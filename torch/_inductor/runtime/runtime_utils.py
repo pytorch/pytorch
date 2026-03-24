@@ -697,7 +697,7 @@ def pallas_make_block_spec(
 
     if buf_nd == 0:
         # Scalar — untouched regardless of grid shape.
-        return pl.BlockSpec((), _make_index_map([], buf_nd, n_grid))
+        return pl.BlockSpec((1,), _make_index_map([], 1, n_grid))
 
     bs = list(buf_shape)
     tiled_pairs: list[tuple[int, int]] = []
@@ -786,3 +786,22 @@ def _make_index_map(
         )
 
     return index_map
+
+
+def pallas_ensure_nonzero_rank(x: torch.Tensor) -> torch.Tensor:
+    if len(x.shape) == 0:
+        return x.reshape((1,))
+    return x
+
+
+def pallas_make_block_spec_non_tiled(shape: tuple[int, ...]) -> Any:
+    import jax.numpy as jnp  # pyrefly: ignore [import-error, missing-import]
+    from jax.experimental import (  # pyrefly: ignore [import-error, missing-import]
+        pallas as pl,
+    )
+
+    nonzero_rank_shape = shape if len(shape) > 0 else (1,)
+    return pl.BlockSpec(
+        nonzero_rank_shape,
+        lambda i: [jnp.int32(i)] * len(nonzero_rank_shape),
+    )

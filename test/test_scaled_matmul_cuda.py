@@ -51,6 +51,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     TEST_CUDA,
     TestCase,
+    skipIfXpu,
 )
 from torch.testing._internal.common_quantized import (
     _bfloat16_to_float4_e2m1fn_x2,
@@ -922,14 +923,13 @@ class TestFP8Matmul(TestCase):
         # Assert outputs are close.
         torch.testing.assert_close(y_lp, y_bf16, atol=8.0e-2, rtol=8.0e-2)
 
-
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("base_dtype", [torch.float16, torch.bfloat16, torch.float32])
     @parametrize("x_cm", [True, False])
     @parametrize("y_cm", [True, False])
     def test_scaled_mm_vs_emulated(self, base_dtype, x_cm, y_cm, device="cuda"):
         # Blackwell (SM_10) supports all possible layout permutations, while Hopper only TN
-        if (x_cm, y_cm) != (True, False) and torch.cuda.get_device_properties(0).major != 10:
+        if (x_cm, y_cm) != (True, False) and torch.cuda.is_available() and torch.cuda.get_device_properties(0).major != 10:
             raise unittest.SkipTest("Unsupported layout on the architecture")
         torch.manual_seed(42)
         input_dtype = e4m3_type
@@ -1105,6 +1105,7 @@ class TestFP8Matmul(TestCase):
             lambda: scaled_mm_wrap(x, y, scale_a, scale_b, out_dtype=torch.float32),
         )
 
+    @skipIfXpu(msg="AssertionError, torch-xpu-ops: 2862")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(SM100OrLater, "fast_accum is SM90-only")
     def test_float8_scale_fast_accum(self, device) -> None:

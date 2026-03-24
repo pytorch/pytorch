@@ -711,6 +711,10 @@ class CPUReproTests(TestCase):
             ]
         ),
     )
+    @unittest.skipIf(
+        IS_ARM64 and not IS_CPU_EXT_SVE_SUPPORTED,
+        "flaky on AArch64 (no SVE)",
+    )
     def test_lstm_packed(
         self,
         unbatched,
@@ -757,6 +761,10 @@ class CPUReproTests(TestCase):
     @parametrize(
         "unbatched, input_size, hidden_size, num_layers, bidirectional, bias, empty_state, batch_first, batch_size, seq_len",
         _test_lstm_packed_change_input_sizes_cpu_params,
+    )
+    @unittest.skipIf(
+        IS_ARM64 and not IS_CPU_EXT_SVE_SUPPORTED,
+        "flaky on AArch64 (no SVE)",
     )
     def test_lstm_packed_change_input_sizes_cpu(
         self,
@@ -4638,6 +4646,35 @@ class CPUReproTests(TestCase):
         torch.testing.assert_close(weight_cmp.grad, weight_ref.grad)
         torch.testing.assert_close(bias_cmp.grad, bias_ref.grad)
 
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_backward_dynamic_item_from_size1_tensor(self):
+        def fn(x, w):
+            num = x.nonzero().numel()
+            num = x.new_tensor([num]).item()
+            y = w * x
+            return y.sum() / num
+
+        torch._dynamo.reset()
+        metrics.reset()
+
+        x = torch.tensor([0.0, 1.0, -1.0, 0.5])
+        w_ref = torch.tensor(0.0, requires_grad=True)
+        w_cmp = w_ref.detach().clone().requires_grad_(True)
+
+        eager_out = fn(x, w_ref)
+        eager_out.backward()
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+        compiled_out = compiled(x, w_cmp)
+        compiled_out.backward()
+
+        self.assertEqual(eager_out.shape, torch.Size([]))
+        self.assertEqual(compiled_out.shape, eager_out.shape)
+        torch.testing.assert_close(compiled_out, eager_out)
+        torch.testing.assert_close(w_cmp.grad, w_ref.grad)
+
     @config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_cpp_backend_no_error(self):
         """
@@ -5039,6 +5076,26 @@ class CPUReproTests(TestCase):
                 FileCheck().check_count(
                     "at::vec::VectorizedN<int64_t,2>::loadu", 2, exactly=True
                 ).run(code)
+
+    @requires_vectorization
+    def test_indirect_assert_scalar_mask_tail_vec_no_crash(self):
+        # https://github.com/pytorch/pytorch/issues/178136
+        def fn(positions, cache):
+            x = cache[positions]
+            y = x[0].clone()
+            y[..., 1::3] = x[1, ..., 1::3]
+            y[..., 2::3] = x[2, ..., 2::3]
+            return y
+
+        positions = torch.tensor([[0, 0], [0, 0], [0, 0]], dtype=torch.int64)
+        cache = torch.arange(3, dtype=torch.float32).reshape(1, 3)
+
+        with config.patch({"cpp.enable_loop_tail_vec": True}):
+            expected = fn(positions, cache)
+            compiled_fn = torch.compile(fn, fullgraph=True)
+            actual = compiled_fn(positions, cache)
+
+        torch.testing.assert_close(actual, expected)
 
     def test_uint64_pointwise_vec(self):
         def fn(x):
@@ -5973,13 +6030,13 @@ class CPUReproTests(TestCase):
         Original PR: https://github.com/pytorch/pytorch/pull/141766
         """
         from torch.testing._internal.common_quantization import (
-            _static_reference_quantized_linear_module,
+            _static_quantized_linear_module,
         )
 
         class Model(torch.nn.Module):
             def __init__(self, example_input):
                 super().__init__()
-                self.dense = _static_reference_quantized_linear_module(
+                self.dense = _static_quantized_linear_module(
                     N=768, K=768, bias=True, example_input=example_input
                 )
                 self.layernorm = torch.nn.LayerNorm(768, eps=1e-12)

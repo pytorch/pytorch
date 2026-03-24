@@ -989,6 +989,7 @@ Tensor unbind_backward_nested(
     int64_t dim,
     const at::TensorOptions& options) {
   std::vector<Tensor> grads_tensors;
+  grads_tensors.reserve(grads.size());
   for (int64_t i : c10::irange(static_cast<int64_t>(grads.size()))) {
     if (grads[i].defined()) {
       grads_tensors.push_back(static_cast<Tensor>(grads[i]));
@@ -2185,6 +2186,7 @@ Tensor _nested_split_with_sizes_backward(
   // it's possible some of the grads are not defined (represents tensors of all
   // 0s). Since at::cat can't handle those, let's define them
   std::vector<Tensor> grads_all_defined;
+  grads_all_defined.reserve(grads.size());
   for (int64_t i : c10::irange(static_cast<int64_t>(grads.size()))) {
     if (grads[i].defined()) {
       grads_all_defined.push_back(static_cast<Tensor>(grads[i]));
@@ -4928,16 +4930,6 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
   auto gO = gO_t.reshape_symint({M, N});
   auto save_mean = save_mean_t.reshape_symint({M, c10::SymInt(1)});
   auto save_invstd = save_invstd_t.reshape_symint({M, c10::SymInt(1)});
-  if (at::GradMode::is_enabled() && input.requires_grad()) {
-    // save_mean and save_invstd have no autograd history, error instead
-    // of silently giving wrong results for higher-order derivatives.
-    auto err = std::make_shared<DelayedError>(
-        "layer_norm does not support 3rd+ order derivatives.",
-        /* num inputs */ 3);
-    auto result = err->apply({save_mean, save_invstd, input});
-    save_mean = result[0];
-    save_invstd = result[1];
-  }
 
   bool affine = isDefined(gamma);
   Tensor gamma_expanded;
@@ -7220,7 +7212,7 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     grad_self = grad_self.scatter(dim, index, 0);
   }
 
-  return std::make_tuple(grad_self, grad_src);
+  return std::make_tuple(std::move(grad_self), std::move(grad_src));
 }
 
 Tensor _to_copy_backward(
@@ -7316,7 +7308,7 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
     grad_self = grad_self.index_fill(dim, index, 0);
   }
 
-  return std::make_tuple(grad_self, grad_src);
+  return std::make_tuple(std::move(grad_self), std::move(grad_src));
 }
 
 Tensor take_backward(

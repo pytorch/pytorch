@@ -145,7 +145,12 @@ from .nn_module import (
 )
 from .optimizer import OptimizerVariable
 from .sdpa import SDPAParamsVariable
-from .streams import EventVariable, StreamContextVariable, StreamVariable
+from .streams import (
+    CudaStreamVariable,
+    EventVariable,
+    StreamContextVariable,
+    StreamVariable,
+)
 from .tensor import (
     DataPtrVariable,
     FakeItemVariable,

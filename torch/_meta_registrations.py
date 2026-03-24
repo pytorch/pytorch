@@ -624,10 +624,11 @@ def meta_sparse_structured_linear(
             raise AssertionError(
                 f"out_dtype is only supported for i8i8->i32 linear operator, got input.dtype={input.dtype}, out_dtype={out_dtype}"
             )
-    output = input.new_empty(
+    output = input.new_empty_strided(
         output_sizes,
+        transposed_strides,
         dtype=input.dtype if out_dtype is None else out_dtype,
-    ).as_strided(output_sizes, transposed_strides)
+    )
 
     return output
 
@@ -2617,6 +2618,11 @@ def meta_conv(
     if guard_or_false(input_tensor.size(input_channels_dim) == 0):
         shape_out[output_channels_dim] = 0
 
+    # Memory format is left as contiguous: meta tensors have no device info,
+    # so _select_conv_backend returns Overrideable and the correct format
+    # cannot be determined here.  The FakeTensor path (torch.compile, export)
+    # intercepts via a register_op_impl in fake_impls.py before reaching this
+    # kernel and uses FakeTensor.fake_device for an accurate answer.
     out = input_tensor.new_empty(shape_out)
     return out
 
@@ -3675,18 +3681,13 @@ def meta_convolution_backward(
     backend_grad_weight = None
     backend_grad_bias = None
 
-    # Backend layout expectation: GPU backends (CUDA via cudnn_conv_suggest_memory_format,
-    # MPS via mps_conv_use_channels_last) return channels_last outputs when either input
-    # tensor is channels_last. This must be matched here to avoid stride assertion failures
-    # in inductor when the predicted strides don't match actual backend output strides.
+    # All GPU backends compute output memory format via
+    # determine_backend_memory_format(input, weight, backend) — which calls
+    # cudnn_conv_suggest_memory_format(input, weight), mps_conv_use_channels_last(input, weight),
+    # etc. The format depends only on input and weight, NOT on grad_output.
+    # Both grad_input and grad_weight use this same backend_memory_format.
     # See: https://github.com/pytorch/pytorch/issues/171622
-    #
-    # Memory format inference rules (matching backend behavior):
-    #   - grad_input format: derived from grad_output and weight
-    #   - grad_weight format: derived from input and grad_output
     def _conv_memory_format(t1, t2):
-        # Match the logic in cudnn_conv_suggest_memory_format and mps_conv_use_channels_last:
-        # Use channels_last if either tensor suggests it
         fmt1 = suggest_memory_format(t1)
         fmt2 = suggest_memory_format(t2)
         if fmt1 == torch.channels_last or fmt2 == torch.channels_last:
@@ -3695,13 +3696,12 @@ def meta_convolution_backward(
             return torch.channels_last_3d
         return torch.contiguous_format
 
+    memory_format = _conv_memory_format(input_, weight_)
     if output_mask[0]:
-        memory_format = _conv_memory_format(grad_output_, weight_)
         backend_grad_input = grad_output_.new_empty(input_.size()).to(
             memory_format=memory_format
         )
     if output_mask[1]:
-        memory_format = _conv_memory_format(input_, grad_output_)
         backend_grad_weight = grad_output_.new_empty(weight_.size()).to(
             memory_format=memory_format
         )
@@ -5034,7 +5034,8 @@ def max_pool2d_checks_and_compute_shape(
     return nInputPlane, outputHeight, outputWidth
 
 
-@register_meta(aten.max_pool2d_with_indices_backward.default)
+@register_meta(aten.max_pool2d_with_indices_backward)
+@out_wrapper("grad_input")
 def meta_max_pool2d_with_indices_backward(
     grad_output,
     self,
@@ -6153,37 +6154,9 @@ def meta__scaled_dot_product_attention_math_for_mps(
     q_, unsqueezed = ensure_4d(query)
     k_, _ = ensure_4d(key)
     v_, _ = ensure_4d(value)
-    mask_ = None
-    if attn_mask is not None:
-        mask_expanded_dims = list(query.shape)
-        mask_expanded_dims[-1] = k_.size(2)
-        mask_ = attn_mask.expand(mask_expanded_dims)
-        mask_, _ = ensure_4d(mask_)
 
-    batch_size, num_head, q_size, query_head_size = q_.shape
-    _, k_size, max_seq_length, value_head_size = v_.shape
-
-    def sdpa_vector_fast_mps():
-        out = q_.new_empty(q_.shape)
-        if unsqueezed:
-            out = out.view_as(query)
-
-        attn = q_.new_empty((batch_size, num_head, q_size, max_seq_length))
-        if unsqueezed:
-            if query.dim() == 3:
-                attn = attn.squeeze(0)
-            else:
-                shape = list(query.shape[:-3]) + attn.shape[1:4]
-                attn = attn.view(shape)
-        return out, attn
-
-    def sdpa_vector_2pass_mps():
-        blocks = 32
-        out = q_.new_empty(q_.shape)
-        intermediate = q_.new_empty(
-            (batch_size, num_head, q_size, blocks, query_head_size)
-        )
-        return out, intermediate
+    batch_size, num_head, q_size, _ = q_.shape
+    _, _, max_seq_length, value_head_size = v_.shape
 
     def sdpa_general_mps():
         out = q_.new_empty((batch_size, num_head, q_size, value_head_size))
@@ -6199,26 +6172,9 @@ def meta__scaled_dot_product_attention_math_for_mps(
                 attn = attn.view(attn_shape)
         return out, attn
 
-    query_head_dim = q_.size(3)
-    value_head_dim = v_.size(3)
-    sdpa_vector_supported_head_dim = (query_head_dim == value_head_dim) and (
-        query_head_dim == 64 or query_head_dim == 96 or query_head_dim == 128
-    )
-    query_seq_len = q_.size(2)
-    supports_sdpa_vector = (
-        (query_seq_len <= 8)
-        and (query_seq_len <= k_.size(2))
-        and ((mask_ is None) or (mask_.dtype == torch.bool))
-        and sdpa_vector_supported_head_dim
-    )
-    supports_fast_sdpa = (not is_causal) and supports_sdpa_vector
-
-    if not supports_fast_sdpa:
-        return sdpa_general_mps()
-    elif (max_seq_length >= 1024) or (k_size < q_size and max_seq_length >= 4096):
-        return sdpa_vector_2pass_mps()
-    else:
-        return sdpa_vector_fast_mps()
+    # sdpa_vector_2pass_mps and sdpa_vector_fast_mps are intentionally left out.
+    # See https://github.com/pytorch/pytorch/issues/177603 for additional context.
+    return sdpa_general_mps()
 
 
 @register_meta([aten._scaled_dot_product_efficient_attention])

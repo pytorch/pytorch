@@ -43,7 +43,7 @@ from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
 from torch._inductor import metrics
 from torch._inductor.utils import get_free_symbols
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_value
+from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_value
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
@@ -1855,7 +1855,7 @@ class Reduction(Loops):
             reduction_ranges, [reduction_numel], dense_index
         )
         need_mask = not V.graph.sizevars.statically_known_true(
-            sympy.Eq(reduction_numel % split, 0)
+            sympy.Eq(Mod(reduction_numel, split), 0)
         )
 
         def wrapper_fn(
@@ -2326,7 +2326,7 @@ class WelfordReduction(MultiOutputReduction):
         """
         reduction_numel = sympy_product(reduction_ranges)
         need_mask = not V.graph.sizevars.statically_known_true(
-            sympy.Eq(reduction_numel % split, 0)
+            sympy.Eq(Mod(reduction_numel, split), 0)
         )
 
         if need_mask and reduction_type != "welford_combine":
@@ -5256,6 +5256,14 @@ class TemplateBuffer(OperationBuffer):
         self.allowed_prologue_inps: OrderedSet[str] = (
             allowed_prologue_inps or OrderedSet()
         )
+
+    @property
+    def dtype(self) -> torch.dtype:
+        if isinstance(self.layout, MultiOutputLayout):
+            raise NotImplementedError(
+                "Multi-output templates do not have a single dtype"
+            )
+        return self.get_layout().dtype
 
     def get_read_writes(self) -> dependencies.ReadWrites:
         return self.extract_read_writes(normalize=True)
@@ -8718,32 +8726,37 @@ class FallbackKernel(ExternKernelAlloc):
             ) = cls.process_kernel(kernel, *args, **kwargs)
 
         # Try to lower single output functional custom ops to their out-variant.
-        if isinstance(kernel, torch._ops.OpOverload):
+        if isinstance(kernel, torch._ops.OpOverload) and isinstance(
+            example_output, torch.Tensor
+        ):
             from torch._library._out_variant import (
                 _is_functional,
                 get_out_arg_names,
+                lookup_manual_out_variant,
                 to_out_variant,
             )
 
-            if _is_functional(kernel._schema) and isinstance(
-                example_output, torch.Tensor
-            ):
+            out_op = None
+            if _is_functional(kernel._schema):
                 out_op = to_out_variant(kernel)
-                if out_op is not None and len(get_out_arg_names(out_op)) == 1:
-                    layout = FixedLayout(
-                        device=example_output.device,
-                        dtype=example_output.dtype,
-                        size=[*example_output.shape],
-                        stride=[*example_output.stride()],
-                    )
-                    return ExternKernelOut(  # type: ignore[return-value]
-                        layout=layout,
-                        inputs=list(tensor_args),
-                        constant_args=list(non_tensor_args),
-                        kwargs=kwargs,
-                        python_kernel_name=_make_out_variant_kernel_name(out_op),
-                        op_overload=out_op,
-                    )
+            if out_op is None:
+                out_op = lookup_manual_out_variant(kernel)
+
+            if out_op is not None and len(get_out_arg_names(out_op)) == 1:
+                layout = FixedLayout(
+                    device=example_output.device,
+                    dtype=example_output.dtype,
+                    size=[*example_output.shape],
+                    stride=[*example_output.stride()],
+                )
+                return ExternKernelOut(  # type: ignore[return-value]
+                    layout=layout,
+                    inputs=list(tensor_args),
+                    constant_args=list(non_tensor_args),
+                    kwargs=kwargs,
+                    python_kernel_name=_make_out_variant_kernel_name(out_op),
+                    op_overload=out_op,
+                )
 
         # We need this extra check for input alignment since the example
         # inputs we created are always aligned.
@@ -10245,6 +10258,27 @@ class TorchBindObject(NonTensorObj):
             if isinstance(x, torch.Tensor)
         ]
         return functools.reduce(operator.add, flat_sizes, 0)
+
+
+@ir_dataclass
+class OpaqueValueTypeConstant(NonTensorObj):
+    """IR node for opaque value type constants that appear directly in graph outputs.
+
+    Unlike TorchBindObject (which references named constants loaded at runtime),
+    this inlines the value's repr into the generated code since value types are
+    reconstructed from their repr.
+    """
+
+    value: Any
+
+    def get_name(self) -> str:
+        return repr(self.value)
+
+    def codegen_reference(self, writer: IndentedBuffer | None = None) -> str:
+        obj_repr, opaque_types = get_opaque_obj_repr(self.value)
+        for n, t in opaque_types.items():
+            V.graph.opaque_value_type_classes[n] = t
+        return obj_repr
 
 
 @ir_dataclass

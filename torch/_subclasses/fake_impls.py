@@ -641,14 +641,14 @@ def _compute_stride(
 def _view_has_unbacked_input(
     a: torch.Tensor, shape: ShapeType | tuple[ShapeType]
 ) -> bool:
-    from torch.fx.experimental.symbolic_shapes import has_hint
+    from torch.fx.experimental.symbolic_shapes import has_guarding_hint
 
     shape = utils.extract_shape_from_varargs(shape, validate=False)
 
     return (
-        any(not has_hint(s) for s in a.size())
-        or any(not has_hint(s) for s in a.stride())
-        or any(not has_hint(s) for s in shape)
+        any(not has_guarding_hint(s) for s in a.size())
+        or any(not has_guarding_hint(s) for s in a.stride())
+        or any(not has_guarding_hint(s) for s in shape)
     )
 
 
@@ -1329,17 +1329,19 @@ def conv(
     _, new_kwargs = _normalize_function_or_error(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
-    device = new_kwargs["input"].fake_device
+    input_ = new_kwargs["input"]
+    weight = new_kwargs["weight"]
+    device = input_.fake_device
     # need to re-enable mode so the tensors report fake device
     with fake_mode:
-        # if the input is unsqueezed is done in Convolution.cpp we get segfault
-        k = new_kwargs["weight"].ndim
+        # if the input is unsqueezed in Convolution.cpp we get segfault
+        k = weight.ndim
 
         # Avoid importing sympy at a module level
-        from torch.fx.experimental.symbolic_shapes import has_hint
+        from torch.fx.experimental.symbolic_shapes import has_guarding_hint
 
-        all_hinted = all(has_hint(s) for s in new_kwargs["input"].shape) and all(
-            has_hint(s) for s in new_kwargs["weight"].shape
+        all_hinted = all(has_guarding_hint(s) for s in input_.shape) and all(
+            has_guarding_hint(s) for s in weight.shape
         )
 
         if not all_hinted:
@@ -1347,53 +1349,33 @@ def conv(
             # channels last detection (but only if it's statically obvious!)
             mem_fmt = None
         else:
-            if func is aten.convolution.default:
-                conv_backend = torch._C._select_conv_backend(**new_kwargs)
-            else:
-                conv_backend = torch._C._select_conv_backend(
-                    new_kwargs["input"],
-                    new_kwargs["weight"],
-                    bias=None,
-                    stride=new_kwargs["stride"],
-                    padding=new_kwargs["padding"],
-                    dilation=new_kwargs["dilation"],
-                    transposed=new_kwargs["transposed"],
-                    output_padding=new_kwargs["output_padding"],
-                    groups=new_kwargs["groups"],
-                    bias_sizes=new_kwargs["bias_sizes"],
-                )
+            # convolution has "bias" but not "bias_sizes"; convolution_backward
+            # has "bias_sizes" but not "bias". .get() handles both with one call.
+            bias = new_kwargs.get("bias")
+            select_kwargs: dict[str, object] = dict(
+                stride=new_kwargs["stride"],
+                padding=new_kwargs["padding"],
+                dilation=new_kwargs["dilation"],
+                transposed=new_kwargs["transposed"],
+                output_padding=new_kwargs["output_padding"],
+                groups=new_kwargs["groups"],
+                bias=bias,
+            )
+            if bias is None:
+                select_kwargs["bias_sizes"] = new_kwargs.get("bias_sizes")
+            conv_backend = torch._C._select_conv_backend(
+                input_, weight, **select_kwargs
+            )
             # Expand 1d -> 2d.
             # Note: Avoid expanding before calling _select_conv_backend,
             # as the function handles 2D expansion internally.
-            if (
-                k == 3
-                and not new_kwargs["input"].is_mkldnn
-                and not new_kwargs["input"].is_xpu
-            ):
+            if k == 3 and not input_.is_mkldnn and not input_.is_xpu:
                 # Note: Using input.to(memory_format=contiguous) does not work.
-                new_kwargs["input"] = new_kwargs["input"].contiguous().unsqueeze(2)
-                new_kwargs["weight"] = new_kwargs["weight"].unsqueeze(2)
-                if len(new_kwargs["stride"]) == 1:
-                    new_kwargs["stride"].insert(0, 1)
-                    new_kwargs["padding"].insert(0, 0)
-                    new_kwargs["dilation"].insert(0, 1)
-                    new_kwargs["output_padding"].insert(0, 0)
+                input_ = input_.contiguous().unsqueeze(2)
+                weight = weight.unsqueeze(2)
             mem_fmt = torch._C._conv_determine_backend_memory_format(
-                new_kwargs["input"], new_kwargs["weight"], conv_backend
+                input_, weight, conv_backend
             )
-            # revert 2d -> 1d
-            if (
-                k == 3
-                and not new_kwargs["input"].is_mkldnn
-                and not new_kwargs["input"].is_xpu
-            ):
-                new_kwargs["input"] = new_kwargs["input"].squeeze(2)
-                new_kwargs["weight"] = new_kwargs["weight"].squeeze(2)
-                if len(new_kwargs["stride"]) == 2:
-                    new_kwargs["stride"].pop(0)
-                    new_kwargs["padding"].pop(0)
-                    new_kwargs["dilation"].pop(0)
-                    new_kwargs["output_padding"].pop(0)
 
     def convert(
         t: torch.Tensor | None, mem_fmt: torch.memory_format | None

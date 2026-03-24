@@ -23,6 +23,7 @@ import tempfile
 import textwrap
 import time
 import unittest
+import warnings
 from collections.abc import (
     Callable,
     Collection,
@@ -68,6 +69,7 @@ OPTIMUS_EXCLUDE_POST_GRAD = [
     "inductor_autotune_lookup_table",
 ]
 
+from torch.fx.experimental._size_hinting import _sympy_subs
 from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
     free_unbacked_symbols,
@@ -1171,22 +1173,7 @@ def sympy_subs(expr: sympy.Expr, replacements: dict[sympy.Expr, Any]) -> sympy.E
     When the passed replacement symbol v is a string, it is converted to a symbol with name v that
     have the same replaced expression integer and nonnegative properties.
     """
-
-    def to_symbol(replaced: sympy.Expr, replacement: sympy.Expr | str) -> sympy.Symbol:
-        assert isinstance(replaced, sympy.Expr)
-        if isinstance(replacement, str):
-            return sympy.Symbol(
-                replacement,
-                integer=replaced.is_integer,  # type: ignore[attr-defined]
-                nonnegative=replaced.is_nonnegative,  # type: ignore[attr-defined]
-            )
-        else:
-            return replacement
-
-    # xreplace is faster than subs, but is way more picky
-    return sympy.sympify(expr).xreplace(
-        {k: to_symbol(k, v) for k, v in replacements.items()}
-    )
+    return _sympy_subs(expr, replacements)
 
 
 def is_symbolic(a: Any) -> TypeGuard[torch.SymInt | torch.Tensor]:
@@ -1964,12 +1951,16 @@ def can_use_tma(
 def use_triton_tma_template(
     *matrices: IRNode, output_layout: Layout, add_guards: bool = False
 ) -> bool:
+    if not config.triton.enable_persistent_tma_matmul:
+        return False
+    if not all(len(m.get_size()) == 2 for m in matrices):
+        return False
+    # On AMD (HIP), TMA is not available but we still use non-TMA persistent
+    # kernels, so skip the TMA compatibility checks.
+    if torch.version.hip is not None:
+        return True
     layout = output_layout if config.triton.enable_template_tma_store else None
-    return (
-        all(len(m.get_size()) == 2 for m in matrices)
-        and can_use_tma(*matrices, output_layout=layout, add_guards=add_guards)
-        and config.triton.enable_persistent_tma_matmul
-    )
+    return can_use_tma(*matrices, output_layout=layout, add_guards=add_guards)
 
 
 def use_triton_blackwell_tma_template(
@@ -2142,9 +2133,9 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     # for the compiled CUTLASS .so, similar to how the triton branch uses
     # static CUfunction + loadKernel for non-AOT mode.
     if V.graph.cpp_wrapper and not V.graph.aot_mode:
-        log.warning(
+        warnings.warn(
             "CUTLASS backend is not supported with non-AOT cpp_wrapper mode. "
-            "Skipping CUTLASS backend."
+            "Skipping CUTLASS backend.",
         )
         return False
 
@@ -3540,7 +3531,7 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
 
     int_max = torch.iinfo(torch.int32).max
     guarding_hint_or_throw = V.graph.sizevars.guarding_hint_or_throw
-    has_hint = V.graph.sizevars.shape_env.has_hint
+    has_guarding_hint = V.graph.sizevars.shape_env.has_guarding_hint
 
     if config.assume_32bit_indexing:
         V.graph.sizevars.check_leq(e, int_max)  # type: ignore[arg-type]
@@ -3571,7 +3562,7 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
             return False
 
     # Otherwise, the hint MUST exist and be in range
-    return has_hint(e) and guarding_hint_or_throw(e) <= int_max
+    return has_guarding_hint(e) and guarding_hint_or_throw(e) <= int_max
 
 
 def set_tracing_context_output_strides(

@@ -361,6 +361,9 @@ class MixOrderReduction:
         if not V.graph.sizevars.statically_known_leq(ncol, 1024 * 16):
             return False
 
+        if MixOrderReduction.is_split_reduction(contiguous_node):
+            return False
+
         # Other reduction types like max/min is not supported yet.
         # There are no real use case as well.
         out = all(
@@ -3123,6 +3126,8 @@ class Scheduler:
         self.node_to_stream: dict[BaseSchedulerNode, int] = {}
         self.buff_to_stream: dict[str, int] = {}
         self._multi_stream_nodes: bool = False
+        # Maps stream_idx → user_object_index for retrieving user stream objects
+        self.stream_idx_to_user_obj_idx: dict[int, int] = {}
         self._populate_stream_assignments()
 
         self.nodes = self.fuse_nodes(self.nodes)
@@ -3283,7 +3288,7 @@ class Scheduler:
 
         # Map user_object_index to stream index (1-indexed for side streams)
         user_obj_to_stream_idx: dict[int, int] = {}
-        next_stream_idx = 1  # 0 is reserved for default stream
+        stream_idx_counter = itertools.count(1)  # 0 is reserved for default stream
 
         for node in self.nodes:
             stream_idx = DEFAULT_STREAM_IDX
@@ -3299,8 +3304,11 @@ class Scheduler:
                     if "stream" in custom_meta:
                         user_obj_idx = custom_meta["stream"]
                         if user_obj_idx not in user_obj_to_stream_idx:
-                            user_obj_to_stream_idx[user_obj_idx] = next_stream_idx
-                            next_stream_idx += 1
+                            new_stream_idx = next(stream_idx_counter)
+                            user_obj_to_stream_idx[user_obj_idx] = new_stream_idx
+                            self.stream_idx_to_user_obj_idx[new_stream_idx] = (
+                                user_obj_idx
+                            )
                         stream_idx = user_obj_to_stream_idx[user_obj_idx]
                         # Use the first stream found
                         break
@@ -3310,6 +3318,24 @@ class Scheduler:
             # Also populate buff_to_stream for all buffers produced by this node
             for buf in node.get_buffer_names():
                 self.buff_to_stream[buf] = stream_idx
+
+        # Propagate a device to device-less nodes (e.g. record_event,
+        # wait_event) so they naturally enter the device guard in the
+        # main codegen loop instead of requiring special-case handling.
+        if any(s != DEFAULT_STREAM_IDX for s in self.node_to_stream.values()):
+            device = next(
+                (n.get_device() for n in self.nodes if n.get_device() is not None), None
+            )
+            if device is not None:
+                for node in self.nodes:
+                    ir_node = node.node
+                    if (
+                        node.get_device() is None
+                        and isinstance(ir_node, ir.Buffer)
+                        and isinstance(ir_node.layout, ir.NoneLayout)
+                    ):
+                        # pyrefly: ignore [bad-assignment]
+                        ir_node.layout = ir.NoneLayout(device=device)
 
         # Check if we have any nodes on non-default streams
         self._multi_stream_nodes = any(
@@ -5593,8 +5619,10 @@ class Scheduler:
         def low_prec_fp(dtype: torch.dtype) -> bool:
             return dtype.itemsize <= 2 and dtype.is_floating_point
 
+        template_buf = template_node.get_template_node_or_throw()
         if (
-            low_prec_fp(template_node.get_template_node_or_throw().dtype)
+            not template_buf.is_multi_outputs_template()
+            and low_prec_fp(template_buf.dtype)
             and not prologue_node.can_codegen_in_low_precision()
         ):
             why(
@@ -7467,13 +7495,18 @@ class Scheduler:
                                 max(unique_streams) + 1 if unique_streams else 1
                             )
                         V.graph.wrapper_code.codegen_device_guard_enter(
-                            device.index, num_streams
+                            device.index,
+                            num_streams,
+                            self.stream_idx_to_user_obj_idx,
                         )
 
-                # Handle stream context switching for multi-stream scheduling
-                # Only do this for nodes with a device, inside the device guard
-                if self._has_multi_stream_nodes():
-                    self.generate_stream_ctx_switching(node)
+            # Handle stream context switching for multi-stream scheduling.
+            # This runs for all nodes (including device-less sync ops like
+            # record_event/wait_event) so they are placed inside the correct
+            # stream context. Only switch when inside a device guard (i.e.
+            # current_device is set), since stream variables are declared there.
+            if self._has_multi_stream_nodes() and self.current_device is not None:
+                self.generate_stream_ctx_switching(node)
 
             self.current_node = node
             self.buffer_names_to_free.update(node.last_usage)

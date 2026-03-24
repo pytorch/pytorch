@@ -132,10 +132,10 @@ _mx8_mx8_bf16_grouped_mm_mslk(
         scale_b,
         offs.value(),
         out);
+    return out;
 #else
     TORCH_CHECK_NOT_IMPLEMENTED(false, "mxfp8_mxfp8 grouped gemm requires compile with USE_MSLK");
 #endif
-    return out;
 }
 
 // 2d-2d and 2d-3d cases
@@ -197,10 +197,10 @@ _f8_f8_bf16_rowwise_grouped_mm_rocm(
       scale_b,
       offs,
       out);
+  return out;
 #else
   TORCH_CHECK_NOT_IMPLEMENTED(false, "grouped gemm is not supported without USE_MSLK on ROCM")
 #endif
-  return out;
 
 }
 #endif // USE_ROCM
@@ -291,11 +291,11 @@ _f4_f4_bf16_grouped_mm_mslk(
       out,
       combined_global_scale
   );
+
+  return out;
 #else
   TORCH_CHECK_NOT_IMPLEMENTED(false, "nvfp4 grouped gemm is not supported without USE_MSLK, and only for CUDA")
 #endif
-
-  return out;
 }
 
 void _check_scales_fp8_rowwise(const Tensor& mat, const Tensor& scale, const int dim, const int arg_idx, const int scale_multiplier=1) {

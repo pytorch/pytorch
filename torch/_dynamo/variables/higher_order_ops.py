@@ -39,6 +39,7 @@ from torch._dynamo.variables.constant import CONSTANT_VARIABLE_NONE, ConstantVar
 from torch._dynamo.variables.ctx_manager import RepararametrizeModuleContextVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
 from torch._dynamo.variables.nn_module import UnspecializedNNModuleVariable
+from torch._dynamo.variables.script_object import TorchScriptObjectVariable
 from torch._dynamo.variables.tensor import SymNodeVariable, TensorVariable
 from torch._guards import Source
 from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
@@ -322,8 +323,17 @@ def overwrite_tensor_vt_proxy(
     # while still allowing `body_r` to contain arbitrary Python objects.
     # pyrefly: ignore[missing-attribute]
     for orig_vt, subgraph_vt in zip(graph_output_vts, flat_variable.items):
-        if isinstance(orig_vt, (variables.SymNodeVariable, variables.TensorVariable)):
-            assert subgraph_vt.is_tensor() or isinstance(subgraph_vt, SymNodeVariable)
+        if isinstance(
+            orig_vt,
+            (
+                variables.SymNodeVariable,
+                variables.TensorVariable,
+                TorchScriptObjectVariable,
+            ),
+        ):
+            assert subgraph_vt.is_tensor() or isinstance(
+                subgraph_vt, (SymNodeVariable, TorchScriptObjectVariable)
+            )
             orig_vt.proxy = subgraph_vt.proxy
 
 
@@ -574,7 +584,7 @@ def collect_intermediate_outputs(
         tracker.collect_from_inputs(tx)
         tracker.collect_from_outputs(graph_output_vts)
 
-    for out in subtracer.tracked_tensor_or_symint_vt:
+    for out in subtracer.tracked_proxyable_vt:
         proxy = out.as_proxy()
 
         # Skip if already in output
@@ -1696,7 +1706,9 @@ def speculate_subgraph_with_auto_output_flattening(
             graph_output_vt_list = []
 
             def visit(vt: VariableTracker) -> None:
-                if vt.is_tensor() or isinstance(vt, SymNodeVariable):
+                if vt.is_tensor() or isinstance(
+                    vt, (SymNodeVariable, TorchScriptObjectVariable)
+                ):
                     graph_output_vt_list.append(vt)
 
             VariableTracker.visit(visit, output)
@@ -2486,10 +2498,12 @@ def validate_subgraph_output_types(
     ):
         for out in non_tensor_output:
             if (
-                isinstance(out, SymNodeVariable) and out.python_type() in (int, bool)
-            ) or (
-                out.is_python_constant()
-                and isinstance(out.as_python_constant(), (int, bool))
+                (isinstance(out, SymNodeVariable) and out.python_type() in (int, bool))
+                or (
+                    out.is_python_constant()
+                    and isinstance(out.as_python_constant(), (int, bool))
+                )
+                or isinstance(out, TorchScriptObjectVariable)
             ):
                 continue
             unimplemented(
@@ -3989,6 +4003,31 @@ class RunWithRNGStateHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
+class InlineAsmElementwiseHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    _HOP_NAME = "inline_asm_elementwise"
+
+    def _call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
+        p_args = tuple(arg.as_proxy() for arg in args)
+        p_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                self.value,
+                args=p_args,
+                kwargs=p_kwargs,
+            ),
+            example_value=None,
+        )
+
+
 class AutoFunctionalizeHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.ops.higher_order.auto_functionalized"
 
@@ -5135,150 +5174,6 @@ class BaseHOPVariable(WrapHigherOrderVariable):
         )
 
 
-class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
-    _HOP_NAME = "torch.ops.higher_order.invoke_subgraph"
-    _ALLOW_FALLBACK_TO_EAGER = False
-    supports_input_mutation = True
-    supports_aliasing = False
-    allow_side_effects = True
-    # invoke_subgraph is NOT desugared in AOTAutograd, so the HOP input/output
-    # shouldn't alias. For checkpoint HOP, we inline it so we don't need
-    # alias analysis as functionalization would just work on the flat graph.
-    filter_aliased_intermediates = True
-
-    # pyrefly: ignore[bad-override]
-    def install_subgraph_in_output_graph(
-        self,
-        tx: "InstructionTranslator",
-        fn_vt: VariableTracker,
-        fn_args_vt: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-        body_gmod: GraphModule,
-        attr_name: str,
-    ) -> str:
-        # Check if the subgraph from speculate_subgraph (body_gmod) and the fake
-        # inputs have already been seen before. If yes, the subgraph is already
-        # installed in the output graph and we can just access the subgraph
-        # using the saved attr name.
-
-        if not isinstance(fn_vt, (UnspecializedNNModuleVariable, UserFunctionVariable)):
-            unimplemented(
-                gb_type="Encountered non user function variable during invoke_subgraph HOP tracing",
-                context=str(fn_vt),
-                explanation="invoke_subgraph does not support non user function variable",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
-
-        invoke_subgraph_cache = (
-            tx.output.tracing_context.hop_dispatch_set_cache.get_cache(
-                torch._higher_order_ops.invoke_subgraph
-            )
-        )
-
-        if isinstance(fn_vt, UserFunctionVariable):
-            fn_id = id(fn_vt.get_function())
-            fn_name = fn_vt.get_function().__name__
-        else:
-            assert isinstance(fn_vt, UnspecializedNNModuleVariable)
-            fn_id = id(fn_vt.value.forward.__func__)  # type: ignore[attr-defined]
-            fn_name = fn_vt.value.forward.__name__  # type: ignore[attr-defined]
-        # pyrefly: ignore [implicit-any]
-        previously_installed_submodules = []
-        if invoke_subgraph_cache:
-            previously_installed_submodules = (
-                invoke_subgraph_cache.get_dynamo_installed_submodules(fn_id)
-            )
-            current_mod = body_gmod
-            # NB - reverse is more likely to cause a hit sooner because first
-            # graph can have requires_grad=False for a few inputs
-            for submodule_name in reversed(previously_installed_submodules):
-                assert submodule_name in tx.output.nn_modules
-                previous_mod = tx.output.nn_modules[submodule_name]
-                assert tx.fake_mode
-                if are_same_graph_modules(
-                    fn_name, previous_mod, current_mod, tx.fake_mode
-                ):
-                    return submodule_name
-
-        body_name = super().install_subgraph_in_output_graph(
-            tx, fn_vt, fn_args_vt, kwargs, body_gmod, "subgraph"
-        )
-        hc_log.debug(
-            "%s: Installing subgraph with identifier '%s', bringing total count for '%s' function to %s",
-            fn_name,
-            body_name,
-            fn_name,
-            len(previously_installed_submodules) + 1,
-        )
-        if invoke_subgraph_cache:
-            invoke_subgraph_cache.add_dynamo_installed_submodule(fn_id, body_name)
-
-        return body_name
-
-    def _call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        fn_var = args[0]
-        fn_args_vt = args[1:]
-
-        config = None
-        if hasattr(fn_var, "get_function"):
-            try:
-                fn = fn_var.get_function()
-                config = getattr(fn, "__marked_compile_region_config__", None)
-            except Exception:
-                log.warning(
-                    "Failed to extract nested_compile_region() config from InvokeSubgraphHigherOrderVariable. ",
-                    exc_info=True,
-                )
-                raise
-
-        assert self._HOP_NAME is not None
-        (
-            p_args,
-            p_kwargs,
-            example_value,
-            body_r,
-            body_gmod,
-            body_name,
-            body_graph_output_vts,
-            tracing_info,
-        ) = self.create_wrapped_node(tx, fn_var, fn_args_vt, kwargs, self._HOP_NAME)
-
-        if len(p_kwargs) > 0:
-            unimplemented(
-                gb_type="invoke_subgraph: kwargs unexpected",
-                context=f"args: {args}, kwargs: {kwargs}",
-                explanation="kwargs should have been flattened into lifted args.",
-                hints=[
-                    *graph_break_hints.DYNAMO_BUG,
-                ],
-            )
-
-        if isinstance(config, NestedCompileRegionOptions):
-            body_gmod.meta["nested_region_config"] = config
-
-        p_args = (
-            p_args[0],
-            body_name,
-            *p_args[1:],
-        )
-
-        return _call_function_with_auto_output_flattening(  # type: ignore[return-value]
-            tx,
-            torch._higher_order_ops.invoke_subgraph,
-            tuple(p_args),
-            p_kwargs,
-            example_value,
-            body_r,
-            body_graph_output_vts,
-            config=config,
-        )
-
-
 class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
     _HOP_NAME = "torch.ops.higher_order.local_map_hop"
     supports_input_mutation = False
@@ -5547,6 +5442,9 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
         return out
 
 
+from .invoke_subgraph import InvokeSubgraphHigherOrderVariable  # noqa: E402
+
+
 # Map operator names to their corresponding variable for fast TorchHigherOrderOperatorVariable.make()
 _hop_name_to_variable_class = {
     "cond": CondHigherOrderVariable,
@@ -5574,6 +5472,7 @@ _hop_name_to_variable_class = {
     "dynamo_bypassing_wrapper": DynamoBypassingWrapperHigherOrderVariable,
     "auto_functionalized": AutoFunctionalizeHigherOrderVariable,
     "auto_functionalized_v2": AutoFunctionalizeHigherOrderVariable,
+    "inline_asm_elementwise": InlineAsmElementwiseHigherOrderVariable,
     "invoke_subgraph": InvokeSubgraphHigherOrderVariable,
     "custom_function_call": CustomFunctionHigherOrderOperatorVariable,
     "local_map_hop": LocalMapWrappedHigherOrderVariable,

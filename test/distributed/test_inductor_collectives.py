@@ -1686,6 +1686,48 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             raise AssertionError(f"Expected out to match correct: {out} vs {correct}")
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_all_gather_bucket_copy_cat_fusion(self):
+        """Bucketed all_gather merge uses copy_(cat(...)) which inductor fuses
+        into 1 Triton kernel instead of N kernels from _foreach_copy_."""
+
+        def func(ag_0, ag_1, ag_2, *, tag, ranks, group_size):
+            group_name = (
+                torch.distributed.distributed_c10d._get_default_group().group_name
+            )
+            ag_0_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_0, group_size, group_name
+            )
+            ag_1_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_1, group_size, group_name
+            )
+            ag_2_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_2, group_size, group_name
+            )
+            return (
+                torch.ops.c10d_functional.wait_tensor(ag_0_out),
+                torch.ops.c10d_functional.wait_tensor(ag_1_out),
+                torch.ops.c10d_functional.wait_tensor(ag_2_out),
+            )
+
+        inputs = [torch.ones(64, device="cuda") for _ in range(3)]
+        with torch._inductor.config.patch(
+            {
+                "bucket_all_gathers_fx": "all",
+                "reorder_for_compute_comm_overlap": False,
+            }
+        ):
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
+        # Bucketed merge should produce 1 copy kernel (fused copy_(cat(...))),
+        # not 3 separate kernels from _foreach_copy_.
+        num_triton_kernels = code.count("def triton_")
+        self.assertEqual(
+            num_triton_kernels,
+            1,
+            f"Expected 1 Triton kernel for fused copy_(cat(...)), got {num_triton_kernels}",
+        )
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
     def test_all_gather_bucket_path(self):
         def func(x, w, ag_0, ag_1, *, tag, ranks, group_size):

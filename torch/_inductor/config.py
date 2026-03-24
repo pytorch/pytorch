@@ -300,7 +300,7 @@ joint_custom_post_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = 
 # Registers a custom pregrad pass. Note that the pre-grad IR is 1.
 # non-functional, 2. non-normalized, and 3. prone to change. Ideally we should
 # use post-grad passes.
-pre_grad_custom_pass: Callable[[torch.fx.graph.Graph], None] | None = None
+pre_grad_custom_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = None
 
 # Registers a custom pass to be run right before fusion in Inductor scheduler.
 # WARNING: Inductor scheduler IR is at prototype stage and subject to change,
@@ -660,6 +660,15 @@ use_dce: bool = True
 
 # Use fx graph passes
 use_pre_grad_passes: bool = True
+
+# "early": pre-grad passes run before cache lookup (every compile).
+# "late": pre-grad passes run after cache lookup (only on cache miss);
+#   requires custom passes to implement uuid() for the cache key.
+# "default": resolves to "late" when possible (no custom pass, or custom pass
+#   with uuid), falls back to "early" otherwise.
+pre_grad_pass_timing: Literal["early", "late", "default"] = "default"
+
+
 use_joint_graph_passes: bool = True
 use_post_grad_passes: bool = True
 
@@ -781,6 +790,16 @@ realize_opcount_threshold = 30
 realize_acc_reads_threshold = 8
 realize_acc_reads_size_threshold: int | None = (
     None  # TODO(xuanzh): harden this to make it non optional
+)
+
+# Defer early realization of cheap output nodes (0 buffer reads, small opcount)
+# to prevent cascade materialization in fullgraph compilation.
+# Shared constants/indices saved for backward get eagerly materialized because
+# they are graph outputs with multiple users, which inflates downstream read
+# counts and can trigger suboptimal Triton block size heuristics.
+delay_realize_cheap_outputs: bool = Config(
+    env_name_force="TORCHINDUCTOR_DELAY_REALIZE_CHEAP_OUTPUTS",
+    default=True,
 )
 
 # fallback to eager for random/dropout, this is slow but useful for debugging
@@ -1103,6 +1122,16 @@ class aten_distributed_optimizations:
 
     # Prioritize bucketing during overlap scheduling by grouping candidates by bucket key
     prioritize_bucketing_during_scheduling: bool = True
+
+    # Verify FX graphs are identical across ranks before overlap scheduling.
+    # Detects non-SPMD graphs that would cause NCCL collective ordering
+    # mismatches and hangs.
+    spmd_check: bool = True
+
+    # Action on SPMD graph mismatch: "warn" logs a warning, "error" raises
+    # RuntimeError. "error" fails fast instead of risking silent NCCL hang.
+    # TODO(ivankobzarev): change default to "error" after real-world testing.
+    spmd_mismatch: Literal["warn", "error"] = "warn"
 
 
 def parallel_compile_enabled_internally() -> bool:
@@ -1791,8 +1820,9 @@ class triton:
     # Whether to upcast float16 / bfloat16 to float32 in triton codegen (Experimental)
     codegen_upcast_to_fp32 = True
 
-    # Whether persistent matmul kernels should be enabled this flag only has effect when on h100
-    # with a version of triton new enough to support TMA
+    # Whether persistent matmul kernels should be enabled. On NVIDIA H100+ with TMA support,
+    # this enables TMA persistent kernels. On AMD GPUs without TMA, this enables
+    # non-TMA persistent kernels as a fallback.
     enable_persistent_tma_matmul = (
         os.environ.get("ENABLE_PERSISTENT_TMA_MATMUL", "0") == "1"
     )
@@ -1855,14 +1885,6 @@ class triton:
     # When the maximum is reached the first values get overwritten
     # This ensures the last N runs are saved, where N is this value
     max_kernel_dump_occurrences = 3
-
-    # TLX template mode: "default", "allow", or "force"
-    tlx_mode: str = os.environ.get("TORCHINDUCTOR_TLX_MODE", "default")
-
-    # TLX heuristic config: when True, use heuristic-based config selection for TLX templates
-    tlx_heuristic_config: bool = (
-        os.environ.get("TORCHINDUCTOR_TLX_HEURISTIC_CONFIG", "1") == "1"
-    )
 
     proton_profiling: bool = (
         os.environ.get("TORCHINDUCTOR_TRITON_PROTON_PROFILING", "0") == "1"
@@ -2474,10 +2496,13 @@ _cache_config_ignore_prefix: list[str] = [
     "post_grad_custom_pre_pass",
     "joint_custom_pre_pass",
     "joint_custom_post_pass",
+    "pre_grad_custom_pass",
     "_fuse_ddp_communication_passes",
     "_pre_fusion_custom_pass",
     # tests assume that changes here don't invalidate cache
     "always_complex_memory_overlap_TESTING_ONLY",
+    # timing affects cache structure, not cache content
+    "pre_grad_pass_timing",
     # cache related options are not relevant to cache results
     "fx_graph_cache",
     "fx_graph_remote_cache",

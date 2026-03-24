@@ -3562,15 +3562,14 @@ class PallasKernel(SIMDKernel):
                         if cshape is not None:
                             code.writeline(f"{param} = {param}.reshape({cshape})")
 
-                    code.writeline("indexer = lambda n: lambda i: [jnp.int32(i)] * n")
                     code.writeline("out_specs_pallas = tuple(")
-                    code.writeline("    pl.BlockSpec(shape, indexer(len(shape)))")
+                    code.writeline("    pallas_make_block_spec_non_tiled(shape)")
                     code.writeline(
                         "    for shape, dtype in zip(_pallas_out_shapes, out_dtypes)"
                     )
                     code.writeline(")")
                     code.writeline("in_specs_pallas = tuple(")
-                    code.writeline("    pl.BlockSpec(i.shape, indexer(len(i.shape)))")
+                    code.writeline("    pallas_make_block_spec_non_tiled(i.shape)")
                     code.writeline(
                         "    for i in [" + ", ".join(ctx.kernel_input_params) + "]"
                     )
@@ -3660,6 +3659,8 @@ from torch._inductor.runtime.runtime_utils import (
     pallas_compute_tiling, pallas_make_block_spec, pallas_permute,
     pallas_gpu_align_output_specs, pallas_gpu_pad_inputs,
     pallas_gpu_unpad_results,
+    pallas_ensure_nonzero_rank,
+    pallas_make_block_spec_non_tiled,
     torch_dtype_to_jax_runtime,
 )
 """
@@ -4156,7 +4157,10 @@ from torch._inductor.runtime.runtime_utils import (
         )
         code.writeline(")(")
         if ctx.kernel_input_params:
-            code.writeline(f"    {', '.join(ctx.kernel_input_params)},")
+            kernel_input_params_nonzero_rank = [
+                f"pallas_ensure_nonzero_rank({p})" for p in ctx.kernel_input_params
+            ]
+            code.writeline(f"    {', '.join(kernel_input_params_nonzero_rank)},")
         code.writeline(")")
         # Reshape results back to original shapes (restores 0-d from promoted (1,))
         code.writeline("if isinstance(_result, tuple):")
@@ -4184,6 +4188,11 @@ from torch._inductor.runtime.runtime_utils import (
             f"def {main_name}({', '.join(ctx.full_kernel_params)}, stream=None):"
         )
         with code.indent():
+            # `jax_enable_x64` is per-process. The CPU path sets it to True,
+            # so running both CPU and TPU tests in one process can cause
+            # x64-related TPU crashes if we do not explicitly set it to
+            # False here.
+            code.writeline("jax.config.update('jax_enable_x64', False)")
             code.writeline("jax.clear_caches()")
 
             # Build JAX placeholders for all inputs

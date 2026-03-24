@@ -1168,9 +1168,7 @@ class GuardBuilder(GuardBuilderBase):
         self.source_ref = source_ref
         self.lookup_weakrefs = lookup_weakrefs
         self.scope: dict[str, dict[str, object]] = {"L": local_scope, "G": global_scope}
-        self.src_get_value_cache: weakref.WeakKeyDictionary[Source, object] = (
-            weakref.WeakKeyDictionary()
-        )
+        self.src_get_value_cache: dict[Source, object] = {}
         self.runtime_global_scope = runtime_global_scope or global_scope
         self.scope["__builtins__"] = builtins.__dict__.copy()
         for (
