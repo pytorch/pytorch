@@ -766,16 +766,19 @@ class MemoryPlanningLine(WrapperLine):
 
 @dataclasses.dataclass
 class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine):
-    """Enter a CUDA device context and allocate required side streams.
+    """Enter a CUDA device context and retrieve user stream objects.
 
     Attributes:
-        num_streams: Number of streams to allocate (determined by user annotations on nodes).
+        num_streams: Number of streams (determined by user annotations on nodes).
+        stream_idx_to_user_obj_idx: Maps stream_idx → user_object_index for
+            retrieving user stream objects via get_external_object_by_index.
     """
 
     num_streams: int = 1
+    stream_idx_to_user_obj_idx: dict[int, int] = dataclasses.field(default_factory=dict)
 
     def codegen(self, code: IndentedBuffer) -> None:
-        """Generate context switching and stream allocation code."""
+        """Generate context switching and stream retrieval code."""
         if V.graph.cpp_wrapper:
             super().codegen(code)
         else:
@@ -783,10 +786,14 @@ class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine)
             code.writeline(f"{DEFAULT_STREAM} = torch.cuda.current_stream()")
 
             if self.num_streams > 1:
+                code.writeline(
+                    "from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index"
+                )
                 for i in range(1, self.num_streams):
+                    user_obj_idx = self.stream_idx_to_user_obj_idx[i]
                     code.writeline(
                         f"{STREAM_NAME_TEMPLATE.format(stream_idx=i)} "
-                        f"= torch.cuda.Stream(device={self.device_idx})",
+                        f"= get_external_object_by_index({user_obj_idx})",
                     )
 
 
@@ -1676,13 +1683,19 @@ class PythonWrapperCodegen(CodeGen):
     def next_kernel_suffix(self) -> str:
         return f"{next(self._names_iter)}"
 
-    def codegen_device_guard_enter(self, device_idx: int, num_streams: int = 1) -> None:
+    def codegen_device_guard_enter(
+        self,
+        device_idx: int,
+        num_streams: int = 1,
+        stream_idx_to_user_obj_idx: dict[int, int] | None = None,
+    ) -> None:
         if num_streams > 1:
             self.writeline(
                 EnterDeviceContextManagerWithStreamInfoLine(
                     device_idx,
                     self.last_seen_device_guard_index,
                     num_streams,
+                    stream_idx_to_user_obj_idx or {},
                 ),
             )
         else:

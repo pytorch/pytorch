@@ -53,14 +53,15 @@ def _length(obj) -> int:
     return len(obj)
 
 
-def _get_expected_num_tensor_outputs(op: OpOverload) -> int:
+def _get_expected_num_tensor_outputs(op: OpOverload) -> int | None:
     """
     Get the expected number of tensor outputs for an operator based on its schema.
 
     Returns:
         The number of tensor outputs expected. Returns 0 for ops that don't return tensors
         (e.g., _linalg_check_errors). Returns 1 for single tensor return, and >1 for
-        tuple returns where each element is a tensor.
+        tuple returns where each element is a tensor. Returns None for List[Tensor]
+        returns where the length is unknown at schema time.
     """
     return_types = op._schema.returns
     if len(return_types) == 0:
@@ -71,8 +72,8 @@ def _get_expected_num_tensor_outputs(op: OpOverload) -> int:
         # Could be single tensor or tuple of tensors
         return len(return_types)
     elif isinstance(first_return.type, torch.ListType):
-        # List[Tensor] - we don't know the length at schema time, treat as 1
-        return 1
+        # List[Tensor] - we don't know the length at schema time
+        return None
     else:
         # Not a tensor return type
         return 0
@@ -100,6 +101,16 @@ def _validate_tensor_meta_count(
         actual_outputs = 1
     else:
         actual_outputs = len(tensor_meta)
+
+    if expected_outputs is None:
+        # List[Tensor] return type: length unknown at schema time, but
+        # tensor_meta must be a list of TensorMeta.
+        if not isinstance(tensor_meta, list):
+            raise AssertionError(
+                f"Tensor meta for {op_schema.op} should be a list[TensorMeta] "
+                f"(op returns List[Tensor]), but got {type(tensor_meta).__name__}"
+            )
+        return
 
     if actual_outputs != expected_outputs:
         raise AssertionError(
@@ -829,7 +840,8 @@ class ShardingPropagator:
                         raise AssertionError
                     selected_strategy = _select_min_cost_strategy(strategy)
                     selected_strategies.append(selected_strategy)
-                    out_spec_list.append(selected_strategy.output_spec)
+                    if selected_strategy.output_specs is not None:
+                        out_spec_list.append(selected_strategy.output_spec)
 
                 needs_redistribute = False
                 suggestion_args: list[object] = []

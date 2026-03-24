@@ -17,6 +17,7 @@ import torch
 import torch._dynamo
 import torch._dynamo.logging
 import torch._dynamo.test_case
+import torch._inductor.test_case
 import torch.distributed as dist
 import torch.optim as optim
 from torch import nn
@@ -24,7 +25,8 @@ from torch._C import FileCheck
 from torch._dynamo import config
 from torch._dynamo.backends.distributed import DDPOptimizer
 from torch._dynamo.comptime import comptime
-from torch._dynamo.testing import collect_results
+from torch._dynamo.device_interface import CudaInterface, DeviceGuard
+from torch._dynamo.testing import collect_results, CompileCounter
 from torch._dynamo.utils import same
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
 from torch.compiler import set_enable_guard_collectives
@@ -39,7 +41,9 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+    TEST_MULTIGPU,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     _dynamo_dist_per_rank_init,
     DynamoDistributedMultiProcTestCase,
@@ -568,6 +572,212 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
         model = FakeDDP(model)
         opt_model = torch.compile(model)
         opt_model(torch.randn(2, 129, 100, 96))
+
+
+# These tests aren't really distributed, but need multiple GPUs to run
+class TestMultiGPU(torch._inductor.test_case.TestCase):
+    @unittest.skipIf(not TEST_MULTIGPU, "Requires multiple gpus")
+    def test_cuda__exchange_device(self):
+        def fn(x):
+            dev = torch.cuda._exchange_device(0)
+            x = torch.sin(x + dev)
+            torch.cuda._maybe_exchange_device(dev)
+            return x
+
+        initial_dev = torch.cuda.current_device()
+        x = torch.randn((2, 2), device="cuda")
+        ref = fn(x)
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+        # make sure we recompile if device changes
+        with torch.cuda.device(1):
+            ref = fn(x)
+            res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(torch.cuda.current_device(), initial_dev)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "need multiple GPU")
+    def test_device_guard(self):
+        current_device = torch.cuda.current_device()
+
+        device_guard = DeviceGuard(CudaInterface, 1)
+
+        with device_guard as _:
+            self.assertEqual(torch.cuda.current_device(), 1)
+            self.assertEqual(device_guard.prev_idx, 0)
+            self.assertEqual(device_guard.idx, 1)
+
+        self.assertEqual(torch.cuda.current_device(), current_device)
+        self.assertEqual(device_guard.prev_idx, 0)
+        self.assertEqual(device_guard.idx, 1)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "need multiple GPU")
+    def test_new_event_api(self) -> None:
+        from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
+        from torch._dynamo.variables.streams import new_event
+
+        def event_generation_backend(gm, *args, **kwargs):  # type: ignore[no-untyped-def]
+            e0_ind = new_event()
+            with torch.Stream(device="cuda:1"):
+                get_external_object_by_index(e0_ind).record()
+            e1_ind = new_event()
+            self.assertNotEqual(e0_ind, e1_ind)
+            self.assertNotEqual(
+                get_external_object_by_index(e0_ind),
+                get_external_object_by_index(e1_ind),
+            )
+            with gm.graph.inserting_after(next(iter(gm.graph.nodes))):
+                gm.graph.call_function(
+                    get_external_object_by_index, args=(1,), kwargs={}
+                )
+            return gm
+
+        @torch.compile(backend=event_generation_backend)
+        def fn(x):
+            return x + 1
+
+        fn(torch.ones(2, 2, device="cuda:0"))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "need multiple GPU")
+    def test_get_current_stream_return_no_index(self):
+        def fn(x, s0, s1):
+            with s1:
+                with s0:
+                    s = torch.accelerator.current_stream(torch.device("cuda"))
+            return s
+
+        s0 = torch.Stream(device="cuda:0")
+        s1 = torch.Stream(device="cuda:1")
+        inp = (torch.ones(2, 2) + 1, s0, s1)
+        fn_opt = torch.compile(fn, fullgraph=True)
+        s_act = fn_opt(*inp)
+        s_exp = fn(*inp)
+        self.assertEqual(s_act, s_exp)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "need multiple GPU")
+    def test_get_current_stream_return_different_device(self):
+        def fn(x, s0, s1):
+            with s1:
+                with s0:
+                    s = torch.accelerator.current_stream(torch.device("cuda:1"))
+            return s
+
+        s0 = torch.Stream(device="cuda:0")
+        s1 = torch.Stream(device="cuda:1")
+        inp = (torch.ones(2, 2) + 1, s0, s1)
+        fn_opt = torch.compile(fn, fullgraph=True)
+        s_act = fn_opt(*inp)
+        s_exp = fn(*inp)
+        self.assertEqual(s_act, s_exp)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    def test_gpu_current_device(self):
+        def fn(x):
+            y = torch.empty(
+                (2, 3),
+                dtype=torch.float32,
+                device=torch.accelerator.current_device_index(),
+            )
+            y.copy_(x)
+            return torch.sin(y + y.device.index)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(backend=counter, fullgraph=True)(fn)
+
+        with torch.accelerator.device_index(0):
+            x = torch.randn(2, 3)
+            self.assertEqual(opt_fn(x), fn(x))
+            self.assertEqual(counter.frame_count, 1)
+            with torch.accelerator.device_index(1):
+                self.assertEqual(opt_fn(x), fn(x))
+                self.assertEqual(counter.frame_count, 2)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "need multiple GPU")
+    def test_symint_as_device_kwarg_multi_gpu(self):
+        def fn(rank):
+            # -2 to make device id smaller for easier testing on CI
+            return torch.ones(10, device=rank.size(0) - 2)
+
+        x = torch.randn(2)
+        out = fn(torch.randn(2))
+
+        guard_failure = None
+
+        def guard_failures(failure):
+            nonlocal guard_failure
+            guard_failure = failure
+
+        opt_fn = torch._dynamo.optimize(
+            "eager", guard_fail_fn=guard_failures, dynamic=True
+        )(fn)
+        self.assertEqual(out, opt_fn(x))
+
+        x = torch.randn(3)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertTrue(guard_failure is not None)
+        self.assertIn("""tensor 'rank' size mismatch at index 0""", guard_failure[0])
+
+    def _clear_dynamo_and_codecache(self):
+        """
+        Clear unrelated caches, like dynamo and PyCodeCache
+        """
+        torch._dynamo.reset()
+        torch._inductor.codecache.PyCodeCache.cache_clear(purge=True)
+
+    @torch._inductor.config.patch("fx_graph_cache", True)
+    @torch._inductor.config.patch("fx_graph_remote_cache", False)
+    @torch._functorch.config.patch({"enable_autograd_cache": True})
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_constant_tensor_device_guards(self):
+        """
+        Usually, when there are example inputs, the device index of the inputs
+        is sufficient to make sure we don't cache hit with the results from different
+        cuda devices.
+        When the input has no arguments, we still need to have the cuda
+        device index in the cache key.
+        """
+
+        @torch.compile(backend="inductor")
+        def f():
+            y = torch.tensor([5], device="cuda")
+            return (y,)
+
+        with torch.cuda._DeviceGuard(0):
+            torch.cuda.set_device(0)
+            result = f()
+            self.assertEqual(result[0].device, torch.device("cuda:0"))
+
+        self._clear_dynamo_and_codecache()
+
+        with torch.cuda._DeviceGuard(1):
+            torch.cuda.set_device(1)
+            result = f()
+            self.assertEqual(result[0].device, torch.device("cuda:1"))
+
+
+class TestMultiGPUDevice(torch._inductor.test_case.TestCase):
+    @unittest.skipIf(not TEST_MULTIGPU, "need multiple GPU")
+    def test_gpu_set_device(self, device):
+        def fn():
+            a = torch.ones(2, device=device)
+            torch.get_device_module(device).set_device(1)
+            return a + 1
+
+        with torch.get_device_module(device).device(0):
+            counter = CompileCounter()
+            opt_fn = torch.compile(fn, backend=counter)
+            res = opt_fn()
+            self.assertTrue(res.device.type in device)
+            self.assertEqual(res.device.index, 0)
+            self.assertEqual(counter.frame_count, 2)
+
+
+devices = ("cuda", "hpu", "xpu")
+instantiate_device_type_tests(
+    TestMultiGPUDevice, globals(), only_for=devices, allow_xpu=True
+)
 
 
 # Are these tests failing?  Check and see if TestFakeDistributedSingleProc has a

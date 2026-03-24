@@ -1395,6 +1395,19 @@ class TestMPS(TestCaseMPS):
         result_contig = torch.nn.functional.linear(input_s, weight_contiguous_equiv)
         self.assertEqual(result_contig, result_sliced)
 
+    def test_linear_backward_channels_last_grad(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/178222
+        # Linear backward crashed when grad_output had channels_last strides,
+        # because suggest_memory_format() returned ChannelsLast which was then
+        # applied to 2D weight grad and 1D bias grad tensors (requires rank 4).
+        x = torch.randn(2, 8, 3, 4, device='mps', requires_grad=True)
+        proj = torch.nn.Linear(4, 4, device='mps')
+        y = proj(x)
+        z = y.permute(0, 2, 3, 1).contiguous()
+        target = torch.randn_like(z)
+        loss = (z - target).pow(2).sum()
+        loss.backward()
+
     def _linear_helper(self, in_features, out_features, shape, bias=True, backward_pass=False):
         cpu_linear = torch.nn.Linear(in_features=in_features, out_features=out_features, device="cpu", bias=bias)
         mps_linear = torch.nn.Linear(in_features=in_features, out_features=out_features, device="mps", bias=bias)

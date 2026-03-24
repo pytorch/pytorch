@@ -29,6 +29,7 @@ from typing import (
     get_origin as _get_origin,
     overload as _overload,
     TYPE_CHECKING,
+    TypeGuard as _TypeGuard,
     TypeVar as _TypeVar,
 )
 from typing_extensions import (
@@ -1171,7 +1172,7 @@ def is_tensor(obj: _Any, /) -> _TypeIs["torch.Tensor"]:
     return isinstance(obj, torch.Tensor)
 
 
-def is_storage(obj: _Any, /) -> builtins.bool:
+def is_storage(obj: _Any, /) -> _TypeGuard["TypedStorage | UntypedStorage"]:
     r"""Returns True if `obj` is a PyTorch storage object.
 
     Args:

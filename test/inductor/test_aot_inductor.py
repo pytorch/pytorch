@@ -61,6 +61,10 @@ from torch.testing._internal.common_device_type import (
     e5m2_type,
     skipCUDAIf,
 )
+from torch.testing._internal.common_dtype import (
+    highest_precision_complex,
+    highest_precision_float,
+)
 from torch.testing._internal.common_quantization import (
     _group_quantize_tensor,
     skip_if_no_torchvision,
@@ -2961,11 +2965,11 @@ class AOTInductorTestsTemplate:
         Original PR: https://github.com/pytorch/pytorch/pull/139054
         """
         from torch.testing._internal.common_quantization import (
-            _static_reference_quantized_linear_module,
+            _static_quantized_linear_module,
         )
 
         example_inputs = (torch.randn(32, 16),)
-        model = _static_reference_quantized_linear_module(
+        model = _static_quantized_linear_module(
             N=15, K=16, bias=True, example_input=example_inputs[0]
         )
         model = torch.export.export(model, example_inputs, strict=True).module()
@@ -3632,7 +3636,7 @@ class AOTInductorTestsTemplate:
 
         # Call eval() here so that batch_norm won't update the running stats
         # Use float64 to avoid numeric difference failure
-        dtype = torch.float32 if self.device == "mps" else torch.float64
+        dtype = highest_precision_float(self.device)
         model = Model().to(device=self.device, dtype=dtype).eval()
         example_inputs = (torch.randn(4, 3, 64, 64, device=self.device, dtype=dtype),)
         self.check_model(model, example_inputs)
@@ -5135,7 +5139,7 @@ class AOTInductorTestsTemplate:
         )
         x2 = torch.tensor(
             128,
-            dtype=torch.complex128 if self.device != "mps" else torch.complex64,
+            dtype=highest_precision_complex(self.device),
             device=self.device,
         )
         inputs.append(x0)

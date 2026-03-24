@@ -982,7 +982,8 @@ arg0_1, = args
 with torch.cuda._DeviceGuard(0):
     torch.cuda.set_device(0)
     default_stream = torch.cuda.current_stream()
-    stream1 = torch.cuda.Stream(device=0)
+    from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
+    stream1 = get_external_object_by_index(0)
     with torch.cuda.stream(stream1):
         buf0 = empty_strided_cuda((1024, ), (1, ), torch.float32)
         buf1 = buf0; del buf0
@@ -1052,7 +1053,8 @@ torch.ops.streams.wait_event.default(1, 0)
 with torch.cuda._DeviceGuard(0):
     torch.cuda.set_device(0)
     default_stream = torch.cuda.current_stream()
-    stream1 = torch.cuda.Stream(device=0)
+    from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
+    stream1 = get_external_object_by_index(0)
     with torch.cuda.stream(default_stream):
         buf2 = empty_strided_cuda((32, 32), (32, 1), torch.float32)
         extern_kernels.mm(arg0_1, arg1_1, out=buf2)
@@ -1152,9 +1154,10 @@ torch.ops.streams.wait_event.default(4, 2)
 with torch.cuda._DeviceGuard(0):
     torch.cuda.set_device(0)
     default_stream = torch.cuda.current_stream()
-    stream1 = torch.cuda.Stream(device=0)
-    stream2 = torch.cuda.Stream(device=0)
-    stream3 = torch.cuda.Stream(device=0)
+    from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
+    stream1 = get_external_object_by_index(0)
+    stream2 = get_external_object_by_index(1)
+    stream3 = get_external_object_by_index(2)
     with torch.cuda.stream(stream1):
         buf4 = empty_strided_cuda((32, 32), (32, 1), torch.float32)
         extern_kernels.mm(arg0_1, arg1_1, out=buf4)
@@ -1249,8 +1252,9 @@ torch.ops.streams.wait_event.default(3, 4)
 with torch.cuda._DeviceGuard(0):
     torch.cuda.set_device(0)
     default_stream = torch.cuda.current_stream()
-    stream1 = torch.cuda.Stream(device=0)
-    stream2 = torch.cuda.Stream(device=0)
+    from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
+    stream1 = get_external_object_by_index(0)
+    stream2 = get_external_object_by_index(1)
     with torch.cuda.stream(stream1):
         buf4 = empty_strided_cuda((32, 32), (32, 1), torch.float32)
         extern_kernels.mm(arg0_1, arg1_1, out=buf4)
@@ -1422,11 +1426,62 @@ class TestGenericStreamCompile(InductorTestCase):
         )
 
 
+@unittest.skipUnless(TEST_CUDA, "requires CUDA")
+class TestStreamIdentity(InductorTestCase):
+    """Verify that compiled code uses the user's original stream objects."""
+
+    def test_single_stream_identity(self):
+        """Codegen should retrieve the user's stream via get_external_object_by_index."""
+        from torch._inductor.utils import run_and_get_code
+
+        user_stream = torch.cuda.Stream()
+
+        def fn(x):
+            with torch.cuda.stream(user_stream):
+                return x * 2
+
+        x = torch.randn(1024, device="cuda")
+        result, (code,) = run_and_get_code(torch.compile(fn), x)
+
+        self.assertEqual(result, fn(x))
+        self.assertIn("get_external_object_by_index", code)
+        self.assertNotIn("torch.cuda.Stream(device=", code)
+
+    def test_multiple_stream_identity(self):
+        """Each stream context should retrieve a different user stream object."""
+        from torch._inductor.utils import run_and_get_code
+
+        stream_a = torch.cuda.Stream()
+        stream_b = torch.cuda.Stream()
+
+        def fn(x):
+            event = torch.cuda.Event()
+            with torch.cuda.stream(stream_a):
+                a = x * 2
+                event.record()
+            with torch.cuda.stream(stream_b):
+                event.wait()
+                b = a + 1
+            stream_b.synchronize()
+            return b
+
+        x = torch.randn(1024, device="cuda")
+        result, (code,) = run_and_get_code(torch.compile(fn), x)
+
+        self.assertEqual(result, fn(x))
+        # Should have two distinct get_external_object_by_index calls
+        matches = re.findall(r"get_external_object_by_index\((\d+)\)", code)
+        self.assertEqual(len(matches), 2)
+        self.assertNotEqual(matches[0], matches[1])
+        self.assertNotIn("torch.cuda.Stream(device=", code)
+
+
 instantiate_parametrized_tests(TestStreamUtils)
 instantiate_parametrized_tests(TestWrapperCodegenStreams)
 instantiate_parametrized_tests(TestStreamCodegen)
 instantiate_parametrized_tests(TestUserStreamCompile)
 instantiate_parametrized_tests(TestGenericStreamCompile)
+instantiate_parametrized_tests(TestStreamIdentity)
 
 
 if __name__ == "__main__":

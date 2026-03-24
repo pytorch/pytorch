@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import functools
 import re
 import unittest
 import weakref
@@ -13,13 +12,7 @@ from torch._dynamo.graph_bytecode_inputs import (
     store_user_object_weakrefs,
 )
 from torch._dynamo.testing import extract_graph, remove_trailing_space
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import requires_cuda
-
-
-requires_multigpu = functools.partial(
-    unittest.skipIf, not TEST_MULTIGPU, "requires multiple cuda devices"
-)
 
 
 def remove_file_comment(gm_str: str) -> str:
@@ -162,40 +155,6 @@ class <lambda>(torch.nn.Module):
         _, s1 = fn_opt(*inp)
         self.assertEqual(s_inp, s0)
         self.assertEqual(s0, s1)
-
-    @requires_cuda
-    @requires_multigpu()
-    def test_get_current_stream_return_different_device(self):
-        def fn(x, s0, s1):
-            with s1:
-                with s0:
-                    s = torch.accelerator.current_stream(torch.device("cuda:1"))
-            return s
-
-        s0 = torch.Stream(device="cuda:0")
-        s1 = torch.Stream(device="cuda:1")
-        inp = (torch.ones(2, 2) + 1, s0, s1)
-        fn_opt = torch.compile(fn, fullgraph=True)
-        s_act = fn_opt(*inp)
-        s_exp = fn(*inp)
-        self.assertEqual(s_act, s_exp)
-
-    @requires_cuda
-    @requires_multigpu()
-    def test_get_current_stream_return_no_index(self):
-        def fn(x, s0, s1):
-            with s1:
-                with s0:
-                    s = torch.accelerator.current_stream(torch.device("cuda"))
-            return s
-
-        s0 = torch.Stream(device="cuda:0")
-        s1 = torch.Stream(device="cuda:1")
-        inp = (torch.ones(2, 2) + 1, s0, s1)
-        fn_opt = torch.compile(fn, fullgraph=True)
-        s_act = fn_opt(*inp)
-        s_exp = fn(*inp)
-        self.assertEqual(s_act, s_exp)
 
     @requires_cuda
     def test_cuda_current_stream_attrs(self):
@@ -360,34 +319,6 @@ class <lambda>(torch.nn.Module):
         return (add_1, add_2)
 """,
         )
-
-    @requires_cuda
-    @requires_multigpu()
-    def test_new_event_api(self) -> None:
-        from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
-        from torch._dynamo.variables.streams import new_event
-
-        def event_generation_backend(gm, *args, **kwargs):  # type: ignore[no-untyped-def]
-            e0_ind = new_event()
-            with torch.Stream(device="cuda:1"):
-                get_external_object_by_index(e0_ind).record()
-            e1_ind = new_event()
-            self.assertNotEqual(e0_ind, e1_ind)
-            self.assertNotEqual(
-                get_external_object_by_index(e0_ind),
-                get_external_object_by_index(e1_ind),
-            )
-            with gm.graph.inserting_after(next(iter(gm.graph.nodes))):
-                gm.graph.call_function(
-                    get_external_object_by_index, args=(1,), kwargs={}
-                )
-            return gm
-
-        @torch.compile(backend=event_generation_backend)
-        def fn(x):
-            return x + 1
-
-        fn(torch.ones(2, 2, device="cuda:0"))
 
     @requires_cuda
     def test_new_stream_api(self) -> None:

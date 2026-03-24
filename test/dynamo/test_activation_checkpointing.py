@@ -419,6 +419,112 @@ class ActivationCheckpointingViaTagsTests(
         _ = torch.compile(fn, backend=backend)(x, y)
 
     @requires_cuda_and_triton
+    def test_ac_tags_through_custom_autograd_function(self, device):
+        class MyMM(torch.autograd.Function):
+            @staticmethod
+            def forward(x, w):
+                return x @ w
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                x, w = inputs
+                ctx.save_for_backward(x, w)
+
+            @staticmethod
+            def backward(ctx, grad):
+                x, w = ctx.saved_tensors
+                return grad @ w.t(), x.t() @ grad
+
+        def gn(x, w):
+            return MyMM.apply(x, w)
+
+        def fn(x, w):
+            return torch.utils.checkpoint.checkpoint(gn, x, w, use_reentrant=False)
+
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        w = torch.randn(4, 4, device=device, requires_grad=True)
+
+        def partition_fn(joint_gm, *args, **kwargs):
+            fwd_mm_nodes = [
+                node
+                for node in joint_gm.graph.nodes
+                if node.op == "call_function"
+                and node.target == torch.ops.aten.mm.default
+                and node.meta.get("partitioner_tag") == "is_forward"
+            ]
+            self.assertTrue(
+                fwd_mm_nodes, "Expected forward mm nodes in the joint graph"
+            )
+            for node in fwd_mm_nodes:
+                self.assertIn("recompute", node.meta)
+                self.assertIn("ac_graph_id", node.meta)
+            return min_cut_rematerialization_partition(joint_gm, *args, **kwargs)
+
+        backend = aot_autograd(
+            fw_compiler=nop, bw_compiler=nop, partition_fn=partition_fn
+        )
+        out = torch.compile(fn, backend=backend)(x, w)
+        out.sum().backward()
+
+    @requires_cuda_and_triton
+    def test_sac_tags_through_custom_autograd_function(self, device):
+        class MyMM(torch.autograd.Function):
+            @staticmethod
+            def forward(x, w):
+                return x @ w
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                x, w = inputs
+                ctx.save_for_backward(x, w)
+
+            @staticmethod
+            def backward(ctx, grad):
+                x, w = ctx.saved_tensors
+                return grad @ w.t(), x.t() @ grad
+
+        def gn(x, w):
+            return MyMM.apply(x, w)
+
+        context_fn = functools.partial(
+            torch.utils.checkpoint.create_selective_checkpoint_contexts,
+            lambda ctx,
+            op,
+            *args,
+            **kwargs: torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE,
+        )
+
+        def fn(x, w):
+            return torch.utils.checkpoint.checkpoint(
+                gn, x, w, use_reentrant=False, context_fn=context_fn
+            )
+
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        w = torch.randn(4, 4, device=device, requires_grad=True)
+
+        def partition_fn(joint_gm, *args, **kwargs):
+            fwd_mm_nodes = [
+                node
+                for node in joint_gm.graph.nodes
+                if node.op == "call_function"
+                and node.target == torch.ops.aten.mm.default
+                and node.meta.get("partitioner_tag") == "is_forward"
+            ]
+            self.assertTrue(
+                fwd_mm_nodes, "Expected forward mm nodes in the joint graph"
+            )
+            for node in fwd_mm_nodes:
+                self.assertIn("recompute", node.meta)
+                self.assertIn("ac_graph_id", node.meta)
+            return min_cut_rematerialization_partition(joint_gm, *args, **kwargs)
+
+        backend = aot_autograd(
+            fw_compiler=nop, bw_compiler=nop, partition_fn=partition_fn
+        )
+        out = torch.compile(fn, backend=backend)(x, w)
+        out.sum().backward()
+
+    @requires_cuda_and_triton
     def test_tangent_placeholders_have_is_backward_tag(self, device):
         """Test that tangent placeholders in the joint graph are tagged with is_backward."""
 
@@ -1871,7 +1977,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
     @requires_distributed()
     @requires_cuda_and_triton
     def test_dynamo_does_not_trace_getattr_as_top_frame(self):
-        # inline_inbuilt_nn_modules is a proxy to emulate what FSDP tests do.
         from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
             CheckpointWrapper,
         )
@@ -2238,16 +2343,16 @@ def forward(self, arg0_1, arg1_1):
     expand = torch.ops.aten.expand.default(ones_like, [4, 4]);  ones_like = None
     mm_recomputed = torch.ops.aten.mm.default(arg0_1, arg1_1)
     sigmoid_recomputed = torch.ops.aten.sigmoid.default(mm_recomputed);  mm_recomputed = None
-    detach_recomputed = torch.ops.aten.detach.default(sigmoid_recomputed);  sigmoid_recomputed = None
-    detach_2 = torch.ops.aten.detach.default(detach_recomputed);  detach_recomputed = None
-    sigmoid_backward = torch.ops.aten.sigmoid_backward.default(expand, detach_2);  expand = detach_2 = None
+    detach_2_recomputed = torch.ops.aten.detach.default(sigmoid_recomputed);  sigmoid_recomputed = None
+    detach_4 = torch.ops.aten.detach.default(detach_2_recomputed);  detach_2_recomputed = None
+    sigmoid_backward = torch.ops.aten.sigmoid_backward.default(expand, detach_4);  expand = detach_4 = None
     t = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
     mm_2 = torch.ops.aten.mm.default(t, sigmoid_backward);  t = None
     t_1 = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
     mm_3 = torch.ops.aten.mm.default(sigmoid_backward, t_1);  sigmoid_backward = t_1 = None
-    detach_3 = torch.ops.aten.detach.default(mm_3);  mm_3 = None
-    detach_4 = torch.ops.aten.detach.default(mm_2);  mm_2 = None
-    return (detach_3, detach_4)""",
+    detach_5 = torch.ops.aten.detach.default(mm_3);  mm_3 = None
+    detach_6 = torch.ops.aten.detach.default(mm_2);  mm_2 = None
+    return (detach_5, detach_6)""",
         )
 
     def test_ac_rematerialize_with_rng_ops_raises_error(self):
@@ -2418,11 +2523,11 @@ def forward(self, arg0_1):
     ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
     expand = torch.ops.aten.expand.default(ones_like, [4, 4]);  ones_like = None
     sigmoid_recomputed = torch.ops.aten.sigmoid.default(arg0_1);  arg0_1 = None
-    detach_recomputed = torch.ops.aten.detach.default(sigmoid_recomputed);  sigmoid_recomputed = None
-    detach_2 = torch.ops.aten.detach.default(detach_recomputed);  detach_recomputed = None
-    sigmoid_backward = torch.ops.aten.sigmoid_backward.default(expand, detach_2);  expand = detach_2 = None
-    detach_3 = torch.ops.aten.detach.default(sigmoid_backward);  sigmoid_backward = None
-    return (detach_3,)""",
+    detach_3_recomputed = torch.ops.aten.detach.default(sigmoid_recomputed);  sigmoid_recomputed = None
+    detach_5 = torch.ops.aten.detach.default(detach_3_recomputed);  detach_3_recomputed = None
+    sigmoid_backward = torch.ops.aten.sigmoid_backward.default(expand, detach_5);  expand = detach_5 = None
+    detach_6 = torch.ops.aten.detach.default(sigmoid_backward);  sigmoid_backward = None
+    return (detach_6,)""",
         )
 
     def test_joint_graph_passes_permute_optimization(self):
@@ -2467,11 +2572,11 @@ def forward(self, arg0_1):
     ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
     expand = torch.ops.aten.expand.default(ones_like, [4, 4]);  ones_like = None
     sigmoid_recomputed = torch.ops.aten.sigmoid.default(arg0_1);  arg0_1 = None
-    detach_recomputed = torch.ops.aten.detach.default(sigmoid_recomputed);  sigmoid_recomputed = None
-    detach_2 = torch.ops.aten.detach.default(detach_recomputed);  detach_recomputed = None
-    sigmoid_backward = torch.ops.aten.sigmoid_backward.default(expand, detach_2);  expand = detach_2 = None
-    detach_3 = torch.ops.aten.detach.default(sigmoid_backward);  sigmoid_backward = None
-    return (detach_3,)""",
+    detach_3_recomputed = torch.ops.aten.detach.default(sigmoid_recomputed);  sigmoid_recomputed = None
+    detach_5 = torch.ops.aten.detach.default(detach_3_recomputed);  detach_3_recomputed = None
+    sigmoid_backward = torch.ops.aten.sigmoid_backward.default(expand, detach_5);  expand = detach_5 = None
+    detach_6 = torch.ops.aten.detach.default(sigmoid_backward);  sigmoid_backward = None
+    return (detach_6,)""",
         )
 
 

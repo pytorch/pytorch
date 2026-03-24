@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 # ruff: noqa: F841
 import contextlib
+import contextvars
 import copy
 import dataclasses
 import functools
@@ -83,7 +84,11 @@ from torch.testing._internal.common_device_type import (
     expectedFailureXPU,
     largeTensorTest,
 )
-from torch.testing._internal.common_dtype import all_types, get_all_dtypes
+from torch.testing._internal.common_dtype import (
+    all_types,
+    get_all_dtypes,
+    highest_precision_float,
+)
 from torch.testing._internal.common_quantization import (
     _dynamically_quantize_per_channel,
     _group_quantize_tensor_symmetric,
@@ -3336,7 +3341,7 @@ class CommonTemplate:
         def fn(a):
             return torch.round(a)
 
-        dtype = torch.float64 if self.device != "mps" else torch.float32
+        dtype = highest_precision_float(self.device)
         self.common(
             fn,
             [torch.arange(-10, 10, 0.1, dtype=dtype)],
@@ -4650,7 +4655,7 @@ class CommonTemplate:
 
         x1 = torch.randn(30, device=self.device)
         x2 = torch.randn(36, device=self.device)
-        dtype = torch.float64 if self.device != "mps" else torch.float32
+        dtype = highest_precision_float(self.device)
         y = torch.ones(1, dtype=dtype, device=self.device)
 
         self.assertEqual(torch.compile(fn)(x1, y), fn(x1, y))
@@ -5409,8 +5414,9 @@ class CommonTemplate:
         threads = []
         compiled_m = torch.compile(model)
         for _ in range(1, numb_instance + 1):
+            ctx = contextvars.copy_context()
             thread = threading.Thread(
-                target=run_weights_sharing_model, args=(compiled_m, inp)
+                target=ctx.run, args=(run_weights_sharing_model, compiled_m, inp)
             )
             threads.append(thread)
             thread.start()
@@ -6535,7 +6541,7 @@ class CommonTemplate:
         def fn(dist, angle):
             return torch.polar(dist, angle)
 
-        dtype = torch.float64 if self.device != "mps" else torch.float32
+        dtype = highest_precision_float(self.device)
         inp = (
             torch.tensor([1, 2], dtype=dtype),
             torch.tensor([np.pi / 2, 5 * np.pi / 4], dtype=dtype),
@@ -13684,7 +13690,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return out
 
         device = "cpu"
-        dtype = torch.double if self.device != "mps" else torch.float32
+        dtype = highest_precision_float(self.device)
         tensor = torch.rand((1,), dtype=dtype, device=device)
         index = torch.tensor([0], dtype=torch.long, device=device)
         source = torch.rand((1,), dtype=dtype, device=device)
