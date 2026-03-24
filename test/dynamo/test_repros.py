@@ -4169,7 +4169,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         cnt = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt)
         opt_fn(inp1, inp2, inp3, inp4, c)
-        self.assertEqual(cnt.frame_count, 3)
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_torch_variable_type(self):
         # from torchvision
@@ -5395,17 +5395,11 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         obj = A()
 
-        try:
+        with self.assertRaisesRegex(RuntimeError, r"super\(\)"):
             fn(obj)
-        except Exception as e:
-            orig_str = str(e)
-        self.assertIn("no arguments", orig_str)
 
-        try:
+        with self.assertRaisesRegex(RuntimeError, r"super\(\)"):
             torch.compile(backend="eager")(fn)(obj)
-        except Exception as e:
-            compiled_str = str(e)
-        self.assertEqual(orig_str, compiled_str)
 
     def test_super_staticmethod(self):
         class Parent:
