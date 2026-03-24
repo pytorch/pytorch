@@ -160,7 +160,6 @@ class GraphModule(torch.nn.Module):
         res = fn(x)
         self.assertEqual(res, (x + 1, [0]))
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_device_mesh_init_skip_after_graph_break(self):
         device_mesh = init_device_mesh(
             device_type="cpu",
