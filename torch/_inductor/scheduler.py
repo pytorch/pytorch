@@ -6089,11 +6089,43 @@ class Scheduler:
             if self.mode_requires_synchronization(write.mode):
                 return False
 
-            return (
+            if (
                 read.index == write.index
                 and len(read.size) >= len(write.size)
                 and read.size[: len(write.size)] == write.size
-            )
+            ):
+                return True
+
+            # Check for broadcast-compatible read pattern:
+            # A Pointwise reads a Reduction output using integer division
+            # (e.g., scales[d1 // 128] over [N*K] matches scales[d1] over [N]).
+            # This is safe to fuse because the Pointwise can run as an epilogue
+            # inside the Reduction's loop, using the value already in registers.
+            if len(read.size) == len(write.size) and read.size[:-1] == write.size[:-1]:
+                import sympy
+                from torch.utils._sympy.functions import FloorDiv
+
+                last_read = read.size[-1]
+                last_write = write.size[-1]
+                if (
+                    last_read != last_write
+                    and last_write != 0
+                    and sympy.sympify(last_read % last_write) == 0
+                ):
+                    K = sympy.sympify(last_read // last_write)
+                    read_vars = sorted(read.index.free_symbols, key=str)
+                    write_vars = sorted(write.index.free_symbols, key=str)
+                    if read_vars and write_vars:
+                        d_read_last = read_vars[-1]
+                        d_write_last = write_vars[-1]
+                        # The read index contains FloorDiv(d1, K).
+                        # Replace it with d_write_last and check match.
+                        floor_div_expr = FloorDiv(d_read_last, K)
+                        substituted = read.index.subs(floor_div_expr, d_write_last)
+                        if substituted == write.index:
+                            return True
+
+            return False
         elif isinstance(read, StarDep):
             read_name = self.mutation_renames.get(read.name, read.name)
             write_name = self.mutation_renames.get(write.name, write.name)
