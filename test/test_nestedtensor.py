@@ -27,6 +27,7 @@ from torch.nested._internal.nested_tensor import (
 )
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
+    skipIfNoTritonOnWindows,
     SM70OrLater,
     SM80OrLater,
     tf32_on_and_off,
@@ -6801,6 +6802,7 @@ torch.cuda.synchronize()
         nt1_t, nt2_t, nt3_t, nt4_t = (x.transpose(1, 2) for x in (nt1, nt2, nt3, nt4))
         check_size(nt1_t, nt2_t, nt3_t, nt4_t)
 
+    @skipIfNoTritonOnWindows
     @skipIfTorchDynamo("compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     def test_specialize_dynamic_shape(self, device):
@@ -7319,6 +7321,7 @@ torch.cuda.synchronize()
     @onlyCUDA
     # efficient_attention_forward meta kernel shape mismatch on CDNA - see issue #171568
     @skipIfRocm
+    @skipIfNoTritonOnWindows
     @dtypes(
         *(
             [torch.float16, torch.bfloat16, torch.float32]
@@ -7347,6 +7350,7 @@ torch.cuda.synchronize()
         not PLATFORM_SUPPORTS_FUSED_ATTENTION,
         "Platform doesn't support flash or mem-efficient attention",
     )
+    @skipIfNoTritonOnWindows
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @onlyCUDA
     # flash_attention_forward meta kernel shape mismatch on CDNA - see issue #171568
@@ -7495,6 +7499,7 @@ torch.cuda.synchronize()
 
     # Internally-defined NT use cases are lifted to here for maximum test realism.
     # TODO: Remove these when ViewNestedFromBuffer, etc. are deprecated.
+    @skipIfNoTritonOnWindows
     @skipCUDAIfRocm  # not needed
     @skipIfTorchDynamo("compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
@@ -7851,6 +7856,7 @@ torch.cuda.synchronize()
                     padded, [offsets_wrong], total_L
                 )
 
+    @skipIfNoTritonOnWindows
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
     # efficient_attention_forward meta kernel shape mismatch on CDNA - see issue #171568
@@ -8070,6 +8076,7 @@ torch.cuda.synchronize()
 
     # blows up due to test parametrization otherwise
     @torch._dynamo.utils.disable_cache_limit()
+    @skipIfNoTritonOnWindows
     @skipIfTorchDynamo("SDPA test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @dtypes(torch.float32, torch.double, torch.half)
@@ -8170,6 +8177,7 @@ torch.cuda.synchronize()
             if "cuda" in device:
                 self.assertFalse(any(d == 3 for d in buffer_dims))
 
+    @skipIfNoTritonOnWindows
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
@@ -8259,6 +8267,7 @@ torch.cuda.synchronize()
 
         self.assertEqual(res.shape, (4, nt.shape[1], 6))
 
+    @skipIfNoTritonOnWindows
     @skipIfTorchDynamo("compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @dtypes(torch.float32)

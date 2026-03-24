@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 import torch
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
-from torch.testing._internal.common_cuda import SM70OrLater
+from torch.testing._internal.common_cuda import skipIfNoTritonOnWindows, SM70OrLater
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -231,6 +231,7 @@ TEST_CASE_NAMES = [tc.name for tc in TEST_CASES]
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available")
 @unittest.skipIf(not SM70OrLater, "Requires SM70+")
+@skipIfNoTritonOnWindows
 @instantiate_parametrized_tests
 class TestInlineAsmElementwise(TestCase):
     """Parametrized tests for inline_asm_elementwise."""
@@ -370,6 +371,7 @@ class TestInlineAsmElementwiseEdgeCases(TestCase):
         self.assertEqual(result.shape, x.shape)
         self.assertEqual(result, x)
 
+    @skipIfNoTritonOnWindows
     def test_composition_with_pytorch_ops(self):
         def fn(x, y):
             z = x * 2
@@ -423,6 +425,7 @@ class TestInlineAsmElementwiseEdgeCases(TestCase):
         self.assertEqual(eager_result.shape, fake_result.shape)
         self.assertEqual(eager_result.stride(), fake_result.stride())
 
+    @skipIfNoTritonOnWindows
     def test_dynamic_shapes(self):
         def fn(x, y):
             return inline_asm_elementwise(
@@ -445,6 +448,7 @@ class TestInlineAsmElementwiseEdgeCases(TestCase):
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available")
 @unittest.skipIf(not SM70OrLater, "Requires SM70+")
+@skipIfNoTritonOnWindows
 class TestInlineAsmPackPadding(TestCase):
     """Test that pack padding works when block size < pack."""
 

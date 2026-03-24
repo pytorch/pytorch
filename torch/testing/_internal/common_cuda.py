@@ -6,6 +6,7 @@ import functools
 import torch
 import torch.cuda
 from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU
+from torch.utils._triton import has_triton
 import inspect
 import contextlib
 import os
@@ -468,3 +469,7 @@ requires_triton_ptxas_compat = unittest.skipIf(not torch.version.xpu
 if not CUDA_ALREADY_INITIALIZED_ON_IMPORT:
     if torch.cuda.is_initialized():
         raise AssertionError("CUDA should not be initialized on import")
+
+skipIfNoTritonOnWindows = unittest.skipIf(
+    IS_WINDOWS and not has_triton(), "Triton not installed on Windows"
+)
