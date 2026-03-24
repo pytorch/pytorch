@@ -8052,7 +8052,7 @@ class TestCompileKernel(TestCase):
         # Test error handling with more than supported shared memory size
         if torch.version.hip:
             max_smem = (
-                65536 if get_device_properties().gcnArchName != "gfx950" else 160 * 1024
+                65536 if get_device_properties().gcnArchName.split(":")[0] != "gfx950" else 160 * 1024
             )
         else:
             max_smem = get_device_properties().shared_memory_per_block_optin
@@ -8061,7 +8061,6 @@ class TestCompileKernel(TestCase):
         with self.assertRaises(RuntimeError):
             kernel.set_shared_memory_config(excessive_shared_mem)
 
-    @skipIfRocmArch(MI300_ARCH)
     @tf32_on_and_off(0.005)
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_advanced(self):
@@ -8116,7 +8115,7 @@ class TestCompileKernel(TestCase):
         if not torch.version.hip:
             compute_cap = f"{device_props.major}{device_props.minor}"
         else:
-            compute_cap = f"{device_props.gcnArchName}"
+            compute_cap = device_props.gcnArchName.split(":")[0]
 
         # Recompile with explicit compute capability
         matmul_kernel_explicit = _compile_kernel(
