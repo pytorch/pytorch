@@ -7,7 +7,7 @@ import torch._dynamo.config
 import torch._dynamo.test_case
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import run_tests, skipIfCrossRef, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfCrossRef, TestCase, xfailIfNoAcceleratorTriton
 
 
 class TestDynamoDecompositions(torch._dynamo.test_case.TestCase):
@@ -569,7 +569,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-
+@xfailIfNoAcceleratorTriton
 class TestDynamoDecompositionsNumerics(TestCase):
     """Numerics tests for dynamo decompositions across devices."""
 
