@@ -3763,10 +3763,10 @@ class TestProfilerEventsParity(TestCase):
     def test_python_function_events_in_events(self):
         # Default: python function events are excluded from events()
         with profile(
-            activities=[ProfilerActivity.CPU],
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
             with_stack=True,
         ) as prof:
-            x = torch.randn(10, 10)
+            x = torch.randn(10, 10, device="cuda")
             torch.mm(x, x)
 
         default_py = [e for e in prof.events() if e.is_python_function]
@@ -3776,9 +3776,7 @@ class TestProfilerEventsParity(TestCase):
         with profile(
             activities=[ProfilerActivity.CPU],
             with_stack=True,
-            experimental_config=_ExperimentalConfig(
-                expose_python_function_events=True
-            ),
+            experimental_config=_ExperimentalConfig(expose_python_function_events=True),
         ) as prof:
             x = torch.randn(10, 10)
             torch.mm(x, x)
