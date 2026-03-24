@@ -160,7 +160,7 @@ if TYPE_CHECKING:
 
     from torch._inductor.cudagraph_utils import BoxedDeviceIndex
     from torch._inductor.output_code import OutputCode
-    from torch._inductor.utils import InputType
+    from torch._inductor.utils import BoxedBool, InputType
     from torch._ops import OpOverload
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
@@ -1099,9 +1099,6 @@ def aot_module_simplified(
 
     :func:`aot_module_simplified` removes these overheads.
     """
-
-    if cudagraphs is None:
-        cudagraphs = BoxedBool(torch._inductor.config.triton.cudagraphs)
 
     with contextlib.ExitStack() as stack:
         (

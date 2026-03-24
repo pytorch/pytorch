@@ -708,8 +708,10 @@ def normalize_placeholder_names(
 
 
 def create_fx_config(
-    cudagraphs: BoxedBool, boxed_forward_device_index: BoxedDeviceIndex | None
+    cudagraphs: BoxedBool | None, boxed_forward_device_index: BoxedDeviceIndex | None
 ) -> _CompileFxKwargs:
+    if cudagraphs is None:
+        cudagraphs = BoxedBool(torch._inductor.config.triton.cudagraphs)
     return {
         "cudagraphs": cudagraphs,
         "boxed_forward_device_index": boxed_forward_device_index,
