@@ -1509,6 +1509,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._foreach_clamp_max",
         "torch._foreach_clamp_min_",
         "torch._foreach_clamp_min",
+        "torch._foreach_clone",
         "torch._foreach_copy_",
         "torch._foreach_cos_",
         "torch._foreach_cos",
