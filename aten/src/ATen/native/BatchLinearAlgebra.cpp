@@ -3883,6 +3883,60 @@ Tensor& linalg_solve_triangular_out(
   // and B are F-ready and not A.is_neg() (which happens almost always in practice).
   // When called as f(A, B, out=B) in most practical cases it'll perform no copies.
 
+  bool out_fully_owned = false;
+  if (out.numel() == 0) {
+    // Empty implies full ownership of out.
+    // This means we can alter its stride structure and play transposition tricks.
+    out_fully_owned = true;
+  } else {
+    TORCH_CHECK(
+      out.sizes() == B_.sizes(),
+      "torch.linalg.solve_triangular: ",
+      "expected `out`.shape=", B_.sizes(), ", but got ", out.sizes(), " instead"
+    );
+  }
+
+  // Prepare A to be BLAS-compliant.
+  // NOTE: mem overlaps are fine as long as there is a contiguous row/col.
+  // FIXME: batch overlaps are permissible, but the kernel loops over the batch dims,
+  // so the batch dims are being materialized.
+  // This behavior is inhereted from the previous imlementations.
+  const auto pA = can_flatten_batch_dims(A_) && (A_.stride(-2) == 1 || A_.stride(-1) == 1)
+    ? c10::MaybeOwned<Tensor>::borrowed(A_)
+    : c10::MaybeOwned<Tensor>::owned(cloneMatrix(A_));
+
+  // This case is simple:
+  // B is copied into a resized out such that
+  // mem_layout(A) == mem_layout(out).
+  // Then, after the kernel run, we update
+  // set_conj(out, A.is_conj)
+  // set_neg(out, A.is_neg)
+  // This prevents A copies in most cases.
+  if (out_fully_owned) {
+    const auto is_A_col_major = (pA->stride(-2) == 1);
+    if (is_A_col_major) {
+      // Trivial case to avoid copies of A
+      out.resize_(B_.transpose(-2, -1).sizes(), MemoryFormat::Contiguous);
+      out.transpose_(-2, -1);
+    } else {
+      // In this case we transpose the problem to avoid copies of A
+      out.resize_(B_.sizes(), MemoryFormat::Contiguous);
+    }
+
+    out.copy_(pA->is_conj() ? B_.conj() : B_);
+    triangular_solve_stub(
+      pA->device().type(),
+      is_A_col_major ? *pA : pA->mT(),
+      is_A_col_major? out : out.mT(),
+      /*left=*/is_A_col_major ? left : !left,
+      /*upper=*/is_A_col_major ? upper : !upper,
+      /*transpose*/TransposeType::NoTranspose,
+      /*unitriangular=*/unitriangular);
+    out._set_neg(pA->is_neg());
+    out._set_conj(pA->is_conj());
+    return out;
+  }
+
   const bool avoid_copy_A = A_.transpose(-2, -1).is_contiguous() && A_.is_conj();
   if (avoid_copy_A) {
     // See Note: [Cloning A]
