@@ -189,7 +189,7 @@ class DeferredTritonCallWrapper:
         )
 
         # Write function signature
-        prefix.writeline(f"static inline void {self.wrapper_name}(")
+        prefix.writeline(f"static __attribute__((noinline)) void {self.wrapper_name}(")
         with prefix.indent():
             for i, param in enumerate(param_lines):
                 comma = "," if i < len(param_lines) - 1 else ""
