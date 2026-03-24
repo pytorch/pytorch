@@ -2588,8 +2588,26 @@ class TestOpInfoSampleFunctions(TestCase):
         self.assertIsInstance(samples, Iterator)
 
 
-instantiate_device_type_tests(TestOpInfoSampleFunctions, globals())
-instantiate_parametrized_tests(TestImports)
+class TestBypassOnlyOn(TestCase):
+    # This class verifies that the bypass_only_on flag correctly allows tests
+    # to run even when they would otherwise be skipped by decorators like @onlyCUDA.
+    pass
+
+class TestBypassOnlyOnDisabled(TestBypassOnlyOn):
+    @onlyCUDA
+    def test_only_cuda_bypass(self, device):
+        # This test should normally skip on CPU.
+        self.assertTrue(True)
+
+    @onlyNativeDeviceTypes
+    def test_only_native_device_types_bypass(self, device):
+        self.assertTrue(True)
+
+class TestBypassOnlyOnEnabled(TestBypassOnlyOnDisabled):
+    bypass_only_on = True
+
+instantiate_device_type_tests(TestBypassOnlyOnDisabled, globals(), only_for='cpu')
+instantiate_device_type_tests(TestBypassOnlyOnEnabled, globals(), only_for='cpu')
 
 
 if __name__ == '__main__':

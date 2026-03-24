@@ -317,6 +317,7 @@ def _update_param_kwargs(param_kwargs, name, value):
 
 class DeviceTypeTestBase(TestCase):
     device_type: str = "generic_device_type"
+    bypass_only_on: bool = False
 
     # Flag to disable test suite early due to unrecoverable error such as CUDA error.
     _stop_test_suite = False
@@ -1443,6 +1444,8 @@ class onlyOn:
     def __call__(self, fn):
         @wraps(fn)
         def only_fn(slf, *args, **kwargs):
+            if getattr(slf, "bypass_only_on", False):
+                return fn(slf, *args, **kwargs)
             if slf.device_type not in self.device_type:
                 reason = f"Only runs on {self.device_type}"
                 if IS_SANDCASTLE or IS_FBCODE:
@@ -1492,6 +1495,8 @@ class deviceCountAtLeast:
 def onlyNativeDeviceTypes(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     @wraps(fn)
     def only_fn(self, *args: _P.args, **kwargs: _P.kwargs) -> _T:
+        if getattr(self, "bypass_only_on", False):
+            return fn(self, *args, **kwargs)
         if self.device_type not in NATIVE_DEVICES:
             reason = f"onlyNativeDeviceTypes: doesn't run on {self.device_type}"
             raise unittest.SkipTest(reason)
@@ -1506,6 +1511,8 @@ def onlyNativeDeviceTypesAnd(devices=None):
     def decorator(fn):
         @wraps(fn)
         def only_fn(self, *args, **kwargs):
+            if getattr(self, "bypass_only_on", False):
+                return fn(self, *args, **kwargs)
             if (
                 self.device_type not in NATIVE_DEVICES
                 and self.device_type not in devices
@@ -1694,6 +1701,8 @@ def onlyPRIVATEUSE1(fn):
 def onlyCUDAAndPRIVATEUSE1(fn):
     @wraps(fn)
     def only_fn(self, *args, **kwargs):
+        if getattr(self, "bypass_only_on", False):
+            return fn(self, *args, **kwargs)
         if self.device_type not in ("cuda", torch._C._get_privateuse1_backend_name()):
             reason = f"onlyCUDAAndPRIVATEUSE1: doesn't run on {self.device_type}"
             raise unittest.SkipTest(reason)
