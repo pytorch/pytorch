@@ -1613,9 +1613,7 @@ class CPUReproTests(TestCase):
     @requires_vectorization
     def test_dequant_quant_lowering_int8(self):
         self._test_dequant_quant_lowering_helper(torch.int8)
-        self._test_dequant_quant_lowering_helper(
-            torch.int8, input_dtype=torch.bfloat16
-        )
+        self._test_dequant_quant_lowering_helper(torch.int8, input_dtype=torch.bfloat16)
         self._test_dequant_quant_lowering_helper(
             torch.int8, dequant_out_dtype=torch.bfloat16
         )

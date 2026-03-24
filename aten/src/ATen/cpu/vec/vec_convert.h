@@ -64,8 +64,8 @@ inline std::enable_if_t<std::is_same_v<dst_t, src_t>, Vectorized<src_t>> convert
 }
 
 template <typename dst_t, typename src_t>
-inline std::enable_if_t<std::is_same_v<dst_t, src_t>, Vectorized<src_t>> round_convert(
-    const Vectorized<src_t>& src) {
+inline std::enable_if_t<std::is_same_v<dst_t, src_t>, Vectorized<src_t>>
+round_convert(const Vectorized<src_t>& src) {
   return src;
 }
 
