@@ -717,6 +717,56 @@ class TestDTensorOptimizer(DTensorTestBase):
             inp = torch.ones(8, 10, device=self.device_type)
             self._assert_optimizer(None, mod, opt, mod_copy, dist_opt, inp)
 
+    @with_comms
+    def test_adamw_sharding_cache_no_leak(self):
+        """Foreach optimizer ops with step-varying ScalarList args (like
+        AdamW's bias corrections) must not cause unbounded growth of the
+        DTensor sharding propagation cache."""
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        model = MLPModule(self.device_type)
+        for name, param in model.named_parameters():
+            dist_param = nn.Parameter(distribute_tensor(param, mesh, [Shard(0)]))
+            dist_param.register_hook(
+                lambda grad: grad.redistribute(placements=[Shard(0)])
+            )
+            # set the parameter on the parent module
+            parts = name.split(".")
+            mod = model
+            for part in parts[:-1]:
+                mod = getattr(mod, part)
+            mod.register_parameter(parts[-1], dist_param)
+
+        optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+
+        def run_step():
+            inp = distribute_tensor(
+                torch.randn(8, 10, device=self.device_type), mesh, [Shard(0)]
+            )
+            out = model(inp)
+            out.sum().backward()
+            optimizer.step()
+            optimizer.zero_grad()
+
+        # Warmup to populate caches
+        for _ in range(3):
+            run_step()
+
+        _, misses_after_warmup = torch._C._get_DTensor_sharding_propagator_cache_stats()
+
+        for _ in range(10):
+            run_step()
+
+        # After warmup, the cache should be fully populated: no new
+        # misses across subsequent training steps.
+        _, misses_after_steps = torch._C._get_DTensor_sharding_propagator_cache_stats()
+        self.assertEqual(
+            misses_after_warmup,
+            misses_after_steps,
+            f"Cache misses increased from {misses_after_warmup} to "
+            f"{misses_after_steps} over 10 steps (expected 0 new misses "
+            "after warmup)",
+        )
+
 
 TestDTensorOptimizerWithLocalTensor = create_local_tensor_test_class(
     TestDTensorOptimizer,

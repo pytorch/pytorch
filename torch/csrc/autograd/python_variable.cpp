@@ -2411,7 +2411,13 @@ create_native_op_schema(
                 item_flavor == TensorFlavor::NON_DTENSOR_TENSOR_SUBCLASS) {
               handle_exactly_tensor(item_py_tensor);
             } else { // non-tensor
-              handle_non_tensor_or_undefined(item);
+              // Use handle_non_dtensor_arg to respect static_argnum.
+              // Non-tensor items in lists (e.g., ScalarList args to
+              // foreach ops) should only be included in the cache key
+              // if the list's argument index is >= static_argnum.
+              // Otherwise, step-varying scalars (like AdamW bias
+              // corrections) cause unbounded cache growth.
+              handle_non_dtensor_arg(idx, item);
             }
           }
         } else {
