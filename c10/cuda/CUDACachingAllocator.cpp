@@ -459,9 +459,15 @@ struct ExpandableSegment {
       if (enable_ipc_handles) {
         if (CUDAAllocatorConfig::expandable_segments_handle_type() !=
             Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
+#ifdef USE_ROCM
+          prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+#else
           prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+#endif
         } else {
+#ifndef USE_ROCM
           prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_FABRIC;
+#endif
         }
       }
       int flag = 0;

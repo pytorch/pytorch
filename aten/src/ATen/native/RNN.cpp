@@ -104,8 +104,9 @@ bool use_mkldnn(const Tensor& input, TensorList params, TensorList hx) {
        (input.scalar_type() == kHalf && !at::GradMode::is_enabled() &&
         mkldnn_fp16_device_check())) &&
       input.numel() != 0;
-#endif
+#else
   return false;
+#endif
 }
 
 bool use_cudnn(const Tensor& t) {

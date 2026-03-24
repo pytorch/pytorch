@@ -16,11 +16,7 @@ import torch.utils._pytree as python_pytree
 from torch._dynamo.exc import ResumePrologueTracingError, TorchRuntimeError, Unsupported
 from torch._dynamo.testing import skipIfNotPy312, skipIfOnlyNotPy312
 from torch._dynamo.utils import counters
-from torch.testing._internal.common_utils import (
-    IS_FBCODE,
-    munge_exc,
-    scoped_load_inline,
-)
+from torch.testing._internal.common_utils import IS_FBCODE, munge_exc
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
@@ -469,92 +465,6 @@ Attempted to call function marked as skipped
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0007.html""",
         )
 
-    @scoped_load_inline
-    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
-    @unittest.skipIf(IS_FBCODE, "inline cpp_extension doesn't work in fbcode")
-    def test_cpp_extension_recommends_custom_ops(self, load_inline):
-        cpp_source = """
-        #include <torch/extension.h>
-        at::Tensor foobar(const at::Tensor& x) {
-            return x.clone();
-        }
-        """
-        module = load_inline(
-            name="mylib",
-            cpp_sources=cpp_source,
-            functions="foobar",
-            verbose=True,
-        )
-
-        x = torch.ones(2, 2, requires_grad=True)
-        counters.clear()
-
-        @torch.compile(backend="eager")
-        def f(x):
-            return module.foobar(x)
-
-        with self.assertWarnsOnceRegex(
-            UserWarning,
-            "(?s).*https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html.*",
-        ):
-            f(x)
-        self.assertEqual(len(counters["graph_break"]), 1)
-        first_graph_break = next(iter(counters["graph_break"].keys()))
-
-        first_graph_break = re.sub(r"mylib(_v\d+)?", "mylib", first_graph_break)
-        # HACK: this patches around the fact that PyBind11 improperly sets the
-        # __qualname__ attribute on functions and methods; see
-        # https://github.com/pybind/pybind11/issues/5774.  This should be removed if
-        # that issue is fixed.
-        first_graph_break = re.sub(
-            r"pybind11_detail_function_record_v[^ .]+", "PyCapsule", first_graph_break
-        )
-
-        self.assertExpectedInline(
-            first_graph_break,
-            """\
-Attempted to call function marked as skipped
-  Explanation: Dynamo does not know how to trace the builtin `mylib.PyCapsule.foobar.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
-  Hint: If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
-  Hint: If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
-
-  Developer debug context: module: mylib, qualname: PyCapsule.foobar, skip reason: cannot determine source file for mylib (likely a C extension or builtin)
-
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0007.html""",
-        )
-
-        cpp_source = """
-        #include <torch/extension.h>
-        at::Tensor baz(const at::Tensor& x) {
-            return x.clone();
-        }
-        """
-        module2 = load_inline(
-            name="mylib2",
-            cpp_sources=cpp_source,
-            functions="baz",
-            verbose=True,
-        )
-
-        torch._dynamo.reset()
-
-        # Test that each warning only happens once
-        @torch.compile(backend="eager")
-        def f(x):
-            module2.baz(x)
-            module.foobar(x)
-            module.foobar(x)
-            module2.baz(x)
-            module.foobar(x)
-            module2.baz(x)
-            return x.clone()
-
-        with warnings.catch_warnings(record=True) as ws:
-            warnings.simplefilter("always")
-            f(x)
-            f(x)
-        self.assertEqual(len(ws), 2)
-
     def test_observed_exception(self):
         def fn():
             raise RuntimeError("test")
@@ -601,35 +511,6 @@ Uninitialized nn.Module
 from user code:
    File "test_error_messages.py", line N, in fn
     return mod(1)""",
-        )
-
-    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
-    def test_class_property(self):
-        class Foo(torch.nn.Module):
-            attr = unittest
-
-        def fn(mod, x):
-            return mod.attr
-
-        self.assertExpectedInlineMunged(
-            Unsupported,
-            lambda: torch.compile(fn, backend="eager", fullgraph=True)(
-                Foo(), torch.randn(3)
-            ),
-            """\
-Unsupported nn.Module attribute type
-  Explanation: Dynamo does not support tracing nn.Module attributes of type `module`
-  Hint: Refactor your code so that `attr` (type `module`) is not an attribute of `Foo`
-  Hint: Currently supported attribute types are methods, classmethods, staticmethods, properties, constants, and tensors.
-  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
-
-  Developer debug context: nn.Module subclass: Foo, name: attr, attribute type: module
-
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0161.html
-
-from user code:
-   File "test_error_messages.py", line N, in fn
-    return mod.attr""",
         )
 
     def test_generic_ctx_mgr_graph_break_fullgraph_true(self):

@@ -76,6 +76,7 @@ std::tuple<Tensor, Tensor, Tensor> native_layer_norm(
   const Tensor bias = bias_opt->is_vulkan() ? *bias_opt : bias_opt->vulkan();
 
   std::vector<int64_t> dims_to_reduce;
+  dims_to_reduce.reserve(normalized_shape.size());
   for (const auto i : c10::irange(normalized_shape.size())) {
     dims_to_reduce.push_back(input_arg.dim() - i - 1);
   }

@@ -128,9 +128,7 @@ def strict_export_and_aot_export_joint_with_descriptors(model, args, kwargs=None
     torch.utils._pytree.register_constant(DTensorSpec)
     try:
         # install_free_tensors is required for dynamo to work
-        with torch._dynamo.config.patch(
-            install_free_tensors=True, inline_inbuilt_nn_modules=True
-        ):
+        with torch._dynamo.config.patch(install_free_tensors=True):
             with torch._export.utils._disable_aten_to_metadata_assertions():
                 ep = torch.export.export(model, args, kwargs, strict=True)
 
@@ -543,7 +541,18 @@ graph():
     %item : [num_users=2] = call_method[target=item](args = (%clamp,), kwargs = {})
     %ge_1 : [num_users=1] = call_function[target=operator.ge](args = (%item, 1), kwargs = {})
     %_assert_scalar_default : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%ge_1, Runtime assertion failed for expression u0 >= 1 on node 'ge_1'), kwargs = {})
-    %getitem : [num_users=1] = call_function[target=operator.getitem](args = (%l_x_, slice(None, item, None)), kwargs = {})
+    %getitem : [num_users=3] = call_function[target=operator.getitem](args = (%l_x_, slice(None, item, None)), kwargs = {})
+    %getattr_1 : [num_users=1] = call_function[target=builtins.getattr](args = (%getitem, _local_tensor), kwargs = {})
+    %sym_size_int : [num_users=2] = call_function[target=torch.ops.aten.sym_size.int](args = (%getattr_1, 0), kwargs = {})
+    %sym_size_int_1 : [num_users=2] = call_function[target=torch.ops.aten.sym_size.int](args = (%getitem, 0), kwargs = {})
+    %ge_2 : [num_users=1] = call_function[target=operator.ge](args = (%sym_size_int, 0), kwargs = {})
+    %_assert_scalar_default_1 : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%ge_2, Runtime assertion failed for expression u2 >= 0 on node 'ge_2'), kwargs = {})
+    %le : [num_users=1] = call_function[target=operator.le](args = (%sym_size_int, 4), kwargs = {})
+    %_assert_scalar_default_2 : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%le, Runtime assertion failed for expression u2 <= 4 on node 'le'), kwargs = {})
+    %ge_3 : [num_users=1] = call_function[target=operator.ge](args = (%sym_size_int_1, 0), kwargs = {})
+    %_assert_scalar_default_3 : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%ge_3, Runtime assertion failed for expression u1 >= 0 on node 'ge_3'), kwargs = {})
+    %le_1 : [num_users=1] = call_function[target=operator.le](args = (%sym_size_int_1, 4), kwargs = {})
+    %_assert_scalar_default_4 : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%le_1, Runtime assertion failed for expression u1 <= 4 on node 'le_1'), kwargs = {})
     return (getitem,)""",  # noqa: B950
         )
 
