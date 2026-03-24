@@ -80,6 +80,7 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
     from .constant import ConstantVariable
+    from .dicts import DunderDictVariable
 
 
 def initialize_lazy_module(
@@ -204,6 +205,11 @@ class NNModuleVariable(VariableTracker):
         self.source: Source = self.source
         self.nn_module_stack_source = self.source
 
+    def get_dict_vt(self, tx: "InstructionTranslator") -> "DunderDictVariable":
+        if not hasattr(self, "dict_vt"):
+            self.dict_vt = variables.DunderDictVariable.create(tx, self)
+        return self.dict_vt
+
     def get_nn_module_stack_source(self) -> Source:
         res = self.nn_module_stack_source or self.source
         assert res
@@ -281,18 +287,6 @@ class NNModuleVariable(VariableTracker):
         if tx.f_code.co_name != "__init__":
             GenerationTracker.mark_class_dynamic(type(mod))
         raise UnspecializeRestartAnalysis
-
-    def has_key_in_generic_dict(self, tx: "InstructionTranslator", key: str) -> bool:
-        base = tx.output.get_submodule(self.module_key)
-
-        if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
-            mutated_attr = tx.output.side_effects.load_attr(self, key, deleted_ok=True)
-            return not isinstance(mutated_attr, variables.DeletedVariable)
-
-        # Use object.__getattribute__ to access __dict__ directly,
-        # bypassing any custom __getattribute__ on the module.
-        base_dict = object.__getattribute__(base, "__dict__")
-        return key in base_dict
 
     def _custom_getattr_fallback(
         self,
@@ -381,7 +375,7 @@ class NNModuleVariable(VariableTracker):
             )
 
         if name == "__dict__":
-            return variables.GetAttrVariable(self, name, source=source)
+            return self.get_dict_vt(tx)
 
         subobj = None
         if name in base_dict:
