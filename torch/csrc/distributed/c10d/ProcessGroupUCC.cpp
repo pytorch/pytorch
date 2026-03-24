@@ -1,7 +1,6 @@
 #ifdef USE_C10D_UCC
 
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
-#include <c10/util/CallOnce.h>
 #include <c10/util/env.h>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
@@ -86,7 +85,6 @@ ucc_reduction_op_t to_ucc_reduceOp(
 }
 
 struct torch_ucc_config_t {
-  c10::once_flag flag;
   std::array<bool, 32> blocking_wait;
   bool enable_comms_logger;
   bool use_future;
@@ -577,7 +575,10 @@ ProcessGroupUCC::ProcessGroupUCC(
     int size,
     std::chrono::duration<float> timeout)
     : Backend(rank, size), timeout_(timeout) {
-  c10::call_once(torch_ucc_config.flag, read_config);
+  [[maybe_unused]] static bool config_read = [] {
+    read_config();
+    return true;
+  }();
   oob = std::make_shared<torch_ucc_oob_coll_info_t>();
   oob->rank = rank;
   oob->size = size;
