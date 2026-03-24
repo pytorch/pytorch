@@ -8,7 +8,7 @@ from torch.testing._internal.common_cuda import (
     SM100OrLater,
     SM80OrLater,
     SM90OrLater,
-    TEST_CUDNN_VERSION,
+    PLATFORM_SUPPORTS_CUDNN_ATTENTION,
 )
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
@@ -42,12 +42,9 @@ def evaluate_platform_supports_efficient_attention():
         return True
     return False
 
-def evaluate_platform_supports_cudnn_attention():
-    return (not TEST_WITH_ROCM) and SM80OrLater and (TEST_CUDNN_VERSION >= 90000)
 
 PLATFORM_SUPPORTS_FLASH_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_flash_attention())
 PLATFORM_SUPPORTS_MEM_EFF_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_efficient_attention())
-PLATFORM_SUPPORTS_CUDNN_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_cudnn_attention())
 # This condition always evaluates to PLATFORM_SUPPORTS_MEM_EFF_ATTENTION but for logical clarity we keep it separate
 PLATFORM_SUPPORTS_FUSED_ATTENTION: bool = LazyVal(lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION or
                                                   PLATFORM_SUPPORTS_CUDNN_ATTENTION or

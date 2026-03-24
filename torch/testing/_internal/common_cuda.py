@@ -70,6 +70,11 @@ def CDNA3OrLater():
 def CDNA2OrLater():
     return evaluate_gfx_arch_within(["gfx90a", "gfx942", "gfx950"])
 
+def evaluate_platform_supports_cudnn_attention():
+    return (not TEST_WITH_ROCM) and SM80OrLater and (TEST_CUDNN_VERSION >= 90000)
+
+PLATFORM_SUPPORTS_CUDNN_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_cudnn_attention())
+
 def evaluate_platform_supports_ck_sdpa():
     if TEST_WITH_ROCM:
         return torch.backends.cuda.is_ck_sdpa_available()
