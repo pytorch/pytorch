@@ -68,12 +68,19 @@ class CustomPreGradPassRemoveIdentMuls(CustomGraphPass):
     """
 
     def __call__(self, g: torch.fx.Graph) -> None:
+        changed = False
         for n in g.nodes:
             if n.op == "call_function" and n.target is operator.mul:
                 lhs, rhs = n.args
                 if lhs == 1:
                     n.replace_all_uses_with(rhs)
                     g.erase_node(n)
+                    changed = True
+        if not changed:
+            raise RuntimeError(
+                "Custom pass did not change the graph. "
+                "All test cases expect the pass to modify the graph."
+            )
 
     def uuid(self):
         return "custom_pre_grad_pass_remove_ident_muls_v1"
@@ -2762,12 +2769,19 @@ class AOTAutogradCacheTests(InductorTestCase):
 
                 class TestPreGradPass(CustomGraphPass):
                     def __call__(self, g):
+                        changed = False
                         for n in g.nodes:
                             if n.op == "call_function" and n.target is operator.mul:
                                 lhs, rhs = n.args
                                 if lhs == 1:
                                     n.replace_all_uses_with(rhs)
                                     g.erase_node(n)
+                                    changed = True
+                        if not changed:
+                            raise RuntimeError(
+                                "Custom pass did not change the graph. "
+                                "All test cases expect the pass to modify the graph."
+                            )
 
                     def uuid(self):
                         return {pass_uuid}
