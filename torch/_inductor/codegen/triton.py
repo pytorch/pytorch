@@ -5972,9 +5972,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         f'AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan("{arg}", {arg}));'
                     )
                 else:
-                    line = f"assert not {arg}.isnan().any().item()"
+                    # FP8 dtypes don't support isnan/isinf, upcast to float first
+                    dtype = arg_signature.dtype
+                    cast = ".float()" if dtype.is_floating_point and dtype.itemsize == 1 else ""
+                    line = f"assert not {arg}{cast}.isnan().any().item()"
                     wrapper.writeline(line)
-                    line = f"assert not {arg}.isinf().any().item()"
+                    line = f"assert not {arg}{cast}.isinf().any().item()"
                     wrapper.writeline(line)
 
     def create_cse_var(self, *args, **kwargs) -> TritonCSEVariable:

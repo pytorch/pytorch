@@ -17748,6 +17748,16 @@ if RUN_GPU:
             ):
                 torch.compile(f)(x)
 
+        @config.patch("nan_asserts", True)
+        def test_nan_checker_fp8(self):
+            def f(x):
+                return x.half() + 1
+
+            x = torch.randn(10, device=GPU_TYPE).to(torch.float8_e4m3fn)
+            ref = f(x)
+            actual = torch.compile(f)(x)
+            self.assertEqual(ref, actual)
+
 
 if RUN_CPU:
 
