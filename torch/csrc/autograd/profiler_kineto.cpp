@@ -494,19 +494,17 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
 
       // Unfinished events automatically have end time set to trace end time
       if (!e->finished_) {
-        e->visit(
-            c10::overloaded(
-                [trace_end_ns](ExtraFields<EventType::TorchOp>& i) {
-                  i.end_time_ns_ = trace_end_ns;
-                },
-                [](auto&) {}));
+        e->visit(c10::overloaded(
+            [trace_end_ns](ExtraFields<EventType::TorchOp>& i) {
+              i.end_time_ns_ = trace_end_ns;
+            },
+            [](auto&) {}));
       }
 
-      e->visit(
-          c10::overloaded(
-              [this](ExtraFields<EventType::TorchOp>& i) { invokeCallback(i); },
-              [this](ExtraFields<EventType::Backend>& i) { invokeCallback(i); },
-              [](auto&) {}));
+      e->visit(c10::overloaded(
+          [this](ExtraFields<EventType::TorchOp>& i) { invokeCallback(i); },
+          [this](ExtraFields<EventType::Backend>& i) { invokeCallback(i); },
+          [](auto&) {}));
 
       kinetoEvents.emplace_back(e, config_.experimental_config.verbose);
       AddTensorboardFields add_tb(e, kinetoEvents.back());
