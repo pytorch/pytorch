@@ -57,18 +57,6 @@ macro(custom_protobuf_find)
     set(CMAKE_CXX_FLAGS ${__caffe2_CMAKE_CXX_FLAGS})
   endif()
 
-  # Protobuf "namespaced" target is only added post protobuf 3.5.1. As a
-  # result, for older versions, we will manually add alias.
-  if(NOT TARGET protobuf::libprotobuf)
-    add_library(protobuf::libprotobuf ALIAS libprotobuf)
-    add_library(protobuf::libprotobuf-lite ALIAS libprotobuf-lite)
-    # There is link error when cross compiling protoc on mobile:
-    # https://github.com/protocolbuffers/protobuf/issues/2719
-    # And protoc is very unlikely needed for mobile builds.
-    if(NOT (ANDROID OR IOS))
-      add_executable(protobuf::protoc ALIAS protoc)
-    endif()
-  endif()
 endmacro()
 
 # Main entry for protobuf. If we are building on Android, iOS or we have hard
@@ -109,15 +97,7 @@ get_target_property(__tmp protobuf::libprotobuf INTERFACE_INCLUDE_DIRECTORIES)
 message(STATUS "Caffe2 protobuf include directory: " ${__tmp})
 include_directories(BEFORE SYSTEM ${__tmp})
 
-# If Protobuf_VERSION is known (true in most cases, false if we are building
-# local protobuf), then we will add a protobuf version check in
-# Caffe2Config.cmake.in.
-if(DEFINED ${Protobuf_VERSION})
-  set(CAFFE2_KNOWN_PROTOBUF_VERSION TRUE)
-else()
-  set(CAFFE2_KNOWN_PROTOBUF_VERSION FALSE)
-  set(Protobuf_VERSION "Protobuf_VERSION_NOTFOUND")
-endif()
+set(CAFFE2_KNOWN_PROTOBUF_VERSION TRUE)
 
 
 # Figure out which protoc to use.

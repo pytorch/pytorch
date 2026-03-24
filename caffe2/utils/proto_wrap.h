@@ -11,4 +11,18 @@ namespace ONNX_NAMESPACE {
 TORCH_API const ::std::string& GetEmptyStringAlreadyInited();
 
 } // namespace ONNX_NAMESPACE
+
+namespace caffe2 {
+
+// A wrapper function to shut down protobuf library (this is needed in ASAN
+// testing and valgrind cases to avoid protobuf appearing to "leak" memory).
+TORCH_API void ShutdownProtobufLibrary();
+
+} // namespace caffe2
+
+namespace torch {
+
+void ShutdownProtobufLibrary();
+
+} // namespace torch
 #endif // CAFFE2_UTILS_PROTO_WRAP_H_
