@@ -1511,7 +1511,8 @@ static Tensor& logsumexp_out_impl(Tensor& result, const Tensor& self, IntArrayRe
     // For complex numbers, use the real part to calculate the max. Based on
     // https://scicomp.stackexchange.com/questions/34273/log-sum-exp-trick-for-signed-complex-numbers
     auto maxes = at::amax(at::real(self), dims, true);
-    auto maxes_squeezed = (keepdim ? maxes : at::squeeze(maxes, dims));
+    auto maxes_squeezed = keepdim ? maxes
+        : (dims.empty() ? at::squeeze(maxes) : at::squeeze(maxes, dims));
     maxes_squeezed.masked_fill_(maxes_squeezed.abs() == INFINITY, 0);
     at::sum_out(result, (self - maxes).exp_(), dims, keepdim);
     result.log_().add_(maxes_squeezed);
