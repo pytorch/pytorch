@@ -3065,7 +3065,7 @@ std::tuple<Tensor, Tensor> linalg_eig(const Tensor& input) {
 
   at::linalg_eig_outf(input, values, vectors);
 
-  return std::tuple<Tensor, Tensor>(values, vectors);
+  return std::tuple<Tensor, Tensor>(std::move(values), std::move(vectors));
 }
 
 Tensor& linalg_eigvals_out(const Tensor& input, Tensor& values) {

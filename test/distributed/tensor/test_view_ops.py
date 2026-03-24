@@ -21,6 +21,7 @@ from torch.distributed.tensor._ops._view_ops import (
     dim_maps,
     Flatten,
     InputDim,
+    propagate_shape_and_sharding,
     Repeat,
     Singleton,
     Split,
@@ -691,6 +692,154 @@ class TestViewOps(DTensorTestBase):
         )
         self.assertEqual(dist_x.placements, [Partial(), Shard(0)])
 
+        # squeeze_ should not trigger any communication
+        y = torch.randn((1, 4), device=self.device_type)
+        dist_y = DTensor.from_local(y, mesh_2d, [Partial(), Shard(1)])
+        with CommDebugMode() as comm_mode:
+            torch.ops.aten.squeeze_.dim(dist_y, 0)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+
+    @with_comms
+    def test_squeeze_variants(self):
+        """Test squeeze.default, squeeze.dim, and squeeze.dims with DTensor."""
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        # squeeze.dims on sharded tensor - squeeze non-sharded dims
+        with self.subTest("dims_sharded"):
+            x = torch.randn(self.world_size, 1, 1, 8, device=self.device_type)
+            dt = distribute_tensor(x, mesh, [Shard(0)])
+            with CommDebugMode() as comm_mode:
+                result = dt.squeeze((1, 2))
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(result.shape, torch.Size([self.world_size, 8]))
+            self.assertEqual(result.placements, (Shard(0),))
+            self.assertEqual(result.to_local().shape, torch.Size([1, 8]))
+
+        # squeeze.dim on sharded tensor - squeeze non-sharded dim
+        with self.subTest("dim_sharded"):
+            x = torch.randn(self.world_size, 1, 8, device=self.device_type)
+            dt = distribute_tensor(x, mesh, [Shard(0)])
+            with CommDebugMode() as comm_mode:
+                result = dt.squeeze(1)
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(result.shape, torch.Size([self.world_size, 8]))
+            self.assertEqual(result.placements, (Shard(0),))
+            self.assertEqual(result.to_local().shape, torch.Size([1, 8]))
+
+        # squeeze.default on replicated tensor
+        with self.subTest("default_replicated"):
+            x = torch.randn(4, 1, 1, 8, device=self.device_type)
+            dt = distribute_tensor(x, mesh, [Replicate()])
+            with CommDebugMode() as comm_mode:
+                result = dt.squeeze()
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(result.shape, torch.Size([4, 8]))
+            self.assertEqual(result.placements, (Replicate(),))
+
+        # squeeze.dims on replicated tensor
+        with self.subTest("dims_replicated"):
+            x = torch.randn(2, 1, 3, 1, device=self.device_type)
+            dt = distribute_tensor(x, mesh, [Replicate()])
+            with CommDebugMode() as comm_mode:
+                result = dt.squeeze((1, 3))
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(result.shape, torch.Size([2, 3]))
+            self.assertEqual(result.placements, (Replicate(),))
+
+        # squeeze non-singleton dim is a no-op
+        with self.subTest("non_singleton_noop"):
+            x = torch.randn(self.world_size, 4, device=self.device_type)
+            dt = distribute_tensor(x, mesh, [Shard(0)])
+            with CommDebugMode() as comm_mode:
+                result = dt.squeeze(1)
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(result.shape, torch.Size([self.world_size, 4]))
+            self.assertEqual(result.placements, (Shard(0),))
+
+        # Partial passes through squeeze unchanged
+        with self.subTest("partial_max_passthrough"):
+            x = torch.randn(1, 4, device=self.device_type)
+            dt = DTensor.from_local(x, mesh, [Partial("max")])
+            with CommDebugMode() as comm_mode:
+                result = dt.squeeze(0)
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(result.shape, torch.Size([4]))
+            self.assertEqual(result.placements, (Partial("max"),))
+
+        # Partial("sum") also passes through
+        with self.subTest("partial_sum_passthrough"):
+            x = torch.randn(1, device=self.device_type)
+            dt = DTensor.from_local(x, mesh, [Partial("sum")])
+            with CommDebugMode() as comm_mode:
+                result = dt.squeeze()
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(result.shape, torch.Size([]))
+            self.assertEqual(result.placements, (Partial("sum"),))
+
+        # squeeze must not remove sharded dim (local size 1, global size > 1)
+        with self.subTest("preserve_sharded_dim_default"):
+            x = (
+                torch.arange(self.world_size * 8, device=self.device_type)
+                .reshape(self.world_size, 8)
+                .float()
+            )
+            dt = distribute_tensor(x, mesh, [Shard(0)])
+            with CommDebugMode() as comm_mode:
+                result = dt.squeeze()
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(result.shape, torch.Size([self.world_size, 8]))
+            self.assertEqual(result._local_tensor.shape, torch.Size([1, 8]))
+            self.assertEqual(result.placements, (Shard(0),))
+            self.assertEqual(result.full_tensor(), x)
+
+        # same as above but via squeeze.dim (single int arg)
+        with self.subTest("preserve_sharded_dim_explicit"):
+            x = (
+                torch.arange(self.world_size * 8, device=self.device_type)
+                .reshape(self.world_size, 8)
+                .float()
+            )
+            dt = distribute_tensor(x, mesh, [Shard(0)])
+            with CommDebugMode() as comm_mode:
+                result = dt.squeeze(0)
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(result.shape, torch.Size([self.world_size, 8]))
+            self.assertEqual(result._local_tensor.shape, torch.Size([1, 8]))
+            self.assertEqual(result.placements, (Shard(0),))
+            self.assertEqual(result.full_tensor(), x)
+
+        # squeeze.dims with mixed singleton/non-singleton dims
+        with self.subTest("mixed_dims"):
+            x = torch.randn(1, 4, 1, device=self.device_type)
+            dt = distribute_tensor(x, mesh, [Replicate()])
+            with CommDebugMode() as comm_mode:
+                result = dt.squeeze((0, 1, 2))
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(result.shape, torch.Size([4]))
+            self.assertEqual(result.placements, (Replicate(),))
+            self.assertEqual(result.full_tensor(), x.squeeze())
+
+        # sharded non-singleton dim preserved, shard index shifts
+        with self.subTest("shard_index_shift"):
+            x = torch.randn(1, self.world_size, 1, device=self.device_type)
+            dt = distribute_tensor(x, mesh, [Shard(1)])
+            with CommDebugMode() as comm_mode:
+                result = dt.squeeze((0, 1, 2))
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(result.shape, torch.Size([self.world_size]))
+            self.assertEqual(result._local_tensor.shape, torch.Size([1]))
+            self.assertEqual(result.placements, (Shard(0),))
+            self.assertEqual(result.full_tensor(), x.squeeze((0, 2)))
+
+        # S(0) on globally-singleton dim becomes R after squeeze (#174136)
+        with self.subTest("singleton_shard_becomes_replicate"):
+            x = torch.randn(1, 4, device=self.device_type)
+            dt = distribute_tensor(x, mesh, [Shard(0)])
+            result = dt.squeeze()
+            self.assertEqual(result.shape, torch.Size([4]))
+            self.assertEqual(result.placements, (Replicate(),))
+            self.assertEqual(result.full_tensor(), x.squeeze())
+
     @with_comms
     def test_storage_offset_slice(self):
         """
@@ -786,12 +935,159 @@ class TestViewOps(DTensorTestBase):
         expected = tensor[2:, :]
         self.assertEqual(sliced_dtensor.full_tensor(), expected)
 
+    def test_view_groups_unbacked_symint(self):
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+
+        def fresh_sym():
+            return shape_env.create_unbacked_symint()
+
+        # Same symbol forwards correctly
+        u0 = fresh_sym()
+        self.assertEqual(
+            view_groups([4, u0, 3], [4, u0, 3]),
+            (InputDim(0), InputDim(1), InputDim(2)),
+        )
+
+        # Same symbol with concrete split
+        u1 = fresh_sym()
+        self.assertEqual(
+            view_groups([u1, 12], [u1, 3, 4]),
+            (
+                InputDim(0),
+                Split(InputDim(1), (3, 4), 0),
+                Split(InputDim(1), (3, 4), 1),
+            ),
+        )
+
+        # Same symbol with concrete flatten
+        u2 = fresh_sym()
+        self.assertEqual(
+            view_groups([u2, 3, 4], [u2, 12]),
+            (InputDim(0), Flatten((InputDim(1), InputDim(2)))),
+        )
+
+        # Concrete split with trailing symbol
+        u3 = fresh_sym()
+        self.assertEqual(
+            view_groups([6, u3], [2, 3, u3]),
+            (
+                Split(InputDim(0), (2, 3), 0),
+                Split(InputDim(0), (2, 3), 1),
+                InputDim(1),
+            ),
+        )
+
+        # Singletons with symbolic dims
+        u4 = fresh_sym()
+        self.assertEqual(
+            view_groups([1, 1, u4, 3], [u4, 3]),
+            (InputDim(2), InputDim(3)),
+        )
+
+        # Flatten symbolic dims using same product expression
+        u5 = fresh_sym()
+        u6 = fresh_sym()
+        self.assertEqual(
+            view_groups([u5, u6], [u5 * u6]),
+            (Flatten((InputDim(0), InputDim(1))),),
+        )
+
+        # Partial fallback: concrete prefix resolves, symbolic suffix falls back
+        u7 = fresh_sym()
+        u8 = fresh_sym()
+        result = view_groups([4, u7, u8], [4, u7 * u8])
+        # dim 0 resolves as InputDim(0), dims 1-2 flatten
+        self.assertEqual(
+            result,
+            (InputDim(0), Flatten((InputDim(1), InputDim(2)))),
+        )
+
+        # Different unbacked symbols (1-to-1): fallback simplifies to InputDim
+        u9 = fresh_sym()
+        u10 = fresh_sym()
+        result = view_groups([4, u9], [4, u10])
+        self.assertEqual(result, (InputDim(0), InputDim(1)))
+
+    def test_view_groups_unbacked_sharding_propagation(self):
+        """Test that sharding is correctly propagated through view_groups with symbolic shapes."""
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+
+        def fresh_sym():
+            return shape_env.create_unbacked_symint()
+
+        mesh_sizes = (2, 3)
+
+        # InputDim forwarding: Shard(1) on symbolic dim should propagate
+        u0 = fresh_sym()
+        from_shape = (4, u0, 6)
+        to_shape = (4, u0, 6)
+        rule = view_groups(from_shape, to_shape)
+        input_placements = [Shard(1), Replicate()]
+        inp_tgt, out_plc = propagate_shape_and_sharding(
+            input_placements, from_shape, rule, mesh_sizes
+        )
+        self.assertEqual(out_plc, [Shard(1), Replicate()])
+
+        # Same symbol with concrete split: Shard(0) on symbolic dim should forward
+        u1 = fresh_sym()
+        from_shape = (u1, 12)
+        to_shape = (u1, 3, 4)
+        rule = view_groups(from_shape, to_shape)
+        input_placements = [Shard(0), Replicate()]
+        inp_tgt, out_plc = propagate_shape_and_sharding(
+            input_placements, from_shape, rule, mesh_sizes
+        )
+        self.assertEqual(out_plc, [Shard(0), Replicate()])
+
+        # Shard on concrete dim that gets split: should propagate to split_id=0
+        u2 = fresh_sym()
+        from_shape = (6, u2)
+        to_shape = (2, 3, u2)
+        rule = view_groups(from_shape, to_shape)
+        input_placements = [Shard(0), Replicate()]
+        inp_tgt, out_plc = propagate_shape_and_sharding(
+            input_placements, from_shape, rule, mesh_sizes
+        )
+        self.assertEqual(out_plc, [Shard(0), Replicate()])
+
+        # Flatten [u, 16] -> [u*16] with Shard(0) on unbacked dim (leftmost)
+        u3 = fresh_sym()
+        for ms in mesh_sizes:  # needed for sharding
+            torch._check(u3 % ms == 0)
+        from_shape = (u3, 16)
+        to_shape = (u3 * 16,)
+        rule = view_groups(from_shape, to_shape)
+        input_placements = [Shard(0), Replicate()]
+        inp_tgt, out_plc = propagate_shape_and_sharding(
+            input_placements, from_shape, rule, mesh_sizes
+        )
+        self.assertEqual(out_plc, [Shard(0), Replicate()])
+
+        # Flatten [16, u] -> [16*u] with Shard(1) on unbacked dim (non-leftmost):
+        # should force replicate since non-leftmost dims can't propagate through flatten
+        u4 = fresh_sym()
+        from_shape = (16, u4)
+        to_shape = (16 * u4,)
+        rule = view_groups(from_shape, to_shape)
+        input_placements = [Shard(1), Replicate()]
+        inp_tgt, out_plc = propagate_shape_and_sharding(
+            input_placements, from_shape, rule, mesh_sizes
+        )
+        self.assertEqual(out_plc, [Replicate(), Replicate()])
+
 
 TestViewOpsWithLocalTensor = create_local_tensor_test_class(
     TestViewOps,
     skipped_tests=[
         # Comparing data pointers is not supported for local tensor
         "test_dtensor_view_op_uneven",
+        # These tests use ShapeEnv directly, not local tensor tests
+        "test_view_groups_unbacked_symint",
+        "test_view_groups_unbacked_sharding_propagation",
     ],
 )
 

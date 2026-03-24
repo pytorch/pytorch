@@ -5,7 +5,6 @@ import itertools as it
 import textwrap
 import unittest
 from collections.abc import Callable, Iterator
-from typing import Optional
 
 import torch
 from torch._C._profiler import _EventType, _TensorMetadata
@@ -110,7 +109,7 @@ class TestIdentifyGradients(TestCase):
         prof: torch.profiler.profile,
         ctx: _EventType,
         grad_tensor: torch.Tensor,
-        parameter: Optional[torch.Tensor] = None,
+        parameter: torch.Tensor | None = None,
     ) -> None:
         # This is not an exhaustive check, but for the purpose of unit testing
         # it is sufficient.
@@ -327,7 +326,7 @@ class TestDataFlow(TestCase):
     @staticmethod
     def _run_and_format_data_flow(
         inputs: dict[str, torch.Tensor],
-        f: Callable[..., Optional[dict[str, torch.Tensor]]],
+        f: Callable[..., dict[str, torch.Tensor] | None],
         indent: int = 12,
     ) -> str:
         with profile() as prof:
@@ -831,7 +830,7 @@ class TestMemoryProfilerE2E(TestCase):
     @staticmethod
     def _lookup_tensor_categories(
         t: torch.Tensor, memory_profile: _memory_profiler.MemoryProfile
-    ) -> dict[_memory_profiler.TensorAndID, Optional[_memory_profiler.Category]]:
+    ) -> dict[_memory_profiler.TensorAndID, _memory_profiler.Category | None]:
         storage = t.storage()
         if storage is None:
             raise ValueError("Cannot look up uninitialized Tensor.")

@@ -686,6 +686,17 @@ def get_args_parser() -> ArgumentParser:
     )
 
     parser.add_argument(
+        "--shutdown-timeout",
+        "--shutdown_timeout",
+        action=env,
+        type=int,
+        default=None,
+        help="Time in seconds to wait for graceful shutdown of worker processes before "
+        "sending SIGKILL. If not specified, uses TORCH_ELASTIC_SHUTDOWN_TIMEOUT environment "
+        "variable or defaults to 30 seconds.",
+    )
+
+    parser.add_argument(
         "--virtual-local-rank",
         "--virtual_local_rank",
         action=check_env,
@@ -915,6 +926,7 @@ def config_from_args(args) -> tuple[LaunchConfig, Callable | str, list[str]]:
         duplicate_stdout_filters=args.duplicate_stdout_filters,
         duplicate_stderr_filters=args.duplicate_stderr_filters,
         virtual_local_rank=args.virtual_local_rank,
+        shutdown_timeout=args.shutdown_timeout,
     )
 
     with_python = not args.no_python

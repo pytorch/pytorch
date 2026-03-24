@@ -653,7 +653,8 @@ print(t.is_pinned())
         def _check_default():
             default = torch.backends.cuda.preferred_blas_library()
             if torch.version.cuda:
-                self.assertTrue(default == torch._C._BlasBackend.Cublaslt)
+                # CUDA logic is easy, it's always cublas
+                self.assertTrue(default == torch._C._BlasBackend.Cublas)
             else:
                 # ROCm logic is less so, it's cublaslt for some Instinct, cublas for all else
                 gcn_arch = str(
@@ -690,11 +691,13 @@ print(t.is_pinned())
             torch.backends.cuda.preferred_blas_library(1.0)
         # check env var override
         custom_envs = [
-            {"TORCH_BLAS_PREFER_CUBLASLT": "1"},
-            {"TORCH_BLAS_PREFER_HIPBLASLT": "1"},
+            ({"TORCH_BLAS_PREFER_CUBLASLT": "1"}, "_BlasBackend.Cublaslt"),
+            ({"TORCH_BLAS_PREFER_HIPBLASLT": "1"}, "_BlasBackend.Cublaslt"),
+            ({"TORCH_BLAS_PREFER_CUBLASLT": "0"}, "_BlasBackend.Cublas"),
+            ({"TORCH_BLAS_PREFER_HIPBLASLT": "0"}, "_BlasBackend.Cublas"),
         ]
         test_script = "import torch;print(torch.backends.cuda.preferred_blas_library())"
-        for env_config in custom_envs:
+        for env_config, expected in custom_envs:
             env = os.environ.copy()
             for key, value in env_config.items():
                 env[key] = value
@@ -703,7 +706,15 @@ print(t.is_pinned())
                 .decode("ascii")
                 .strip()
             )
-            self.assertEqual("_BlasBackend.Cublaslt", r)
+            self.assertEqual(expected, r)
+
+        # explicitly check default when no env vars are set
+        if not any(
+            os.environ.get(v)
+            for v in ("TORCH_BLAS_PREFER_CUBLASLT", "TORCH_BLAS_PREFER_HIPBLASLT")
+        ):
+            torch.backends.cuda.preferred_blas_library("default")
+            _check_default()
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
     @serialTest()
@@ -4175,7 +4186,7 @@ print(ret)
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
-class TestCudaMallocAsync(TestCase):
+class TestCudaAllocator(TestCase):
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
@@ -5921,6 +5932,43 @@ class TestMemPool(TestCase):
         # increments the id
         self.assertTrue(abs(pool2[1] - pool1[1]) > 0)
 
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
+    )
+    def test_pool_id_in_snapshot(self):
+        try:
+            torch.cuda.memory.empty_cache()
+            torch.cuda.memory._record_memory_history("all")
+
+            pool = torch.cuda.MemPool()
+            with torch.cuda.use_mem_pool(pool):
+                x = torch.rand(64, device="cuda")
+
+            ss = torch.cuda.memory._snapshot()
+
+            # segment_pool_id should match the MemPool id
+            found_segment = False
+            for seg in ss["segments"]:
+                if seg["segment_pool_id"] == pool.id:
+                    found_segment = True
+                    break
+            self.assertTrue(found_segment)
+
+            # trace entries for this allocation should carry pool_id
+            found_trace = False
+            for trace in ss["device_traces"]:
+                for te in trace:
+                    if "pool_id" not in te:
+                        continue
+                    if te["pool_id"] == pool.id and te["action"] == "alloc":
+                        found_trace = True
+                        break
+            self.assertTrue(found_trace)
+
+            del x
+        finally:
+            torch.cuda.memory._record_memory_history(None)
+
     def get_dummy_allocator(self, check_vars):
         dummy_allocator_source_vars = """
         #include <torch/extension.h>
@@ -6146,67 +6194,68 @@ class TestMemPool(TestCase):
         nelem_1mb = 1024 * 1024 // 4
 
         self._setup_mempool_limited_memory_test(80)
-        # remaining free mem: 80 mb
-        # mempool_use [] 0 mb
-        # mempool_do_not_use [] 0 mb
-        # default pool [] 0 mb
-        with torch.cuda.use_mem_pool(pool_do_not_use):
-            a = torch.randn(40 * nelem_1mb, device="cuda")
-        with torch.cuda.use_mem_pool(pool_use):
-            b = torch.randn(40 * nelem_1mb, device="cuda")
-        a_dataptr = a.data_ptr()
-        b_dataptr = b.data_ptr()
-        # remaining free mem: 0 mb
-        # mempool_do_not_use [aaaa] 40 mb
-        # mempool_use [bbbb] 40 mb
-        # default pool [] 0 mb
-        with self.assertRaises(torch.OutOfMemoryError):
-            # out of memory
-            c = torch.randn(40 * nelem_1mb, device="cuda")
+        try:
+            # remaining free mem: 80 mb
+            # mempool_use [] 0 mb
+            # mempool_do_not_use [] 0 mb
+            # default pool [] 0 mb
+            with torch.cuda.use_mem_pool(pool_do_not_use):
+                a = torch.randn(40 * nelem_1mb, device="cuda")
+            with torch.cuda.use_mem_pool(pool_use):
+                b = torch.randn(40 * nelem_1mb, device="cuda")
+            a_dataptr = a.data_ptr()
+            b_dataptr = b.data_ptr()
+            # remaining free mem: 0 mb
+            # mempool_do_not_use [aaaa] 40 mb
+            # mempool_use [bbbb] 40 mb
+            # default pool [] 0 mb
+            with self.assertRaises(torch.OutOfMemoryError):
+                # out of memory
+                c = torch.randn(40 * nelem_1mb, device="cuda")
 
-        del a, b
-        # remaining free mem: 0 mb
-        # mempool_do_not_use [____] 40 mb
-        # mempool_use [____] 40 mb
-        # default pool [] 0 mb
+            del a, b
+            # remaining free mem: 0 mb
+            # mempool_do_not_use [____] 40 mb
+            # mempool_use [____] 40 mb
+            # default pool [] 0 mb
 
-        # c should not oom and instead can use mempool_use as fallback
-        c = torch.randn(30 * nelem_1mb, device="cuda")
-        c_dataptr = c.data_ptr()
-        # remaining free mem: 0 mb
-        # mempool_do_not_use [____] 40 mb
-        # mempool_use [ccc_] 40 mb
-        # default pool [] 0 mb
-        with self.assertRaises(torch.OutOfMemoryError):
-            # out of memory since can't use mempool_do_not_use
-            d = torch.randn(30 * nelem_1mb, device="cuda")
+            # c should not oom and instead can use mempool_use as fallback
+            c = torch.randn(30 * nelem_1mb, device="cuda")
+            c_dataptr = c.data_ptr()
+            # remaining free mem: 0 mb
+            # mempool_do_not_use [____] 40 mb
+            # mempool_use [ccc_] 40 mb
+            # default pool [] 0 mb
+            with self.assertRaises(torch.OutOfMemoryError):
+                # out of memory since can't use mempool_do_not_use
+                d = torch.randn(30 * nelem_1mb, device="cuda")
 
-        del c
-        # remaining free mem: 0 mb
-        # mempool_do_not_use [____] 40 mb
-        # mempool_use [____] 40 mb
-        # default pool [] 0 mb
+            del c
+            # remaining free mem: 0 mb
+            # mempool_do_not_use [____] 40 mb
+            # mempool_use [____] 40 mb
+            # default pool [] 0 mb
 
-        # expect that we used same memory address for both a and c
-        self.assertEqual(b_dataptr, c_dataptr)
+            # expect that we used same memory address for both a and c
+            self.assertEqual(b_dataptr, c_dataptr)
 
-        # make sure we can still use mempool_use as intended after c is deleted
-        with torch.cuda.use_mem_pool(pool_use):
-            e = torch.randn(20 * nelem_1mb, device="cuda")
-        # remaining free mem: 0 mb
-        # mempool_do_not_use [____] 40 mb
-        # mempool_use [ee__] 40 mb
-        # default pool [] 0 mb
+            # make sure we can still use mempool_use as intended after c is deleted
+            with torch.cuda.use_mem_pool(pool_use):
+                e = torch.randn(20 * nelem_1mb, device="cuda")
+            # remaining free mem: 0 mb
+            # mempool_do_not_use [____] 40 mb
+            # mempool_use [ee__] 40 mb
+            # default pool [] 0 mb
 
-        e_dataptr = e.data_ptr()
-        del e
+            e_dataptr = e.data_ptr()
+            del e
 
-        self.assertEqual(e_dataptr, c_dataptr)
+            self.assertEqual(e_dataptr, c_dataptr)
 
-        # pool's destructor calls emptyCache()
-        del pool_use, pool_do_not_use
-
-        self._teardown_mempool_limited_memory_test()
+            # pool's destructor calls emptyCache()
+            del pool_use, pool_do_not_use
+        finally:
+            self._teardown_mempool_limited_memory_test()
 
     @serialTest()
     def test_mempool_no_split(self):
@@ -6279,31 +6328,36 @@ class TestMemPool(TestCase):
 
         # set 40 mb total available memory
         self._setup_mempool_limited_memory_test(40)
+        try:
+            # Create many pools with use_on_oom=True, allocate memory, then delete the pools
+            for _ in range(10):
+                pool_use_on_oom = torch.cuda.MemPool(
+                    allocator.allocator(), use_on_oom=True
+                )
+                with torch.cuda.use_mem_pool(pool_use_on_oom):
+                    a = torch.randn(40 * nelem_1mb, device="cuda")
+                del a
+                del pool_use_on_oom
 
-        # Create many pools with use_on_oom=True, allocate memory, then delete the pools
-        for _ in range(10):
-            pool_use_on_oom = torch.cuda.MemPool(allocator.allocator(), use_on_oom=True)
-            with torch.cuda.use_mem_pool(pool_use_on_oom):
+            # create new pool that we want to use_on_oom, all other pools should be deleted
+            # all available 40mb in use by mempool
+            new_pool_use_on_oom = torch.cuda.MemPool(
+                allocator.allocator(), use_on_oom=True
+            )
+            with torch.cuda.use_mem_pool(new_pool_use_on_oom):
                 a = torch.randn(40 * nelem_1mb, device="cuda")
             del a
-            del pool_use_on_oom
 
-        # create new pool that we want to use_on_oom, all other pools should be deleted
-        # all available 40mb in use by mempool
-        new_pool_use_on_oom = torch.cuda.MemPool(allocator.allocator(), use_on_oom=True)
-        with torch.cuda.use_mem_pool(new_pool_use_on_oom):
-            a = torch.randn(40 * nelem_1mb, device="cuda")
-        del a
+            # allocate tensors that will fallback to use_on_oom pool since all available 40mb in use by mempool
+            # tensors should only use valid pool and not deleted pools
+            b = torch.randn(20 * nelem_1mb, device="cuda")
+            c = torch.randn(20 * nelem_1mb, device="cuda")
 
-        # allocate tensors that will fallback to use_on_oom pool since all available 40mb in use by mempool
-        # tensors should only use valid pool and not deleted pools
-        b = torch.randn(20 * nelem_1mb, device="cuda")
-        c = torch.randn(20 * nelem_1mb, device="cuda")
-
-        del b
-        del c
-        del new_pool_use_on_oom
-        self._teardown_mempool_limited_memory_test()
+            del b
+            del c
+            del new_pool_use_on_oom
+        finally:
+            self._teardown_mempool_limited_memory_test()
 
     def test_mempool_multithread(self):
         pool_ids = []
@@ -6664,7 +6718,6 @@ class TestMemPool(TestCase):
             "graph_capture_record_stream_reuse:False"
         )
 
-    @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Load_inline doesn't work in fbcode")
     def test_mempool_expandable(self):
         torch.cuda.empty_cache()
@@ -8567,7 +8620,7 @@ class TestFXMemoryProfiler(TestCase):
 
 
 instantiate_parametrized_tests(TestCuda)
-instantiate_parametrized_tests(TestCudaMallocAsync)
+instantiate_parametrized_tests(TestCudaAllocator)
 instantiate_parametrized_tests(TestCompileKernel)
 instantiate_parametrized_tests(TestCachingHostAllocatorCudaGraph)
 instantiate_device_type_tests(TestCudaOptims, globals())

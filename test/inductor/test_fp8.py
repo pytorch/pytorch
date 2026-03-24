@@ -2,7 +2,6 @@
 
 import functools
 import unittest
-from typing import Union
 
 import torch
 from torch import Tensor
@@ -28,12 +27,13 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIf,
 )
 from torch.testing._internal.common_quantized import ceil_div, to_blocked
-from torch.testing._internal.common_utils import parametrize, xfailIf
+from torch.testing._internal.common_utils import parametrize, skipIfXpu, xfailIf
 from torch.testing._internal.inductor_utils import (
     _quantize_blockwise,
     _quantize_rowwise,
     _quantize_tensorwise,
     _to_fp8_saturated,
+    GPU_TYPE,
     HAS_CPU,
     HAS_CUDA_AND_TRITON,
     is_big_gpu,
@@ -56,8 +56,8 @@ def _is_cuda_device(device) -> bool:
 
 
 def _fix_fp8_dtype_for_rocm(
-    dtype: Union[torch.dtype, list[torch.dtype], tuple[torch.dtype]], device
-) -> Union[torch.dtype, list[torch.dtype], tuple[torch.dtype]]:
+    dtype: torch.dtype | list[torch.dtype] | tuple[torch.dtype], device
+) -> torch.dtype | list[torch.dtype] | tuple[torch.dtype]:
     # This function is used to change FP8 data types
     # with MI300 supported FP8 types if device is GPU:
     #    e4m3fn -> e4m3fnuz
@@ -169,6 +169,9 @@ class TestFP8Types(TestCase):
         torch.testing.assert_close(y0_fp8, x, rtol=5e-1, atol=5e-1)
         torch.testing.assert_close(y1_fp8, x, rtol=5e-1, atol=5e-1)
 
+    @skipIfXpu(
+        msg="Conversions between float8_e5m2 and float8_e4m3fn is not supported, torch-xpu-ops: 2888"
+    )
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_bad_cast(self, device):
         def fp8_cast(x, dtype):
@@ -332,7 +335,7 @@ class TestFP8Types(TestCase):
             amax_buffer_compiled, amax_buffer, rtol=1e-2, atol=1e-2
         )
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
     @parametrize("shape", ("4,2048,4096",))
@@ -343,7 +346,7 @@ class TestFP8Types(TestCase):
         shape: str,
         keepdim: bool,
     ):
-        float8_dtype = _fix_fp8_dtype_for_rocm(float8_dtype, device="cuda")
+        float8_dtype = _fix_fp8_dtype_for_rocm(float8_dtype, device=GPU_TYPE)
         shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
 
@@ -374,11 +377,11 @@ class TestFP8Types(TestCase):
         compiled_ln_fp8_quant = torch.compile(ln_fp8, backend="inductor")
 
         x_shape = (batch_size, sequence_length, hidden_size)
-        x = torch.rand(*x_shape, device="cuda", dtype=torch.half)
-        scale = torch.tensor(0.2, device="cuda", dtype=torch.float)
+        x = torch.rand(*x_shape, device=GPU_TYPE, dtype=torch.half)
+        scale = torch.tensor(0.2, device=GPU_TYPE, dtype=torch.float)
 
-        amax_buffer_compiled = torch.zeros((1), device="cuda", dtype=torch.half)
-        amax_buffer = torch.zeros((1), device="cuda", dtype=torch.half)
+        amax_buffer_compiled = torch.zeros((1), device=GPU_TYPE, dtype=torch.half)
+        amax_buffer = torch.zeros((1), device=GPU_TYPE, dtype=torch.half)
         _ = compiled_ln_fp8_quant(x, scale, amax_buffer_compiled)
         compiled_latency = utils.do_bench_using_profiling(
             functools.partial(compiled_ln_fp8_quant, x, scale, amax_buffer_compiled)
@@ -1035,9 +1038,20 @@ class TestFP8Lowering(TestCase):
             w_inverse_scale,
             bias,
         )
+
+        # On gfx120x, autotuned kernels have issues with small M
+        compile_mode = "max-autotune"
+        if (
+            torch.version.hip is not None
+            and M < 16
+            and torch.cuda.is_available()
+            and "gfx120" in torch.cuda.get_device_properties(0).gcnArchName
+        ):
+            compile_mode = "default"
+
         with config.patch({"triton.enable_persistent_tma_matmul": persistent_matmul}):
             linear_compiled = torch.compile(
-                linear, backend="inductor", mode="max-autotune"
+                linear, backend="inductor", mode=compile_mode
             )
             y_compiled = linear_compiled(
                 x_fp8,
@@ -1335,9 +1349,20 @@ class TestFP8Lowering(TestCase):
             w_inverse_scale,
             bias,
         )
+
+        # On gfx120x, autotuned kernels have issues with small M
+        compile_mode = "max-autotune"
+        if (
+            torch.version.hip is not None
+            and M < 16
+            and torch.cuda.is_available()
+            and "gfx120" in torch.cuda.get_device_properties(0).gcnArchName
+        ):
+            compile_mode = "default"
+
         with config.patch({"triton.enable_persistent_tma_matmul": persistent_matmul}):
             linear_compiled = torch.compile(
-                linear, backend="inductor", mode="max-autotune"
+                linear, backend="inductor", mode=compile_mode
             )
             y_compiled = linear_compiled(
                 x_fp8,

@@ -58,12 +58,17 @@ class FusionScore:
     template_score: int
     node_type_score: bool
     memory_score: int
+    buffer_overlap_score: int
     proximity_score: int
 
     def __lt__(self, other):
         """
         node_type_score has higher priority than memory_score unless
-        the memory_score differs too much
+        the memory_score differs too much.
+
+        buffer_overlap_score is prioritized below memory_score so that
+        strict global memory savings (exact dep matches) are preferred
+        over buffer overlap scoring (same buffer, different indexing).
         """
         threshold = 16
         if self.template_score != other.template_score:
@@ -75,9 +80,15 @@ class FusionScore:
         ):
             return self.memory_score < other.memory_score
 
-        return (self.node_type_score, self.memory_score, self.proximity_score) < (
+        return (
+            self.node_type_score,
+            self.memory_score,
+            self.buffer_overlap_score,
+            self.proximity_score,
+        ) < (
             other.node_type_score,
             other.memory_score,
+            other.buffer_overlap_score,
             other.proximity_score,
         )
 
@@ -335,6 +346,10 @@ class InductorChoices:
     ) -> dict[str, Any]:
         """Hook to change the kwargs passed to TritonKernel, used to apply fixed configurations"""
         return kernel_kwargs
+
+    def customize_fused_kernel_name(self, fused_name: str, src_code: str) -> str:
+        """Hook to transform fused kernel names during codegen"""
+        return fused_name
 
     @staticmethod
     def should_use_cooperative_reduction(features: SIMDKernelFeatures) -> bool:
@@ -632,8 +647,8 @@ class InductorChoices:
         - Fusions closer together in original graph order
         """
 
-        memory_score, is_mix_order_reduction = typing.cast(
-            tuple[int, bool],
+        memory_score, buffer_overlap_score, is_mix_order_reduction = typing.cast(
+            tuple[int, int, bool],
             scheduler.score_fusion_memory(
                 node1, node2, return_is_mix_order_reduction=True
             ),
@@ -658,5 +673,6 @@ class InductorChoices:
             template_score,
             type_score,
             memory_score,
+            buffer_overlap_score,
             proximity_score,
         )

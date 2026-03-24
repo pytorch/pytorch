@@ -275,6 +275,22 @@ class ChunkingApplier:
                 )
                 continue
 
+            # Chunk aten.view: adjust the target shape at the chunk dimension
+            if (
+                original_node.target == aten.view.default
+                and isinstance(original_node.args[0], torch.fx.Node)
+                and (meta := get_chunking_meta(original_node)) is not None
+                and meta.chunk_dim is not None
+            ):
+                shape = list(original_node.args[1])  # type: ignore[arg-type]
+                shape[meta.chunk_dim] = chunk_size
+                env[original_node] = new_graph.call_function(
+                    aten.view.default,
+                    (env[original_node.args[0]], shape),  # type: ignore[arg-type]
+                    original_node.kwargs,
+                )
+                continue
+
             # create the node with chunked inputs
             env[original_node] = new_graph.node_copy(original_node, lambda x: env[x])
 

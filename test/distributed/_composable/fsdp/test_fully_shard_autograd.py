@@ -4,7 +4,7 @@ import collections
 import copy
 import functools
 import itertools
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -36,7 +36,7 @@ class TestFullyShardAutograd(FSDPTest):
         return min(4, torch.get_device_module(device_type).device_count())
 
     def _reduce_1d_partial_grads(
-        self, module: nn.Module, group: Optional[dist.ProcessGroup] = None
+        self, module: nn.Module, group: dist.ProcessGroup | None = None
     ) -> None:
         group = group or dist.distributed_c10d._get_default_group()
         for param in module.parameters():
@@ -55,7 +55,7 @@ class TestFullyShardAutograd(FSDPTest):
             self._test_unused_forward_output,
         )
 
-    def _test_unused_forward_output(self, reshard_after_forward: Union[bool, int]):
+    def _test_unused_forward_output(self, reshard_after_forward: bool | int):
         torch.manual_seed(42)
         local_batch_size = 2
         global_batch_size, dim = (self.world_size * local_batch_size, 24)
@@ -101,7 +101,7 @@ class TestFullyShardAutograd(FSDPTest):
             self._test_unused_forward_module,
         )
 
-    def _test_unused_forward_module(self, reshard_after_forward: Union[bool, int]):
+    def _test_unused_forward_module(self, reshard_after_forward: bool | int):
         torch.manual_seed(42)
         local_batch_size, dim = (2, 24)
         global_batch_size = self.world_size * local_batch_size

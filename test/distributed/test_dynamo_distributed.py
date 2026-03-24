@@ -4,6 +4,7 @@ import copy
 import functools
 import logging
 import random
+import re
 import unittest
 from contextlib import contextmanager
 from datetime import timedelta
@@ -775,23 +776,6 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             first_graph_break = list(counters["graph_break"].keys())[0]  # noqa: RUF015
             self.assertIn("setattr() on Tensor.requires_grad", first_graph_break)
 
-    @config.patch(inline_inbuilt_nn_modules=False)
-    @config.patch(enable_compiler_collectives=True)
-    @skip_if_lt_x_gpu(1)
-    def test_fsdp_unspecialized_forced_getattr_no_inline(self):
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
-            # Test with basic FSDP wrapping (outer wrap around whole model)
-            from torch._dynamo.utils import counters
-
-            counters.clear()
-            m, inputs, correct_outputs = get_forced_getattr_module(
-                f"{self.device_type}:{self.rank}"
-            )
-            fsdp_m = FSDP(m, use_orig_params=True)
-            fsdp_m = torch.compile(fsdp_m, backend="eager", fullgraph=False)
-            outputs = fsdp_m(inputs)
-            self.assertTrue(same(correct_outputs, outputs))
-
     @config.patch(enable_compiler_collectives=True)
     @skip_if_lt_x_gpu(1)
     def test_fsdp_unspecialized_forced_getattr_inline(self):
@@ -1190,11 +1174,13 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             f(x)
             """
 
+            # Ranks take different code paths (tensor vs int), so compilation counts
+            # can differ. Check that every rank triggered compilation at least once.
             metrics = torch._dynamo.utils.get_compilation_metrics()
             res = [None] * self.world_size
             torch.distributed.all_gather_object(res, len(metrics))
-            for r in res[1:]:
-                self.assertEqual(res[0], r)
+            for r in res:
+                self.assertGreaterEqual(r, 1, "each rank should compile at least once")
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @enable_guard_collectives()
@@ -2340,6 +2326,144 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
         actual = compiled_fn(output, input, w)
         self.assertEqual(actual, input @ w)
+
+
+@unittest.skipIf(not dist.is_available(), "requires distributed")
+class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
+    """Tests for torch.distributed.nn.functional under torch.compile."""
+
+    def setUp(self):
+        super().setUp()
+        dist.init_process_group(backend="fake", rank=0, world_size=2)
+
+    def tearDown(self):
+        dist.destroy_process_group()
+        super().tearDown()
+
+    def _assert_not_supported(self, fn, x, name, *, suggestion=None):
+        expected = f"torch.distributed.nn.functional.{name} is not supported under torch.compile."
+        if suggestion:
+            expected = re.escape(expected + f" Use {suggestion} instead.")
+        with self.assertRaisesRegex(RuntimeError, expected):
+            fn(x)
+
+    def test_nn_functional_all_reduce_unsupported(self):
+        from torch.distributed.nn.functional import all_reduce
+
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return all_reduce(x, op=dist.ReduceOp.SUM)
+
+        self._assert_not_supported(
+            fn,
+            torch.randn(4, 4),
+            "all_reduce",
+            suggestion="torch.distributed._functional_collectives.all_reduce",
+        )
+
+    def test_nn_functional_all_gather_unsupported(self):
+        from torch.distributed.nn.functional import all_gather
+
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return all_gather(x)
+
+        self._assert_not_supported(
+            fn,
+            torch.randn(4, 4),
+            "all_gather",
+            suggestion="torch.distributed._functional_collectives.all_gather_tensor",
+        )
+
+    def test_nn_functional_reduce_scatter_unsupported(self):
+        from torch.distributed.nn.functional import reduce_scatter
+
+        @torch.compile(fullgraph=True)
+        def fn(input_list):
+            output = torch.empty(4, 4)
+            return reduce_scatter(output, input_list)
+
+        self._assert_not_supported(
+            fn,
+            [torch.randn(4, 4), torch.randn(4, 4)],
+            "reduce_scatter",
+            suggestion="torch.distributed._functional_collectives.reduce_scatter_tensor",
+        )
+
+    def test_nn_functional_all_to_all_single_unsupported(self):
+        from torch.distributed.nn.functional import all_to_all_single
+
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            output = torch.empty_like(x)
+            return all_to_all_single(output, x)
+
+        self._assert_not_supported(
+            fn,
+            torch.randn(4, 4),
+            "all_to_all_single",
+            suggestion="torch.distributed._functional_collectives.all_to_all_single",
+        )
+
+    def test_nn_functional_broadcast_unsupported(self):
+        from torch.distributed.nn.functional import broadcast
+
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return broadcast(x, src=0)
+
+        self._assert_not_supported(
+            fn,
+            torch.randn(4),
+            "broadcast",
+            suggestion="torch.distributed._functional_collectives.broadcast",
+        )
+
+    def test_nn_functional_reduce_unsupported(self):
+        from torch.distributed.nn.functional import reduce
+
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return reduce(x, dst=0)
+
+        self._assert_not_supported(fn, torch.randn(4), "reduce")
+
+    def test_nn_functional_gather_unsupported(self):
+        from torch.distributed.nn.functional import gather
+
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return gather(x, dst=0)
+
+        self._assert_not_supported(fn, torch.randn(4), "gather")
+
+    def test_nn_functional_scatter_unsupported(self):
+        from torch.distributed.nn.functional import scatter
+
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return scatter([x, x], src=0)
+
+        self._assert_not_supported(fn, torch.randn(4), "scatter")
+
+    def test_nn_functional_all_to_all_unsupported(self):
+        from torch.distributed.nn.functional import all_to_all
+
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return all_to_all([torch.empty_like(x)], [x])
+
+        self._assert_not_supported(fn, torch.randn(4), "all_to_all")
+
+    def test_nn_functional_all_gather_base_unsupported(self):
+        from torch.distributed.nn.functional import _all_gather_base
+
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            output = torch.empty(8)
+            return _all_gather_base(output, x)
+
+        self._assert_not_supported(fn, torch.randn(4), "_all_gather_base")
 
 
 if __name__ == "__main__":

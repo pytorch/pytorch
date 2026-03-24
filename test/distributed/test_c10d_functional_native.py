@@ -4,7 +4,6 @@ import re
 import threading
 import unittest
 from datetime import timedelta
-from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -257,6 +256,35 @@ class TestWithNCCL(DistributedTestBase):
                     dtype=torch.bfloat16,
                 ),
             )
+
+    @skip_if_lt_x_gpu(2)
+    def test_functional_collectives_batched(self) -> None:
+        self._init_process_group()
+
+        def f(x):
+            if self.rank not in [0, 1]:
+                return
+            tensor = self.rank * x
+            return funcol.wait_tensor(
+                funcol.batch_p2p_ops_inplace(
+                    op_list=["isend" if self.rank == 0 else "irecv"],
+                    peer_list=[1 if self.rank == 0 else 0],
+                    tensors=[tensor],
+                    tag_list=[0],
+                    group_name="",
+                )[0]
+            )
+
+        with torch.inference_mode():
+            input = torch.ones((10), device=self.device)
+            output = f(input)
+            if self.rank == 0:
+                self.assertEqual(
+                    output,
+                    torch.empty(0, device=self.device, dtype=input.dtype),
+                )
+            else:
+                self.assertEqual(output, 0 * input)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
@@ -636,7 +664,7 @@ class _DummyWork(dist.Work):
         super().__init__()
         self.pg = pg
 
-    def wait(self, timeout: Optional[timedelta] = None) -> bool:
+    def wait(self, timeout: timedelta | None = None) -> bool:
         self.pg.waits += 1
         return True
 
@@ -722,7 +750,7 @@ class CrossThreadWaitTest(TestCase):
         than where the collective was registered.
         """
         wait_called = False
-        exception_in_thread: Optional[BaseException] = None
+        exception_in_thread: BaseException | None = None
 
         class MyWork(dist.Work):
             def wait(self, _=None):
@@ -828,6 +856,48 @@ class PyWorkTest(TestCase):
         x.wait()
         self.assertEqual(pg.waits, 4)
         self.assertEqual(pg.dels, 4)
+
+
+class ProcessGroupArgTest(TestCase):
+    """
+    Test that _c10d_functional ops accept ProcessGroup objects directly
+    (not just string group names) via the Any-typed group argument.
+    """
+
+    def setUp(self):
+        super().setUp()
+        dummy_init_pg()
+        self.pg = ProcessGroupDummy().register()
+
+    def test_all_reduce(self) -> None:
+        x = torch.rand(2, 2)
+        out = torch.ops._c10d_functional.all_reduce(x, "sum", self.pg)
+        torch.ops._c10d_functional.wait_tensor(out)
+
+    def test_all_reduce_(self) -> None:
+        x = torch.rand(2, 2)
+        out = torch.ops._c10d_functional.all_reduce_(x, "sum", self.pg)
+        torch.ops._c10d_functional.wait_tensor(out)
+
+    def test_all_gather_into_tensor(self) -> None:
+        x = torch.rand(2, 2)
+        out = torch.ops._c10d_functional.all_gather_into_tensor(x, 1, self.pg)
+        torch.ops._c10d_functional.wait_tensor(out)
+
+    def test_reduce_scatter_tensor(self) -> None:
+        x = torch.rand(2, 2)
+        out = torch.ops._c10d_functional.reduce_scatter_tensor(x, "sum", 1, self.pg)
+        torch.ops._c10d_functional.wait_tensor(out)
+
+    def test_broadcast(self) -> None:
+        x = torch.rand(2, 2)
+        out = torch.ops._c10d_functional.broadcast(x, 0, self.pg)
+        torch.ops._c10d_functional.wait_tensor(out)
+
+    def test_broadcast_(self) -> None:
+        x = torch.rand(2, 2)
+        out = torch.ops._c10d_functional.broadcast_(x, 0, self.pg)
+        torch.ops._c10d_functional.wait_tensor(out)
 
 
 def find_buffer_assignments(code):

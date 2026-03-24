@@ -25,7 +25,7 @@ import tempfile
 import time
 import weakref
 from contextlib import contextmanager
-from typing import Any, NamedTuple, Optional, overload, TYPE_CHECKING, TypeVar
+from typing import Any, NamedTuple, overload, TYPE_CHECKING, TypeVar
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -1788,7 +1788,7 @@ class BenchmarkRunner:
         self.grad_scaler = DummyGradScaler()
         self.autocast = contextlib.nullcontext
         self.autocast_arg = {}
-        self.optimizer: Optional[torch.optim.Optimizer] = None
+        self.optimizer: torch.optim.Optimizer | None = None
         self._args = None
 
     def setup_amp(self, current_device=None):
@@ -1951,10 +1951,6 @@ class BenchmarkRunner:
 
     @property
     def guard_on_nn_module_models(self):
-        return set()
-
-    @property
-    def inline_inbuilt_nn_modules_models(self):
         return set()
 
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
@@ -3640,7 +3636,6 @@ def parse_args(args=None):
             "int8dynamic",
             "int8weightonly",
             "int4weightonly",
-            "autoquant",
             "noquant",
         ],
         default=None,
@@ -4617,7 +4612,7 @@ def run(runner, args, original_dir=None):
                             # Use duck_shape_id="batch" so all batch dimensions
                             # share the same unbacked symbol
                             torch._dynamo.decorators.mark_unbacked(
-                                t, i, shape_id="batch", hint_override=batch_size
+                                t, i, shape_id="batch", hint_override=batch_size, min=1
                             )
                         else:
                             torch._dynamo.maybe_mark_dynamic(t, i)
@@ -4658,22 +4653,17 @@ def run(runner, args, original_dir=None):
             if name in runner.guard_on_nn_module_models:
                 guard_ctx = torch._dynamo.config.patch(guard_nn_modules=True)
 
-            inline_ctx = contextlib.nullcontext()
-            if name in runner.inline_inbuilt_nn_modules_models:
-                inline_ctx = torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
-
             with guard_ctx:
-                with inline_ctx:
-                    runner.run_one_model(
-                        name,
-                        model,
-                        example_inputs,
-                        optimize_ctx,
-                        experiment,
-                        explain=args.explain,
-                        tag=args.tag,
-                        batch_size=batch_size if args.dynamic_batch_only else None,
-                    )
+                runner.run_one_model(
+                    name,
+                    model,
+                    example_inputs,
+                    optimize_ctx,
+                    experiment,
+                    explain=args.explain,
+                    tag=args.tag,
+                    batch_size=batch_size if args.dynamic_batch_only else None,
+                )
         if args.generate_aot_autograd_stats:
             stats_file = output_filename.split(".csv")[0] + "_stats.csv"
             write_outputs(

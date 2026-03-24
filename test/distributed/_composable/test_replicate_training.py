@@ -7,7 +7,6 @@ import itertools
 import unittest
 from collections import defaultdict
 from collections.abc import Iterable
-from typing import Union
 
 import torch
 import torch.distributed as dist
@@ -875,7 +874,7 @@ class TestReplicateGradientAccumulation(FSDPTest):
     def _test_gradient_accumulation(
         self,
         mesh: DeviceMesh,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool | int,
         mode: str,
         reshard_after_backward: bool,
         offload_policy: OffloadPolicy,

@@ -1040,6 +1040,40 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         if guard_manager_wrapper.diff_guard_root:
             self.assertTrue(guard_manager_wrapper.diff_guard_root.check(f_locals))
 
+    def test_swap_tensors_subclass_not_blocked_by_metaconverter_refcycle(self):
+        """Checks that MetaConverter doesn't create refcycles of itself that blocks swap_tensor on subclass tensors"""
+        was_gc_enabled = gc.isenabled()
+        gc.disable()
+        try:
+            from torch._subclasses.meta_utils import MetaConverter
+            from torch.utils.weak import WeakIdRef
+
+            w_a = torch.randn(4, 4)
+            w_b = w_a.clone()
+            # For custom tensor parameters, `nn.Parameter` returns the same custom tensor type
+            # and sets `_is_param`, which is what Module._apply uses to decide swap_tensors.
+            w = nn.Parameter(TwoTensor(w_a, w_b).requires_grad_())
+
+            def weak_id_ref_count(t: torch.Tensor) -> int:
+                return sum(isinstance(r, WeakIdRef) for r in weakref.getweakrefs(t))
+
+            baseline_weak_id_refs = weak_id_ref_count(w)
+            converter = MetaConverter()
+            _ = converter(w)
+            after_convert_weak_id_refs = weak_id_ref_count(w)
+            self.assertGreater(after_convert_weak_id_refs, baseline_weak_id_refs)
+
+            # If MetaConverter is collectable by refcount, the weakrefs go away immediately.
+            # If it's kept alive only by a refcycle, this weakref will persist while gc is
+            # disabled.
+            del _
+            del converter
+            self.assertEqual(weak_id_ref_count(w), baseline_weak_id_refs)
+        finally:
+            if was_gc_enabled:
+                gc.enable()
+            gc.collect()
+
     def test_do_paste_mask(self):
         torch._dynamo.utils.counters.clear()
         cnt = torch._dynamo.testing.CompileCounter()
@@ -1182,6 +1216,21 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         eager_out = fn(x)
         compiled_fn = torch.compile(fn, backend="aot_eager_decomp_partition")
         compiled_out = compiled_fn(x)
+        self.assertEqual(eager_out, compiled_out)
+
+    # https://github.com/pytorch/pytorch/issues/166626
+    def test_inplace_add_from_meta_tensor_factory(self):
+        def fn(x):
+            log_det = torch.zeros(x.size(0), device=x.device)
+            log_det += torch.zeros(x.size(0), device="meta")
+            return log_det
+
+        x = torch.randn(2, 4)
+        eager_out = fn(x)
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        compiled_out = compiled_fn(x)
+
+        self.assertEqual(eager_out.device, compiled_out.device)
         self.assertEqual(eager_out, compiled_out)
 
     # https://github.com/pytorch/pytorch/issues/109053
@@ -1350,12 +1399,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_reformer_train(self):
         with torch.enable_grad():
             cnt = self._reformer(nopython=False)
-        expected_op_count = (
-            """10""" if torch._dynamo.config.inline_inbuilt_nn_modules else """4"""
-        )
-
         self.assertExpectedInline(cnt.frame_count, """1""")
-        self.assertExpectedInline(cnt.op_count, expected_op_count)
+        self.assertExpectedInline(cnt.op_count, """10""")
 
     def test_longformer_chunk(self):
         input1 = torch.randn([1, 4096, 1])
@@ -4293,16 +4338,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(fn(x), opt_fn(x)))
 
     def test_add_sub_alpha_out(self):
-        inp = torch.randn(2, 3, 4)
-        other = 1
-        alpha = 2
+        test_cases = (
+            (torch.randn(2, 3, 4), 1, 2, torch.zeros(2, 3, 4)),
+            (2, 1.1, 0.4, torch.tensor(0.0)),
+        )
         for op in [torch.add, torch.sub]:
-            out = torch.zeros(2, 3, 4)
-            compile_out = torch.zeros(2, 3, 4)
-            op(inp, other, alpha=alpha, out=out)
-            compiled_fn = torch.compile(op, dynamic=True, backend="eager")
-            compiled_fn(inp, other, alpha=alpha, out=compile_out)
-            self.assertTrue(same(out, compile_out))
+            for inp, other, alpha, out in test_cases:
+                compiled_fn = torch.compile(op, dynamic=True, backend="eager")
+                eager_out = out.clone()
+                compiled_out = out.clone()
+                op(inp, other, alpha=alpha, out=eager_out)
+                compiled_fn(inp, other, alpha=alpha, out=compiled_out)
+                self.assertTrue(same(eager_out, compiled_out))
 
     def test_negative_shape_guard(self):
         def fn(x):
@@ -5854,10 +5901,9 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         opt_mod = torch.compile(mod, backend=compiler)
         opt_mod(torch.randn(2, 2))
 
-        with torch._dynamo.config.patch(inline_inbuilt_nn_modules=True):
-            mod = Mod()
-            opt_mod = torch.compile(mod, backend=compiler)
-            opt_mod(torch.randn(2, 2))
+        mod = Mod()
+        opt_mod = torch.compile(mod, backend=compiler)
+        opt_mod(torch.randn(2, 2))
 
         # an example similar to Pippy usecase
         mod = Mod()
@@ -6222,96 +6268,6 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         # No assert necessary since this used to crash.
         fn(aot6_sub_58, aot6_mul_170)
-
-    @torch._dynamo.config.patch(guard_nn_modules=False)
-    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
-    def test_inlining_cornercase(self):
-        """
-        nn.Modules can be mapped to either NNModuleVariable or UnspecializedNNModuleVariable. For NNModuleVariable, the
-        tensor attributes become part of the Dynamo graph. For unspecialized, they are lifted as inputs.
-
-        But there is a cornercase. Suppose you have NNModuleVariable with a submodule that is
-        UnspecializedNNModuleVariable. Today, Dynamo will still consider the submodule as specialized (courtesy of
-        guard.source().is_nn_module()). In retrospect, this is a mistake but there are dependencies of export and also
-        cudagraphs which make it harder to fix the corner case right away. The long term solution is
-        inline_inbuilt_nn_modules anyways, so we might have to live with this cornercase in the short term.
-
-        We are starting to annotate the source of each nn module more precisely - NNModuleVariable attribute is marked
-        as NNModuleSource, UnspecilaizedNNModuleVariable attribute is marked as UnspecializedNNModuleSource. But this
-        changes the behavior for the cornercase. And fails some tests which have unfortunately relied on this behavior.
-
-
-        To solve this, we tag the source only when inline_inbuilt_nn_module flag is turned on.
-
-        In this test, we purposely turn the flag off, testing that the tagging is disabled.
-        """
-
-        class SubMod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(1, 1)
-                self.a = torch.randn(1, 1)
-                self.counter = 0
-                self.multipliers = [2.2, 3.3]
-
-            def forward(self, x):
-                self.counter += 1
-                return (
-                    self.linear(x) * self.a * self.multipliers[0] * self.multipliers[1]
-                )
-
-        class Mod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.submod = SubMod()
-
-            def forward(self, x):
-                return self.submod(x)
-
-        mod = Mod()
-        opt_mod = torch.compile(mod, backend="eager")
-
-        x = torch.randn(1, 1)
-        ref = mod(x)  # noqa: F841
-        res = opt_mod(x)  # noqa: F841
-
-        mod.submod.multipliers = [3.3, 4.4]
-        # Since guard_nn_modules is False, this will not recompile
-        with torch._dynamo.config.patch(error_on_recompile=True):
-            ref = mod(x)  # noqa: F841
-            res = opt_mod(x)  # noqa: F841
-
-    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
-    def test_nnmodule_variable_children_wrap_value(self):
-        """
-        tests wrap_values() in nn_module.py by calling children() on a submodule,
-        which triggers NNModuleVariable.call_method only when
-        inline_inbuilt_nn_modules=False.  This path was previously untested
-        causing #173924
-        """
-
-        class Parent(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.container = torch.nn.Sequential(
-                    torch.nn.Linear(10, 10),
-                    torch.nn.ReLU(),
-                    torch.nn.Linear(10, 5),
-                )
-
-            def forward(self, x):
-                for child in self.container.children():
-                    x = child(x)
-                return x
-
-        model = Parent()
-        x = torch.randn(2, 10)
-
-        eager_result = model(x)
-        compiled_model = torch.compile(model, backend="eager", fullgraph=True)
-        compiled_result = compiled_model(x)
-
-        self.assertEqual(eager_result, compiled_result)
 
     def test_optimized_module_training(self):
         mod = torch.nn.Linear(3, 3)
@@ -7953,6 +7909,61 @@ SavedForBackwardsAOTOutput(idx=5)""",
         with torch._dynamo.config.patch(error_on_recompile=True):
             linear(torch.randn(1, 2, device="cpu"))
 
+    def test_property_setter_with_dict_get_176608(self):
+        """
+        Test that property setters work correctly with __dict__.get() in compiled functions.
+        Regression test for https://github.com/pytorch/pytorch/issues/176608
+        """
+        from torch.compiler import disable
+
+        class Container:
+            def __init__(self):
+                self._len_value = 0
+
+            @property
+            def _len(self):
+                # Using __dict__.get instead of self._len_value triggers the bug
+                return self.__dict__.get("_len_value", 0)
+
+            @_len.setter
+            def _len(self, value):
+                self._len_value = value
+
+            def add(self, n):
+                self._len = self._len + n
+
+            @disable()
+            def __len__(self):
+                return self._len
+
+        c = Container()
+
+        @torch.compile(backend="eager")
+        def f(x):
+            c.add(x.shape[0])  # mutates c._len_value via property setter
+            return len(c)  # reads c._len via property getter -> __dict__.get
+
+        result = f(torch.randn(5))
+        self.assertEqual(result, 5)
+
+    def test_one_hot_bounds_check_compiled(self):
+        # https://github.com/pytorch/pytorch/issues/144211
+        # torch.compile(one_hot) should raise on out-of-bounds indices,
+        # not silently produce wrong results.
+        one_hot = torch.compile(torch.nn.functional.one_hot, fullgraph=True)
+
+        a = torch.arange(0, 5) % 3  # [0, 1, 2, 0, 1]
+        with self.assertRaises(RuntimeError):
+            one_hot(a, 1)
+
+        torch._dynamo.reset()
+        with self.assertRaises(RuntimeError):
+            one_hot(torch.tensor([-1, 0, 1]), 3)
+
+        torch._dynamo.reset()
+        expected = torch.nn.functional.one_hot(a, 3)
+        self.assertEqual(one_hot(a, 3), expected)
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     def test_sub_alpha_scalar_repro(self, device):
@@ -8868,6 +8879,79 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
         result = f(torch.tensor(0.0))
         self.assertEqual(result.item(), 4.0)
+
+    def test_enum_with_class_values(self):
+        from enum import Enum
+
+        class AvgMetric:
+            def __init__(self):
+                self.sum = None
+                self.count = 0
+
+            def append(self, x):
+                if self.count > 0:
+                    self.sum = self.sum + x
+                else:
+                    self.sum = x.clone()
+                self.count += 1
+
+        class GlobalReduction(Enum):
+            AVG = AvgMetric
+
+        class ScalarLogger:
+            def __init__(self):
+                self.metrics = {}
+
+            def log(self, key, value, global_reduction):
+                if key not in self.metrics:
+                    self.metrics[key] = global_reduction.value()
+                self.metrics[key].append(value)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(logger, x):
+            logger.log("test", x, GlobalReduction.AVG)
+            return x + 1
+
+        logger = ScalarLogger()
+        fn(logger, torch.tensor(1.0))
+
+    def test_class_attr_mutation_recompiles(self):
+        class GlobalState:
+            factor = 1.0
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(x):
+            return x * GlobalState.factor
+
+        x = torch.tensor([4.0])
+
+        GlobalState.factor = 1.0
+        result1 = fn(x)
+        self.assertEqual(result1, torch.tensor([4.0]))
+        self.assertEqual(cnt.frame_count, 1)
+
+        GlobalState.factor = 10.0
+        result2 = fn(x)
+        self.assertEqual(result2, torch.tensor([40.0]))
+        self.assertEqual(cnt.frame_count, 2)
+
+    @skipIfHpu
+    @requires_cuda
+    def test_deterministic_pad_replicate_compile(self, device):
+        from torch.testing._internal.common_utils import DeterministicGuard
+
+        pad = torch.nn.ReplicationPad1d(2).to(device)
+        compiled_pad = torch.compile(pad, backend="aot_eager", fullgraph=True)
+        x = torch.randn(3, 3, device=device, requires_grad=True)
+        with DeterministicGuard(True):
+            ref = pad(x)
+            res = compiled_pad(x)
+            self.assertEqual(ref, res)
+            grad = torch.autograd.grad(res.sum(), x)
+            ref_grad = torch.autograd.grad(ref.sum(), x)
+            self.assertEqual(grad, ref_grad)
 
 
 instantiate_parametrized_tests(ReproTests)

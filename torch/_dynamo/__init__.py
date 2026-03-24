@@ -24,7 +24,7 @@ from .callback import callback_handler, on_compile_end, on_compile_start
 from .code_context import code_context
 from .convert_frame import replay
 from .decorators import (
-    allow_in_graph,
+    allow_in_graph,  # pyrefly: ignore [deprecated]
     assume_constant_result,
     disable,
     disable_nested_graph_breaks,

@@ -1,6 +1,7 @@
 # Owner(s): ["module: unknown"]
 import os
 import pickle
+import warnings
 from unittest.mock import patch
 
 
@@ -8,8 +9,6 @@ os.environ["ENV_TRUE"] = "1"
 os.environ["ENV_FALSE"] = "0"
 os.environ["ENV_STR"] = "1234"
 os.environ["ENV_STR_EMPTY"] = ""
-
-from typing import Optional
 
 from torch.testing._internal import (
     fake_config_module as config,
@@ -25,6 +24,10 @@ class TestConfigModule(TestCase):
         # Config changes get persisted between test cases
         for k in config._config:
             config._config[k].user_override = _UNSET_SENTINEL
+        config._hash_digest = None
+        # Reset deprecation warning flags
+        for k in config._config:
+            config._config[k]._deprecation_warned = False
 
     def test_base_value_loading(self):
         self.assertTrue(config.e_bool)
@@ -44,8 +47,8 @@ class TestConfigModule(TestCase):
             config.does_not_exist
 
     def test_type_loading(self):
-        self.assertEqual(config.get_type("e_optional"), Optional[bool])
-        self.assertEqual(config.get_type("e_none"), Optional[bool])
+        self.assertEqual(config.get_type("e_optional"), bool | None)
+        self.assertEqual(config.get_type("e_none"), bool | None)
 
     def test_overrides(self):
         config.e_bool = False
@@ -113,7 +116,10 @@ class TestConfigModule(TestCase):
         self.assertTrue(config2.e_env_force_multi)
 
     def test_save_config(self):
-        p = config.save_config()
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=FutureWarning)
+            p = config.save_config()
+
         self.assertDictEqual(
             pickle.loads(p),
             {
@@ -141,6 +147,8 @@ class TestConfigModule(TestCase):
                 "e_env_default_str_empty": "",
                 "e_env_force": True,
                 "e_optional": True,
+                "e_deprecated": True,
+                "e_not_deprecated": False,
             },
         )
         config.e_bool = False
@@ -150,7 +158,10 @@ class TestConfigModule(TestCase):
         self.assertFalse(config.e_ignored)
 
     def test_save_config_portable(self):
-        p = config.save_config_portable()
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=FutureWarning)
+            p = config.save_config_portable()
+
         self.assertDictEqual(
             p,
             {
@@ -175,6 +186,8 @@ class TestConfigModule(TestCase):
                 "e_env_default_str_empty": "",
                 "e_env_force": True,
                 "e_optional": True,
+                "e_deprecated": True,
+                "e_not_deprecated": False,
             },
         )
         config.e_bool = False
@@ -215,20 +228,24 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
         )
 
     def test_get_hash(self):
-        hash_value = b"\x87\xf7\xc6\x1di\x7f\x96-\x85\xdc\x04\xd5\xd0\xf6\x1c\x87"
-        self.assertEqual(
-            config.get_hash(),
-            hash_value,
-        )
-        # Test cached value
-        self.assertEqual(
-            config.get_hash(),
-            hash_value,
-        )
-        self.assertEqual(
-            config.get_hash(),
-            hash_value,
-        )
+        hash_value = b"#d\x8b\xd3\xbc'\xf5\x0c\xcd\xb6\x87zDw6g"
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=FutureWarning)
+            self.assertEqual(
+                config.get_hash(),
+                hash_value,
+            )
+            # Test cached value
+            self.assertEqual(
+                config.get_hash(),
+                hash_value,
+            )
+            self.assertEqual(
+                config.get_hash(),
+                hash_value,
+            )
+
         config._hash_digest = "fake"
         self.assertEqual(config.get_hash(), "fake")
 
@@ -247,7 +264,11 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
         )
 
     def test_dict_copy_semantics(self):
-        p = config.shallow_copy_dict()
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=FutureWarning)
+            p = config.shallow_copy_dict()
+            p2 = config.to_dict()
+
         self.assertDictEqual(
             p,
             {
@@ -276,9 +297,10 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
                 "e_env_default_str_empty": "",
                 "e_env_force": True,
                 "e_optional": True,
+                "e_deprecated": True,
+                "e_not_deprecated": False,
             },
         )
-        p2 = config.to_dict()
         self.assertEqual(
             p2,
             {
@@ -307,9 +329,15 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
                 "e_env_default_str_empty": "",
                 "e_env_force": True,
                 "e_optional": True,
+                "e_deprecated": True,
+                "e_not_deprecated": False,
             },
         )
-        p3 = config.get_config_copy()
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=FutureWarning)
+            p3 = config.get_config_copy()
+
         self.assertEqual(
             p3,
             {
@@ -338,6 +366,8 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
                 "e_env_default_str_empty": "",
                 "e_env_force": True,
                 "e_optional": True,
+                "e_deprecated": True,
+                "e_not_deprecated": False,
             },
         )
 
@@ -405,6 +435,91 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
         with self.assertRaises(AssertionError):
             _ConfigEntry(
                 Config(default=2, env_name_force="FAKE_DISABLE", value_type=float)
+            )
+
+    def test_deprecated_config(self):
+        """Test that deprecated configs warn on access but still work normally."""
+        config._config["e_deprecated"]._deprecation_warned = False
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+
+            # Read access triggers warning
+            self.assertTrue(config.e_deprecated)
+            self.assertEqual(len(w), 1)
+            self.assertTrue(issubclass(w[0].category, FutureWarning))
+            msg = str(w[0].message)
+            self.assertIn("e_deprecated", msg)
+            self.assertIn("is no longer needed", msg)
+            self.assertIn("will be removed in a future version of PyTorch", msg)
+
+        # Write access also triggers warning
+        config._config["e_deprecated"]._deprecation_warned = False
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            config.e_deprecated = False
+            self.assertEqual(len(w), 1)
+            self.assertFalse(config.e_deprecated)
+
+        # Functionality still works: patch, multiple accesses, etc.
+        config.e_deprecated = True
+        with config.patch(e_deprecated=False):
+            self.assertFalse(config.e_deprecated)
+        self.assertTrue(config.e_deprecated)
+
+    def test_deprecated_config_warn_once(self):
+        """Test that deprecation warning is only issued once per config."""
+        config._config["e_deprecated"]._deprecation_warned = False
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            # First access
+            _ = config.e_deprecated
+            # Second access
+            _ = config.e_deprecated
+            config.e_deprecated = True  # Write - no warn
+            _ = config.e_deprecated  # Read again - no warn
+            self.assertEqual(len(w), 1)
+
+    def test_deprecated_alias_config(self):
+        """Test that aliased deprecated configs issue their own warning."""
+        config._config["e_deprecated_alias"]._deprecation_warned = False
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            value = config.e_deprecated_alias
+            # Comes from e_not_deprecated = False
+            self.assertFalse(value)
+            self.assertEqual(len(w), 1)
+            self.assertIn("e_deprecated_alias", str(w[0].message))
+            self.assertIn("use something else instead", str(w[0].message))
+
+    def test_no_warnings_for_normal_user_code(self):
+        """Test that normal user operations don't produce deprecation warnings."""
+        import torch
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+
+            # Simple user code - compile and run a function
+            @torch.compile(backend="eager")
+            def fn(x):
+                return x + 1
+
+            _ = fn(torch.ones(3))
+
+            # No deprecation warnings should be issued from config system
+            deprecation_warnings = [
+                warning
+                for warning in w
+                if issubclass(warning.category, FutureWarning)
+                and "deprecated" in str(warning.message).lower()
+                and "config" in str(warning.message).lower()
+            ]
+            self.assertEqual(
+                len(deprecation_warnings),
+                0,
+                f"Unexpected config deprecation warnings: {[str(x.message) for x in deprecation_warnings]}",
             )
 
 

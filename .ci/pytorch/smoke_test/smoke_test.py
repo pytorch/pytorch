@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import importlib
 import json
@@ -7,7 +9,8 @@ import subprocess
 import sys
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Optional
+
+from check_wheel_tags import check_mac_wheel_minos, check_wheel_platform_tag
 
 import torch
 import torch._dynamo
@@ -24,6 +27,7 @@ channel = os.getenv("MATRIX_CHANNEL")
 package_type = os.getenv("MATRIX_PACKAGE_TYPE")
 target_os = os.getenv("TARGET_OS", sys.platform)
 BASE_DIR = Path(__file__).parent.parent.parent
+PYTORCH_ROOT = BASE_DIR.parent
 
 is_cuda_system = gpu_arch_type == "cuda"
 NIGHTLY_ALLOWED_DELTA = 3
@@ -205,7 +209,7 @@ def test_cuda_gds_errors_captured() -> None:
         )
 
 
-def find_pypi_package_version(package: str) -> Optional[str]:
+def find_pypi_package_version(package: str) -> str | None:
     from importlib import metadata
 
     dists = metadata.distributions()
@@ -213,6 +217,89 @@ def find_pypi_package_version(package: str) -> Optional[str]:
         if dist.metadata["Name"].startswith(package):
             return dist.version
     return None
+
+
+def get_expected_cudnn_version_linux(cuda_version: str) -> str | None:
+    """Parse expected cuDNN version from generate_binary_build_matrix.py for Linux.
+
+    Reads PYTORCH_EXTRA_INSTALL_REQUIREMENTS and extracts the cudnn version
+    for the given CUDA version (e.g. "12.6").
+    """
+    matrix_script = (
+        PYTORCH_ROOT / ".github" / "scripts" / "generate_binary_build_matrix.py"
+    )
+    if not matrix_script.exists():
+        print(f"Warning: {matrix_script} not found, skipping cuDNN version check")
+        return None
+
+    content = matrix_script.read_text()
+    # Match the full cudnn package version like nvidia-cudnn-cu12==9.10.2.21
+    # and extract major.minor.patch (dropping the build number)
+    pattern = (
+        rf'"{re.escape(cuda_version)}":\s*\(\s*'
+        r"[\s\S]*?nvidia-cudnn-cu\d+==(\d+\.\d+\.\d+)\.\d+"
+    )
+    match = re.search(pattern, content)
+    if match:
+        return match.group(1)
+    return None
+
+
+def get_expected_cudnn_version_windows(cuda_version: str) -> str | None:
+    """Parse expected cuDNN version from cuda_install.bat for Windows.
+
+    Reads the batch file and extracts EXPECTED_CUDNN_VERSION for the given
+    CUDA version (e.g. "12.6" maps to CUDA_VER 126).
+    """
+    bat_file = (
+        PYTORCH_ROOT / ".ci" / "pytorch" / "windows" / "internal" / "cuda_install.bat"
+    )
+    if not bat_file.exists():
+        print(f"Warning: {bat_file} not found, skipping cuDNN version check")
+        return None
+
+    content = bat_file.read_text()
+    # Convert "12.6" to "126" to match batch file's CUDA_VER format
+    cuda_ver_nodot = cuda_version.replace(".", "")
+    # Match: if %CUDA_VER% EQU 126 ( ... set EXPECTED_CUDNN_VERSION=9.10.2 )
+    pattern = (
+        rf"if %CUDA_VER% EQU {re.escape(cuda_ver_nodot)}\s*\("
+        r"[\s\S]*?set EXPECTED_CUDNN_VERSION=(\d+\.\d+\.\d+)"
+    )
+    match = re.search(pattern, content)
+    if match:
+        return match.group(1)
+    return None
+
+
+def check_cudnn_version(cuda_version: str, actual_cudnn_version: str) -> None:
+    """Validate cuDNN version matches expected version from build config files."""
+    if sys.platform in ["linux", "linux2"]:
+        expected = get_expected_cudnn_version_linux(cuda_version)
+        source = "generate_binary_build_matrix.py"
+    elif sys.platform == "win32":
+        expected = get_expected_cudnn_version_windows(cuda_version)
+        source = "cuda_install.bat"
+    else:
+        print(f"cuDNN version check not supported on platform {sys.platform}")
+        return
+
+    if expected is None:
+        print(
+            f"Warning: Could not determine expected cuDNN version for CUDA {cuda_version} "
+            f"from {source}, skipping validation"
+        )
+        return
+
+    if not actual_cudnn_version.startswith(expected):
+        raise RuntimeError(
+            f"cuDNN version mismatch for CUDA {cuda_version}. "
+            f"Loaded: {actual_cudnn_version} Expected: {expected} (from {source})"
+        )
+    print(
+        f"cuDNN version check passed: {actual_cudnn_version} matches "
+        f"expected {expected} from {source}"
+    )
 
 
 def cudnn_to_version_str(cudnn_version: int) -> str:
@@ -292,6 +379,8 @@ def smoke_test_cuda(
                 f"Loaded: {torch_cudnn_runtime_version} "
                 f"Expected: {torch_cudnn_compile_version}"
             )
+
+        check_cudnn_version(gpu_arch_ver, torch_cudnn_version)
 
         if sys.platform in ["linux", "linux2"]:
             torch_nccl_version = ".".join(str(v) for v in torch.cuda.nccl.version())
@@ -549,6 +638,9 @@ def main() -> None:
     )
 
     smoke_test_nvshmem()
+
+    check_wheel_platform_tag()
+    check_mac_wheel_minos()
 
 
 if __name__ == "__main__":

@@ -64,6 +64,13 @@ class Options:
     node_metadata_key_filter: Callable[[str], bool] | None = (
         _node_metadata_key_filter_safe
     )
+    # If True, raw torch.fx.Node objects encountered during pickling will be
+    # silently replaced with None instead of raising an AssertionError.
+    ignore_raw_node: bool = False
+
+
+def _unpickle_as_none() -> None:
+    return None
 
 
 @contextlib.contextmanager
@@ -143,6 +150,8 @@ class GraphPickler(pickle.Pickler):
         else:
             # We should never get a raw Node!
             if isinstance(obj, torch.fx.Node):
+                if self.options.ignore_raw_node:
+                    return (_unpickle_as_none, ())
                 raise AssertionError("Unexpected raw Node during pickling")
             if reduce := _TorchNumpyPickleData.reduce_helper(self, obj):
                 return reduce

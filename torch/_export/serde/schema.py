@@ -9,7 +9,7 @@ from torch._export.serde.union import _Union, _union_dataclass
 
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (8, 17)
+SCHEMA_VERSION = (8, 18)
 TREESPEC_VERSION = 1
 
 
@@ -40,6 +40,7 @@ class ScalarType(IntEnum):
     FLOAT8E5M2 = 30
     FLOAT8E4M3FNUZ = 31
     FLOAT8E5M2FNUZ = 32
+    FLOAT8E8M0FNU = 33
 
 
 class Layout(IntEnum):
@@ -80,6 +81,7 @@ SCALAR_TYPE_TO_C10: dict[int, str] = {
     ScalarType.FLOAT8E5M2: "Float8_e5m2",
     ScalarType.FLOAT8E4M3FNUZ: "Float8_e4m3fnuz",
     ScalarType.FLOAT8E5M2FNUZ: "Float8_e5m2fnuz",
+    ScalarType.FLOAT8E8M0FNU: "Float8_e8m0fnu",
 }
 
 LAYOUT_TO_C10: dict[int, str] = {

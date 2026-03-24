@@ -1097,6 +1097,7 @@ void _trace_post_record(
   }
 
   std::vector<torch::jit::Value*> trace_outputs;
+  trace_outputs.reserve(static_cast<size_t>(std::max(0, num_outputs)));
   for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GET_ITEM(output_objects, i);
     if (THPVariable_Check(obj)) {
@@ -1125,9 +1126,10 @@ void _trace_post_record(
   // to the original tuple type.
   if (!unpack_output) {
     std::vector<at::TypePtr> new_tuple_values;
+    new_tuple_values.reserve(num_outputs);
     for (const auto i : c10::irange(num_outputs)) {
       auto ptr = node->outputs()[i]->type();
-      new_tuple_values.push_back(ptr);
+      new_tuple_values.push_back(std::move(ptr));
     }
     auto tuple_type = at::TupleType::create(std::move(new_tuple_values));
     // The i-th tuple element receives a new tensor type with element type and
