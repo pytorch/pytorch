@@ -4483,6 +4483,15 @@ class CppKernelProxy(CppKernel):
             tiling_factors, tiling_indices = tiling_select.select_tiling(
                 fn_list, var_sizes_list
             )
+
+            def _tail_vec_worthwhile(tail_size, tiling_factor) -> bool:
+                # Tail vectorization has non-trivial mask/cast/blend overhead.
+                # Only vectorize tail when it is large enough to amortize overhead.
+                return V.graph.sizevars.guard_or_false(
+                    sympy.Gt(4 * V.graph.sizevars.optimization_hint(tail_size),
+                    tiling_factor)
+                )
+
             assert len(tiling_factors) == len(tiling_indices)
             _inner_loop_reduction_outer_not = False
             _outer_loop = None
@@ -4510,7 +4519,9 @@ class CppKernelProxy(CppKernel):
                 )
                 tail_size = loop.size - loop.tiled_size
                 vec_kernel.active_ranges = {loop.var: (0, loop.tiled_size)}
-                if config.cpp.enable_loop_tail_vec:
+                if config.cpp.enable_loop_tail_vec and _tail_vec_worthwhile(
+                    tail_size, tiling_factors[0]
+                ):
                     tail_kernel = codegen_kernel(
                         self.vec_kernel_cls,
                         tiling_factors[0],
@@ -4557,7 +4568,11 @@ class CppKernelProxy(CppKernel):
                     inner_loop.var: inner_ranges["main"],
                 }
                 tail_kernel = []
-                if config.cpp.enable_loop_tail_vec:
+                if (
+                    config.cpp.enable_loop_tail_vec
+                    and _tail_vec_worthwhile(inner_tail_size, tiling_factors[0])
+                    and _tail_vec_worthwhile(outer_tail_size, tiling_factors[0])
+                ):
                     for outer_r, inner_r in (
                         ("main", "tail"),
                         ("tail", "main"),
