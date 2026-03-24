@@ -15,6 +15,7 @@ from torch.testing._internal.common_utils import (
     LazyVal,
     TEST_CUDA,
     TEST_WITH_ROCM,
+    TEST_XPU,
 )
 
 def evaluate_platform_supports_flash_attention():
@@ -25,6 +26,8 @@ def evaluate_platform_supports_flash_attention():
         return evaluate_gfx_arch_within(arch_list)
     if TEST_CUDA:
         return not IS_WINDOWS and SM80OrLater
+    if TEST_XPU:
+        return True
     return False
 
 def evaluate_platform_supports_efficient_attention():
@@ -34,6 +37,8 @@ def evaluate_platform_supports_efficient_attention():
             arch_list += ["gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]
         return evaluate_gfx_arch_within(arch_list)
     if TEST_CUDA:
+        return True
+    if TEST_XPU:
         return True
     return False
 
@@ -50,7 +55,7 @@ PLATFORM_SUPPORTS_FUSED_ATTENTION: bool = LazyVal(lambda: PLATFORM_SUPPORTS_FLAS
 PLATFORM_SUPPORTS_FUSED_SDPA: bool = TEST_CUDA and not TEST_WITH_ROCM
 
 def evaluate_platform_supports_fp8():
-    if torch.cuda.is_available():
+    if TEST_CUDA:
         if torch.version.hip:
             archs = ['gfx94']
             if ROCM_VERSION >= (6, 3):
@@ -62,6 +67,8 @@ def evaluate_platform_supports_fp8():
                     return True
         else:
             return SM90OrLater or torch.cuda.get_device_capability() == (8, 9)
+    if TEST_XPU:
+        return True
     # As CPU supports FP8 and is always available, return True.
     return True
 
@@ -69,6 +76,8 @@ def evaluate_platform_supports_bf16():
     if TEST_CUDA:
         return SM80OrLater
     elif torch.version.hip:
+        return True
+    elif TEST_XPU:
         return True
     return False
 
