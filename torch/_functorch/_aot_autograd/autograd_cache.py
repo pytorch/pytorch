@@ -707,6 +707,15 @@ def normalize_placeholder_names(
         gm.recompile()
 
 
+def create_fx_config(
+    cudagraphs: BoxedBool, boxed_forward_device_index: BoxedDeviceIndex | None
+) -> _CompileFxKwargs:
+    return {
+        "cudagraphs": cudagraphs,
+        "boxed_forward_device_index": boxed_forward_device_index,
+    }
+
+
 def autograd_cache_key(
     gm: torch.fx.GraphModule,
     example_inputs: Sequence[Any],
@@ -869,10 +878,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             debug_lines: list[str] = []
             cache_event_time = time.time_ns()
             cache_state = None
-            fx_config: _CompileFxKwargs = {
-                "cudagraphs": cudagraphs,
-                "boxed_forward_device_index": boxed_forward_device_index,
-            }
+            fx_config = create_fx_config(cudagraphs, boxed_forward_device_index)
             try:
                 cache_key, debug_lines = autograd_cache_key(
                     gm, args, aot_config, fx_config
