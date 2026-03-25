@@ -1153,6 +1153,7 @@ class TestMaxAutotune(TestCase):
         f_c = torch.compile(mode="max-autotune-no-cudagraphs")(f)
         self.assertEqual(f_c(*inps), f(*inps), atol=0.03, rtol=0.25)
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @config.patch("trace.enabled", True)
     @config.patch({"test_configs.force_extern_kernel_in_multi_template": True})
     @config.patch("triton.native_matmul", False)
@@ -1206,6 +1207,7 @@ class TestMaxAutotune(TestCase):
 
         torch._logging.set_logs()
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @config.patch({"test_configs.force_extern_kernel_in_multi_template": True})
     def test_cat_max_autotune_extern(self):
         self._test_cat_max_autotune_impl(using_triton_mm=False)
@@ -1418,6 +1420,7 @@ class TestMaxAutotune(TestCase):
             if not same(expect, actual, tol=1e-2):
                 raise AssertionError(f"ref:\n{expect}\nact:\n{actual}")
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -1541,6 +1544,7 @@ class TestMaxAutotune(TestCase):
                 bf16_red_setting
             )
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -1594,6 +1598,7 @@ class TestMaxAutotune(TestCase):
                     rtol=1e-4,
                 )
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -1649,6 +1654,7 @@ class TestMaxAutotune(TestCase):
                     code[1]
                 )
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -1700,6 +1706,7 @@ class TestMaxAutotune(TestCase):
                     f" empty_strided_{GPU_TYPE}((256, 1096), (1096, 1), torch.bfloat16)"
                 ).run(code[0])
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))
     @parametrize("sizes", ((64, 128, 256), (128, 256, 512), (256, 512, 1024)))
@@ -1743,6 +1750,7 @@ class TestMaxAutotune(TestCase):
             # Check that contiguous transform was used
             FileCheck().check("contiguous_mm").run(code[0])
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))
     @parametrize("sizes", ((64, 128, 256), (128, 256, 512), (256, 512, 1024)))
@@ -1787,6 +1795,7 @@ class TestMaxAutotune(TestCase):
             # Check that contiguous transform was used
             FileCheck().check("contiguous_addmm").run(code[0])
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @parametrize("dynamic", (False, True))
     def test_max_autotune_contiguous_transform_non_contiguous_second_matrix(
@@ -1854,6 +1863,7 @@ class TestMaxAutotune(TestCase):
             out2, expected2_fp64.to(torch.float32), atol=1e-2, rtol=1e-2
         )
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @config.patch(
         max_autotune=True,
@@ -2304,6 +2314,7 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(misses(), 4)
 
     @fresh_cache()
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -2671,6 +2682,7 @@ class TestMaxAutotune(TestCase):
         self.assertObjectIn(k, (15, 16))
         self.assertEqual("'EVEN_K': True" in cache_key, k == 16 and not dynamic)
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @config.patch(
         {
             "max_autotune": True,
@@ -4480,6 +4492,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                 tma_heuristic.mm_configs = original_tma_mm_configs
                 mm_heuristic.mm_configs = original_mm_mm_configs
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(
         not HAS_CUDA_AND_TRITON, "Scheduler static analysis only tested on cuda"
     )
@@ -4963,6 +4976,7 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
         cache_entries_after_second = len(AsyncAutotuner.choice_hash_to_future)
         self.assertEqual(cache_entries_after_second, 0)
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @config.patch(max_autotune_gemm=True)
     def test_triton_error_precompilation_and_autotuning(self):
         """

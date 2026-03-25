@@ -70,6 +70,11 @@ from torch.testing._internal.common_device_type import (
     skipXPUIf,
 )
 from torch.testing._internal.common_quantized import _snr
+from torch.testing._internal.common_utils import (  # noqa: F401
+    MI200_ARCH,
+    skipIfRocm,
+    skipIfRocmArch,
+)
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._triton import has_triton, has_triton_tma_device
 
@@ -7953,6 +7958,8 @@ class TestLearnableBiases(InductorTestCase):
         )
 
     @skip_on_cpu
+    # Fails with triton 3.7
+    @skip_on_rocm
     def test_flex_attention_with_dynamic_max_autotune(self, device):
         self._test_flex_attention_with_dynamic_max_autotune(device)
 
@@ -7962,6 +7969,7 @@ class TestLearnableBiases(InductorTestCase):
         self._test_flex_attention_with_dynamic_max_autotune(device)
 
     @skip_on_cpu
+    @skipIfRocm(msg="Fails with Triton 3.7")
     def test_flex_attention_logging(self, device):
         with tempfile.TemporaryDirectory() as tmpdir:
             log_file = os.path.join(tmpdir, "flex_attention_configs")

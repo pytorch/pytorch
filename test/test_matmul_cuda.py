@@ -46,6 +46,7 @@ from torch.testing._internal.common_utils import (
     runOnRocmArch,
     serialTest,
     skipIfRocm,
+    skipIfRocmArch,
     TEST_CUDA,
     TEST_WITH_ROCM,
     TestCase,
@@ -240,6 +241,8 @@ class TestMatmulCuda(InductorTestCase):
 
 
     @onlyCUDA
+    # Fails with triton 3.7
+    @skipIfRocmArch(NAVI_ARCH)
     @dtypes(torch.float16)
     # m == 4 chooses OUTPUT_TYPE reduction on H200
     # m == 8 chooses OUTPUT_TYPE reduction on A100
@@ -709,9 +712,11 @@ class TestMatmulCuda(InductorTestCase):
             self.assertEqual(C, C_ref)
 
     @skipCUDAIfNotRocm
-    def test_grouped_gemm_rocm_ck_flag_and_k_variants(self):
-        CK_EQUAL_K_HINT = "DeviceGroupedGemmXdlSplitKCShuffle"
-        CK_UNEQUAL_K_HINT = "DeviceGroupedGemmMultipleDSplitKXdlCShuffleTwoStage"
+    # Fails with triton 3.7
+    @skipIfRocmArch(NAVI_ARCH)
+    def test_grouped_gemm_rocm_ck_flag(self):
+        CK_EQUAL_K_HINT = "kernel_grouped_gemm_xdl_splitk"
+        CK_UNEQUAL_K_HINT = "kernel_grouped_gemm_xdl_splitk"
         HIPBLASLT_HINT = "Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs"
 
         def has_ck_kernel(kernels: set[str], hint: str) -> bool:
