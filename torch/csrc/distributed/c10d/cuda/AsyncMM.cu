@@ -270,8 +270,8 @@ struct AsyncGemmConfig
         get_k_warp_tile<PrecType, M_Warp_Tile>();
 
     static constexpr bool kPadM = false;
-    static constexpr bool kPadN = false;
-    static constexpr bool kPadK = false;
+    static constexpr bool kPadN = true;
+    static constexpr bool kPadK = true;
 
     static constexpr bool DoubleSmemBuffer = false;
     static constexpr ck_tile::GemmPipeline Pipeline = ck_tile::GemmPipeline::COMPUTE_V3;
