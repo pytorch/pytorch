@@ -44,9 +44,9 @@ from torch.sparse import SparseSemiStructuredTensor, to_sparse_semi_structured
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
+    SM100OrLater,
     SM80OrLater,
     SM90OrLater,
-    SM100OrLater,
 )
 from torch.testing._internal.common_utils import (
     IN_RE_WORKER,
