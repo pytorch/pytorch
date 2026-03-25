@@ -2409,7 +2409,7 @@ def forward(self, pred_1, x_1):
         )
 
         counter[0] = 0
-        result = generic_scan(combine_flat, init, xs)
+        result = generic_scan(combine_flat, init, xs)  # noqa: F841
         self.assertEqual(counter[0], 5)
 
         # Single-element scan should call operator exactly once.
