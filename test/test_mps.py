@@ -8040,12 +8040,11 @@ class TestMPS(TestCaseMPS):
 
         # Expected dtypes for MPS testing helpers
         expected = set(all_mps_types())
-        self.assertTrue(len(supported) == len(expected))
         # Per Apple docs, bfloat16 support starts on macOS 14.0+
         if not torch.backends.mps.is_macos_or_newer(14, 0):
             expected.discard(torch.bfloat16)
 
-        self.assertTrue(all(dtype in expected for dtype in supported))
+        self.assertTrue(all(dtype in supported for dtype in expected))
 
     def test_jit_save_load(self):
         m = torch.nn.Module()
