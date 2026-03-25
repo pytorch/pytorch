@@ -1768,11 +1768,6 @@ class MultiProcContinuousTest(TestCase):
         os.environ["LOCAL_RANK"] = str(rank)
         store = c10d.FileStore(rdvz_file, world_size)
         # create nccl processgroup with opts
-        device_id = (
-            torch.device(cls.device_type(), rank)
-            if cls.device_type() != "cpu"
-            else None
-        )
         c10d.init_process_group(
             backend=cls.backend_str(),
             world_size=world_size,
@@ -1780,7 +1775,6 @@ class MultiProcContinuousTest(TestCase):
             store=store,
             pg_options=cls.opts(),
             timeout=cls.timeout,
-            device_id=device_id,
         )
         cls.pg = c10d.distributed_c10d._get_default_group()
 
