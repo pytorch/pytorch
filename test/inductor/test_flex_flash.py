@@ -25,6 +25,7 @@ from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_cuda import (
     IS_SM90,
     PLATFORM_SUPPORTS_FP8,
+    xfailIfSM12X,
     xfailIfSM90,
 )
 from torch.testing._internal.common_device_type import (
@@ -802,6 +803,7 @@ GQA_MQA_BLOCK_MASK_CASES = [
     not ensure_flash_available(), "Flash attention (CUTE) library is not available"
 )
 class TestFlexFlash(InductorTestCase):
+    @xfailIfSM12X
     @decorateIf(
         unittest.expectedFailure,
         lambda params: params["case"].requires_grad and IS_SM90,
@@ -826,6 +828,7 @@ class TestFlexFlash(InductorTestCase):
             score_mod=case.score_mod_factory(dtype, device),
         )
 
+    @xfailIfSM12X
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", DETERMINISTIC_SCORE_MOD_CASES, name_fn=score_case_name)
     def test_flash_attention_backward_deterministic_score_mod_cases(
@@ -851,6 +854,7 @@ class TestFlexFlash(InductorTestCase):
                 else None,
             )
 
+    @xfailIfSM12X
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", MASK_MOD_CASES, name_fn=mask_case_name)
     def test_flash_attention_mask_mod_cases(self, device, dtype, case):
@@ -888,6 +892,7 @@ class TestFlexFlash(InductorTestCase):
             ),
         )
 
+    @xfailIfSM12X
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", DETERMINISTIC_MASK_MOD_CASES, name_fn=mask_case_name)
     def test_flash_attention_backward_deterministic_block_mask_raises(
@@ -934,6 +939,7 @@ class TestFlexFlash(InductorTestCase):
                 )
                 out.sum().backward()
 
+    @xfailIfSM12X
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", DETERMINISTIC_MASK_MOD_CASES, name_fn=mask_case_name)
     def test_flash_attention_backward_deterministic_warn_only_block_mask(
@@ -982,6 +988,7 @@ class TestFlexFlash(InductorTestCase):
             ):
                 out.sum().backward()
 
+    @xfailIfSM12X
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", GQA_MQA_BLOCK_MASK_CASES, name_fn=mask_case_name)
     def test_flash_attention_gqa_mqa_block_mask_cases(self, device, dtype, case):
@@ -1019,6 +1026,7 @@ class TestFlexFlash(InductorTestCase):
             ),
         )
 
+    @xfailIfSM12X
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_kernel_called(self, device, dtype):
         q, k, v = create_test_tensors(dtype=dtype, device=device)
@@ -1107,6 +1115,7 @@ class TestFlexFlash(InductorTestCase):
                 kernel_options={"BACKEND": "FLASH"},
             ).sum().backward()
 
+    @xfailIfSM12X
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_backward_kernel_called(self, device, dtype):
         q, k, v = create_test_tensors(dim=128, dtype=dtype, device=device)
@@ -1132,6 +1141,7 @@ class TestFlexFlash(InductorTestCase):
             f"Flash attention backward kernel not found. Kernels: {prof_result['kernel_names']}",
         )
 
+    @xfailIfSM12X
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_backward_forwards_deterministic_flag(self, device, dtype):
         q, k, v = create_test_tensors(dim=128, dtype=dtype, device=device)
@@ -1150,6 +1160,7 @@ class TestFlexFlash(InductorTestCase):
             "Expected deterministic flag to be wired through flash backward",
         )
 
+    @xfailIfSM12X
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_generates_cute_hash(self, device, dtype):
         q, k, v = create_test_tensors(dtype=dtype, device=device)
@@ -1170,6 +1181,7 @@ class TestFlexFlash(InductorTestCase):
             "Generated code should set __cute_hash__ on score_mod for fast hashing",
         )
 
+    @xfailIfSM12X
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_fused_qkv_reinterpret_view(self, device, dtype):
         B, M, H, D = 2, 256, 4, 64
@@ -1189,6 +1201,7 @@ class TestFlexFlash(InductorTestCase):
         out = compiled_fn(x, weight)
         self.assertEqual(out.shape, (B, H, M, D))
 
+    @xfailIfSM12X
     @dtypes(torch.float16, torch.bfloat16)
     def test_gqa_expand_stride_zero_backward(self, device, dtype):
         """Test GQA backward with expand()-created K/V tensors (stride=0).
@@ -1224,6 +1237,7 @@ class TestFlexFlash(InductorTestCase):
 
         flash_vs_triton(q, k, v, block_mask=block_mask)
 
+    @xfailIfSM12X
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_backend_raises_on_grad_logsumexp(self, device, dtype):
         from torch._dynamo.exc import BackendCompilerFailed
@@ -1257,6 +1271,7 @@ class TestFlexFlash(InductorTestCase):
                 kernel_options={"BACKEND": "FLASH"},
             )
 
+    @xfailIfSM12X
     @decorateIf(
         unittest.expectedFailure,
         lambda params: IS_SM90,

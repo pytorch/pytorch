@@ -43,6 +43,7 @@ IS_JETSON = LazyVal(lambda: torch.cuda.is_available() and (torch.cuda.get_device
 IS_SM89 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (8, 9))
 IS_SM90 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (9, 0))
 IS_SM100 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (10, 0))
+IS_SM12X = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 12)
 
 @contextlib.contextmanager
 def blas_library_context(backend):
@@ -462,6 +463,9 @@ def xfailIfSM100OrLater(func):
 
 def xfailIfSM120OrLater(func):
     return func if not SM120OrLater else unittest.expectedFailure(func)
+
+def xfailIfSM12X(func):
+    return func if not IS_SM12X else unittest.expectedFailure(func)
 
 def xfailIfDistributedNotSupported(func):
     return func if not (IS_MACOS or IS_JETSON) else unittest.expectedFailure(func)
