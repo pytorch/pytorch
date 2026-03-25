@@ -29,7 +29,6 @@ _SYNC_OPS = (
     torch.ops.streams.record_event.default,
     torch.ops.streams.wait_event.default,
     torch.ops.streams.synchronize_event.default,
-    torch.ops.streams.synchronize_device.default,
 )
 
 
@@ -480,19 +479,6 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
 
         if node.op == "call_function":
             if node.target in _SYNC_OPS:
-                # synchronize_device has no event — it acts as a full
-                # barrier across all streams, same as synchronize_event.
-                if node.target is torch.ops.streams.synchronize_device.default:
-                    all_stream_deps: list[Node] = [
-                        n for nodes in stream_to_nodes.values() for n in nodes
-                    ]
-                    if all_stream_deps:
-                        found_sync = True
-                        _wrap_sync_node(gm, node, all_stream_deps, visited)
-                    stream_to_nodes.clear()
-                    node = next_node
-                    continue
-
                 event_index: int = node.args[0]  # type: ignore[assignment]
 
                 # synchronize_event blocks the CPU thread, so it acts
