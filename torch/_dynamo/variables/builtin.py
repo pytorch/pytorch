@@ -3361,7 +3361,7 @@ class IterBuiltinVariable(VariableTracker):
                 gb_type="iter() with no arguments",
                 context="iter()",
                 explanation="iter() requires at least one argument",
-                hints=[],
+                hints=[*graph_break_hints.USER_ERROR],
             )
         obj, *rest = args
 
