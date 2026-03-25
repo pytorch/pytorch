@@ -1144,6 +1144,26 @@ graph():
 
         self.assertEqual(cnt.frame_count, 2)
 
+    def test_function_defaults_guarded(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(x, val):
+            return x + val
+
+        x = torch.randn(8)
+        results = []
+        for i in range(3):
+            def inner(y, default_val=i):
+                return y + default_val
+
+            results.append(fn(x, inner))
+
+        for i, r in enumerate(results):
+            self.assertEqual(r, x + i)
+
+        self.assertEqual(cnt.frame_count, 3)
+
     def test_generate_trivial_abstract_impl(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(

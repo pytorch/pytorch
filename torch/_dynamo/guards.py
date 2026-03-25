@@ -2698,7 +2698,7 @@ class GuardBuilder(GuardBuilderBase):
         eval_fn=check_closure,
     )
     def CLOSURE_MATCH(self, guard: Guard) -> None:
-        """matches a closure by __code__ id."""
+        """matches a closure by __code__ id and __defaults__ identity."""
         # don't support this in serialization because it uses unsupported FUNCTION_MATCH
         val = self.get(guard)
         # Strictly only want user-defined functions
@@ -2706,6 +2706,11 @@ class GuardBuilder(GuardBuilderBase):
             # No explicit HASATTR guard needed for __code__ — the getattr
             # accessor installed by CONSTANT_MATCH implicitly guards hasattr.
             self._guard_on_attribute(guard, "__code__", GuardBuilder.CONSTANT_MATCH)  # type: ignore[arg-type]
+            # Guard on __defaults__ identity to ensure recompilation when default
+            # args change (e.g., when a function is defined in a loop with different
+            # default values, each iteration creates a new __defaults__ tuple).
+            if hasattr(val, "__defaults__") and val.__defaults__ is not None:
+                self._guard_on_attribute(guard, "__defaults__", GuardBuilder.ID_MATCH)  # type: ignore[arg-type]
         else:
             self.FUNCTION_MATCH(guard)
 
