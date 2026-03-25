@@ -1815,7 +1815,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
   auto dy = grad_output.contiguous();
   auto y = output;
   auto w = weight_buf;
-  auto dx = at::empty_like(input, MemoryFormat::Contiguous);
+  auto dx = at::empty_like(input);
   auto dhy = grad_hy.contiguous().view(hidden_size);
   auto dcy =
       grad_cy.defined() ? grad_cy.contiguous().view(cell_size) : Tensor();
