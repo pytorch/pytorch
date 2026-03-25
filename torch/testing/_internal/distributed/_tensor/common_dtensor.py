@@ -1465,3 +1465,27 @@ def validate_sharding_rule_sample(
         ):
             return False
     return True
+
+
+@contextlib.contextmanager
+def op_strategy_context(op_overload, strategy_func, schema_info=None):
+    """Temporarily register an op strategy for testing, then restore the original."""
+    from torch.distributed.tensor._ops.utils import register_op_strategy
+    from torch.distributed.tensor.debug import _clear_sharding_prop_cache
+
+    propagator = DTensor._op_dispatcher.sharding_propagator
+    orig_funcs = propagator.op_strategy_funcs.get(op_overload)
+    orig_schema = propagator.op_to_schema_info.get(op_overload)
+    try:
+        propagator.op_strategy_funcs.pop(op_overload, None)
+        propagator.op_to_schema_info.pop(op_overload, None)
+        register_op_strategy(op_overload, schema_info=schema_info)(strategy_func)
+        yield
+    finally:
+        propagator.op_strategy_funcs.pop(op_overload, None)
+        propagator.op_to_schema_info.pop(op_overload, None)
+        if orig_funcs is not None:
+            propagator.op_strategy_funcs[op_overload] = orig_funcs
+        if orig_schema is not None:
+            propagator.op_to_schema_info[op_overload] = orig_schema
+        _clear_sharding_prop_cache()

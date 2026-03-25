@@ -32,6 +32,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     LocalDTensorContinuousTestBase,
     LocalDTensorTestBase,
+    op_strategy_context,
     with_comms,
 )
 
@@ -1384,8 +1385,6 @@ class DistTensorCppPyTree(DTensorContinuousTestBase):
             self.assertEqual(hits, 1)
 
     def test_two_list_op_cache_collision(self):
-        from test_op_strategy import op_strategy_context
-
         from torch.distributed.tensor._op_schema import RuntimeSchemaInfo
         from torch.distributed.tensor._ops.utils import replicate_op_strategy
         from torch.distributed.tensor.debug import (
@@ -1420,8 +1419,6 @@ class DistTensorCppPyTree(DTensorContinuousTestBase):
         without the is_none_or_undefined fix in handle_non_dtensor_arg.
         With same-spec DTensors the collision is deterministic.
         """
-        from test_op_strategy import op_strategy_context
-
         from torch.distributed.tensor._op_schema import RuntimeSchemaInfo
         from torch.distributed.tensor._ops.utils import replicate_op_strategy
         from torch.distributed.tensor.debug import (
