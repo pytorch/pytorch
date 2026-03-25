@@ -336,7 +336,9 @@ def _collect_tensors_with_sources(
                 out=plain,  # pyrefly: ignore[bad-argument-type]
             )
             assert all(
-                isinstance(t, torch._subclasses.fake_tensor.FakeTensor) for t in plain
+                isinstance(t, torch._subclasses.fake_tensor.FakeTensor)
+                for t in plain
+                if isinstance(t, torch.Tensor)
             ), (
                 f"Expected all plain tensors to be FakeTensors, got {[type(t) for t in plain]}"
             )
