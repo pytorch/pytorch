@@ -25,7 +25,9 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
       int globalRankStart,
       int globalRankStride,
       int worldSize,
-      bool isAsynchronizedOp = true);
+      bool isAsynchronizedOp = true,
+      int64_t seqNumber = 0,
+      bool isP2P = false);
 
   ~ParamCommsDebugInfo() override = default;
 
@@ -98,6 +100,14 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
     isP2P_ = isP2P;
   }
 
+  int64_t getSeqNumber() const {
+    return seqNumber_;
+  }
+
+  bool isP2P() const {
+    return isP2P_;
+  }
+
  private:
   std::tuple<std::string, std::string> pgName_; // <group_name, group_desc>
   int rank_{};
@@ -110,10 +120,11 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
   std::vector<int64_t> outputSplitSizes_;
   int globalRankStart_{};
   int globalRankStride_{};
+  int64_t seqNumber_{0};
+  bool isP2P_{false};
   std::vector<int64_t> groupRanks_;
   bool isAsynchronizedOp_{};
   int64_t sequenceNumber_{-1};
-  bool isP2P_{false};
 };
 
 // Helper to set sequence info from tuple-typed seq arguments (NCCL backend).
@@ -129,6 +140,28 @@ template <typename T>
 inline void maybeSetSequenceInfo(
     const std::shared_ptr<ParamCommsDebugInfo>&,
     const T&) {}
+
+// Helpers to extract seqNumber/isP2P from tuple-typed seq (NCCL backend).
+// Return defaults for backends that pass non-tuple seq types (e.g., XPU/XCCL).
+template <typename A, typename B>
+inline int64_t maybeGetSeqNumber(const std::tuple<A, B>& seq) {
+  return static_cast<int64_t>(std::get<0>(seq));
+}
+
+template <typename T>
+inline int64_t maybeGetSeqNumber(const T& seq) {
+  return static_cast<int64_t>(seq);
+}
+
+template <typename A, typename B>
+inline bool maybeGetIsP2P(const std::tuple<A, B>& seq) {
+  return static_cast<bool>(std::get<1>(seq));
+}
+
+template <typename T>
+inline bool maybeGetIsP2P(const T&) {
+  return false;
+}
 
 #define RECORD_PARAM_COMMS(                                                    \
     seq,                                                                       \
@@ -155,7 +188,9 @@ inline void maybeSetSequenceInfo(
       globalRankStart,                                                         \
       globalRankStride,                                                        \
       worldSize,                                                               \
-      false);                                                                  \
+      false,                                                                   \
+      torch::maybeGetSeqNumber(seq),                                           \
+      torch::maybeGetIsP2P(seq));                                              \
   torch::maybeSetSequenceInfo(paramCommsInfo, seq);                            \
   c10::DebugInfoGuard g(c10::DebugInfoKind::PARAM_COMMS_INFO, paramCommsInfo); \
   std::initializer_list<const c10::IValue> paramList = {                       \
@@ -232,7 +267,9 @@ inline void maybeSetSequenceInfo(
       globalRankStart,                                                         \
       globalRankStride,                                                        \
       worldSize,                                                               \
-      isAsyncOp);                                                              \
+      isAsyncOp,                                                               \
+      torch::maybeGetSeqNumber(seq),                                           \
+      torch::maybeGetIsP2P(seq));                                              \
   torch::maybeSetSequenceInfo(paramCommsInfo, seq);                            \
   c10::DebugInfoGuard g(c10::DebugInfoKind::PARAM_COMMS_INFO, paramCommsInfo); \
   std::initializer_list<const c10::IValue> paramList = {                       \
