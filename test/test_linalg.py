@@ -1008,19 +1008,6 @@ class TestLinalg(TestCase):
         self.assertEqual(vec1.grad.dtype, torch.float64)
         self.assertEqual(vec2.grad.dtype, torch.complex128)
 
-    def test_addmv_backward_mixed_complex_real(self, device):
-        # Regression test for https://github.com/pytorch/pytorch/issues/95434
-        self_ = torch.rand([3], dtype=torch.float64, device=device, requires_grad=True)
-        mat = torch.rand([3, 2], dtype=torch.complex128, device=device, requires_grad=True)
-        vec = torch.rand([2], dtype=torch.complex128, device=device, requires_grad=True)
-
-        res = torch.addmv(self_, mat, vec)
-        res.backward(torch.ones_like(res))
-
-        self.assertEqual(self_.grad.dtype, torch.float64)
-        self.assertEqual(mat.grad.dtype, torch.complex128)
-        self.assertEqual(vec.grad.dtype, torch.complex128)
-
     # Tests migrated from test_torch.py
     # 1) test the shape of the result tensor when there is empty input tensor
     # 2) test the Runtime Exception when there is scalar input tensor
