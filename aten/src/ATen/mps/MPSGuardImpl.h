@@ -84,6 +84,18 @@ struct TORCH_API MPSGuardImpl final
   Stream exchangeStream(Stream s) const override {
     return Stream(Stream::DEFAULT, Device(c10::DeviceType::MPS, 0));
   }
+  DeviceCapability getDeviceCapability(Device /* unused */) const override {
+    DeviceCapability cap;
+    cap.capability_data.capability_bits = (1ULL << kIndex_Byte) |
+        (1ULL << kIndex_Char) | (1ULL << kIndex_Short) | (1ULL << kIndex_Int) |
+        (1ULL << kIndex_Long) | (1ULL << kIndex_Half) | (1ULL << kIndex_Float) |
+        (1ULL << kIndex_ComplexHalf) | (1ULL << kIndex_ComplexFloat) |
+        (1ULL << kIndex_Bool) | (1ULL << kIndex_BFloat16) |
+        (1ULL << kIndex_UInt32) | (1ULL << kIndex_UInt16) |
+        (1ULL << kIndex_UInt64);
+    return cap;
+  }
+
   DeviceIndex deviceCount() const noexcept override {
     if (at::hasMPS()) {
       // TODO: extend it for multi-device case
