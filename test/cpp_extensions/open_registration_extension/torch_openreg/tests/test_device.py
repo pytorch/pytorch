@@ -3,11 +3,6 @@
 import multiprocessing
 
 import torch
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyCUDA,
-    onlyOn,
-)
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.testing._internal.common_utils import run_tests, skipIfWindows, TestCase
 
@@ -131,35 +126,6 @@ class TestDevice(TestCase):
             ),
         ):
             raise exc
-
-
-class TestBypassDeviceRestrictions(TestCase):
-    """Verify that PrivateUse1 backends can run tests decorated with @onlyCUDA.
-
-    PrivateUse1TestBase sets bypass_device_restrictions = True, which causes
-    @onlyOn-based decorators to be bypassed. This allows out-of-tree backends
-    to run accelerator tests that are currently gated behind @onlyCUDA while
-    the long-term migration to device-generic tests is in progress.
-    """
-
-    @onlyCUDA
-    def test_bypass_only_cuda(self, device):
-        self.assertEqual(torch.device(device).type, "openreg")
-        x = torch.ones(4, device=device)
-        y = x + 1
-        self.assertEqual(y, torch.full((4,), 2.0, device=device))
-
-    @onlyOn(["cuda", "cpu"])
-    def test_bypass_only_on(self, device):
-        self.assertEqual(torch.device(device).type, "openreg")
-        x = torch.ones(4, device=device)
-        y = x + 1
-        self.assertEqual(y, torch.full((4,), 2.0, device=device))
-
-
-instantiate_device_type_tests(
-    TestBypassDeviceRestrictions, globals(), only_for="openreg"
-)
 
 
 if __name__ == "__main__":
