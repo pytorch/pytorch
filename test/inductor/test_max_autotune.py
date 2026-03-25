@@ -38,7 +38,7 @@ from torch._inductor.codegen.common import WorkspaceArg
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, FlexibleLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
-from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+from torch._inductor.runtime.triton_heuristics import CachingAutotuner, pointwise
 from torch._inductor.scheduler import Scheduler
 from torch._inductor.select_algorithm import (
     add_feedback_saver,
@@ -175,6 +175,42 @@ class TestMaxAutotune(TestCase):
             {"max_autotune": True, "max_autotune_gemm_search_space": search_space}
         ):
             torch.compile(mm_plus_mm, dynamic=dynamic)(a, b, c, d)
+
+    def test_max_autotune_includes_max_autotune_pointwise_configs(self):
+        """
+        Verify that `max_autotune` includes all pointwise configs from
+        `max_autotune_pointwise` for 1D, 2D, and 3D pointwise kernels.
+        """
+        triton_meta = {"device": object()}
+        inductor_meta_common = {"autotune_pointwise": False}
+
+        for size_hints in (
+            {"x": 2048},
+            {"x": 128, "y": 256},
+            {"x": 64, "y": 64, "z": 64},
+        ):
+            with self.subTest(size_hints=size_hints):
+                max_autotune_configs = pointwise(
+                    size_hints,
+                    triton_meta=triton_meta,
+                    inductor_meta={**inductor_meta_common, "max_autotune": True},
+                    return_configs=True,
+                )
+                max_autotune_pointwise_configs = pointwise(
+                    size_hints,
+                    triton_meta=triton_meta,
+                    inductor_meta={
+                        **inductor_meta_common,
+                        "max_autotune_pointwise": True,
+                    },
+                    return_configs=True,
+                )
+
+                self.assertEqual(
+                    len(max_autotune_configs),
+                    len(max_autotune_pointwise_configs),
+                    "max_autotune should include all pointwise configs from max_autotune_pointwise",
+                )
 
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
