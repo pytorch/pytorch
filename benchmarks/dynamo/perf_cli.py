@@ -944,13 +944,23 @@ class ModelDelta:
         return _short_config(self.config, self.device)
 
 
+@dataclass
+class ConfigAgg:
+    base_agg: float
+    base_count: int
+    head_agg: float
+    head_count: int
+    paired_ratio: float  # gmean(head_val / base_val) over paired models
+    paired_count: int
+
+
 def compute_deltas(
     head_perf: list[PerfData], base_perf: list[PerfData], metric: Metric
-) -> tuple[list[ModelDelta], dict[str, tuple[float, float]]]:
+) -> tuple[list[ModelDelta], dict[str, ConfigAgg]]:
     """Join head and base on (device, config, model_name) and compute deltas.
 
     Returns (per_model_deltas, per_config_aggregates).
-    per_config_aggregates maps qualified_config -> (base_agg, head_agg).
+    per_config_aggregates maps qualified_config -> ConfigAgg.
     """
     # Build base lookup: (device, config, model_name) -> metric value
     base_lookup: dict[tuple[str, str, str], float] = {}
@@ -978,43 +988,66 @@ def compute_deltas(
                 device=perf.device,
             ))
 
+    # Group deltas by qualified_config for paired aggregates
+    deltas_by_qconfig: dict[str, list[ModelDelta]] = defaultdict(list)
+    for d in deltas:
+        qc = f"{d.device}/{d.config}" if d.device else d.config
+        deltas_by_qconfig[qc].append(d)
+
     # Per-config aggregates (keyed by qualified_config for display)
-    config_aggs: dict[str, tuple[float, float]] = {}
+    config_aggs: dict[str, ConfigAgg] = {}
     base_by_qconfig: dict[str, PerfData] = {
         p.qualified_config: p for p in base_perf
     }
     for perf in head_perf:
         qc = perf.qualified_config
-        if qc in base_by_qconfig:
-            head_agg = perf.aggregate_metric(metric)
-            base_agg = base_by_qconfig[qc].aggregate_metric(metric)
-            config_aggs[qc] = (base_agg, head_agg)
+        if qc not in base_by_qconfig:
+            continue
+        base_perf_data = base_by_qconfig[qc]
+        head_agg = perf.aggregate_metric(metric)
+        base_agg = base_perf_data.aggregate_metric(metric)
+        head_count = len([m for m in perf.models if getattr(m, metric.field) > 0])
+        base_count = len([m for m in base_perf_data.models if getattr(m, metric.field) > 0])
+
+        paired = deltas_by_qconfig.get(qc, [])
+        ratios = [d.head_val / d.base_val for d in paired if d.base_val > 0]
+        config_aggs[qc] = ConfigAgg(
+            base_agg=base_agg,
+            base_count=base_count,
+            head_agg=head_agg,
+            head_count=head_count,
+            paired_ratio=gmean(ratios) if ratios else 0.0,
+            paired_count=len(ratios),
+        )
 
     return deltas, config_aggs
 
 
 def print_comparison_table(
-    config_aggs: dict[str, tuple[float, float]], metric: Metric
+    config_aggs: dict[str, ConfigAgg], metric: Metric
 ):
-    print(f"\n{'Config':<60} {'base':>8} {'new':>8} {'delta':>8}")
-    print("─" * 90)
+    u = metric.unit
+    print(
+        f"\n{'Config':<55} "
+        f"{'base':>16} {'new':>16} "
+        f"{'head/base':>18}"
+    )
+    print("─" * 108)
     for config in sorted(config_aggs):
-        base_agg, head_agg = config_aggs[config]
-        if base_agg > 0:
-            delta_pct = (head_agg - base_agg) / base_agg * 100
-        else:
-            delta_pct = 0.0
+        agg = config_aggs[config]
         flag = ""
-        if abs(delta_pct) > RELATIVE_THRESHOLD * 100:
-            if metric.higher_is_better:
-                flag = " !!" if delta_pct < 0 else " ++"
-            else:
-                flag = " !!" if delta_pct > 0 else " ++"
+        if agg.paired_ratio > 0:
+            delta_pct = (agg.paired_ratio - 1.0) * 100
+            if abs(delta_pct) > RELATIVE_THRESHOLD * 100:
+                if metric.higher_is_better:
+                    flag = " !!" if delta_pct < 0 else " ++"
+                else:
+                    flag = " !!" if delta_pct > 0 else " ++"
         print(
-            f"  {config:<58} "
-            f"{base_agg:>6.2f}{metric.unit} "
-            f"{head_agg:>6.2f}{metric.unit} "
-            f"{delta_pct:>+6.1f}%{flag}"
+            f"  {config:<53} "
+            f"{agg.base_agg:>5.2f}{u} (n={agg.base_count}) "
+            f"{agg.head_agg:>5.2f}{u} (n={agg.head_count}) "
+            f"{agg.paired_ratio:>5.3f}x (n={agg.paired_count}){flag}"
         )
 
 
