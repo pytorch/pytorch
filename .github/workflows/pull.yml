@@ -445,9 +445,9 @@ jobs:
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
     secrets: inherit
 
-  linux-jammy-xpu-n-py3_10-build:
+  linux-noble-xpu-n-py3_10-build:
     if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-xpu-n-py3.10 ') }}
-    name: linux-jammy-xpu-n-py3.10
+    name: linux-noble-xpu-n-py3.10
     uses: ./.github/workflows/_linux-build.yml
     needs:
       - get-label-type
