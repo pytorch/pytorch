@@ -40,6 +40,9 @@ class C10_CUDA_API CUDAAllocatorConfig {
     }
     return false;
 #else
+    if (enabled) {
+      TORCH_WARN_ONCE("expandable_segments is enabled");
+    }
     return enabled;
 #endif
   }
