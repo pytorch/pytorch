@@ -2526,6 +2526,72 @@ class TestMaxAutotune(TestCase):
         finally:
             clear_preprocessing_fns(clear_defaults=False)
 
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "ATEN",
+            "triton.autotune_cublasLt": True,
+            "triton.native_matmul": False,
+        }
+    )
+    def test_rocm_addmm_aten_bias_input_is_1d(self):
+        """
+        ROCm regression test for addmm autotune input wiring.
+        A 1D bias is required for hipBLASLt bias-fused addmm kernels; expanded 2D
+        bias disables that fused path.
+        """
+        bias_input_ranks: dict[str, set[int]] = {"addmm": set(), "bias_addmm": set()}
+
+        def capture_bias_input_rank(choices):
+            for choice in choices:
+                if isinstance(choice, ExternKernelCaller) and choice.name in (
+                    "addmm",
+                    "bias_addmm",
+                ):
+                    bias_node = choice.input_nodes[0]
+                    bias_input_ranks[choice.name].add(len(bias_node.get_size()))
+            return choices
+
+        add_preprocessing_fn(capture_bias_input_rank)
+        try:
+            bias = torch.randn(64, device=GPU_TYPE)
+            mat1 = torch.randn(32, 128, device=GPU_TYPE)
+            mat2 = torch.randn(128, 64, device=GPU_TYPE)
+
+            from torch._inductor.template_heuristics.aten import (
+                ATenAddMMConfigHeuristics,
+            )
+
+            def allow_bias_addmm_configs(self, kernel_inputs, op_name):
+                yield from ATenAddMMConfigHeuristics._get_template_configs_impl(
+                    self, kernel_inputs, op_name
+                )
+
+            # Relax bias_addmm heuristics here so this test can assert 1D vs 2D bias wiring.
+            with mock.patch(
+                "torch._inductor.template_heuristics.aten.ATenBiasAddMMConfigHeuristics._get_template_configs_impl",
+                autospec=True,
+                side_effect=allow_bias_addmm_configs,
+            ):
+                compiled_fn = torch.compile(
+                    lambda b, x, w: torch.addmm(b, x, w),
+                    dynamic=False,
+                )
+                _ = compiled_fn(bias, mat1, mat2)
+
+            self.assertTrue(
+                bias_input_ranks["addmm"], "Expected ATen addmm choice to be generated"
+            )
+            self.assertTrue(
+                bias_input_ranks["bias_addmm"],
+                "Expected ATen bias_addmm choice to be generated",
+            )
+            self.assertEqual(bias_input_ranks["addmm"], {1})
+            self.assertEqual(bias_input_ranks["bias_addmm"], {1})
+        finally:
+            clear_preprocessing_fns()
+
     @config.patch(
         {"test_configs.max_mm_configs": 4, "max_autotune_gemm_backends": "TRITON"}
     )
