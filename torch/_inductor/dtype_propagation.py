@@ -444,13 +444,7 @@ class DtypePropagationOpsHandler:
 
     @staticmethod
     def inline_asm_elementwise(
-        *inputs,
-        asm,
-        constraints=None,
-        dtype=torch.float32,
-        is_pure=True,
-        pack=1,
-        input_dtypes=None,
+        *inputs, asm, constraints=None, dtype=torch.float32, is_pure=True, pack=1
     ):
         return dtype
 

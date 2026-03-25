@@ -735,7 +735,6 @@ class OpsHandler(Generic[T]):
         dtype: torch.dtype = torch.float32,
         is_pure: bool = True,
         pack: int = 1,
-        input_dtypes: tuple[torch.dtype, ...] | None = None,
     ) -> T:
         raise NotImplementedError
 

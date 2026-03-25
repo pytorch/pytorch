@@ -1602,58 +1602,13 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def inline_asm_elementwise(
-        *inputs,
-        asm,
-        constraints=None,
-        dtype=torch.float32,
-        is_pure=True,
-        pack=1,
-        input_dtypes=None,
+        *inputs, asm, constraints=None, dtype=torch.float32, is_pure=True, pack=1
     ):
-        # Use the actual dtype, not the compute type — the asm operates on
-        # specific register types and Triton needs to know the real output type.
-        asm_triton_type = triton_type(dtype)
+        triton_type = triton_compute_type(dtype)
+        input_refs = ", ".join([str(i) for i in inputs])
         if constraints is None:
             constraints = ", ".join(["=r"] + ["r" for _ in inputs])
-
-        # Inductor computes bf16/fp16 in fp32. For "h" (16-bit register)
-        # constraints, cast back to the original dtype so the asm sees the
-        # right register type.
-        constraint_parts = [p.strip() for p in constraints.split(",")]
-        input_constraints = [p for p in constraint_parts if not p.startswith("=")]
-        cast_inputs = []
-        for i, (inp, c) in enumerate(zip(inputs, input_constraints[: len(inputs)])):
-            if (
-                c == "h"
-                and input_dtypes is not None
-                and isinstance(inp, CSEVariable)
-                and inp.dtype != input_dtypes[i]
-            ):
-                cast_inputs.append(f"{inp}.to({triton_type(input_dtypes[i])})")
-            else:
-                cast_inputs.append(str(inp))
-
-        def asm_call(args):
-            return (
-                f"tl.inline_asm_elementwise('{asm}', '{constraints}', "
-                f"[{args}], dtype={asm_triton_type}, is_pure={is_pure}, pack={pack})"
-            )
-
-        if pack <= 1:
-            return asm_call(", ".join(cast_inputs))
-
-        first_input = inputs[0]
-        compute = V.kernel.compute
-        cse = V.kernel.cse
-        result = cse.newvar(dtype=dtype, shape=first_input.shape)
-        packed_args = ", ".join(
-            f"triton_helpers.inline_asm_pack({inp}, {pack})" for inp in cast_inputs
-        )
-        compute.writeline(f"{result} = {asm_call(packed_args)}")
-        compute.writeline(
-            f"{result} = triton_helpers.inline_asm_unpack({result}, {first_input}, {pack})"
-        )
-        return result
+        return f"tl.inline_asm_elementwise('{asm}', '{constraints}', [{input_refs}], dtype={triton_type}, is_pure={is_pure}, pack={pack})"  # noqa: B950
 
     @staticmethod
     @maybe_upcast_float32()

@@ -796,27 +796,3 @@ def if_mask(mask: Any, val, *, _builder: object = None) -> tl.constexpr:
     if isinstance(mask, tl.constexpr) and mask.value is None:
         return tl.constexpr(None)
     return val
-
-
-@triton.jit
-def inline_asm_pack(x, pack: tl.constexpr):
-    """Ravel to 1D and pad (via join with zeros) so numel is divisible by pack."""
-    result = x.ravel()
-    # Only pad when the block size is smaller than pack. When block >= pack
-    # the numel is already divisible by pack (both are powers of 2).
-    n_pad: tl.constexpr = _log2(pack) - _log2(result.numel)
-    for _ in tl.static_range(n_pad):
-        result = tl.reshape(
-            tl.join(result, tl.zeros_like(result)), (result.shape[0] * 2,)
-        )
-    return result
-
-
-@triton.jit
-def inline_asm_unpack(x, orig, pack: tl.constexpr):
-    """Unpad and reshape back to orig's shape."""
-    result = x
-    n_pad: tl.constexpr = _log2(pack) - _log2(orig.numel)
-    for _ in tl.static_range(n_pad):
-        result, _ = tl.split(tl.reshape(result, (result.shape[0] // 2, 2)))
-    return tl.reshape(result, orig.shape)
