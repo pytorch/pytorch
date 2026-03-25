@@ -326,11 +326,17 @@ def cudagraph_partition_post_compile(
         maybe_handle_backward_generation(compiled_graph, boxed_forward_device_index)
         # Log reasons and raise error if cudagraph_or_error=True
         if cudagraph_fail_reasons:
-            log_cudagraph_skip_and_bump_counter(f"skipping cudagraphs due to {cudagraph_fail_reasons=}")
+            log_cudagraph_skip_and_bump_counter(
+                f"skipping cudagraphs due to {cudagraph_fail_reasons=}"
+            )
         elif compiled_graph.partition_maps is None:
-            log_cudagraph_skip_and_bump_counter("skipping cudagraphs as compiled_graph.partition_maps is None")
+            log_cudagraph_skip_and_bump_counter(
+                "skipping cudagraphs as compiled_graph.partition_maps is None"
+            )
         else:
-            log_cudagraph_skip_and_bump_counter("skipping cudagraphs as len(compiled_graph.partition_maps) == 0")
+            log_cudagraph_skip_and_bump_counter(
+                "skipping cudagraphs as len(compiled_graph.partition_maps) == 0"
+            )
         if V.config.inductor.cudagraph_or_error:
             raise RuntimeError("Unable to find any CUDA graphable partitions")
         return
