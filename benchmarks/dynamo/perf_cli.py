@@ -21,7 +21,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.request
 import zipfile
@@ -133,15 +132,20 @@ def gmean(values: list[float]) -> float:
 @dataclass
 class Metric:
     name: str
-    field: str        # attribute on ModelResult
-    unit: str         # display suffix
+    field: str  # attribute on ModelResult
+    unit: str  # display suffix
     higher_is_better: bool
-    aggregate: str    # "gmean" or "mean"
+    aggregate: str  # "gmean" or "mean"
+
 
 METRICS = {
     "speedup": Metric("speedup", "speedup", "x", True, "gmean"),
-    "compilation_latency": Metric("compilation latency", "compilation_latency", "s", False, "mean"),
-    "compression_ratio": Metric("memory compression", "compression_ratio", "x", True, "gmean"),
+    "compilation_latency": Metric(
+        "compilation latency", "compilation_latency", "s", False, "mean"
+    ),
+    "compression_ratio": Metric(
+        "memory compression", "compression_ratio", "x", True, "gmean"
+    ),
     "abs_latency": Metric("absolute latency", "abs_latency", "ms", False, "mean"),
 }
 
@@ -255,8 +259,11 @@ class PerfData:
         return gmean(vals)
 
     def aggregate_metric(self, metric: Metric) -> float:
-        vals = [getattr(m, metric.field) for m in self.models
-                if getattr(m, metric.field) > 0]
+        vals = [
+            getattr(m, metric.field)
+            for m in self.models
+            if getattr(m, metric.field) > 0
+        ]
         if not vals:
             return 0.0
         if metric.aggregate == "gmean":
@@ -271,7 +278,13 @@ class PerfData:
 
 def get_run_jobs(run_id: int) -> list[dict]:
     data = gh(
-        "run", "view", str(run_id), "--repo", REPO, "--json", "jobs",
+        "run",
+        "view",
+        str(run_id),
+        "--repo",
+        REPO,
+        "--json",
+        "jobs",
         json_output=True,
     )
     return data["jobs"]
@@ -288,14 +301,16 @@ def get_perf_jobs(jobs: list[dict]) -> list[dict]:
             continue
         if job.get("conclusion") != "success":
             continue
-        perf_jobs.append({
-            "config": config,
-            "shard": m.group("shard"),
-            "num_shards": m.group("num_shards"),
-            "runner": m.group("runner"),
-            "job_id": job["databaseId"],
-            "name": job["name"],
-        })
+        perf_jobs.append(
+            {
+                "config": config,
+                "shard": m.group("shard"),
+                "num_shards": m.group("num_shards"),
+                "runner": m.group("runner"),
+                "job_id": job["databaseId"],
+                "name": job["name"],
+            }
+        )
     return perf_jobs
 
 
@@ -319,7 +334,9 @@ def get_cache_dir(run_id: int, attempt: int) -> Path:
 
 
 def download_and_extract_csvs(
-    run_id: int, jobs: list[dict], attempt: int = 1,
+    run_id: int,
+    jobs: list[dict],
+    attempt: int = 1,
     no_cache: bool = False,
 ) -> list[tuple[str, str]]:
     """Download artifacts and return list of (csv_filename, csv_content) pairs."""
@@ -329,7 +346,9 @@ def download_and_extract_csvs(
 
     for job in jobs:
         # Check cache first
-        cache_key = f"{job['config']}-{job['shard']}-{job['num_shards']}-{job['job_id']}"
+        cache_key = (
+            f"{job['config']}-{job['shard']}-{job['num_shards']}-{job['job_id']}"
+        )
         cache_marker = cache / f"{cache_key}.done"
 
         if not no_cache and cache_marker.exists():
@@ -345,8 +364,11 @@ def download_and_extract_csvs(
             urllib.request.urlretrieve(url, str(zip_path))
             fetched += 1
         except urllib.error.HTTPError as e:
-            print(f"  warning: failed to download shard {job['config']} "
-                  f"shard {job['shard']}: {e}", file=sys.stderr)
+            print(
+                f"  warning: failed to download shard {job['config']} "
+                f"shard {job['shard']}: {e}",
+                file=sys.stderr,
+            )
             continue
 
         with zipfile.ZipFile(zip_path) as zf:
@@ -383,20 +405,23 @@ def parse_csvs(csv_pairs: list[tuple[str, str]], device: str = "") -> list[PerfD
                 speedup = float(row.get("speedup", 0))
             except (ValueError, TypeError):
                 continue
-            grouped[config].append(ModelResult(
-                name=row.get("name", "?"),
-                speedup=speedup,
-                abs_latency=float(row.get("abs_latency", 0) or 0),
-                compilation_latency=float(row.get("compilation_latency", 0) or 0),
-                compression_ratio=float(row.get("compression_ratio", 0) or 0),
-                eager_peak_mem=float(row.get("eager_peak_mem", 0) or 0),
-                dynamo_peak_mem=float(row.get("dynamo_peak_mem", 0) or 0),
-                config=config,
-                device=device,
-            ))
+            grouped[config].append(
+                ModelResult(
+                    name=row.get("name", "?"),
+                    speedup=speedup,
+                    abs_latency=float(row.get("abs_latency", 0) or 0),
+                    compilation_latency=float(row.get("compilation_latency", 0) or 0),
+                    compression_ratio=float(row.get("compression_ratio", 0) or 0),
+                    eager_peak_mem=float(row.get("eager_peak_mem", 0) or 0),
+                    dynamo_peak_mem=float(row.get("dynamo_peak_mem", 0) or 0),
+                    config=config,
+                    device=device,
+                )
+            )
 
-    return [PerfData(config=k, models=v, device=device)
-            for k, v in sorted(grouped.items())]
+    return [
+        PerfData(config=k, models=v, device=device) for k, v in sorted(grouped.items())
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -417,8 +442,11 @@ def subsample(items: list, max_rows: int) -> list:
 
 
 def render_scurve(
-    perf: PerfData, metric: Metric, top_n: int = 5,
-    term_width: int | None = None, term_height: int | None = None,
+    perf: PerfData,
+    metric: Metric,
+    top_n: int = 5,
+    term_width: int | None = None,
+    term_height: int | None = None,
 ):
     if not perf.models:
         return
@@ -460,7 +488,9 @@ def render_scurve(
     prefix_len = 2 + max_name + 2 + val_width + 2
     plot_width = max(term_width - prefix_len - 1, 20)
 
-    get_val = lambda m: getattr(m, metric.field)
+    def get_val(m):
+        return getattr(m, metric.field)
+
     min_val = get_val(sorted_models[0])
     p95_idx = max(0, int(n * 0.95) - 1)
     p95_val = get_val(sorted_models[p95_idx])
@@ -483,7 +513,9 @@ def render_scurve(
         span = 1
 
     def val_to_col(v: float) -> int:
-        return max(0, min(plot_width - 1, int((v - plot_min) / span * (plot_width - 1))))
+        return max(
+            0, min(plot_width - 1, int((v - plot_min) / span * (plot_width - 1)))
+        )
 
     marker_col = val_to_col(marker_val) if marker_val is not None else None
 
@@ -509,7 +541,9 @@ def render_scurve(
 
 
 def print_worst_offenders(perf: PerfData, metric: Metric, top_n: int = 5):
-    get_val = lambda m: getattr(m, metric.field)
+    def get_val(m):
+        return getattr(m, metric.field)
+
     live = [m for m in perf.models if get_val(m) > 0]
     if not live:
         return
@@ -537,9 +571,15 @@ def build_dispatch_inputs(args) -> list[str]:
     """Build -f flags for workflow dispatch inputs from CLI args."""
     flags = []
     bool_inputs = [
-        "training", "inference", "default", "dynamic",
-        "cppwrapper", "cudagraphs", "freezing_cudagraphs",
-        "aotinductor", "maxautotune",
+        "training",
+        "inference",
+        "default",
+        "dynamic",
+        "cppwrapper",
+        "cudagraphs",
+        "freezing_cudagraphs",
+        "aotinductor",
+        "maxautotune",
     ]
     for name in bool_inputs:
         val = getattr(args, name, None)
@@ -555,22 +595,32 @@ def dispatch_one(device: str, ref: str, extra_flags: list[str]) -> int | None:
     print(f"\nLaunching {wf['name']} on ref: {ref}")
 
     dispatch_args = [
-        "workflow", "run", str(wf["id"]),
-        "--repo", REPO,
-        "--ref", ref,
+        "workflow",
+        "run",
+        str(wf["id"]),
+        "--repo",
+        REPO,
+        "--ref",
+        ref,
     ] + extra_flags
 
     gh(*dispatch_args)
-    print(f"Dispatched. Waiting a few seconds for the run to appear...")
+    print("Dispatched. Waiting a few seconds for the run to appear...")
     time.sleep(5)
 
     runs = gh(
-        "run", "list",
-        "--repo", REPO,
-        "--workflow", str(wf["id"]),
-        "--branch", ref,
-        "--limit", "1",
-        "--json", "databaseId,status,url,createdAt",
+        "run",
+        "list",
+        "--repo",
+        REPO,
+        "--workflow",
+        str(wf["id"]),
+        "--branch",
+        ref,
+        "--limit",
+        "1",
+        "--json",
+        "databaseId,status,url,createdAt",
         json_output=True,
     )
     if not runs:
@@ -596,9 +646,13 @@ def wait_for_runs(pending: dict[str, int]) -> dict[str, int]:
         done = []
         for device, run_id in remaining.items():
             data = gh(
-                "run", "view", str(run_id),
-                "--repo", REPO,
-                "--json", "status,conclusion",
+                "run",
+                "view",
+                str(run_id),
+                "--repo",
+                REPO,
+                "--json",
+                "status,conclusion",
                 json_output=True,
             )
             status = data.get("status", "unknown")
@@ -724,7 +778,8 @@ NIGHTLY_WORKFLOW_IDS = {k: v["id"] for k, v in WORKFLOWS.items() if k != "a100-c
 
 
 def _find_latest_run(
-    branch: str, device: str,
+    branch: str,
+    device: str,
 ) -> dict | None:
     """Find the latest successful perf nightly run for a branch + device.
 
@@ -735,13 +790,20 @@ def _find_latest_run(
         return None
 
     runs = gh(
-        "run", "list",
-        "--repo", REPO,
-        "--workflow", str(wf_id),
-        "--branch", branch,
-        "--status", "success",
-        "--limit", "1",
-        "--json", "databaseId,createdAt,headSha",
+        "run",
+        "list",
+        "--repo",
+        REPO,
+        "--workflow",
+        str(wf_id),
+        "--branch",
+        branch,
+        "--status",
+        "success",
+        "--limit",
+        "1",
+        "--json",
+        "databaseId,createdAt,headSha",
         json_output=True,
     )
     if not runs:
@@ -753,8 +815,10 @@ def resolve_run(branch: str, device: str) -> int:
     """Find the latest successful perf nightly run for a branch + device."""
     run = _find_latest_run(branch, device)
     if not run:
-        print(f"No successful perf run found for branch '{branch}' on {device}.",
-              file=sys.stderr)
+        print(
+            f"No successful perf run found for branch '{branch}' on {device}.",
+            file=sys.stderr,
+        )
         sys.exit(1)
     run_id = run["databaseId"]
     created = run["createdAt"][:10]
@@ -775,8 +839,10 @@ def discover_runs(branch: str) -> dict[str, int]:
             candidates.append((device, run))
 
     if not candidates:
-        print(f"No successful perf runs found for branch '{branch}' on any device.",
-              file=sys.stderr)
+        print(
+            f"No successful perf runs found for branch '{branch}' on any device.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     # Pick the most recent commit (by createdAt) and collect all runs on it
@@ -788,7 +854,9 @@ def discover_runs(branch: str) -> dict[str, int]:
         if run["headSha"] == target_sha:
             run_id = run["databaseId"]
             created = run["createdAt"][:10]
-            print(f"Discovered '{branch}' → run {run_id} ({device}, {created}, {target_sha[:10]})")
+            print(
+                f"Discovered '{branch}' → run {run_id} ({device}, {created}, {target_sha[:10]})"
+            )
             result[device] = run_id
 
     return result
@@ -805,26 +873,39 @@ def resolve_runs(branch: str, devices: list[str]) -> dict[str, int]:
 def resolve_baseline(head_run_id: int) -> int:
     """Find the latest successful nightly on main, skipping the head run itself."""
     run_data = gh(
-        "run", "view", str(head_run_id),
-        "--repo", REPO,
-        "--json", "workflowName",
+        "run",
+        "view",
+        str(head_run_id),
+        "--repo",
+        REPO,
+        "--json",
+        "workflowName",
         json_output=True,
     )
     wf_name = run_data.get("workflowName", "")
     nightly_id = WORKFLOW_NAME_TO_NIGHTLY_ID.get(wf_name)
     if nightly_id is None:
-        print(f"Don't know which nightly corresponds to workflow '{wf_name}'",
-              file=sys.stderr)
+        print(
+            f"Don't know which nightly corresponds to workflow '{wf_name}'",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     runs = gh(
-        "run", "list",
-        "--repo", REPO,
-        "--workflow", str(nightly_id),
-        "--branch", "main",
-        "--status", "success",
-        "--limit", "5",
-        "--json", "databaseId,createdAt,headBranch",
+        "run",
+        "list",
+        "--repo",
+        REPO,
+        "--workflow",
+        str(nightly_id),
+        "--branch",
+        "main",
+        "--status",
+        "success",
+        "--limit",
+        "5",
+        "--json",
+        "databaseId,createdAt,headBranch",
         json_output=True,
     )
     # Skip the head run itself to avoid comparing a run to itself
@@ -867,8 +948,10 @@ class RunMeta:
 
 def fetch_run_meta(run_id: int) -> RunMeta:
     data = gh(
-        "api", f"repos/{REPO}/actions/runs/{run_id}",
-        "-q", "{headSha: .head_sha, headBranch: .head_branch, workflowName: .name, createdAt: .created_at, event: .event}",
+        "api",
+        f"repos/{REPO}/actions/runs/{run_id}",
+        "-q",
+        "{headSha: .head_sha, headBranch: .head_branch, workflowName: .name, createdAt: .created_at, event: .event}",
         json_output=True,
     )
     return RunMeta(
@@ -894,8 +977,10 @@ def print_run_header(
         print(f"  Commit:   {m.short_sha}  ({m.head_branch}, {m.date})")
     else:
         # Show commit from first (should all match for multi-device)
-        print(f"  Commit:   {metas[0].short_sha}  ({metas[0].head_branch}, {metas[0].date})")
-        print(f"  Runs:")
+        print(
+            f"  Commit:   {metas[0].short_sha}  ({metas[0].head_branch}, {metas[0].date})"
+        )
+        print("  Runs:")
         for m in metas:
             print(f"    {m.run_id}  ({m.workflow_name})")
     if configs:
@@ -903,7 +988,10 @@ def print_run_header(
 
 
 def fetch_run_perf(
-    run_id: int, attempt: int, no_cache: bool, device: str = "",
+    run_id: int,
+    attempt: int,
+    no_cache: bool,
+    device: str = "",
     allow_empty: bool = False,
 ) -> list[PerfData]:
     """Fetch and parse perf data for a run."""
@@ -980,13 +1068,15 @@ def compute_deltas(
             if key not in base_lookup:
                 continue
             base_val = base_lookup[key]
-            deltas.append(ModelDelta(
-                name=m.name,
-                base_val=base_val,
-                head_val=head_val,
-                config=perf.config,
-                device=perf.device,
-            ))
+            deltas.append(
+                ModelDelta(
+                    name=m.name,
+                    base_val=base_val,
+                    head_val=head_val,
+                    config=perf.config,
+                    device=perf.device,
+                )
+            )
 
     # Group deltas by qualified_config for paired aggregates
     deltas_by_qconfig: dict[str, list[ModelDelta]] = defaultdict(list)
@@ -996,9 +1086,7 @@ def compute_deltas(
 
     # Per-config aggregates (keyed by qualified_config for display)
     config_aggs: dict[str, ConfigAgg] = {}
-    base_by_qconfig: dict[str, PerfData] = {
-        p.qualified_config: p for p in base_perf
-    }
+    base_by_qconfig: dict[str, PerfData] = {p.qualified_config: p for p in base_perf}
     for perf in head_perf:
         qc = perf.qualified_config
         if qc not in base_by_qconfig:
@@ -1007,7 +1095,9 @@ def compute_deltas(
         head_agg = perf.aggregate_metric(metric)
         base_agg = base_perf_data.aggregate_metric(metric)
         head_count = len([m for m in perf.models if getattr(m, metric.field) > 0])
-        base_count = len([m for m in base_perf_data.models if getattr(m, metric.field) > 0])
+        base_count = len(
+            [m for m in base_perf_data.models if getattr(m, metric.field) > 0]
+        )
 
         paired = deltas_by_qconfig.get(qc, [])
         ratios = [d.head_val / d.base_val for d in paired if d.base_val > 0]
@@ -1023,15 +1113,9 @@ def compute_deltas(
     return deltas, config_aggs
 
 
-def print_comparison_table(
-    config_aggs: dict[str, ConfigAgg], metric: Metric
-):
+def print_comparison_table(config_aggs: dict[str, ConfigAgg], metric: Metric):
     u = metric.unit
-    print(
-        f"\n{'Config':<55} "
-        f"{'base':>16} {'new':>16} "
-        f"{'head/base':>18}"
-    )
+    print(f"\n{'Config':<55} {'base':>16} {'new':>16} {'head/base':>18}")
     print("─" * 108)
     for config in sorted(config_aggs):
         agg = config_aggs[config]
@@ -1062,7 +1146,7 @@ def print_regressions(deltas: list[ModelDelta], metric: Metric, top_n: int):
         bad.sort(key=lambda d: d.delta_pct, reverse=True)
 
     if not bad:
-        print(f"\n  No regressions (>{RELATIVE_THRESHOLD*100:.0f}% change).")
+        print(f"\n  No regressions (>{RELATIVE_THRESHOLD * 100:.0f}% change).")
         return
 
     print(f"\n  Regressions ({len(bad)} models, showing top {min(top_n, len(bad))}):")
@@ -1075,8 +1159,10 @@ def print_regressions(deltas: list[ModelDelta], metric: Metric, top_n: int):
 
 
 def render_delta_scurve(
-    deltas: list[ModelDelta], metric: Metric,
-    term_width: int | None = None, term_height: int | None = None,
+    deltas: list[ModelDelta],
+    metric: Metric,
+    term_width: int | None = None,
+    term_height: int | None = None,
 ):
     if not deltas:
         return
@@ -1117,7 +1203,9 @@ def render_delta_scurve(
         span = 1
 
     def pct_to_col(pct: float) -> int:
-        return max(0, min(plot_width - 1, int((pct - range_lo) / span * (plot_width - 1))))
+        return max(
+            0, min(plot_width - 1, int((pct - range_lo) / span * (plot_width - 1)))
+        )
 
     zero_col = pct_to_col(0)
 
@@ -1189,8 +1277,11 @@ def cmd_summary(args):
     for device, run_id in list(head_run_ids.items()):
         print(f"Fetching head run {run_id} ({device})...")
         perf = fetch_run_perf(
-            run_id, attempt, args.no_cache,
-            device=device, allow_empty=auto_discovered,
+            run_id,
+            attempt,
+            args.no_cache,
+            device=device,
+            allow_empty=auto_discovered,
         )
         if not perf:
             del head_run_ids[device]
@@ -1221,8 +1312,11 @@ def cmd_summary(args):
 
             print(f"Fetching baseline run {baseline_id} ({device})...")
             base_data = fetch_run_perf(
-                baseline_id, attempt, args.no_cache,
-                device=device, allow_empty=auto_discovered,
+                baseline_id,
+                attempt,
+                args.no_cache,
+                device=device,
+                allow_empty=auto_discovered,
             )
             if not base_data:
                 continue
@@ -1269,7 +1363,9 @@ CONFIG_RE = re.compile(
 
 
 def config_to_command(
-    config: str, suite: str, model: str | None = None,
+    config: str,
+    suite: str,
+    model: str | None = None,
 ) -> str | None:
     """Turn a config name into a runnable benchmark command."""
     m = CONFIG_RE.match(config)
@@ -1285,11 +1381,14 @@ def config_to_command(
     device_flag = runtime.split("_")[0]  # "cpu_x86_zen" → "cpu"
 
     cmd_parts = [
-        "python", f"benchmarks/dynamo/{suite}.py",
+        "python",
+        f"benchmarks/dynamo/{suite}.py",
         f"--{mode}",
         f"--{dtype}",
-        "--backend", "inductor",
-        "--device", device_flag,
+        "--backend",
+        "inductor",
+        "--device",
+        device_flag,
     ]
 
     if "no_cudagraphs" in backend_variant:
@@ -1328,8 +1427,11 @@ def cmd_repro(args):
         print(f"Fetching run {run_id} ({device})...")
         metas.append(fetch_run_meta(run_id))
         perf = fetch_run_perf(
-            run_id, args.attempt, no_cache=False,
-            device=device, allow_empty=auto_discovered,
+            run_id,
+            args.attempt,
+            no_cache=False,
+            device=device,
+            allow_empty=auto_discovered,
         )
         all_perf.extend(perf)
 
@@ -1403,12 +1505,14 @@ def cmd_prepare_repro(args):
 
     if "timm_models" in suites:
         print("# ── Timm ──")
-        print(f"pip install git+https://github.com/huggingface/pytorch-image-models@{timm_pin}")
+        print(
+            f"pip install git+https://github.com/huggingface/pytorch-image-models@{timm_pin}"
+        )
         print()
 
     if "torchbench" in suites:
         print("# ── TorchBench ──")
-        print(f"git clone https://github.com/pytorch/benchmark torchbench")
+        print("git clone https://github.com/pytorch/benchmark torchbench")
         print(f"cd torchbench && git checkout {torchbench_pin}")
         print("python install.py --continue_on_fail")
         print("cd ..")
@@ -1504,122 +1608,275 @@ Examples:
     sub = parser.add_subparsers(dest="command", required=True)
 
     # -- launch --
-    p_launch = sub.add_parser("launch", help="Launch a perf regression run on your branch")
-    p_launch.add_argument("--device", nargs="+", default=["a100"],
-                          choices=DEVICE_CHOICES, metavar="DEVICE",
-                          help=f"Devices to launch (default: a100). Choices: {', '.join(DEVICE_CHOICES)}")
-    p_launch.add_argument("--ref", type=str, default=None,
-                          help="Git ref to benchmark (default: current branch)")
-    p_launch.add_argument("--wait", action="store_true",
-                          help="Wait for all runs to complete")
-    p_launch.add_argument("--wait-and-summarize", dest="wait_and_summarize",
-                          action="store_true",
-                          help="Wait for all runs, then print summary vs. latest main nightly")
+    p_launch = sub.add_parser(
+        "launch", help="Launch a perf regression run on your branch"
+    )
+    p_launch.add_argument(
+        "--device",
+        nargs="+",
+        default=["a100"],
+        choices=DEVICE_CHOICES,
+        metavar="DEVICE",
+        help=f"Devices to launch (default: a100). Choices: {', '.join(DEVICE_CHOICES)}",
+    )
+    p_launch.add_argument(
+        "--ref",
+        type=str,
+        default=None,
+        help="Git ref to benchmark (default: current branch)",
+    )
+    p_launch.add_argument(
+        "--wait", action="store_true", help="Wait for all runs to complete"
+    )
+    p_launch.add_argument(
+        "--wait-and-summarize",
+        dest="wait_and_summarize",
+        action="store_true",
+        help="Wait for all runs, then print summary vs. latest main nightly",
+    )
     # Workflow dispatch inputs
     launch_opts = p_launch.add_argument_group("workflow options")
-    launch_opts.add_argument("--training", action="store_true", default=None,
-                             help="Enable training benchmarks")
-    launch_opts.add_argument("--no-training", dest="training", action="store_false",
-                             help="Disable training benchmarks")
-    launch_opts.add_argument("--inference", action="store_true", default=None,
-                             help="Enable inference benchmarks")
-    launch_opts.add_argument("--no-inference", dest="inference", action="store_false",
-                             help="Disable inference benchmarks")
-    launch_opts.add_argument("--cudagraphs", action="store_true", default=None,
-                             help="Enable cudagraphs")
-    launch_opts.add_argument("--no-cudagraphs", dest="cudagraphs", action="store_false",
-                             help="Disable cudagraphs")
-    launch_opts.add_argument("--dynamic", action="store_true", default=None,
-                             help="Enable dynamic shapes")
-    launch_opts.add_argument("--no-dynamic", dest="dynamic", action="store_false",
-                             help="Disable dynamic shapes")
-    launch_opts.add_argument("--cppwrapper", action="store_true", default=None,
-                             help="Enable cpp wrapper")
-    launch_opts.add_argument("--freezing-cudagraphs", dest="freezing_cudagraphs",
-                             action="store_true", default=None)
+    launch_opts.add_argument(
+        "--training",
+        action="store_true",
+        default=None,
+        help="Enable training benchmarks",
+    )
+    launch_opts.add_argument(
+        "--no-training",
+        dest="training",
+        action="store_false",
+        help="Disable training benchmarks",
+    )
+    launch_opts.add_argument(
+        "--inference",
+        action="store_true",
+        default=None,
+        help="Enable inference benchmarks",
+    )
+    launch_opts.add_argument(
+        "--no-inference",
+        dest="inference",
+        action="store_false",
+        help="Disable inference benchmarks",
+    )
+    launch_opts.add_argument(
+        "--cudagraphs", action="store_true", default=None, help="Enable cudagraphs"
+    )
+    launch_opts.add_argument(
+        "--no-cudagraphs",
+        dest="cudagraphs",
+        action="store_false",
+        help="Disable cudagraphs",
+    )
+    launch_opts.add_argument(
+        "--dynamic", action="store_true", default=None, help="Enable dynamic shapes"
+    )
+    launch_opts.add_argument(
+        "--no-dynamic",
+        dest="dynamic",
+        action="store_false",
+        help="Disable dynamic shapes",
+    )
+    launch_opts.add_argument(
+        "--cppwrapper", action="store_true", default=None, help="Enable cpp wrapper"
+    )
+    launch_opts.add_argument(
+        "--freezing-cudagraphs",
+        dest="freezing_cudagraphs",
+        action="store_true",
+        default=None,
+    )
     launch_opts.add_argument("--aotinductor", action="store_true", default=None)
     launch_opts.add_argument("--maxautotune", action="store_true", default=None)
-    launch_opts.add_argument("--default", dest="default", action="store_true", default=None)
-    launch_opts.add_argument("--benchmark-configs", dest="benchmark_configs", type=str,
-                             default=None, help="Override benchmark_configs input")
+    launch_opts.add_argument(
+        "--default", dest="default", action="store_true", default=None
+    )
+    launch_opts.add_argument(
+        "--benchmark-configs",
+        dest="benchmark_configs",
+        type=str,
+        default=None,
+        help="Override benchmark_configs input",
+    )
 
     # -- summary --
     p_summary = sub.add_parser("summary", help="Summarize results of a perf run")
-    p_summary.add_argument("run_id", type=str,
-                           help="GitHub Actions run ID or branch name")
-    p_summary.add_argument("--device", nargs="+", default=None,
-                           choices=DEVICE_CHOICES, metavar="DEVICE",
-                           help=f"Device(s) to summarize (default: auto-discover from branch). Choices: {', '.join(DEVICE_CHOICES)}")
-    p_summary.add_argument("--baseline", type=str, default="latest",
-                           help="Baseline run ID, 'latest' for most recent main nightly (default), or 'none' to disable")
-    p_summary.add_argument("--metric", type=str, default="speedup",
-                           choices=METRIC_CHOICES,
-                           help="Metric to display (default: speedup)")
-    p_summary.add_argument("--top", type=int, default=5,
-                           help="Number of worst offenders to show (default: 5)")
+    p_summary.add_argument(
+        "run_id", type=str, help="GitHub Actions run ID or branch name"
+    )
+    p_summary.add_argument(
+        "--device",
+        nargs="+",
+        default=None,
+        choices=DEVICE_CHOICES,
+        metavar="DEVICE",
+        help=f"Device(s) to summarize (default: auto-discover from branch). Choices: {', '.join(DEVICE_CHOICES)}",
+    )
+    p_summary.add_argument(
+        "--baseline",
+        type=str,
+        default="latest",
+        help="Baseline run ID, 'latest' for most recent main nightly (default), or 'none' to disable",
+    )
+    p_summary.add_argument(
+        "--metric",
+        type=str,
+        default="speedup",
+        choices=METRIC_CHOICES,
+        help="Metric to display (default: speedup)",
+    )
+    p_summary.add_argument(
+        "--top",
+        type=int,
+        default=5,
+        help="Number of worst offenders to show (default: 5)",
+    )
     # Filters
     filters = p_summary.add_argument_group("filters")
-    filters.add_argument("--config", type=str, default=None,
-                         help="Regex to filter config names (e.g. 'cudagraphs', 'dynamic')")
-    filters.add_argument("--suite", type=str, default=None,
-                         help="Filter to suite: hf, timm, tb")
-    filters.add_argument("--mode", type=str, choices=["training", "inference"],
-                         default=None, help="Filter to training or inference")
-    filters.add_argument("--backend", type=str, default=None,
-                         help="Regex to filter backend (e.g. 'cudagraphs', 'dynamic')")
-    filters.add_argument("--dtype", type=str, default=None,
-                         help="Filter to dtype (e.g. amp, float16, bfloat16)")
-    filters.add_argument("--runtime", type=str, default=None,
-                         help="Filter to runtime (e.g. cuda, cpu, xpu)")
-    p_summary.add_argument("--group-by", dest="group_by", nargs="+", default=None,
-                           choices=GROUP_CHOICES, metavar="KEY",
-                           help=f"Group S-curves by key(s) (default: single combined). Choices: {', '.join(GROUP_CHOICES)}")
-    p_summary.add_argument("--attempt", type=int, default=1,
-                           help="Run attempt number (default: 1)")
-    p_summary.add_argument("--no-cache", dest="no_cache", action="store_true",
-                           default=False,
-                           help="Re-download artifacts even if cached")
+    filters.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Regex to filter config names (e.g. 'cudagraphs', 'dynamic')",
+    )
+    filters.add_argument(
+        "--suite", type=str, default=None, help="Filter to suite: hf, timm, tb"
+    )
+    filters.add_argument(
+        "--mode",
+        type=str,
+        choices=["training", "inference"],
+        default=None,
+        help="Filter to training or inference",
+    )
+    filters.add_argument(
+        "--backend",
+        type=str,
+        default=None,
+        help="Regex to filter backend (e.g. 'cudagraphs', 'dynamic')",
+    )
+    filters.add_argument(
+        "--dtype",
+        type=str,
+        default=None,
+        help="Filter to dtype (e.g. amp, float16, bfloat16)",
+    )
+    filters.add_argument(
+        "--runtime",
+        type=str,
+        default=None,
+        help="Filter to runtime (e.g. cuda, cpu, xpu)",
+    )
+    p_summary.add_argument(
+        "--group-by",
+        dest="group_by",
+        nargs="+",
+        default=None,
+        choices=GROUP_CHOICES,
+        metavar="KEY",
+        help=f"Group S-curves by key(s) (default: single combined). Choices: {', '.join(GROUP_CHOICES)}",
+    )
+    p_summary.add_argument(
+        "--attempt", type=int, default=1, help="Run attempt number (default: 1)"
+    )
+    p_summary.add_argument(
+        "--no-cache",
+        dest="no_cache",
+        action="store_true",
+        default=False,
+        help="Re-download artifacts even if cached",
+    )
 
     # -- repro --
     p_repro = sub.add_parser("repro", help="Reproduce a remote perf run locally")
-    p_repro.add_argument("run_id", type=str,
-                         help="GitHub Actions run ID or branch name")
-    p_repro.add_argument("--device", nargs="+", default=None,
-                         choices=DEVICE_CHOICES, metavar="DEVICE",
-                         help="Device(s) (default: auto-discover from branch)")
-    p_repro.add_argument("--model", type=str, default=None,
-                         help="Run only this model (e.g. BERT_pytorch)")
-    p_repro.add_argument("--suite", type=str, default=None,
-                         help="Filter to suite (hf, timm, tb)")
-    p_repro.add_argument("--mode", type=str, choices=["training", "inference"], default=None,
-                         help="Filter to mode")
-    p_repro.add_argument("--backend", type=str, default=None,
-                         help="Regex to filter backend (e.g. 'cudagraphs', 'dynamic')")
-    p_repro.add_argument("--dtype", type=str, default=None,
-                         help="Filter to dtype (e.g. amp, bfloat16)")
-    p_repro.add_argument("--runtime", type=str, default=None,
-                         help="Filter to runtime (e.g. cuda, cpu)")
-    p_repro.add_argument("--attempt", type=int, default=1,
-                         help="Run attempt number (default: 1)")
+    p_repro.add_argument(
+        "run_id", type=str, help="GitHub Actions run ID or branch name"
+    )
+    p_repro.add_argument(
+        "--device",
+        nargs="+",
+        default=None,
+        choices=DEVICE_CHOICES,
+        metavar="DEVICE",
+        help="Device(s) (default: auto-discover from branch)",
+    )
+    p_repro.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="Run only this model (e.g. BERT_pytorch)",
+    )
+    p_repro.add_argument(
+        "--suite", type=str, default=None, help="Filter to suite (hf, timm, tb)"
+    )
+    p_repro.add_argument(
+        "--mode",
+        type=str,
+        choices=["training", "inference"],
+        default=None,
+        help="Filter to mode",
+    )
+    p_repro.add_argument(
+        "--backend",
+        type=str,
+        default=None,
+        help="Regex to filter backend (e.g. 'cudagraphs', 'dynamic')",
+    )
+    p_repro.add_argument(
+        "--dtype", type=str, default=None, help="Filter to dtype (e.g. amp, bfloat16)"
+    )
+    p_repro.add_argument(
+        "--runtime", type=str, default=None, help="Filter to runtime (e.g. cuda, cpu)"
+    )
+    p_repro.add_argument(
+        "--attempt", type=int, default=1, help="Run attempt number (default: 1)"
+    )
 
     # -- prepare-repro --
-    p_prep = sub.add_parser("prepare-repro",
-                            help="Show setup commands to prepare benchmark suites locally")
-    p_prep.add_argument("run_id", nargs="?", type=str, default=None,
-                        help="Optional: run ID or branch to also show benchmark commands")
-    p_prep.add_argument("--device", nargs="+", default=None,
-                        choices=DEVICE_CHOICES, metavar="DEVICE",
-                        help="Device(s) for benchmark commands")
-    p_prep.add_argument("--suite", type=str, default=None,
-                        help="Only show setup for this suite (hf, timm, tb)")
-    p_prep.add_argument("--mode", type=str, choices=["training", "inference"],
-                        default=None, help="Filter benchmark commands to mode")
-    p_prep.add_argument("--model", type=str, default=None,
-                        help="Filter benchmark commands to model")
-    p_prep.add_argument("--no-repro", dest="no_repro", action="store_true",
-                        help="Only show setup, skip benchmark commands")
-    p_prep.add_argument("--attempt", type=int, default=1,
-                        help="Run attempt number (default: 1)")
+    p_prep = sub.add_parser(
+        "prepare-repro", help="Show setup commands to prepare benchmark suites locally"
+    )
+    p_prep.add_argument(
+        "run_id",
+        nargs="?",
+        type=str,
+        default=None,
+        help="Optional: run ID or branch to also show benchmark commands",
+    )
+    p_prep.add_argument(
+        "--device",
+        nargs="+",
+        default=None,
+        choices=DEVICE_CHOICES,
+        metavar="DEVICE",
+        help="Device(s) for benchmark commands",
+    )
+    p_prep.add_argument(
+        "--suite",
+        type=str,
+        default=None,
+        help="Only show setup for this suite (hf, timm, tb)",
+    )
+    p_prep.add_argument(
+        "--mode",
+        type=str,
+        choices=["training", "inference"],
+        default=None,
+        help="Filter benchmark commands to mode",
+    )
+    p_prep.add_argument(
+        "--model", type=str, default=None, help="Filter benchmark commands to model"
+    )
+    p_prep.add_argument(
+        "--no-repro",
+        dest="no_repro",
+        action="store_true",
+        help="Only show setup, skip benchmark commands",
+    )
+    p_prep.add_argument(
+        "--attempt", type=int, default=1, help="Run attempt number (default: 1)"
+    )
 
     args = parser.parse_args()
 
