@@ -13641,21 +13641,8 @@ op_db: list[OpInfo] = [
            skips=(
                # cumsum does not handle correctly out= dtypes
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
-               # The following dtypes did not work in forward but are listed by the OpInfo: {torch.complex64}
+               # The following dtypes did not work in forward but are listed by the OpInfo: {torch.bool}
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-               # RuntimeError: cumulative ops are not yet supported for complex
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                   device_type='mps', dtypes=(torch.complex64,)
-               ),
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_out_requires_grad_error',
-                   device_type='mps', dtypes=(torch.complex64,)
-               ),
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager',
-                   device_type='mps', dtypes=(torch.complex64,)
-               ),
            ),
            sample_inputs_func=sample_inputs_cumulative_ops),
     OpInfo('cumprod',
@@ -21009,16 +20996,6 @@ op_db: list[OpInfo] = [
                    toleranceOverride({torch.float16: tol(atol=4e-3, rtol=4e-3)}),
                    'TestInductorOpInfo', 'test_comprehensive',
                ),
-               # RuntimeError: cumulative ops are not yet supported for complex
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager',
-                   device_type='mps', dtypes=(torch.complex64,)
-               ),
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                   device_type='mps', dtypes=(torch.complex64,)
-               ),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
            ),
            sample_inputs_func=sample_cumulative_trapezoid,),
     OpInfo('unsqueeze',
@@ -26341,15 +26318,6 @@ python_ref_db = [
         skips=(
             # doesn't test out behavior properly for this operator
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
-            # RuntimeError: cumulative ops are not yet supported for complex
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps',
-                dtypes=(torch.complex64,)
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps',
-                dtypes=(torch.complex64,)
-            ),
         ),
     ),
     PythonRefInfo(
