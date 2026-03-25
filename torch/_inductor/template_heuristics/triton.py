@@ -36,6 +36,7 @@ from ..utils import (
     get_tma_workspace_arg,
     TMA_DESCRIPTOR_SIZE,
     using_b200,
+    using_rocm_rdna3,
 )
 from ..virtualized import V
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
@@ -1106,7 +1107,9 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         ]
 
     # Flex attn helpers
-    def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
+    def get_flex_attn_fwd_configs(
+        self, head_dim: int, seq_len: Any, dtype: Any
+    ) -> list[FlexConfig]:
         flex_attn_fwd_configs: list[FlexConfig] = []
 
         if config.max_autotune:
@@ -1312,7 +1315,9 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
             if BLOCK_N % BLOCK_M == 0
         ]
 
-    def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
+    def get_flex_attn_fwd_configs(
+        self, head_dim: int, seq_len: Any, dtype: Any
+    ) -> list[FlexConfig]:
         capability = torch.cuda.get_device_capability()
         flex_attn_fwd_configs: list[FlexConfig] = []
 
@@ -1561,6 +1566,28 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             (torch.float16, 256): ROCmFlexConfig(32, 64, 2, 4),
         }
 
+        # RDNA3 (gfx11xx) optimal configs profiled on gfx1151 (head_dim=256).
+        # Three seq_len tiers to match CU occupancy on 16-CU RDNA3:
+        #   short  (seq < 128):  BLOCK_M=16 — tiny tiles keep all CUs busy
+        #   medium (128 <= seq < 512): BLOCK_M=32 — transitional tile size
+        #   long   (seq >= 512): BLOCK_M=64 — enough seq rows to fill all CUs
+        self.rdna3_short_seq_flex_config = {
+            (torch.bfloat16, 256): ROCmFlexConfig(16, 16, 1, 4, waves_per_eu=2),
+            (torch.float16, 256): ROCmFlexConfig(16, 16, 1, 4, waves_per_eu=2),
+        }
+        self.rdna3_medium_seq_flex_config = {
+            (torch.bfloat16, 256): ROCmFlexConfig(
+                32, 16, 1, 4, matrix_instr_nonkdim=16, waves_per_eu=2
+            ),
+            (torch.float16, 256): ROCmFlexConfig(
+                32, 16, 1, 4, matrix_instr_nonkdim=16, waves_per_eu=2
+            ),
+        }
+        self.rdna3_default_flex_config = {
+            (torch.bfloat16, 256): ROCmFlexConfig(64, 16, 1, 4, waves_per_eu=2),
+            (torch.float16, 256): ROCmFlexConfig(64, 16, 1, 4, waves_per_eu=2),
+        }
+
         self.flex_attn_fwd_autotune_configs: list[FlexConfig] = [
             ROCmFlexConfig(BLOCK1, BLOCK2, 1, w)
             for BLOCK1 in [16, 64, 128]
@@ -1722,7 +1749,18 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                     kwargs["GROUP_M"] = group_m
                 yield self.triton_config(**kwargs)
 
-    def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
+    @staticmethod
+    def _static_seq_len(seq_len: Any) -> int | None:
+        """Return seq_len as a plain int if statically known, else None."""
+        return (
+            int(seq_len)
+            if seq_len is not None and isinstance(seq_len, (int, sympy.Integer))
+            else None
+        )
+
+    def get_flex_attn_fwd_configs(
+        self, head_dim: int, seq_len: Any, dtype: Any
+    ) -> list[FlexConfig]:
         flex_attn_fwd_configs: list[FlexConfig] = []
 
         if config.max_autotune:
@@ -1735,9 +1773,25 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 default_config = ROCmFlexConfig(64, 64, 1, 4)
             else:
                 default_config = ROCmFlexConfig(128, 64, 2, 4)
-            default_config = self.default_flex_config.get(
-                (dtype, head_dim), default_config
-            )
+
+            if using_rocm_rdna3():
+                static_seq = self._static_seq_len(seq_len)
+                if static_seq is not None and static_seq < 128:
+                    default_config = self.rdna3_short_seq_flex_config.get(
+                        (dtype, head_dim), default_config
+                    )
+                elif static_seq is not None and static_seq < 512:
+                    default_config = self.rdna3_medium_seq_flex_config.get(
+                        (dtype, head_dim), default_config
+                    )
+                else:
+                    default_config = self.rdna3_default_flex_config.get(
+                        (dtype, head_dim), default_config
+                    )
+            else:
+                default_config = self.default_flex_config.get(
+                    (dtype, head_dim), default_config
+                )
         else:
             if dtype == torch.float32:
                 default_config = ROCmFlexConfig(32, 16, 1, 4)
@@ -1850,7 +1904,9 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
                 FlexDecodeConfig(64, 2, 1),
             ]
 
-    def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
+    def get_flex_attn_fwd_configs(
+        self, head_dim: int, seq_len: Any, dtype: Any
+    ) -> list[FlexConfig]:
         flex_attn_fwd_configs: list[FlexConfig] = []
 
         if config.max_autotune:
