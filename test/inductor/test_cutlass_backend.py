@@ -46,6 +46,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
     SM80OrLater,
     SM90OrLater,
+    SM100OrLater,
 )
 from torch.testing._internal.common_utils import (
     IN_RE_WORKER,
@@ -1424,7 +1425,12 @@ class TestCutlassBackend(TestCase):
                                         f"Expected op_conf_name to be str, got {type(op_conf_name)}"
                                     )
                                 if use_fast_accum:
-                                    if "fastaccum" not in op_conf_name:
+                                    if SM100OrLater:
+                                        if "fastaccum" in op_conf_name:
+                                            raise AssertionError(
+                                                "Blackwell CUTLASS kernels should not use Hopper-only fastaccum naming"
+                                            )
+                                    elif "fastaccum" not in op_conf_name:
                                         raise AssertionError(
                                             "Only fastaccum Kernels should have been allowed"
                                         )
