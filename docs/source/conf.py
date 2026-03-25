@@ -2341,12 +2341,7 @@ def coverage_post_process(app, exception):
 
     # These are all the modules that have "automodule" in an rst file
     # These modules are the ones for which coverage is checked
-    # Here, we make sure that no module is missing from that list
     modules = app.env.domaindata["py"]["modules"]
-
-    # We go through all the torch submodules and make sure they are
-    # properly tested
-    missing = set()
 
     def is_not_internal(modname):
         split_name = modname.split(".")
@@ -2354,6 +2349,47 @@ def coverage_post_process(app, exception):
             if name[0] == "_":
                 return False
         return True
+
+    # Sphinx's built-in coverage only catches items that pass
+    # inspect.isfunction() or inspect.isclass(), missing decorated/wrapped
+    # callables (e.g. @cache, @lru_cache, @deprecated). Cross-reference
+    # __all__ exports directly against the documented objects dict.
+    objects = app.env.domaindata["py"]["objects"]
+    ignore_names = set(app.config.coverage_ignore_functions) | set(
+        app.config.coverage_ignore_classes
+    )
+    undocumented = []
+    for mod_name in modules:
+        if not is_not_internal(mod_name):
+            continue
+        try:
+            mod = __import__(mod_name, fromlist=["__all__"])
+        except ImportError:
+            continue
+        for name in getattr(mod, "__all__", []):
+            if name.startswith("_") or name in ignore_names:
+                continue
+            full_name = f"{mod_name}.{name}"
+            obj = getattr(mod, name, None)
+            if obj is None or not callable(obj):
+                continue
+            if getattr(obj, "__module__", mod_name) != mod_name:
+                continue
+            if full_name not in objects:
+                undocumented.append(full_name)
+
+    if undocumented:
+        items = "\n".join(f"  - {u}" for u in sorted(undocumented))
+        raise RuntimeError(
+            f"The following public APIs are in __all__ but not documented:\n{items}\n"
+            "Add them to the appropriate .rst/.md doc file, add to "
+            "coverage_ignore_functions/coverage_ignore_classes, or "
+            "remove from __all__."
+        )
+
+    # We go through all the torch submodules and make sure they are
+    # properly documented
+    missing = set()
 
     # The walk function does not return the top module
     if "torch" not in modules:
