@@ -634,9 +634,6 @@ def is_impure(
         if _get_effect(op) is not None:
             return True
 
-        if op in _side_effectful_functions:
-            return True
-
         return False
 
     # Impure since it mutates RNG state

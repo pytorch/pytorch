@@ -328,8 +328,6 @@ def aot_dispatch_base_graph(
     if not aot_config.disable_functionalization:
         copy_count = assert_functional_graph(fw_module.graph)
         assign_epilogue_copy_streams(fw_module)
-        # Wrap sync nodes with control_deps to prevent reordering
-        wrap_all_sync_nodes_with_control_deps(fw_module)
         # Populate fw_metadata with stream indices from the compiled graph
         populate_fw_metadata_with_stream_indices(fw_module, fw_metadata)
         fw_module.graph.eliminate_dead_code()

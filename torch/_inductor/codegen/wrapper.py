@@ -1690,13 +1690,12 @@ class PythonWrapperCodegen(CodeGen):
         stream_idx_to_user_obj_idx: dict[int, int] | None = None,
     ) -> None:
         if num_streams > 1:
-            assert stream_idx_to_user_obj_idx is not None
             self.writeline(
                 EnterDeviceContextManagerWithStreamInfoLine(
                     device_idx,
                     self.last_seen_device_guard_index,
                     num_streams,
-                    stream_idx_to_user_obj_idx,
+                    stream_idx_to_user_obj_idx or {},
                 ),
             )
         else:
