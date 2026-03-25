@@ -16,6 +16,8 @@ enum class C10_API_ENUM DebugInfoKind : uint8_t {
 
   TEST_INFO, // used only in tests
   TEST_INFO_2, // used only in tests
+
+  NUM_DEBUG_INFO_KINDS, // must be last
 };
 
 class C10_API DebugInfoBase {
@@ -80,6 +82,16 @@ class C10_API DebugInfoGuard {
  private:
   bool active_ = false;
   std::shared_ptr<ThreadLocalDebugInfo> prev_info_ = nullptr;
+};
+
+// Global (process-wide) debug information, keyed by DebugInfoKind.
+// Complements ThreadLocalDebugInfo for cases where state needs to be
+// visible across all threads (e.g. profile_all_threads).
+class C10_API GlobalDebugInfo {
+ public:
+  static DebugInfoBase* get(DebugInfoKind kind);
+  static void set(DebugInfoKind kind, std::shared_ptr<DebugInfoBase> info);
+  static std::shared_ptr<DebugInfoBase> pop(DebugInfoKind kind);
 };
 
 } // namespace c10

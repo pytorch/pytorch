@@ -1,12 +1,11 @@
 #include <torch/csrc/profiler/orchestration/observer.h>
 
+#include <c10/util/ThreadLocalDebugInfo.h>
 #include <torch/csrc/profiler/util.h>
 
 #include <utility>
 
 namespace torch::profiler::impl {
-
-using GlobalManager = GlobalStateManager<ProfilerStateBase>;
 
 // ----------------------------------------------------------------------------
 // -- Profiler Config ---------------------------------------------------------
@@ -125,7 +124,8 @@ ProfilerStateBase::~ProfilerStateBase() {
 
 /*static*/ ProfilerStateBase* ProfilerStateBase::get(bool global) {
   auto* out = global
-      ? GlobalManager::get()
+      ? static_cast<ProfilerStateBase*>(
+            c10::GlobalDebugInfo::get(c10::DebugInfoKind::PROFILER_STATE))
       : static_cast<ProfilerStateBase*>(
             c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PROFILER_STATE));
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
@@ -137,7 +137,8 @@ ProfilerStateBase::~ProfilerStateBase() {
     std::shared_ptr<ProfilerStateBase>&& state) {
   TORCH_INTERNAL_ASSERT(state != nullptr);
   if (state->config().pushGlobalCallbacks()) {
-    GlobalManager::push(std::move(state));
+    c10::GlobalDebugInfo::set(
+        c10::DebugInfoKind::PROFILER_STATE, std::move(state));
   } else {
     c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
   }
@@ -158,7 +159,10 @@ std::shared_ptr<ProfilerStateBase> popTLS() {
 
 /*static*/ std::shared_ptr<ProfilerStateBase> ProfilerStateBase::pop(
     bool global) {
-  auto out = global ? GlobalManager::pop() : popTLS();
+  auto out = global
+      ? std::static_pointer_cast<ProfilerStateBase>(
+            c10::GlobalDebugInfo::pop(c10::DebugInfoKind::PROFILER_STATE))
+      : popTLS();
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!out || out->config().global() == global);
   return out;
 }

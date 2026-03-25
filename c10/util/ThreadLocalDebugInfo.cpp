@@ -2,6 +2,7 @@
 #include <c10/util/ThreadLocal.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 
+#include <array>
 #include <utility>
 
 namespace c10 {
@@ -90,6 +91,28 @@ DebugInfoGuard::DebugInfoGuard(std::shared_ptr<ThreadLocalDebugInfo> info) {
   prev_info_ = std::move(debug_info);
   debug_info = std::move(info);
   active_ = true;
+}
+
+static std::array<
+    std::shared_ptr<DebugInfoBase>,
+    static_cast<size_t>(DebugInfoKind::NUM_DEBUG_INFO_KINDS)>
+    global_debug_info_;
+
+/* static */
+DebugInfoBase* GlobalDebugInfo::get(DebugInfoKind kind) {
+  return global_debug_info_[static_cast<size_t>(kind)].get();
+}
+
+/* static */
+void GlobalDebugInfo::set(
+    DebugInfoKind kind,
+    std::shared_ptr<DebugInfoBase> info) {
+  global_debug_info_[static_cast<size_t>(kind)] = std::move(info);
+}
+
+/* static */
+std::shared_ptr<DebugInfoBase> GlobalDebugInfo::pop(DebugInfoKind kind) {
+  return std::move(global_debug_info_[static_cast<size_t>(kind)]);
 }
 
 } // namespace c10

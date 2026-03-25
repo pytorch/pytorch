@@ -2661,6 +2661,47 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
 
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_profile_memory_with_profile_all_threads(self):
+        def worker_fn():
+            a = torch.randn(1024, 1024)
+            del a
+
+        def run(profile_all_threads):
+            t = threading.Thread(target=worker_fn, args=())
+
+            experimental_config = torch._C._profiler._ExperimentalConfig(
+                profile_all_threads=profile_all_threads
+            )
+            with torch.profiler.profile(
+                profile_memory=True,
+                experimental_config=experimental_config,
+            ) as p:
+                t.start()
+                a = torch.randn(1024, 1024)
+                del a
+                t.join()
+
+            with TemporaryFileName(mode="w+") as fname:
+                p.export_chrome_trace(fname)
+                with open(fname) as f:
+                    trace = json.load(f)
+
+            events = trace["traceEvents"]
+            mem_events = [e for e in events if e.get("name") == "[memory]"]
+            tids = {e["tid"] for e in mem_events}
+            return mem_events, tids
+
+        mem_all, tids_all = run(profile_all_threads=True)
+        mem_local, tids_local = run(profile_all_threads=False)
+
+        self.assertEqual(len(mem_all), 4)
+        self.assertEqual(len(tids_all), 2)
+
+        self.assertEqual(len(mem_local), 2)
+        self.assertEqual(len(tids_local), 1)
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_python_gc_event(self):
         activities = [ProfilerActivity.CPU]
 

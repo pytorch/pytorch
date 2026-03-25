@@ -57,9 +57,18 @@ at::Allocator* GetAllocator(const at::DeviceType& t) {
   return alloc;
 }
 
-bool memoryProfilingEnabled() {
+static MemoryReportingInfoBase* getMemoryReporter() {
   auto* reporter_ptr = static_cast<MemoryReportingInfoBase*>(
+      GlobalDebugInfo::get(DebugInfoKind::PROFILER_STATE));
+  if (reporter_ptr) {
+    return reporter_ptr;
+  }
+  return static_cast<MemoryReportingInfoBase*>(
       ThreadLocalDebugInfo::get(DebugInfoKind::PROFILER_STATE));
+}
+
+bool memoryProfilingEnabled() {
+  auto* reporter_ptr = getMemoryReporter();
   return reporter_ptr && reporter_ptr->memoryProfilingEnabled();
 }
 
@@ -69,8 +78,7 @@ void reportMemoryUsageToProfiler(
     size_t total_allocated,
     size_t total_reserved,
     Device device) {
-  auto* reporter_ptr = static_cast<MemoryReportingInfoBase*>(
-      ThreadLocalDebugInfo::get(DebugInfoKind::PROFILER_STATE));
+  auto* reporter_ptr = getMemoryReporter();
   if (reporter_ptr) {
     reporter_ptr->reportMemoryUsage(
         ptr, alloc_size, total_allocated, total_reserved, device);
@@ -82,8 +90,7 @@ void reportOutOfMemoryToProfiler(
     size_t total_allocated,
     size_t total_reserved,
     Device device) {
-  auto* reporter_ptr = static_cast<MemoryReportingInfoBase*>(
-      ThreadLocalDebugInfo::get(DebugInfoKind::PROFILER_STATE));
+  auto* reporter_ptr = getMemoryReporter();
   if (reporter_ptr) {
     reporter_ptr->reportOutOfMemory(
         alloc_size, total_allocated, total_reserved, device);
