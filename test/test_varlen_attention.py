@@ -605,7 +605,6 @@ class TestVarlenAttention(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
-    @unittest.skipIf(not IS_SM90, "FA3 requires compute capability 9.0")
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("num_splits", [1, None])
     @parametrize(
@@ -617,11 +616,17 @@ class TestVarlenAttention(NNTestCase):
             (384, 0),  # edge case
         ],
     )
+    @parametrize(
+        "backend",
+        ["fa2"] + (["fa3"] if IS_SM90 else []) + (["fa4"] if SM100OrLater else []),
+    )
     def test_batch_invariance(
-        self, device, dtype, num_splits, window_size, sdpa_backend=None
+        self, device, dtype, num_splits, window_size, backend, sdpa_backend=None
     ):
         if TEST_WITH_ROCM:
             torch.backends.cuda.preferred_rocm_fa_library(sdpa_backend)
+
+        split_kwargs = {"num_splits": num_splits} if backend != "fa2" else {}
 
         torch.manual_seed(42)
 
@@ -663,7 +668,7 @@ class TestVarlenAttention(NNTestCase):
         all_v = torch.cat([target_v, extra_v], dim=0)
 
         # fa4 is batch invariant (num_splits=1) by default
-        with use_fa3(), torch.no_grad():
+        with _use_backend(backend), torch.no_grad():
             solo_output = varlen_attn(
                 target_q,
                 target_k,
@@ -673,7 +678,7 @@ class TestVarlenAttention(NNTestCase):
                 target_seq_len,
                 target_seq_len,
                 window_size=window_size,
-                num_splits=num_splits,
+                **split_kwargs,
             )
 
             batched_output = varlen_attn(
@@ -685,7 +690,7 @@ class TestVarlenAttention(NNTestCase):
                 extra_seq_len,
                 extra_seq_len,
                 window_size=window_size,
-                num_splits=num_splits,
+                **split_kwargs,
             )
 
             solo_out_buf = torch.empty_like(target_q)
@@ -699,7 +704,7 @@ class TestVarlenAttention(NNTestCase):
                 target_seq_len,
                 target_seq_len,
                 window_size=window_size,
-                num_splits=num_splits,
+                **split_kwargs,
             )
 
             batched_out_buf = torch.empty_like(all_q)
@@ -713,16 +718,16 @@ class TestVarlenAttention(NNTestCase):
                 extra_seq_len,
                 extra_seq_len,
                 window_size=window_size,
-                num_splits=num_splits,
+                **split_kwargs,
             )
-
             if num_splits == 1:
                 self.assertEqual(solo_output, batched_output[:target_seq_len])
                 self.assertEqual(solo_out_buf, batched_out_buf[:target_seq_len])
                 self.assertEqual(solo_output, solo_out_buf)
             else:
-                self.assertNotEqual(solo_output, batched_output[:target_seq_len])
-                self.assertNotEqual(solo_out_buf, batched_out_buf[:target_seq_len])
+                if backend == "fa3":
+                    self.assertNotEqual(solo_output, batched_output[:target_seq_len])
+                    self.assertNotEqual(solo_out_buf, batched_out_buf[:target_seq_len])
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
