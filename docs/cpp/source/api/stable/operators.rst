@@ -46,7 +46,7 @@ Tensor Creation
 
 .. doxygenfunction:: torch::stable::full
 
-.. doxygenfunction:: torch::stable::from_blob
+.. doxygenfunction:: torch::stable::from_blob(void *data, torch::headeronly::IntHeaderOnlyArrayRef sizes, torch::headeronly::IntHeaderOnlyArrayRef strides, torch::stable::Device device, torch::headeronly::ScalarType dtype, int64_t storage_offset, torch::headeronly::Layout layout)
 
 **Example:**
 

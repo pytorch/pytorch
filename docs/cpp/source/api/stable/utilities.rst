@@ -23,6 +23,13 @@ DeviceGuard Class
    }
    // Previous device is restored
 
+Stream
+------
+
+.. doxygenclass:: torch::stable::accelerator::Stream
+   :members:
+   :undoc-members:
+
 Stream Utilities
 ----------------
 

@@ -38,6 +38,27 @@ Custom Dataset Example
      torch::Tensor images_, labels_;
    };
 
+MapDataset
+----------
+
+.. doxygenclass:: torch::data::datasets::MapDataset
+   :members:
+   :undoc-members:
+
+ChunkDataset
+------------
+
+.. doxygenclass:: torch::data::datasets::ChunkDataset
+   :members:
+   :undoc-members:
+
+SharedBatchDataset
+------------------
+
+.. doxygenclass:: torch::data::datasets::SharedBatchDataset
+   :members:
+   :undoc-members:
+
 Built-in Datasets
 -----------------
 

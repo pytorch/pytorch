@@ -69,3 +69,82 @@ effectively leave it ownerless.
 More details and implementation code can be found at
 `MaybeOwned.h <https://github.com/pytorch/pytorch/blob/main/c10/util/MaybeOwned.h>`_ and
 `TensorBody.h <https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/templates/TensorBody.h>`_.
+
+Error Handling and Assertions
+-----------------------------
+
+PyTorch provides macros for error checking and assertions that produce
+informative error messages with source location. These are defined in
+``c10/util/Exception.h``.
+
+TORCH_CHECK
+^^^^^^^^^^^
+
+The primary macro for validating user input and runtime conditions. On failure,
+raises ``c10::Error`` (which becomes ``RuntimeError`` in Python).
+
+.. code-block:: cpp
+
+   #include <c10/util/Exception.h>
+
+   // Basic check
+   TORCH_CHECK(tensor.dim() == 2, "Expected 2D tensor, got ", tensor.dim(), "D");
+
+   // Without message (default message generated)
+   TORCH_CHECK(x >= 0);
+
+Typed variants raise specific Python exception types:
+
+- ``TORCH_CHECK_INDEX(cond, ...)`` — raises ``IndexError``
+- ``TORCH_CHECK_VALUE(cond, ...)`` — raises ``ValueError``
+- ``TORCH_CHECK_TYPE(cond, ...)`` — raises ``TypeError``
+- ``TORCH_CHECK_LINALG(cond, ...)`` — raises ``LinAlgError``
+- ``TORCH_CHECK_NOT_IMPLEMENTED(cond, ...)`` — raises ``NotImplementedError``
+
+TORCH_INTERNAL_ASSERT
+^^^^^^^^^^^^^^^^^^^^^
+
+For internal invariants that should always hold (i.e., failures indicate a bug
+in PyTorch, not user error). Produces a message asking users to report the bug.
+
+.. code-block:: cpp
+
+   TORCH_INTERNAL_ASSERT(googol > 0);
+   TORCH_INTERNAL_ASSERT(googol > 0, "googol was ", googol);
+
+.. note::
+
+   Use ``TORCH_CHECK`` for conditions that can fail due to user input.
+   Use ``TORCH_INTERNAL_ASSERT`` only for conditions that indicate a PyTorch bug.
+   ``TORCH_INTERNAL_ASSERT_DEBUG_ONLY`` is the debug-build-only variant for
+   hot paths.
+
+TORCH_WARN
+^^^^^^^^^^
+
+Issues a warning (not an error) to the user.
+
+.. code-block:: cpp
+
+   TORCH_WARN("This operation is slow for sparse tensors");
+   TORCH_WARN_ONCE("This warning appears only once");
+
+c10::Error
+^^^^^^^^^^
+
+The base exception class for PyTorch C++ errors. Provides source location
+and optional backtrace.
+
+.. code-block:: cpp
+
+   try {
+       auto result = some_operation();
+   } catch (const c10::Error& e) {
+       std::cerr << e.what() << std::endl;
+       // Or without backtrace:
+       std::cerr << e.what_without_backtrace() << std::endl;
+   }
+
+Specialized subclasses: ``c10::IndexError``, ``c10::ValueError``,
+``c10::TypeError``, ``c10::NotImplementedError``, ``c10::LinAlgError``,
+``c10::OutOfMemoryError``.

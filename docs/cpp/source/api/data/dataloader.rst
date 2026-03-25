@@ -19,6 +19,13 @@ DataLoaderOptions
    :members:
    :undoc-members:
 
+Iterator
+--------
+
+.. doxygenclass:: torch::data::Iterator
+   :members:
+   :undoc-members:
+
 Creating a DataLoader
 ---------------------
 

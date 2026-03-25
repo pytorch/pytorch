@@ -1,0 +1,152 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+
+<html lang="en">
+
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  <title>LCOV - PyTorch C++ API Doc Coverage - torch/serialize/output-archive.h</title>
+  <link rel="stylesheet" type="text/css" href="../../gcov.css">
+</head>
+
+<body>
+
+  <table width="100%" border=0 cellspacing=0 cellpadding=0>
+    <tr><td class="title">LCOV - code coverage report</td></tr>
+    <tr><td class="ruler"><img src="../../glass.png" width=3 height=3 alt=""></td></tr>
+
+    <tr>
+      <td width="100%">
+        <table cellpadding=1 border=0 width="100%">
+          <tr>
+            <td width="10%" class="headerItem">Current view:</td>
+            <td width="35%" class="headerValue"><a href="../../index.html">top level</a> - <a href="index.html">torch/serialize</a> - output-archive.h</td>
+            <td width="5%"></td>
+            <td width="15%"></td>
+            <td width="10%" class="headerCovTableHead">Hit</td>
+            <td width="10%" class="headerCovTableHead">Total</td>
+            <td width="15%" class="headerCovTableHead">Coverage</td>
+          </tr>
+          <tr>
+            <td class="headerItem">Test:</td>
+            <td class="headerValue">PyTorch C++ API Doc Coverage</td>
+            <td></td>
+            <td class="headerItem">Lines:</td>
+            <td class="headerCovTableEntry">7</td>
+            <td class="headerCovTableEntry">15</td>
+            <td class="headerCovTableEntryLo">46.7 %</td>
+          </tr>
+          <tr>
+            <td class="headerItem">Date:</td>
+            <td class="headerValue">2026-03-24 16:08:32</td>
+            <td></td>
+          </tr>
+          <tr><td><img src="../../glass.png" width=3 height=3 alt=""></td></tr>
+        </table>
+      </td>
+    </tr>
+
+    <tr><td class="ruler"><img src="../../glass.png" width=3 height=3 alt=""></td></tr>
+  </table>
+
+  <table cellpadding=0 cellspacing=0 border=0>
+    <tr>
+      <td><br></td>
+    </tr>
+    <tr>
+      <td>
+<pre class="sourceHeading">          Line data    Source code</pre>
+<pre class="source">
+<a name="1"><span class="lineNum">       1 </span>            : #pragma once</a>
+<a name="2"><span class="lineNum">       2 </span>            : </a>
+<a name="3"><span class="lineNum">       3 </span>            : #include &lt;torch/csrc/Export.h&gt;</a>
+<a name="4"><span class="lineNum">       4 </span>            : #include &lt;torch/csrc/jit/api/module.h&gt;</a>
+<a name="5"><span class="lineNum">       5 </span>            : </a>
+<a name="6"><span class="lineNum">       6 </span>            : #include &lt;iosfwd&gt;</a>
+<a name="7"><span class="lineNum">       7 </span>            : #include &lt;memory&gt;</a>
+<a name="8"><span class="lineNum">       8 </span>            : #include &lt;string&gt;</a>
+<a name="9"><span class="lineNum">       9 </span>            : #include &lt;utility&gt;</a>
+<a name="10"><span class="lineNum">      10 </span>            : </a>
+<a name="11"><span class="lineNum">      11 </span>            : namespace at {</a>
+<a name="12"><span class="lineNum">      12 </span>            : class Tensor;</a>
+<a name="13"><span class="lineNum">      13 </span>            : } // namespace at</a>
+<a name="14"><span class="lineNum">      14 </span>            : </a>
+<a name="15"><span class="lineNum">      15 </span>            : namespace torch {</a>
+<a name="16"><span class="lineNum">      16 </span>            : using at::Tensor;</a>
+<a name="17"><span class="lineNum">      17 </span>            : namespace jit {</a>
+<a name="18"><span class="lineNum">      18 </span>            : struct Module;</a>
+<a name="19"><span class="lineNum">      19 </span>            : } // namespace jit</a>
+<a name="20"><span class="lineNum">      20 </span>            : } // namespace torch</a>
+<a name="21"><span class="lineNum">      21 </span>            : </a>
+<a name="22"><span class="lineNum">      22 </span>            : namespace torch::serialize {</a>
+<a name="23"><span class="lineNum">      23 </span><span class="lineNoCov">          0 : class TORCH_API OutputArchive final {</span></a>
+<a name="24"><span class="lineNum">      24 </span>            :  public:</a>
+<a name="25"><span class="lineNum">      25 </span><span class="lineNoCov">          0 :   explicit OutputArchive(std::shared_ptr&lt;jit::CompilationUnit&gt; cu);</span></a>
+<a name="26"><span class="lineNum">      26 </span><span class="lineNoCov">          0 :   explicit OutputArchive()</span></a>
+<a name="27"><span class="lineNum">      27 </span>            :       : cu_(std::make_shared&lt;jit::CompilationUnit&gt;()),</a>
+<a name="28"><span class="lineNum">      28 </span>            :         module_(&quot;__torch__.Module&quot;, cu_) {}</a>
+<a name="29"><span class="lineNum">      29 </span>            : </a>
+<a name="30"><span class="lineNum">      30 </span>            :   // Move is allowed.</a>
+<a name="31"><span class="lineNum">      31 </span><span class="lineNoCov">          0 :   OutputArchive(OutputArchive&amp;&amp;) = default;</span></a>
+<a name="32"><span class="lineNum">      32 </span><span class="lineNoCov">          0 :   OutputArchive&amp; operator=(OutputArchive&amp;&amp;) = default;</span></a>
+<a name="33"><span class="lineNum">      33 </span>            : </a>
+<a name="34"><span class="lineNum">      34 </span>            :   // Copy is disallowed.</a>
+<a name="35"><span class="lineNum">      35 </span><span class="lineNoCov">          0 :   OutputArchive(OutputArchive&amp;) = delete;</span></a>
+<a name="36"><span class="lineNum">      36 </span><span class="lineNoCov">          0 :   OutputArchive&amp; operator=(OutputArchive&amp;) = delete;</span></a>
+<a name="37"><span class="lineNum">      37 </span>            : </a>
+<a name="38"><span class="lineNum">      38 </span><span class="lineNoCov">          0 :   std::shared_ptr&lt;jit::CompilationUnit&gt; compilation_unit() const {</span></a>
+<a name="39"><span class="lineNum">      39 </span>            :     return cu_;</a>
+<a name="40"><span class="lineNum">      40 </span>            :   }</a>
+<a name="41"><span class="lineNum">      41 </span>            : </a>
+<a name="42"><span class="lineNum">      42 </span>            :   /// Writes an `IValue` to the `OutputArchive`.</a>
+<a name="43"><span class="lineNum">      43 </span><span class="lineCov">          1 :   void write(const std::string&amp; key, const c10::IValue&amp; ivalue);</span></a>
+<a name="44"><span class="lineNum">      44 </span>            : </a>
+<a name="45"><span class="lineNum">      45 </span>            :   /// Writes a `(key, tensor)` pair to the `OutputArchive`, and marks it as</a>
+<a name="46"><span class="lineNum">      46 </span>            :   /// being or not being a buffer (non-differentiable tensor).</a>
+<a name="47"><span class="lineNum">      47 </span><span class="lineCov">          1 :   void write(</span></a>
+<a name="48"><span class="lineNum">      48 </span>            :       const std::string&amp; key,</a>
+<a name="49"><span class="lineNum">      49 </span>            :       const Tensor&amp; tensor,</a>
+<a name="50"><span class="lineNum">      50 </span>            :       bool is_buffer = false);</a>
+<a name="51"><span class="lineNum">      51 </span>            : </a>
+<a name="52"><span class="lineNum">      52 </span>            :   /// Writes a nested `OutputArchive` under the given `key` to this</a>
+<a name="53"><span class="lineNum">      53 </span>            :   /// `OutputArchive`.</a>
+<a name="54"><span class="lineNum">      54 </span><span class="lineCov">          1 :   void write(const std::string&amp; key, OutputArchive&amp; nested_archive);</span></a>
+<a name="55"><span class="lineNum">      55 </span>            : </a>
+<a name="56"><span class="lineNum">      56 </span>            :   /// Saves the `OutputArchive` into a serialized representation in a file at</a>
+<a name="57"><span class="lineNum">      57 </span>            :   /// `filename`.</a>
+<a name="58"><span class="lineNum">      58 </span><span class="lineCov">          1 :   void save_to(const std::string&amp; filename);</span></a>
+<a name="59"><span class="lineNum">      59 </span>            : </a>
+<a name="60"><span class="lineNum">      60 </span>            :   /// Saves the `OutputArchive` into a serialized representation into the given</a>
+<a name="61"><span class="lineNum">      61 </span>            :   /// `stream`.</a>
+<a name="62"><span class="lineNum">      62 </span><span class="lineCov">          1 :   void save_to(std::ostream&amp; stream);</span></a>
+<a name="63"><span class="lineNum">      63 </span>            : </a>
+<a name="64"><span class="lineNum">      64 </span>            :   /// Saves the `OutputArchive` into a serialized representation using the</a>
+<a name="65"><span class="lineNum">      65 </span>            :   /// given writer function.</a>
+<a name="66"><span class="lineNum">      66 </span><span class="lineCov">          1 :   void save_to(const std::function&lt;size_t(const void*, size_t)&gt;&amp; func);</span></a>
+<a name="67"><span class="lineNum">      67 </span>            : </a>
+<a name="68"><span class="lineNum">      68 </span>            :   /// Forwards all arguments to `write()`.</a>
+<a name="69"><span class="lineNum">      69 </span>            :   /// Useful for generic code that can be reused for both `OutputArchive` and</a>
+<a name="70"><span class="lineNum">      70 </span>            :   /// `InputArchive` (where `operator()` forwards to `read()`).</a>
+<a name="71"><span class="lineNum">      71 </span>            :   template &lt;typename... Ts&gt;</a>
+<a name="72"><span class="lineNum">      72 </span><span class="lineCov">          1 :   void operator()(Ts&amp;&amp;... ts) {</span></a>
+<a name="73"><span class="lineNum">      73 </span>            :     write(std::forward&lt;Ts&gt;(ts)...);</a>
+<a name="74"><span class="lineNum">      74 </span>            :   }</a>
+<a name="75"><span class="lineNum">      75 </span>            : </a>
+<a name="76"><span class="lineNum">      76 </span>            :  private:</a>
+<a name="77"><span class="lineNum">      77 </span>            :   std::shared_ptr&lt;jit::CompilationUnit&gt; cu_;</a>
+<a name="78"><span class="lineNum">      78 </span>            :   jit::Module module_;</a>
+<a name="79"><span class="lineNum">      79 </span>            : };</a>
+<a name="80"><span class="lineNum">      80 </span>            : } // namespace torch::serialize</a>
+</pre>
+      </td>
+    </tr>
+  </table>
+  <br>
+
+  <table width="100%" border=0 cellspacing=0 cellpadding=0>
+    <tr><td class="ruler"><img src="../../glass.png" width=3 height=3 alt=""></td></tr>
+    <tr><td class="versionInfo">Generated by: <a href="https://github.com/linux-test-project/lcov" target="_parent">LCOV version 1.16</a></td></tr>
+  </table>
+  <br>
+
+</body>
+</html>

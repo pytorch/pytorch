@@ -57,6 +57,75 @@ AnyModule
    torch::nn::AnyModule any_module(torch::nn::Linear(10, 5));
    auto output = any_module.forward(input);
 
+Functional
+----------
+
+.. doxygenclass:: torch::nn::Functional
+   :members:
+   :undoc-members:
+
+Wraps a function or callable as a module, useful for inserting arbitrary
+functions into a ``Sequential`` container:
+
+.. code-block:: cpp
+
+   auto model = torch::nn::Sequential(
+       torch::nn::Linear(10, 5),
+       torch::nn::Functional(torch::relu),
+       torch::nn::Linear(5, 1));
+
+ModuleHolder
+------------
+
+.. doxygenclass:: torch::nn::ModuleHolder
+   :members:
+   :undoc-members:
+
+CosineSimilarity
+----------------
+
+.. doxygenclass:: torch::nn::CosineSimilarity
+   :members:
+   :undoc-members:
+
+PairwiseDistance
+----------------
+
+.. doxygenclass:: torch::nn::PairwiseDistance
+   :members:
+   :undoc-members:
+
+PackedSequence
+--------------
+
+.. cpp:class:: torch::nn::utils::rnn::PackedSequence
+
+   Holds the data and list of ``batch_sizes`` of a packed sequence.
+   All RNN modules accept packed sequences as inputs.
+
+   .. cpp:function:: const Tensor& data() const
+
+      Returns the packed tensor containing all sequence elements.
+
+   .. cpp:function:: const Tensor& batch_sizes() const
+
+      Returns a 1D tensor of batch sizes at each time step.
+
+   .. cpp:function:: const Tensor& sorted_indices() const
+
+      Returns indices used to sort sequences by length (descending).
+
+   .. cpp:function:: const Tensor& unsorted_indices() const
+
+      Returns indices to restore the original sequence order.
+
+   .. cpp:function:: PackedSequence to(torch::Device device) const
+
+      Moves the packed sequence to the specified device.
+
+   See also: ``torch::nn::utils::rnn::pack_padded_sequence`` and
+   ``torch::nn::utils::rnn::pad_packed_sequence``.
+
 Padding Layers
 --------------
 

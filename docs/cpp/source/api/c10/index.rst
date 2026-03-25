@@ -42,7 +42,7 @@ Header Files
 - ``c10/util/OptionalArrayRef.h`` - Optional array reference
 - ``c10/util/Optional.h`` - Optional value wrapper
 - ``c10/util/Half.h`` - Half-precision float
-- ``c10/util/Exception.h`` - Exception utilities
+- ``c10/util/Exception.h`` - Error checking macros (``TORCH_CHECK``, ``TORCH_INTERNAL_ASSERT``, etc.)
 - ``c10/cuda/CUDAGuard.h`` - CUDA device guards (see :doc:`../cuda/index`)
 - ``c10/cuda/CUDAStream.h`` - CUDA stream management (see :doc:`../cuda/index`)
 - ``c10/xpu/XPUStream.h`` - Intel XPU stream management

@@ -22,6 +22,10 @@ StepLR
 Decays the learning rate by ``gamma`` every ``step_size`` epochs. This is the
 simplest and most commonly used scheduler.
 
+.. doxygenclass:: torch::optim::StepLR
+   :members:
+   :undoc-members:
+
 **Example:**
 
 .. code-block:: cpp
@@ -41,6 +45,17 @@ simplest and most commonly used scheduler.
        scheduler.step();
        // LR: 0.1 (epochs 0-29), 0.01 (30-59), 0.001 (60-89)
    }
+
+ReduceLROnPlateau
+-----------------
+
+Reduces the learning rate when a metric has stopped improving. Useful when
+you want the scheduler to respond to validation loss rather than follow a
+fixed schedule.
+
+.. doxygenclass:: torch::optim::ReduceLROnPlateauScheduler
+   :members:
+   :undoc-members:
 
 ExponentialLR
 -------------

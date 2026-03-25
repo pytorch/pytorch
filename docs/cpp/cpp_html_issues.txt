@@ -1,0 +1,9 @@
+HTML Formatting Check
+==================================================
+
+Found 2 issue(s):
+
+File                                                    Issue
+------------------------------------------------------------------------------------------
+api/cuda/utilities.html                                 unresolved breathe directive (16x)
+api/cuda/utilities.html                                 raw directive text in output (16x)

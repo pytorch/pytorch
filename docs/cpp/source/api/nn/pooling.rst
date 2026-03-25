@@ -8,6 +8,7 @@ providing translation invariance and reducing computational cost in deeper layer
 - **AvgPool**: Takes the average value in each pooling window (smoother downsampling)
 - **AdaptivePool**: Automatically calculates kernel size to produce a target output size
 - **FractionalMaxPool**: Randomized pooling with fractional output size
+- **MaxUnpool**: Computes the partial inverse of MaxPool using stored indices
 - **LPPool**: Power-average pooling (generalization of avg/max pooling)
 
 MaxPool1d / MaxPool2d / MaxPool3d
@@ -151,6 +152,48 @@ FractionalMaxPool2d / FractionalMaxPool3d
 .. doxygenclass:: torch::nn::FractionalMaxPool3dImpl
    :members:
    :undoc-members:
+
+MaxUnpool1d / MaxUnpool2d / MaxUnpool3d
+---------------------------------------
+
+Computes a partial inverse of ``MaxPool``, using the indices of the maximum
+values computed during pooling to place values back into unpooled positions.
+
+.. doxygenclass:: torch::nn::MaxUnpool1d
+   :members:
+   :undoc-members:
+
+.. doxygenclass:: torch::nn::MaxUnpool1dImpl
+   :members:
+   :undoc-members:
+
+.. doxygenclass:: torch::nn::MaxUnpool2d
+   :members:
+   :undoc-members:
+
+.. doxygenclass:: torch::nn::MaxUnpool2dImpl
+   :members:
+   :undoc-members:
+
+.. doxygenclass:: torch::nn::MaxUnpool3d
+   :members:
+   :undoc-members:
+
+.. doxygenclass:: torch::nn::MaxUnpool3dImpl
+   :members:
+   :undoc-members:
+
+**Example:**
+
+.. code-block:: cpp
+
+   auto pool = torch::nn::MaxPool2d(
+       torch::nn::MaxPool2dOptions(2).stride(2).return_indices(true));
+   auto unpool = torch::nn::MaxUnpool2d(
+       torch::nn::MaxUnpoolOptions<2>(2).stride(2));
+
+   auto [output, indices] = pool->forward_with_indices(input);
+   auto reconstructed = unpool->forward(output, indices);
 
 LPPool1d / LPPool2d / LPPool3d
 ------------------------------

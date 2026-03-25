@@ -63,6 +63,48 @@ RReLU
    :members:
    :undoc-members:
 
+ReLU6
+-----
+
+Like ReLU but caps the output at 6: ``min(max(0, x), 6)``. Commonly used in
+mobile architectures (MobileNet).
+
+.. doxygenclass:: torch::nn::ReLU6
+   :members:
+   :undoc-members:
+
+.. doxygenclass:: torch::nn::ReLU6Impl
+   :members:
+   :undoc-members:
+
+GLU
+---
+
+Gated Linear Unit. Splits the input tensor in half along a dimension,
+then applies ``a * sigmoid(b)``.
+
+.. doxygenclass:: torch::nn::GLU
+   :members:
+   :undoc-members:
+
+.. doxygenclass:: torch::nn::GLUImpl
+   :members:
+   :undoc-members:
+
+LogSigmoid
+----------
+
+Applies element-wise ``log(sigmoid(x))``. Numerically more stable than
+computing ``log`` and ``sigmoid`` separately.
+
+.. doxygenclass:: torch::nn::LogSigmoid
+   :members:
+   :undoc-members:
+
+.. doxygenclass:: torch::nn::LogSigmoidImpl
+   :members:
+   :undoc-members:
+
 ELU
 ---
 

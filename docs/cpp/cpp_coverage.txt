@@ -1,0 +1,44 @@
+Undocumented C++ objects
+==================================================
+
+
+==================================================
+Summary
+==================================================
+
+Total APIs in allowlist:  252
+Documented:              252
+Missing:                 0
+Coverage:                100.0%
+
+Section                                        Covered  Total       %
+----------------------------------------------------------------------
+torch::nn (Modules - Activation)                    25     25  100.0%
+torch::nn (Modules - Convolution)                    6      6  100.0%
+torch::nn (Modules - Pooling)                       20     20  100.0%
+torch::nn (Modules - Linear)                         5      5  100.0%
+torch::nn (Modules - Dropout)                        5      5  100.0%
+torch::nn (Modules - Normalization)                  9      9  100.0%
+torch::nn (Modules - Embedding)                      2      2  100.0%
+torch::nn (Modules - Recurrent)                      6      6  100.0%
+torch::nn (Modules - Transformer)                    6      6  100.0%
+torch::nn (Modules - Loss)                          20     20  100.0%
+torch::nn (Modules - Containers)                     5      5  100.0%
+torch::nn (Modules - Utilities)                      8      8  100.0%
+torch::nn (Modules - Padding/Vision)                17     17  100.0%
+torch::nn::functional                               29     29  100.0%
+torch::optim                                        13     13  100.0%
+torch::data                                         25     25  100.0%
+torch::autograd                                      3      3  100.0%
+torch::serialize                                     4      4  100.0%
+torch (Library/Registration)                         7      7  100.0%
+torch::stable                                        9      9  100.0%
+c10 (Core)                                           8      8  100.0%
+CUDA                                                10     10  100.0%
+XPU                                                  6      6  100.0%
+ATen                                                 4      4  100.0%
+
+Missing by priority:
+  high    : 0
+  medium  : 0
+  low     : 0

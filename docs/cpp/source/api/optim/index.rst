@@ -49,6 +49,27 @@ functionality for parameter updates, gradient zeroing, and state management.
    :members:
    :undoc-members:
 
+OptimizerOptions
+^^^^^^^^^^^^^^^^
+
+.. doxygenclass:: torch::optim::OptimizerOptions
+   :members:
+   :undoc-members:
+
+OptimizerParamGroup
+^^^^^^^^^^^^^^^^^^^
+
+.. doxygenclass:: torch::optim::OptimizerParamGroup
+   :members:
+   :undoc-members:
+
+OptimizerParamState
+^^^^^^^^^^^^^^^^^^^
+
+.. doxygenclass:: torch::optim::OptimizerParamState
+   :members:
+   :undoc-members:
+
 Choosing an Optimizer
 ---------------------
 

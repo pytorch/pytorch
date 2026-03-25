@@ -84,27 +84,16 @@ Library
 CppFunction
 ^^^^^^^^^^^
 
-``torch::CppFunction`` represents a C++ function that can be registered with
-the dispatcher. It is typically created implicitly when passing function
-pointers to ``Library::def()`` or ``Library::impl()``.
+.. doxygenclass:: torch::CppFunction
+   :members:
+   :no-link:
 
-**Common usage patterns:**
+OrderedDict
+^^^^^^^^^^^^
 
-.. code-block:: cpp
-
-   // Direct function pointer (inferred schema)
-   m.def("op_name", &my_function);
-
-   // With explicit schema
-   m.def("op_name(Tensor x) -> Tensor", &my_function);
-
-   // Lambda function
-   m.def("op_name", [](torch::Tensor x) { return x + 1; });
-
-   // Functor object
-   m.def("op_name", MyFunctor());
-
-See the ``Library`` class above for the complete registration API.
+.. doxygenclass:: torch::OrderedDict
+   :members:
+   :undoc-members:
 
 Functions
 ---------

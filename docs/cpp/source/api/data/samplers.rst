@@ -40,3 +40,24 @@ the data without overlap.
 .. doxygenclass:: torch::data::samplers::DistributedRandomSampler
    :members:
    :undoc-members:
+
+Distributed Sampler (Base)
+--------------------------
+
+.. doxygenclass:: torch::data::samplers::DistributedSampler
+   :members:
+   :undoc-members:
+
+Distributed Sequential Sampler
+------------------------------
+
+.. doxygenclass:: torch::data::samplers::DistributedSequentialSampler
+   :members:
+   :undoc-members:
+
+Stream Sampler
+--------------
+
+.. doxygenclass:: torch::data::samplers::StreamSampler
+   :members:
+   :undoc-members:

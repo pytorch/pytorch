@@ -76,4 +76,5 @@ Module Categories
    recurrent
    transformer
    loss
+   functional
    utilities
