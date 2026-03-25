@@ -330,6 +330,37 @@ class TestSparseCompressed(TestCase):
                                     ", but got size"):
             torch.empty((5,), dtype=dtype, device=device, layout=layout)
 
+    @onlyCPU
+    @skipMeta
+    def test_empty_indices_from_numpy(self, device):
+        """Test that sparse_csr_tensor works with empty indices from numpy arrays.
+
+        See https://github.com/pytorch/pytorch/issues/178309
+        """
+        import numpy as np
+        crow_indices = [0, 0]
+        col_indices = []
+        values = []
+
+        # This should work - using torch.tensor
+        t1 = torch.sparse_csr_tensor(
+            torch.tensor(crow_indices, dtype=torch.int32),
+            torch.tensor(col_indices, dtype=torch.int32),
+            torch.tensor(values, dtype=torch.int32),
+            (1, 100)
+        )
+        self.assertEqual(t1._nnz(), 0)
+
+        # This should also work - using numpy arrays
+        # Previously failed with "expected col_indices to be a contiguous tensor per batch"
+        t2 = torch.sparse_csr_tensor(
+            torch.from_numpy(np.array(crow_indices, dtype="int32")).contiguous(),
+            torch.from_numpy(np.array(col_indices, dtype="int32")).contiguous(),
+            torch.from_numpy(np.array(values, dtype="int32")).contiguous(),
+            (1, 100)
+        )
+        self.assertEqual(t2._nnz(), 0)
+
     @skipMeta
     @all_sparse_compressed_layouts()
     @dtypes(*all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half))
