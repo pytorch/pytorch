@@ -21296,8 +21296,6 @@ op_db: list[OpInfo] = [
                    "test_comprehensive",
                    device_type="cuda"
                ),
-               # RuntimeError: Failed to create function state object for: logcumsumexp_outer_float2
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
                # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
            ),
