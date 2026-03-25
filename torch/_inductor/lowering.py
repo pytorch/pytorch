@@ -2433,8 +2433,15 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
     return check_skip_condition(node, is_output=True)
 
 
-def make_fallback(op, layout_constraint=None, warn=True, override_decomp=False):
-    assert op not in decompositions or override_decomp, (
+def make_fallback(
+    op,
+    layout_constraint=None,
+    warn=True,
+    override_decomp=False,
+    get_decomp_fn=None,
+):
+    check_decomps = get_decomp_fn() if get_decomp_fn is not None else decompositions
+    assert op not in check_decomps or override_decomp, (
         f"both a fallback and a decomp for same op: {op}"
     )
     if (
