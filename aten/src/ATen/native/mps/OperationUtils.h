@@ -250,7 +250,7 @@ struct MPSKernelCache {
     __block MPSCachedKernel* cachedKernel = nil;
     MPSCacheKey hash = std::hash<std::string>{}(key);
     dispatch_sync_with_rethrow(serialQueue_, ^() {
-      if (cache_.count(hash) != 0) {
+      if (cache_.contains(hash)) {
         auto& entry = cache_.at(hash);
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached kernel!\n");
         cachedKernel = entry.cachedKernel_;
