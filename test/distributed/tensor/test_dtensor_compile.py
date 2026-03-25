@@ -1802,6 +1802,75 @@ class outer_fn(torch.nn.Module):
         # Test backward pass
         result.sum().backward()
 
+    def test_to_local_symbolic_sizes_non_sharded_dims(self):
+        # Checks that symbolic sizes are not polluted by the sharding
+        # in to_local - for instance we could incorrectly have (16 * (s27//2))
+        # as opposed to just (8 * s27) which enables correct generation
+        # https://github.com/pytorch/pytorch/issues/175690
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fn(x):
+            local = x.narrow(1, 0, x.shape[1] // self.world_size)
+            dt = DTensor.from_local(
+                local,
+                mesh,
+                [Shard(1)],
+                run_check=False,
+                shape=x.shape,
+                stride=x.stride(),
+            )
+            r = dt.redistribute(placements=[Replicate()])
+            out = r.to_local()
+            return out.view(out.shape[0], -1)
+
+        inp = torch.randn(1, 10, 8)
+        torch._dynamo.mark_dynamic(inp, 1)
+
+        backend = AotEagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        result = opt_fn(inp)
+        self.assertEqual(result, fn(inp))
+
+        # The view shape should use the clean symbol (s0), not 2*((s0//2)).
+        fw_code = backend.fw_graphs[0].print_readable(print_output=False)
+        for line in fw_code.splitlines():
+            if "view" in line and "-1" in line:
+                self.assertNotIn("//", line, f"Polluted symbolic shape: {line}")
+
+    def test_to_local_symbolic_sizes_uneven_shard(self):
+        # Regression test to ensure our narrow changes does not cause any
+        # unintentional incorrectness
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fn(x):
+            local = x.narrow(1, 0, x.shape[1] // self.world_size)
+            dt = DTensor.from_local(
+                local,
+                mesh,
+                [Shard(1)],
+                run_check=False,
+                shape=x.shape,
+                stride=x.stride(),
+            )
+            r = dt.redistribute(placements=[Replicate()])
+            out = r.to_local()
+            return out.view(out.shape[0], -1)
+
+        opt_fn = torch.compile(fn, backend="aot_eager")
+
+        # Divisible: 10 % 2 == 0
+        inp_even = torch.randn(1, 10, 8)
+        torch._dynamo.mark_dynamic(inp_even, 1)
+        result = opt_fn(inp_even)
+        self.assertEqual(result, fn(inp_even))
+
+        # Non-divisible: 9 % 2 != 0, exercises padding/unpadding + recompile
+        # - most importantly ensures correctness
+        inp_odd = torch.randn(1, 9, 8)
+        torch._dynamo.mark_dynamic(inp_odd, 1)
+        result = opt_fn(inp_odd)
+        self.assertEqual(result, fn(inp_odd))
+
 
 @instantiate_parametrized_tests
 class TestDTensorCompileE2E(DTensorTestBase):
