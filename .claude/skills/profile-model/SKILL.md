@@ -112,9 +112,8 @@ Only proceed with caching if the user agrees.
 
 After loading, show a quick summary:
 - Total events and breakdown by category (`df["cat"].value_counts()`)
-- GPU utilization: `100 * kernels["dur"].sum() / trace_duration`
-- Kernel count
-- Flag if GPU utilization < 50%
+- Kernel count and total kernel time
+- Top kernels by duration
 
 ### Step 4: Analyze with DataFrame Queries
 
@@ -128,19 +127,7 @@ Timestamps (`ts`) and durations (`dur`) are in **microseconds (μs)**.
 
 Use standard pandas operations (groupby, filter, sort, aggregate) to answer user questions.
 
-### Step 5: GPU Utilization & Idle Gap Analysis
-
-**GPU Utilization:**
-- Filter to kernel events: `df[(df["cat"] == "kernel") & df["dur"].notna()]`
-- Calculate: `100 * kernels["dur"].sum() / (trace_end - trace_start)`
-
-**Idle Gap Detection:**
-- Sort kernels by timestamp
-- Calculate gap between each kernel's end (`ts + dur`) and next kernel's start
-- Filter gaps > 1ms (1000μs) as significant
-- Large gaps (>10ms) indicate CPU bottlenecks worth investigating
-
-### Step 6: Interpret Results
+### Step 5: Interpret Results
 
 | Finding | Likely Issue | Recommendation |
 |---------|--------------|----------------|
@@ -149,7 +136,7 @@ Use standard pandas operations (groupby, filter, sort, aggregate) to answer user
 | Many memory operations | Memory-bound | Reduce copies, use pinned memory |
 | High communication time | Distributed overhead | Overlap comm with compute |
 
-### Step 4: Deep Analysis with HTA (Optional)
+### Step 6: Deep Analysis with HTA (Optional)
 
 If the user wants deeper analysis, use HTA (Holistic Trace Analysis):
 
