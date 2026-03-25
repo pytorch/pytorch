@@ -297,7 +297,7 @@ PyObject* THCPModule_cudaCachingAllocator_raw_alloc(
     return nullptr;
   }
   auto size = PyLong_AsSsize_t(size_o);
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
       size >= 0,
       "Invalid memory size: ",
       size,
