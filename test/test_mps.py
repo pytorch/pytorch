@@ -28,7 +28,7 @@ from torch.testing._internal.common_utils import \
      NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests, xfailIf)
 from torch.testing._internal.common_mps import mps_ops_modifier, mps_ops_grad_modifier, mps_ops_error_inputs_modifier
 from torch.testing import make_tensor
-from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
+from torch.testing._internal.common_dtype import get_all_dtypes, integral_types, all_mps_types
 import torch.backends.mps
 from torch.distributions import Uniform, Exponential
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -8044,6 +8044,20 @@ class TestMPS(TestCaseMPS):
         torch.accelerator.synchronize()
         self.assertTrue(event.query())
         self.assertEqual(c_acc.cpu(), c)
+
+    def test_mps_device_capability(self):
+        # Query device capability via accelerator API
+        cap = torch.accelerator.get_device_capability()
+        # The API returns a dict containing a `supported_dtypes` set
+        supported = set(cap["supported_dtypes"]) if isinstance(cap, dict) else set(cap)
+
+        # Expected dtypes for MPS testing helpers
+        expected = set(all_mps_types())
+        # Per Apple docs, bfloat16 support starts on macOS 14.0+
+        if not torch.backends.mps.is_macos_or_newer(14, 0):
+            expected.discard(torch.bfloat16)
+
+        self.assertTrue(all(dtype in supported for dtype in expected))
 
     def test_jit_save_load(self):
         m = torch.nn.Module()
