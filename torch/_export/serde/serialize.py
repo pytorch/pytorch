@@ -1520,6 +1520,12 @@ class GraphModuleSerializer(metaclass=Final):
             ):
                 # list of int tuples
                 return Argument.create(as_int_lists=[list(t) for t in arg])
+            elif all(
+                isinstance(a, (list, tuple)) and all(isinstance(x, float) for x in a)
+                for a in arg
+            ):
+                # list of float lists (List[List[float]])
+                return Argument.create(as_float_lists=[list(t) for t in arg])
             else:
                 raise SerializeError(
                     f"Unsupported list/tuple argument type: {[type(a) for a in arg]}"
@@ -3071,6 +3077,8 @@ class GraphModuleDeserializer(metaclass=Final):
             elif typ_ == "as_int_lists":
                 # Convert list of lists back to list of tuples for Triton grids
                 return [tuple(dims) for dims in value]
+            elif typ_ == "as_float_lists":
+                return [list(floats) for floats in value]
             elif typ_ == "as_nested_tensors":
                 # nested list of tensors (List[List[Tensor]])
                 return [
@@ -3759,6 +3767,8 @@ def _canonicalize_graph(
         elif a.type == "as_operator":
             return None
         elif a.type == "as_int_lists":
+            return None
+        elif a.type == "as_float_lists":
             return None
         elif a.type == "as_string_to_argument":
             return None
