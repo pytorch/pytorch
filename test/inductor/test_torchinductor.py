@@ -17750,6 +17750,35 @@ if RUN_GPU:
             ):
                 torch.compile(f)(x)
 
+        @config.patch("nan_asserts", True)
+        def test_nan_checker_fp8_pass(self):
+            def f(x):
+                return x.half() + 1
+
+            x = torch.randn(10, device=GPU_TYPE).to(torch.float8_e4m3fn)
+            actual, code = run_and_get_code(torch.compile(f), x)
+            ref = f(x)
+            self.assertTrue(torch.allclose(ref, actual))
+
+            code = code[0]
+            if not config.cpp_wrapper:
+                self.assertIn("# make sure graph inputs are not nan/inf", code)
+                self.assertIn(".to(torch.float32)", code)
+
+        @config.patch("nan_asserts", True)
+        def test_nan_checker_fp8_fail(self):
+            def f(x):
+                return x.half() + 1
+
+            # Create an FP8 tensor with NaN by converting from a float tensor
+            x = torch.tensor([float("nan")] * 10, device=GPU_TYPE).to(
+                torch.float8_e4m3fn
+            )
+            with self.assertRaises(
+                AssertionError if not config.cpp_wrapper else RuntimeError
+            ):
+                torch.compile(f)(x)
+
 
 if RUN_CPU:
 

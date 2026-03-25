@@ -1562,9 +1562,19 @@ class PythonWrapperCodegen(CodeGen):
             if isinstance(buf, (sympy.Expr, ir.TorchBindObject)):
                 continue
 
-            line = f"assert not {name}.isnan().any().item()"
+            # FP8 dtypes don't support isnan/isinf, upcast to float first
+            if buf.get_dtype() in (
+                torch.float8_e4m3fn,
+                torch.float8_e5m2,
+                torch.float8_e4m3fnuz,
+                torch.float8_e5m2fnuz,
+            ):
+                nan_check = f"{name}.to(torch.float32)"
+            else:
+                nan_check = name
+            line = f"assert not {nan_check}.isnan().any().item()"
             self.prefix.writeline(line)
-            line = f"assert not {name}.isinf().any().item()"
+            line = f"assert not {nan_check}.isinf().any().item()"
             self.prefix.writeline(line)
 
     def write_async_compile_wait(self) -> None:
@@ -1766,8 +1776,18 @@ class PythonWrapperCodegen(CodeGen):
                 self.wrapper_call.do_indent()
                 self.wrapper_call.writeline("if isinstance(var, torch.Tensor):")
                 self.wrapper_call.do_indent()
-                self.wrapper_call.writeline("assert not var.isnan().any().item()")
-                self.wrapper_call.writeline("assert not var.isinf().any().item()")
+                # FP8 dtypes don't support isnan/isinf, upcast to float first
+                self.wrapper_call.writeline(
+                    "check_var = var.to(torch.float32) if var.dtype in "
+                    "(torch.float8_e4m3fn, torch.float8_e5m2, "
+                    "torch.float8_e4m3fnuz, torch.float8_e5m2fnuz) else var"
+                )
+                self.wrapper_call.writeline(
+                    "assert not check_var.isnan().any().item()"
+                )
+                self.wrapper_call.writeline(
+                    "assert not check_var.isinf().any().item()"
+                )
                 self.wrapper_call.do_unindent(2)
 
             self.wrapper_call.writeline("return (" + ", ".join(output_refs) + ", )")
