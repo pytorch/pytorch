@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import importlib
 import logging
 
 import onnx_ir as ir
@@ -967,6 +968,53 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
 
         # Verify the output is correct
         onnx_testing.assert_onnx_program(onnx_program, args=(x, y))
+
+
+@common_utils.instantiate_parametrized_tests
+class TorchVisionExporterTest(common_utils.TestCase, _WithExport):
+    @pytest.mark.skipif(
+        importlib.util.find_spec("torchvision") is None,
+        reason="torchvision is required",
+    )
+    def test_roi_align(self):
+        import torchvision  # noqa: F401
+
+        class RoiAlignModel(torch.nn.Module):
+            def forward(self, input, rois):
+                return torchvision.ops.roi_align(
+                    input, rois, output_size=(7, 7), spatial_scale=1.0
+                )
+
+        input = torch.randn(1, 1, 10, 10)
+        rois = torch.tensor([[0.0, 0.0, 0.0, 9.0, 9.0]])
+
+        onnx_program = self.export(RoiAlignModel(), (input, rois))
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    @pytest.mark.skipif(
+        importlib.util.find_spec("torchvision") is None,
+        reason="torchvision is required",
+    )
+    def test_roi_align_aligned(self):
+        import torchvision  # noqa: F401
+
+        class RoiAlignAlignedModel(torch.nn.Module):
+            def forward(self, input, rois):
+                return torchvision.ops.roi_align(
+                    input,
+                    rois,
+                    output_size=(7, 7),
+                    spatial_scale=0.25,
+                    aligned=True,
+                )
+
+        input = torch.randn(2, 3, 16, 16)
+        rois = torch.tensor(
+            [[0.0, 1.0, 1.0, 5.0, 5.0], [1.0, 2.0, 2.0, 6.0, 6.0]]
+        )
+
+        onnx_program = self.export(RoiAlignAlignedModel(), (input, rois))
+        onnx_testing.assert_onnx_program(onnx_program)
 
 
 if __name__ == "__main__":
