@@ -129,6 +129,7 @@ class TestGpuWrapper(InductorTestCase):
             "config": {"num_ctas": 8},
             "num_warps": 4,
             "shared_mem": 0,
+            "global_scratch": 256,
         }
 
         DeferredTritonCallWrapper(
