@@ -8509,7 +8509,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         cnt = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt)
         self.assertEqual(fn(x), opt_fn(x))
-        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_filter_warnings(self):
         x = torch.ones(2, 2, requires_grad=True)
