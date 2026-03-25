@@ -49,7 +49,7 @@ fi
 
 if [[ "$PACKAGE_TYPE" != libtorch ]]; then
   if [[ "\$BUILD_ENVIRONMENT" != *s390x* ]]; then
-    pip install "\$pkg" --index-url "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}"
+    pip install "\$pkg" --find-links "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}"
 
     # numpy tests:
     # We test 1 version no numpy. 1 version with numpy 1.x and rest with numpy 2.x
