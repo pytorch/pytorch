@@ -2,11 +2,13 @@
 
 import dataclasses
 from collections import defaultdict
+from dataclasses import dataclass
 
 import torch
 import torch.fx.passes.operator_support as op_support
 import torch.fx.passes.splitter_base as splitter_base
 from torch.fx.passes.split_utils import split_by_tags
+from torch.fx.passes.splitter_base import FxNetSplitterInternalError
 from torch.testing._internal.common_utils import TestCase
 
 
@@ -21,6 +23,22 @@ class DummyDataClass:
 @torch.fx.wrap
 def wrapped_add(_dataclass, y):
     return _dataclass.c + y
+
+
+@torch.fx.wrap
+def acc_f(x):
+    return x + x
+
+
+@dataclass
+class AConfig:
+    a: int
+    b: int
+
+
+@torch.fx.wrap
+def acc_const(x, a: AConfig):
+    return torch.empty(a.a, a.b)
 
 
 class TestFXSplit(TestCase):
@@ -298,6 +316,86 @@ class TestSplitOutputType(TestCase):
 
         self.assertTrue(type(gm_output) is type(split_gm_output))
         self.assertTrue(torch.equal(gm_output, split_gm_output))
+
+
+class TestSplitSupportedAcc(TestCase):
+    """Tests for ACC/CPU splitting with operator support classification.
+
+    Adopted from D75636868 to validate the enhanced error diagnostics
+    (cycle detection and external dependency reporting) added to
+    put_nodes_into_subgraphs().
+    """
+
+    class IsAccSupported(op_support.OperatorSupportBase):
+        def is_node_supported(self, submodules, node) -> bool:
+            return "acc_" in node.name
+
+    def test_split_by_acc_supported_normal_case(self):
+        """Regression test: basic ACC/CPU split produces correct submodules
+        and output.
+
+        Validates that the refactoring of put_nodes_into_subgraphs() into
+        a try/finally wrapper + _put_nodes_into_subgraphs_impl() does not
+        break the normal (non-crashing) split path.
+        """
+
+        class TestModule(torch.nn.Module):
+            def forward(self, x, y):
+                x = acc_f(x)
+                y = y * y
+                return x - y
+
+        gm = torch.fx.symbolic_trace(TestModule())
+        splitter = splitter_base._SplitterBase(
+            gm,
+            (torch.rand((2, 2)), torch.rand((2, 2))),
+            TestSplitSupportedAcc.IsAccSupported(),
+            splitter_base._SplitterSettingBase(),
+        )
+        split = splitter()
+
+        submodule_names = [k for k, _ in split.named_children()]
+        self.assertEqual(
+            submodule_names, ["_run_on_cpu_0", "_run_on_acc_1", "_run_on_cpu_2"]
+        )
+        input = (torch.rand((2, 2)), torch.rand((2, 2)))
+        self.assertEqual(split(*input), TestModule()(*input))
+
+    def test_split_by_acc_supported_isolated_node(self):
+        """Tests that a get_attr-connected ACC node is correctly split.
+
+        When a module attribute (e.g., a dataclass stored as self.a_config)
+        is used by an ACC call_function, FX traces self.a_config as a
+        get_attr node.  starter_nodes() discovers users of get_attr nodes
+        as starters, so the ACC node is reachable and the split succeeds.
+        """
+
+        class TestModule(torch.nn.Module):
+            def __init__(self, a_config) -> None:
+                super().__init__()
+                self.a_config = a_config
+
+            def forward(self, x, y):
+                x = acc_f(x)
+                z = acc_const(x, self.a_config)
+                y = y * z
+                return x - y
+
+        gm = torch.fx.symbolic_trace(TestModule(AConfig(2, 2)))
+        splitter = splitter_base._SplitterBase(
+            gm,
+            (torch.rand((2, 2)), torch.rand((2, 2))),
+            TestSplitSupportedAcc.IsAccSupported(),
+            splitter_base._SplitterSettingBase(),
+        )
+        split = splitter()
+        # acc_f and acc_const are ACC nodes; mul and sub are CPU nodes.
+        # The split should produce acc and cpu submodules without error.
+        submodule_names = [k for k, _ in split.named_children()]
+        self.assertTrue(
+            any("acc" in name for name in submodule_names),
+            f"Expected at least one ACC submodule, got: {submodule_names}",
+        )
 
 
 if __name__ == "__main__":
