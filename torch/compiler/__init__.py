@@ -145,7 +145,7 @@ def allow_in_graph(fn):
     """
     import torch._dynamo
 
-    return torch._dynamo.allow_in_graph(fn)
+    return torch._dynamo.nonstrict_trace(fn, in_place=True)
 
 
 def substitute_in_graph(

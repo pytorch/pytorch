@@ -166,10 +166,10 @@ def invoke_subgraph_inner_compiler(
     from torch._higher_order_ops.invoke_subgraph import invoke_subgraph_infer
 
     @disable
-    # pyrefly: ignore [deprecated]
-    @torch._dynamo.allow_in_graph
     def invoke_subgraph_wrapper_unboxed(*operands: Any) -> Any:
         return invoke_subgraph_infer(subgraph, *operands)
+
+    torch._dynamo.nonstrict_trace(invoke_subgraph_wrapper_unboxed, in_place=True)
 
     # NB: The direct to unboxed path is broken, you MUST DO THIS
 
@@ -212,7 +212,6 @@ def invoke_subgraph_inner_compiler_good(
     fx_g_is_boxed = getattr(fx_g, "_boxed_call", False)
 
     @disable
-    @torch._dynamo.allow_in_graph
     def invoke_subgraph_wrapper_unboxed(*args: Any) -> Any:
         proxy_mode = get_proxy_mode()
         if proxy_mode is not None:
@@ -224,6 +223,8 @@ def invoke_subgraph_inner_compiler_good(
                 return fx_g(list(args))
             else:
                 return fx_g(*args)
+
+    torch._dynamo.nonstrict_trace(invoke_subgraph_wrapper_unboxed, in_place=True)
 
     # Wrap to handle boxed arguments (list of args) as expected by AOTAutograd
     def invoke_subgraph_wrapper(args: list[Any]) -> Any:

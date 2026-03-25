@@ -17,10 +17,18 @@ _P = ParamSpec("_P")
 _Ts = TypeVarTuple("_Ts")
 
 
+_extra_graphable_types: set[type] = set()
+
+
+def register_graphable_type(typ: type) -> None:
+    """Register a type as an acceptable leaf type for flat_apply I/O."""
+    _extra_graphable_types.add(typ)
+
+
 def is_graphable(val: object) -> TypeIs[torch.fx.node.BaseArgumentTypes]:
     """Definition: a graphable type is a type that is an acceptable input/output type to a FX node."""
     return isinstance(
-        val, (*torch.fx.node.base_types, FakeScriptObject)
+        val, (*torch.fx.node.base_types, FakeScriptObject, *_extra_graphable_types)
     ) or is_opaque_type(type(val))
 
 
@@ -30,6 +38,7 @@ def is_graphable_type(typ: type[object]) -> bool:
         issubclass(typ, torch.fx.node.base_types)
         or is_opaque_type(typ)
         or issubclass(typ, FakeScriptObject)
+        or typ in _extra_graphable_types
     )
 
 

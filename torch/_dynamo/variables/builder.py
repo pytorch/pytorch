@@ -3462,10 +3462,27 @@ def handle_traced_output(
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
     elif isinstance(example_value, torch.backends.cuda.SDPAParams):
-        from .sdpa import SDPAParamsVariable
+        from .sdpa import PARAM_NAMES, SDPAParamsVariable
 
         set_example_value(proxy.node, example_value)
-        return SDPAParamsVariable(proxy, **options)
+        param_vars: list[VariableTracker] = []
+        for name in PARAM_NAMES:
+            attr_val = getattr(example_value, name)
+            attr_proxy = proxy.tracer.create_proxy(
+                kind="call_function",
+                target=getattr,
+                args=(proxy, name),
+                kwargs={},
+            )
+            param_vars.append(
+                wrap_fx_proxy_cls(
+                    target_cls=target_cls,  # pyrefly: ignore[bad-argument-type]
+                    tx=tx,
+                    proxy=attr_proxy,
+                    example_value=attr_val,
+                )
+            )
+        return SDPAParamsVariable(proxy, param_vars=param_vars)
     elif isinstance(example_value, bool) and (
         proxy.node.target
         in [

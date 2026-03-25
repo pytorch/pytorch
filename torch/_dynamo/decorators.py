@@ -219,7 +219,11 @@ def _check_mutually_exclusive_decorators(fn: Callable, decorator_name: str) -> N
             )
 
 
-def nonstrict_trace(traceable_fn: Callable[_P, _R]) -> Callable[_P, _R]:
+def nonstrict_trace(
+    traceable_fn: Callable[_P, _R],
+    *,
+    in_place: bool = False,
+) -> Callable[_P, _R]:
     """
     Decorator to mark a function as nonstrict-traceable for dynamo.
 
@@ -287,19 +291,37 @@ def nonstrict_trace(traceable_fn: Callable[_P, _R]) -> Callable[_P, _R]:
 
     _check_mutually_exclusive_decorators(traceable_fn, "nonstrict_trace")
 
+    if inspect.isclass(traceable_fn):
+        cls_id = id(traceable_fn)
+        trace_rules._disallowed_callable_ids.remove(cls_id)
+        trace_rules._allowed_callable_ids.add(cls_id)
+
+        def deregister() -> None:
+            trace_rules._allowed_callable_ids.remove(cls_id)
+
+        weakref.finalize(traceable_fn, deregister)
+        return traceable_fn
+
+    if in_place:
+        fn_id = id(traceable_fn)
+        trace_rules._disallowed_callable_ids.remove(fn_id)
+        trace_rules._allowed_callable_ids.add(fn_id)
+
+        def deregister() -> None:
+            trace_rules._allowed_callable_ids.remove(fn_id)
+
+        weakref.finalize(traceable_fn, deregister)
+        return traceable_fn
+
     @functools.wraps(traceable_fn)
     def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         return traceable_fn(*args, **kwargs)
 
     wrapped_id = id(wrapped)
 
-    # This line allows us to reuse much of the `allow_in_graph` impl.
     trace_rules._allowed_callable_ids.add(wrapped_id)
-
-    # This line allows us to diverge the impl from `allow_in_graph`.
     trace_rules._nonstrict_trace_callable_ids.add(wrapped_id)
 
-    # Avoid id reuse which creates subtle bugs.
     def deregister() -> None:
         trace_rules._allowed_callable_ids.remove(wrapped_id)
         trace_rules._nonstrict_trace_callable_ids.remove(wrapped_id)
@@ -1402,16 +1424,16 @@ def _allow_in_graph_einops() -> None:
         # helpers. Backport the try/except TypeError fallback from einops 0.7.0+
         # so allow_in_graph works during fake tensor validation.
         _patch_einops_symint_compat(einops.einops)  # type: ignore[attr-defined]
-        allow_in_graph(einops.rearrange)
-        allow_in_graph(einops.reduce)
+        nonstrict_trace(einops.rearrange, in_place=True)
+        nonstrict_trace(einops.reduce, in_place=True)
         if hasattr(einops, "repeat"):
-            allow_in_graph(einops.repeat)  # available since einops 0.2.0
+            nonstrict_trace(einops.repeat, in_place=True)
         if hasattr(einops, "einsum"):
-            allow_in_graph(einops.einsum)  # available since einops 0.5.0
+            nonstrict_trace(einops.einsum, in_place=True)
         if hasattr(einops, "pack"):
-            allow_in_graph(einops.pack)  # available since einops 0.6.0
+            nonstrict_trace(einops.pack, in_place=True)
         if hasattr(einops, "unpack"):
-            allow_in_graph(einops.unpack)  # available since einops 0.6.0
+            nonstrict_trace(einops.unpack, in_place=True)
 
 
 # Note: this carefully avoids eagerly import einops.

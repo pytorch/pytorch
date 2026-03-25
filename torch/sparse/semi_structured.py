@@ -132,7 +132,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
             cls._load_dispatch_table()
 
             # we can also register the classes with dynamo when the warning is shown.
-            torch._dynamo.allow_in_graph(cls)
+            torch._dynamo.nonstrict_trace(cls, in_place=True)
 
         if packed is not None:
             previous_tensor = packed
