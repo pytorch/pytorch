@@ -2109,6 +2109,63 @@ class TestDTensorCompileE2E(DTensorTestBase):
             for dt_chunk, tensor_chunk in zip(result, expected):
                 self.assertEqual(dt_chunk.full_tensor(), tensor_chunk)
 
+    @with_comms
+    def test_dtensor_processgroup_backward(self):
+        """Test that ProcessGroups are correctly handled in backward graph."""
+        from torch._functorch.aot_autograd import aot_function
+
+        with patch("torch.distributed.config.compile_on_one_rank", True):
+            mesh = self.build_device_mesh()
+
+            def fn(dt):
+                out = dt.redistribute(mesh, [Replicate()])
+                return out.sum()
+
+            local_tensor = torch.randn(
+                4, 8, device=self.device_type, requires_grad=True
+            )
+            dt_input = DTensor.from_local(
+                local_tensor, mesh, [Shard(0)], run_check=False
+            )
+
+            fw_graph_cell = [None]
+            bw_graph_cell = [None]
+
+            def extract_fw_graph(fx_g, _):
+                fw_graph_cell[0] = fx_g
+                return fx_g
+
+            def extract_bw_graph(fx_g, _):
+                bw_graph_cell[0] = fx_g
+                return fx_g
+
+            compiled_fn = aot_function(
+                fn,
+                fw_compiler=extract_fw_graph,
+                bw_compiler=extract_bw_graph,
+            )
+
+            output = compiled_fn(dt_input)
+            output.backward()
+
+            fw_graph = fw_graph_cell[0]
+            if fw_graph is not None:
+                fw_code = fw_graph.code
+                self.assertNotIn(
+                    "_opaque_obj",
+                    fw_code,
+                    f"Forward graph should not contain opaque objects. Graph:\n{fw_code}",
+                )
+
+            bw_graph = bw_graph_cell[0]
+            if bw_graph is not None:
+                bw_code = bw_graph.code
+                self.assertNotIn(
+                    "_opaque_obj",
+                    bw_code,
+                    f"Backward graph should not contain opaque objects. Graph:\n{bw_code}",
+                )
+
 
 if __name__ == "__main__":
     run_tests()

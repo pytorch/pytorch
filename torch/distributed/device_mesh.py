@@ -1240,7 +1240,11 @@ else:
             import torch.distributed.config as config
             from torch._guards import detect_fake_mode
 
-            if not detect_fake_mode() or not config.compile_on_one_rank:
+            if (
+                not config.compile_on_one_rank
+                or not (fake_mode := detect_fake_mode())
+                or not fake_mode.shape_env
+            ):
                 # This is only valid when the current rank is part of the mesh.
                 if self._coordinate_on_dim is None:
                     raise AssertionError
@@ -1608,6 +1612,7 @@ def _register_distributed_opaque_types():
             "group_name": MemberType.USE_REAL,
             "group_desc": MemberType.USE_REAL,
             "__eq__": MemberType.USE_REAL,
+            "__ne__": MemberType.USE_REAL,
         },
     )
 
@@ -1634,6 +1639,7 @@ def _register_distributed_opaque_types():
             "get_coordinate": MemberType.USE_REAL,
             "get_local_rank": MemberType.USE_REAL,
             "__eq__": MemberType.USE_REAL,
+            "__ne__": MemberType.USE_REAL,
             "ndim": MemberType.USE_REAL,
             "shape": MemberType.USE_REAL,
             "mesh_dim_names": MemberType.USE_REAL,
