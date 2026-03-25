@@ -1033,6 +1033,92 @@ def forward(self, x_1, cfg_1):
     """,  # noqa: B950
         )
 
+    def test_subclass_opaque_output_reuses_input_proxy(self):
+        # Regression test: when a tensor subclass's __torch_dispatch__ wraps
+        # the output with the real OpaqueBase (not the FakeScriptObject proxy),
+        # the AOTAutograd forward graph should still reference the opaque via
+        # its input placeholder — not create a duplicate get_attr constant.
+        #
+        # This mirrors DTensor where C++ dispatch creates new DTensors storing
+        # the real DeviceMesh, so output flattening calls maybe_to_fake_obj
+        # and mints a fresh FakeScriptObject for the same underlying object.
+
+        class TensorWithRealCounter(torch.Tensor):
+            @staticmethod
+            def __new__(cls, data, counter):
+                return torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    data.size(),
+                    strides=data.stride(),
+                    storage_offset=data.storage_offset(),
+                    device=data.device,
+                    dtype=data.dtype,
+                    layout=data.layout,
+                    requires_grad=data.requires_grad,
+                )
+
+            def __init__(self, data, counter):
+                self._data = data
+                self._counter = counter
+
+            def __repr__(self):
+                return "TensorWithRealCounter(...)"
+
+            def __tensor_flatten__(self):
+                return ["_data", "_counter"], ()
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, ctx, outer_size, outer_stride):
+                return TensorWithRealCounter(
+                    inner_tensors["_data"], inner_tensors["_counter"]
+                )
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if kwargs is None:
+                    kwargs = {}
+
+                counter = None
+                for arg in torch.utils._pytree.tree_leaves(args):
+                    if isinstance(arg, TensorWithRealCounter):
+                        counter = arg._counter
+                        break
+
+                def unwrap(x):
+                    return x._data if isinstance(x, TensorWithRealCounter) else x
+
+                out = func(
+                    *torch.utils._pytree.tree_map(unwrap, args),
+                    **torch.utils._pytree.tree_map(unwrap, kwargs),
+                )
+
+                # Unwrap FakeScriptObject to real OpaqueBase, simulating what
+                # happens in DTensor's C++ dispatch path.
+                real_counter = counter
+                if isinstance(counter, FakeScriptObject):
+                    real_counter = counter.real_obj
+
+                return torch.utils._pytree.tree_map(
+                    lambda x: TensorWithRealCounter(x, real_counter)
+                    if isinstance(x, torch.Tensor)
+                    else x,
+                    out,
+                )
+
+        counter = Counter(start=0, end=10)
+        x = TensorWithRealCounter(torch.randn(4), counter)
+
+        backend = AotEagerAndRecordGraphs()
+        torch.compile(lambda x: x + 1, fullgraph=True, backend=backend)(x)
+
+        fw = backend.fw_graphs[0]
+        get_attr_nodes = [n for n in fw.graph.nodes if n.op == "get_attr"]
+        self.assertEqual(
+            get_attr_nodes,
+            [],
+            "Opaque output should reuse the input placeholder, not create a get_attr constant",
+        )
+
     @parametrize("make_fx_tracing_mode", ["fake", "symbolic"])
     def test_bad_fake(self, make_fx_tracing_mode):
         torch.library.define(
@@ -2173,6 +2259,48 @@ class GraphModule(torch.nn.Module):
         self.assertTrue(isinstance(x2.grad, TensorWithCounter))
         self.assertIs(x2.grad._counter, counter2)
         self.assertEqual(x2.grad._size_store, size2)
+
+    def test_tangent_primal_proxy_collision_for_opaque_inner_attr(self):
+        """Regression test for tangent/primal proxy collision.
+
+        When a tensor subclass has an opaque inner attr, joint graph tracing
+        creates separate FakeScriptObject wrappers for the primal and tangent
+        that share the same underlying real object.  set_proxy_slot must map
+        the tangent wrapper to the *primal* proxy so that forward outputs
+        don't spuriously depend on tangent placeholders (which would crash the
+        partitioner with 'Node tangents_N was invalid, but is output').
+        """
+        from torch._library.fake_class_registry import FakeScriptObject
+        from torch.fx.experimental.proxy_tensor import (
+            _GraphAppendingTracerEx,
+            set_proxy_slot,
+        )
+
+        counter = Counter(start=3, end=10)
+        fso_primal = FakeScriptObject(counter, "Counter", counter)
+        fso_tangent = FakeScriptObject(counter, "Counter", counter)
+        # Sanity: different wrappers, same real_obj
+        self.assertIsNot(fso_primal, fso_tangent)
+        self.assertIs(
+            object.__getattribute__(fso_primal, "real_obj"),
+            object.__getattribute__(fso_tangent, "real_obj"),
+        )
+
+        graph = torch.fx.Graph()
+        tracer = _GraphAppendingTracerEx(graph)
+
+        primal_node = graph.placeholder("primals_1")
+        tangent_node = graph.placeholder("tangents_1")
+        primal_proxy = torch.fx.Proxy(primal_node, tracer)
+        tangent_proxy = torch.fx.Proxy(tangent_node, tracer)
+
+        # Register primal first, then tangent (mirrors joint graph tracing)
+        set_proxy_slot(fso_primal, tracer, primal_proxy)
+        set_proxy_slot(fso_tangent, tracer, tangent_proxy)
+
+        # Both wrappers should resolve to the primal proxy
+        self.assertIs(tracer.opaque_tracker[fso_primal].node, primal_node)
+        self.assertIs(tracer.opaque_tracker[fso_tangent].node, primal_node)
 
     def test_opaque_produced_by_call_function_saved_for_backward(self):
         """Test that an opaque object produced by a call_function node

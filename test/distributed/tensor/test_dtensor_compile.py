@@ -261,7 +261,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
 
             def forward(self, x):
                 inter = self.buffer + DTensor.from_local(
-                    x, mesh, [Shard(0)], run_check=False
+                    x, self.buffer.device_mesh, [Shard(0)], run_check=False
                 )
                 return inter.to_local()
 
@@ -273,20 +273,20 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(
             str(backend.graphs[0].code).strip(),
             """\
-def forward(self, L_self_buffers_buffer_ : torch.distributed.tensor.DTensor, L_x_ : torch.Tensor, L_mesh_ : torch.distributed.device_mesh.DeviceMesh):
+def forward(self, L_self_buffers_buffer_ : torch.distributed.tensor.DTensor, L_x_ : torch.Tensor, L_self_buffers_buffer_device_mesh : torch.distributed.device_mesh.DeviceMesh):
     l_self_buffers_buffer_ = L_self_buffers_buffer_
     l_x_ = L_x_
-    l_mesh_ = L_mesh_
-    from_local = torch.distributed.tensor._api.from_local(l_x_, l_mesh_, [torch.distributed.tensor.placement_types.Shard(dim=0)], run_check = False);  l_x_ = l_mesh_ = None
+    l_self_buffers_buffer_device_mesh = L_self_buffers_buffer_device_mesh
+    from_local = torch.distributed.tensor._api.from_local(l_x_, l_self_buffers_buffer_device_mesh, [torch.distributed.tensor.placement_types.Shard(dim=0)], run_check = False);  l_x_ = l_self_buffers_buffer_device_mesh = None
     inter = l_self_buffers_buffer_ + from_local;  l_self_buffers_buffer_ = from_local = None
     to_local = inter.to_local();  inter = None
     return (to_local,)""",  # noqa: B950
         )
         self.assertExpectedInline(
             str(backend.fw_graphs[0].code).strip(),
-            f"""\
+            """\
 def forward(self, arg0_1, arg1_1, arg2_1):
-    _to_copy = torch.ops.aten._to_copy.default(arg1_1, dtype = torch.float64, layout = torch.strided, device = device(type='{self.device_type}', index=0));  arg1_1 = None
+    _to_copy = torch.ops.aten._to_copy.default(arg1_1, dtype = torch.float64, layout = torch.strided, device = device(type='cuda', index=0));  arg1_1 = None
     view = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
     add = torch.ops.aten.add.Tensor(arg0_1, view);  arg0_1 = view = None
     view_1 = torch.ops.aten.view.default(add, [4, 4]);  add = None
