@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import math
+import re
 import typing_extensions
 from typing import Any, cast, TYPE_CHECKING
 
@@ -70,17 +71,6 @@ if TYPE_CHECKING:
 
 # Main function suffix used in generated Pallas code
 MAIN_SUFFIX = "main"
-
-# Mosaic GPU warpgroup size: 4 warps × 32 threads = 128 threads per warpgroup.
-# This is a hardware constant for Hopper and Blackwell GPUs.
-# See: jax/_src/pallas/mosaic_gpu/lowering.py
-WARPGROUP_SIZE = 128
-
-
-def _align_to_warpgroup(size: int) -> int:
-    """Align size to WARPGROUP_SIZE (128) for Mosaic GPU compatibility."""
-    return ((size + WARPGROUP_SIZE - 1) // WARPGROUP_SIZE) * WARPGROUP_SIZE
-
 
 # Logger for Pallas kernel code
 kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
@@ -268,6 +258,9 @@ class PallasKernelOverrides(OpOverrides):
         src_dtype: torch.dtype | None = None,
         use_compute_types: bool = True,
     ) -> str:
+        # TPU doesn't support 64-bit types
+        if dtype == torch.int64 and V.graph.get_current_device_or_throw().type == "tpu":
+            dtype = torch.int32
         jax_dtype = torch_dtype_to_jax(dtype)
         # Wrap in jnp.asarray to handle scalars from integer indexing
         return f"jnp.asarray({x}).astype({jax_dtype})"
@@ -810,6 +803,18 @@ class PallasKernelOverrides(OpOverrides):
 
 
 @dataclasses.dataclass
+class _IndirectAccessInfo:
+    """Describes a detected indirect (data-dependent) buffer access."""
+
+    table_param: str
+    table_buf_name: str
+    table_shape: tuple
+    indirect_dim: int
+    indirect_var: str
+    indices_param: str
+
+
+@dataclasses.dataclass
 class _CodegenContext:
     """Bundles local state shared across codegen_kernel helper methods."""
 
@@ -834,19 +839,10 @@ class _CodegenContext:
 
 
 class PallasKernel(SIMDKernel):
-    """
-    Pallas kernel for elementwise operations with support for strided/scatter access.
+    """Pallas kernel codegen for TPU and GPU (Mosaic backend).
 
-    Strategy:
-    - Convert index expressions to JAX-compatible array slicing
-    - Load/store using indexed access: "in_ptrX[slice]" or full-array "in_ptrX[...]"
-    - Compute expression with Python operators (compatible with jax.numpy broadcasting)
-    - Generate Python code that defines a Pallas kernel and a host entrypoint.
-    - Use async_compile.pallas path to compile and load Python code.
-
-    For GPU (Mosaic backend):
-    - Use TMA (Tensor Memory Accelerator) for automatic OOB masking
-    - Falls back to legacy padding approach for reductions, broadcasting, non-contiguous tensors
+    Generates Python code that defines a Pallas kernel and a host entrypoint,
+    compiled and loaded via async_compile.pallas.
     """
 
     overrides = PallasKernelOverrides  # type: ignore[assignment]
@@ -894,6 +890,11 @@ class PallasKernel(SIMDKernel):
         # Buffers that already use flatten+gather indexing; strided
         # decomposition must not reshape these (it would break flat offsets).
         self.flatten_indexed_buffers: OrderedSet[str] = OrderedSet()
+        # Indirect (data-dependent) access info for scalar prefetch
+        self.indirect_access: _IndirectAccessInfo | None = None
+        self._cse_to_param: dict[str, str] = {}
+        self._param_to_graph_name: dict[str, str] = {}
+        self.is_tpu = device.type == "tpu"
 
     def check_bounds(
         self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
@@ -1281,37 +1282,6 @@ class PallasKernel(SIMDKernel):
                     code.writeline(f"{param} = {param}[{', '.join(slice_parts)}]")
 
     @staticmethod
-    def _c_contiguous_strides(shape: list[int]) -> list[int]:
-        """Return C-contiguous strides for the given shape."""
-        n = len(shape)
-        strides = [1] * n
-        for i in range(n - 2, -1, -1):
-            strides[i] = strides[i + 1] * shape[i + 1]
-        return strides
-
-    @staticmethod
-    def _map_coeffs_to_dims(coeffs: list[int], strides: list[int]) -> list[int] | None:
-        """Map coefficient values to dimension indices via stride matching.
-
-        Returns a list where entry k is the dimension whose stride equals
-        coeffs[k], or None if the mapping is ambiguous or incomplete.
-        """
-        stride_to_dim: dict[int, int] = {}
-        for d, s in enumerate(strides):
-            if s in stride_to_dim:
-                return None  # duplicate strides
-            stride_to_dim[s] = d
-        mapping: list[int] = []
-        for c in coeffs:
-            d = stride_to_dim.get(c)
-            if d is None:
-                return None
-            mapping.append(d)
-        if len(OrderedSet(mapping)) != len(coeffs):
-            return None
-        return mapping
-
-    @staticmethod
     def _get_actual_out_strides(out_buf, n: int) -> list[int] | None:
         """Extract actual output buffer strides from its layout."""
         layout = getattr(out_buf, "get_layout", lambda: None)()
@@ -1636,6 +1606,37 @@ class PallasKernel(SIMDKernel):
             return int(val)
         except (TypeError, ValueError):
             return None
+
+    @staticmethod
+    def _c_contiguous_strides(shape: list[int]) -> list[int]:
+        """Return C-contiguous strides for the given shape."""
+        n = len(shape)
+        strides = [1] * n
+        for i in range(n - 2, -1, -1):
+            strides[i] = strides[i + 1] * shape[i + 1]
+        return strides
+
+    @staticmethod
+    def _map_coeffs_to_dims(coeffs: list[int], strides: list[int]) -> list[int] | None:
+        """Map coefficient values to dimension indices via stride matching.
+
+        Returns a list where entry k is the dimension whose stride equals
+        coeffs[k], or None if the mapping is ambiguous or incomplete.
+        """
+        stride_to_dim: dict[int, int] = {}
+        for d, s in enumerate(strides):
+            if s in stride_to_dim:
+                return None  # duplicate strides
+            stride_to_dim[s] = d
+        mapping: list[int] = []
+        for c in coeffs:
+            d = stride_to_dim.get(c)
+            if d is None:
+                return None
+            mapping.append(d)
+        if len(OrderedSet(mapping)) != len(coeffs):
+            return None
+        return mapping
 
     def _zero_dim_output_flags(self, ctx: _CodegenContext) -> tuple[bool, bool]:
         """Return whether an output has a zero or unknown dimension."""
@@ -1968,14 +1969,7 @@ class PallasKernel(SIMDKernel):
         index_str: str,
         needs_flatten: bool,
     ) -> tuple[str, bool]:
-        """
-        Check if buffer access needs strided indexing due to size mismatch or gather patterns.
-
-        This handles cases like:
-        - Pooling operations where input/output have different sizes
-        - im2col-like gather patterns
-        - Transposed or strided buffer access
-        """
+        """Check if buffer access needs strided indexing due to size mismatch or gather patterns."""
         # Only applies when full array access is indicated
         if index_str != "..." or needs_flatten:
             return index_str, needs_flatten
@@ -2148,6 +2142,141 @@ class PallasKernel(SIMDKernel):
         """
         return f"pallas_permute({load_expr}, {perm})"
 
+    def _trace_to_load_source(self, var_name: str) -> str | None:
+        """Trace a tmp variable back to its source buffer's kernel param.
+
+        Follows CSE assignments backward through bounds-checking (where/clamp)
+        until it finds a variable that was directly loaded from a buffer.
+        """
+        if var_name in self._cse_to_param:
+            return self._cse_to_param[var_name]
+        for line in self.compute._lines:
+            line_str = str(line).lstrip()
+            if not line_str.startswith(f"{var_name} = "):
+                continue
+            for ref in re.findall(r"\btmp\d+\b", line_str.split(" = ", 1)[1]):
+                result = self._trace_to_load_source(ref)
+                if result is not None:
+                    return result
+        return None
+
+    def _detect_indirect_access(
+        self, buf: str, name: str, index: sympy.Expr
+    ) -> _IndirectAccessInfo | None:
+        """Detect a load with data-dependent indexing suitable for scalar prefetch.
+
+        Matches exactly one indirect variable whose coefficient corresponds to
+        a C-contiguous stride dimension.  Rejects 1-to-1 gather patterns where
+        the indices buffer covers the full iteration space.
+        """
+        buf_info = self._get_buffer_info(name)
+        if buf_info is None:
+            return None
+        _, buf_size, _, _, _ = buf_info
+        buf_size_raw = [self._safe_int(s) for s in buf_size]
+        if len(buf_size_raw) < 2 or any(s is None for s in buf_size_raw):
+            return None
+        buf_size_ints: list[int] = cast(list[int], buf_size_raw)
+
+        indirect_vars = self._get_indirect_vars(index)
+        if len(indirect_vars) != 1:
+            return None
+        indirect_var = indirect_vars[0]
+
+        coeff = self._get_index_coefficient(index, indirect_var)
+        if coeff == 0 or not isinstance(coeff, int):
+            return None
+
+        # Use existing stride mapping to find which dimension is indirected
+        strides = self._c_contiguous_strides(buf_size_ints)
+        mapping = self._map_coeffs_to_dims([coeff], strides)
+        if mapping is None:
+            return None
+        indirect_dim = mapping[0]
+
+        ndim = len(buf_size_ints)
+        if indirect_dim >= max(1, ndim - 2):
+            return None
+
+        indirect_var_name = str(indirect_var)
+        indices_param = self._trace_to_load_source(indirect_var_name)
+        if indices_param is None:
+            return None
+
+        # Reject gather patterns: only 1-D static index tensors supported
+        indices_graph_name = self._param_to_graph_name.get(indices_param)
+        if indices_graph_name is not None:
+            indices_info = self._get_buffer_info(indices_graph_name)
+            if indices_info is not None:
+                _, indices_size, _, _, _ = indices_info
+                if len(indices_size) != 1:
+                    return None
+                if self._safe_int(indices_size[0]) is None:
+                    return None
+                indices_numel = math.prod(
+                    v for s in indices_size if (v := self._safe_int(s)) is not None
+                )
+                iter_product = math.prod(
+                    length
+                    for var in self._get_used_iter_vars(index)
+                    if var in self.range_tree_nodes
+                    if (length := self._safe_int(self.range_tree_nodes[var].length))
+                    is not None
+                )
+                if indices_numel >= iter_product:
+                    return None
+
+        return _IndirectAccessInfo(
+            table_param=buf,
+            table_buf_name=name,
+            table_shape=tuple(buf_size_ints),
+            indirect_dim=indirect_dim,
+            indirect_var=indirect_var_name,
+            indices_param=indices_param,
+        )
+
+    def _eliminate_dead_indirect_code(self) -> None:
+        """Remove dead compute lines after scalar prefetch replaces indirect load.
+
+        When the table load is simplified to buf[0] (scalar prefetch handles
+        indexing), the indices load and all derived bounds-checking code become
+        dead.  This performs backward liveness analysis from the store variables
+        to identify and remove dead lines.
+        """
+        # Collect variables used by stores (live roots)
+        live_vars: OrderedSet[str] = OrderedSet()
+        for _, store_line in self.store_with_output:
+            for m in re.finditer(r"\btmp\d+\b", store_line):
+                live_vars.add(m.group())
+
+        # Parse assignments from compute lines
+        assignments: list[tuple[str | None, str, Any]] = []
+        for line in self.compute._lines:
+            line_str = str(line).lstrip()
+            m = re.match(r"^(tmp\d+)\s*=\s*(.*)", line_str, re.DOTALL)
+            if m:
+                assignments.append((m.group(1), m.group(2), line))
+            else:
+                assignments.append((None, line_str, line))
+
+        # Propagate liveness backward
+        changed = True
+        while changed:
+            changed = False
+            for var_name, rhs, _ in reversed(assignments):
+                if var_name and var_name in live_vars:
+                    for m in re.finditer(r"\btmp\d+\b", rhs):
+                        if m.group() not in live_vars:
+                            live_vars.add(m.group())
+                            changed = True
+
+        # Keep only live assignments (and non-assignment lines)
+        self.compute._lines = [
+            line
+            for var_name, _, line in assignments
+            if var_name is None or var_name in live_vars
+        ]
+
     def _build_load_expr(
         self,
         buf: str,
@@ -2160,11 +2289,25 @@ class PallasKernel(SIMDKernel):
         Build the load expression based on indexing mode.
         """
         if needs_flatten:
+            # Detect indirect (data-dependent) access for scalar prefetch
+            indirect = self._detect_indirect_access(buf, name, index)
+            if indirect is not None:
+                if self.indirect_access is not None:
+                    # Fused nodes may re-visit the same indirect load (e.g.
+                    # a reduction + pointwise over the same embedding).
+                    # Allow that, but reject truly different indirect accesses.
+                    assert indirect == self.indirect_access, (
+                        "only one indirect access per kernel supported"
+                    )
+                self.indirect_access = indirect
+                return f"{buf}[0]"
+
             self.has_flatten_indexing = True
             self.flatten_indexed_buffers.add(name)
             # Flatten then index for non-contiguous access (gather operation)
             has_minmax = index.has(sympy.Min) or index.has(sympy.Max)
-            idx = f"({index_str}).astype(jnp.int64)" if has_minmax else index_str
+            idx_dtype = "jnp.int32" if self.is_tpu else "jnp.int64"
+            idx = f"({index_str}).astype({idx_dtype})" if has_minmax else index_str
             return f"{buf}[...].flatten()[{idx}]"
         else:
             # Direct indexing for contiguous access
@@ -2669,11 +2812,16 @@ class PallasKernel(SIMDKernel):
             # Handle 1D buffer broadcasting for higher-dimensional kernels
             load_expr = self._maybe_broadcast_1d_buffer(name, index, load_expr)
 
-        return self.cse.generate(
+        cse_var = self.cse.generate(
             self.compute,
             load_expr,
             dtype=dtype,
         )
+        # Track CSE var -> param -> graph name for indirect access detection
+        buf_param = self.args.input(name)
+        self._cse_to_param[str(cse_var)] = buf_param
+        self._param_to_graph_name[buf_param] = name
+        return cse_var
 
     def _handle_mixed_indexing(self, index: sympy.Expr) -> str:
         """
@@ -3479,6 +3627,21 @@ class PallasKernel(SIMDKernel):
 
         ctx.alias_pairs = self._compute_alias_pairs(ctx, aliasable_flags)
 
+        use_scalar_prefetch = bool(self.indirect_access)
+
+        if use_scalar_prefetch:
+            self._eliminate_dead_indirect_code()
+            kernel_body_sp = IndentedBuffer()
+            with kernel_body_sp.indent():
+                for line in self.compute._lines:
+                    kernel_body_sp.writeline(str(line))
+            self._codegen_scalar_prefetch_wrapper(
+                ctx,
+                kernel_name,
+                kernel_body_sp,
+            )
+            return code.getvalue()
+
         # Emit the kernel function with the correct signature
         kernel_signature = f"def {kernel_name}_kernel({', '.join(ctx.full_kernel_params)}{extra_kernel_params}):"
         code.writeline(kernel_signature)
@@ -3646,6 +3809,180 @@ class PallasKernel(SIMDKernel):
             if out_ptr in ctx.full_kernel_params:
                 code.writeline(store_line)
 
+    def _codegen_scalar_prefetch_wrapper(
+        self,
+        ctx: _CodegenContext,
+        kernel_name: str,
+        kernel_body: IndentedBuffer,
+    ) -> None:
+        """Emit kernel, JIT wrapper, and main entry for scalar prefetch."""
+        assert self.indirect_access is not None
+        indirect = self.indirect_access
+        code = ctx.code
+
+        alias_set = OrderedSet(ctx.alias_params)
+        other_input_params = [
+            p
+            for p in ctx.kernel_input_params
+            if p != indirect.indices_param
+            and p != indirect.table_param
+            and p not in alias_set
+        ]
+
+        # Emit kernel function with params reordered for PrefetchScalarGridSpec:
+        # [scalar_prefetch] + [in_specs refs] + [out_specs refs]
+        prefetch_kernel_params = (
+            [indirect.indices_param]
+            + [indirect.table_param]
+            + other_input_params
+            + list(ctx.alias_params)
+            + ctx.output_params
+        )
+        code.writeline(
+            f"def {kernel_name}_kernel({', '.join(prefetch_kernel_params)}):"
+        )
+        with code.indent():
+            self._emit_kernel_body(code, kernel_body, ctx)
+
+        # Emit JIT wrapper
+        code.writeline("")
+        jit_wrapper_name = f"{kernel_name}_jit_wrapper"
+        wrapper_params = (
+            ["out_shapes", "out_dtypes"] + ctx.size_var_params + ctx.kernel_input_params
+        )
+        static_argnums = list(range(2 + len(ctx.size_var_params)))
+        static_argnums_literal = "(" + ", ".join(str(x) for x in static_argnums) + ",)"
+        code.writeline(
+            f"@functools.partial(jax.jit, static_argnums={static_argnums_literal})"
+        )
+        code.writeline(f"def {jit_wrapper_name}({', '.join(wrapper_params)}):")
+
+        with code.indent():
+            table = indirect.table_param
+            indices = indirect.indices_param
+
+            ind_dim = indirect.indirect_dim
+            ndim = len(indirect.table_shape)
+            code.writeline("_D = 1")
+            for i in range(ndim):
+                if i != ind_dim:
+                    code.writeline(f"_D = _D * {table}.shape[{i}]")
+            code.writeline(f"_seq = {indices}.shape[0]")
+
+            if ind_dim == 0:
+                code.writeline(f"_table_3d = {table}.reshape({table}.shape[0], 1, _D)")
+            else:
+                perm = (ind_dim, *[d for d in range(ndim) if d != ind_dim])
+                code.writeline(
+                    f"_table_3d = {table}.transpose{perm}.reshape("
+                    f"{table}.shape[{ind_dim}], 1, _D)"
+                )
+
+            # Reshape other (non-table, non-indices) inputs to 3D to match the
+            # table's (seq, 1, D) layout.  Currently handles:
+            #   - 2D with leading dim == seq: row-aligned, reshape to (seq, 1, D)
+            #   - 1D: broadcast scalar/vector, reshape to (1, 1, numel)
+            #   - else: flatten to (1, 1, -1) — assumes broadcastable with
+            #     (seq, 1, D).  This may not work correctly for 3D+ inputs.
+            pallas_call_other_args = []
+            for p in other_input_params:
+                p3d = f"_{p}_3d"
+                code.writeline(f"if {p}.ndim == 2 and {p}.shape[0] == _seq:")
+                code.writeline(f"    {p3d} = {p}.reshape(_seq, 1, _D)")
+                code.writeline(f"elif {p}.ndim == 1:")
+                code.writeline(f"    {p3d} = {p}.reshape(1, 1, {p}.shape[0])")
+                code.writeline("else:")
+                code.writeline(f"    {p3d} = {p}.reshape(1, 1, -1)")
+                pallas_call_other_args.append(p3d)
+
+            pallas_call_alias_args = []
+            for p in ctx.alias_params:
+                p3d = f"_{p}_3d"
+                code.writeline(f"{p3d} = {p}.reshape(_seq, 1, _D)")
+                pallas_call_alias_args.append(p3d)
+
+            partial_args = [f"{sv}={sv}" for sv in ctx.size_var_params]
+            if partial_args:
+                kernel_ref = (
+                    f"functools.partial({kernel_name}_kernel,"
+                    f" {', '.join(partial_args)})"
+                )
+            else:
+                kernel_ref = f"{kernel_name}_kernel"
+
+            # Reusable row-tiled BlockSpec (all i32 index_map for Mosaic compat)
+            code.writeline(
+                "_ROW_SPEC = pl.BlockSpec((1, 1, _D),"
+                " lambda i, _: (i, jnp.int32(0), jnp.int32(0)))"
+            )
+
+            num_non_alias_in_specs = 1 + len(pallas_call_other_args)
+            code.writeline("_in_specs = [")
+            with code.indent():
+                code.writeline(
+                    "pl.BlockSpec((1, 1, _D),"
+                    " lambda gi, idx: (idx[gi], jnp.int32(0), jnp.int32(0))),"
+                )
+                for p3d in pallas_call_other_args:
+                    code.writeline(
+                        f"_ROW_SPEC"
+                        f" if {p3d}.shape[0] == _seq else"
+                        f" pl.BlockSpec({p3d}.shape,"
+                        f" lambda i, _: (jnp.int32(0), jnp.int32(0), jnp.int32(0))),"
+                    )
+                for _ in ctx.alias_params:
+                    code.writeline("_ROW_SPEC,")
+            code.writeline("]")
+
+            num_outputs = len(ctx.output_params)
+            code.writeline(
+                "_out_specs = [" + ", ".join(["_ROW_SPEC"] * num_outputs) + "]"
+            )
+
+            # input_output_aliases: pallas_call arg index -> output index
+            # (offset by 1 for scalar prefetch arg)
+            alias_map_parts = []
+            for out_idx, _ in enumerate(ctx.alias_params):
+                arg_idx = 1 + num_non_alias_in_specs + out_idx
+                alias_map_parts.append(f"{arg_idx}: {out_idx}")
+            alias_map_literal = ", ".join(alias_map_parts)
+
+            out_shape_parts = [
+                f"jax.ShapeDtypeStruct((_seq, 1, _D), out_dtypes[{i}])"
+                for i in range(num_outputs)
+            ]
+            out_shape_expr = "[" + ", ".join(out_shape_parts) + "]"
+
+            code.writeline("_result = pl.pallas_call(")
+            with code.indent():
+                code.writeline(f"{kernel_ref},")
+                code.writeline(f"out_shape={out_shape_expr},")
+                code.writeline("grid_spec=pltpu.PrefetchScalarGridSpec(")
+                with code.indent():
+                    code.writeline("num_scalar_prefetch=1,")
+                    code.writeline("grid=(_seq,),")
+                    code.writeline("in_specs=_in_specs,")
+                    code.writeline("out_specs=_out_specs,")
+                code.writeline("),")
+                if alias_map_parts:
+                    code.writeline(f"input_output_aliases={{ {alias_map_literal} }},")
+                if not self.is_tpu:
+                    code.writeline(f"interpret={ctx.interpret_literal},")
+
+            all_pallas_args = (
+                [indices]
+                + ["_table_3d"]
+                + pallas_call_other_args
+                + pallas_call_alias_args
+            )
+            code.writeline(f")({', '.join(all_pallas_args)})")
+
+            code.writeline(
+                "return tuple(r.reshape(s) for r, s in zip(_result, out_shapes))"
+            )
+
+        self._codegen_main_entry(ctx, jit_wrapper_name)
+
     def _codegen_imports(self, ctx: _CodegenContext) -> None:
         imports = """
 import functools
@@ -3666,9 +4003,15 @@ from torch._inductor.runtime.runtime_utils import (
 """
         if ctx.is_tpu:
             imports += "\nimport jax.export"
+            imports += "\nfrom jax.experimental.pallas import tpu as pltpu"
             imports += "\nfrom torch_tpu._internal.pallas import tpu_torch_pallas"
         elif not ctx.interpret_is_cpu:
             imports += "\nfrom jax.experimental.pallas import mosaic_gpu as plgpu"
+        if self.indirect_access and not ctx.is_tpu:
+            imports += (
+                "\nimport os as _os; _os.environ.setdefault('JAX_PLATFORMS', 'cpu')"
+            )
+            imports += "\nfrom jax.experimental.pallas import tpu as pltpu"
         ctx.code.splice(imports, strip=True)
 
     def _get_iter_var_axis(self, var_sym: sympy.Symbol) -> int | None:
@@ -4194,6 +4537,14 @@ from torch._inductor.runtime.runtime_utils import (
             # False here.
             code.writeline("jax.config.update('jax_enable_x64', False)")
             code.writeline("jax.clear_caches()")
+
+            # Convert int64 inputs to int32 (TPU doesn't support int64)
+            all_input_params = list(ctx.alias_params) + list(ctx.pointer_tail)
+            for param_name in all_input_params:
+                code.writeline(
+                    f"{param_name} = {param_name}.to(torch.int32) "
+                    f"if {param_name}.dtype == torch.int64 else {param_name}"
+                )
 
             # Build JAX placeholders for all inputs
             code.writeline("# Build JAX placeholders for export tracing")
