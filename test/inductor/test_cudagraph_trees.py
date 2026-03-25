@@ -12,6 +12,7 @@ import unittest
 import warnings
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
+from unittest.mock import patch
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -5962,21 +5963,23 @@ if HAS_CUDA_AND_TRITON:
                 obs.op_outputs[aten.rand.default][2],
             )
 
-        @patch('torch._inductor.compile_fx.cudagraph_partition_post_compile')
+        @patch("torch._inductor.compile_fx.cudagraph_partition_post_compile")
         def test_cudagraph_empty_partition_raises_error(self, mock_post_compile):
             """Verify RuntimeError is raised when partitions are empty and cudagraph_or_error=True"""
             # 1. Simulate empty partitions returning from the post-compile step
             mock_post_compile.return_value = []
-        
+
             def fn(x):
                 return x * 2
 
-            x = torch.randn(4, device='cuda')
+            x = torch.randn(4, device="cuda")
             # This option triggers the logic you fixed
             compiled_fn = torch.compile(fn, options={"cudagraph_or_error": True})
-        
+
             # 2. Verify the fix for issue #176611
-            with self.assertRaisesRegex(RuntimeError, "Unable to find any CUDA graphable partitions"):
+            with self.assertRaisesRegex(
+                RuntimeError, "Unable to find any CUDA graphable partitions"
+            ):
                 compiled_fn(x)
 
     instantiate_parametrized_tests(CudaGraphTreeTests)
