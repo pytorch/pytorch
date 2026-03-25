@@ -107,7 +107,9 @@ from torch.utils._triton import (
     has_triton_tensor_descriptor_host_tma,
 )
 
+
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+, XPU and CPU devices"
+
 
 @contextlib.contextmanager
 def use_fa3():
