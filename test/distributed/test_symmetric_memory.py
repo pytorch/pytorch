@@ -628,26 +628,22 @@ class AsyncTPTest(MultiProcContinuousTest):
         ag_baseline, mm_baseline = _fused_all_gather_matmul_fallback(
             A_shard, [B], gather_dim=0, group_name=group_name
         )
-        with torch.profiler.profile(
-            activities=[
-                torch.profiler.ProfilerActivity.CUDA,
-            ],
-        ) as prof:
+
+        profiler_activities = [torch.profiler.ProfilerActivity.CUDA]
+        if TEST_WITH_ROCM:
+            # CK surfaces the scheduler path through RECORD_FUNCTION instead of
+            # the HIP kernel symbol, so we need CPU activity to observe it.
+            profiler_activities.insert(0, torch.profiler.ProfilerActivity.CPU)
+
+        with torch.profiler.profile(activities=profiler_activities) as prof:
             ag_target, mm_target = torch.ops.symm_mem.fused_all_gather_matmul(
                 A_shard, [B], gather_dim=0, group_name=group_name
             )
 
-        if not TEST_WITH_ROCM:
-            # CK's scheduler is a runtime struct, not a kernel template parameter,
-            # so it doesn't appear in HIP profiler symbols. Scheduler correctness
-            # on ROCm is validated by TORCH_CHECK in AsyncMM.cu + assert_close below.
-            self.assertTrue(
-                any(
-                    "PersistentAsyncInputScheduler" in event.key
-                    for event in prof.events()
-                )
-            )
-        
+        self.assertTrue(
+            any("PersistentAsyncInputScheduler" in event.key for event in prof.events())
+        )
+
         torch.testing.assert_close(ag_target, ag_baseline)
         torch.testing.assert_close(mm_target[0], mm_baseline[0])
         os.environ["TORCH_SYMM_MEM_ENABLE_NATIVE_ASYNC_TP"] = "0"
