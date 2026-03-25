@@ -189,6 +189,14 @@ Tensor NestedTensor_add_Tensor(
       });
 }
 
+// Only usable on the C++ side; scalars are converted to tensors coming from Python.
+Tensor NestedTensor_add_Scalar(
+    const Tensor& self,
+    const Scalar& other,
+    const Scalar& alpha) {
+  return NestedTensor_add_Tensor(self, wrapped_scalar_tensor(other), alpha);
+}
+
 Tensor NestedTensor_sub_Tensor(
     const Tensor& self,
     const Tensor& other,
@@ -269,6 +277,11 @@ Tensor& NestedTensor_add__Tensor(
       self, other, "add_", [alpha](const Tensor& b1, const Tensor& b2) {
         return b1.add_(b2, alpha);
       });
+}
+
+// Only usable on the C++ side; scalars are converted to tensors coming from Python.
+Tensor& NestedTensor_add__Scalar(Tensor& self, const Scalar& other, const Scalar& alpha) {
+  return NestedTensor_add__Tensor(self, wrapped_scalar_tensor(other), alpha);
 }
 
 Tensor& NestedTensor_mul__Tensor(Tensor& self, const Tensor& other) {

@@ -249,6 +249,10 @@ TORCH_IMPL_FUNC(add_out_mps)(const Tensor& self, const Tensor& other, const Scal
   mps::add_sub_lerp_template(self, other, alpha, output, "add");
 }
 
+TORCH_IMPL_FUNC(add_Scalar_out_mps)(const Tensor& self, const Scalar& other, const Scalar& alpha, const Tensor& output) {
+  mps::add_sub_lerp_template(self, wrapped_scalar_tensor(other), alpha, output, "add");
+}
+
 TORCH_IMPL_FUNC(sub_out_mps)(const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& output) {
   mps::add_sub_lerp_template(self, other, alpha, output, "sub");
 }

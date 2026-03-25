@@ -1792,6 +1792,10 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         out = nt1 + nt2
         self.assertEqual(ref, out)
 
+        ref_scalar = torch.nested.nested_tensor([t + 2 for t in nt1.unbind()])
+        out_scalar = torch.ops.aten.add.Scalar(nt1, 2)
+        self.assertEqual(ref_scalar, out_scalar)
+
     @dtypes(torch.float, torch.float16)
     @skipMeta
     @torch.inference_mode()
@@ -1930,6 +1934,11 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         )
         nt1 += nt2
         self.assertEqual(ref, nt1)
+
+        ref_scalar = torch.nested.nested_tensor([t + 2 for t in nt1.unbind()])
+        nt1_scalar = nt1.clone()
+        torch.ops.aten.add_.Scalar(nt1_scalar, 2)
+        self.assertEqual(ref_scalar, nt1_scalar)
 
     @dtypes(torch.float, torch.float16)
     @skipMeta

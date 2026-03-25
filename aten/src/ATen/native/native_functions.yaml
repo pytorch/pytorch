@@ -620,19 +620,29 @@
   autogen: _add_relu.Scalar_out
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
+- func: add.Scalar_out(Tensor self, Scalar other, Scalar alpha=1, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA, MTIA: add_Scalar_out
+    MPS: add_Scalar_out_mps
+  tags: pointwise
+
 - func: add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
+  structured_delegate: add.Scalar_out
   dispatch:
-    CompositeExplicitAutograd: add
+    NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: NestedTensor_add_Scalar
   tags: [core, pointwise]
 
 - func: add_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
+  structured_delegate: add.Scalar_out
   dispatch:
-    CompositeExplicitAutograd: add_
-  autogen: add.Scalar_out
+    NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: NestedTensor_add__Scalar
   tags: pointwise
 
 - func: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor

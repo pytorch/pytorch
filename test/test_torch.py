@@ -9017,6 +9017,15 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         y = x + 2
         self.assertEqual(y.size(), x.size())
 
+        x = torch.empty(4, 3, 8, 8, device='meta', memory_format=torch.channels_last)
+        out = torch.empty(0, device='meta')
+        torch.add(x, 2, out=out)
+        self.assertEqual(out.size(), x.size())
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+
+        x.add_(2)
+        self.assertTrue(x.is_contiguous(memory_format=torch.channels_last))
+
     def test_normal_shape(self):
         for device in get_all_device_types():
             tensor1 = torch.rand(1, device=device)
