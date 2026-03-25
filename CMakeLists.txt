@@ -268,9 +268,7 @@ cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX OR WIN32" OFF)
 cmake_dependent_option(USE_ROCM_CK_GEMM "Use ROCm Composable Kernel for GEMMs" ON "USE_ROCM;NOT WIN32" OFF)
 option(USE_ROCM_CK_SDPA "Use ROCm Composable Kernel for SDPA" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
-cmake_dependent_option(USE_NVRTC "Use NVRTC. Only available if USE_CUDA is on."
-                       OFF "USE_CUDA" OFF)
-cmake_dependent_option(USE_CUDNN "Use cuDNN" ON "USE_CUDA AND USE_NVRTC" OFF)
+cmake_dependent_option(USE_CUDNN "Use cuDNN" ON "USE_CUDA" OFF)
 cmake_dependent_option(USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
                        "USE_CUDNN" OFF)
 cmake_dependent_option(USE_CUSPARSELT "Use cuSPARSELt" ON "USE_CUDA" OFF)
@@ -304,6 +302,8 @@ option(USE_NNAPI "Use NNAPI" OFF)
 option(USE_NNPACK "Use NNPACK" ON)
 cmake_dependent_option(USE_NUMA "Use NUMA. Only available on Linux." ON "LINUX"
                        OFF)
+cmake_dependent_option(USE_NVRTC "Use NVRTC. Only available if USE_CUDA is on."
+                       OFF "USE_CUDA" OFF)
 option(USE_NUMPY "Use NumPy" ON)
 option(USE_OBSERVERS "Use observers module." OFF)
 option(USE_OPENCL "Use OpenCL" OFF)
