@@ -16098,7 +16098,8 @@
   autogen: _foobar.out
 
 - func: _fused_adam_(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] exp_avgs, Tensor(d!)[] exp_avg_sqs, Tensor(e!)[] max_exp_avg_sqs, Tensor[] state_steps, *, float lr, float beta1, float beta2, float weight_decay, float eps, bool amsgrad, bool maximize, Tensor? grad_scale=None, Tensor? found_inf=None) -> ()
-  # Unlike "foreach" functions, lists of tensors should be guaranteed to be on the same device (for now).
+  # state_steps can be on CPU when fused=True without capturable
+  device_check: NoCheck
   variants: function
   dispatch:
     CPU: _fused_adam_kernel_cpu_
@@ -16118,7 +16119,8 @@
   autogen: _fused_adam.tensor_lr, _fused_adam.tensor_lr_out
 
 - func: _fused_adamw_(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] exp_avgs, Tensor(d!)[] exp_avg_sqs, Tensor(e!)[] max_exp_avg_sqs, Tensor[] state_steps, *, float lr, float beta1, float beta2, float weight_decay, float eps, bool amsgrad, bool maximize, Tensor? grad_scale=None, Tensor? found_inf=None) -> ()
-  # Unlike "foreach" functions, lists of tensors should be guaranteed to be on the same device (for now).
+  # state_steps can be on CPU when fused=True without capturable
+  device_check: NoCheck
   variants: function
   dispatch:
     CPU: _fused_adamw_kernel_cpu_
@@ -16158,6 +16160,8 @@
   autogen: _fused_sgd.tensor_lr, _fused_sgd.tensor_lr_out
 
 - func: _fused_adagrad_(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] state_sums, Tensor(d!)[] state_steps, *, float lr, float lr_decay, float weight_decay, float eps, bool maximize, Tensor? grad_scale=None, Tensor? found_inf=None) -> ()
+  # state_steps can be on CPU when fused=True without capturable
+  device_check: NoCheck
   variants: function
   dispatch:
     CPU: _fused_adagrad_kernel_cpu_

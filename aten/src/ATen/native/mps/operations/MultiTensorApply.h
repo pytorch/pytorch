@@ -15,6 +15,7 @@ struct MetadataArguments { // the size of this struct must be less than 4 kiloby
   uint64_t numels[kmaxTensors];
   uint64_t threadgroup_to_tensor[kmaxThreadGroups];
   uint64_t threadgroup_to_chunk[kmaxThreadGroups];
+  float state_steps_values[kmaxTensors];
 };
 
 struct FusedAdamEncodingFunctor {
@@ -181,8 +182,7 @@ static void multi_tensor_apply_for_fused_optimizer(const std::string& kernel_nam
                                 usage:MTLResourceUsageRead | MTLResourceUsageWrite];
         }
         if (!state_steps.empty()) {
-          mtl_setBuffer(tensorArgumentEncoder, state_steps[tensor_index], depth * kmaxTensors + tensor_loc);
-          [computeEncoder useResource:getMTLBufferStorage(state_steps[tensor_index]) usage:MTLResourceUsageRead];
+          metadata_arguments.state_steps_values[tensor_loc] = state_steps[tensor_index].item<float>();
         }
         metadata_arguments.numels[tensor_loc] = tensor_lists[0][tensor_index].numel();
 
@@ -231,8 +231,7 @@ static void multi_tensor_apply_for_fused_optimizer(const std::string& kernel_nam
                                       usage:MTLResourceUsageWrite | MTLResourceUsageRead];
               }
               if (!state_steps.empty()) {
-                mtl_setBuffer(tensorArgumentEncoder, state_steps[tensor_index], depth * kmaxTensors);
-                [computeEncoder useResource:getMTLBufferStorage(state_steps[tensor_index]) usage:MTLResourceUsageRead];
+                metadata_arguments.state_steps_values[0] = metadata_arguments.state_steps_values[tensor_loc - 1];
               }
               tensor_loc = 1;
             }

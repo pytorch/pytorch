@@ -85,14 +85,31 @@ struct TensorListScalarListMetadata<c10::complex<double>, 2> {
 // NOTE(crcrpar): This is a conservative resolution to handle `state_steps`
 // whose each element is `at::Tensor` of 1 element representing the number of
 // `step`s called so far.
+//
+// When state_steps tensors are on the same device as parameters (e.g. for
+// capturable optimizers), we store device pointers and the kernel dereferences
+// them. When state_steps are on CPU (fused without capturable), we extract the
+// float values on the host and embed them directly in this struct, avoiding
+// device-side scalar tensors and the kernel launch to increment them.
 template <int n>
 struct FusedOptimizerTensorListMetadata {
   const void* addresses[n][depth_to_max_tensors[n - 1]];
   int64_t numel_for_tensor[depth_to_max_tensors[n - 1]];
-  const void* state_steps_addresses[depth_to_max_tensors_scalarlist[n - 1]];
+  union {
+    const void* addresses[depth_to_max_tensors_scalarlist[n - 1]];
+    float values[depth_to_max_tensors_scalarlist[n - 1]];
+  } state_steps;
+  bool state_steps_are_device_pointers;
   unsigned char block_to_tensor[depth_to_max_blocks[n - 1]];
   int block_to_chunk[depth_to_max_blocks[n - 1]];
   int start_tensor_this_launch;
+
+  C10_HOST_DEVICE float get_state_step(int i) const {
+    if (state_steps_are_device_pointers) {
+      return *reinterpret_cast<const float*>(state_steps.addresses[i]);
+    }
+    return state_steps.values[i];
+  }
 };
 
 template <typename T, typename U, typename... ArgTypes>
@@ -309,6 +326,10 @@ void multi_tensor_apply_for_fused_optimizer(
   const auto num_tensors = tensor_lists[0].size();
   FusedOptimizerTensorListMetadata<depth> tensorListMeta;
 
+  // if state_steps is on CPU, we pass in values directly through the struct
+  tensorListMeta.state_steps_are_device_pointers =
+      state_steps.empty() || !state_steps[0].is_cpu();
+
   int loc_block_info = 0;
   int loc_tensor_info = 0;
   for (const auto& tensor_index : c10::irange(num_tensors)) {
@@ -316,8 +337,13 @@ void multi_tensor_apply_for_fused_optimizer(
     if (tensor_lists[0][tensor_index].numel() == 0) {
       continue;
     }
-    tensorListMeta.state_steps_addresses[loc_tensor_info] =
-        state_steps[tensor_index].const_data_ptr();
+    if (tensorListMeta.state_steps_are_device_pointers) {
+      tensorListMeta.state_steps.addresses[loc_tensor_info] =
+          state_steps[tensor_index].const_data_ptr();
+    } else {
+      tensorListMeta.state_steps.values[loc_tensor_info] =
+          state_steps[tensor_index].item<float>();
+    }
     tensorListMeta.numel_for_tensor[loc_tensor_info] =
         tensor_lists[0][tensor_index].numel();
     for (const auto& d : c10::irange(depth)) {
@@ -356,8 +382,13 @@ void multi_tensor_apply_for_fused_optimizer(
         } else {
           tensorListMeta.numel_for_tensor[0] =
               tensorListMeta.numel_for_tensor[loc_tensor_info - 1];
-          tensorListMeta.state_steps_addresses[0] =
-              tensorListMeta.state_steps_addresses[loc_tensor_info - 1];
+          if (tensorListMeta.state_steps_are_device_pointers) {
+            tensorListMeta.state_steps.addresses[0] =
+                tensorListMeta.state_steps.addresses[loc_tensor_info - 1];
+          } else {
+            tensorListMeta.state_steps.values[0] =
+                tensorListMeta.state_steps.values[loc_tensor_info - 1];
+          }
           for (const auto& d : c10::irange(depth)) {
             tensorListMeta.addresses[d][0] =
                 tensorListMeta.addresses[d][loc_tensor_info - 1];

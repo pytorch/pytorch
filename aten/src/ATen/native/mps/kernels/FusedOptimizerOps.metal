@@ -58,6 +58,7 @@ struct MetadataArguments {
   ulong numels[kmaxTensors];
   ulong threadgroup_to_tensor[kmaxThreadGroups];
   ulong threadgroup_to_chunk[kmaxThreadGroups];
+  float state_steps_values[kmaxTensors];
 };
 
 enum ADAM_MODE : uint8_t { ORIGINAL = 0, ADAMW = 1 };
@@ -69,7 +70,7 @@ inline void adam_math_amsgrad(
     device T& exp_avg,
     device T& exp_avg_sq,
     device T& max_exp_avg_sq,
-    device state_steps_t& state_steps,
+    const float state_steps,
     const float lr,
     const float beta1,
     const float beta2,
@@ -96,12 +97,9 @@ inline void adam_math_amsgrad(
 
   exp_avg = T(beta1 * exp_avg + (1 - beta1) * grad);
   exp_avg_sq = T(beta2 * exp_avg_sq + (1 - beta2) * grad * grad);
-  const float casted_state_steps = static_cast<float>(state_steps);
-  const auto bias_correction1 =
-      1 - metal::precise::pow(beta1, casted_state_steps);
+  const auto bias_correction1 = 1 - metal::precise::pow(beta1, state_steps);
   const auto step_size = lr / bias_correction1;
-  const auto bias_correction2 =
-      1 - metal::precise::pow(beta2, casted_state_steps);
+  const auto bias_correction2 = 1 - metal::precise::pow(beta2, state_steps);
   const auto bias_correction2_sqrt = metal::precise::sqrt(bias_correction2);
   max_exp_avg_sq = max(max_exp_avg_sq, exp_avg_sq);
 
@@ -117,7 +115,7 @@ inline void adam_math(
     device T& grad,
     device T& exp_avg,
     device T& exp_avg_sq,
-    device state_steps_t& state_steps,
+    const float state_steps,
     const float lr,
     const float beta1,
     const float beta2,
@@ -144,12 +142,9 @@ inline void adam_math(
 
   exp_avg = T(beta1 * exp_avg + (1 - beta1) * grad);
   exp_avg_sq = T(beta2 * exp_avg_sq + (1 - beta2) * grad * grad);
-  const float casted_state_steps = static_cast<float>(state_steps);
-  const auto bias_correction1 =
-      1 - metal::precise::pow(beta1, casted_state_steps);
+  const auto bias_correction1 = 1 - metal::precise::pow(beta1, state_steps);
   const auto step_size = lr / bias_correction1;
-  const auto bias_correction2 =
-      1 - metal::precise::pow(beta2, casted_state_steps);
+  const auto bias_correction2 = 1 - metal::precise::pow(beta2, state_steps);
   const auto bias_correction2_sqrt = metal::precise::sqrt(bias_correction2);
   const auto denom =
       (metal::precise::sqrt(exp_avg_sq) / bias_correction2_sqrt) + eps;
@@ -175,7 +170,7 @@ kernel void fused_adam_amsgrad(
   const uint32_t chunk_offset = chunk_idx * chunk_size;
   const uint32_t numel = metadata_args.numels[tensor_loc] - chunk_offset;
 
-  const auto step_count = args.state_steps[tensor_loc];
+  const auto step_count = metadata_args.state_steps_values[tensor_loc];
 
   // each chunk is a threadgroup
   auto param = args.params[tensor_loc] + chunk_offset;
@@ -192,7 +187,7 @@ kernel void fused_adam_amsgrad(
         *(exp_avg + i_start),
         *(exp_avg_sq + i_start),
         *(max_exp_avg_sq + i_start),
-        *step_count,
+        step_count,
         lr,
         beta1,
         beta2,
@@ -220,7 +215,7 @@ kernel void fused_adam(
   const uint32_t chunk_offset = chunk_idx * chunk_size;
   const uint32_t numel = metadata_args.numels[tensor_loc] - chunk_offset;
 
-  const auto step_count = args.state_steps[tensor_loc];
+  const auto step_count = metadata_args.state_steps_values[tensor_loc];
 
   // each chunk is a threadgroup
   auto param = args.params[tensor_loc] + chunk_offset;
@@ -235,7 +230,7 @@ kernel void fused_adam(
         *(grad + i_start),
         *(exp_avg + i_start),
         *(exp_avg_sq + i_start),
-        *step_count,
+        step_count,
         lr,
         beta1,
         beta2,

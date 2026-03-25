@@ -79,14 +79,8 @@ class Adagrad(Optimizer):
         for group in self.param_groups:
             for p in group["params"]:
                 state = self.state[p]
-                state["step"] = (
-                    torch.zeros(
-                        (),
-                        dtype=_get_scalar_dtype(is_fused=group["fused"]),
-                        device=p.device,
-                    )
-                    if group["fused"]
-                    else torch.tensor(0.0, dtype=_get_scalar_dtype())
+                state["step"] = torch.tensor(
+                    0.0, dtype=_get_scalar_dtype(is_fused=group["fused"])
                 )
                 init_value = (
                     complex(initial_accumulator_value, initial_accumulator_value)
@@ -605,8 +599,14 @@ def _fused_adagrad(
             )
         if lr_dict is not None and device not in lr_dict:
             lr_dict[device] = lr.to(device=device, non_blocking=True)  # type: ignore[union-attr]
-            lr = lr_dict[device]
-        torch._foreach_add_(device_state_steps, 1)
+            lr = lr_dict[device]  # type: ignore[index]
+        if device_state_steps[0].is_cpu:
+            torch._foreach_add_(
+                device_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
+            )
+        else:
+            torch._foreach_add_(device_state_steps, 1)
+
         torch._fused_adagrad_(
             device_params,
             device_grads,
@@ -621,6 +621,14 @@ def _fused_adagrad(
             found_inf=device_found_inf,
         )
         if device_found_inf is not None:
-            torch._foreach_sub_(
-                device_state_steps, [device_found_inf] * len(device_state_steps)
-            )
+            if device_state_steps[0].is_cpu:
+                torch._foreach_add_(
+                    device_state_steps,
+                    torch.tensor(-1.0, device="cpu"),
+                    alpha=1.0,
+                )
+            else:
+                torch._foreach_sub_(
+                    device_state_steps,
+                    [device_found_inf] * len(device_state_steps),
+                )
