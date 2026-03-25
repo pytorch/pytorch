@@ -632,7 +632,9 @@ class DTensorTest(DTensorTestBase):
         # test backward new_empty_strided with sharding works correctly
         my_dtensor.to_local().sum().backward()
         local_tensor.sum().backward()
-        self.assertEqual(my_dtensor.grad, new_strided_dtensor.grad)
+        self.assertEqual(
+            my_dtensor.grad.full_tensor(), new_strided_dtensor.grad.full_tensor()
+        )
         self.assertEqual(
             my_dtensor.grad.redistribute(placements=[Replicate()]).to_local(),
             local_tensor.grad,
@@ -909,6 +911,50 @@ class DTensorTest(DTensorTestBase):
 
         loss = out1.sum()
         loss.backward()
+
+    @with_comms
+    def test_assert_equal_dtensor(self):
+        mesh = self.build_device_mesh()
+        local = torch.randn(4, 4, device=self.device_type)
+
+        dt1 = DTensor.from_local(local.clone(), mesh, [Replicate()])
+        dt2 = DTensor.from_local(local.clone(), mesh, [Replicate()])
+
+        self.assertEqual(dt1, dt2)
+        torch.testing.assert_close(dt1, dt2)
+
+        dt3 = DTensor.from_local(
+            torch.randn(4, 4, device=self.device_type), mesh, [Replicate()]
+        )
+        with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close"):
+            self.assertEqual(dt1, dt3)
+
+        dt_shard = DTensor.from_local(local.clone(), mesh, [Shard(0)])
+        with self.assertRaisesRegex(AssertionError, "DTensor placements do not match"):
+            self.assertEqual(dt1, dt_shard)
+
+        with self.assertRaisesRegex(
+            TypeError, "Comparing a DTensor to a non-DTensor is ambiguous"
+        ):
+            self.assertEqual(dt1, local)
+        with self.assertRaisesRegex(
+            TypeError, "Comparing a DTensor to a non-DTensor is ambiguous"
+        ):
+            self.assertEqual(local, dt1)
+        with self.assertRaisesRegex(
+            TypeError, "Comparing a DTensor to a non-DTensor is ambiguous"
+        ):
+            torch.testing.assert_close(dt1, local)
+
+        dt_scalar = DTensor.from_local(
+            torch.tensor(42.0, device=self.device_type), mesh, [Replicate()]
+        )
+        with self.assertRaisesRegex(
+            TypeError, "Comparing a DTensor to a non-DTensor is ambiguous"
+        ):
+            self.assertEqual(dt_scalar, 42.0)
+        self.assertEqual(dt_scalar.full_tensor(), 42.0)
+        self.assertEqual(dt_scalar.to_local(), 42.0)
 
 
 DTensorTestWithLocalTensor = create_local_tensor_test_class(

@@ -605,7 +605,12 @@ class DistMathOpsTest(DTensorTestBase):
                 with CommDebugMode() as comm_mode:
                     output_dist = model_dist(x)
 
-                self.assertEqual(output_local, output_dist)
+                output_dist_cmp = (
+                    output_dist.full_tensor()
+                    if isinstance(output_dist, DTensor)
+                    else output_dist
+                )
+                self.assertEqual(output_local, output_dist_cmp)
 
                 # all requires_grad patterns should have the same forward comm counts
                 expected_fwd_comm = {
@@ -645,7 +650,12 @@ class DistMathOpsTest(DTensorTestBase):
                     comm_mode.comm_module_counts["Global"]["backward"],
                     expected_bwd_comm,
                 )
-                self.assertEqual(output_local, output_dist)
+                output_dist_cmp = (
+                    output_dist.full_tensor()
+                    if isinstance(output_dist, DTensor)
+                    else output_dist
+                )
+                self.assertEqual(output_local, output_dist_cmp)
 
             except Exception as e:
                 subtest_fails[subtest_cfg] = e
@@ -1274,7 +1284,9 @@ class DistMathOpsTest(DTensorTestBase):
         dt = dt.redistribute(dt.device_mesh, placements=[Replicate()])
         out_with_redistribute = torch.norm(dt)
 
-        self.assertEqual(out_without_redistribute, out_with_redistribute)
+        self.assertEqual(
+            out_without_redistribute.full_tensor(), out_with_redistribute.full_tensor()
+        )
 
         local_tensor = torch.rand(3, dtype=torch.float32, device=self.device_type)
         dt = DTensor.from_local(
@@ -1285,7 +1297,9 @@ class DistMathOpsTest(DTensorTestBase):
         dt = dt.redistribute(dt.device_mesh, placements=[Replicate()])
         out_with_redistribute = torch.max(dt)
 
-        self.assertEqual(out_without_redistribute, out_with_redistribute)
+        self.assertEqual(
+            out_without_redistribute.full_tensor(), out_with_redistribute.full_tensor()
+        )
 
         local_tensor = torch.rand(3, dtype=torch.float32, device=self.device_type)
         dt = DTensor.from_local(
@@ -1296,7 +1310,9 @@ class DistMathOpsTest(DTensorTestBase):
         dt = dt.redistribute(dt.device_mesh, placements=[Replicate()])
         out_with_redistribute = torch.min(dt)
 
-        self.assertEqual(out_without_redistribute, out_with_redistribute)
+        self.assertEqual(
+            out_without_redistribute.full_tensor(), out_with_redistribute.full_tensor()
+        )
 
     @with_comms
     def test_matching_partial_reduction_ops(self):
@@ -1315,7 +1331,9 @@ class DistMathOpsTest(DTensorTestBase):
 
         self.assertTrue(out_without_redistribute.placements[0].is_partial())
         self.assertTrue(out_with_redistribute.placements[0].is_replicate())
-        self.assertEqual(out_without_redistribute, out_with_redistribute)
+        self.assertEqual(
+            out_without_redistribute.full_tensor(), out_with_redistribute.full_tensor()
+        )
 
     @skip_if_lt_x_gpu(4)
     @with_comms
