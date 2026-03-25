@@ -30,6 +30,7 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import typing
 import uuid
 from importlib import import_module
 from tempfile import TemporaryFile
@@ -154,6 +155,7 @@ def _extract_distributed_info(
     Returns a dict mapping group names to dicts with 'size' and 'rank' keys.
     Example: {'tp': {'size': 4, 'rank': 0}, 'dp': {'size': 2, 'rank': 0}}
     """
+    from torch.distributed import GroupName
     from torch.fx.operator_schemas import normalize_function
 
     group_info: dict[str, dict[str, int]] = {}
@@ -176,9 +178,10 @@ def _extract_distributed_info(
             continue
         _, kwargs = opt_args_kwargs
 
-        group_name = kwargs.get("group_name")
-        if group_name is None:
+        group_name_ = kwargs.get("group_name")
+        if not isinstance(group_name_, str):
             continue
+        group_name = typing.cast(GroupName, group_name_)
 
         if group_name in group_info:
             continue
