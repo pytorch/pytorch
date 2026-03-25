@@ -1332,6 +1332,15 @@ class SideEffects:
                     cg.call_function(1, False)
                     cg.pop_top()
                 _maybe_log_side_effect(var)
+            elif isinstance(var, variables.CountIteratorVariable):
+                for _ in range(var.advance_count):
+                    cg.add_push_null(
+                        lambda: cg.load_import_from(utils.__name__, "iter_next")
+                    )
+                    cg(var.source)  # type: ignore[attr-defined]
+                    cg.call_function(1, False)
+                    cg.pop_top()
+                _maybe_log_side_effect(var)
             elif isinstance(var, variables.RandomVariable):
                 # set correct random seed state
                 def gen_fn() -> None:

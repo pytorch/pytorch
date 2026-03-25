@@ -26,6 +26,7 @@ import functools
 import importlib
 import inspect
 import io
+import itertools
 import logging
 import math
 import pickle
@@ -184,6 +185,7 @@ from .utils import (
     istype,
     key_is_id,
     key_to_id,
+    normalize_count_iter,
     normalize_range_iter,
     orig_code_map,
     tensor_always_has_static_shape,
@@ -198,6 +200,7 @@ if TYPE_CHECKING:
 
 
 guard_manager_testing_hook_fn: Callable[[Any, Any, Any], Any] | None = None
+_COUNT_ITERATOR_TYPE = type(itertools.count())
 
 try:
     import numpy as np
@@ -749,6 +752,7 @@ def _get_closure_vars() -> dict[str, object]:
             "___dict_version": dict_version,
             "___dict_contains": lambda a, b: dict.__contains__(b, a),
             "___tuple_iterator_len": tuple_iterator_len,
+            "___normalize_count_iter": normalize_count_iter,
             "___normalize_range_iter": normalize_range_iter,
             "___tuple_iterator_getitem": tuple_iterator_getitem,
             "___dataclass_fields": dataclass_fields,
@@ -2806,6 +2810,30 @@ class GuardBuilder(GuardBuilderBase):
             guard.user_stack,
         )
 
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: (type(value), normalize_count_iter(value)),
+        eval_fn=lambda value, metadata: (
+            type(value) is metadata[0] and normalize_count_iter(value) == metadata[1]
+        ),
+    )
+    def COUNT_ITERATOR_MATCH(self, guard: Guard) -> None:
+        ref = self.arg_ref(guard)
+        value = self.get(guard)
+        count_type = type(value)
+        normalized_count_iter = normalize_count_iter(value)
+
+        def guard_fn(x: Any) -> bool:
+            return (
+                type(x) is count_type
+                and normalize_count_iter(x) == normalized_count_iter
+            )
+
+        code = [f"___normalize_count_iter({ref}) == {normalized_count_iter}"]
+        self._set_guard_export_info(guard, code)
+        self.get_guard_manager(guard).add_lambda_guard(
+            guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
     # Multi-source guard (two inputs aliasing) — not expressible as a
     # single source → value check.
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
@@ -3791,6 +3819,10 @@ class GuardsStatePickler(pickle.Pickler):
         return dict.fromkeys(elems).keys()
 
     @classmethod
+    def _unpickle_count_iter(cls, item: int, step: int) -> itertools.count[int]:
+        return itertools.count(item, step)
+
+    @classmethod
     def _unpickle_fsdp_module_type(
         cls, original_type: type[torch.nn.Module]
     ) -> type[torch.nn.Module]:
@@ -3972,6 +4004,11 @@ class GuardsStatePickler(pickle.Pickler):
 
         elif isinstance(obj, types.MappingProxyType):
             return type(self)._unpickle_mapping_proxy, (obj.copy(),)
+
+        elif type(obj) is _COUNT_ITERATOR_TYPE:
+            item, step = normalize_count_iter(obj)
+            if item is not NotImplemented and step is not NotImplemented:
+                return type(self)._unpickle_count_iter, (item, step)
 
         elif isinstance(obj, torch._dynamo.utils.dict_keys):
             return type(self)._unpickle_dict_keys, (list(obj),)

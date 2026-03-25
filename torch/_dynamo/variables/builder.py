@@ -52,6 +52,7 @@ from torch._dynamo.utils import (
     get_metrics_context,
     is_int_specialization_case,
     is_torch_sym,
+    normalize_count_iter,
     set_feature_use,
 )
 from torch._guards import TracingContext
@@ -222,7 +223,7 @@ from .higher_order_ops import (
     LocalMapWrappedHigherOrderVariable,
     TorchHigherOrderOperatorVariable,
 )
-from .iter import ItertoolsVariable
+from .iter import CountIteratorVariable, ItertoolsVariable
 from .lazy import LazyConstantVariable, LazyVariableTracker
 from .lists import (
     BaseListVariable,
@@ -594,6 +595,7 @@ class VariableBuilder:
                 (tuple, list, odict_values, collections.deque, torch.Size),
                 cls.wrap_listlike,
             ),
+            (itertools.count, cls.wrap_itertools_count),
             (tuple_iterator, cls.wrap_tuple_iterator),
             (range_iterator, cls.wrap_range_iterator),
             ((slice, range), cls.wrap_slice_range),
@@ -1973,6 +1975,22 @@ class VariableBuilder:
         # on items since `RANGE_ITERATOR_MATCH` guarantees the same items.
         items = [ConstantVariable.create(v) for v in copy.deepcopy(value)]
         result = ListIteratorVariable(items, source=self.source)
+        return self.tx.output.side_effects.track_mutable(value, result)
+
+    def wrap_itertools_count(self, value: Any) -> VariableTracker:
+        current_item, step = normalize_count_iter(value)
+        if not (
+            ConstantVariable.is_literal(current_item)
+            and ConstantVariable.is_literal(step)
+        ):
+            return self.wrap_user_defined(value)
+
+        self.install_guards(GuardBuilder.COUNT_ITERATOR_MATCH)
+        result = CountIteratorVariable(
+            ConstantVariable.create(current_item),
+            ConstantVariable.create(step),
+            source=self.source,
+        )
         return self.tx.output.side_effects.track_mutable(value, result)
 
     def wrap_slice_range(self, value: slice | range) -> SliceVariable | RangeVariable:
