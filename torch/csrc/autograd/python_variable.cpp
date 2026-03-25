@@ -1087,10 +1087,9 @@ struct IValueOrDTensorSpec {
   py::object dtensor_spec;
 
   bool operator==(const IValueOrDTensorSpec& rhs) const {
-    if (dtensor_spec) {
-      return rhs.dtensor_spec && dtensor_spec.equal(rhs.dtensor_spec);
-    }
-    return !rhs.dtensor_spec && iv == rhs.iv;
+    return dtensor_spec
+        ? (rhs.dtensor_spec && dtensor_spec.equal(rhs.dtensor_spec))
+        : (iv == rhs.iv);
   }
 };
 
@@ -1163,6 +1162,18 @@ class NativeOpSchema {
   // have no guarantees about its lifetime. This class is cheap anyway.
   c10::OperatorHandle op_;
   std::size_t hash_;
+  // Subtle point: consider clamp.Tensor(Tensor self, Tensor?
+  // min=None, Tensor? max=None). The invocations clamp(t1, None, t2)
+  // and clamp(t1, t2, None) have the same comparison key (t1, t2)
+  // because we drop non-static non-tensor args from comparison. The
+  // only way we happen to be able to tell them apart is that we omit
+  // trailing defaulted arguments from the args tuple passed to
+  // __torch_dispatch__ (and hence to DTensor dispatch as well), so
+  // they have different args_schema_len_.
+  //
+  // I am preserving this existing behavior, but I suspect we should
+  // make an algorithm change to be less brittle, such as including
+  // None defaults for Tensor arguments in the comparison.
   std::size_t args_schema_len_;
   // There is no particular justification for the choice of 8
   // here. Feel free to change it.
@@ -1831,7 +1842,7 @@ static bool DTensor_OpSchema_recompute_comparison_key_impl(
   size_t idx = 0;
   for (const auto& e : args_schema) {
     if (idx >= native_info.static_argnum ||
-        arg_type_tensor_or_tensor_list_like(e) || e.is_none()) {
+        arg_type_tensor_or_tensor_list_like(e)) {
       if (PyList_Check(e.ptr())) {
         args_to_hash.push_back(
             py::reinterpret_steal<py::object>(PyList_AsTuple(e.ptr())));
@@ -2293,9 +2304,7 @@ create_native_op_schema(
   const auto handle_non_dtensor_arg =
       [&comparison_key, &comparison_key_hash, &native_info](
           size_t idx, c10::IValue arg) {
-        bool is_none_or_undefined =
-            arg.isNone() || (arg.isTensor() && !arg.toTensor().defined());
-        if (idx >= native_info.static_argnum || is_none_or_undefined) {
+        if (idx >= native_info.static_argnum) {
           if (arg.isList()) {
             const auto& list = arg.toList();
             if (list.empty()) {
