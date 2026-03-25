@@ -1134,6 +1134,7 @@ class TreeSpec:
     num_nodes: int = dataclasses.field(init=False)
     num_leaves: int = dataclasses.field(init=False)
     num_children: int = dataclasses.field(init=False)
+    _unflatten_fn: Any = dataclasses.field(init=False, compare=False, hash=False)
 
     def __init__(
         self,
@@ -1155,6 +1156,7 @@ class TreeSpec:
             num_nodes = 1
             num_leaves = 1
             num_children = 0
+            unflatten_fn = None
         else:
             num_nodes = 1
             num_leaves = 0
@@ -1162,9 +1164,13 @@ class TreeSpec:
                 num_nodes += child.num_nodes
                 num_leaves += child.num_leaves
             num_children = len(self._children)
+            # Capture the unflatten function at construction time so the
+            # TreeSpec remains valid even if the type is later deregistered.
+            unflatten_fn = SUPPORTED_NODES[self.type].unflatten_fn
         object.__setattr__(self, "num_nodes", num_nodes)
         object.__setattr__(self, "num_leaves", num_leaves)
         object.__setattr__(self, "num_children", num_children)
+        object.__setattr__(self, "_unflatten_fn", unflatten_fn)
 
     def __repr__(self, indent: int = 0) -> str:
         repr_prefix: str = f"TreeSpec({self.type.__name__}, {self._context}, ["
@@ -1319,7 +1325,13 @@ class TreeSpec:
         if self.is_leaf():
             return leaves[0]
 
-        unflatten_fn = SUPPORTED_NODES[self.type].unflatten_fn
+        # Look up unflatten_fn from the registry when available (dynamo
+        # traces this dict lookup specially).  Fall back to the cached copy
+        # for types that were temporarily registered then deregistered.
+        node_def = SUPPORTED_NODES.get(self.type)
+        unflatten_fn = (
+            node_def.unflatten_fn if node_def is not None else self._unflatten_fn
+        )
 
         # Recursively unflatten the children
         start = 0
@@ -1382,9 +1394,39 @@ class LeafSpec(TreeSpec):
         object.__setattr__(self, "num_nodes", 1)
         object.__setattr__(self, "num_leaves", 1)
         object.__setattr__(self, "num_children", 0)
+        object.__setattr__(self, "_unflatten_fn", None)
 
     def __repr__(self, indent: int = 0) -> str:
         return "*"
+
+
+# Override dataclass-generated __getstate__/__setstate__ (which include all
+# slots) to exclude _unflatten_fn — it holds a function reference that may
+# not be picklable.  Re-resolve it from SUPPORTED_NODES on unpickle.
+def _treespec_getstate(self: TreeSpec) -> dict[str, Any]:
+    return {
+        "type": self.type,
+        "_context": self._context,
+        "_children": self._children,
+        "num_nodes": self.num_nodes,
+        "num_leaves": self.num_leaves,
+        "num_children": self.num_children,
+    }
+
+
+def _treespec_setstate(self: TreeSpec, state: dict[str, Any]) -> None:
+    for k, v in state.items():
+        object.__setattr__(self, k, v)
+    if self.type is None:
+        object.__setattr__(self, "_unflatten_fn", None)
+    else:
+        node_def = SUPPORTED_NODES.get(self.type)
+        unflatten_fn = node_def.unflatten_fn if node_def is not None else None
+        object.__setattr__(self, "_unflatten_fn", unflatten_fn)
+
+
+TreeSpec.__getstate__ = _treespec_getstate  # type: ignore[assignment]
+TreeSpec.__setstate__ = _treespec_setstate  # type: ignore[assignment]
 
 
 # All leaves are equivalent, so represent with a single object to save on
