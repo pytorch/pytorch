@@ -137,20 +137,14 @@ def semi_sparse_mm(func, types, args=(), kwargs=None) -> torch.Tensor:
             "`SparseSemiStructuredTensor` matmul: Broadcasting is not implemented"
         )
     if isinstance(A, torch.sparse.SparseSemiStructuredTensor):
-        row, col = B.shape
-        B_padded = A._pad_dense_input(B)
-        res = A._mm(B_padded)
-        return res[:, :col]
+        return A._mm(B)
     else:
         B_t = B.t()
         if not isinstance(B_t, torch.sparse.SparseSemiStructuredTensor):
             raise AssertionError(
                 f"expected SparseSemiStructuredTensor, got {type(B_t).__name__}"
             )
-        row, col = A.shape
-        A_padded = B._pad_dense_input(A)
-        res = B_t._mm(A_padded.t()).t()
-        return res[:row, :]
+        return B_t._mm(A, should_transpose_dense=True).t()
 
 
 def semi_sparse_addmm(func, types, args=(), kwargs=None) -> torch.Tensor:
@@ -175,9 +169,7 @@ def semi_sparse_addmm(func, types, args=(), kwargs=None) -> torch.Tensor:
             f"expected SparseSemiStructuredTensor, got {type(B_t).__name__}"
         )
     row, _col = A.shape
-    A_padded = B_t._pad_dense_input(A)
-    result = B_t._mm(A_padded.t(), bias=bias).t()
-    return result[:row, :]
+    return B_t._mm(A, bias=bias, should_transpose_dense=True).t()
 
 
 def semi_sparse_linear(func, types, args=(), kwargs=None) -> torch.Tensor:
@@ -188,7 +180,6 @@ def semi_sparse_linear(func, types, args=(), kwargs=None) -> torch.Tensor:
 
     shape = A.shape
     A_2d = A.view(-1, shape[-1])
-
     if bias is None:
         res = A_2d @ B.t()
     else:
@@ -197,7 +188,6 @@ def semi_sparse_linear(func, types, args=(), kwargs=None) -> torch.Tensor:
             types=None,
             args=[bias, A_2d, B.t()],
         )
-
     return res.view(*shape[:-1], -1)
 
 
