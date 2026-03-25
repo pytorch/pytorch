@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 # ruff: noqa: F841
 import contextlib
-import contextvars
 import copy
 import dataclasses
 import functools
@@ -5414,9 +5413,8 @@ class CommonTemplate:
         threads = []
         compiled_m = torch.compile(model)
         for _ in range(1, numb_instance + 1):
-            ctx = contextvars.copy_context()
             thread = threading.Thread(
-                target=ctx.run, args=(run_weights_sharing_model, compiled_m, inp)
+                target=run_weights_sharing_model, args=(compiled_m, inp)
             )
             threads.append(thread)
             thread.start()
