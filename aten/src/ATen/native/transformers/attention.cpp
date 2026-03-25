@@ -492,6 +492,20 @@ int64_t _fused_sdp_choice_meta(
     return choice_int;
   }
 #endif
+  bool has_xpu = query_key_set.has(c10::DispatchKey::XPU);
+  if (has_xpu) {
+    auto choice_int = _fused_sdp_choice_stub(
+        at::kXPU,
+        query_,
+        key,
+        value,
+        attn_mask_,
+        dropout_p,
+        is_causal,
+        scale,
+        enable_gqa);
+    return choice_int;
+  }
   return static_cast<int64_t>(sdp::SDPBackend::math);
 }
 namespace {
