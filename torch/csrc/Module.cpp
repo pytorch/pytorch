@@ -2586,7 +2586,9 @@ Call this whenever a new thread is created in order to propagate values from
           "Winograd3x3Depthwise", at::native::ConvBackend::Winograd3x3Depthwise)
       .value("Xnnpack2d", at::native::ConvBackend::Xnnpack2d)
       .value("Mps", at::native::ConvBackend::Mps)
-      .value("MpsTranspose,", at::native::ConvBackend::MpsTranspose);
+      .value("MpsTranspose,", at::native::ConvBackend::MpsTranspose)
+      .value("Hipdnn", at::native::ConvBackend::Hipdnn)
+      .value("HipdnnTranspose", at::native::ConvBackend::HipdnnTranspose);
 
   py_module.def(
       "_select_conv_backend",
