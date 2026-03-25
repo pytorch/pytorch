@@ -1013,11 +1013,6 @@ class ConstDictVariable(VariableTracker):
         """
         return False
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str):
-        if name == "__class__":
-            return VariableTracker.build(tx, self.python_type())
-        return super().var_getattr(tx, name)
-
 
 class MappingProxyVariable(VariableTracker):
     # proxies to the original dict_vt

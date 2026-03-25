@@ -1353,7 +1353,10 @@ class GetAttrVariable(VariableTracker):
             and args[0].is_python_constant()
             and isinstance(
                 self.obj,
-                (variables.NNModuleVariable,),
+                (
+                    variables.NNModuleVariable,
+                    variables.UserDefinedClassVariable,
+                ),
             )
         ):
             obj = self.obj
@@ -1389,7 +1392,10 @@ class GetAttrVariable(VariableTracker):
             and not kwargs
             and isinstance(
                 self.obj,
-                (variables.NNModuleVariable,),
+                (
+                    variables.NNModuleVariable,
+                    variables.UserDefinedClassVariable,
+                ),
             )
         ):
             obj = self.obj
@@ -1405,6 +1411,15 @@ class GetAttrVariable(VariableTracker):
                 self.obj.convert_to_unspecialized(tx)
 
         return super().call_method(tx, name, args, kwargs)
+
+    def get_forwarded_dict(self, tx: "InstructionTranslator") -> VariableTracker:
+        assert (
+            self.name == "__dict__"
+            and isinstance(self.obj, variables.UserDefinedClassVariable)
+            and not tx.output.side_effects.has_pending_mutation(self.obj)
+        )
+        self.obj.ban_mutation = True
+        return VariableTracker.build(tx, self.obj.value.__dict__, self.source)
 
 
 class MethodWrapperVariable(VariableTracker):
