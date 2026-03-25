@@ -227,9 +227,6 @@ def _(
     pass
 
 
-has_side_effect(torch.ops.streams.record_stream.default)
-
-
 class SymbolicStreamState:
     """Track the currently entered stream if any"""
 
