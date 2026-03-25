@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
 
 project(headeronly CXX)
 
-set(CMAKE_CXX_STANDARD 17 CACHE STRING "The C++ standard whose features are requested to build this target.")
+set(CMAKE_CXX_STANDARD 20 CACHE STRING "The C++ standard whose features are requested to build this target.")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Main build file for torch/headeronly, except there's no build cuz this lib is header-only!
