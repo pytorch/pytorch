@@ -923,7 +923,6 @@ def _should_use_fused_all_gather_matmul_native(
         and len(Bs) == 1
     )
 
-
 def _fused_all_gather_matmul_native(
     A_shard: torch.Tensor,
     B: torch.Tensor,
@@ -968,11 +967,12 @@ def _fused_all_gather_matmul_native(
     if torch.version.hip is not None:
         backend_stream.wait_stream(current_stream)
 
+    # TODO: Remove once CK fixes pivot behavior.
+    # CK scheduler currently pivots signal-index mapping without pivoting
+    # the tile's M-coordinate itself. Keep pivot 0 so signal i always
+    # corresponds to data chunk i when communication overlaps compute.
     async_mm_chunk_pivot = rank
     if torch.version.hip is not None:
-        # CK scheduler currently pivots signal-index mapping without pivoting
-        # the tile's M-coordinate itself. Keep pivot 0 so signal i always
-        # corresponds to data chunk i when communication overlaps compute.
         async_mm_chunk_pivot = 0
 
     out = torch.ops.symm_mem._async_input_mm(A, B, A_signals, async_mm_chunk_pivot)
