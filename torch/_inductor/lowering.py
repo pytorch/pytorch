@@ -3063,7 +3063,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         return result
 
     def _apply_constraint_inner(idx, arg, meta_val, meta_stride_expr, stride_order):
-        if not meta_val.is_cuda:
+        if not (meta_val.is_cuda or meta_val.is_xpu):
             return ir.ExternKernel.require_stride_order(arg, stride_order)
 
         # This is the minimum alignment required by SDPA kernels for attention_bias.
