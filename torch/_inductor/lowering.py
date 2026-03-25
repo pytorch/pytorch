@@ -2594,7 +2594,6 @@ make_fallback(aten.randint)
 make_fallback(torch.ops.streams.record_event.default)
 make_fallback(torch.ops.streams.wait_event.default)
 make_fallback(torch.ops.streams.synchronize_event.default)
-make_fallback(torch.ops.streams.synchronize_device.default)
 
 
 @register_lowering(aten.rand)

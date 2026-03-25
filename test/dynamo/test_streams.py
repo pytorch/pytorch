@@ -2095,19 +2095,6 @@ class <lambda>(torch.nn.Module):
         self.assertEqual(len(sync_nodes), 1)
 
     @requires_cuda
-    def test_device_synchronize_inductor_lowering(self):
-        def f(x):
-            y = x + 1
-            torch.cuda.synchronize()
-            return y + 1
-
-        f_compiled = torch.compile(f, fullgraph=True)
-        x = torch.randn(10, device="cuda")
-        eager_result = f(x)
-        compiled_result = f_compiled(x)
-        self.assertEqual(eager_result, compiled_result)
-
-    @requires_cuda
     def test_control_deps_wrapping_synchronize_device(self):
         def f(x):
             s = torch.cuda.Stream()
