@@ -2089,6 +2089,22 @@ class <lambda>(torch.nn.Module):
         ]
         self.assertEqual(len(sync_nodes), 1)
 
+    @requires_cuda
+    def test_control_deps_wrapping_synchronize_device(self):
+        def f(x):
+            s = torch.cuda.Stream()
+            with torch.cuda.stream(s):
+                y = x + 1
+            torch.cuda.synchronize()
+            return y + 2
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        f_compiled = torch.compile(f, backend=backend)
+        x = torch.randn(10, device="cuda")
+        eager_result = f(x)
+        compiled_result = f_compiled(x)
+        self.assertEqual(eager_result, compiled_result)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
