@@ -3,6 +3,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+#include <ATen/record_function.h>
 #include <c10/cuda/CUDAGuard.h>
 #if defined(USE_ROCM)
 #include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h>
@@ -299,7 +300,7 @@ at::Tensor async_input_mm_impl_ck_tile(
     int64_t a_chunk_pivot,
     at::Tensor out) {
 
-  c10::hip::HIPGuardMasqueradingAsCUDA guard(a.device());
+  c10::hip::HIPGuardMasqueradingAsCUDA hip_guard(a.device());
 
   using ElementA = ck_tile::bf16_t;
   using LayoutA = ck_tile::tensor_layout::gemm::RowMajor;
@@ -406,6 +407,9 @@ at::Tensor async_input_mm_impl_ck_tile(
                                        GemmConfig::DoubleSmemBuffer>>;
 
   using Kernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
+  static_assert(
+      Kernel::UniversalGemmKernel::PersistentKernel,
+      "async_input_mm: CK kernel must be persistent");
 
   // Calculate tile and chunk parameters
   size_t chunk_size_M = M / num_chunks_M;
@@ -479,6 +483,13 @@ at::Tensor async_input_mm_impl_ck_tile(
 
   TORCH_CHECK(is_supported,
               "async_input_mm: Arguments not supported by CK tile kernel");
+
+  // CK passes the async scheduler as runtime kernel state, so unlike the
+  // CUTLASS path it does not appear in the HIP kernel symbol. Surface the
+  // scheduler path through a profiler annotation instead.  
+  RECORD_FUNCTION(
+      "PersistentAsyncInputScheduler",
+      c10::ArrayRef<const c10::IValue>{});
 
   // Launch the kernel
   ck_tile::launch_kernel(
