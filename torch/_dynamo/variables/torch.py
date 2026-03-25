@@ -2692,7 +2692,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 fake_tensor_tls.allow_non_fake_inputs_override = old_val
             return res
 
-        f_callable = _LeafCallable(patched_fn)
+        f_callable = _LeafCallable(patched_fn, name=fn.__name__)
 
         f_callable_proxy = tx.output.register_static_attr_and_return_proxy(
             f"{fn.__name__}_callable", f_callable
@@ -2902,8 +2902,19 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             real_impl, fake_impl, captured_out_spec
         )
 
-        real_impl_callable = _LeafCallable(wrapped_real_impl)
-        fake_impl_callable = _LeafCallable(wrapped_fake_impl)
+        from torch._higher_order_ops.invoke_leaf_function import _get_source_location
+
+        source_location = _get_source_location(real_impl)
+        real_impl_callable = _LeafCallable(
+            wrapped_real_impl,
+            name=real_impl.__name__,
+            source_location=source_location,
+        )
+        fake_impl_callable = _LeafCallable(
+            wrapped_fake_impl,
+            name=real_impl.__name__,
+            source_location=source_location,
+        )
 
         def make_callable_proxy(name: str, spec: Any) -> Any:
             proxy = tx.output.register_static_attr_and_return_proxy(name, spec)

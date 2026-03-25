@@ -3558,8 +3558,8 @@ def emit_noargs_leaf_function_to_graph(
         real_impl, fake_impl, captured_out_spec
     )
 
-    real_callable = _LeafCallable(wrapped_real)
-    fake_callable = _LeafCallable(wrapped_fake)
+    real_callable = _LeafCallable(wrapped_real, name=name)
+    fake_callable = _LeafCallable(wrapped_fake, name=name)
     input_spec = pytree.tree_flatten(((), {}))[1]
 
     def make_proxy(attr_name: str, val: Any) -> Any:

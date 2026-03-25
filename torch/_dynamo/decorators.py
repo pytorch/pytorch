@@ -359,8 +359,15 @@ def _invoke_leaf_function_python(
         real_impl, fake_impl, captured_out_spec
     )
 
-    real_fn_callable = _LeafCallable(wrapped_real)
-    fake_fn_callable = _LeafCallable(wrapped_fake)
+    from torch._higher_order_ops.invoke_leaf_function import _get_source_location
+
+    source_location = _get_source_location(real_impl)
+    real_fn_callable = _LeafCallable(
+        wrapped_real, name=real_impl.__name__, source_location=source_location
+    )
+    fake_fn_callable = _LeafCallable(
+        wrapped_fake, name=real_impl.__name__, source_location=source_location
+    )
 
     mutated_flat_indices = ""
     if mutates_args:

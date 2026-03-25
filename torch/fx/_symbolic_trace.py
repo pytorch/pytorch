@@ -425,6 +425,8 @@ class Tracer(TracerBase):
         if isinstance(a, _constant_attribute_types) or (
             is_opaque_reference_type(type(a))
         ):
+            from torch._higher_order_ops.invoke_leaf_function import _LeafCallable
+
             qualname: str | None = self.tensor_attrs.get(a)
 
             # Tensor was not found in the Module hierarchy, stow it away in a
@@ -437,7 +439,10 @@ class Tracer(TracerBase):
                 elif isinstance(a, pytree.TreeSpec):
                     base_name = "_tree_spec_constant"
                 elif is_opaque_type(type(a)):
-                    base_name = "_opaque_obj"
+                    if isinstance(a, _LeafCallable) and a._name:
+                        base_name = f"_leaf_fn_{a._name}"
+                    else:
+                        base_name = "_opaque_obj"
                 else:
                     raise RuntimeError(
                         f"cannot create constant arg for {a} of type {type(a)}."
@@ -450,7 +455,10 @@ class Tracer(TracerBase):
                 self.tensor_attrs[a] = qualname
                 setattr(self.root, qualname, a)
 
-            return self.create_node("get_attr", qualname, (), {})
+            node = self.create_node("get_attr", qualname, (), {})
+            if isinstance(a, _LeafCallable) and a._source_location:
+                node.meta["stack_trace"] = a._source_location
+            return node
 
         if type(a) in _proxyable_classes:
             # This is an instance of a proxyable class for which we did not

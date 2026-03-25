@@ -1,5 +1,6 @@
 import contextlib
 import functools
+import inspect
 from collections.abc import Callable, Generator, Sequence
 from dataclasses import dataclass
 from typing import Any, NamedTuple
@@ -49,14 +50,25 @@ def reset_makefx_module_storage() -> None:
 
 
 class _LeafCallable(OpaqueBase):
-    def __init__(self, fn: Callable) -> None:
+    def __init__(self, fn: Callable, name: str = "", source_location: str = "") -> None:
         self._fn = fn
+        self._name = name
+        self._source_location = source_location
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         return self._fn(*args, **kwargs)
 
 
 register_opaque_type(_LeafCallable, typ="reference")
+
+
+def _get_source_location(fn: Callable) -> str:
+    try:
+        file = inspect.getfile(fn)
+        _, line = inspect.getsourcelines(fn)
+        return f"{file}:{line}"
+    except (TypeError, OSError):
+        return ""
 
 
 def set_leaf_function_module_retriever(retriever: Callable[[int], Any]) -> None:
@@ -719,7 +731,11 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
                     result.append(None)
             return tuple(result)
 
-        new_real_fn_callable = _LeafCallable(real_forward)
+        name = getattr(real_fn_callable, "_name", "")
+        source_location = getattr(real_fn_callable, "_source_location", "")
+        new_real_fn_callable = _LeafCallable(
+            real_forward, name=name, source_location=source_location
+        )
 
         with torch._C._AutoDispatchBelowAutograd():
             fw_outputs = invoke_leaf_function(
@@ -733,14 +749,22 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
 
         ctx.real_backward = real_backward
         ctx.fake_backward = fake_backward
+        ctx._leaf_name = name
+        ctx._leaf_source_location = source_location
 
         return fw_outputs
 
     @staticmethod
     # pyrefly: ignore [bad-override]
     def backward(ctx, *grads):
-        real_bw_callable = _LeafCallable(ctx.real_backward)
-        fake_bw_callable = _LeafCallable(ctx.fake_backward)
+        bw_name = f"{ctx._leaf_name}_backward" if ctx._leaf_name else ""
+        source_location = ctx._leaf_source_location
+        real_bw_callable = _LeafCallable(
+            ctx.real_backward, name=bw_name, source_location=source_location
+        )
+        fake_bw_callable = _LeafCallable(
+            ctx.fake_backward, name=bw_name, source_location=source_location
+        )
         _, bw_input_spec = pytree.tree_flatten((grads, {}))
         fw_grads = invoke_leaf_function(
             real_bw_callable, fake_bw_callable, bw_input_spec, "", *grads
