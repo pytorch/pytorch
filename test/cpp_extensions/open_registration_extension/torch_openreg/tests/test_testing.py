@@ -30,7 +30,7 @@ class TestBypassDeviceRestrictions(TestCase):
         type(self).executed_count += 1
         self.assertEqual(torch.device(device).type, "openreg")
 
-    def test_zzz_validate_bypass_execution(self, device):
+    def test_vaildate_bypass_execution(self, device):
         expected_runs = 2
         actual_runs = type(self).executed_count
         self.assertEqual(
