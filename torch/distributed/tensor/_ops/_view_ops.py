@@ -622,8 +622,8 @@ def propagate_shape_and_sharding(
                     can_shard_dim = False
                     if strict_view and input_sharded:
                         raise RuntimeError(
-                            f"Attempted to flatten multiple dimensions, with dimension {dim.input_dim} being sharded. ",
-                            "It cannot be performed without redistribution, which is disallowed by the current operator.",
+                            f"Attempted to flatten multiple dimensions, with dimension {dim.input_dim} being sharded. "
+                            "It cannot be performed without redistribution, which is disallowed by the current operator."
                         )
                 elif input_sharded:
                     if not (shard_placement is not None and shard_mesh_dim is not None):
@@ -670,14 +670,17 @@ def propagate_shape_and_sharding(
                 if strict_view and shard_mesh_dim is not None:
                     if not shardable_dims[in_dim.input_dim][shard_mesh_dim]:
                         raise RuntimeError(
-                            f"Attempted to split the sharded dimension {in_dim.input_dim} into multiple subdimensions. ",
-                            "It cannot be performed without redistribution, which is disallowed by the current operator.",
+                            f"Attempted to split the sharded dimension {in_dim.input_dim} into multiple subdimensions. "
+                            "It cannot be performed without redistribution, which is disallowed by the current operator."
                         )
 
                 # 2. here we special case things like [Shard(0), Shard(0)]
                 submesh_size = 1
                 for size, shard in zip(mesh_sizes, input_src_placements):
-                    if isinstance(shard, Shard | _StridedShard) and shard.dim == in_dim:
+                    if (
+                        isinstance(shard, Shard | _StridedShard)
+                        and shard.dim == in_dim.input_dim
+                    ):
                         submesh_size *= size
                 if guard_or_true(out_size % submesh_size != 0):
                     raise AssertionError(

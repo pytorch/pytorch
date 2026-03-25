@@ -248,6 +248,31 @@ class TestViewOps(DTensorTestBase):
         with self.assertRaisesRegex(RuntimeError, "Sharding propagation failed"):
             shard.view(8, 2, -1)
 
+    def test_double_shard_split_validation(self):
+        """[Shard(0), Shard(0)] through Split correctly validates divisibility."""
+        # Compatible: reshape (24,)→(6,4) with [Shard(0), Shard(0)] on mesh (2,3)
+        # submesh_size = 2*3 = 6, split_id=0 out_size=6, 6%6==0 → passes
+        result = propagate_shape_and_sharding(
+            [Shard(0), Shard(0)],
+            (24,),
+            dim_maps[torch.Tensor.view](torch.empty(24), [6, 4]),
+            (2, 3),
+        )
+        self.assertEqual(len(result), 2)
+        input_tgt, output = result
+        self.assertEqual(list(input_tgt), [Shard(0), Shard(0)])
+        self.assertEqual(list(output), [Shard(0), Shard(0)])
+
+        # Incompatible: reshape (12,)→(3,4) with [Shard(0), Shard(0)] on mesh (2,3)
+        # submesh_size = 2*3 = 6, split_id=0 out_size=3, 3%6!=0 → error
+        with self.assertRaisesRegex(AssertionError, "not divisible by its mesh"):
+            propagate_shape_and_sharding(
+                [Shard(0), Shard(0)],
+                (12,),
+                dim_maps[torch.Tensor.view](torch.empty(12), [3, 4]),
+                (2, 3),
+            )
+
     @with_comms
     def test_view_ops(self):
         mesh_shape = (dist.get_world_size() // 2, 2)
