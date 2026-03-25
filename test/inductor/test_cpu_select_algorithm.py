@@ -33,7 +33,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     TEST_MKL,
-    xfailIf,
 )
 
 
@@ -2047,7 +2046,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             _target_code_check = f"constexpr int64_t Kc_blocks = {group_size // kr};"
             torch._C.FileCheck().check(_target_code_check).run(code)
 
-    @xfailIf(IS_ARM64)  # Int4 kernel numerical errors (5.4x rel diff, 5.8% mismatch)
+    @unittest.expectedFailure  # Int4 kernel numerical errors (5.4x rel diff, 5.8% mismatch)
     @unittest.skipIf(
         not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
     )
@@ -2118,7 +2117,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             )
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @xfailIf(IS_ARM64)  # Int4 kernel numerical errors (43.5x rel diff, 10.7% mismatch)
+    @unittest.expectedFailure  # Int4 kernel numerical errors (43.5x rel diff, 10.7% mismatch)
     @unittest.skipIf(
         not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
     )
