@@ -3206,6 +3206,11 @@ def parse_args(args=None):
         "--freezing", action="store_true", help="turn on freezing", default=False
     )
     parser.add_argument(
+        "--deterministic",
+        action="store_true",
+        help="Enable deterministic mode (torch.use_deterministic_algorithms, cudnn.deterministic, etc.)",
+    )
+    parser.add_argument(
         "--inductor-config",
         "-c",
         action="append",
@@ -3985,7 +3990,7 @@ def write_csv_when_exception(args, name: str, status: str, device=None):
         write_outputs(output_filename, headers, row)
 
 
-def setup_determinism_for_accuracy_test(args):
+def setup_determinism(args):
     if args.only is not None and args.only not in {
         "alexnet",
         "Background_Matting",
@@ -4021,6 +4026,11 @@ def setup_determinism_for_accuracy_test(args):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     torch.backends.mkldnn.deterministic = True
+    os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+    torch.backends.cudnn.allow_tf32 = False
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(False)
+    patch_torch_manual_seed()
 
 
 def run(runner, args, original_dir=None):
@@ -4081,6 +4091,9 @@ def run(runner, args, original_dir=None):
                 "DLRM+DDP is unsupported as it requires sharding the embedding layer separately from DDP"
             )
             return sys.exit(-1)
+    if args.deterministic and not args.accuracy:
+        setup_determinism(args)
+
     if args.accuracy:
         # Use small batch size. We use >1 batch size to ensure we test
         # batch_norm type of operators that work on batch dims.
@@ -4104,22 +4117,14 @@ def run(runner, args, original_dir=None):
             args.use_eval_mode = True
         inductor_config.fallback_random = True
 
-        setup_determinism_for_accuracy_test(args)
+        setup_determinism(args)
 
-        os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         if args.only is not None and args.only in {
             "nvidia_deeprecommender",
         }:
             # These seem unhappy with numerics of larger cuBLASLt workspace
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
-
-        torch.backends.cudnn.allow_tf32 = False
-        torch.backends.cuda.matmul.allow_tf32 = False
-        torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(False)
-
-        # Remove randomness when torch manual seed is called
-        patch_torch_manual_seed()
 
         # Some models e.g. yolov3 assert batch size on n_gpus
         if "CUDA_VISIBLE_DEVICES" not in os.environ and not args.multiprocess:
