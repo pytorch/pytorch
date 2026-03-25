@@ -6,7 +6,11 @@ from typing import NamedTuple
 
 import torch
 from torch._inductor import config
+from torch._inductor.codegen.common import TritonScratchWorkspace
+from torch._inductor.codegen.cpp_wrapper_gpu import DeferredTritonCallWrapper
+from torch._inductor.codegen.cuda.device_op_overrides import CUDADeviceOpOverrides
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.utils import IndentedBuffer
 from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import GPU_TYPE, RUN_GPU
 
@@ -76,6 +80,66 @@ class TestGpuWrapper(InductorTestCase):
         with torch.utils._device.DeviceContext(self.device):
             _, code = test_torchinductor.run_and_get_cpp_code(compiled, x, 3)
         self.assertIn("torch.tensor(arg, device='cpu')", code)
+
+    def test_cpp_scratch_scales_with_grid_size_for_tma(self):
+        if GPU_TYPE != "cuda" or torch.version.hip:
+            self.skipTest("CUDA-only codegen test")
+
+        scratch_def, scratch_var = CUDADeviceOpOverrides().cpp_scratch(
+            0,
+            TritonScratchWorkspace(
+                size=256, generate_dtype_str=lambda: "at::ScalarType::Byte"
+            ),
+            prefix="global_scratch",
+        )
+        self.assertEqual(scratch_var, "global_scratch_scratch_0")
+        self.assertIn(
+            "static_cast<int64_t>(256) * grid_0 * grid_1 * grid_2", scratch_def[0]
+        )
+
+    def test_triton_wrapper_scales_scratch_with_num_ctas(self):
+        if GPU_TYPE != "cuda" or torch.version.hip:
+            self.skipTest("CUDA-only codegen test")
+
+        class FakeWrapper:
+            device = "cuda"
+
+            def __init__(self):
+                self.scratch_spaces = None
+
+            def generate_args_decl(
+                self,
+                prefix,
+                call_args,
+                arg_types,
+                arg_signatures,
+                is_triton_kernel=True,
+                scratch_spaces=None,
+            ):
+                self.scratch_spaces = scratch_spaces
+
+                return ""
+
+        wrapper = FakeWrapper()
+        prefix = IndentedBuffer()
+        params = {
+            "triton_meta": {"signature": {"x": "*fp32"}, "constants": {}},
+            "def_args": ["x"],
+            "call_args": ["x"],
+            "config": {"num_ctas": 8},
+            "num_warps": 4,
+            "shared_mem": 0,
+            "global_scratch": 256,
+        }
+
+        DeferredTritonCallWrapper(
+            wrapper_name="wrapper",
+            kernel_name="kernel",
+            kernel_name_to_body={},
+            arg_types=[torch.float32],
+        ).generate_launch_kernel(prefix, wrapper, "kernel_var", params)
+
+        self.assertEqual(wrapper.scratch_spaces, {"global_scratch": 256 * 8})
 
 
 class DynamicShapesGpuWrapperGpuTests(InductorTestCase):
