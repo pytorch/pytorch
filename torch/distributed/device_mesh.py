@@ -553,7 +553,7 @@ else:
                 and (
                     backend is None
                     or default_group._get_backend(
-                        torch.accelerator.current_accelerator()
+                        torch.accelerator.current_accelerator()  # pyrefly: ignore[bad-argument-type]
                     ).name()
                     == backend
                 )

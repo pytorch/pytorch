@@ -5455,7 +5455,9 @@ def split_group(
     parent_group_rank = parent_global_to_group_ranks[global_rank]
 
     if torch.accelerator.is_available():
-        parent_backend = parent_pg._get_backend(torch.accelerator.current_accelerator()) # pyrefly: ignore[bad-argument-type]
+        parent_backend = parent_pg._get_backend(
+            torch.accelerator.current_accelerator()  # pyrefly: ignore[bad-argument-type]
+        )
     else:
         raise RuntimeError(
             "No backend for the parent process group or its backend does not support splitting"
@@ -5530,7 +5532,9 @@ def split_group(
     split_pg.bound_device_id = device_id  # type: ignore[union-attr]
 
     if torch.accelerator.is_available():
-        split_backend_class = split_pg._get_backend(torch.accelerator.current_accelerator()) # pyrefly: ignore[bad-argument-type]
+        split_backend_class = split_pg._get_backend(
+            torch.accelerator.current_accelerator()  # pyrefly: ignore[bad-argument-type]
+        )
     else:
         raise RuntimeError(
             "No backend for the parent process group or its backend does not support splitting"
