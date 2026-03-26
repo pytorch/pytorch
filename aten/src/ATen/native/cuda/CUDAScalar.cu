@@ -25,7 +25,7 @@ void _local_scalar_dense_cuda_impl(const Tensor& self, Scalar& r) {
     C10_CUDA_CHECK(hipStreamGetCaptureInfo(stream, &captureStatus, nullptr));
     if (C10_LIKELY(captureStatus == hipStreamCaptureStatusNone)) {
       at::cuda::stream_synchronize(stream);
-      r = Scalar(*self.const_data_ptr<scalar_t>());
+      r = Scalar(*self.template const_data_ptr<scalar_t>());
     } else {
       C10_CUDA_CHECK(hipErrorStreamCaptureUnsupported);
     }
@@ -44,8 +44,8 @@ void _local_scalar_dense_cuda_impl(const Tensor& self, Scalar& r) {
     std::nullopt /* memory format */
   );
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  at::cuda::memcpy_and_sync(value.mutable_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(), sizeof(scalar_t), cudaMemcpyDeviceToHost, stream);
-  r = Scalar(*value.const_data_ptr<scalar_t>());
+  at::cuda::memcpy_and_sync(value.template mutable_data_ptr<scalar_t>(), self.template const_data_ptr<scalar_t>(), sizeof(scalar_t), cudaMemcpyDeviceToHost, stream);
+  r = Scalar(*value.template const_data_ptr<scalar_t>());
 }
 
 } // anonymous namespace
