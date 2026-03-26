@@ -1524,6 +1524,7 @@ class LoweringTest(MultiProcContinuousTest):
             return torch.ops.symm_mem.one_shot_all_reduce(x, "sum", "0")
 
         x_input = torch.rand(N, N, device=self.device)
+
         compiled_input_direct = torch.compile(func_input_direct, fullgraph=True)
         code = run_and_get_triton_code(compiled_input_direct, x_input)
 
@@ -1587,6 +1588,46 @@ class LoweringTest(MultiProcContinuousTest):
             rtol=1e-5,
             atol=1e-5,
             msg="Compiled and eager do not match",
+        )
+
+    @skip_if_rocm_multiprocess  # requires registered-buffer support
+    @skip_if_lt_x_gpu(2)
+    @fresh_inductor_cache()
+    def test_one_shot_all_reduce_with_cudagraph(self):
+        """
+        Verify one_shot_all_reduce correctness under CUDAGraph
+        record + replay (mode="reduce-overhead").
+        """
+        self._init_process()
+
+        N = 8
+        x = torch.rand(N, N, device=self.device)
+        w = torch.rand(N, N, device=self.device)
+
+        @torch.compile(mode="reduce-overhead")
+        def graph_a(x, w):
+            return torch.mm(x, w)
+
+        @torch.compile(mode="reduce-overhead")
+        def graph_b(y):
+            return torch.ops.symm_mem.one_shot_all_reduce(y, "sum", "0")
+
+        # Run multiple iterations to trigger CG record + replay
+        for _ in range(4):
+            torch.compiler.cudagraph_mark_step_begin()
+            tmp = graph_a(x, w)
+            out = graph_b(tmp)
+
+        # Verify correctness
+        eager_tmp = torch.mm(x, w)
+        eager_result = eager_tmp.clone()
+        dist.all_reduce(eager_result, op=dist.ReduceOp.SUM)
+        torch.testing.assert_close(
+            out,
+            eager_result,
+            rtol=1e-5,
+            atol=1e-5,
+            msg="CUDAGraph-managed P2P input produced incorrect result",
         )
 
 
