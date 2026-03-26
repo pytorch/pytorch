@@ -552,7 +552,9 @@ else:
                 and torch.accelerator.is_available()
                 and (
                     backend is None
-                    or default_group._get_backend(torch.accelerator.current_accelerator()).name()
+                    or default_group._get_backend(
+                        torch.accelerator.current_accelerator()
+                    ).name()
                     == backend
                 )
             ):
