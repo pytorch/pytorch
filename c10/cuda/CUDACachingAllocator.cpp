@@ -165,7 +165,6 @@ void decrease_stat_array(
 struct Block;
 struct PrivatePool;
 typedef bool (*Comparison)(const Block*, const Block*);
-static bool BlockComparatorSize(const Block* a, const Block* b);
 static bool BlockComparatorRegistrationCounter(const Block* a, const Block* b);
 static bool BlockComparatorAddress(const Block* a, const Block* b);
 
@@ -1005,16 +1004,6 @@ struct RestoreResult {
   std::vector<void*> allocations_freed;
   std::vector<Block*> allocations_created;
 };
-
-bool BlockComparatorSize(const Block* a, const Block* b) {
-  if (a->stream != b->stream) {
-    return (uintptr_t)a->stream < (uintptr_t)b->stream;
-  }
-  if (a->size != b->size) {
-    return a->size < b->size;
-  }
-  return (uintptr_t)a->ptr < (uintptr_t)b->ptr;
-}
 
 bool BlockComparatorRegistrationCounter(const Block* a, const Block* b) {
   if (a->stream != b->stream) {
