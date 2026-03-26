@@ -389,7 +389,7 @@ class OverlapScheduler:
         bucket_exposed_first: bool | None = None,
         enable_fusion_regions: bool = False,
         bucket_only_internode_comms: bool = False,
-        bucket_mode: BucketMode = "custom_ops_multidtype",
+        bucket_mode: BucketMode = "default",
         max_off_bucket_gb: float | None = 0.5,
         prioritize_bucketing_during_scheduling: bool = True,
     ):
@@ -1001,6 +1001,7 @@ class OverlapScheduler:
             region_of=self.region_of,
             bucket_exposed_first=self.bucket_exposed_first,
             bucket_only_internode_comms=self.bucket_only_internode_comms,
+            bucket_mode=self.bucket_mode,
         )
 
         if self.log_final_collectives_estimations:
@@ -1422,12 +1423,12 @@ class OverlapScheduler:
         if not torch._inductor.config.test_configs.assume_bucketing_reduces_latency:
             return False
 
-        key = bucket_key(node, mode="custom_ops_multidtype")
+        key = bucket_key(node, mode=self.bucket_mode)
         if key is None:
             return False
 
         for in_flight_coll in self.in_flight:
-            if bucket_key(in_flight_coll, mode="custom_ops_multidtype") == key:
+            if bucket_key(in_flight_coll, mode=self.bucket_mode) == key:
                 return True
 
         return False
@@ -1739,6 +1740,7 @@ def schedule_overlap_bucketing(
     bucket_only_internode_comms=False,
     prioritize_bucketing_during_scheduling: bool = True,
     max_off_bucket_gb: float | None = 0.5,
+    bucket_mode: BucketMode = "default",
 ) -> torch.fx.GraphModule:
     """Schedule nodes to maximize compute-collective overlap.
 
@@ -1796,6 +1798,7 @@ def schedule_overlap_bucketing(
         bucket_only_internode_comms=bucket_only_internode_comms,
         prioritize_bucketing_during_scheduling=prioritize_bucketing_during_scheduling,
         max_off_bucket_gb=max_off_bucket_gb,
+        bucket_mode=bucket_mode,
     ).run()
     trace_structured(
         "artifact",
@@ -1842,6 +1845,7 @@ def schedule_overlap_bucketing_from_inductor_configs(
         "bucket_only_internode_comms",
         "enable_fusion_regions",
         "prioritize_bucketing_during_scheduling",
+        "bucket_mode",
     )
     for key in config_keys:
         if (val := getattr(dist_opts, key, None)) is not None:
