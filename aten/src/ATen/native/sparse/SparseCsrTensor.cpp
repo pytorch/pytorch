@@ -189,8 +189,10 @@ static void _validate_sparse_compressed_tensor_args_worker(const Tensor& compres
               batch_ndim, " + ", block_ndim, ") but got ", values.dim());
 
   // 3.5
-  TORCH_CHECK(plain_indices.stride(-1) == 1,
-              "expected ", plain_indices_name, " to be a contiguous tensor per batch");
+  if (plain_indices.numel() != 0) {
+    TORCH_CHECK(plain_indices.stride(-1) == 1,
+                "expected ", plain_indices_name, " to be a contiguous tensor per batch");
+  }
 
   // 3.6
   TORCH_CHECK(compressed_indices.stride(-1) == 1,
