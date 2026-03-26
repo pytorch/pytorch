@@ -679,7 +679,7 @@ class PrivateUse1TestBase(DeviceTypeTestBase):
     primary_device: ClassVar[str]
     device_mod = None
     device_type = "privateuse1"
-    bypass_device_restrictions = True
+    bypass_device_restrictions = False
 
     @classmethod
     def get_primary_device(cls):

@@ -12,13 +12,21 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 class TestBypassDeviceRestrictions(TestCase):
     """Verify that PrivateUse1 backends can run tests decorated with @onlyCUDA.
 
-    PrivateUse1TestBase sets bypass_device_restrictions = True, which causes
-    @onlyOn-based decorators to be bypassed. This allows out-of-tree backends
-    to run accelerator tests that are currently gated behind @onlyCUDA while
-    the long-term migration to device-generic tests is in progress.
+    PrivateUse1TestBase sets bypass_device_restrictions = False by default.
+    Backends that are ready to run @onlyOn-gated tests must explicitly opt in
+    by setting bypass_device_restrictions = True in their setUp or subclass.
+    This allows out-of-tree backends to run accelerator tests that are
+    currently gated behind @onlyCUDA while the long-term migration to
+    device-generic tests is in progress.
     """
 
     executed_count = 0
+
+    def setUp(self):
+        # Explicitly opt-in: instance attribute shadows the False default on
+        # PrivateUse1TestBase so @onlyOn-based decorators allow this test to run.
+        self.bypass_device_restrictions = True
+        super().setUp()
 
     @onlyCUDA
     def test_bypass_only_cuda(self, device):
@@ -37,7 +45,8 @@ class TestBypassDeviceRestrictions(TestCase):
             actual_runs,
             expected_runs,
             f"Bypass logic failed! "
-            f"Expected {expected_runs} tests to run, but only {actual_runs} executed.",
+            f"Expected {expected_runs} tests to run, "
+            f"but only {actual_runs} executed.",
         )
 
 
