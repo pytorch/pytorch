@@ -145,10 +145,16 @@ aten = torch.ops.aten
 _post_grad_graph_counter = itertools.count()
 
 if config.is_fbcode():
+    from torch._inductor.fb.triton_kernel_metadata import (
+        save_triton_kernel_perf_artifact,
+    )
     from torch._inductor.fb.utils import log_module_code
 else:
 
     def log_module_code(*args: Any, **kwargs: Any) -> None:
+        pass
+
+    def save_triton_kernel_perf_artifact(*args: Any, **kwargs: Any) -> None:
         pass
 
 
@@ -2465,6 +2471,7 @@ class GraphLowering(torch.fx.Interpreter):
                     if user_defined_kernels:
                         real_inputs = extract_real_inputs()
                         self.extract_autotune_inputs(real_inputs)
+                        save_triton_kernel_perf_artifact(self)
                 return self.codegen()
             else:
                 if not self.aot_mode:
