@@ -2159,31 +2159,15 @@ class TestPatternMatcher(TestCase):
 
         my_patterns = PatternMatcherPass()
 
-        # Single tensor (not list/tuple) to exercise normalization logic
+        # Single tensor should fail fast instead of reaching tracing logic.
         example_input = torch.randn(4, 4, device=GPU_TYPE, requires_grad=True)
-        register_replacement(pattern, replacement, example_input, fwd_only, my_patterns)
-
-        count = 0
-
-        def custom_pass(graph: torch.fx.Graph) -> torch.fx.Graph:
-            nonlocal count
-            count = my_patterns.apply(graph)
-            return graph
-
-        def fn(x):
-            return x + 1
-
-        x = torch.randn(4, 4, device=GPU_TYPE, requires_grad=True)
-
-        compiled_fn = torch.compile(
-            fn,
-            fullgraph=True,
-            options={"post_grad_custom_post_pass": custom_pass},
-        )
-
-        result = compiled_fn(x)
-        self.assertEqual(count, 1)
-        torch.testing.assert_close(result, x - 1)
+        with self.assertRaisesRegex(
+            TypeError,
+            f"example_inputs must be a list or tuple, got {type(example_input)}",
+        ):
+            register_replacement(
+                pattern, replacement, example_input, fwd_only, my_patterns
+            )
 
 
 class TestPatternMatcherLogging(LoggingTestCase):
