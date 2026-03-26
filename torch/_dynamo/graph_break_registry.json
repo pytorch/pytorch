@@ -886,22 +886,6 @@
       ]
     }
   ],
-  "GB7230": [
-    {
-      "Gb_type": "iter() with no arguments",
-      "Context": "iter()",
-      "Explanation": "iter() requires at least one argument",
-      "Hints": [
-        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
-      ]
-    },
-    {
-      "Gb_type": "iter() with no arguments",
-      "Context": "iter()",
-      "Explanation": "iter() requires at least one argument",
-      "Hints": []
-    }
-  ],
   "GB0073": [
     {
       "Gb_type": "Invoking an nn.Module inside a HigherOrderOperator",

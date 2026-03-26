@@ -58,11 +58,9 @@ from .utils import (
 )
 from .variables import (
     BuiltinVariable,
-    DictBuiltinVariable,
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
     InspectSignatureVariable,
-    IterBuiltinVariable,
     LocalGeneratorFunctionVariable,
     LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
@@ -3977,8 +3975,6 @@ def is_torch(filename: str) -> bool:
 Main entry point for looking up the trace rule (the Dynamo variable) for a given callable object.
 """
 
-BUILTIN_CALLABLES = {dict: DictBuiltinVariable, iter: IterBuiltinVariable}
-
 
 def lookup_callable(obj: Callable[..., Any]) -> type[VariableTracker] | None:
     if not hashable(obj):
@@ -3990,8 +3986,6 @@ def lookup_callable(obj: Callable[..., Any]) -> type[VariableTracker] | None:
         return TorchInGraphFunctionVariable
     if is_polyfilled_callable(obj):
         return PolyfilledFunctionVariable
-    if obj in BUILTIN_CALLABLES:
-        return BUILTIN_CALLABLES[obj]
     if is_builtin_callable(obj):
         return BuiltinVariable
     return None
