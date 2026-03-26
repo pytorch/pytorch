@@ -252,6 +252,7 @@ TORCH_LIBRARY(_quantized, m) {
 }
 
 TORCH_LIBRARY(onednn, m) {
+  m.set_python_module("torch.testing._internal.common_quantization");
   // New OP definition for Quantization in PyTorch 2.0 Export
   // Weight Prepack
   m.def(TORCH_SELECTIVE_SCHEMA("onednn::qconv_prepack(Tensor weight, Tensor w_scales, float x_scale, int x_zp, int[] stride, int[] padding, int[] dilation, int groups, int[]? x_shape=None) -> Tensor"));
