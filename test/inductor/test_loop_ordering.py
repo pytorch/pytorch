@@ -1338,6 +1338,70 @@ class TestTiling(TestCase):
         self.assertEqual(out, expected)
 
 
+class TestSplitIterationRanges(MockSchedulerTest):
+    """Unit tests for SIMDKernel._split_iteration_ranges."""
+
+    def test_exact_match(self):
+        """Groups exactly match lengths — no splitting needed."""
+        from torch._inductor.codegen.simd import SIMDKernel
+
+        new_ranges, getters = SIMDKernel._split_iteration_ranges(
+            [sympy.Integer(4), sympy.Integer(8)],
+            [[sympy.Integer(4)], [sympy.Integer(8)]],
+        )
+        self.assertEqual(len(new_ranges), 2)
+        self.assertEqual(len(new_ranges[0]), 1)
+        self.assertEqual(len(new_ranges[1]), 1)
+
+    def test_two_way_split(self):
+        """A single large dimension splits across two groups."""
+        from torch._inductor.codegen.simd import SIMDKernel
+
+        new_ranges, getters = SIMDKernel._split_iteration_ranges(
+            [sympy.Integer(4), sympy.Integer(8)],
+            [[sympy.Integer(32)], []],
+        )
+        # 32 should split into 4 * 8 across the two groups
+        self.assertEqual(len(new_ranges), 2)
+
+    def test_groups_exhausted_raises_cant_split(self):
+        """When all groups are consumed but sizes remain, CantSplit is raised."""
+        from torch._inductor.codegen.simd import CantSplit, SIMDKernel
+
+        # groups=[1, 2, 2] can only absorb 2 sizes of 2 (consuming groups 1 and 2),
+        # leaving the third size=2 with no group to map to.
+        with self.assertRaises(CantSplit):
+            SIMDKernel._split_iteration_ranges(
+                [sympy.Integer(1), sympy.Integer(2), sympy.Integer(2)],
+                [[], [sympy.Integer(2), sympy.Integer(2), sympy.Integer(2)]],
+            )
+
+    def test_single_group_multiple_sizes(self):
+        """Multiple sizes fitting within a single group."""
+        from torch._inductor.codegen.simd import SIMDKernel
+
+        # groups=[8], lengths=[[2, 2, 2], []] — all 3 sizes fit in group 0
+        new_ranges, getters = SIMDKernel._split_iteration_ranges(
+            [sympy.Integer(8)],
+            [[sympy.Integer(2), sympy.Integer(2), sympy.Integer(2)], []],
+        )
+        self.assertEqual(len(new_ranges), 1)
+        self.assertEqual(len(new_ranges[0]), 3)
+
+    def test_size_one_skipped(self):
+        """Dimensions of size 1 produce a zero-constant getter."""
+        from torch._inductor.codegen.simd import SIMDKernel
+
+        new_ranges, getters = SIMDKernel._split_iteration_ranges(
+            [sympy.Integer(4)],
+            [[sympy.Integer(1), sympy.Integer(4)], []],
+        )
+        # Size-1 dim should not consume any range
+        self.assertEqual(len(getters[0]), 2)
+        # The first getter should return 0 for any input
+        self.assertEqual(getters[0][0]([sympy.Integer(99)]), sympy.Integer(0))
+
+
 class TestIndexInversion(TestCase):
     @classmethod
     def setUpClass(cls):
