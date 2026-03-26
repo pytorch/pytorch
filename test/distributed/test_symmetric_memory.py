@@ -1513,8 +1513,11 @@ class LoweringTest(MultiProcContinuousTest):
     @fresh_inductor_cache()
     def test_external_allocation_fallback(self):
         """
-        When the input is not pre-allocated in symmetric memory, Inductor
-        auto-inserts an identity copy to P2P.  Verify codegen + correctness.
+        When the input is not pre-allocated in symmetric memory, the Layout
+        approach annotates the InputBuffer with AllocatorType(kind="symm_mem")
+        and generates a .copy_() from the caller's input to a persistent P2P
+        buffer.  Verify codegen + correctness for both the Layout path and
+        the identity-copy fallback path.
         """
         self._init_process()
 
@@ -1531,7 +1534,17 @@ class LoweringTest(MultiProcContinuousTest):
         self.assertIn(
             "empty_strided_p2p",
             code,
-            "Expected P2P allocation for auto-inserted copy",
+            "Expected empty_strided_p2p for persistent P2P buffer allocation",
+        )
+        self.assertIn(
+            ".copy_(",
+            code,
+            "Expected .copy_() for DMA copy to P2P buffer",
+        )
+        self.assertIn(
+            "one_shot_all_reduce_out",
+            code,
+            "Expected out-variant allreduce in generated code",
         )
 
         compiled_result = compiled_input_direct(x_input)
@@ -1544,6 +1557,80 @@ class LoweringTest(MultiProcContinuousTest):
             atol=1e-5,
             msg="Auto-copy to P2P does not match eager",
         )
+
+        # --- Identity copy fallback ---
+        # When the allreduce input is NOT a graph placeholder (InputBuffer)
+        # but an ExternKernel output (e.g., cpu->cuda DeviceCopy), the
+        # Layout approach does not apply.  The fallback inserts a Triton
+        # identity copy with CommBufferLayout instead.
+        torch._dynamo.reset()
+
+        def func_fallback(x_cpu):
+            x_cuda = x_cpu.cuda()
+            return torch.ops.symm_mem.one_shot_all_reduce(x_cuda, "sum", "0")
+
+        x_cpu = torch.rand(N, N, device="cpu")
+        compiled_fallback = torch.compile(func_fallback, fullgraph=True)
+        code_fallback = run_and_get_triton_code(compiled_fallback, x_cpu)
+
+        self.assertIn(
+            "empty_strided_p2p",
+            code_fallback,
+            "Expected empty_strided_p2p for identity copy fallback",
+        )
+        self.assertNotIn(
+            "_p2p_buf_",
+            code_fallback,
+            "Fallback should not use module-level persistent P2P buffer",
+        )
+
+        compiled_result_fallback = compiled_fallback(x_cpu)
+        eager_result_fallback = x_cpu.cuda().clone()
+        dist.all_reduce(eager_result_fallback, op=dist.ReduceOp.SUM)
+        torch.testing.assert_close(
+            compiled_result_fallback,
+            eager_result_fallback,
+            rtol=1e-5,
+            atol=1e-5,
+            msg="Identity copy fallback does not match eager",
+        )
+
+    def test_layout_allocator_type_propagation(self):
+        """
+        Verify that Layout.as_fixed() propagates the allocator field and that
+        Layout.__eq__ distinguishes layouts with different allocators.
+        """
+        from torch._inductor.ir import AllocatorType, FixedLayout, FlexibleLayout
+
+        device = torch.device("cuda", 0)
+        size = [8, 8]
+
+        # as_fixed() should propagate AllocatorType(kind="symm_mem")
+        flex = FlexibleLayout(device, torch.float32, size)
+        flex.allocator = AllocatorType(kind="symm_mem")
+        fixed = flex.as_fixed()
+        self.assertIsInstance(fixed, FixedLayout)
+        self.assertEqual(fixed.allocator, AllocatorType(kind="symm_mem"))
+
+        # as_fixed() on DEFAULT should also work
+        flex_default = FlexibleLayout(device, torch.float32, size)
+        fixed_default = flex_default.as_fixed()
+        self.assertEqual(fixed_default.allocator, AllocatorType())
+
+        # __eq__: same allocator -> equal
+        fixed_a = FixedLayout(
+            device, torch.float32, size, allocator=AllocatorType(kind="symm_mem")
+        )
+        fixed_b = FixedLayout(
+            device, torch.float32, size, allocator=AllocatorType(kind="symm_mem")
+        )
+        self.assertEqual(fixed_a, fixed_b)
+
+        # __eq__: different allocator -> not equal
+        fixed_default2 = FixedLayout(
+            device, torch.float32, size, allocator=AllocatorType()
+        )
+        self.assertNotEqual(fixed_a, fixed_default2)
 
     @skip_if_rocm_multiprocess  # requires registered-buffer support
     @skip_if_lt_x_gpu(2)

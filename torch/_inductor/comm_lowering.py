@@ -521,28 +521,59 @@ def register_symm_mem_lowerings():
         group_name: str,  # type: ignore[arg-type]
     ) -> ir.TensorBox:
         """
-        Ensure inp is in P2P memory for a symm_mem collective.
+        Helper to realize an input as symmetric memory buffer if possible.
 
         If inductor controls the buffer's allocation (ComputedBuffer,
         or any buffer with FlexibleLayout/FixedLayout), switch its
         layout to CommBufferLayout in-place, zero-copy.
 
-        If inductor does not control allocation (e.g. InputBuffer),
-        insert a Pointwise identity copy into a new CommBufferLayout buffer.
-        This adds an extra Triton kernel. Returns the possibly new TensorBox.
+        If the input is an InputBuffer with static shapes, mark its
+        layout allocator as SYMM_MEM; the wrapper pre-allocates P2P
+        memory and DMA .copy_() at call time.
 
-        TODO(tianrengao): eliminate the extra kernel for static-shape
-        InputBuffers by pre-allocating P2P memory in the wrapper and DMA .copy_()
+        Otherwise, insert a Pointwise identity copy into a new
+        CommBufferLayout buffer (adds an extra Triton kernel).
+
+        Returns the possibly new TensorBox.
         """
         if can_realize_as_comm_buffer(inp, ir.CommBufferType.SYMM_MEM):
             realize_as_comm_buffer(inp, ir.CommBufferType.SYMM_MEM, group_name)  # type: ignore[arg-type]
             return inp
-        else:
-            return _copy_input_to_comm_buffer(
-                inp,
-                ir.CommBufferType.SYMM_MEM,
-                group_name,  # type: ignore[arg-type]
+
+        data = _get_data(inp)
+        if isinstance(data, ir.InputBuffer):
+            # Layout approach: mark allocator constraint on InputBuffer.
+            # The wrapper will allocate P2P and DMA .copy_() at call time,
+            # avoiding an extra Triton identity kernel inside the graph.
+            #
+            # CUDAGraph-safe: CUDAPeerAllocInfo uses cudaMalloc (not the
+            # caching allocator), so rendezvous inside a CG private pool
+            # context no longer creates untracked allocations.
+            #
+            # This requires static shapes because the P2P buffer is
+            # allocated once at module scope with a fixed size.  If
+            # any dimension is symbolic, fall back to the identity copy.
+            layout = data.get_output_spec()
+            assert isinstance(layout, ir.Layout)
+            has_symbolic = any(is_symbolic(s) for s in layout.size) or any(
+                is_symbolic(s) for s in layout.stride
             )
+            if not has_symbolic:
+                data.layout = ir.FixedLayout(
+                    device=layout.device,
+                    dtype=layout.dtype,
+                    size=layout.size,
+                    stride=layout.stride,
+                    offset=layout.offset,
+                    allocator=ir.AllocatorType(kind="symm_mem", group_name=group_name),
+                )
+                return inp
+
+        return _copy_input_to_comm_buffer(
+            inp,
+            ir.CommBufferType.SYMM_MEM,
+            group_name,  # type: ignore[arg-type]
+        )
 
     @register_lowering(symm_mem.one_shot_all_reduce)
     def _symm_mem_one_shot_all_reduce(
