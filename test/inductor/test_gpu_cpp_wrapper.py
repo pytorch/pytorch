@@ -255,8 +255,8 @@ test_failures_gpu_wrapper = {
 # which currently surfaces as InductorError in test_add_complex4_xpu_gpu_wrapper.
 # Keep this targeted skip to XPU only.
 if device_type == "xpu":
-    test_failures_gpu_wrapper["test_add_complex4"] = test_torchinductor.TestFailure(
-        ("gpu_wrapper",), is_skip=True
+    test_failures_gpu_wrapper["test_add_complex4_xpu"] = (
+        test_torchinductor.TestFailure(("gpu_wrapper",), is_skip=True)
     )
 
 # Skip only on CUDA as wrapper dynamic shapes passes on ROCm.
