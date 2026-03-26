@@ -1119,6 +1119,27 @@ def forward(self, x_1, cfg_1):
             "Opaque output should reuse the input placeholder, not create a get_attr constant",
         )
 
+    def test_guard_pickle_subclass_with_opaque_inner_attr(self):
+        # Regression test: the guard state pickler serializes tensor subclasses
+        # by iterating over __tensor_flatten__ inner attrs.  Opaque inner attrs
+        # (e.g. Counter) must be handled correctly — they are pickled by the
+        # normal pickle machinery alongside tensor inner attrs.
+        from torch._dynamo.guards import GuardsStatePickler
+
+        a = torch.randn(4)
+        b = torch.randn(4)
+        counter = Counter(start=0, end=10)
+        size = SizeStore(4)
+        x = TensorWithCounter(a, b, counter, size)
+
+        import io
+
+        buf = io.BytesIO()
+        pickler = GuardsStatePickler({id(x): x}, {}, {}, buf)
+        func, args = pickler.reducer_override(x)
+        obj = func(*args)
+        self.assertIsInstance(obj, torch.Tensor)
+
     @parametrize("make_fx_tracing_mode", ["fake", "symbolic"])
     def test_bad_fake(self, make_fx_tracing_mode):
         torch.library.define(

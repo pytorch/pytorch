@@ -3779,12 +3779,9 @@ class GuardsStatePickler(pickle.Pickler):
         pytype: type,
         dispatch_keys_raw: int,
         ctx: Any,
-        inner_data: list[tuple[str, Callable[..., Any], tuple[Any, ...]]],
+        inner_data: list[tuple[str, Any]],
     ) -> torch.Tensor:
-        # Unpickle the inner tensor components. These could also be subclass instances.
-        inner_tensors = {}
-        for attr, unpickle_func, unpickle_func_args in inner_data:
-            inner_tensors[attr] = unpickle_func(*unpickle_func_args)
+        inner_tensors = dict(inner_data)
 
         outer_size, outer_stride = meta_tensor.shape, meta_tensor.stride()
         out = type(meta_tensor).__tensor_unflatten__(  # type: ignore[attr-defined]
@@ -3923,8 +3920,7 @@ class GuardsStatePickler(pickle.Pickler):
                     inner = getattr(obj, attr)
                     if isinstance(inner, torch.Tensor):
                         self.guard_tree_values[id(inner)] = inner
-                    func, args_tuple = self.reducer_override(inner)
-                    inner_data.append((attr, func, args_tuple))
+                    inner_data.append((attr, inner))
 
                 return type(self)._unpickle_traceable_wrapper_subclass, (
                     torch.empty_like(obj, device="meta"),
