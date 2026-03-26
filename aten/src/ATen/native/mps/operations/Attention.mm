@@ -15,6 +15,8 @@
 #else
 #include <ATen/ops/_scaled_dot_product_attention_math_for_mps_native.h>
 #include <ATen/ops/empty_native.h>
+#include <ATen/ops/matmul.h>
+#include <ATen/ops/softmax.h>
 #endif
 
 namespace at {
@@ -480,6 +482,21 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
 
   // boolean to decide if we can use kernel paths
   bool supports_fast_sdpa = !is_causal && supports_sdpa_vector;
+
+  // Fast path for long sequences without mask/causal: use native MPS ops directly.
+  // This avoids MPSGraph compilation/dispatch overhead, float32 upcast, and
+  // unnecessary attention weight allocation — ~2x faster than sdpa_general_mps.
+  if (!supports_fast_sdpa && !is_causal && !mask_.has_value() && query_seq_len > 8) {
+    auto scale_factor = sdp::calculate_scale(q_, scale).expect_float();
+    auto scores = at::matmul(q_, k_.transpose(-2, -1));
+    scores.mul_(scale_factor);
+    auto attn_weights = at::softmax(scores, -1);
+    auto out = at::matmul(attn_weights, v_);
+    if (unsqueezed) {
+      out = out.view_as(query);
+    }
+    return {std::move(out), std::move(attn_weights)};
+  }
 
   // if none of the fast paths apply, fall back to the generic mps graph solution
   if (!supports_fast_sdpa) {
