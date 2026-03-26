@@ -4542,7 +4542,7 @@ print("SUCCESS")
                 [sys.executable, "-c", script],
                 capture_output=True,
                 text=True,
-                timeout=10,
+                timeout=JOIN_TIMEOUT,
             )
         except subprocess.TimeoutExpired:
             self.fail("Process hung - threading workers prevented clean exit")
