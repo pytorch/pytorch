@@ -50,6 +50,23 @@ CUDA_AARCH64_ARCHES = [
     "13.2-aarch64",
 ]
 
+# TORCH_CUDA_ARCH_LIST per CUDA version x architecture.
+# x86_64 targets desktop/server GPUs; aarch64 targets Grace Hopper and similar.
+TORCH_CUDA_ARCH_LIST: dict[str, dict[str, str]] = {
+    "12.6": {
+        "x86_64": "5.0;6.0;7.0;7.5;8.0;8.6;9.0",
+        "aarch64": "8.0;9.0",
+    },
+    "13.0": {
+        "x86_64": "7.5;8.0;8.6;9.0;10.0;12.0+PTX",
+        "aarch64": "8.0;9.0;10.0;11.0;12.0+PTX",
+    },
+    "13.2": {
+        "x86_64": "7.5;8.0;8.6;9.0;10.0;12.0+PTX",
+        "aarch64": "8.0;9.0;10.0;11.0;12.0+PTX",
+    },
+}
+
 
 # WARNING: For CUDA 13.0, cublas is pinned to a version range rather
 # than an exact version. A broken cublas release within that range will be
@@ -271,6 +288,59 @@ RELEASE = "release"
 DEBUG = "debug"
 
 FULL_PYTHON_VERSIONS = ["3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t"]
+
+# TORCH_NVCC_FLAGS per CUDA major version.
+TORCH_NVCC_FLAGS: dict[str, str] = {
+    "12": "-Xfatbin -compress-all --threads 2",
+    "13": "-Xfatbin -compress-all --threads 2 -compress-mode=size",
+}
+
+# Container images for the linux-binary-manywheel workflow (container: directive).
+MANYWHEEL_CONTAINER_IMAGES: dict[str, str] = {
+    "cpu-x86_64": "ghcr.io/pytorch/test-infra:cpu-x86_64-latest",
+    "cuda-x86_64": "ghcr.io/pytorch/test-infra:cuda-x86_64-latest",
+    "cpu-aarch64": "pytorch/manylinux2_28_aarch64-builder:cpu-aarch64",
+    "cuda12.6-aarch64": "pytorch/manylinuxaarch64-builder:cuda12.6",
+    "cuda13.0-aarch64": "pytorch/manylinuxaarch64-builder:cuda13.0",
+    "cuda13.2-aarch64": "pytorch/manylinuxaarch64-builder:cuda13.2",
+    "rocm7.1": "pytorch/manylinux2_28-builder:rocm7.1",
+    "rocm7.2": "pytorch/manylinux2_28-builder:rocm7.2",
+    "xpu": "pytorch/manylinux2_28-builder:xpu",
+}
+
+PYTORCH_ROCM_ARCH = (
+    "gfx900;gfx906;gfx908;gfx90a;gfx942;gfx1030;"
+    "gfx1100;gfx1101;gfx1102;gfx1200;gfx1201;gfx950;gfx1150;gfx1151"
+)
+
+MANYWHEEL_RUNNERS = {
+    "build": {
+        "x86_64": "linux.12xlarge.memory.ephemeral",
+        "aarch64": "linux.arm64.r7g.12xlarge.memory",
+    },
+    "test_cpu": {
+        "x86_64": "linux.4xlarge",
+        "aarch64": "linux.arm64.2xlarge",
+    },
+    "test_cuda": {
+        "x86_64": "linux.g4dn.4xlarge.nvidia.gpu",
+        "aarch64": "linux.arm64.2xlarge",
+    },
+    "test_rocm": "linux.rocm.gpu.gfx942.1",
+    "test_xpu": "linux.idc.xpu",
+}
+
+# Python version -> manylinux tag / ABI tag mapping.
+# TODO: Re-enable full list for release builds.
+MANYWHEEL_PYTHON_VERSIONS = [
+    {"tag": "cp310-cp310", "abi": "cp310", "version": "3.10"},
+    # {"tag": "cp311-cp311", "abi": "cp311", "version": "3.11"},
+    # {"tag": "cp312-cp312", "abi": "cp312", "version": "3.12"},
+    # {"tag": "cp313-cp313", "abi": "cp313", "version": "3.13"},
+    # {"tag": "cp313-cp313t", "abi": "cp313t", "version": "3.13t"},
+    # {"tag": "cp314-cp314", "abi": "cp314", "version": "3.14"},
+    # {"tag": "cp314-cp314t", "abi": "cp314t", "version": "3.14t"},
+]
 
 
 def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
@@ -500,6 +570,246 @@ def generate_libtorch_extraction_configs(
     return ret
 
 
+# ---------------------------------------------------------------------------
+# Manywheel matrix builders (used by generate_linux_manywheel_matrix.py)
+# ---------------------------------------------------------------------------
+
+
+def _cuda_version_base(cuda_ver: str) -> str:
+    """Strip '-aarch64' suffix to get the base CUDA version."""
+    return cuda_ver.replace("-aarch64", "")
+
+
+def _nvcc_flags(cuda_ver: str) -> str:
+    major = _cuda_version_base(cuda_ver).split(".")[0]
+    return TORCH_NVCC_FLAGS.get(major, TORCH_NVCC_FLAGS["12"])
+
+
+def _extra_install_reqs(cuda_ver: str) -> str:
+    base = _cuda_version_base(cuda_ver)
+    return PYTORCH_EXTRA_INSTALL_REQUIREMENTS.get(base, "")
+
+
+def generate_manywheel_build_configs() -> list[dict[str, str]]:
+    """Generate gpu_config entries for the manywheel build matrix."""
+    configs: list[dict[str, str]] = []
+
+    # --- x86_64 CPU ---
+    configs.append(
+        {
+            "name": "cpu",
+            "desired_cuda": "cpu",
+            "gpu_arch_type": "cpu",
+            "gpu_arch_version": "",
+            "container_image": MANYWHEEL_CONTAINER_IMAGES["cpu-x86_64"],
+            "extra_install_reqs": "",
+            "torch_cuda_arch_list": "",
+            "torch_nvcc_flags": "",
+            "pytorch_rocm_arch": "",
+            "use_cuda": "0",
+            "use_gold_linker": "ON",
+            "use_gloo_with_openssl": "ON",
+            "runs_on_build": MANYWHEEL_RUNNERS["build"]["x86_64"],
+        }
+    )
+
+    # --- x86_64 CUDA ---
+    for cuda_ver in CUDA_ARCHES:
+        desired_cuda = translate_desired_cuda("cuda", cuda_ver)
+        configs.append(
+            {
+                "name": f"cuda{cuda_ver}",
+                "desired_cuda": desired_cuda,
+                "gpu_arch_type": "cuda",
+                "gpu_arch_version": cuda_ver,
+                "container_image": MANYWHEEL_CONTAINER_IMAGES["cuda-x86_64"],
+                "extra_install_reqs": _extra_install_reqs(cuda_ver),
+                "torch_cuda_arch_list": TORCH_CUDA_ARCH_LIST[cuda_ver]["x86_64"],
+                "torch_nvcc_flags": _nvcc_flags(cuda_ver),
+                "pytorch_rocm_arch": "",
+                "use_cuda": "1",
+                "use_gold_linker": "OFF",
+                "use_gloo_with_openssl": "ON",
+                "runs_on_build": MANYWHEEL_RUNNERS["build"]["x86_64"],
+            }
+        )
+
+    # --- x86_64 ROCm ---
+    for rocm_ver in ROCM_ARCHES:
+        desired_cuda = translate_desired_cuda("rocm", rocm_ver)
+        configs.append(
+            {
+                "name": f"rocm{rocm_ver}",
+                "desired_cuda": desired_cuda,
+                "gpu_arch_type": "rocm",
+                "gpu_arch_version": rocm_ver,
+                "container_image": MANYWHEEL_CONTAINER_IMAGES[f"rocm{rocm_ver}"],
+                "extra_install_reqs": "",
+                "torch_cuda_arch_list": "",
+                "torch_nvcc_flags": "",
+                "pytorch_rocm_arch": PYTORCH_ROCM_ARCH,
+                "use_cuda": "0",
+                "use_gold_linker": "OFF",
+                "use_gloo_with_openssl": "ON",
+                "runs_on_build": MANYWHEEL_RUNNERS["build"]["x86_64"],
+            }
+        )
+
+    # --- x86_64 XPU ---
+    configs.append(
+        {
+            "name": "xpu",
+            "desired_cuda": "xpu",
+            "gpu_arch_type": "xpu",
+            "gpu_arch_version": "",
+            "container_image": MANYWHEEL_CONTAINER_IMAGES["xpu"],
+            "extra_install_reqs": PYTORCH_EXTRA_INSTALL_REQUIREMENTS["xpu"],
+            "torch_cuda_arch_list": "",
+            "torch_nvcc_flags": "",
+            "pytorch_rocm_arch": "",
+            "use_cuda": "0",
+            "use_gold_linker": "OFF",
+            "use_gloo_with_openssl": "ON",
+            "runs_on_build": MANYWHEEL_RUNNERS["build"]["x86_64"],
+        }
+    )
+
+    # --- aarch64 CPU ---
+    configs.append(
+        {
+            "name": "cpu-aarch64",
+            "desired_cuda": "cpu",
+            "gpu_arch_type": "cpu-aarch64",
+            "gpu_arch_version": "",
+            "container_image": MANYWHEEL_CONTAINER_IMAGES["cpu-aarch64"],
+            "extra_install_reqs": "",
+            "torch_cuda_arch_list": "",
+            "torch_nvcc_flags": "",
+            "pytorch_rocm_arch": "",
+            "use_cuda": "0",
+            "use_gold_linker": "OFF",
+            "use_gloo_with_openssl": "OFF",
+            "runs_on_build": MANYWHEEL_RUNNERS["build"]["aarch64"],
+        }
+    )
+
+    # --- aarch64 CUDA ---
+    for aarch64_ver in CUDA_AARCH64_ARCHES:
+        base_ver = _cuda_version_base(aarch64_ver)
+        desired_cuda = translate_desired_cuda("cuda-aarch64", aarch64_ver)
+        configs.append(
+            {
+                "name": f"cuda{base_ver}-aarch64",
+                "desired_cuda": desired_cuda,
+                "gpu_arch_type": "cuda-aarch64",
+                "gpu_arch_version": base_ver,
+                "container_image": MANYWHEEL_CONTAINER_IMAGES[f"cuda{base_ver}-aarch64"],
+                "extra_install_reqs": _extra_install_reqs(base_ver),
+                "torch_cuda_arch_list": TORCH_CUDA_ARCH_LIST[base_ver]["aarch64"],
+                "torch_nvcc_flags": _nvcc_flags(base_ver),
+                "pytorch_rocm_arch": "",
+                "use_cuda": "1",
+                "use_gold_linker": "OFF",
+                "use_gloo_with_openssl": "OFF",
+                "runs_on_build": MANYWHEEL_RUNNERS["build"]["aarch64"],
+            }
+        )
+
+    return configs
+
+
+def generate_manywheel_test_configs() -> list[dict[str, str]]:
+    """Generate gpu_config entries for the manywheel test matrix."""
+    configs: list[dict[str, str]] = []
+
+    configs.append(
+        {
+            "name": "cpu",
+            "desired_cuda": "cpu",
+            "gpu_arch_type": "cpu",
+            "container_image": MANYWHEEL_CONTAINER_IMAGES["cpu-x86_64"],
+            "runs_on": MANYWHEEL_RUNNERS["test_cpu"]["x86_64"],
+        }
+    )
+
+    for cuda_ver in CUDA_ARCHES:
+        desired_cuda = translate_desired_cuda("cuda", cuda_ver)
+        configs.append(
+            {
+                "name": f"cuda{cuda_ver}",
+                "desired_cuda": desired_cuda,
+                "gpu_arch_type": "cuda",
+                "container_image": MANYWHEEL_CONTAINER_IMAGES["cuda-x86_64"],
+                "runs_on": MANYWHEEL_RUNNERS["test_cuda"]["x86_64"],
+            }
+        )
+
+    for rocm_ver in ROCM_ARCHES:
+        desired_cuda = translate_desired_cuda("rocm", rocm_ver)
+        configs.append(
+            {
+                "name": f"rocm{rocm_ver}",
+                "desired_cuda": desired_cuda,
+                "gpu_arch_type": "rocm",
+                "container_image": MANYWHEEL_CONTAINER_IMAGES[f"rocm{rocm_ver}"],
+                "runs_on": MANYWHEEL_RUNNERS["test_rocm"],
+            }
+        )
+
+    configs.append(
+        {
+            "name": "xpu",
+            "desired_cuda": "xpu",
+            "gpu_arch_type": "xpu",
+            "container_image": MANYWHEEL_CONTAINER_IMAGES["xpu"],
+            "runs_on": MANYWHEEL_RUNNERS["test_xpu"],
+        }
+    )
+
+    configs.append(
+        {
+            "name": "cpu-aarch64",
+            "desired_cuda": "cpu",
+            "gpu_arch_type": "cpu-aarch64",
+            "container_image": MANYWHEEL_CONTAINER_IMAGES["cpu-aarch64"],
+            "runs_on": MANYWHEEL_RUNNERS["test_cpu"]["aarch64"],
+        }
+    )
+
+    for aarch64_ver in CUDA_AARCH64_ARCHES:
+        base_ver = _cuda_version_base(aarch64_ver)
+        desired_cuda = translate_desired_cuda("cuda-aarch64", aarch64_ver)
+        configs.append(
+            {
+                "name": f"cuda{base_ver}-aarch64",
+                "desired_cuda": desired_cuda,
+                "gpu_arch_type": "cuda-aarch64",
+                "container_image": MANYWHEEL_CONTAINER_IMAGES[f"cuda{base_ver}-aarch64"],
+                "runs_on": MANYWHEEL_RUNNERS["test_cuda"]["aarch64"],
+            }
+        )
+
+    return configs
+
+
+def generate_manywheel_upload_configs() -> list[dict[str, str]]:
+    """Generate gpu_config entries for the manywheel upload matrix."""
+    configs: list[dict[str, str]] = []
+
+    configs.append({"name": "cpu"})
+    for cuda_ver in CUDA_ARCHES:
+        configs.append({"name": f"cuda{cuda_ver}"})
+    for rocm_ver in ROCM_ARCHES:
+        configs.append({"name": f"rocm{rocm_ver}"})
+    configs.append({"name": "xpu"})
+    configs.append({"name": "cpu-aarch64"})
+    for aarch64_ver in CUDA_AARCH64_ARCHES:
+        base_ver = _cuda_version_base(aarch64_ver)
+        configs.append({"name": f"cuda{base_ver}-aarch64"})
+
+    return configs
+
+
 arch_version = ""
 for arch_version in CUDA_ARCHES:
     validate_nccl_dep_consistency(arch_version)
@@ -508,7 +818,25 @@ del arch_version
 
 
 if __name__ == "__main__":
-    # Used by tools/nightly.py
-    (SCRIPT_DIR / "nightly_source_matrix.json").write_text(
-        json.dumps(NIGHTLY_SOURCE_MATRIX, indent=4) + "\n"
-    )
+    import sys
+
+    if "--manywheel" in sys.argv:
+        # Output the linux manywheel matrix as JSON for GitHub Actions.
+        # Usage: python3 generate_binary_build_matrix.py --manywheel
+        result = {
+            "python-versions": MANYWHEEL_PYTHON_VERSIONS,
+            "build-configs": generate_manywheel_build_configs(),
+            "test-configs": generate_manywheel_test_configs(),
+            "upload-configs": generate_manywheel_upload_configs(),
+        }
+        print(json.dumps(result, indent=2))
+        github_output = os.environ.get("GITHUB_OUTPUT")
+        if github_output:
+            with open(github_output, "a") as f:
+                for key, value in result.items():
+                    f.write(f"{key}={json.dumps(value)}\n")
+    else:
+        # Default: write nightly_source_matrix.json (used by tools/nightly.py)
+        (SCRIPT_DIR / "nightly_source_matrix.json").write_text(
+            json.dumps(NIGHTLY_SOURCE_MATRIX, indent=4) + "\n"
+        )

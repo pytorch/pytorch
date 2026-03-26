@@ -1,0 +1,115 @@
+# Workflow for building PyTorch manywheel packages.
+# Uses GitHub Actions container: directive instead of Docker-in-Docker,
+# making it compatible with ARC runners in Kubernetes where Docker is unavailable.
+#
+# Build/test logic lives in reusable workflows:
+#   _linux-manywheel-build.yml  (build + repair + upload artifact)
+#   _linux-manywheel-test.yml   (download artifact + test)
+#   _binary-upload.yml          (upload to S3/R2)
+
+name: linux-binary-manywheel
+
+on:
+  pull_request:
+  push:
+    branches:
+      - nightly
+    tags:
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+      - 'ciflow/binaries/*'
+      - 'ciflow/binaries_wheel/*'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+
+concurrency:
+  group: linux-manywheel-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  generate-matrix:
+    if: github.repository_owner == 'pytorch'
+    runs-on: ubuntu-latest
+    outputs:
+      python-versions: ${{ steps.generate.outputs.python-versions }}
+      build-configs: ${{ steps.generate.outputs.build-configs }}
+      test-configs: ${{ steps.generate.outputs.test-configs }}
+      upload-configs: ${{ steps.generate.outputs.upload-configs }}
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          submodules: false
+          show-progress: false
+
+      - name: Generate matrix
+        id: generate
+        working-directory: .github/scripts
+        run: python3 generate_binary_build_matrix.py --manywheel
+
+  build:
+    needs: generate-matrix
+    uses: ./.github/workflows/_linux-manywheel-build.yml
+    with:
+      python-versions: ${{ needs.generate-matrix.outputs.python-versions }}
+      build-configs: ${{ needs.generate-matrix.outputs.build-configs }}
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  test:
+    needs: [generate-matrix, build]
+    uses: ./.github/workflows/_linux-manywheel-test.yml
+    with:
+      python-versions: ${{ needs.generate-matrix.outputs.python-versions }}
+      test-configs: ${{ needs.generate-matrix.outputs.test-configs }}
+
+  # Merge per-Python artifacts into per-GPU artifacts for the upload job.
+  # Build produces: wheels-cpu-cp310, wheels-cpu-cp311, ...
+  # Upload expects: wheels-cpu (containing all Python wheels)
+  merge-artifacts:
+    if: github.repository_owner == 'pytorch'
+    needs: [generate-matrix, test]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        gpu_config: ${{ fromJSON(needs.generate-matrix.outputs.upload-configs) }}
+    steps:
+      - name: Download all Python variant wheels for this GPU config
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          pattern: wheels-${{ matrix.gpu_config.name }}-*
+          merge-multiple: true
+          path: merged/
+
+      - name: Upload merged artifact
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
+        with:
+          name: wheels-${{ matrix.gpu_config.name }}
+          if-no-files-found: error
+          path: merged/*.whl
+
+  upload:
+    if: github.repository_owner == 'pytorch'
+    needs: [generate-matrix, merge-artifacts]
+    permissions:
+      id-token: write
+      contents: read
+    strategy:
+      matrix:
+        gpu_config: ${{ fromJSON(needs.generate-matrix.outputs.upload-configs) }}
+    uses: ./.github/workflows/_binary-upload.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      DESIRED_CUDA: ${{ matrix.gpu_config.name }}
+      GPU_ARCH_TYPE: ${{ matrix.gpu_config.name }}
+      DESIRED_PYTHON: "3.10"
+      build_name: wheels-${{ matrix.gpu_config.name }}
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
