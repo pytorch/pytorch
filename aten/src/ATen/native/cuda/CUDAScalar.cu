@@ -15,6 +15,7 @@ namespace at::native {
 
 namespace {
 
+template <typename scalar_t>
 void _local_scalar_dense_cuda_impl(const Tensor& self, Scalar& r) {
 #if defined(USE_ROCM) && (ROCM_VERSION >= 70200)
   // If this is a large BAR device, we can just read directly from VRAM
@@ -54,7 +55,7 @@ Scalar _local_scalar_dense_cuda(const Tensor& self) {
   TORCH_CHECK(self.numel() > 0, "_local_scalar_dense: Empty tensor not supported");
     AT_DISPATCH_V2(
       self.scalar_type(), "_local_scalar_dense_cuda", AT_WRAP([&] {
-        _local_scalar_dense_cuda_impl(self, r);
+        _local_scalar_dense_cuda_impl<scalar_t>(self, r);
       }), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), kComplexHalf, kHalf, kBool, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
   return r;
 }
