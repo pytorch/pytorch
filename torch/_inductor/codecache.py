@@ -97,6 +97,7 @@ from torch._inductor.utils import (
     XPU_KERNEL_FORMAT,
 )
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_reference_type
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
@@ -832,6 +833,11 @@ def resolve_pre_grad_pass_timing() -> Literal["early", "late"]:
     return timing
 
 
+@dataclasses.dataclass
+class HashableOpaqueValue:
+    ordinal: int
+
+
 class FxGraphHashDetails:
     """
     Object to capture all the details for a compiled FX graph relevant to computing
@@ -849,7 +855,19 @@ class FxGraphHashDetails:
         inputs_to_check: Sequence[int],
     ) -> None:
         self.gm = gm
-        self.example_inputs = example_inputs
+        # Replace opaque references with hashable ordinals. What's important
+        # is that if the same reference appears twice then it's the same hash
+        # value for each.
+        processed_inputs: list[InputType | HashableOpaqueValue] = []
+        seen_opaques: dict[int, HashableOpaqueValue] = {}
+        for inp in example_inputs:
+            if is_opaque_reference_type(type(inp)):
+                if id(inp) not in seen_opaques:
+                    seen_opaques[id(inp)] = HashableOpaqueValue(len(seen_opaques))
+                processed_inputs.append(seen_opaques[id(inp)])
+            else:
+                processed_inputs.append(inp)
+        self.example_inputs = processed_inputs
         self.cache_key_tag = cconfig.cache_key_tag
 
         # Order kwargs so hashing is stable to changes in kwarg order. Although

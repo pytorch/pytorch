@@ -24,7 +24,11 @@ from torch import device, Tensor
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_type, is_opaque_value_type
+from torch._library.opaque_object import (
+    is_opaque_reference_type,
+    is_opaque_type,
+    is_opaque_value_type,
+)
 from torch._library.utils import get_layout_constraint_tag
 from torch._logging import LazyString, trace_structured
 from torch._prims_common import (
@@ -1244,6 +1248,11 @@ class GraphLowering(torch.fx.Interpreter):
             self.graph_inputs[target] = gen  # type: ignore[assignment]
             self.graph_input_names.append(target)
             return gen
+        elif is_opaque_reference_type(type(example)):
+            opaque_obj = ir.OpaqueObjectState(name=target, value=example)
+            self.graph_inputs[target] = opaque_obj  # type: ignore[assignment]
+            self.graph_input_names.append(target)
+            return opaque_obj
 
         assert isinstance(example, torch.Tensor), example
         # todo(chilli): We can remove the last check once we turn buffers into
@@ -1522,11 +1531,11 @@ class GraphLowering(torch.fx.Interpreter):
     def call_method(self, target: Any, args: Any, kwargs: Any) -> NoReturn:
         raise AssertionError
 
-    # pyrefly: ignore [bad-override]
+    @typing_extensions.override
     def output(
         self,
-        target: str,  # type: ignore[override]
-        args: tuple[object],  # type: ignore[override]
+        target: torch.fx.node.Target,
+        args: tuple[torch.fx.node.Argument, ...],
         kwargs: dict[str, object],
     ) -> None:
         result = super().output(target, args, kwargs)  # type: ignore[arg-type]
@@ -1592,13 +1601,19 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_outputs = result_correct_strides
         value: ir.IRNode
         for name, value in self.graph_inputs.items():
-            if isinstance(value, TorchBindObject):
+            if isinstance(
+                value,
+                (
+                    TorchBindObject,
+                    sympy.Expr,
+                    torch._inductor.ir.GeneratorState,
+                    torch._inductor.ir.OpaqueObjectState,
+                ),
+            ):
                 continue
-            assert isinstance(
-                value, (TensorBox, sympy.Expr, torch._inductor.ir.GeneratorState)
-            ), f"Unsupported inductor graph input type: {type(value)}"
-            if not isinstance(value, TensorBox):
-                continue
+            assert isinstance(value, TensorBox), (
+                f"Unsupported inductor graph input type: {type(value)}"
+            )
             value.realize()
             assert isinstance(value, TensorBox)
             value = value.data

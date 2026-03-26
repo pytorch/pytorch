@@ -27,7 +27,7 @@ from torch._functorch.aot_autograd import (
     aot_export_module,
 )
 from torch._inductor import config as inductor_config
-from torch._inductor.compile_fx import compile_fx
+from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch._library.effects import EffectType
@@ -3537,6 +3537,31 @@ def forward(self, p_linear_weight, p_linear_bias, obj_lifted_custom_0, x):
         opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager_decomp_partition")
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    def test_reference_type_opaque_object_state(self):
+        """When compile_fx_inner receives an FX graph whose placeholder meta['val']
+        is a raw opaque reference type (not wrapped in FakeScriptObject), inductor
+        handles it via OpaqueObjectState. This codepath is used by compile-on-one-rank
+        (COOR) where the FX graph is constructed with real objects."""
+        m = OpaqueMultiplier(2.0)
+        x = torch.ones(3)
+
+        graph = torch.fx.Graph()
+        m_node = graph.placeholder("m")
+        m_node.meta["val"] = m
+        fake_mode = FakeTensorMode()
+        x_node = graph.placeholder("x")
+        x_node.meta["val"] = fake_mode.from_tensor(x)
+        out = graph.call_function(
+            torch.ops._TestOpaqueObject.mul_with_scale.default, (m_node, x_node)
+        )
+        out.meta["val"] = fake_mode.from_tensor(x)
+        graph.output((out,))
+
+        gm = torch.fx.GraphModule({}, graph)
+        compiled = compile_fx_inner(gm, [m, x])
+        result = compiled([m, x])
+        self.assertEqual(result, (x * 2,))
 
 
 instantiate_parametrized_tests(TestOpaqueObject)

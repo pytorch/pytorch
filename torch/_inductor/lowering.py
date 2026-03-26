@@ -2973,7 +2973,9 @@ def constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs):
 
 def constrain_to_fx_strides(fx_node, *args, **kwargs):
     def apply_constraint(arg, fx_arg):
-        if _is_tensor_irnode(arg):
+        if _is_tensor_irnode(arg) and not isinstance(
+            arg, (ir.GeneratorState, ir.OpaqueObjectState)
+        ):
             stride_order = ir.get_stride_order(
                 fx_arg.meta["val"].stride(), V.graph.sizevars.shape_env
             )
