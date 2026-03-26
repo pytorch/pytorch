@@ -2484,9 +2484,12 @@ if HAS_CUDA_AND_TRITON:
             with warnings.catch_warnings(record=True) as w:
                 out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
 
-            FileCheck().check(
-                "Unable to hit fast path of CUDAGraphs because of pending"
-            ).run(str(w[0]))
+            # Match substring only; scan all warnings in case another warning fires first.
+            msgs = [str(x.message) for x in w]
+            self.assertTrue(
+                any("require backward" in m for m in msgs),
+                f"expected CUDAGraph pending-backward warning; got: {msgs}",
+            )
             self.assertTrue(self.get_manager().new_graph_id().id == 0)
 
         def test_mark_step(self):
