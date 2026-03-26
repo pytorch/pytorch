@@ -56,8 +56,6 @@ Module Base Class
 All neural network modules inherit from ``torch::nn::Module``.
 
 .. doxygenclass:: torch::nn::Module
-   :members:
-   :undoc-members:
 
 Module Categories
 -----------------

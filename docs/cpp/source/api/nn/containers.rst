@@ -26,10 +26,6 @@ networks.
    :members:
    :undoc-members:
 
-.. doxygenclass:: torch::nn::SequentialImpl
-   :members:
-   :undoc-members:
-
 **Example:**
 
 .. code-block:: cpp
@@ -54,10 +50,6 @@ modules are called.
    :members:
    :undoc-members:
 
-.. doxygenclass:: torch::nn::ModuleListImpl
-   :members:
-   :undoc-members:
-
 **Example:**
 
 .. code-block:: cpp
@@ -78,10 +70,6 @@ ModuleDict
 need to select modules by name at runtime.
 
 .. doxygenclass:: torch::nn::ModuleDict
-   :members:
-   :undoc-members:
-
-.. doxygenclass:: torch::nn::ModuleDictImpl
    :members:
    :undoc-members:
 

@@ -47,8 +47,6 @@ AnyModule
 ---------
 
 .. doxygenclass:: torch::nn::AnyModule
-   :members:
-   :undoc-members:
 
 ``AnyModule`` provides type-erased storage for any module:
 
@@ -61,8 +59,6 @@ Functional
 ----------
 
 .. doxygenclass:: torch::nn::Functional
-   :members:
-   :undoc-members:
 
 Wraps a function or callable as a module, useful for inserting arbitrary
 functions into a ``Sequential`` container:
