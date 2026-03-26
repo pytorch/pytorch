@@ -1,6 +1,7 @@
 ---
 name: debug-graph-breaks
-description: Debug and fix torch.compile graph breaks to achieve fullgraph compilation
+disable-model-invocation: true
+description: Debug and fix torch.compile graph breaks to prioritize and eliminate graph-breaks, and optionally achieve fullgraph compilation
 
 ---
 
