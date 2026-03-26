@@ -19,7 +19,6 @@
 
 #include <ATen/Parallel.h>
 #include <ATen/Utils.h>
-#include <ATen/core/Vitals.h>
 #include <ATen/dlpack.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/ForeachUtils.h>
@@ -2401,17 +2400,6 @@ PyObject* initModule() {
   py_module.def("_demangle", &c10::demangle);
   py_module.def("_log_api_usage_once", &LogAPIUsageOnceFromPython);
   py_module.def("_log_api_usage_metadata", &LogAPIUsageMetadataFromPython);
-
-  py_module.def("vitals_enabled", &at::vitals::torchVitalEnabled);
-  py_module.def(
-      "set_vital",
-      [](const std::string& vital,
-         const std::string& attr,
-         const std::string& value) {
-        return at::vitals::VitalsAPI.setVital(vital, attr, value);
-      });
-  py_module.def(
-      "read_vitals", []() { return at::vitals::VitalsAPI.readVitals(); });
 
   py_module.def(
       "init_num_threads",
