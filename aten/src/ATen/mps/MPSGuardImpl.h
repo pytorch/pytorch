@@ -67,22 +67,6 @@ struct TORCH_API MPSGuardImpl final
     // TODO: Currently setting only device 0
   }
 
-  DeviceCapability getDeviceCapability(Device /*d*/) const override {
-    DeviceCapability cap;
-    // Currently the supported dtypes are align with all_mps_types()
-    // in torch/testing/_internal/common_dtype.py
-    // TODO: Need to align all_mps_types() and MPS_DTYPES in test_mps.py
-    cap.capability_data.capability_bits = (1ULL << kIndex_Byte) |
-        (1ULL << kIndex_Char) | (1ULL << kIndex_Byte) | (1ULL << kIndex_Short) |
-        (1ULL << kIndex_Int) | (1ULL << kIndex_Long) | (1ULL << kIndex_Float) |
-        (1ULL << kIndex_Half);
-    // Apple documents `MPSDataType.bFloat16` as available on macOS 14.0+.
-    if (at::detail::getMPSHooks().isOnMacOSorNewer(14, 0)) {
-      cap.capability_data.capability_bits |= (1ULL << kIndex_BFloat16);
-    }
-    return cap;
-  }
-
   Stream getStream(Device d) const override {
     return Stream(Stream::DEFAULT, Device(c10::DeviceType::MPS, 0));
   }
