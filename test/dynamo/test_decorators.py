@@ -2243,6 +2243,7 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
 
         self.assertEqual(cnts.frame_count, 0)
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_nested_compile_fullgraph(self):
         # Test that fullgraph=True cannot be toggled back by fullgraph=False
         inp = torch.ones(3)
