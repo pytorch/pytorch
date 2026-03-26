@@ -7426,10 +7426,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         @torch.compile(backend="eager")
         def f1(a, b):
-            try:
-                f2(a, b)
-            finally:
-                pass
+            f2(a, b)
 
         def f2(a, b):
             c = a + b
@@ -7438,10 +7435,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         @torch.compile(backend="eager")
         def g1(a, b):
-            try:
-                g2(a, b)
-            finally:
-                pass
+            g2(a, b)
 
         def g2(a, b):
             c = a + b

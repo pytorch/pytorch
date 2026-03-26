@@ -193,8 +193,7 @@ class TestUtils(TestCase):
         @torch.compile(backend=my_backend)
         def fn(x):
             z = x + 1
-            with torch._dynamo.disable_nested_graph_breaks():
-                y = break_it(z)
+            y = break_it(z)
             return y * 2
 
         x = torch.randn(3)

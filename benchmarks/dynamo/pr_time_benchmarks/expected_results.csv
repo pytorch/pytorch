@@ -106,7 +106,7 @@ dtensor_dispatch_add_backward,instruction_count,346201,0.1
 
 
 
-dtensor_dispatch_inplace,instruction_count,62320,0.1
+dtensor_dispatch_inplace,instruction_count,56530,0.1
 
 
 

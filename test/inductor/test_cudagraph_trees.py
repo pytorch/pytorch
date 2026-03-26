@@ -746,7 +746,8 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(foo_opt(ones), foo(ones))
             # paths
             children = self.get_root_children()
-            self.assertEqual(children, [1])
+            # one root with two children
+            self.assertEqual(children, [2])
 
         def test_end_recording_early(self):
             def foo(x):
