@@ -737,6 +737,7 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+
     @skipCPUIf(True, "Triton codegen bug only affects GPU")
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_scalar_outputs": True})
@@ -823,6 +824,40 @@ class TestUnbackedSymints(InductorTestCase):
         )
         actual = torch.compile(fn, fullgraph=True, dynamic=True)(*example_inputs)
         expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    def test_slice_on_unbacked_plus_constant(self, device):
+        """
+        Test slicing on a tensor whose size is (unbacked + constant).
+
+        When we have:
+        - repeat_interleave creates unbacked symbol u0
+        - cat creates size u0 + 1
+        - slice [1:] produces size u0 (existing symbol, not fresh)
+
+        The lowering should handle this case where the output uses an existing
+        unbacked symbol rather than creating a new one.
+        """
+
+        def fn(x: torch.Tensor, repeats: list[int]):
+            repeats_t = torch.tensor(repeats, device=x.device, dtype=torch.long)
+
+            # repeat_interleave with tensor repeats -> unbacked size u0
+            vals = torch.repeat_interleave(x, repeats_t)
+
+            # cat with fixed-size tensor -> size becomes u0 + 1
+            vals = torch.cat([torch.zeros(1, device=x.device, dtype=x.dtype), vals])
+
+            # slice on u0 + 1 sized tensor -> should produce size u0
+            return vals[1:]
+
+        x = torch.tensor([10, 20, 30], device=device, dtype=torch.int32)
+        repeats = [2, 3, 1]
+
+        actual = torch.compile(fn, fullgraph=True)(x, repeats)
+        expected = fn(x, repeats)
         torch.testing.assert_close(actual, expected)
 
 
