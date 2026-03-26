@@ -691,7 +691,7 @@ libtorch_lite_cmake_sources = sorted(
     torch_mobile_core,
 )
 
-libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources + libtorch_nativert_sources
+libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources
 
 libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/autograd/TraceTypeManual.cpp",
