@@ -86,14 +86,14 @@ jobs:
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@8e3ec190e7f9da56d28a687dc8b54838cf4ffa1a # main
 
       - name: Setup XPU
         uses: ./.github/actions/setup-xpu
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-image-name: ${{ inputs.docker-image }}
 
@@ -107,7 +107,7 @@ jobs:
           echo "docker pull ghcr.io/pytorch/ci-image:${tag/:/-}"
 
       - name: Pull docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -342,7 +342,7 @@ jobs:
           aws-region: us-east-1
 
       - name: Upload the benchmark results
-        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
+        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           benchmark-results-dir: test/test-reports
           dry-run: false

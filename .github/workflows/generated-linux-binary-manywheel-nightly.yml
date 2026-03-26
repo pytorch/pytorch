@@ -42,7 +42,7 @@ jobs:
   get-label-type:
     if: github.repository_owner == 'pytorch'
     name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@8e3ec190e7f9da56d28a687dc8b54838cf4ffa1a # main
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -532,21 +532,21 @@ jobs:
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.1
           docker-build-dir: .ci/docker
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -648,21 +648,21 @@ jobs:
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.2
           docker-build-dir: .ci/docker
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -750,9 +750,9 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
       - name: Setup XPU
-        uses: pytorch/pytorch/.github/actions/setup-xpu@main
+        uses: pytorch/pytorch/.github/actions/setup-xpu@8e3ec190e7f9da56d28a687dc8b54838cf4ffa1a # main
       - name: Login to ECR
-        uses: pytorch/pytorch/.github/actions/ecr-login@main
+        uses: pytorch/pytorch/.github/actions/ecr-login@8e3ec190e7f9da56d28a687dc8b54838cf4ffa1a # main
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -760,14 +760,14 @@ jobs:
           path: "${{ runner.temp }}/artifacts/"
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: xpu
           docker-build-dir: .ci/docker
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -1284,21 +1284,21 @@ jobs:
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.1
           docker-build-dir: .ci/docker
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -1400,21 +1400,21 @@ jobs:
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.2
           docker-build-dir: .ci/docker
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -1502,9 +1502,9 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
       - name: Setup XPU
-        uses: pytorch/pytorch/.github/actions/setup-xpu@main
+        uses: pytorch/pytorch/.github/actions/setup-xpu@8e3ec190e7f9da56d28a687dc8b54838cf4ffa1a # main
       - name: Login to ECR
-        uses: pytorch/pytorch/.github/actions/ecr-login@main
+        uses: pytorch/pytorch/.github/actions/ecr-login@8e3ec190e7f9da56d28a687dc8b54838cf4ffa1a # main
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -1512,14 +1512,14 @@ jobs:
           path: "${{ runner.temp }}/artifacts/"
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: xpu
           docker-build-dir: .ci/docker
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -2036,21 +2036,21 @@ jobs:
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.1
           docker-build-dir: .ci/docker
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -2152,21 +2152,21 @@ jobs:
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.2
           docker-build-dir: .ci/docker
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -2254,9 +2254,9 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
       - name: Setup XPU
-        uses: pytorch/pytorch/.github/actions/setup-xpu@main
+        uses: pytorch/pytorch/.github/actions/setup-xpu@8e3ec190e7f9da56d28a687dc8b54838cf4ffa1a # main
       - name: Login to ECR
-        uses: pytorch/pytorch/.github/actions/ecr-login@main
+        uses: pytorch/pytorch/.github/actions/ecr-login@8e3ec190e7f9da56d28a687dc8b54838cf4ffa1a # main
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -2264,14 +2264,14 @@ jobs:
           path: "${{ runner.temp }}/artifacts/"
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: xpu
           docker-build-dir: .ci/docker
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -2788,21 +2788,21 @@ jobs:
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.1
           docker-build-dir: .ci/docker
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -2904,21 +2904,21 @@ jobs:
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.2
           docker-build-dir: .ci/docker
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -3006,9 +3006,9 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
       - name: Setup XPU
-        uses: pytorch/pytorch/.github/actions/setup-xpu@main
+        uses: pytorch/pytorch/.github/actions/setup-xpu@8e3ec190e7f9da56d28a687dc8b54838cf4ffa1a # main
       - name: Login to ECR
-        uses: pytorch/pytorch/.github/actions/ecr-login@main
+        uses: pytorch/pytorch/.github/actions/ecr-login@8e3ec190e7f9da56d28a687dc8b54838cf4ffa1a # main
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -3016,14 +3016,14 @@ jobs:
           path: "${{ runner.temp }}/artifacts/"
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: xpu
           docker-build-dir: .ci/docker
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -3540,21 +3540,21 @@ jobs:
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.1
           docker-build-dir: .ci/docker
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -3656,21 +3656,21 @@ jobs:
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.2
           docker-build-dir: .ci/docker
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -3758,9 +3758,9 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
       - name: Setup XPU
-        uses: pytorch/pytorch/.github/actions/setup-xpu@main
+        uses: pytorch/pytorch/.github/actions/setup-xpu@8e3ec190e7f9da56d28a687dc8b54838cf4ffa1a # main
       - name: Login to ECR
-        uses: pytorch/pytorch/.github/actions/ecr-login@main
+        uses: pytorch/pytorch/.github/actions/ecr-login@8e3ec190e7f9da56d28a687dc8b54838cf4ffa1a # main
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -3768,14 +3768,14 @@ jobs:
           path: "${{ runner.temp }}/artifacts/"
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: xpu
           docker-build-dir: .ci/docker
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -4292,21 +4292,21 @@ jobs:
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.1
           docker-build-dir: .ci/docker
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -4408,21 +4408,21 @@ jobs:
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.2
           docker-build-dir: .ci/docker
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -4510,9 +4510,9 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
       - name: Setup XPU
-        uses: pytorch/pytorch/.github/actions/setup-xpu@main
+        uses: pytorch/pytorch/.github/actions/setup-xpu@8e3ec190e7f9da56d28a687dc8b54838cf4ffa1a # main
       - name: Login to ECR
-        uses: pytorch/pytorch/.github/actions/ecr-login@main
+        uses: pytorch/pytorch/.github/actions/ecr-login@8e3ec190e7f9da56d28a687dc8b54838cf4ffa1a # main
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -4520,14 +4520,14 @@ jobs:
           path: "${{ runner.temp }}/artifacts/"
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: xpu
           docker-build-dir: .ci/docker
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -5044,21 +5044,21 @@ jobs:
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.1
           docker-build-dir: .ci/docker
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -5160,21 +5160,21 @@ jobs:
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.2
           docker-build-dir: .ci/docker
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -5262,9 +5262,9 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
       - name: Setup XPU
-        uses: pytorch/pytorch/.github/actions/setup-xpu@main
+        uses: pytorch/pytorch/.github/actions/setup-xpu@8e3ec190e7f9da56d28a687dc8b54838cf4ffa1a # main
       - name: Login to ECR
-        uses: pytorch/pytorch/.github/actions/ecr-login@main
+        uses: pytorch/pytorch/.github/actions/ecr-login@8e3ec190e7f9da56d28a687dc8b54838cf4ffa1a # main
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -5272,14 +5272,14 @@ jobs:
           path: "${{ runner.temp }}/artifacts/"
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: xpu
           docker-build-dir: .ci/docker
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary

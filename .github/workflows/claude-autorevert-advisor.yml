@@ -38,14 +38,14 @@ jobs:
           git fetch origin ${{ inputs.suspect_commit }} --depth=32 || true
 
       - name: Configure AWS credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_claude_code
           aws-region: us-east-1
 
       - name: Run AI Advisor
         id: claude
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@3ac52d0da9f8ec9ca7b4dc23bb477e36ef9c77a9 # v1
         with:
           allowed_bots: "pytorch-auto-revert[bot]"
           use_bedrock: "true"
@@ -130,4 +130,4 @@ jobs:
 
       - name: Upload usage metrics
         if: always()
-        uses: pytorch/test-infra/.github/actions/upload-claude-usage@main
+        uses: pytorch/test-infra/.github/actions/upload-claude-usage@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main

@@ -22,7 +22,7 @@ jobs:
   get-label-type:
     if: github.repository_owner == 'pytorch'
     name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@8e3ec190e7f9da56d28a687dc8b54838cf4ffa1a # main
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -71,12 +71,12 @@ jobs:
           git config --global core.ignorecase false
           git config --global core.fsmonitor false
       - name: Setup SSH (Click me for login details)
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        uses: pytorch/test-infra/.github/actions/setup-ssh@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@8e3ec190e7f9da56d28a687dc8b54838cf4ffa1a # main
         with:
           no-sudo: true
           submodules: true
@@ -90,7 +90,7 @@ jobs:
           echo "CUDA_HOME=${CUDA_PATH}" >> "${GITHUB_ENV}"
           echo "${CUDA_PATH}/bin" >> "${GITHUB_PATH}"
       - name: Setup MSVC
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
 
       - name: Remove link.exe conflict
         run: rm -f /usr/bin/link

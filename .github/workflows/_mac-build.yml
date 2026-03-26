@@ -71,11 +71,11 @@ jobs:
       build-environment: ${{ inputs.build-environment }}
     steps:
       - name: Clean up disk space before running MacOS workflow
-        uses: pytorch/test-infra/.github/actions/check-disk-space@main
+        uses: pytorch/test-infra/.github/actions/check-disk-space@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
 
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@8e3ec190e7f9da56d28a687dc8b54838cf4ffa1a # main
 
       - name: Set xcode version
         env:
@@ -86,7 +86,7 @@ jobs:
           fi
 
       - name: Setup Python
-        uses: pytorch/test-infra/.github/actions/setup-python@main
+        uses: pytorch/test-infra/.github/actions/setup-python@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           python-version: ${{ inputs.python-version }}
           pip-requirements-file: .ci/docker/requirements-ci.txt
@@ -192,4 +192,4 @@ jobs:
       - name: Clean up disk space
         if: always()
         continue-on-error: true
-        uses: pytorch/test-infra/.github/actions/check-disk-space@main
+        uses: pytorch/test-infra/.github/actions/check-disk-space@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main

@@ -80,7 +80,7 @@ jobs:
     name: build-docs-${{ matrix.docs_type }}-${{ inputs.push }}
     steps:
       - name: Setup SSH (Click me for login details)
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        uses: pytorch/test-infra/.github/actions/setup-ssh@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
           instructions: |
@@ -91,7 +91,7 @@ jobs:
 
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@8e3ec190e7f9da56d28a687dc8b54838cf4ffa1a # main
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
@@ -103,12 +103,12 @@ jobs:
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-image-name: ${{ inputs.docker-image }}
 
       - name: Pull docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -213,5 +213,5 @@ jobs:
           echo "https://docs-preview.pytorch.org/pytorch/pytorch/nightly-${{ github.sha }}/cppdocs/index.html"
 
       - name: Teardown Linux
-        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        uses: pytorch/test-infra/.github/actions/teardown-linux@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         if: always()
