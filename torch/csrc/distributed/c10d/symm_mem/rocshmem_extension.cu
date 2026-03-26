@@ -1,3 +1,23 @@
+// ROCm implementation of the NVSHMEM symmetric memory extension ops.
+//
+// This is a separate file from nvshmem_extension.cu (rather than a hipified
+// copy) for the following reasons:
+//
+// 1. API differences: NVSHMEM and rocSHMEM device APIs diverge enough that
+//    #ifdef'ing would be more noise than signal. Key differences include:
+//    - nvshmemx_collective_launch (grid-wide sync) has no rocSHMEM equivalent;
+//      ROCm uses regular hip kernel launches with host-side barriers instead.
+//    - nvshmemx_getmem_nbi_block → rocshmem_getmem_nbi_wg (workgroup scope).
+//
+// 2. Missing features: rocSHMEM does not yet support tiled communication
+//    (nvshmemx::Tensor, nvshmemx::tile_sum_reduce_block, etc.), so the
+//    tile_reduce and multi_root_tile_reduce ops are not included here.
+//
+// 3. Offset writeback: without grid-wide sync, multi-block kernels cannot
+//    safely write output offsets in-kernel (race with blocks still reading
+//    source_offsets). A separate writeOutputOffsets kernel runs after the data
+//    exchange completes.
+
 #include <hip/hip_runtime.h>
 #include <algorithm>
 #include <vector>
