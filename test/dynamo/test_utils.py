@@ -1,7 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import dataclasses
-import os
 import json
+import os
 import pprint
 import sys
 from unittest import mock
