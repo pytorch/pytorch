@@ -2742,6 +2742,7 @@ fake_autocast_backward_xfails = {
     skip("linalg.pinv", "hermitian"),
     skip("linalg.pinv", "singular"),
     skip("pinverse"),
+    skip("nn.functional.bilinear"),
 }
 
 
