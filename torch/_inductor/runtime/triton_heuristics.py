@@ -1468,7 +1468,6 @@ class CachingAutotuner(KernelInterface):
             )
 
         if best_config not in config2launcher:
-
             # On a Coordesc cache hit, we might not have loaded the launcher
             # This can happen because PyCodeCache saves CachingAutotuners in memory,
             # even for separate compile IDs (which can have different inputs without changing output code)
@@ -1558,6 +1557,11 @@ class CachingAutotuner(KernelInterface):
             ]
 
         (launcher,) = self.launchers
+        # Ensure the final launcher is marked as a winner for bundle filtering.
+        # For multi-config autotuning and coordesc, put_winner was already called
+        # (this is an idempotent set-add). For single-config kernels that skip
+        # autotuning entirely, this is the only call site that records the winner.
+        TritonBundler.put_winner(launcher.cache_hash)
         if launcher.store_cubin and (not benchmark_run or not self.cuda_kernel_saved):
             self.save_gpu_kernel(stream, launcher)
 
