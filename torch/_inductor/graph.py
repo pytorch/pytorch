@@ -367,8 +367,10 @@ class GraphLowering(torch.fx.Interpreter):
         name: str | None = None,
         inputs_to_check: Sequence[int] | None = None,
         fx_wrapper: bool = False,
+        get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] | None = None,
     ) -> None:
         super().__init__(gm)
+        self.get_decomp_fn = get_decomp_fn
         self.example_inputs = example_inputs
         self.layout_opt = (
             layout_opt
@@ -1309,7 +1311,7 @@ class GraphLowering(torch.fx.Interpreter):
             )
             base_name = target.name().split(".")[0]
             if base_name in FALLBACK_ALLOW_LIST:
-                make_fallback(target, warn=False, override_decomp=True)
+                make_fallback(target, warn=False, get_decomp_fn=self.get_decomp_fn)
             elif config.implicit_fallbacks:
                 error = (
                     MissingOperatorWithDecomp
@@ -1347,7 +1349,11 @@ class GraphLowering(torch.fx.Interpreter):
                     )
                     decided_constraint = tag_to_layout_constraint(default_tag)
 
-                make_fallback(target, layout_constraint=decided_constraint)
+                make_fallback(
+                    target,
+                    layout_constraint=decided_constraint,
+                    get_decomp_fn=self.get_decomp_fn,
+                )
 
             elif get_decompositions([target]):
                 # There isn't a good way to dynamically patch this in

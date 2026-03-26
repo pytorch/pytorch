@@ -12710,6 +12710,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                     x_strided = x[::2].reshape(25, 2).transpose(0, 1)
                     yield x_strided, y_size, memory_format
 
+    def test_resize_overlapping_strides(self):
+        # Resize on a stride-0 view should read logical elements, not raw storage.
+        def fn(x):
+            view = torch.as_strided(x, (100,), (0,))
+            return torch.ops.aten.resize(view, (50,))
+
+        self.common(fn, (torch.ones(10),))
+
     def test_resize(self):
         def fn(x, size, memory_format):
             # NOTE: Tensor.resize() =/= aten::resize()

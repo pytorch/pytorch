@@ -381,7 +381,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         ):
             model.config.use_cache = False
 
-        self.validate_model(model, example_inputs)
+        self.validate_model(benchmark.name, model, example_inputs)
         return device, benchmark.name, model, example_inputs, batch_size
 
     def iter_model_names(self, args):

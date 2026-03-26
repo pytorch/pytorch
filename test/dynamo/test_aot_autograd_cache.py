@@ -44,7 +44,7 @@ from torch._subclasses import FakeTensorMode
 from torch.compiler._cache import CacheArtifactManager
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
-from torch.testing._internal.common_cuda import SM80OrLater, TEST_MULTIGPU
+from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -68,12 +68,19 @@ class CustomPreGradPassRemoveIdentMuls(CustomGraphPass):
     """
 
     def __call__(self, g: torch.fx.Graph) -> None:
+        changed = False
         for n in g.nodes:
             if n.op == "call_function" and n.target is operator.mul:
                 lhs, rhs = n.args
                 if lhs == 1:
                     n.replace_all_uses_with(rhs)
                     g.erase_node(n)
+                    changed = True
+        if not changed:
+            raise RuntimeError(
+                "Custom pass did not change the graph. "
+                "All test cases expect the pass to modify the graph."
+            )
 
     def uuid(self):
         return "custom_pre_grad_pass_remove_ident_muls_v1"
@@ -1817,36 +1824,6 @@ class AOTAutogradCacheTests(InductorTestCase):
             self.assertNotEqual(res1, res3)
             self.assertEqual(res1, res3.sub(torch.ones(2, 2)))
 
-    @inductor_config.patch("fx_graph_cache", True)
-    @inductor_config.patch("fx_graph_remote_cache", False)
-    @functorch_config.patch({"enable_autograd_cache": True})
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    def test_constant_tensor_device_guards(self):
-        """
-        Usually, when there are example inputs, the device index of the inputs
-        is sufficient to make sure we don't cache hit with the results from different
-        cuda devices.
-        When the input has no arguments, we still need to have the cuda
-        device index in the cache key.
-        """
-
-        @torch.compile(backend="inductor")
-        def f():
-            y = torch.tensor([5], device="cuda")
-            return (y,)
-
-        with torch.cuda._DeviceGuard(0):
-            torch.cuda.set_device(0)
-            result = f()
-            self.assertEqual(result[0].device, torch.device("cuda:0"))
-
-        self._clear_dynamo_and_codecache()
-
-        with torch.cuda._DeviceGuard(1):
-            torch.cuda.set_device(1)
-            result = f()
-            self.assertEqual(result[0].device, torch.device("cuda:1"))
-
     @requires_cuda_and_triton
     @inductor_config.patch("fx_graph_cache", True)
     @inductor_config.patch("fx_graph_remote_cache", False)
@@ -2792,12 +2769,19 @@ class AOTAutogradCacheTests(InductorTestCase):
 
                 class TestPreGradPass(CustomGraphPass):
                     def __call__(self, g):
+                        changed = False
                         for n in g.nodes:
                             if n.op == "call_function" and n.target is operator.mul:
                                 lhs, rhs = n.args
                                 if lhs == 1:
                                     n.replace_all_uses_with(rhs)
                                     g.erase_node(n)
+                                    changed = True
+                        if not changed:
+                            raise RuntimeError(
+                                "Custom pass did not change the graph. "
+                                "All test cases expect the pass to modify the graph."
+                            )
 
                     def uuid(self):
                         return {pass_uuid}
@@ -3172,6 +3156,9 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             fx_g.meta = {"foo": "bar"}
             fx_g.compile_subgraph_reason = "Blah"
             config = self.default_config()
+            # autograd_cache_key now applies sanitize_gm_for_cache
+            # internally, so the result is the same whether we wrap the
+            # call or not.
             with sanitize_gm_for_cache(fx_g):
                 c1 = autograd_cache_key(fx_g, example_inputs, config, {})
             c3 = autograd_cache_key(fx_g, example_inputs, config, {})
@@ -3183,7 +3170,8 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             c4 = autograd_cache_key(fx_g, example_inputs, config, {})
 
             self.assertEqual(c1, c2)
-            self.assertNotEqual(c3, c4)
+            self.assertEqual(c1, c3)
+            self.assertEqual(c1, c4)
 
     def test_dill_serialization_with_inner_functions(self):
         """

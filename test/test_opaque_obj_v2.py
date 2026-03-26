@@ -807,6 +807,27 @@ class TestOpaqueObject(TestCase):
             lib=self.lib,
         )
 
+        torch.library.define(
+            "_TestOpaqueObject::create_multiplier",
+            f"(Tensor scale) -> {opaque_multiplier_type}",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::create_multiplier",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def create_multiplier_impl(scale: torch.Tensor) -> OpaqueMultiplier:
+            return OpaqueMultiplier(scale.item())
+
+        @torch.library.register_fake(
+            "_TestOpaqueObject::create_multiplier", lib=self.lib
+        )
+        def create_multiplier_fake(scale: torch.Tensor) -> OpaqueMultiplier:
+            return OpaqueMultiplier(0.0)
+
         counter_type = get_opaque_type_name(Counter)
         torch.library.define(
             "_TestOpaqueObject::create_counter",
@@ -2152,6 +2173,29 @@ class GraphModule(torch.nn.Module):
         self.assertTrue(isinstance(x2.grad, TensorWithCounter))
         self.assertIs(x2.grad._counter, counter2)
         self.assertEqual(x2.grad._size_store, size2)
+
+    def test_opaque_produced_by_call_function_saved_for_backward(self):
+        """Test that an opaque object produced by a call_function node
+        (not a placeholder) is correctly saved for backward.
+
+        Without is_opaque_node() in the min_cut partitioner, this crashes
+        with 'AOT Autograd failed to partition' because the opaque node
+        is a non-tensor call_function that can't be saved or recomputed."""
+
+        def fn(x):
+            scale = torch.tensor(2.5)
+            multiplier = torch.ops._TestOpaqueObject.create_multiplier(scale)
+            return torch.ops._TestOpaqueObject.mul_with_scale(multiplier, x)
+
+        x = torch.randn(3, 3, requires_grad=True)
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        out = opt_fn(x)
+        self.assertTrue(torch.allclose(out, x * 2.5))
+
+        out.backward(torch.ones_like(out))
+        self.assertIsNotNone(x.grad)
+        expected_grad = torch.ones_like(x) * 2.5
+        self.assertTrue(torch.allclose(x.grad, expected_grad))
 
     def test_tensor_subclass_opaque_backward_compiled_autograd(self):
         """Test opaque objects work with compiled autograd backward."""

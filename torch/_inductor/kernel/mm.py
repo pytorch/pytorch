@@ -629,6 +629,10 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     kernel_inputs = MMKernelInputs(
         [inp_expanded, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
     )
+    kernel_inputs_aten = MMKernelInputs(
+        [inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
+    )
+
     choices: list[ChoiceCaller] = []
 
     # below is for getting an overview logging info of inductor mms
@@ -645,15 +649,9 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     if (not is_nonzero) or (
         not (inductor_config.max_autotune or inductor_config.max_autotune_gemm)
     ):
-        # TODO(coconutruben): combine this with the main flow of addmm through
-        # a subgraph or something as inp vs inp_expanded causes some slight numeric
-        # differences
-        kernel_inputs = MMKernelInputs(
-            [inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
-        )
         choices.extend(
             V.choices.get_template_configs(
-                kernel_inputs,
+                kernel_inputs_aten,
                 [aten_addmm],
                 name,
             )
@@ -663,15 +661,23 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         )
         return node
 
-    # Collect all templates for unified call
     templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
+
     if use_aten_gemm_kernels():
-        templates_to_use.append(aten_addmm)
+        aten_templates: list[ExternKernelChoice | KernelTemplate] = [aten_addmm]
         if (
             inp_expanded.get_stride()[0] == 0
             and inductor_config.triton.autotune_cublasLt
         ):
-            templates_to_use.append(aten_bias_addmm)
+            aten_templates.append(aten_bias_addmm)
+
+        # On ROCm, ATen choices use original bias input; non-ROCm keeps unified inputs.
+        if torch.version.hip:
+            choices.extend(
+                V.choices.get_template_configs(kernel_inputs_aten, aten_templates, name)
+            )
+        else:
+            templates_to_use.extend(aten_templates)
 
     if is_nonzero and use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(mm_template)

@@ -546,14 +546,6 @@ hop_db = [
         check_batched_forward_grad=False,
         check_inplace_batched_forward_grad=False,
         supports_autograd=False,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_aot_export"),
-            DecorateInfo(
-                unittest.expectedFailure, "TestHOP", "test_pre_dispatch_export"
-            ),
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
-        ),
         decorators=[onlyCUDA],
     ),
 ]

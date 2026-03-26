@@ -217,7 +217,13 @@ class LocalElasticAgent(SimpleElasticAgent):
         Once workers are running and the watchdog is active, we delegate
         to the watchdog's ``get_last_progress_time`` for real liveness
         tracking.
+
+        During the exit barrier wait, workers have finished and the watchdog
+        progress time is stale. We return the current time to prevent TW
+        from killing the task while agents coordinate shutdown.
         """
+        if self._in_exit_barrier:
+            return int(time.time())
         if self._worker_watchdog is not None:
             return self._worker_watchdog.get_last_progress_time()
         return int(time.time())

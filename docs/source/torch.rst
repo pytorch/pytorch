@@ -665,6 +665,7 @@ Foreach Operations
     _foreach_atan_
     _foreach_ceil
     _foreach_ceil_
+    _foreach_clone
     _foreach_cos
     _foreach_cos_
     _foreach_cosh

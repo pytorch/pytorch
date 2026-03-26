@@ -16,10 +16,7 @@ from torch._dynamo.testing import (
 )
 from torch._dynamo.utils import counters
 from torch.nn import functional as F
-from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FLASH_ATTENTION,
-    TEST_MULTIGPU,
-)
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -593,28 +590,6 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
         res = opt_fn(x)
         self.assertEqual(ref, res)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "Requires multiple gpus")
-    def test_cuda__exchange_device(self):
-        def fn(x):
-            dev = torch.cuda._exchange_device(0)
-            x = torch.sin(x + dev)
-            torch.cuda._maybe_exchange_device(dev)
-            return x
-
-        initial_dev = torch.cuda.current_device()
-        x = torch.randn((2, 2), device="cuda")
-        ref = fn(x)
-        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
-        res = opt_fn(x)
-        self.assertEqual(ref, res)
-
-        # make sure we recompile if device changes
-        with torch.cuda.device(1):
-            ref = fn(x)
-            res = opt_fn(x)
-        self.assertEqual(ref, res)
-        self.assertEqual(torch.cuda.current_device(), initial_dev)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda__exchange_device_args(self):

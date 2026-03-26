@@ -704,6 +704,16 @@
       ]
     }
   ],
+  "GB6270": [
+    {
+      "Gb_type": "Unhandled tensor method",
+      "Context": "call_method {self} {name} {args} {kwargs}",
+      "Explanation": "Tensor method `{name}` is not defined on {check_type.__name__} and does not have an explicit handler in TensorVariable.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0060": [
     {
       "Gb_type": "Failed to trace unittest method",
@@ -3457,6 +3467,14 @@
       "Hints": [
         "Use two-argument super(type, object_or_type)."
       ]
+    }
+  ],
+  "GB3383": [
+    {
+      "Gb_type": "Pydantic dataclass constructor",
+      "Context": "{self.value}",
+      "Explanation": "Dynamo graph breaks on pydantic dataclass constructors because validation mutates the instance outside traced bytecode.",
+      "Hints": []
     }
   ],
   "GB0281": [

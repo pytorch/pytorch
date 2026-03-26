@@ -1250,7 +1250,6 @@ class AOTDedupeWrapper(CompilerWrapper):
                 flat_args_descs=deduped_flat_args_descs,
                 static_input_indices=aot_config.static_input_indices,
                 keep_input_mutations=fw_metadata.keep_input_mutations,
-                is_train=fw_metadata.is_train,
             )(*deduped_flat_args)
             if ref_fw_metadata != updated_fw_metadata:
                 raise AssertionError(
@@ -1473,7 +1472,6 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                 flat_args_descs=flat_args_descs_with_synthetic_bases,
                 static_input_indices=aot_config.static_input_indices,
                 keep_input_mutations=fw_metadata.keep_input_mutations,
-                is_train=fw_metadata.is_train,
             )(*flat_args_with_synthetic_bases)
             if ref_fw_metadata != fw_metadata_updated:
                 raise AssertionError(
@@ -1989,7 +1987,7 @@ def _backward_prologue_functional(
 
     bw_tokens = [None] * metadata.num_backward_tokens
 
-    # - note: donated buffer logic requires (*ctx.symints, *ctx.saved_tensors) showing up first
+    # - note: donated buffer logic requires (*ctx.symints, *ctx.saved_tensors, *ctx.opaques) showing up first
     #   in the bw output order.
 
     # Every dereference of ctx.saved_tensors incurs saved_tensors_hooks calls
@@ -2075,23 +2073,23 @@ def _backward_prologue_functional(
             )
         )
 
-        all_args = (
-            runtime_unwrap_tensor_subclasses(
-                all_args[:tangents_start_idx],  # type: ignore[arg-type]
-                # SymInts that are inputs to the backward graph are
-                # already included in the "all_args" list.
-                # Any symints coming from tensor subclasses should always
-                # come from primals, and so they will show up as extra
-                # arguments to the forward graph, and they will be saved
-                # as activation in the backward graph.
-                append_symints=False,
-            )
-            + flat_processed_tangents
-            + runtime_unwrap_tensor_subclasses(
-                all_args[tangents_end_idx:],  # type: ignore[arg-type]
-                append_symints=False,
-            )
+        unwrapped_tangents = runtime_unwrap_tensor_subclasses(
+            all_args[:tangents_start_idx],  # type: ignore[arg-type]
+            # SymInts that are inputs to the backward graph are
+            # already included in the "all_args" list.
+            # Any symints coming from tensor subclasses should always
+            # come from primals, and so they will show up as extra
+            # arguments to the forward graph, and they will be saved
+            # as activation in the backward graph.
+            append_symints=False,
         )
+
+        unwrapped_primals = runtime_unwrap_tensor_subclasses(
+            all_args[tangents_end_idx:],  # type: ignore[arg-type]
+            append_symints=False,
+        )
+
+        all_args = unwrapped_tangents + flat_processed_tangents + unwrapped_primals
     else:
         stack_traces = metadata.tangent_source_stack_traces or ()
 

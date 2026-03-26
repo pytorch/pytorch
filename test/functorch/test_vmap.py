@@ -70,6 +70,7 @@ from torch.testing._internal.common_utils import (
     markDynamoStrictTest,
     parametrize,
     run_tests,
+    skipIfRocm,
     skipIfTorchDynamo,
     subtest,
     TEST_WITH_ROCM,
@@ -4438,6 +4439,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             }
         ),
     )
+    @skipIfRocm(msg="Fails with Triton 3.7 on MI200")
     def test_vmap_exhaustive(self, device, dtype, op):
         # needs to be fixed
         inplace_failure_list = ()
@@ -4944,6 +4946,23 @@ class TestVmapOperatorsOpInfo(TestCase):
         weight = torch.randn(B, C)
         bias = torch.randn(B, C)
         test(self, op, (x, 4, weight, bias), in_dims=(0, None, 0, 0))
+
+    def test_group_norm_layout_corruption(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/176432
+        def op_function(cotangent):
+            input = torch.tensor([[-6.517, -6.264]], device=device, requires_grad=True)
+            result = F.group_norm(input, num_groups=1)
+            return torch.autograd.grad(result, input, grad_outputs=cotangent)[0]
+
+        cotangent = torch.tensor([[-0.0236, -0.1431]], device=device)
+        result_in_dims_0 = vmap(op_function, in_dims=0)(
+            cotangent.unsqueeze(0).expand(2, -1, -1)
+        )
+        result_in_dims_neg1 = vmap(op_function, in_dims=-1)(
+            cotangent.unsqueeze(-1).expand(-1, -1, 2)
+        )
+
+        self.assertEqual(result_in_dims_0, result_in_dims_neg1)
 
     def test_index_put(self, device):
         def test(f, t, idx, values):

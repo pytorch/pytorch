@@ -9781,6 +9781,8 @@ class foreach_inputs_sample_func:
         if self.arity == 1:
             if "foreach_abs" in opinfo.name and dtype in complex_types():
                 return True
+            if "foreach_clone" in opinfo.name:
+                return False
             # unary
             if opinfo.ref in (torch.abs, torch.neg):
                 return False
@@ -11247,6 +11249,13 @@ foreach_unary_op_db: list[OpInfo] = [
                 dtypes=(torch.complex128,),
             ),
         ),
+    ),
+    ForeachFuncInfo(
+        "clone",
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_forward_ad=True,
+        supports_autograd=True,
+        supports_inplace_autograd=True,
     ),
 ]
 
@@ -13632,21 +13641,8 @@ op_db: list[OpInfo] = [
            skips=(
                # cumsum does not handle correctly out= dtypes
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
-               # The following dtypes did not work in forward but are listed by the OpInfo: {torch.complex64}
+               # The following dtypes did not work in forward but are listed by the OpInfo: {torch.bool}
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-               # RuntimeError: cumulative ops are not yet supported for complex
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                   device_type='mps', dtypes=(torch.complex64,)
-               ),
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_out_requires_grad_error',
-                   device_type='mps', dtypes=(torch.complex64,)
-               ),
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager',
-                   device_type='mps', dtypes=(torch.complex64,)
-               ),
            ),
            sample_inputs_func=sample_inputs_cumulative_ops),
     OpInfo('cumprod',
@@ -20837,9 +20833,6 @@ op_db: list[OpInfo] = [
                   sample_inputs_func=sample_repeat_tile,
                   skips=(
                       DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
-                      # Exception: repeat(): Not supported for complex yet!
-                      DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-                      DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
                   )),
     OpInfo('squeeze',
            ref=_squeeze_ref,
@@ -20962,11 +20955,6 @@ op_db: list[OpInfo] = [
                   supports_out=False,
                   supports_forward_ad=True,
                   supports_fwgrad_bwgrad=True,
-                  skips=(
-                      # RuntimeError: repeat(): Not supported for complex yet!
-                      DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-                      DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
-                  ),
                   sample_inputs_func=sample_repeat_tile),
     OpInfo('trapz',  # TODO: in the future, 'trapz' should be made a proper alias of 'trapezoid'
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
@@ -21008,16 +20996,6 @@ op_db: list[OpInfo] = [
                    toleranceOverride({torch.float16: tol(atol=4e-3, rtol=4e-3)}),
                    'TestInductorOpInfo', 'test_comprehensive',
                ),
-               # RuntimeError: cumulative ops are not yet supported for complex
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager',
-                   device_type='mps', dtypes=(torch.complex64,)
-               ),
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                   device_type='mps', dtypes=(torch.complex64,)
-               ),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
            ),
            sample_inputs_func=sample_cumulative_trapezoid,),
     OpInfo('unsqueeze',
@@ -21318,8 +21296,6 @@ op_db: list[OpInfo] = [
                    "test_comprehensive",
                    device_type="cuda"
                ),
-               # RuntimeError: Failed to create function state object for: logcumsumexp_outer_float2
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
                # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
            ),
@@ -25988,17 +25964,6 @@ python_ref_db = [
         "_refs.repeat",
         torch_opinfo_name="repeat",
         validate_view_consistency=False,
-        skips=(
-            # Exception: repeat(): Not supported for complex yet!
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                device_type='mps', dtypes=(torch.complex64,)
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                device_type='mps', dtypes=(torch.complex64,)
-            ),
-        ),
     ),
     PythonRefInfo(
         "_refs.reshape",
@@ -26351,15 +26316,6 @@ python_ref_db = [
         skips=(
             # doesn't test out behavior properly for this operator
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
-            # RuntimeError: cumulative ops are not yet supported for complex
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps',
-                dtypes=(torch.complex64,)
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps',
-                dtypes=(torch.complex64,)
-            ),
         ),
     ),
     PythonRefInfo(

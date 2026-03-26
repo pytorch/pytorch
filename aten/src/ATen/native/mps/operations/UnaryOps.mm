@@ -333,8 +333,17 @@ static void cumulative_op_impl(const Tensor& self,
               "(original dim is ",
               dim,
               ")");
-  TORCH_CHECK(!self.is_complex(), "cumulative ops are not yet supported for complex");
   auto input = dtype.has_value() ? self.to(dtype.value()) : self;
+  if (input.is_complex()) {
+    if (cumulativeOpType == MPSCumulativeOpType::CUMSUM) {
+      auto input_real = at::view_as_real(input.dim() == 0 ? input.view({1}) : input);
+      auto result_real = at::view_as_real(result.dim() == 0 ? result.view({1}) : result);
+      return cumulative_op_impl(
+          input_real, wrapped_dim, std::nullopt, result_real, MPSCumulativeOpType::CUMSUM, "cumsum_out_mps");
+    } else {
+      TORCH_CHECK(false, "cumulative ops are not yet supported for complex, except for cumsum");
+    }
+  }
 
   // issue #103810551: cumsum / cumprod are broken for int8, int16 and as chances for overflow are pretty high, cast to
   // int32 fixed in macOS 13.3

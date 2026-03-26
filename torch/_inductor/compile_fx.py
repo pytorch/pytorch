@@ -772,6 +772,7 @@ class _CompileFxKwargs(TypedDict, total=False):
     extern_node_serializer: Callable[[list[ExternKernelNode]], Any] | None
     boxed_forward_device_index: BoxedDeviceIndex | None
     fx_wrapper: bool
+    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]]
 
 
 class _CompileFxCallable(Protocol):
@@ -1240,7 +1241,9 @@ class _InProcessFxCompile(FxCompile):
         extern_node_serializer: Callable[[list[ExternKernelNode]], Any] | None = (
             graph_kwargs.get("extern_node_serializer", None)
         )
-
+        get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = graph_kwargs.get(
+            "get_decomp_fn", select_decomp_table
+        )
         with (
             _WaitCounter("pytorch.wait_counter.actual_codegen_and_compile").guard(),
             dynamo_utils.preserve_rng_state(),
@@ -1436,6 +1439,7 @@ class _InProcessFxCompile(FxCompile):
                         is_backward=is_backward,
                         is_const_graph=True,
                         fx_wrapper=fx_wrapper,
+                        get_decomp_fn=get_decomp_fn,
                     )
                     with (
                         V.set_graph_handler(const_graph),
@@ -1470,6 +1474,7 @@ class _InProcessFxCompile(FxCompile):
                     const_module=const_graph,
                     inputs_to_check=inputs_to_check,
                     fx_wrapper=fx_wrapper,
+                    get_decomp_fn=get_decomp_fn,
                 )
                 metrics_helper = metrics.CachedMetricsHelper()
 
@@ -2077,7 +2082,8 @@ def fw_compiler_freezing(
     # partition_fn won't be called
     inputs_devices = get_inputs_devices(aot_example_inputs, aot_autograd_model)
     aot_autograd_model = _recursive_joint_graph_passes(
-        aot_autograd_model, input_device=next(iter(inputs_devices))
+        aot_autograd_model,
+        input_device=next(iter(inputs_devices)),
     )
 
     layout_opt = GraphLowering.decide_layout_opt(aot_autograd_model, is_inference=True)
@@ -2216,7 +2222,9 @@ def partition_fn(
         # in partitioning.
         inputs_devices = get_inputs_devices(joint_inputs, gm)
         gm = _recursive_joint_graph_passes(
-            gm, skip_invoke_subgraph=True, input_device=next(iter(inputs_devices))
+            gm,
+            skip_invoke_subgraph=True,
+            input_device=next(iter(inputs_devices)),
         )
 
     static_lifetime_input_indices: list[int] | None = kwargs.pop(  # type: ignore[assignment]
@@ -2601,6 +2609,13 @@ def compile_fx(
     NB: This function TAKES OWNERSHIP of the input ``model_`` and can potentially
     mutate it!  Make a copy if you need to preserve the original GraphModule.
     """
+    if decompositions is not None:
+
+        def get_decomp_fn() -> dict[Any, Callable[..., Any]]:
+            return decompositions  # pyrefly: ignore[bad-return]
+    else:
+        get_decomp_fn = select_decomp_table
+
     # Some arguments trigger a recursive call to compile_fx.  Handle these
     # short circuits first, before anything else
 
@@ -2659,16 +2674,16 @@ def compile_fx(
                         cpp_wrapper=cpp_wrapper_config,
                         fx_wrapper=fx_wrapper_config,
                     ),
-                    decompositions=decompositions,
                     ignore_shape_env=ignore_shape_env,
+                    get_decomp_fn=get_decomp_fn,
                 )
 
     return _maybe_wrap_and_compile_fx_main(
         model_,
         example_inputs_,
         inner_compile,
-        decompositions,
         ignore_shape_env,
+        get_decomp_fn=get_decomp_fn,
     )
 
 
@@ -2707,8 +2722,9 @@ def _maybe_wrap_and_compile_fx_main(
     model_: GraphModule,
     example_inputs_: Sequence[InputType],
     inner_compile: Callable[..., OutputCode],
-    decompositions: dict[OpOverload, Callable[..., Any]] | None,
     ignore_shape_env: bool,
+    *,
+    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
 ) -> CompileFxOutput:
     """
     Part of compile_fx, called after patching configs.
@@ -2722,8 +2738,8 @@ def _maybe_wrap_and_compile_fx_main(
     compile_gm = functools.partial(
         _maybe_wrap_and_compile_fx_main,
         inner_compile=inner_compile,
-        decompositions=decompositions,
         ignore_shape_env=ignore_shape_env,
+        get_decomp_fn=get_decomp_fn,
     )
     if not graph_returns_tuple(model_):
         return make_graph_return_tuple(model_, example_inputs_, compile_gm)
@@ -2744,8 +2760,8 @@ def _maybe_wrap_and_compile_fx_main(
         model_,
         example_inputs_,
         inner_compile,
-        decompositions,
         ignore_shape_env,
+        get_decomp_fn=get_decomp_fn,
     )
 
 
@@ -2753,8 +2769,9 @@ def _compile_fx_main(
     model_: GraphModule,
     example_inputs_: Sequence[InputType],
     inner_compile: Callable[..., OutputCode],
-    decompositions: dict[OpOverload, Callable[..., Any]] | None,
     ignore_shape_env: bool,
+    *,
+    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
 ) -> CompileFxOutput:
     """
     Main part of compile_fx, called after wrapping is done.
@@ -2786,9 +2803,8 @@ def _compile_fx_main(
         gm_meta = model_.meta if isinstance(model_, GraphModule) else None
         compiler_config_extra = create_compiler_config_extra(config, gm_meta)
 
-        decompositions = (
-            decompositions if decompositions is not None else select_decomp_table()
-        )
+        decompositions = get_decomp_fn()
+        inner_compile = functools.partial(inner_compile, get_decomp_fn=get_decomp_fn)
 
         def fw_compiler_base(
             gm: GraphModule,

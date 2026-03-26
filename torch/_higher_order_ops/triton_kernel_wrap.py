@@ -334,11 +334,6 @@ def generate_ttir(
                 return True
         return False
 
-    def is_tensor_like_arg(arg: Any) -> bool:
-        if isinstance(arg, Tensor) or is_stable_tensor_descriptor_arg(arg):
-            return True
-        return False
-
     # Note: one would expect that each input to the triton kernel maps to
     # one input parameter in the TTIR. This is _not_ true for TMA descriptors:
     # one TMA descriptor gets converted into:
@@ -347,9 +342,16 @@ def generate_ttir(
     #   * N sizes, for a rank-N tensor
     # To account for this, we inject some fake arg names as placeholders for
     # the stride and size parameters.
-    def get_tensor_names(name: str, arg: Any) -> list[str]:
-        if isinstance(arg, Tensor):
-            return [name]
+    #
+    # Additionally, tensors and scalars are both included as TTIR parameters,
+    # whereas `constexpr` are inlined, and None are excluded. This matters for
+    # "odd" ordering (eg. [tensor, scalar, tensor]).
+    def get_arg_names(name: str, arg: Any) -> list[str]:
+        param_idx = kernel.arg_names.index(name)
+
+        if kernel.params[param_idx].is_constexpr or arg is None:
+            return []
+
         if is_stable_tensor_descriptor_arg(arg):
             stable_meta = maybe_unpack_tma_stable_metadata(
                 tma_descriptor_metadata[name]
@@ -362,11 +364,12 @@ def generate_ttir(
             names.extend(name + f" STRIDE PLACEHOLDER {i}" for i in range(tensor_rank))
             names.extend(name + f" SIZE PLACEHOLDER {i}" for i in range(tensor_rank))
             return names
-        return []
 
-    ordered_tensor_names = list(
+        return [name]
+
+    ordered_arg_names = list(
         itertools.chain.from_iterable(
-            get_tensor_names(name, arg) for name, arg in ordered_args.items()
+            get_arg_names(name, arg) for name, arg in ordered_args.items()
         )
     )
 
@@ -456,8 +459,12 @@ def generate_ttir(
             return attrs
 
     specialization = _get_specialization(ordered_args.values())
+    # Triton explicitly interprets ASTSource.constants entries as constexpr
+    # Thus, only None and arguments marked `is_constexpr` should be treated as such.
     constants = {
-        name: arg for name, arg in ordered_args.items() if not is_tensor_like_arg(arg)
+        name: arg
+        for i, (name, arg) in enumerate(ordered_args.items())
+        if kernel.params[i].is_constexpr or arg is None
     }
 
     if (mangle_type := getattr(triton.runtime.jit, "mangle_type", None)) is not None:
@@ -529,7 +536,7 @@ def generate_ttir(
     if not ttir_module.verify():
         raise RuntimeError("Verification for TTIR module has failed")
 
-    return ttir_module, ordered_tensor_names
+    return ttir_module, ordered_arg_names
 
 
 def ttir_to_functions(
@@ -997,6 +1004,15 @@ def analyze_kernel_access(
                 write_stack.extend(op.args[idx] for idx in WRITE_OPS.get(op.name, []))
                 read_stack.extend(op.args[idx] for idx in READ_OPS.get(op.name, []))
 
+    # For these ops, only the first argument (base pointer) refers to actual
+    # memory. The remaining arguments are shape/stride/offset metadata and
+    # should not be traced during mutation analysis.
+    POINTER_ONLY_OPS = {
+        "tt.make_tensor_ptr",
+        "tt.advance",
+        "tt.make_tensor_descriptor",
+    }
+
     def _find_arg_access_count(
         initial_stack: list[Param | Intermediate],
         skip_loads: bool,
@@ -1019,7 +1035,10 @@ def analyze_kernel_access(
                 for op in ops[arg]:
                     if skip_loads and op.name == "tt.load":
                         continue
-                    stack.extend(op.args)
+                    if op.name in POINTER_ONLY_OPS:
+                        stack.append(op.args[0])
+                    else:
+                        stack.extend(op.args)
 
         return access_count
 
@@ -1072,12 +1091,14 @@ def identify_accessed_tensors(
     2) Parses the TTIR and creates a control flow graph
     3) Analyzes the graph to detect which input tensors are read and/or written
     """
+
     from torch._inductor.dependencies import Dep, ReadWrites, StarDep
+    from torch._inductor.ir import TensorBox
 
     ttir_module = None
     functions = None
     try:
-        ttir_module, ordered_tensor_names = generate_ttir(
+        ttir_module, ordered_arg_names = generate_ttir(
             kernel, kwargs, tma_descriptor_metadata
         )
 
@@ -1099,15 +1120,15 @@ def identify_accessed_tensors(
         # detection, so each top level invocation needs a clean cache
         analyze_kernel_access.reset()
         get_tma_stores.reset()
+
         return analyze_kernel_access(
             functions,
             kernel_name,
-            len(ordered_tensor_names),
-            tuple(ordered_tensor_names),
+            len(ordered_arg_names),
+            tuple(ordered_arg_names),
         )
-    except Exception:
-        import torch._inductor.ir
 
+    except Exception:
         log.warning(
             "Encountered an exception in identify_accessed_tensors, assuming every input is mutated",
             exc_info=True,
@@ -1124,7 +1145,7 @@ def identify_accessed_tensors(
         all_tensor_names = [
             key
             for key, value in kwargs.items()
-            if isinstance(value, (Tensor, torch._inductor.ir.TensorBox))
+            if isinstance(value, (Tensor, TensorBox))
         ]
         all_deps = OrderedSet(StarDep(name) for name in all_tensor_names)
         all_deps = typing.cast(OrderedSet[Dep], all_deps)
@@ -1435,7 +1456,13 @@ def get_mutated_tensors(
     tensor_accesses = identify_accessed_tensors(
         kernel, {**kwargs, **constant_args}, tma_descriptor_metadata
     )
-    return [dep.name for dep in tensor_accesses.read_writes.writes]
+    # Filter to only tensor kwargs: with Triton 3.7+, ordered_arg_names
+    # includes scalars, so writes may reference non-tensor args like SymInts.
+    return [
+        dep.name
+        for dep in tensor_accesses.read_writes.writes
+        if isinstance(kwargs.get(dep.name), Tensor)
+    ]
 
 
 @triton_kernel_wrapper_mutation.py_functionalize_impl

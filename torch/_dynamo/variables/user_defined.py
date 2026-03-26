@@ -161,6 +161,14 @@ def is_cython_function(obj: object) -> bool:
     )
 
 
+def is_pydantic_dataclass_cls(value: object) -> bool:
+    return (
+        inspect.isclass(value)
+        and dataclasses.is_dataclass(value)
+        and "__is_pydantic_dataclass__" in getattr(value, "__dict__", {})
+    )
+
+
 # Types whose instances are data descriptors (have __get__ + (__set__ or __delete__)).
 # CPython invokes data descriptors found on the type MRO *before* checking
 # the instance __dict__.  This set is used by is_data_descriptor for a fast
@@ -553,7 +561,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         "Set TORCHDYNAMO_ENABLE_P2P_COMPILATION=1 to enable.",
                     ],
                 )
-
             var = tx.output.side_effects.track_new_user_defined_object(
                 SourcelessBuilder.create(tx, object),
                 self,
@@ -857,6 +864,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             tup = SourcelessBuilder.create(tx, tuple).call_function(tx, args, kwargs)
             return SizeVariable(tup.items)  # type: ignore[missing-attribute]
+        elif is_pydantic_dataclass_cls(self.value):
+            # Pydantic populates dataclass fields through an external validator,
+            # so tracing through the constructor misses the instance mutations.
+            unimplemented(
+                gb_type="Pydantic dataclass constructor",
+                context=f"{self.value}",
+                explanation="Dynamo graph breaks on pydantic dataclass constructors "
+                "because validation mutates the instance outside traced bytecode.",
+                hints=graph_break_hints.SUPPORTABLE,
+            )
         elif is_frozen_dataclass(self.value) and self.is_standard_new():
             fields = dataclasses.fields(self.value)  # type: ignore[arg-type]
             assert self.source is not None
@@ -893,7 +910,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
                     default_kwargs[field.name] = var_tracker
             kwargs.update(default_kwargs)
-
             var = tx.output.side_effects.track_new_user_defined_object(
                 SourcelessBuilder.create(tx, object),
                 self,
@@ -1062,6 +1078,26 @@ class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
     @property
     def fn(self) -> type[object]:
         return self.value
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
+        if self.source is None:
+            # NB: If source is added via side effects, create the exception
+            # object through side_effects as well. See FrozenDataClass creation
+            var = tx.output.side_effects.track_new_user_defined_object(
+                SourcelessBuilder.create(tx, BaseException),
+                self,
+                list(args),
+            )
+            var.call_method(tx, "__init__", list(args), dict(kwargs))
+            return var
+        return super().call_function(tx, args, kwargs)
 
 
 class UserDefinedEnumClassVariable(UserDefinedClassVariable):
@@ -2102,11 +2138,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> Source | None:
         """Wrap source for nn.Module instance dict attribute access if needed."""
         if (
-            (
-                torch._dynamo.config.inline_inbuilt_nn_modules
-                or isinstance(self, variables.FSDPManagedNNModuleVariable)
-            )
-            and source
+            source
             and isinstance(self, variables.UnspecializedNNModuleVariable)
             and (not tx.output.export or torch._dynamo.config.install_free_tensors)
         ):

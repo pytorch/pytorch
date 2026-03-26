@@ -462,7 +462,7 @@ skip_no_tensor_aliasing_guards_on_parameters = True
 skip_tensor_guards_with_matching_dict_tags = True
 
 # Skips guards on func.__defaults__ if the element to be guarded is a constant
-skip_guards_on_constant_func_defaults = True
+skip_guards_on_constant_func_defaults = False
 
 
 # The recursive-dict-tag guard relies on the class/function identity staying
@@ -564,6 +564,8 @@ enable_faithful_generator_behavior = True
 inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
     default=True,
     justknob="pytorch/compiler:inline_inbuilt_nn_modules",
+    deprecated=True,
+    deprecation_message="does not do anything, inline_inbuilt_nn_modules is always True",
 )
 
 # Resume tracing in nested frames if a nested graph break occurs

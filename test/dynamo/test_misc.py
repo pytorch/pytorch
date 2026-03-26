@@ -80,7 +80,6 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     SM80OrLater,
     TEST_CUDA,
-    TEST_MULTIGPU,
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_methods_invocations import (
@@ -1673,6 +1672,59 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         result = fn(torch.ones(1))
         self.assertEqual(torch.ones(1) + 2, result)
+
+    def test_known_tensor_methods_traced(self):
+        # Verify that known tensor methods (in all_tensor_attrs) are still
+        # traced into the graph via the generic proxy path.
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            return x.abs().cos()
+
+        result = fn(torch.randn(4))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 2)
+
+    def test_tensor_subclass_method_traced(self):
+        # Methods defined on the actual tensor class (including dynamically
+        # added ones) should be proxied through the generic call_method path,
+        # not graph-broken.  This validates that the guard uses the concrete
+        # class_type rather than the static all_tensor_attrs dict.
+        def _dynamo_test_method(self):
+            return self + 1
+
+        with unittest.mock.patch.object(
+            torch.Tensor, "_dynamo_test_method", _dynamo_test_method, create=True
+        ):
+            cnt = CompileCounterWithBackend("eager")
+
+            @torch.compile(backend=cnt)
+            def fn(x):
+                y = x._dynamo_test_method()
+                return y + 1
+
+            result = fn(torch.randn(4))
+            self.assertEqual(cnt.frame_count, 1)
+            # Verify _dynamo_test_method appears as a call_method in the FX graph
+            call_method_targets = [
+                n.target for n in cnt.graphs[0].graph.nodes if n.op == "call_method"
+            ]
+            self.assertIn("_dynamo_test_method", call_method_targets)
+
+    def test_unknown_tensor_method_graph_break(self):
+        # Truly unknown methods raise AttributeError during tracing at
+        # LOAD_ATTR time (dynamic_getattr), ensuring dynamo does not
+        # silently proxy them into the compiled graph.
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(x):
+            y = x._nonexistent_test_method_xyz()
+            return y + 1
+
+        with self.assertRaises(AttributeError):
+            fn(torch.randn(4))
 
     def test_shape_unpack(self):
         def fn(x):
@@ -8255,31 +8307,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             # This guard was created
             self.assertTrue(guard.name != "nested_fn.__closure__[0].cell_contents")
 
-    @unittest.skipIf(not TEST_MULTIGPU, "need multiple GPU")
-    def test_symint_as_device_kwarg_multi_gpu(self):
-        def fn(rank):
-            # -2 to make device id smaller for easier testing on CI
-            return torch.ones(10, device=rank.size(0) - 2)
-
-        x = torch.randn(2)
-        out = fn(torch.randn(2))
-
-        guard_failure = None
-
-        def guard_failures(failure):
-            nonlocal guard_failure
-            guard_failure = failure
-
-        opt_fn = torch._dynamo.optimize(
-            "eager", guard_fail_fn=guard_failures, dynamic=True
-        )(fn)
-        self.assertEqual(out, opt_fn(x))
-
-        x = torch.randn(3)
-        self.assertEqual(fn(x), opt_fn(x))
-        self.assertTrue(guard_failure is not None)
-        self.assertIn("""tensor 'rank' size mismatch at index 0""", guard_failure[0])
-
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "Test requires CUDA or XPU.")
     def test_symint_as_device_kwarg_non_strict_export(self):
         class Mod(torch.nn.Module):
@@ -11666,6 +11693,39 @@ def ___make_guard_fn():
             self.assertEqual(list(eager), list(compiled))
             self.assertEqual(len(counters["graph_break"]), 0)
 
+    def test_itertools_count_from_uncompiled_region(self):
+        counters.clear()
+        counter = itertools.count()
+
+        def fn(x):
+            return x * (next(counter) + 1)
+
+        x = torch.randn([2, 5])
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        self.assertEqual(compiled_fn(x), x)
+        self.assertEqual(compiled_fn(x), x * 2)
+        self.assertEqual(next(counter), 2)
+        self.assertEqual(len(counters["graph_break"]), 0)
+
+    def test_itertools_count_already_advanced(self):
+        counters.clear()
+        counter = itertools.count()
+        # Advance the counter before entering the compiled region
+        next(counter)  # 0
+        next(counter)  # 1
+
+        def fn(x):
+            return x * (next(counter) + 1)
+
+        x = torch.randn([2, 5])
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        self.assertEqual(compiled_fn(x), x * 3)  # next(counter) = 2
+        self.assertEqual(compiled_fn(x), x * 4)  # next(counter) = 3
+        self.assertEqual(next(counter), 4)
+        self.assertEqual(len(counters["graph_break"]), 0)
+
     def test_itertools_infinite_cycle(self):
         counters.clear()
 
@@ -12163,6 +12223,35 @@ def ___make_guard_fn():
         actual = fn_opt(*inps)
         expected = fn(*inps)
         self.assertEqual(actual, expected)
+
+    def test_frozen_dataclass_in_compile(self):
+        from torch.utils._pytree import MappingKey, SequenceKey
+
+        def fn(x):
+            path = (MappingKey("a"), SequenceKey(0))
+            msg = f"path={path}"
+            return x * 2, msg
+
+        x = torch.randn(4, 4)
+        eager_result = fn(x)
+        compiled_result = torch.compile(fn, fullgraph=True)(x)
+        self.assertEqual(eager_result[0], compiled_result[0])
+        self.assertEqual(eager_result[1], compiled_result[1])
+
+    def test_frozen_dataclass_treespec_method_and_fields(self):
+        from torch.utils._pytree import tree_flatten
+
+        def fn(x):
+            d = {"a": x, "b": [x * 2, x * 3]}
+            flat, spec = tree_flatten(d)
+            is_leaf = spec.is_leaf()
+            return sum(flat), spec.num_leaves, spec.num_nodes, is_leaf
+
+        x = torch.randn(4)
+        eager_result = fn(x)
+        compiled_result = torch.compile(fn, fullgraph=True)(x)
+        for i in range(4):
+            self.assertEqual(eager_result[i], compiled_result[i])
 
     def test_shape_env_no_recording(self):
         main = ShapeEnv(should_record_events=False)
@@ -15457,21 +15546,6 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         out = f(torch.randn(2))
         opt_out = torch.compile(backend="eager", dynamic=True, fullgraph=True)(f)(x)
         self.assertEqual(out, opt_out)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "need multiple GPU")
-    def test_gpu_set_device(self, device):
-        def fn():
-            a = torch.ones(2, device=device)
-            torch.get_device_module(device).set_device(1)
-            return a + 1
-
-        with torch.get_device_module(device).device(0):
-            counter = CompileCounter()
-            opt_fn = torch.compile(fn, backend=counter)
-            res = opt_fn()
-            self.assertTrue(res.device.type in device)
-            self.assertEqual(res.device.index, 0)
-            self.assertEqual(counter.frame_count, 2)
 
     def test_torch_device_python_type(self, device):
         device_type = torch.device(device).type

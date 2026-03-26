@@ -1486,6 +1486,7 @@ def register_replacement(
     search_fn_pattern: PatternExpr | None = None,
     skip_duplicates: bool = False,
     pattern_name: str | None = None,
+    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
 ) -> bool:
     """
     Create a replacement rule based on example functions that get traced
@@ -1572,12 +1573,15 @@ def register_replacement(
                     # Later, when we actually do the replacement, the symbolic shape
                     # sizes will get re-traced and added to the graph.
 
-                    def search_fn_new(*args_new: Any) -> Any:
+                    def search_fn_new(*args_new: Any, **_: Any) -> Any:
                         return search_fn(*args_new[len(args_new) - len(args) :])
 
                     try:
-                        # pyrefly: ignore [bad-argument-type]
-                        specific_graph = trace_fn(search_fn_new, sym_args + args)
+                        specific_graph = trace_fn(
+                            search_fn_new,
+                            sym_args + args,
+                            get_decomp_fn=get_decomp_fn,
+                        )
                     except RuntimeError as e:
                         log_trace_failure(search_fn, e)
                         return False
@@ -1603,7 +1607,9 @@ def register_replacement(
                     argnames = sym_arg_names + argnames
                 else:
                     try:
-                        specific_graph = trace_fn(search_fn, args)
+                        specific_graph = trace_fn(
+                            search_fn, args, get_decomp_fn=get_decomp_fn
+                        )
                     except RuntimeError as e:
                         log_trace_failure(search_fn, e)
                         return False
@@ -1630,7 +1636,9 @@ def register_replacement(
 
             if is_match(specific_pattern_match) and extra_check(specific_pattern_match):
                 # trace the pattern using the shapes from the user program
-                match.replacement_graph = trace_fn(replace_fn, args)
+                match.replacement_graph = trace_fn(
+                    replace_fn, args, get_decomp_fn=get_decomp_fn
+                )
                 if len(match.nodes) == 1:
                     for n in match.replacement_graph.graph.nodes:
                         _transfer_meta(
@@ -1668,6 +1676,7 @@ def register_replacement(
                 trace_fn,
                 scalar_workaround,
                 exclusive_arg_names,
+                get_decomp_fn=get_decomp_fn,
             )
         else:
             pattern = search_fn_pattern
@@ -1805,6 +1814,7 @@ def gen_register_replacement(
     scalar_workaround: dict[str, float | int] | None = None,
     exclusive_arg_names: Sequence[str] = (),
     skip_duplicates: bool = False,
+    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
 ) -> None:
     # Make sure the example_inputs is materialized.
     example_inputs = tuple(example_inputs)
@@ -1848,6 +1858,7 @@ def gen_register_replacement(
         search_fn_pattern=pat,
         skip_duplicates=skip_duplicates,
         pattern_name=unique_name,
+        get_decomp_fn=get_decomp_fn,
     )
 
 
@@ -1858,6 +1869,7 @@ def gen_pattern_and_search_gm(
     trace_fn: TraceFn,
     scalar_workaround: dict[str, float | int] | None = None,
     exclusive_arg_names: Sequence[str] = (),
+    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
 ) -> tuple[PatternExpr, torch.fx.GraphModule]:
     argnames = [*inspect.signature(search_fn).parameters.keys()]
 
@@ -1873,7 +1885,7 @@ def gen_pattern_and_search_gm(
             flat_inputs.append(example_inputs[input_idx])
             input_idx += 1
 
-    search_gm = trace_fn(search_fn, flat_inputs)
+    search_gm = trace_fn(search_fn, flat_inputs, get_decomp_fn=get_decomp_fn)
     return (
         fx_to_pattern(
             search_gm,
@@ -2261,15 +2273,12 @@ def fwd_only(
     args: Sequence[Any],
     *,
     run_functional_passes: bool = True,
-    get_decomp_fn: Callable[..., Any] | None = None,
+    get_decomp_fn: Callable[..., Any] = select_decomp_table,
 ) -> torch.fx.GraphModule:
     """Build a normalized inference graph, for use with fx_to_pattern"""
     # TODO - look into using aot autograd, asserting no mutating ops here
     with enable_python_dispatcher(), preserve_node_meta():
-        decompositions = (
-            get_decomp_fn() if get_decomp_fn is not None else select_decomp_table()
-        )
-        gm = make_fx(fn, decompositions, tracing_mode="real")(*args)
+        gm = make_fx(fn, get_decomp_fn(), tracing_mode="real")(*args)
 
     from .fx_passes.post_grad import remove_noop_ops
 
@@ -2290,7 +2299,12 @@ def fwd_only(
 
 
 @torch.enable_grad()
-def joint_fwd_bwd(fn: Callable[..., Any], args: Sequence[Any]) -> torch.fx.GraphModule:
+def joint_fwd_bwd(
+    fn: Callable[..., Any],
+    args: Sequence[Any],
+    *,
+    get_decomp_fn: Callable[..., Any] = select_decomp_table,
+) -> torch.fx.GraphModule:
     """Build a normalized training graph, for use with fx_to_pattern"""
     gm: torch.fx.GraphModule | None = None
 
@@ -2308,7 +2322,7 @@ def joint_fwd_bwd(fn: Callable[..., Any], args: Sequence[Any]) -> torch.fx.Graph
             # pyrefly: ignore[bad-argument-type]
             lambda gm, example_inputs: make_boxed_func(gm),
             partition_fn=record_joint_graph,
-            decompositions=select_decomp_table(),
+            decompositions=get_decomp_fn(),
             keep_inference_input_mutations=True,
             enable_log=False,
         )(*args)
@@ -2371,16 +2385,29 @@ def stable_topological_sort(graph: torch.fx.Graph) -> None:
     assert not waiting and len(ready) == len(graph.nodes)
 
 
-def init_once_fakemode(fn: Callable[..., Any]) -> Callable[[], Any]:
+def init_once_fakemode(fn: Callable[..., Any]) -> Callable[..., Any]:
     """Wrapper around lazy init functions in fx_passes/"""
+
+    _fn_params = inspect.signature(fn).parameters
 
     @functools.cache
     @functools.wraps(fn)
-    def lazy_init(input_device: torch.device | None = None) -> Any:
+    def lazy_init(
+        input_device: Any | None = None,
+        get_decomp_fn: Callable[
+            ..., dict[Any, Callable[..., Any]]
+        ] = select_decomp_table,
+    ) -> Any:
         counters_ref = counters[backend].copy()
 
+        kwargs: dict[str, Any] = {}
+        if "input_device" in _fn_params:
+            kwargs["input_device"] = input_device
+        if "get_decomp_fn" in _fn_params:
+            kwargs["get_decomp_fn"] = get_decomp_fn
+
         with torch._guards.tracing(None), unset_fake_temporarily(), FakeTensorMode():
-            result = fn(input_device)
+            result = fn(**kwargs)
 
         # clear view matches encountered during tracing
         counters[backend] = counters_ref

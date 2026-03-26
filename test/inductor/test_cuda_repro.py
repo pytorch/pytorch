@@ -2117,6 +2117,7 @@ class CudaReproTests(TestCase):
         self.assertEqual(graph.device_types, {device_type})
         self.assertEqual(compiled_fn(*inp), fn(*inp))
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     def test_epilogue_fusion_with_view(self):
         class ToyModel(torch.nn.Module):
             def __init__(self) -> None:

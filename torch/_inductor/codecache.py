@@ -3180,7 +3180,15 @@ def _worker_compile_cpp(
 @clear_on_fresh_cache
 class CppPythonBindingsCodeCache(CppCodeCache):
     cache: dict[str, Callable[[], CDLL | ModuleType]] = {}
-    cache_clear = staticmethod(cache.clear)
+    _loaded_module_names: OrderedSet[str] = OrderedSet()
+
+    @staticmethod
+    def cache_clear() -> None:
+        CppPythonBindingsCodeCache.cache.clear()
+        for name in CppPythonBindingsCodeCache._loaded_module_names:
+            sys.modules.pop(name, None)
+        CppPythonBindingsCodeCache._loaded_module_names.clear()
+
     cpp_compile_command_flags = {
         # kernels have no dependency on libtorch
         "include_pytorch": False,
@@ -3293,6 +3301,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         assert spec is not None
         module = importlib.util.module_from_spec(spec)
         sys.modules[module_name] = module
+        CppPythonBindingsCodeCache._loaded_module_names.add(module_name)
         assert spec.loader is not None
         spec.loader.exec_module(module)
         return module
@@ -3362,7 +3371,11 @@ class CppPythonBindingsCodeCache(CppCodeCache):
 @clear_on_fresh_cache
 class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     cache: dict[str, Callable[[], CDLL | ModuleType]] = {}
-    cache_clear = staticmethod(cache.clear)
+
+    @staticmethod
+    def cache_clear() -> None:
+        CppWrapperCodeCache.cache.clear()
+
     cpp_compile_command_flags = {
         "include_pytorch": True,
         "shared": True,

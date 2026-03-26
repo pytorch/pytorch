@@ -9,7 +9,7 @@ from torch._export.serde.union import _Union, _union_dataclass
 
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (8, 18)
+SCHEMA_VERSION = (8, 19)
 TREESPEC_VERSION = 1
 
 
@@ -261,6 +261,7 @@ class Argument(_Union):
     as_nested_tensors: Annotated[list[list[TensorArgument]], 270]
     as_int_lists: Annotated[list[list[int]], 280]
     as_string_to_argument: Annotated[dict[str, "Argument"], 290]
+    as_float_lists: Annotated[list[list[float]], 300]
 
 
 class ArgumentKind(IntEnum):

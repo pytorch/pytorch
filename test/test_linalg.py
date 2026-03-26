@@ -5161,9 +5161,6 @@ class TestLinalg(TestCase):
         # We set the TunableOp numerical check environment variable here because it is
         # possible to hit some invalid numerical solutions due to the small matrix sizes.
 
-        if torch.version.hip and isRocmArchAnyOf(MI350_ARCH) and dtype is torch.double:
-            self.skipTest("Currently hangs on rocm mi350")
-
         with self._tunableop_ctx():
             torch.cuda.tunable.set_rotating_buffer_size(0)
             # Numerical check adds significant overhead, unsure if this is needed
@@ -6133,6 +6130,8 @@ class TestLinalg(TestCase):
 
     @onlyCUDA
     @skipCUDAIfNotRocm
+    # Fails with triton 3.7
+    @skipIfRocmArch(NAVI_ARCH)
     @dtypes(torch.float)
     def test_mm_submatrix_offline_tunableop(self, device, dtype):
         import os

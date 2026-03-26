@@ -57,6 +57,13 @@ class ControlDeps(HigherOrderOperator):
 
 control_deps = ControlDeps()
 
+# control_deps wraps side-effecting ops (e.g. record_event, wait_event)
+# and must not be eliminated by DCE even when its outputs are unused.
+from torch.fx.node import has_side_effect
+
+
+has_side_effect(control_deps)
+
 
 # Register fake implementation for tracing
 @register_fake(control_deps)

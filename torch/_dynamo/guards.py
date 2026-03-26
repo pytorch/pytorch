@@ -26,6 +26,7 @@ import functools
 import importlib
 import inspect
 import io
+import itertools
 import logging
 import math
 import pickle
@@ -178,19 +179,18 @@ from .utils import (
     dataclass_fields,
     dict_keys,
     get_current_stream,
-    get_custom_getattr,
     get_torch_function_mode_stack,
     get_torch_function_mode_stack_at,
     guard_failures,
     istype,
     key_is_id,
     key_to_id,
+    normalize_count_iter,
     normalize_range_iter,
     orig_code_map,
     tensor_always_has_static_shape,
     tuple_iterator_getitem,
     tuple_iterator_len,
-    unpatched_nn_module_getattr,
     verify_guard_fn_signature,
 )
 
@@ -200,6 +200,7 @@ if TYPE_CHECKING:
 
 
 guard_manager_testing_hook_fn: Callable[[Any, Any, Any], Any] | None = None
+_COUNT_ITERATOR_TYPE = type(itertools.count())
 
 try:
     import numpy as np
@@ -751,6 +752,7 @@ def _get_closure_vars() -> dict[str, object]:
             "___dict_version": dict_version,
             "___dict_contains": lambda a, b: dict.__contains__(b, a),
             "___tuple_iterator_len": tuple_iterator_len,
+            "___normalize_count_iter": normalize_count_iter,
             "___normalize_range_iter": normalize_range_iter,
             "___tuple_iterator_getitem": tuple_iterator_getitem,
             "___dataclass_fields": dataclass_fields,
@@ -910,13 +912,7 @@ def raise_local_type_error(obj: Any) -> NoReturn:
 
 
 def should_optimize_getattr_on_nn_module(value: Any) -> bool:
-    # If inline_inbuilt_nn_modules flag is True, Dynamo has already traced
-    # through the __getattr__, and therefore it is always safe to optimize
-    # getattr on nn modules.
-    return isinstance(value, torch.nn.Module) and (
-        config.inline_inbuilt_nn_modules
-        or get_custom_getattr(value) is unpatched_nn_module_getattr
-    )
+    return isinstance(value, torch.nn.Module)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -2814,6 +2810,30 @@ class GuardBuilder(GuardBuilderBase):
             guard.user_stack,
         )
 
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: (type(value), normalize_count_iter(value)),
+        eval_fn=lambda value, metadata: (
+            type(value) is metadata[0] and normalize_count_iter(value) == metadata[1]
+        ),
+    )
+    def COUNT_ITERATOR_MATCH(self, guard: Guard) -> None:
+        ref = self.arg_ref(guard)
+        value = self.get(guard)
+        count_type = type(value)
+        normalized_count_iter = normalize_count_iter(value)
+
+        def guard_fn(x: Any) -> bool:
+            return (
+                type(x) is count_type
+                and normalize_count_iter(x) == normalized_count_iter
+            )
+
+        code = [f"___normalize_count_iter({ref}) == {normalized_count_iter}"]
+        self._set_guard_export_info(guard, code)
+        self.get_guard_manager(guard).add_lambda_guard(
+            guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
     # Multi-source guard (two inputs aliasing) — not expressible as a
     # single source → value check.
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
@@ -3255,8 +3275,7 @@ class GuardBuilder(GuardBuilderBase):
         if config._unsafe_skip_fsdp_module_guards and guard.is_fsdp_module():
             return
         # For tensors that are part of the Dynamo extracted Fx graph module, an
-        # ID_MATCH suffices. Once we turn on inline_inbuilt_nn_modules, these
-        # will be lifted as inputs and have a TENSOR_MATCH guard.
+        # ID_MATCH suffices.
         if match_on_id_for_tensor(guard):
             self.ID_MATCH(guard)
         else:
@@ -3800,6 +3819,10 @@ class GuardsStatePickler(pickle.Pickler):
         return dict.fromkeys(elems).keys()
 
     @classmethod
+    def _unpickle_count_iter(cls, item: int, step: int) -> itertools.count[int]:
+        return itertools.count(item, step)
+
+    @classmethod
     def _unpickle_fsdp_module_type(
         cls, original_type: type[torch.nn.Module]
     ) -> type[torch.nn.Module]:
@@ -3981,6 +4004,11 @@ class GuardsStatePickler(pickle.Pickler):
 
         elif isinstance(obj, types.MappingProxyType):
             return type(self)._unpickle_mapping_proxy, (obj.copy(),)
+
+        elif type(obj) is _COUNT_ITERATOR_TYPE:
+            item, step = normalize_count_iter(obj)
+            if item is not NotImplemented and step is not NotImplemented:
+                return type(self)._unpickle_count_iter, (item, step)
 
         elif isinstance(obj, torch._dynamo.utils.dict_keys):
             return type(self)._unpickle_dict_keys, (list(obj),)

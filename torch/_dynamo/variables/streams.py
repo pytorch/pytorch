@@ -171,6 +171,19 @@ def _(event_index: int) -> None:
 has_side_effect(torch.ops.streams.synchronize_event.default)
 
 
+@custom_op("streams::synchronize_device", mutates_args=())
+def synchronize_device(device_type: str, device_index: int) -> None:
+    torch.accelerator.synchronize(torch.device(device_type, device_index))
+
+
+@synchronize_device.register_fake
+def _(device_type: str, device_index: int) -> None:
+    pass
+
+
+has_side_effect(torch.ops.streams.synchronize_device.default)
+
+
 @custom_op("streams::wait_stream", mutates_args=())
 def wait_stream(waiting_stream_index: int, waited_on_stream_index: int) -> None:
     waiting = _get_stream_by_index(waiting_stream_index)

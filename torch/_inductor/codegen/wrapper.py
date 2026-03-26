@@ -1690,12 +1690,13 @@ class PythonWrapperCodegen(CodeGen):
         stream_idx_to_user_obj_idx: dict[int, int] | None = None,
     ) -> None:
         if num_streams > 1:
+            assert stream_idx_to_user_obj_idx is not None
             self.writeline(
                 EnterDeviceContextManagerWithStreamInfoLine(
                     device_idx,
                     self.last_seen_device_guard_index,
                     num_streams,
-                    stream_idx_to_user_obj_idx or {},
+                    stream_idx_to_user_obj_idx,
                 ),
             )
         else:
@@ -3349,6 +3350,7 @@ class PythonWrapperCodegen(CodeGen):
                     self.kernel_autotune_example_args[arg] = (arg_str, kernel_name)
                 else:
                     arg_str = self.generate_example_arg_value(arg, arg_type, raw_arg)
+
                 if isinstance(arg, str) and should_unwrap_unspec_arg(arg):
                     arg_str += ".item()"
                 all_args.append(arg_str if key is None else f"{key}={arg_str}")

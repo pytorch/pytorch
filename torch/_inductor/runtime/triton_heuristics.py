@@ -836,6 +836,8 @@ class CachingAutotuner(KernelInterface):
                 options["waves_per_eu"] = compile_meta["waves_per_eu"]
             if "matrix_instr_nonkdim" in compile_meta:
                 options["matrix_instr_nonkdim"] = compile_meta["matrix_instr_nonkdim"]
+            if "kpack" in compile_meta:
+                options["kpack"] = compile_meta["kpack"]
 
         if self.device_props.type == "xpu" and XPU_KERNEL_FORMAT == "zebin":
             options["generate_native_code"] = True
@@ -2498,6 +2500,7 @@ def triton_config(
     num_warps=None,
     matrix_instr=None,
     waves_per_eu=None,
+    kpack=None,
 ) -> Config:
     """
     Construct a pointwise triton config with some adjustment heuristics
@@ -2595,6 +2598,8 @@ def triton_config(
             config.kwargs["matrix_instr_nonkdim"] = matrix_instr
         if waves_per_eu is not None:
             config.kwargs["waves_per_eu"] = waves_per_eu
+        if kpack is not None:
+            config.kwargs["kpack"] = kpack
 
     return config
 
@@ -2741,6 +2746,10 @@ def _handle_combo_kernel_per_subkernel_blocks(
     using the same heuristics as standalone Triton kernels. The final config uses
     the maximum num_warps and num_stages across all sub-kernels.
 
+    When autotuning is enabled (i.e. the heuristic returns multiple configs),
+    generates O(N*K) phase configs that vary one sub-kernel's block sizes at a
+    time, feeding into the standard autotune_to_one_config path.
+
     Returns:
         List of configs if combo kernel with combo_grid_meta and per-subkernel
         blocks enabled, None otherwise.
@@ -2759,12 +2768,15 @@ def _handle_combo_kernel_per_subkernel_blocks(
     all_num_stages: list[int] = []
     unique_warp_stage_pairs: OrderedSet[tuple[int, int]] = OrderedSet()
 
+    all_subkernel_cfgs: list[list[Config]] = []
+    all_skip_rblock: list[bool] = []
+
     for i in range(num_kernels):
         subkernel_heuristic = combo_meta[f"heuristic_{i}"]
         size_hints_i = combo_meta[f"size_hints_{i}"]
 
         if subkernel_heuristic == "pointwise":
-            cfg = pointwise(
+            cfgs = pointwise(
                 size_hints_i,
                 triton_meta=triton_meta,
                 tile_hint=TileHint.SQUARE
@@ -2774,31 +2786,32 @@ def _handle_combo_kernel_per_subkernel_blocks(
                 min_elem_per_thread=min_elem_per_thread,
                 inductor_meta=inductor_meta_clean,
                 return_configs=True,
-            )[0]
+            )
             skip_rblock = False
         elif subkernel_heuristic == "reduction":
-            cfg = reduction(
+            cfgs = reduction(
                 size_hints_i,
                 reduction_hint=reduction_hint,
                 triton_meta=triton_meta,
                 filename=filename,
                 inductor_meta=inductor_meta_clean,
                 return_configs=True,
-            )[0]
+            )
             skip_rblock = False
         elif subkernel_heuristic == "persistent_reduction":
-            cfg = persistent_reduction(
+            cfgs = persistent_reduction(
                 size_hints_i,
                 reduction_hint=reduction_hint,
                 triton_meta=triton_meta,
                 filename=filename,
                 inductor_meta=inductor_meta_clean,
                 return_configs=True,
-            )[0]
+            )
             skip_rblock = True  # persistent reduction embeds RBLOCK in kernel body
         else:
             raise ValueError(f"Unknown heuristic: {subkernel_heuristic}")
 
+        cfg = cfgs[0]
         for key, value in cfg.kwargs.items():
             if skip_rblock and key.startswith("R") and "BLOCK" in key:
                 continue
@@ -2807,10 +2820,38 @@ def _handle_combo_kernel_per_subkernel_blocks(
         all_num_warps.append(cfg.num_warps)
         all_num_stages.append(cfg.num_stages)
         unique_warp_stage_pairs.add((cfg.num_warps, cfg.num_stages))
+        all_subkernel_cfgs.append(cfgs)
+        all_skip_rblock.append(skip_rblock)
 
     unique_warp_stage_pairs.add((max(all_num_warps), max(all_num_stages)))
 
-    return [
+    phase_configs: list[Config] = []
+    base_num_warps = max(all_num_warps)
+    base_num_stages = max(all_num_stages)
+
+    for phase_idx in range(num_kernels):
+        phase_cfgs = all_subkernel_cfgs[phase_idx]
+        skip_rblock = all_skip_rblock[phase_idx]
+
+        if len(phase_cfgs) <= 1:
+            continue
+
+        for cfg in phase_cfgs[1:]:
+            phase_kwargs = dict(combined_kwargs)
+            for key, value in cfg.kwargs.items():
+                if skip_rblock and key.startswith("R") and "BLOCK" in key:
+                    continue
+                phase_kwargs[f"{key}_{phase_idx}"] = value
+
+            phase_configs.append(
+                triton.Config(
+                    phase_kwargs,
+                    num_warps=base_num_warps,
+                    num_stages=base_num_stages,
+                )
+            )
+
+    base_configs = [
         triton.Config(
             combined_kwargs,
             num_warps=num_warps,
@@ -2818,6 +2859,7 @@ def _handle_combo_kernel_per_subkernel_blocks(
         )
         for num_warps, num_stages in unique_warp_stage_pairs
     ]
+    return base_configs + phase_configs
 
 
 def triton_config_tiled_reduction(
@@ -2975,25 +3017,24 @@ def pointwise(
             ]
             # Additional configs appended for ROCm builds
             if torch.version.hip:
-                if inductor_meta.get("max_autotune_pointwise"):
-                    configs.extend(
-                        [
-                            triton_config_with_settings(
-                                size_hints, TRITON_MAX_BLOCK["X"], waves_per_eu=2
-                            ),
-                            triton_config_with_settings(
-                                size_hints,
-                                4096,  # wrt: better than the max_block for some kernel
-                            ),
-                            triton_config_with_settings(
-                                size_hints,
-                                2048,
-                                num_warps=8,
-                                num_stages=2,
-                                waves_per_eu=1,  # 20% improvement
-                            ),
-                        ]
-                    )
+                configs.extend(
+                    [
+                        triton_config_with_settings(
+                            size_hints, TRITON_MAX_BLOCK["X"], waves_per_eu=2
+                        ),
+                        triton_config_with_settings(
+                            size_hints,
+                            4096,  # wrt: better than the max_block for some kernel
+                        ),
+                        triton_config_with_settings(
+                            size_hints,
+                            2048,
+                            num_warps=8,
+                            num_stages=2,
+                            waves_per_eu=1,  # 20% improvement
+                        ),
+                    ]
+                )
                 if inductor_meta.get("atomic_add_found"):
                     configs.extend(
                         [
@@ -3065,7 +3106,9 @@ def pointwise(
                 )
     if len(size_hints) == 3:
         if not (
-            inductor_meta.get("max_autotune_pointwise") or torch.xpu.is_available()
+            inductor_meta.get("max_autotune")
+            or inductor_meta.get("max_autotune_pointwise")
+            or torch.xpu.is_available()
         ):
             configs = [triton_config_with_settings(size_hints, 16, 16, 16)]
         else:
@@ -3917,7 +3960,8 @@ def persistent_reduction(
                 # more warps for larger rows
                 new_configs.append(c)
 
-                if max_autotune_enabled and c.num_warps < 32:
+                max_warps_limit = 16 if torch.version.hip else 32
+                if max_autotune_enabled and c.num_warps < max_warps_limit:
                     newc = copy.deepcopy(c)
                     newc.num_warps *= 2
                     new_configs.append(newc)
