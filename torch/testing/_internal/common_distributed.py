@@ -740,12 +740,12 @@ def cleanup_temp_dir() -> None:
         tmp_dir.cleanup()
 
 
-def retrieve_result_from_process_queue(
+def retrieve_result_from_completion_queue(
     process: torch.multiprocessing.Process,
-    queue: torch.multiprocessing.Queue,
+    completion_queue: torch.multiprocessing.Queue,
     timeout: int | None = None,
 ) -> Any:
-    """Get result from queue associated with process.
+    """Get result from the completion_queue associated with process.
 
     When the process finished without putting a result or the timeout expired an exception instance will be returned"""
     queue_timeout = 120 if timeout is None else max(10, min(120, timeout // 4))
@@ -753,15 +753,17 @@ def retrieve_result_from_process_queue(
     # Periodically check the process for liveness
     while True:
         try:
-            return queue.get(timeout=queue_timeout)
+            return completion_queue.get(timeout=queue_timeout)
         except queue.Empty:
-            # If not alive do a last check because the timeout might have happened just before completion
-            if not process.is_alive() and queue.empty():
+            # If the process is no longer alive we cannot get a result from the queue unless it is there right now.
+            # This can happen if the timeout occurred just before the process put its result and terminated.
+            # So do a last check for emptiness before considering it as a failure.
+            if not process.is_alive() and completion_queue.empty():
                 return RuntimeError(f"Exited with {process.exitcode}")
         if timeout is not None:
             elapsed = time.time() - start_time
             if elapsed > timeout:
-                return RuntimeError(f"Process timeout out after {elapsed}s")
+                return RuntimeError(f"Process timed out out after {elapsed}s")
 
 
 # Most tests operate with this worldsize
@@ -2049,7 +2051,7 @@ class MultiProcContinuousTest(TestCase):
                 for i, (p, completion_queue) in enumerate(
                     zip(self.processes, self.completion_queues)
                 ):
-                    rv = retrieve_result_from_process_queue(
+                    rv = retrieve_result_from_completion_queue(
                         p, completion_queue, timeout=get_timeout(self.id())
                     )
                     if deferred_exception is not None:
