@@ -348,6 +348,8 @@ manual_torch_name_rule_map: dict[
     "torch._tensor._convert": UserFunctionVariable,
     "torch.jit._unwrap_optional": UserFunctionVariable,
     "torch.backends.mha.get_fastpath_enabled": UserFunctionVariable,
+    "torch._dynamo.allow_in_graph": TorchInGraphFunctionVariable,
+    "torch.compiler.allow_in_graph": TorchInGraphFunctionVariable,
     "torch._dynamo.dont_skip_tracing": UserFunctionVariable,
     "torch._dynamo.mark_static": UserFunctionVariable,
     "torch._dynamo.nonstrict_trace": UserFunctionVariable,

@@ -2437,6 +2437,42 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         with self.assertRaises(RuntimeError):
             exported_model = torch.export.export(model, (inp,))
 
+    def test_allow_in_graph_inside_compile_torch_fn(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/178511
+        # allow_in_graph called inside a compiled function on a torch operation
+        def forward(x):
+            wrapped_fn = torch.compiler.allow_in_graph(torch.relu)
+            return wrapped_fn(x)
+
+        compiled = torch.compile(forward, fullgraph=True)
+        x = torch.randn(4)
+        result = compiled(x)
+        self.assertEqual(result, torch.relu(x))
+
+    def test_allow_in_graph_inside_compile_module_level_fn(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/178511
+        # allow_in_graph called inside compiled function on a module-level user function
+        def forward(x):
+            wrapped_fn = torch.compiler.allow_in_graph(my_custom_function)
+            return wrapped_fn(x)
+
+        compiled = torch.compile(forward, fullgraph=True)
+        x = torch.randn(4)
+        result = compiled(x)
+        self.assertEqual(result, my_custom_function(x))
+
+    def test_allow_in_graph_inside_compile_dynamo_allow_in_graph(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/178511
+        # torch._dynamo.allow_in_graph called inside a compiled function
+        def forward(x):
+            wrapped_fn = torch._dynamo.allow_in_graph(torch.relu)
+            return wrapped_fn(x)
+
+        compiled = torch.compile(forward, fullgraph=True)
+        x = torch.randn(4)
+        result = compiled(x)
+        self.assertEqual(result, torch.relu(x))
+
 
 instantiate_parametrized_tests(DecoratorTests)
 
