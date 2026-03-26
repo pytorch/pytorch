@@ -32,7 +32,7 @@ import typing
 import unittest
 from collections import defaultdict, OrderedDict
 from collections.abc import Callable, Iterable, KeysView, Sequence
-from typing import Any, cast, Literal, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 from torch import sym_float, sym_int
@@ -293,7 +293,39 @@ def populate_builtin_to_tensor_fn_map() -> None:
                     BUILTIN_TO_TENSOR_RFN_MAP[op] = most_recent_func
 
 
-class BuiltinVariable(VariableTracker):
+class BaseBuiltinVariable(VariableTracker):
+    """
+    Common base class for all builtin variable trackers (BuiltinVariable,
+    DictBuiltinVariable, IterBuiltinVariable, and future specialized builtins).
+
+    Provides shared implementations for guard installation, hasattr tracing,
+    and Python-level hashability/equality.
+    """
+
+    @classmethod
+    def create_with_source(cls, value: Any, source: Source) -> "BaseBuiltinVariable":
+        install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
+        return cls(source=source)
+
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> ConstantVariable:
+        return VariableTracker.build(tx, hasattr(self.as_python_constant(), name))  # type: ignore[return-value]
+
+    def is_python_hashable(self) -> bool:
+        return True
+
+    def get_python_hash(self) -> int:
+        return hash(self.as_python_constant())
+
+    def is_python_equal(self, other: object) -> bool:
+        return (
+            type(self) is type(other)
+            and self.as_python_constant() is other.as_python_constant()  # type: ignore[union-attr]
+        )
+
+
+class BuiltinVariable(BaseBuiltinVariable):
     """
     A VariableTracker that represents a built-in value (functions and operators).
     A lot of the code here assumes it will be a function object.
@@ -2323,8 +2355,6 @@ class BuiltinVariable(VariableTracker):
     ) -> VariableTracker | None:
         if attr.is_python_constant():
             name = attr.as_python_constant()
-            if isinstance(obj, variables.BuiltinVariable):
-                return VariableTracker.build(tx, hasattr(obj.fn, name))
             return obj.call_obj_hasattr(tx, name)
         return None
 
@@ -3137,23 +3167,12 @@ class BuiltinVariable(VariableTracker):
     ) -> VariableTracker:
         return a.call_method(tx, "__contains__", [b], {})
 
-    def is_python_hashable(self) -> Literal[True]:
-        return True
-
-    def get_python_hash(self) -> int:
-        return hash(self.fn)
-
     def is_python_equal(self, other: object) -> bool:
         return isinstance(other, variables.BuiltinVariable) and self.fn is other.fn
 
 
-class DictBuiltinVariable(VariableTracker):
+class DictBuiltinVariable(BaseBuiltinVariable):
     """Variable tracker for the `dict` builtin constructor."""
-
-    @classmethod
-    def create_with_source(cls, value: Any, source: Source) -> "DictBuiltinVariable":
-        install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
-        return cls(source=source)
 
     def __init__(self, value: type = dict, **kwargs: Any) -> None:
         assert value is dict
@@ -3164,15 +3183,6 @@ class DictBuiltinVariable(VariableTracker):
 
     def as_python_constant(self) -> type:
         return dict
-
-    def is_python_hashable(self) -> bool:
-        return True
-
-    def get_python_hash(self) -> int:
-        return hash(dict)
-
-    def is_python_equal(self, other: object) -> bool:
-        return isinstance(other, DictBuiltinVariable)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         assert "dict" not in codegen.tx.f_globals, "shadowed global"
@@ -3328,13 +3338,8 @@ class DictBuiltinVariable(VariableTracker):
         )
 
 
-class IterBuiltinVariable(VariableTracker):
+class IterBuiltinVariable(BaseBuiltinVariable):
     """Variable tracker for the `iter` builtin."""
-
-    @classmethod
-    def create_with_source(cls, value: Any, source: Source) -> "IterBuiltinVariable":
-        install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
-        return cls(source=source)
 
     def __init__(self, value: Any = iter, **kwargs: Any) -> None:
         assert value is iter

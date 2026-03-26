@@ -17,7 +17,12 @@ allows Dynamo to accurately trace and optimize Python code while preserving its 
 """
 
 from .base import VariableTracker
-from .builtin import BuiltinVariable, DictBuiltinVariable, IterBuiltinVariable
+from .builtin import (
+    BaseBuiltinVariable,
+    BuiltinVariable,
+    DictBuiltinVariable,
+    IterBuiltinVariable,
+)
 from .constant import (
     CONSTANT_VARIABLE_FALSE,
     CONSTANT_VARIABLE_NONE,
@@ -183,6 +188,7 @@ __all__ = [
     "AutogradFunctionContextVariable",
     "AutogradFunctionVariable",
     "BackwardHookVariable",
+    "BaseBuiltinVariable",
     "BaseListVariable",
     "BuiltinVariable",
     "CatchWarningsCtxManagerVariable",
