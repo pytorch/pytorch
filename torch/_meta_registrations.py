@@ -6050,7 +6050,8 @@ def meta__scaled_dot_product_flash_backward(
 ):
     grad_q = torch.empty_like(query)
     grad_k = torch.empty_like(key)
-    grad_v = torch.empty_like(value)
+    # eager returns contiguous grad_v, empty_like would keep transposed strides.
+    grad_v = torch.empty_like(value, memory_format=torch.contiguous_format)
     return grad_q, grad_k, grad_v
 
 
