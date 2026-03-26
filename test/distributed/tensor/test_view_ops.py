@@ -2147,6 +2147,13 @@ TestViewOpsWithLocalTensor = create_local_tensor_test_class(
         "test_dtensor_flatten_1d",
         "test_dtensor_flatten_2d",
         "test_dtensor_flatten_multi_mesh",
+        # DTensor view tests skipped in LocalTensorMode for CuTe demo
+        "test_dtensor_flatten_shard_outside_range",
+        "test_dtensor_flatten_unflatten_roundtrip",
+        "test_dtensor_unflatten_1d",
+        "test_dtensor_unflatten_multi_mesh",
+        "test_dtensor_flatten_unflatten_2d_reversed_mesh",
+        "test_dtensor_unflatten_ss_and_s_same_dim",
     ],
     base_class=LocalDTensorContinuousTestBase,
 )
