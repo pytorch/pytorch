@@ -443,35 +443,52 @@ def get_output_metadata(subgraph, *operands):
     if not isinstance(subgraph, torch.fx.GraphModule):
         return _get_output_metadata_by_execution(subgraph, *operands)
 
-    output_metadata = OutputMetadata()
-
     # Extract output arguments from the output node
     # The output node has args=(output_values,) where output_values is a tuple/list
     output_node = next(reversed(subgraph.graph.find_nodes(op="output")))
-    output_metadata.num_fw_outs = len(output_node.args[0])
+    output_args = output_node.args[0]
 
-    for idx, output_arg in enumerate(output_node.args[0]):
+    # Check if we can determine all metadata statically. We need to fall back to
+    # execution when any output has missing meta["val"] or is a float/complex tensor
+    # (since snapshot_fake uses detach() which strips requires_grad, making
+    # meta["val"].requires_grad unreliable for differentiable dtypes).
+    needs_execution = False
+    for output_arg in output_args:
+        if not isinstance(output_arg, torch.fx.Node):
+            continue
+        val = output_arg.meta.get("val")
+        if val is None:
+            needs_execution = True
+            break
+        if isinstance(val, torch.Tensor) and (
+            val.dtype.is_floating_point or val.is_complex()
+        ):
+            needs_execution = True
+            break
+
+    if needs_execution:
+        return _get_output_metadata_by_execution(subgraph, *operands)
+
+    output_metadata = OutputMetadata()
+    output_metadata.num_fw_outs = len(output_args)
+
+    for idx, output_arg in enumerate(output_args):
         if not isinstance(output_arg, torch.fx.Node):
             if isinstance(output_arg, int):
                 output_metadata.indexes_with_symint.add(idx)
             output_metadata.indexes_with_no_grad.add(idx)
             continue
 
-        # Check node metadata for type information
-        if output_arg.meta.get("val") is None:
-            # If we don't have complete metadata for all outputs, fall back to execution
-            # This is important for correctness (e.g., detecting SymInts) even though it
-            # runs side-effectful operations
-            return _get_output_metadata_by_execution(subgraph, *operands)
-
         val = output_arg.meta["val"]
         if isinstance(val, torch.SymInt):
             output_metadata.indexes_with_symint.add(idx)
             output_metadata.indexes_with_no_grad.add(idx)
         elif isinstance(val, torch.Tensor):
-            # Check if tensor requires grad from metadata
-            if hasattr(val, "requires_grad") and not val.requires_grad:
-                output_metadata.indexes_with_no_grad.add(idx)
+            if val.requires_grad:
+                raise AssertionError(
+                    f"Non-floating point, non-complex tensor has requires_grad=True: {val.dtype}"
+                )
+            output_metadata.indexes_with_no_grad.add(idx)
         else:
             # Non-tensor, non-symint (shouldn't happen but be safe)
             output_metadata.indexes_with_no_grad.add(idx)
