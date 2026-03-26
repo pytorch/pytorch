@@ -766,6 +766,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("CU_MEM_HANDLE_TYPE_WIN32", "hipMemHandleTypeWin32"),
     ("CU_MEM_HANDLE_TYPE_WIN32_KMT", "hipMemHandleTypeWin32Kmt"),
     ("CU_MEM_LOCATION_TYPE_DEVICE", "hipMemLocationTypeDevice"),
+    ("CU_MEM_LOCATION_TYPE_HOST", "hipMemLocationTypeHost"),
     ("CU_MEM_LOCATION_TYPE_INVALID", "hipMemLocationTypeInvalid"),
     ("CU_MEM_OPERATION_TYPE_MAP", "hipMemOperationTypeMap"),
     ("CU_MEM_OPERATION_TYPE_UNMAP", "hipMemOperationTypeUnmap"),
