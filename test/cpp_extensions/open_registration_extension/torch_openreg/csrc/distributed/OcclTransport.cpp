@@ -96,6 +96,7 @@ static void setSocketTimeout(int fd, int timeoutSec) {
 }
 
 static constexpr int kDataTimeoutSec = 300; // 5 minutes
+static constexpr int kConnectTimeoutSec = 60; // 1 minute
 
 void OcclTransport::send(
     const void* data,
@@ -179,28 +180,40 @@ void OcclTransport::ensureConnected(int peerRank) {
     int fd = ::socket(AF_INET, SOCK_STREAM, 0);
     TORCH_CHECK(fd >= 0, "Failed to create socket: ", strerror(errno));
 
-    int optval = 1;
-    ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &optval, sizeof(optval));
+    try {
+      int optval = 1;
+      ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &optval, sizeof(optval));
 
-    struct sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(static_cast<uint16_t>(conn.port));
-    TORCH_CHECK(
-        ::inet_pton(AF_INET, conn.host.c_str(), &addr.sin_addr) == 1,
-        "Invalid peer address: ", conn.host);
+      struct sockaddr_in addr{};
+      addr.sin_family = AF_INET;
+      addr.sin_port = htons(static_cast<uint16_t>(conn.port));
+      TORCH_CHECK(
+          ::inet_pton(AF_INET, conn.host.c_str(), &addr.sin_addr) == 1,
+          "Invalid peer address: ", conn.host);
 
-    TORCH_CHECK(
-        ::connect(fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0,
-        "Failed to connect to rank ", peerRank, ": ", strerror(errno));
+      TORCH_CHECK(
+          ::connect(fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0,
+          "Failed to connect to rank ", peerRank, ": ", strerror(errno));
 
-    // Handshake: send our rank so the peer knows who connected
-    int32_t myRank = rank_;
-    sendAll(fd, &myRank, sizeof(myRank));
+      // Handshake: send our rank so the peer knows who connected
+      int32_t myRank = rank_;
+      sendAll(fd, &myRank, sizeof(myRank));
+    } catch (...) {
+      ::close(fd);
+      throw;
+    }
 
     conn.fd = fd;
   } else {
     // Higher rank waits for the accept thread to fill in the fd
-    conn.cv.wait(lock, [&conn] { return conn.fd >= 0; });
+    bool connected = conn.cv.wait_for(
+        lock,
+        std::chrono::seconds(kConnectTimeoutSec),
+        [&conn] { return conn.fd >= 0; });
+    TORCH_CHECK(
+        connected,
+        "Timed out waiting for connection from rank ", peerRank,
+        " after ", kConnectTimeoutSec, "s");
   }
 }
 
