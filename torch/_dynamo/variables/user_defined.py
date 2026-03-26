@@ -475,7 +475,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             self.value in {collections.OrderedDict, collections.defaultdict}
             and name == "fromkeys"
         ):
-            return variables.BuiltinVariable.call_custom_dict_fromkeys(
+            return variables.DictBuiltinVariable.call_custom_dict_fromkeys(
                 tx, self.value, *args, **kwargs
             )
         elif self.value is collections.OrderedDict and name == "move_to_end":
@@ -595,7 +595,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 args = []
             else:
                 default_factory, *args = args
-            dict_vt = variables.BuiltinVariable.call_custom_dict(
+            dict_vt = variables.DictBuiltinVariable.call_custom_dict(
                 tx, dict, *args, **kwargs
             )
             return DefaultDictVariable(
@@ -615,7 +615,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         *graph_break_hints.SUPPORTABLE,
                     ],
                 )
-            return SourcelessBuilder.create(tx, dict).call_dict(tx, *args, **kwargs)
+            return variables.DictBuiltinVariable.call_custom_dict(
+                tx, dict, *args, **kwargs
+            )
         elif self.value is collections.deque:
             maxlen = variables.CONSTANT_VARIABLE_NONE
 
