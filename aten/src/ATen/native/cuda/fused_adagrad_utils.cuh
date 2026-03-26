@@ -104,6 +104,9 @@ struct FusedAdagradMathFunctor {
             found_inf_ptr);
 
         load_store(args[kParamIdx], r_args[kParamIdx], i_start, 0);
+        if (grad_scale_ptr) {
+          load_store(args[kGradIdx], r_args[kGradIdx], i_start, 0);
+        }
         load_store(args[kStateSumIdx], r_args[kStateSumIdx], i_start, 0);
       }
     } else {
