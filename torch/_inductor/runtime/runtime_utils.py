@@ -52,6 +52,14 @@ def last_power_of_2(n: int) -> int:
     return next_pow2 // 2 if next_pow2 > n else next_pow2
 
 
+def _assert_no_nan_or_inf(t: torch.Tensor) -> None:
+    # FP8 types don't support isnan/isinf, upcast to float first
+    if t.is_floating_point() and t.element_size() == 1:
+        t = t.float()
+    assert not t.isnan().any().item()
+    assert not t.isinf().any().item()
+
+
 def get_num_bytes(*args: torch.Tensor, num_in_out_args: int = 0) -> int:
     """
     Return the total number of bytes the arguments of tensor type takes.

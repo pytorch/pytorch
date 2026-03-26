@@ -257,10 +257,7 @@ class MultiKernel:
                     continue
                 seen.add(arg)
                 if isinstance(precompile_arg, TensorArg):
-                    line = f"assert not {arg}.isnan().any().item()"
-                    wrapper.writeline(line)
-                    line = f"assert not {arg}.isinf().any().item()"
-                    wrapper.writeline(line)
+                    wrapper.writeline(f"_assert_no_nan_or_inf({arg})")
 
     @property
     def removed_buffers(self):

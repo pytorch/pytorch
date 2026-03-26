@@ -17738,11 +17738,10 @@ if RUN_GPU:
                 self.assertIn("aoti_torch_check_inf_and_nan", code)
             else:
                 self.assertIn("# make sure graph inputs are not nan/inf", code)
+                self.assertIn("_assert_no_nan_or_inf(", code)
                 self.assertRegex(code, r"return_vars = (.*)")
                 self.assertIn("for var in return_vars:", code)
                 self.assertIn("if isinstance(var, torch.Tensor):", code)
-                self.assertRegex(code, r"assert not .*\.isnan\(\)\.any\(\).item\(\)")
-                self.assertRegex(code, r"assert not .*\.isinf\(\)\.any\(\).item\(\)")
 
         @config.patch("nan_asserts", True)
         def test_nan_checker_fail(self):
@@ -17755,6 +17754,15 @@ if RUN_GPU:
                 AssertionError if not config.cpp_wrapper else RuntimeError
             ):
                 torch.compile(f)(x)
+
+        @config.patch("nan_asserts", True)
+        def test_nan_checker_fp8(self):
+            def f(x):
+                return x.half() + 1
+
+            x = torch.randn(10, device=GPU_TYPE).to(torch.float8_e4m3fn)
+            # Should not raise RuntimeError for isinf/isnan on FP8
+            torch.compile(f, fullgraph=True)(x)
 
 
 if RUN_CPU:

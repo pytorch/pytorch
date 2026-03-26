@@ -1341,6 +1341,9 @@ class PythonWrapperCodegen(CodeGen):
             inductor_debug_utils = "from torch._inductor.codegen.debug_utils import _print_debugging_tensor_value_info"
         elif torch._inductor.config.test_configs.track_memory_lifecycle:
             inductor_debug_utils = "from torch._inductor.runtime.debug_utils import tracked_empty_strided\n"
+        nan_assert_import = ""
+        if config.nan_asserts:
+            nan_assert_import = "from torch._inductor.runtime.runtime_utils import _assert_no_nan_or_inf"
 
         self.imports.splice(
             f"""
@@ -1360,6 +1363,7 @@ class PythonWrapperCodegen(CodeGen):
                 from {async_compile.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
                 {inductor_debug_utils}
+                {nan_assert_import}
             """,
             strip=True,
         )
@@ -1562,10 +1566,7 @@ class PythonWrapperCodegen(CodeGen):
             if isinstance(buf, (sympy.Expr, ir.TorchBindObject)):
                 continue
 
-            line = f"assert not {name}.isnan().any().item()"
-            self.prefix.writeline(line)
-            line = f"assert not {name}.isinf().any().item()"
-            self.prefix.writeline(line)
+            self.prefix.writeline(f"_assert_no_nan_or_inf({name})")
 
     def write_async_compile_wait(self) -> None:
         self.prefix.splice(
@@ -1767,8 +1768,7 @@ class PythonWrapperCodegen(CodeGen):
                 self.wrapper_call.do_indent()
                 self.wrapper_call.writeline("if isinstance(var, torch.Tensor):")
                 self.wrapper_call.do_indent()
-                self.wrapper_call.writeline("assert not var.isnan().any().item()")
-                self.wrapper_call.writeline("assert not var.isinf().any().item()")
+                self.wrapper_call.writeline("_assert_no_nan_or_inf(var)")
                 self.wrapper_call.do_unindent(2)
 
             self.wrapper_call.writeline("return (" + ", ".join(output_refs) + ", )")
