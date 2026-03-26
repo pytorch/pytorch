@@ -2063,23 +2063,29 @@ def solve_min_cut(
         log.info("Ops banned from re-materialization: %s", ops_ignored)
 
     def can_fuse_into_auto_functionalized(a: fx.Node, b: fx.Node) -> bool:
-        if b.target != torch.ops.higher_order.auto_functionalized:
-            return False
-        mutable_op = b.args[0]
-        (
-            mutable_arg_names,
-            _,
-        ) = torch._higher_order_ops.auto_functionalize.get_mutable_args(
-            # pyrefly: ignore[bad-argument-type]
-            mutable_op
-        )
-        for name in mutable_arg_names:  # pyrefly: ignore [not-iterable]
-            arg = b.kwargs[name]
-            if a is arg:
-                return True
-            if isinstance(arg, list):
-                if a in arg:
+        if b.target == torch.ops.higher_order.auto_functionalized:
+            mutable_op = b.args[0]
+            (
+                mutable_arg_names,
+                _,
+            ) = torch._higher_order_ops.auto_functionalize.get_mutable_args(
+                # pyrefly: ignore[bad-argument-type]
+                mutable_op
+            )
+            for name in mutable_arg_names:  # pyrefly: ignore [not-iterable]
+                arg = b.kwargs[name]
+                if a is arg:
                     return True
+                if isinstance(arg, list):
+                    if a in arg:
+                        return True
+            return False
+        elif b.target == torch.ops.higher_order.auto_functionalized_v2:
+            all_bases = b.kwargs.get("_all_bases", [])
+            for base in all_bases:
+                if a is base:
+                    return True
+            return False
         return False
 
     def can_fuse_into_triton_kernel_wrapper_functional(a: fx.Node, b: fx.Node) -> bool:
