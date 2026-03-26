@@ -9,6 +9,7 @@ from pathlib import Path
 from torch._dynamo.utils import counters, dynamo_timed, set_feature_use
 from torch._utils_internal import justknobs_check
 from torch.utils._filelock import FileLock
+from torch.utils._ordered_set import OrderedSet
 
 from .runtime.runtime_utils import triton_cache_dir
 from .utils import _IS_WINDOWS, GPU_KERNEL_BIN_EXTS
@@ -106,7 +107,7 @@ class TritonBundler:
 
     _entries: list[TritonBundleEntry] | None = None
     _static_autotuners: list[StaticallyLaunchedAutotuner] | None = None
-    _winners: set[str] | None = None
+    _winners: OrderedSet[str] | None = None
 
     # __grp__kernel_name.json contains metadata with source code paths
     # we use this as sentinel value for search and replace
@@ -141,7 +142,7 @@ class TritonBundler:
         assert cls._entries is None
         cls._entries = []
         cls._static_autotuners = []
-        cls._winners = set()
+        cls._winners = OrderedSet()
 
     @classmethod
     def end_compile(cls) -> None:
@@ -285,9 +286,7 @@ class TritonBundler:
                 kernel_names: list[str] = []
                 for entry in entries:
                     if winners and entry.kernel_hash not in winners:
-                        log.debug(
-                            "Skipping non-winning kernel %s", entry.kernel_hash
-                        )
+                        log.debug("Skipping non-winning kernel %s", entry.kernel_hash)
                         continue
                     artifacts: list[TritonKernelArtifact] = []
                     path = os.path.join(entry.directory, entry.kernel_hash)
