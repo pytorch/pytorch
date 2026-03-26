@@ -2976,9 +2976,10 @@ void ProcessGroupNCCL::allgatherUniqueNCCLIDs(
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
       size_); // worldSize
-
+  std::string commCounterStr = std::to_string(ncclCommCounter_++);
   for (size_t r = 0; r < ncclIDs.size(); r++) {
-    storeKeys.emplace_back("UniqueNCCLID:" + std::to_string(r));
+    storeKeys.emplace_back(
+        "UniqueNCCLID:" + commCounterStr + std::to_string(r));
   }
   // For non-root rank, rootIdx is set to -1.
   if (rootIdx >= 0) {
