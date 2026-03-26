@@ -1794,8 +1794,10 @@ class SIMDScheduling(BaseScheduling):
             opname = reduction_type2op.get(
                 partial_accum.reduction_type, partial_accum.reduction_type
             )
-            # Check if the original reduction used keepdim=True by comparing dimensions.
-            # Without keepdim, reduction produces [rnumel]; with keepdim, [1, rnumel].
+            final_reduce = f"{buffer_name} = {ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)"
+
+            # Restore the exact original shape via .view() to handle keepdim
+            # and multi-dimensional reductions correctly.
             buffer = V.graph.get_buffer(buffer_name)
             if buffer is not None:
                 final_shape = [
@@ -1803,12 +1805,7 @@ class SIMDScheduling(BaseScheduling):
                     for s in buffer.get_layout().size
                 ]
                 final_shape_str = f"[{', '.join(final_shape)}]"
-                # We use .view() at the end to ensure the exact original shape is restored,
-                # which is more robust than guessing keepdim.
-                final_reduce = f"{buffer_name} = {ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0).view({final_shape_str})"
-            else:
-                final_reduce = f"{buffer_name} = {ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)"
-
+                final_reduce += f".view({final_shape_str})"
 
             # The workspace tensor is in torch.float, need a cast if the buffer is
             # not.
