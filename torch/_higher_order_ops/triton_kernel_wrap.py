@@ -334,6 +334,10 @@ def generate_ttir(
                 return True
         return False
 
+    def _is_constexpr_or_none(name: str, arg: Any) -> bool:
+        param_idx = kernel.arg_names.index(name)
+        return kernel.params[param_idx].is_constexpr or arg is None
+
     # Note: one would expect that each input to the triton kernel maps to
     # one input parameter in the TTIR. This is _not_ true for TMA descriptors:
     # one TMA descriptor gets converted into:
@@ -344,12 +348,11 @@ def generate_ttir(
     # the stride and size parameters.
     #
     # Additionally, tensors and scalars are both included as TTIR parameters,
-    # whereas `constexpr` are inlined, and None are excluded. We only preserve
-    # scalars as this matters for "odd" ordering (eg. [tensor, scalar, tensor]).
+    # whereas `constexpr` are inlined, and None are excluded. We both preserve
+    # scalars and tensors as this matters for "odd" ordering,
+    # eg. [tensor, scalar, tensor].
     def get_arg_names(name: str, arg: Any) -> list[str]:
-        param_idx = kernel.arg_names.index(name)
-
-        if kernel.params[param_idx].is_constexpr or arg is None:
+        if _is_constexpr_or_none(name, arg):
             return []
 
         if is_stable_tensor_descriptor_arg(arg):
@@ -463,8 +466,8 @@ def generate_ttir(
     # Thus, only None and arguments marked `is_constexpr` should be treated as such.
     constants = {
         name: arg
-        for i, (name, arg) in enumerate(ordered_args.items())
-        if kernel.params[i].is_constexpr or arg is None
+        for name, arg in ordered_args.items()
+        if _is_constexpr_or_none(name, arg)
     }
 
     if (mangle_type := getattr(triton.runtime.jit, "mangle_type", None)) is not None:
