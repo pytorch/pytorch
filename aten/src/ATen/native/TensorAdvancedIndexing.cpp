@@ -2821,7 +2821,7 @@ static int64_t count_nonzero_impl(TensorIteratorBase& iter, Range range) {
   return num_nonzero;
 }
 
-Tensor count_nonzero_cuda(const Tensor& self, IntArrayRef dims) {
+Tensor count_nonzero(const Tensor& self, IntArrayRef dims) {
   auto reduce = self;
   if (reduce.scalar_type() != kBool) {
     reduce = reduce != 0;

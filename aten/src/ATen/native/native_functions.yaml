@@ -1877,8 +1877,7 @@
   variants: function, method
   dispatch:
     CPU: count_nonzero_cpu
-    CUDA: count_nonzero_cuda
-    MPS: count_nonzero_mps
+    CUDA, MPS: count_nonzero
   autogen: count_nonzero.dim_IntList_out
   tags: reduction
 
