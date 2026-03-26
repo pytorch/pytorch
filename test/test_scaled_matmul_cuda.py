@@ -1627,12 +1627,11 @@ class TestFP8Matmul(TestCase):
             output_dtype
         )
 
-    @skipIfRocm
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(IS_SM90, "DeepSeek style (1x128, 128x128) blockwise scaling works on SM90 (Hopper)")
     @unittest.skipIf(
-        _get_torch_cuda_version() < (12, 9),
+        not torch.version.hip and _get_torch_cuda_version() < (12, 9),
         "cuBLAS blockwise scaling added in CUDA 12.9",
     )
     @parametrize("output_dtype", [torch.bfloat16, ])
@@ -1641,6 +1640,7 @@ class TestFP8Matmul(TestCase):
     def test_scaled_mm_deepseek_error_messages(
         self, output_dtype, lhs_block, rhs_block, M, N, K
     ):
+
         torch.manual_seed(42)
 
         x = torch.randn(M, K, device="cuda", dtype=output_dtype).pow(3)
@@ -1662,10 +1662,18 @@ class TestFP8Matmul(TestCase):
         else:
             rhs_recipe = ScalingType.BlockWise128x128
 
-        # Verify that actual F8 mm raises expected error on non-SM90
+        # Verify that actual F8 mm raises expected error
+        if torch.version.hip:
+            # ROCm does not yet support DeepSeek-style blockwise scaling
+            expected_error = ValueError
+            expected_pattern = "Invalid scaling configuration"
+        else:
+            # CUDA non-SM90 should raise NotImplementedError
+            expected_error = NotImplementedError
+            expected_pattern = ".*DeepSeek.*scaling.*only supported in CUDA for SM90.*"
         with self.assertRaisesRegex(
-            NotImplementedError,
-            ".*DeepSeek.*scaling.*only supported in CUDA for SM90.*"
+            expected_error,
+            expected_pattern
         ):
             scaled_mm_wrap(
                 x_fp8,
