@@ -62,5 +62,8 @@
     idx_n = rn[None, :]
     mask = (idx_m < M) & (idx_n < N)
 
+    # cast accumulator to output dtype
+    acc = acc.to({{OUT_DTYPE}})
+
     # inductor generates a suffix
     {{store_output(("idx_q", "idx_m", "idx_n"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}

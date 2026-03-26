@@ -179,11 +179,13 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         templates_to_use.append(aten_handler)
         kwarg_overrides[aten_handler.uid] = aten_extra_kwargs
 
-    if use_triton_template(layout, check_max_autotune=False) and (
-        out_dtype is None or out_dtype == mat1.get_dtype()
-    ):
-        # TODO: add out_dtype support for Triton Template
+    if use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(bmm_template)
+        # when out_dtype not specified, default to the input dtype
+        triton_out_dtype = out_dtype or mat1.get_dtype()
+        kwarg_overrides[bmm_template.uid] = {
+            "OUT_DTYPE": f"tl.{triton_out_dtype}".replace("torch.", ""),
+        }
 
     # Single unified call for all templates
     choices.extend(
@@ -275,15 +277,25 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
     # Collect all templates for unified call
     templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
+    kwarg_overrides = {}
+
     if use_aten_gemm_kernels():
         templates_to_use.append(aten_baddbmm)
 
     if use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(bmm_template)
+        kwarg_overrides[bmm_template.uid] = {
+            "OUT_DTYPE": f"tl.{mat1.get_dtype()}".replace("torch.", ""),
+        }
 
     # Single unified call for all templates
     choices.extend(
-        V.choices.get_template_configs(kernel_inputs, templates_to_use, name)
+        V.choices.get_template_configs(
+            kernel_inputs,
+            templates_to_use,
+            name,
+            kwarg_overrides=kwarg_overrides,
+        )
     )
 
     node, _ = autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
