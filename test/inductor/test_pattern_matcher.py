@@ -21,6 +21,7 @@ from torch._inductor.pattern_matcher import (
     is_mutation_op,
     KeywordArg,
     Match,
+    MatchContext,
     PatternMatcherPass,
     PatternPrettyPrinter,
     register_graph_pattern,
@@ -2149,6 +2150,73 @@ class TestPatternMatcher(TestCase):
         result = compiled_fn(x)
         self.assertEqual(result, x * 3)
         self.assertEqual(count, 1)
+
+    def test_replace_with_graph_nested_args_recompute_tags(self):
+        """
+        Test that recompute tags don't leak past nested replacement args.
+        Regression test for https://github.com/pytorch/pytorch/issues/178374
+        """
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                s1 = torch.sin(x)
+                s2 = torch.sin(y)
+                c = torch.cat([s1, s2], dim=1)
+                return torch.cos(c)
+
+        traced = torch.fx.symbolic_trace(M())
+        graph = traced.graph
+        nodes_before = set(graph.nodes)
+
+        call_nodes = [n for n in graph.nodes if n.op == "call_function"]
+        sin_nodes = [n for n in call_nodes if n.target == torch.sin]
+        self.assertEqual(len(sin_nodes), 2)
+        node_s1, node_s2 = sin_nodes
+        node_cat = next(n for n in call_nodes if n.target == torch.cat)
+
+        # Mark the cat node with recompute tags
+        node_cat.meta["recompute"] = "1"
+        node_cat.meta["ac_graph_id"] = 1
+
+        # Define replacement function that takes nested args
+        def rep_fn(nested):
+            x = nested[0]
+            y = nested[1]
+            return torch.add(x, y)
+
+        replacement_gm = torch.fx.symbolic_trace(rep_fn)
+
+        # Create match
+        pattern = Arg()
+        ctx = MatchContext([pattern], graph=graph)
+        ctx.pattern_to_node[pattern] = node_cat
+        match = Match(ctx, pattern)
+
+        # Replace with nested args: [(node_s1, node_s2)]
+        match.replace_with_graph(replacement_gm, args=[(node_s1, node_s2)])
+
+        # Verify replacement was created
+        nodes_after = [n for n in graph.nodes if n not in nodes_before and n.op != "output"]
+        new_add_nodes = [
+            n for n in nodes_after if n.op == "call_function" and n.target == torch.add
+        ]
+        self.assertEqual(len(new_add_nodes), 1)
+        new_add_node = new_add_nodes[0]
+
+        # Verify recompute tags ARE present on the new replacement node
+        self.assertEqual(new_add_node.meta.get("recompute"), "1")
+        self.assertEqual(new_add_node.meta.get("ac_graph_id"), 1)
+
+        # Verify recompute tags DO NOT leak to input nodes
+        self.assertNotIn("recompute", node_s1.meta)
+        self.assertNotIn("recompute", node_s2.meta)
+        self.assertNotIn("ac_graph_id", node_s1.meta)
+        self.assertNotIn("ac_graph_id", node_s2.meta)
+
+        # Verify recompute tags DO NOT leak to placeholders
+        placeholders = [n for n in graph.nodes if n.op == "placeholder"]
+        for n in placeholders:
+            self.assertNotIn("recompute", n.meta)
+            self.assertNotIn("ac_graph_id", n.meta)
 
 
 class TestPatternMatcherLogging(LoggingTestCase):
