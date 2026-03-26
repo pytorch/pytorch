@@ -71,7 +71,7 @@ jobs:
           echo "Outputs of download-docker-builds-artifacts job: ${JSON_STRINGIFIED}"
 
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@8e3ec190e7f9da56d28a687dc8b54838cf4ffa1a # main
         with:
           no-sudo: true
 
@@ -86,7 +86,7 @@ jobs:
             echo "ghcr_image=${ghcr_image}" >> "$GITHUB_OUTPUT"
 
       - name: Pull docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-image: ${{ steps.ghcr-io-tag.outputs.ghcr_image }}
 
@@ -95,7 +95,7 @@ jobs:
           docker_image_tag=${{ matrix.docker-image }}
           docker_image_tag="${docker_image_tag#*:}" # Remove everything before and including first ":"
           docker_image_tag="${docker_image_tag%-*}" # Remove everything after and including last "-"
-          ref_name=${{ github.event.workflow_run.head_branch || github.event.inputs.branch }}
+          ref_name=${WORKFLOW_RUN_HEAD_BRANCH}
           if [[ $ref_name =~ "release/" ]]; then
             ref_suffix="release"
           elif [[ $ref_name == "main" ]]; then
@@ -107,3 +107,6 @@ jobs:
           # mv is atomic operation, so we use intermediate tar.tmp file to prevent read-write contention
           docker save -o ~/pytorch-data/docker/${docker_image_tag}.tar.tmp ${{ matrix.docker-image }}
           mv ~/pytorch-data/docker/${docker_image_tag}.tar.tmp ~/pytorch-data/docker/${docker_image_tag}_${ref_suffix}.tar
+
+        env:
+          WORKFLOW_RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch || github.event.inputs.branch }}

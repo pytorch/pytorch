@@ -60,22 +60,24 @@ jobs:
                   "ghcr.io/github/github-mcp-server:v0.30.1"
                 ],
                 "env": {
-                  "GITHUB_PERSONAL_ACCESS_TOKEN": "${{ secrets.GITHUB_TOKEN }}"
+                  "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
                 }
               }
             }
           }
           EOF
 
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Configure AWS credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_claude_code
           aws-region: us-east-1
 
       - name: Run Issue Triage
         timeout-minutes: 5
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@3ac52d0da9f8ec9ca7b4dc23bb477e36ef9c77a9 # v1
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TRIAGE_HOOK_DEBUG_LOG: /tmp/triage_hooks.log
@@ -106,7 +108,7 @@ jobs:
           fi
 
       - name: Upload usage metrics
-        uses: pytorch/test-infra/.github/actions/upload-claude-usage@main
+        uses: pytorch/test-infra/.github/actions/upload-claude-usage@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
 
       - name: Upload execution output to S3
         if: always()

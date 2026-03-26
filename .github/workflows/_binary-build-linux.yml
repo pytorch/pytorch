@@ -142,13 +142,13 @@ jobs:
 
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         if: inputs.build_environment != 'linux-s390x-binary-manywheel'
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        uses: pytorch/test-infra/.github/actions/setup-ssh@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         continue-on-error: true
         with:
           github-secret: ${{ secrets.github-token }}
 
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@8e3ec190e7f9da56d28a687dc8b54838cf4ffa1a # main
         with:
           no-sudo: ${{ inputs.build_environment == 'linux-aarch64-binary-manywheel' || inputs.build_environment == 'linux-s390x-binary-manywheel' }}
 
@@ -215,7 +215,7 @@ jobs:
       - name: Calculate docker image
         id: calculate-docker-image
         if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' && inputs.build_environment != 'linux-s390x-binary-manywheel' }}
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           # If doing this in main or release branch, use docker.io. Otherwise
           # use ECR
@@ -230,7 +230,7 @@ jobs:
 
       - name: Pull Docker image
         if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' && inputs.build_environment != 'linux-s390x-binary-manywheel' }}
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -283,7 +283,7 @@ jobs:
 
       - name: Teardown Linux
         if: always() && inputs.build_environment != 'linux-s390x-binary-manywheel'
-        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        uses: pytorch/test-infra/.github/actions/teardown-linux@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
 
       - name: Chown workspace
         if: always() && inputs.build_environment != 'linux-s390x-binary-manywheel'

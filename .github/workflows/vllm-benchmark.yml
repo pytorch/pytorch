@@ -50,7 +50,7 @@ jobs:
       torch_cuda_arch_list: '8.0 8.9 9.0 10.0 12.0'
       build_environment: linux-jammy-cuda13.0-py3.12-gcc11
     steps:
-      - uses: pytorch/test-infra/.github/actions/setup-uv@main
+      - uses: pytorch/test-infra/.github/actions/setup-uv@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           python-version: "3.12"
           activate-environment: "true"
@@ -88,7 +88,7 @@ jobs:
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@cf2afb424dc37011b7d3c9d81fa23387148d9d41 # main
         with:
           working-directory: pytorch/pytorch
           docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-vllm
