@@ -68,7 +68,6 @@ from ..scheduler import (
 from ..shape_propagation import get_broadcasted_shape
 from ..utils import (
     cache_on_self,
-    DeferredLineBase,
     DelayReplaceLine,
     get_bounds_index_expr,
     get_fused_kernel_name,
@@ -2703,7 +2702,8 @@ class TMACompatibilityChecker:
         """
         return self.force
 
-def _should_use_xmask_unswitch(kernel: "TritonKernel") -> bool:
+
+def _should_use_xmask_unswitch(kernel: TritonKernel) -> bool:
     """Whether xmask unswitch optimization may apply.
 
     Config flag must be enabled and x-dimension numel must be dynamic.
@@ -3780,6 +3780,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         append_broadcast = None
         shape: BlockShapeType = None
         _register_xmask_load = False
+        unmasked_line = ""
 
         if should_unwrap_unspec_arg(name):
             line = var
@@ -3818,7 +3819,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 # Register unmasked variant for xmask unswitch optimization.
                 _register_xmask_load = (
                     self._use_xmask_unswitch
-                    and indexing.mask_vars == {"xmask"}
+                    and indexing.mask_vars == OrderedSet(["xmask"])
                 )
                 if _register_xmask_load:
                     unmasked_line = f"tl.load({var} + ({indexing.index_str}), None{ep}{other}{cachemod})"
@@ -3959,7 +3960,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if (
                 self._use_xmask_unswitch
                 and isinstance(indexing, IndexingOptions)
-                and indexing.mask_vars == {"xmask"}
+                and indexing.mask_vars == OrderedSet(["xmask"])
             ):
                 self._xmask_unswitch_map[line] = (
                     f"tl.store({var} + ({indexing_str}), {value}, None)"
@@ -6175,9 +6176,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         elif mode == 2:
             self._codegen_body_unswitch_whole()
         else:
-            raise ValueError(
-                f"unexpected xmask_unswitch={mode}, expected 0, 1, or 2"
-            )
+            raise ValueError(f"unexpected xmask_unswitch={mode}, expected 0, 1, or 2")
 
     def _codegen_body_plain(self) -> None:
         """Mode 0: plain masked code — no unswitch."""
