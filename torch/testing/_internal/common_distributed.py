@@ -181,7 +181,6 @@ TEST_SKIPS = {
     ),
     "importerror": TestSkip(88, "Test skipped due to missing import"),
     "no_accelerator": TestSkip(89, "accelerator is not available."),
-    "power-of-two": TestSkip(90, "world size needs to be power of two on xpu."),
 }
 
 
@@ -334,21 +333,6 @@ def skip_if_lt_x_gpu(x, *, allow_cpu=False):
         return wrapper
 
     return decorator
-
-
-def skip_if_not_powerof2_worldsize_xpu():
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            if TEST_XPU:
-                x = torch.xpu.device_count()
-                print(f"skip_if_not_powerof2_worldsize_xpu x: {x}")
-                if (x & (x - 1)) == 0:
-                    return func(*args, **kwargs)
-                sys.exit(TEST_SKIPS["power-of-two"].exit_code)
-            return func(*args, **kwargs)
-
-        return wrapper
 
 
 def requires_world_size(n: int):

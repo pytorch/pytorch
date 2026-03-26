@@ -13,6 +13,7 @@ from torch.distributed._shard.sharding_spec._internals import (
     get_split_size,
 )
 
+
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 

@@ -667,7 +667,7 @@ class ShardedTensor(ShardedTensorBase):
             torch.device(device_to) if isinstance(device_to, (str, int)) else device_to
         )
 
-        if torch.accelerator.is_available() and device_to.type == torch.accelerator.current_accelerator().type:
+        if device_to.type == "cuda" or device_to.type == "xpu":
             # if device_to set to cuda, set to current device even
             # if user specify the device index.
             current_idx = torch.accelerator.current_device_index()

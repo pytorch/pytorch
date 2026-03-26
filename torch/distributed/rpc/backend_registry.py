@@ -154,7 +154,9 @@ def _tensorpipe_construct_rpc_backend_options_handler(
 
 
 def _tensorpipe_validate_devices(devices, device_count):
-    device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+    device_type = (
+        acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+    )
     return all(
         d.type == "cpu" or (d.type == device_type and 0 <= d.index < device_count)
         for d in devices

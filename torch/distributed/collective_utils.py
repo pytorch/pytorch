@@ -317,7 +317,7 @@ def _check_cpu_rng_sync(
 def _check_rng_sync_internal(
     generator: torch.Generator, group: dist.ProcessGroup
 ) -> tuple[dict[Any, set], str]:
-    if generator.device.type == "cuda"  or generator.device.type == "xpu":
+    if generator.device.type == "cuda" or generator.device.type == "xpu":
         return _check_philox_rng_sync(generator, group)
     elif generator.device.type == "cpu":
         return _check_cpu_rng_sync(generator, group)

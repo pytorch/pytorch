@@ -6,7 +6,6 @@ import os
 import re
 import sys
 import time
-import unittest
 import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -1170,6 +1169,7 @@ def check_sharded_parity(
         if not isinstance(sharded_param.grad, DTensor):
             raise AssertionError("Expected sharded_param.grad to be a DTensor")  # mypy
         cls.assertEqual(sharded_param.grad.to_local(), sharded_ref_grad.to_local())
+
 
 class FSDPTestMultiThread(MultiThreadedTestCase):
     @property
