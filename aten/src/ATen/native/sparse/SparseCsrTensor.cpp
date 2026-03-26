@@ -189,12 +189,13 @@ static void _validate_sparse_compressed_tensor_args_worker(const Tensor& compres
               batch_ndim, " + ", block_ndim, ") but got ", values.dim());
 
   // 3.5
-  // Skip stride check for empty tensors - stride is meaningless for tensors with no elements
-  TORCH_CHECK(plain_indices.size(-1) == 0 || plain_indices.stride(-1) == 1,
-              "expected ", plain_indices_name, " to be a contiguous tensor per batch");
+  if (plain_indices.numel() != 0) {
+    TORCH_CHECK(plain_indices.stride(-1) == 1,
+                "expected ", plain_indices_name, " to be a contiguous tensor per batch");
+  }
 
   // 3.6
-  TORCH_CHECK(compressed_indices.size(-1) == 0 || compressed_indices.stride(-1) == 1,
+  TORCH_CHECK(compressed_indices.stride(-1) == 1,
               "expected ", compressed_indices_name, " to be a contiguous tensor per batch");
 
   // 3.1

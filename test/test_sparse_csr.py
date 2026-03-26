@@ -354,9 +354,9 @@ class TestSparseCompressed(TestCase):
         # This should also work - using numpy arrays
         # Previously failed with "expected col_indices to be a contiguous tensor per batch"
         t2 = torch.sparse_csr_tensor(
-            torch.from_numpy(np.array(crow_indices, dtype="int32")).contiguous(),
-            torch.from_numpy(np.array(col_indices, dtype="int32")).contiguous(),
-            torch.from_numpy(np.array(values, dtype="int32")).contiguous(),
+            torch.from_numpy(np.array(crow_indices, dtype="int32")),
+            torch.from_numpy(np.array(col_indices, dtype="int32")),
+            torch.from_numpy(np.array(values, dtype="int32")),
             (1, 100)
         )
         self.assertEqual(t2._nnz(), 0)
