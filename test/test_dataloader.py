@@ -3861,6 +3861,28 @@ class TestOutOfOrderDataLoader(TestCase):
         self.assertEqual(expected_data, data)
 
 
+class ThreadRNGTransformDataset(Dataset):
+    """Dataset that uses thread-specific RNG for deterministic transforms.
+
+    Defined at module level to be picklable for multiprocessing.
+    """
+
+    def __init__(self, size):
+        self.size = size
+
+    def __len__(self):
+        return self.size
+
+    def __getitem__(self, idx):
+        worker_info = torch.utils.data.get_worker_info()
+
+        generator = worker_info.rng.torch_generator if worker_info.rng else None
+
+        # Apply random transform using thread-specific generator
+        random_val = torch.empty(1).uniform_(0.0, 1.0, generator=generator).item()
+        return random_val
+
+
 @instantiate_parametrized_tests
 @unittest.skipIf(
     IS_WINDOWS or IS_MACOS,
@@ -3916,24 +3938,6 @@ class TestThreadingDataLoader(TestCase):
 
     def test_threading_thread_rng_deterministic(self):
         # Test that using thread specific rng provides deterministic results
-        class ThreadRNGTransformDataset(Dataset):
-            def __init__(self, size):
-                self.size = size
-
-            def __len__(self):
-                return self.size
-
-            def __getitem__(self, idx):
-                worker_info = torch.utils.data.get_worker_info()
-
-                generator = worker_info.rng.torch_generator if worker_info.rng else None
-
-                # Apply random transform using thread-specific generator
-                random_val = (
-                    torch.empty(1).uniform_(0.0, 1.0, generator=generator).item()
-                )
-                return random_val
-
         # Run twice with same seed - should get identical results
         dataset1 = ThreadRNGTransformDataset(100)
         torch.manual_seed(42)
