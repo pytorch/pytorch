@@ -210,9 +210,6 @@ html_context = {
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
 # NOTE: sharing python docs resources
-html_static_path = ["_static"]
-html_css_files = ["cpp_theme.css"]
-html_js_files = ["cpp_theme.js"]
 
 # Called automatically by Sphinx, making this `conf.py` an "extension".
 
