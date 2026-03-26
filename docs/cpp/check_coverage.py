@@ -17,11 +17,11 @@ Usage:
 """
 
 import argparse
-import os
 import re
 import subprocess
 import sys
 from pathlib import Path
+
 
 # ─── Paths ───────────────────────────────────────────────────────────────────
 
@@ -353,8 +353,7 @@ DIRECTIVE_RE = re.compile(
 
 # Matches manual Sphinx C++ domain directives: .. cpp:class:: at::Tensor
 CPP_DIRECTIVE_RE = re.compile(
-    r"^\.\.\s+cpp:(class|struct|function|enum|type)"
-    r"::\s*(.+?)\s*$",
+    r"^\.\.\s+cpp:(class|struct|function|enum|type)" r"::\s*(.+?)\s*$",
     re.MULTILINE,
 )
 
@@ -456,16 +455,23 @@ def generate_coverage_report(documented: set[str]) -> str:
 
 # Patterns indicating broken rendering
 BROKEN_PATTERNS = [
-    (re.compile(r"Cannot find (?:class|struct|function|file)", re.I),
-     "unresolved breathe directive"),
-    (re.compile(r"Unable to resolve (?:class|struct|function)", re.I),
-     "unresolved breathe directive (ambiguous overload)"),
-    (re.compile(r"doxygenclass:|doxygenfunction:|doxygenstruct:", re.I),
-     "raw directive text in output"),
-    (re.compile(r"<span class=\"problematic\">", re.I),
-     "Sphinx problematic node (broken reference)"),
-    (re.compile(r"System Message:", re.I),
-     "Sphinx system message (build error)"),
+    (
+        re.compile(r"Cannot find (?:class|struct|function|file)", re.IGNORECASE),
+        "unresolved breathe directive",
+    ),
+    (
+        re.compile(r"Unable to resolve (?:class|struct|function)", re.IGNORECASE),
+        "unresolved breathe directive (ambiguous overload)",
+    ),
+    (
+        re.compile(r"doxygenclass:|doxygenfunction:|doxygenstruct:", re.IGNORECASE),
+        "raw directive text in output",
+    ),
+    (
+        re.compile(r"<span class=\"problematic\">", re.IGNORECASE),
+        "Sphinx problematic node (broken reference)",
+    ),
+    (re.compile(r"System Message:", re.IGNORECASE), "Sphinx system message (build error)"),
 ]
 
 # Minimum content length for a page to not be considered empty
@@ -540,7 +546,10 @@ def run_coverxygen(xml_dir: Path) -> str:
 
     # Try CLI first, then fall back to python -m
     coverxygen_cmd = None
-    for cmd in [["coverxygen", "--version"], [sys.executable, "-m", "coverxygen", "--version"]]:
+    for cmd in [
+        ["coverxygen", "--version"],
+        [sys.executable, "-m", "coverxygen", "--version"],
+    ]:
         try:
             subprocess.run(cmd, capture_output=True, check=True)
             coverxygen_cmd = cmd[:-1]  # strip --version
@@ -555,27 +564,40 @@ def run_coverxygen(xml_dir: Path) -> str:
         lines.append("This is complementary to the RST coverage check above.")
         lines.append("")
         lines.append("Usage:")
-        lines.append(f"  coverxygen --xml-dir {xml_dir} --src-dir ../../ --output coverxygen.info")
+        lines.append(
+            f"  coverxygen --xml-dir {xml_dir} --src-dir ../../ --output coverxygen.info"
+        )
         lines.append("  # Then use lcov/genhtml to visualize:")
-        lines.append("  genhtml --no-function-coverage coverxygen.info -o coverxygen_html")
+        lines.append(
+            "  genhtml --no-function-coverage coverxygen.info -o coverxygen_html"
+        )
         return "\n".join(lines)
 
     # Run coverxygen with summary
-    index_xml = xml_dir / "index.xml"
     try:
         result = subprocess.run(
-            coverxygen_cmd + [
-                "--xml-dir", str(xml_dir),
-                "--src-dir", str(SCRIPT_DIR / ".." / ".."),
-                "--output", "-",
-                "--kind", "class,struct,function",
-                "--scope", "public",
+            coverxygen_cmd
+            + [
+                "--xml-dir",
+                str(xml_dir),
+                "--src-dir",
+                str(SCRIPT_DIR / ".." / ".."),
+                "--output",
+                "-",
+                "--kind",
+                "class,struct,function",
+                "--scope",
+                "public",
                 # Exclude auto-generated code and internal implementation details.
                 # To exclude additional paths, add more --exclude entries below.
-                "--exclude", ".*/build/.*",
-                "--exclude", ".*/detail/.*",
-                "--exclude", ".*/nativert/.*",
-                "--exclude", ".*/stable/library\\.h",
+                "--exclude",
+                ".*/build/.*",
+                "--exclude",
+                ".*/detail/.*",
+                "--exclude",
+                ".*/nativert/.*",
+                "--exclude",
+                ".*/stable/library\\.h",
             ],
             capture_output=True,
             text=True,
@@ -617,11 +639,13 @@ def run_coverxygen(xml_dir: Path) -> str:
 def main():
     parser = argparse.ArgumentParser(description="C++ docs coverage checker")
     parser.add_argument(
-        "--coverxygen", action="store_true",
+        "--coverxygen",
+        action="store_true",
         help="Also run coverxygen on Doxygen XML for doc-comment coverage",
     )
     parser.add_argument(
-        "--html-only", action="store_true",
+        "--html-only",
+        action="store_true",
         help="Only run HTML formatting checks",
     )
     args = parser.parse_args()
