@@ -1,0 +1,155 @@
+name: linux-manywheel-build
+
+on:
+  workflow_call:
+    inputs:
+      python-versions:
+        required: true
+        type: string
+        description: JSON array of python version objects [{tag, abi, version}]
+      build-configs:
+        required: true
+        type: string
+        description: JSON array of GPU build config objects
+    secrets:
+      github-token:
+        required: true
+        description: GitHub token
+
+permissions:
+  id-token: write
+
+env:
+  PYTORCH_ROOT: /pytorch
+  PYTORCH_FINAL_PACKAGE_DIR: /artifacts
+
+jobs:
+  build:
+    if: github.repository_owner == 'pytorch'
+    runs-on: ${{ matrix.gpu_config.runs_on_build }}
+    container:
+      image: ${{ matrix.gpu_config.container_image }}
+    timeout-minutes: 720
+    strategy:
+      fail-fast: false
+      matrix:
+        python_version: ${{ fromJSON(inputs.python-versions) }}
+        gpu_config: ${{ fromJSON(inputs.build-configs) }}
+
+    env:
+      DESIRED_CUDA: ${{ matrix.gpu_config.desired_cuda }}
+      GPU_ARCH_TYPE: ${{ matrix.gpu_config.gpu_arch_type }}
+      GPU_ARCH_VERSION: ${{ matrix.gpu_config.gpu_arch_version }}
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: ${{ matrix.gpu_config.extra_install_reqs }}
+
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 2
+          submodules: recursive
+          show-progress: false
+
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Set GCC toolset
+        run: |
+          # Use GCC 13 to match legacy manylinux2_28-builder images.
+          # GCC 14 breaks: CUDA 12.6 nvcc (max GCC 13) and ld.gold (--dependency-file).
+          GCC_ROOT="/opt/rh/gcc-toolset-13/root/usr"
+          if [[ -d "$GCC_ROOT/bin" ]]; then
+            echo "$GCC_ROOT/bin" >> "$GITHUB_PATH"
+            echo "LD_LIBRARY_PATH=$GCC_ROOT/lib64:$GCC_ROOT/lib:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+          fi
+
+      - name: GPU environment setup
+        run: bash .ci/manywheel/build_env_setup.sh
+
+      - name: Populate build version
+        id: build-version
+        run: |
+          set -eux
+          export TZ=UTC
+          DATE="$(date -u +%Y%m%d)"
+          BASE_VERSION="$(cat version.txt | cut -da -f1).dev${DATE}"
+
+          # Check for release candidate tag
+          if git describe --tags --match 'v[0-9]*.[0-9]*.[0-9]*' --exact 2>/dev/null; then
+            BASE_VERSION="$(git describe --tags --match 'v[0-9]*.[0-9]*.[0-9]*' --exact | sed -e 's/^v//' -e 's/-.*$//')"
+          fi
+
+          BUILD_VERSION="${BASE_VERSION}+${{ matrix.gpu_config.desired_cuda }}"
+          echo "build_version=${BUILD_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "date=${DATE}" >> "$GITHUB_OUTPUT"
+
+          # Populate triton requirement
+          TRITON_VERSION=$(cat .ci/docker/triton_version.txt)
+          TRITON_REQS=""
+          if [[ -n "${{ matrix.gpu_config.extra_install_reqs }}" ]]; then
+            TRITON_SHORTHASH=$(cut -c1-8 .ci/docker/ci_commit_pins/triton.txt)
+            if [[ "${BUILD_VERSION}" =~ .*dev.* ]]; then
+              TRITON_REQS="triton==${TRITON_VERSION}+git${TRITON_SHORTHASH}; platform_system == 'Linux'"
+            else
+              TRITON_REQS="triton==${TRITON_VERSION}; platform_system == 'Linux'"
+            fi
+          fi
+          echo "triton_reqs=${TRITON_REQS}" >> "$GITHUB_OUTPUT"
+
+      - name: Install build dependencies
+        run: |
+          set -eux
+          export PATH="/opt/python/${{ matrix.python_version.tag }}/bin:$PATH"
+          bash .ci/manywheel/build_install_deps.sh "$GITHUB_WORKSPACE"
+
+      - name: Build wheel
+        env:
+          PYTORCH_BUILD_VERSION: ${{ steps.build-version.outputs.build_version }}
+          PYTORCH_BUILD_NUMBER: 1
+          OVERRIDE_PACKAGE_VERSION: ${{ steps.build-version.outputs.build_version }}
+          PYTORCH_EXTRA_INSTALL_REQUIREMENTS: >-
+            ${{ matrix.gpu_config.extra_install_reqs }}
+            ${{ steps.build-version.outputs.triton_reqs && format('| {0}', steps.build-version.outputs.triton_reqs) || '' }}
+          TH_BINARY_BUILD: 1
+          USE_FBGEMM: 1
+          MAX_JOBS: 12
+          USE_GOLD_LINKER: ${{ matrix.gpu_config.use_gold_linker }}
+          USE_GLOO_WITH_OPENSSL: ${{ matrix.gpu_config.use_gloo_with_openssl }}
+          TORCH_CUDA_ARCH_LIST: ${{ matrix.gpu_config.torch_cuda_arch_list }}
+          TORCH_NVCC_FLAGS: ${{ matrix.gpu_config.torch_nvcc_flags }}
+          PYTORCH_ROCM_ARCH: ${{ matrix.gpu_config.pytorch_rocm_arch }}
+          USE_CUDA: ${{ matrix.gpu_config.use_cuda }}
+          USE_STATIC_CUDNN: 0
+          USE_STATIC_NCCL: 0
+          ATEN_STATIC_CUDA: 0
+          USE_CUDA_STATIC_LINK: 0
+          USE_CUPTI_SO: 1
+          USE_CUSPARSELT: ${{ matrix.gpu_config.use_cuda }}
+          USE_CUFILE: ${{ matrix.gpu_config.use_cuda }}
+          USE_SYSTEM_NCCL: ${{ matrix.gpu_config.use_cuda }}
+          NCCL_ROOT_DIR: /usr/local/cuda
+          NCCL_INCLUDE_DIR: /usr/local/cuda/include/
+          NCCL_LIB_DIR: /usr/local/cuda/lib64/
+          CUDNN_ROOT_DIR: /usr/local/cuda
+          CUDNN_INCLUDE_DIR: /usr/local/cuda/include/
+          CUDNN_LIBRARY: /usr/local/cuda/lib64/
+        run: |
+          export PATH="/opt/python/${{ matrix.python_version.tag }}/bin:$PATH"
+          bash .ci/manywheel/build_wheel.sh /tmp/raw-wheels
+
+      - name: Repair wheel
+        env:
+          USE_CUDA: ${{ matrix.gpu_config.use_cuda }}
+          GPU_ARCH_VERSION: ${{ matrix.gpu_config.gpu_arch_version }}
+        run: |
+          export PATH="/opt/python/${{ matrix.python_version.tag }}/bin:$PATH"
+          pip install wheel
+          bash .ci/manywheel/repair_wheel.sh /tmp/raw-wheels "$GITHUB_WORKSPACE/wheelhouse"
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
+        with:
+          name: wheels-${{ matrix.gpu_config.name }}-${{ matrix.python_version.abi }}
+          if-no-files-found: error
+          path: wheelhouse/*.whl
