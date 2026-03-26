@@ -19,6 +19,7 @@
 #include <ATen/ops/mkldnn_linear_backward_weights.h>
 #include <ATen/ops/mkldnn_linear_backward_weights_native.h>
 #include <ATen/ops/mkldnn_linear_native.h>
+#include <ATen/ops/ones.h>
 #endif
 
 #if !AT_MKLDNN_ENABLED()
