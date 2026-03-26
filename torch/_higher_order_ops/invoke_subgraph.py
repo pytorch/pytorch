@@ -469,8 +469,16 @@ def get_output_metadata(subgraph, *operands):
             output_metadata.indexes_with_symint.add(idx)
             output_metadata.indexes_with_no_grad.add(idx)
         elif isinstance(val, torch.Tensor):
-            # Check if tensor requires grad from metadata
-            if hasattr(val, "requires_grad") and not val.requires_grad:
+            if val.dtype.is_floating_point or val.is_complex():
+                # Can't trust requires_grad from meta["val"] since snapshot_fake
+                # uses detach() which strips it. Fall back to execution to get
+                # the accurate requires_grad for differentiable dtypes.
+                return _get_output_metadata_by_execution(subgraph, *operands)
+            else:
+                if val.requires_grad:
+                    raise AssertionError(
+                        f"Non-floating point, non-complex tensor has requires_grad=True: {val.dtype}"
+                    )
                 output_metadata.indexes_with_no_grad.add(idx)
         else:
             # Non-tensor, non-symint (shouldn't happen but be safe)

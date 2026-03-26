@@ -999,6 +999,26 @@ def _trace(f, *args):
     inps = [torch.randn(arg) for arg in args]
     return make_fx(f, tracing_mode="symbolic")(*inps)
 
+class TestGetOutputMetadata(TestCase):
+    def test_get_output_metadata_float_not_no_grad(self):
+        # Verify that get_output_metadata does not mark float tensor outputs
+        # as no-grad. meta["val"] is populated via detach() which strips
+        # requires_grad, so we must not rely on it.
+        from torch._higher_order_ops.invoke_subgraph import get_output_metadata
+
+        def f(x):
+            return x * 2.0, x.to(torch.int64)
+
+        x = torch.randn(4, requires_grad=True)
+        gm = make_fx(f, tracing_mode="fake")(x)
+
+        metadata = get_output_metadata(gm, x)
+        # Only the int output (index 1) should be marked as no-grad;
+        # the float output (index 0) must not be, even though meta["val"]
+        # has requires_grad=False due to detach().
+        self.assertEqual(metadata.indexes_with_no_grad, {1})
+
+
 # TODO: Need to test the guards themselves specifically as well
 class TestSymbolicTracing(TestCase):
     def _test_dynamic(self, fn, trace_inputs, test_inputs, assert_eq=True):
