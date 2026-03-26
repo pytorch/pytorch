@@ -862,7 +862,8 @@ Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result)
   // NOTE: cuBLAS is currently broken for some combination of transposed inputs.
   TORCH_CHECK(self.dim() == 2, "Expected self to be of dimension 2 but got ", self.dim());
   TORCH_CHECK(mat2.dim() == 2, "Expected mat2 to be of dimension 2 but got ", mat2.dim());
-  TORCH_CHECK(self.size(0) > 16, "self.size(0) needs to be greater than 16, but got ", self.size(0));
+  TORCH_CHECK(self.dtype() == at::kChar, "Expected self dtype to be of type kChar (int8) but got ", self.dtype());
+  TORCH_CHECK(mat2.dtype() == at::kChar, "Expected mat2 dtype to be of type kChar (int8) but got ", mat2.dtype());
   TORCH_CHECK(self.size(1) > 0 && self.size(1) % 8 == 0, "self.size(1) needs to be greater than 0 and a multiple of 8, but got ", self.size(1));
   TORCH_CHECK(self.size(1) == mat2.size(0), "self.size(1) needs to match mat2.size(0) but got ", self.size(1), " and ", mat2.size(0));
   TORCH_CHECK(mat2.size(1) > 0 && mat2.size(1) % 8 == 0, "mat2.size(1) needs to be greater than 0 and a multiple of 8, but got ", mat2.size(1));
@@ -875,7 +876,35 @@ Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result)
 
   TORCH_CHECK(result.is_contiguous(), "Expected result to be contiguous.");
 
-  cublasCommonArgs args(self, mat2, result);
+  const auto m = self.size(0);
+
+  // Handle M=0: return zeroed result, matching CPU _int_mm and torch.mm
+  // behavior for empty matrices.
+  if (m == 0) {
+    result.zero_();
+    return result;
+  }
+
+  // cuBLAS int8 GEMM (cublasLtMatmul with CUBLAS_COMPUTE_32I) may fail to
+  // find a valid algorithm for small M values, returning
+  // CUBLAS_STATUS_NOT_SUPPORTED.  The threshold varies across CUDA toolkit
+  // versions and GPU architectures.  Rather than rejecting these inputs
+  // (which is inconsistent with FP16/FP32 torch.mm), we pad the first
+  // operand to kPadM rows with zeros and slice the result back.  Zero rows
+  // do not affect the int32 dot-product accumulation, so the result is
+  // bit-exact.
+  constexpr int64_t kPadM = 32;
+  const bool needs_pad = m < kPadM;
+
+  Tensor self_padded = self;
+  Tensor result_padded = result;
+  if (needs_pad) {
+    self_padded = at::zeros({kPadM, self.size(1)}, self.options());
+    self_padded.narrow(0, 0, m).copy_(self);
+    result_padded = at::empty({kPadM, mat2.size(1)}, result.options());
+  }
+
+  cublasCommonArgs args(self_padded, mat2, result_padded);
 
   at::cuda::blas::int8_gemm(
       args.transa == 't',
@@ -890,7 +919,14 @@ Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result)
       args.result->data_ptr<int32_t>(),
       args.result_ld);
 
-  if (!result.is_same(*args.result)) {
+  if (needs_pad) {
+    // cublasCommonArgs may have transposed result_padded into args.result;
+    // use whichever holds the computed data.
+    const Tensor& computed = result_padded.is_same(*args.result)
+        ? result_padded
+        : *args.result;
+    result.copy_(computed.narrow(0, 0, m));
+  } else if (!result.is_same(*args.result)) {
     result.copy_(*args.result);
   }
   return result;

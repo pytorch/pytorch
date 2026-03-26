@@ -7939,6 +7939,114 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyCUDA
+    @parametrize("m", [1, 2, 3, 4, 7, 8, 12, 15, 16, 17, 24, 31])
+    @parametrize("k", [8, 32, 64, 768])
+    @parametrize("n", [8, 32, 64, 768])
+    def test__int_mm_small_m(self, device, m, k, n):
+        """_int_mm with M < 32 (padded path) must be bit-exact vs int32 reference."""
+        a_int8 = torch.randint(-128, 127, (m, k), dtype=torch.int8, device=device)
+        b_int8 = torch.randint(-128, 127, (k, n), dtype=torch.int8, device=device)
+
+        result = torch._int_mm(a_int8, b_int8)
+        expected = torch.matmul(a_int8.cpu().to(torch.int32), b_int8.cpu().to(torch.int32)).to(device)
+
+        self.assertEqual(result.dtype, torch.int32)
+        self.assertEqual(result.shape, (m, n))
+        self.assertEqual(result, expected)
+
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
+    @onlyCUDA
+    @parametrize("m", [1, 3, 7, 16])
+    def test__int_mm_small_m_out_variant(self, device, m):
+        """The .out variant must also work for small M."""
+        k, n = 64, 64
+        a = torch.randint(-128, 127, (m, k), dtype=torch.int8, device=device)
+        b = torch.randint(-128, 127, (k, n), dtype=torch.int8, device=device)
+        out = torch.empty(m, n, dtype=torch.int32, device=device)
+        torch._int_mm(a, b, out=out)
+        expected = torch.matmul(a.cpu().to(torch.int32), b.cpu().to(torch.int32)).to(device)
+        self.assertEqual(out, expected)
+
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
+    @onlyCUDA
+    def test__int_mm_m_zero(self, device):
+        """M=0 should return an empty tensor, matching CPU _int_mm and torch.mm."""
+        a = torch.empty(0, 64, dtype=torch.int8, device=device)
+        b = torch.randint(-128, 127, (64, 32), dtype=torch.int8, device=device)
+        result = torch._int_mm(a, b)
+        self.assertEqual(result.shape, (0, 32))
+        self.assertEqual(result.dtype, torch.int32)
+
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
+    @onlyCUDA
+    def test__int_mm_small_m_non_contiguous_b(self, device):
+        """Small M with a transposed (non-contiguous) mat2."""
+        m, k, n = 5, 64, 32
+        a = torch.randint(-128, 127, (m, k), dtype=torch.int8, device=device)
+        # Create non-contiguous b via transpose
+        b_base = torch.randint(-128, 127, (n, k), dtype=torch.int8, device=device)
+        b = b_base.t()  # now (k, n), non-contiguous
+        self.assertFalse(b.is_contiguous())
+        result = torch._int_mm(a, b)
+        expected = torch.matmul(a.cpu().to(torch.int32), b.cpu().to(torch.int32)).to(device)
+        self.assertEqual(result, expected)
+
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
+    @onlyCUDA
+    def test__int_mm_small_m_extreme_values(self, device):
+        """Small M with int8 min/max values to stress accumulation."""
+        m, k, n = 3, 128, 32
+        a = torch.full((m, k), 127, dtype=torch.int8, device=device)
+        b = torch.full((k, n), 127, dtype=torch.int8, device=device)
+        result = torch._int_mm(a, b)
+        # Each element should be 127 * 127 * 128 = 2064384
+        expected_val = 127 * 127 * k
+        self.assertTrue((result == expected_val).all())
+
+        a_neg = torch.full((m, k), -128, dtype=torch.int8, device=device)
+        result_neg = torch._int_mm(a_neg, b)
+        expected_neg = -128 * 127 * k
+        self.assertTrue((result_neg == expected_neg).all())
+
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
+    @onlyCUDA
+    @parametrize("m", [16, 31, 32, 33])
+    def test__int_mm_boundary_padded_vs_direct(self, device, m):
+        """Results at the pad boundary must be consistent.
+
+        M < 32 uses the padded path; M >= 32 uses the direct cuBLAS path.
+        Verify correctness at and around the boundary.
+        """
+        k, n = 128, 128
+        a = torch.randint(-128, 127, (m, k), dtype=torch.int8, device=device)
+        b = torch.randint(-128, 127, (k, n), dtype=torch.int8, device=device)
+        result = torch._int_mm(a, b)
+        expected = torch.matmul(a.cpu().to(torch.int32), b.cpu().to(torch.int32)).to(device)
+        self.assertEqual(result, expected)
+
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
+    @onlyCUDA
+    def test__int_mm_boundary_sliced_consistency(self, device):
+        """A (33, K) matmul must produce the same first 16 rows as a (16, K)
+        matmul on the same data, even across the pad boundary."""
+        k, n = 128, 128
+        a_full = torch.randint(-128, 127, (33, k), dtype=torch.int8, device=device)
+        b = torch.randint(-128, 127, (k, n), dtype=torch.int8, device=device)
+        r_full = torch._int_mm(a_full, b)
+        r_16 = torch._int_mm(a_full[:16], b)
+        r_31 = torch._int_mm(a_full[:31], b)
+        self.assertEqual(r_full[:16], r_16)
+        self.assertEqual(r_full[:31], r_31)
+
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
+    @onlyCUDA
     def test__int_mm_errors(self, device):
 
         def genf_int(x, y):
@@ -7947,9 +8055,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         def _gen_pair(m, k, n):
             return genf_int(m, k), genf_int(k, n)
 
-        self.assertRaisesRegex(RuntimeError,
-                               r"self.size\(0\) needs to be greater than 16, but got 16",
-                               lambda: torch._int_mm(*_gen_pair(16, 8, 32)))
         self.assertRaisesRegex(RuntimeError,
                                r"self.size\(1\) needs to be greater than 0 and a multiple of 8, but got 7",
                                lambda: torch._int_mm(*_gen_pair(17, 7, 32)))
