@@ -161,6 +161,14 @@ def is_cython_function(obj: object) -> bool:
     )
 
 
+def is_pydantic_dataclass_cls(value: object) -> bool:
+    return (
+        inspect.isclass(value)
+        and dataclasses.is_dataclass(value)
+        and "__is_pydantic_dataclass__" in getattr(value, "__dict__", {})
+    )
+
+
 # Types whose instances are data descriptors (have __get__ + (__set__ or __delete__)).
 # CPython invokes data descriptors found on the type MRO *before* checking
 # the instance __dict__.  This set is used by is_data_descriptor for a fast
@@ -856,6 +864,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             tup = SourcelessBuilder.create(tx, tuple).call_function(tx, args, kwargs)
             return SizeVariable(tup.items)  # type: ignore[missing-attribute]
+        elif is_pydantic_dataclass_cls(self.value):
+            # Pydantic populates dataclass fields through an external validator,
+            # so tracing through the constructor misses the instance mutations.
+            unimplemented(
+                gb_type="Pydantic dataclass constructor",
+                context=f"{self.value}",
+                explanation="Dynamo graph breaks on pydantic dataclass constructors "
+                "because validation mutates the instance outside traced bytecode.",
+                hints=graph_break_hints.SUPPORTABLE,
+            )
         elif is_frozen_dataclass(self.value) and self.is_standard_new():
             fields = dataclasses.fields(self.value)  # type: ignore[arg-type]
             assert self.source is not None
