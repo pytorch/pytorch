@@ -512,17 +512,30 @@ class DeferredTritonCallWrapper:
         tma_tensor_args = self.tma_tensor_args
         num_autotune_args = len(wrapper_arg_names) - len(tma_tensor_args)
         autotune_arg_list = []
-        for name in wrapper_arg_names[:num_autotune_args]:
+        # Track which args need scalar extraction for the autotune call.
+        # UnwrapUnspecArg args are 0-dim tensors in C++ that Triton expects
+        # as Python scalars; we use codegen_tensor_item to extract them.
+        scalar_extractions: list[tuple[str, str, torch_dtype]] = []
+        for idx, name in enumerate(wrapper_arg_names[:num_autotune_args]):
             if name in tma_signature_types:
                 autotune_arg_list.append(f"_tma_tensor_{name}")
+            elif isinstance(self.arg_types[idx], UnwrapUnspecArg):
+                scalar_var = f"_autotune_scalar_{name}"
+                scalar_extractions.append((name, scalar_var, self.arg_types[idx].dtype))
+                autotune_arg_list.append(scalar_var)
             else:
                 autotune_arg_list.append(name)
         autotune_args = ", ".join(autotune_arg_list)
         # Lazy compile with autotuning on first invocation
         with prefix.indent():
-            prefix.splice(
-                f"""\
-                if ({kernel_name} == nullptr) {{
+            prefix.writeline(f"if ({kernel_name} == nullptr) {{")
+            with prefix.indent():
+                for tensor_name, scalar_var, dtype in scalar_extractions:
+                    wrapper.codegen_tensor_item(
+                        dtype, tensor_name, scalar_var, indented_buffer=prefix
+                    )
+                prefix.splice(
+                    f"""\
                     {kernel_name}_result = runTritonKernelWithAutotune(
                         _module_pending_kernels, "{kernel_name}", stream_, {autotune_args});
 
@@ -533,9 +546,9 @@ class DeferredTritonCallWrapper:
 
                     // First invocation already ran the kernel, so return early
                     return;
-                }}
-                """
-            )
+                    """
+                )
+            prefix.writeline("}")
 
             self._generate_lazy_grid(prefix)
             self._generate_lazy_launch(
