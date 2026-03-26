@@ -1080,7 +1080,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._nn._test_warn_in_autograd",
         "torch._C._nn._upsample_bicubic2d_aa",
         "torch._C._nn._upsample_bilinear2d_aa",
-        "torch._C._nn._upsample_lanczos2d_aa",
         "torch._C._nn._upsample_nearest_exact1d",
         "torch._C._nn._upsample_nearest_exact2d",
         "torch._C._nn._upsample_nearest_exact3d",
