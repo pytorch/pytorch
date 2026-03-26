@@ -570,6 +570,12 @@ def run_coverxygen(xml_dir: Path) -> str:
                 "--output", "-",
                 "--kind", "class,struct,function",
                 "--scope", "public",
+                # Exclude auto-generated code and internal implementation details.
+                # To exclude additional paths, add more --exclude entries below.
+                "--exclude", ".*/build/.*",
+                "--exclude", ".*/detail/.*",
+                "--exclude", ".*/nativert/.*",
+                "--exclude", ".*/stable/library\\.h",
             ],
             capture_output=True,
             text=True,
