@@ -538,9 +538,16 @@ def run_coverxygen(xml_dir: Path) -> str:
         lines.append("ERROR: build/xml directory not found. Run 'make doxygen' first.")
         return "\n".join(lines)
 
-    try:
-        subprocess.run(["coverxygen", "--version"], capture_output=True, check=True)
-    except (FileNotFoundError, subprocess.CalledProcessError):
+    # Try CLI first, then fall back to python -m
+    coverxygen_cmd = None
+    for cmd in [["coverxygen", "--version"], [sys.executable, "-m", "coverxygen", "--version"]]:
+        try:
+            subprocess.run(cmd, capture_output=True, check=True)
+            coverxygen_cmd = cmd[:-1]  # strip --version
+            break
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            continue
+    if coverxygen_cmd is None:
         lines.append("coverxygen not installed. Install with: pip install coverxygen")
         lines.append("")
         lines.append("Once installed, coverxygen analyzes Doxygen XML to report what")
@@ -557,8 +564,7 @@ def run_coverxygen(xml_dir: Path) -> str:
     index_xml = xml_dir / "index.xml"
     try:
         result = subprocess.run(
-            [
-                "coverxygen",
+            coverxygen_cmd + [
                 "--xml-dir", str(xml_dir),
                 "--src-dir", str(SCRIPT_DIR / ".." / ".."),
                 "--output", "-",
