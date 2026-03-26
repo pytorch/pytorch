@@ -1955,7 +1955,9 @@ class TritonHOPifier:
             )(iter_kernel)
             # create a new variable to contain the new (wrapped) kernel;
             # skip kernel_idx to get a new record in the kernel side table
-            new_var = type(variable)(new_kernel, None, variable.grid)
+            new_var = type(variable)(
+                new_kernel, None, variable.grid, kernel_source=variable.kernel_source
+            )
             return self.call_triton_kernel(new_var, args, kwargs, tx)
 
         SPECIAL_CONFIG_NAMES = {
@@ -2000,7 +2002,9 @@ class TritonHOPifier:
 
             # create a new variable to contain the new (wrapped) kernel;
             # skip kernel_idx to get a new record in the kernel side table
-            new_var = type(variable)(new_kernel, None, variable.grid)
+            new_var = type(variable)(
+                new_kernel, None, variable.grid, kernel_source=variable.kernel_source
+            )
             return self.call_triton_kernel(new_var, args, kwargs, tx)
 
         if isinstance(variable.kernel, Autotuner):
@@ -2040,7 +2044,12 @@ class TritonHOPifier:
                     new_kernel = autotune(
                         configs=new_configs, prune_configs_by=prune_configs_by, key=[]
                     )(variable.kernel.fn)
-                    new_var = type(variable)(new_kernel, None, variable.grid)
+                    new_var = type(variable)(
+                        new_kernel,
+                        None,
+                        variable.grid,
+                        kernel_source=variable.kernel_source,
+                    )
                     return self.call_triton_kernel(new_var, args, kwargs, tx)
 
         # These are the default values in upstream Triton
@@ -2100,7 +2109,9 @@ class TritonHOPifier:
             new_kernel = autotune(configs=pruned_configs, key=[])(variable.kernel.fn)
             # create a new variable to contain the new (wrapped) kernel;
             # skip kernel_idx to get a new record in the kernel side table
-            new_var = type(variable)(new_kernel, None, variable.grid)
+            new_var = type(variable)(
+                new_kernel, None, variable.grid, kernel_source=variable.kernel_source
+            )
             return self.call_triton_kernel(new_var, args, kwargs, tx)
 
         # Both for grid's meta as well as for the kernel, we need combined

@@ -4957,6 +4957,36 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
                 compiled_f(dst, src, N=N)
 
+    @requires_gpu
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_triton_kernel_heuristics_and_prune_configs_by(self, backend):
+        # Test for issue #178179: heuristics + autotune + prune_configs_by
+        def noop_prune(configs, named_args, **kwargs):
+            return configs
+
+        @triton.autotune(
+            configs=[triton.Config({"BLOCK": 128}), triton.Config({"BLOCK": 256})],
+            key=["N"],
+            prune_configs_by={"early_config_prune": noop_prune},
+        )
+        @triton.heuristics({"EVEN": lambda args: args["N"] % 128 == 0})
+        @triton.jit
+        def kernel(x_ptr, out_ptr, N, BLOCK: tl.constexpr, EVEN: tl.constexpr):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK + tl.arange(0, BLOCK)
+            mask = offs < N
+            tl.store(out_ptr + offs, tl.load(x_ptr + offs, mask=mask) * 2, mask=mask)
+
+        def f(x):
+            out = torch.empty_like(x)
+            kernel[(triton.cdiv(x.numel(), 128),)](x, out, x.numel())
+            return out
+
+        compiled_f = torch.compile(f, backend=backend, fullgraph=True)
+        x = torch.randn(1024, device=GPU_TYPE)
+        result = compiled_f(x)
+        self.assertEqual(result, x * 2)
+
 
 class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
     @classmethod
