@@ -603,7 +603,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         local_shards = st.local_shards()
         self.assertEqual(1, len(local_shards))
         local_shard = local_shards[0].tensor
-        self.assertEqual(self.rank, local_shard.device)
+        self.assertEqual(torch.device(f"{DEVICE_TYPE}:{self.rank}"), local_shard.device)
         # The split: for rank!=3 ceil(h/4)=3  for rank=3 1
         expected_h = 1 if self.rank == 3 else math.ceil(h / 4)
         self.assertEqual((expected_h, w), local_shard.size())
