@@ -760,14 +760,6 @@ INSTANTIATE_INDEX_FILL(uchar);
 INSTANTIATE_INDEX_FILL(float2);
 INSTANTIATE_INDEX_FILL(half2);
 
-[[host_name("index_fill_set_mask")]]
-kernel void index_fill_set_mask(
-    device bool*,
-    constant long*,
-    constant long&,
-    constant long&,
-    uint);
-
 #define INSTANTIATE_INDEX_FILL_FROM_MASK(T)                  \
   template [[host_name("index_fill_dense_from_mask_" #T)]]   \
   kernel void index_fill_dense_from_mask<T>(                 \
