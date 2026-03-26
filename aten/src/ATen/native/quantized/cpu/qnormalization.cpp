@@ -80,6 +80,20 @@ static Tensor quantized_group_norm_impl(
 
   const int64_t batches = input_shape[0];
   const int64_t num_channels = input_shape[1];
+
+  if (weight.defined()) {
+    TORCH_CHECK(
+        weight.numel() == num_channels,
+        "quantized::group_norm: Expected weight to have ",
+        num_channels, " elements, but got ", weight.numel());
+  }
+  if (bias.defined()) {
+    TORCH_CHECK(
+        bias.numel() == num_channels,
+        "quantized::group_norm: Expected bias to have ",
+        num_channels, " elements, but got ", bias.numel());
+  }
+
   const int64_t elements_per_batch =
       c10::multiply_integers(input_shape.cbegin() + 1, input_shape.cend());
 

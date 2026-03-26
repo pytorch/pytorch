@@ -2624,6 +2624,31 @@ class TestQuantizedOps(TestCase):
                 self.assertTrue(pct_diff_off_by_one < 0.01)
 
     @skipIfNoFBGEMM
+    def test_group_norm_wrong_bias_size(self):
+        # Regression test: bias with wrong size should raise a user-friendly error
+        # rather than an internal assert failure.
+        num_groups = 2
+        num_channels = 6
+        weight = torch.ones(num_channels)
+        bias_wrong = torch.ones(1)  # should be num_channels
+        X = torch.randn(2, num_channels, 4, 4)
+        qX = torch.quantize_per_tensor(X, scale=1.0, zero_point=0, dtype=torch.qint8)
+        with self.assertRaisesRegex(RuntimeError, "quantized::group_norm: Expected bias to have 6 elements"):
+            torch.ops.quantized.group_norm(qX, num_groups, weight, bias_wrong, 1e-5, 1.0, 0)
+
+    @skipIfNoFBGEMM
+    def test_group_norm_wrong_weight_size(self):
+        # Regression test: weight with wrong size should raise a user-friendly error.
+        num_groups = 2
+        num_channels = 6
+        weight_wrong = torch.ones(1)  # should be num_channels
+        bias = torch.ones(num_channels)
+        X = torch.randn(2, num_channels, 4, 4)
+        qX = torch.quantize_per_tensor(X, scale=1.0, zero_point=0, dtype=torch.qint8)
+        with self.assertRaisesRegex(RuntimeError, "quantized::group_norm: Expected weight to have 6 elements"):
+            torch.ops.quantized.group_norm(qX, num_groups, weight_wrong, bias, 1e-5, 1.0, 0)
+
+    @skipIfNoFBGEMM
     def test_instance_norm(self):
         max_sides = (4, 5)
         shape_list = ([2, 2, 2, 2], [8, 8, 8, 8], [11, 11, 11, 11])
