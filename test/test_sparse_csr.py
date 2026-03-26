@@ -1029,6 +1029,20 @@ def _npref_block_addmm_addmv(c, a, b, alpha, beta):
 
 
 class TestSparseCSR(TestCase):
+    
+    @onlyCPU
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_empty_plain_indices_with_stride_zero(self, device, dtype):
+        # Test that empty plain_indices with stride 0 works.
+        crow_indices = torch.tensor([0, 0], dtype=torch.int32, device=device)
+        
+        col_indices = torch.as_strided(torch.empty((0,), device=device), (0,), (0,))
+        
+        values = torch.empty(0, dtype=dtype, device=device)
+        
+        t = torch.sparse_csr_tensor(crow_indices, col_indices, values, (1, 100), dtype=dtype, device=device)
+        
+        self.assertEqual(t._nnz(), 0)
 
     @onlyCPU
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
