@@ -195,10 +195,8 @@ static void _validate_sparse_compressed_tensor_args_worker(const Tensor& compres
   }
 
   // 3.6
-  if (compressed_indices.numel() != 0) {
-    TORCH_CHECK(compressed_indices.stride(-1) == 1,
-                "expected ", compressed_indices_name, " to be a contiguous tensor per batch");
-  }
+  TORCH_CHECK(compressed_indices.stride(-1) == 1,
+              "expected ", compressed_indices_name, " to be a contiguous tensor per batch");
 
   // 3.1
   TORCH_CHECK(
