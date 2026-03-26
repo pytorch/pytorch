@@ -258,11 +258,10 @@ class ChunkingApplier:
                     original_node.kwargs,
                 )
                 continue
-            # Chunk aten.expand a scalar
+            # Chunk aten.expand: adjust the target shape at the chunk dimension
             if (
                 original_node.target == aten.expand.default
                 and isinstance(original_node.args[0], torch.fx.Node)
-                and original_node.args[0].meta["val"].numel() == 1
                 and (meta := get_chunking_meta(original_node)) is not None
                 and meta.chunk_dim is not None
             ):
