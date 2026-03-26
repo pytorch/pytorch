@@ -3153,6 +3153,28 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             if code.count("AMXState amx_state") != 2:
                 raise AssertionError
 
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @unittest.skipIf(IS_WINDOWS, "Not supported on Windows")
+    def test_qlinear_prepack_with_requires_set_python_module(self):
+        input = torch.randn(4, 128).to(dtype=torch.float32)
+        mod = _static_quantized_linear_module(
+            N=64,
+            K=128,
+            bias=True,
+            example_input=input,
+            epilogue="none",
+            output_dtype=torch.uint8,
+        ).eval()
+
+        with patch("torch._utils_internal.REQUIRES_SET_PYTHON_MODULE", True):
+            exported_mod = torch.export.export(mod, (input,), strict=True).module()
+
+        # Ensure the exported module is runnable after fake tensor tracing.
+        exported_mod(input)
+
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
 class _DynamicShapesTestBase(BaseTestSelectAlgorithm):
