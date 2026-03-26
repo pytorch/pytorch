@@ -319,9 +319,8 @@ class BaseBuiltinVariable(VariableTracker):
         return hash(self.as_python_constant())
 
     def is_python_equal(self, other: object) -> bool:
-        return (
-            type(self) is type(other)
-            and self.as_python_constant() is other.as_python_constant()  # type: ignore[union-attr]
+        return isinstance(other, BaseBuiltinVariable) and (
+            self.as_python_constant() is other.as_python_constant()  # type: ignore[union-attr]
         )
 
 
