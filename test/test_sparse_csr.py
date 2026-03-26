@@ -1036,7 +1036,7 @@ class TestSparseCSR(TestCase):
         # Test that empty plain_indices with stride 0 works.
         crow_indices = torch.tensor([0, 0], dtype=torch.int32, device=device)
         
-        col_indices = torch.as_strided(torch.empty((0,), device=device), (0,), (0,))
+        col_indices = torch.as_strided(torch.empty((0,), device=device, dtype=torch.int32), (0,), (0,))
         
         values = torch.empty(0, dtype=dtype, device=device)
         
