@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import dataclasses
+import json
 import os
 import pprint
 import sys
@@ -296,6 +297,14 @@ class TestUtils(TestCase):
             ReinplaceCounters._values,
             "Should not use enum value (integer) in key, should use trigger.name instead",
         )
+
+    def test_get_dynamo_config_for_logging_ignores_logging_functions(self):
+        with dynamo_config.patch(ignore_logging_functions={print}):
+            result = utils._get_dynamo_config_for_logging()
+            parsed = json.loads(result)
+
+        self.assertIsInstance(parsed, dict)
+        self.assertNotIn("ignore_logging_functions", parsed)
 
 
 class TestModel(torch.nn.Module):
