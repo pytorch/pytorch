@@ -2380,12 +2380,12 @@ def coverage_post_process(app, exception):
 
     if undocumented:
         items = "\n".join(f"  - {u}" for u in sorted(undocumented))
-        raise RuntimeError(
-            f"The following public APIs are in __all__ but not documented:\n{items}\n"
-            "Add them to the appropriate .rst/.md doc file, add to "
-            "coverage_ignore_functions/coverage_ignore_classes, or "
+        print(
+            f"\nThe following public APIs are in __all__ but not documented:\n{items}\n"
+            "Either add them to the appropriate .rst/.md doc file or "
             "remove from __all__."
         )
+        sys.exit(1)
 
     # We go through all the torch submodules and make sure they are
     # properly documented

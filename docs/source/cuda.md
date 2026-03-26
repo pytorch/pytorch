@@ -188,6 +188,8 @@
     nvtx.range_push
     nvtx.range_pop
     nvtx.range
+    nvtx.range_end
+    nvtx.range_start
 ```
 
 ## Jiterator (beta)
