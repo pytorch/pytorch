@@ -67,6 +67,12 @@ jobs:
           set -eux
           lintrunner init
 
+      - name: Install lumen CLI
+        shell: bash
+        run: |
+          set -eux
+          uv pip install -e .ci/lumen_cli
+
       - name: Run linter
         shell: bash
         env:
