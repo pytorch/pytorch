@@ -613,7 +613,10 @@ def compute_elementwise_output_logical_to_physical_perm(
                 return True
             elif guard_or_false(a == 0):
                 return False
-            return guard_or_false(a >= b) or guard_or_false(a % b == 0)
+            try:
+                return guard_or_false(a >= b) or guard_or_false(a % b == 0)
+            except ZeroDivisionError:
+                return False
 
         for tensor in tensors:
             stride_a = tensor.stride()[idx_a]

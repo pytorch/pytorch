@@ -9915,6 +9915,30 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         with self.assertRaises(ConstraintViolationError):
             torch.compile(my_dyn_fn, backend="eager")(y)
 
+    def test_mark_dynamic_with_open_ended_ranges(self):
+        def my_dyn_fn(x):
+            return x.sin() + 1
+
+        opt = torch.compile(my_dyn_fn, backend="eager", fullgraph=True, dynamic=True)
+
+        for shape in [(2, 2), (1, 1)]:
+            y = torch.randn(shape)
+            for dim in range(y.dim()):
+                torch._dynamo.mark_dynamic(y, dim, min=0, max=65536)
+            self.assertEqual(opt(y), my_dyn_fn(y))
+
+    def test_mark_dynamic_with_zero_min(self):
+        def my_dyn_fn(x):
+            return x.sin() + 1
+
+        opt = torch.compile(my_dyn_fn, backend="eager", fullgraph=True, dynamic=True)
+
+        for shape in [(2, 2), (1, 1)]:
+            y = torch.randn(shape)
+            for dim in range(y.dim()):
+                torch._dynamo.mark_dynamic(y, dim, min=0)
+            self.assertEqual(opt(y), my_dyn_fn(y))
+
     def test_mark_static(self):
         counter = CompileCounter()
 

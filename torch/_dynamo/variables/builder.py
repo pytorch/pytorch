@@ -108,6 +108,7 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     is_traceable_wrapper_subclass_type,
 )
+from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils.weak import TensorWeakRef
 
@@ -2703,7 +2704,11 @@ class VariableBuilder:
             not _has_spec
             and not is_static_input
             and (
-                isinstance(value, torch.nn.Parameter)
+                (
+                    isinstance(value, torch.nn.Parameter)
+                    and not hasattr(value, "_dynamo_dynamic_indices")
+                    and not hasattr(value, "_dynamo_unbacked_indices")
+                )
                 # mark tensor attributes of nn modules static
                 or (source and source.guard_source.is_unspecialized_nn_module())
             )
@@ -4608,7 +4613,12 @@ def _automatic_dynamic(
     constraint_sizes = []
     constraint_strides = []
     specialize_on = []
-
+    do_not_specialize_zero_one = []
+    excluded_sizes = (
+        list(frame_state_entry.excluded_sizes)
+        if frame_state_entry.excluded_sizes is not None
+        else None
+    )
     for i in range(e.dim()):
         # NB: mark dynamic has precedence over static
         marked_strict_unbacked = i in getattr(e, "_dynamo_strict_unbacked_indices", ())
@@ -4621,7 +4631,15 @@ def _automatic_dynamic(
         ) or i in getattr(e, "_dynamo_propagated_dynamic_indices", ())
         marked_static = i in getattr(e, "_dynamo_static_indices", ())
 
+        if excluded_sizes is not None and marked_dynamic:
+            excluded_sizes[i] = None
+
         specialize_on.append(getattr(e, "_specialize_on", {}).get(i, []))
+        do_not_specialize_zero_one.append(
+            marked_dynamic
+            and not tx.output.export
+            and not isinstance(source, AttrSource)
+        )
 
         # Reflect the user directive in the frame_state
         # For dynamic, apply None always
@@ -4690,8 +4708,10 @@ def _automatic_dynamic(
                             StrictMinMaxConstraint,
                         )
 
+                        lower = 0 if dim_range.min is None else dim_range.min
+                        upper = int_oo if dim_range.max is None else dim_range.max
                         constraint_size = StrictMinMaxConstraint(
-                            vr=ValueRanges(lower=dim_range.min, upper=dim_range.max),
+                            vr=ValueRanges(lower=lower, upper=upper),
                             warn_only=False,
                         )
                 else:
@@ -4758,12 +4778,13 @@ def _automatic_dynamic(
         # pyrefly: ignore [bad-argument-type]
         constraint_strides=constraint_strides,
         specialize_on=specialize_on,
+        do_not_specialize_zero_one=do_not_specialize_zero_one,
         view_base_context=view_base_context,
         tensor_source=source,
         shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
         shape_ids=getattr(e, "_dynamo_shape_ids", None),
         unbacked_bounds=getattr(e, "_dynamo_unbacked_bounds", None),
-        excluded_sizes=frame_state_entry.excluded_sizes,
+        excluded_sizes=None if excluded_sizes is None else tuple(excluded_sizes),
     )
 
 

@@ -1558,6 +1558,42 @@ def _guard_or(a: BoolLikeType, default: bool) -> bool:
         return guard_bool(a)
 
     sym_node = a.node
+    expr = sym_node.expr
+    has_do_not_specialize_zero_one_symbol = bool(
+        expr.free_symbols & shape_env.do_not_specialize_zero_one_symbols
+    )
+
+    def equality_specializes_zero_one(
+        lhs: sympy.Expr, rhs: sympy.Expr
+    ) -> sympy.Expr | None:
+        diff = sympy.expand(lhs - rhs)
+        for symbol in expr.free_symbols & shape_env.do_not_specialize_zero_one_symbols:
+            coeff = diff.coeff(symbol)
+            if coeff == 0 or not coeff.is_number:
+                continue
+            remainder = diff - coeff * symbol
+            if remainder.has(symbol):
+                continue
+            value = sympy.simplify(-remainder / coeff)
+            if value in (0, 1):
+                return value
+        return None
+
+    if expr.func in (sympy.Eq, sympy.Ne):
+        lhs, rhs = expr.args
+        specialized_value = equality_specializes_zero_one(lhs, rhs)
+        if has_do_not_specialize_zero_one_symbol and (
+            specialized_value == 1 or (specialized_value == 0 and default is True)
+        ):
+            return default
+    elif (
+        default is False
+        and has_do_not_specialize_zero_one_symbol
+        and expr.is_Relational
+        and any(arg in (0, 1, 2) for arg in expr.args)
+    ):
+        return default
+
     r = sym_node.shape_env.evaluate_sym_node(
         sym_node, size_oblivious=False, fallback_value=default
     )
@@ -2269,6 +2305,7 @@ class StatelessSymbolicContext(SymbolicContext, Generic[_P1, _T1]):
     shape_ids: dict[int, str | None] | None = None
     # Maps dimension index to (min, max) bounds for unbacked dimensions.
     unbacked_bounds: dict[int, tuple[int | None, int | None]] | None = None
+    do_not_specialize_zero_one: DimList[bool] = None  # type: ignore[assignment]
     # TODO: add storage offset and stride symbolic_context
 
     def __post_init__(self) -> None:
@@ -2291,6 +2328,10 @@ class StatelessSymbolicContext(SymbolicContext, Generic[_P1, _T1]):
         if self.constraint_strides is None:
             object.__setattr__(
                 self, "constraint_strides", [None] * len(self.dynamic_sizes)
+            )
+        if self.do_not_specialize_zero_one is None:
+            object.__setattr__(
+                self, "do_not_specialize_zero_one", [False] * len(self.dynamic_sizes)
             )
         if not all(
             stride in (DimDynamic.INFER_STRIDE, DimDynamic.DYNAMIC, DimDynamic.DUCK)
@@ -3985,6 +4026,10 @@ class ShapeEnv:
         # transitioned static → dynamic. All pairs are combined into a single
         # Or(Ne(...), ...) guard in produce_guards_verbose.
         self.exclusion_constraints: list[tuple[sympy.Symbol, int]] = []
+        # Symbols created from an explicit context that asked us not to
+        # specialize on 0/1.  This lets guard production distinguish those
+        # symbols from export-created symbols whose ranges also include 0/1.
+        self.do_not_specialize_zero_one_symbols: set[sympy.Symbol] = set()
         # Set that holds "size-like" symbols.  When we perform
         # "size-oblivious" tests, these can be assumed to be >= 2.
         self.size_like: set[sympy.Symbol] = set()
@@ -4709,7 +4754,10 @@ class ShapeEnv:
                 TensorPropertySource(source, TensorProperty.SIZE, i),
                 dynamic_dims[i],
                 constraint_dims[i],
-                do_not_specialize_zero_one=config.backed_size_oblivious,
+                do_not_specialize_zero_one=(
+                    config.backed_size_oblivious
+                    or symbolic_context.do_not_specialize_zero_one[i]  # type: ignore[attr-defined]
+                ),
                 symbolic_context=symbolic_context,
             )
             if (
@@ -4739,6 +4787,9 @@ class ShapeEnv:
         # not-all check in produce_guards_verbose to emit a guard that
         # immediately fails.
         excluded_sizes = getattr(symbolic_context, "excluded_sizes", None)
+        do_not_specialize_zero_one = getattr(
+            symbolic_context, "do_not_specialize_zero_one", None
+        )
         dim = len(tensor_size)
         if (
             excluded_sizes
@@ -4751,6 +4802,11 @@ class ShapeEnv:
                     ev is not None
                     and isinstance(size[i], sympy.Symbol)
                     and i not in (hint_overrides or {})
+                    and not (
+                        do_not_specialize_zero_one
+                        and len(do_not_specialize_zero_one) == dim
+                        and do_not_specialize_zero_one[i]
+                    )
                 ):
                     self._record_exclusion_constraint(size[i], ev)
         return size
@@ -5624,6 +5680,14 @@ class ShapeEnv:
                     SymT.FLOAT, symbol_id, positive=positive, real=True
                 )
             self.source_to_var[source_name] = sympy_expr
+            if do_not_specialize_zero_one and type(val) is int:
+                from torch._dynamo.source import TensorProperty, TensorPropertySource
+
+                if (
+                    isinstance(source, TensorPropertySource)
+                    and source.prop is TensorProperty.SIZE
+                ):
+                    self.do_not_specialize_zero_one_symbols.add(sympy_expr)
             # We always associate vars to vals
             if isinstance(val, int):
                 self.backed_var_to_val[sympy_expr] = sympy.Integer(val)
@@ -5647,8 +5711,11 @@ class ShapeEnv:
 
             if isinstance(val, int):
                 if positive:
-                    # Add assertions for the newly created symbols
-                    self._add_assertion(sympy_expr > 1)
+                    if do_not_specialize_zero_one:
+                        self._add_assertion(sympy_expr >= 0)
+                    else:
+                        # Add assertions for the newly created symbols
+                        self._add_assertion(sympy_expr > 1)
 
                     # Apply default range, which assumes not zero-one
                     self.var_to_range[sympy_expr] = self._default_value_range(
@@ -6441,8 +6508,21 @@ class ShapeEnv:
         #    like s0 == s1*2 because trivial due to simplification)
         issued = set()
 
+        def guard_excludes_valid_zero_one(expr: sympy.Expr) -> bool:
+            if expr.func is not sympy.Ne:
+                return False
+            lhs, rhs = expr.args
+            if isinstance(rhs, sympy.Symbol):
+                lhs, rhs = rhs, lhs
+            if not isinstance(lhs, sympy.Symbol) or rhs not in (0, 1):
+                return False
+            return lhs in self.do_not_specialize_zero_one_symbols
+
         def issue_guard(guard: ShapeGuard) -> None:
             expr = self.simplify(guard.expr)
+
+            if guard_excludes_valid_zero_one(expr):
+                return
 
             # Avoid re-issuing the same guard.
             if expr in issued:

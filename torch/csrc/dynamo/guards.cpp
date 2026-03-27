@@ -12,6 +12,7 @@
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/inductor/inductor_ops.h>
@@ -306,6 +307,20 @@ std::string TensorCheck::check_verbose(
 
 namespace {
 
+bool is_parameter(py::handle tensor) {
+  py::object parameter = py::module::import("torch.nn").attr("Parameter");
+  return py::isinstance(tensor, parameter);
+}
+
+static bool tensor_pytype_matches(PyObject* value, PyTypeObject* expected) {
+  if (Py_TYPE(value) == expected) {
+    return true;
+  }
+  return THPVariableClass &&
+      reinterpret_cast<PyObject*>(expected) == THPVariableClass &&
+      is_parameter(py::handle(value));
+}
+
 typedef std::vector<TensorCheck> ChecksList;
 
 typedef struct {
@@ -466,7 +481,7 @@ PyObject* TensorGuards_check(
   for (auto i : c10::irange(len)) {
     PyObject* item = PyTuple_GET_ITEM(args, i);
 
-    if (Py_TYPE(item) != checks[i].pytype) {
+    if (!tensor_pytype_matches(item, checks[i].pytype)) {
       Py_RETURN_FALSE;
     }
     auto insertion = unique_tensors.insert({item, nullptr});
@@ -534,7 +549,7 @@ PyObject* TensorGuards_check_verbose(
   ska::flat_hash_map<PyObject*, std::nullptr_t> unique_tensors;
   for (auto i : c10::irange(len)) {
     PyObject* item = PyTuple_GET_ITEM(args, i);
-    if (Py_TYPE(item) != checks[i].pytype) {
+    if (!tensor_pytype_matches(item, checks[i].pytype)) {
       std::stringstream fail_reason;
       PyObject* type_str =
           PyObject_Str(reinterpret_cast<PyObject*>(Py_TYPE(item)));
@@ -1281,11 +1296,6 @@ bool is_immutable_object(py::handle example_value) {
       PyCode_Check(example_value.ptr()) ||
       (Py_TYPE(example_value.ptr()) == &PyCFunction_Type) ||
       (is_tensor_immutable && THPVariable_Check(example_value.ptr()));
-}
-
-bool is_parameter(py::handle tensor) {
-  py::object parameter = py::module::import("torch.nn").attr("Parameter");
-  return py::isinstance(tensor, parameter);
 }
 
 /**
@@ -5046,7 +5056,7 @@ class TENSOR_MATCH : public LeafGuard {
   }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    if (Py_TYPE(value) != _tensor_check->pytype) {
+    if (!tensor_pytype_matches(value, _tensor_check->pytype)) {
       return false;
     }
     return _tensor_check->check(
@@ -5056,7 +5066,7 @@ class TENSOR_MATCH : public LeafGuard {
   GuardDebugInfo check_verbose_nopybind(
       PyObject* value) override { // borrowed ref
 
-    if (Py_TYPE(value) != _tensor_check->pytype) {
+    if (!tensor_pytype_matches(value, _tensor_check->pytype)) {
       std::stringstream fail_reason;
       PyObject* type_str =
           PyObject_Str(reinterpret_cast<PyObject*>(Py_TYPE(value)));
