@@ -776,22 +776,18 @@ def _rand_like(
     return result.permute(permutation).clone()
 
 
-@register_decomposition(aten.rand_like)
 def rand_like(self: torch.Tensor, **kwargs: Any) -> torch.Tensor:
     return _rand_like(torch.rand, self, **kwargs)
 
 
-@register_decomposition(aten.randn_like)
 def randn_like(self: torch.Tensor, **kwargs: Any) -> torch.Tensor:
     return _rand_like(torch.randn, self, **kwargs)
 
 
-@register_decomposition(aten.randint_like.default)
 def randint_like(self: torch.Tensor, high: int, **kwargs: Any) -> torch.Tensor:
     return _rand_like(functools.partial(aten.randint.low, 0, high), self, **kwargs)
 
 
-@register_decomposition(aten.randint_like.low_dtype)
 def randint_like_low(
     self: torch.Tensor, low: int, high: int, **kwargs: Any
 ) -> torch.Tensor:
@@ -956,7 +952,18 @@ def miopen_batch_norm(
 
 @functools.cache
 def fast_random_decomps() -> dict[Any, Callable[..., Any]]:
-    return {**decompositions, **extra_random_decomps}
+    table = {**decompositions, **extra_random_decomps}
+
+    for ol in aten.rand_like.overloads():
+        table[getattr(aten.rand_like, ol)] = rand_like
+
+    for ol in aten.randn_like.overloads():
+        table[getattr(aten.randn_like, ol)] = randn_like
+
+    table[aten.randint_like.default] = randint_like
+    table[aten.randint_like.low_dtype] = randint_like_low
+
+    return table
 
 
 # TODO(aakhundov): replace this (and the above) Any by more
@@ -964,14 +971,7 @@ def fast_random_decomps() -> dict[Any, Callable[..., Any]]:
 def select_decomp_table() -> dict[Any, Callable[..., Any]]:
     """decomps can change based on config"""
     if config.fallback_random:
-        # Keep rand*_like as ATen fallbacks so RNG matches eager layout
-        # (see github.com/pytorch/pytorch/issues/177652).
-        table = dict(decompositions)  # make shallow copy
-        for name in ("rand_like", "randn_like", "randint_like"):
-            pkt = getattr(aten, name)
-            for ol in pkt.overloads():
-                table.pop(getattr(pkt, ol), None)
-        return table
+        return decompositions
     if config.fallback_embedding_bag_byte_unpack:
         # remove q_embedding_bag_byte_unpack_decomp from decompositions
         decompositions.pop(torch.ops.quantized.embedding_bag_byte_unpack.default, None)
