@@ -45,6 +45,7 @@ class CppWrapperMps(CppWrapperGpu):
         inductor_meta: dict[str, Any] | None = None,
         graph_name: str = "",
         original_fxnode_name: str | None = None,
+        current_stream_idx: int | None = None,
     ) -> None:
         """
         Generates MPS kernel call code. It should look something like:
