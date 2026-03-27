@@ -228,7 +228,7 @@ un_ops = (
     operator.length_hint,
 )
 
-_SET_LIKE_OP_SUPPORT = (
+_SET_LIKE_OP_SUPPORT: tuple[type[VariableTracker], ...] = (
     DictItemsVariable,
     DictKeysVariable,
     SetVariable,
