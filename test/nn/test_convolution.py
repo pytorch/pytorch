@@ -337,6 +337,119 @@ class TestConvolutionNN(NNTestCase):
                 output_mask,
             )
 
+    def test_conv_transpose_meta_invalid_output_padding(self):
+        # conv_transpose1d: output_padding not smaller than stride or dilation
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "output padding must be smaller than either stride or dilation",
+        ):
+            F.conv_transpose1d(
+                torch.randn(20, 16, 50, device="meta"),
+                torch.randn(16, 33, 5, device="meta"),
+                stride=2,
+                padding=0,
+                output_padding=2,
+                groups=2,
+                dilation=1,
+            )
+
+        # conv_transpose2d: output_padding not smaller than stride or dilation
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "output padding must be smaller than either stride or dilation",
+        ):
+            F.conv_transpose2d(
+                torch.randn(1, 4, 5, 5, device="meta"),
+                torch.randn(4, 8, 3, 3, device="meta"),
+                stride=2,
+                padding=(1, 0),
+                output_padding=2,
+                groups=1,
+                dilation=2,
+            )
+
+        # conv_transpose3d: output_padding not smaller than stride or dilation
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "output padding must be smaller than either stride or dilation",
+        ):
+            F.conv_transpose3d(
+                torch.randn(2, 4, 5, 5, 5, device="meta"),
+                torch.randn(4, 8, 3, 3, 3, device="meta"),
+                stride=2,
+                padding=1,
+                output_padding=2,
+                dilation=1,
+            )
+
+        # valid output_padding should succeed
+        result = F.conv_transpose1d(
+            torch.randn(20, 16, 50, device="meta"),
+            torch.randn(16, 33, 5, device="meta"),
+            stride=2,
+            padding=0,
+            output_padding=1,
+            groups=2,
+            dilation=1,
+        )
+        self.assertEqual(result.shape, torch.Size([20, 66, 104]))
+
+    def test_conv_meta_invalid_bias(self):
+        # conv_transpose3d: bias size doesn't match weight.shape[1] * groups
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"expected bias to be 1-dimensional with 66 elements",
+        ):
+            F.conv_transpose3d(
+                torch.randn(20, 16, 50, 10, 20, device="meta"),
+                torch.randn(16, 33, 3, 3, 3, device="meta"),
+                bias=torch.randn(33, device="meta"),
+                stride=1,
+                padding=1,
+                output_padding=0,
+                groups=2,
+                dilation=1,
+            )
+
+        # conv_transpose1d: bias size doesn't match weight.shape[1] * groups
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"expected bias to be 1-dimensional with 66 elements",
+        ):
+            F.conv_transpose1d(
+                torch.randn(20, 16, 50, device="meta"),
+                torch.randn(16, 33, 5, device="meta"),
+                bias=torch.randn(33, device="meta"),
+                stride=1,
+                padding=0,
+                output_padding=0,
+                groups=2,
+            )
+
+        # non-transposed conv: bias size doesn't match weight.shape[0]
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"expected bias to be 1-dimensional with 4 elements",
+        ):
+            F.conv2d(
+                torch.randn(1, 3, 8, 8, device="meta"),
+                torch.randn(4, 3, 3, 3, device="meta"),
+                bias=torch.randn(3, device="meta"),
+            )
+
+        # valid bias should succeed
+        result = F.conv_transpose3d(
+            torch.randn(20, 16, 50, 10, 20, device="meta"),
+            torch.randn(16, 33, 3, 3, 3, device="meta"),
+            bias=torch.randn(66, device="meta"),
+            stride=1,
+            padding=1,
+            output_padding=0,
+            groups=2,
+            dilation=1,
+        )
+        self.assertEqual(result.shape, torch.Size([20, 66, 50, 10, 20]))
+
     def test_conv3d_overflow_values(self):
         input = torch.full(
             (
