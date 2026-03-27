@@ -6,6 +6,7 @@ import torch.fx.traceback
 import torch.utils._pytree as pytree
 from torch._dynamo.graph_utils import _get_flat_args
 from torch._dynamo.variables.streams import get_current_stream, new_event
+from torch.fx.node import map_arg
 from torch.utils._runtime_estimation import (
     _FLOAT_TYPES,
     _IGNORE_OPS,
@@ -428,17 +429,24 @@ def _wrap_sync_node(
             replacements[dep] = getitem_node
             visited.add(getitem_node)
 
-    # Replace uses of dependencies that come after sync_node
+    # Replace uses of dependencies that come after sync_node.
+    # Use map_arg to handle nested structures (e.g. output node's list args).
     for dep, getitem_node in replacements.items():
         for user in list(dep.users.keys()):
             if user is control_deps_node:
                 continue
             if user in visited:
                 continue
-            user.args = tuple(getitem_node if arg is dep else arg for arg in user.args)
-            user.kwargs = {
-                k: getitem_node if v is dep else v for k, v in user.kwargs.items()
-            }
+            # Don't replace forward outputs in the output node — they belong
+            # to the forward partition and must not reference backward nodes.
+            if user.op == "output" and not is_bwd_node(dep):
+                continue
+
+            def _replace(n: Node) -> Node:
+                return getitem_node if n is dep else n
+
+            user.args = map_arg(user.args, _replace)
+            user.kwargs = map_arg(user.kwargs, _replace)
 
     # Remove original sync node
     sync_node.replace_all_uses_with(control_deps_node)
