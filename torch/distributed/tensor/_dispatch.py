@@ -173,11 +173,6 @@ class OpDispatcher:
             aten.bernoulli.default,
             aten.bernoulli_.float,
         }
-        self._squeeze_inplace_ops = {
-            aten.squeeze_.dim,
-            aten.squeeze_.default,
-            aten.squeeze_.dims,
-        }
         self._custom_op_handlers = {
             aten.is_same_size.default: is_same_size_handler,
             aten.is_pinned.default: is_pinned_handler,
@@ -496,29 +491,38 @@ class OpDispatcher:
                 if not isinstance(args[0], dtensor.DTensor):
                     raise AssertionError
 
-                # NOTE: squeeze_ inplace ops may change the tensor's metadata
-                # (shape/strides). We special-case them to update the spec.
-                if op_call in self._squeeze_inplace_ops:
-                    # update the spec to handle tensor meta changes
-                    args[0]._spec = output_spec
-                    # use return_and_correct_aliasing to match the outer and the inner
-                    # aliasing. See https://github.com/pytorch/pytorch/pull/158954
-                    return return_and_correct_aliasing(op_call, args, kwargs, args[0])
-                else:
-                    # For all other inplace ops, check if placement changes are required
-                    # Inplace operations that change placement are not supported because
-                    # they would require redistribution, which breaks aliasing semantics.
-                    # If there are views into the tensor, the views would not be updated.
-                    if args[0]._spec.placements != output_spec.placements:
-                        raise RuntimeError(
-                            f"{op_call}: in-place operations that require placement changes "
-                            f"are not supported. The operation would change placement from "
-                            f"{args[0]._spec.placements} to {output_spec.placements}, "
-                            f"which requires redistribution and breaks aliasing semantics. "
-                            f"Please use the out-of-place version of this operation instead."
+                # Check if arg 0's input placement actually needs to change.
+                # needs_redistribute can be True for reasons other than
+                # arg 0 placement changes (e.g. squeeze dim rewriting),
+                # so we check the redistribute schema directly.
+                if (
+                    output_sharding.needs_redistribute
+                    and output_sharding.redistribute_schema is not None
+                ):
+                    desired_arg0 = output_sharding.redistribute_schema.args_schema[0]
+                    if not isinstance(desired_arg0, DTensorSpec):
+                        raise AssertionError(
+                            f"Expected DTensorSpec for inplace arg 0, "
+                            f"got {type(desired_arg0)}"
                         )
-                    # Most inplace ops don't change tensor meta, so no spec update needed
+                    if args[0]._spec.placements != desired_arg0.placements:
+                        raise RuntimeError(
+                            f"{op_call}: in-place operations that require "
+                            f"redistribution of the first argument are not "
+                            f"supported because redistribution replaces the "
+                            f"local tensor, breaking aliasing semantics. "
+                            f"Please redistribute explicitly first."
+                        )
+
+                # Fast path: spec unchanged (common case: add_, mul_, etc.)
+                if args[0]._spec == output_spec:
                     return args[0]
+
+                # Spec changed without redistribution (e.g. dim reindexing
+                # in squeeze_: Shard(1) → Shard(0) after removing dim 0).
+                # Currently only squeeze_ inplace ops hit this path.
+                args[0]._spec = output_spec
+                return return_and_correct_aliasing(op_call, args, kwargs, args[0])
             else:
                 return None
         elif is_out_variant_op:
