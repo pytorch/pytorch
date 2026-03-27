@@ -28,6 +28,7 @@ struct PreMulSumSupplement : _SupplementBase {
     TORCH_CHECK_EQ(tensor_factor.numel(), 1);
   }
 };
+// Keep for BC only
 using NCCLPreMulSumSupplement = PreMulSumSupplement;
 
 // Other ReduceOps that need different supplementary data can also
