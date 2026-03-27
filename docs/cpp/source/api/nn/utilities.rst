@@ -46,8 +46,6 @@ All ``torch::nn`` modules inherit from ``Cloneable``, enabling deep copies:
 AnyModule
 ---------
 
-.. doxygenclass:: torch::nn::AnyModule
-
 ``AnyModule`` provides type-erased storage for any module:
 
 .. code-block:: cpp
@@ -57,8 +55,6 @@ AnyModule
 
 Functional
 ----------
-
-.. doxygenclass:: torch::nn::Functional
 
 Wraps a function or callable as a module, useful for inserting arbitrary
 functions into a ``Sequential`` container:

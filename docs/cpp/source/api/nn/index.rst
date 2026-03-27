@@ -53,9 +53,8 @@ Header Files
 Module Base Class
 -----------------
 
-All neural network modules inherit from ``torch::nn::Module``.
-
-.. doxygenclass:: torch::nn::Module
+All neural network modules inherit from ``torch::nn::Module``. See
+``torch/nn/module.h`` for the full class definition.
 
 Module Categories
 -----------------

@@ -62,8 +62,6 @@ Library
 ^^^^^^^
 
 .. doxygenclass:: torch::Library
-   :members:
-   :undoc-members:
 
 **Example:**
 
