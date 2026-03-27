@@ -160,6 +160,14 @@ class OPENREG_EXPORT ProcessGroupOCCL : public Backend {
   c10::intrusive_ptr<Work> barrier(
     const BarrierOptions& opts = BarrierOptions()) override;
 
+  // Copy contiguous tensor data from device memory to a host buffer.
+  // Handles mprotect unprotect/reprotect via MemoryGuard.
+  static std::vector<uint8_t> tensorToHost(const at::Tensor& tensor);
+
+  // Copy data from a host buffer into a contiguous device tensor.
+  // Handles mprotect unprotect/reprotect via MemoryGuard.
+  static void hostToTensor(const std::vector<uint8_t>& buf, at::Tensor& tensor);
+
  protected:
   std::unique_ptr<c10d::openreg::OcclTransport> transport_;
   const c10::intrusive_ptr<Options> options_;

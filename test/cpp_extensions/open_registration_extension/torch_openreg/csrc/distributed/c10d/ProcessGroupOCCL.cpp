@@ -1,10 +1,13 @@
 #if USE_DISTRIBUTED
+#include <cstring>
 #include <stdexcept>
 
 #include <ATen/core/Tensor.h>
 #include <c10/util/Exception.h>
 #include <c10/util/string_view.h>
 #include <torch/headeronly/core/DeviceType.h>
+
+#include <aten/native/Common.h>
 
 #include "ProcessGroupOCCL.hpp"
 namespace {
@@ -193,6 +196,40 @@ c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupOCCL::DummyWork::
 
 ProcessGroupOCCL::Options::Options(std::chrono::milliseconds timeout)
     : Backend::Options(OCCL_BACKEND_NAME, timeout) {}
+
+// Memory helpers -----------------------------------------------------------
+
+std::vector<uint8_t> ProcessGroupOCCL::tensorToHost(const at::Tensor& tensor) {
+  TORCH_CHECK(
+      tensor.is_contiguous(),
+      "tensorToHost requires a contiguous tensor, got non-contiguous");
+  const auto nbytes = tensor.nbytes();
+  std::vector<uint8_t> buf(nbytes);
+  {
+    at::native::openreg::MemoryGuard guard(tensor);
+    std::memcpy(buf.data(), tensor.data_ptr(), nbytes);
+  }
+  return buf;
+}
+
+void ProcessGroupOCCL::hostToTensor(
+    const std::vector<uint8_t>& buf,
+    at::Tensor& tensor) {
+  TORCH_CHECK(
+      tensor.is_contiguous(),
+      "hostToTensor requires a contiguous tensor, got non-contiguous");
+  TORCH_CHECK(
+      buf.size() == tensor.nbytes(),
+      "hostToTensor buffer size (",
+      buf.size(),
+      ") does not match tensor size (",
+      tensor.nbytes(),
+      ")");
+  {
+    at::native::openreg::MemoryGuard guard(tensor);
+    std::memcpy(tensor.data_ptr(), buf.data(), buf.size());
+  }
+}
 
 // ProcessGroupOCCL ---------------------------------------------------------
 
