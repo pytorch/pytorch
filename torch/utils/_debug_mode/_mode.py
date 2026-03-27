@@ -588,6 +588,30 @@ class DebugMode(TorchDispatchMode):
         finally:
             self.call_depth -= 1
 
+    def log_redistribute(
+        self,
+        arg,
+        src_placement,
+        dst_placement,
+        transform_info_str: str | None = None,
+    ):
+        """Record a redistribution that already happened (no call_depth nesting).
+
+        Use this instead of record_redistribute_calls when the redistribution
+        was performed externally (e.g. coalesced) and there are no nested
+        debug calls to track.
+        """
+        self._record_call(
+            _RedistributeCall(
+                arg,
+                src_placement=src_placement,
+                dst_placement=dst_placement,
+                transform_info_str=transform_info_str,
+                call_depth=self.call_depth + 1,
+                stack=self.record_stack_trace,
+            )
+        )
+
     def record_output_placements(self, output_spec) -> None:
         """Record output placements for a DTensor op as a separate line."""
         if not self.record_output:

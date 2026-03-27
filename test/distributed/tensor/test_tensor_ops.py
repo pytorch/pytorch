@@ -1660,6 +1660,184 @@ class DistTensorCppPyTree(DTensorContinuousTestBase):
         self.assertEqual(comm_mode.get_total_counts(), 1)
         self.assertEqual(result.full_tensor(), expected)
 
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_foreach_redistribution_allgather_coalesced(self):
+        """Verify that _foreach_add_ coalesces allgather when grads are Shard(0)
+        and states are Replicate (inplace forces output = Replicate)."""
+        funcol_py = torch.ops.c10d_functional
+        mesh = self.build_device_mesh()
+
+        torch.manual_seed(42)
+        states, grads, expected = [], [], []
+        for size in [(8, 4), (4, 8), (12, 4), (8, 8)]:
+            global_state = torch.randn(size, device=self.device_type)
+            states.append(distribute_tensor(global_state.clone(), mesh, [Replicate()]))
+            global_grad = torch.randn(size, device=self.device_type)
+            grads.append(distribute_tensor(global_grad, mesh, [Shard(0)]))
+            expected.append(global_state + global_grad)
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            torch._foreach_add_(states, grads)
+
+        # All grads need Shard(0)→Replicate → 1 coalesced allgather
+        self.assertEqual(
+            comm_mode.get_comm_counts().get(
+                funcol_py.all_gather_into_tensor_coalesced, 0
+            ),
+            1,
+        )
+        self.assertEqual(comm_mode.get_total_counts(), 1)
+        for s, e in zip(states, expected):
+            self.assertEqual(s.full_tensor(), e)
+
+    @skip_if_lt_x_gpu(4)
+    @with_comms
+    def test_coalesced_flattened_transform_2d_mesh(self):
+        """Coalesced redistribution through _FlattenedTransformInfo on a 2D mesh.
+
+        _optimize_transform_infos merges consecutive same-type transforms into
+        one using the flattened mesh. Tests both uniform Partial() and mixed
+        Partial("sum")/Partial("avg") (which exercises avg_scale).
+        """
+        from torch.distributed.tensor._dtensor_spec import DTensorSpec
+        from torch.distributed.tensor._redistribute import (
+            redistribute_local_tensor,
+            redistribute_local_tensors,
+        )
+
+        mesh_2d = init_device_mesh(
+            self.device_type, (2, 2), mesh_dim_names=("dp", "tp")
+        )
+        mesh_2d["dp", "tp"]._flatten("dp_tp")
+
+        cases = [
+            ("uniform Partial", (Partial(), Partial())),
+            ("mixed sum/avg", (Partial("sum"), Partial("avg"))),
+        ]
+        dst_placements = (Replicate(), Replicate())
+        sizes = [(8, 4), (4, 8), (12, 6)]
+
+        for label, src_placements in cases:
+            with self.subTest(label):
+                torch.manual_seed(42)
+                items = []
+                for size in sizes:
+                    t = torch.randn(size, device=self.device_type)
+                    src_spec = DTensorSpec(
+                        mesh_2d,
+                        src_placements,
+                        tensor_meta=TensorMeta(torch.Size(size), (size[1], 1), t.dtype),
+                    )
+                    dst_spec = DTensorSpec(
+                        mesh_2d,
+                        dst_placements,
+                        tensor_meta=TensorMeta(torch.Size(size), (size[1], 1), t.dtype),
+                    )
+                    items.append((t, src_spec, dst_spec))
+
+                coalesced = redistribute_local_tensors(items)
+                per_tensor = [redistribute_local_tensor(t, s, d) for t, s, d in items]
+
+                for c, p in zip(coalesced, per_tensor):
+                    self.assertEqual(c, p)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_coalesced_fallback_mixed_transform_types(self):
+        """When some tensors need coalesceable transforms and others don't,
+        redistribute_local_tensors must handle both correctly: coalescing
+        within compatible groups and falling back to per-tensor for the rest.
+
+        Shard(0)→Shard(1) requires all-to-all (not coalesceable), while
+        Partial→Replicate is coalesceable. Mixing them in a single call
+        exercises the fallback path where _try_coalesced_redistribute
+        returns None for the all-to-all group.
+        """
+        from torch.distributed.tensor._dtensor_spec import DTensorSpec
+        from torch.distributed.tensor._redistribute import (
+            redistribute_local_tensor,
+            redistribute_local_tensors,
+        )
+
+        mesh = self.build_device_mesh()
+        ws = self.world_size
+
+        torch.manual_seed(42)
+        items = []
+        # 2 tensors that need Partial→Replicate (coalesceable)
+        for size in [(8, 8), (4, 16)]:
+            t = torch.randn(size, device=self.device_type)
+            src_spec = DTensorSpec(
+                mesh,
+                (Partial(),),
+                tensor_meta=TensorMeta(torch.Size(size), (size[1], 1), t.dtype),
+            )
+            dst_spec = DTensorSpec(
+                mesh,
+                (Replicate(),),
+                tensor_meta=src_spec.tensor_meta,
+            )
+            items.append((t, src_spec, dst_spec))
+
+        # 1 tensor that needs Shard(0)→Shard(1) (all-to-all, not coalesceable)
+        size = (ws * 4, ws * 4)
+        t = torch.randn(size, device=self.device_type)
+        src_spec = DTensorSpec(
+            mesh,
+            (Shard(0),),
+            tensor_meta=TensorMeta(torch.Size(size), (size[1], 1), t.dtype),
+        )
+        dst_spec = DTensorSpec(
+            mesh,
+            (Shard(1),),
+            tensor_meta=src_spec.tensor_meta,
+        )
+        items.append((t, src_spec, dst_spec))
+
+        coalesced = redistribute_local_tensors(items)
+        per_tensor = [redistribute_local_tensor(t, s, d) for t, s, d in items]
+
+        for c, p in zip(coalesced, per_tensor):
+            self.assertEqual(c, p)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_coalesced_debug_trace_format(self):
+        """DebugMode trace for coalesced redistribution uses compact notation
+        (e.g. 'P->R') matching the per-tensor path, and reports the correct
+        per-group coalescing count."""
+        from torch.utils._debug_mode import DebugMode
+
+        mesh = self.build_device_mesh()
+
+        torch.manual_seed(42)
+        states, grads = [], []
+        for _ in range(3):
+            states.append(
+                distribute_tensor(
+                    torch.randn(8, 8, device=self.device_type), mesh, [Replicate()]
+                )
+            )
+            grads.append(
+                DTensor.from_local(
+                    torch.randn(8, 8, device=self.device_type),
+                    mesh,
+                    [Partial()],
+                    run_check=False,
+                )
+            )
+
+        with DebugMode(record_torchfunction=False) as debug_mode:
+            torch._foreach_add_(states, grads)
+
+        debug_str = debug_mode.debug_string()
+        # Each of the 3 tensors gets a redistribute_input entry with
+        # compact notation and the correct per-group count.
+        # Partial() renders as P(sum) via format_shard_order_str.
+        self.assertEqual(debug_str.count("trace: P(sum)->R (coalesced 3 tensors)"), 3)
+
     def test_two_list_op_cache_collision(self):
         from torch.distributed.tensor._op_schema import RuntimeSchemaInfo
         from torch.distributed.tensor._ops.utils import replicate_op_strategy

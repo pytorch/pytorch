@@ -1472,7 +1472,7 @@ def redistribute_local_tensors(
     results: list[torch.Tensor | None] = [None] * n
     groups: defaultdict[tuple, list[int]] = defaultdict(list)
     for i, (_, src, dst) in enumerate(items):
-        groups[(id(src.mesh), src.placements, dst.placements)].append(i)
+        groups[(src.mesh, src.placements, dst.placements)].append(i)
 
     # Dict insertion order ensures all ranks issue collectives in the same order.
     for indices in groups.values():

@@ -639,17 +639,40 @@ class OpDispatcher:
         else:
             items = [(t, src, dst) for _, t, src, dst in reshard_requests]
             resharded = redistribute_local_tensors(items)
+            # Compute per-group sizes so the debug annotation reflects how
+            # many tensors were actually coalesced together, not the total.
+            if debug_mode is not None:
+                group_sizes: dict[tuple, int] = {}
+                for _, _, s, d in reshard_requests:
+                    key = (s.mesh, s.placements, d.placements)
+                    group_sizes[key] = group_sizes.get(key, 0) + 1
             for (idx, _, arg_spec, reshard_arg_spec), result in zip(
                 reshard_requests, resharded, strict=True
             ):
                 if debug_mode is not None:
-                    with debug_mode.record_redistribute_calls(  # type: ignore[union-attr]
+                    gkey = (
+                        arg_spec.mesh,
+                        arg_spec.placements,
+                        reshard_arg_spec.placements,
+                    )
+                    # Use the same compact notation as the per-tensor path
+                    # (e.g. "P->R") so debug traces are directly comparable.
+                    src_str = DTensorSpec.format_shard_order_str(
+                        arg_spec.placements, arg_spec.shard_order
+                    )
+                    dst_str = DTensorSpec.format_shard_order_str(
+                        reshard_arg_spec.placements,
+                        reshard_arg_spec.shard_order,
+                    )
+                    debug_mode.log_redistribute(  # type: ignore[union-attr]
                         idx,
                         arg_spec,
                         reshard_arg_spec,
-                        transform_info_str=f"coalesced {len(items)} tensors",
-                    ):
-                        pass
+                        transform_info_str=(
+                            f"{src_str}->{dst_str}"
+                            f" (coalesced {group_sizes[gkey]} tensors)"  # type: ignore[possibly-undefined]
+                        ),
+                    )
                 new_local_args[idx] = result
 
         op_info.local_args = tuple(new_local_args)
