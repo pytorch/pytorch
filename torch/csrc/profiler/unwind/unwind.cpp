@@ -3,32 +3,32 @@
 #include <c10/util/env.h>
 #include <torch/csrc/profiler/unwind/unwind.h>
 
-#if !defined(__linux__) || !defined(__x86_64__) || !defined(__has_include) || \
-    !__has_include("ext/stdio_filebuf.h")
+#if !defined(__linux__) || !(defined(__x86_64__) || defined(__aarch64__)) || \
+    !defined(__has_include) || !__has_include("ext/stdio_filebuf.h")
 namespace torch::unwind {
 std::vector<void*> unwind() {
   TORCH_WARN_ONCE(
-      "record_context_cpp is not support on non-linux non-x86_64 platforms");
+      "record_context_cpp is not supported on this platform (requires linux x86_64 or aarch64)");
   return {};
 }
 
 std::optional<std::pair<std::string, uint64_t>> libraryFor(void* addr) {
   TORCH_WARN_ONCE(
-      "record_context_cpp is not support on non-linux non-x86_64 platforms");
+      "record_context_cpp is not supported on this platform (requires linux x86_64 or aarch64)");
   return {};
 }
 
 #ifndef FBCODE_CAFFE2
 std::vector<Frame> symbolize(const std::vector<void*>& frames, Mode mode) {
   TORCH_WARN_ONCE(
-      "record_context_cpp is not support on non-linux non-x86_64 platforms");
+      "record_context_cpp is not supported on this platform (requires linux x86_64 or aarch64)");
   return {};
 }
 #endif
 
 Stats stats() {
   TORCH_WARN_ONCE(
-      "record_context_cpp is not support on non-linux non-x86_64 platforms");
+      "record_context_cpp is not supported on this platform (requires linux x86_64 or aarch64)");
   return {};
 }
 
@@ -41,8 +41,10 @@ Stats stats() {
 #include <elf.h>
 #include <link.h>
 #include <linux/limits.h>
+#include <pthread.h>
 #include <algorithm>
 #include <climits>
+#include <cstring>
 #include <vector>
 
 #include <c10/util/irange.h>
@@ -53,7 +55,14 @@ Stats stats() {
 #include <torch/csrc/profiler/unwind/unwinder.h>
 #include <shared_mutex>
 
+#if defined(__aarch64__)
+extern "C" void unwind_c(
+    std::vector<void*>* result,
+    uintptr_t fp,
+    uintptr_t lr);
+#else
 extern "C" void unwind_c(std::vector<void*>* result, int64_t rsp, int64_t rbp);
+#endif
 extern "C" void unwind_entry(std::vector<void*>* result);
 
 namespace torch::unwind {
@@ -98,7 +107,8 @@ struct LibraryInfo {
     void* fde_data = eh_frame_hdr_.entryForAddr(addr);
     FDE fde(fde_data, name().c_str(), load_bias());
     TableState state = fde.readUpTo(addr);
-    return Unwinder(state.cfa, state.registers[D_RIP], state.registers[D_RBP]);
+    return Unwinder(
+        state.cfa, state.registers[D_RET_ADDR], state.registers[D_FRAME_PTR]);
   }
   const std::string& name() const {
     return name_;
@@ -501,6 +511,82 @@ Stats stats() {
 
 } // namespace torch::unwind
 
+#if defined(__aarch64__)
+// aarch64 uses frame-pointer chain walking instead of DWARF unwinding.
+// Each frame has: *(FP) = caller's FP, *(FP+8) = saved LR (return address).
+// This is simpler and avoids issues with tail calls producing stale x30
+// values in DWARF-based unwinding.  GCC/Clang on aarch64 emit frame
+// pointers by default even at -O2.
+//
+// External libraries (CPython, libc, CUDA runtime) may be built without
+// frame pointers, making x29 an arbitrary callee-saved value.  We obtain
+// the current thread's stack bounds and reject any fp outside that range
+// to avoid dereferencing garbage pointers.
+//
+// No cache_mutex_ needed: frame-pointer walking reads only the stack,
+// unlike the x86 path which queries the DWARF FDE cache.
+
+static bool get_stack_bounds(uintptr_t& lo, uintptr_t& hi) {
+  pthread_attr_t attr;
+  if (pthread_getattr_np(pthread_self(), &attr) != 0) {
+    return false;
+  }
+  void* base = nullptr;
+  size_t size = 0;
+  int rc = pthread_attr_getstack(&attr, &base, &size);
+  pthread_attr_destroy(&attr);
+  if (rc != 0) {
+    return false;
+  }
+  lo = reinterpret_cast<uintptr_t>(base);
+  hi = lo + size;
+  return true;
+}
+
+extern "C" C10_USED void unwind_c(
+    std::vector<void*>* result,
+    uintptr_t fp,
+    uintptr_t lr) {
+  // NOLINTNEXTLINE(performance-no-int-to-ptr)
+  result->push_back((void*)lr);
+
+  uintptr_t stack_lo = 0, stack_hi = 0;
+  if (!get_stack_bounds(stack_lo, stack_hi)) {
+    return;
+  }
+
+  constexpr int kMaxFrames = 4096;
+  int depth = 0;
+  while (fp != 0 && (fp & 0xF) == 0 && depth++ < kMaxFrames) {
+    if (fp < stack_lo || fp + 16 > stack_hi) {
+      break;
+    }
+    uintptr_t saved_lr;
+    std::memcpy(
+        &saved_lr, reinterpret_cast<const void*>(fp + 8), sizeof(saved_lr));
+    if (saved_lr == 0) {
+      break;
+    }
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    result->push_back((void*)saved_lr);
+    uintptr_t next_fp;
+    std::memcpy(&next_fp, reinterpret_cast<const void*>(fp), sizeof(next_fp));
+    if (next_fp <= fp) {
+      break;
+    }
+    fp = next_fp;
+  }
+}
+
+// x0 already holds the result pointer.
+// Pass FP (x29) and LR (x30), then tail-call unwind_c.
+__asm__(
+    ".global unwind_entry\n"
+    "unwind_entry:\n"
+    "mov x1, x29\n"
+    "mov x2, x30\n"
+    "b unwind_c\n");
+#else
 extern "C" C10_USED void unwind_c(
     std::vector<void*>* result,
     int64_t rsp,
@@ -508,17 +594,17 @@ extern "C" C10_USED void unwind_c(
   std::shared_lock lock(torch::unwind::cache_mutex_);
   torch::unwind::UnwindState state{};
   // NOLINTNEXTLINE(performance-no-int-to-ptr)
-  state.rip = *(int64_t*)rsp;
+  state.pc = *(int64_t*)rsp;
   // +8 because we saved rsp after the return address was already pushed
   // to the stack
-  state.rsp = rsp + 8;
-  state.rbp = rbp;
+  state.sp = rsp + 8;
+  state.fp = rbp;
   torch::unwind::unwind_cache.checkRefresh(lock);
-  while (true) { // unwind for _start sets rip as being undefined
+  while (true) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    result->push_back((void*)state.rip);
+    result->push_back((void*)state.pc);
     const torch::unwind::Unwinder& uw =
-        torch::unwind::unwind_cache.unwinderFor(state.rip, lock);
+        torch::unwind::unwind_cache.unwinderFor(state.pc, lock);
     if (uw.terminator()) {
       if (uw.isUnknown()) {
         result->push_back(nullptr);
@@ -529,8 +615,7 @@ extern "C" C10_USED void unwind_c(
   }
 }
 
-// calling convention puts the first three pointer/int64_t arguments in
-// rdi rsi rdx (all caller-saved)
+// x86-64 calling convention: rdi rsi rdx (all caller-saved)
 // rdi already holds the pointer to the result vector
 // we add arguments for current rsp and rbp and then tail call
 // into unwind_c
@@ -540,5 +625,6 @@ __asm__(
     "mov %rsp, %rsi;\n"
     "mov %rbp, %rdx;\n"
     "jmp unwind_c;\n");
+#endif
 
 #endif
