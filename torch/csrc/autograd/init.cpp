@@ -311,6 +311,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
                 e.activityType() ==
                 (uint8_t)libkineto::ActivityType::GPU_USER_ANNOTATION;
           })
+      .def(
+          "is_python_function",
+          [](const KinetoEvent& e) { return e.isPythonFunction(); })
       .def("nbytes", [](const KinetoEvent& e) { return e.nBytes(); })
       // whether the event is hidden
       .def(
