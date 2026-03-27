@@ -334,6 +334,10 @@ def generate_ttir(
                 return True
         return False
 
+    def _is_constexpr_or_none(name: str, arg: Any) -> bool:
+        param_idx = kernel.arg_names.index(name)
+        return kernel.params[param_idx].is_constexpr or arg is None
+
     # Note: one would expect that each input to the triton kernel maps to
     # one input parameter in the TTIR. This is _not_ true for TMA descriptors:
     # one TMA descriptor gets converted into:
@@ -344,12 +348,11 @@ def generate_ttir(
     # the stride and size parameters.
     #
     # Additionally, tensors and scalars are both included as TTIR parameters,
-    # whereas `constexpr` are inlined, and None are excluded. This matters for
-    # "odd" ordering (eg. [tensor, scalar, tensor]).
+    # whereas `constexpr` are inlined, and None are excluded. We both preserve
+    # scalars and tensors as this matters for "odd" ordering,
+    # eg. [tensor, scalar, tensor].
     def get_arg_names(name: str, arg: Any) -> list[str]:
-        param_idx = kernel.arg_names.index(name)
-
-        if kernel.params[param_idx].is_constexpr or arg is None:
+        if _is_constexpr_or_none(name, arg):
             return []
 
         if is_stable_tensor_descriptor_arg(arg):
@@ -463,8 +466,8 @@ def generate_ttir(
     # Thus, only None and arguments marked `is_constexpr` should be treated as such.
     constants = {
         name: arg
-        for i, (name, arg) in enumerate(ordered_args.items())
-        if kernel.params[i].is_constexpr or arg is None
+        for name, arg in ordered_args.items()
+        if _is_constexpr_or_none(name, arg)
     }
 
     if (mangle_type := getattr(triton.runtime.jit, "mangle_type", None)) is not None:
@@ -911,6 +914,7 @@ def analyze_kernel_access(
     fn_name: str,
     num_args: int,
     tensor_names: tuple[str, ...],
+    tensor_arg_indices: frozenset[int] | None,
 ) -> TensorAccesses:
     """
     Analyzes the graph to detect which arguments are written to and which are read.
@@ -985,12 +989,16 @@ def analyze_kernel_access(
                     )
                 # Create placeholder names for nested function arguments
                 nested_names = tuple(f"_arg{i}" for i in range(len(op.args)))
+
+                # Do not pass tensor_arg_indices, most outer call of
+                # analyze_kernel_access will filter Param nodes.
                 accesses = analyze_kernel_access(
                     functions,
                     # pyrefly: ignore [bad-argument-type]
                     op.fn_call_name,
                     len(op.args),
                     nested_names,
+                    None,
                 )
                 # Map back from StarDep names to args
                 written_set = {dep.name for dep in accesses.read_writes.writes}
@@ -1026,6 +1034,8 @@ def analyze_kernel_access(
 
             if isinstance(arg, Param):
                 if arg.idx >= num_args:
+                    continue
+                if tensor_arg_indices is not None and arg.idx not in tensor_arg_indices:
                     continue
                 if arg.idx not in access_count:
                     access_count[arg.idx] = 1
@@ -1121,13 +1131,22 @@ def identify_accessed_tensors(
         analyze_kernel_access.reset()
         get_tma_stores.reset()
 
+        # Build frozenset of indices corresponding to tensor args only.
+        # Used to filter out scalars which are transitively captured as mutated
+        # during traversal.
+        tensor_arg_indices = frozenset(
+            i
+            for i, name in enumerate(ordered_arg_names)
+            if isinstance(kwargs.get(name), (Tensor, TensorBox))
+        )
+
         return analyze_kernel_access(
             functions,
             kernel_name,
             len(ordered_arg_names),
             tuple(ordered_arg_names),
+            tensor_arg_indices,
         )
-
     except Exception:
         log.warning(
             "Encountered an exception in identify_accessed_tensors, assuming every input is mutated",

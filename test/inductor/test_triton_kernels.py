@@ -2982,6 +2982,26 @@ if HAS_GPU:
 class MutationTests(torch._inductor.test_case.TestCase):
     # Tests injected below
 
+    # Test that a scalar args are not flagged as mutated when passed
+    # to a tt.call op.
+    @make_mutation_test
+    def test_scalar_via_nested_write():
+        @triton.jit
+        def inner(ptr, scalar_offset):
+            tl.store(ptr + scalar_offset, 1.0)
+
+        @triton.jit
+        def outer(out_ptr, n_elements):
+            inner(out_ptr, n_elements)
+
+        t = torch.randn(4)
+        return (
+            outer,
+            {"out_ptr": t, "n_elements": 4},
+            {},
+            ["out_ptr"],
+        )
+
     # Regression test for #169782
     @make_mutation_test
     def test_with_none_arg():
@@ -3404,7 +3424,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             in_ptr0,
             in_ptr1,
             out_ptr,
-            n_elements,
+            n_elements: "tl.constexpr",
             BLOCK_SIZE: "tl.constexpr",
         ):
             pid = tl.program_id(axis=0)
