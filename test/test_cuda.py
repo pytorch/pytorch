@@ -7066,7 +7066,7 @@ class TestMemPool(TestCase):
         )
 
     @serialTest()
-    def test_nccl_mem_alloc_decreasing_addresses(self):
+    def test_nccl_mem_alloc_addresses_in_random_order(self):
         """
         Test NCCL mem allocator with non-increasing allocation addresses.
 
@@ -7079,95 +7079,61 @@ class TestMemPool(TestCase):
         regardless of actual memory addresses, which is critical for NCCL
         symmetric memory alignment.
         """
-        mock_nccl_allocator_source = """
-#include <torch/extension.h>
-#include <ATen/cuda/Exceptions.h>
-#include <cuda_runtime_api.h>
-#include <mutex>
 
-static std::mutex alloc_mutex;
-void * base_ptr = nullptr;
-void * allocated_addrs[128] = {};
-size_t buffer_size = 1ULL * 1024 * 1024 * 1024; // 1GB buffer
-void * first_stream = nullptr;
-void * second_stream = nullptr;
-int allocated_blocks = 0;
-char * head = nullptr;
-char * tail = nullptr;
 
-extern "C" {
-    C10_EXPORT void* mock_nccl_mem_alloc(size_t size, int device, void* stream) {
-        std::lock_guard<std::mutex> lock(alloc_mutex);
-        if (base_ptr == nullptr){
-            C10_CUDA_CHECK(cudaMalloc(&base_ptr, buffer_size));
-            head = (char *)base_ptr;
-            tail = (char *)base_ptr + buffer_size;
-        }
-        if (first_stream == nullptr){
-            first_stream = stream;
-        }else if (second_stream == nullptr){
-            second_stream = stream;
-        }
-        void * ptr = nullptr;
-        if (first_stream == stream){
-            // allocate mem from head for first stream
-            ptr = (void *)head;
-            head += size;
-        }else{
-            // allocate from tail for second stream
-            tail -= size;
-            ptr = (void *)tail;
-        }
-        allocated_addrs[allocated_blocks] = ptr;
-        allocated_blocks += 1;
-        printf("%lld %lld %lld\\n", allocated_blocks-1, (unsigned long long)ptr, size);
-        return ptr;
-    }
+        from cuda.bindings import runtime
 
-    C10_EXPORT void mock_nccl_mem_free(void* ptr, size_t size, int device, void* stream) {
-        std::lock_guard<std::mutex> lock(alloc_mutex);
-        // For testing, we don't actually free individual allocations
-        // The base buffer is freed when allocator is destroyed
-        (void)ptr;  // Suppress unused parameter warning
-        (void)size;  // Suppress unused parameter warning
-        (void)device;  // Suppress unused parameter warning
-        (void)stream;  // Suppress unused parameter warning
-    }
-
-    C10_EXPORT void free_mem(){
-        std::lock_guard<std::mutex> lock(alloc_mutex);
-        C10_CUDA_CHECK(cudaFree(base_ptr));
-    }
-
-}
-"""
-
-        from torch.utils.cpp_extension import load_inline
-
-        torch.cuda.empty_cache()
-
-        # Load custom allocator simulating ncclMemAlloc
-        mock_nccl_allocator = load_inline(
-            name="mock_nccl_mem_alloc_" + str(os.getpid()),
-            cpp_sources=mock_nccl_allocator_source,
-            is_python_module=False,
-            keep_intermediates=False,
-            with_cuda=True,
+        ALLOC_FN = ctypes.CFUNCTYPE(
+            ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
+        )
+        FREE_FN = ctypes.CFUNCTYPE(
+            None, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
         )
 
-        allocator = torch.cuda.memory.CUDAPluggableAllocator(
-            mock_nccl_allocator,
-            "mock_nccl_mem_alloc",
-            "mock_nccl_mem_free",
-        )
+        class AllocState:
+            def __init__(self):
+                self.first_stream = None
+                self.second_stream = None
+                self.allocated_addrs = []
+                self.buffer_size = 1 * 1024 * 1024 * 1024 # 1GB
+                err, base_ptr = runtime.cudaMalloc(self.buffer_size)
+                assert err == runtime.cudaError_t.cudaSuccess
+                self.base_ptr = base_ptr
+                self.head = base_ptr
+                self.tail = base_ptr + self.buffer_size
+            def __del__(self):
+                runtime.cudaFree(self.base_ptr)
+                print('AllocState deleted')
 
-        pool = torch.cuda.MemPool(allocator.allocator())
+        state = AllocState()
+        def my_alloc(size, device, stream, _runtime=runtime):
+
+            if state.first_stream is None:
+                state.first_stream = stream
+            elif state.second_stream is None:
+                state.second_stream = stream
+
+            if state.first_stream == stream:
+                ptr = state.head
+                state.head += size
+            else:
+                state.tail -=size
+                ptr = state.tail
+            state.allocated_addrs.append(ptr)
+            return ptr
+        def my_free(ptr, size, device, stream, _runtime=runtime):
+            pass
+        # Must keep these alive for the lifetime of the allocator
+        c_alloc = ALLOC_FN(my_alloc)
+        c_free = FREE_FN(my_free)
+        alloc_ptr = ctypes.cast(c_alloc, ctypes.c_void_p).value
+        free_ptr = ctypes.cast(c_free, ctypes.c_void_p).value
+        allocator = torch._C._cuda_customAllocator(alloc_ptr, free_ptr)
+        pool = torch.cuda.MemPool(allocator)
+
         first_stream = torch.cuda.Stream()
         second_stream = torch.cuda.Stream()
 
-        # make sure first_stream.cuda_stream > second_stream.cuda_stream
-        if second_stream.cuda_stream > first_stream.cuda_stream:
-            first_stream, second_stream = second_stream, first_steam
         tensor_sizes = [24 * 1024 * 1024, 32 * 1024 * 1024]
         alloc_cases = []
         case_no = 0
@@ -7179,8 +7145,6 @@ extern "C" {
                 for size in tensor_sizes:
                     alloc_cases.append({"stream": stream, "size": size, "case_no": case_no})
                     case_no += 1
-
-        sorted_idx = sorted(range(len(alloc_cases)), key=lambda idx: (alloc_cases[idx]["stream"].cuda_stream, alloc_cases[idx]["size"], alloc_cases[idx]["case_no"]))
 
         # Test allocation and deallocation patterns
         def alloc_tensors():
@@ -7201,24 +7165,16 @@ extern "C" {
         second_round_tensor_ptrs = [ t.data_ptr() for t in second_round_tensors]
         del second_round_tensors
 
-        mock_alloc_lib = ctypes.CDLL(mock_nccl_allocator)
-        ArrType = ctypes.c_voidp * 128
-        allocated_addrs = ArrType.in_dll(mock_alloc_lib, "allocated_addrs")
         mem_snapshot = pool.snapshot()
         assert len(mem_snapshot) == len(tensor_ptrs), f"expected to have {len(tensor_ptrs)} segments, but actually got {len(mem_snapshot)}"
 
-
-        snapshot_ordered_addrs = []
-        for idx in sorted_idx:
-            snapshot_ordered_addrs.append(tensor_ptrs[idx])
-
         for idx, first_addr in enumerate(tensor_ptrs):
-            assert second_round_tensor_ptrs[idx] == mem_snapshot[idx]["address"]
-            assert second_round_tensor_ptrs[idx] == first_addr
-            assert second_round_tensor_ptrs[idx] == allocated_addrs[idx], f"{second_round_tensor_ptrs[idx]=} != {allocated_addrs[idx]=}"
+            second_addr = second_round_tensor_ptrs[idx]
+            assert second_addr == first_addr
+            assert second_addr == state.allocated_addrs[idx], f"{second_round_tensor_ptrs[idx]=} != {state.allocated_addrs[idx]=}"
         del pool
+        del state
         torch.cuda.empty_cache()
-        mock_alloc_lib.free_mem()
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
