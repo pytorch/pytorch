@@ -916,8 +916,27 @@ class BaseSchedulerNode:
                         for x in input_buf.users
                         if x.node.get_name() not in inconsequential_nodes
                     ]
+                    # In multi-stream graphs, don't reuse a buffer if
+                    # completed (codegen'd) users on other streams may
+                    # still be reading it on the GPU.
+                    has_cross_stream_hazard = False
+                    if self.scheduler._has_multi_stream_nodes():
+                        my_stream = self.scheduler.node_to_stream.get(self)
+                        for user in input_buf.users:
+                            unode = user.node
+                            if (
+                                isinstance(unode, BaseSchedulerNode)
+                                and unode is not self
+                                and unode.get_name() in inconsequential_nodes
+                            ):
+                                user_stream = self.scheduler.node_to_stream.get(unode)
+                                if user_stream is not None and user_stream != my_stream:
+                                    has_cross_stream_hazard = True
+                                    break
+
                     if (
-                        len(remaining_uses) == 1
+                        not has_cross_stream_hazard
+                        and len(remaining_uses) == 1
                         and remaining_uses[0].can_inplace
                         and remaining_uses[0].node is self
                         and input_buf.node is not None
