@@ -6449,7 +6449,7 @@ class CommonTemplate:
             reference_in_float=False,
         )
 
-    @skipCUDAIf(
+    @unittest.skipIf(
         TEST_WITH_ROCM and not torch.cuda.has_magma,
         "ROCm hipsolver backend does not currently support eig",
     )
