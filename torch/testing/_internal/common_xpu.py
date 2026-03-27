@@ -1,19 +1,21 @@
+import enum
+import functools
+
 import torch
 import torch.xpu
-from torch.testing._internal.common_utils import LazyVal, TEST_XPU, IS_WINDOWS
-import enum, functools, logging
+from torch.testing._internal.common_utils import IS_WINDOWS, LazyVal, TEST_XPU
 
 
 XPU_ALREADY_INITIALIZED_ON_IMPORT = torch.xpu.is_initialized()
 
 
 class XPUCodename(enum.Enum):
-    PVC = "PVC"     # Intel® Data Center GPU Max Series
-    BMG = "BMG"     # Intel® Arc™ Pro Battlemage Graphics
+    PVC = "PVC"  # Intel® Data Center GPU Max Series
+    BMG = "BMG"  # Intel® Arc™ Pro Battlemage Graphics
 
 
 class XPUArch(enum.Enum):
-    Xe = "Xe"       # Xe HPC
+    Xe = "Xe"  # Xe HPC
     Xe2 = "Xe2"
 
 
@@ -43,6 +45,7 @@ _CODENAME_TO_ARCH = {
     XPUCodename.BMG: XPUArch.Xe2,
 }
 
+
 @functools.lru_cache(1)
 def get_xpu_device_id() -> int | None:
     try:
@@ -51,12 +54,14 @@ def get_xpu_device_id() -> int | None:
         log.exception("Error in getting xpu device_id.")
         return None
 
+
 @functools.lru_cache(1)
 def get_xpu_codename() -> XPUCodename | None:
     device_id = get_xpu_device_id()
     if device_id is None:
         return None
     return _DEVICE_ID_TO_CODENAME.get(device_id)
+
 
 @functools.lru_cache(1)
 def get_xpu_arch() -> XPUArch | None:
@@ -66,14 +71,20 @@ def get_xpu_arch() -> XPUArch | None:
     return _CODENAME_TO_ARCH.get(codename)
 
 
-Xe2_Or_Later = LazyVal(lambda: torch.xpu.is_available() and get_xpu_arch() in (XPUArch.Xe2,))
+Xe2_Or_Later = LazyVal(
+    lambda: torch.xpu.is_available() and get_xpu_arch() in (XPUArch.Xe2,)
+)
+
 
 def evaluate_platform_supports_flash_attention():
     if TEST_XPU:
         return not IS_WINDOWS and Xe2_Or_Later
     return False
 
-PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU: bool = LazyVal(lambda: evaluate_platform_supports_flash_attention())
+
+PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU: bool = LazyVal(
+    lambda: evaluate_platform_supports_flash_attention()
+)
 
 # Importing this module should NOT eagerly initialize XPU
 if not XPU_ALREADY_INITIALIZED_ON_IMPORT:
