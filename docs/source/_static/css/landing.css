@@ -1,46 +1,27 @@
 /* ============================================================
-   PyTorch Docs Landing Page – Card Grid Styles
-   Targets sphinx_design .sd-card components used in index.md
+   PyTorch Docs Landing Page – Minimal Overrides
+   Only brand tokens, card hover effects, heading accents,
+   and icon tint. Everything else uses sphinx_design built-ins.
    ============================================================ */
 
-/* ------------------------------------------------------------------
-   Brand tokens (fallback values when theme vars aren't available)
-   ------------------------------------------------------------------ */
 :root {
   --pt-brand: #ee4c2c;
   --pt-brand-light: #ff6f4e;
-  --pt-brand-dark: #c9381a;
-  --pt-card-radius: 0.625rem;
-  --pt-card-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-  --pt-card-shadow-hover: 0 6px 20px rgba(0, 0, 0, 0.12);
-  --pt-transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* ------------------------------------------------------------------
-   Card base
-   ------------------------------------------------------------------ */
+/* Card hover lift */
 .sd-card {
-  border: 1px solid var(--pst-color-border, #e0e0e0);
-  border-radius: var(--pt-card-radius);
-  box-shadow: var(--pt-card-shadow);
-  transition:
-    transform var(--pt-transition),
-    box-shadow var(--pt-transition),
-    border-color var(--pt-transition);
-  overflow: hidden;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
-/* ------------------------------------------------------------------
-   Hover / focus lift
-   ------------------------------------------------------------------ */
 .sd-card:hover,
 .sd-card:focus-within {
   transform: translateY(-3px);
-  box-shadow: var(--pt-card-shadow-hover);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
   border-color: var(--pt-brand);
 }
 
-/* Accent stripe along the top on hover */
+/* Accent stripe on hover */
 .sd-card:hover::before {
   content: "";
   position: absolute;
@@ -49,138 +30,37 @@
   right: 0;
   height: 3px;
   background: linear-gradient(90deg, var(--pt-brand), var(--pt-brand-light));
-  border-radius: var(--pt-card-radius) var(--pt-card-radius) 0 0;
+  border-radius: 0.5rem 0.5rem 0 0;
 }
 
-/* ------------------------------------------------------------------
-   Card body padding & typography
-   ------------------------------------------------------------------ */
-.sd-card .sd-card-body {
-  padding: 1.25rem;
-}
-
-.sd-card .sd-card-title {
-  font-size: 1.05rem;
-  font-weight: 600;
-  margin-bottom: 0.4rem;
-  color: var(--pst-color-text-base, #1a1a1a);
-}
-
-.sd-card .sd-card-text {
-  font-size: 0.9rem;
-  line-height: 1.5;
-  color: var(--pst-color-text-muted, #555);
-}
-
-/* ------------------------------------------------------------------
-   Clickable card link overlay
-   ------------------------------------------------------------------ */
-.sd-card .sd-stretched-link::after {
-  border-radius: var(--pt-card-radius);
-}
-
-/* ------------------------------------------------------------------
-   Grid gutter fine-tuning
-   ------------------------------------------------------------------ */
-.sd-row {
-  row-gap: 1rem;
-}
-
-/* ------------------------------------------------------------------
-   Section dividers between card groups
-   ------------------------------------------------------------------ */
-article.bd-article hr {
-  border: none;
-  border-top: 1px solid var(--pst-color-border, #e0e0e0);
-  margin: 2.5rem 0 2rem;
-}
-
-/* ------------------------------------------------------------------
-   Section headings (h2) that label each card group
-   ------------------------------------------------------------------ */
+/* Section heading accent */
 article.bd-article h2 {
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  margin-bottom: 1rem;
   padding-bottom: 0.35rem;
   border-bottom: 2px solid var(--pt-brand);
 }
 
-/* ------------------------------------------------------------------
-   Octicon icons inside card titles
-   ------------------------------------------------------------------ */
+/* Octicon icon tint */
 .sd-card-title .octicon {
   color: var(--pt-brand);
-  margin-right: 0.35rem;
-  vertical-align: -0.15em;
 }
 
-/* ------------------------------------------------------------------
-   Dark mode overrides
-   ------------------------------------------------------------------ */
-html[data-theme="dark"] {
-  --pt-card-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
-  --pt-card-shadow-hover: 0 6px 20px rgba(0, 0, 0, 0.35);
-}
-
-html[data-theme="dark"] .sd-card {
-  border-color: rgba(255, 255, 255, 0.1);
-  background: var(--pst-color-surface, #1e1e1e);
-}
-
-html[data-theme="dark"] .sd-card:hover,
-html[data-theme="dark"] .sd-card:focus-within {
-  border-color: var(--pt-brand-light);
-}
-
-html[data-theme="dark"] .sd-card .sd-card-text {
-  color: var(--pst-color-text-muted, #aaa);
-}
-
-html[data-theme="dark"] article.bd-article hr {
-  border-top-color: rgba(255, 255, 255, 0.1);
-}
-
-/* ------------------------------------------------------------------
-   Responsive: stack to 1-col on very small screens
-   ------------------------------------------------------------------ */
-@media (max-width: 480px) {
-  .sd-card .sd-card-body {
-    padding: 1rem;
-  }
-
-  article.bd-article h2 {
-    font-size: 1.25rem;
-  }
-}
-
-/* ==================================================================
-   Landing page search box
-   ================================================================== */
+/* Search input */
 .landing-search {
   max-width: 680px;
   margin: 2rem auto 0;
 }
 
-.landing-search form {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-
 .landing-search input[type="search"] {
   width: 100%;
-  padding: 0.85rem 3rem 0.85rem 1.15rem;
+  padding: 0.85rem 1.15rem;
   font-size: 1rem;
   font-family: inherit;
-  color: var(--pst-color-text-base, #1a1a1a);
-  background: var(--pst-color-surface, #fff);
   border: 2px solid var(--pst-color-border, #d0d0d0);
-  border-radius: var(--pt-card-radius);
+  border-radius: 0.5rem;
+  background: var(--pst-color-surface, #fff);
+  color: var(--pst-color-text-base, #1a1a1a);
   outline: none;
-  transition:
-    border-color var(--pt-transition),
-    box-shadow var(--pt-transition);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .landing-search input[type="search"]:focus {
@@ -192,64 +72,13 @@ html[data-theme="dark"] article.bd-article hr {
   color: var(--pst-color-text-muted, #888);
 }
 
-.landing-search button[type="submit"] {
-  position: absolute;
-  right: 0.65rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.45rem;
-  background: none;
-  border: none;
-  color: var(--pst-color-text-muted, #888);
-  cursor: pointer;
-  border-radius: 0.375rem;
-  transition:
-    color var(--pt-transition),
-    background var(--pt-transition);
-}
-
-.landing-search button[type="submit"]:hover {
-  color: var(--pt-brand);
-  background: rgba(238, 76, 44, 0.08);
-}
-
-/* Quick-link tags below the search box */
-.landing-search-tags {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.4rem;
-  margin-top: 0.65rem;
-  font-size: 0.82rem;
-}
-
-.landing-search-label {
-  color: var(--pst-color-text-muted, #888);
-  margin-right: 0.15rem;
-}
-
-.landing-search-tags a {
-  display: inline-block;
-  padding: 0.2rem 0.6rem;
-  background: var(--pst-color-surface, #f5f5f5);
-  border: 1px solid var(--pst-color-border, #e0e0e0);
-  border-radius: 999px;
-  color: var(--pst-color-text-base, #333);
-  text-decoration: none;
-  transition:
-    background var(--pt-transition),
-    border-color var(--pt-transition),
-    color var(--pt-transition);
-}
-
-.landing-search-tags a:hover {
-  background: rgba(238, 76, 44, 0.08);
-  border-color: var(--pt-brand);
-  color: var(--pt-brand);
-}
-
 /* Dark mode */
+html[data-theme="dark"] .sd-card:hover,
+html[data-theme="dark"] .sd-card:focus-within {
+  border-color: var(--pt-brand-light);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
 html[data-theme="dark"] .landing-search input[type="search"] {
   background: var(--pst-color-surface, #1e1e1e);
   border-color: rgba(255, 255, 255, 0.15);
@@ -259,27 +88,4 @@ html[data-theme="dark"] .landing-search input[type="search"] {
 html[data-theme="dark"] .landing-search input[type="search"]:focus {
   border-color: var(--pt-brand-light);
   box-shadow: 0 0 0 3px rgba(238, 76, 44, 0.2);
-}
-
-html[data-theme="dark"] .landing-search-tags a {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.12);
-  color: var(--pst-color-text-base, #ccc);
-}
-
-html[data-theme="dark"] .landing-search-tags a:hover {
-  background: rgba(238, 76, 44, 0.12);
-  border-color: var(--pt-brand-light);
-  color: var(--pt-brand-light);
-}
-
-@media (max-width: 480px) {
-  .landing-search {
-    margin-top: 1.25rem;
-  }
-
-  .landing-search input[type="search"] {
-    font-size: 0.9rem;
-    padding: 0.7rem 2.5rem 0.7rem 0.9rem;
-  }
 }

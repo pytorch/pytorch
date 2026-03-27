@@ -15,36 +15,19 @@ Features described in this documentation are classified by release status:
 - **Unstable (API-Unstable):** Under active development; APIs may change.
 
 ```{raw} html
-<div class="landing-search" role="search">
-  <form id="landing-search-form" action="search.html" method="get">
-    <input
-      id="landing-search-input"
-      type="search"
-      name="q"
-      placeholder="Search APIs — e.g. torch.nn.Linear, autograd, DataLoader …"
-      autocomplete="off"
-      aria-label="Search PyTorch documentation"
-    />
-    <button type="submit" aria-label="Search">
-      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24"
-           fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-           stroke-linejoin="round">
-        <circle cx="11" cy="11" r="8"/>
-        <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-      </svg>
-    </button>
-  </form>
-  <div class="landing-search-tags">
-    <span class="landing-search-label">Popular:</span>
-    <a href="search.html?q=torch.nn">torch.nn</a>
-    <a href="search.html?q=torch.compile">torch.compile</a>
-    <a href="search.html?q=DataLoader">DataLoader</a>
-    <a href="search.html?q=autograd">autograd</a>
-    <a href="search.html?q=FSDP">FSDP</a>
-    <a href="search.html?q=torch.export">torch.export</a>
-  </div>
-</div>
+<form class="landing-search" action="search.html" method="get" role="search">
+  <input type="search" name="q"
+         placeholder="Search APIs — e.g. torch.nn.Linear, autograd, DataLoader …"
+         aria-label="Search PyTorch documentation" />
+</form>
 ```
+
+**Popular:** {bdg-link-secondary}`torch.nn <search.html?q=torch.nn>`
+{bdg-link-secondary}`torch.compile <search.html?q=torch.compile>`
+{bdg-link-secondary}`DataLoader <search.html?q=DataLoader>`
+{bdg-link-secondary}`autograd <search.html?q=autograd>`
+{bdg-link-secondary}`FSDP <search.html?q=FSDP>`
+{bdg-link-secondary}`torch.export <search.html?q=torch.export>`
 
 ---
 
