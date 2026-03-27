@@ -310,12 +310,7 @@ def setup_compilation_env():
 
 @contextmanager
 def _set_compilation_env():
-    _symbolic_trace_tls = getattr(torch.fx._symbolic_trace, "_is_fx_tracing_tls", None)
-    _old_is_tracing = (
-        getattr(_symbolic_trace_tls, "flag", False)
-        if _symbolic_trace_tls is not None
-        else False
-    )
+    _old_is_tracing = getattr(torch.fx._symbolic_trace._is_fx_tracing_tls, "flag", False)
     _old_allow_empty_graphs = torch._dynamo.config.allow_empty_graphs
     _old_capture_scalar_outputs = torch._dynamo.config.capture_scalar_outputs
     # The issue is tracked in https://github.com/pytorch/pytorch/issues/144360: when dynamo finds
