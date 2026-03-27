@@ -14,14 +14,6 @@ Features described in this documentation are classified by release status:
 - **Stable (API-Stable):** Maintained long-term with backwards compatibility.
 - **Unstable (API-Unstable):** Under active development; APIs may change.
 
-```{raw} html
-<form class="landing-search" action="search.html" method="get" role="search">
-  <input type="search" name="q"
-         placeholder="Search APIs — e.g. torch.nn.Linear, autograd, DataLoader …"
-         aria-label="Search PyTorch documentation" />
-</form>
-```
-
 **Popular:** {bdg-link-secondary}`torch.nn <search.html?q=torch.nn>`
 {bdg-link-secondary}`torch.compile <search.html?q=torch.compile>`
 {bdg-link-secondary}`DataLoader <search.html?q=DataLoader>`
