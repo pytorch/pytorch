@@ -532,7 +532,7 @@ jobs:
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
@@ -648,7 +648,7 @@ jobs:
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
@@ -1284,7 +1284,7 @@ jobs:
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
@@ -1400,7 +1400,7 @@ jobs:
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
@@ -2036,7 +2036,7 @@ jobs:
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
@@ -2152,7 +2152,7 @@ jobs:
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
@@ -2788,7 +2788,7 @@ jobs:
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
@@ -2904,7 +2904,7 @@ jobs:
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
@@ -3540,7 +3540,7 @@ jobs:
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
@@ -3656,7 +3656,7 @@ jobs:
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
@@ -4292,7 +4292,7 @@ jobs:
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
@@ -4408,7 +4408,7 @@ jobs:
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
@@ -5044,7 +5044,7 @@ jobs:
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
@@ -5160,7 +5160,7 @@ jobs:
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
