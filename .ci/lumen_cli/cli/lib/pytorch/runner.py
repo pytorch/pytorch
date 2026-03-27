@@ -14,7 +14,7 @@ import subprocess
 from collections.abc import Iterator
 from typing import Any
 
-from cli.lib.pytorch.lint_test.lint_plans import LINT_PLANS, LintTestPlan
+from cli.lib.pytorch.lint_test.lint_plans import LINT_PLANS, TestPlan
 
 
 logger = logging.getLogger(__name__)
@@ -35,8 +35,8 @@ def _env_vars(env: dict[str, str]) -> Iterator[None]:
                 os.environ[k] = orig
 
 
-def run_plan(group_id: str, plan: LintTestPlan, input_overrides: dict[str, str] | None = None) -> None:
-    """Run a lint test plan locally."""
+def run_plan(group_id: str, plan: TestPlan, input_overrides: dict[str, str] | None = None) -> None:
+    """Run a test plan locally."""
     logger.info("[%s] %s", group_id, plan.title)
 
     resolved = plan.resolve_env_vars(input_overrides)

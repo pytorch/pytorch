@@ -99,7 +99,12 @@ jobs:
       docker-image: ghcr.io/pytorch/test-infra:cpu-x86_64-810d48d
       script: |
         uv pip install -e .ci/lumen_cli
-        lumen test lint --group-id lintrunner_noclang --input changed_files='${{ needs.get-changed-files.outputs.changed-files }}'
+        CHANGED_FILES="${{ needs.get-changed-files.outputs.changed-files }}"
+        if [ "$CHANGED_FILES" = '*' ]; then
+          lumen test lint --group-id lintrunner_noclang
+        else
+          lumen test lint --group-id lintrunner_noclang --input changed_files="$CHANGED_FILES"
+        fi
 
   quick-checks:
     if: github.repository_owner == 'pytorch'

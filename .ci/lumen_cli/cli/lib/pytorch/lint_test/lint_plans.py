@@ -18,7 +18,7 @@ class TestStep:
 
 
 @dataclass
-class LintTestPlan:
+class TestPlan:
     group_id: str
     title: str
     image: str
@@ -29,20 +29,9 @@ class LintTestPlan:
     inputs: dict[str, str] = field(default_factory=dict)
 
     def resolve_env_vars(self, overrides: dict[str, str] | None = None) -> dict[str, str]:
-        """Resolve env_vars by substituting {input_name} placeholders.
-
-        Special handling: if an input value is "*", the placeholder
-        {input_name} is replaced with "--all-files" (matching the
-        CHANGED_FILES convention in lint-osdc.yml).
-        """
+        """Resolve env_vars by substituting {input_name} placeholders."""
         values = {**self.inputs, **(overrides or {})}
-        resolved = {}
-        for k, v in values.items():
-            if v == "*":
-                resolved[k] = "--all-files"
-            else:
-                resolved[k] = v
-        return {k: v.format(**resolved) for k, v in self.env_vars.items()}
+        return {k: v.format(**values) for k, v in self.env_vars.items()}
 
 
 # Common setup shared by all _lint.yml based jobs
@@ -53,13 +42,13 @@ _LINT_SETUP = [
     "lintrunner init",
 ]
 
-LINT_PLANS: dict[str, LintTestPlan] = {
-    "lintrunner_noclang": LintTestPlan(
+LINT_PLANS: dict[str, TestPlan] = {
+    "lintrunner_noclang": TestPlan(
         group_id="lintrunner_noclang",
         title="Lintrunner (no clang)",
         image="ghcr.io/pytorch/test-infra:cpu-x86_64-67eb930",
         setup_commands=_LINT_SETUP,
-        inputs={"changed_files": "*"},
+        inputs={"changed_files": "--all-files"},
         env_vars={
             "ADDITIONAL_LINTRUNNER_ARGS": "--skip CLANGTIDY,CLANGTIDY_EXECUTORCH_COMPATIBILITY,CLANGFORMAT,PYREFLY {changed_files}",
         },
