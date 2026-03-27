@@ -3009,12 +3009,36 @@ def get_scheduler_node_symbol_uses(
     return free_symbol_uses
 
 
+def _is_epilogue_fusion_enabled(template_node: BaseSchedulerNode) -> bool:
+    """Check per-template flag, fall back to global config."""
+    tb = template_node.get_template_node()
+    if tb is not None and tb.allow_epilogue_fusion is not None:
+        return tb.allow_epilogue_fusion
+    return config.epilogue_fusion
+
+
+def _is_prologue_fusion_enabled(template_node: BaseSchedulerNode) -> bool:
+    """Check per-template flag, fall back to global config."""
+    tb = template_node.get_template_node()
+    if tb is not None and tb.allow_prologue_fusion is not None:
+        return tb.allow_prologue_fusion
+    return config.prologue_fusion
+
+
 def is_epilogue_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
-    return node1.is_template() and config.epilogue_fusion and not node2.is_template()
+    return (
+        node1.is_template()
+        and not node2.is_template()
+        and _is_epilogue_fusion_enabled(node1)
+    )
 
 
 def is_prologue_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
-    return node2.is_template() and config.prologue_fusion and not node1.is_template()
+    return (
+        node2.is_template()
+        and not node1.is_template()
+        and _is_prologue_fusion_enabled(node2)
+    )
 
 
 def is_template_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
@@ -4942,11 +4966,7 @@ class Scheduler:
             is_reorder_round,
         )
 
-        if (
-            (config.max_autotune_gemm or config.max_autotune)
-            and config.prologue_fusion
-            and config.epilogue_fusion
-        ):
+        if config.max_autotune_gemm or config.max_autotune:
             possible_fusions = self._handle_template_overlap(
                 possible_fusions, deferred_prologue_fusions
             )
@@ -5843,7 +5863,7 @@ class Scheduler:
             return False
 
         if node2.is_template():
-            if not config.prologue_fusion:
+            if not _is_prologue_fusion_enabled(node2):
                 why("prologue fusion turned off")
                 return False
 
@@ -5903,7 +5923,7 @@ class Scheduler:
             if (
                 node2.has_aliasing_or_mutation()
                 or node2.is_reduction()
-                or not config.epilogue_fusion
+                or not _is_epilogue_fusion_enabled(node1)
             ):
                 why("template epilogue not satisfied")
                 return False
@@ -6300,9 +6320,7 @@ class Scheduler:
         if node1.is_template() or node2.is_template():
             return False
 
-        if (config.max_autotune or config.max_autotune_gemm) and (
-            config.prologue_fusion or config.epilogue_fusion
-        ):
+        if config.max_autotune or config.max_autotune_gemm:
             node1_outputs = node1.get_outputs()
             node2_outputs = node2.get_outputs()
 
@@ -6323,6 +6341,7 @@ class Scheduler:
                     if (
                         isinstance(user.node, BaseSchedulerNode)
                         and user.node.is_template()
+                        and _is_prologue_fusion_enabled(user.node)
                     ):
                         # Check if this output is actually in the template's
                         # allowed_prologue_inps. If not, fusing horizontally
@@ -6360,12 +6379,15 @@ class Scheduler:
                                 # Conservative: block fusion
                                 return False
 
-            if config.epilogue_fusion:
-                for node in (node1, node2):
-                    for dep in node.read_writes.reads:
-                        producer = self.name_to_fused_node.get(dep.name)
-                        if producer is not None and producer.is_template():
-                            return False
+            for node in (node1, node2):
+                for dep in node.read_writes.reads:
+                    producer = self.name_to_fused_node.get(dep.name)
+                    if (
+                        producer is not None
+                        and producer.is_template()
+                        and _is_epilogue_fusion_enabled(producer)
+                    ):
+                        return False
 
         return True
 

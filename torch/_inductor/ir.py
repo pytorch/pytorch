@@ -5256,6 +5256,10 @@ class TemplateBuffer(OperationBuffer):
         self.allowed_prologue_inps: OrderedSet[str] = (
             allowed_prologue_inps or OrderedSet()
         )
+        # Per-template fusion overrides.  None means fall back to global
+        # config.epilogue_fusion / config.prologue_fusion.
+        self.allow_epilogue_fusion: bool | None = None
+        self.allow_prologue_fusion: bool | None = None
 
     @property
     def dtype(self) -> torch.dtype:
