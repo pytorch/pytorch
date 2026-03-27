@@ -15,8 +15,9 @@ class XPUCodename(enum.Enum):
 
 
 class XPUArch(enum.Enum):
-    Xe = "Xe"  # Xe HPC
-    Xe2 = "Xe2"
+    Unknown = 0
+    Xe = 1  # Xe HPC
+    Xe2 = 2
 
 
 # device_id -> GPU codename
@@ -47,32 +48,19 @@ _CODENAME_TO_ARCH = {
 
 
 @functools.lru_cache(1)
-def get_xpu_device_id() -> int | None:
-    try:
-        return torch.xpu.get_device_capability()["device_id"]
-    except Exception:
-        log.exception("Error in getting xpu device_id.")
-        return None
-
-
-@functools.lru_cache(1)
 def get_xpu_codename() -> XPUCodename | None:
-    device_id = get_xpu_device_id()
-    if device_id is None:
-        return None
+    device_id = torch.xpu.get_device_capability()["device_id"]
     return _DEVICE_ID_TO_CODENAME.get(device_id)
 
 
 @functools.lru_cache(1)
 def get_xpu_arch() -> XPUArch | None:
     codename = get_xpu_codename()
-    if codename is None:
-        return None
-    return _CODENAME_TO_ARCH.get(codename)
+    return _CODENAME_TO_ARCH.get(codename, XPUArch.Unknown)
 
 
 Xe2_Or_Later = LazyVal(
-    lambda: torch.xpu.is_available() and get_xpu_arch() in (XPUArch.Xe2,)
+    lambda: torch.xpu.is_available() and get_xpu_arch() >= XPUArch.Xe2
 )
 
 
