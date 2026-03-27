@@ -104,6 +104,12 @@ fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
                          nullptr, // q_descale_ptr
                          nullptr, // k_descale_ptr
                          nullptr, // v_descale_ptr
+                         0, // q_descale_stride_b
+                         0, // q_descale_stride_h
+                         0, // k_descale_stride_b
+                         0, // k_descale_stride_h
+                         0, // v_descale_stride_b
+                         0, // v_descale_stride_h
                          has_dropout_randval ? dropout_randval.data_ptr() : nullptr,
                          has_lse ? softmax_lse.data_ptr() : nullptr,
                          out.data_ptr(),
