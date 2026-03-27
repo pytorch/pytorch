@@ -52,6 +52,7 @@ When a PR touches code in the scope of any item below, **stop and investigate** 
 - [ ] **AT_DISPATCH macros** — PR manually switches on `dtype` with `if (dtype == kFloat) ... else if (dtype == kDouble)` instead of using `AT_DISPATCH_FLOATING_TYPES`, `AT_DISPATCH_ALL_TYPES_AND`, or the `AT_DISPATCH_SWITCH` / `AT_DISPATCH_CASE` pattern from `aten/src/ATen/Dispatch.h`
 - [ ] **Device guards (RAII)** — PR manually saves/restores device context (`cudaSetDevice` + try/catch) instead of using `DeviceGuard` or `OptionalDeviceGuard` from `c10/core/DeviceGuard.h`
 - [ ] **Memory format propagation** — PR allocates output tensors with `at::empty(shape, options)` (defaulting to contiguous) without calling `input.suggest_memory_format()` to preserve ChannelsLast or other input formats
+- [ ] **Subclass-safe tensor allocation** — PR uses `at::empty(shape, input.options())` instead of `input.new_empty(shape)` or `at::empty_like(input)`, which don't propagate tensor subclass metadata
 - [ ] **TORCH_LIBRARY operator registration** — PR registers operators using manual dispatcher calls instead of `TORCH_LIBRARY` / `TORCH_LIBRARY_IMPL` macros from `torch/library.h`
 - [ ] **TORCH_WARN_DEPRECATION** — PR uses `TORCH_WARN` for deprecation notices instead of `TORCH_WARN_DEPRECATION` which issues a proper `DeprecationWarning`
 
