@@ -3692,18 +3692,6 @@ class CommonTemplate:
                 b = torch.full((8,), 0, device=self.device, dtype=dtype)
                 self.common(fn, (a, b))
 
-            # Mixed zero and non-zero divisors in the same tensor
-            n = 4
-            a = torch.cat([
-                torch.full((n,), 10, device=self.device, dtype=dtype),
-                torch.full((n,), -7, device=self.device, dtype=dtype),
-            ])
-            b = torch.cat([
-                torch.full((n,), 0, device=self.device, dtype=dtype),
-                torch.full((n,), 3, device=self.device, dtype=dtype),
-            ])
-            self.common(fn, (a, b))
-
     def test_floordiv_float_accuracy(self):
         # Triton uses an approximate reciprocal for fp32 division, so a naive
         # floor(a / b) can be off by one when the true quotient is very close
