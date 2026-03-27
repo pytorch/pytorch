@@ -60,7 +60,7 @@ inline C10_HOST_DEVICE scalar_t div_floor_floating(scalar_t a, scalar_t b)
 template <typename scalar_t>
 inline C10_HOST_DEVICE scalar_t div_floor_integer(scalar_t a, scalar_t b) {
   if (C10_UNLIKELY(b == 0)) {
-    return 0;
+    return scalar_t(0);
   }
 
   if (C10_UNLIKELY(
