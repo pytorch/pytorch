@@ -270,6 +270,39 @@ class TestXmaskUnswitch(InductorTestCase):
         code_str = "\n".join(code)
         self.assertNotIn("xoffset + XBLOCK <= xnumel", code_str)
 
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @parametrize("mode", [1, 2])
+    def test_combo_kernel_unswitch(self, mode):
+        """Combo kernel fusing two independent pointwise ops should emit
+        both the pid dispatch (combo) and the unswitch pattern in each
+        sub-kernel under dynamic shapes."""
+
+        def fn(x1, x2):
+            return x1 * x1, x2 + 1.0
+
+        x1 = torch.randn(4097, device=GPU_TYPE, dtype=torch.float16)
+        x2 = torch.randn(4097, device=GPU_TYPE, dtype=torch.float16)
+        with inductor_config.patch(
+            {
+                "combo_kernels": True,
+                "benchmark_combo_kernel": False,
+                "triton.xmask_unswitch": mode,
+            }
+        ):
+            result, code = run_and_get_code(
+                torch.compile(fn, dynamic=True), x1, x2
+            )
+        code_str = "\n".join(code)
+        # Should be a combo kernel with pid-based dispatch
+        self.assertIn("pid = tl.program_id(0)", code_str)
+        self.assertIn("num_xblocks_0", code_str)
+        # Should contain unswitch pattern inside the combo sub-kernels
+        self.assertIn("xoffset + XBLOCK <= xnumel_0", code_str)
+        self.assertIn(", None)", code_str)
+        result_ref = fn(x1, x2)
+        torch.testing.assert_close(result[0], result_ref[0], atol=1e-3, rtol=1e-3)
+        torch.testing.assert_close(result[1], result_ref[1], atol=1e-3, rtol=1e-3)
+
 
 instantiate_parametrized_tests(TestXmaskUnswitch)
 
