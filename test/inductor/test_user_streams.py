@@ -1167,7 +1167,7 @@ with torch.cuda._DeviceGuard(0):
         torch.ops.streams.record_event.default(4, 1)
     with torch.cuda.stream(stream3):
         torch.ops.streams.wait_event.default(4, 2)
-        buf6 = buf0; del buf0
+        buf6 = empty_strided_cuda((32, 32), (32, 1), torch.float32)
         extern_kernels.mm(buf3, arg3_1, out=buf6)
     return (buf6, )""",
         )
@@ -1264,9 +1264,9 @@ with torch.cuda._DeviceGuard(0):
     with torch.cuda.stream(default_stream):
         torch.ops.streams.wait_event.default(2, 4)
         torch.ops.streams.wait_event.default(3, 4)
-        buf6 = buf0; del buf0
+        buf6 = empty_strided_cuda((32, 32), (32, 1), torch.float32)
         stream0 = get_raw_stream(0)
-        triton_kernel.run(buf6, buf2, 1024, stream=stream0)
+        triton_kernel.run(buf0, buf2, buf6, 1024, stream=stream0)
     return (buf6, )""",  # noqa: B950
         )
 
@@ -1421,7 +1421,6 @@ class TestStreamOrderingStress(InductorTestCase):
     # 4. Race: diamond pattern with heavy work on both branches.
     #    The join must wait for both branches.
     # ------------------------------------------------------------------
-    @unittest.skip("requires cross-stream buffer reuse fix")
     def test_race_diamond(self):
         N = self.N
 

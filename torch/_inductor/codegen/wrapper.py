@@ -920,6 +920,23 @@ class AllocateLine(MemoryPlanningLine):
         key = buffer_reuse_key(self.node)
         if config.allow_buffer_reuse and key in state:
             free_line = state.pop(key)
+            # In multi-stream graphs, only reuse buffers from the same stream
+            # to avoid races where a stream is still reading a buffer whose
+            # memory slot gets reused by a different stream.
+            if V.graph.scheduler._has_multi_stream_nodes():
+                alloc_stream = V.graph.scheduler.buff_to_stream.get(
+                    self.node.get_name()
+                )
+                free_stream = V.graph.scheduler.buff_to_stream.get(
+                    free_line.node.get_name()
+                )
+                if (
+                    alloc_stream is not None
+                    and free_stream is not None
+                    and alloc_stream != free_stream
+                ):
+                    state.push(key, free_line)
+                    return self
             size = V.graph.sizevars.optimization_hint(
                 V.graph.get_allocation_storage_size(self.node), fallback=0
             ) * get_dtype_size(self.node.get_dtype())
