@@ -20,12 +20,6 @@ from ._fsdp_common import (
 from ._fsdp_param import FSDPParam, ShardedState
 
 
-def _label_with_fqn(label: str, module_fqn: str | None) -> str:
-    if module_fqn:
-        return f"{label} ({module_fqn})"
-    return label
-
-
 class AllGatherResult(NamedTuple):
     all_gather_output: torch.Tensor
     all_gather_event: torch.Event | None
@@ -336,51 +330,43 @@ def foreach_all_gather(
     all_gather_stream: torch.Stream,
     device: torch.device,
     all_gather_comm: AllGather,
-    module_fqn: str | None = None,
 ) -> AllGatherResult | None:
     world_size, rank = group.size(), group.rank()
     device_handle = _get_device_handle(device.type)
-
     with device_handle.stream(all_gather_copy_in_stream):
-        with torch.profiler.record_function(
-            _label_with_fqn("FSDP::all_gather_copy_in", module_fqn)
-        ):
-            param_all_gather_inputs = _get_param_all_gather_inputs(fsdp_params)
-            (
-                param_all_gather_input_dtypes,
-                param_all_gather_input_numels,
-                dtype,
-            ) = _get_all_gather_input_metadatas(param_all_gather_inputs)
-            if dtype == torch.uint8:
-                all_gather_inputs = [
-                    t.view(torch.uint8) for ts in param_all_gather_inputs for t in ts
-                ]
-            else:
-                all_gather_inputs = [*chain.from_iterable(param_all_gather_inputs)]
-            inp_split_sizes = [t.numel() for t in all_gather_inputs]
-            all_gather_input_numel = sum(inp_split_sizes)
-            all_gather_output = all_gather_comm.allocate(
-                (all_gather_input_numel * world_size,), dtype=dtype, device=device
-            )
-            all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(
-                all_gather_inputs,
-                all_gather_output,
-                inp_split_sizes,
-                all_gather_input_numel,
-                rank,
-            )
-            del param_all_gather_inputs
+        param_all_gather_inputs = _get_param_all_gather_inputs(fsdp_params)
+        (
+            param_all_gather_input_dtypes,
+            param_all_gather_input_numels,
+            dtype,
+        ) = _get_all_gather_input_metadatas(param_all_gather_inputs)
+        if dtype == torch.uint8:
+            all_gather_inputs = [
+                t.view(torch.uint8) for ts in param_all_gather_inputs for t in ts
+            ]
+        else:
+            all_gather_inputs = [*chain.from_iterable(param_all_gather_inputs)]
+        inp_split_sizes = [t.numel() for t in all_gather_inputs]
+        all_gather_input_numel = sum(inp_split_sizes)
+        all_gather_output = all_gather_comm.allocate(
+            (all_gather_input_numel * world_size,), dtype=dtype, device=device
+        )
+        all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(
+            all_gather_inputs,
+            all_gather_output,
+            inp_split_sizes,
+            all_gather_input_numel,
+            rank,
+        )
+        del param_all_gather_inputs
     all_gather_stream.wait_stream(all_gather_copy_in_stream)
     with device_handle.stream(all_gather_stream):
-        ag_profiling_name = _label_with_fqn("FSDP::all_gather", module_fqn)
-        with torch.profiler.record_function(ag_profiling_name):
-            with dist.record_comm(ag_profiling_name):
-                all_gather_work = all_gather_comm(
-                    output_tensor=all_gather_output,
-                    input_tensor=all_gather_input,
-                    group=group,
-                    async_op=async_op,
-                )
+        all_gather_work = all_gather_comm(
+            output_tensor=all_gather_output,
+            input_tensor=all_gather_input,
+            group=group,
+            async_op=async_op,
+        )
         all_gather_event = all_gather_stream.record_event()
         return AllGatherResult(
             all_gather_output,
@@ -551,7 +537,6 @@ def foreach_reduce(
     partial_reduce_output: torch.Tensor | None,  # only used for HSDP
     all_reduce_hook: Callable[[torch.Tensor], None] | None,
     force_sum_reduction_for_comms: bool = False,
-    module_fqn: str | None = None,
 ) -> tuple[
     torch.Tensor,
     torch.Event,
@@ -632,15 +617,12 @@ def foreach_reduce(
         )
         _div_if_needed(reduce_scatter_input, predivide_factor)
         if world_size > 1:
-            rs_profiling_name = _label_with_fqn("FSDP::reduce_scatter", module_fqn)
-            with torch.profiler.record_function(rs_profiling_name):
-                with dist.record_comm(rs_profiling_name):
-                    reduce_scatter_comm(
-                        output_tensor=reduce_output,
-                        input_tensor=reduce_scatter_input,
-                        group=reduce_scatter_group,
-                        op=reduce_scatter_op,
-                    )
+            reduce_scatter_comm(
+                output_tensor=reduce_output,
+                input_tensor=reduce_scatter_input,
+                group=reduce_scatter_group,
+                op=reduce_scatter_op,
+            )
         else:
             # For single GPU, just copy the input to output (no actual reduce-scatter needed), and
             # account for a possible gradient_divide_factor.
@@ -673,14 +655,11 @@ def foreach_reduce(
             else:
                 all_reduce_stream.wait_stream(current_stream)
             with device_handle.stream(all_reduce_stream):
-                ar_profiling_name = _label_with_fqn("FSDP::all_reduce", module_fqn)
-                with torch.profiler.record_function(ar_profiling_name):
-                    with dist.record_comm(ar_profiling_name):
-                        dist.all_reduce(
-                            reduce_output,
-                            group=all_reduce_group,
-                            op=all_reduce_op,
-                        )
+                dist.all_reduce(
+                    reduce_output,
+                    group=all_reduce_group,
+                    op=all_reduce_op,
+                )
                 all_reduce_input = reduce_output
                 all_reduce_event = all_reduce_stream.record_event()
     # -- END: ops in reduce_scatter stream
