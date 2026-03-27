@@ -1250,6 +1250,7 @@ class AOTDedupeWrapper(CompilerWrapper):
                 flat_args_descs=deduped_flat_args_descs,
                 static_input_indices=aot_config.static_input_indices,
                 keep_input_mutations=fw_metadata.keep_input_mutations,
+                is_train=fw_metadata.is_train,
             )(*deduped_flat_args)
             if ref_fw_metadata != updated_fw_metadata:
                 raise AssertionError(
@@ -1472,6 +1473,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                 flat_args_descs=flat_args_descs_with_synthetic_bases,
                 static_input_indices=aot_config.static_input_indices,
                 keep_input_mutations=fw_metadata.keep_input_mutations,
+                is_train=fw_metadata.is_train,
             )(*flat_args_with_synthetic_bases)
             if ref_fw_metadata != fw_metadata_updated:
                 raise AssertionError(

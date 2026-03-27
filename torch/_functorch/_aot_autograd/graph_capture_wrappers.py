@@ -1473,6 +1473,7 @@ def aot_dispatch_subclass(
         flat_args_descs=primals_unwrapped_descs,
         static_input_indices=remapped_static_indices,
         keep_input_mutations=meta.keep_input_mutations,
+        is_train=meta.is_train,
         # pyrefly: ignore [not-iterable]
     )(*primals_unwrapped)
 

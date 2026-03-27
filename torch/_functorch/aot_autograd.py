@@ -27,6 +27,7 @@ from torch._dynamo.utils import (
 from torch._functorch._aot_autograd.autograd_cache import create_fx_config
 from torch._guards import detect_fake_mode
 from torch._inductor.codecache import resolve_pre_grad_pass_timing
+from torch._inductor.utils import BoxedBool
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.export._tree_utils import reorder_kwargs
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -582,6 +583,7 @@ def create_aot_state(
                     flat_args_descs=flat_args_descs,
                     static_input_indices=aot_config.static_input_indices,
                     keep_input_mutations=aot_config.keep_inference_input_mutations,
+                    is_train=needs_autograd,
                     pre_dispatch=aot_config.pre_dispatch,
                 )(*_dup_fake_script_obj(fake_flat_args))
 
@@ -617,6 +619,35 @@ def create_aot_state(
                 # and none of the inputs that require grad are mutated.
                 # so we actually have an inference graph.
                 needs_autograd = False
+                # A bit silly: right now in the subclass codepath, our ViewAndMutationMeta
+                # changes depending on whether we pass in is_train / keep_input_mutations,
+                # so we're forced to recompute the metadata.
+                # TODO: refactor the subclass path of run_functionalized_fw_and_collect_metadata
+                # so that this is unnecessary.
+                if req_subclass_dispatch:
+                    fw_metadata = run_functionalized_fw_and_collect_metadata(
+                        flat_fn,
+                        flat_args_descs=flat_args_descs,
+                        keep_input_mutations=aot_config.keep_inference_input_mutations,
+                        is_train=False,
+                        pre_dispatch=aot_config.pre_dispatch,
+                        static_input_indices=aot_config.static_input_indices,
+                    )(*fake_flat_args)
+                else:
+                    fw_metadata = ViewAndMutationMeta(
+                        input_info=fw_metadata.input_info,
+                        output_info=fw_metadata.output_info,
+                        num_intermediate_bases=fw_metadata.num_intermediate_bases,
+                        keep_input_mutations=aot_config.keep_inference_input_mutations,
+                        traced_tangents=fw_metadata.traced_tangents,
+                        traced_tangents_descs=fw_metadata.traced_tangents_descs,
+                        subclass_inp_meta=fw_metadata.subclass_inp_meta,
+                        subclass_fw_graph_out_meta=fw_metadata.subclass_fw_graph_out_meta,
+                        subclass_tangent_meta=fw_metadata.subclass_tangent_meta,
+                        is_train=False,
+                        tokens=fw_metadata.tokens,
+                        static_input_indices=fw_metadata.static_input_indices,
+                    )
 
     if fw_metadata.num_intermediate_bases > 0:
         if req_subclass_dispatch:

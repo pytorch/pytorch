@@ -459,6 +459,9 @@ class ViewAndMutationMeta:
     subclass_fw_graph_out_meta: list[PlainTensorMeta | SubclassCreationMeta]
     # length = # backward graph inputs
     subclass_tangent_meta: list[PlainTensorMeta | SubclassCreationMeta]
+    # TODO: we should kill this
+    # (need to default it to not break internal)
+    is_train: bool = False
 
     # length = (# inputs w data mutations) + (# user outputs that are non_aliasing tensors)
     #        + (# intermediate bases)
