@@ -746,8 +746,7 @@ def get_fqn_to_example_inputs(
     arguments as positional arguments and fill in the missing keyword args with default
     values, e.g. if we have a forward function::
 
-        def forward(self, x, key1=3, key2=3):
-            ...
+        def forward(self, x, key1=3, key2=3): ...
 
     and we call it with ``self.submodule(x, key2=6)``
     we'll get ``example_inputs: (x, 3, 6)``

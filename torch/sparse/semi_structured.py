@@ -470,9 +470,11 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
             )
 
             pruned = _sparse_semi_structured_tile(dense)
-            packed_cutlass, meta_cutlass = sparse_semi_structured_from_dense_cutlass(pruned)
-            packed_t_cutlass, meta_t_cutlass = sparse_semi_structured_from_dense_cutlass(
-                pruned.t().contiguous()
+            packed_cutlass, meta_cutlass = sparse_semi_structured_from_dense_cutlass(
+                pruned
+            )
+            packed_t_cutlass, meta_t_cutlass = (
+                sparse_semi_structured_from_dense_cutlass(pruned.t().contiguous())
             )
             bitmask = _compute_compressed_swizzled_bitmask(pruned)
 

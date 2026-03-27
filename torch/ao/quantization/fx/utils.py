@@ -123,15 +123,9 @@ def get_custom_module_class_keys(
     Example input::
 
         {
-            QuantType.STATIC: {
-                CustomModule1: ObservedCustomModule
-            },
-            QuantType.DYNAMIC: {
-                CustomModule2: DynamicObservedCustomModule
-            },
-            QuantType.WEIGHT_ONLY: {
-                CustomModule3: WeightOnlyObservedCustomModule
-            },
+            QuantType.STATIC: {CustomModule1: ObservedCustomModule},
+            QuantType.DYNAMIC: {CustomModule2: DynamicObservedCustomModule},
+            QuantType.WEIGHT_ONLY: {CustomModule3: WeightOnlyObservedCustomModule},
         }
 
     Example output::

@@ -2238,6 +2238,15 @@ language = "en"
 # This patterns also effect to html_static_path and html_extra_path
 exclude_patterns = []
 
+if not torch.distributed.is_available():
+    exclude_patterns += [
+        "distributed*.md",
+        "distributed*.rst",
+        "elastic/*",
+        "rpc.md",
+        "rpc/*",
+    ]
+
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = "sphinx"
 
@@ -2333,11 +2342,11 @@ def coverage_post_process(app, exception):
         return
 
     if not torch.distributed.is_available():
-        raise RuntimeError(
-            "The coverage tool cannot run with a version "
-            "of PyTorch that was built with USE_DISTRIBUTED=0 "
-            "as this module's API changes."
+        print(
+            "Skipping coverage check: torch.distributed is not available "
+            "(built with USE_DISTRIBUTED=0)."
         )
+        return
 
     # These are all the modules that have "automodule" in an rst file
     # These modules are the ones for which coverage is checked
