@@ -1271,6 +1271,72 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_f = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(f(), opt_f())
 
+    @parametrize("op", ["or_", "and_", "xor", "sub"])
+    def test_cross_type_set_binop_dict_keys_vs_set(self, op):
+        op = getattr(operator, op)
+
+        def f():
+            keys = {"one": 1, "two": 2, "three": 3}.keys()
+            s = {"one", "four"}
+            return op(keys, s), op(s, keys)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["or_", "and_", "xor", "sub"])
+    def test_cross_type_set_binop_dict_items_vs_set(self, op):
+        op = getattr(operator, op)
+
+        def f():
+            items = {"one": 1, "two": 2}.items()
+            s = {("one", 1), ("three", 3)}
+            return op(items, s), op(s, items)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["or_", "and_", "xor", "sub"])
+    def test_cross_type_set_binop_dict_keys_vs_dict_items(self, op):
+        op = getattr(operator, op)
+
+        def f():
+            keys = {"one": 1, "two": 2}.keys()
+            items = {"three": 3, "four": 4}.items()
+            return op(keys, items), op(items, keys)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["or_", "and_", "xor", "sub"])
+    def test_cross_type_set_binop_dict_keys_vs_user_defined_set(self, op):
+        class MySet(set):
+            pass
+
+        op = getattr(operator, op)
+
+        def f():
+            keys = {"one": 1, "two": 2, "three": 3}.keys()
+            s = MySet({"one", "four"})
+            return op(keys, s), op(s, keys)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["or_", "and_", "xor", "sub"])
+    def test_cross_type_set_binop_set_vs_user_defined_set(self, op):
+        class MySet(set):
+            pass
+
+        op = getattr(operator, op)
+
+        def f():
+            s = {"one", "two", "three"}
+            u = MySet({"one", "four"})
+            return op(s, u), op(u, s)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
     def test_dict_union_result_type(self):
         def_dict = defaultdict(int, {1: 1, 2: 2})
         ord_dict = OrderedDict({3: 3, 4: 4})
