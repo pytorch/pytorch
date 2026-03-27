@@ -273,10 +273,10 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(
             str(backend.graphs[0].code).strip(),
             """\
-def forward(self, L_self_buffers_buffer_ : torch.distributed.tensor.DTensor, L_x_ : torch.Tensor, L_self_buffers_buffer_device_mesh : torch.distributed.device_mesh.DeviceMesh):
+def forward(self, L_self_buffers_buffer_ : torch.distributed.tensor.DTensor, L_self_buffers_buffer_device_mesh : torch.distributed.device_mesh.DeviceMesh, L_x_ : torch.Tensor):
     l_self_buffers_buffer_ = L_self_buffers_buffer_
-    l_x_ = L_x_
     l_self_buffers_buffer_device_mesh = L_self_buffers_buffer_device_mesh
+    l_x_ = L_x_
     from_local = torch.distributed.tensor._api.from_local(l_x_, l_self_buffers_buffer_device_mesh, [torch.distributed.tensor.placement_types.Shard(dim=0)], run_check = False);  l_x_ = l_self_buffers_buffer_device_mesh = None
     inter = l_self_buffers_buffer_ + from_local;  l_self_buffers_buffer_ = from_local = None
     to_local = inter.to_local();  inter = None
@@ -285,8 +285,8 @@ def forward(self, L_self_buffers_buffer_ : torch.distributed.tensor.DTensor, L_x
         self.assertExpectedInline(
             str(backend.fw_graphs[0].code).strip(),
             """\
-def forward(self, arg0_1, arg1_1, arg2_1):
-    _to_copy = torch.ops.aten._to_copy.default(arg1_1, dtype = torch.float64, layout = torch.strided, device = device(type='cuda', index=0));  arg1_1 = None
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
+    _to_copy = torch.ops.aten._to_copy.default(arg3_1, dtype = torch.float64, layout = torch.strided, device = device(type='cuda', index=0));  arg3_1 = None
     view = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
     add = torch.ops.aten.add.Tensor(arg0_1, view);  arg0_1 = view = None
     view_1 = torch.ops.aten.view.default(add, [4, 4]);  add = None
@@ -323,11 +323,11 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             """\
 def forward(self, args_0):
     _fn_args = (args_0, )
-    L_self_buffers_buffer_ , L_x_ , L_mesh_ , = self._dynamo_bytecode_flatten(*_fn_args)
+    L_self_buffers_buffer_ , L_self_buffers_buffer_device_mesh , L_x_ , = self._dynamo_bytecode_flatten(*_fn_args)
     l_self_buffers_buffer_ = L_self_buffers_buffer_
+    l_self_buffers_buffer_device_mesh = L_self_buffers_buffer_device_mesh
     l_x_ = L_x_
-    l_mesh_ = L_mesh_
-    from_local = torch.distributed.tensor._api.from_local(l_x_, l_mesh_, [torch.distributed.tensor.placement_types.Shard(dim=0)], run_check = False);  l_x_ = l_mesh_ = None
+    from_local = torch.distributed.tensor._api.from_local(l_x_, l_self_buffers_buffer_device_mesh, [torch.distributed.tensor.placement_types.Shard(dim=0)], run_check = False);  l_x_ = l_self_buffers_buffer_device_mesh = None
     inter = l_self_buffers_buffer_ + from_local;  l_self_buffers_buffer_ = from_local = None
     to_local = inter.to_local();  inter = None
     return self._dynamo_bytecode_unflatten((to_local,), _fn_args)""",  # noqa: B950
@@ -347,8 +347,8 @@ def forward(self, args_0):
         self.assertExpectedInline(
             str(joint_gm.code).strip(),
             f"""\
-def forward(self, arg0_1, arg1_1):
-    _to_copy = torch.ops.aten._to_copy.default(arg1_1, dtype = torch.float64, layout = torch.strided, device = device(type='{self.device_type}', index=0));  arg1_1 = None
+def forward(self, arg0_1, arg1_1, arg2_1):
+    _to_copy = torch.ops.aten._to_copy.default(arg2_1, dtype = torch.float64, layout = torch.strided, device = device(type='{self.device_type}', index=0));  arg2_1 = None
     view = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
     add = torch.ops.aten.add.Tensor(arg0_1, view);  arg0_1 = view = None
     view_1 = torch.ops.aten.view.default(add, [4, 4]);  add = None
@@ -403,6 +403,38 @@ def forward(self, arg0_1, arg1_1):
         compiled_out = torch.compile(fn, backend="aot_eager", fullgraph=True)(mesh)
         self.assertEqual(opt_fn, compiled_out)
 
+    def test_device_mesh_input_to_dtensor_from_local(self):
+        """Test that DeviceMesh passed as input is correctly used in DTensor.from_local.
+
+        This tests the opaque object remapping: when a DeviceMesh is passed as a
+        function input and used inside DTensor.from_local, the output DTensor
+        should use the runtime mesh, not a compile-time baked-in mesh.
+        """
+
+        def fn(local_tensor, mesh):
+            # Use the passed-in mesh to create a DTensor
+            return DTensor.from_local(local_tensor, mesh, [Shard(0)], run_check=False)
+
+        # Create two different meshes to verify the output uses the runtime mesh
+        mesh1 = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        local_tensor = torch.randn(4, 4)
+        compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+
+        # First call with mesh1
+        result1 = compiled_fn(local_tensor, mesh1)
+        self.assertIsInstance(result1, DTensor)
+        self.assertIs(result1.device_mesh, mesh1)
+
+        # Create a second mesh (same shape but different object)
+        mesh2 = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        self.assertIsNot(mesh1, mesh2)  # Different objects
+
+        # Second call with mesh2 - the output should use mesh2, not mesh1
+        result2 = compiled_fn(local_tensor, mesh2)
+        self.assertIsInstance(result2, DTensor)
+        self.assertIs(result2.device_mesh, mesh2)
+
     def test_get_local_rank_compile(self):
         mesh = init_device_mesh(
             self.device_type, (self.world_size,), mesh_dim_names=("dp",)
@@ -437,6 +469,88 @@ def forward(self, arg0_1, arg1_1):
         opt_fn3 = torch.compile(fn_without_arg, backend="aot_eager", fullgraph=True)
         res3 = opt_fn3(x)
         self.assertEqual(res3, ref3)
+
+    def test_dtensor_from_local_with_extracted_device_mesh_no_dce(self):
+        """Test that DTensor.from_local() works in compiled code when using
+        a DeviceMesh extracted from another DTensor passed as input.
+
+        This exercises:
+        1. Accessing dtensor.device_mesh inside compiled code
+        2. Passing that DeviceMesh to DTensor.from_local() with a different tensor
+        3. Returning the new DTensor with correct DeviceMesh
+        """
+        mesh1 = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh2 = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fn(dt, local_tensor):
+            # Extract DeviceMesh from input DTensor
+            extracted_mesh = dt.device_mesh
+            # Create new DTensor with the extracted mesh
+            new_dt = DTensor.from_local(
+                local_tensor,
+                extracted_mesh,
+                [Replicate()],
+                run_check=False,
+            )
+            return new_dt, torch.add(dt, dt)
+
+        # Create input DTensor
+        input_local = torch.randn(4, 4)
+        input_dt1 = DTensor.from_local(input_local, mesh1, [Shard(0)], run_check=False)
+        input_dt2 = DTensor.from_local(input_local, mesh2, [Shard(0)], run_check=False)
+
+        # Create the normal tensor to pass
+        other_tensor = torch.randn(4, 4)
+
+        # Compile and run
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        result1, _ = opt_fn(input_dt1, other_tensor)
+        result2, _ = opt_fn(input_dt2, other_tensor)
+
+        # Verify the new DTensor has the correct DeviceMesh
+        self.assertIs(result1.device_mesh, mesh1)
+        self.assertIs(result2.device_mesh, mesh2)
+
+    def test_dtensor_from_local_with_extracted_device_mesh_dce(self):
+        """Test that DTensor.from_local() works in compiled code when using
+        a DeviceMesh extracted from another DTensor passed as input.
+
+        This exercises:
+        1. Accessing dtensor.device_mesh inside compiled code
+        2. Passing that DeviceMesh to DTensor.from_local() with a different tensor
+        3. Returning the new DTensor with correct DeviceMesh
+        """
+        mesh1 = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh2 = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fn(dt, local_tensor):
+            # Extract DeviceMesh from input DTensor
+            extracted_mesh = dt.device_mesh
+            # Create new DTensor with the extracted mesh
+            new_dt = DTensor.from_local(
+                local_tensor,
+                extracted_mesh,
+                [Replicate()],
+                run_check=False,
+            )
+            return new_dt
+
+        # Create input DTensor
+        input_local = torch.randn(4, 4)
+        input_dt1 = DTensor.from_local(input_local, mesh1, [Shard(0)], run_check=False)
+        input_dt2 = DTensor.from_local(input_local, mesh2, [Shard(0)], run_check=False)
+
+        # Create the normal tensor to pass
+        other_tensor = torch.randn(4, 4)
+
+        # Compile and run
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        result1 = opt_fn(input_dt1, other_tensor)
+        result2 = opt_fn(input_dt2, other_tensor)
+
+        # Verify the new DTensor has the correct DeviceMesh
+        self.assertIs(result1.device_mesh, mesh1)
+        self.assertIs(result2.device_mesh, mesh2)
 
     def test_fakify_dtensor(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -1666,17 +1780,19 @@ class outer_fn(torch.nn.Module):
         view: "f32[4, 4]" = torch.ops.aten.view.default(add, [4, 4]);  add = None
         repeated_subgraph0 = self.repeated_subgraph0
         _opaque_obj0 = self._opaque_obj0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', view, _opaque_obj0);  repeated_subgraph0 = view = _opaque_obj0 = None
-        getitem: "f32[8, 4]" = invoke_subgraph[0];  invoke_subgraph = None
+        _opaque_obj0_1 = self._opaque_obj0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', view, _opaque_obj0, _opaque_obj0_1);  repeated_subgraph0 = view = _opaque_obj0 = _opaque_obj0_1 = None
+        getitem: "f32[8, 4]" = invoke_subgraph[0]
+        getitem_1 = invoke_subgraph[1];  invoke_subgraph = getitem_1 = None
         view_1: "f32[8, 4]" = torch.ops.aten.view.default(getitem, [8, 4]);  getitem = None
         return view_1
 
     class repeated_subgraph0(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4, 4]", arg1_1):
+        def forward(self, arg0_1: "f32[4, 4]", arg1_1, arg2_1):
             # No stacktrace found for following nodes
             all_gather_into_tensor: "f32[8, 4]" = torch.ops._c10d_functional.all_gather_into_tensor.default(arg0_1, 2, '0');  arg0_1 = None
             wait_tensor: "f32[8, 4]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor);  all_gather_into_tensor = None
-            return (wait_tensor,)""",  # noqa: B950
+            return (wait_tensor, arg2_1)""",  # noqa: B950
         )
 
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
@@ -2234,6 +2350,106 @@ class TestDTensorCompileE2E(DTensorTestBase):
                     bw_code,
                     f"Backward graph should not contain opaque objects. Graph:\n{bw_code}",
                 )
+
+    @with_comms
+    def test_dtensor_processgroup_extraction(self):
+        """Test that with compile_on_one_rank, DeviceMesh becomes a graph input
+        and ProcessGroups are extracted in-graph as placeholders."""
+        from torch._functorch.aot_autograd import aot_function
+
+        with patch("torch.distributed.config.compile_on_one_rank", True):
+            mesh = self.build_device_mesh()
+
+            def fn(dt):
+                return dt.redistribute(mesh, [Replicate()])
+
+            local_tensor = torch.randn(4, 8, device=self.device_type)
+            dt_input = DTensor.from_local(
+                local_tensor, mesh, [Shard(0)], run_check=False
+            )
+
+            fw_graph_cell = [None]
+
+            def extract_graph(fx_g, _):
+                fw_graph_cell[0] = fx_g
+                return fx_g
+
+            compiled_fn = aot_function(
+                fn,
+                fw_compiler=extract_graph,
+                bw_compiler=lambda fx_g, _: fx_g,
+            )
+
+            compiled_fn(dt_input)
+
+            fw_graph = fw_graph_cell[0]
+            self.assertIsNotNone(fw_graph)
+
+            graph_code = fw_graph.code
+
+            self.assertNotIn(
+                "_opaque_obj",
+                graph_code,
+                f"Graph should not contain opaque objects. Graph:\n{graph_code}",
+            )
+
+            placeholders = [n for n in fw_graph.graph.nodes if n.op == "placeholder"]
+            self.assertGreater(
+                len(placeholders),
+                1,
+                f"Expected ProcessGroup placeholders but only got {len(placeholders)} placeholder(s)",
+            )
+
+    @with_comms
+    def test_dtensor_processgroup_deduplication(self):
+        """Test that multiple DTensors sharing the same ProcessGroup only pass
+        it once as a graph placeholder."""
+        from torch._functorch.aot_autograd import aot_function
+
+        with patch("torch.distributed.config.compile_on_one_rank", True):
+            mesh = self.build_device_mesh()
+
+            def fn(dt1, dt2):
+                out1 = dt1.redistribute(mesh, [Replicate()])
+                out2 = dt2.redistribute(mesh, [Replicate()])
+                return out1 + out2
+
+            local1 = torch.randn(4, 8, device=self.device_type)
+            local2 = torch.randn(4, 8, device=self.device_type)
+            dt1 = DTensor.from_local(local1, mesh, [Shard(0)], run_check=False)
+            dt2 = DTensor.from_local(local2, mesh, [Shard(0)], run_check=False)
+
+            fw_graph_cell = [None]
+
+            def extract_graph(fx_g, _):
+                fw_graph_cell[0] = fx_g
+                return fx_g
+
+            compiled_fn = aot_function(
+                fn,
+                fw_compiler=extract_graph,
+                bw_compiler=lambda fx_g, _: fx_g,
+            )
+
+            compiled_fn(dt1, dt2)
+
+            fw_graph = fw_graph_cell[0]
+            self.assertIsNotNone(fw_graph)
+
+            graph_code = fw_graph.code
+
+            self.assertNotIn(
+                "_opaque_obj",
+                graph_code,
+                f"Graph should not contain opaque objects. Graph:\n{graph_code}",
+            )
+
+            placeholders = [n for n in fw_graph.graph.nodes if n.op == "placeholder"]
+            self.assertGreater(
+                len(placeholders),
+                2,
+                f"Expected ProcessGroup placeholders but only got {len(placeholders)} placeholder(s)",
+            )
 
 
 if __name__ == "__main__":
