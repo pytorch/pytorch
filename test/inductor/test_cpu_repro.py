@@ -178,16 +178,35 @@ class CPUReproTests(TestCase):
                 def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                     kwargs = kwargs if kwargs else {}
                     if func == torch.ops.aten.convolution.default:
-                        # For CPU and mkldnn enable, we always using channels last
                         nonlocal fmt
-                        if (
+                        nonlocal conv_seen
+                        mkldnn_available = (
                             torch.backends.mkldnn.enabled
                             and torch.backends.mkldnn.is_available()
-                        ):
+                        )
+                        if mkldnn_available:
+                            # For CPU with mkldnn, layout optimization
+                            # converts both input and weight to channels_last
                             fmt = torch.channels_last
-                        test_self.assertTrue(args[0].is_contiguous(memory_format=fmt))
-                        test_self.assertTrue(args[1].is_contiguous(memory_format=fmt))
-                        nonlocal conv_seen
+                            test_self.assertTrue(
+                                args[0].is_contiguous(memory_format=fmt)
+                            )
+                            test_self.assertTrue(
+                                args[1].is_contiguous(memory_format=fmt)
+                            )
+                        else:
+                            # Without mkldnn (e.g. ROCm), layout optimization
+                            # does not activate for small channels, so the
+                            # input keeps its original contiguous layout and
+                            # the weight keeps whatever format it was given.
+                            test_self.assertTrue(
+                                args[0].is_contiguous(
+                                    memory_format=torch.contiguous_format
+                                )
+                            )
+                            test_self.assertTrue(
+                                args[1].is_contiguous(memory_format=fmt)
+                            )
                         conv_seen = True
 
                     return func(*args, **kwargs)
