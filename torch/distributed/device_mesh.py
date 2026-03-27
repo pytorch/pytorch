@@ -1596,12 +1596,20 @@ else:
         return device_mesh
 
 
+_distributed_opaque_types_registered = False
+
+
 def _register_distributed_opaque_types():
     """
     Register DeviceMesh as an opaque type for torch.compile.
     This must happen before any custom ops that use DeviceMesh in their schema.
     Called lazily to avoid circular import issues.
     """
+    global _distributed_opaque_types_registered
+    if _distributed_opaque_types_registered:
+        return
+    _distributed_opaque_types_registered = True
+
     from torch._library.opaque_object import MemberType, register_opaque_type
 
     register_opaque_type(

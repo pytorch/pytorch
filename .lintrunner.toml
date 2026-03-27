@@ -532,6 +532,8 @@ exclude_patterns = [
     'torch/csrc/inductor/aoti_runtime/**',
     # Test files use EXPECT_THROW which is a gtest macro
     'test/cpp/**/*.cpp',
+    # JIT frontend uses throw(ErrorReport(...)) pervasively
+    'torch/csrc/jit/frontend/schema_type_parser.cpp',
 ]
 command = [
     'python3',
