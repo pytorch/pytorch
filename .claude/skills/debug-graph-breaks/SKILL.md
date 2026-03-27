@@ -142,6 +142,23 @@ def my_function(x):
 - Decorator/context manager that skips compilation for a function entirely. The function runs in eager mode. Causes a graph break at the call site.
 - Use when: a function is fundamentally incompatible with compilation and doesn't need to be compiled.
 
+**Custom ops (`torch.library`)**
+- Register a Python function as a custom PyTorch operator. Dynamo treats custom ops as opaque, well-typed nodes in the graph — no graph break, and Inductor can call them at runtime.
+- Use when: wrapping a third-party or non-traceable function that has well-defined tensor input/output shapes.
+```python
+import torch.library
+
+@torch.library.custom_op("mylib::my_op", mutates_args=())
+def my_op(x: torch.Tensor) -> torch.Tensor:
+    # arbitrary non-traceable code here
+    return x.numpy().copy()  # example
+
+@my_op.register_fake
+def my_op_fake(x):
+    return torch.empty_like(x)
+```
+- Unlike `@leaf_function`, custom ops are part of the public `torch.library` API and show up as named nodes in the FX graph, making them more suitable when the op will be reused across multiple compiled functions.
+
 #### Common fixes by graph break type
 
 **`print()` / logging (GB0059: "Failed to trace builtin operator")**
