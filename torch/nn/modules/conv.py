@@ -327,6 +327,12 @@ class Conv1d(_ConvNd):
     """
     )
 
+    kernel_size: tuple[int]
+    stride: tuple[int]
+    padding: str | tuple[int]
+    dilation: tuple[int]
+    output_padding: tuple[int]
+
     def __init__(
         self,
         in_channels: int,
@@ -507,6 +513,12 @@ class Conv2d(_ConvNd):
     """
     )
 
+    kernel_size: tuple[int, int]
+    stride: tuple[int, int]
+    padding: str | tuple[int, int]
+    dilation: tuple[int, int]
+    output_padding: tuple[int, int]
+
     def __init__(
         self,
         in_channels: int,
@@ -676,6 +688,12 @@ class Conv3d(_ConvNd):
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
     )
+
+    kernel_size: tuple[int, int, int]
+    stride: tuple[int, int, int]
+    padding: str | tuple[int, int, int]
+    dilation: tuple[int, int, int]
+    output_padding: tuple[int, int, int]
 
     def __init__(
         self,
