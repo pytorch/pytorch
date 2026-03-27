@@ -72,13 +72,17 @@ def register_test_commands(subparsers: argparse._SubParsersAction) -> None:
 
 
 def _register_pytorch_commands(subparsers: argparse._SubParsersAction) -> None:
+    _register_lint_commands(subparsers)
+
+
+def _register_lint_commands(subparsers: argparse._SubParsersAction) -> None:
     available = "\n".join(
         f"  {gid:30} {plan.title}" for gid, plan in LINT_PLANS.items()
     )
     parser = subparsers.add_parser(
         "lint",
         help="Run lint test plans",
-        description="Run Pytroch test.\n\nAvailable group IDs:\n" + available,
+        description="Run PyTorch lint test.\n\nAvailable group IDs:\n" + available,
         formatter_class=RichHelp,
     )
     parser.add_argument(
