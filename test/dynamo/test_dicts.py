@@ -1298,7 +1298,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_f = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(f(), opt_f())
 
-    @parametrize("op", ["or_", "and_", "xor", "sub"])
+    @parametrize("op", ["or_", "and_", "xor", "sub", "iand", "ior", "ixor", "isub"])
     def test_cross_type_set_binop_dict_keys_vs_set(self, op):
         op = getattr(operator, op)
 
@@ -1310,7 +1310,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_f = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(f(), opt_f())
 
-    @parametrize("op", ["or_", "and_", "xor", "sub"])
+    @parametrize("op", ["or_", "and_", "xor", "sub", "iand", "ior", "ixor", "isub"])
     def test_cross_type_set_binop_dict_items_vs_set(self, op):
         op = getattr(operator, op)
 
@@ -1322,7 +1322,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_f = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(f(), opt_f())
 
-    @parametrize("op", ["or_", "and_", "xor", "sub"])
+    @parametrize("op", ["or_", "and_", "xor", "sub", "iand", "ior", "ixor", "isub"])
     def test_cross_type_set_binop_dict_keys_vs_dict_items(self, op):
         op = getattr(operator, op)
 
@@ -1334,7 +1334,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_f = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(f(), opt_f())
 
-    @parametrize("op", ["or_", "and_", "xor", "sub"])
+    @parametrize("op", ["or_", "and_", "xor", "sub", "iand", "ior", "ixor", "isub"])
     def test_cross_type_set_binop_dict_keys_vs_user_defined_set(self, op):
         class MySet(set):
             pass
@@ -1345,6 +1345,21 @@ class DictTests(torch._dynamo.test_case.TestCase):
             keys = {"one": 1, "two": 2, "three": 3}.keys()
             s = MySet({"one", "four"})
             return op(keys, s), op(s, keys)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["or_", "and_", "xor", "sub", "iand", "ior", "ixor", "isub"])
+    def test_cross_type_set_binop_dict_items_vs_user_defined_set(self, op):
+        class MySet(set):
+            pass
+
+        op = getattr(operator, op)
+
+        def f():
+            items = {"one": 1, "two": 2, "three": 3}.items()
+            s = MySet({"one", "four"})
+            return op(items, s), op(s, items)
 
         opt_f = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(f(), opt_f())
