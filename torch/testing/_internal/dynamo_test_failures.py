@@ -62,6 +62,11 @@ if not test_dir:
     logger.warning(
         "test/dynamo_expected_failures directory not found - known dynamo errors won't be skipped."
     )
+else:
+    logger = logging.getLogger(__name__)
+    logger.warning(
+        f"test_dir is {test_dir}."
+    )
 
 # Tests that run without strict mode in PYTORCH_TEST_WITH_INDUCTOR=1.
 # Please don't add anything to this list.
