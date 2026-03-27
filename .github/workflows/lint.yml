@@ -98,13 +98,8 @@ jobs:
       runner: mt-l-x86iamx-8-16
       docker-image: ghcr.io/pytorch/test-infra:cpu-x86_64-810d48d
       script: |
-        CHANGED_FILES="${{ needs.get-changed-files.outputs.changed-files }}"
-        echo "Running all other linters"
-        if [ "$CHANGED_FILES" = '*' ]; then
-          ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGTIDY_EXECUTORCH_COMPATIBILITY,CLANGFORMAT,PYREFLY --all-files" .github/scripts/lintrunner.sh
-        else
-          ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGTIDY_EXECUTORCH_COMPATIBILITY,CLANGFORMAT,PYREFLY ${CHANGED_FILES}" .github/scripts/lintrunner.sh
-        fi
+        uv pip install -e .ci/lumen_cli
+        lumen test lint --group-id lintrunner_noclang --input changed_files='${{ needs.get-changed-files.outputs.changed-files }}'
 
   quick-checks:
     if: github.repository_owner == 'pytorch'
