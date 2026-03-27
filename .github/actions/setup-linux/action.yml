@@ -131,10 +131,14 @@ runs:
       if: ${{ inputs.use-arc == 'true' }}
       shell: bash
       run: |
+        # Limit uv parallelism to avoid OOM on memory-constrained pods where
+        # uv defaults to the host CPU count (e.g., 192) instead of the pod
+        # limit. Can be removed once uv pip cache is ready
+        export UV_CONCURRENT_BUILDS=1
         uv pip install -r .ci/docker/requirements-ci.txt
         echo "CMAKE_PREFIX_PATH=${VIRTUAL_ENV}" >> "${GITHUB_ENV}"
 
-    - name: Install C++ compiler
+    - name: Activate C++ compiler
       if: ${{ inputs.use-arc == 'true' && inputs.compiler != '' }}
       shell: bash
       run: |
@@ -144,54 +148,38 @@ runs:
         CLANG_VERSION=$(echo "${COMPILER}" | perl -n -e'/^clang(\d+)$/ && print $1')
         GCC_VERSION=$(echo "${COMPILER}" | perl -n -e'/^gcc(\d+)$/ && print $1')
 
+        # Strip any gcc-toolset paths that might linger from the base image
+        CLEAN_PATH=$(echo "${PATH}" | tr ':' '\n' | grep -v '/opt/rh/gcc-toolset-' | tr '\n' ':' | sed 's/:$//')
+        CLEAN_LD_PATH=$(echo "${LD_LIBRARY_PATH:-}" | tr ':' '\n' | grep -v '/opt/rh/gcc-toolset-' | tr '\n' ':' | sed 's/:$//')
+
         if [ -z "${CLANG_VERSION}" ] && [ -z "${GCC_VERSION}" ]; then
           echo "ERROR: unrecognized compiler '${COMPILER}', expected gcc<N> or clang<N>"
           exit 1
         elif [ -n "${CLANG_VERSION}" ]; then
-          # Clang 20 and libomp-devel 20 are already installed in the base image.
-          # For older versions (15, 18), download pre-built tarballs from S3.
-          if [ "${CLANG_VERSION}" = "20" ]; then
-            echo "Using base image default clang 20"
-          elif [ "${CLANG_VERSION}" = "15" ] || [ "${CLANG_VERSION}" = "18" ]; then
-            ARCH=$(uname -m)
-            PLATFORM="linux-${ARCH}"
-            S3_URL="https://gha-artifacts.s3.amazonaws.com/clang/${PLATFORM}/clang-${CLANG_VERSION}/clang-${CLANG_VERSION}-${PLATFORM}.tar.gz"
-            INSTALL_DIR="/opt/clang-${CLANG_VERSION}"
-
-            echo "Downloading clang ${CLANG_VERSION} from ${S3_URL}"
-            curl -fsSL "${S3_URL}" -o /tmp/clang.tar.gz
-            mkdir -p "${INSTALL_DIR}"
-            tar xzf /tmp/clang.tar.gz -C "${INSTALL_DIR}" --strip-components=1
-            rm -f /tmp/clang.tar.gz
-
-            echo "PATH=${INSTALL_DIR}/bin:${PATH}" >> "${GITHUB_ENV}"
-            echo "CC=${INSTALL_DIR}/bin/clang" >> "${GITHUB_ENV}"
-            echo "CXX=${INSTALL_DIR}/bin/clang++" >> "${GITHUB_ENV}"
-            echo "CMAKE_PREFIX_PATH=${INSTALL_DIR}:${CMAKE_PREFIX_PATH:-}" >> "${GITHUB_ENV}"
-          else
-            echo "ERROR: unsupported clang version '${CLANG_VERSION}', available: 15, 18, 20"
+          # Clang versions are pre-installed in the base image under /opt/clang-{VERSION}.
+          INSTALL_DIR="/opt/clang-${CLANG_VERSION}"
+          if [ ! -d "${INSTALL_DIR}" ]; then
+            echo "ERROR: clang ${CLANG_VERSION} not found at ${INSTALL_DIR}"
             exit 1
           fi
+          echo "PATH=${INSTALL_DIR}/bin:${CLEAN_PATH}" >> "${GITHUB_ENV}"
+          echo "LD_LIBRARY_PATH=${CLEAN_LD_PATH}" >> "${GITHUB_ENV}"
+          echo "CC=${INSTALL_DIR}/bin/clang" >> "${GITHUB_ENV}"
+          echo "CXX=${INSTALL_DIR}/bin/clang++" >> "${GITHUB_ENV}"
+          echo "CMAKE_PREFIX_PATH=${INSTALL_DIR}:${CMAKE_PREFIX_PATH:-}" >> "${GITHUB_ENV}"
         else
-          # On AlmaLinux 9, GCC 11 is the system default at /usr/bin/gcc.
-          # Only install gcc-toolset for newer versions that aren't already available.
-          if [ "${GCC_VERSION}" = "11" ]; then
-            # Remove gcc/g++ from /usr/local/bin so they don't shadow /usr/bin/gcc (system default)
-            rm -f /usr/local/bin/gcc /usr/local/bin/g++ /usr/local/bin/cc /usr/local/bin/c++
-            # Strip any /opt/rh/gcc-toolset-* paths from PATH
-            CLEAN_PATH=$(echo "${PATH}" | tr ':' '\n' | grep -v '/opt/rh/gcc-toolset-' | tr '\n' ':' | sed 's/:$//')
-            echo "PATH=${CLEAN_PATH}" >> "${GITHUB_ENV}"
-            echo "Using system default GCC 11"
-          else
-            dnf install -y \
-              gcc-toolset-${GCC_VERSION}-gcc \
-              gcc-toolset-${GCC_VERSION}-gcc-c++ \
-              gcc-toolset-${GCC_VERSION}-gcc-gfortran
-
-            TOOLSET_ROOT="/opt/rh/gcc-toolset-${GCC_VERSION}/root/usr"
-            echo "PATH=${TOOLSET_ROOT}/bin:${PATH}" >> "${GITHUB_ENV}"
-            echo "LD_LIBRARY_PATH=${TOOLSET_ROOT}/lib64:${TOOLSET_ROOT}/lib:${LD_LIBRARY_PATH}" >> "${GITHUB_ENV}"
+          # All GCC versions are pre-installed in the base image via gcc-toolset
+          # under /opt/rh/gcc-toolset-{VERSION}. Remove /usr/local/bin compiler
+          # symlinks from the manylinux base image so they don't shadow the
+          # toolset we're activating.
+          rm -f /usr/local/bin/gcc /usr/local/bin/g++ /usr/local/bin/cc /usr/local/bin/c++
+          TOOLSET_ROOT="/opt/rh/gcc-toolset-${GCC_VERSION}/root/usr"
+          if [ ! -d "${TOOLSET_ROOT}" ]; then
+            echo "ERROR: gcc-toolset-${GCC_VERSION} not found at ${TOOLSET_ROOT}"
+            exit 1
           fi
+          echo "PATH=${TOOLSET_ROOT}/bin:${CLEAN_PATH}" >> "${GITHUB_ENV}"
+          echo "LD_LIBRARY_PATH=${TOOLSET_ROOT}/lib64:${TOOLSET_ROOT}/lib:${CLEAN_LD_PATH}" >> "${GITHUB_ENV}"
         fi
 
     - name: Switch CUDA version
