@@ -636,13 +636,8 @@ class StopTheWorldGuard {
 // == Thread local cache ======================================================
 // ============================================================================
 struct ThreadLocalResults {
-  ThreadLocalResults(
-      PyThreadState* thread_state,
-      ValueCache* value_cache,
-      PythonTracer* active_tracer)
-      : thread_state_{thread_state},
-        value_cache_{value_cache},
-        active_tracer_{active_tracer} {}
+  ThreadLocalResults(PyThreadState* thread_state, PythonTracer* active_tracer)
+      : thread_state_{thread_state}, active_tracer_{active_tracer} {}
 
   ThreadLocalResults() = delete;
   ThreadLocalResults(const ThreadLocalResults&) = delete;
@@ -656,13 +651,13 @@ struct ThreadLocalResults {
         Config<C>::event_type == E,
         "ThreadLocalResults.intern called from the wrong typed context.");
     auto callsite = Callsite<C>(std::forward<Args>(args)...);
-    return std::get<C>(trace_keys_).intern(callsite, ephemeral, *value_cache_);
+    return std::get<C>(trace_keys_).intern(callsite, ephemeral, value_cache_);
   }
 
   static constexpr size_t BLOCK_SIZE = 1024;
 
   PyThreadState* thread_state_;
-  ValueCache* value_cache_;
+  ValueCache value_cache_;
   PythonTracer* active_tracer_;
   CallTypeHelper<TraceKeyCacheState>::tuple_type trace_keys_;
   AppendOnlyList<c10::approx_time_t, BLOCK_SIZE> exit_times_;
@@ -743,7 +738,6 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
   std::deque<ThreadLocalResults> thread_local_results_;
   std::unordered_map<PyThreadState*, ThreadLocalResults*>
       thread_local_results_map_;
-  ValueCache value_cache_;
 
 #if IS_PYTHON_3_12
   friend PyObject* c_call_callback(
@@ -1058,7 +1052,7 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
   {
     StopTheWorldGuard stw(interpreter_);
     for (const auto thread_state : interpreterThreads()) {
-      thread_local_results_.emplace_back(thread_state, &value_cache_, this);
+      thread_local_results_.emplace_back(thread_state, this);
       auto& tls = thread_local_results_.back();
       thread_local_results_map_[thread_state] = &tls;
 
@@ -1295,12 +1289,14 @@ class PostProcess {
   PostProcess(
       std::function<c10::time_t(c10::approx_time_t)> time_converter,
       std::deque<ThreadLocalResults>& tls,
-      const ValueCache& value_cache,
       c10::time_t end_time_ns)
       : end_time_{end_time_ns}, time_converter_{std::move(time_converter)} {
     for (size_t python_tid : c10::irange(tls.size())) {
       CallTypeHelper<TraceKeyCacheState>::map(
-          tls[python_tid].trace_keys_, *this, value_cache, python_tid);
+          tls[python_tid].trace_keys_,
+          *this,
+          tls[python_tid].value_cache_,
+          python_tid);
 
       addExits<EventType::PyCall>(tls[python_tid].exit_times_, python_tid);
       addExits<EventType::PyCCall>(tls[python_tid].c_exit_times_, python_tid);
@@ -1461,12 +1457,11 @@ std::vector<std::shared_ptr<Result>> PythonTracer::getEvents(
     std::function<c10::time_t(c10::approx_time_t)> time_converter,
     std::vector<python_tracer::CompressedEvent>& enters,
     c10::time_t end_time_ns) {
-  value_cache_.trimPrefixes();
+  for (auto& tls : thread_local_results_) {
+    tls.value_cache_.trimPrefixes();
+  }
   PostProcess post_process(
-      std::move(time_converter),
-      thread_local_results_,
-      value_cache_,
-      end_time_ns);
+      std::move(time_converter), thread_local_results_, end_time_ns);
   post_process.set_start_frames(start_frames_, enters);
   auto out = post_process.run(enters);
 
