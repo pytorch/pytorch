@@ -325,10 +325,12 @@ def cudagraph_partition_post_compile(
         # cudagraphify is not called if there are no partitions
         BoxedBool.disable(cudagraphs)
         maybe_handle_backward_generation(compiled_graph, boxed_forward_device_index)
-        # Raise an error if no CUDA graphable partitions are found and the user 
-        # has explicitly enabled the 'cudagraph_or_error' configuration.
-        if config.inductor.cudagraph_or_error and len(compiled_graph.partition_maps) == 0:
-            raise RuntimeError("Unable to find any CUDA graphable partitions")
+        if cudagraph_fail_reasons:
+            log_cudagraph_skip_and_bump_counter(f"skipping cudagraphs due to {cudagraph_fail_reasons=}")
+        elif compiled_graph.partition_maps is None:
+            log_cudagraph_skip_and_bump_counter("skipping cudagraphs as compiled_graph.partition_maps is None")
+        else:
+            log_cudagraph_skip_and_bump_counter("skipping cudagraphs as len(compiled_graph.partition_maps) == 0")
         return
 
     assert compiled_graph.current_callable is not None
