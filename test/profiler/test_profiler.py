@@ -3775,6 +3775,7 @@ class TestProfilerEventsParity(TestCase):
             self.assertIsInstance(e.name, str)
             self.assertGreater(e.time_range.end - e.time_range.start, 0)
 
+        # Parity: count should match python_function events in Chrome trace
         with TemporaryFileName(mode="w+") as fname:
             prof.export_chrome_trace(fname)
             with open(fname) as f:
@@ -3793,6 +3794,7 @@ class TestProfilerEventsParity(TestCase):
             x = torch.randn(32, 32, device="cuda")
             torch.mm(x, x)
 
+        # Collect async CPU->GPU flow info from events()
         events_with_flow = [
             e for e in prof.events() if e.flow_id is not None and e.flow_id != 0
         ]
@@ -3805,6 +3807,7 @@ class TestProfilerEventsParity(TestCase):
             self.assertIsInstance(e.flow_type, int)
             self.assertIsInstance(e.flow_start, bool)
 
+        # Verify parity with Chrome trace JSON for async CPU->GPU flow
         with TemporaryFileName(mode="w+") as fname:
             prof.export_chrome_trace(fname)
             with open(fname) as f:
@@ -3891,8 +3894,12 @@ class TestProfilerEventsParity(TestCase):
             with open(fname) as f:
                 j = json.load(f)
 
+            # Chrome trace is relative to a different base time which is not exposed in Python.
+            # It's probably not important to do so as we still have the relative differences
+            # in duration.
             base_time_ns = j.get("baseTimeNanoseconds", 0)
 
+            # Grab mm timestamp from events() and json
             fe_mm = next((e for e in prof.events() if e.name == "aten::mm"), None)
             json_mm = next(
                 (
@@ -3903,9 +3910,9 @@ class TestProfilerEventsParity(TestCase):
                 None,
             )
 
-            # Chrome trace uses a different base time; reconstruct ts from events()
-            # absolute_ns = start_us * 1000 + trace_start_ns
-            # chrome_ts = (absolute_ns - base_time_ns) / 1000
+            # Reconstruct Chrome trace ts from events():
+            # absolute_ns = mm_op_start_us * 1000 + trace_start_ns
+            # chrome_ts = (absolute_ns - base_time_ns) / 1000 -> realign with json timeframe
             absolute_ns = int(fe_mm.time_range.start * 1000) + trace_start_ns
             recovered_ts = (absolute_ns - base_time_ns) / 1000
             self.assertEqual(
