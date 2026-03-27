@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstdint>
+#include <unordered_map>
 #include <utility>
 
 #include <ATen/mps/MPSDevice.h>
@@ -130,6 +131,10 @@ class TORCH_API MPSStream {
   bool _enableCommitAndContinue = true;
   // Buffer that contains last raised error
   MTLBuffer_t _errorBuffer = nil;
+  // Cache of compiled MPSGraphExecutable objects keyed by MPSGraph pointer.
+  // Populated lazily on first executeMPSGraph call per graph; never invalidated
+  // because each MPSGraph* in MPSGraphCache is shape-specific.
+  std::unordered_map<uintptr_t, void*> _graphExecutableCache;
 
   // use synchronize() to access any of these commit functions outside MPSStream
   void commit();

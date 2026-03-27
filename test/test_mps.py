@@ -16549,6 +16549,84 @@ class TestMetalLibrary(TestCaseMPS):
         self.assertEqual(x, torch.tensor([1.0, 4.0, 9.0, 16.0], device="mps"))
 
 
+class TestExecutableCache(TestCaseMPS):
+    """Verify MPSStream._graphExecutableCache correctness.
+
+    The cache is internal — there is no Python API to inspect it.  Tests confirm
+    that the warm (cached executable) path produces identical results to the cold
+    (first-call compilation) path for a variety of op types.
+    """
+
+    def _assert_mps_matches_cpu(self, mps_tensor, cpu_ref, atol=1e-4, rtol=1e-4):
+        self.assertEqual(mps_tensor.cpu(), cpu_ref, atol=atol, rtol=rtol)
+
+    def test_matmul_warm_path_correctness(self):
+        # Cold call #1 compiles the executable; calls 2-10 use the cache.
+        a = torch.randn(64, 64, device="mps")
+        b = torch.randn(64, 64, device="mps")
+        ref = a.cpu() @ b.cpu()
+        for _ in range(10):
+            self._assert_mps_matches_cpu(a @ b, ref)
+
+    def test_layernorm_warm_path_correctness(self):
+        m = torch.nn.LayerNorm(128).to("mps").eval()
+        x = torch.randn(16, 128, device="mps")
+        with torch.no_grad():
+            ref = copy.deepcopy(m).cpu()(x.cpu())
+            for _ in range(10):
+                self._assert_mps_matches_cpu(m(x), ref)
+
+    def test_softmax_warm_path_correctness(self):
+        x = torch.randn(32, 256, device="mps")
+        ref = torch.softmax(x.cpu(), dim=-1)
+        for _ in range(10):
+            self._assert_mps_matches_cpu(torch.softmax(x, dim=-1), ref, atol=1e-5, rtol=1e-5)
+
+    def test_rmsnorm_warm_path_correctness(self):
+        x = torch.randn(16, 512, device="mps", dtype=torch.float16)
+        ns = [512]
+        ref = torch.nn.functional.rms_norm(x.float().cpu(), ns)
+        for _ in range(10):
+            result = torch.nn.functional.rms_norm(x, ns)
+            self._assert_mps_matches_cpu(result.float(), ref, atol=1e-2, rtol=1e-2)
+
+    def test_different_graphs_independent_cache_entries(self):
+        # Two different nn.Linear modules → two different MPSGraph* keys.
+        # Both must produce correct results — no aliasing in the exe cache.
+        m1 = torch.nn.Linear(32, 64, bias=False, device="mps").eval()
+        m2 = torch.nn.Linear(64, 32, bias=False, device="mps").eval()
+        x1 = torch.randn(8, 32, device="mps")
+        x2 = torch.randn(8, 64, device="mps")
+        with torch.no_grad():
+            ref1 = copy.deepcopy(m1).cpu()(x1.cpu())
+            ref2 = copy.deepcopy(m2).cpu()(x2.cpu())
+            for _ in range(5):
+                self._assert_mps_matches_cpu(m1(x1), ref1)
+                self._assert_mps_matches_cpu(m2(x2), ref2)
+
+    def test_new_input_data_on_warm_path(self):
+        # Warm path re-binds buffers per call — different input each time must give
+        # the correct result, not the cached result from the cold call.
+        m = torch.nn.Linear(16, 16, bias=False, device="mps").eval()
+        inputs = [torch.randn(4, 16, device="mps") for _ in range(8)]
+        with torch.no_grad():
+            m_cpu = copy.deepcopy(m).cpu()
+            refs = [m_cpu(x.cpu()) for x in inputs]
+            m(inputs[0])  # warm up cache
+            for x, ref in zip(inputs, refs):
+                self._assert_mps_matches_cpu(m(x), ref)
+
+    def test_f16_executable_correctness(self):
+        # f16 inputs must compile and cache correctly — dtype is part of the MPSGraph*.
+        m = torch.nn.Linear(32, 32, bias=False, device="mps").to(torch.float16).eval()
+        x = torch.randn(8, 32, device="mps", dtype=torch.float16)
+        with torch.no_grad():
+            ref = copy.deepcopy(m).cpu().float()(x.float().cpu())
+            for _ in range(5):
+                result = m(x)
+                self.assertEqual(result.float().cpu(), ref, atol=1e-2, rtol=1e-2)
+
+
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
 # This requires mps to be properly registered in the device generic test framework which is not the
 # case right now. We can probably use `allow_mps` introduced in https://github.com/pytorch/pytorch/pull/87342

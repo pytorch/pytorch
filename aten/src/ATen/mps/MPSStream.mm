@@ -37,6 +37,9 @@ MPSStream::MPSStream(Stream stream) : _stream(stream) {
 }
 
 MPSStream::~MPSStream() {
+  for (auto& [key, val] : _graphExecutableCache) {
+    [(__bridge MPSGraphExecutable*)val release];
+  }
   [_commandQueue release];
   _commandQueue = nil;
   [_executionDescriptor release];
@@ -220,16 +223,65 @@ void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDicti
   dispatch_sync_with_rethrow(_serialQueue, ^() {
     endKernelCoalescing();
     if (isGraphProfilingEnabled) {
-      // this function call is only relevant for interval-based Signposts
-      // which exclude schedule time (only includes GPU run time)
       profiler.beginProfileGPUInterval(mpsGraph);
     }
-    // note: CommitAndContinue feature is enabled/disabled via "_executionDescriptor"
-    [mpsGraph encodeToCommandBuffer:commandBuffer()
-                              feeds:feeds
-                   targetOperations:nil
-                  resultsDictionary:results
-                executionDescriptor:_executionDescriptor];
+
+    if (!isGraphProfilingEnabled) {
+      // Warm path: use a compiled MPSGraphExecutable to skip per-call graph re-validation.
+      // _graphExecutableCache is only accessed inside _serialQueue, so no extra locking needed.
+      uintptr_t graphKey = reinterpret_cast<uintptr_t>(mpsGraph);
+      auto it = _graphExecutableCache.find(graphKey);
+      MPSGraphExecutable* exe = nil;
+      if (it != _graphExecutableCache.end()) {
+        exe = (__bridge MPSGraphExecutable*)it->second;
+      } else {
+        // First call for this graph: compile the executable.
+        NSMutableDictionary<MPSGraphTensor*, MPSGraphShapedType*>* feedShapes =
+            [[NSMutableDictionary alloc] initWithCapacity:[feeds count]];
+        for (MPSGraphTensor* t in feeds) {
+          MPSGraphTensorData* tdata = (MPSGraphTensorData*)feeds[t];
+          feedShapes[t] = [[[MPSGraphShapedType alloc] initWithShape:tdata.shape
+                                                            dataType:tdata.dataType] autorelease];
+        }
+        exe = [[mpsGraph compileWithDevice:[MPSGraphDevice deviceWithMTLDevice:device()]
+                                     feeds:feedShapes
+                             targetTensors:[results allKeys]
+                          targetOperations:nil
+                     compilationDescriptor:_compilationDescriptor] retain];
+        [feedShapes release];
+        _graphExecutableCache[graphKey] = (__bridge void*)exe;
+      }
+
+      // Build ordered input/output arrays using the stable ordering from the executable.
+      NSArray<MPSGraphTensor*>* feedTensors = exe.feedTensors;
+      NSArray<MPSGraphTensor*>* targetTensors = exe.targetTensors;
+      NSMutableArray<MPSGraphTensorData*>* inputsArray =
+          [[NSMutableArray alloc] initWithCapacity:feedTensors.count];
+      for (MPSGraphTensor* t in feedTensors) {
+        [inputsArray addObject:(MPSGraphTensorData*)feeds[t]];
+      }
+      NSMutableArray<MPSGraphTensorData*>* resultsArray =
+          [[NSMutableArray alloc] initWithCapacity:targetTensors.count];
+      for (MPSGraphTensor* t in targetTensors) {
+        [resultsArray addObject:(MPSGraphTensorData*)results[t]];
+      }
+
+      [exe encodeToCommandBuffer:commandBuffer()
+                     inputsArray:inputsArray
+                    resultsArray:resultsArray
+             executionDescriptor:nil];
+
+      [inputsArray release];
+      [resultsArray release];
+    } else {
+      // Profiling path: use MPSGraph directly so profiler hooks work correctly.
+      // note: CommitAndContinue feature is enabled/disabled via "_executionDescriptor"
+      [mpsGraph encodeToCommandBuffer:commandBuffer()
+                                feeds:feeds
+                     targetOperations:nil
+                    resultsDictionary:results
+                  executionDescriptor:_executionDescriptor];
+    }
 
     SyncType _syncType = syncType;
     // if commitAndContinue is disabled, we need to always commit manually after encoding
