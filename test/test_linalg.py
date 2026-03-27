@@ -6592,7 +6592,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @parametrize("m", [0, 8, 17])
     @parametrize("k", [0, 16, 32])
     @parametrize("n", [16, 32])
-
     @parametrize("use_transpose_a", [True, False])
     @parametrize("use_transpose_b", [True, False])
     @parametrize("non_contig_type", [0, 1, 2])

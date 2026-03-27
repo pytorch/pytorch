@@ -4,7 +4,7 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 
-#include "oneapi/dnnl/dnnl.hpp"
+#include <oneapi/dnnl/dnnl.hpp>
 
 namespace {
 template <typename T>
