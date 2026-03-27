@@ -6,6 +6,8 @@ import logging
 from cli.lib.common.cli_helper import register_targets, RichHelp, TargetSpec
 from cli.lib.core.torchtitan.torchtitan_test import TorchtitanTestRunner
 from cli.lib.core.vllm.vllm_test import VllmTestRunner
+from cli.lib.pytorch.lint_test.lint_plans import LINT_PLANS
+from cli.lib.pytorch.runner import PytorchTestRunner
 
 
 logger = logging.getLogger(__name__)
@@ -66,3 +68,33 @@ def register_test_commands(subparsers: argparse._SubParsersAction) -> None:
         formatter_class=RichHelp,
     )
     register_targets(external_parser, _TARGETS, common_args=common_args)
+    _register_pytorch_commands(build_subparsers)
+
+
+def _register_pytorch_commands(subparsers: argparse._SubParsersAction) -> None:
+    _register_lint_commands(subparsers)
+
+
+def _register_lint_commands(subparsers: argparse._SubParsersAction) -> None:
+    available = "\n".join(
+        f"  {gid:30} {plan.title}" for gid, plan in LINT_PLANS.items()
+    )
+    parser = subparsers.add_parser(
+        "lint",
+        help="Run lint test plans",
+        description="Run PyTorch lint test.\n\nAvailable group IDs:\n" + available,
+        formatter_class=RichHelp,
+    )
+    parser.add_argument(
+        "--group-id",
+        required=True,
+        help="lint plan to run, e.g. 'lintrunner_noclang'",
+    )
+    parser.add_argument(
+        "--input",
+        metavar="KEY=VALUE",
+        action="append",
+        default=[],
+        help="override plan inputs, e.g. --input changed_files='src/foo.py src/bar.py'",
+    )
+    parser.set_defaults(func=lambda args: PytorchTestRunner(args).run())
