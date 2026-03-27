@@ -717,6 +717,37 @@ class KernelCallLine(WrapperLine):
 
 
 @dataclasses.dataclass
+class VariantKernelCallLine(WrapperLine):
+    """Deferred WrapperLine that emits runtime if/else dispatch between kernel variants.
+
+    Like KernelCallLine but for multi-variant dispatch. Wrapper codegen appends
+    WrapperLine objects during IR lowering; actual code emission happens later
+    when codegen() is called during the flush pass. This class carries the
+    variant list and runtime condition, then delegates to
+    _generate_variant_kernel_call_helper to emit the if/else structure.
+    """
+
+    wrapper: PythonWrapperCodegen
+    kernel_name: str
+    call_args: tuple[Any, ...]
+    arg_types: list[str]
+    variants: list[Any]  # list[KernelVariant]
+    runtime_condition: str
+    device: torch.device
+    graph_name: str
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        self.wrapper._generate_variant_kernel_call_helper(
+            self.kernel_name,
+            self.call_args,
+            self.variants,
+            self.runtime_condition,
+            self.device,
+            self.graph_name,
+        )
+
+
+@dataclasses.dataclass
 class KernelDefinitionLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     kernel_name: str
@@ -1210,6 +1241,7 @@ class PythonWrapperCodegen(CodeGen):
     """
 
     supports_caching: bool = True  # Whether the output code is cacheable.
+    supports_variant_dispatch: bool = True  # Whether the wrapper can emit if/else variant dispatch.
 
     def __init__(self):
         super().__init__()
@@ -3159,6 +3191,8 @@ class PythonWrapperCodegen(CodeGen):
         triton_meta=None,
         inductor_meta=None,
         original_fxnode_name=None,
+        variants=None,
+        runtime_condition=None,
     ):
         """
         Generates kernel call code.
@@ -3178,27 +3212,42 @@ class PythonWrapperCodegen(CodeGen):
         )
 
         device = device or V.graph.get_current_device_or_throw()
-        self.writeline(
-            KernelCallLine(
-                self,
-                kernel_name=kernel_name,
-                call_args=call_args,
-                # pyrefly: ignore [bad-argument-type]
-                raw_keys=raw_keys,
-                # pyrefly: ignore [bad-argument-type]
-                raw_args=raw_args,
-                # pyrefly: ignore [bad-argument-type]
-                arg_types=arg_types,
-                triton=triton,
-                # pyrefly: ignore [bad-argument-type]
-                triton_meta=triton_meta,
-                inductor_meta=inductor_meta,
-                device=device,
-                graph_name=V.graph.name,
-                # pyrefly: ignore [bad-argument-type]
-                original_fxnode_name=original_fxnode_name,
+
+        if variants and runtime_condition:
+            self.writeline(
+                VariantKernelCallLine(
+                    self,
+                    kernel_name=kernel_name,
+                    call_args=call_args,
+                    arg_types=arg_types or [],
+                    variants=variants,
+                    runtime_condition=runtime_condition,
+                    device=device,
+                    graph_name=V.graph.name,
+                )
             )
-        )
+        else:
+            self.writeline(
+                KernelCallLine(
+                    self,
+                    kernel_name=kernel_name,
+                    call_args=call_args,
+                    # pyrefly: ignore [bad-argument-type]
+                    raw_keys=raw_keys,
+                    # pyrefly: ignore [bad-argument-type]
+                    raw_args=raw_args,
+                    # pyrefly: ignore [bad-argument-type]
+                    arg_types=arg_types,
+                    triton=triton,
+                    # pyrefly: ignore [bad-argument-type]
+                    triton_meta=triton_meta,
+                    inductor_meta=inductor_meta,
+                    device=device,
+                    graph_name=V.graph.name,
+                    # pyrefly: ignore [bad-argument-type]
+                    original_fxnode_name=original_fxnode_name,
+                )
+            )
 
     def _generate_kernel_call_helper(
         self,
@@ -3387,6 +3436,48 @@ class PythonWrapperCodegen(CodeGen):
         with debug_printer_manager:
             self.writeline(f"{kernel_name}.run({call_args_str}, stream={stream_name})")
         self.write_triton_header_once()
+
+    def _generate_variant_kernel_call_helper(
+        self,
+        kernel_name: str,
+        call_args,
+        variants,
+        runtime_condition: str,
+        device=None,
+        graph_name="",
+    ):
+        """Emit runtime if/else dispatch between N kernel variants.
+
+        Generates code like:
+            if s0 % 16 == 0:
+                kernel_div16.run(args, stream=stream0)
+            else:
+                kernel_general.run(args, stream=stream0)
+
+        The first variant gets the runtime_condition as its `if` guard.
+        The last variant is always the `else` fallback (no condition).
+        Intermediate variants (for N>2 strategies) use per-variant conditions.
+        """
+        device = device or V.graph.get_current_device_or_throw()
+        call_args_str = ", ".join(self.prepare_triton_kernel_call(call_args))
+        stream_name = PythonWrapperCodegen.write_get_raw_stream(
+            self, device.index, graph_name
+        )
+        self.write_triton_header_once()
+
+        for i, variant in enumerate(variants):
+            variant_name = kernel_name + variant.suffix
+            run_call = f"{variant_name}.run({call_args_str}, stream={stream_name})"
+
+            if i == 0 and runtime_condition:
+                self.writeline(f"if {runtime_condition}:")
+            elif i == len(variants) - 1:
+                self.writeline("else:")
+            else:
+                self.writeline(f"elif {getattr(variant, 'condition', 'True')}:")
+            self.wrapper_call.do_indent()
+            self.writeline(run_call)
+            self.wrapper_call.do_unindent()
 
     def writeline(self, line):
         self.lines.append(line)

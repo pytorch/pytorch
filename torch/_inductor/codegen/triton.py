@@ -115,6 +115,7 @@ from .simd import (
 from .triton_utils import (
     config_of,
     equal_1_arg_indices,
+    config_with_speculative_divisible,
     non_constexpr_signature,
     should_unwrap_unspec_arg,
     signature_to_meta,
@@ -139,6 +140,22 @@ perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 async_compile = AsyncCompile()
+
+
+@dataclasses.dataclass
+class KernelVariant:
+    """A compiled Triton kernel variant with specific divisibility assumptions.
+
+    When speculative_divisibility is enabled, we AOT-compile multiple variants
+    of each kernel: a fast variant with tt.divisibility=16 annotations on
+    speculated SizeArgs, and a general fallback without. The wrapper emits
+    runtime if/else dispatch between them.
+    """
+
+    config: Any  # AttrsDescriptorWrapper for this variant's divisibility assumptions
+    suffix: str  # appended to kernel name, e.g. "_div16" or "_general"
+    triton_meta: dict  # full triton_meta dict with this variant's configs
+    src_code: str = ""  # Triton source code, filled after codegen via repr replacement
 
 # Threshold for detecting inner reductions based on tiling score ratio.
 # If r0_tiling_score / x_tiling_score >= this value, upgrade DEFAULT hint to INNER.
@@ -5760,6 +5777,44 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if flops is not None:
                 inductor_meta["kernel_flop"] = flops
 
+        # Speculative divisibility: always compile two kernel variants —
+        # _div16 (all symbolic SizeArgs annotated as divisible by 16) and
+        # _general (no speculation) — with runtime if/else dispatch.
+        # This avoids Dynamo guard pollution and 2^N graph recompilations.
+        # Disabled for: cpp_wrapper (AOTI uses offline compilation with known
+        # shapes), autotune_at_compile_time (variant dispatch doesn't handle
+        # autotune example args), WrapperFxCodegen (FX IR can't represent
+        # if/else dispatch).
+        base_config = config_of(signature)
+        if (
+            not V.graph.cpp_wrapper
+            and config.triton.speculative_divisibility
+            and not config.triton.autotune_at_compile_time
+            and V.graph.wrapper_code.supports_variant_dispatch
+        ):
+            fast_config, speculative_args = config_with_speculative_divisible(signature, base_config)
+        else:
+            fast_config, speculative_args = base_config, []
+
+        if speculative_args:
+            self._speculative_args = speculative_args
+            self.variants: list[KernelVariant] = [
+                KernelVariant(
+                    config=fast_config,
+                    suffix="_div16",
+                    triton_meta={**triton_meta, "configs": [fast_config]},
+                ),
+                KernelVariant(
+                    config=base_config,
+                    suffix="_general",
+                    triton_meta={**triton_meta, "configs": [base_config]},
+                ),
+            ]
+        else:
+            # No speculation — single kernel, existing path
+            self._speculative_args = []
+            self.variants = []
+
         # Triton compiler includes equal_to_1 args into constants even
         # when they are not constexpr. otherwise there may be a segfault
         # during launching the Inductor-compiled Triton kernel.
@@ -5846,7 +5901,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if config.benchmark_kernel:
             code.splice(self.codegen_kernel_benchmark(num_gb))
 
-        return code.getvalue()
+        src_code = code.getvalue()
+
+        # Generate per-variant Triton source by replacing triton_meta in the source.
+        # The kernel body is identical across variants — only the @triton_heuristics
+        # decorator's triton_meta differs (different divisible_by_16 annotations).
+        # src_code contains the base config; we replace it with each variant's config.
+        if self.variants:
+            base_meta_repr = repr(triton_meta)
+            for variant in self.variants:
+                variant_meta_repr = repr(variant.triton_meta)
+                variant.src_code = src_code.replace(base_meta_repr, variant_meta_repr)
+
+        return src_code
 
     @staticmethod
     def _get_persistent_RBLOCK(rnumel):
@@ -5958,17 +6025,64 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         for ws in self.args.workspace_args:
             wrapper.generate_workspace_allocation(ws)
 
-        wrapper.generate_kernel_call(
-            name,
-            call_args,
-            triton=True,
-            arg_types=arg_types,
-            triton_meta=self.triton_meta,
-            inductor_meta=self.inductor_meta,
-        )
+        if self.variants:
+            runtime_condition = self._build_runtime_condition(
+                self._speculative_args, call_args
+            )
+            wrapper.generate_kernel_call(
+                name,
+                call_args,
+                triton=True,
+                arg_types=arg_types,
+                triton_meta=self.triton_meta,
+                inductor_meta=self.inductor_meta,
+                variants=self.variants,
+                runtime_condition=runtime_condition,
+            )
+        else:
+            wrapper.generate_kernel_call(
+                name,
+                call_args,
+                triton=True,
+                arg_types=arg_types,
+                triton_meta=self.triton_meta,
+                inductor_meta=self.inductor_meta,
+            )
 
         if deallocate_ws:
             self.deallocate_workspaces()
+
+    def _build_runtime_condition(
+        self,
+        speculative_args: list[tuple[int, sympy.Expr]],
+        call_args: list[Any],
+    ) -> str | None:
+        """Build a single bitwise OR runtime condition for variant dispatch.
+
+        Combines checks into (a | b | c) % 16 == 0 instead of
+        a % 16 == 0 and b % 16 == 0 and c % 16 == 0.
+
+        This equivalence holds because 16 is a power of 2: for any power-of-2 k,
+        (a | b) % k == 0 iff a % k == 0 and b % k == 0, since the low bits of
+        (a | b) are the union of the low bits of a and b. Do not reuse this
+        pattern for non-power-of-2 divisors.
+
+        speculative_args is already deduplicated by config_with_speculative_divisible.
+        """
+        check_vars: list[str] = []
+        for arg_index, sympy_expr in speculative_args:
+            call_var = (
+                call_args[arg_index]
+                if arg_index < len(call_args)
+                else str(sympy_expr)
+            )
+            check_vars.append(str(call_var))
+
+        if not check_vars:
+            return None
+        if len(check_vars) == 1:
+            return f"{check_vars[0]} % 16 == 0"
+        return f"({' | '.join(check_vars)}) % 16 == 0"
 
     def codegen_nan_check(self) -> None:
         wrapper = V.graph.wrapper_code
@@ -6499,34 +6613,46 @@ class TritonScheduling(SIMDScheduling):
 
             # use the original src_code as the key
             wrapper.src_to_kernel[src_code] = kernel_name
-            subs_name = kernel_name if config.triton.unique_kernel_names else "triton_"
 
-            # DESCRIPTIVE_NAME is used for profiling purposes; it shows the full kernel name
-            # even when unique_kernel_names is turned off. Meanwhile, KERNEL_NAME is sometimes set
-            # to "triton_" to maximize caching opportunities (when unique_kernel_names = False).
-            src_code = src_code.replace(str(Placeholder.DESCRIPTIVE_NAME), kernel_name)
-            src_code = src_code.replace(str(Placeholder.KERNEL_NAME), subs_name)
+            # Emit kernel definitions: one per variant if speculative dispatch is active,
+            # otherwise just the single base kernel. Each entry is (name, source).
+            if getattr(kernel, "variants", None):
+                emit_list = [
+                    (kernel_name + v.suffix, v.src_code) for v in kernel.variants
+                ]
+            else:
+                emit_list = [(kernel_name, src_code)]
 
-            # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
-            # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
-            src_code = src_code.replace("#pragma CMT", "#")
-
-            _basename, _, kernel_path = get_path(code_hash(src_code.strip()), "py")
-
-            self._emit_kernel_to_wrapper(
-                wrapper,
-                kernel,
-                src_code,
-                kernel_name,
-                subs_name,
-                node_schedule,
-                kernel_path,
-                get_kernel_metadata,
-            )
+            for emit_name, emit_src in emit_list:
+                subs_name = (
+                    emit_name if config.triton.unique_kernel_names else "triton_"
+                )
+                emit_src = emit_src.replace(
+                    str(Placeholder.DESCRIPTIVE_NAME), emit_name
+                )
+                emit_src = emit_src.replace(
+                    str(Placeholder.KERNEL_NAME), subs_name
+                )
+                emit_src = emit_src.replace("#pragma CMT", "#")
+                _basename, _, kernel_path = get_path(
+                    code_hash(emit_src.strip()), "py"
+                )
+                self._emit_kernel_to_wrapper(
+                    wrapper,
+                    kernel,
+                    emit_src,
+                    emit_name,
+                    subs_name,
+                    node_schedule,
+                    kernel_path,
+                    get_kernel_metadata,
+                )
 
             # log kernel metadata for offline analysis.
             # E.g. one can find all unaligned inner reduction and check if
             # padding helps with the perf kernel by kernel.
+            # When variants are emitted, kernel_path holds the last variant's
+            # path after the loop — still useful for locating the kernel on disk.
             if metrics.is_metric_table_enabled("kernel_metadata"):
                 metrics.log_kernel_metadata(kernel_name, kernel_path, src_code)
 

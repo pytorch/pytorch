@@ -145,6 +145,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
     """
 
     supports_caching = False
+    supports_variant_dispatch = False  # FX IR cannot represent if/else variant dispatch.
 
     def __init__(self, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)

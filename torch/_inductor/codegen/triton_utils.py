@@ -309,3 +309,69 @@ def config_of(
 
     # pyrefly: ignore [bad-argument-count, bad-argument-type]
     return AttrsDescriptorWrapper(divisible_by_16, equal_to_1, pointer_range_32)
+
+def _get_divisible_by_16(attrs_config: Any) -> set[int]:
+    """Extract divisible-by-16 arg indices from an AttrsDescriptorWrapper.
+
+    AttrsDescriptorWrapper has different formats across Triton versions:
+      - V0 (no triton) / V1 (triton.compiler): namedtuple with .divisible_by_16
+      - V2/V3 (triton.backends): AttrsDescriptor with .divisibility_16
+      - V4 (2025 dict): {(idx,): [["tt.divisibility", 16]], ...}
+    """
+    if hasattr(attrs_config, "divisible_by_16"):
+        return set(attrs_config.divisible_by_16)
+    if hasattr(attrs_config, "divisibility_16"):
+        return set(attrs_config.divisibility_16)
+    if isinstance(attrs_config, dict):
+        return {k[0] for k in attrs_config if isinstance(k, tuple)}
+    return set()
+
+
+def config_with_speculative_divisible(
+    args: list[KernelArgType],
+    base_config: Any,
+    *,
+    indices: list[int] | None = None,
+) -> tuple[Any, list[tuple[int, sympy.Expr]]]:
+    """Build a config with all symbolic SizeArgs speculatively annotated as div16.
+
+    When dynamic=True, SizeArgs (strides, numels) may not be statically provable
+    as divisible by 16, preventing Triton from emitting vectorized loads. This
+    function builds a config that speculatively annotates all such SizeArgs as
+    div16, paired with a list of (arg_index, sympy_expr) for building a runtime
+    dispatch condition.
+
+    Returns (fast_config, speculative_args). speculative_args is empty if
+    no speculation is needed, in which case fast_config == base_config.
+    Deduplicates by sympy expression (multiple SizeArgs can share the same symbol).
+    """
+    if indices is None:
+        indices = list(range(len(args)))
+
+    proven_div16 = _get_divisible_by_16(base_config)
+    extra: list[tuple[int, sympy.Expr]] = []
+    seen_exprs: set[sympy.Expr] = set()
+
+    for i, arg in zip(indices, args):
+        if i in proven_div16:
+            continue
+        if not isinstance(arg, SizeArg):
+            continue
+        if arg.name.startswith("load_seed_offset"):
+            continue
+        if arg.expr is None:
+            continue
+        if isinstance(arg.expr, (float, bool)):
+            continue
+        if arg.expr in seen_exprs:
+            continue
+        seen_exprs.add(arg.expr)
+        extra.append((i, arg.expr))
+
+    if not extra:
+        return base_config, []
+
+    all_div16 = tuple(sorted(proven_div16 | {i for i, _ in extra}))
+    equal_to_1 = equal_1_arg_indices(args, indices=indices)
+    fast_config = AttrsDescriptorWrapper(all_div16, equal_to_1)
+    return fast_config, extra
