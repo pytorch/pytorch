@@ -1950,7 +1950,7 @@ class DictKeysVariable(DictViewVariable):
             m = getattr(self.set_items, name)
             r = m(args[0].set_items)  # type: ignore[attr-defined]
             return SetVariable(r)
-        if name in cmp_name_to_op_mapping:
+        elif name in cmp_name_to_op_mapping:
             if not isinstance(
                 args[0],
                 (
@@ -2069,6 +2069,21 @@ class DictItemsVariable(DictViewVariable):
             fn_hdl = getattr(self.set_items, name)
             ret_val = fn_hdl(args[0].set_items)  # type: ignore[attr-defined]
             return SetVariable(ret_val)
+        elif name in cmp_name_to_op_mapping:
+            if not isinstance(
+                args[0],
+                (
+                    SetVariable,
+                    variables.UserDefinedSetVariable,
+                    DictItemsVariable,
+                    DictKeysVariable,
+                ),
+            ):
+                return VariableTracker.build(tx, NotImplemented)
+            return VariableTracker.build(
+                tx,
+                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items),  # type: ignore[attr-defined]
+            )
         return super().call_method(tx, name, args, kwargs)
 
     def is_python_hashable(self) -> Literal[False]:
