@@ -1916,10 +1916,15 @@ class CyclicLR(LRScheduler):
             )
         # pyrefly: ignore [bad-assignment]
         step_size_up = float(step_size_up)
-        step_size_down = (
+        if step_size_down is not None:
+            if step_size_down <= 0:
+                raise ValueError(
+                    f"step_size_down must be a positive integer, but got {step_size_down}"
+                )
             # pyrefly: ignore [bad-assignment]
-            float(step_size_down) if step_size_down is not None else step_size_up
-        )
+            step_size_down = float(step_size_down)
+        else:
+            step_size_down = step_size_up
         # pyrefly: ignore [unsupported-operation]
         self.total_size = step_size_up + step_size_down
         self.step_ratio = step_size_up / self.total_size

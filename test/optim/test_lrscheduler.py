@@ -1717,14 +1717,17 @@ class TestLRScheduler(TestCase):
 
     @parametrize("step_size_up", [0, -1])
     def test_cycle_lr_step_size_up_non_positive(self, step_size_up):
-        base_lr = 1
-        max_lr = 5
         with self.assertRaisesRegex(
             ValueError, "step_size_up must be a positive integer"
         ):
-            CyclicLR(
-                self.opt, base_lr=base_lr, max_lr=max_lr, step_size_up=step_size_up
-            )
+            CyclicLR(self.opt, base_lr=1, max_lr=5, step_size_up=step_size_up)
+
+    @parametrize("step_size_down", [0, -1])
+    def test_cycle_lr_step_size_down_non_positive(self, step_size_down):
+        with self.assertRaisesRegex(
+            ValueError, "step_size_down must be a positive integer"
+        ):
+            CyclicLR(self.opt, base_lr=1, max_lr=5, step_size_down=step_size_down)
 
     def test_onecycle_lr_invalid_anneal_strategy(self):
         with self.assertRaises(ValueError):
