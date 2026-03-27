@@ -98,7 +98,6 @@ jobs:
       runner: mt-l-x86iamx-8-16
       docker-image: ghcr.io/pytorch/test-infra:cpu-x86_64-810d48d
       script: |
-        uv pip install -e .ci/lumen_cli
         CHANGED_FILES="${{ needs.get-changed-files.outputs.changed-files }}"
         if [ "$CHANGED_FILES" = '*' ]; then
           lumen test lint --group-id lintrunner_noclang
