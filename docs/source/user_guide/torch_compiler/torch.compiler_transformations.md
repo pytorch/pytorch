@@ -422,3 +422,9 @@ partition_list = capability_partitioner.propose_partitions()
 # Fuses the partitions into graph modules and inserts `call_module` nodes in the graph
 fused_graph_module = capability_partitioner.fuse_partitions(partition_list)
 ```
+
+:::{seealso}
+For details on the built-in FX graph passes that TorchInductor applies during
+compilation (pre-grad, joint graph, and post-grad stages), see
+[TorchInductor FX Graph Passes](torch.compiler_inductor_fx_passes.md).
+:::

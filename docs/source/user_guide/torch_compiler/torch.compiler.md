@@ -133,6 +133,13 @@ advanced
 :maxdepth: 1
 :hidden:
 
+torch.compiler_inductor
+```
+
+```{toctree}
+:maxdepth: 1
+:hidden:
+
 
 troubleshooting_faqs
 ```
