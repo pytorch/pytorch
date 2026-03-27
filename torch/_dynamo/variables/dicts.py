@@ -1495,7 +1495,15 @@ class SetVariable(ConstDictVariable):
                 "__xor__": "symmetric_difference",
                 "__sub__": "difference",
             }.get(name)
-            if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable, DictItemsVariable, DictKeysVariable)):
+            if not isinstance(
+                args[0],
+                (
+                    SetVariable,
+                    variables.UserDefinedSetVariable,
+                    DictItemsVariable,
+                    DictKeysVariable,
+                ),
+            ):
                 raise_observed_exception(
                     TypeError,
                     tx,
@@ -1512,7 +1520,15 @@ class SetVariable(ConstDictVariable):
                 "__rxor__": "__xor__",
                 "__rsub__": "__sub__",
             }.get(name)
-            if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable, DictItemsVariable, DictKeysVariable)):
+            if not isinstance(
+                args[0],
+                (
+                    SetVariable,
+                    variables.UserDefinedSetVariable,
+                    DictItemsVariable,
+                    DictKeysVariable,
+                ),
+            ):
                 raise_observed_exception(
                     TypeError,
                     tx,
@@ -1521,7 +1537,15 @@ class SetVariable(ConstDictVariable):
             assert m is not None
             return args[0].call_method(tx, m, [self], kwargs)
         elif name in ("__iand__", "__ior__", "__ixor__", "__isub__"):
-            if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable, DictItemsVariable, DictKeysVariable)):
+            if not isinstance(
+                args[0],
+                (
+                    SetVariable,
+                    variables.UserDefinedSetVariable,
+                    DictItemsVariable,
+                    DictKeysVariable,
+                ),
+            ):
                 raise_observed_exception(
                     TypeError,
                     tx,
@@ -1539,12 +1563,28 @@ class SetVariable(ConstDictVariable):
             self.call_method(tx, m, args, kwargs)
             return self
         elif name == "__eq__":
-            if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable, DictItemsVariable, DictKeysVariable)):
+            if not isinstance(
+                args[0],
+                (
+                    SetVariable,
+                    variables.UserDefinedSetVariable,
+                    DictItemsVariable,
+                    DictKeysVariable,
+                ),
+            ):
                 return CONSTANT_VARIABLE_FALSE
             r = self.call_method(tx, "symmetric_difference", args, kwargs)
             return VariableTracker.build(tx, len(r.set_items) == 0)  # type: ignore[attr-defined]
         elif name in cmp_name_to_op_mapping:
-            if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable, DictItemsVariable, DictKeysVariable)):
+            if not isinstance(
+                args[0],
+                (
+                    SetVariable,
+                    variables.UserDefinedSetVariable,
+                    DictItemsVariable,
+                    DictKeysVariable,
+                ),
+            ):
                 return VariableTracker.build(tx, NotImplemented)
             return VariableTracker.build(
                 tx,
@@ -1911,7 +1951,15 @@ class DictKeysVariable(DictViewVariable):
             r = m(args[0].set_items)  # type: ignore[attr-defined]
             return SetVariable(r)
         if name in cmp_name_to_op_mapping:
-            if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable, DictItemsVariable, DictKeysVariable)):
+            if not isinstance(
+                args[0],
+                (
+                    SetVariable,
+                    variables.UserDefinedSetVariable,
+                    DictItemsVariable,
+                    DictKeysVariable,
+                ),
+            ):
                 return VariableTracker.build(tx, NotImplemented)
             return VariableTracker.build(
                 tx,
@@ -1987,7 +2035,15 @@ class DictItemsVariable(DictViewVariable):
                 raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
             if isinstance(args[0], DictItemsVariable):
                 return self.dv_dict.call_method(tx, "__eq__", [args[0].dv_dict], {})
-            elif isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable, DictItemsVariable, DictKeysVariable)):
+            elif isinstance(
+                args[0],
+                (
+                    SetVariable,
+                    variables.UserDefinedSetVariable,
+                    DictItemsVariable,
+                    DictKeysVariable,
+                ),
+            ):
                 return VariableTracker.build(
                     tx,
                     len(self.set_items ^ args[0].set_items) == 0,
