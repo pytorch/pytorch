@@ -845,15 +845,11 @@ class _ViewShardingPropagator:
                     )
                 sharded_dims.append(dim)
             else:
-                # TODO: non-strict (reshape) should allow can_shard_dim = True
-                # for non-first flatten dims, since strict_view already does.
-                # Currently forces redistribution because the rewrite phase
-                # wasn't originally implemented for this case.
-                if i == 0:
-                    sharded_dims.append(dim)
-                    if guard_or_true(tensor_dim_size % mesh_dim_size != 0):
-                        can_shard_dim = False
-                else:
+                is_last_input_dim = i == num_input_dims - 1
+                sharded_dims.append(dim)
+                if not is_last_input_dim and guard_or_true(
+                    tensor_dim_size % mesh_dim_size != 0
+                ):
                     can_shard_dim = False
             self.shard_allowed[dim.input_dim] = [can_shard_dim] * self.mesh_ndim
 
@@ -1128,10 +1124,12 @@ class _ViewShardingPropagator:
         # E.g. [3,4]→[12] Shard(0) mesh=2: device 0 has 2 groups of 4,
         # device 1 has 1 group of 4 — no consistent split_factor.
         # The last dim is exempt: only group *size* varies, not count.
+        from torch.fx.experimental.symbolic_shapes import guard_or_true
+
         flatten_end = last_dim.input_dim + 1
-        if local_tensor_shapes[p.dim] % self.mesh_sizes[
-            mesh_dim
-        ] != 0 and not self._is_last_shard_in_flatten_range(
+        if guard_or_true(
+            local_tensor_shapes[p.dim] % self.mesh_sizes[mesh_dim] != 0
+        ) and not self._is_last_shard_in_flatten_range(
             mesh_dim, placements, input_start_idx, flatten_end
         ):
             raise RuntimeError(
