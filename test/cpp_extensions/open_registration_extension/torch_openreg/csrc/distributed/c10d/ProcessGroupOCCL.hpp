@@ -11,6 +11,8 @@
 
 #include <include/Macros.h>
 
+#include <distributed/OcclTransport.h>
+
 namespace c10d {
 
 //
@@ -51,7 +53,10 @@ class OPENREG_EXPORT ProcessGroupOCCL : public Backend {
     }
   };
 
-  explicit ProcessGroupOCCL(int rank = -1, int size = -1);
+  explicit ProcessGroupOCCL(
+      const c10::intrusive_ptr<c10d::Store>& store,
+      int rank,
+      int size);
   virtual ~ProcessGroupOCCL();
   const std::string getBackendName() const override {
     return std::string(OCCL_BACKEND_NAME);
@@ -156,6 +161,7 @@ class OPENREG_EXPORT ProcessGroupOCCL : public Backend {
     const BarrierOptions& opts = BarrierOptions()) override;
 
  protected:
+  std::unique_ptr<c10d::openreg::OcclTransport> transport_;
   const c10::intrusive_ptr<Options> options_;
 };
 OPENREG_EXPORT c10::intrusive_ptr<ProcessGroupOCCL> createProcessGroupOCCL(

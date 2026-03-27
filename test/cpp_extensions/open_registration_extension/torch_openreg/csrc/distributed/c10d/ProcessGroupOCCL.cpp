@@ -133,7 +133,7 @@ namespace {
    rank, int size, const std::chrono::duration<float>& timeout) Constructs a
    ProcessGroupOCCL using the given rank and size. The store and timeout are
    accepted for API parity but are not used to affect behavior.
-            - @param store: Process group store (ignored).
+            - @param store: Process group store (used for OcclTransport address exchange).
             - @param rank: This process rank.
             - @param size: World size.
             - @param timeout: Operation timeout hint (ignored).
@@ -196,8 +196,13 @@ ProcessGroupOCCL::Options::Options(std::chrono::milliseconds timeout)
 
 // ProcessGroupOCCL ---------------------------------------------------------
 
-ProcessGroupOCCL::ProcessGroupOCCL(int rank, int size)
-    : Backend(rank, size), options_(Options::create()) {}
+ProcessGroupOCCL::ProcessGroupOCCL(
+    const c10::intrusive_ptr<c10d::Store>& store,
+    int rank,
+    int size)
+    : Backend(rank, size),
+      transport_(std::make_unique<c10d::openreg::OcclTransport>(rank, size, store)),
+      options_(Options::create()) {}
 
 ProcessGroupOCCL::~ProcessGroupOCCL() = default;
 
@@ -361,7 +366,7 @@ c10::intrusive_ptr<ProcessGroupOCCL> createProcessGroupOCCL(
     int rank,
     int size,
     const std::chrono::duration<float>& timeout) {
-  return c10::make_intrusive<ProcessGroupOCCL>(rank, size);
+  return c10::make_intrusive<ProcessGroupOCCL>(store, rank, size);
 }
 
 } // namespace c10d
