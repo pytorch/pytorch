@@ -62,6 +62,7 @@ from torch.testing._internal.common_utils import (
     IS_JETSON,
     IS_LINUX,
     IS_WINDOWS,
+    IS_X86,
     parametrize,
     run_tests,
     serialTest,
@@ -3462,7 +3463,9 @@ aten::mm""",
                 actual_fields = sorted(event.keys())
                 self.assertEqual(expected_fields, actual_fields)
 
-    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "x86 linux only cpp unwinding")
+    @unittest.skipIf(
+        not IS_LINUX or not (IS_X86 or IS_ARM64), "linux x86/aarch64 only cpp unwinding"
+    )
     def test_fuzz_symbolize(self):
         # generate some random addresses in the text section and make sure the
         # symbolizers do not throw exceptions/crash
