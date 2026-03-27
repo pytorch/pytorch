@@ -342,9 +342,9 @@ class DataLoader(Generic[_T_co]):
                  distribution being fed to the trainer in cases with imbalanced data.
 
     .. warning:: Using ``"thread"`` with mutable or non-thread-safe datasets will cause data races
-         and undefined behavior. Additionally, thread workers only achieve true parallelism when
-        the data loading pipeline releases the GIL (e.g., during I/O, or PyTorch transforms).
-        For CPU-bound pure Python transforms, ``"multiprocessing"`` is recommended.
+                 and undefined behavior. Additionally, thread workers only achieve true parallelism when
+                 the data loading pipeline releases the GIL (e.g., during I/O, or PyTorch transforms).
+                 For CPU-bound pure Python transforms, ``"multiprocessing"`` is recommended.
     """
 
     dataset: Dataset[_T_co]
