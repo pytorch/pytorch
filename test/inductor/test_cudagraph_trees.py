@@ -1929,7 +1929,9 @@ if HAS_CUDA_AND_TRITON:
             del x
             self.assertEqual(all_live_block_count(), 0)
 
-        @unittest.skipUnless(IS_X86 and IS_LINUX, "cpp contexts are linux only")
+        @unittest.skipUnless(
+            (IS_X86 or IS_ARM64) and IS_LINUX, "cpp contexts are linux x86/aarch64 only"
+        )
         @torch._inductor.config.patch("triton.cudagraph_trees_history_recording", True)
         @blas_library_context("cublas")
         def test_workspace_allocation_error(self):

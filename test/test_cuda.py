@@ -64,6 +64,7 @@ from torch.testing._internal.common_utils import (
     gcIfJetson,
     get_cycles_per_ms,
     instantiate_parametrized_tests,
+    IS_ARM64,
     IS_FBCODE,
     IS_JETSON,
     IS_LINUX,
@@ -98,7 +99,7 @@ from torch.utils.viz._cycles import observe_tensor_cycles
 
 
 requiresCppContext = unittest.skipUnless(
-    IS_X86 and IS_LINUX, "cpp contexts are x86 linux only"
+    (IS_X86 or IS_ARM64) and IS_LINUX, "cpp contexts are linux x86/aarch64 only"
 )
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -4271,7 +4272,9 @@ class TestCudaAllocator(TestCase):
         x = torch.rand(64, device="cuda")
         self.assertIsNone(torch.cuda.memory._allocation_traceback(x.data_ptr()))
 
-    @unittest.skipUnless(IS_X86 and IS_LINUX, "x86 linux only cpp unwinding")
+    @unittest.skipUnless(
+        (IS_X86 or IS_ARM64) and IS_LINUX, "linux x86/aarch64 only cpp unwinding"
+    )
     def test_direct_traceback(self):
         from torch._C._profiler import gather_traceback, symbolize_tracebacks  # @manual
 
@@ -5000,7 +5003,7 @@ print(value, end="")
             torch.empty(1024 * 1024 * 1024 * 1024, device="cuda")
 
     @unittest.skipIf(
-        not (IS_LINUX and os.uname().machine == "x86_64"), "cpp traces only on linux"
+        not ((IS_X86 or IS_ARM64) and IS_LINUX), "cpp traces are linux x86/aarch64 only"
     )
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
