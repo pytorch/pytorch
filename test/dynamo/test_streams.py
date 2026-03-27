@@ -1593,6 +1593,25 @@ class GraphModule(torch.nn.Module):
             torch.ops.streams.record_stream.default(t, 0)
 
     @requires_cuda
+    def test_record_stream(self):
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        def fn(x):
+            s = torch.Stream()
+            x.record_stream(s)
+            return x
+
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        compiled(torch.randn(4, device="cuda"))
+
+        self.assertEqual(len(backend.graphs), 1)
+        found = any(
+            node.target is torch.ops.streams.record_stream
+            for node in backend.graphs[0].graph.nodes
+        )
+        self.assertTrue(found, "record_stream op not found in graph")
+
+    @requires_cuda
     def test_event_record_after_input_mutation_errors(self):
         def fn(x):
             s = torch.Stream()
