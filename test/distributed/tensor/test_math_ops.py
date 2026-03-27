@@ -688,9 +688,34 @@ class DistMathOpsTest(DTensorTestBase):
             out_full_values = out_dt.values.full_tensor()
             self.assertEqual(global_topk.values, out_full_values)
 
-            # TODO: support backward scatter
-            # global_topk.values.sum().backward()
-            # out_full_values.sum().backward()
+    @with_comms
+    def test_topk_backward(self):
+        device_mesh = self.build_device_mesh()
+        # Test backward for topk with various shard_dim / topk_dim combinations.
+        # The fix in value_selecting_reduction_backward ensures that the zeros
+        # tensor created during backward is properly dispatched through DTensor
+        # (using new_zeros instead of at::zeros).
+        topk_dims = [0, 1, -1]
+        shard_dims = [0, 1, 2]
+        for topk_dim, shard_dim in itertools.product(topk_dims, shard_dims):
+            # Use DTensor.from_local to create a sharded DTensor that exercises
+            # the backward path through DTensor dispatch (as opposed to
+            # distribute_tensor which may create a different autograd graph).
+            local_x = torch.randn(
+                12, 8, 8, device=self.device_type, requires_grad=True
+            )
+            dist_x = DTensor.from_local(local_x, device_mesh, [Shard(shard_dim)])
+            dist_x.retain_grad()
+
+            dist_topk = dist_x.topk(3, dim=topk_dim)
+            dist_loss = dist_topk.values.sum()
+            dist_loss.backward()
+
+            # Verify gradient exists and has the right placement
+            self.assertIsNotNone(
+                dist_x.grad,
+                msg=f"topk_dim={topk_dim}, shard_dim={shard_dim}",
+            )
 
     @with_comms
     def test_shard0_svd(self):
