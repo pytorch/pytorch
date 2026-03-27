@@ -60,14 +60,8 @@ jobs:
       runner: mt-l-x86iamx-8-16
       docker-image: ghcr.io/pytorch/test-infra:cuda-x86_64-67eb930
       script: |
-        CHANGED_FILES="${{ needs.get-changed-files.outputs.changed-files }}"
-        if [ "$CHANGED_FILES" = "*" ]; then
-          export ADDITIONAL_LINTRUNNER_ARGS="--take CLANGTIDY,CLANGFORMAT --all-files"
-        else
-          export ADDITIONAL_LINTRUNNER_ARGS="--take CLANGTIDY,CLANGFORMAT $CHANGED_FILES"
-        fi
-        export CLANG=1
-        .github/scripts/lintrunner.sh
+        (cd .ci/lumen_cli && python -m pip install -e .)
+        lumen test lint --group-id lintrunner_clang --input changed_files="${{ needs.get-changed-files.outputs.changed-files }}"
 
   # NOTE: mypy needs its own job because it depends on --all-files, without assessing all files it sometimes
   #       fails to find types when it should
@@ -87,9 +81,8 @@ jobs:
       runner: mt-l-x86iamx-8-16
       docker-image: ghcr.io/pytorch/test-infra:cpu-x86_64-67eb930
       script: |
-        CHANGED_FILES="${{ needs.get-changed-files.outputs.changed-files }}"
-        echo "Running pyrefly"
-        ADDITIONAL_LINTRUNNER_ARGS="--take PYREFLY --all-files" .github/scripts/lintrunner.sh
+        (cd .ci/lumen_cli && python -m pip install -e .)
+        lumen test lint --group-id lintrunner_pyrefly
 
   lintrunner-noclang:
     uses: ./.github/workflows/_lint.yml
@@ -99,13 +92,8 @@ jobs:
       runner: mt-l-x86iamx-8-16
       docker-image: ghcr.io/pytorch/test-infra:cpu-x86_64-67eb930
       script: |
-        CHANGED_FILES="${{ needs.get-changed-files.outputs.changed-files }}"
-        echo "Running all other linters"
-        if [ "$CHANGED_FILES" = '*' ]; then
-          ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGTIDY_EXECUTORCH_COMPATIBILITY,CLANGFORMAT,PYREFLY --all-files" .github/scripts/lintrunner.sh
-        else
-          ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGTIDY_EXECUTORCH_COMPATIBILITY,CLANGFORMAT,PYREFLY ${CHANGED_FILES}" .github/scripts/lintrunner.sh
-        fi
+        (cd .ci/lumen_cli && python -m pip install -e .)
+        lumen test lint --group-id lintrunner_noclang --input changed_files="${{ needs.get-changed-files.outputs.changed-files }}"
 
   quick-checks:
     if: github.repository_owner == 'pytorch'
@@ -115,28 +103,8 @@ jobs:
       runner: mt-l-x86iamx-8-16
       docker-image: ghcr.io/pytorch/test-infra:cpu-x86_64-67eb930
       script: |
-        # Ensure no non-breaking spaces
-        # NB: We use 'printf' below rather than '\u000a' since bash pre-4.2
-        # does not support the '\u000a' syntax (which is relevant for local linters)
-        (! git --no-pager grep -In "$(printf '\xC2\xA0')" -- . || (echo "The above lines have non-breaking spaces (U+00A0); please convert them to spaces (U+0020)"; false))
-
-        # Ensure cross-OS compatible file names
-        (! git ls-files | grep -E '([<>:"|?*]|[ .]$)' || (echo "The above file names are not valid across all operating systems. Please ensure they don't contain the characters '<>:""|?*' and don't end with a white space or a '.' "; false))
-
-        # Ensure no versionless Python shebangs
-        (! git --no-pager grep -In '#!.*python$' -- . || (echo "The above lines have versionless Python shebangs; please specify either python2 or python3"; false))
-
-        # Ensure ciflow tags mentioned in config
-        python3 .github/scripts/collect_ciflow_labels.py --validate-tags
-
-        # C++ docs check
-        pushd docs/cpp/source
-        ./check-doxygen.sh
-        popd
-
-        # CUDA kernel launch check
-        set -eux
-        python3 torch/testing/_internal/check_kernel_launches.py |& tee cuda_kernel_launch_checks.txt
+        (cd .ci/lumen_cli && python -m pip install -e .)
+        lumen test lint --group-id quick_checks
 
   pr-sanity-checks:
     name: pr-sanity-checks
@@ -165,28 +133,8 @@ jobs:
       runner: mt-l-x86iamx-8-16
       docker-image: ghcr.io/pytorch/test-infra:cpu-x86_64-67eb930
       script: |
-        # Regenerate workflows
-        .github/scripts/generate_ci_workflows.py
-
-        RC=0
-        # Assert that regenerating the workflows didn't change them
-        if ! .github/scripts/report_git_status.sh .github/workflows; then
-          echo
-          echo 'As shown by the above diff, the committed .github/workflows'
-          echo 'are not up to date according to .github/templates.'
-          echo 'Please run this command, commit, and push again to your PR:'
-          echo
-          echo '    .github/scripts/generate_ci_workflows.py'
-          echo
-          echo 'If running that command does nothing, you may need to rebase'
-          echo 'onto a more recent commit from the PyTorch main branch.'
-          RC=1
-        fi
-
-        # Check that jobs will be cancelled
-        .github/scripts/ensure_actions_will_cancel.py
-
-        exit $RC
+        (cd .ci/lumen_cli && python -m pip install -e .)
+        lumen test lint --group-id workflow_checks
 
   toc:
     if: github.repository_owner == 'pytorch'
@@ -196,29 +144,8 @@ jobs:
       runner: mt-l-x86iamx-8-16
       docker-image: ghcr.io/pytorch/test-infra:cpu-x86_64-67eb930
       script: |
-        # Regenerate ToCs and check that they didn't change
-        set -eu
-
-        export PATH=~/.npm-global/bin:"$PATH"
-        for FILE in $(git grep -Il '<!-- toc -->' -- '**.md'); do
-          markdown-toc --bullets='-' -i "$FILE"
-        done
-
-        if ! .github/scripts/report_git_status.sh .; then
-          echo
-          echo 'As shown by the above diff, the table of contents in one or'
-          echo 'more Markdown files is not up to date with the file contents.'
-          echo 'You can either apply that Git diff directly to correct the'
-          echo 'table of contents, or if you have npm installed, you can'
-          echo 'install the npm package markdown-toc and run the following'
-          # shellcheck disable=SC2016
-          echo 'command (replacing $FILE with the filename for which you want'
-          echo 'to regenerate the table of contents):'
-          echo
-          # shellcheck disable=SC2016
-          echo "    markdown-toc --bullets='-' -i \"\$FILE\""
-          false
-        fi
+        (cd .ci/lumen_cli && python -m pip install -e .)
+        lumen test lint --group-id toc
 
   test-tools:
     name: Test tools
@@ -229,10 +156,8 @@ jobs:
       runner: mt-l-x86iamx-8-16
       docker-image: ghcr.io/pytorch/test-infra:cpu-x86_64-67eb930
       script: |
-        # Test tools
-        PYTHONPATH=$(pwd) pytest tools/stats
-        PYTHONPATH=$(pwd) pytest tools/test -o "python_files=test*.py"
-        PYTHONPATH=$(pwd) pytest .github/scripts -o "python_files=test*.py"
+        (cd .ci/lumen_cli && python -m pip install -e .)
+        lumen test lint --group-id test_tools
 
   test_run_test:
     name: Test `run_test.py` is usable without boto3

@@ -23,6 +23,7 @@ jobs:
       image: ${{ inputs.docker-image }}
     timeout-minutes: 120
     steps:
+
       - name: Fix Git ownership
         shell: bash
         run: |
@@ -45,25 +46,28 @@ jobs:
       - name: Install pip requirements
         shell: bash
         run: |
+          # re:add
           set -eux
           uv pip install -r .ci/docker/requirements-ci.txt
 
       - name: Install system requirements
         shell: bash
         run: |
+          # re:add
           set -eux
-          # Update repository
           dnf install -y doxygen graphviz nodejs npm
 
       - name: Install Node.js packages
         shell: bash
         run: |
+          # re:add
           set -eux
           npm install -g markdown-toc
 
       - name: Prepare lintrunner
         shell: bash
         run: |
+          # re:add
           set -eux
           lintrunner init
 
