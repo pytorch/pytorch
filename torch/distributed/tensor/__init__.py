@@ -15,11 +15,11 @@ from torch.distributed.tensor._api import (
     zeros,
 )
 from torch.distributed.tensor.placement_types import (
+    _StridedShard,
     Partial,
     Placement,
     Replicate,
     Shard,
-    _StridedShard
 )
 from torch.optim.optimizer import (
     _foreach_supported_types as _optim_foreach_supported_types,
