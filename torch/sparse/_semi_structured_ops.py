@@ -16,6 +16,8 @@ __all__ = [
     "semi_sparse_linear",
     "semi_sparse_scaled_mm",
     "semi_sparse_clone",
+    "semi_sparse_to",
+    "semi_sparse_to_copy",
 ]
 
 
@@ -252,4 +254,47 @@ def semi_sparse_clone(func, types, args=(), kwargs=None) -> torch.Tensor:
         fuse_transpose_cusparselt=self.fuse_transpose_cusparselt,
         alg_id_cusparselt=self.alg_id_cusparselt,
         requires_grad=self.requires_grad,
+    )
+
+
+def semi_sparse_to_copy(func, types, args, kwargs=None) -> torch.Tensor:
+    self = args[0]
+    kwargs = kwargs or {}
+
+    device = kwargs.get("device", None)
+
+    if device is not None and torch.device(device).type == "cpu":
+        dense = self.to_dense()
+        return func(dense, **kwargs)
+
+    raise NotImplementedError(
+        f"`_to_copy()` with kwargs={kwargs} is not implemented "
+        "for SparseSemiStructuredTensor. Only converting to CPU is supported currently."
+    )
+
+
+def semi_sparse_to(func, types, args, kwargs=None) -> torch.Tensor:
+    self = args[0]
+    remaining_args = args[1:]
+    kwargs = kwargs or {}
+
+    # Determine the target device from args/kwargs
+    device = None
+    if remaining_args:
+        first_arg = remaining_args[0]
+        if isinstance(first_arg, (torch.device, str)):
+            try:
+                device = torch.device(first_arg)
+            except RuntimeError:
+                pass
+    if "device" in kwargs:
+        device = torch.device(kwargs["device"])
+
+    if device is not None and device.type == "cpu":
+        dense = self.to_dense()
+        return func(dense, *remaining_args, **kwargs)
+
+    raise NotImplementedError(
+        f"`to()` with args={remaining_args}, kwargs={kwargs} is not implemented "
+        "for SparseSemiStructuredTensor. Only `to('cpu')` is supported currently."
     )
