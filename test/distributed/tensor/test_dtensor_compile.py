@@ -1987,6 +1987,77 @@ class outer_fn(torch.nn.Module):
         result = opt_fn(inp_odd)
         self.assertEqual(result, fn(inp_odd))
 
+    def test_mesh_get_process_group_1d(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        pg = torch.ops._dtensor.mesh_get_process_group(mesh, 0)
+        self.assertIsInstance(pg, dist.ProcessGroup)
+        self.assertEqual(pg, mesh.get_group(0))
+
+    def test_mesh_get_process_group_2d(self):
+        dist.destroy_process_group()
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
+
+        mesh = DeviceMesh(self.device_type, torch.arange(4).reshape(2, 2))
+        for dim in range(2):
+            pg = torch.ops._dtensor.mesh_get_process_group(mesh, dim)
+            self.assertIsInstance(pg, dist.ProcessGroup)
+            self.assertEqual(pg, mesh.get_group(dim))
+
+    def test_mesh_get_process_group_fake(self):
+        from torch._library.fake_class_registry import (
+            FakeScriptObject,
+            maybe_to_fake_obj,
+        )
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        with FakeTensorMode() as fake_mode:
+            fake_mesh = maybe_to_fake_obj(fake_mode, mesh)
+            self.assertIsInstance(fake_mesh, FakeScriptObject)
+
+            pg = torch.ops._dtensor.mesh_get_process_group(fake_mesh, 0)
+            self.assertIsInstance(pg, dist.ProcessGroup)
+            self.assertEqual(pg, mesh.get_group(0))
+
+    def test_resolve_group_uses_op_with_compile_on_one_rank(self):
+        """Test that _resolve_group returns a ProcessGroup (not a string name)
+        when compile_on_one_rank is enabled, for both 1D mesh and (mesh, dim)
+        tuple inputs. Also tests that _group_or_group_name passes through the
+        ProcessGroup instead of extracting .group_name."""
+        import torch.distributed.config as dist_config
+        from torch.distributed._functional_collectives import (
+            _group_or_group_name,
+            _resolve_group,
+        )
+
+        mesh_1d = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        dist.destroy_process_group()
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
+        mesh_2d = DeviceMesh(self.device_type, torch.arange(4).reshape(2, 2))
+
+        with dist_config.patch(compile_on_one_rank=True):
+            # 1D mesh
+            result = _resolve_group(mesh_1d)
+            self.assertIsInstance(result, dist.ProcessGroup)
+            self.assertEqual(result, mesh_1d.get_group(0))
+
+            # (mesh, dim) tuple
+            for dim in range(2):
+                result = _resolve_group((mesh_2d, dim))
+                self.assertIsInstance(result, dist.ProcessGroup)
+                self.assertEqual(result, mesh_2d.get_group(dim))
+
+            # _group_or_group_name passes ProcessGroup through
+            pg = mesh_1d.get_group(0)
+            result = _group_or_group_name(pg)
+            self.assertIs(result, pg)
+
+        # Without compile_on_one_rank, _resolve_group returns a string name
+        result = _resolve_group(mesh_1d)
+        self.assertIsInstance(result, str)
+
 
 @instantiate_parametrized_tests
 class TestDTensorCompileE2E(DTensorTestBase):
