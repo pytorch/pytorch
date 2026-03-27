@@ -1541,7 +1541,6 @@ class TestProfiler(TestCase):
             torch._C._profiler._set_fwd_bwd_enabled_val(True)
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_cuda_sync_events(self):
         device = torch.device("cuda:0")
         t1, t2 = torch.ones(1, device=device), torch.ones(1, device=device)
@@ -3240,7 +3239,6 @@ aten::mm""",
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_extra_cuda_copy_pattern(self):
         cases = (
             (0, lambda: torch.ones((100, 100), device="cuda")),
@@ -3303,7 +3301,6 @@ aten::mm""",
             num_matched.append(len(pattern.matched_events()))
         self.assertEqual(num_matched, [i for i, _ in cases])
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_fp32_matmul_pattern(self):
         x = torch.ones((100, 100), device="cuda")
         with profile(with_stack=True) as prof:
@@ -3313,7 +3310,6 @@ aten::mm""",
         num_matched = len(pattern.matched_events())
         self.assertEqual(num_matched, has_tf32)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_extra_cuda_copy_pattern_benchmark(self):
         with profile(with_stack=True, record_shapes=True) as prof:
             x = torch.ones((100, 100)).to("cuda")
@@ -3411,7 +3407,6 @@ aten::mm""",
             num_matched.append(len(pattern.matched_events()))
         self.assertEqual(num_matched, [i for i, _ in cases])
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_matmul_dim_fp16_pattern(self):
         cases = (
             (1, torch.randn((201, 201), device="cuda", dtype=torch.float16)),
@@ -3756,15 +3751,16 @@ class TestPrivateUse1ProfilerState(TestCase):
 
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
+@unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
 class TestProfilerEventsParity(TestCase):
     """Tests validating parity between events() and export_chrome_trace() JSON."""
 
     def test_python_function_events_in_events(self):
         with profile(
-            activities=[ProfilerActivity.CPU],
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
             with_stack=True,
         ) as prof:
-            x = torch.randn(10, 10)
+            x = torch.randn(10, 10, device="cuda")
             torch.mm(x, x)
 
         events = prof.events()
@@ -3786,7 +3782,6 @@ class TestProfilerEventsParity(TestCase):
             ]
             self.assertEqual(len(python_events), len(json_py))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_flow_events_parity(self):
         """Verify that async CPU->GPU flow fields on events() match Chrome trace JSON."""
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
@@ -3833,7 +3828,6 @@ class TestProfilerEventsParity(TestCase):
                 "Async CPU->GPU flow end IDs differ between events() and Chrome trace",
             )
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_fwdbwd_flow_events_parity(self):
         """Verify that fwd->bwd flow fields on events() match Chrome trace JSON."""
         with profile(activities=[ProfilerActivity.CPU]) as prof:
@@ -3878,7 +3872,6 @@ class TestProfilerEventsParity(TestCase):
                 "fwdbwd flow end IDs differ between events() and Chrome trace",
             )
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_timestamp_consistency(self):
         """Verify that FunctionEvent timestamps can reconstruct Chrome trace ts values."""
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
@@ -3912,7 +3905,6 @@ class TestProfilerEventsParity(TestCase):
                 msg="Recovered Chrome trace ts doesn't match JSON for aten::mm",
             )
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_external_id_parity(self):
         """Verify that FunctionEvent.external_id matches External id in Chrome trace JSON."""
         from collections import Counter
@@ -3945,7 +3937,6 @@ class TestProfilerEventsParity(TestCase):
                 "(name, external_id) pairs differ between events() and Chrome trace JSON",
             )
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_activity_type_parity(self):
         """Verify activity_type on events() matches Chrome trace cat field."""
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
