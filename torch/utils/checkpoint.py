@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import platform
 import uuid
 import warnings
 import weakref
 from collections import defaultdict
+from copy import deepcopy
 from typing import *  # noqa: F403
 from typing_extensions import Self
 import enum
@@ -820,18 +822,45 @@ class _CheckpointFrame:
         self.forward_completed = False
         self.ignore_saved_mismatch = False
 
-    def save_inputs(self, *args):
-        self.saved_args = [
-            _make_saved_tensor(arg, is_output=False)
-            if isinstance(arg, torch.Tensor) else arg
-            for arg in args
-        ]
+    _EXCLUDED_SEQUENCE_TYPES = (str, bytes, bytearray, range)
 
-    def get_inputs(self):
-        return [
-            arg.unpack() if isinstance(arg, SavedTensor) else arg
-            for arg in self.saved_args
-        ]
+    def _tree_map(self, fn, target_type, obj):
+        """Apply given function to a target type, supporting nested combinations of Mappings,
+        Sequences and dataclasses. 
+        """
+        if isinstance(obj, target_type):
+            return fn(obj)
+        
+        _cls = type(obj)
+        if isinstance(obj, Mapping):
+            mapped = {k: self._tree_map(fn, target_type, v) for k, v in obj.items()}
+            return _cls(mapped)
+        
+        if dataclasses.is_dataclass(obj):
+            return _cls(**{
+                f.name: self._tree_map(fn, target_type, getattr(obj, f.name))
+                for f in dataclasses.fields(obj)
+            })
+        
+        if isinstance(obj, Sequence) and not isinstance(obj, self._EXCLUDED_SEQUENCE_TYPES):
+            mapped = [self._tree_map(fn, target_type, v) for v in obj]
+            
+            # NamedTuple
+            if isinstance(obj, tuple) and hasattr(obj, "_fields"):
+                return _cls(*mapped)
+            return _cls(mapped)
+
+        # In the case where the object does not fall into any explicitly handled types,
+        # keep the contents as-is, but make a deepcopy in case it is mutable
+        return deepcopy(obj)
+
+    def save_inputs(self, *args):
+        fn = lambda x: _make_saved_tensor(x, is_output=False)
+        self.saved_args = list(self._tree_map(fn, torch.Tensor, args))
+
+    def get_inputs(self) -> List[Any]:
+        fn = lambda x: x.unpack()
+        return list(self._tree_map(fn, SavedTensor, self.saved_args))
 
     def check_recomputed_tensors_match(self, gid) -> None:
         if self.ignore_saved_mismatch:
