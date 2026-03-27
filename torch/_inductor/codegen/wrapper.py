@@ -2525,11 +2525,7 @@ class PythonWrapperCodegen(CodeGen):
                     # the subclass.
                     continue
                 if isinstance(value, ir.TorchBindObject):
-                    if len(V.graph.torchbind_constants) == 0:
-                        # otherwise we have already imported the pickle package
-                        output.writeline("import pickle")
-                    output.writeline(f"global {name}")
-                    add_torchbind_input(name, value.get_real_obj())
+                    output.writeline(f"{name} = None")
                 elif isinstance(value, sympy.Expr):  # Don't need to add symbolic
                     # TODO: this fallback and those below actually will generate possibly
                     # invalid benchmark code, because it's not guaranteed 42
