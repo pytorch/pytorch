@@ -4,6 +4,7 @@ import importlib
 import io
 import itertools
 import pickle
+import weakref
 from abc import abstractmethod
 from collections.abc import Callable
 from typing import Any, NewType, TypeVar
@@ -71,6 +72,14 @@ class Options:
 
 def _unpickle_as_none() -> None:
     return None
+
+
+def _unpickle_as_weakref(referent: object) -> weakref.ref:
+    return weakref.ref(referent)
+
+
+def _unpickle_as_dead_weakref() -> Callable[[], None]:
+    return lambda: None
 
 
 @contextlib.contextmanager
@@ -147,6 +156,15 @@ class GraphPickler(pickle.Pickler):
             return _SymNodePickleData.reduce_helper(self, obj)
         elif isinstance(obj, torch._guards.TracingContext):
             return _TracingContextPickleData.reduce_helper(self, obj)
+        elif isinstance(obj, weakref.ref):
+            # Serialize weakrefs properly: if the referent is alive,
+            # serialize it and reconstruct the weakref on unpickle.
+            # If the referent is dead, unpickle as a dead-weakref-like callable.
+            referent = obj()
+            if referent is not None:
+                return (_unpickle_as_weakref, (referent,))
+            else:
+                return (_unpickle_as_dead_weakref, ())
         else:
             # We should never get a raw Node!
             if isinstance(obj, torch.fx.Node):
