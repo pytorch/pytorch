@@ -102,7 +102,7 @@ class CommitResolver:
             ["git", "log", "-1", "--format=%B"],
             capture_output=True, text=True, check=True,
         )
-        match = re.search(r"^Pull-Request:\s*https://github\.com/.+/pull/(\d+)", out.stdout, re.MULTILINE)
+        match = re.search(r"^Pull Request resolved:\s*https://github\.com/.+/pull/(\d+)", out.stdout, re.MULTILINE)
         if match:
             pr = int(match.group(1))
             logger.info("Detected ghstack PR #%d from commit trailer", pr)
