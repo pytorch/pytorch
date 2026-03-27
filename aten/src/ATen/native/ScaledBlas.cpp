@@ -15,6 +15,11 @@
 #include <cpuinfo.h>
 #endif
 
+#if defined(_WIN32) && defined(USE_ROCM)
+#include <windows.h>
+#include <torch/library.h>
+#endif
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/CPUFunctions.h>
 #include <ATen/Functions.h>
@@ -34,6 +39,7 @@
 #include <ATen/ops/_scaled_mm_native.h>
 #include <ATen/ops/mul.h>
 #include <ATen/ops/matmul.h>
+#include <ATen/ops/_scaled_mm_v2.h>
 #endif
 
 namespace at::native {
@@ -156,6 +162,77 @@ std::optional<c10::ScalarType> out_dtype) {
   const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
   Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
   _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
+  return out;
+}
+
+// Windows ROCm: C-bridge for ABI compatibility between MSVC and Clang DLLs
+Tensor _scaled_mm_v2_composite(
+    const Tensor& mat_a, const Tensor& mat_b,
+    ArrayRef<Tensor> scale_a, IntArrayRef scale_recipe_a, IntArrayRef swizzle_a,
+    ArrayRef<Tensor> scale_b, IntArrayRef scale_recipe_b, IntArrayRef swizzle_b,
+    const std::optional<Tensor>& bias,
+    const std::optional<c10::ScalarType> out_dtype,
+    IntArrayRef contraction_dim, bool use_fast_accum);
+
+#if defined(_WIN32)
+#include <windows.h>
+
+using ScaledMmV2CBridge = Tensor (*)(
+    const Tensor&, const Tensor&,
+    const Tensor*, int64_t, const int64_t*, int64_t, const int64_t*, int64_t,
+    const Tensor*, int64_t, const int64_t*, int64_t, const int64_t*, int64_t,
+    const Tensor*, const c10::ScalarType*, const int64_t*, int64_t, bool);
+
+static ScaledMmV2CBridge get_scaled_mm_v2_c_bridge() {
+  static ScaledMmV2CBridge fn = nullptr;
+  static bool tried = false;
+  if (fn || tried) return fn;
+  tried = true;
+  HMODULE m = GetModuleHandleA("torch_hip.dll");
+  if (!m) return nullptr;
+  fn = reinterpret_cast<ScaledMmV2CBridge>(
+      GetProcAddress(m, "_scaled_mm_cuda_v2_c_bridge"));
+  return fn;
+}
+#endif
+
+Tensor _scaled_mm_v2_composite(
+    const Tensor& mat_a, const Tensor& mat_b,
+    ArrayRef<Tensor> scale_a, IntArrayRef scale_recipe_a, IntArrayRef swizzle_a,
+    ArrayRef<Tensor> scale_b, IntArrayRef scale_recipe_b, IntArrayRef swizzle_b,
+    const std::optional<Tensor>& bias,
+    const std::optional<c10::ScalarType> out_dtype,
+    IntArrayRef contraction_dim, bool use_fast_accum) {
+
+  TORCH_CHECK(mat_a.is_cuda() || mat_a.is_hip(),
+      "_scaled_mm_v2 requires CUDA/HIP tensors");
+
+#if defined(_WIN32)
+  auto c_bridge = get_scaled_mm_v2_c_bridge();
+  if (c_bridge) {
+    c10::ScalarType dtype_val = out_dtype.value_or(c10::ScalarType::BFloat16);
+    return c_bridge(
+        mat_a, mat_b,
+        scale_a.data(), static_cast<int64_t>(scale_a.size()),
+        scale_recipe_a.data(), static_cast<int64_t>(scale_recipe_a.size()),
+        swizzle_a.data(), static_cast<int64_t>(swizzle_a.size()),
+        scale_b.data(), static_cast<int64_t>(scale_b.size()),
+        scale_recipe_b.data(), static_cast<int64_t>(scale_recipe_b.size()),
+        swizzle_b.data(), static_cast<int64_t>(swizzle_b.size()),
+        bias ? &*bias : nullptr,
+        out_dtype ? &dtype_val : nullptr,
+        contraction_dim.data(), static_cast<int64_t>(contraction_dim.size()),
+        use_fast_accum);
+  }
+#endif
+
+  // Non-Windows-ROCm: use regular dispatcher
+  const auto dtype = out_dtype.value_or(mat_a.scalar_type());
+  Tensor out = at::empty({0}, mat_a.options().dtype(dtype));
+  at::_scaled_mm_v2_outf(mat_a, mat_b,
+      scale_a, scale_recipe_a, swizzle_a,
+      scale_b, scale_recipe_b, swizzle_b,
+      bias, out_dtype, contraction_dim, use_fast_accum, out);
   return out;
 }
 

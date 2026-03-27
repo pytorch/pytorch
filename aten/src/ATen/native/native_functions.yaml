@@ -7329,7 +7329,7 @@
 - func: _scaled_mm_v2(Tensor self, Tensor mat2, Tensor[] scale_a, int[] recipe_a, int[] swizzle_a, Tensor[] scale_b, int[] recipe_b, int[] swizzle_b, Tensor? bias, ScalarType? out_dtype, int[] contraction_dim=[], bool use_fast_accum=False) -> Tensor
   variants: function
   dispatch:
-    CUDA: _scaled_mm_cuda_v2
+    CompositeExplicitAutograd: _scaled_mm_v2_composite
     XPU: _scaled_mm_xpu_v2
   tags: needs_exact_strides
 

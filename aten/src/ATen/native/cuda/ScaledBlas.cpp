@@ -1504,4 +1504,36 @@ _scaled_mm_cuda_v2(
                       out);
 }
 
+// Windows ROCm: C-bridge export for ABI compatibility
+#if defined(_WIN32) && defined(USE_ROCM)
+
+extern "C" __declspec(dllexport) at::Tensor _scaled_mm_cuda_v2_c_bridge(
+    const at::Tensor& mat_a, const at::Tensor& mat_b,
+    const at::Tensor* scale_a_data, int64_t scale_a_size,
+    const int64_t* recipe_a_data, int64_t recipe_a_size,
+    const int64_t* swizzle_a_data, int64_t swizzle_a_size,
+    const at::Tensor* scale_b_data, int64_t scale_b_size,
+    const int64_t* recipe_b_data, int64_t recipe_b_size,
+    const int64_t* swizzle_b_data, int64_t swizzle_b_size,
+    const at::Tensor* bias_ptr,
+    const c10::ScalarType* out_dtype_ptr,
+    const int64_t* contraction_dim_data, int64_t contraction_dim_size,
+    bool use_fast_accum) {
+
+  return _scaled_mm_cuda_v2(
+      mat_a, mat_b,
+      c10::ArrayRef<at::Tensor>(scale_a_data, scale_a_size),
+      c10::ArrayRef<int64_t>(recipe_a_data, recipe_a_size),
+      c10::ArrayRef<int64_t>(swizzle_a_data, swizzle_a_size),
+      c10::ArrayRef<at::Tensor>(scale_b_data, scale_b_size),
+      c10::ArrayRef<int64_t>(recipe_b_data, recipe_b_size),
+      c10::ArrayRef<int64_t>(swizzle_b_data, swizzle_b_size),
+      bias_ptr ? std::make_optional(*bias_ptr) : std::nullopt,
+      out_dtype_ptr ? std::make_optional(*out_dtype_ptr) : std::nullopt,
+      c10::ArrayRef<int64_t>(contraction_dim_data, contraction_dim_size),
+      use_fast_accum);
+}
+
+#endif // defined(_WIN32) && defined(USE_ROCM)
+
 } // namespace at::native
