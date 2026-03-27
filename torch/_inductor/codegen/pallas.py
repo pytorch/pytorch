@@ -821,6 +821,14 @@ class _BufferIndexing:
     index_str: str
     needs_flatten: bool
 
+    # sometimes we need to reshape the Ref before loading it
+    # e.g. on TPU, slices stride != 1 isn't support,
+    # but it works if we reshape immediately before slicing + use static indexing
+    reshape_before_load: list[int] | None = None
+
+    # where possible, tracks the shape of the resulting buffer load expr
+    loaded_array_shape: list[int] | None = None
+
 
 @dataclasses.dataclass
 class _BroadcastedIterVar:
@@ -1629,6 +1637,17 @@ class PallasKernel(SIMDKernel):
             return None
 
     @staticmethod
+    def _safe_int_list(vals: Sequence[Any]) -> list[int] | None:
+        """Convert value sequence to int list, returning None on failure."""
+        try:
+            ints = [PallasKernel._safe_int(v) for v in vals]
+            if any(i is None for i in ints):
+                return None
+            return cast(list[int], ints)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
     def _c_contiguous_strides(shape: list[int]) -> list[int]:
         """Return C-contiguous strides for the given shape."""
         n = len(shape)
@@ -2050,7 +2069,7 @@ class PallasKernel(SIMDKernel):
         """
         Adjust index expression based on buffer shape (0-dim scalar, multi-dim, etc.).
         """
-        if indexing.needs_flatten or indexing.index_str == "...":
+        if indexing.needs_flatten:
             return indexing
 
         buf_obj = V.graph.get_buffer(name)
@@ -2058,6 +2077,10 @@ class PallasKernel(SIMDKernel):
             return indexing
 
         buf_size = buf_obj.get_size()
+
+        if indexing.index_str == "...":
+            indexing.loaded_array_shape = self._safe_int_list(buf_size)
+            return indexing
 
         # 0-dimensional (scalar) buffer - use [...] to access it
         if len(buf_size) == 0:
@@ -2153,12 +2176,26 @@ class PallasKernel(SIMDKernel):
         if var_length is None or var_length * stride != buf_numel:
             return indexing
 
-        prefix = ":, " * (ndim - 1)
-        if offset_val == 0:
-            slice_str = f"{prefix}::{stride}"
-        else:
-            slice_str = f"{prefix}{offset_val}::{stride}"
-        return _BufferIndexing(index_str=slice_str, needs_flatten=False)
+        loaded_array_shape = self._safe_int_list(buf_size)
+        if loaded_array_shape is None:
+            return indexing
+        loaded_array_shape[-1] = math.ceil(
+            (loaded_array_shape[-1] - offset_val) / stride
+        )
+
+        # On TPUs, `::stride` where stride != 1 is not allowed
+        # So we reshape the final dimension [N] into [N//stride, stride]
+        # and then use static indexing [..., :offset]
+
+        index_str = ":, " * ndim + f"{offset_val}"
+        reshape = loaded_array_shape + [stride]
+
+        return _BufferIndexing(
+            index_str=index_str,
+            needs_flatten=False,
+            reshape_before_load=reshape,
+            loaded_array_shape=loaded_array_shape,
+        )
 
     @staticmethod
     def _gather_permute_expr(load_expr: str, perm: tuple[int, ...]) -> str:
@@ -2342,7 +2379,11 @@ class PallasKernel(SIMDKernel):
             return f"{buf}[...].flatten()[{idx}]"
         else:
             # Direct indexing for contiguous access
-            load_expr = f"{buf}[{indexing.index_str}]"
+            buf_expr = f"{buf}"
+            if indexing.reshape_before_load is not None:
+                reshape_str = ", ".join(map(str, indexing.reshape_before_load))
+                buf_expr = f"{buf_expr}.reshape({reshape_str})"
+            load_expr = f"{buf_expr}[{indexing.index_str}]"
 
             if indexing.index_str == "..." and not self.is_gpu:
                 perm = self._get_full_load_permutation(name, index)
@@ -2359,6 +2400,28 @@ class PallasKernel(SIMDKernel):
                         self.collapsed_reshape_inputs[name] = collapsed_shape
                         self.collapsed_output_shape = tuple(
                             collapsed_shape[p] for p in cperm
+                        )
+
+            if indexing.loaded_array_shape:
+                target_shape, _ = self._get_reshape_target_shape_and_numel()
+                if target_shape is not None:
+                    target_shape = [*target_shape]
+                    if target_shape != indexing.loaded_array_shape:
+                        # we have a `reshape_target_shape` different from the loaded shape
+                        # so we reshape them to match. Example:
+                        # loaded shape == (32, 32), reshape_target_shape == (32, 32, 2)
+                        # we generate `broadcast_to(expand_dims({loaded}, axis=(-1)), (32, 32, 2))`
+                        if len(indexing.loaded_array_shape) < len(target_shape):
+                            dim_delta = len(target_shape) - len(
+                                indexing.loaded_array_shape
+                            )
+                            expand_dims = [-i - 1 for i in range(dim_delta)]
+                            expand_dims_str = ", ".join(map(str, expand_dims))
+                            load_expr = f"jnp.expand_dims({load_expr}, axis=({expand_dims_str}))"
+                            indexing.loaded_array_shape += [1] * dim_delta
+                        target_shape_str = ", ".join(tuple(map(str, target_shape)))
+                        load_expr = (
+                            f"jnp.broadcast_to({load_expr}, ({target_shape_str}))"
                         )
 
             return load_expr
