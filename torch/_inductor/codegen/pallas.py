@@ -25,7 +25,7 @@ from .common import (
     OpOverrides,
     PythonPrinter,
 )
-from .simd import SIMDKernel, SIMDScheduling
+from .simd import IterationRangesEntry, SIMDKernel, SIMDScheduling
 
 
 class PallasPrinter(PythonPrinter):
@@ -820,6 +820,17 @@ class _BufferIndexing:
 
     index_str: str
     needs_flatten: bool
+
+
+@dataclasses.dataclass
+class _BroadcastedIterVar:
+    """Encapsulates information needed to codegen a broadcasted iteration var"""
+
+    # index of this var in `self.range_tree_nodes.items()``
+    idx: int
+    var_sym: sympy.Symbol
+    entry: IterationRangesEntry
+    length_val: int | None
 
 
 @dataclasses.dataclass
@@ -4097,7 +4108,9 @@ from torch._inductor.runtime.runtime_utils import (
             if length_val is not None and length_val == reshape_target_numel:
                 total_var_idx = idx
             else:
-                broadcast_vars.append((idx, var_sym, entry, length_val))
+                broadcast_vars.append(
+                    _BroadcastedIterVar(idx, var_sym, entry, length_val)
+                )
 
         num_broadcast_dims = len(broadcast_vars)
 
@@ -4117,11 +4130,7 @@ from torch._inductor.runtime.runtime_utils import (
                     and idx != total_var_idx
                 ):
                     broadcast_idx = next(
-                        (
-                            i
-                            for i, (vidx, _, _, _) in enumerate(broadcast_vars)
-                            if vidx == idx
-                        ),
+                        (i for i, v in enumerate(broadcast_vars) if v.idx == idx),
                         None,
                     )
                     if broadcast_idx is not None:
@@ -4149,7 +4158,7 @@ from torch._inductor.runtime.runtime_utils import (
                 kernel_body.writeline(f"{var_name} = {arange}.reshape({shape_str})")
             elif num_broadcast_dims > 1 and idx != total_var_idx:
                 broadcast_idx = next(
-                    i for i, (vidx, _, _, _) in enumerate(broadcast_vars) if vidx == idx
+                    i for i, v in enumerate(broadcast_vars) if v.idx == idx
                 )
                 axis_idx = self._broadcast_axis_idx(
                     broadcast_vars, broadcast_idx, num_broadcast_dims
@@ -4191,7 +4200,7 @@ from torch._inductor.runtime.runtime_utils import (
 
     @staticmethod
     def _broadcast_axis_idx(
-        broadcast_vars: list[tuple[int, Any, Any, Any]],
+        broadcast_vars: list[_BroadcastedIterVar],
         broadcast_idx: int,
         num_broadcast_dims: int,
     ) -> int:
@@ -4199,10 +4208,10 @@ from torch._inductor.runtime.runtime_utils import (
         # - Mixed: pointwise first, reduction last for output reshape
         # - Same-type: reverse order, first var innermost
         has_reduction_vars = any(
-            str(v).startswith("r") for _, v, _, _ in broadcast_vars
+            str(bv.var_sym).startswith("r") for bv in broadcast_vars
         )
         has_pointwise_vars = any(
-            not str(v).startswith("r") for _, v, _, _ in broadcast_vars
+            not str(bv.var_sym).startswith("r") for bv in broadcast_vars
         )
         is_mixed = has_reduction_vars and has_pointwise_vars
         if is_mixed:
