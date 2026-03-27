@@ -4054,16 +4054,9 @@ from torch._inductor.runtime.runtime_utils import (
                 pw_idx += 1
         return None
 
-    def _codegen_iteration_vars(
-        self, kernel_body: IndentedBuffer, ctx: _CodegenContext
-    ) -> None:
-        # Generate iteration variables as jnp.arange arrays
-        # Skip on GPU - jnp.arange is not supported by Pallas Mosaic backend
-        if not (self.range_tree_nodes and not self.is_gpu and self.used_iter_vars):
-            return
-
-        kernel_body.writeline("# Define iteration variables as JAX arrays")
-
+    def _get_reshape_target_shape_and_numel(
+        self,
+    ) -> tuple[tuple[int, ...] | None, int | None]:
         # Find reshape target: N-D shape whose numel matches an iteration
         # var. Try output first (repeat/upsample), then inputs (reductions).
         iter_lengths = OrderedSet(
@@ -4085,11 +4078,7 @@ from torch._inductor.runtime.runtime_utils import (
             numel = math.prod(shape)
             return (shape, numel) if numel in iter_lengths else (None, None)
 
-        candidate_buf_names = []
-        if ctx.output_params:
-            buf_name = ctx.output_buffer_lookup.get(ctx.output_params[0])
-            if buf_name:
-                candidate_buf_names.append(buf_name)
+        candidate_buf_names = self._output_buffer_names.copy()
         candidate_buf_names.extend(self.args.input_buffers)
 
         reshape_target_shape, reshape_target_numel = None, None
@@ -4098,6 +4087,41 @@ from torch._inductor.runtime.runtime_utils import (
             if result[0]:
                 reshape_target_shape, reshape_target_numel = result
                 break
+
+        return reshape_target_shape, reshape_target_numel
+
+    def _make_broadcasted_iteration_var_expr(
+        self, broadcast_vars: list[_BroadcastedIterVar], broadcast_idx: int
+    ) -> str:
+        bv = broadcast_vars[broadcast_idx]
+        length = bv.entry.length
+        renamed_length = self.rename_indexing(length)
+        length_str = self.kexpr(renamed_length)
+
+        num_broadcast_dims = len(broadcast_vars)
+        axis_idx = self._broadcast_axis_idx(
+            broadcast_vars, broadcast_idx, num_broadcast_dims
+        )
+        shape_parts = ["1"] * num_broadcast_dims
+        shape_parts[axis_idx] = length_str
+        shape_str = ", ".join(shape_parts)
+        arange = f"jnp.arange({length_str})"
+        reshaped = f"{arange}.reshape({shape_str})"
+        return reshaped
+
+    def _codegen_iteration_vars(
+        self, kernel_body: IndentedBuffer, ctx: _CodegenContext
+    ) -> None:
+        # Generate iteration variables as jnp.arange arrays
+        # Skip on GPU - jnp.arange is not supported by Pallas Mosaic backend
+        if not (self.range_tree_nodes and not self.is_gpu and self.used_iter_vars):
+            return
+
+        kernel_body.writeline("# Define iteration variables as JAX arrays")
+
+        reshape_target_shape, reshape_target_numel = (
+            self._get_reshape_target_shape_and_numel()
+        )
 
         var_items = list(self.range_tree_nodes.items())
 
@@ -4134,16 +4158,10 @@ from torch._inductor.runtime.runtime_utils import (
                         None,
                     )
                     if broadcast_idx is not None:
-                        axis_idx = self._broadcast_axis_idx(
-                            broadcast_vars, broadcast_idx, num_broadcast_dims
+                        expr = self._make_broadcasted_iteration_var_expr(
+                            broadcast_vars, broadcast_idx
                         )
-                        shape_parts = ["1"] * num_broadcast_dims
-                        shape_parts[axis_idx] = length_str
-                        shape_str = ", ".join(shape_parts)
-                        arange = f"jnp.arange({length_str})"
-                        kernel_body.writeline(
-                            f"{var_name} = {arange}.reshape({shape_str})"
-                        )
+                        kernel_body.writeline(f"{var_name} = {expr}")
                         continue
                 kernel_body.writeline(f"{var_name} = jnp.arange({length_str})")
                 continue
@@ -4160,14 +4178,10 @@ from torch._inductor.runtime.runtime_utils import (
                 broadcast_idx = next(
                     i for i, v in enumerate(broadcast_vars) if v.idx == idx
                 )
-                axis_idx = self._broadcast_axis_idx(
-                    broadcast_vars, broadcast_idx, num_broadcast_dims
+                expr = self._make_broadcasted_iteration_var_expr(
+                    broadcast_vars, broadcast_idx
                 )
-                shape_parts = ["1"] * num_broadcast_dims
-                shape_parts[axis_idx] = length_str
-                shape_str = ", ".join(shape_parts)
-                arange = f"jnp.arange({length_str})"
-                kernel_body.writeline(f"{var_name} = {arange}.reshape({shape_str})")
+                kernel_body.writeline(f"{var_name} = {expr}")
             else:
                 # Simple 1D arange — emit tile-relative form so tiling is safe.
                 # When grid=(1,), _pallas_tile[ax] == full length and
