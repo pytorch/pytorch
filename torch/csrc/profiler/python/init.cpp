@@ -385,8 +385,7 @@ void initPythonBindings(PyObject* module) {
               bool /* record_python_gc_info */,
               bool /* expose_kineto_event_metadata */,
               std::string /* custom_profiler_config*/,
-              bool /* adjust_timestamps */,
-              bool /* expose_python_function_events */
+              bool /* adjust_timestamps */
               >(),
           "An experimental config for Kineto features. Please note that"
           "backward compatibility is not guaranteed.\n"
@@ -408,8 +407,7 @@ void initPythonBindings(PyObject* module) {
           "    record_python_gc_info (bool) : adds python gc events to profile\n"
           "    expose_kineto_event_metadata (bool) : whether to expose KinetoEvent metadata in the PyTorch Profiler\n"
           "    custom_profiler_config (string) : Used to pass some configurations to the custom profiler backend.\n"
-          "    adjust_timestamps (bool) : whether to adjust timestamps to align Vulkan event timelines with parent CPU events\n"
-          "    expose_python_function_events (bool) : whether to include Python function call frame events in events()\n",
+          "    adjust_timestamps (bool) : whether to adjust timestamps to align Vulkan event timelines with parent CPU events\n",
           py::arg("profiler_metrics") = std::vector<std::string>(),
           py::arg("profiler_measure_per_kernel") = false,
           py::arg("verbose") = false,
@@ -422,8 +420,7 @@ void initPythonBindings(PyObject* module) {
           py::arg("record_python_gc_info") = false,
           py::arg("expose_kineto_event_metadata") = false,
           py::arg("custom_profiler_config") = "",
-          py::arg("adjust_timestamps") = false,
-          py::arg("expose_python_function_events") = false)
+          py::arg("adjust_timestamps") = false)
       .def(py::pickle(
           [](const ExperimentalConfig& p) { // __getstate__
             py::list py_metrics;
@@ -450,11 +447,10 @@ void initPythonBindings(PyObject* module) {
                 p.record_python_gc_info,
                 p.expose_kineto_event_metadata,
                 p.custom_profiler_config,
-                p.adjust_timestamps,
-                p.expose_python_function_events);
+                p.adjust_timestamps);
           },
           [](const py::tuple& t) { // __setstate__
-            TORCH_CHECK(t.size() >= 14, "Expected at least 14 values in state");
+            TORCH_CHECK(t.size() >= 13, "Expected at least 13 values in state");
 
             py::list py_metrics = t[0].cast<py::list>();
             std::vector<std::string> metrics;
@@ -483,8 +479,7 @@ void initPythonBindings(PyObject* module) {
                 t[9].cast<bool>(),
                 t[10].cast<bool>(),
                 t[11].cast<std::string>(),
-                t[12].cast<bool>(),
-                t[13].cast<bool>());
+                t[12].cast<bool>());
           }));
 
   py::class_<ProfilerConfig>(m, "ProfilerConfig")

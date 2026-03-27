@@ -3761,22 +3761,9 @@ class TestProfilerEventsParity(TestCase):
     """Tests validating parity between events() and export_chrome_trace() JSON."""
 
     def test_python_function_events_in_events(self):
-        # Default: python function events are excluded from events()
-        with profile(
-            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-            with_stack=True,
-        ) as prof:
-            x = torch.randn(10, 10, device="cuda")
-            torch.mm(x, x)
-
-        default_py = [e for e in prof.events() if e.is_python_function]
-        self.assertEqual(len(default_py), 0)
-
-        # Opt-in: expose_python_function_events includes them
         with profile(
             activities=[ProfilerActivity.CPU],
             with_stack=True,
-            experimental_config=_ExperimentalConfig(expose_python_function_events=True),
         ) as prof:
             x = torch.randn(10, 10)
             torch.mm(x, x)

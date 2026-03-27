@@ -465,15 +465,6 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
 
     materializeOpEvents(records_and_trace.first, end_time);
 
-    if (!config_.experimental_config.expose_python_function_events) {
-      kinetoEvents.erase(
-          std::remove_if(
-              kinetoEvents.begin(),
-              kinetoEvents.end(),
-              [](const auto& i) { return i.isPythonFunction(); }),
-          kinetoEvents.end());
-    }
-
     return std::move(records_and_trace.second);
   }
 
