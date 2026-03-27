@@ -1541,6 +1541,7 @@ class TestProfiler(TestCase):
             torch._C._profiler._set_fwd_bwd_enabled_val(True)
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_cuda_sync_events(self):
         device = torch.device("cuda:0")
         t1, t2 = torch.ones(1, device=device), torch.ones(1, device=device)
@@ -3239,6 +3240,7 @@ aten::mm""",
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_extra_cuda_copy_pattern(self):
         cases = (
             (0, lambda: torch.ones((100, 100), device="cuda")),
@@ -3301,6 +3303,7 @@ aten::mm""",
             num_matched.append(len(pattern.matched_events()))
         self.assertEqual(num_matched, [i for i, _ in cases])
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_fp32_matmul_pattern(self):
         x = torch.ones((100, 100), device="cuda")
         with profile(with_stack=True) as prof:
@@ -3310,6 +3313,7 @@ aten::mm""",
         num_matched = len(pattern.matched_events())
         self.assertEqual(num_matched, has_tf32)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_extra_cuda_copy_pattern_benchmark(self):
         with profile(with_stack=True, record_shapes=True) as prof:
             x = torch.ones((100, 100)).to("cuda")
@@ -3407,6 +3411,7 @@ aten::mm""",
             num_matched.append(len(pattern.matched_events()))
         self.assertEqual(num_matched, [i for i, _ in cases])
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_matmul_dim_fp16_pattern(self):
         cases = (
             (1, torch.randn((201, 201), device="cuda", dtype=torch.float16)),
@@ -3813,6 +3818,7 @@ class TestProfilerEventsParity(TestCase):
             json_flow_starts = {e["id"] for e in json_flow_events if e["ph"] == "s"}
             json_flow_ends = {e["id"] for e in json_flow_events if e["ph"] == "f"}
 
+            # kLinkAsyncCpuGpu = 2
             ac2g_events = [e for e in events_with_flow if e.flow_type == 2]
             events_flow_starts = {e.flow_id for e in ac2g_events if e.flow_start}
             events_flow_ends = {e.flow_id for e in ac2g_events if not e.flow_start}
@@ -3897,6 +3903,9 @@ class TestProfilerEventsParity(TestCase):
                 None,
             )
 
+            # Chrome trace uses a different base time; reconstruct ts from events()
+            # absolute_ns = start_us * 1000 + trace_start_ns
+            # chrome_ts = (absolute_ns - base_time_ns) / 1000
             absolute_ns = int(fe_mm.time_range.start * 1000) + trace_start_ns
             recovered_ts = (absolute_ns - base_time_ns) / 1000
             self.assertEqual(
