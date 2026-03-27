@@ -20135,6 +20135,7 @@ op_db: list[OpInfo] = [
              ),
              supports_out=True,
              sample_inputs_func=sample_inputs_index_reduce,
+             gradcheck_nondet_tol=GRADCHECK_NONDET_TOL if reduction_type in ('mean', 'prod') else 0.0,
              ) for reduction_type in ('mean', 'prod', 'amin', 'amax')),
     OpInfo('_unsafe_masked_index',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
