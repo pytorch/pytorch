@@ -132,6 +132,8 @@ using extra_args_t = std::unordered_map<std::string, c10::IValue>;
 using extra_meta_t = std::unordered_map<std::string, std::string>;
 using kwinputs_t = std::unordered_map<std::string, c10::IValue>;
 
+// Mirrors `libkineto::GenericTraceActivity::Flow`. Used during post processing
+// to embed Kineto events into the broader profiler tree structure.
 struct Flow {
   uint32_t id{0};
   uint32_t type{0};
