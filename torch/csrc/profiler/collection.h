@@ -132,6 +132,12 @@ using extra_args_t = std::unordered_map<std::string, c10::IValue>;
 using extra_meta_t = std::unordered_map<std::string, std::string>;
 using kwinputs_t = std::unordered_map<std::string, c10::IValue>;
 
+struct Flow {
+  uint32_t id{0};
+  uint32_t type{0};
+  uint32_t start{0};
+};
+
 struct FallbackPair {
   ProfilerVoidEventStub device_event_start_ = nullptr;
   ProfilerVoidEventStub device_event_end_ = nullptr;
@@ -179,6 +185,7 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
   bool allow_tf32_cublas_;
   std::unique_ptr<perf_counters_t> perf_event_counters_;
   std::string metadata_json_;
+  Flow flow;
 };
 
 template <>
@@ -354,16 +361,6 @@ struct ExtraFields<EventType::PyCCall> : public PyExtraFieldsBase {
 
 template <>
 struct ExtraFields<EventType::Kineto> {
-  // Mirrors `libkineto::GenericTraceActivity::Flow`. This information is used
-  // during post processing to properly embed Kineto events into the broader
-  // profiler tree structure. End users are not generally expected to use these
-  // fields directly, but they are available for debugging.
-  struct Flow {
-    uint32_t id{0};
-    uint32_t type{0};
-    uint32_t start{0};
-  };
-
   std::string name_;
   int64_t duration_ns_{0};
   uint64_t correlation_id_{0};

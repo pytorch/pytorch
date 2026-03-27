@@ -3756,7 +3756,6 @@ class TestPrivateUse1ProfilerState(TestCase):
 
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
-@unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
 class TestProfilerEventsParity(TestCase):
     """Tests validating parity between events() and export_chrome_trace() JSON."""
 
@@ -3775,7 +3774,6 @@ class TestProfilerEventsParity(TestCase):
             self.assertIsInstance(e.name, str)
             self.assertGreater(e.time_range.end - e.time_range.start, 0)
 
-        # Parity: count should match python_function events in Chrome trace
         with TemporaryFileName(mode="w+") as fname:
             prof.export_chrome_trace(fname)
             with open(fname) as f:
@@ -3788,13 +3786,13 @@ class TestProfilerEventsParity(TestCase):
             ]
             self.assertEqual(len(python_events), len(json_py))
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_flow_events_parity(self):
         """Verify that async CPU->GPU flow fields on events() match Chrome trace JSON."""
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
             x = torch.randn(32, 32, device="cuda")
             torch.mm(x, x)
 
-        # Collect async CPU->GPU flow info from events()
         events_with_flow = [
             e for e in prof.events() if e.flow_id is not None and e.flow_id != 0
         ]
@@ -3807,7 +3805,6 @@ class TestProfilerEventsParity(TestCase):
             self.assertIsInstance(e.flow_type, int)
             self.assertIsInstance(e.flow_start, bool)
 
-        # Verify parity with Chrome trace JSON for async CPU->GPU flow
         with TemporaryFileName(mode="w+") as fname:
             prof.export_chrome_trace(fname)
             with open(fname) as f:
@@ -3821,7 +3818,6 @@ class TestProfilerEventsParity(TestCase):
             json_flow_starts = {e["id"] for e in json_flow_events if e["ph"] == "s"}
             json_flow_ends = {e["id"] for e in json_flow_events if e["ph"] == "f"}
 
-            # kLinkAsyncCpuGpu = 2
             ac2g_events = [e for e in events_with_flow if e.flow_type == 2]
             events_flow_starts = {e.flow_id for e in ac2g_events if e.flow_start}
             events_flow_ends = {e.flow_id for e in ac2g_events if not e.flow_start}
@@ -3837,6 +3833,52 @@ class TestProfilerEventsParity(TestCase):
                 "Async CPU->GPU flow end IDs differ between events() and Chrome trace",
             )
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_profiler_fwdbwd_flow_events_parity(self):
+        """Verify that fwd->bwd flow fields on events() match Chrome trace JSON."""
+        with profile(activities=[ProfilerActivity.CPU]) as prof:
+            t1 = torch.ones(1, requires_grad=True)
+            t2 = torch.ones(1, requires_grad=True)
+            z = torch.add(t1, t2)
+            y = torch.ones(1)
+            loss = torch.nn.functional.binary_cross_entropy_with_logits(z, y)
+            loss.backward()
+
+        fwdbwd_events = [
+            e for e in prof.events() if e.flow_type == 1 and e.flow_id != 0
+        ]
+        self.assertGreater(
+            len(fwdbwd_events), 0, "No fwdbwd flow events found via events()"
+        )
+
+        events_flow_starts = {e.flow_id for e in fwdbwd_events if e.flow_start}
+        events_flow_ends = {e.flow_id for e in fwdbwd_events if not e.flow_start}
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                j = json.load(f)
+
+            json_flow_events = [
+                e
+                for e in j["traceEvents"]
+                if e.get("ph") in ("s", "f") and e.get("cat") == "fwdbwd"
+            ]
+            json_flow_starts = {e["id"] for e in json_flow_events if e["ph"] == "s"}
+            json_flow_ends = {e["id"] for e in json_flow_events if e["ph"] == "f"}
+
+            self.assertEqual(
+                json_flow_starts,
+                events_flow_starts,
+                "fwdbwd flow start IDs differ between events() and Chrome trace",
+            )
+            self.assertEqual(
+                json_flow_ends,
+                events_flow_ends,
+                "fwdbwd flow end IDs differ between events() and Chrome trace",
+            )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_timestamp_consistency(self):
         """Verify that FunctionEvent timestamps can reconstruct Chrome trace ts values."""
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
@@ -3850,12 +3892,8 @@ class TestProfilerEventsParity(TestCase):
             with open(fname) as f:
                 j = json.load(f)
 
-            # Chrome trace is relative to a different base time which is not exposed in Python.
-            # It's probably not important to do so as we still have the relative differences
-            # in duration.
             base_time_ns = j.get("baseTimeNanoseconds", 0)
 
-            # Grab mm timestamp from events() and json
             fe_mm = next((e for e in prof.events() if e.name == "aten::mm"), None)
             json_mm = next(
                 (
@@ -3866,9 +3904,6 @@ class TestProfilerEventsParity(TestCase):
                 None,
             )
 
-            # Reconstruct Chrome trace ts from events():
-            # absolute_ns = mm_op_start_us * 1000 + trace_start_ns
-            # chrome_ts = (absolute_ns - base_time_ns) / 1000 -> realign with json timeframe
             absolute_ns = int(fe_mm.time_range.start * 1000) + trace_start_ns
             recovered_ts = (absolute_ns - base_time_ns) / 1000
             self.assertEqual(
@@ -3877,6 +3912,7 @@ class TestProfilerEventsParity(TestCase):
                 msg="Recovered Chrome trace ts doesn't match JSON for aten::mm",
             )
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_external_id_parity(self):
         """Verify that FunctionEvent.external_id matches External id in Chrome trace JSON."""
         from collections import Counter
@@ -3908,6 +3944,39 @@ class TestProfilerEventsParity(TestCase):
                 json_name_ext,
                 "(name, external_id) pairs differ between events() and Chrome trace JSON",
             )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_profiler_activity_type_parity(self):
+        """Verify activity_type on events() matches Chrome trace cat field."""
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            x = torch.randn(32, 32, device="cuda")
+            torch.mm(x, x)
+
+        events = prof.events()
+        for e in events:
+            self.assertIsInstance(e.activity_type, str)
+            self.assertGreater(len(e.activity_type), 0)
+
+        mm_event = next((e for e in events if e.name == "aten::mm"), None)
+        self.assertIsNotNone(mm_event)
+        self.assertEqual(mm_event.activity_type, "cpu_op")
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                j = json.load(f)
+
+            json_name_cats = {
+                (e["name"], e["cat"])
+                for e in j["traceEvents"]
+                if e.get("ph") == "X" and "cat" in e
+            }
+            for e in events:
+                self.assertIn(
+                    (e.name, e.activity_type),
+                    json_name_cats,
+                    f"activity_type mismatch for {e.name}",
+                )
 
 
 if __name__ == "__main__":
