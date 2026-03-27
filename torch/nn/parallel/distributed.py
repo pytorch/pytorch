@@ -1637,11 +1637,17 @@ class DistributedDataParallel(Module, Joinable):
     @contextmanager
     @torch._disable_dynamo(recursive=False)
     def _inside_ddp_forward(self):
+        # Save and restore the previous _active_ddp_module to handle nested
+        # DDP correctly (e.g., TorchRec wraps embeddings in an inner DDP inside
+        # an outer DDP).  Without this, the inner DDP's exit would clear the
+        # flag to None, causing DDPOptimizer to miss compiled regions that run
+        # after the inner forward.
+        old = DistributedDataParallel._active_ddp_module
         DistributedDataParallel._active_ddp_module = self
         try:
             yield
         finally:
-            DistributedDataParallel._active_ddp_module = None
+            DistributedDataParallel._active_ddp_module = old
 
     def _run_ddp_forward(self, *inputs, **kwargs):
         if self._use_python_reducer:
