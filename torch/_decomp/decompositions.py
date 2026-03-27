@@ -5399,7 +5399,9 @@ def isin(elements, test_elements, *, assume_unique=False, invert=False):
         else:
             return torch.eq(elements, test_elements)
 
-    if test_elements.numel() < 10.0 * pow(elements.numel(), 0.145):
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if guard_or_false(test_elements.numel() < 10.0 * pow(elements.numel(), 0.145)):
         return isin_default(elements, test_elements, invert=invert)
     else:
         return isin_sorting(
