@@ -4382,22 +4382,26 @@ def all_gather_coalesced(
         Async work handle, if async_op is set to True.
         None, if not async_op or if not part of the group
 
-    Example:
-        we have 2 process groups, 2 ranks.
-        rank 0 passes:
-            input_tensor_list = [[[1, 1], [1, 1]], [2], [3, 3]]
-            output_tensor_lists =
-               [[[[-1, -1], [-1, -1]], [-1], [-1, -1]],
-                [[[-1, -1], [-1, -1]], [-1], [-1, -1]]]
-        rank 1 passes:
-            input_tensor_list = [[[3, 3], [3, 3]], [5], [1, 1]]
-            output_tensor_lists =
-               [[[[-1, -1], [-1, -1]], [-1], [-1, -1]],
-                [[[-1, -1], [-1, -1]], [-1], [-1, -1]]]
-        both rank 0 and 1 get:
-            output_tensor_lists =
-               [[[1, 1], [1, 1]], [2], [3, 3]],
-                [[3, 3], [3, 3]], [5], [1, 1]]].
+    Example::
+
+        # we have 2 process groups, 2 ranks.
+        # rank 0 passes:
+        input_tensor_list = [[[1, 1], [1, 1]], [2], [3, 3]]
+        output_tensor_lists = [
+            [[[-1, -1], [-1, -1]], [-1], [-1, -1]],
+            [[[-1, -1], [-1, -1]], [-1], [-1, -1]],
+        ]
+        # rank 1 passes:
+        input_tensor_list = [[[3, 3], [3, 3]], [5], [1, 1]]
+        output_tensor_lists = [
+            [[[-1, -1], [-1, -1]], [-1], [-1, -1]],
+            [[[-1, -1], [-1, -1]], [-1], [-1, -1]],
+        ]
+        # both rank 0 and 1 get:
+        output_tensor_lists = [
+            [[[1, 1], [1, 1]], [2], [3, 3]],
+            [[[3, 3], [3, 3]], [5], [1, 1]],
+        ]
 
     WARNING: at this time individual shape checking is not implemented across nodes.
     For example, if the rank 0 node passes [torch.rand(4), torch.rand(2)] and the

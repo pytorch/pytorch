@@ -50,18 +50,17 @@ class SubgraphMatcherWithNameNodeMap(SubgraphMatcher):
     initialization since we need to modify the graph (which requires `recompile` the GraphModule)
 
     Example::
+
         def pattern(x, weight):
             conv = F.conv2d(x, weight)
             relu = F.relu(conv)
             return relu, {"conv": conv, "relu": relu}
-
 
         def target_graph(x, weight):
             conv = F.conv2d(x, weight)
             relu = F.relu(conv)
             relu *= 2
             return relu
-
 
         pattern_gm = export(pattern, example_inputs).module()
         target_gm = export(target_graph, example_inputs).module()
@@ -93,21 +92,20 @@ class SubgraphMatcherWithNameNodeMap(SubgraphMatcher):
     def match(self, graph: Graph, node_name_match: str = "") -> list[InternalMatch]:
         """The returned InternalMatch will have name_node_map populated with a map
         from node name (str) to the target node, e.g.
-        {"conv": target_conv_ndoe, "relu": target_relu_node}
+        ``{"conv": target_conv_ndoe, "relu": target_relu_node}``
 
-        this requires the pattern graph returns an additional
-        output of node name to node, e.g. instead of:
-        ```
-        def pattern(...):
-            ...
-            return relu
-        ```
-        we should do:
-        ```
-        def pattern(...):
-            ...
-            return relu, {"conv": conv, "relu": relu}
-        ``` instead
+        This requires the pattern graph returns an additional
+        output of node name to node, e.g. instead of::
+
+            def pattern(...):
+                ...
+                return relu
+
+        we should do::
+
+            def pattern(...):
+                ...
+                return relu, {"conv": conv, "relu": relu}
         """
         internal_matches = super().match(graph, node_name_match)
         for internal_match in internal_matches:
