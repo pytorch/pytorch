@@ -2,6 +2,7 @@
 
 #include <ATen/AccumulateType.h>
 #include <ATen/NumericUtils.h>
+#include <ATen/OpMathType.h>
 #include <ATen/jiterator_macros.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/BFloat16.h>
@@ -372,7 +373,7 @@ inline float trigamma(float x) __ubsan_ignore_float_divide_by_zero__ {
  * This function is derived from the implementation of the digamma function in the Cephes Math Library.
  * See note [3-Clause BSD License for the Cephes Math Library].
  */
-inline double calc_digamma(double x) {
+inline C10_HOST_DEVICE double calc_digamma(double x) {
   // [C++ Standard Reference: Gamma Function] https://en.cppreference.com/w/cpp/numeric/math/tgamma
   static double PSI_10 = 2.25175258906672110764;
   if (x == 0) {
@@ -430,7 +431,7 @@ inline double calc_digamma(double x) {
  * This function is derived from the implementation of the digamma function in the Cephes Math Library.
  * See note [3-Clause BSD License for the Cephes Math Library].
  */
-inline float calc_digamma(float x) {
+inline C10_HOST_DEVICE float calc_digamma(float x) {
   // See [C++ Standard Reference: Gamma Function]
   static float PSI_10 = 2.25175258906672110764f;
   if (x == 0) {
@@ -1228,6 +1229,205 @@ template <>
     c10::Half a,
     c10::Half x) {
   return calc_igammac<float>(float(a), float(x));
+}
+
+// Backward pass for igamma/igammac w.r.t. first argument (a).
+// Derived from Stan math library's grad_reg_inc_gamma.
+// See note [Stan's 3-Clause BSD License] in NOTICE.
+
+template <typename opmath_t>
+static C10_HOST_DEVICE opmath_t
+_igammac_grada_helper_asymptotic_series(opmath_t a, opmath_t x) {
+  // Compute igammac gradient from [dlmf] 8.11.2
+  const int NTERMS = 9;
+  constexpr opmath_t ONE = opmath_t(1.0);
+  opmath_t sum = opmath_t(0.0);
+  opmath_t uk = opmath_t(1.0);
+  opmath_t du = opmath_t(1.0);
+  opmath_t uterm = opmath_t(a);
+  opmath_t logx = std::log(x);
+  int k;
+
+  for (k = 1; k <= NTERMS; ++k) {
+    uterm -= ONE;
+    if (k > 1) {
+      du = uk + du * uterm;
+    }
+    uk *= uterm;
+    sum += du / std::pow(x, static_cast<opmath_t>(k));
+  }
+  return (
+    calc_igammac(a, x) * (logx - calc_digamma(a)) +
+      sum * std::exp((a - ONE) * logx - x - std::lgamma(a))
+  );
+}
+
+template <typename opmath_t>
+static C10_HOST_DEVICE opmath_t
+_igammac_grada_helper_series(opmath_t a, opmath_t x) {
+  // Compute igammac gradient from [dlmf] 8.7.3
+  const int MAXITER = 2000;
+  const opmath_t MACHEP = std::is_same<opmath_t, double>::value ?
+    opmath_t(1.11022302462515654042E-16) : opmath_t(5.9604644775390625E-8);
+  constexpr opmath_t ONE = opmath_t(1.0);
+  constexpr opmath_t TWO = opmath_t(2.0);
+  opmath_t sum = opmath_t(0.0);
+  opmath_t subterm = opmath_t(0.0);
+  opmath_t a_plus_k = a;
+  opmath_t logx = std::log(x);
+  opmath_t term;
+  int k;
+
+  for (k = 0; k <= MAXITER; ++k) {
+    term = std::exp(subterm - TWO * std::log(a_plus_k));
+    sum += ((k % 2) ? -ONE : +ONE) * term;
+    if (std::fabs(term) <= MACHEP) {
+      break;
+    }
+    a_plus_k += ONE;
+    subterm += logx - std::log1p(k);
+  }
+  return (
+    (ONE - calc_igammac(a, x)) * (calc_digamma(a) - logx) +
+      sum * std::exp(a * logx - std::lgamma(a))
+  );
+}
+
+template <typename opmath_t>
+static C10_HOST_DEVICE opmath_t
+_igamma_grada_helper_series(opmath_t a, opmath_t x) {
+  // Compute igamma gradient from [gautschi] 5.4
+  const int MAXITER = 2000;
+  const opmath_t MACHEP = std::is_same<opmath_t, double>::value ?
+    opmath_t(1.11022302462515654042E-16) : opmath_t(5.9604644775390625E-8);
+  constexpr opmath_t ONE = opmath_t(1.0);
+  opmath_t suma = opmath_t(0.0);
+  opmath_t sumb = opmath_t(0.0);
+  opmath_t terma = opmath_t(1.0);
+  opmath_t termb = opmath_t(1.0);
+  opmath_t a_plus_k = a;
+  opmath_t logx = std::log(x);
+  opmath_t coef = calc_digamma(a + ONE);
+  opmath_t expo = a * logx - std::lgamma(a + ONE);
+  int k;
+
+  for (k = 0; k <= MAXITER; ++k) {
+    if (std::fabs(terma) > MACHEP) {
+      terma = std::exp(expo);
+      suma += terma;
+    }
+    if (std::fabs(termb) > MACHEP) {
+      termb = coef * std::exp(expo);
+      sumb += termb;
+    }
+    if ((std::fabs(terma) <= MACHEP) && (std::fabs(termb) <= MACHEP)) {
+      break;
+    }
+    expo += logx - std::log1p(a_plus_k);
+    a_plus_k += ONE;
+    coef += ONE / a_plus_k;
+  }
+  return std::exp(-x) * (logx * suma - sumb);
+}
+
+template <typename scalar_t>
+C10_HOST_DEVICE at::opmath_type<scalar_t>
+calc_igammac_grada(scalar_t a_, scalar_t x_) {
+  using opmath_t = at::opmath_type<scalar_t>;
+  opmath_t a = static_cast<opmath_t>(a_);
+  opmath_t x = static_cast<opmath_t>(x_);
+  constexpr opmath_t ZERO = opmath_t(0.0);
+  constexpr opmath_t LARGE = opmath_t(8.0);
+
+  if (std::isnan(a) || std::isnan(x)) {
+    return std::numeric_limits<opmath_t>::quiet_NaN();
+  }
+  else if ((a <= ZERO) || (x < ZERO)) {
+    return std::numeric_limits<opmath_t>::quiet_NaN();
+  }
+  else if (std::isinf(x)) {
+    return std::numeric_limits<opmath_t>::quiet_NaN();
+  }
+  else if (std::isinf(a)) {
+    return ZERO;
+  }
+  else if (x == ZERO) {
+    return ZERO;
+  }
+
+  if ((x >= LARGE) && (x >= a)) {
+    return _igammac_grada_helper_asymptotic_series(a, x);
+  }
+  return _igammac_grada_helper_series(a, x);
+}
+
+template <typename scalar_t>
+C10_HOST_DEVICE at::opmath_type<scalar_t>
+calc_igamma_grada(scalar_t a_, scalar_t x_) {
+  using opmath_t = at::opmath_type<scalar_t>;
+  opmath_t a = static_cast<opmath_t>(a_);
+  opmath_t x = static_cast<opmath_t>(x_);
+  constexpr opmath_t ZERO = opmath_t(0.0);
+  constexpr opmath_t SMALLA1 = opmath_t(0.8);
+  constexpr opmath_t LARGEX1 = opmath_t(15.0);
+  constexpr opmath_t SMALLA2 = opmath_t(12.0);
+  constexpr opmath_t LARGEX2 = opmath_t(30.0);
+  opmath_t REGION = std::sqrt(-x * x + 60.0 * x - 756.0);
+
+  if (std::isnan(a) || std::isnan(x)) {
+    return std::numeric_limits<opmath_t>::quiet_NaN();
+  }
+  else if ((a <= ZERO) || (x < ZERO)) {
+    return std::numeric_limits<opmath_t>::quiet_NaN();
+  }
+  else if (std::isinf(x)) {
+    return std::numeric_limits<opmath_t>::quiet_NaN();
+  }
+  else if (std::isinf(a)) {
+    return ZERO;
+  }
+  else if (x == ZERO) {
+    return ZERO;
+  }
+
+  if ((x > LARGEX1) && (a < SMALLA1)) {
+    return -calc_igammac_grada(a_, x_);
+  }
+  else if ((x > LARGEX2) && (a < SMALLA2)) {
+    return -calc_igammac_grada(a_, x_);
+  }
+  else if (a < REGION) {
+    return -calc_igammac_grada(a_, x_);
+  }
+  return _igamma_grada_helper_series(a, x);
+}
+
+template <>
+[[maybe_unused]] inline c10::BFloat16 calc_igamma_grada<c10::BFloat16>(
+    c10::BFloat16 a,
+    c10::BFloat16 x) {
+  return calc_igamma_grada<float>(float(a), float(x));
+}
+
+template <>
+[[maybe_unused]] inline c10::Half calc_igamma_grada<c10::Half>(
+    c10::Half a,
+    c10::Half x) {
+  return calc_igamma_grada<float>(float(a), float(x));
+}
+
+template <>
+[[maybe_unused]] inline c10::BFloat16 calc_igammac_grada<c10::BFloat16>(
+    c10::BFloat16 a,
+    c10::BFloat16 x) {
+  return calc_igammac_grada<float>(float(a), float(x));
+}
+
+template <>
+[[maybe_unused]] inline c10::Half calc_igammac_grada<c10::Half>(
+    c10::Half a,
+    c10::Half x) {
+  return calc_igammac_grada<float>(float(a), float(x));
 }
 
 inline c10::BFloat16 calc_erfinv(c10::BFloat16 a) { return calc_erfinv(float(a)); }
