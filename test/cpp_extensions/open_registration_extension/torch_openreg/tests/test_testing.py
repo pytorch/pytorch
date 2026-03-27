@@ -39,6 +39,8 @@ class TestBypassDeviceRestrictions(TestCase):
         self.assertEqual(torch.device(device).type, "openreg")
 
     def test_vaildate_bypass_execution(self, device):
+        # Must run last. The 'v' prefix ensures this sorts after test_bypass_* ('b') alphabetically,
+        # so executed_count has been incremented by both bypass tests before we check it here.
         expected_runs = 2
         actual_runs = type(self).executed_count
         self.assertEqual(
