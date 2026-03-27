@@ -19,6 +19,7 @@ from torch.distributed.tensor.placement_types import (
     Placement,
     Replicate,
     Shard,
+    _StridedShard
 )
 from torch.optim.optimizer import (
     _foreach_supported_types as _optim_foreach_supported_types,
@@ -63,6 +64,7 @@ torch.serialization.add_safe_globals(
         Partial,
         Replicate,
         Shard,
+        _StridedShard,
     ]
 )
 
