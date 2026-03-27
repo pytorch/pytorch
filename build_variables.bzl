@@ -1503,6 +1503,7 @@ aten_native_source_non_codegen_list = [
     # "aten/src/ATen/native/UpSample.cpp",
     "aten/src/ATen/native/UpSampleBicubic2d.cpp",
     "aten/src/ATen/native/UpSampleBilinear2d.cpp",
+    "aten/src/ATen/native/UpSampleLanczos2d.cpp",
     "aten/src/ATen/native/UpSampleLinear1d.cpp",
     "aten/src/ATen/native/UpSampleNearest1d.cpp",
     "aten/src/ATen/native/UpSampleNearest2d.cpp",
