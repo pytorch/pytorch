@@ -176,37 +176,6 @@ def _resolve_iterable(iterable: str | Iterable[str] | None) -> Iterable[str]:
     return iterable
 
 
-def _filter(
-    dsl_name: str,
-    op_symbol: str,
-    dispatch_key: str,
-    filter_dsl_names: str | Iterable[str] | None = None,
-    filter_op_symbols: str | Iterable[str] | None = None,
-    filter_dispatch_keys: str | Iterable[str] | None = None,
-) -> bool:
-    if (
-        (not filter_dsl_names)
-        and (not filter_op_symbols)
-        and (not filter_dispatch_keys)
-    ):
-        raise ValueError("Must pass 1+ of filter_{dsl_names,op_symbols,dispatch_keys}")
-
-    _filter_dsl_names = _resolve_iterable(filter_dsl_names)
-    _filter_op_symbols = _resolve_iterable(filter_op_symbols)
-    _filter_dispatch_keys = _resolve_iterable(filter_dispatch_keys)
-
-    if dsl_name in _filter_dsl_names:
-        return True
-
-    if op_symbol in _filter_op_symbols:
-        return True
-
-    if dispatch_key in _filter_dispatch_keys:
-        return True
-
-    return False
-
-
 def reenable_op_overrides(
     *,
     enable_dsl_names: str | list[str] | None = None,
@@ -361,6 +330,9 @@ def register_op_override(
     unconditional_override: bool - Impl doesn't have a fallback, and doesn't require
                                    torch.DispatchKeySet as the first argument.
     """
+    if lib_symbol != "aten":
+        raise ValueError(f'Unsupported lib_symbol (must be "aten", got: "{lib_symbol}"')
+
     key = (op_symbol, dispatch_key)
     lib = _get_or_create_library(*key)
 
