@@ -177,3 +177,79 @@ def normal(
         dtype = torch.float32
     result = torch.empty(shape, dtype=dtype, device=key.device)
     return normal_(key, result, mean=mean, std=std)
+
+
+def uniform_(
+    key: torch.Tensor,
+    result: torch.Tensor,
+    *,
+    low: float = 0.0,
+    high: float = 1.0,
+) -> torch.Tensor:
+    r"""Fill ``result`` in-place with uniform random values from a stateless PRNG key.
+
+    The values are drawn uniformly from the interval ``[low, high)``. The output
+    is fully determined by the key, so calling with the same key always produces
+    the same result.
+
+    Supports batched keys: if ``key`` has shape ``(*batch, 2)``, the leading
+    dimensions of ``result`` must be broadcastable with ``*batch`` and each key
+    independently generates its slice of the output.
+
+    Args:
+        key (Tensor): A PRNG key of shape ``(..., 2)`` with dtype ``torch.uint64``.
+        result (Tensor): The output tensor to fill in-place.
+        low (float): Lower bound (inclusive) of the uniform distribution. Default: ``0.0``.
+        high (float): Upper bound (exclusive) of the uniform distribution. Default: ``1.0``.
+
+    Returns:
+        Tensor: ``result``, filled with uniform random values.
+
+    Example::
+
+        >>> key = torch.func._random.key(42, device="cuda")
+        >>> result = torch.empty(1000, device="cuda")
+        >>> torch.func._random.uniform_(key, result)
+    """
+    return torch.ops.aten._philox_uniform_(result, key, low, high)
+
+
+def uniform(
+    key: torch.Tensor,
+    *shape: tuple[int, ...],
+    low: float = 0.0,
+    high: float = 1.0,
+    dtype: torch.dtype | None = None,
+) -> torch.Tensor:
+    r"""Generate uniformly distributed random values from a stateless PRNG key.
+
+    Produces a tensor of the given shape filled with values drawn uniformly
+    from the interval ``[low, high)``. The output is fully determined by the
+    key, so calling with the same key always returns the same result. The output
+    is placed on the same device as ``key``.
+
+    Supports batched keys: if ``key`` has shape ``(*batch, 2)``, the leading
+    dimensions of ``shape`` must be broadcastable with ``*batch`` and each key
+    independently generates its slice of the output.
+
+    Args:
+        key (Tensor): A PRNG key of shape ``(..., 2)`` with dtype ``torch.uint64``.
+        *shape (int): The desired output shape.
+        low (float): Lower bound (inclusive) of the uniform distribution. Default: ``0.0``.
+        high (float): Upper bound (exclusive) of the uniform distribution. Default: ``1.0``.
+        dtype (:class:`torch.dtype`, optional): The desired dtype. Default: ``torch.float32``.
+
+    Returns:
+        Tensor: A tensor of the given shape filled with uniform random values.
+
+    Example::
+
+        >>> key = torch.func._random.key(42, device="cuda")
+        >>> torch.func._random.uniform(key, (1000,))
+    """
+    if len(shape) == 1 and isinstance(shape[0], Sequence):
+        shape = tuple(shape[0])
+    if dtype is None:
+        dtype = torch.float32
+    result = torch.empty(shape, dtype=dtype, device=key.device)
+    return uniform_(key, result, low=low, high=high)

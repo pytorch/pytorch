@@ -219,8 +219,11 @@ __global__ void philox_normal_kernel(
     // Each warp processes 1024-element tiles: 32 threads x 8 curand calls x
     // 4 elements/call. Values go to shared memory in thread-major order,
     // then are read back in position-major order for coalesced stores.
+    bool could_wrap = key_offset != 0 &&
+        (key_offset + static_cast<unsigned long long>(event_numel) *
+         outputs_per_normal < key_offset);
     if constexpr (elems_per_call == 4) {
-      if ((key_offset & 3) == 0) {
+      if ((key_offset & 3) == 0 && !could_wrap) {
         constexpr int K = 8;
         constexpr int EPT = elems_per_call * K;  // 32 elements per thread
         constexpr int TILE = 32 * EPT;            // 1024 elements per tile

@@ -507,6 +507,11 @@ def meta_philox_normal_(self, key, mean=0.0, std=1.0):
     return self
 
 
+@register_meta(aten._philox_uniform_.default)
+def meta_philox_uniform_(self, key, low=0.0, high=1.0):
+    return self
+
+
 @register_meta([aten._fft_c2r.default, aten._fft_c2r.out])
 @out_wrapper()
 def meta_fft_c2r(self: Tensor, dim: list[int], normalization: int, lastdim: int):
