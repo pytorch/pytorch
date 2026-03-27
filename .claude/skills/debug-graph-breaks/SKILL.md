@@ -19,12 +19,9 @@ The graph break documentation website at https://meta-pytorch.org/compile-graph-
 
 ### Phase 1: Detect — Find the graph breaks
 
-Ask the user which detection method they'd like to use (or recommend one based on context):
-
-#### Option A: `TORCH_LOGS="graph_breaks"` (recommended for most users)
-Tell the user to run their script with the environment variable:
+If the user provides a script path and no existing logs, run it with `TORCH_LOGS="graph_breaks"`:
 ```bash
-TORCH_LOGS="graph_breaks" python your_script.py
+TORCH_LOGS="graph_breaks" python your_script.py 2>&1
 ```
 This prints each graph break with:
 - The file and line in user code that triggered it
@@ -32,13 +29,15 @@ This prints each graph break with:
 - A user code traceback
 - A link to documentation for that specific graph break
 
-For more verbose output (full Dynamo internals traceback), suggest:
+If the output is ambiguous or a break's origin is unclear, re-run with verbose mode:
 ```bash
-TORCH_LOGS="graph_breaks" TORCHDYNAMO_VERBOSE=1 python your_script.py
+TORCH_LOGS="graph_breaks" TORCHDYNAMO_VERBOSE=1 python your_script.py 2>&1
 ```
 The verbose mode adds the internal Dynamo stack trace and recent bytecode instructions, which can help when the standard output is ambiguous.
 
-Ask the user to paste the output.
+If the user provides existing `TORCH_LOGS` output, parse it directly and skip to Phase 2.
+
+Other detection methods are available if the user requests them or provides the relevant artifacts:
 
 #### Option B: tlparse report
 If the user has a tlparse report (a structured HTML report from `TORCH_TRACE`), they can provide:
@@ -60,14 +59,12 @@ When reading a tlparse report:
 3. Use `compilation_metrics_N.html` to understand compile time impact per subgraph.
 4. The compile IDs with `_1` suffix (e.g., `[0/0_1]`) indicate a restart — the `_1` means Dynamo restarted analysis after discovering a graph break on attempt `_0`.
 
-#### Option C: `fullgraph=True` (for users who want to fix one break at a time)
+#### Option C: `fullgraph=True` (fix one break at a time)
+If the user wants to fix breaks one at a time rather than all at once, use `fullgraph=True`:
 ```python
 torch.compile(fn, fullgraph=True)(*args)
 ```
-This raises an error on the first graph break encountered. Good for iterative fixing — fix one break, re-run, fix the next.
-
-#### Option D: User already has graph break logs
-If the user pastes graph break output directly, skip to Phase 2.
+This raises an error on the first graph break encountered. Fix it, re-run, fix the next.
 
 ### Phase 2: Diagnose — Understand each graph break
 
@@ -97,7 +94,7 @@ For each graph break found, do the following:
 
 ### Phase 3: Fix — Eliminate graph breaks
 
-For each graph break, apply a fix based on its type. Always read the user's code before suggesting changes.
+For each graph break, apply a fix based on its type. Always read the user's code before making changes and then make changes directly.
 
 #### Escape hatches (compile-safe alternatives)
 
@@ -198,10 +195,9 @@ def my_function(x):
 
 ### Iterative workflow
 
-After suggesting fixes:
-1. Ask the user to apply the fix and re-run with `TORCH_LOGS="graph_breaks"` (or `fullgraph=True`).
-2. Check if the graph break is resolved.
-3. If new graph breaks appear, repeat Phase 2-3.
+After applying fixes, re-run the script with `TORCH_LOGS="graph_breaks"` (or `fullgraph=True`) to verify:
+1. Check if the graph break is resolved.
+2. If new graph breaks appear, repeat Phase 2-3.
 4. Goal: either `fullgraph=True` runs without errors, or the user has eliminated the most impactful breaks.
 5. Optional: If the user is a PyTorch developer (can be determined if torch is built locally) and the graph break message is unclear, suggest a change to the error message or to create an issue.
 
