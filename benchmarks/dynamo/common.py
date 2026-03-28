@@ -3873,7 +3873,8 @@ def _run_compare_backed_unbacked(runner, args):
                 )
         print(f"{'=' * 80}", flush=True)
 
-    # Build base command, stripping --compare-backed-unbacked and --only + value
+    # Build base command, stripping --compare-backed-unbacked, --only, --filter and their values
+    # Handles both space-separated (--filter VALUE) and equals-separated (--filter=VALUE) forms
     filtered = []
     skip_next = False
     for a in sys.argv:
@@ -3882,8 +3883,13 @@ def _run_compare_backed_unbacked(runner, args):
         if skip_next:
             skip_next = False
             continue
-        if a == "--only":
-            skip_next = True
+        if a == "--only" or a.startswith("--only="):
+            if "=" not in a:
+                skip_next = True
+            continue
+        if a == "--filter" or a.startswith("--filter="):
+            if "=" not in a:
+                skip_next = True
             continue
         filtered.append(a)
     base_cmd = [sys.executable, "-B"] + filtered
