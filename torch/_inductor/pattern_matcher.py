@@ -1509,7 +1509,7 @@ def register_replacement(
     if inspect.ismethod(replace_fn):
         replace_argnames = [*inspect.signature(replace_fn).parameters.keys()]
         replace_fn = _wrap_bound_method(replace_fn, replace_argnames)
-    
+
     if not isinstance(example_inputs, (list, tuple)):
         raise TypeError(
             f"example_inputs must be a list or tuple, got {type(example_inputs)}"
