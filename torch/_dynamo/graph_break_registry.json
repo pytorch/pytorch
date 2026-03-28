@@ -614,6 +614,27 @@
       ]
     }
   ],
+  "GB1947": [
+    {
+      "Gb_type": "allow_in_graph with incorrect arguments",
+      "Context": "args={args}, kwargs={kwargs}",
+      "Explanation": "allow_in_graph expects exactly one callable argument with no keyword arguments",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5231": [
+    {
+      "Gb_type": "allow_in_graph on non-constant function",
+      "Context": "fn={fn_var}",
+      "Explanation": "allow_in_graph called inside a compiled function requires a function whose Python value can be determined at trace time. Functions defined inside the compiled function body with non-constant closures are not supported.",
+      "Hints": [
+        "Move the allow_in_graph call to module level, outside the compiled function.",
+        "Use @torch.compiler.allow_in_graph as a decorator on the function definition."
+      ]
+    }
+  ],
   "GB4297": [
     {
       "Gb_type": "Call to `torch._dynamo.skip_frame()`",

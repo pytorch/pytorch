@@ -933,6 +933,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         "Use @torch.compiler.allow_in_graph as a decorator on the function definition.",
                     ],
                 )
+            # Registering python_fn in _allowed_callable_ids makes lookup_callable
+            # return TorchInGraphFunctionVariable for it, so VariableTracker.build
+            # will always produce a TorchInGraphFunctionVariable here.
+            # Note: this mutation is global; any other variable tracker that already
+            # holds python_fn (pre-registration) will remain its original type, but
+            # calling python_fn again from a fresh LOAD would still get the updated
+            # classification via lookup_callable.
             torch._dynamo.allow_in_graph(python_fn)
             return VariableTracker.build(tx, python_fn)
 

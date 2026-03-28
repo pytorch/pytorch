@@ -2288,17 +2288,6 @@ class SkipFunctionVariable(VariableTracker):
                     ]
                     # also warn on it because most users won't see the graph break message
                     torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
-            if qualname == "allow_in_graph":
-                explanation = (
-                    "Found a skipped function named `allow_in_graph`. "
-                    "If you meant to call `torch.compiler.allow_in_graph` or "
-                    "`torch._dynamo.allow_in_graph` inside a compiled function, "
-                    "this is now supported — ensure you are calling one of those APIs."
-                )
-                # pyrefly: ignore [implicit-any]
-                hints = [
-                    "Use `torch.compiler.allow_in_graph(fn)` instead of a custom function named `allow_in_graph`.",
-                ]
             if self.reason:
                 reason = self.reason
             else:

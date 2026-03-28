@@ -12,6 +12,7 @@ from torch._dynamo.exc import Unsupported
 from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    parametrize,
     skipIfWindows,
 )
 from torch.testing._internal.dynamo_pytree_test_utils import PytreeRegisteringTestCase
@@ -2437,41 +2438,66 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         with self.assertRaises(RuntimeError):
             exported_model = torch.export.export(model, (inp,))
 
-    def test_allow_in_graph_inside_compile_torch_fn(self):
+    @parametrize("allow_fn", [torch.compiler.allow_in_graph, torch._dynamo.allow_in_graph])
+    def test_allow_in_graph_inside_compile_api_paths(self, allow_fn):
         # Regression test for https://github.com/pytorch/pytorch/issues/178511
-        # allow_in_graph called inside a compiled function on a torch operation
+        # Both torch.compiler.allow_in_graph and torch._dynamo.allow_in_graph are registered
+        # separately in manual_torch_name_rule_map, so both need coverage.
         def forward(x):
-            wrapped_fn = torch.compiler.allow_in_graph(torch.relu)
+            wrapped_fn = allow_fn(torch.relu)
             return wrapped_fn(x)
 
         compiled = torch.compile(forward, fullgraph=True)
         x = torch.randn(4)
-        result = compiled(x)
-        self.assertEqual(result, torch.relu(x))
+        self.assertEqual(compiled(x), torch.relu(x))
 
     def test_allow_in_graph_inside_compile_module_level_fn(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/178511
-        # allow_in_graph called inside compiled function on a module-level user function
+        # Verify that my_custom_function appears as a call_function node in the FX graph.
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
         def forward(x):
             wrapped_fn = torch.compiler.allow_in_graph(my_custom_function)
             return wrapped_fn(x)
 
-        compiled = torch.compile(forward, fullgraph=True)
+        compiled = torch.compile(forward, fullgraph=True, backend=backend)
         x = torch.randn(4)
         result = compiled(x)
         self.assertEqual(result, my_custom_function(x))
+        self.assertEqual(len(backend.graphs), 1)
+        call_nodes = [
+            n
+            for n in backend.graphs[0].graph.nodes
+            if n.op == "call_function" and n.target is my_custom_function
+        ]
+        self.assertEqual(len(call_nodes), 1)
 
-    def test_allow_in_graph_inside_compile_dynamo_allow_in_graph(self):
+    def test_allow_in_graph_inside_compile_constantifiable_closure(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/178511
-        # torch._dynamo.allow_in_graph called inside a compiled function
-        def forward(x):
-            wrapped_fn = torch._dynamo.allow_in_graph(torch.relu)
-            return wrapped_fn(x)
+        # The main use case for allow_in_graph inside compile is constantifiable closures:
+        # local functions whose closed-over values are Python constants (not tensors),
+        # so as_python_constant() can reconstruct the function at trace time.
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
 
-        compiled = torch.compile(forward, fullgraph=True)
+        def forward(x):
+            scale_factor = 2  # Python constant, not a tensor
+
+            def scale(t):
+                return t * scale_factor
+
+            wrapped = torch.compiler.allow_in_graph(scale)
+            return wrapped(x)
+
+        compiled = torch.compile(forward, fullgraph=True, backend=backend)
         x = torch.randn(4)
         result = compiled(x)
-        self.assertEqual(result, torch.relu(x))
+        self.assertEqual(result, x * 2)
+        self.assertEqual(len(backend.graphs), 1)
+        # The closed-over constant is baked in; no separate graph break for it
+        call_nodes = [
+            n for n in backend.graphs[0].graph.nodes if n.op == "call_function"
+        ]
+        self.assertGreater(len(call_nodes), 0)
 
 
 instantiate_parametrized_tests(DecoratorTests)
