@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import math
-from typing import Literal
+from typing import Any, Literal
 from typing_extensions import deprecated
 
 import torch
@@ -73,16 +73,18 @@ class _ConvNd(Module):
     in_channels: int
     _reversed_padding_repeated_twice: list[int]
     out_channels: int
-    kernel_size: tuple[int, ...]
-    stride: tuple[int, ...]
-    padding: str | tuple[int, ...]
-    dilation: tuple[int, ...]
     transposed: bool
-    output_padding: tuple[int, ...]
     groups: int
     padding_mode: Literal["zeros", "reflect", "replicate", "circular"]
     weight: Tensor
     bias: Tensor | None
+
+    # Type of the following attributes varies dynamically in subclasses
+    kernel_size: Any
+    stride: Any
+    padding: Any
+    dilation: Any
+    output_padding: Any
 
     def __init__(
         self,
