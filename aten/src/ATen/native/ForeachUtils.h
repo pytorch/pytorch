@@ -201,6 +201,14 @@ inline bool check_fast_path_restrictions(
              does_op_promote_integer_inputs_to_float);
 }
 
+inline bool check_fast_path_restrictions(
+    ArrayRef<TensorList> tensorLists,
+    bool skip_dtype_check) {
+  return _check_tensors_share_device_and_dtype(tensorLists, skip_dtype_check) &&
+      _check_tensors_share_sizes_and_strides(tensorLists) &&
+      _check_tensors_do_type_promotion_with_scalars(tensorLists[0]);
+}
+
 inline std::vector<c10::Scalar> convert_tensor_to_scalar_list(
     const Tensor& scalarList_,
     int64_t expect_length) {
@@ -299,7 +307,6 @@ inline FlatMap _group_tensors_by_first_tensors_device_and_dtype(
           "-th Tensor is not.");
       return {t->device(), t->scalar_type()};
     }();
-    /*
     TORCH_CHECK(
         std::all_of(
             nested_tensorlist.cbegin(),
@@ -319,9 +326,11 @@ inline FlatMap _group_tensors_by_first_tensors_device_and_dtype(
                 const auto s = tensor->scalar_type();
                 const auto d = tensor->device();
                 // Note: `step` or `state_step` is float32 by default.
+                // BFloat16 is allowed for mixed-precision optimizer states.
                 if (key.first == d) {
                   return key.second == s || s == at::ScalarType::Float ||
-                      s == at::ScalarType::Double;
+                      s == at::ScalarType::Double ||
+                      s == at::ScalarType::BFloat16;
                 } else if (d.is_cpu()) {
                   // note(crcrpar): There are some test cases (e.g.
                   // TestOptim::test_adam) where state_steps are on CPU and the
@@ -334,9 +343,9 @@ inline FlatMap _group_tensors_by_first_tensors_device_and_dtype(
                 }
               }
             }),
-        "Tensors of the same index must be on the same device and the same dtype
-    except `step` tensors that can be CPU and float32/64 notwithstanding");
-    */
+        "Tensors of the same index must be on the same device and the same dtype "
+        "except `step` tensors that can be CPU and float32/64, and optimizer "
+        "states that can be bfloat16 for mixed-precision training");
     grouped_tensors_with_indices.try_emplace(
         key,
         TensorsAndIndicesT{

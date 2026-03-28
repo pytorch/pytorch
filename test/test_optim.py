@@ -2438,7 +2438,8 @@ class TestOptimRenewed(TestCase):
                     tracker.pop_check_set(pc, self)
                     tracker.pop_check_set(pc.grad, self)
 
-                self.assertEqual(params[0], params_c[0])
+                for p, pc in zip(params, params_c):
+                    self.assertEqual(p, pc)
 
                 for dc in bf16_optim.state.values():
                     tracker.pop_check_set(dc["exp_avg"], self)
@@ -2462,20 +2463,31 @@ class TestOptimRenewed(TestCase):
 
         optim = optim_cls(params, lr=1e-3, fused=True)
 
-        # Manually pre-populate state for the first param in fp32
+        # Pre-populate state for the first param in bf16 with specific
+        # non-zero values so we can verify the hook doesn't overwrite them.
         p0 = params[0]
         optim.state[p0]["step"] = torch.zeros(
             (), dtype=torch.float32, device=p0.device
         )
-        optim.state[p0]["exp_avg"] = torch.zeros_like(p0)
-        optim.state[p0]["exp_avg_sq"] = torch.zeros_like(p0)
+        optim.state[p0]["exp_avg"] = torch.ones_like(
+            p0, dtype=torch.bfloat16
+        )
+        optim.state[p0]["exp_avg_sq"] = torch.ones_like(
+            p0, dtype=torch.bfloat16
+        )
 
         optim.register_step_pre_hook(_bf16_state_init_hook)
+
+        # Snapshot pre-populated values before step
+        exp_avg_before = optim.state[p0]["exp_avg"].clone()
+
         optim.step()
 
-        # First param: hook should have skipped it, states remain fp32
-        self.assertEqual(optim.state[p0]["exp_avg"].dtype, torch.float32)
-        self.assertEqual(optim.state[p0]["exp_avg_sq"].dtype, torch.float32)
+        # First param: hook should have skipped it (state was non-empty).
+        # Values should have been updated by the optimizer (not reset to zero).
+        self.assertEqual(optim.state[p0]["exp_avg"].dtype, torch.bfloat16)
+        self.assertEqual(optim.state[p0]["exp_avg_sq"].dtype, torch.bfloat16)
+        self.assertNotEqual(optim.state[p0]["exp_avg"], exp_avg_before)
 
         # Other params: hook should have initialized them in bf16
         for p in params[1:]:

@@ -3,7 +3,7 @@
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 #include <ATen/native/cuda/MultiTensorApply.cuh>
 #include <ATen/native/cuda/Pow.cuh>
-#include <cuda/std/type_traits>
+#include <type_traits>
 #include <utility>
 
 namespace at::native {
@@ -228,7 +228,7 @@ struct FusedAdamMathFunctorMP {
       "depth of 4 for Adam, depth of 5 for Adam with AMSGrad.");
   using opmath_t = at::opmath_type<scalar_type>;
   C10_DEVICE __forceinline__ void operator()(
-      int chunk_size,
+      int64_t chunk_size,
       FusedOptimizerTensorListMetadata<depth>& tl,
       const float* lr_ptr,
       const double& lr,
@@ -288,7 +288,7 @@ struct FusedAdamMathFunctorMP {
       for (int64_t i_start = threadIdx.x;
            i_start * kILP < n && i_start * kILP < chunk_size;
            i_start += blockDim.x) {
-        if (!std::is_same_v<scalar_type, param_type>) {
+        if constexpr (!std::is_same_v<scalar_type, param_type>) {
           scalar_type casted_param_args[kILP];
           for (int ii = 0; ii < kILP; ii++) {
             casted_param_args[ii] =
@@ -298,7 +298,7 @@ struct FusedAdamMathFunctorMP {
         } else {
           load_store(r_args[kParamIdx], (scalar_type*)param_args, 0, i_start);
         }
-        if (!std::is_same_v<scalar_type, grad_type>) {
+        if constexpr (!std::is_same_v<scalar_type, grad_type>) {
           scalar_type casted_grad_args[kILP];
           for (int ii = 0; ii < kILP; ii++) {
             casted_grad_args[ii] =
@@ -308,7 +308,7 @@ struct FusedAdamMathFunctorMP {
         } else {
           load_store(r_args[kGradIdx], (scalar_type*)grad_args, 0, i_start);
         }
-        if (!std::is_same_v<scalar_type, exp_avg_type>) {
+        if constexpr (!std::is_same_v<scalar_type, exp_avg_type>) {
           scalar_type casted_exp_avg_args[kILP];
           for (int ii = 0; ii < kILP; ii++) {
             casted_exp_avg_args[ii] =
@@ -319,7 +319,7 @@ struct FusedAdamMathFunctorMP {
           load_store(
               r_args[kExpAvgIdx], (scalar_type*)exp_avg_args, 0, i_start);
         }
-        if (!std::is_same_v<scalar_type, exp_avg_sq_type>) {
+        if constexpr (!std::is_same_v<scalar_type, exp_avg_sq_type>) {
           scalar_type casted_exp_avg_sq_args[kILP];
           for (int ii = 0; ii < kILP; ii++) {
             casted_exp_avg_sq_args[ii] =
@@ -342,7 +342,7 @@ struct FusedAdamMathFunctorMP {
             found_inf_ptr,
             bias_correction1,
             bias_correction2_sqrt);
-        if (!std::is_same_v<scalar_type, param_type>) {
+        if constexpr (!std::is_same_v<scalar_type, param_type>) {
           param_type casted_r_args[kILP];
           for (int ii = 0; ii < kILP; ii++) {
             casted_r_args[ii] = static_cast<param_type>(r_args[kParamIdx][ii]);
@@ -351,7 +351,7 @@ struct FusedAdamMathFunctorMP {
         } else {
           load_store(param_args, (param_type*)r_args[kParamIdx], i_start, 0);
         }
-        if (!std::is_same_v<scalar_type, exp_avg_type>) {
+        if constexpr (!std::is_same_v<scalar_type, exp_avg_type>) {
           exp_avg_type casted_r_args[kILP];
           for (int ii = 0; ii < kILP; ii++) {
             casted_r_args[ii] =
@@ -362,7 +362,7 @@ struct FusedAdamMathFunctorMP {
           load_store(
               exp_avg_args, (exp_avg_type*)r_args[kExpAvgIdx], i_start, 0);
         }
-        if (!std::is_same_v<scalar_type, exp_avg_sq_type>) {
+        if constexpr (!std::is_same_v<scalar_type, exp_avg_sq_type>) {
           exp_avg_sq_type casted_r_args[kILP];
           for (int ii = 0; ii < kILP; ii++) {
             casted_r_args[ii] =
@@ -377,7 +377,7 @@ struct FusedAdamMathFunctorMP {
               0);
         }
         if (grad_scale_ptr) {
-          if (!std::is_same_v<scalar_type, grad_type>) {
+          if constexpr (!std::is_same_v<scalar_type, grad_type>) {
             grad_type casted_r_args[kILP];
             for (int ii = 0; ii < kILP; ii++) {
               casted_r_args[ii] = static_cast<grad_type>(r_args[kGradIdx][ii]);
