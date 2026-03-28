@@ -15,6 +15,7 @@ from torch.testing._internal.common_cuda import (
     IS_SM90,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     SM100OrLater,
+    SM120OrLater,
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
@@ -242,7 +243,9 @@ class TestVarlenAttention(NNTestCase):
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize(
         "backend",
-        ["fa2"] + (["fa3"] if IS_SM90 else []) + (["fa4"] if SM100OrLater else []),
+        ["fa2"]
+        + (["fa3"] if IS_SM90 else [])
+        + (["fa4"] if SM100OrLater and not SM120OrLater else []),
     )
     def test_basic_functionality(self, device, dtype, backend):
         torch.manual_seed(42)
@@ -469,7 +472,9 @@ class TestVarlenAttention(NNTestCase):
     )
     @parametrize(
         "backend",
-        ["fa2"] + (["fa3"] if IS_SM90 else []) + (["fa4"] if SM100OrLater else []),
+        ["fa2"]
+        + (["fa3"] if IS_SM90 else [])
+        + (["fa4"] if SM100OrLater and not SM120OrLater else []),
     )
     def test_varlen_vs_sdpa(self, device, dtype, scale, window_size, backend):
         torch.manual_seed(42)
@@ -751,7 +756,9 @@ class TestVarlenAttention(NNTestCase):
     )
     @parametrize(
         "backend",
-        ["fa2"] + (["fa3"] if IS_SM90 else []) + (["fa4"] if SM100OrLater else []),
+        ["fa2"]
+        + (["fa3"] if IS_SM90 else [])
+        + (["fa4"] if SM100OrLater and not SM120OrLater else []),
     )
     def test_seqused_k_kv_cache(self, device, dtype, actual_kv_lens, backend):
         torch.manual_seed(42)
@@ -872,7 +879,9 @@ class TestVarlenAttention(NNTestCase):
     )
     @parametrize(
         "backend",
-        ["fa2"] + (["fa3"] if IS_SM90 else []) + (["fa4"] if SM100OrLater else []),
+        ["fa2"]
+        + (["fa3"] if IS_SM90 else [])
+        + (["fa4"] if SM100OrLater and not SM120OrLater else []),
     )
     def test_block_table_kv_cache(
         self, device, dtype, page_size, compile, actual_kv_lens, backend
