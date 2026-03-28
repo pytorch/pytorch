@@ -39,7 +39,7 @@ jobs:
       opt_out_experiments: lf
 
   linux-noble-rocm-py3_12-inductor-build:
-    name: rocm-py3.12-inductor-mi300
+    name: linux-noble-rocm-py3.12-mi300
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
@@ -57,7 +57,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    name: rocm-py3.12-inductor-mi300
+    name: linux-noble-rocm-py3.12-mi300
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-noble-rocm-py3_12-inductor-build
     with:
