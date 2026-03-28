@@ -376,6 +376,7 @@ class FSDPParamGroup:
                 *self.comm_ctx.get_all_gather_streams(async_op, self._training_state),
                 self.device,
                 self._all_gather_comm,
+                self._module_fqn,
             )
 
     def wait_for_unshard(self):
@@ -612,6 +613,7 @@ class FSDPParamGroup:
                 self._partial_reduce_output,
                 self._all_reduce_hook,
                 self.force_sum_reduction_for_comms,
+                self._module_fqn,
             )
             self.comm_ctx.reduce_scatter_states.append(
                 ReduceScatterState(reduce_scatter_input, reduce_scatter_event)
