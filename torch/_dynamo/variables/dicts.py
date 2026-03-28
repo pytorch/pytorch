@@ -83,8 +83,6 @@ def was_instancecheck_override(obj: Any) -> bool:
 def raise_unhashable(
     arg: VariableTracker, tx: Optional["InstructionTranslator"] = None
 ) -> None:
-    from .builder import SourcelessBuilder
-
     if tx is None:
         from torch._dynamo.symbolic_convert import InstructionTranslator
 
@@ -98,10 +96,7 @@ def raise_unhashable(
         TypeError,
         tx,
         args=[
-            SourcelessBuilder.create(
-                tx,
-                f"unhashable type: {arg_type!r} and variable tracker = {type(arg.realize())}",
-            )
+            f"unhashable type: {arg_type!r} and variable tracker = {type(arg.realize())}",
         ],
     )
 
@@ -523,7 +518,6 @@ class ConstDictVariable(VariableTracker):
                 )
             except Exception:
                 error_message = f"Dict key lookup failed for {str(arg)}"
-            error_message = VariableTracker.build(tx, error_message)
             raise_observed_exception(KeyError, tx, args=[error_message])
         return self.items[key]
 
@@ -761,8 +755,13 @@ class ConstDictVariable(VariableTracker):
                 raise_args_mismatch(tx, name)
 
             if not self.items:
-                msg = VariableTracker.build(tx, "popitem(): dictionary is empty")
-                raise_observed_exception(KeyError, tx, args=[msg])
+                raise_observed_exception(
+                    KeyError,
+                    tx,
+                    args=[
+                        "popitem(): dictionary is empty",
+                    ],
+                )
 
             if self.user_cls is collections.OrderedDict and (
                 len(args) == 1 or "last" in kwargs
@@ -953,12 +952,14 @@ class ConstDictVariable(VariableTracker):
                 new_dict_vt.items.update(args[0].items)  # type: ignore[attr-defined]
                 return new_dict_vt
             else:
-                err_msg = VariableTracker.build(
+                raise_observed_exception(
+                    TypeError,
                     tx,
-                    f"unsupported operand type(s) for |: '{self.python_type().__name__}'"
-                    f"and '{other.python_type().__name__}'",
+                    args=[
+                        f"unsupported operand type(s) for |: '{self.python_type().__name__}'"
+                        f"and '{other.python_type().__name__}'"
+                    ],
                 )
-                raise_observed_exception(TypeError, tx, args=[err_msg])
         elif name == "__ior__":
             self.call_method(tx, "update", args, kwargs)
             return self
@@ -1299,9 +1300,7 @@ class SetVariable(ConstDictVariable):
                 **{k: v.as_python_constant() for k, v in kwargs.items()},
             )
         except Exception as exc:
-            raise_observed_exception(
-                type(exc), tx, args=[VariableTracker.build(tx, a) for a in exc.args]
-            )
+            raise_observed_exception(type(exc), tx, args=list(exc.args))
         return VariableTracker.build(tx, res)
 
     def call_method(
@@ -1360,9 +1359,7 @@ class SetVariable(ConstDictVariable):
             try:
                 result: VariableTracker = self.set_items.pop().vt  # type: ignore[assignment]
             except KeyError as e:
-                raise_observed_exception(
-                    KeyError, tx, args=[VariableTracker.build(tx, a) for a in e.args]
-                )
+                raise_observed_exception(KeyError, tx, args=list(e.args))
             super().call_method(tx, name, [result], kwargs)
             return result
         elif name == "isdisjoint":
@@ -1493,20 +1490,24 @@ class SetVariable(ConstDictVariable):
                 "__sub__": "difference",
             }.get(name)
             if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable)):
-                msg = VariableTracker.build(
+                raise_observed_exception(
+                    TypeError,
                     tx,
-                    f"unsupported operand type(s) for {name}: '{self.python_type_name()}' and '{args[0].python_type_name()}'",
+                    args=[
+                        f"unsupported operand type(s) for {name}: '{self.python_type_name()}' and '{args[0].python_type_name()}'"
+                    ],
                 )
-                raise_observed_exception(TypeError, tx, args=[msg])
             assert m is not None
             return self.call_method(tx, m, args, kwargs)
         elif name in ("__iand__", "__ior__", "__ixor__", "__isub__"):
             if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable)):
-                msg = VariableTracker.build(
+                raise_observed_exception(
+                    TypeError,
                     tx,
-                    f"unsupported operand type(s) for {name}: '{self.python_type_name()}' and '{args[0].python_type_name()}'",
+                    args=[
+                        f"unsupported operand type(s) for {name}: '{self.python_type_name()}' and '{args[0].python_type_name()}'"
+                    ],
                 )
-                raise_observed_exception(TypeError, tx, args=[msg])
             m = {
                 "__iand__": "intersection_update",
                 "__ior__": "update",
