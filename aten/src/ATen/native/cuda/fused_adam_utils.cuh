@@ -219,6 +219,7 @@ template <
     typename grad_type,
     typename exp_avg_type,
     typename exp_avg_sq_type,
+    typename max_exp_avg_sq_type,
     int depth,
     ADAM_MODE adam_mode,
     bool amsgrad>
@@ -260,6 +261,7 @@ struct FusedAdamMathFunctorMP {
     grad_type* grad_args;
     exp_avg_type* exp_avg_args;
     exp_avg_sq_type* exp_avg_sq_args;
+    [[maybe_unused]] max_exp_avg_sq_type* max_exp_avg_sq_args;
 
     // r_args represents the state when everything is casted to scalar_type
     // to be passed into the adam_math function. scalar_type is our operation
@@ -270,7 +272,7 @@ struct FusedAdamMathFunctorMP {
     // so n = numel in current tensor not yet processed
     const auto n = tl.numel_for_tensor[tensor_loc] - chunk_idx * chunk_size;
 
-    const bool all_aligned{init_args_mixed_prec<
+    bool all_aligned = init_args_mixed_prec<
         depth,
         param_type,
         grad_type,
@@ -283,7 +285,13 @@ struct FusedAdamMathFunctorMP {
         tl,
         chunk_idx,
         chunk_size,
-        tensor_loc)};
+        tensor_loc);
+    if constexpr (amsgrad) {
+      max_exp_avg_sq_args =
+          (max_exp_avg_sq_type*)tl.addresses[kMaxExpAvgSqIdx][tensor_loc] +
+          chunk_idx * chunk_size;
+      all_aligned = all_aligned && is_aligned(max_exp_avg_sq_args);
+    }
     if ((n % kILP == 0) && (chunk_size % kILP == 0) && all_aligned) {
       for (int64_t i_start = threadIdx.x;
            i_start * kILP < n && i_start * kILP < chunk_size;
@@ -329,6 +337,22 @@ struct FusedAdamMathFunctorMP {
         } else {
           load_store(
               r_args[kExpAvgSqIdx], (scalar_type*)exp_avg_sq_args, 0, i_start);
+        }
+        if constexpr (amsgrad) {
+          if constexpr (!std::is_same_v<scalar_type, max_exp_avg_sq_type>) {
+            scalar_type casted[kILP];
+            for (int ii = 0; ii < kILP; ii++) {
+              casted[ii] = static_cast<scalar_type>(
+                  max_exp_avg_sq_args[ii + i_start * kILP]);
+            }
+            load_store(r_args[kMaxExpAvgSqIdx], casted, 0, 0);
+          } else {
+            load_store(
+                r_args[kMaxExpAvgSqIdx],
+                (scalar_type*)max_exp_avg_sq_args,
+                0,
+                i_start);
+          }
         }
         adam_math<scalar_type, opmath_t, depth, adam_mode, amsgrad>(
             r_args,
@@ -376,6 +400,22 @@ struct FusedAdamMathFunctorMP {
               i_start,
               0);
         }
+        if constexpr (amsgrad) {
+          if constexpr (!std::is_same_v<scalar_type, max_exp_avg_sq_type>) {
+            max_exp_avg_sq_type casted[kILP];
+            for (int ii = 0; ii < kILP; ii++) {
+              casted[ii] = static_cast<max_exp_avg_sq_type>(
+                  r_args[kMaxExpAvgSqIdx][ii]);
+            }
+            load_store(max_exp_avg_sq_args, casted, i_start, 0);
+          } else {
+            load_store(
+                max_exp_avg_sq_args,
+                (max_exp_avg_sq_type*)r_args[kMaxExpAvgSqIdx],
+                i_start,
+                0);
+          }
+        }
         if (grad_scale_ptr) {
           if constexpr (!std::is_same_v<scalar_type, grad_type>) {
             grad_type casted_r_args[kILP];
@@ -405,6 +445,17 @@ struct FusedAdamMathFunctorMP {
             i_start,
             chunk_size,
             n);
+        if constexpr (amsgrad) {
+#pragma unroll
+          for (int ii = 0; ii < kILP; ii++) {
+            const auto i = i_start + threadIdx.x + ii * blockDim.x;
+            r_args[kMaxExpAvgSqIdx][ii] = 0;
+            if (i < n && i < chunk_size) {
+              r_args[kMaxExpAvgSqIdx][ii] =
+                  static_cast<scalar_type>(max_exp_avg_sq_args[i]);
+            }
+          }
+        }
         adam_math<scalar_type, opmath_t, depth, adam_mode, amsgrad>(
             r_args,
             lr_double,
@@ -421,6 +472,14 @@ struct FusedAdamMathFunctorMP {
         store_args(exp_avg_args, r_args[kExpAvgIdx], i_start, chunk_size, n);
         store_args(
             exp_avg_sq_args, r_args[kExpAvgSqIdx], i_start, chunk_size, n);
+        if constexpr (amsgrad) {
+          store_args(
+              max_exp_avg_sq_args,
+              r_args[kMaxExpAvgSqIdx],
+              i_start,
+              chunk_size,
+              n);
+        }
         if (grad_scale_ptr) {
           store_args(grad_args, r_args[kGradIdx], i_start, chunk_size, n);
         }

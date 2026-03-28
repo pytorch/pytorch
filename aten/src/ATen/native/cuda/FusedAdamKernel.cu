@@ -31,12 +31,11 @@ void _fused_adam_kernel_cuda_(
     const std::optional<at::Tensor>& found_inf) {
   if (amsgrad) {
     TORCH_CHECK(
-        params[0].scalar_type() == exp_avgs[0].scalar_type(),
-        "amsgrad is not supported with mixed-precision optimizer states");
-    TORCH_CHECK(
         at::native::check_fast_path_restrictions(
-            {params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs}),
-        "params, grads, exp_avgs, exp_avg_sqs, and max_exp_avg_sqs must have same dtype, device, and layout");
+            {params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs},
+            /*skip_dtype_check=*/true),
+        "params, grads, exp_avgs, exp_avg_sqs, and max_exp_avg_sqs must be on "
+        "the same device with compatible sizes and strides");
     _fused_adam_amsgrad_cuda_impl_(
         params,
         grads,
@@ -131,12 +130,11 @@ void _fused_adam_kernel_cuda_(
 
   if (amsgrad) {
     TORCH_CHECK(
-        params[0].scalar_type() == exp_avgs[0].scalar_type(),
-        "amsgrad is not supported with mixed-precision optimizer states");
-    TORCH_CHECK(
         at::native::check_fast_path_restrictions(
-            {params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs}),
-        "params, grads, exp_avgs, exp_avg_sqs, and max_exp_avg_sqs must have same dtype, device, and layout");
+            {params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs},
+            /*skip_dtype_check=*/true),
+        "params, grads, exp_avgs, exp_avg_sqs, and max_exp_avg_sqs must be on "
+        "the same device with compatible sizes and strides");
     _fused_adam_amsgrad_cuda_impl_(
         params,
         grads,
