@@ -2027,22 +2027,9 @@ def compile_fx_aot(
             "into a pt2, please call `torch._inductor.aoti_compile_and_package`."
         )
     else:
-        with config.patch(config_patches):
-            effective_inductor_config = config.save_config_portable(
-                ignore_private_configs=False
-            )
         config_patches = {
             **config_patches,
-            "aot_inductor.output_path": code_hash(
-                json.dumps(
-                    {
-                        "model_code": model_.code,
-                        "inductor_config": effective_inductor_config,
-                    },
-                    sort_keys=True,
-                    default=repr,
-                )
-            ),
+            "aot_inductor.output_path": code_hash(model_.code),
         }
 
     from .utils import maybe_aoti_standalone_config
