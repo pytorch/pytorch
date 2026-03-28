@@ -1286,6 +1286,8 @@ class CachingAutotuner(KernelInterface):
             launcher.shared,
         )
 
+        TritonBundler.put_winner(launcher.cache_hash)
+
         if self.save_cache_hook:
             self.save_cache_hook(
                 launcher.config,
@@ -1473,11 +1475,14 @@ class CachingAutotuner(KernelInterface):
                 best_config
             ).make_launcher()
 
+        winner = config2launcher[best_config]
+        TritonBundler.put_winner(winner.cache_hash)
+
         fn_hash = generate_lookup_hash_from_source_code(
             str(self.size_hints), self.fn.src
         )
         log.debug("Function hash %s has best config %s", fn_hash, best_config)
-        return config2launcher[best_config]
+        return winner
 
     def get_profiler_kwargs(self, stream, launcher):
         kernel_kwargs_str = ",".join(
@@ -1552,6 +1557,11 @@ class CachingAutotuner(KernelInterface):
             ]
 
         (launcher,) = self.launchers
+        # Ensure the final launcher is marked as a winner for bundle filtering.
+        # For multi-config autotuning and coordesc, put_winner was already called
+        # (this is an idempotent set-add). For single-config kernels that skip
+        # autotuning entirely, this is the only call site that records the winner.
+        TritonBundler.put_winner(launcher.cache_hash)
         if launcher.store_cubin and (not benchmark_run or not self.cuda_kernel_saved):
             self.save_gpu_kernel(stream, launcher)
 
