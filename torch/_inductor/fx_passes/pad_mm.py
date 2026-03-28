@@ -124,6 +124,14 @@ def can_pad(
     if not check_dtype(mat1, mat2):
         return False
 
+    # Skip padding if any dimension is an unbacked symint
+    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+    for t in (mat1, mat2):
+        for dim in t.shape:
+            if isinstance(dim, torch.SymInt) and free_unbacked_symbols(dim):
+                return False
+
     # For padding to be vaible each tensor should have at least one static dim.
     tensors = [t for t in (mat1, mat2, input) if t is not None]
     if not all(has_one_static_dim(t) for t in tensors):
