@@ -1910,13 +1910,18 @@ def load_test_times_from_file(file: str) -> dict[str, Any]:
 
     with open(path) as f:
         test_times_file = cast(dict[str, Any], json.load(f))
-    job_name = os.environ.get("JOB_NAME")
+    raw_job_name = os.environ.get("JOB_NAME")
+    build_env = os.environ.get("BUILD_ENVIRONMENT")
+    job_name = raw_job_name
     if job_name is None or job_name == "":
         # If job name isn't available, use build environment as a backup
-        job_name = os.environ.get("BUILD_ENVIRONMENT")
+        job_name = build_env
     else:
         job_name = job_name.split(" / test (")[0]
     test_config = os.environ.get("TEST_CONFIG")
+    print_to_stderr(f"JOB_NAME={raw_job_name}")
+    print_to_stderr(f"BUILD_ENVIRONMENT={build_env}")
+    print_to_stderr(f"test-times lookup key={job_name}, test_config={test_config}")
     if test_config in test_times_file.get(job_name, {}):
         print_to_stderr("Found test times from artifacts")
         return test_times_file[job_name][test_config]
