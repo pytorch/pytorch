@@ -6286,6 +6286,53 @@ class CPUReproTests(TestCase):
             )
         )
 
+    def test_star_dep_preserved_through_outer_loop_fusion(self) -> None:
+        class LayerNorm2d(nn.LayerNorm):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x = x.permute(0, 2, 3, 1)
+                x = F.layer_norm(
+                    x, self.normalized_shape, self.weight, self.bias, self.eps
+                )
+                return x.permute(0, 3, 1, 2)
+
+        class Model(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.ln = LayerNorm2d(128)
+                self.ds = nn.Conv2d(128, 256, 2, stride=2)
+                self.pool = nn.AdaptiveAvgPool2d(1)
+                self.cls_ln = LayerNorm2d(256)
+                self.fc = nn.Linear(256, 1000)
+
+            def _path(self, x: torch.Tensor) -> torch.Tensor:
+                x = self.ln(x)
+                x = self.ds(x)
+                x = self.pool(x)
+                x = self.cls_ln(x)
+                return self.fc(x.flatten(1))
+
+            def forward(self, x1: torch.Tensor, x2: torch.Tensor) -> torch.Tensor:
+                return (
+                    self._path(x1).float().pow(2).mean()
+                    + self._path(x2).float().pow(2).mean()
+                )
+
+        x1 = torch.randn(4, 128, 16, 16)
+        x2 = torch.randn(4, 128, 16, 16)
+
+        model = Model()
+        eager_model = model
+        compiled_model = torch.compile(copy.deepcopy(model))
+        compiled_loss = compiled_model(x1.clone(), x2.clone())
+        compiled_loss.backward()
+        eager_loss = eager_model(x1.clone(), x2.clone())
+        eager_loss.backward()
+        torch.testing.assert_close(eager_loss, compiled_loss)
+        for p_eager, p_compiled in zip(
+            eager_model.parameters(), compiled_model.parameters()
+        ):
+            torch.testing.assert_close(p_eager.grad, p_compiled.grad)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
