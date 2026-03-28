@@ -962,14 +962,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         op.element_epilogue = op.accumulator_type()
 
         if self.use_fast_accum is not None:
-            # Hopper encodes FP8 fast-accum support in the CUTLASS op name.
-            # Blackwell kernels do not expose a distinct fast-accum variant, so
-            # treating the flag as a hard name filter would drop every valid op.
-            cuda_arch = cutlass_utils.get_cuda_arch()
-            if cuda_arch is None or int(cuda_arch) < 100:
-                is_op_fast_accum = "fastaccum" in op.configuration_name()
-                if self.use_fast_accum ^ is_op_fast_accum:
-                    return None
+            is_op_fast_accum = "fastaccum" in op.configuration_name()
+            if self.use_fast_accum ^ is_op_fast_accum:
+                return None
 
         # Set bias layout and alignment.
         status = self._set_bias_layout_and_alignment(op)
