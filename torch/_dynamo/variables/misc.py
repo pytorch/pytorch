@@ -620,9 +620,7 @@ class ExceptionVariable(VariableTracker):
         val: VariableTracker,
     ) -> VariableTracker:
         def raise_error(msg: str) -> NoReturn:
-            raise_observed_exception(
-                TypeError, tx, args=[VariableTracker.build(tx, msg)]
-            )
+            raise_observed_exception(TypeError, tx, args=[msg])
 
         name = name_var.as_python_constant()
         if name == "__context__":
@@ -653,11 +651,7 @@ class ExceptionVariable(VariableTracker):
                 raise_observed_exception(
                     TypeError,
                     tx,
-                    args=[
-                        VariableTracker.build(
-                            tx, "__traceback__ must be a traceback object or None"
-                        )
-                    ],
+                    args=["__traceback__ must be a traceback object or None"],
                 )
             self.__traceback__ = val
         else:
