@@ -168,7 +168,6 @@ class SharedResource:
 
     def add_log(self, log: str) -> None:
         with self._lock:
-            print("here log")
             self._data_logs.append(log)
 
 
