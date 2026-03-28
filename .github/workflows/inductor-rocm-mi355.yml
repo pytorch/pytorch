@@ -16,15 +16,13 @@ concurrency:
 permissions:
   id-token: write
   contents: read
+  actions: read
 
 jobs:
   target-determination:
     if: github.repository_owner == 'pytorch'
     name: before-test
     uses: ./.github/workflows/target_determination.yml
-    permissions:
-      id-token: write
-      contents: read
 
   get-label-type:
     name: get-label-type
@@ -53,9 +51,6 @@ jobs:
     secrets: inherit
 
   linux-noble-rocm-py3_12-inductor-test:
-    permissions:
-      id-token: write
-      contents: read
     name: linux-noble-rocm-py3.12-mi355
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-noble-rocm-py3_12-inductor-build

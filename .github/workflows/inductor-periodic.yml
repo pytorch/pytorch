@@ -18,6 +18,7 @@ concurrency:
 permissions:
   id-token: write
   contents: read
+  actions: read
 
 jobs:
   get-default-label-prefix:
@@ -120,9 +121,6 @@ jobs:
     secrets: inherit
 
   rocm-periodic-dynamo-benchmarks-test:
-    permissions:
-      id-token: write
-      contents: read
     name: rocm-periodic-dynamo-benchmarks-test
     uses: ./.github/workflows/_rocm-test.yml
     needs: rocm-periodic-dynamo-benchmarks-build

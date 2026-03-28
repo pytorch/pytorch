@@ -17,6 +17,7 @@ concurrency:
 permissions:
   id-token: write
   contents: read
+  actions: read
 
 jobs:
   get-label-type:
@@ -46,9 +47,6 @@ jobs:
     secrets: inherit
 
   linux-jammy-rocm-py3_10-inductor-test:
-    permissions:
-      id-token: write
-      contents: read
     name: linux-jammy-rocm-py3.10-mi200
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-jammy-rocm-py3_10-inductor-build
