@@ -117,7 +117,7 @@ Tensor qcat_nhwc_kernel(
       zero_point,
       std::nullopt);
 
-  AT_DISPATCH_QINT_TYPES(output.scalar_type(), "qcat_nhwc", [&, N, H, W]() {
+  AT_DISPATCH_QINT_TYPES(output.scalar_type(), "qcat_nhwc", [&]() {
     using Vec = Vectorized<scalar_t>;
     at::parallel_for(0, N * H * W, 0, [&](int64_t begin, int64_t end) {
       for (const auto i : c10::irange(begin, end)) {

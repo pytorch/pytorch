@@ -94,7 +94,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_layer_norm_last_index_weight_bias_f32(
 
   TORCH_INTERNAL_ASSERT(normalized_shape.size() == 1, "only accept shapes with the last dimension");
   TORCH_INTERNAL_ASSERT(input.scalar_type() == at::kFloat);
-  auto [M, N] = at::native::_check_layer_norm_inputs(input, normalized_shape, weight, bias);
+  auto M = at::native::_check_layer_norm_inputs(input, normalized_shape, weight, bias).first;
 
   auto mean = empty_mkldnn(
         {M},
