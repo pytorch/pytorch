@@ -96,12 +96,15 @@ def _default_to_weights_only(pickle_module):
 # (1) map_location (needed for wrapper subclasses/third party devices to torch._utils)
 # (2) skip_data (needed for torch.Tensor.__reduce_ex__ for skip_data ctx)
 # (3) materialize_fake_tensors (needed for torch.Tensor.__reduce_ex__ for skip_data ctx)
+# (4) storage_save_hook / storage_load_hook (for custom storage I/O, e.g. GDS)
 class _SerializationLocal(threading.local):
     def __init__(self):
         super().__init__()
         self.map_location: MAP_LOCATION | None = None
         self.skip_data: bool = False
         self.materialize_fake_tensors: bool = False
+        self.storage_save_hook: Callable | None = None
+        self.storage_load_hook: Callable | None = None
 
 
 _serialization_tls = _SerializationLocal()
@@ -1284,6 +1287,11 @@ def _save(
         global _serialization_tls
         if _serialization_tls.skip_data:
             zip_file.write_record_metadata(name, num_bytes)
+        elif (
+            _serialization_tls.storage_save_hook is not None
+            and _serialization_tls.storage_save_hook(zip_file, name, storage, num_bytes)
+        ):
+            pass
         else:
             # given that we copy things around anyway, we might use storage.cpu()
             # this means to that to get tensors serialized, you need to implement
@@ -2069,6 +2077,16 @@ def _load(
                 storage._checkpoint_offset = zip_file.get_record_offset(name)
         elif _serialization_tls.skip_data:
             storage = torch.UntypedStorage(nbytes)
+        elif (
+            _serialization_tls.storage_load_hook is not None
+            and (
+                _hook_result := _serialization_tls.storage_load_hook(
+                    zip_file, name, nbytes, location
+                )
+            )
+            is not None
+        ):
+            storage = _hook_result
         elif overall_storage is not None:
             if can_calculate_storage_offsets and calculate_storage_offsets:
                 storage_offset = _get_offset(key, name, nbytes)
