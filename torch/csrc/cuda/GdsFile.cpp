@@ -46,9 +46,14 @@ void gds_load_storage(
   void* dataPtr = storage.mutable_data();
   const size_t nbytes = storage.nbytes();
 
-  // Read the binary file
   ssize_t ret = cuFileRead(cf_handle, dataPtr, nbytes, offset, 0);
   TORCH_CHECK(ret >= 0, "cuFileRead failed: ", cuGDSFileGetErrorString(ret));
+  TORCH_CHECK(
+      static_cast<size_t>(ret) == nbytes,
+      "cuFileRead partial read: expected ",
+      nbytes,
+      " bytes, got ",
+      ret);
 }
 
 void gds_save_storage(
@@ -59,16 +64,22 @@ void gds_save_storage(
   CUfileHandle_t cf_handle = reinterpret_cast<CUfileHandle_t>(handle);
   c10::cuda::CUDAGuard gpuGuard(storage.device());
 
-  void* dataPtr = storage.mutable_data();
+  const void* dataPtr = storage.data();
   const size_t nbytes = storage.nbytes();
 
-  // Write device memory contents to the file
   ssize_t ret = cuFileWrite(cf_handle, dataPtr, nbytes, offset, 0);
   TORCH_CHECK(ret >= 0, "cuFileWrite failed: ", cuGDSFileGetErrorString(ret));
+  TORCH_CHECK(
+      static_cast<size_t>(ret) == nbytes,
+      "cuFileWrite partial write: expected ",
+      nbytes,
+      " bytes, wrote ",
+      ret);
 }
 
 void gds_register_buffer(const at::Storage& storage) {
-  void* dataPtr = storage.mutable_data();
+  c10::cuda::CUDAGuard gpuGuard(storage.device());
+  const void* dataPtr = storage.data();
   const size_t nbytes = storage.nbytes();
 
   CUfileError_t status = cuFileBufRegister(dataPtr, nbytes, 0);
@@ -76,23 +87,21 @@ void gds_register_buffer(const at::Storage& storage) {
       status.err == CU_FILE_SUCCESS,
       "cuFileBufRegister failed: ",
       cuGDSFileGetErrorString(status));
-  return;
 }
 
 void gds_deregister_buffer(const at::Storage& storage) {
-  void* dataPtr = storage.mutable_data();
+  c10::cuda::CUDAGuard gpuGuard(storage.device());
+  const void* dataPtr = storage.data();
   CUfileError_t status = cuFileBufDeregister(dataPtr);
   TORCH_CHECK(
       status.err == CU_FILE_SUCCESS,
       "cuFileBufDeregister failed: ",
       cuGDSFileGetErrorString(status));
-  return;
 }
 
 int64_t gds_register_handle(int fd) {
-  CUfileDescr_t cf_descr;
+  CUfileDescr_t cf_descr{};
   CUfileHandle_t cf_handle{};
-  memset((void*)&cf_descr, 0, sizeof(CUfileDescr_t));
   cf_descr.handle.fd = fd;
   cf_descr.type = CU_FILE_HANDLE_TYPE_OPAQUE_FD;
   CUfileError_t status = cuFileHandleRegister(&cf_handle, &cf_descr);
@@ -121,6 +130,7 @@ void initGdsBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
 #if defined(USE_CUFILE)
+  m.def("_gds_is_available", []() { return true; });
   m.def("_gds_register_handle", &gds_register_handle);
   m.def("_gds_deregister_handle", &gds_deregister_handle);
   m.def("_gds_register_buffer", &gds_register_buffer);
