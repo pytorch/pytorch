@@ -2627,28 +2627,47 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
                     CompiledFunction.metadata.tensors_saved_for_backwards_no_vc_check_slice
                 ]
                 if not all(
-                    isinstance(x, torch.Tensor) for x in tensors_saved_with_vc_check
+                    isinstance(x, torch.Tensor) or x is None
+                    for x in tensors_saved_with_vc_check
                 ):
+                    _vc_slice = CompiledFunction.metadata.tensors_saved_for_backwards_with_vc_check_slice
+                    non_tensor_idxs = [
+                        (i, type(x).__name__)
+                        for i, x in enumerate(tensors_saved_with_vc_check)
+                        if not isinstance(x, torch.Tensor) and x is not None
+                    ]
                     raise AssertionError(
-                        f"expected all tensors_saved_with_vc_check to be Tensors, "
-                        f"got types: {[type(x) for x in tensors_saved_with_vc_check]}"
+                        f"expected all tensors_saved_with_vc_check to be Tensors or None, "
+                        f"but found non-tensors at indices {non_tensor_idxs} "
+                        f"(slice={_vc_slice}, fw_outs_len={len(fw_outs)}, "
+                        f"num_forward={CompiledFunction.metadata.num_forward})"
                     )
                 if not all(
-                    isinstance(x, torch.Tensor) for x in tensors_saved_no_vc_check
+                    isinstance(x, torch.Tensor) or x is None
+                    for x in tensors_saved_no_vc_check
                 ):
+                    _no_vc_slice = CompiledFunction.metadata.tensors_saved_for_backwards_no_vc_check_slice
+                    non_tensor_idxs = [
+                        (i, type(x).__name__)
+                        for i, x in enumerate(tensors_saved_no_vc_check)
+                        if not isinstance(x, torch.Tensor) and x is not None
+                    ]
                     raise AssertionError(
-                        f"expected all tensors_saved_no_vc_check to be Tensors, "
-                        f"got types: {[type(x) for x in tensors_saved_no_vc_check]}"
+                        f"expected all tensors_saved_no_vc_check to be Tensors or None, "
+                        f"but found non-tensors at indices {non_tensor_idxs} "
+                        f"(slice={_no_vc_slice}, fw_outs_len={len(fw_outs)}, "
+                        f"num_forward={CompiledFunction.metadata.num_forward})"
                     )
 
                 # See Note [Detaching saved tensors in AOTAutograd]
                 num_vc_check = len(tensors_saved_with_vc_check)
                 tensors_to_save = [
-                    x.detach() if x._is_view() else x
+                    (x.detach() if x._is_view() else x) if x is not None else None
                     for x in tensors_saved_with_vc_check
                 ]
                 tensors_no_vc = [
-                    x.detach() if x._is_view() else x for x in tensors_saved_no_vc_check
+                    (x.detach() if x._is_view() else x) if x is not None else None
+                    for x in tensors_saved_no_vc_check
                 ]
 
                 # dynamic_saved_tensors_idxs has indices relative to all saved tensors
@@ -2658,11 +2677,16 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
                     dims,
                 ) in CompiledFunction.metadata.dynamic_saved_tensors_idxs.items():
                     if idx < num_vc_check:
-                        maybe_mark_dynamic_helper(tensors_to_save[idx], dims)
+                        if tensors_to_save[idx] is not None:
+                            # pyrefly: ignore[bad-argument-type]
+                            maybe_mark_dynamic_helper(tensors_to_save[idx], dims)
                     else:
-                        maybe_mark_dynamic_helper(
-                            tensors_no_vc[idx - num_vc_check], dims
-                        )
+                        if tensors_no_vc[idx - num_vc_check] is not None:
+                            maybe_mark_dynamic_helper(
+                                # pyrefly: ignore[bad-argument-type]
+                                tensors_no_vc[idx - num_vc_check],
+                                dims,
+                            )
 
                 # Only save tensors that need VC checks via save_for_backward
                 ctx.save_for_backward(*tensors_to_save)

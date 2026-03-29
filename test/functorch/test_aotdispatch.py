@@ -651,6 +651,60 @@ class TestAOTAutograd(AOTTestCase):
 
         self.verify_aot_autograd(F(), inp)
 
+    def test_none_in_saved_activations(self):
+        # Regression test: when a compiled forward function returns None for
+        # certain saved activations (e.g., optional parameters that are None
+        # emitted via inductor's NoneAsConstantBuffer), the assertion and detach
+        # logic in CompiledFunction.forward() must handle None correctly.
+        # Previously, isinstance(x, torch.Tensor) rejected None, and
+        # x._is_view() crashed on None.
+
+        # Simulate saved activations containing None (as produced by inductor)
+        view_tensor = torch.randn(4, 4).view(2, 8)
+        non_view_tensor = torch.randn(3, 3)
+        saved = [non_view_tensor, None, view_tensor]
+
+        # Test the OLD expression (pre-fix) — this would reject None
+        self.assertFalse(
+            all(isinstance(x, torch.Tensor) for x in saved),
+            "Old assertion rejects None — this is the bug",
+        )
+
+        # Test the OLD detach expression — this crashes on None
+        with self.assertRaises(
+            AttributeError, msg="'NoneType' has no attribute '_is_view'"
+        ):
+            _ = [x.detach() if x._is_view() else x for x in saved]
+
+        # Test the NEW expression (post-fix) — accepts None
+        self.assertTrue(all(isinstance(x, torch.Tensor) or x is None for x in saved))
+
+        # Test the NEW detach expression (post-fix) — handles None
+        result = [
+            (x.detach() if x._is_view() else x) if x is not None else None
+            for x in saved
+        ]
+        self.assertIs(result[0], non_view_tensor)  # non-view passes through
+        self.assertIsNone(result[1])  # None passes through
+        self.assertFalse(result[2]._is_view())  # view gets detached
+
+        # Verify save_for_backward accepts None (PyTorch documents this)
+        class TestFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x, None, x)
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad):
+                a, b, c = ctx.saved_tensors
+                if b is not None:
+                    raise RuntimeError("Expected saved tensor b to be None")
+                return grad
+
+        x = torch.randn(2, requires_grad=True)
+        TestFn.apply(x).sum().backward()
+
     def test_embedding_bag_view_dynamic(self):
         # Backwards pass tries to wrap a sparse tensor in a FunctionalTensorWrapper;
         # test that this works even though the sparse tensor has no storage.
