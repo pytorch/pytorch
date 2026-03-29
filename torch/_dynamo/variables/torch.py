@@ -2152,17 +2152,21 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # consumed grad_fns of returned tensors. This gives better compile
             # coverage than failing the entire compile.
             if tx.speculation_log.graph_break_on_autograd_grad:
+                leaked = tx.speculation_log.autograd_grad_leaked_tensors
+                leaked_str = ", ".join(leaked) if leaked else "unknown"
                 unimplemented(
                     gb_type="autograd.grad consumed returned tensor's grad_fn",
-                    context="",
+                    context=f"Leaked output tensors: {leaked_str}",
                     explanation=(
                         "torch.autograd.grad() consumes grad_fns that are needed by tensors "
                         "returned from this compiled function. This would cause 'backward "
-                        "through graph a second time' errors."
+                        "through graph a second time' errors.\n"
+                        f"  The following returned tensors have consumed grad_fns: {leaked_str}"
                     ),
                     hints=[
-                        "If you don't need to backward through the returned tensor, "
-                        "call .detach() before returning: `return loss.detach()`",
+                        f"Detach the problematic tensor(s) before returning: e.g. `{leaked[0]}.detach()`"
+                        if leaked
+                        else "Call .detach() on the tensor before returning.",
                         "If you need to backward through the returned tensor, use retain_graph=True in autograd.grad().",
                     ],
                 )
