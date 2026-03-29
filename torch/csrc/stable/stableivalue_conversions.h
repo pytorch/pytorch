@@ -261,9 +261,11 @@ struct FromImpl<std::optional<T>> {
     if (!val.has_value()) {
       return torch::stable::detail::from(std::nullopt);
     }
-    return torch::stable::detail::from(
-        new StableIValue(detail::FromImpl<T>::call(
-            val.value(), extension_build_version, is_internal)));
+    StableIValue* ivalue_ptr = nullptr;
+    TORCH_ERROR_CODE_CHECK(aoti_torch_new_stable_ivalue(&ivalue_ptr));
+    *ivalue_ptr = StableIValue(detail::FromImpl<T>::call(
+        val.value(), extension_build_version, is_internal));
+    return torch::stable::detail::from(ivalue_ptr);
   }
 };
 

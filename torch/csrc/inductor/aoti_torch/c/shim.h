@@ -489,6 +489,14 @@ AOTI_TORCH_EXPORT void aoti_torch_save_tensor_handle(
 // helpers for converting between StableIValue and actual IValues
 using StableIValue = uint64_t;
 
+// Allocates an StableIValue on the heap, returns an owning pointer.
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_new_stable_ivalue(StableIValue** ret_value);
+
+// Frees an StableIValue that was created by aoti_torch_new_stable_ivalue.
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_delete_stable_ivalue(StableIValue* value);
+
 class TorchLibraryOpaque;
 using TorchLibraryHandle = TorchLibraryOpaque*;
 

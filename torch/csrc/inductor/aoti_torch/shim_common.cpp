@@ -1537,3 +1537,14 @@ AOTITorchError aoti_torch_get_current_device_index(int32_t* ret_device_index) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
       { *ret_device_index = at::accelerator::getDeviceIndex(); });
 }
+
+AOTITorchError aoti_torch_new_stable_ivalue(StableIValue** ret_value) {
+  *ret_value = nullptr;
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *ret_value = new StableIValue(0); });
+}
+
+AOTITorchError aoti_torch_delete_stable_ivalue(StableIValue* value) {
+  delete value;
+  return AOTI_TORCH_SUCCESS;
+}
