@@ -1228,7 +1228,7 @@ _scaled_nvfp4_nvfp4(
 void check_swizzle_lengths(ScaledGemmImplementation impl,
                            std::vector<SwizzleType>& swizzle_a,
                            std::vector<SwizzleType>& swizzle_b) {
-#ifdef ROCM
+#ifdef USE_ROCM
   // ROCM doesn't swizzle their formats - we don't care what's passed.
   return;
 #else
