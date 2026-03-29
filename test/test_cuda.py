@@ -8744,7 +8744,7 @@ class TestFXMemoryProfiler(TestCase):
             self.assertIn("fx_original_trace", frame)
 
             self.assertIn(frame["fx_node_name"], ["addmm", "relu", "addmm_1"])
-            fx_node_name: Literal['addmm', 'addmm_1', 'relu'] = frame["fx_node_name"]
+            fx_node_name = frame["fx_node_name"]
             if fx_node_name == "addmm":
                 self.assertIn("d = self.net1(x)", frame["fx_original_trace"])
             elif fx_node_name == "addmm_1":
