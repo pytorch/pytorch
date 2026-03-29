@@ -262,15 +262,20 @@ endif()
 
 # cufile
 if(CAFFE2_USE_CUFILE)
-  add_library(torch::cufile INTERFACE IMPORTED)
   if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
-      set_property(
-          TARGET torch::cufile PROPERTY INTERFACE_LINK_LIBRARIES
-          CUDA::cuFile_static)
+    set(_cufile_target CUDA::cuFile_static)
   else()
-      set_property(
-          TARGET torch::cufile PROPERTY INTERFACE_LINK_LIBRARIES
-          CUDA::cuFile)
+    set(_cufile_target CUDA::cuFile)
+  endif()
+  if(TARGET ${_cufile_target})
+    add_library(torch::cufile INTERFACE IMPORTED)
+    set_property(
+        TARGET torch::cufile PROPERTY INTERFACE_LINK_LIBRARIES
+        ${_cufile_target})
+  else()
+    message(WARNING
+      "Cannot find cuFile library. Turning the option off")
+    set(CAFFE2_USE_CUFILE OFF)
   endif()
 else()
   message(STATUS "USE_CUFILE is set to 0. Compiling without cuFile support")
