@@ -74,6 +74,27 @@ class TestTypePromotion(TestCase):
         uint8_tensor *= int16_tensor
 
     @float_double_default_dtype
+    def test_comparison_out_of_bounds(self, device):
+        # https://github.com/pytorch/pytorch/issues/178716
+        # Test negative wrapper numbers against unsigned tensors
+        t1 = torch.tensor([1, 2], dtype=torch.uint8, device=device)
+        t2 = torch.tensor(-19, dtype=torch.int8, device=device)
+
+        self.assertEqual(t1 <= t2, torch.tensor([False, False], device=device))
+        self.assertEqual(t1 >= t2, torch.tensor([True, True], device=device))
+
+        # Test positive out of bounds wrapper numbers
+        t3 = torch.tensor([255], dtype=torch.uint8, device=device)
+        t4 = torch.tensor(300, dtype=torch.int16, device=device)
+
+        self.assertEqual(t3 <= t4, torch.tensor([True], device=device))
+        self.assertEqual(t3 >= t4, torch.tensor([False], device=device))
+
+        # Test that Python literals (which wrap to int64) promote comparison when OOB
+        self.assertEqual(t1 <= -19, torch.tensor([False, False], device=device))
+        self.assertEqual(t3 <= 300, torch.tensor([True], device=device))
+
+    @float_double_default_dtype
     def test_unsigned(self, device):
         dont_promote = torch.ones(3, dtype=torch.uint8, device=device) + 5
         self.assertEqual(dont_promote.dtype, torch.uint8)

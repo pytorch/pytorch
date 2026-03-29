@@ -454,6 +454,36 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
     common_dtype_ = compute_common_dtype();
   }
 
+  // For comparison ops, the default type promotion (which preserves the
+  // higher-category tensor dtype for arithmetic wrapping purposes) can produce
+  // incorrect results when a wrapped-number scalar has a different integral
+  // type than common_dtype_. For example, comparing a uint8 tensor against an
+  // int8 scalar: the standard rule picks uint8 as the common type, silently
+  // casting -19 to 237 and producing the wrong comparison result.
+  //
+  // We re-promote using c10::promoteTypes, which correctly yields int16 for
+  // (uint8, int8), preserving the sign of the scalar.
+  //
+  // Note: an alternative would be to inspect the scalar's numeric value and
+  // short-circuit (any unsigned value is >= 0, so a negative scalar makes the
+  // result deterministic). We deliberately avoid that because (a) it requires
+  // an .item() call which triggers a CUDA device-to-host sync for GPU scalars,
+  // (b) it only handles the negative-OOB case and not positive-OOB
+  // (e.g. uint8 vs int16(300)), and (c) it couples dtype promotion to op
+  // semantics. The dtype-only promoteTypes path is zero-cost at runtime.
+  if (config.is_comparison_op_ && c10::isIntegralType(common_dtype_, /*includeBool=*/false)) {
+    for (const auto& op : operands_) {
+      if (!op.is_output && op.tensor_base().defined() &&
+          op.tensor_base().unsafeGetTensorImpl()->is_wrapped_number()) {
+        ScalarType wrapped_dtype = op.tensor_base().scalar_type();
+        if (c10::isIntegralType(wrapped_dtype, /*includeBool=*/false) &&
+            wrapped_dtype != common_dtype_) {
+          common_dtype_ = c10::promoteTypes(common_dtype_, wrapped_dtype);
+        }
+      }
+    }
+  }
+
   // Promotes common dtype to the default float scalar type, if needed
   if (config.promote_integer_inputs_to_float_ &&
       c10::isIntegralType(common_dtype_, /*includeBool=*/true)) {
@@ -909,6 +939,7 @@ static void set_up_comparison_op_config(TensorIteratorConfig& config, const Tens
   config.set_check_mem_overlap(true);
   config.allow_cpu_scalars(true);
   config.promote_inputs_to_common_dtype(true);
+  config.is_comparison_op(true);
 
   // When 'out' isn't defined (e.g. for the functional operator 'a == b'), we
   // want the output to be bool. Otherwise (e.g. 'torch.eq(a, b, out=c)') we
