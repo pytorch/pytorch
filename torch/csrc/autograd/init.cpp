@@ -220,6 +220,34 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
           "is_cpp_nested_tensor",
           &torch::autograd::InputMetadata::is_cpp_nested_tensor);
 
+  py::enum_<libkineto::ActivityType>(m, "_ActivityType")
+      .value("CPU_OP", libkineto::ActivityType::CPU_OP)
+      .value("USER_ANNOTATION", libkineto::ActivityType::USER_ANNOTATION)
+      .value("GPU_USER_ANNOTATION", libkineto::ActivityType::GPU_USER_ANNOTATION)
+      .value("GPU_MEMCPY", libkineto::ActivityType::GPU_MEMCPY)
+      .value("GPU_MEMSET", libkineto::ActivityType::GPU_MEMSET)
+      .value("CONCURRENT_KERNEL", libkineto::ActivityType::CONCURRENT_KERNEL)
+      .value("EXTERNAL_CORRELATION", libkineto::ActivityType::EXTERNAL_CORRELATION)
+      .value("CUDA_RUNTIME", libkineto::ActivityType::CUDA_RUNTIME)
+      .value("CUDA_DRIVER", libkineto::ActivityType::CUDA_DRIVER)
+      .value("CPU_INSTANT_EVENT", libkineto::ActivityType::CPU_INSTANT_EVENT)
+      .value("PYTHON_FUNCTION", libkineto::ActivityType::PYTHON_FUNCTION)
+      .value("OVERHEAD", libkineto::ActivityType::OVERHEAD)
+      .value("MTIA_RUNTIME", libkineto::ActivityType::MTIA_RUNTIME)
+      .value("MTIA_CCP_EVENTS", libkineto::ActivityType::MTIA_CCP_EVENTS)
+      .value("MTIA_INSIGHT", libkineto::ActivityType::MTIA_INSIGHT)
+      .value("CUDA_SYNC", libkineto::ActivityType::CUDA_SYNC)
+      .value("CUDA_EVENT", libkineto::ActivityType::CUDA_EVENT)
+      .value("MTIA_COUNTERS", libkineto::ActivityType::MTIA_COUNTERS)
+      .value("GLOW_RUNTIME", libkineto::ActivityType::GLOW_RUNTIME)
+      .value("CUDA_PROFILER_RANGE", libkineto::ActivityType::CUDA_PROFILER_RANGE)
+      .value("HPU_OP", libkineto::ActivityType::HPU_OP)
+      .value("XPU_RUNTIME", libkineto::ActivityType::XPU_RUNTIME)
+      .value("XPU_DRIVER", libkineto::ActivityType::XPU_DRIVER)
+      .value("COLLECTIVE_COMM", libkineto::ActivityType::COLLECTIVE_COMM)
+      .value("PRIVATEUSE1_RUNTIME", libkineto::ActivityType::PRIVATEUSE1_RUNTIME)
+      .value("PRIVATEUSE1_DRIVER", libkineto::ActivityType::PRIVATEUSE1_DRIVER);
+
   py::class_<KinetoEvent>(m, "_KinetoEvent")
       // name of the event
       .def("name", [](const KinetoEvent& e) { return e.name(); })
@@ -322,7 +350,28 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       // KinetoEvent metadata
       .def("metadata_json", [](const KinetoEvent& e) {
         return e.metadataJson();
-      });
+      })
+      .def(
+          "module_hierarchy",
+          [](const KinetoEvent& e) { return e.moduleHierarchy().vec(); })
+      .def(
+          "activity_type",
+          [](const KinetoEvent& e) {
+            return static_cast<libkineto::ActivityType>(e.activityType());
+          })
+      .def(
+          "get_perf_event_counters",
+          [](const KinetoEvent& e) {
+            torch::profiler::perf_counters_t counters;
+            e.getPerfEventCounters(counters);
+            return counters;
+          })
+      .def(
+          "debug_handle",
+          [](const KinetoEvent& e) { return e.debugHandle(); })
+      .def(
+          "extra_meta",
+          [](const KinetoEvent& e) { return e.extraMeta(); });
 
   m.def("_soft_assert_raises", &setSoftAssertRaises);
   m.def("_get_sequence_nr", &at::sequence_number::peek);
