@@ -1541,7 +1541,12 @@ def _make_node_magic(method, func):
                 handle_sym_dispatch,
             )
 
-            out_hint = then_node.hint if pred_node.hint else else_node.hint
+            if pred_node.hint is None:
+                out_hint = None
+            elif pred_node.hint:
+                out_hint = then_node.hint
+            else:
+                out_hint = else_node.hint
             if get_proxy_mode():
                 return to_node(
                     pred_node,

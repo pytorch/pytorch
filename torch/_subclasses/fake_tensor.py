@@ -2740,9 +2740,7 @@ class FakeTensorMode(TorchDispatchMode):
                                 "self.shape_env must not be None for symbolic Eq"
                             )
 
-                        self.shape_env.set_real_tensor_prop_unbacked_vals(
-                            s, int(real_t)
-                        )
+                        self.shape_env.set_real_tensor_prop_unbacked_vals(s, real_t)
 
             if real_out is not nil:
                 # cross check fake/real outputs, and optionally override fake kernel mismatches

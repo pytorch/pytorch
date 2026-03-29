@@ -3725,6 +3725,39 @@ class TestUnbacked(TestCase):
 
             meta_copy_(self_tensor, src_tensor)
 
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_symbool_propagate_real_tensors(self):
+        """
+        Test that propagate_real_tensors properly handles SymBool from boolean .item() calls.
+
+        When tracing with propagate_real_tensors=True, if a boolean .item() returns False
+        during tracing, a runtime assertion should be generated that throws when the
+        boolean becomes True at runtime.
+
+        This is a regression test for a bug where int(real_t) was used instead of real_t,
+        causing boolean values to be incorrectly converted to integers and losing the
+        proper runtime assertion.
+        """
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            if x.eq(0.1).any().item():
+                return x
+            return x + 1
+
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            # First call with 0.2 - item() returns False, traces the x + 1 branch
+            result1 = f(torch.ones(2) * 0.2)
+            torch.testing.assert_close(result1, torch.ones(2) * 1.2)
+
+            # Second call with 0.1 - item() returns True, should throw runtime assertion
+            # because the traced graph assumed False
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"Runtime assertion failed for expression Ne\(u0, 1\)",
+            ):
+                f(torch.ones(2) * 0.1)
+
 
 class TestUbackedOps(TestCase):
     @fresh_cache()
