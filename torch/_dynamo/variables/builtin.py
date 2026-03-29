@@ -152,6 +152,14 @@ IN_PLACE_DESUGARING_MAP = {
     operator.ixor: operator.xor,
 }
 
+_BUILTIN_CONSTANT_FOLDABLE_METHODS: dict[type, frozenset[str]] = {
+    int: frozenset({"__new__", "from_bytes"}),
+    bool: frozenset({"__new__", "from_bytes"}),
+    float: frozenset({"fromhex", "hex"}),
+}
+if sys.version_info >= (3, 14):
+    _BUILTIN_CONSTANT_FOLDABLE_METHODS[complex] = frozenset({"from_number"})
+
 
 _HandlerCallback = Callable[
     ["InstructionTranslator", typing.Any, typing.Any], VariableTracker | None
@@ -1473,20 +1481,18 @@ class BuiltinVariable(VariableTracker):
                     args[1:],
                 )
 
-        if (
-            self.fn in (float, complex)
-            and len(args) == 1
-            and (
-                (self.fn is float and name in ("fromhex", "hex"))
-                or (name == "from_number" and sys.version_info >= (3, 14))
-            )
-        ):
-            if args[0].is_python_constant():
+        if name in _BUILTIN_CONSTANT_FOLDABLE_METHODS.get(self.fn, ()):
+            if all(a.is_python_constant() for a in args) and all(
+                v.is_python_constant() for v in kwargs.values()
+            ):
                 try:
                     fn = getattr(self.fn, name)
-                    res = fn(args[0].as_python_constant())
+                    res = fn(
+                        *(a.as_python_constant() for a in args),
+                        **{k: v.as_python_constant() for k, v in kwargs.items()},
+                    )
                     return VariableTracker.build(tx, res)
-                except (OverflowError, ValueError) as e:
+                except Exception as e:
                     raise_observed_exception(
                         type(e),
                         tx,
