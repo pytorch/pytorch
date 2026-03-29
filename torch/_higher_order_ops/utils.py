@@ -1041,6 +1041,7 @@ def check_input_alias_and_mutation_return_outputs(
     outputs = [
         _get_example_value(n)
         for n in pytree.tree_flatten(gm.graph.find_nodes(op="output")[0].args[0])[0]
+        if not isinstance(n, torch.fx.Node) or "val" in n.meta
     ]
 
     # We need to analyze the original fake_args to detect

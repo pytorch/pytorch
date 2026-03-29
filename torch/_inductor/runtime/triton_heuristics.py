@@ -836,6 +836,8 @@ class CachingAutotuner(KernelInterface):
                 options["waves_per_eu"] = compile_meta["waves_per_eu"]
             if "matrix_instr_nonkdim" in compile_meta:
                 options["matrix_instr_nonkdim"] = compile_meta["matrix_instr_nonkdim"]
+            if "kpack" in compile_meta:
+                options["kpack"] = compile_meta["kpack"]
 
         if self.device_props.type == "xpu" and XPU_KERNEL_FORMAT == "zebin":
             options["generate_native_code"] = True
@@ -1284,6 +1286,8 @@ class CachingAutotuner(KernelInterface):
             launcher.shared,
         )
 
+        TritonBundler.put_winner(launcher.cache_hash)
+
         if self.save_cache_hook:
             self.save_cache_hook(
                 launcher.config,
@@ -1471,11 +1475,14 @@ class CachingAutotuner(KernelInterface):
                 best_config
             ).make_launcher()
 
+        winner = config2launcher[best_config]
+        TritonBundler.put_winner(winner.cache_hash)
+
         fn_hash = generate_lookup_hash_from_source_code(
             str(self.size_hints), self.fn.src
         )
         log.debug("Function hash %s has best config %s", fn_hash, best_config)
-        return config2launcher[best_config]
+        return winner
 
     def get_profiler_kwargs(self, stream, launcher):
         kernel_kwargs_str = ",".join(
@@ -1550,6 +1557,11 @@ class CachingAutotuner(KernelInterface):
             ]
 
         (launcher,) = self.launchers
+        # Ensure the final launcher is marked as a winner for bundle filtering.
+        # For multi-config autotuning and coordesc, put_winner was already called
+        # (this is an idempotent set-add). For single-config kernels that skip
+        # autotuning entirely, this is the only call site that records the winner.
+        TritonBundler.put_winner(launcher.cache_hash)
         if launcher.store_cubin and (not benchmark_run or not self.cuda_kernel_saved):
             self.save_gpu_kernel(stream, launcher)
 
@@ -2498,6 +2510,7 @@ def triton_config(
     num_warps=None,
     matrix_instr=None,
     waves_per_eu=None,
+    kpack=None,
 ) -> Config:
     """
     Construct a pointwise triton config with some adjustment heuristics
@@ -2595,6 +2608,8 @@ def triton_config(
             config.kwargs["matrix_instr_nonkdim"] = matrix_instr
         if waves_per_eu is not None:
             config.kwargs["waves_per_eu"] = waves_per_eu
+        if kpack is not None:
+            config.kwargs["kpack"] = kpack
 
     return config
 
@@ -3223,6 +3238,10 @@ def _reduction_configs(
     loads_and_red = inductor_meta.get("num_load", 0) + inductor_meta.get(
         "num_reduction", 0
     )
+
+    device_major = triton_meta["device"].major
+    # Prefer smaller MAX_R0_BLOCK for Blackwell
+    MAX_R0_BLOCK = 1024 if device_major is not None and device_major >= 10 else 2048
     if size_hints["x"] >= 1024 and loads_and_red >= 10:
         # A heuristics to reduce R0_BLOCK if a kernel potentially need many registers.
         # Consider load and reduction since load need move data into registers and
@@ -3955,7 +3974,8 @@ def persistent_reduction(
                 # more warps for larger rows
                 new_configs.append(c)
 
-                if max_autotune_enabled and c.num_warps < 32:
+                max_warps_limit = 16 if torch.version.hip else 32
+                if max_autotune_enabled and c.num_warps < max_warps_limit:
                     newc = copy.deepcopy(c)
                     newc.num_warps *= 2
                     new_configs.append(newc)

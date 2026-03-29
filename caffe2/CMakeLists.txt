@@ -556,13 +556,6 @@ if(USE_CUDA OR USE_ROCM)
   append_filelist("libtorch_cuda_core_sources" Caffe2_GPU_HIP_JIT_FUSERS_SRCS)
 endif()
 
-# NativeRT is disabled
-# if(USE_CUDA)
-#   append_filelist("libtorch_nativert_cuda_sources" Caffe2_GPU_SRCS)
-# endif()
-# if(USE_ROCM)
-#   append_filelist("libtorch_nativert_cuda_sources" Caffe2_HIP_SRCS)
-# endif()
 
 if(USE_CUDA)
   list(APPEND Caffe2_GPU_CU_SRCS ${Caffe2_GPU_HIP_JIT_FUSERS_SRCS})
@@ -1369,8 +1362,6 @@ if(BUILD_TEST)
   else()
     add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
     add_subdirectory(${TORCH_ROOT}/test/cpp/lazy ${CMAKE_BINARY_DIR}/test_lazy)
-    # NativeRT is disabled
-    # add_subdirectory(${TORCH_ROOT}/test/cpp/nativert ${CMAKE_BINARY_DIR}/test_nativert)
     add_subdirectory(${TORCH_ROOT}/test/cpp/profiler ${CMAKE_BINARY_DIR}/test_profiler)
     add_subdirectory(${TORCH_ROOT}/test/inductor ${CMAKE_BINARY_DIR}/test_inductor)
     add_subdirectory(${TORCH_ROOT}/test/cpp/aoti_abi_check ${CMAKE_BINARY_DIR}/test_aoti_abi_check)
@@ -1468,6 +1459,46 @@ if(USE_ROCM)
   if(USE_ROCM_CK_SDPA)
     target_compile_definitions(torch_hip PRIVATE USE_ROCM_CK_SDPA)
   endif()
+
+  message(INFO "USE_NVSHMEM=${USE_NVSHMEM} USE_ROCM=${USE_ROCM} rocshmem_FOUND=${rocshmem_FOUND}")
+  if(USE_NVSHMEM)
+    if(rocshmem_FOUND)
+      message(STATUS "rocSHMEM found, building with rocSHMEM support")
+      message(STATUS "ROCSHMEM_INCLUDE_DIR: '${ROCSHMEM_INCLUDE_DIR}'")
+      set(TORCH_ROCSHMEM_SRCS
+        "${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/utils.cpp"
+        "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/rocshmem_extension.cu"
+        "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cpp"
+        "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp"
+      )
+      set_source_files_properties(${TORCH_ROCSHMEM_SRCS} PROPERTIES LANGUAGE HIP)
+
+      # FindHIP's generated compile script bakes in global HIP_CLANG_FLAGS. Override
+      # -fno-gpu-rdc with -fgpu-rdc so device linker can pull in rocSHMEM device APIs.
+      set(HIP_CLANG_FLAGS_SAVED ${HIP_CLANG_FLAGS})
+      set(HIP_CLANG_FLAGS_FOR_ROCSHMEM ${HIP_CLANG_FLAGS})
+      list(FILTER HIP_CLANG_FLAGS_FOR_ROCSHMEM EXCLUDE REGEX "^-fno-gpu-rdc$")
+      list(APPEND HIP_CLANG_FLAGS_FOR_ROCSHMEM -fgpu-rdc)
+      set(HIP_CLANG_FLAGS ${HIP_CLANG_FLAGS_FOR_ROCSHMEM})
+
+      hip_add_library(torch_rocshmem SHARED ${TORCH_ROCSHMEM_SRCS})
+
+      set(HIP_CLANG_FLAGS ${HIP_CLANG_FLAGS_SAVED})
+
+      set_target_properties(torch_rocshmem PROPERTIES LINKER_LANGUAGE HIP)
+
+      target_compile_definitions(torch_hip PUBLIC USE_NVSHMEM)
+      target_compile_definitions(torch_rocshmem PUBLIC USE_NVSHMEM USE_ROCM)
+
+      target_link_libraries(torch_rocshmem PRIVATE roc::rocshmem)
+      target_link_libraries(torch_hip PRIVATE torch_rocshmem)
+
+      install(TARGETS torch_rocshmem EXPORT Caffe2Targets DESTINATION
+        "${TORCH_INSTALL_LIB_DIR}")
+    else()
+      message(WARNING "rocSHMEM not found (USE_NVSHMEM=ON). Building without rocSHMEM support.")
+    endif() #rocshmem_FOUND
+  endif() #USE_NVSHMEM
 endif()
 
 if(BUILD_LITE_INTERPRETER)
@@ -1990,7 +2021,11 @@ if(BUILD_TEST)
   endif()
 
   if(USE_ROCM)
+    string(JOIN " " HIP_HIPCC_FLAGS_STR ${HIP_HIPCC_FLAGS})
+    set(HIP_HIPCC_FLAGS ${HIP_HIPCC_FLAGS_STR})
+
     set(BASE_HIPCC_FLAGS ${HIP_HIPCC_FLAGS})
+
     foreach(test_src ${Caffe2_HIP_TEST_SRCS})
       get_filename_component(test_name ${test_src} NAME_WE)
       if(test_src MATCHES "^.*\.hip$")

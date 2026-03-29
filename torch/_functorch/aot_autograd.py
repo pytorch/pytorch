@@ -24,6 +24,7 @@ from torch._dynamo.utils import (
     preserve_rng_state,
     set_feature_use,
 )
+from torch._functorch._aot_autograd.autograd_cache import create_fx_config
 from torch._guards import detect_fake_mode
 from torch._inductor.codecache import resolve_pre_grad_pass_timing
 from torch._inductor.utils import BoxedBool
@@ -159,7 +160,7 @@ if TYPE_CHECKING:
 
     from torch._inductor.cudagraph_utils import BoxedDeviceIndex
     from torch._inductor.output_code import OutputCode
-    from torch._inductor.utils import InputType
+    from torch._inductor.utils import BoxedBool, InputType
     from torch._ops import OpOverload
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
@@ -923,7 +924,6 @@ def prepare_aot_module_simplified(
     kwargs: dict[str, Any] | None,
     decompositions: dict[OpOverload, Callable[..., Any]] | None,
     keep_inference_input_mutations: bool,
-    boxed_forward_device_index: BoxedDeviceIndex | None,
     ignore_shape_env: bool,
     flatten: bool,
     *,
@@ -1099,9 +1099,6 @@ def aot_module_simplified(
     :func:`aot_module_simplified` removes these overheads.
     """
 
-    if cudagraphs is None:
-        cudagraphs = BoxedBool(torch._inductor.config.triton.cudagraphs)
-
     with contextlib.ExitStack() as stack:
         (
             functional_call,
@@ -1121,7 +1118,6 @@ def aot_module_simplified(
             None,
             decompositions,
             keep_inference_input_mutations,
-            boxed_forward_device_index,
             ignore_shape_env,
             flatten=False,
             force_non_lazy_backward_lowering=config.force_non_lazy_backward_lowering,
@@ -1147,12 +1143,12 @@ def aot_module_simplified(
             remote = should_use_remote_autograd_cache()
             if local or remote:
                 set_feature_use("aot_autograd_remote_cache", remote)
+                fx_config = create_fx_config(cudagraphs, boxed_forward_device_index)
                 compiled_fn = AOTAutogradCache.try_load(
                     mod,
                     fake_flat_args,
                     aot_config,
-                    cudagraphs,
-                    boxed_forward_device_index,
+                    fx_config,
                     local,
                     remote,
                 )
@@ -1338,7 +1334,6 @@ def aot_export_joint_with_descriptors(
         # In contrast, decompositions are needed at this stage.
         decompositions,
         keep_inference_input_mutations,
-        None,
         ignore_shape_env,
         flatten=True,
         # Without this, we will attempt to "compile" the backward lazily

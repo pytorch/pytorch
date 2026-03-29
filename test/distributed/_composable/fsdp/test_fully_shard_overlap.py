@@ -376,7 +376,7 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
 
         ep_degree = 2
         efsdp_size = self.world_size // ep_degree
-        comm_sleep_ms = 100
+        comm_sleep_ms = 500
         world_mesh = init_device_mesh(
             device_type.type,
             (self.world_size,),

@@ -56,7 +56,11 @@ from torch._dynamo.testing import (
 )
 from torch._inductor.utils import fresh_cache
 from torch.nn import functional as F
-from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+from torch.nn.attention.flex_attention import (
+    AuxRequest,
+    create_block_mask,
+    flex_attention,
+)
 from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
@@ -8509,7 +8513,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         cnt = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt)
         self.assertEqual(fn(x), opt_fn(x))
-        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_filter_warnings(self):
         x = torch.ones(2, 2, requires_grad=True)
@@ -8952,6 +8956,90 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             grad = torch.autograd.grad(res.sum(), x)
             ref_grad = torch.autograd.grad(ref.sum(), x)
             self.assertEqual(grad, ref_grad)
+
+    @requires_cuda
+    @unittest.skipIf(
+        TEST_WITH_ROCM or not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "flash attention not supported",
+    )
+    def test_flex_attention_guard_on_constant_func_defaults(self):
+        """
+        Dynamo must guard on mask_mod.__defaults__ so that when a
+        compiled function is re-invoked with a new BlockMask whose
+        mask_mod has the same __code__ but different __defaults__,
+        Dynamo recompiles instead of reusing the stale first graph.
+        """
+        from torch.utils._triton import has_triton
+
+        if not has_triton():
+            self.skipTest("requires triton")
+
+        @torch.compile(fullgraph=True)
+        def flex_chunk(q, k, v, block_mask, scale):
+            out, aux = flex_attention(
+                q,
+                k,
+                v,
+                block_mask=block_mask,
+                scale=scale,
+                return_aux=AuxRequest(lse=True),
+            )
+            return out, aux.lse
+
+        def merge(out, lse, new_out, new_lse):
+            lse, new_lse = lse.unsqueeze(-1), new_lse.unsqueeze(-1)
+            mx = torch.maximum(lse, new_lse)
+            e0, e1 = torch.exp(lse - mx), torch.exp(new_lse - mx)
+            d = e0 + e1
+            return (out * e0 + new_out * e1) / d, (mx + torch.log(d)).squeeze(-1)
+
+        @torch.compile(fullgraph=True)
+        def ref_attn(q, k, v, block_mask, scale):
+            return flex_attention(q, k, v, block_mask=block_mask, scale=scale)
+
+        torch.manual_seed(42)
+        B, H, S, D = 1, 1, 512, 16
+        device = "cuda"
+        NUM_CHUNKS = 4
+        chunk_size = S // NUM_CHUNKS
+
+        q = torch.randn(B, H, S, D, device=device)
+        k = torch.randn(B, H, S, D, device=device)
+        v = torch.randn(B, H, S, D, device=device)
+        scale = D**-0.5
+
+        merged_out = merged_lse = None
+        for step in range(NUM_CHUNKS):
+            kv_offset = step * chunk_size
+
+            def mask_mod(b, h, q_idx, kv_idx, _offset=kv_offset):
+                return q_idx >= kv_idx + _offset
+
+            bm = create_block_mask(
+                mask_mod, B=B, H=H, Q_LEN=S, KV_LEN=chunk_size, device=device
+            )
+            out, lse = flex_chunk(
+                q,
+                k[:, :, kv_offset : kv_offset + chunk_size],
+                v[:, :, kv_offset : kv_offset + chunk_size],
+                bm,
+                scale,
+            )
+            if merged_out is None:
+                merged_out, merged_lse = out, lse
+            else:
+                merged_out, merged_lse = merge(merged_out, merged_lse, out, lse)
+
+        def causal(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        ref_bm = create_block_mask(causal, B=B, H=H, Q_LEN=S, KV_LEN=S, device=device)
+        ref_out = ref_attn(q, k, v, ref_bm, scale)
+
+        self.assertTrue(
+            (merged_out - ref_out).abs().max().item() < 1e-3,
+            "flex_attention mask_mod __defaults__ not properly guarded",
+        )
 
 
 instantiate_parametrized_tests(ReproTests)

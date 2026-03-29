@@ -4586,6 +4586,10 @@ def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None, out_dtype
 
     torch._check(batch1.dim() == 3, lambda: "batch1 must be a 3D tensor")
     torch._check(batch2.dim() == 3, lambda: "batch2 must be a 3D tensor")
+    torch._check(
+        batch1.dtype == batch2.dtype,
+        lambda: f"expected scalar type {batch1.dtype} but found {batch2.dtype}",
+    )
 
     batch1_sizes = batch1.size()
     batch2_sizes = batch2.size()

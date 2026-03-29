@@ -691,7 +691,7 @@ libtorch_lite_cmake_sources = sorted(
     torch_mobile_core,
 )
 
-libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources + libtorch_nativert_sources
+libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources
 
 libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/autograd/TraceTypeManual.cpp",
@@ -1504,6 +1504,7 @@ aten_native_source_non_codegen_list = [
     # "aten/src/ATen/native/UpSample.cpp",
     "aten/src/ATen/native/UpSampleBicubic2d.cpp",
     "aten/src/ATen/native/UpSampleBilinear2d.cpp",
+    "aten/src/ATen/native/UpSampleLanczos2d.cpp",
     "aten/src/ATen/native/UpSampleLinear1d.cpp",
     "aten/src/ATen/native/UpSampleNearest1d.cpp",
     "aten/src/ATen/native/UpSampleNearest2d.cpp",

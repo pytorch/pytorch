@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 # ruff: noqa: F841
 import contextlib
-import contextvars
 import copy
 import dataclasses
 import functools
@@ -5414,9 +5413,8 @@ class CommonTemplate:
         threads = []
         compiled_m = torch.compile(model)
         for _ in range(1, numb_instance + 1):
-            ctx = contextvars.copy_context()
             thread = threading.Thread(
-                target=ctx.run, args=(run_weights_sharing_model, compiled_m, inp)
+                target=run_weights_sharing_model, args=(compiled_m, inp)
             )
             threads.append(thread)
             thread.start()
@@ -6451,7 +6449,7 @@ class CommonTemplate:
             reference_in_float=False,
         )
 
-    @skipCUDAIf(
+    @unittest.skipIf(
         TEST_WITH_ROCM and not torch.cuda.has_magma,
         "ROCm hipsolver backend does not currently support eig",
     )
@@ -12712,6 +12710,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                     x_strided = x[::2].reshape(25, 2).transpose(0, 1)
                     yield x_strided, y_size, memory_format
 
+    def test_resize_overlapping_strides(self):
+        # Resize on a stride-0 view should read logical elements, not raw storage.
+        def fn(x):
+            view = torch.as_strided(x, (100,), (0,))
+            return torch.ops.aten.resize(view, (50,))
+
+        self.common(fn, (torch.ones(10),))
+
     def test_resize(self):
         def fn(x, size, memory_format):
             # NOTE: Tensor.resize() =/= aten::resize()
@@ -17697,6 +17703,46 @@ if RUN_GPU:
             result, code = run_and_get_code(torch.compile(fn), inp)
             self.assertIn("0x80000000", code[0])
             torch.testing.assert_close(result, fn(inp))
+
+        def test_3d_reductions_with_max_tiles_3(self):
+            # Inductor only supports at most two reduction iteration ranges, R0 and R1, which the
+            # reduction component of the kernel can be tiled across.
+            # When max_tiles>=3, SIMDScheduling.create_tiling would previously incorrectly allow the
+            # tiling of the kernel in three dimensions, despite there being no pointwise component
+            # of the kernel.
+
+            @torch._inductor.config.patch(
+                {
+                    "triton.prefer_nd_tiling": True,
+                    "triton.max_tiles": 3,
+                    "triton.tile_reductions": True,
+                    "triton.use_tensor_descriptor": True,
+                }
+            )
+            @torch.compile
+            def sum(x):
+                return torch.sum(x, [0, 1, 2])
+
+            shape = (2, 2, 4)
+            strides = (32, 8, 1)
+
+            arg0_1_orig = torch.arange(
+                math.prod(shape), device=GPU_TYPE, dtype=torch.int32
+            ).view(shape)
+            arg0_1 = torch.empty_strided(
+                shape, strides, device=GPU_TYPE, dtype=torch.int32
+            )
+            arg0_1.copy_(arg0_1_orig)
+
+            actual, code = run_and_get_code(sum, arg0_1)
+            expected = torch.sum(arg0_1, [0, 1, 2])
+
+            torch.testing.assert_close(actual=actual, expected=expected)
+
+            fc = FileCheck()
+            # There's no pointwise work to do, so xnumel should be 1...
+            fc.check("xnumel = 1")
+            fc.run(code[0])
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE

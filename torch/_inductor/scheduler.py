@@ -916,8 +916,27 @@ class BaseSchedulerNode:
                         for x in input_buf.users
                         if x.node.get_name() not in inconsequential_nodes
                     ]
+                    # In multi-stream graphs, don't reuse a buffer if
+                    # completed (codegen'd) users on other streams may
+                    # still be reading it on the GPU.
+                    has_cross_stream_hazard = False
+                    if self.scheduler._has_multi_stream_nodes():
+                        my_stream = self.scheduler.node_to_stream.get(self)
+                        for user in input_buf.users:
+                            unode = user.node
+                            if (
+                                isinstance(unode, BaseSchedulerNode)
+                                and unode is not self
+                                and unode.get_name() in inconsequential_nodes
+                            ):
+                                user_stream = self.scheduler.node_to_stream.get(unode)
+                                if user_stream is not None and user_stream != my_stream:
+                                    has_cross_stream_hazard = True
+                                    break
+
                     if (
-                        len(remaining_uses) == 1
+                        not has_cross_stream_hazard
+                        and len(remaining_uses) == 1
                         and remaining_uses[0].can_inplace
                         and remaining_uses[0].node is self
                         and input_buf.node is not None
@@ -1326,7 +1345,9 @@ def get_estimate_runtime_cache_key_from_snode(snode: BaseSchedulerNode) -> str:
     flat_args, flat_args_pytree_spec = pytree.tree_flatten((args, kwargs))
 
     def _is_tensor_ir(x) -> bool:  # type: ignore[no-untyped-def]
-        return isinstance(x, ir.IRNode) and not isinstance(x, ir.GeneratorState)
+        return isinstance(x, ir.IRNode) and not isinstance(
+            x, (ir.GeneratorState, ir.OpaqueObjectState)
+        )
 
     cache_key = str(
         (python_kernel_name,)
@@ -1544,12 +1565,24 @@ class SchedulerNode(BaseSchedulerNode):
         self._init_from_node(node)
         self._compute_attrs()
 
+    def _collect_fake_deps(self) -> OrderedSet[Dep]:
+        """Collect manually-added fake dependencies (StarDep/WeakDep) that
+        cannot be re-derived by extract_read_writes."""
+        if not hasattr(self, "read_writes"):
+            return OrderedSet()
+        return OrderedSet(
+            dep for dep in self.read_writes.reads if isinstance(dep, (WeakDep, StarDep))
+        )
+
     def _compute_attrs(
         self,
         extra_indexing_constraints: tuple[dict[Any, Any], list[Any]] | None = None,
         recompute_sizes_body_func: Callable[_P, _T] | None = None,
     ) -> None:
         assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer))
+
+        fake_deps = self._collect_fake_deps()
+
         self._sizes, body = self.node.simplify_and_reorder(
             extra_indexing_constraints=extra_indexing_constraints,
             recompute_sizes_body_func=recompute_sizes_body_func,
@@ -1567,15 +1600,18 @@ class SchedulerNode(BaseSchedulerNode):
         )
 
         if isinstance(self.node, ir.TemplateBuffer):
-            self.set_read_writes(
-                self.node.extract_read_writes(normalize=should_normalize)
-            )
+            new_rw = self.node.extract_read_writes(normalize=should_normalize)
         else:
-            self.set_read_writes(
-                dependencies.extract_read_writes(
-                    self._body, *self._sizes, normalize=should_normalize
-                )
+            new_rw = dependencies.extract_read_writes(
+                self._body, *self._sizes, normalize=should_normalize
             )
+
+        if fake_deps:
+            new_rw = new_rw.with_read(fake_deps)
+        # Apply mutation renames for consistency with refresh_dependencies.
+        if self.mutation_renames:
+            new_rw = new_rw.rename(self.mutation_renames)
+        self.set_read_writes(new_rw)
 
     def recompute_size_and_body(
         self,
@@ -1590,11 +1626,7 @@ class SchedulerNode(BaseSchedulerNode):
     def refresh_dependencies(
         self, normalize: bool, need_clear_tiling_cache: bool
     ) -> None:
-        # Fake dependencies are added manually. They can not be analyzed from
-        # extract_read_writes. Find them out and apply manually.
-        fake_deps: OrderedSet[Dep] = OrderedSet(
-            dep for dep in self.read_writes.reads if isinstance(dep, (WeakDep, StarDep))
-        )
+        fake_deps = self._collect_fake_deps()
 
         # don't normalize since the loop order may need to be further changed
         # later
@@ -3007,12 +3039,36 @@ def get_scheduler_node_symbol_uses(
     return free_symbol_uses
 
 
+def _is_epilogue_fusion_enabled(template_node: BaseSchedulerNode) -> bool:
+    """Check per-template flag, fall back to global config."""
+    tb = template_node.get_template_node()
+    if tb is not None and tb.allow_epilogue_fusion is not None:
+        return tb.allow_epilogue_fusion
+    return config.epilogue_fusion
+
+
+def _is_prologue_fusion_enabled(template_node: BaseSchedulerNode) -> bool:
+    """Check per-template flag, fall back to global config."""
+    tb = template_node.get_template_node()
+    if tb is not None and tb.allow_prologue_fusion is not None:
+        return tb.allow_prologue_fusion
+    return config.prologue_fusion
+
+
 def is_epilogue_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
-    return node1.is_template() and config.epilogue_fusion and not node2.is_template()
+    return (
+        node1.is_template()
+        and not node2.is_template()
+        and _is_epilogue_fusion_enabled(node1)
+    )
 
 
 def is_prologue_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
-    return node2.is_template() and config.prologue_fusion and not node1.is_template()
+    return (
+        node2.is_template()
+        and not node1.is_template()
+        and _is_prologue_fusion_enabled(node2)
+    )
 
 
 def is_template_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
@@ -3292,7 +3348,7 @@ class Scheduler:
 
         # Map user_object_index to stream index (1-indexed for side streams)
         user_obj_to_stream_idx: dict[int, int] = {}
-        next_stream_idx = 1  # 0 is reserved for default stream
+        stream_idx_counter = itertools.count(1)  # 0 is reserved for default stream
 
         for node in self.nodes:
             stream_idx = DEFAULT_STREAM_IDX
@@ -3308,11 +3364,11 @@ class Scheduler:
                     if "stream" in custom_meta:
                         user_obj_idx = custom_meta["stream"]
                         if user_obj_idx not in user_obj_to_stream_idx:
-                            user_obj_to_stream_idx[user_obj_idx] = next_stream_idx
-                            self.stream_idx_to_user_obj_idx[next_stream_idx] = (
+                            new_stream_idx = next(stream_idx_counter)
+                            user_obj_to_stream_idx[user_obj_idx] = new_stream_idx
+                            self.stream_idx_to_user_obj_idx[new_stream_idx] = (
                                 user_obj_idx
                             )
-                            next_stream_idx += 1
                         stream_idx = user_obj_to_stream_idx[user_obj_idx]
                         # Use the first stream found
                         break
@@ -3322,6 +3378,24 @@ class Scheduler:
             # Also populate buff_to_stream for all buffers produced by this node
             for buf in node.get_buffer_names():
                 self.buff_to_stream[buf] = stream_idx
+
+        # Propagate a device to device-less nodes (e.g. record_event,
+        # wait_event) so they naturally enter the device guard in the
+        # main codegen loop instead of requiring special-case handling.
+        if any(s != DEFAULT_STREAM_IDX for s in self.node_to_stream.values()):
+            device = next(
+                (n.get_device() for n in self.nodes if n.get_device() is not None), None
+            )
+            if device is not None:
+                for node in self.nodes:
+                    ir_node = node.node
+                    if (
+                        node.get_device() is None
+                        and isinstance(ir_node, ir.Buffer)
+                        and isinstance(ir_node.layout, ir.NoneLayout)
+                    ):
+                        # pyrefly: ignore [bad-assignment]
+                        ir_node.layout = ir.NoneLayout(device=device)
 
         # Check if we have any nodes on non-default streams
         self._multi_stream_nodes = any(
@@ -4922,11 +4996,7 @@ class Scheduler:
             is_reorder_round,
         )
 
-        if (
-            (config.max_autotune_gemm or config.max_autotune)
-            and config.prologue_fusion
-            and config.epilogue_fusion
-        ):
+        if config.max_autotune_gemm or config.max_autotune:
             possible_fusions = self._handle_template_overlap(
                 possible_fusions, deferred_prologue_fusions
             )
@@ -5823,7 +5893,7 @@ class Scheduler:
             return False
 
         if node2.is_template():
-            if not config.prologue_fusion:
+            if not _is_prologue_fusion_enabled(node2):
                 why("prologue fusion turned off")
                 return False
 
@@ -5883,7 +5953,7 @@ class Scheduler:
             if (
                 node2.has_aliasing_or_mutation()
                 or node2.is_reduction()
-                or not config.epilogue_fusion
+                or not _is_epilogue_fusion_enabled(node1)
             ):
                 why("template epilogue not satisfied")
                 return False
@@ -6280,9 +6350,7 @@ class Scheduler:
         if node1.is_template() or node2.is_template():
             return False
 
-        if (config.max_autotune or config.max_autotune_gemm) and (
-            config.prologue_fusion or config.epilogue_fusion
-        ):
+        if config.max_autotune or config.max_autotune_gemm:
             node1_outputs = node1.get_outputs()
             node2_outputs = node2.get_outputs()
 
@@ -6303,6 +6371,7 @@ class Scheduler:
                     if (
                         isinstance(user.node, BaseSchedulerNode)
                         and user.node.is_template()
+                        and _is_prologue_fusion_enabled(user.node)
                     ):
                         # Check if this output is actually in the template's
                         # allowed_prologue_inps. If not, fusing horizontally
@@ -6340,12 +6409,15 @@ class Scheduler:
                                 # Conservative: block fusion
                                 return False
 
-            if config.epilogue_fusion:
-                for node in (node1, node2):
-                    for dep in node.read_writes.reads:
-                        producer = self.name_to_fused_node.get(dep.name)
-                        if producer is not None and producer.is_template():
-                            return False
+            for node in (node1, node2):
+                for dep in node.read_writes.reads:
+                    producer = self.name_to_fused_node.get(dep.name)
+                    if (
+                        producer is not None
+                        and producer.is_template()
+                        and _is_epilogue_fusion_enabled(producer)
+                    ):
+                        return False
 
         return True
 
@@ -6499,7 +6571,7 @@ class Scheduler:
                 inp = V.graph.graph_inputs[name]
                 if isinstance(inp, ir.TorchBindObject):
                     V.graph.wrapper_code.codegen_free(inp)
-                elif isinstance(inp, ir.GeneratorState):
+                elif isinstance(inp, (ir.GeneratorState, ir.OpaqueObjectState)):
                     continue
                 else:
                     storage = inp.data
@@ -7486,10 +7558,13 @@ class Scheduler:
                             self.stream_idx_to_user_obj_idx,
                         )
 
-                # Handle stream context switching for multi-stream scheduling
-                # Only do this for nodes with a device, inside the device guard
-                if self._has_multi_stream_nodes():
-                    self.generate_stream_ctx_switching(node)
+            # Handle stream context switching for multi-stream scheduling.
+            # This runs for all nodes (including device-less sync ops like
+            # record_event/wait_event) so they are placed inside the correct
+            # stream context. Only switch when inside a device guard (i.e.
+            # current_device is set), since stream variables are declared there.
+            if self._has_multi_stream_nodes() and self.current_device is not None:
+                self.generate_stream_ctx_switching(node)
 
             self.current_node = node
             self.buffer_names_to_free.update(node.last_usage)

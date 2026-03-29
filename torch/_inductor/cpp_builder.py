@@ -2227,7 +2227,7 @@ class CppBuilder:
             f"""
             cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
             project({self._target_name} LANGUAGES CXX)
-            set(CMAKE_CXX_STANDARD 17)
+            set(CMAKE_CXX_STANDARD 20)
 
             # Set a library target
             add_library({self._target_name} {target_library_type})

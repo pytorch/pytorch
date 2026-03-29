@@ -19,9 +19,7 @@ ParamCommsDebugInfo::ParamCommsDebugInfo(
     int globalRankStart,
     int globalRankStride,
     int worldSize,
-    bool isAsynchronizedOp,
-    int64_t seqNumber,
-    bool isP2P)
+    bool isAsynchronizedOp)
     : pgName_(std::move(pgName)),
       rank_(rank),
       worldSize_(worldSize),
@@ -33,8 +31,6 @@ ParamCommsDebugInfo::ParamCommsDebugInfo(
       outputSplitSizes_(std::move(outSplitSizes)),
       globalRankStart_(globalRankStart),
       globalRankStride_(globalRankStride),
-      seqNumber_(seqNumber),
-      isP2P_(isP2P),
       isAsynchronizedOp_(isAsynchronizedOp) {
   if (globalRankStride > 0) {
     for (int i = 0; i < worldSize; i++) {

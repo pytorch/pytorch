@@ -33,6 +33,7 @@ concurrency:
 permissions:
   id-token: write
   contents: read
+  actions: read
 
 jobs:
   # See job-filter.yml for rules on adding job filter conditions
@@ -47,17 +48,11 @@ jobs:
     if: github.repository_owner == 'pytorch'
     name: before-test
     uses: ./.github/workflows/llm_td_retrieval.yml
-    permissions:
-      id-token: write
-      contents: read
 
   target-determination:
     name: before-test
     uses: ./.github/workflows/target_determination.yml
     needs: llm-td
-    permissions:
-      id-token: write
-      contents: read
 
   get-label-type:
     name: get-label-type
@@ -445,9 +440,9 @@ jobs:
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
     secrets: inherit
 
-  linux-jammy-xpu-n-py3_10-build:
+  linux-noble-xpu-n-py3_10-build:
     if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-xpu-n-py3.10 ') }}
-    name: linux-jammy-xpu-n-py3.10
+    name: linux-noble-xpu-n-py3.10
     uses: ./.github/workflows/_linux-build.yml
     needs:
       - get-label-type

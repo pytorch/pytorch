@@ -1758,6 +1758,14 @@ def get_tma_workspace_arg(
     )
 
 
+def get_default_kpack(block_k: int = 16) -> int:
+    if not torch.version.hip:
+        return 0
+    if "gfx942" in torch.cuda.get_device_properties(0).gcnArchName and block_k <= 16:
+        return 1
+    return 2
+
+
 def _use_template_for_gpu(
     layout: Layout, allowed_layout_dtypes: list[torch.dtype]
 ) -> bool:
@@ -4324,7 +4332,8 @@ def snode_args_kwargs(snode: BaseSchedulerNode) -> tuple[list[Any], dict[str, An
 
     def _is_tensor_ir(x) -> bool:  # type: ignore[no-untyped-def]
         return isinstance(x, torch._inductor.ir.IRNode) and not isinstance(
-            x, torch._inductor.ir.GeneratorState
+            x,
+            (torch._inductor.ir.GeneratorState, torch._inductor.ir.OpaqueObjectState),
         )
 
     flat_args = [

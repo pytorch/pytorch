@@ -2226,7 +2226,6 @@ class ReduceOpTest(TestCase):
             self.assertTrue(
                 isinstance(dist._make_nccl_premul_sum(scale), c10d.ReduceOp)
             )
-            self.assertTrue(isinstance(c10d.ReduceOp.PREMUL_SUM(scale), c10d.ReduceOp))
 
     # Ref: https://github.com/pytorch/pytorch/pull/87303#discussion_r1002879700
     def test_reduceop_copyable(self):
@@ -2327,6 +2326,30 @@ class LocalRankTest(MultiProcessTestCase):
     def testNodeLocalRank(self):
         os.environ["LOCAL_RANK"] = str(self.rank)
         self.assertEqual(dist.get_node_local_rank(), self.rank)
+
+
+class RecordCommTest(TestCase):
+    def test_set_get(self):
+        self.assertEqual(torch._C._distributed_c10d._get_comm_profiling_name(), "")
+        with dist.record_comm("test_name"):
+            self.assertEqual(
+                torch._C._distributed_c10d._get_comm_profiling_name(), "test_name"
+            )
+        self.assertEqual(torch._C._distributed_c10d._get_comm_profiling_name(), "")
+
+    def test_nesting(self):
+        with dist.record_comm("outer"):
+            self.assertEqual(
+                torch._C._distributed_c10d._get_comm_profiling_name(), "outer"
+            )
+            with dist.record_comm("inner"):
+                self.assertEqual(
+                    torch._C._distributed_c10d._get_comm_profiling_name(), "inner"
+                )
+            self.assertEqual(
+                torch._C._distributed_c10d._get_comm_profiling_name(), "outer"
+            )
+        self.assertEqual(torch._C._distributed_c10d._get_comm_profiling_name(), "")
 
 
 if __name__ == "__main__":

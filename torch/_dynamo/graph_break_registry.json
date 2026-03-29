@@ -3469,6 +3469,14 @@
       ]
     }
   ],
+  "GB3383": [
+    {
+      "Gb_type": "Pydantic dataclass constructor",
+      "Context": "{self.value}",
+      "Explanation": "Dynamo graph breaks on pydantic dataclass constructors because validation mutates the instance outside traced bytecode.",
+      "Hints": []
+    }
+  ],
   "GB0281": [
     {
       "Gb_type": "Invalid or non-const argument in nn.Module __getitem__",

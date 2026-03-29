@@ -44,7 +44,6 @@ import torch.utils.cpp_extension
 from torch import Tensor
 from torch._C import FileCheck
 from torch._dynamo import allow_in_graph
-from torch._dynamo.comptime import comptime
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.source import ConstantSource, GetItemSource, LocalSource
@@ -7121,49 +7120,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         torch._dynamo.reset()
         test_recompile(foo_graph_break, exp_frame_count=2)
 
-    def test_multithread_compile_dynamic(self):
-        def f(x):
-            comptime.assert_static(x.shape[0])
-            return x * x
-
-        def _do_test(func):
-            success = True
-
-            def run(offset):
-                for i in range(20):
-                    print(func(torch.randn(i * 2 + offset)))
-
-            t1 = threading.Thread(target=run, args=[0])
-            t2 = threading.Thread(target=run, args=[1])
-
-            def exc_hook(x):
-                nonlocal success
-                success = False
-
-            try:
-                threading.excepthook = exc_hook
-                t1.start()
-                t2.start()
-
-                t1.join()
-                t2.join()
-            finally:
-                threading.excepthook = threading.__excepthook__
-            self.assertTrue(success)
-
-        _do_test(torch.compile(f, backend="eager", dynamic=False))
-        torch._dynamo.reset()
-
-        f_opt = torch.compile(f, backend="eager")
-
-        def g(x):
-            with torch._dynamo.config.patch(
-                automatic_dynamic_shapes=False, assume_static_by_default=True
-            ):
-                f_opt(x)
-
-        _do_test(g)
-
     def test_backend_match_guard_multi_threads(self):
         x = torch.randn([3, 4])
 
@@ -11736,6 +11692,39 @@ def ___make_guard_fn():
 
             self.assertEqual(list(eager), list(compiled))
             self.assertEqual(len(counters["graph_break"]), 0)
+
+    def test_itertools_count_from_uncompiled_region(self):
+        counters.clear()
+        counter = itertools.count()
+
+        def fn(x):
+            return x * (next(counter) + 1)
+
+        x = torch.randn([2, 5])
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        self.assertEqual(compiled_fn(x), x)
+        self.assertEqual(compiled_fn(x), x * 2)
+        self.assertEqual(next(counter), 2)
+        self.assertEqual(len(counters["graph_break"]), 0)
+
+    def test_itertools_count_already_advanced(self):
+        counters.clear()
+        counter = itertools.count()
+        # Advance the counter before entering the compiled region
+        next(counter)  # 0
+        next(counter)  # 1
+
+        def fn(x):
+            return x * (next(counter) + 1)
+
+        x = torch.randn([2, 5])
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        self.assertEqual(compiled_fn(x), x * 3)  # next(counter) = 2
+        self.assertEqual(compiled_fn(x), x * 4)  # next(counter) = 3
+        self.assertEqual(next(counter), 4)
+        self.assertEqual(len(counters["graph_break"]), 0)
 
     def test_itertools_infinite_cycle(self):
         counters.clear()

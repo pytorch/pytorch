@@ -2578,9 +2578,9 @@ class CUDAGraphTreeManager:
 
         self.warned_functions.add(function_id)
         warnings.warn(
-            "Unable to hit fast path of CUDAGraphs because of pending, uninvoked backwards. "
-            "Consider running with torch.no_grad() or using torch.compiler.cudagraph_mark_step_begin() "
-            "before each model invocation"
+            "Unable to hit fast path of CUDAGraphs because outputs from a previous step "
+            "still require backward. Ensure backward() is invoked or detach outputs. "
+            "You may also call torch.compiler.cudagraph_mark_step_begin() before each model invocation."
         )
 
     @staticmethod

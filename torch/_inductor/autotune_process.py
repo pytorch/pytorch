@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import atexit
-import contextvars
 import ctypes
 import dataclasses
 import functools
@@ -1335,9 +1334,6 @@ class PrecompileThreadPool:
         return cls._instance
 
     def submit(self, fn, *args, **kwargs):
-        ctx = contextvars.copy_context()
-        # Need to copy context so workers have access to the correct config settings
-        fn = functools.partial(ctx.run, fn)
         return self._executor.submit(fn, *args, **kwargs)
 
     def _shutdown(self, wait: bool = False):

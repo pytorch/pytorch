@@ -40,6 +40,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     MI200_ARCH,
     parametrize,
+    skipIfRocm,
     skipIfRocmArch,
     slowTest,
     TEST_MKL,
@@ -1500,7 +1501,12 @@ class CPUReproTests(TestCase):
     def test_decomposed_dequant_relu_quant_int8(self):
         self._test_decomposed_dequant_relu_quant_helper(torch.int8)
 
-    def _test_dequant_quant_lowering_helper(self, dtype, dequant_out_dtype=None):
+    def _test_dequant_quant_lowering_helper(
+        self,
+        dtype,
+        input_dtype=torch.float32,
+        dequant_out_dtype=None,
+    ):
         def fn(
             x,
             scale,
@@ -1561,7 +1567,7 @@ class CPUReproTests(TestCase):
             use_tensor_overload_list,
         ):
             x = torch.clamp(
-                torch.randn((1, 7, 7, 9), dtype=torch.float32) * 100,
+                torch.randn((1, 7, 7, 9), dtype=input_dtype) * 100,
                 quant_min,
                 quant_max,
             )
@@ -1599,12 +1605,16 @@ class CPUReproTests(TestCase):
     def test_dequant_quant_lowering_uint8(self):
         self._test_dequant_quant_lowering_helper(torch.uint8)
         self._test_dequant_quant_lowering_helper(
+            torch.uint8, input_dtype=torch.bfloat16
+        )
+        self._test_dequant_quant_lowering_helper(
             torch.uint8, dequant_out_dtype=torch.bfloat16
         )
 
     @requires_vectorization
     def test_dequant_quant_lowering_int8(self):
         self._test_dequant_quant_lowering_helper(torch.int8)
+        self._test_dequant_quant_lowering_helper(torch.int8, input_dtype=torch.bfloat16)
         self._test_dequant_quant_lowering_helper(
             torch.int8, dequant_out_dtype=torch.bfloat16
         )
@@ -5235,6 +5245,7 @@ class CPUReproTests(TestCase):
         get_gcc_major_version() == 13,
         "Fails under GCC 13 due to vector codegen (passes with GCC 11)",
     )
+    @skipIfRocm(msg="Fails with Triton 3.7")
     def test_convert_fp32_to_double_vec(self):
         def fn(x):
             return x.to(torch.double)
@@ -6030,13 +6041,13 @@ class CPUReproTests(TestCase):
         Original PR: https://github.com/pytorch/pytorch/pull/141766
         """
         from torch.testing._internal.common_quantization import (
-            _static_quantized_linear_module,
+            _static_reference_quantized_linear_module,
         )
 
         class Model(torch.nn.Module):
             def __init__(self, example_input):
                 super().__init__()
-                self.dense = _static_quantized_linear_module(
+                self.dense = _static_reference_quantized_linear_module(
                     N=768, K=768, bias=True, example_input=example_input
                 )
                 self.layernorm = torch.nn.LayerNorm(768, eps=1e-12)
@@ -6274,6 +6285,53 @@ class CPUReproTests(TestCase):
                 torch.tensor([1.0]),
             )
         )
+
+    def test_star_dep_preserved_through_outer_loop_fusion(self) -> None:
+        class LayerNorm2d(nn.LayerNorm):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x = x.permute(0, 2, 3, 1)
+                x = F.layer_norm(
+                    x, self.normalized_shape, self.weight, self.bias, self.eps
+                )
+                return x.permute(0, 3, 1, 2)
+
+        class Model(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.ln = LayerNorm2d(128)
+                self.ds = nn.Conv2d(128, 256, 2, stride=2)
+                self.pool = nn.AdaptiveAvgPool2d(1)
+                self.cls_ln = LayerNorm2d(256)
+                self.fc = nn.Linear(256, 1000)
+
+            def _path(self, x: torch.Tensor) -> torch.Tensor:
+                x = self.ln(x)
+                x = self.ds(x)
+                x = self.pool(x)
+                x = self.cls_ln(x)
+                return self.fc(x.flatten(1))
+
+            def forward(self, x1: torch.Tensor, x2: torch.Tensor) -> torch.Tensor:
+                return (
+                    self._path(x1).float().pow(2).mean()
+                    + self._path(x2).float().pow(2).mean()
+                )
+
+        x1 = torch.randn(4, 128, 16, 16)
+        x2 = torch.randn(4, 128, 16, 16)
+
+        model = Model()
+        eager_model = model
+        compiled_model = torch.compile(copy.deepcopy(model))
+        compiled_loss = compiled_model(x1.clone(), x2.clone())
+        compiled_loss.backward()
+        eager_loss = eager_model(x1.clone(), x2.clone())
+        eager_loss.backward()
+        torch.testing.assert_close(eager_loss, compiled_loss)
+        for p_eager, p_compiled in zip(
+            eager_model.parameters(), compiled_model.parameters()
+        ):
+            torch.testing.assert_close(p_eager.grad, p_compiled.grad)
 
 
 if __name__ == "__main__":
