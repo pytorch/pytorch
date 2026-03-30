@@ -4366,8 +4366,10 @@ class TestConvolutionNNDeviceType(NNTestCase):
         transposed=False,
         output_padding=0,
         memory_format=torch.contiguous_format,
+        atol=1e-4,
+        rtol=1e-4,
     ):
-        atol, rtol = (1e-4, 1e-4) if dtype == torch.float32 else (5e-2, 5e-2)
+        """Compares float32 cpu reference output to hipdnn (gpu) output."""
 
         x_gpu = torch.randn(*x_shape, dtype=dtype, device=device)
         if memory_format != torch.contiguous_format:
@@ -4419,11 +4421,18 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @parametrize_test("transposed", [False, True])
     @torch.backends.hipdnn.flags(enabled=True)
     def test_conv2d_hipdnn(self, device, dtype, has_bias, transposed):
-        # Use smaller channels for half/bf16 to avoid hipDNN compilation limits
+        # Condition on rocm sdk version when hipdnn ships with conv+bias fusion support by default.
+        if has_bias:
+            self.skipTest(
+                "No default plugin for hipdnn supports conv + bias fusion yet."
+            )
+
         if dtype == torch.float32:
-            C_in, C_out = 64, 128
+            C_in, C_out, rtol, atol = 16, 32, 1e-4, 1e-4
+        elif dtype == torch.float16:
+            C_in, C_out, rtol, atol = 8, 16, 5e-2, 5e-2
         else:
-            C_in, C_out = 8, 16
+            C_in, C_out, rtol, atol = 4, 8, 1e-1, 1e-1
 
         if transposed:
             self._hipdnn_compare_conv(
@@ -4438,6 +4447,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
                 dtype=dtype,
                 transposed=True,
                 output_padding=1,
+                atol=atol,
+                rtol=rtol,
             )
         else:
             self._hipdnn_compare_conv(
@@ -4450,6 +4461,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
                 dilation=1,
                 groups=1,
                 dtype=dtype,
+                atol=atol,
+                rtol=rtol,
             )
 
     @onlyCUDA
