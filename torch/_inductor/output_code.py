@@ -463,6 +463,7 @@ class CompiledFxGraph(OutputCode):
     # ShapeEnv.produce_guards_expression()
     guards_expr: str | None
     extern_libs_key: str | None
+    guards_expr_debug_info: Optional[dict[str, Any]]
     inductor_provenance_mapping_str: str | None
     inductor_provenance_stack_traces_str: str | None
 
@@ -548,6 +549,7 @@ class CompiledFxGraph(OutputCode):
         self.counter_deltas = counter_deltas
         self.guards_expr = None
         self.extern_libs_key = None
+        self.guards_expr_debug_info = None
         self.cudagraph_info = None
         self.partition_maps = graph.partition_maps
         self.fx_kwargs = {}

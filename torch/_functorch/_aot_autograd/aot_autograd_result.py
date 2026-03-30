@@ -370,6 +370,7 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
     sanitized_aot_config: AOTConfig
 
     guards_expr: str | None
+    guards_expr_debug_info: dict[str, Any] | None
 
     # Used by Compiled Autograd
     serialized_bw_module: SerializedGraphModule | None
