@@ -155,9 +155,7 @@ class TestPyCodeCache(TestCase):
                 PyCodeCache.cache_clear()
                 key, path = PyCodeCache.write("value = 1\n")
 
-                mod = PyCodeCache.load_by_key_path(
-                    key, path, set_sys_modules=False
-                )
+                mod = PyCodeCache.load_by_key_path(key, path, set_sys_modules=False)
                 mod_name = mod.__name__
                 self.assertNotIn(mod_name, sys.modules)
 

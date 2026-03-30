@@ -595,7 +595,7 @@ class TestSelectAlgorithm(TestCase):
 class TestSelectAlgorithmCleanup(TestCase):
     def test_benchmark_only_clears_matching_precompile_cache_entry(self):
         asc = select_algorithm.AlgorithmSelectorCache()
-        asc.precompile_cache = {"keep": lambda: {}, "drop": lambda: {}}
+        asc.precompile_cache = {"keep": dict, "drop": dict}
 
         with patch.object(asc, "make_benchmark_fn", return_value=lambda _choices: {}):
             asc.benchmark(

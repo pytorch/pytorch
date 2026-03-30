@@ -4048,7 +4048,9 @@ class AlgorithmSelectorCache(PersistentCache):
             for path in evict_paths:
                 PyCodeCache.modules_no_attr.pop(path, None)
             PyCodeCache.modules[:] = [
-                m for m in PyCodeCache.modules if getattr(m, "__file__", None) not in evict_paths
+                m
+                for m in PyCodeCache.modules
+                if getattr(m, "__file__", None) not in evict_paths
             ]
 
         # Release the precompile closure for just this autotune site so other
