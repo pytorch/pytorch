@@ -1,7 +1,9 @@
 # Owner(s): ["module: inductor"]
+import gc
 import os
 import random
 import tempfile
+import weakref
 from unittest import mock
 
 import torch
@@ -419,6 +421,55 @@ def kernel_many_args(out_tensor, {decl}):
         buf1 = torch.zeros(1, device=GPU_TYPE)
         launcher.run(1, 1, 1, stream, buf1, *kernel_args)
         self.assertEqual(buf0, buf1)
+
+    def test_launcher_keeps_module_owner_alive_until_release(self):
+        """
+        Generated static launchers store `runner=self.kernel.run`.
+        Keeping the launcher alive must therefore keep the kernel owner
+        alive and defer module unload until the launcher is released.
+        """
+        unloaded_modules = []
+
+        class FakeImpl:
+            @staticmethod
+            def _unload_kernel(mod):
+                unloaded_modules.append(mod)
+
+        class FakeKernelOwner:
+            # Use the real destructor implementation under test.
+            __del__ = StaticallyLaunchedCudaKernel.__del__
+
+            def __init__(self):
+                self.module = 0xC0FFEE
+                self.C_impl = FakeImpl
+
+            def run(self, *_args, **_kwargs):
+                return None
+
+        owner = FakeKernelOwner()
+        owner_ref = weakref.ref(owner)
+
+        # Mirror _gen_launcher_code() behavior where launcher body calls runner(...)
+        scope = {"runner": owner.run}
+        exec(
+            "def launcher(stream):\n    runner(1, 1, 1, stream)\n",
+            scope,
+        )
+        launcher = scope.pop("launcher")
+        del scope
+
+        # Dropping the direct owner reference should not trigger unload while
+        # launcher still holds runner=self.kernel.run.
+        del owner
+        gc.collect()
+        self.assertIsNotNone(owner_ref())
+        self.assertEqual(unloaded_modules, [])
+
+        # Once launcher is released, owner becomes unreachable and unload fires.
+        del launcher
+        gc.collect()
+        self.assertIsNone(owner_ref())
+        self.assertEqual(unloaded_modules, [0xC0FFEE])
 
 
 @requires_gpu_and_triton
