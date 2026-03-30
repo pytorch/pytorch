@@ -328,6 +328,14 @@ class DeviceTypeTestBase(TestCase):
     bypass_device_restrictions: bool = False
 
     # Decorators and skips to apply to tests that are parametrized by ops.
+    # Keys are OpInfo.full_name (e.g. "op" or "linalg.norm"), NOT OpInfo.name.
+    # Note that OpInfo.full_name and OpInfo.name differ for namespaced ops:
+    # OpInfo.name omits the namespace prefix, while OpInfo.full_name includes it.
+    # Values are lists of DecorateInfo objects, each of which may target a
+    # specific device type or dtype.
+    # These are intentionally placed on DeviceTypeTestBase (rather than solely on
+    # PrivateUse1TestBase) so that in-tree backends can adopt the same mechanism
+    # in the future.
     op_decorators = None  # type: Optional[dict[str, list[DecorateInfo]]]
     op_skips = None  # type: Optional[dict[str, list[DecorateInfo]]]
 
@@ -369,7 +377,10 @@ class DeviceTypeTestBase(TestCase):
                         decorator.device_type = torch._C._get_privateuse1_backend_name()
                     else:
                         decorator.device_type = cls.device_type
-                    op_dict[op_name].decorators += (decorator,)
+                    # op_name may not be in op_dict if @ops() has restricted the
+                    # OpInfo list to a smaller set than op_decorators covers.
+                    if op_name in op_dict:
+                        op_dict[op_name].decorators += (decorator,)
 
         if cls.op_skips is not None:
             for op_name, skips in cls.op_skips.items():
@@ -378,8 +389,16 @@ class DeviceTypeTestBase(TestCase):
                         skip.device_type = torch._C._get_privateuse1_backend_name()
                     else:
                         skip.device_type = cls.device_type
-                    op_dict[op_name].skips += (skip,)
-                    op_dict[op_name].decorators += (skip,)
+                    # op_name may not be in op_dict if @ops() has restricted the
+                    # OpInfo list to a smaller set than op_skips covers.
+                    if op_name in op_dict:
+                        # We must add to both .skips and .decorators because
+                        # OpInfo.__post_init__ has already executed and folded the
+                        # original .skips into .decorators (see OpInfo.__post_init__).
+                        # Only .decorators is consulted by ops._parametrize_test, so
+                        # adding to .skips alone would have no effect at this point.
+                        op_dict[op_name].skips += (skip,)
+                        op_dict[op_name].decorators += (skip,)
 
         ops.op_list = list(op_dict.values())
 
