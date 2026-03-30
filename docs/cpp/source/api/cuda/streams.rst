@@ -142,3 +142,46 @@ Multi-Device Stream Management
 
    ``CUDAMultiStreamGuard`` does not change the current device index. It only
    changes the stream on each passed-in stream's device.
+
+Multi-Device Stream Handling Pattern
+------------------------------------
+
+The following skeleton shows three common patterns for acquiring and setting
+streams across multiple CUDA devices:
+
+.. code-block:: cpp
+
+   // Create stream vectors on device 0
+   std::vector<at::cuda::CUDAStream> streams0 =
+     {at::cuda::getDefaultCUDAStream(), at::cuda::getStreamFromPool()};
+   at::cuda::setCurrentCUDAStream(streams0[0]);
+
+   // Create stream vector on device 1 using CUDAGuard
+   std::vector<at::cuda::CUDAStream> streams1;
+   {
+     at::cuda::CUDAGuard device_guard(1);
+     streams1.push_back(at::cuda::getDefaultCUDAStream());
+     streams1.push_back(at::cuda::getStreamFromPool());
+   }
+   at::cuda::setCurrentCUDAStream(streams1[0]);
+
+   // Pattern 1: CUDAGuard changes current device only, not streams
+   {
+     at::cuda::CUDAGuard device_guard(1);
+     // current device is 1, current stream on device 1 is still streams1[0]
+   }
+
+   // Pattern 2: CUDAStreamGuard changes both current device and current stream
+   {
+     at::cuda::CUDAStreamGuard stream_guard(streams1[1]);
+     // current device is 1, current stream is streams1[1]
+   }
+   // restored to device 0, stream streams0[0]
+
+   // Pattern 3: CUDAMultiStreamGuard sets streams on multiple devices at once
+   {
+     at::cuda::CUDAMultiStreamGuard multi_guard({streams0[1], streams1[1]});
+     // current device unchanged (still 0)
+     // stream on device 0 is streams0[1], stream on device 1 is streams1[1]
+   }
+   // streams restored to streams0[0] and streams1[0]

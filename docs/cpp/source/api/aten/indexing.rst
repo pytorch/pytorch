@@ -8,6 +8,12 @@ The PyTorch C++ API provides tensor indexing similar to Python. Use
 
    using namespace torch::indexing;
 
+The main difference from Python is that instead of using the ``[]`` operator,
+the C++ API uses the ``index`` and ``index_put_`` methods:
+
+- ``torch::Tensor::index`` — read elements
+- ``torch::Tensor::index_put_`` — write elements
+
 Getter Operations
 -----------------
 
@@ -42,7 +48,7 @@ Setter Operations
    * - ``tensor[1::2] = 1``
      - ``tensor.index_put_({Slice(1, None, 2)}, 1)``
 
-Slice Syntax
+     Slice Syntax
 ------------
 
 .. list-table::

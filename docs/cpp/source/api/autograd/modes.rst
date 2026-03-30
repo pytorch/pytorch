@@ -123,3 +123,37 @@ it provides better performance. Key differences:
 - Tensors created inside ``InferenceMode`` are marked as inference tensors with
   certain limitations that apply after exiting ``InferenceMode``.
 - ``InferenceMode`` can be nested with enabled/disabled states.
+
+Migrating from AutoNonVariableTypeMode
+--------------------------------------
+
+The legacy ``AutoNonVariableTypeMode`` guard (now renamed to
+``AutoDispatchBelowADInplaceOrView``) was commonly used for inference workloads
+but is unsafe — it can silently bypass safety checks and produce wrong results.
+
+- **For inference-only workloads** (e.g. loading a pretrained JIT model and
+  running inference in C++ runtime), use ``c10::InferenceMode`` as a drop-in
+  replacement. It preserves the performance characteristics while providing
+  correctness guarantees.
+
+- **For custom autograd kernels** that need to redispatch below the Autograd
+  dispatch key, use ``AutoDispatchBelowADInplaceOrView`` instead:
+
+  .. code-block:: cpp
+
+     class ROIAlignFunction : public torch::autograd::Function<ROIAlignFunction> {
+      public:
+       static torch::autograd::variable_list forward(
+           torch::autograd::AutogradContext* ctx,
+           const torch::autograd::Variable& input,
+           const torch::autograd::Variable& rois,
+           double spatial_scale, int64_t pooled_height,
+           int64_t pooled_width, int64_t sampling_ratio, bool aligned) {
+         ctx->saved_data["spatial_scale"] = spatial_scale;
+         ctx->save_for_backward({rois});
+         at::AutoDispatchBelowADInplaceOrView guard;
+         auto result = roi_align(input, rois, spatial_scale,
+             pooled_height, pooled_width, sampling_ratio, aligned);
+         return {result};
+       }
+     };
