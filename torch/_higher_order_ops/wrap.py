@@ -31,9 +31,6 @@ _R = TypeVar("_R")
 log = logging.getLogger(__name__)
 
 
-uid = itertools.count(1)
-
-
 # Used for testing the HigherOrderOperator mechanism
 class Wrap(HigherOrderOperator):
     def __init__(self) -> None:
@@ -434,20 +431,18 @@ class TagActivationCheckpoint(HigherOrderOperator):
 tag_activation_checkpoint = TagActivationCheckpoint()
 
 
-def _always_prefer_recompute(ctx, op, *args, **kwargs):
-    from torch.utils.checkpoint import CheckpointPolicy
-
-    return CheckpointPolicy.PREFER_RECOMPUTE
-
-
 def tag_activation_checkpoint_impl(gmod, *args, **kwargs):
     import functools
 
     import torch.fx.traceback as fx_traceback
     from torch.fx import Interpreter
-    from torch.utils.checkpoint import create_selective_checkpoint_contexts
+    from torch.utils.checkpoint import (
+        _ac_graph_id_counter,
+        _always_prefer_recompute,
+        create_selective_checkpoint_contexts,
+    )
 
-    unique_graph_id = next(uid)
+    unique_graph_id = next(_ac_graph_id_counter)
     if "_checkpoint_context_fn" in gmod.meta:
         context_fn = gmod.meta["_checkpoint_context_fn"]
         warning_once(
@@ -485,6 +480,7 @@ Please make sure the checkpointed region does not contain in-place ops (e.g. tor
     # recomputation between _vmap_increment_nesting and _vmap_decrement_nesting,
     # which would leak a functorch dynamic layer.
     kwargs["early_stop"] = False
+
     # Using interpreter allows preservation of metadata through torch.compile stack.
     # We use a wrapper instead of passing Interpreter(gmod).run directly because
     # checkpoint's recompute_fn captures the function in a closure. A bound method

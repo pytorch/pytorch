@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import itertools
 import platform
 import uuid
 import warnings
@@ -1310,6 +1311,14 @@ SAC_IGNORED_OPS = {
 } | set(torch._subclasses.functional_tensor.FunctionalTensor.metadata_fns)  # type: ignore[has-type]
 
 
+_ac_graph_id_counter = itertools.count(1)
+
+
+def _always_prefer_recompute(ctx, op, *args, **kwargs):
+    return CheckpointPolicy.PREFER_RECOMPUTE
+
+
+
 class _CachingTorchDispatchMode(TorchDispatchMode):
     @classmethod
     def ignore_compile_internals(cls):
@@ -1475,6 +1484,16 @@ def create_selective_checkpoint_contexts(policy_fn_or_list, allow_cache_entry_mu
         _CachedTorchDispatchMode(policy_fn, storage, allow_cache_entry_mutation),
     )
 
+def _validate_sac_context(forward_ctx, recompute_ctx):
+    if not isinstance(forward_ctx, _CachingTorchDispatchMode) or not isinstance(
+        recompute_ctx, _CachedTorchDispatchMode
+    ):
+        raise AssertionError(
+            "`context_fn` arg passed to `torch.utils.checkpoint` must generate "
+            "contexts from `create_selective_checkpoint_contexts`."
+        )
+
+
 # NB: this helper wraps fn before calling checkpoint_impl. kwargs and
 #     saving/restoring of global state is handled here.
 
@@ -1535,6 +1554,25 @@ def _checkpoint_without_reentrant_generator(
             f"determinism_check should be one of {list(_allowed_determinism_checks_to_fns.keys())}, "
             f"but got {determinism_check}"
         )
+
+    if torch.compiler._is_non_strict_tracing() and torch.is_grad_enabled():
+        # Under tracing, skip the checkpoint machinery (saved_tensor_hooks,
+        # rng state, CheckpointFrame) and just tag nodes via the dispatch mode.
+        if context_fn is noop_context_fn:
+            forward_context, _ = create_selective_checkpoint_contexts(
+                _always_prefer_recompute
+            )
+        else:
+            forward_context, recompute_context = context_fn()
+            _validate_sac_context(forward_context, recompute_context)
+        if getattr(forward_context, "ac_graph_id", None) is not None:
+            raise RuntimeError(
+                "Nested activation checkpointing is not supported during non-strict tracing."
+            )
+        forward_context.ac_graph_id = next(_ac_graph_id_counter)  # pyrefly: ignore[missing-attribute]
+        with forward_context:
+            yield
+        return
 
     device_type = _infer_device_type(*args)
     device_module = _get_device_module(device_type)
