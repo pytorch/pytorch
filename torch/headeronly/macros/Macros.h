@@ -335,7 +335,7 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 // use warpSize for C10_WARP_SIZE. Further, amdgcnspirv needs a fully dynamic
 // warp size and cannot use the __GFX9__ trick below, which means we set
 // C10_WARP_SIZE to 64 for amdgcnspirv because it is used to statically size
-// arrays in certain device code and 64 is the larger of 32, erroring on the 
+// arrays in certain device code and 64 is the larger of 32, erroring on the
 // side of larger arrays. However, all use of C10_WARP_SIZE must be carefully
 // scrutinized. It is better to use warpSize in device code where possible.
 
