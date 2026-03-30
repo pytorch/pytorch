@@ -98,19 +98,10 @@ ROCM_SO_FILES=(
     "libhipsparselt.so"
     "libhiprtc.so"
     "librocprofiler-sdk.so"
+    "librocprofiler-register.so"
+    "librocm-core.so"
+    "librocroller.so"
 )
-
-if [[ $ROCM_INT -ge 60100 ]]; then
-    ROCM_SO_FILES+=("librocprofiler-register.so")
-fi
-
-if [[ $ROCM_INT -ge 60200 ]]; then
-    ROCM_SO_FILES+=("librocm-core.so")
-fi
-
-if [[ $ROCM_INT -ge 70000 ]]; then
-    ROCM_SO_FILES+=("librocroller.so")
-fi
 
 OS_NAME=`awk -F= '/^NAME/{print $2}' /etc/os-release`
 if [[ "$OS_NAME" == *"CentOS Linux"* || "$OS_NAME" == *"AlmaLinux"* ]]; then
