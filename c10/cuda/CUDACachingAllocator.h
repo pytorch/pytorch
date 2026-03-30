@@ -95,6 +95,18 @@ using OutOfMemoryObserver = std::function<void(
     size_t device_total,
     size_t device_free)>;
 
+// Observer called when an allocation is preemptively rejected due to
+// throw_on_cudamalloc_oom policy. Parameters:
+//   - device: GPU device index
+//   - alloc_size: size of the rejected allocation request
+//   - total_allocated: total memory allocated before the request
+//   - device_total: total GPU memory
+using OomRejectionObserver = std::function<void(
+    int64_t device,
+    size_t alloc_size,
+    size_t total_allocated,
+    size_t device_total)>;
+
 struct ShareableHandle {
   ptrdiff_t offset;
   std::string handle;
@@ -216,6 +228,7 @@ class CUDAAllocator : public DeviceAllocator {
     return "";
   }
   virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
+  virtual void attachOomRejectionObserver(OomRejectionObserver observer) = 0;
 
   // Attached AllocatorTraceTracker callbacks will be called while the
   // per-device allocator lock is held. Any additional locks taken from within
@@ -419,6 +432,10 @@ inline bool checkPoolLiveAllocations(
 
 inline void attachOutOfMemoryObserver(OutOfMemoryObserver observer) {
   get()->attachOutOfMemoryObserver(std::move(observer));
+}
+
+inline void attachOomRejectionObserver(OomRejectionObserver observer) {
+  get()->attachOomRejectionObserver(std::move(observer));
 }
 
 inline void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) {
