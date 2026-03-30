@@ -3401,6 +3401,46 @@ def forward(self, p_linear_weight, p_linear_bias, obj_lifted_custom_0, x):
 
         self.assertFalse(_is_tensor_irnode(42))
 
+    @unittest.skipIf(not dist.is_available(), "requires distributed")
+    def test_fake_script_object_process_group_pybind(self):
+        """FakeScriptObject wrapping ProcessGroup must be unwrapped in the
+        pybind toIValue before casting to c10::intrusive_ptr<ProcessGroup>.
+
+        During Dynamo tracing with CooR, mesh_get_process_group returns a
+        FakeScriptObject-wrapped ProcessGroup. When that flows into a C++
+        custom op, toIValue needs to unwrap real_obj before the pybind
+        cast. This test exercises that path by calling
+        mesh_get_process_group (which returns a wrapped PG during tracing)
+        and passing it to another op that consumes the ProcessGroup."""
+        from torch.distributed.device_mesh import (
+            _register_distributed_opaque_types,
+            DeviceMesh,
+        )
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        already_initialized = dist.is_initialized()
+        if already_initialized:
+            dist.destroy_process_group()
+
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=2)
+        try:
+            _register_distributed_opaque_types()
+            mesh = DeviceMesh("cpu", torch.arange(2))
+
+            def f(mesh, x):
+                pg = torch.ops._dtensor.mesh_get_process_group(mesh, 0)
+                return x + pg.size()
+
+            x = torch.randn(4)
+            compiled_f = torch.compile(f, backend="aot_eager", fullgraph=True)
+            result = compiled_f(mesh, x)
+            expected = f(mesh, x)
+            self.assertEqual(result, expected)
+        finally:
+            dist.destroy_process_group()
+            if already_initialized:
+                dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=2)
+
     def test_subclass_parametrization_with_opaque_attrs(self):
         """unwrap_tensor_subclass_parameters should handle non-tensor attrs."""
         from torch._functorch._aot_autograd.subclass_parametrization import (
