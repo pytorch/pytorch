@@ -1666,9 +1666,9 @@ def _log_fw_bw_graphs(
         )
         aot_graphs_log.info(
             "aot_config id: %s, fw_metadata=%s, inner_meta=%s",
-            str(aot_config.aot_id),
-            str(fw_metadata),
-            str(_get_inner_meta(maybe_subclass_meta, fw_metadata)),
+            aot_config.aot_id,
+            fw_metadata,
+            _get_inner_meta(maybe_subclass_meta, fw_metadata),
         )
 
         aot_graphs_log.info(

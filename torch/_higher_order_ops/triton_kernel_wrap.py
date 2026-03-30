@@ -1153,7 +1153,7 @@ def identify_accessed_tensors(
             exc_info=True,
         )
         if ttir_module is not None:
-            log.debug("TTIR:\n%s", str(ttir_module))
+            log.debug("TTIR:\n%s", ttir_module)
         if functions is not None:
             log.debug("functions:")
             for name, fn in functions.items():

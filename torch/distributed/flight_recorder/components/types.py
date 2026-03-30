@@ -283,7 +283,7 @@ class EntryState:
         logger.info("input sizes: %s", self.input_sizes)
         logger.info("output sizes: %s", self.output_sizes)
         logger.info("world size: %d", len(self.expected_ranks))
-        logger.info("expected ranks: %s", str(self.expected_ranks))
+        logger.info("expected ranks: %s", self.expected_ranks)
         logger.info("collective state: %s", self.collective_state)
         if errors:
             self.errors = errors

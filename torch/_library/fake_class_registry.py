@@ -36,7 +36,7 @@ class FakeScriptObject:
                     "dangerous as side effects may be directly applied "
                     "to the object.",
                     script_class_name,
-                    str(e),
+                    e,
                 )
 
         object.__setattr__(self, "real_obj", real_obj)
