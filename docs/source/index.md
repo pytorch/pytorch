@@ -21,120 +21,6 @@ Features described in this documentation are classified by release status:
 {bdg-link-secondary}`FSDP <search.html?q=FSDP>`
 {bdg-link-secondary}`torch.export <search.html?q=torch.export>`
 
-:::{dropdown} Browse all APIs
-:icon: list-unordered
-
-**Core**
-
-- {doc}`torch <torch>`
-- {doc}`torch.nn <nn>`
-- {doc}`torch.nn.functional <nn.functional>`
-- {doc}`torch.nn.init <nn.init>`
-- {doc}`torch.nn.attention <nn.attention>`
-- {doc}`torch.Tensor <tensors>`
-- {doc}`Tensor Attributes <tensor_attributes>`
-- {doc}`Tensor Views <tensor_view>`
-- {doc}`torch.autograd <autograd>`
-- {doc}`torch.optim <optim>`
-- {doc}`torch.utils.data <data>`
-- {doc}`torch.library <library>`
-
-**Math & Signal**
-
-- {doc}`torch.fft <fft>`
-- {doc}`torch.linalg <linalg>`
-- {doc}`torch.special <special>`
-- {doc}`torch.signal <signal>`
-- {doc}`Complex Numbers <complex_numbers>`
-
-**Hardware Acceleration**
-
-- {doc}`torch.accelerator <accelerator>`
-- {doc}`torch.cpu <cpu>`
-- {doc}`torch.cuda <cuda>`
-- {doc}`torch.cuda.memory <torch_cuda_memory>`
-- {doc}`torch.mps <mps>`
-- {doc}`torch.xpu <xpu>`
-- {doc}`torch.mtia <mtia>`
-- {doc}`torch.mtia.memory <mtia.memory>`
-- {doc}`torch.mtia.mtia_graph <mtia.mtia_graph>`
-- {doc}`Meta device <meta>`
-- {doc}`torch.amp <amp>`
-- {doc}`torch.backends <backends>`
-
-**Compiler & Export**
-
-- {doc}`torch.compiler <torch.compiler_api>`
-- {doc}`torch.export <user_guide/torch_compiler/export>`
-- {doc}`torch.fx <fx>`
-- {doc}`torch.fx.experimental <fx.experimental>`
-- {doc}`torch.func <func>`
-- {doc}`torch.onnx <onnx>`
-- {doc}`torch.nativert <nativert>`
-
-**Distributed**
-
-- {doc}`torch.distributed <distributed>`
-- {doc}`torch.distributed.tensor <distributed.tensor>`
-- {doc}`torch.distributed.algorithms.join <distributed.algorithms.join>`
-- {doc}`torch.distributed.elastic <distributed.elastic>`
-- {doc}`torch.distributed.fsdp <fsdp>`
-- {doc}`torch.distributed.fsdp.fully_shard <distributed.fsdp.fully_shard>`
-- {doc}`torch.distributed.tensor.parallel <distributed.tensor.parallel>`
-- {doc}`torch.distributed.optim <distributed.optim>`
-- {doc}`torch.distributed.pipelining <distributed.pipelining>`
-- {doc}`torch.distributed._symmetric_memory <symmetric_memory>`
-- {doc}`torch.distributed.checkpoint <distributed.checkpoint>`
-- {doc}`DDP Communication Hooks <ddp_comm_hooks>`
-- {doc}`Distributed RPC Framework <rpc>`
-
-**Quantization & Performance**
-
-- {doc}`Quantization <quantization>`
-- {doc}`torch.profiler <profiler>`
-- {doc}`torch.sparse <sparse>`
-- {doc}`torch.utils.benchmark <benchmark_utils>`
-
-**Utilities**
-
-- {doc}`torch.distributions <distributions>`
-- {doc}`torch.futures <futures>`
-- {doc}`torch.hub <hub>`
-- {doc}`torch.monitor <monitor>`
-- {doc}`torch.overrides <torch.overrides>`
-- {doc}`torch.package <package>`
-- {doc}`torch.random <random>`
-- {doc}`torch.masked <masked>`
-- {doc}`torch.nested <nested>`
-- {doc}`torch.Size <size>`
-- {doc}`torch.Storage <storage>`
-- {doc}`torch.testing <testing>`
-- {doc}`torch.utils <utils>`
-- {doc}`torch.utils.benchmark <benchmark_utils>`
-- {doc}`torch.utils.checkpoint <checkpoint>`
-- {doc}`torch.utils.cpp_extension <cpp_extension>`
-- {doc}`torch.utils.data <data>`
-- {doc}`torch.utils.deterministic <deterministic>`
-- {doc}`torch.utils.jit <jit_utils>`
-- {doc}`torch.utils.dlpack <dlpack>`
-- {doc}`torch.utils.mobile_optimizer <mobile_optimizer>`
-- {doc}`torch.utils.model_zoo <model_zoo>`
-- {doc}`torch.utils.tensorboard <tensorboard>`
-- {doc}`torch.utils.module_tracker <module_tracker>`
-- {doc}`Multiprocessing <multiprocessing>`
-
-**Other**
-
-- [C++](https://docs.pytorch.org/cppdocs/)
-- {doc}`Type Info <type_info>`
-- {doc}`Named Tensors <named_tensor>`
-- {doc}`Named Tensors operator coverage <name_inference>`
-- {doc}`torch.__config__ <config_mod>`
-- {doc}`torch.__future__ <future_mod>`
-- {doc}`torch._logging <logging>`
-- {doc}`Torch Environment Variables <torch_environment_variables>`
-:::
-
 ---
 
 ## Get Started
@@ -530,6 +416,124 @@ Complete list of all PyTorch Python and C++ APIs.
 :::
 
 ::::
+
+---
+
+## API List
+
+:::{dropdown} Complete PyTorch API Reference — all modules and packages
+:icon: list-unordered
+
+**Core**
+
+- {doc}`torch <torch>`
+- {doc}`torch.nn <nn>`
+- {doc}`torch.nn.functional <nn.functional>`
+- {doc}`torch.nn.init <nn.init>`
+- {doc}`torch.nn.attention <nn.attention>`
+- {doc}`torch.Tensor <tensors>`
+- {doc}`Tensor Attributes <tensor_attributes>`
+- {doc}`Tensor Views <tensor_view>`
+- {doc}`torch.autograd <autograd>`
+- {doc}`torch.optim <optim>`
+- {doc}`torch.utils.data <data>`
+- {doc}`torch.library <library>`
+
+**Math & Signal**
+
+- {doc}`torch.fft <fft>`
+- {doc}`torch.linalg <linalg>`
+- {doc}`torch.special <special>`
+- {doc}`torch.signal <signal>`
+- {doc}`Complex Numbers <complex_numbers>`
+
+**Hardware Acceleration**
+
+- {doc}`torch.accelerator <accelerator>`
+- {doc}`torch.cpu <cpu>`
+- {doc}`torch.cuda <cuda>`
+- {doc}`torch.cuda.memory <torch_cuda_memory>`
+- {doc}`torch.mps <mps>`
+- {doc}`torch.xpu <xpu>`
+- {doc}`torch.mtia <mtia>`
+- {doc}`torch.mtia.memory <mtia.memory>`
+- {doc}`torch.mtia.mtia_graph <mtia.mtia_graph>`
+- {doc}`Meta device <meta>`
+- {doc}`torch.amp <amp>`
+- {doc}`torch.backends <backends>`
+
+**Compiler & Export**
+
+- {doc}`torch.compiler <torch.compiler_api>`
+- {doc}`torch.export <user_guide/torch_compiler/export>`
+- {doc}`torch.fx <fx>`
+- {doc}`torch.fx.experimental <fx.experimental>`
+- {doc}`torch.func <func>`
+- {doc}`torch.onnx <onnx>`
+- {doc}`torch.nativert <nativert>`
+
+**Distributed**
+
+- {doc}`torch.distributed <distributed>`
+- {doc}`torch.distributed.tensor <distributed.tensor>`
+- {doc}`torch.distributed.algorithms.join <distributed.algorithms.join>`
+- {doc}`torch.distributed.elastic <distributed.elastic>`
+- {doc}`torch.distributed.fsdp <fsdp>`
+- {doc}`torch.distributed.fsdp.fully_shard <distributed.fsdp.fully_shard>`
+- {doc}`torch.distributed.tensor.parallel <distributed.tensor.parallel>`
+- {doc}`torch.distributed.optim <distributed.optim>`
+- {doc}`torch.distributed.pipelining <distributed.pipelining>`
+- {doc}`torch.distributed._symmetric_memory <symmetric_memory>`
+- {doc}`torch.distributed.checkpoint <distributed.checkpoint>`
+- {doc}`DDP Communication Hooks <ddp_comm_hooks>`
+- {doc}`Distributed RPC Framework <rpc>`
+
+**Quantization & Performance**
+
+- {doc}`Quantization <quantization>`
+- {doc}`torch.profiler <profiler>`
+- {doc}`torch.sparse <sparse>`
+- {doc}`torch.utils.benchmark <benchmark_utils>`
+
+**Utilities**
+
+- {doc}`torch.distributions <distributions>`
+- {doc}`torch.futures <futures>`
+- {doc}`torch.hub <hub>`
+- {doc}`torch.monitor <monitor>`
+- {doc}`torch.overrides <torch.overrides>`
+- {doc}`torch.package <package>`
+- {doc}`torch.random <random>`
+- {doc}`torch.masked <masked>`
+- {doc}`torch.nested <nested>`
+- {doc}`torch.Size <size>`
+- {doc}`torch.Storage <storage>`
+- {doc}`torch.testing <testing>`
+- {doc}`torch.utils <utils>`
+- {doc}`torch.utils.benchmark <benchmark_utils>`
+- {doc}`torch.utils.checkpoint <checkpoint>`
+- {doc}`torch.utils.cpp_extension <cpp_extension>`
+- {doc}`torch.utils.data <data>`
+- {doc}`torch.utils.deterministic <deterministic>`
+- {doc}`torch.utils.jit <jit_utils>`
+- {doc}`torch.utils.dlpack <dlpack>`
+- {doc}`torch.utils.mobile_optimizer <mobile_optimizer>`
+- {doc}`torch.utils.model_zoo <model_zoo>`
+- {doc}`torch.utils.tensorboard <tensorboard>`
+- {doc}`torch.utils.module_tracker <module_tracker>`
+- {doc}`Multiprocessing <multiprocessing>`
+
+**Other**
+
+- [C++](https://docs.pytorch.org/cppdocs/)
+- {doc}`Type Info <type_info>`
+- {doc}`Named Tensors <named_tensor>`
+- {doc}`Named Tensors operator coverage <name_inference>`
+- {doc}`torch.__config__ <config_mod>`
+- {doc}`torch.__future__ <future_mod>`
+- {doc}`torch._logging <logging>`
+- {doc}`Torch Environment Variables <torch_environment_variables>`
+:::
 
 ---
 
