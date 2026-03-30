@@ -96,5 +96,8 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     pip_install -r /opt/conda/requirements-docs.txt
   fi
 
+  # Clean conda package cache
+  as_jenkins conda clean -ya
+
   popd
 fi
