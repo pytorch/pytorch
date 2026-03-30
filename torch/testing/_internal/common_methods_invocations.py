@@ -24218,7 +24218,7 @@ python_ref_db = [
                     torch.float32, torch.float64, torch.float16, torch.complex64,
                     torch.complex128, torch.bfloat16, torch.int8, torch.uint8
                 ),
-                device_type="cuda"
+                device_type="xpu"
             ),
             
             # Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
