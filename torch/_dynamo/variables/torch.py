@@ -917,6 +917,20 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             fn_var = args[0]
             if isinstance(fn_var, TorchInGraphFunctionVariable):
                 return fn_var
+            if not isinstance(fn_var, variables.functions.UserFunctionVariable):
+                unimplemented(
+                    gb_type="allow_in_graph on non-user-function",
+                    context=f"fn={fn_var}",
+                    explanation=(
+                        "allow_in_graph inside a compiled function only supports user-defined "
+                        "Python functions (UserFunctionVariable). For cases requiring nn.Module "
+                        "arguments or user-defined class inputs, use @torch._dynamo.nonstrict_trace instead."
+                    ),
+                    hints=[
+                        "Use @torch.compiler.allow_in_graph as a module-level decorator on your function.",
+                        "For functions with nn.Module or user-defined class arguments, use @torch._dynamo.nonstrict_trace.",
+                    ],
+                )
             try:
                 python_fn = fn_var.as_python_constant()
             except NotImplementedError:
@@ -931,6 +945,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     hints=[
                         "Move the allow_in_graph call to module level, outside the compiled function.",
                         "Use @torch.compiler.allow_in_graph as a decorator on the function definition.",
+                        "For complex cases (non-constant closures), use @torch._dynamo.nonstrict_trace.",
                     ],
                 )
             # Registering python_fn in _allowed_callable_ids makes lookup_callable

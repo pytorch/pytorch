@@ -2438,7 +2438,9 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         with self.assertRaises(RuntimeError):
             exported_model = torch.export.export(model, (inp,))
 
-    @parametrize("allow_fn", [torch.compiler.allow_in_graph, torch._dynamo.allow_in_graph])
+    @parametrize(
+        "allow_fn", [torch.compiler.allow_in_graph, torch._dynamo.allow_in_graph]
+    )
     def test_allow_in_graph_inside_compile_api_paths(self, allow_fn):
         # Regression test for https://github.com/pytorch/pytorch/issues/178511
         # Both torch.compiler.allow_in_graph and torch._dynamo.allow_in_graph are registered
@@ -2472,32 +2474,44 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         ]
         self.assertEqual(len(call_nodes), 1)
 
-    def test_allow_in_graph_inside_compile_constantifiable_closure(self):
+    def test_allow_in_graph_inside_compile_inner_fn_rejected(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/178511
-        # The main use case for allow_in_graph inside compile is constantifiable closures:
-        # local functions whose closed-over values are Python constants (not tensors),
-        # so as_python_constant() can reconstruct the function at trace time.
-        backend = torch._dynamo.testing.EagerAndRecordGraphs()
-
+        # allow_in_graph inside compile only supports UserFunctionVariable (module-level
+        # functions). Inner functions defined inside the compiled region are
+        # NestedUserFunctionVariable and are intentionally rejected - use
+        # @torch._dynamo.nonstrict_trace for those cases.
         def forward(x):
-            scale_factor = 2  # Python constant, not a tensor
+            def inner(t):
+                return t * 2
 
-            def scale(t):
-                return t * scale_factor
-
-            wrapped = torch.compiler.allow_in_graph(scale)
+            wrapped = torch.compiler.allow_in_graph(inner)
             return wrapped(x)
 
-        compiled = torch.compile(forward, fullgraph=True, backend=backend)
+        # fullgraph=True ensures the graph break surfaces as Unsupported rather than
+        # silently resuming in eager mode.
+        compiled = torch.compile(forward, fullgraph=True)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            compiled(torch.randn(4))
+
+    def test_disallow_in_graph_after_allow_in_graph_causes_graph_break(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/178511
+        # disallow_in_graph is in the torch._dynamo blanket-skip module and
+        # causes a graph break when called inside compiled code.
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def forward(x):
+            wrapped_fn = torch.compiler.allow_in_graph(my_custom_function)
+            result = wrapped_fn(x)
+            torch._dynamo.disallow_in_graph(my_custom_function)  # graph break here
+            return result
+
+        compiled = torch.compile(forward, backend=cnts, fullgraph=False)
         x = torch.randn(4)
         result = compiled(x)
-        self.assertEqual(result, x * 2)
-        self.assertEqual(len(backend.graphs), 1)
-        # The closed-over constant is baked in; no separate graph break for it
-        call_nodes = [
-            n for n in backend.graphs[0].graph.nodes if n.op == "call_function"
-        ]
-        self.assertGreater(len(call_nodes), 0)
+        self.assertEqual(result, my_custom_function(x))
+        # One graph compiled (allow_in_graph + wrapped_fn(x)); the remainder
+        # (disallow_in_graph + return) runs eagerly after the break with no new graph.
+        self.assertEqual(cnts.frame_count, 1)
 
 
 instantiate_parametrized_tests(DecoratorTests)
