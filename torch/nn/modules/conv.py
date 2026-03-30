@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import math
-from typing import Any, Literal
-from typing_extensions import deprecated
+from typing import Any, Generic, Literal
+from typing_extensions import TypeVarTuple, Unpack, deprecated
 
 import torch
 from torch import Tensor
@@ -51,8 +51,10 @@ convolution_notes = {
         :math:`(C_\text{in}=C_\text{in}, C_\text{out}=C_\text{in} \times \text{K}, ..., \text{groups}=C_\text{in})`.""",
 }  # noqa: B950
 
+Ts = TypeVarTuple("Ts")
 
-class _ConvNd(Module):
+
+class _ConvNd(Module, Generic[Unpack[Ts]]):
     __constants__ = [
         "stride",
         "padding",
@@ -73,18 +75,16 @@ class _ConvNd(Module):
     in_channels: int
     _reversed_padding_repeated_twice: list[int]
     out_channels: int
+    kernel_size: tuple[Unpack[Ts]]
+    stride: tuple[Unpack[Ts]]
+    padding: str | tuple[Unpack[Ts]]
+    dilation: tuple[Unpack[Ts]]
     transposed: bool
+    output_padding: tuple[Unpack[Ts]]
     groups: int
     padding_mode: Literal["zeros", "reflect", "replicate", "circular"]
     weight: Tensor
     bias: Tensor | None
-
-    # Type of the following attributes varies dynamically in subclasses
-    kernel_size: Any
-    stride: Any
-    padding: Any
-    dilation: Any
-    output_padding: Any
 
     def __init__(
         self,
@@ -224,7 +224,7 @@ class _ConvNd(Module):
             self.padding_mode = "zeros"
 
 
-class Conv1d(_ConvNd):
+class Conv1d(_ConvNd[int]):
     __doc__ = (
         r"""Applies a 1D convolution over an input signal composed of several input
     planes.
@@ -329,12 +329,6 @@ class Conv1d(_ConvNd):
     """
     )
 
-    kernel_size: tuple[int]
-    stride: tuple[int]
-    padding: str | tuple[int]
-    dilation: tuple[int]
-    output_padding: tuple[int]
-
     def __init__(
         self,
         in_channels: int,
@@ -393,7 +387,7 @@ class Conv1d(_ConvNd):
         return self._conv_forward(input, self.weight, self.bias)
 
 
-class Conv2d(_ConvNd):
+class Conv2d(_ConvNd[int, int]):
     __doc__ = (
         r"""Applies a 2D convolution over an input signal composed of several input
     planes.
@@ -515,12 +509,6 @@ class Conv2d(_ConvNd):
     """
     )
 
-    kernel_size: tuple[int, int]
-    stride: tuple[int, int]
-    padding: str | tuple[int, int]
-    dilation: tuple[int, int]
-    output_padding: tuple[int, int]
-
     def __init__(
         self,
         in_channels: int,
@@ -577,7 +565,7 @@ class Conv2d(_ConvNd):
         return self._conv_forward(input, self.weight, self.bias)
 
 
-class Conv3d(_ConvNd):
+class Conv3d(_ConvNd[int, int, int]):
     __doc__ = (
         r"""Applies a 3D convolution over an input signal composed of several input
     planes.
@@ -690,12 +678,6 @@ class Conv3d(_ConvNd):
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
     )
-
-    kernel_size: tuple[int, int, int]
-    stride: tuple[int, int, int]
-    padding: str | tuple[int, int, int]
-    dilation: tuple[int, int, int]
-    output_padding: tuple[int, int, int]
 
     def __init__(
         self,
