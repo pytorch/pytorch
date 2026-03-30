@@ -592,6 +592,24 @@ class TestSelectAlgorithm(TestCase):
         self.assertEqual(caller_str, f"TritonTemplateCaller({module_path}, extra)")
 
 
+class TestSelectAlgorithmCleanup(TestCase):
+    def test_benchmark_only_clears_matching_precompile_cache_entry(self):
+        asc = select_algorithm.AlgorithmSelectorCache()
+        asc.precompile_cache = {"keep": lambda: {}, "drop": lambda: {}}
+
+        with patch.object(asc, "make_benchmark_fn", return_value=lambda _choices: {}):
+            asc.benchmark(
+                [],
+                [],
+                unittest.mock.Mock(),
+                None,
+                precompile_key="drop",
+            )
+
+        self.assertIn("keep", asc.precompile_cache)
+        self.assertNotIn("drop", asc.precompile_cache)
+
+
 class TestExternKernelCaller(TestCase):
     @requires_gpu()
     @patches

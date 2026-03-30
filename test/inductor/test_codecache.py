@@ -148,6 +148,28 @@ class TestPyCodeCache(TestCase):
         stack_frames = PyCodeCache.stack_frames_for_code(path, 0)
         self.assertEqual(stack_frames, None)
 
+    def test_load_by_key_path_can_defer_sys_modules_registration(self):
+        mod_name = None
+        try:
+            with fresh_cache():
+                PyCodeCache.cache_clear()
+                key, path = PyCodeCache.write("value = 1\n")
+
+                mod = PyCodeCache.load_by_key_path(
+                    key, path, set_sys_modules=False
+                )
+                mod_name = mod.__name__
+                self.assertNotIn(mod_name, sys.modules)
+
+                registered_mod = PyCodeCache.load_by_key_path(key, path)
+                self.assertIs(registered_mod, mod)
+                self.assertIn(mod_name, sys.modules)
+                self.assertIs(sys.modules[mod_name], mod)
+        finally:
+            if mod_name is not None:
+                sys.modules.pop(mod_name, None)
+            PyCodeCache.cache_clear()
+
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_editable_cached_wrapper(self):
         with tempfile.TemporaryDirectory() as tmpdir:
