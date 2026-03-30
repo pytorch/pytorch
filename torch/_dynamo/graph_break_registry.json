@@ -3191,16 +3191,6 @@
   "GB4927": [
     {
       "Gb_type": "autograd.grad consumed returned tensor's grad_fn",
-      "Context": "Leaked output tensors: {leaked_str}",
-      "Explanation": "torch.autograd.grad() consumes grad_fns that are needed by tensors returned from this compiled function. This would cause 'backward through graph a second time' errors.\n  The following returned tensors have consumed grad_fns: {leaked_str}",
-      "Hints": [
-        "Detach the problematic tensor(s) before returning: e.g. `{leaked[0]}.detach()`",
-        "Call .detach() on the tensor before returning.",
-        "If you need to backward through the returned tensor, use retain_graph=True in autograd.grad()."
-      ]
-    },
-    {
-      "Gb_type": "autograd.grad consumed returned tensor's grad_fn",
       "Context": "",
       "Explanation": "torch.autograd.grad() consumes grad_fns that are needed by tensors returned from this compiled function. This would cause 'backward through graph a second time' errors.",
       "Hints": [
