@@ -257,6 +257,90 @@ class TestProfilerCodeGen(TestCase):
         self.assertNotIn("_forward_impl", gm._code)
         self.assertNotIn("_forward_profiled", gm._code)
 
+    def test_exec_from_disk(self):
+        """When codegen_dump_dir is set, exec from the on-disk file produces correct output."""
+        from torch.fx.experimental import _config as fx_config
+
+        model = torch.nn.Linear(4, 4)
+        inp = torch.randn(1, 4)
+        expected = model(inp)
+        gm = self._trace_and_recompile(model, (inp,))
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fx_config.codegen_dump_dir = tmpdir
+            try:
+                gm.recompile()
+                result = gm(inp)
+                torch.testing.assert_close(result, expected)
+            finally:
+                fx_config.codegen_dump_dir = ""
+
+    def test_hot_reload(self):
+        """Modifying the dumped file causes forward() to pick up changes."""
+        from torch.fx.experimental import _config as fx_config
+
+        model = torch.nn.Linear(4, 4)
+        inp = torch.randn(1, 4)
+        gm = self._trace_and_recompile(model, (inp,))
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fx_config.codegen_dump_dir = tmpdir
+            try:
+                gm.recompile()
+                dump_path = gm._codegen_dump_path
+
+                # Read the original code
+                with open(dump_path) as f:
+                    original_code = f.read()
+
+                # Modify: replace forward to return zeros
+                modified_code = original_code
+                # Replace _forward_impl body to return zeros
+                import re
+                modified_code = re.sub(
+                    r"(def _forward_impl\(self.*?\).*?:\n)",
+                    r"\1    return torch.zeros(1, 4)\n",
+                    modified_code,
+                    count=1,
+                    flags=re.DOTALL,
+                )
+                # Also need a standalone forward that calls _forward_impl
+                # Simpler: just replace the entire file with a trivial forward
+                trivial_code = (
+                    "import torch\n"
+                    "def forward(self, x):\n"
+                    "    return torch.zeros(1, 4)\n"
+                )
+                import time
+                time.sleep(0.01)  # ensure mtime differs
+                with open(dump_path, "w") as f:
+                    f.write(trivial_code)
+
+                result = gm(inp)
+                torch.testing.assert_close(result, torch.zeros(1, 4))
+            finally:
+                fx_config.codegen_dump_dir = ""
+
+    def test_no_hot_reload_without_modification(self):
+        """forward() should not reload if file is unchanged."""
+        from torch.fx.experimental import _config as fx_config
+
+        model = torch.nn.Linear(4, 4)
+        inp = torch.randn(1, 4)
+        gm = self._trace_and_recompile(model, (inp,))
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fx_config.codegen_dump_dir = tmpdir
+            try:
+                gm.recompile()
+                expected = gm(inp)
+                # Call again — no modification, should return same result
+                result = gm(inp)
+                torch.testing.assert_close(result, expected)
+                self.assertFalse(gm._codegen_check_modified())
+            finally:
+                fx_config.codegen_dump_dir = ""
+
 
 if __name__ == "__main__":
     run_tests()

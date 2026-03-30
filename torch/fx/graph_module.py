@@ -6,6 +6,7 @@ import hashlib
 import itertools
 import linecache
 import os
+import weakref
 import sys
 import traceback
 import warnings
@@ -866,11 +867,13 @@ class {module_name}(torch.nn.Module):
             )
         return self._code
 
-    def _dump_codegen_to_disk(self) -> None:
+    def _dump_codegen_to_disk(self, python_code_globals: dict[str, Any] | None = None) -> None:
         """Write generated source to content-addressed file for debugging.
 
         When ``codegen_dump_dir`` is set or ``profiler_codegen`` is enabled,
         dump ``self._code`` to disk with a SHA-256-based filename.
+        If ``python_code_globals`` is provided, also exec from disk and
+        install a hot-reload forward wrapper.
         """
         dump_dir = fx_experimental_config.codegen_dump_dir
         if not dump_dir and fx_experimental_config.profiler_codegen:
@@ -887,6 +890,8 @@ class {module_name}(torch.nn.Module):
             with open(dump_path, "w") as f:
                 f.write(self._code)
         self._codegen_dump_path = dump_path
+        self._codegen_dump_hash = code_hash
+        self._codegen_dump_mtime = os.path.getmtime(dump_path)
 
         trace_structured(
             "fx_codegen_dump",
@@ -897,6 +902,67 @@ class {module_name}(torch.nn.Module):
             payload_fn=lambda: self._code,
             expect_trace_id=False,
         )
+
+        # Hot-reload: exec from disk file and install a forward wrapper
+        # that checks for file modifications on each call.
+        if python_code_globals is not None:
+            self._codegen_reload_from_disk(python_code_globals)
+            self._codegen_python_code_globals = python_code_globals
+
+    def _codegen_check_modified(self) -> bool:
+        """Check if the dumped codegen file was modified since last load.
+
+        Uses mtime as a cheap first check, then hash comparison.
+        Only active when codegen_dump_dir is set.
+        """
+        dump_path = getattr(self, "_codegen_dump_path", None)
+        if dump_path is None or not os.path.exists(dump_path):
+            return False
+        current_mtime = os.path.getmtime(dump_path)
+        if current_mtime == getattr(self, "_codegen_dump_mtime", None):
+            return False
+        with open(dump_path) as f:
+            current_code = f.read()
+        current_hash = hashlib.sha256(current_code.encode("utf-8")).hexdigest()[:16]
+        if current_hash != getattr(self, "_codegen_dump_hash", None):
+            return True
+        self._codegen_dump_mtime = current_mtime
+        return False
+
+    def _codegen_reload_from_disk(self, python_code_globals: dict[str, Any]) -> None:
+        """Reload forward() from the on-disk codegen file.
+
+        Reads the file, injects python_code globals into the exec namespace,
+        and binds an instance-level forward that checks for file modifications.
+        """
+        dump_path = self._codegen_dump_path
+        with open(dump_path) as f:
+            code = f.read()
+        self._code = code
+        self._codegen_dump_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()[:16]
+        self._codegen_dump_mtime = os.path.getmtime(dump_path)
+
+        globals_ns = python_code_globals.copy()
+        code_obj = compile(code, dump_path, "exec")
+        exec(code_obj, globals_ns)
+
+        loaded_forward = globals_ns.get("forward")
+        if loaded_forward is None:
+            return
+
+        gm_weak = weakref.ref(self)
+        saved_globals = python_code_globals
+
+        def _hot_reload_forward(self, *args, **kwargs):
+            gm = gm_weak()
+            if gm is None:
+                return loaded_forward(self, *args, **kwargs)
+            if gm._codegen_check_modified():
+                gm._codegen_reload_from_disk(saved_globals)
+                return gm.forward(*args, **kwargs)
+            return loaded_forward(self, *args, **kwargs)
+
+        self.forward = _hot_reload_forward.__get__(self, type(self))
 
     @compatibility(is_backward_compatible=True)
     def recompile(self) -> PythonCode:
@@ -933,8 +999,10 @@ class {module_name}(torch.nn.Module):
         self._lineno_map = python_code._lineno_map
         self._prologue_start = python_code._prologue_start
 
-        # Disk dump: write generated source to content-addressed file for debugging.
-        self._dump_codegen_to_disk()
+        # Disk dump + hot-reload: write generated source to content-addressed file.
+        # When codegen_dump_dir is set, the file is executable and supports
+        # hot-reload: edit the file on disk and the next forward() picks up changes.
+        self._dump_codegen_to_disk(python_code.globals)
 
         cls = type(self)
         co_fields = self._graph._co_fields if hasattr(self._graph, "_co_fields") else {}
