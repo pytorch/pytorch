@@ -941,7 +941,6 @@ def prepare_aot_config(
     list[Any],
     AOTConfig,
 ]:
-
     # TODO: There's something a bit suspicious here; typically simplified
     # module shouldn't actually have any parameters...
     params = dict(mod.named_parameters(remove_duplicate=False))
@@ -963,10 +962,6 @@ def prepare_aot_config(
     full_args_descs: list[DifferentiableAOTInput] = []
     full_args_descs.extend(ParamAOTInput(fqn) for fqn in params_spec)
     full_args_descs.extend(BufferAOTInput(fqn) for fqn in buffers_spec)
-    # TODO: it would be better to put pytree information in here
-    full_args_descs.extend(
-        PlainAOTInput(i) for i in range(len(full_args) - len(full_args_descs))
-    )
 
     # TODO: These tracing_context fields should become unnecessary once we
     # always maintain sources on all arguments
@@ -1096,6 +1091,11 @@ def prepare_aot_module_simplified(
             functional_call, full_args, kwargs
         )
         full_args, in_spec = pytree.tree_flatten((full_args, kwargs))
+
+    # TODO: it would be better to put pytree information in here
+    full_args_descs.extend(
+        PlainAOTInput(i) for i in range(len(full_args) - len(full_args_descs))
+    )
 
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
     # NB: full_args_descs not needed here, fake_flat_args is 1:1 with full_args
