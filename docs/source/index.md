@@ -65,7 +65,7 @@ Features described in this documentation are classified by release status:
 **Compiler & Export**
 
 - [torch.compiler](torch.compiler_api.html)
-- [torch.export](user_guide/torch_compiler/export.html)
+- [torch.export](export.html)
 - [torch.fx](fx.html)
 - [torch.fx.experimental](fx.experimental.html)
 - [torch.func](func.html)
@@ -302,7 +302,7 @@ Compiler-based model optimization with TorchDynamo and TorchInductor.
 :::
 
 :::{grid-item-card} {octicon}`file-symlink-file;1.5em` torch.export
-:link: user_guide/torch_compiler/export.html
+:link: export.html
 
 Export models to a portable, standardized representation.
 :::
