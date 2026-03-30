@@ -979,6 +979,8 @@ class GraphModule(torch.nn.Module):
             wrapper_body,
             """\
 arg0_1, = args
+if arg0_1.data_ptr() % 16 != 0:
+    arg0_1 = clone_preserve_strides(arg0_1)
 with torch.cuda._DeviceGuard(0):
     torch.cuda.set_device(0)
     default_stream = torch.cuda.current_stream()
@@ -1049,6 +1051,10 @@ class GraphModule(torch.nn.Module):
 arg0_1, arg1_1, arg2_1 = args
 torch.ops.streams.record_event.default(1, 2)
 torch.ops.streams.wait_event.default(1, 0)
+if arg0_1.data_ptr() % 16 != 0:
+    arg0_1 = clone_preserve_strides(arg0_1)
+if arg1_1.data_ptr() % 16 != 0:
+    arg1_1 = clone_preserve_strides(arg1_1)
 with torch.cuda._DeviceGuard(0):
     torch.cuda.set_device(0)
     default_stream = torch.cuda.current_stream()
@@ -1056,6 +1062,8 @@ with torch.cuda._DeviceGuard(0):
     with torch.cuda.stream(default_stream):
         buf2 = empty_strided_cuda((32, 32), (32, 1), torch.float32)
         extern_kernels.mm(arg0_1, arg1_1, out=buf2)
+        if arg2_1.data_ptr() % 16 != 0:
+            arg2_1 = clone_preserve_strides(arg2_1)
     with torch.cuda.stream(stream1):
         buf3 = empty_strided_cuda((32, 32), (32, 1), torch.float32)
         extern_kernels.mm(buf2, arg2_1, out=buf3)
@@ -1149,6 +1157,10 @@ torch.ops.streams.record_event.default(3, 0)
 torch.ops.streams.wait_event.default(3, 1)
 torch.ops.streams.record_event.default(4, 1)
 torch.ops.streams.wait_event.default(4, 2)
+if arg0_1.data_ptr() % 16 != 0:
+    arg0_1 = clone_preserve_strides(arg0_1)
+if arg1_1.data_ptr() % 16 != 0:
+    arg1_1 = clone_preserve_strides(arg1_1)
 with torch.cuda._DeviceGuard(0):
     torch.cuda.set_device(0)
     default_stream = torch.cuda.current_stream()
@@ -1158,9 +1170,13 @@ with torch.cuda._DeviceGuard(0):
     with torch.cuda.stream(stream1):
         buf4 = empty_strided_cuda((32, 32), (32, 1), torch.float32)
         extern_kernels.mm(arg0_1, arg1_1, out=buf4)
+        if arg2_1.data_ptr() % 16 != 0:
+            arg2_1 = clone_preserve_strides(arg2_1)
     with torch.cuda.stream(stream2):
         buf5 = empty_strided_cuda((32, 32), (32, 1), torch.float32)
         extern_kernels.mm(buf4, arg2_1, out=buf5)
+        if arg3_1.data_ptr() % 16 != 0:
+            arg3_1 = clone_preserve_strides(arg3_1)
     with torch.cuda.stream(stream3):
         buf6 = buf4; del buf4
         extern_kernels.mm(buf5, arg3_1, out=buf6)
@@ -1246,6 +1262,10 @@ torch.ops.streams.record_event.default(2, 0)
 torch.ops.streams.record_event.default(3, 1)
 torch.ops.streams.wait_event.default(2, 4)
 torch.ops.streams.wait_event.default(3, 4)
+if arg0_1.data_ptr() % 16 != 0:
+    arg0_1 = clone_preserve_strides(arg0_1)
+if arg1_1.data_ptr() % 16 != 0:
+    arg1_1 = clone_preserve_strides(arg1_1)
 with torch.cuda._DeviceGuard(0):
     torch.cuda.set_device(0)
     default_stream = torch.cuda.current_stream()
@@ -1254,6 +1274,8 @@ with torch.cuda._DeviceGuard(0):
     with torch.cuda.stream(stream1):
         buf4 = empty_strided_cuda((32, 32), (32, 1), torch.float32)
         extern_kernels.mm(arg0_1, arg1_1, out=buf4)
+        if arg2_1.data_ptr() % 16 != 0:
+            arg2_1 = clone_preserve_strides(arg2_1)
     with torch.cuda.stream(default_stream):
         buf5 = empty_strided_cuda((32, 32), (32, 1), torch.float32)
         extern_kernels.addmm(buf4, arg0_1, arg2_1, alpha=1, beta=1, out=buf5)
