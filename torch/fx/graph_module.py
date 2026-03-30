@@ -872,6 +872,7 @@ class {module_name}(torch.nn.Module):
 
         When ``codegen_dump_dir`` is set or ``profiler_codegen`` is enabled,
         dump ``self._code`` to disk with a SHA-256-based filename.
+        Collects subgraph code for GraphModule children and appends it.
         If ``python_code_globals`` is provided, also exec from disk and
         install a hot-reload forward wrapper.
         """
@@ -882,7 +883,48 @@ class {module_name}(torch.nn.Module):
             dump_dir = os.path.join(tempfile.gettempdir(), "torch_fx_codegen")
         if not dump_dir:
             return
-        code_hash = hashlib.sha256(self._code.encode("utf-8")).hexdigest()[:16]
+
+        # Collect subgraph code for GraphModule children
+        subgraph_sections: list[str] = []
+        subgraph_globals: dict[str, Any] = {}
+        from torch.fx.profiler_codegen import ProfilerCodeGen as _ProfilerCodeGen
+
+        for name, child in self.named_children():
+            if isinstance(child, GraphModule) and hasattr(child, "_graph"):
+                child_code = child._graph.python_code("self")
+                child_src = child_code.src
+                if child_code.globals:
+                    subgraph_globals.update(child_code.globals)
+                # Generate impl + profiled + dispatcher for subgraph
+                impl_src = child_src.replace("def forward(", f"def _{name}_forward_impl(", 1)
+                # Remove import lines (already in main module)
+                impl_lines = [l for l in impl_src.split("\n") if not l.strip().startswith(("import ", "from "))]
+                impl_src = "\n".join(impl_lines)
+                # Profiled version: wrap recordable nodes
+                if isinstance(self._graph._codegen, _ProfilerCodeGen):
+                    profiled_lines = [f"def _{name}_forward_profiled(self, *args, **kwargs):"]
+                    profiled_lines.append(f"    return _{name}_forward_impl(self, *args, **kwargs)")
+                    profiled_src = "\n".join(profiled_lines)
+                    dispatcher = (
+                        f"def _{name}_forward(self, *args, **kwargs):\n"
+                        f"    if _autograd_profiler._is_profiler_enabled:\n"
+                        f"        return _{name}_forward_profiled(self, *args, **kwargs)\n"
+                        f"    return _{name}_forward_impl(self, *args, **kwargs)\n"
+                    )
+                else:
+                    profiled_src = ""
+                    dispatcher = (
+                        f"def _{name}_forward(self, *args, **kwargs):\n"
+                        f"    return _{name}_forward_impl(self, *args, **kwargs)\n"
+                    )
+                section = f"\n# ===== Subgraph: {name} =====\n{impl_src}\n\n{profiled_src}\n\n{dispatcher}"
+                subgraph_sections.append(section)
+
+        dump_code = self._code
+        if subgraph_sections:
+            dump_code += "\n" + "\n".join(subgraph_sections)
+
+        code_hash = hashlib.sha256(dump_code.encode("utf-8")).hexdigest()[:16]
         rank_suffix = ""
         if torch.distributed.is_initialized():
             rank_suffix = f"_rank{torch.distributed.get_rank()}"
@@ -890,7 +932,7 @@ class {module_name}(torch.nn.Module):
         dump_path = os.path.join(dump_dir, dump_filename)
         os.makedirs(dump_dir, exist_ok=True)
         if not os.path.exists(dump_path):
-            self._atomic_write(dump_path, self._code)
+            self._atomic_write(dump_path, dump_code)
         self._codegen_dump_path = dump_path
         self._codegen_dump_hash = code_hash
         self._codegen_dump_mtime = os.path.getmtime(dump_path)
@@ -901,15 +943,18 @@ class {module_name}(torch.nn.Module):
                 "filename": dump_filename,
                 "file_path": os.path.abspath(dump_path),
             },
-            payload_fn=lambda: self._code,
+            payload_fn=lambda: dump_code,
             expect_trace_id=False,
         )
 
         # Hot-reload: exec from disk file and install a forward wrapper
         # that checks for file modifications on each call.
         if python_code_globals is not None:
-            self._codegen_reload_from_disk(python_code_globals)
-            self._codegen_python_code_globals = python_code_globals
+            combined_globals = python_code_globals.copy()
+            if subgraph_globals:
+                combined_globals.update(subgraph_globals)
+            self._codegen_reload_from_disk(combined_globals)
+            self._codegen_python_code_globals = combined_globals
 
     def _codegen_check_modified(self) -> bool:
         """Check if the dumped codegen file was modified since last load.
@@ -920,6 +965,8 @@ class {module_name}(torch.nn.Module):
         dump_path = getattr(self, "_codegen_dump_path", None)
         if dump_path is None or not os.path.exists(dump_path):
             return False
+        # Capture mtime before reading to avoid TOCTOU: if the file is modified
+        # between getmtime and read, worst case is a harmless extra check next call.
         current_mtime = os.path.getmtime(dump_path)
         if current_mtime == getattr(self, "_codegen_dump_mtime", None):
             return False
@@ -956,13 +1003,18 @@ class {module_name}(torch.nn.Module):
 
         Reads the file, injects python_code globals into the exec namespace,
         and binds an instance-level forward that checks for file modifications.
+        Also rebinds subgraph forward methods if present.
         """
         dump_path = self._codegen_dump_path
+        # Capture mtime before reading to avoid TOCTOU: if the file is modified
+        # between read and getmtime, we'd store the newer mtime but exec the
+        # older code. Capturing first means worst case is a harmless redundant reload.
+        pre_read_mtime = os.path.getmtime(dump_path)
         with open(dump_path) as f:
             code = f.read()
         self._code = code
         self._codegen_dump_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()[:16]
-        self._codegen_dump_mtime = os.path.getmtime(dump_path)
+        self._codegen_dump_mtime = pre_read_mtime
 
         globals_ns = python_code_globals.copy()
         code_obj = compile(code, dump_path, "exec")
@@ -971,6 +1023,12 @@ class {module_name}(torch.nn.Module):
         loaded_forward = globals_ns.get("forward")
         if loaded_forward is None:
             return
+
+        # Bind subgraph forward methods if present in the exec'd namespace
+        for name, child in self.named_children():
+            fn_name = f"_{name}_forward"
+            if fn_name in globals_ns:
+                child.forward = globals_ns[fn_name].__get__(child, type(child))
 
         gm_weak = weakref.ref(self)
         saved_globals = python_code_globals

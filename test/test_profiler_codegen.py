@@ -311,8 +311,10 @@ class TestProfilerCodeGen(TestCase):
                     "def forward(self, x):\n"
                     "    return torch.zeros(1, 4)\n"
                 )
+                # Force mtime change (os.utime avoids filesystem resolution issues)
                 import time
-                time.sleep(0.01)  # ensure mtime differs
+                future_time = time.time() + 10
+                os.utime(dump_path, (future_time, future_time))
                 with open(dump_path, "w") as f:
                     f.write(trivial_code)
 
@@ -376,6 +378,48 @@ class TestProfilerCodeGen(TestCase):
             # No leftover .tmp files
             tmp_files = [f for f in os.listdir(tmpdir) if f.endswith(".tmp")]
             self.assertEqual(len(tmp_files), 0)
+
+    def test_subgraph_codegen_dump(self):
+        """Subgraph GraphModule children get included in the dump file."""
+        from torch.fx.experimental import _config as fx_config
+
+        # Create a main model with a submodule that is also a GraphModule
+        class SubModel(torch.nn.Module):
+            def forward(self, x):
+                return x * 2
+
+        class MainModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sub = SubModel()
+
+            def forward(self, x):
+                return self.sub(x) + 1
+
+        model = MainModel()
+        gm = torch.fx.symbolic_trace(model)
+
+        # The traced gm should have 'sub' as a child module
+        # Trace the submodule separately and attach it as a GraphModule child
+        sub_gm = torch.fx.symbolic_trace(SubModel())
+        gm.sub = sub_gm
+
+        from torch.fx.profiler_codegen import ProfilerCodeGen
+        gm.graph.set_codegen(ProfilerCodeGen())
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fx_config.codegen_dump_dir = tmpdir
+            try:
+                gm.recompile()
+                dump_path = gm._codegen_dump_path
+                with open(dump_path) as f:
+                    content = f.read()
+                # Subgraph section should be present
+                self.assertIn("# ===== Subgraph: sub =====", content)
+                self.assertIn("_sub_forward_impl", content)
+                self.assertIn("_sub_forward", content)
+            finally:
+                fx_config.codegen_dump_dir = ""
 
 
 if __name__ == "__main__":
