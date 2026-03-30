@@ -889,19 +889,45 @@ def stamp_out_subgraph(
             vt = VariableBuilder(tx, new_source)(value)
             new_lifted_args.append(vt.as_proxy())
 
-    # Generate fake tensor outputs
+    # Generate fake tensor outputs.
     assert tx.fake_mode is not None
+    # When trace_autograd_ops is enabled, output FakeTensors must have grad_fn
+    # connected to the inputs so that torch.autograd.grad can trace through the
+    # full autograd graph. We establish this link via a trivial zero-valued
+    # addition that creates the grad_fn chain without affecting tensor values.
+    grad_inputs = []
+    if torch._dynamo.config.trace_autograd_ops and torch.is_grad_enabled():
+        grad_inputs = [
+            p.node.meta["example_value"]
+            for p in new_lifted_args
+            if isinstance(p.node.meta.get("example_value"), torch.Tensor)
+            and p.node.meta["example_value"].requires_grad
+        ]
     with tx.fake_mode:
-        example_value = tuple(
-            torch.empty_strided(
-                shape,
-                stride,
-                dtype=dtype,
-                device=device,
-                requires_grad=req_grad,
+        if grad_inputs:
+            zero = sum(inp.reshape(-1)[0] * 0 for inp in grad_inputs)
+            example_value = tuple(
+                (
+                    torch.empty_strided(shape, stride, dtype=dtype, device=device)
+                    + zero
+                ).as_strided(shape, stride)
+                if req_grad
+                else torch.empty_strided(
+                    shape, stride, dtype=dtype, device=device
+                )
+                for shape, stride, dtype, device, req_grad in cached.output_metadata
             )
-            for shape, stride, dtype, device, req_grad in cached.output_metadata
-        )
+        else:
+            example_value = tuple(
+                torch.empty_strided(
+                    shape,
+                    stride,
+                    dtype=dtype,
+                    device=device,
+                    requires_grad=req_grad,
+                )
+                for shape, stride, dtype, device, req_grad in cached.output_metadata
+            )
 
     # Install the invoke_subgraph call
     body_node = make_attr(tx, cached.body_name)
