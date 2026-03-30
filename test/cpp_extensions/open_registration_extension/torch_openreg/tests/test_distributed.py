@@ -86,11 +86,25 @@ class TestProcessGroupOCCL(TestDistBackend, DistributedTest._DistTestBase):
         res = fut.value()
         self.assertEqual(res, None)
 
+    def test_occl_send_recv(self) -> None:
+        pg = _get_default_group()
+        device = torch.device("openreg")
+
+        if self.rank == 0:
+            tensor = torch.tensor([1.0, 2.0, 3.0, 4.0], device=device)
+            pg.send([tensor], 1, 0).wait()
+        else:
+            tensor = torch.zeros(4, device=device)
+            pg.recv([tensor], 0, 0).wait()
+            expected = torch.tensor([1.0, 2.0, 3.0, 4.0], device=device)
+            self.assertEqual(tensor, expected)
+
 
 # Drop inherited torch distributed backend tests; we only need the OCCL smoke test.
 _allowed_tests = {
     "test_occl_backend_registration_and_default_group",
     "test_occl_allreduce",
+    "test_occl_send_recv",
 }
 for _name in dir(TestProcessGroupOCCL):
     if _name.startswith("test_") and _name not in _allowed_tests:

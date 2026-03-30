@@ -1,5 +1,4 @@
 #if USE_DISTRIBUTED
-#include <cstring>
 #include <stdexcept>
 
 #include <ATen/core/Tensor.h>
@@ -205,10 +204,10 @@ std::vector<uint8_t> ProcessGroupOCCL::tensorToHost(const at::Tensor& tensor) {
       "tensorToHost requires a contiguous tensor, got non-contiguous");
   const auto nbytes = tensor.nbytes();
   std::vector<uint8_t> buf(nbytes);
-  {
-    at::native::openreg::MemoryGuard guard(tensor);
-    std::memcpy(buf.data(), tensor.data_ptr(), nbytes);
-  }
+  TORCH_CHECK(
+      orMemcpy(buf.data(), tensor.data_ptr(), nbytes, orMemcpyDeviceToHost) ==
+          orSuccess,
+      "tensorToHost: orMemcpy(DeviceToHost) failed");
   return buf;
 }
 
@@ -225,10 +224,10 @@ void ProcessGroupOCCL::hostToTensor(
       ") does not match tensor size (",
       tensor.nbytes(),
       ")");
-  {
-    at::native::openreg::MemoryGuard guard(tensor);
-    std::memcpy(tensor.data_ptr(), buf.data(), buf.size());
-  }
+  TORCH_CHECK(
+      orMemcpy(tensor.data_ptr(), buf.data(), buf.size(), orMemcpyHostToDevice) ==
+          orSuccess,
+      "hostToTensor: orMemcpy(HostToDevice) failed");
 }
 
 // ProcessGroupOCCL ---------------------------------------------------------
@@ -372,17 +371,44 @@ c10::intrusive_ptr<Work> ProcessGroupOCCL::alltoall_base(
 
 c10::intrusive_ptr<Work> ProcessGroupOCCL::send(
     std::vector<at::Tensor>& tensors,
-    int /* dstRank */,
-    int /* tag */) {
+    int dstRank,
+    int tag) {
   CHECK_TENSOR_LIST(tensors);
+  TORCH_CHECK(tensors.size() == 1, "OCCL send expects exactly one tensor");
+  auto& tensor = tensors[0];
+  TORCH_CHECK(tensor.is_contiguous(), "OCCL send requires a contiguous tensor");
+
+  auto buf = tensorToHost(tensor);
+  transport_->send(
+      buf.data(),
+      buf.size(),
+      dstRank,
+      static_cast<uint8_t>(tensor.scalar_type()),
+      static_cast<uint64_t>(tensor.numel()),
+      static_cast<uint32_t>(tag));
+
   return c10::make_intrusive<ProcessGroupOCCL::DummyWork>();
 }
 
 c10::intrusive_ptr<Work> ProcessGroupOCCL::recv(
     std::vector<at::Tensor>& tensors,
-    int /* srcRank */,
-    int /* tag */) {
+    int srcRank,
+    int tag) {
   CHECK_TENSOR_LIST(tensors);
+  TORCH_CHECK(tensors.size() == 1, "OCCL recv expects exactly one tensor");
+  auto& tensor = tensors[0];
+  TORCH_CHECK(tensor.is_contiguous(), "OCCL recv requires a contiguous tensor");
+
+  std::vector<uint8_t> buf(tensor.nbytes());
+  transport_->recv(
+      buf.data(),
+      buf.size(),
+      srcRank,
+      static_cast<uint8_t>(tensor.scalar_type()),
+      static_cast<uint64_t>(tensor.numel()),
+      static_cast<uint32_t>(tag));
+  hostToTensor(buf, tensor);
+
   return c10::make_intrusive<ProcessGroupOCCL::DummyWork>();
 }
 
