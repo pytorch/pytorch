@@ -2174,13 +2174,6 @@ def try_revert(
                 f"Failed to fetch dependent PRs: {str(e)}, fall over to single revert"
             )
 
-    if not shas_and_prs:
-        raise RuntimeError(
-            f"No revertable PRs found in ghstack for #{pr.pr_num}. "
-            f"This typically means the PR is still open (not merged) or "
-            f"its GitHub state is inconsistent. Only closed/merged PRs can be reverted."
-        )
-
     do_revert_prs(
         repo,
         pr,
