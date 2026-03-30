@@ -34,7 +34,6 @@ from torch._custom_class_base import CustomClassBase
 from torch._dynamo.utils import counters, get_runtime_metrics_context
 from torch._guards import compile_context, CompileContext
 from torch._higher_order_ops.wrap import inductor_compiled_code
-from torch._inductor import config
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
     cudagraph_trees_clone_live_user_visible_outputs,
