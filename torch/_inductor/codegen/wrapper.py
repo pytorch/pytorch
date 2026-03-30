@@ -1782,12 +1782,8 @@ class PythonWrapperCodegen(CodeGen):
                     "(torch.float8_e4m3fn, torch.float8_e5m2, "
                     "torch.float8_e4m3fnuz, torch.float8_e5m2fnuz) else var"
                 )
-                self.wrapper_call.writeline(
-                    "assert not check_var.isnan().any().item()"
-                )
-                self.wrapper_call.writeline(
-                    "assert not check_var.isinf().any().item()"
-                )
+                self.wrapper_call.writeline("assert not check_var.isnan().any().item()")
+                self.wrapper_call.writeline("assert not check_var.isinf().any().item()")
                 self.wrapper_call.do_unindent(2)
 
             self.wrapper_call.writeline("return (" + ", ".join(output_refs) + ", )")
