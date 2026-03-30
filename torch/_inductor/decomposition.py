@@ -776,18 +776,22 @@ def _rand_like(
     return result.permute(permutation).clone()
 
 
+@decomp.register_decomposition([aten.rand_like], extra_random_decomps)
 def rand_like(self: torch.Tensor, **kwargs: Any) -> torch.Tensor:
     return _rand_like(torch.rand, self, **kwargs)
 
 
+@decomp.register_decomposition([aten.randn_like], extra_random_decomps)
 def randn_like(self: torch.Tensor, **kwargs: Any) -> torch.Tensor:
     return _rand_like(torch.randn, self, **kwargs)
 
 
+@decomp.register_decomposition([aten.randint_like.default], extra_random_decomps)
 def randint_like(self: torch.Tensor, high: int, **kwargs: Any) -> torch.Tensor:
     return _rand_like(functools.partial(aten.randint.low, 0, high), self, **kwargs)
 
 
+@decomp.register_decomposition([aten.randint_like.low_dtype], extra_random_decomps)
 def randint_like_low(
     self: torch.Tensor, low: int, high: int, **kwargs: Any
 ) -> torch.Tensor:
@@ -952,18 +956,7 @@ def miopen_batch_norm(
 
 @functools.cache
 def fast_random_decomps() -> dict[Any, Callable[..., Any]]:
-    table = {**decompositions, **extra_random_decomps}
-
-    for ol in aten.rand_like.overloads():
-        table[getattr(aten.rand_like, ol)] = rand_like
-
-    for ol in aten.randn_like.overloads():
-        table[getattr(aten.randn_like, ol)] = randn_like
-
-    table[aten.randint_like.default] = randint_like
-    table[aten.randint_like.low_dtype] = randint_like_low
-
-    return table
+    return {**decompositions, **extra_random_decomps}
 
 
 # TODO(aakhundov): replace this (and the above) Any by more
