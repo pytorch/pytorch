@@ -2441,7 +2441,8 @@ class DistributedDataParallel(Module, Joinable):
             if not (bf16_supported or (cuda_supported and nccl_supported) or xpu_xccl_supported):
                 self._log_and_throw(
                     TypeError,
-                    "BF16 all reduce communication hook required CUDA 11+ and NCCL 2.10+ or XPU and XCCL",
+                    "BF16 all reduce communication hook requires CUDA 11+ and NCCL 2.10+, "
+                    "XPU and XCCL, or an accelerator with BF16 support",
                 )
 
     @property

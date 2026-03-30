@@ -210,7 +210,9 @@ def at_least_x_gpu(x):
         return True
     if TEST_XPU and torch.xpu.device_count() >= x:
         return True
-    return torch.accelerator.is_available() and torch.accelerator.device_count() >= x
+    if TEST_PRIVATEUSE1 and torch.accelerator.device_count() >= x:
+        return True
+    return False
 
 
 def _maybe_handle_skip_if_lt_x_gpu(args, msg) -> bool:
