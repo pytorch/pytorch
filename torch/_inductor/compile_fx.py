@@ -134,6 +134,21 @@ from .utils import (
 from .virtualized import V
 
 
+def _json_friendly_for_hash(obj: Any) -> Any:
+    # Normalize nested containers so json.dumps() can hash configs that include
+    # non-string dict keys such as OpOverload objects.
+    if isinstance(obj, dict):
+        return {
+            (key if isinstance(key, str) else repr(key)): _json_friendly_for_hash(value)
+            for key, value in obj.items()
+        }
+    if isinstance(obj, (list, tuple)):
+        return [_json_friendly_for_hash(value) for value in obj]
+    if isinstance(obj, (OrderedSet, frozenset)):
+        return sorted((_json_friendly_for_hash(value) for value in obj), key=repr)
+    return obj
+
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Sequence
 
@@ -2027,9 +2042,24 @@ def compile_fx_aot(
             "into a pt2, please call `torch._inductor.aoti_compile_and_package`."
         )
     else:
+        with config.patch(config_patches):
+            effective_inductor_config = config.save_config_portable(
+                ignore_private_configs=False
+            )
         config_patches = {
             **config_patches,
-            "aot_inductor.output_path": code_hash(model_.code),
+            "aot_inductor.output_path": code_hash(
+                json.dumps(
+                    _json_friendly_for_hash(
+                        {
+                            "model_code": model_.code,
+                            "inductor_config": effective_inductor_config,
+                        }
+                    ),
+                    sort_keys=True,
+                    default=repr,
+                )
+            ),
         }
 
     from .utils import maybe_aoti_standalone_config
