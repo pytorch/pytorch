@@ -3379,6 +3379,28 @@ def forward(self, p_linear_weight, p_linear_bias, obj_lifted_custom_0, x):
         self.assertEqual(res2, f(x, "square"))
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_opaque_multi_output_not_tensor_irnode(self):
+        """OpaqueMultiOutput must not be classified as a tensor IR node.
+
+        _is_tensor_irnode is used to select nodes for stride constraint
+        functions (require_stride1, require_contiguous, etc). If
+        OpaqueMultiOutput passes the check, those functions would call
+        get_stride/get_dtype/make_loader on it and crash."""
+        from unittest.mock import MagicMock
+
+        from torch._inductor import ir
+        from torch._inductor.lowering import _is_tensor_irnode
+
+        opaque_multi = ir.OpaqueMultiOutput.__new__(ir.OpaqueMultiOutput)
+        self.assertIsInstance(opaque_multi, ir.IRNode)
+        self.assertFalse(_is_tensor_irnode(opaque_multi))
+
+        non_tensor = MagicMock(spec=ir.NonTensorObj)
+        non_tensor.__class__ = ir.NonTensorObj
+        self.assertFalse(_is_tensor_irnode(non_tensor))
+
+        self.assertFalse(_is_tensor_irnode(42))
+
     def test_subclass_parametrization_with_opaque_attrs(self):
         """unwrap_tensor_subclass_parameters should handle non-tensor attrs."""
         from torch._functorch._aot_autograd.subclass_parametrization import (
