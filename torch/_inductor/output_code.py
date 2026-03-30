@@ -33,7 +33,6 @@ import torch
 from torch._dynamo.utils import counters, get_runtime_metrics_context
 from torch._guards import compile_context, CompileContext
 from torch._higher_order_ops.wrap import inductor_compiled_code
-from torch._inductor import config
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
     CudagraphCachedInfo,
