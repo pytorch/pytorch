@@ -338,6 +338,7 @@ def cublas_workspace_size(size: None | int = None) -> int:
 
     When called with no arguments, returns the current workspace size.
     When called with a size argument, sets the workspace size and returns the new value.
+    Setting the workspace size will take precedence over the CUBLAS_WORKSPACE_CONFIG environment variable.
     Changes take effect lazily: only handles used after the change get new workspaces.
 
     Args:
@@ -390,6 +391,13 @@ def blas_workspace_size(
        cuBLAS workspace size and physically reuses the same allocation.
        Setting a large cuBLASLt workspace via this function will therefore
        *not* increase memory beyond the cuBLAS workspace size.
+
+    .. note::
+
+        Setting the workspace size for the cublas backend will take precedence
+        over the CUBLAS_WORKSPACE_CONFIG environment variable, and setting the
+        workspace size for the cublaslt backend will take precedence over the
+        CUBLASLT_WORKSPACE_SIZE environment variable.
 
     Args:
         size (int, optional): workspace size in bytes.  Must be non-negative.
