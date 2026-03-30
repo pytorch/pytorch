@@ -51,7 +51,6 @@ from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
 from ..source import (
     AttrSource,
-    DictGetItemSource,
     GenericAttrSource,
     GetItemSource,
     TypeMROSource,
@@ -1332,73 +1331,6 @@ class GetAttrVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         return self.obj.call_method(tx, self.name, list(args), kwargs)
-
-    def call_method(
-        self,
-        tx: "InstructionTranslator",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if (
-            name in ("__getitem__", "get")
-            and self.name == "__dict__"
-            and not kwargs
-            and args[0].is_python_constant()
-            and isinstance(
-                self.obj,
-                (variables.NNModuleVariable,),
-            )
-        ):
-            obj = self.obj
-            key = args[0].as_python_constant()
-            if obj.has_key_in_generic_dict(tx, key):
-                if tx.output.side_effects.has_pending_mutation_of_attr(obj, key):
-                    return tx.output.side_effects.load_attr(obj, key)
-
-                # For instance dicts, read directly from __dict__
-                if isinstance(obj.value.__dict__, dict):
-                    raw_value = obj.value.__dict__[key]
-                    raw_source = (
-                        DictGetItemSource(AttrSource(obj.source, "__dict__"), key)
-                        if obj.source
-                        else None
-                    )
-                    return VariableTracker.build(tx, raw_value, raw_source)
-
-                return obj.var_getattr(tx, key)
-
-            # Return the default value for get
-            if name == "get":
-                if len(args) == 2:
-                    return args[1]
-                else:
-                    return variables.CONSTANT_VARIABLE_NONE
-
-        elif (
-            name == "__contains__"
-            and self.name == "__dict__"
-            and len(args) == 1
-            and args[0].is_python_constant()
-            and not kwargs
-            and isinstance(
-                self.obj,
-                (variables.NNModuleVariable,),
-            )
-        ):
-            obj = self.obj
-            key = args[0].as_python_constant()
-            if obj.has_key_in_generic_dict(tx, key):
-                return variables.CONSTANT_VARIABLE_TRUE
-            else:
-                return variables.CONSTANT_VARIABLE_FALSE
-
-        elif name == "__setitem__" and self.name == "__dict__" and not kwargs:
-            if isinstance(self.obj, variables.NNModuleVariable):
-                # This matches how `setattr` is handled for NNModuleVariable
-                self.obj.convert_to_unspecialized(tx)
-
-        return super().call_method(tx, name, args, kwargs)
 
 
 class MethodWrapperVariable(VariableTracker):
