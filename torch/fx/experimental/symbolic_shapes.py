@@ -4997,6 +4997,15 @@ class ShapeEnv:
         else:
             fx_node = None
 
+        # # Resolve through replacements so that fully specialized symbols
+        # # (e.g. s77 with replacements {s77: 5}) produce a plain int rather
+        # # than a SymInt wrapping the now-constant symbol. Only apply when
+        # # replacement yields a concrete Integer to avoid disrupting unbacked
+        # # symbol tracking.
+        # replaced = self.replace(sym)
+        # if isinstance(replaced, sympy.Integer):
+        #     sym = replaced
+
         out: IntLikeType
         if isinstance(sym, sympy.Integer):
             if hint is not None:

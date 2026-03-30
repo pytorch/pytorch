@@ -132,7 +132,6 @@ def construct_fake_mode(
         fake_mode = FakeTensorMode(shape_env=shape_env)
     else:
         shape_env = fake_mode.shape_env
-    print(f"construct_fake_mode: fake_mode = {fake_mode}, shape_env = {shape_env}")
     return (fake_mode, shape_env)
 
 
