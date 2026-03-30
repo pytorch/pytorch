@@ -97,7 +97,6 @@ from .constant import (
 from .dicts import (
     ConstDictVariable,
     DefaultDictVariable,
-    DictItemsVariable,
     DictKeysVariable,
     DictViewVariable,
     FrozensetVariable,
@@ -217,13 +216,6 @@ un_ops = (
     operator.neg,
     operator.not_,  # Note: this has a local scalar dense call
     operator.length_hint,
-)
-
-_SET_LIKE_OP_SUPPORT: tuple[type[VariableTracker], ...] = (
-    DictItemsVariable,
-    DictKeysVariable,
-    SetVariable,
-    UserDefinedObjectVariable,
 )
 
 BUILTIN_TO_TENSOR_FN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
@@ -3154,28 +3146,31 @@ class BuiltinVariable(VariableTracker):
                 sym_num=None,
             )
 
-        if isinstance(a, _SET_LIKE_OP_SUPPORT):
+        if isinstance(
+            a,
+            (DictKeysVariable, SetVariable, UserDefinedObjectVariable),
+        ):
             return a.call_method(tx, "__xor__", [b], {})
         return None
 
     def call_ixor(
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
-        if isinstance(a, _SET_LIKE_OP_SUPPORT):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedObjectVariable)):
             return a.call_method(tx, "__ixor__", [b], {})
         return None
 
     def call_sub(
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
-        if isinstance(a, _SET_LIKE_OP_SUPPORT):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedObjectVariable)):
             return a.call_method(tx, "__sub__", [b], {})
         return None
 
     def call_isub(
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
-        if isinstance(a, _SET_LIKE_OP_SUPPORT):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedObjectVariable)):
             return a.call_method(tx, "__isub__", [b], {})
         return None
 
@@ -3193,7 +3188,7 @@ class BuiltinVariable(VariableTracker):
                 ),
                 sym_num=None,
             )
-        if isinstance(a, _SET_LIKE_OP_SUPPORT):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedObjectVariable)):
             return a.call_method(tx, "__and__", [b], {})
         # None no-ops this handler and lets the driving function proceed
         return None
@@ -3212,7 +3207,7 @@ class BuiltinVariable(VariableTracker):
                 ),
                 sym_num=None,
             )
-        if isinstance(a, _SET_LIKE_OP_SUPPORT):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedObjectVariable)):
             return a.call_method(tx, "__iand__", [b], {})
         return None
 
@@ -3248,10 +3243,12 @@ class BuiltinVariable(VariableTracker):
         if isinstance(
             a,
             (
-                *_SET_LIKE_OP_SUPPORT,
                 ConstDictVariable,
+                DictKeysVariable,
                 MutableMappingVariable,
+                SetVariable,
                 UserDefinedDictVariable,
+                UserDefinedObjectVariable,
             ),
         ):
             # TODO(guilhermeleobas): forward the call to b.__ror__(a) if
@@ -3280,9 +3277,11 @@ class BuiltinVariable(VariableTracker):
         if isinstance(
             a,
             (
-                *_SET_LIKE_OP_SUPPORT,
                 ConstDictVariable,
+                DictKeysVariable,
                 MutableMappingVariable,
+                SetVariable,
+                UserDefinedObjectVariable,
             ),
         ):
             return a.call_method(tx, "__ior__", [b], {})
