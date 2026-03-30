@@ -65,7 +65,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cpu
       DESIRED_PYTHON: "3.10"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cpu"
       build_name: manywheel-py3_10-cpu
       build_environment: linux-binary-manywheel
@@ -91,7 +91,7 @@ jobs:
       build_name: manywheel-py3_10-cpu
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iamx-14-27
+      runs_on: mt-l-x86iamx-14-27
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -135,7 +135,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.10"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.6"
       build_name: manywheel-py3_10-cuda12_6
       build_environment: linux-binary-manywheel
@@ -163,7 +163,7 @@ jobs:
       build_name: manywheel-py3_10-cuda12_6
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.6"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -208,7 +208,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.10"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.8"
       build_name: manywheel-py3_10-cuda12_8
       build_environment: linux-binary-manywheel
@@ -236,7 +236,7 @@ jobs:
       build_name: manywheel-py3_10-cuda12_8
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.8"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -281,7 +281,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.10"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.9"
       build_name: manywheel-py3_10-cuda12_9
       build_environment: linux-binary-manywheel
@@ -309,7 +309,7 @@ jobs:
       build_name: manywheel-py3_10-cuda12_9
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.9"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -354,7 +354,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.10"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.0"
       build_name: manywheel-py3_10-cuda13_0
       build_environment: linux-binary-manywheel
@@ -382,7 +382,7 @@ jobs:
       build_name: manywheel-py3_10-cuda13_0
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.0"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -427,7 +427,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda13.2
       DESIRED_PYTHON: "3.10"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.2"
       build_name: manywheel-py3_10-cuda13_2
       build_environment: linux-binary-manywheel
@@ -455,7 +455,7 @@ jobs:
       build_name: manywheel-py3_10-cuda13_2
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.2"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -731,7 +731,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: xpu
       DESIRED_PYTHON: "3.10"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:xpu"
       build_name: manywheel-py3_10-xpu
       build_environment: linux-binary-manywheel
@@ -837,7 +837,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cpu
       DESIRED_PYTHON: "3.11"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cpu"
       build_name: manywheel-py3_11-cpu
       build_environment: linux-binary-manywheel
@@ -863,7 +863,7 @@ jobs:
       build_name: manywheel-py3_11-cpu
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iamx-14-27
+      runs_on: mt-l-x86iamx-14-27
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -907,7 +907,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.11"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.6"
       build_name: manywheel-py3_11-cuda12_6
       build_environment: linux-binary-manywheel
@@ -935,7 +935,7 @@ jobs:
       build_name: manywheel-py3_11-cuda12_6
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.6"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -980,7 +980,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.11"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.8"
       build_name: manywheel-py3_11-cuda12_8
       build_environment: linux-binary-manywheel
@@ -1008,7 +1008,7 @@ jobs:
       build_name: manywheel-py3_11-cuda12_8
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.8"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -1053,7 +1053,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.11"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.9"
       build_name: manywheel-py3_11-cuda12_9
       build_environment: linux-binary-manywheel
@@ -1081,7 +1081,7 @@ jobs:
       build_name: manywheel-py3_11-cuda12_9
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.9"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -1126,7 +1126,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.11"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.0"
       build_name: manywheel-py3_11-cuda13_0
       build_environment: linux-binary-manywheel
@@ -1154,7 +1154,7 @@ jobs:
       build_name: manywheel-py3_11-cuda13_0
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.0"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -1199,7 +1199,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda13.2
       DESIRED_PYTHON: "3.11"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.2"
       build_name: manywheel-py3_11-cuda13_2
       build_environment: linux-binary-manywheel
@@ -1227,7 +1227,7 @@ jobs:
       build_name: manywheel-py3_11-cuda13_2
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.2"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -1503,7 +1503,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: xpu
       DESIRED_PYTHON: "3.11"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:xpu"
       build_name: manywheel-py3_11-xpu
       build_environment: linux-binary-manywheel
@@ -1609,7 +1609,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cpu
       DESIRED_PYTHON: "3.12"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cpu"
       build_name: manywheel-py3_12-cpu
       build_environment: linux-binary-manywheel
@@ -1635,7 +1635,7 @@ jobs:
       build_name: manywheel-py3_12-cpu
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iamx-14-27
+      runs_on: mt-l-x86iamx-14-27
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -1679,7 +1679,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.12"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.6"
       build_name: manywheel-py3_12-cuda12_6
       build_environment: linux-binary-manywheel
@@ -1707,7 +1707,7 @@ jobs:
       build_name: manywheel-py3_12-cuda12_6
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.6"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -1752,7 +1752,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.12"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.8"
       build_name: manywheel-py3_12-cuda12_8
       build_environment: linux-binary-manywheel
@@ -1780,7 +1780,7 @@ jobs:
       build_name: manywheel-py3_12-cuda12_8
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.8"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -1825,7 +1825,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.12"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.9"
       build_name: manywheel-py3_12-cuda12_9
       build_environment: linux-binary-manywheel
@@ -1853,7 +1853,7 @@ jobs:
       build_name: manywheel-py3_12-cuda12_9
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.9"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -1898,7 +1898,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.12"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.0"
       build_name: manywheel-py3_12-cuda13_0
       build_environment: linux-binary-manywheel
@@ -1926,7 +1926,7 @@ jobs:
       build_name: manywheel-py3_12-cuda13_0
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.0"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -1971,7 +1971,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda13.2
       DESIRED_PYTHON: "3.12"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.2"
       build_name: manywheel-py3_12-cuda13_2
       build_environment: linux-binary-manywheel
@@ -1999,7 +1999,7 @@ jobs:
       build_name: manywheel-py3_12-cuda13_2
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.2"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -2275,7 +2275,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: xpu
       DESIRED_PYTHON: "3.12"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:xpu"
       build_name: manywheel-py3_12-xpu
       build_environment: linux-binary-manywheel
@@ -2381,7 +2381,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cpu
       DESIRED_PYTHON: "3.13"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cpu"
       build_name: manywheel-py3_13-cpu
       build_environment: linux-binary-manywheel
@@ -2407,7 +2407,7 @@ jobs:
       build_name: manywheel-py3_13-cpu
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iamx-14-27
+      runs_on: mt-l-x86iamx-14-27
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -2451,7 +2451,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.13"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.6"
       build_name: manywheel-py3_13-cuda12_6
       build_environment: linux-binary-manywheel
@@ -2479,7 +2479,7 @@ jobs:
       build_name: manywheel-py3_13-cuda12_6
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.6"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -2524,7 +2524,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.13"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.8"
       build_name: manywheel-py3_13-cuda12_8
       build_environment: linux-binary-manywheel
@@ -2552,7 +2552,7 @@ jobs:
       build_name: manywheel-py3_13-cuda12_8
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.8"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -2597,7 +2597,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.13"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.9"
       build_name: manywheel-py3_13-cuda12_9
       build_environment: linux-binary-manywheel
@@ -2625,7 +2625,7 @@ jobs:
       build_name: manywheel-py3_13-cuda12_9
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.9"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -2670,7 +2670,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.13"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.0"
       build_name: manywheel-py3_13-cuda13_0
       build_environment: linux-binary-manywheel
@@ -2698,7 +2698,7 @@ jobs:
       build_name: manywheel-py3_13-cuda13_0
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.0"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -2743,7 +2743,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda13.2
       DESIRED_PYTHON: "3.13"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.2"
       build_name: manywheel-py3_13-cuda13_2
       build_environment: linux-binary-manywheel
@@ -2771,7 +2771,7 @@ jobs:
       build_name: manywheel-py3_13-cuda13_2
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.2"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -3047,7 +3047,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: xpu
       DESIRED_PYTHON: "3.13"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:xpu"
       build_name: manywheel-py3_13-xpu
       build_environment: linux-binary-manywheel
@@ -3153,7 +3153,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cpu
       DESIRED_PYTHON: "3.13t"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cpu"
       build_name: manywheel-py3_13t-cpu
       build_environment: linux-binary-manywheel
@@ -3179,7 +3179,7 @@ jobs:
       build_name: manywheel-py3_13t-cpu
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iamx-14-27
+      runs_on: mt-l-x86iamx-14-27
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -3223,7 +3223,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.13t"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.6"
       build_name: manywheel-py3_13t-cuda12_6
       build_environment: linux-binary-manywheel
@@ -3251,7 +3251,7 @@ jobs:
       build_name: manywheel-py3_13t-cuda12_6
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.6"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -3296,7 +3296,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.13t"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.8"
       build_name: manywheel-py3_13t-cuda12_8
       build_environment: linux-binary-manywheel
@@ -3324,7 +3324,7 @@ jobs:
       build_name: manywheel-py3_13t-cuda12_8
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.8"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -3369,7 +3369,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.13t"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.9"
       build_name: manywheel-py3_13t-cuda12_9
       build_environment: linux-binary-manywheel
@@ -3397,7 +3397,7 @@ jobs:
       build_name: manywheel-py3_13t-cuda12_9
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.9"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -3442,7 +3442,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.13t"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.0"
       build_name: manywheel-py3_13t-cuda13_0
       build_environment: linux-binary-manywheel
@@ -3470,7 +3470,7 @@ jobs:
       build_name: manywheel-py3_13t-cuda13_0
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.0"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -3515,7 +3515,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda13.2
       DESIRED_PYTHON: "3.13t"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.2"
       build_name: manywheel-py3_13t-cuda13_2
       build_environment: linux-binary-manywheel
@@ -3543,7 +3543,7 @@ jobs:
       build_name: manywheel-py3_13t-cuda13_2
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.2"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -3819,7 +3819,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: xpu
       DESIRED_PYTHON: "3.13t"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:xpu"
       build_name: manywheel-py3_13t-xpu
       build_environment: linux-binary-manywheel
@@ -3925,7 +3925,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cpu
       DESIRED_PYTHON: "3.14"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cpu"
       build_name: manywheel-py3_14-cpu
       build_environment: linux-binary-manywheel
@@ -3951,7 +3951,7 @@ jobs:
       build_name: manywheel-py3_14-cpu
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iamx-14-27
+      runs_on: mt-l-x86iamx-14-27
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -3995,7 +3995,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.14"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.6"
       build_name: manywheel-py3_14-cuda12_6
       build_environment: linux-binary-manywheel
@@ -4023,7 +4023,7 @@ jobs:
       build_name: manywheel-py3_14-cuda12_6
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.6"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -4068,7 +4068,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.14"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.8"
       build_name: manywheel-py3_14-cuda12_8
       build_environment: linux-binary-manywheel
@@ -4096,7 +4096,7 @@ jobs:
       build_name: manywheel-py3_14-cuda12_8
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.8"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -4141,7 +4141,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.14"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.9"
       build_name: manywheel-py3_14-cuda12_9
       build_environment: linux-binary-manywheel
@@ -4169,7 +4169,7 @@ jobs:
       build_name: manywheel-py3_14-cuda12_9
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.9"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -4214,7 +4214,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.14"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.0"
       build_name: manywheel-py3_14-cuda13_0
       build_environment: linux-binary-manywheel
@@ -4242,7 +4242,7 @@ jobs:
       build_name: manywheel-py3_14-cuda13_0
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.0"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -4287,7 +4287,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda13.2
       DESIRED_PYTHON: "3.14"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.2"
       build_name: manywheel-py3_14-cuda13_2
       build_environment: linux-binary-manywheel
@@ -4315,7 +4315,7 @@ jobs:
       build_name: manywheel-py3_14-cuda13_2
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.2"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -4591,7 +4591,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: xpu
       DESIRED_PYTHON: "3.14"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:xpu"
       build_name: manywheel-py3_14-xpu
       build_environment: linux-binary-manywheel
@@ -4697,7 +4697,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cpu
       DESIRED_PYTHON: "3.14t"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cpu"
       build_name: manywheel-py3_14t-cpu
       build_environment: linux-binary-manywheel
@@ -4723,7 +4723,7 @@ jobs:
       build_name: manywheel-py3_14t-cpu
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iamx-14-27
+      runs_on: mt-l-x86iamx-14-27
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -4767,7 +4767,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.14t"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.6"
       build_name: manywheel-py3_14t-cuda12_6
       build_environment: linux-binary-manywheel
@@ -4795,7 +4795,7 @@ jobs:
       build_name: manywheel-py3_14t-cuda12_6
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.6"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -4840,7 +4840,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.14t"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.8"
       build_name: manywheel-py3_14t-cuda12_8
       build_environment: linux-binary-manywheel
@@ -4868,7 +4868,7 @@ jobs:
       build_name: manywheel-py3_14t-cuda12_8
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.8"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -4913,7 +4913,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.14t"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.9"
       build_name: manywheel-py3_14t-cuda12_9
       build_environment: linux-binary-manywheel
@@ -4941,7 +4941,7 @@ jobs:
       build_name: manywheel-py3_14t-cuda12_9
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.9"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -4986,7 +4986,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.14t"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.0"
       build_name: manywheel-py3_14t-cuda13_0
       build_environment: linux-binary-manywheel
@@ -5014,7 +5014,7 @@ jobs:
       build_name: manywheel-py3_14t-cuda13_0
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.0"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -5059,7 +5059,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda13.2
       DESIRED_PYTHON: "3.14t"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.2"
       build_name: manywheel-py3_14t-cuda13_2
       build_environment: linux-binary-manywheel
@@ -5087,7 +5087,7 @@ jobs:
       build_name: manywheel-py3_14t-cuda13_2
       build_environment: linux-binary-manywheel
       use-arc: true
-      runs_on: l-x86iavx512-29-115-t4
+      runs_on: mt-l-x86iavx512-29-115-t4
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.2"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -5363,7 +5363,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: xpu
       DESIRED_PYTHON: "3.14t"
       use-arc: true
-      runs_on: l-x86iamx-46-84
+      runs_on: mt-l-x86iamx-46-84
       docker-image-name: "docker.io/pytorch/manylinux2_28-builder:xpu"
       build_name: manywheel-py3_14t-xpu
       build_environment: linux-binary-manywheel
