@@ -1004,6 +1004,103 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
   Py_RETURN_TRUE;
 }
 
+static PyObject* assert_size_stride_grouped(
+    PyObject* dummy,
+    PyObject* args) {
+  /*
+   Assert size/stride for a group of tensors in a single call, ignoring
+   strides of size==1 dimensions.
+   Takes: (items_list, sizes_list, strides_list)
+   where each list has the same length.
+  */
+  PyObject* items = nullptr;
+  PyObject* sizes = nullptr;
+  PyObject* strides = nullptr;
+
+  if (!PyArg_ParseTuple(args, "OOO", &items, &sizes, &strides)) {
+    return nullptr;
+  }
+
+  if (!PyList_CheckExact(items) || !PyList_CheckExact(sizes) ||
+      !PyList_CheckExact(strides)) {
+    PyErr_SetString(PyExc_TypeError, "expected three lists");
+    return nullptr;
+  }
+
+  Py_ssize_t n = PyList_GET_SIZE(items);
+  if (PyList_GET_SIZE(sizes) != n || PyList_GET_SIZE(strides) != n) {
+    PyErr_SetString(
+        PyExc_ValueError,
+        "items, sizes, and strides must have the same length");
+    return nullptr;
+  }
+
+  std::stringstream msg;
+  int total_errors = 0;
+
+  for (Py_ssize_t idx = 0; idx < n; idx++) {
+    PyObject* item = PyList_GET_ITEM(items, idx);
+    PyObject* size = PyList_GET_ITEM(sizes, idx);
+    PyObject* stride = PyList_GET_ITEM(strides, idx);
+
+    if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
+      PyErr_Format(
+          PyExc_TypeError, "expected Tensor() at index %zd", idx);
+      return nullptr;
+    }
+    if (!PyTuple_CheckExact(size) || !PyTuple_CheckExact(stride)) {
+      PyErr_Format(
+          PyExc_TypeError, "expected tuple() at index %zd", idx);
+      return nullptr;
+    }
+
+    at::Tensor tensor = THPVariable_Unpack(item);
+    int64_t ndim = tensor.ndimension();
+    if (PyTuple_GET_SIZE(size) != ndim ||
+        PyTuple_GET_SIZE(stride) != ndim) {
+      PyErr_Format(
+          PyExc_AssertionError,
+          "wrong number of dimensions %lld at index %zd",
+          (long long)ndim,
+          idx);
+      return nullptr;
+    }
+
+    if (tensor.numel() == 0) {
+      continue;
+    }
+
+    for (auto i : c10::irange(ndim)) {
+      int64_t want_size = THPUtils_unpackLong(PyTuple_GET_ITEM(size, i));
+      int64_t want_stride =
+          THPUtils_unpackLong(PyTuple_GET_ITEM(stride, i));
+      int64_t actual_size = tensor.size(i);
+      int64_t actual_stride = tensor.stride(i);
+      if (want_size != actual_size ||
+          (want_stride != actual_stride && actual_size > 1)) {
+        if (total_errors > 0)
+          msg << "; ";
+        msg << "tensor " << idx << ": expected size " << actual_size
+            << "==" << want_size << ", stride " << actual_stride
+            << "==" << want_stride << " at dim=" << i;
+        total_errors++;
+      }
+    }
+  }
+
+  if (total_errors) {
+    msg << "\nThis error most often comes from a incorrect fake (aka meta) "
+           "kernel for a custom op.";
+    msg << "\nUse torch.library.opcheck to test your custom op.";
+    msg << "\nSee https://pytorch.org/docs/stable/library.html#torch.library."
+           "opcheck";
+    PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
+    return nullptr;
+  }
+
+  Py_RETURN_TRUE;
+}
+
 static PyObject* assert_alignment(PyObject* dummy, PyObject* args) {
   /*
    * Asserts that a given tensor meets certain alignment.
@@ -1175,6 +1272,10 @@ static PyMethodDef _methods[] = {
     {"check_type_id", check_type_id, METH_VARARGS, nullptr},
     {"check_obj_id", check_obj_id, METH_VARARGS, nullptr},
     {"assert_size_stride", assert_size_stride, METH_VARARGS, nullptr},
+    {"assert_size_stride_grouped",
+     assert_size_stride_grouped,
+     METH_VARARGS,
+     nullptr},
     {"assert_alignment", assert_alignment, METH_VARARGS, nullptr},
     {"dict_version", dict_version, METH_VARARGS, nullptr},
     {"_empty_strided_cpu", _empty_strided_cpu, METH_VARARGS, nullptr},
