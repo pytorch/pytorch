@@ -21,7 +21,7 @@ import torch.fx as fx
 from torch._inductor.test_case import TestCase
 from torch._logging._internal import TorchLogsFormatter
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.testing._internal.common_utils import find_free_port, skipIfRocm
+from torch.testing._internal.common_utils import find_free_port
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
@@ -744,7 +744,6 @@ class StructuredTraceTest(TestCase):
 
         self.assertParses()
 
-    @skipIfRocm(msg="Fails with Triton 3.7")
     @requires_tlparse
     @unittest.skip("https://github.com/pytorch/pytorch/issues/176188")
     def test_graph_breaks(self):
