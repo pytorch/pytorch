@@ -29,7 +29,7 @@ from torch._functorch.aot_autograd import (
 from torch._inductor import config as inductor_config
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch._library.effects import EffectType
 from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
 from torch._library.opaque_object import (
@@ -50,6 +50,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+from torch.testing._internal.inductor_utils import HAS_GPU
 
 
 class Color(OpaqueBase):
@@ -3562,6 +3563,22 @@ def forward(self, p_linear_weight, p_linear_bias, obj_lifted_custom_0, x):
         compiled = compile_fx_inner(gm, [m, x])
         result = compiled([m, x])
         self.assertEqual(result, (x * 2,))
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_benchmark_harness_no_pickle_for_opaque_inputs(self):
+        """Opaque graph inputs must not be pickled in the benchmark harness."""
+        a = torch.randn(4, 4, device="cuda")
+        b = torch.randn(4, 4, device="cuda")
+        twc = TensorWithCounter(a, b, Counter(0, 10), SizeStore(4))
+
+        def fn(x):
+            return x + 1
+
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        _, codes = run_and_get_code(compiled_fn, twc)
+        self.assertGreater(len(codes), 0)
+        for code in codes:
+            self.assertNotIn("pickle", code)
 
 
 instantiate_parametrized_tests(TestOpaqueObject)

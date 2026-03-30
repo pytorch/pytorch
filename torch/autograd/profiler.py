@@ -694,6 +694,7 @@ class profile:
                 device_resource_id=kineto_event.device_resource_id(),
                 flops=kineto_event.flops(),
                 is_user_annotation=kineto_event.is_user_annotation(),
+                is_python_function=kineto_event.is_python_function(),
                 metadata_json=kineto_event.metadata_json(),
                 flow_id=kineto_event.flow_id(),
                 flow_type=kineto_event.flow_type(),

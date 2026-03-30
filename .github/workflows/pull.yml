@@ -33,6 +33,7 @@ concurrency:
 permissions:
   id-token: write
   contents: read
+  actions: read
 
 jobs:
   # See job-filter.yml for rules on adding job filter conditions
@@ -47,17 +48,11 @@ jobs:
     if: github.repository_owner == 'pytorch'
     name: before-test
     uses: ./.github/workflows/llm_td_retrieval.yml
-    permissions:
-      id-token: write
-      contents: read
 
   target-determination:
     name: before-test
     uses: ./.github/workflows/target_determination.yml
     needs: llm-td
-    permissions:
-      id-token: write
-      contents: read
 
   get-label-type:
     name: get-label-type

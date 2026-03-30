@@ -21,6 +21,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._guards import TracingContext
 from torch._inductor.standalone_compile import AOTCompiledArtifact
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, Tensor
 from torch._subclasses.meta_utils import (
     MetaConverter,
@@ -156,6 +157,11 @@ class GraphPickler(pickle.Pickler):
             return _SymNodePickleData.reduce_helper(self, obj)
         elif isinstance(obj, torch._guards.TracingContext):
             return _TracingContextPickleData.reduce_helper(self, obj)
+        elif isinstance(obj, FakeScriptObject):
+            # FakeScriptObjects wrap opaque traced objects (e.g. DeviceMesh,
+            # ProcessGroup) that can't be default-pickled. Reduce to None
+            # since they aren't meaningful after deserialization.
+            return (_unpickle_as_none, ())
         elif isinstance(obj, weakref.ref):
             # Serialize weakrefs properly: if the referent is alive,
             # serialize it and reconstruct the weakref on unpickle.

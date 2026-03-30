@@ -463,16 +463,7 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
     auto records_and_trace =
         recordQueue.getRecords(std::move(converter), startTime, end_time);
 
-    materializeOpEvents(records_and_trace.first);
-
-    // `kinetoEvents` does not include Python events. Instead it exposes them
-    // via the `stacks` property.
-    kinetoEvents.erase(
-        std::remove_if(
-            kinetoEvents.begin(),
-            kinetoEvents.end(),
-            [](const auto& i) { return i.isPythonFunction(); }),
-        kinetoEvents.end());
+    materializeOpEvents(records_and_trace.first, end_time);
 
     return std::move(records_and_trace.second);
   }
@@ -484,25 +475,34 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
     }
   }
 
-  void materializeOpEvents(std::vector<std::shared_ptr<Result>>& events) {
+  void materializeOpEvents(
+      std::vector<std::shared_ptr<Result>>& events,
+      int64_t trace_end_ns) {
     for (auto& e : events) {
       if (e->parent_.expired() && e->deviceType() == c10::DeviceType::CPU) {
         eventTree.push_back(e);
       }
 
-      if (e->finished_) {
+      // Unfinished events automatically have end time set to trace end time
+      if (!e->finished_) {
         e->visit(c10::overloaded(
-            [this](ExtraFields<EventType::TorchOp>& i) { invokeCallback(i); },
-            [this](ExtraFields<EventType::Backend>& i) { invokeCallback(i); },
+            [trace_end_ns](ExtraFields<EventType::TorchOp>& i) {
+              i.end_time_ns_ = trace_end_ns;
+            },
             [](auto&) {}));
-
-        kinetoEvents.emplace_back(e, config_.experimental_config.verbose);
-        AddTensorboardFields add_tb(e, kinetoEvents.back());
-        AddGenericMetadata add_generic(e, &config_);
-
-        // It is not safe to use the activity after post processing.
-        e->kineto_activity_ = nullptr;
       }
+
+      e->visit(c10::overloaded(
+          [this](ExtraFields<EventType::TorchOp>& i) { invokeCallback(i); },
+          [this](ExtraFields<EventType::Backend>& i) { invokeCallback(i); },
+          [](auto&) {}));
+
+      kinetoEvents.emplace_back(e, config_.experimental_config.verbose);
+      AddTensorboardFields add_tb(e, kinetoEvents.back());
+      AddGenericMetadata add_generic(e, &config_);
+
+      // It is not safe to use the activity after post processing.
+      e->kineto_activity_ = nullptr;
     }
   }
 

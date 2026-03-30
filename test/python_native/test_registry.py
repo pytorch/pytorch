@@ -149,34 +149,6 @@ class TestRegistry(TestCase):
                 result = list(self.registry._resolve_iterable(input_val))
                 self.assertEqual(result, expected)
 
-    def test_filter_functionality(self):
-        """Test _filter function with various filter criteria."""
-        # Test no filters raises error
-        with self.assertRaises(ValueError) as cm:
-            self.registry._filter("dsl", "op", "key")
-        self.assertIn("Must pass 1+ of filter_", str(cm.exception))
-
-        # Test different filter types
-        filter_test_cases = [
-            ("dsl_names", "test_dsl", "op", "key", "test_dsl", True),
-            ("dsl_names", "test_dsl", "op", "key", ["test_dsl", "other"], True),
-            ("dsl_names", "test_dsl", "op", "key", "other_dsl", False),
-            ("op_symbols", "dsl", "test_op", "key", "test_op", True),
-            ("op_symbols", "dsl", "test_op", "key", ["test_op", "other"], True),
-            ("op_symbols", "dsl", "test_op", "key", "other_op", False),
-            ("dispatch_keys", "dsl", "op", "test_key", "test_key", True),
-            ("dispatch_keys", "dsl", "op", "test_key", ["test_key", "other"], True),
-            ("dispatch_keys", "dsl", "op", "test_key", "other_key", False),
-        ]
-
-        for filter_type, dsl, op, key, filter_val, expected in filter_test_cases:
-            with self.subTest(
-                filter_type=filter_type, filter_val=filter_val, expected=expected
-            ):
-                kwargs = {f"filter_{filter_type}": filter_val}
-                result = self.registry._filter(dsl, op, key, **kwargs)
-                self.assertEqual(result, expected)
-
     def test_update_registration_maps(self):
         """Test _update_registration_maps updates all mapping dictionaries."""
         key = ("test_op", "CPU")

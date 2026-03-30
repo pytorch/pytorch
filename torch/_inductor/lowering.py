@@ -9,6 +9,7 @@ import logging
 import math
 import operator
 import os
+import sys
 import warnings
 from collections import defaultdict
 from collections.abc import Callable, Collection, Iterable, Sequence
@@ -1383,8 +1384,10 @@ def permute(x, dims):
     return TensorBox(PermuteView.create(x.data, tuple(dims)))
 
 
+# Note: logic in this function need to be always synchronized with
+# slice_forward in fake implementation.
 @register_lowering(aten.slice, type_promotion_kind=None)
-def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
+def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
     """
     Lowers a slice call, creating ExternKernels for the output size & storage offset symbols,
     if the indices are unbacked and appropriate semantics aren't known.
@@ -1421,9 +1424,9 @@ def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
         fn = lambda x: V.graph.sizevars.guard_or_false(x)  # noqa: E731
         index = sympy.expand(index)
         size = sympy.expand(size)
-        if fn(sympy.Ge(index, 0)) and fn(sympy.Le(index, size)):
+        if fn(sympy.And(sympy.Ge(index, 0), sympy.Le(index, size))):
             return index
-        elif fn(sympy.Lt(index, 0)) and fn(sympy.Ge(index, -size)):
+        elif fn(sympy.And(sympy.Lt(index, 0), sympy.Ge(index, -size))):
             return index + size
         elif fn(sympy.Gt(index, size)):
             return size
@@ -1432,18 +1435,25 @@ def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
         return None
 
     start_index, end_index = None, None
-    ambiguous_slice = clamp
-    if ambiguous_slice:
-        start_index = compute_slice_index(start, size, 0)
-        end_index = compute_slice_index(end, size, size)
-        if start_index is not None and end_index is not None:
-            start, end = start_index, end_index
-            ambiguous_slice = False
-
     # ambiguous_slice=False means we know what semantics this slice call follows,
     # and don't need to generate an extern kernel to represent the output size.
     # This is assumed True for clamp=False
     # (meant to follow standard indexing semantics: 0 <= index < size)
+    ambiguous_slice = clamp
+    if ambiguous_slice:
+        start_index = compute_slice_index(start, size, 0)
+        # Special case: if end is maxsize (unbounded), use size directly
+        # This matches the logic in fake_impls.py
+        if end is not None and V.graph.sizevars.statically_known_equals(
+            end, sys.maxsize
+        ):
+            end_index = size
+        else:
+            end_index = compute_slice_index(end, size, size)
+        if start_index is not None and end_index is not None:
+            start, end = start_index, end_index
+            ambiguous_slice = False
+
     if not ambiguous_slice:
         return TensorBox(
             ir.SliceView.create(x.data, dim, start, end, step, clamp=clamp)
@@ -2973,11 +2983,12 @@ def constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs):
 
 def constrain_to_fx_strides(fx_node, *args, **kwargs):
     def apply_constraint(arg, fx_arg):
-        if _is_tensor_irnode(arg) and not isinstance(
-            arg, (ir.GeneratorState, ir.OpaqueObjectState)
-        ):
+        if _is_tensor_irnode(arg):
+            fake_val = fx_arg.meta.get("val")
+            if not isinstance(fake_val, torch.Tensor):
+                return arg
             stride_order = ir.get_stride_order(
-                fx_arg.meta["val"].stride(), V.graph.sizevars.shape_env
+                fake_val.stride(), V.graph.sizevars.shape_env
             )
             return ir.ExternKernel.require_stride_order(arg, stride_order)
         if isinstance(arg, dict):
@@ -3052,7 +3063,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         return result
 
     def _apply_constraint_inner(idx, arg, meta_val, meta_stride_expr, stride_order):
-        if not meta_val.is_cuda:
+        if not (meta_val.is_cuda or meta_val.is_xpu):
             return ir.ExternKernel.require_stride_order(arg, stride_order)
 
         # This is the minimum alignment required by SDPA kernels for attention_bias.
