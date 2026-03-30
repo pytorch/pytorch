@@ -2459,16 +2459,11 @@ class OutputGraph(OutputGraphCommon):
             # if any node was consumed by autograd.grad
             reachable_grad_fns = collect_reachable_grad_fns([(fake_tensor, None)])
             if reachable_grad_fns & self.autograd_grad_consumed_grad_fns:
-                # Record info about the leaked tensor for the error message
-                tensor_name = str(var.source) if var.source else var.proxy.node.name
-                tx.speculation_log.autograd_grad_leaked_tensors.append(tensor_name)
-
-        if tx.speculation_log.autograd_grad_leaked_tensors:
-            # Set the flag to graph break at autograd.grad on retry
-            tx.speculation_log.graph_break_on_autograd_grad = True
-            raise exc.AutogradGradRestartAnalysis(
-                restart_reason="autograd.grad consumed grad_fns of returned tensors"
-            )
+                # Set the flag to graph break at autograd.grad on retry
+                tx.speculation_log.graph_break_on_autograd_grad = True
+                raise exc.AutogradGradRestartAnalysis(
+                    restart_reason="autograd.grad consumed grad_fns of returned tensors"
+                )
 
     def _check_requires_grad_intermediate_outputs(
         self, rv: list["VariableTracker"], tx: "InstructionTranslatorBase"
