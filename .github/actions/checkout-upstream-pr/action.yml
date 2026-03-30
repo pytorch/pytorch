@@ -1,0 +1,51 @@
+name: "Checkout PyTorch PR"
+description: >
+  Checks out the upstream PyTorch PR commit into the downstream workspace based on the `repository_dispatch` client_payload fields. 
+  This action encapsulates all git logic so downstream repos do not need to parse the payload or run git commands themselves.
+
+inputs:
+  path:
+    description: Checkout path relative to $GITHUB_WORKSPACE
+    required: false
+    default: "pytorch"
+  token:
+    description: GitHub token for auth (prevents rate limits)
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - name: Fetch and Checkout Upstream
+      shell: bash
+      env:
+        UPSTREAM_REPO: ${{ github.event.client_payload.upstream_repo }}
+        HEAD_SHA: ${{ github.event.client_payload.head_sha }}
+        CHECKOUT_PATH: ${{ github.workspace }}/${{ inputs.path }}
+        GH_TOKEN: ${{ inputs.token }}
+      run: |
+        set -euo pipefail
+
+        echo "::group::Fetching ${UPSTREAM_REPO}@${HEAD_SHA}"
+
+        echo "Clean & Prepare ${CHECKOUT_PATH}"
+        rm -rf "${CHECKOUT_PATH}"
+        mkdir -p "${CHECKOUT_PATH}"
+        pushd "${CHECKOUT_PATH}"
+
+        echo "Init repo ${UPSTREAM_REPO}"
+        git init -q
+        git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${UPSTREAM_REPO}.git"
+
+        echo "Fetching commit ${HEAD_SHA}..."
+        git fetch --depth=1 origin "${HEAD_SHA}"
+        git checkout -q FETCH_HEAD
+
+        echo "Initializing submodules..."
+        git submodule sync --recursive
+        git submodule update --init --recursive --jobs 8
+
+        popd
+
+        echo "Successfully checked out to $(git rev-parse HEAD)"
+        echo "::endgroup::"
