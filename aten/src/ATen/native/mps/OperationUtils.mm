@@ -1101,7 +1101,8 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
     }
   }
 
-  const auto alpha_type = scalar_arg_type.has_value() ? scalar_arg_type.value() : iter.common_dtype();
+  const auto alpha_type =
+      scalar_arg_type.has_value() ? scalar_arg_type.value() : (cast_needed ? out.scalar_type() : iter.common_dtype());
   const auto alpha_suffix = alpha.has_value() ? fmt::format("_{}", scalarToMetalTypeString(alpha_type)) : "";
 
   std::string kernel_name;
