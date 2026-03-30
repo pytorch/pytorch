@@ -1532,7 +1532,9 @@ class SetVariable(ConstDictVariable):
                 raise_observed_exception(
                     TypeError,
                     tx,
-                    f"unsupported operand type(s) for {name}: '{args[0].python_type_name()}' and '{self.python_type_name()}'",
+                    args=[
+                        f"unsupported operand type(s) for {name}: '{args[0].python_type_name()}' and '{self.python_type_name()}'"
+                    ],
                 )
             assert m is not None
             return args[0].call_method(tx, m, [self], kwargs)
