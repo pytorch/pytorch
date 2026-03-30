@@ -31,6 +31,8 @@ on:
 
 permissions:
   id-token: write
+  contents: read
+  actions: read
 
 env:
   # Needed for conda builds
@@ -70,8 +72,9 @@ jobs:
     needs: get-label-type
     with:!{{ upload.binary_env_as_input(config) }}
       {%- if "aarch64" in build_environment %}
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.arm64.r7g.12xlarge.memory
+      use-arc: true
+      runs_on: l-arm64g3-61-463
+      docker-image-name: "docker.io/pytorch/!{{ config['container_image'] }}:!{{ config['container_image_tag_prefix'] }}"
       ALPINE_IMAGE: "arm64v8/alpine"
       {%- elif "s390x" in build_environment %}
       runs_on: linux.s390x
@@ -81,10 +84,13 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       timeout-minutes: 300
       {%- elif "conda" in build_environment and config["gpu_arch_type"] == "cuda" %}
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.24xlarge.ephemeral
+      use-arc: true
+      runs_on: l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/!{{ config['container_image'] }}:!{{ config['container_image_tag_prefix'] }}"
       {%- else %}
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/!{{ config['container_image'] }}:!{{ config['container_image_tag_prefix'] }}"
       {%- endif %}
       build_name: !{{ config["build_name"] }}
       build_environment: !{{ build_environment }}
@@ -108,8 +114,9 @@ jobs:
       build_name: !{{ config["build_name"] }}
       build_environment: !{{ build_environment }}
       {%- if "aarch64" in build_environment %}
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.arm64.2xlarge
+      use-arc: true
+      runs_on: l-arm64g4-16-62
+      docker-image-name: "docker.io/pytorch/!{{ config['container_image'] }}:!{{ config['container_image_tag_prefix'] }}"
       ALPINE_IMAGE: "arm64v8/alpine"
       {%- elif "s390x" in build_environment %}
       runs_on: linux.s390x
@@ -117,11 +124,13 @@ jobs:
       {%- elif config["gpu_arch_type"] == "rocm" %}
       runs_on: linux.rocm.gpu
       {%- elif config["gpu_arch_type"] == "cuda" %}
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/!{{ config['container_image'] }}:!{{ config['container_image_tag_prefix'] }}"
       {%- else %}
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.4xlarge
+      use-arc: true
+      runs_on: l-x86iamx-14-27
+      docker-image-name: "docker.io/pytorch/!{{ config['container_image'] }}:!{{ config['container_image_tag_prefix'] }}"
       {%- endif %}
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
