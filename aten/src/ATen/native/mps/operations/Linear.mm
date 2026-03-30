@@ -76,8 +76,6 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
   TORCH_CHECK(input.is_mps(), "Tensor for argument input is on ", input.device(), " but expected on mps");
   TORCH_CHECK(supportedFloatingOrComplexType(weight_arg), "MPS device does not support linear for non-float weights");
   TORCH_CHECK(weight_arg.is_mps(), "Tensor for argument weight is on ", weight_arg.device(), " but expected on mps");
-  TORCH_CHECK((input.scalar_type() != kComplexFloat && input.scalar_type() != kComplexHalf),
-              "mps linear does not support complex types");
 
   const Tensor& bias = *(at::borrow_from_optional_tensor(bias_opt));
   const bool is_bias_defined = bias.defined();
@@ -117,8 +115,9 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
 
   // No-graph execution causes nonsense if these are non-contiguous.
   const bool is_contiguous = input.is_contiguous() && weight.is_contiguous() && bias.is_contiguous();
+  const bool is_complex = input.is_complex() || weight.is_complex() || (is_bias_defined && bias.is_complex());
 
-  if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS) && is_contiguous) {
+  if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS) && is_contiguous && !is_complex) {
     _mps_linear_nograph(input, weight, bias, output);
     // Squeeze last dim of 1D linear
     return weight_arg.dim() != 1 ? output : output.squeeze(-1);
