@@ -1029,7 +1029,7 @@ def forward(self, arg0_1, arg1_1):
             gm.code.strip("\n"),
             """\
 def forward(self, x_1, cfg_1):
-    process_with_config = torch.ops._TestOpaqueObject.process_with_config.default(x_1, cfg_1);  x_1 = cfg_1 = None
+    process_with_config = torch.ops._TestOpaqueObject.process_with_config.default(x_1, ValueConfig(mode='square'));  x_1 = None
     return process_with_config
     """,  # noqa: B950
         )
@@ -3075,6 +3075,23 @@ def forward(self, L_x_ : torch.Tensor, G_Color_GREEN : {_illegal_char_regex.sub(
             self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+
+    def test_hoisted_value_type_make_fx(self):
+        def foo(x, hoisted_str):
+            return op_with_string(x, hoisted_str)
+
+        x = torch.randn(3, 3)
+        gm = make_fx(foo)(x, HoistedString("double"))
+
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x_1, hoisted_str_1):
+    op_with_string = torch.ops.mylib.op_with_string.default(x_1, hoisted_str_1);  x_1 = hoisted_str_1 = None
+    return op_with_string""",  # noqa: B950
+        )
+        self.assertEqual(gm(x, HoistedString("double")), x * 2)
+        self.assertEqual(gm(x, HoistedString("square")), x * x)
 
     def test_opaque_class_literal_attribute_inlined(self):
         """Test that literal attributes on opaque classes are inlined without source tracking.

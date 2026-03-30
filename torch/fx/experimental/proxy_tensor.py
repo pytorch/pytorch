@@ -44,6 +44,7 @@ from torch._library.opaque_object import (
     is_opaque_value,
     is_opaque_value_type,
     OpaqueType,
+    should_hoist,
 )
 from torch._logging import trace_structured
 from torch._opaque_base import OpaqueBase
@@ -933,6 +934,15 @@ def track_tensor_tree(
         elif isinstance(e, _AnyScriptObject) or is_opaque_value(e):
             if not isinstance(proxy, Proxy):
                 raise AssertionError(f"Expected Proxy, got {type(proxy)}")
+            # Non-hoisted opaque value types should be baked as constants
+            # in the graph, not tracked as proxy references. This matches
+            # dynamo's behavior where non-hoisted values are not graph inputs.
+            if (
+                is_opaque_value_type(type(e))  # pyrefly: ignore[bad-argument-type]
+                and not should_hoist(type(e))
+            ):
+                set_meta(proxy, e)
+                return
             set_proxy_slot(e, tracer, proxy)
             set_meta(proxy, e)
         elif isinstance(e, (tuple, list)):

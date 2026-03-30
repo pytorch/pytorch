@@ -30,6 +30,11 @@ from torch._inductor.pattern_matcher import (
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
+from torch._library.opaque_object import (
+    get_opaque_type_name,
+    OpaqueBase,
+    register_opaque_type,
+)
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, xfailIfSM89
@@ -45,6 +50,26 @@ from torch.utils import _pytree as pytree
 
 
 aten = torch.ops.aten
+
+
+class OpaqueScaleFactor(OpaqueBase):
+    def __init__(self, val):
+        self.val = val
+
+    def __eq__(self, other):
+        return isinstance(other, OpaqueScaleFactor) and self.val == other.val
+
+    def __hash__(self):
+        return hash(self.val)
+
+    def __fx_repr__(self):
+        return (
+            f"OpaqueScaleFactor({self.val!r})",
+            {"OpaqueScaleFactor": OpaqueScaleFactor},
+        )
+
+
+register_opaque_type(OpaqueScaleFactor, typ="value", hoist=True)
 
 
 @instantiate_parametrized_tests
@@ -2439,6 +2464,73 @@ class TestPatternMatcherLogging(LoggingTestCase):
                 count2 = sum(counters.get(counter_key, {}).values())
 
                 self.assertEqual(accumulated_count, count1 + count2)
+
+    def test_opaque_obj_custom_op(self):
+        with torch.library._scoped_library("_test_pm", "FRAGMENT") as lib:
+            lib.define(
+                f"original_op(Tensor x, {get_opaque_type_name(OpaqueScaleFactor)} s) -> Tensor"
+            )
+            lib.impl("original_op", lambda x, s: x * s.val, "CompositeExplicitAutograd")
+
+            @torch.library.register_fake("_test_pm::original_op", lib=lib)
+            def _orig_fake(x, s):
+                return torch.empty_like(x)
+
+            lib.define(
+                f"replacement_op(Tensor x, {get_opaque_type_name(OpaqueScaleFactor)} s) -> Tensor"
+            )
+            lib.impl(
+                "replacement_op", lambda x, s: x + s.val, "CompositeExplicitAutograd"
+            )
+
+            @torch.library.register_fake("_test_pm::replacement_op", lib=lib)
+            def _repl_fake(x, s):
+                return torch.empty_like(x)
+
+            def pattern(x, factor):
+                return torch.ops._test_pm.original_op(x, factor)
+
+            def replacement(x, factor):
+                return torch.ops._test_pm.replacement_op(x, factor)
+
+            patterns = PatternMatcherPass()
+            register_replacement(
+                pattern,
+                replacement,
+                [torch.randn(4, 4), OpaqueScaleFactor(2.0)],
+                fwd_only,
+                patterns,
+            )
+
+            count = 0
+            post_pass_graph = None
+
+            def custom_pass(graph):
+                nonlocal count, post_pass_graph
+                count = patterns.apply(graph)
+                post_pass_graph = graph
+                return graph
+
+            def custom_backend(graph, example_inputs):
+                from torch._inductor.compile_fx import compile_fx
+
+                current_config = inductor_config.get_config_copy()
+                current_config["post_grad_custom_post_pass"] = custom_pass
+                return compile_fx(graph, example_inputs, config_patches=current_config)
+
+            @torch.compile(backend=custom_backend)
+            def f(x, s):
+                return torch.ops._test_pm.original_op(x, s)
+
+            inp = torch.randn(4, 4)
+            result = f(inp, OpaqueScaleFactor(4.0))
+            self.assertEqual(result, inp + 4.0)
+            self.assertEqual(count, 1)
+            op_targets = [
+                n.target for n in post_pass_graph.nodes if n.op == "call_function"
+            ]
+            self.assertNotIn(torch.ops._test_pm.original_op.default, op_targets)
+            self.assertIn(torch.ops._test_pm.replacement_op.default, op_targets)
 
 
 if __name__ == "__main__":
