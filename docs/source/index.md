@@ -26,113 +26,113 @@ Features described in this documentation are classified by release status:
 
 **Core**
 
-- [torch](https://docs.pytorch.org/docs/stable/torch.html)
-- [torch.nn](https://docs.pytorch.org/docs/stable/nn.html)
-- [torch.nn.functional](https://docs.pytorch.org/docs/stable/nn.functional.html)
-- [torch.nn.init](https://docs.pytorch.org/docs/stable/nn.init.html)
-- [torch.nn.attention](https://docs.pytorch.org/docs/stable/nn.attention.html)
-- [torch.Tensor](https://docs.pytorch.org/docs/stable/tensors.html)
-- [Tensor Attributes](https://docs.pytorch.org/docs/stable/tensor_attributes.html)
-- [Tensor Views](https://docs.pytorch.org/docs/stable/tensor_view.html)
-- [torch.autograd](https://docs.pytorch.org/docs/stable/autograd.html)
-- [torch.optim](https://docs.pytorch.org/docs/stable/optim.html)
-- [torch.utils.data](https://docs.pytorch.org/docs/stable/data.html)
-- [torch.library](https://docs.pytorch.org/docs/stable/library.html)
+- {doc}`torch <torch>`
+- {doc}`torch.nn <nn>`
+- {doc}`torch.nn.functional <nn.functional>`
+- {doc}`torch.nn.init <nn.init>`
+- {doc}`torch.nn.attention <nn.attention>`
+- {doc}`torch.Tensor <tensors>`
+- {doc}`Tensor Attributes <tensor_attributes>`
+- {doc}`Tensor Views <tensor_view>`
+- {doc}`torch.autograd <autograd>`
+- {doc}`torch.optim <optim>`
+- {doc}`torch.utils.data <data>`
+- {doc}`torch.library <library>`
 
 **Math & Signal**
 
-- [torch.fft](https://docs.pytorch.org/docs/stable/fft.html)
-- [torch.linalg](https://docs.pytorch.org/docs/stable/linalg.html)
-- [torch.special](https://docs.pytorch.org/docs/stable/special.html)
-- [torch.signal](https://docs.pytorch.org/docs/stable/signal.html)
-- [Complex Numbers](https://docs.pytorch.org/docs/stable/complex_numbers.html)
+- {doc}`torch.fft <fft>`
+- {doc}`torch.linalg <linalg>`
+- {doc}`torch.special <special>`
+- {doc}`torch.signal <signal>`
+- {doc}`Complex Numbers <complex_numbers>`
 
 **Hardware Acceleration**
 
-- [torch.accelerator](https://docs.pytorch.org/docs/stable/accelerator.html)
-- [torch.cpu](https://docs.pytorch.org/docs/stable/cpu.html)
-- [torch.cuda](https://docs.pytorch.org/docs/stable/cuda.html)
-- [torch.cuda.memory](https://docs.pytorch.org/docs/stable/torch_cuda_memory.html)
-- [torch.mps](https://docs.pytorch.org/docs/stable/mps.html)
-- [torch.xpu](https://docs.pytorch.org/docs/stable/xpu.html)
-- [torch.mtia](https://docs.pytorch.org/docs/stable/mtia.html)
-- [torch.mtia.memory](https://docs.pytorch.org/docs/stable/mtia.memory.html)
-- [torch.mtia.mtia_graph](https://docs.pytorch.org/docs/stable/mtia.mtia_graph.html)
-- [Meta device](https://docs.pytorch.org/docs/stable/meta.html)
-- [torch.amp](https://docs.pytorch.org/docs/stable/amp.html)
-- [torch.backends](https://docs.pytorch.org/docs/stable/backends.html)
+- {doc}`torch.accelerator <accelerator>`
+- {doc}`torch.cpu <cpu>`
+- {doc}`torch.cuda <cuda>`
+- {doc}`torch.cuda.memory <torch_cuda_memory>`
+- {doc}`torch.mps <mps>`
+- {doc}`torch.xpu <xpu>`
+- {doc}`torch.mtia <mtia>`
+- {doc}`torch.mtia.memory <mtia.memory>`
+- {doc}`torch.mtia.mtia_graph <mtia.mtia_graph>`
+- {doc}`Meta device <meta>`
+- {doc}`torch.amp <amp>`
+- {doc}`torch.backends <backends>`
 
 **Compiler & Export**
 
-- [torch.compiler](https://docs.pytorch.org/docs/stable/torch.compiler_api.html)
-- [torch.export](https://docs.pytorch.org/docs/stable/export.html)
-- [torch.fx](https://docs.pytorch.org/docs/stable/fx.html)
-- [torch.fx.experimental](https://docs.pytorch.org/docs/stable/fx.experimental.html)
-- [torch.func](https://docs.pytorch.org/docs/stable/func.html)
-- [torch.onnx](https://docs.pytorch.org/docs/stable/onnx.html)
-- [torch.nativert](https://docs.pytorch.org/docs/stable/nativert.html)
+- {doc}`torch.compiler <torch.compiler_api>`
+- {doc}`torch.export <user_guide/torch_compiler/export>`
+- {doc}`torch.fx <fx>`
+- {doc}`torch.fx.experimental <fx.experimental>`
+- {doc}`torch.func <func>`
+- {doc}`torch.onnx <onnx>`
+- {doc}`torch.nativert <nativert>`
 
 **Distributed**
 
-- [torch.distributed](https://docs.pytorch.org/docs/stable/distributed.html)
-- [torch.distributed.tensor](https://docs.pytorch.org/docs/stable/distributed.tensor.html)
-- [torch.distributed.algorithms.join](https://docs.pytorch.org/docs/stable/distributed.algorithms.join.html)
-- [torch.distributed.elastic](https://docs.pytorch.org/docs/stable/distributed.elastic.html)
-- [torch.distributed.fsdp](https://docs.pytorch.org/docs/stable/fsdp.html)
-- [torch.distributed.fsdp.fully_shard](https://docs.pytorch.org/docs/stable/distributed.fsdp.fully_shard.html)
-- [torch.distributed.tensor.parallel](https://docs.pytorch.org/docs/stable/distributed.tensor.parallel.html)
-- [torch.distributed.optim](https://docs.pytorch.org/docs/stable/distributed.optim.html)
-- [torch.distributed.pipelining](https://docs.pytorch.org/docs/stable/distributed.pipelining.html)
-- [torch.distributed._symmetric_memory](https://docs.pytorch.org/docs/stable/symmetric_memory.html)
-- [torch.distributed.checkpoint](https://docs.pytorch.org/docs/stable/distributed.checkpoint.html)
-- [DDP Communication Hooks](https://docs.pytorch.org/docs/stable/ddp_comm_hooks.html)
-- [Distributed RPC Framework](https://docs.pytorch.org/docs/stable/rpc.html)
+- {doc}`torch.distributed <distributed>`
+- {doc}`torch.distributed.tensor <distributed.tensor>`
+- {doc}`torch.distributed.algorithms.join <distributed.algorithms.join>`
+- {doc}`torch.distributed.elastic <distributed.elastic>`
+- {doc}`torch.distributed.fsdp <fsdp>`
+- {doc}`torch.distributed.fsdp.fully_shard <distributed.fsdp.fully_shard>`
+- {doc}`torch.distributed.tensor.parallel <distributed.tensor.parallel>`
+- {doc}`torch.distributed.optim <distributed.optim>`
+- {doc}`torch.distributed.pipelining <distributed.pipelining>`
+- {doc}`torch.distributed._symmetric_memory <symmetric_memory>`
+- {doc}`torch.distributed.checkpoint <distributed.checkpoint>`
+- {doc}`DDP Communication Hooks <ddp_comm_hooks>`
+- {doc}`Distributed RPC Framework <rpc>`
 
 **Quantization & Performance**
 
-- [Quantization](https://docs.pytorch.org/docs/stable/quantization.html)
-- [torch.profiler](https://docs.pytorch.org/docs/stable/profiler.html)
-- [torch.sparse](https://docs.pytorch.org/docs/stable/sparse.html)
-- [torch.utils.benchmark](https://docs.pytorch.org/docs/stable/benchmark_utils.html)
+- {doc}`Quantization <quantization>`
+- {doc}`torch.profiler <profiler>`
+- {doc}`torch.sparse <sparse>`
+- {doc}`torch.utils.benchmark <benchmark_utils>`
 
 **Utilities**
 
-- [torch.distributions](https://docs.pytorch.org/docs/stable/distributions.html)
-- [torch.futures](https://docs.pytorch.org/docs/stable/futures.html)
-- [torch.hub](https://docs.pytorch.org/docs/stable/hub.html)
-- [torch.monitor](https://docs.pytorch.org/docs/stable/monitor.html)
-- [torch.overrides](https://docs.pytorch.org/docs/stable/torch.overrides.html)
-- [torch.package](https://docs.pytorch.org/docs/stable/package.html)
-- [torch.random](https://docs.pytorch.org/docs/stable/random.html)
-- [torch.masked](https://docs.pytorch.org/docs/stable/masked.html)
-- [torch.nested](https://docs.pytorch.org/docs/stable/nested.html)
-- [torch.Size](https://docs.pytorch.org/docs/stable/size.html)
-- [torch.Storage](https://docs.pytorch.org/docs/stable/storage.html)
-- [torch.testing](https://docs.pytorch.org/docs/stable/testing.html)
-- [torch.utils](https://docs.pytorch.org/docs/stable/utils.html)
-- [torch.utils.benchmark](https://docs.pytorch.org/docs/stable/benchmark_utils.html)
-- [torch.utils.checkpoint](https://docs.pytorch.org/docs/stable/checkpoint.html)
-- [torch.utils.cpp_extension](https://docs.pytorch.org/docs/stable/cpp_extension.html)
-- [torch.utils.data](https://docs.pytorch.org/docs/stable/data.html)
-- [torch.utils.deterministic](https://docs.pytorch.org/docs/stable/deterministic.html)
-- [torch.utils.jit](https://docs.pytorch.org/docs/stable/jit_utils.html)
-- [torch.utils.dlpack](https://docs.pytorch.org/docs/stable/dlpack.html)
-- [torch.utils.mobile_optimizer](https://docs.pytorch.org/docs/stable/mobile_optimizer.html)
-- [torch.utils.model_zoo](https://docs.pytorch.org/docs/stable/model_zoo.html)
-- [torch.utils.tensorboard](https://docs.pytorch.org/docs/stable/tensorboard.html)
-- [torch.utils.module_tracker](https://docs.pytorch.org/docs/stable/module_tracker.html)
-- [Multiprocessing](https://docs.pytorch.org/docs/stable/multiprocessing.html)
+- {doc}`torch.distributions <distributions>`
+- {doc}`torch.futures <futures>`
+- {doc}`torch.hub <hub>`
+- {doc}`torch.monitor <monitor>`
+- {doc}`torch.overrides <torch.overrides>`
+- {doc}`torch.package <package>`
+- {doc}`torch.random <random>`
+- {doc}`torch.masked <masked>`
+- {doc}`torch.nested <nested>`
+- {doc}`torch.Size <size>`
+- {doc}`torch.Storage <storage>`
+- {doc}`torch.testing <testing>`
+- {doc}`torch.utils <utils>`
+- {doc}`torch.utils.benchmark <benchmark_utils>`
+- {doc}`torch.utils.checkpoint <checkpoint>`
+- {doc}`torch.utils.cpp_extension <cpp_extension>`
+- {doc}`torch.utils.data <data>`
+- {doc}`torch.utils.deterministic <deterministic>`
+- {doc}`torch.utils.jit <jit_utils>`
+- {doc}`torch.utils.dlpack <dlpack>`
+- {doc}`torch.utils.mobile_optimizer <mobile_optimizer>`
+- {doc}`torch.utils.model_zoo <model_zoo>`
+- {doc}`torch.utils.tensorboard <tensorboard>`
+- {doc}`torch.utils.module_tracker <module_tracker>`
+- {doc}`Multiprocessing <multiprocessing>`
 
 **Other**
 
 - [C++](https://docs.pytorch.org/cppdocs/)
-- [Type Info](https://docs.pytorch.org/docs/stable/type_info.html)
-- [Named Tensors](https://docs.pytorch.org/docs/stable/named_tensor.html)
-- [Named Tensors operator coverage](https://docs.pytorch.org/docs/stable/name_inference.html)
-- [torch.\_\_config\_\_](https://docs.pytorch.org/docs/stable/config_mod.html)
-- [torch.\_\_future\_\_](https://docs.pytorch.org/docs/stable/future_mod.html)
-- [torch.\_logging](https://docs.pytorch.org/docs/stable/logging.html)
-- [Torch Environment Variables](https://docs.pytorch.org/docs/stable/torch_environment_variables.html)
+- {doc}`Type Info <type_info>`
+- {doc}`Named Tensors <named_tensor>`
+- {doc}`Named Tensors operator coverage <name_inference>`
+- {doc}`torch.__config__ <config_mod>`
+- {doc}`torch.__future__ <future_mod>`
+- {doc}`torch._logging <logging>`
+- {doc}`Torch Environment Variables <torch_environment_variables>`
 :::
 
 ---
