@@ -815,77 +815,6 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           R"(Sets the debug level of the torch.distributed package from the
           ``TORCH_DISTRIBUTED_DEBUG`` environment variable.)");
 
-  // A callable wrapper for PREMUL_SUM that supports both:
-  // - ReduceOp.PREMUL_SUM as a value (for comparison)
-  // - ReduceOp.PREMUL_SUM(factor) as a callable (to create ReduceOp with
-  // factor)
-  struct PremulSumCallable {
-    ::c10d::ReduceOp operator()(const py::object& factor) const {
-      if (py::isinstance<py::float_>(factor) ||
-          py::isinstance<py::int_>(factor)) {
-        return ::c10d::makePreMulSum(factor.cast<double>());
-      } else {
-        return ::c10d::makePreMulSum(factor.cast<at::Tensor>());
-      }
-    }
-  };
-
-  py::class_<PremulSumCallable>(module, "_PremulSumCallable")
-      .def(
-          "__call__",
-          &PremulSumCallable::operator(),
-          py::arg("factor"),
-          R"(Create a PREMUL_SUM ReduceOp with the given factor.
-
-Args:
-    factor: A scalar (float, int, torch.Tensor) or a single-element Tensor to multiply
-            inputs by before reduction.
-
-Returns:
-    A ReduceOp configured for PREMUL_SUM with the specified factor.
-
-Example:
-    >>> op = ReduceOp.PREMUL_SUM(2.0)
-    >>> dist.all_reduce(tensor, op)
-)")
-      .def(
-          "__eq__",
-          [](const PremulSumCallable&,
-             const ::c10d::ReduceOp::RedOpType& other) {
-            return other == ::c10d::ReduceOp::RedOpType::PREMUL_SUM;
-          })
-      .def(
-          "__eq__",
-          [](const PremulSumCallable&, const ::c10d::ReduceOp& other) {
-            // NOTE: Currently, we only compare the op type and don't handle
-            // the factor value. Two PREMUL_SUM ops with different factors
-            // will be considered equal.
-            return other.op_ == ::c10d::ReduceOp::RedOpType::PREMUL_SUM;
-          })
-      .def(
-          "__eq__",
-          [](const PremulSumCallable&, int64_t other) {
-            // Support comparison with integer value
-            return other ==
-                static_cast<int64_t>(::c10d::ReduceOp::RedOpType::PREMUL_SUM);
-          })
-      .def(
-          "__eq__",
-          // NOLINTNEXTLINE(performance-unnecessary-value-param)
-          [](const PremulSumCallable&, py::object) { return false; })
-      .def(
-          "__hash__",
-          [](const PremulSumCallable&) {
-            return static_cast<uint8_t>(
-                ::c10d::ReduceOp::RedOpType::PREMUL_SUM);
-          })
-      .def("__repr__", [](const PremulSumCallable&) {
-        return c10::str(
-            "<RedOpType.PREMUL_SUM: ",
-            static_cast<int>(::c10d::ReduceOp::RedOpType::PREMUL_SUM),
-            ">");
-      });
-
   py::class_<::c10d::ReduceOp> reduce_op(
       module,
       "ReduceOp",
@@ -935,13 +864,6 @@ This class does not support ``__members__`` property.)");
           "__eq__",
           [](const ::c10d::ReduceOp& self, const ::c10d::ReduceOp& other) {
             return self == other;
-          })
-      .def(
-          // Support comparison with PremulSumCallable
-          // e.g., my_reduce_op == ReduceOp.PREMUL_SUM
-          "__eq__",
-          [](const ::c10d::ReduceOp& self, const PremulSumCallable&) {
-            return self.op_ == ::c10d::ReduceOp::RedOpType::PREMUL_SUM;
           })
       .def(
           // With the above custom `__eq__`'s, I have to manually support the
@@ -1003,10 +925,40 @@ This class does not support ``__members__`` property.)");
       .value("BAND", ::c10d::ReduceOp::RedOpType::BAND)
       .value("BOR", ::c10d::ReduceOp::RedOpType::BOR)
       .value("BXOR", ::c10d::ReduceOp::RedOpType::BXOR)
-      .export_values();
-  // Export enum values to ReduceOp class, except PREMUL_SUM which is handled
-  // specially as a callable object below
-  reduce_op.attr("PREMUL_SUM") = PremulSumCallable();
+      .value("PREMUL_SUM", ::c10d::ReduceOp::RedOpType::PREMUL_SUM)
+      .export_values()
+      .def(
+          "__call__",
+          [](const ::c10d::ReduceOp::RedOpType& self,
+             const py::object& factor) -> ::c10d::ReduceOp {
+            TORCH_CHECK(
+                self == ::c10d::ReduceOp::RedOpType::PREMUL_SUM,
+                "Only PREMUL_SUM supports calling with a factor, got ",
+                py::str(py::cast(self)).cast<std::string>());
+            if (py::isinstance<py::float_>(factor) ||
+                py::isinstance<py::int_>(factor)) {
+              return ::c10d::makePreMulSum(factor.cast<double>());
+            } else {
+              return ::c10d::makePreMulSum(factor.cast<at::Tensor>());
+            }
+          },
+          py::arg("factor"),
+          R"(Create a PREMUL_SUM ReduceOp with the given factor.
+
+Only ``PREMUL_SUM`` supports this callable interface. Other reduction
+operations will raise an error if called.
+
+Args:
+    factor: A scalar (float, int) or a single-element Tensor to multiply
+            inputs by before reduction.
+
+Returns:
+    A ReduceOp configured for PREMUL_SUM with the specified factor.
+
+Example:
+    >>> op = ReduceOp.PREMUL_SUM(2.0)
+    >>> dist.all_reduce(tensor, op)
+)");
 
   // note(crcrpar): This could be removed because users will not pass
   // `RedOpType` to reduce collective ops Ref: [Implicit
