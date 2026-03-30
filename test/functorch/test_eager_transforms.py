@@ -1249,6 +1249,181 @@ class TestGradTransform(TestCase):
             self.assertTrue(torch.is_inference_mode_enabled())
         self.assertTrue(not torch.is_inference_mode_enabled())
 
+    def test_inference_mode_vmap_restored(self, device):
+        # inference_mode flag must be saved/restored across vmap
+        self.assertTrue(not torch.is_inference_mode_enabled())
+        with torch.inference_mode():
+            self.assertTrue(torch.is_inference_mode_enabled())
+            vmap(lambda x: x**2)(torch.randn(5, 3, device=device))
+            self.assertTrue(torch.is_inference_mode_enabled())
+        self.assertTrue(not torch.is_inference_mode_enabled())
+
+    def test_inference_mode_functionalize_restored(self, device):
+        # inference_mode flag must be saved/restored across functionalize
+        self.assertTrue(not torch.is_inference_mode_enabled())
+        with torch.inference_mode():
+            self.assertTrue(torch.is_inference_mode_enabled())
+            torch.func.functionalize(lambda x: x**2)(torch.randn(3, device=device))
+            self.assertTrue(torch.is_inference_mode_enabled())
+        self.assertTrue(not torch.is_inference_mode_enabled())
+
+    def test_inference_mode_vmap_flag_disabled_inside(self, device):
+        # The inference_mode flag should be OFF inside vmap's scope,
+        # so tensors created there carry autograd dispatch keys.
+        flag_inside = []
+
+        def f(x):
+            flag_inside.append(torch.is_inference_mode_enabled())
+            return x**2
+
+        with torch.inference_mode():
+            vmap(f)(torch.randn(5, 3, device=device))
+            # Flag should be off inside vmap, on outside
+            self.assertFalse(flag_inside[0])
+            self.assertTrue(torch.is_inference_mode_enabled())
+
+    def test_inference_mode_functionalize_flag_disabled_inside(self, device):
+        # The inference_mode flag should be OFF inside functionalize's scope.
+        flag_inside = []
+
+        def f(x):
+            flag_inside.append(torch.is_inference_mode_enabled())
+            return x**2
+
+        with torch.inference_mode():
+            torch.func.functionalize(f)(torch.randn(3, device=device))
+            self.assertFalse(flag_inside[0])
+            self.assertTrue(torch.is_inference_mode_enabled())
+
+    def test_inference_mode_vmap_output_not_inference_tensor(self, device):
+        # Tensors created inside vmap under inference_mode should NOT be
+        # inference tensors. Without this, the output can't later be used
+        # with autograd (requires_grad_ raises RuntimeError).
+        x = torch.randn(3, 4, device=device)
+        with torch.inference_mode():
+            r = vmap(lambda v: v**2)(x)
+        self.assertFalse(r.is_inference())
+        # Must be usable with autograd after exiting inference_mode
+        r.requires_grad_(True)
+        r.sum().backward()
+        self.assertEqual(r.grad, torch.ones_like(r))
+
+    def test_inference_mode_functionalize_output_not_inference_tensor(self, device):
+        # Same for functionalize: output must not be an inference tensor.
+        x = torch.randn(4, device=device)
+        with torch.inference_mode():
+            r = torch.func.functionalize(lambda v: v**2)(x)
+        self.assertFalse(r.is_inference())
+        r.requires_grad_(True)
+        r.sum().backward()
+        self.assertEqual(r.grad, torch.ones_like(r))
+
+    def test_inference_mode_jvp_restored(self, device):
+        # inference_mode flag must be saved/restored across jvp
+        with torch.inference_mode():
+            self.assertTrue(torch.is_inference_mode_enabled())
+            _, y = jvp(
+                lambda x: (x**2).sum(),
+                (torch.randn(3, device=device),),
+                (torch.ones(3, device=device),),
+            )
+            self.assertTrue(torch.is_inference_mode_enabled())
+        self.assertFalse(torch.is_inference_mode_enabled())
+
+    def test_inference_mode_restored_after_exception(self, device):
+        # If a transform body raises, inference_mode must still be restored
+        # (Python context managers use try/finally to guarantee the pop).
+        def raises(x):
+            raise RuntimeError("intentional error")
+
+        with torch.inference_mode():
+            with self.assertRaisesRegex(RuntimeError, "intentional error"):
+                vmap(raises)(torch.randn(5, 3, device=device))
+            self.assertTrue(torch.is_inference_mode_enabled())
+
+        with torch.inference_mode():
+            with self.assertRaisesRegex(RuntimeError, "intentional error"):
+                torch.func.functionalize(raises)(torch.randn(3, device=device))
+            self.assertTrue(torch.is_inference_mode_enabled())
+
+        with torch.inference_mode():
+            with self.assertRaisesRegex(RuntimeError, "intentional error"):
+                grad(lambda x: raises(x))(torch.randn(3, device=device))
+            self.assertTrue(torch.is_inference_mode_enabled())
+
+        with torch.inference_mode():
+            with self.assertRaisesRegex(RuntimeError, "intentional error"):
+                jvp(
+                    raises,
+                    (torch.randn(3, device=device),),
+                    (torch.ones(3, device=device),),
+                )
+            self.assertTrue(torch.is_inference_mode_enabled())
+
+    def test_inference_mode_nested_transforms(self, device):
+        # Each transform independently saves/restores inference_mode.
+        # Verify the restore chain works when multiple layers are stacked.
+        x = torch.randn(3, 4, device=device)
+        with torch.inference_mode():
+            # vmap(grad(f)) — grad restores first, then vmap
+            def f(x):
+                return (x**2).sum()
+
+            r = vmap(grad(f))(x)
+            self.assertTrue(torch.is_inference_mode_enabled())
+        self.assertFalse(r.is_inference())
+
+        with torch.inference_mode():
+            # functionalize(vmap(f))
+            r = torch.func.functionalize(vmap(lambda v: v**2))(x)
+            self.assertTrue(torch.is_inference_mode_enabled())
+        self.assertFalse(r.is_inference())
+
+    def test_inference_mode_noop_when_disabled(self, device):
+        # When inference_mode is already off, the save/restore must not
+        # accidentally flip it on.
+        self.assertFalse(torch.is_inference_mode_enabled())
+        vmap(lambda x: x**2)(torch.randn(5, 3, device=device))
+        self.assertFalse(torch.is_inference_mode_enabled())
+
+        torch.func.functionalize(lambda x: x**2)(torch.randn(3, device=device))
+        self.assertFalse(torch.is_inference_mode_enabled())
+
+        grad(lambda x: (x**2).sum())(torch.randn(3, device=device))
+        self.assertFalse(torch.is_inference_mode_enabled())
+
+        jvp(
+            lambda x: (x**2).sum(),
+            (torch.randn(3, device=device),),
+            (torch.ones(3, device=device),),
+        )
+        self.assertFalse(torch.is_inference_mode_enabled())
+
+    def test_inference_mode_preserves_grad_mode(self, device):
+        # The fix uses AutogradState::set_inference_mode directly (not the
+        # InferenceMode RAII guard) to avoid clobbering grad_mode. Verify
+        # that grad_mode survives the transform boundary.
+        grad_mode_inside = []
+
+        def check_grad_mode(x):
+            grad_mode_inside.append(torch.is_grad_enabled())
+            return x**2
+
+        with torch.inference_mode():
+            # grad_mode is off under inference_mode by default
+            torch.set_grad_enabled(True)
+            vmap(check_grad_mode)(torch.randn(5, 3, device=device))
+            self.assertTrue(torch.is_grad_enabled())
+            torch.set_grad_enabled(False)
+
+        # Also check functionalize
+        grad_mode_inside.clear()
+        with torch.inference_mode():
+            torch.set_grad_enabled(True)
+            torch.func.functionalize(check_grad_mode)(torch.randn(3, device=device))
+            self.assertTrue(torch.is_grad_enabled())
+            torch.set_grad_enabled(False)
+
 
 @markDynamoStrictTest
 class TestAutogradFunction(TestCase):
