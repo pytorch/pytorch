@@ -16,6 +16,7 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/ExpandUtils.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/macros/Macros.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -670,34 +671,22 @@ Tensor bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2) {
 }
 
 __global__ void search_end_matrix_indices_cuda_kernel(
-  int64_t* mat_el_end_indices,
+  int64_t* __restrict__ mat_el_end_indices,
   int64_t num_matrices,
-  const TensorInfo<int64_t, int64_t> indices_1D_ti,
+  const int64_t* __restrict__ indices_1D,
   const int64_t num_elements
 ){
-  const int64_t target_mat_num = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
+  const int64_t target_mat_num = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
   if (target_mat_num >= num_matrices) return;
 
-  const int64_t* indices_1D = indices_1D_ti.data;
-  const int64_t indices_1D_stride = indices_1D_ti.strides[0];
-  int64_t start_idx = 0;
-  int64_t end_idx = num_elements - 1;
-
-  while (start_idx < end_idx) {
-    int64_t mid_idx = (start_idx + end_idx + 1) >> 1;
-    int64_t mat_num = indices_1D[mid_idx*indices_1D_stride];
-    if (mat_num > target_mat_num) {
-      end_idx = mid_idx - 1;
-    } else {
-      start_idx = mid_idx;
-    }
-  }
-
-  if (indices_1D[start_idx*indices_1D_stride] == target_mat_num) {
-    mat_el_end_indices[target_mat_num] = start_idx;
-  } else {
-    mat_el_end_indices[target_mat_num] = -1;
-  }
+  // Points to the upper-bound of `target_mat_num`
+  const auto target_mat_num_ub = at::cuda::detail::find_bound(
+    indices_1D,
+    indices_1D + num_elements,
+    target_mat_num + 1
+  );
+  // Store the "end" offset of each matrix into the "batch" dim
+  mat_el_end_indices[target_mat_num] = target_mat_num_ub - indices_1D;
 }
 
 // Search through a 1D tensor of sorted sparse matrix
@@ -707,20 +696,17 @@ void search_end_matrix_indices(int64_t* mat_el_end_indices, int64_t num_matrices
   c10::cuda::GetDevice(&curDevice);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
 
-  auto indices_1D_ti = getTensorInfo<int64_t, int64_t>(indices_1D);
-  int64_t grid_size = (num_matrices / 64)+1;
   int64_t block_size = 64;
+  int64_t grid_size = (num_matrices + block_size - 1) / block_size;
   int64_t num_elements = indices_1D.size(0);
 
   search_end_matrix_indices_cuda_kernel<<<grid_size, block_size, 0, stream>>>(
     mat_el_end_indices,
     num_matrices,
-    indices_1D_ti,
+    indices_1D.data_ptr<int64_t>(),
     num_elements
   );
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-
-  cudaDeviceSynchronize();
 }
 
 cudaDataType getTensorCudaDataType(Tensor self) {
@@ -739,6 +725,12 @@ cudaDataType getTensorCudaDataType(Tensor self) {
   return cuda_data_type;
 }
 
+// cusparseSpMV bug on CUDA < 13.1 -> COO row index array needs to be 16-byte aligned.
+// See https://github.com/pytorch/pytorch/issues/167901
+#if defined(USE_CUDA) && CUDA_VERSION < 13010
+#define CUSPARSE_SPMV_ALIGNMENT_BUG_PRESENT
+#endif
+
 Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor& result) {
   TORCH_CHECK(!mat2.is_sparse(), "bmm_sparse: Tensor 'mat2' must be dense");
   TORCH_CHECK(self.dense_dim() == 0, "bmm_sparse: Tensor 'self' must have 0 dense dims, but has ", self.dense_dim());
@@ -752,10 +744,10 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
   int64_t dim_j = self.size(2);
   int64_t dim_k = mat2.size(2);
 
-  result.resize_({num_matrices, dim_k, dim_i});
+  result.resize_({num_matrices, dim_i, dim_k});
 
   if ((self._nnz() == 0) || (dim_j == 0) || (dim_k == 0)) {
-    result.zero_().transpose_(1, 2);
+    result.zero_();
     return result;
   }
 
@@ -768,7 +760,7 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
     tmp_result = result;
     need_copy_result = false;
   } else {
-    tmp_result = at::empty({num_matrices, dim_k, dim_i}, result.options(), at::MemoryFormat::Contiguous);
+    tmp_result = at::empty({num_matrices, dim_i, dim_k}, result.options(), at::MemoryFormat::Contiguous);
     need_copy_result = true;
   }
 
@@ -785,29 +777,56 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
   Tensor values =      self_coalesced._values();
 
   Tensor indices_dim0 = indices[0];
+  Tensor indices_dim1 = indices[1];
+  Tensor indices_dim2 = indices[2];
 
-  // Need to convert dim1 and dim2 indices to 32-bit since cusparseSpMM
-  // only supports 32-bit indices
-  Tensor indices_dim1 = indices[1].to(ScalarType::Int);
-  Tensor indices_dim2 = indices[2].to(ScalarType::Int);
+  auto mat_el_end_indices_host = at::empty({num_matrices}, indices.options().device(at::kCPU).pinned_memory(true));
+  search_end_matrix_indices(mat_el_end_indices_host.data_ptr<int64_t>(), num_matrices, indices_dim0);
+  cudaDeviceSynchronize();
+  auto* mat_el_end_indices = mat_el_end_indices_host.data_ptr<int64_t>();
 
-  std::vector<int64_t> mat_el_end_indices_host(num_matrices);
+  // cusparseSpMV bug on CUDA < 13.1 -> COO row index array needs to be 16-byte aligned,
+  // so we use a buffer for misaglined sub-arrays to copy into.
+#ifdef CUSPARSE_SPMV_ALIGNMENT_BUG_PRESENT
+  auto aligned_row_indices_buffer = [&]() -> Tensor {
+    if (dim_k == 1) { // implies cusparseSpMV
+      const auto* row_indices_start_ptr = indices_dim1.data_ptr<int64_t>();
+      const auto* mat_end_offsets_ptr = mat_el_end_indices_host.data_ptr<int64_t>();
+      int64_t max_nnz = 0;
+      int64_t start_offset = 0;
+      for (const auto i : c10::irange(num_matrices)) {
+        const auto* row_indices_ptr = row_indices_start_ptr + start_offset;
+        const int64_t row_indices_ptr_not_aligned = (
+            (reinterpret_cast<uintptr_t>(row_indices_ptr) % 16) / 8
+        );
+        const auto end_offset = mat_end_offsets_ptr[i];
+        const auto nnz = end_offset - start_offset;
+        max_nnz = std::max(row_indices_ptr_not_aligned * nnz, max_nnz);
+        start_offset = end_offset;
+      }
+      return max_nnz ? at::empty({max_nnz}, indices.options()) : Tensor{};
+    }
+    return Tensor{};
+  }();
+#endif
 
-  {
-    auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-    auto dataPtr = allocator.allocate(num_matrices*sizeof(int64_t));
-    int64_t* mat_el_end_indices_device = static_cast<int64_t*>(dataPtr.get());
-
-    search_end_matrix_indices(mat_el_end_indices_device, num_matrices, indices_dim0);
-    AT_CUDA_CHECK(cudaMemcpy(
-      mat_el_end_indices_host.data(),
-      mat_el_end_indices_device,
-      num_matrices*sizeof(int64_t),
-      cudaMemcpyDeviceToHost
-    ));
-  }
-  // Need a pointer to an array to access within a lambda
-  int64_t* mat_el_end_indices = mat_el_end_indices_host.data();
+  // MSVC is not happy with having macros in AT_DISPATCH,
+  // so we are using a lambda which we try to force-inline
+  const auto maybe_provide_aligned_buffer_idx_ptr
+    = [&](int64_t* idx_ptr, int64_t start_offset, int64_t len) C10_ALWAYS_INLINE_ATTRIBUTE -> int64_t* {
+#ifdef CUSPARSE_SPMV_ALIGNMENT_BUG_PRESENT
+      auto* start = idx_ptr + start_offset;
+      const auto is_misaligned_start = (reinterpret_cast<uintptr_t>(start) % 16) != 0;
+      if (is_misaligned_start && aligned_row_indices_buffer.defined()) {
+        aligned_row_indices_buffer.narrow(0, 0, len)
+          .copy_(indices_dim1.narrow(0, start_offset, len));
+        return aligned_row_indices_buffer.data_ptr<int64_t>();
+      }
+      return start;
+#else
+      return idx_ptr + start_offset;
+#endif
+  };
 
   Scalar beta = 0;
   Scalar alpha = 1;
@@ -828,112 +847,106 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
     values.scalar_type(), "bmm_sparse_cuda", [&] {
       scalar_t alpha_val = alpha.to<scalar_t>();
       scalar_t beta_val = beta.to<scalar_t>();
-      uint32_t* row_indices_start_ptr = reinterpret_cast<uint32_t*>(indices_dim1.data_ptr());
-      uint32_t* col_indices_start_ptr = reinterpret_cast<uint32_t*>(indices_dim2.data_ptr());
-      scalar_t* values_start_ptr = reinterpret_cast<scalar_t*>(values.data_ptr());
-      scalar_t* mat2_start_ptr = reinterpret_cast<scalar_t*>(mat2_contig.data_ptr());
-      scalar_t* result_start_ptr = reinterpret_cast<scalar_t*>(tmp_result.data_ptr());
+      auto* row_indices_start_ptr = indices_dim1.data_ptr<int64_t>();
+      auto* col_indices_start_ptr = indices_dim2.data_ptr<int64_t>();
+      auto* values_start_ptr = values.data_ptr<scalar_t>();
+      auto* mat2_start_ptr = mat2_contig.data_ptr<scalar_t>();
+      auto* result_start_ptr = tmp_result.data_ptr<scalar_t>();
       for (
         int64_t cur_mat_num = 0;
-        (cur_mat_num < num_matrices);
-        cur_mat_num++
+        cur_mat_num < num_matrices;
+        ++cur_mat_num
       ) {
         int64_t mat_el_end_idx = mat_el_end_indices[cur_mat_num];
 
-        if (mat_el_end_idx != -1) {
-          mat_el_end_idx++;
+        // Create variables to view just the current set of matrices
+        int64_t sparse_nnz = mat_el_end_idx - mat_el_begin_idx;
+        cudaDataType cuda_data_type = getTensorCudaDataType(mat2_contig);
+        auto* row_indices_ptr = maybe_provide_aligned_buffer_idx_ptr(
+          row_indices_start_ptr,
+          mat_el_begin_idx,
+          sparse_nnz
+        );
+        auto* col_indices_ptr = &col_indices_start_ptr[mat_el_begin_idx];
+        scalar_t* values_ptr = &values_start_ptr[mat_el_begin_idx];
 
-          // Create tensors to view just the current set of matrices
-          int64_t sparse_nnz = mat_el_end_idx - mat_el_begin_idx;
-
-          cudaDataType cuda_data_type = getTensorCudaDataType(mat2_contig);
-          uint32_t* row_indices_ptr = &row_indices_start_ptr[mat_el_begin_idx];
-          uint32_t* col_indices_ptr = &col_indices_start_ptr[mat_el_begin_idx];
-          scalar_t* values_ptr = &values_start_ptr[mat_el_begin_idx];
-
-          cusparseSpMatDescr_t sparse_descr;
-          TORCH_CUDASPARSE_CHECK(cusparseCreateCoo(
-            &sparse_descr,
-            dim_i,
-            dim_j,
-            sparse_nnz,
-            reinterpret_cast<void*>(row_indices_ptr),
-            reinterpret_cast<void*>(col_indices_ptr),
-            reinterpret_cast<void*>(values_ptr),
-            CUSPARSE_INDEX_32I,
-            CUSPARSE_INDEX_BASE_ZERO,
-            cuda_data_type
-          ));
-          scalar_t* mat2_ptr = &mat2_start_ptr[dim_k*dim_j*cur_mat_num];
-          cusparseDnMatDescr_t dense_descr;
-          TORCH_CUDASPARSE_CHECK(cusparseCreateDnMat(
-            &dense_descr,
-            dim_k,
-            dim_j,
-            dim_k,
-            reinterpret_cast<void*>(mat2_ptr),
-            cuda_data_type,
-            CUSPARSE_ORDER_COL
-          ));
-          scalar_t* result_ptr = &result_start_ptr[dim_i*dim_k*cur_mat_num];
-          cusparseDnMatDescr_t result_descr;
-          TORCH_CUDASPARSE_CHECK(cusparseCreateDnMat(
-            &result_descr,
-            dim_i,
-            dim_k,
-            dim_i,
-            reinterpret_cast<void*>(result_ptr),
-            cuda_data_type,
-            CUSPARSE_ORDER_COL
-          ));
-          size_t required_workspace_buffer_size = 0;
-          TORCH_CUDASPARSE_CHECK(cusparseSpMM_bufferSize(
-            cusparse_handle,
-            CUSPARSE_OPERATION_NON_TRANSPOSE,
-            CUSPARSE_OPERATION_TRANSPOSE,
-            (void*)&alpha_val,
-            sparse_descr,
-            dense_descr,
-            (void*)&beta_val,
-            result_descr,
-            cuda_data_type,
-            mm_alg,
-            &required_workspace_buffer_size
-          ));
-          if (required_workspace_buffer_size > workspace_buffer_size) {
-            workspace_buffer_size = required_workspace_buffer_size;
-            dataPtr = allocator.allocate(workspace_buffer_size);
-            workspace_buffer = dataPtr.get();
-          }
-          TORCH_CUDASPARSE_CHECK(cusparseSpMM(
-            cusparse_handle,
-            CUSPARSE_OPERATION_NON_TRANSPOSE,
-            CUSPARSE_OPERATION_TRANSPOSE,
-            (void*)&alpha_val,
-            sparse_descr,
-            dense_descr,
-            (void*)&beta_val,
-            result_descr,
-            cuda_data_type,
-            mm_alg,
-            workspace_buffer
-          ));
-          TORCH_CUDASPARSE_CHECK(cusparseDestroySpMat(sparse_descr));
-          TORCH_CUDASPARSE_CHECK(cusparseDestroyDnMat(dense_descr));
-          TORCH_CUDASPARSE_CHECK(cusparseDestroyDnMat(result_descr));
-          mat_el_begin_idx = mat_el_end_idx;
-        } else {
-          tmp_result[cur_mat_num].zero_();
+        cusparseSpMatDescr_t sparse_descr;
+        TORCH_CUDASPARSE_CHECK(cusparseCreateCoo(
+          &sparse_descr,
+          dim_i,
+          dim_j,
+          sparse_nnz,
+          row_indices_ptr,
+          col_indices_ptr,
+          values_ptr,
+          CUSPARSE_INDEX_64I,
+          CUSPARSE_INDEX_BASE_ZERO,
+          cuda_data_type
+        ));
+        scalar_t* mat2_ptr = &mat2_start_ptr[dim_k*dim_j*cur_mat_num];
+        cusparseDnMatDescr_t dense_descr;
+        TORCH_CUDASPARSE_CHECK(cusparseCreateDnMat(
+          &dense_descr,
+          dim_j,
+          dim_k,
+          dim_k,
+          mat2_ptr,
+          cuda_data_type,
+          CUSPARSE_ORDER_ROW
+        ));
+        scalar_t* result_ptr = &result_start_ptr[dim_i*dim_k*cur_mat_num];
+        cusparseDnMatDescr_t result_descr;
+        TORCH_CUDASPARSE_CHECK(cusparseCreateDnMat(
+          &result_descr,
+          dim_i,
+          dim_k,
+          dim_k,
+          result_ptr,
+          cuda_data_type,
+          CUSPARSE_ORDER_ROW
+        ));
+        size_t required_workspace_buffer_size = 0;
+        TORCH_CUDASPARSE_CHECK(cusparseSpMM_bufferSize(
+          cusparse_handle,
+          CUSPARSE_OPERATION_NON_TRANSPOSE,
+          CUSPARSE_OPERATION_NON_TRANSPOSE,
+          &alpha_val,
+          sparse_descr,
+          dense_descr,
+          &beta_val,
+          result_descr,
+          cuda_data_type,
+          mm_alg,
+          &required_workspace_buffer_size
+        ));
+        if (required_workspace_buffer_size > workspace_buffer_size) {
+          workspace_buffer_size = required_workspace_buffer_size;
+          dataPtr = allocator.allocate(workspace_buffer_size);
+          workspace_buffer = dataPtr.get();
         }
+        TORCH_CUDASPARSE_CHECK(cusparseSpMM(
+          cusparse_handle,
+          CUSPARSE_OPERATION_NON_TRANSPOSE,
+          CUSPARSE_OPERATION_NON_TRANSPOSE,
+          &alpha_val,
+          sparse_descr,
+          dense_descr,
+          &beta_val,
+          result_descr,
+          cuda_data_type,
+          mm_alg,
+          workspace_buffer
+        ));
+        TORCH_CUDASPARSE_CHECK(cusparseDestroySpMat(sparse_descr));
+        TORCH_CUDASPARSE_CHECK(cusparseDestroyDnMat(dense_descr));
+        TORCH_CUDASPARSE_CHECK(cusparseDestroyDnMat(result_descr));
+        mat_el_begin_idx = mat_el_end_idx;
       }
     }
   );
   if (need_copy_result) {
     result.copy_(tmp_result);
   }
-  // Need to transpose the result matrices since cusparse stores
-  // them in column-major order in memory
-  result.transpose_(1,2);
 
   return result;
 }

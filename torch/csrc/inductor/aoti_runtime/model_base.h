@@ -346,6 +346,7 @@ RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
 
 #elif defined(USE_XPU)
 
+// NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
 RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
   sycl::queue* queue_ptr = nullptr;
   aoti_torch_get_current_sycl_queue((void**)&queue_ptr);
@@ -505,6 +506,9 @@ class AOTInductorModelBase {
       delete *run_finished_;
       run_finished_.reset();
     }
+    if (stream == nullptr) {
+      aoti_torch_get_current_xpu_stream(this->device_idx_, (void**)&stream);
+    }
 #else // !USE_CUDA && !USE_XPU
     run_finished_ = false;
 #endif
@@ -636,6 +640,21 @@ class AOTInductorModelBase {
       size_t data_size = this->constant_data_size(i);
       int32_t const_device_type = this->constant_device_type(i);
       bool device_type_matches = const_device_type == device_type_;
+
+      // Mixed-device constants are only supported when the secondary device is
+      // CPU. If a constant was compiled for a non-CPU device but we're loading
+      // on a different device, we cannot safely create the tensor.
+      AOTI_RUNTIME_CHECK(
+          device_type_matches ||
+              const_device_type == aoti_torch_device_type_cpu(),
+          "Mixed-device constants are only supported when the secondary "
+          "device is CPU. Constant '" +
+              name +
+              "' was compiled for a non-CPU device. "
+              "Hint: This can happen if you compiled on GPU but are loading "
+              "on CPU, which is not supported. In AOTI, you must compile and "
+              "load on the same device type.");
+
       uint8_t* internal_ptr = nullptr;
       if (data_size != 0) {
         if (device_type_matches) {
@@ -644,15 +663,21 @@ class AOTInductorModelBase {
               bytes_read,
               data_size,
               /* skip_copy = */ false);
-          main_blob_idx++;
         } else {
           auto* secondary_cpu_constants_ptr =
               static_cast<uint8_t*>(secondary_cpu_constant_blob_.get());
           internal_ptr = secondary_cpu_constants_ptr +
               secondary_cpu_constants_internal_offset[secondary_cpu_blob_idx];
           memcpy(internal_ptr, _get_constants_start() + bytes_read, data_size);
-          secondary_cpu_blob_idx++;
         }
+      }
+
+      // Always increment blob indices to stay in sync with
+      // compute_constant_blob(), even for zero-size constants.
+      if (device_type_matches) {
+        main_blob_idx++;
+      } else {
+        secondary_cpu_blob_idx++;
       }
 
       bytes_read += data_size;

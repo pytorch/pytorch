@@ -79,6 +79,7 @@ class TCPStoreMasterDaemon : public BackgroundThread {
   void multiSetHandler(int socket);
   void cancelWaitHandler(int socket);
   void listKeysHandler(int socket);
+  void barrierHandler(int socket);
   void addMiscellaneousSocket(int socket);
   void removeMiscellaneousSocket(int socket);
   bool isMiscellaneousSocket(int socket);
@@ -298,6 +299,8 @@ void TCPStoreMasterDaemon::query(int socket) {
     cancelWaitHandler(socket);
   } else if (qt == QueryType::LIST_KEYS) {
     listKeysHandler(socket);
+  } else if (qt == QueryType::BARRIER) {
+    barrierHandler(socket);
   } else {
     TORCH_CHECK(false, "Unexpected query type");
   }
@@ -489,6 +492,34 @@ void TCPStoreMasterDaemon::listKeysHandler(int socket) {
   tcputil::sendValue<size_t>(socket, tcpStore_.size());
   for (const auto& kv : tcpStore_) {
     tcputil::sendString(socket, kv.first);
+  }
+}
+
+void TCPStoreMasterDaemon::barrierHandler(int socket) {
+  std::string key = tcputil::recvString(socket);
+  int64_t worldSize = tcputil::recvValue<int64_t>(socket);
+
+  // Atomically increment the barrier counter
+  auto it = tcpStore_.find(key);
+  int64_t count = 1;
+  if (it != tcpStore_.end()) {
+    auto buf = reinterpret_cast<const char*>(it->second.data());
+    auto len = it->second.size();
+    count = std::stoll(std::string(buf, len)) + 1;
+  }
+  auto countStr = std::to_string(count);
+  tcpStore_[key] = std::vector<uint8_t>(countStr.begin(), countStr.end());
+
+  if (count >= worldSize) {
+    // All workers have arrived, notify this client
+    tcputil::sendValue<WaitResponseType>(
+        socket, WaitResponseType::STOP_WAITING);
+    // Wake up all previously waiting clients
+    wakeupWaitingClients(key);
+  } else {
+    // Register this client to wait for remaining workers
+    waitingSockets_[key].push_back(socket);
+    keysAwaited_[socket] = 1;
   }
 }
 

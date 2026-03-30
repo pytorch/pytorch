@@ -94,6 +94,10 @@ static_assert(
 #define NCCL_HAS_COMM_SHRINK
 #endif
 
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 7)
+#define NCCL_HAS_COMM_OFFLOAD
+#endif
+
 // Macro to throw on a non-successful NCCL return value.
 #define C10D_NCCL_CHECK(cmd, failureReason)                                   \
   do {                                                                        \
@@ -240,7 +244,6 @@ static std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
 };
 
 TORCH_API size_t hashTensors(const std::vector<at::Tensor>& tensors);
-TORCH_API int genNcclSplitColor(const std::vector<int>& ranks);
 TORCH_API std::string getNcclVersion();
 TORCH_API std::tuple<int, int, int> getNcclVersionTuple();
 TORCH_API int getNcclVersionNumber();
@@ -376,6 +379,13 @@ class NCCLComm {
   ncclResult_t deregisterSegment(void* ptr, bool window = false);
 
   std::string repr() const;
+
+  // APIs related to memory offload (require NCCL 2.29.7+ at runtime)
+  void suspend();
+
+  void resume();
+
+  std::unordered_map<std::string, uint64_t> getMemoryStats();
 
   friend class ProcessGroupNCCL;
 

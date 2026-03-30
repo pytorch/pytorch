@@ -56,7 +56,8 @@ def _toposort(edges):
         n = S.pop()
         L.append(n)
         for m in edges.get(n, ()):
-            assert n in incoming_edges[m]
+            if n not in incoming_edges[m]:
+                raise AssertionError(f"Expected {n} in incoming_edges[{m}]")
             incoming_edges[m].remove(n)
             if not incoming_edges[m]:
                 S.add(m)
@@ -66,11 +67,14 @@ def _toposort(edges):
 
 
 def reverse_dict(d):
-    """Reverses direction of dependence dict
+    """Reverses direction of dependence dict.
+
     >>> d = {"a": (1, 2), "b": (2, 3), "c": ()}
     >>> reverse_dict(d)  # doctest: +SKIP
     {1: ('a',), 2: ('a', 'b'), 3: ('b',)}
-    :note: dict order are not deterministic. As we iterate on the
+
+    .. note::
+        dict order are not deterministic. As we iterate on the
         input dict, it make the output of this function depend on the
         dict order. So this function output order should be considered
         as undeterministic.
@@ -78,6 +82,7 @@ def reverse_dict(d):
     result = {}  # type: ignore[var-annotated]
     for key in d:
         for val in d[key]:
+            # pyrefly: ignore [unsupported-operation]
             result[val] = result.get(val, ()) + (key,)
     return result
 

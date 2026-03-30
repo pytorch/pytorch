@@ -95,7 +95,6 @@ bool is_coalesced_sparse(const SparseTensor& self) {
 
 bool is_coalesced_default(const Tensor& self) {
   TORCH_CHECK(false, "is_coalesced expected sparse coordinate tensor layout but got ", self.layout());
-  return false;
 }
 
 int64_t _nnz_sparse(const SparseTensor& self) {
@@ -488,7 +487,7 @@ Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, a
     std::optional<Device> device,
     std::optional<bool> pin_memory,
     std::optional<bool> is_coalesced) {
-  if (at::globalContext().checkSparseTensorInvariants()) {
+  if (at::globalContext().checkSparseTensorInvariants().value_or(false)) {
     at::native::_validate_sparse_coo_tensor_args(indices, values_, size, is_coalesced);
   }
   return at::native::_sparse_coo_tensor_unsafe_symint(indices, values_, c10::fromIntArrayRefSlow(size), dtype, layout, device, pin_memory, is_coalesced);

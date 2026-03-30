@@ -50,47 +50,47 @@ densenet121,pass,0
 
 
 
-detectron2_fasterrcnn_r_101_c4,fail_accuracy,42
+detectron2_fasterrcnn_r_101_c4,fail_accuracy,43
 
 
 
-detectron2_fasterrcnn_r_101_dc5,fail_accuracy,42
+detectron2_fasterrcnn_r_101_dc5,fail_accuracy,43
 
 
 
-detectron2_fasterrcnn_r_101_fpn,fail_accuracy,46
+detectron2_fasterrcnn_r_101_fpn,fail_accuracy,47
 
 
 
-detectron2_fasterrcnn_r_50_c4,fail_accuracy,42
+detectron2_fasterrcnn_r_50_c4,fail_accuracy,43
 
 
 
-detectron2_fasterrcnn_r_50_dc5,fail_accuracy,42
+detectron2_fasterrcnn_r_50_dc5,fail_accuracy,43
 
 
 
-detectron2_fasterrcnn_r_50_fpn,fail_accuracy,46
+detectron2_fasterrcnn_r_50_fpn,fail_accuracy,47
 
 
 
-detectron2_fcos_r_50_fpn,fail_accuracy,26
+detectron2_fcos_r_50_fpn,fail_accuracy,25
 
 
 
-detectron2_maskrcnn_r_101_c4,fail_accuracy,56
+detectron2_maskrcnn_r_101_c4,fail_accuracy,57
 
 
 
-detectron2_maskrcnn_r_101_fpn,fail_accuracy,62
+detectron2_maskrcnn_r_101_fpn,fail_accuracy,63
 
 
 
-detectron2_maskrcnn_r_50_c4,fail_accuracy,56
+detectron2_maskrcnn_r_50_c4,fail_accuracy,57
 
 
 
-detectron2_maskrcnn_r_50_fpn,fail_accuracy,62
+detectron2_maskrcnn_r_50_fpn,fail_accuracy,63
 
 
 
@@ -186,10 +186,6 @@ pyhpc_turbulent_kinetic_energy,pass,0
 
 
 
-pytorch_CycleGAN_and_pix2pix,pass,0
-
-
-
 pytorch_stargan,pass,0
 
 
@@ -246,7 +242,7 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,fail_accuracy,30
+vision_maskrcnn,fail_accuracy,31
 
 
 

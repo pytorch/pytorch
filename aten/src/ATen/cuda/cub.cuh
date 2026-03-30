@@ -213,7 +213,7 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
       scan_op,
       num_items,
       at::cuda::getCurrentCUDAStream());
-  C10_HIP_KERNEL_LAUNCH_CHECK();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 #else
   // non synchronizing cub call
   // even though cub is supposed to support tensors with int_max elements, in reality it doesn't,
@@ -466,7 +466,7 @@ inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
       init_value,
       num_items,
       at::cuda::getCurrentCUDAStream());
-  C10_HIP_KERNEL_LAUNCH_CHECK();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 #else
   // non synchronizing cub call
   // even though cub is supposed to support tensors with int_max elements, in reality it doesn't,

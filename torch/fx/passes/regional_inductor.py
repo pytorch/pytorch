@@ -23,25 +23,6 @@ def _dummy_wrapper(fn):
     return inner
 
 
-def _partition_by_supported_nodes(gm, supported_ops, prefix):
-    from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
-    from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
-
-    partitioner = CapabilityBasedPartitioner(
-        gm, supported_ops, allows_single_node_partition=True
-    )
-
-    candidate_partitions = partitioner.propose_partitions()
-    partitioned_gm = fuse_by_partitions(
-        partitioner.graph_module,
-        [partition.nodes for partition in candidate_partitions],
-        prefix=prefix,
-        always_return_tuple=True,
-    )
-
-    return partitioned_gm
-
-
 def _compile_submod(gm, prefix):
     from torch._inductor.standalone_compile import AOTCompiledArtifact
 
@@ -99,7 +80,10 @@ def _compile_submod(gm, prefix):
                     dynamic_shapes="from_tracing_context",
                     aot=True,
                 )
-            assert isinstance(compiled_fn, AOTCompiledArtifact)
+            if not isinstance(compiled_fn, AOTCompiledArtifact):
+                raise AssertionError(
+                    f"Expected AOTCompiledArtifact, got {type(compiled_fn)}"
+                )
             # _dummy_wrapper is to make call_function happy
             compiled_submod = _dummy_wrapper(compiled_fn)
             with gm.graph.inserting_after(node):
@@ -131,29 +115,37 @@ class _RegionScooper:
 
     @staticmethod
     def scoop_regions(gm):
-        from torch.fx.passes.operator_support import OperatorSupport
+        from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
 
-        found_marked_node = False
+        # Collect contiguous runs of marked nodes (no horizontal fusion).
+        # Each partition maps nodes to None (no partition-id needed).
+        partitions: list[dict[torch.fx.Node, int | None]] = []
+        current_run: dict[torch.fx.Node, int | None] = {}
         for node in gm.graph.nodes:
             if _needs_inductor_compile(node):
-                found_marked_node = True
-                break
+                current_run[node] = None
+            else:
+                if current_run:
+                    partitions.append(current_run)
+                    current_run = {}
+        if current_run:
+            partitions.append(current_run)
 
-        if not found_marked_node:
+        if not partitions:
             logger.info("No inductor marked nodes found")
             return gm
 
-        class InductorMarkedNodes(OperatorSupport):
-            def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
-                return _needs_inductor_compile(node)
-
-        marked_nodes = InductorMarkedNodes()
-        return _partition_by_supported_nodes(
-            gm, marked_nodes, "__marked_inductor_submod"
+        return fuse_by_partitions(
+            gm,
+            partitions,
+            prefix="__marked_inductor_submod",
+            always_return_tuple=True,
         )
 
     @staticmethod
-    def recursively_scoop_regions(gm):
+    def recursively_scoop_regions(gm, _processed=None):
+        if _processed is None:
+            _processed = set()
         for node in gm.graph.find_nodes(op="get_attr"):
             if _needs_inductor_compile(node):
                 # If the get_attr itself is marked for compile, the outer graph will
@@ -161,8 +153,13 @@ class _RegionScooper:
                 # regional inductor compiles that do not work well.
                 continue
             submod = getattr(gm, node.target)
-            if isinstance(submod, torch.fx.GraphModule):
-                _RegionScooper.recursively_scoop_regions(submod)
+            # Track by id: multiple get_attr nodes may reference the same GraphModule
+            if (
+                isinstance(submod, torch.fx.GraphModule)
+                and id(submod) not in _processed
+            ):
+                _processed.add(id(submod))
+                _RegionScooper.recursively_scoop_regions(submod, _processed)
 
         return _RegionScooper.scoop_regions(gm)
 

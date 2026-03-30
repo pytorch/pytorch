@@ -8,6 +8,7 @@
 
 ## PyTorch
 
+agent_space/
 .coverage
 coverage.xml
 .dmypy.json
@@ -127,9 +128,12 @@ torch/test/
 torch/utils/benchmark/utils/valgrind_wrapper/callgrind.h
 torch/utils/benchmark/utils/valgrind_wrapper/valgrind.h
 torch/version.py
-torch/_inductor/kernel/vendored_templates/*
+torch/_inductor/kernel/vendored_templates/cutedsl/kernels/*
+torch/_inductor/kernel/vendored_templates/cutedsl_grouped_gemm.py
 test/inductor/test_tlx*
 minifier_launcher.py
+aten/src/ATen/native/transformers/hip/flash_attn/ck/fav_v3/asm_fmha_v3_bwd_configs.hpp
+aten/src/ATen/native/transformers/hip/flash_attn/ck/fav_v3/mha_bwd.hip
 aten/src/ATen/native/transformers/hip/flash_attn/ck/fmha_fwd_d*
 aten/src/ATen/native/transformers/hip/flash_attn/ck/fmha_bwd_d*
 aten/src/ATen/native/transformers/hip/flash_attn/ck/fmha_bwd_convert*
@@ -245,8 +249,8 @@ docs/source/scripts/lr_scheduler_images/
 
 # build, distribute, and bins (+ python proto bindings)
 build/
-# Allow tools/build/ for build support.
-!tools/build/
+# Allow tools/build/bazel for build support.
+!tools/build/bazel
 build_host_protoc
 build_android
 build_ios

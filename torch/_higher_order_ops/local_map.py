@@ -9,7 +9,7 @@ import contextlib
 import functools
 from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
-from typing import Any, Optional, TypeAlias
+from typing import Any, TypeAlias
 
 import torch
 import torch.utils._pytree as pytree
@@ -17,8 +17,8 @@ from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
     clone_outputs_aliasing_inputs,
     redirect_to_mode,
-    save_tensors_and_symints_for_backward,
-    saved_tensors_and_symints,
+    save_values_for_backward,
+    saved_values,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -49,8 +49,8 @@ def defer_inlining() -> Generator[None, None, None]:
 # Used to unwrap tensors classes like FunctionalTensor and Parameter
 def _new_tensor(
     t: Any,
-    new_shape: Optional[Sequence[int]] = None,
-    new_stride: Optional[Sequence[int]] = None,
+    new_shape: Sequence[int] | None = None,
+    new_stride: Sequence[int] | None = None,
 ) -> Any:
     if isinstance(t, torch.Tensor):
         if type(t) not in (FunctionalTensor, FakeTensor, torch.Tensor):
@@ -113,7 +113,7 @@ def _redistribute(
 
 
 def redistribute_fw_inputs(
-    global_args: Any, all_placements: Any, mesh: Any, _: Optional[int] = None
+    global_args: Any, all_placements: Any, mesh: Any, _: int | None = None
 ) -> GraphArg:
     if len(global_args) != len(all_placements):
         raise AssertionError(
@@ -174,7 +174,7 @@ def redistribute_bw_inputs(
 
 
 def redistribute_bw_outputs(
-    local_outs: Any, all_placements: Any, mesh: Any, _: Optional[int] = None
+    local_outs: Any, all_placements: Any, mesh: Any, _: int | None = None
 ) -> GraphArg:
     if len(local_outs) != len(all_placements):
         raise AssertionError(
@@ -463,7 +463,7 @@ class LocalMapAutogradOp(torch.autograd.Function):
         filtered_grads_idx: set[int],
         *args: Any,
         **kwargs: Any,
-    ) -> tuple[Optional[torch.Tensor], ...]:
+    ) -> tuple[torch.Tensor | None, ...]:
         from torch._functorch._aot_autograd.schemas import MemoryFormatMeta
 
         ctx.bw_gm = bw_gm
@@ -475,17 +475,21 @@ class LocalMapAutogradOp(torch.autograd.Function):
 
         fw_outs = fw_outs_with_saved_activations[:num_fw_outs]
         saved_activations = fw_outs_with_saved_activations[num_fw_outs:]
-        save_tensors_and_symints_for_backward(ctx, saved_activations)
+        save_values_for_backward(ctx, saved_activations)
 
+        # Force memory_format path (not exact size/stride) because local_map forward
+        # operates on local shapes but backward receives global-shaped tangents.
+        # TODO(ivankobzarev): Support exact size/stride by converting between local/global shapes.
         ctx.expected_tangent_metadata = {
-            i: MemoryFormatMeta.from_tensor(fw_outs[i]) for i in filtered_grads_idx
+            i: MemoryFormatMeta.from_tensor(fw_outs[i], force_use_memory_format=True)
+            for i in filtered_grads_idx
         }
         return fw_outs
 
     @staticmethod
     def backward(
         ctx: Any, *_grads: tuple[torch.Tensor]
-    ) -> tuple[Optional[torch.Tensor], ...]:
+    ) -> tuple[torch.Tensor | None, ...]:
         from torch._functorch._aot_autograd.runtime_wrappers import (
             coerce_to_expected_memory_format,
         )
@@ -494,10 +498,8 @@ class LocalMapAutogradOp(torch.autograd.Function):
             raise AssertionError(
                 "Interleaving saved tensor activations and symints is not expected from min-cut partitioner."
             )
-        ctx.pos = list(
-            reversed(ctx.pos)
-        )  # make saved_tensors_and_symints return symints first
-        saved_activations = saved_tensors_and_symints(ctx)
+        ctx.pos = list(reversed(ctx.pos))  # make saved_values return symints first
+        saved_activations = saved_values(ctx)
         with torch._C._AutoDispatchBelowAutograd():
             # Filter out grads that are None or do not require_grad.
             # The AOTAutograd utils we rely on force this assumption.

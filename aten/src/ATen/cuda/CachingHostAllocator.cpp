@@ -3,6 +3,8 @@
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/core/thread_pool.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
+#include <c10/util/Gauge.h>
 
 #include <cuda_runtime_api.h>
 #include <future>
@@ -10,63 +12,29 @@
 namespace at::cuda {
 namespace {
 
-// Note: cudaEventCreate when concurrently invoked from multiple threads can be
-// very expensive (at least on certain device/driver combinations). Thus, we a)
-// serialize event creation at a per-device level, and b) pool the events to
-// avoid constantly calling cudaEventCreate/cudaEventDestroy. This results in
-// significant improvements in multithreaded workloads with high allocation
-// rates.
-class EventPool {
- public:
-  using Event = std::unique_ptr<
-      at::cuda::CUDAEvent,
-      std::function<void(at::cuda::CUDAEvent*)>>;
-  EventPool() : pools_(at::cuda::device_count()) {}
-
-  Event get(DeviceIndex device) {
-    TORCH_INTERNAL_ASSERT(0 <= device);
-    TORCH_INTERNAL_ASSERT(device < static_cast<DeviceIndex>(pools_.size()));
-    auto& pool = pools_[device];
-    auto destructor = [&pool](at::cuda::CUDAEvent* event) {
-      std::lock_guard<std::mutex> g(pool.mutex_);
-      pool.event_pool_.push_back(std::unique_ptr<at::cuda::CUDAEvent>(event));
-    };
-
-    // Try to acquire an event from the per-device pool.
-    {
-      std::lock_guard<std::mutex> g(pool.mutex_);
-      if (!pool.event_pool_.empty()) {
-        auto* event = pool.event_pool_.back().release();
-        pool.event_pool_.pop_back();
-        return Event(event, destructor);
-      }
-    }
-    // otherwise, allocate a new event that will be returned to the pool on
-    // destruction.
-    return Event(
-        std::make_unique<at::cuda::CUDAEvent>(cudaEventDisableTiming).release(),
-        destructor);
-  }
-
-  void empty_cache() {
-    for (auto& pool : pools_) {
-      std::lock_guard<std::mutex> g(pool.mutex_);
-      pool.event_pool_.clear();
-    }
-  }
-
- private:
-  struct PerDevicePool {
-    alignas(64) std::mutex mutex_;
-    std::vector<std::unique_ptr<at::cuda::CUDAEvent>> event_pool_;
-  };
-  std::vector<PerDevicePool> pools_;
-};
-
 using Block = HostBlock<CUDAStream>;
 
 struct CUDACachingHostAllocatorImpl
-    : public CachingHostAllocatorImpl<CUDAStream, EventPool::Event> {
+    : public CachingHostAllocatorImpl<CUDAStream, CUDAEventPool::Event> {
+  void free(void* ctx) override {
+    using Base = CachingHostAllocatorImpl<CUDAStream, CUDAEventPool::Event>;
+    try {
+      Base::free(ctx);
+    } catch (...) {
+      if (!c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
+              pinned_free_catch_all()) {
+        TORCH_WARN("Exception in pinned allocator free(), rethrowing");
+        throw;
+      }
+      // pinned_free_catch_all is enabled: suppress the exception to prevent
+      // it from escaping through ~StorageImpl() (implicitly noexcept), which
+      // would cause std::terminate. Allows graceful shutdown to proceed.
+      STATIC_GAUGE(pytorch.CUDACachingHostAllocator.free_fail_catch_all)
+          .record(1);
+      TORCH_WARN("Suppressed exception in pinned allocator free()");
+    }
+  }
+
  private:
   ska::flat_hash_map<void*, bool> use_host_register;
 
@@ -104,8 +72,12 @@ struct CUDACachingHostAllocatorImpl
       allocWithCudaHostRegister(ptr, size);
     } else {
       // Use cudaHostAlloc for allocating pinned memory (global lock in driver)
-      at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
-      C10_CUDA_CHECK(cudaHostAlloc(ptr, size, cudaHostAllocDefault));
+      if (current_stream_is_capturing_fast_path()) {
+          at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
+          C10_CUDA_CHECK(cudaHostAlloc(ptr, size, cudaHostAllocDefault));
+      } else {
+          C10_CUDA_CHECK(cudaHostAlloc(ptr, size, cudaHostAllocDefault));
+      }
     }
 
     auto end = std::chrono::steady_clock::now();
@@ -163,27 +135,20 @@ struct CUDACachingHostAllocatorImpl
   }
 
   void record_stream(
-      std::optional<std::vector<EventPool::Event>>& events,
+      std::optional<std::vector<CUDAEventPool::Event>>& events,
       CUDAStream stream) override {
     auto event = create_event_internal(stream.device_index());
     event->record(stream);
     events->push_back(std::move(event));
   }
 
-  bool query_event(EventPool::Event& event) override {
-    cudaError_t err = cudaEventQuery(*event);
-    if (err == cudaErrorNotReady) {
-      (void)cudaGetLastError(); // clear CUDA error
-      return false;
-    } else if (err != cudaSuccess) {
-      C10_CUDA_CHECK(err);
-    }
-    return true;
+  bool query_event(CUDAEventPool::Event& event) override {
+    return event->query();
   }
 
-  EventPool::Event create_event_internal(DeviceIndex idx) {
+  CUDAEventPool::Event create_event_internal(DeviceIndex idx) {
     // Leak the event pool to avoid shutdown issue.
-    static auto* event_pool = new EventPool();
+    static auto* event_pool = new CUDAEventPool();
     return event_pool->get(idx);
   }
 
@@ -278,9 +243,12 @@ struct CUDACachingHostAllocatorImpl
     }
 
     // Register the mapped pages using cudaHostRegister
-    at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
-    AT_CUDA_CHECK(
-        cudaHostRegister(*ptr, roundSize, cudaHostRegisterDefault));
+    if (current_stream_is_capturing_fast_path()) {
+      at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
+      AT_CUDA_CHECK(cudaHostRegister(*ptr, roundSize, cudaHostRegisterDefault));
+    } else {
+      AT_CUDA_CHECK(cudaHostRegister(*ptr, roundSize, cudaHostRegisterDefault));
+    }
   }
 
   CUDAStream get_current_stream() const override {
@@ -298,9 +266,8 @@ struct CUDACachingHostAllocatorImpl
   }
 
   bool stream_is_capturing(CUDAStream s) const override {
-    cudaStreamCaptureStatus status{cudaStreamCaptureStatusNone};
-    C10_CUDA_CHECK(cudaStreamIsCapturing(s, &status));
-    return status != cudaStreamCaptureStatusNone;
+    return c10::cuda::isStreamCapturingMayInitCtx(
+        static_cast<cudaStream_t>(s));
   }
 };
 

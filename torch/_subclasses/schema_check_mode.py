@@ -29,7 +29,9 @@ class Aliasing(NamedTuple):
 
 
 # Simplified naming for C++ classes
+# pyrefly: ignore [missing-attribute]
 SchemaArgument = torch._C._SchemaArgument
+# pyrefly: ignore [missing-attribute]
 SchemaArgType = torch._C._SchemaArgType
 SchemaInfo = torch._C._SchemaInfo
 
@@ -124,6 +126,7 @@ class SchemaCheckMode(TorchDispatchMode):
 
         def has_aliased(lhs: Any, rhs: Any) -> bool:
             try:
+                # pyrefly: ignore [missing-attribute]
                 return torch._C._overlaps(lhs, rhs)
             except Exception as exception:
                 if str(exception).startswith("Cannot inspect value of type "):
@@ -186,6 +189,7 @@ class SchemaCheckMode(TorchDispatchMode):
         tuple_out = tree_map(unwrap, tuple_out)
 
         schema_info = SchemaInfo(func._schema)
+        # pyrefly: ignore [missing-attribute]
         schema_info.add_argument_values(pre_arguments)
 
         # Process arguments with outputs
@@ -203,6 +207,7 @@ class SchemaCheckMode(TorchDispatchMode):
                         has_aliased(tuple_out[j], after)
                         and func._schema.name not in unsafe_ops
                     ):
+                        # pyrefly: ignore [missing-attribute]
                         if not schema_info.may_contain_alias(
                             SchemaArgument(SchemaArgType.output, j),
                             SchemaArgument(SchemaArgType.input, i),
@@ -245,6 +250,7 @@ However, we found that `outputs[{str(j)}] is {name}"""
         # Aliasing between outputs
         for i, j in combinations(range(len(func._schema.returns)), 2):
             if has_aliased(tuple_out[i], tuple_out[j]):
+                # pyrefly: ignore [missing-attribute]
                 if not schema_info.may_contain_alias(
                     SchemaArgument(SchemaArgType.output, i),
                     SchemaArgument(SchemaArgType.output, j),

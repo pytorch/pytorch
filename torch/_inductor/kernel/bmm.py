@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 import torch
 from torch._dynamo.utils import counters
@@ -22,6 +22,7 @@ from ..utils import (
     use_ck_gemm_template,
     use_cpp_bmm_template,
     use_cutlass_template,
+    use_nv_universal_gemm_template,
     use_triton_template,
 )
 from ..virtualized import ops, V
@@ -59,7 +60,7 @@ bmm_template = TritonTemplate(
 aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out", op_overload=aten.bmm.out)
 aten_bmm_dtype = ExternKernelChoice(
     torch.bmm,
-    "at::_bmm_out_dtype_xpu" if torch.xpu.is_available() else "at::_bmm_out_dtype_cuda",
+    "at::_bmm_out_dtype_xpu" if torch.xpu._is_compiled() else "at::_bmm_out_dtype_cuda",
     name="bmm_dtype",
     op_overload=aten.bmm.dtype_out,
 )
@@ -171,7 +172,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     choices: list[ChoiceCaller] = []
 
     # Collect all templates for unified call
-    templates_to_use: list[Union[ExternKernelChoice, KernelTemplate]] = []
+    templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
     kwarg_overrides = {}
 
     if use_aten_gemm_kernels():
@@ -201,7 +202,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         and use_cutlass_template(layout, m, n, k)
         and _use_cutlass_for_op(name)
     ):
-        from ..codegen.cuda.gemm_template import CUTLASS3xGemmTemplate
+        from ..codegen.cutlass.gemm_template import CUTLASS3xGemmTemplate
 
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, kernel_inputs.nodes()
@@ -219,7 +220,13 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     if use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, kernel_inputs.nodes())
 
-    return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    if is_nonzero and use_nv_universal_gemm_template(layout, m, n, k, mat1, mat2):
+        from ..codegen.nv_universal_gemm import add_nv_universal_gemm_choices
+
+        add_nv_universal_gemm_choices(choices, layout, kernel_inputs)
+
+    node, _ = autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    return node
 
 
 @L.register_lowering(aten.baddbmm)
@@ -267,7 +274,7 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     choices: list[ChoiceCaller] = []
 
     # Collect all templates for unified call
-    templates_to_use: list[Union[ExternKernelChoice, KernelTemplate]] = []
+    templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
     if use_aten_gemm_kernels():
         templates_to_use.append(aten_baddbmm)
 
@@ -279,4 +286,5 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         V.choices.get_template_configs(kernel_inputs, templates_to_use, name)
     )
 
-    return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    node, _ = autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    return node

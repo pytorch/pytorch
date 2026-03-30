@@ -227,8 +227,6 @@ typedef bool (*HeapComparison)(const HeapBlock*, const HeapBlock*);
 
 struct BufferPool {
   enum class Kind {
-    PRIVATE_SMALL,
-    PRIVATE_LARGE,
     SHARED_SMALL,
     SHARED_LARGE,
     SCALAR,

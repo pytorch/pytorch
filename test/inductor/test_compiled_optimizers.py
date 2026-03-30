@@ -58,18 +58,19 @@ from torch.testing._internal.common_optimizers import (
     optim_db,
     optims,
 )
-from torch.testing._internal.common_utils import parametrize, skipIfWindows
+from torch.testing._internal.common_utils import (
+    parametrize,
+    skipIfRocm,
+    skipIfWindows,
+    skipIfXpu,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
     HAS_GPU,
     has_triton,
 )
-from torch.testing._internal.triton_utils import (
-    requires_cuda_and_triton,
-    requires_gpu,
-    requires_gpu_and_triton,
-)
+from torch.testing._internal.triton_utils import requires_gpu, requires_gpu_and_triton
 
 
 def get_inputs(optim):
@@ -591,7 +592,7 @@ class CompiledOptimizerParityTests(TestCase):
     @optims(optim_db, dtypes=[torch.float32])
     @parametrize("use_closure", [True, False])
     def test_correctness(self, device, dtype, optim_info, use_closure):
-        torch.cuda.manual_seed_all(0)
+        torch.get_device_module(device).manual_seed_all(0)
         torch.manual_seed(0)
         random.seed(0)
         optim_cls = optim_info.optim_cls
@@ -931,7 +932,7 @@ class CompiledOptimizerTests(TestCase):
 
         self.assertLess(end - start, 90)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_S429861(self):
         # Just verify we can compile this function without error
         try:
@@ -947,7 +948,7 @@ class CompiledOptimizerTests(TestCase):
         from torch._inductor.utils import fresh_cache
 
         with fresh_cache():
-            kwargs = aot_graph_input_parser(forward)
+            kwargs = aot_graph_input_parser(forward, device=GPU_TYPE)
             torch.compile(forward)(**kwargs)
 
     @requires_gpu_and_triton
@@ -991,12 +992,166 @@ class CompiledOptimizerTests(TestCase):
             self.assertEqual(param, param_ref)
 
 
+@skipIfRocm(msg="ROCm may have different numerical behavior")
+@requires_gpu_and_triton
+class CompiledOptimizerBitwiseTests(TestCase):
+    """
+    Tests that compiled optimizers produce bitwise identical results to eager
+    when precision configs are enabled.
+
+    These tests verify that with the following config options:
+    - eager_numerics.division_rounding = True
+    - eager_numerics.use_pytorch_libdevice = True
+    - emulate_precision_casts = True
+
+    The compiled optimizer step produces results that are bitwise identical
+    to the eager optimizer step.
+    """
+
+    @staticmethod
+    def _test_optimizer_bitwise(
+        test_case,
+        optim_cls,
+        kernel_count=None,
+        num_steps=10,
+        **optim_kwargs,
+    ):
+        """Helper to test optimizer bitwise equality."""
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        torch.manual_seed(42)
+
+        input = torch.ones([10, 10], device=GPU_TYPE)
+        model_eager = torch.nn.Sequential(
+            *[torch.nn.Linear(10, 10, device=GPU_TYPE) for _ in range(2)]
+        )
+        model_eager(input).sum().backward()
+
+        model_compiled = deepcopy(model_eager)
+        model_compiled(input).sum().backward()
+
+        opt_eager = optim_cls(model_eager.parameters(), **optim_kwargs)
+        opt_compiled = optim_cls(model_compiled.parameters(), **optim_kwargs)
+        compiled_step = compile_opt(opt_compiled)
+
+        with torch.set_grad_enabled(False):
+            for step in range(num_steps):
+                compiled_step()
+                opt_eager.step()
+
+                # Check bitwise equality
+                for i, (p_eager, p_compiled) in enumerate(
+                    zip(model_eager.parameters(), model_compiled.parameters())
+                ):
+                    test_case.assertEqual(
+                        p_eager,
+                        p_compiled,
+                        atol=0,
+                        rtol=0,
+                        msg=f"Step {step + 1}, param {i}: params differ",
+                    )
+
+        # Also check optimizer state
+        for p_eager, p_compiled in zip(
+            model_eager.parameters(), model_compiled.parameters()
+        ):
+            for key in opt_eager.state[p_eager]:
+                eager_val = opt_eager.state[p_eager][key]
+                compiled_val = opt_compiled.state[p_compiled][key]
+                if isinstance(eager_val, torch.Tensor):
+                    test_case.assertEqual(
+                        eager_val,
+                        compiled_val,
+                        atol=0,
+                        rtol=0,
+                        msg=f"State '{key}' differs",
+                    )
+
+        if kernel_count is not None and test_case.check_kernel_count:
+            if isinstance(kernel_count, types.LambdaType):
+                kernel_count(str(torch._inductor.metrics.generated_kernel_count))
+            else:
+                test_case.assertEqual(
+                    torch._inductor.metrics.generated_kernel_count, kernel_count
+                )
+
+
 for optim_cls, name, kwargs, scheduler_cls in COMPILED_OPT_KWARG_DB:
     setattr(
         CompiledOptimizerTests,
         name,
         make_test(optim_cls, scheduler_cls=scheduler_cls, **kwargs),
     )
+
+
+def _make_bitwise_test(optim_cls, kernel_count=None, **optim_kwargs):
+    @skipIfRocm(msg="ROCm may have different numerical behavior")
+    @skipIfXpu(msg="AttributeError, torch-xpu-ops: #2999")
+    @requires_gpu_and_triton
+    @config.patch(
+        {
+            "score_fusion_memory_threshold": 1,
+            "eager_numerics.division_rounding": True,
+            "eager_numerics.use_pytorch_libdevice": True,
+            "emulate_precision_casts": True,
+        }
+    )
+    def test_fn(self):
+        CompiledOptimizerBitwiseTests._test_optimizer_bitwise(
+            self, optim_cls, kernel_count=kernel_count, **optim_kwargs
+        )
+
+    return test_fn
+
+
+_BITWISE_CAPTURABLE_OPTIMS = (
+    Adam,
+    AdamW,
+    Adadelta,
+    Adamax,
+    ASGD,
+    NAdam,
+    RAdam,
+    RMSprop,
+    Rprop,
+)
+# SGD doesn't support capturable but has no item() calls
+# so it compiles without graph breaks and can be tested bitwise.
+_BITWISE_NON_CAPTURABLE_OPTIMS = (SGD,)
+
+for optim_cls, name, kwargs, scheduler_cls in COMPILED_OPT_KWARG_DB:
+    if (
+        kwargs.get("device") == GPU_TYPE
+        and "tensor_lr" not in name
+        and scheduler_cls is None
+        and (
+            (
+                optim_cls in _BITWISE_CAPTURABLE_OPTIMS
+                and kwargs.get("capturable", False)
+            )
+            or optim_cls in _BITWISE_NON_CAPTURABLE_OPTIMS
+        )
+    ):
+        bitwise_name = name.replace("test_", "test_bitwise_")
+        # Use the same kernel count as the non-bitwise test, including
+        # any overrides for specific test configurations.
+        if name in KERNEL_COUNT_OVERRIDES:
+            kernel_count = KERNEL_COUNT_OVERRIDES[name]
+        else:
+            kernel_count = (
+                KERNEL_COUNTS[optim_cls].multitensor
+                if kwargs.get("foreach", False)
+                else KERNEL_COUNTS[optim_cls].singletensor
+            )
+        optim_kwargs = {
+            k: v for k, v in kwargs.items() if k not in ("device", "kernel_count")
+        }
+        setattr(
+            CompiledOptimizerTests,
+            bitwise_name,
+            _make_bitwise_test(optim_cls, kernel_count=kernel_count, **optim_kwargs),
+        )
+
 
 instantiate_device_type_tests(
     CompiledOptimizerParityTests, globals(), allow_xpu=True, except_for="cpu"

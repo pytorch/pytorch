@@ -112,26 +112,9 @@ class C10_CUDA_API CUDAStream {
     return stream_.id();
   }
 
-  bool query() const {
-    DeviceGuard guard{stream_.device()};
-    cudaError_t err = C10_CUDA_ERROR_HANDLED(cudaStreamQuery(stream()));
+  bool query() const;
 
-    if (err == cudaSuccess) {
-      return true;
-    } else if (err != cudaErrorNotReady) {
-      C10_CUDA_CHECK(err);
-    } else {
-      // ignore and clear the error if not ready
-      (void)cudaGetLastError();
-    }
-
-    return false;
-  }
-
-  void synchronize() const {
-    DeviceGuard guard{stream_.device()};
-    c10::cuda::stream_synchronize(stream());
-  }
+  void synchronize() const;
 
   int priority() const {
     DeviceGuard guard{stream_.device()};
@@ -257,6 +240,46 @@ C10_API void setCurrentCUDAStream(CUDAStream stream);
 C10_API std::ostream& operator<<(std::ostream& stream, const CUDAStream& s);
 
 } // namespace c10::cuda
+
+// hipify v2 backward compat in external projects
+#ifdef USE_ROCM
+namespace c10::hip {
+using c10::cuda::getStreamFromExternal;
+using c10::cuda::getStreamFromPool;
+// must use inline wrappers instead of reference aliases due to default args
+inline c10::cuda::CUDAStream getDefaultHIPStream(
+    DeviceIndex device_index = -1) {
+  return c10::cuda::getDefaultCUDAStream(device_index);
+}
+inline c10::cuda::CUDAStream getCurrentHIPStream(
+    DeviceIndex device_index = -1) {
+  return c10::cuda::getCurrentCUDAStream(device_index);
+}
+inline auto& setCurrentHIPStream = c10::cuda::setCurrentCUDAStream;
+inline c10::cuda::CUDAStream getStreamFromPoolMasqueradingAsCUDA(
+    const bool isHighPriority = false,
+    DeviceIndex device = -1) {
+  return c10::cuda::getStreamFromPool(isHighPriority, device);
+}
+inline c10::cuda::CUDAStream getStreamFromPoolMasqueradingAsCUDA(
+    const int priority,
+    DeviceIndex device = -1) {
+  return c10::cuda::getStreamFromPool(priority, device);
+}
+inline auto& getStreamFromExternalMasqueradingAsCUDA =
+    c10::cuda::getStreamFromExternal;
+inline c10::cuda::CUDAStream getDefaultHIPStreamMasqueradingAsCUDA(
+    DeviceIndex device_index = -1) {
+  return c10::cuda::getDefaultCUDAStream(device_index);
+}
+inline c10::cuda::CUDAStream getCurrentHIPStreamMasqueradingAsCUDA(
+    DeviceIndex device_index = -1) {
+  return c10::cuda::getCurrentCUDAStream(device_index);
+}
+inline auto& setCurrentHIPStreamMasqueradingAsCUDA =
+    c10::cuda::setCurrentCUDAStream;
+} // namespace c10::hip
+#endif
 
 namespace std {
 template <>

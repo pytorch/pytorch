@@ -43,7 +43,7 @@ def _handle_torch_function_and_wrap_type_error_to_not_implemented(
             # See https://github.com/pytorch/pytorch/issues/75462
             sargs = self, *args
             if has_torch_function(sargs):
-                return handle_torch_function(wrapped, sargs, *sargs, **kwargs)
+                return handle_torch_function(wrapped, sargs, self, *args, **kwargs)
             return f(self, *args, **kwargs)
         except TypeError:
             return NotImplemented
@@ -900,7 +900,7 @@ class Tensor(torch._C.TensorBase):
         keepdim=False,
         dtype=None,
     ):
-        r"""See :func:`torch.norm`"""
+        r"""See :func:`torch.linalg.norm`"""
         if has_torch_function_unary(self):
             return handle_torch_function(
                 Tensor.norm, (self,), self, p=p, dim=dim, keepdim=keepdim, dtype=dtype
@@ -1294,10 +1294,10 @@ class Tensor(torch._C.TensorBase):
         """
         if has_torch_function_unary(self):
             # TODO mypy doesn't support @property, see: https://github.com/python/mypy/issues/6185
-            return handle_torch_function(
+            return handle_torch_function(  # pyrefly: ignore [bad-argument-count]
                 Tensor.__cuda_array_interface__.__get__,  # type: ignore[attr-defined]
                 (self,),
-                self,
+                self,  # pyrefly: ignore [bad-argument-type]
             )
 
         # raise AttributeError for unsupported tensors, so that

@@ -42,12 +42,10 @@ class LazyGeneratorTest(TestCase):
 
         torch._lazy.mark_step()
 
-        assert torch.allclose(cpu_t1, lazy_t1.to("cpu")), (
-            f"Expected {cpu_t1}, got {lazy_t1.to('cpu')}"
-        )
-        assert torch.allclose(cpu_t2, lazy_t2.to("cpu")), (
-            f"Expected {cpu_t2}, got {lazy_t2.to('cpu')}"
-        )
+        if not torch.allclose(cpu_t1, lazy_t1.to("cpu")):
+            raise AssertionError(f"Expected {cpu_t1}, got {lazy_t1.to('cpu')}")
+        if not torch.allclose(cpu_t2, lazy_t2.to("cpu")):
+            raise AssertionError(f"Expected {cpu_t2}, got {lazy_t2.to('cpu')}")
 
     @skipIfTorchDynamo("Torch Dynamo does not support torch.Generator type")
     def test_generator_causes_multiple_compiles(self):
@@ -69,35 +67,39 @@ class LazyGeneratorTest(TestCase):
             torch._lazy.mark_step()
 
             uncached_compile = metrics.counter_value("UncachedCompile")
-            assert uncached_compile == 1, (
-                f"Expected 1 uncached compiles, got {uncached_compile}"
-            )
+            if uncached_compile != 1:
+                raise AssertionError(
+                    f"Expected 1 uncached compiles, got {uncached_compile}"
+                )
 
             t = generate_tensor(2)
             torch._lazy.mark_step()
 
             uncached_compile = metrics.counter_value("UncachedCompile")
-            assert uncached_compile == 2, (
-                f"Expected 2 uncached compiles, got {uncached_compile}"
-            )
+            if uncached_compile != 2:
+                raise AssertionError(
+                    f"Expected 2 uncached compiles, got {uncached_compile}"
+                )
 
             t = generate_tensor(1)  # noqa: F841
             torch._lazy.mark_step()
 
             uncached_compile = metrics.counter_value("UncachedCompile")
-            assert uncached_compile == 2, (
-                f"Expected 2 uncached compiles, got {uncached_compile}"
-            )
+            if uncached_compile != 2:
+                raise AssertionError(
+                    f"Expected 2 uncached compiles, got {uncached_compile}"
+                )
             cached_compile = metrics.counter_value("CachedCompile")
-            assert cached_compile == 1, (
-                f"Expected 1 cached compile, got {cached_compile}"
-            )
+            if cached_compile != 1:
+                raise AssertionError(f"Expected 1 cached compile, got {cached_compile}")
 
         metrics.reset()
 
         latest_graph = torch._C._lazy_ts_backend._get_latest_computation_graph()
-        assert 'torch.Generator(device="cpu", seed=1)' in latest_graph
-        assert "aten::uniform" in latest_graph
+        if 'torch.Generator(device="cpu", seed=1)' not in latest_graph:
+            raise AssertionError("Expected generator in graph")
+        if "aten::uniform" not in latest_graph:
+            raise AssertionError("Expected aten::uniform in graph")
 
 
 if __name__ == "__main__":

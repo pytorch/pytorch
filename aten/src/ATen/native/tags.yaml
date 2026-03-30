@@ -97,3 +97,9 @@
   desc: |
           This tag indicates that an operator performs a reduction operation, computing aggregate values
           (sum, mean, max, min, etc.) across one or more dimensions of the input tensor(s).
+- tag: out_variant
+  desc: |
+          This tag indicates that the operator is an out variant of a functional
+          operator. This tag only applies to custom ops. Out variant operators
+          write their results to pre-allocated output tensors (the out args)
+          rather than allocating new tensors.

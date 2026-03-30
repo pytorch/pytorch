@@ -78,7 +78,8 @@ class TestExtendedCUDAIsAvail(TestCase):
                     in_bad_fork, TestExtendedCUDAIsAvail.SUBPROCESS_REMINDER_MSG
                 )
             else:
-                assert in_bad_fork
+                if not in_bad_fork:
+                    raise AssertionError("expected in_bad_fork to be True")
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest

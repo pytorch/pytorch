@@ -7,7 +7,7 @@ import sys
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from types import MethodType
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import pytest
 from _pytest.config import Config, filename_arg
@@ -144,7 +144,10 @@ class _NodeReporterReruns(_NodeReporter):
             # Super here instead of the actual code so we can reduce possible divergence
             super().append_skipped(report)
         else:
-            assert isinstance(report.longrepr, tuple)
+            if not isinstance(report.longrepr, tuple):
+                raise AssertionError(
+                    f"Expected report.longrepr to be tuple, got {type(report.longrepr)}"
+                )
             filename, lineno, skipreason = report.longrepr
             skipreason = skipreason.removeprefix("Skipped: ")
             details = f"{filename}:{lineno}: {skipreason}"
@@ -165,8 +168,9 @@ class LogXMLReruns(LogXML):
         if hasattr(report, "wasxfail"):
             reporter._add_simple("skipped", "xfail-marked test passes unexpectedly")
         else:
-            assert report.longrepr is not None
-            reprcrash: Optional[ReprFileLocation] = getattr(
+            if report.longrepr is None:
+                raise AssertionError("Expected report.longrepr to not be None")
+            reprcrash: ReprFileLocation | None = getattr(
                 report.longrepr, "reprcrash", None
             )
             if reprcrash is not None:
@@ -187,8 +191,8 @@ class LogXMLReruns(LogXML):
                 reason = f"{report.nodeid}: {_get_raw_skip_reason(report)}"
                 report.longrepr = (fspath, lineno, reason)
 
-    def node_reporter(self, report: Union[TestReport, str]) -> _NodeReporterReruns:
-        nodeid: Union[str, TestReport] = getattr(report, "nodeid", report)
+    def node_reporter(self, report: TestReport | str) -> _NodeReporterReruns:
+        nodeid: str | TestReport = getattr(report, "nodeid", report)
         # Local hack to handle xdist report order.
         workernode = getattr(report, "node", None)
 
@@ -306,11 +310,12 @@ class StepcurrentPlugin:
     def __init__(self, config: Config) -> None:
         self.config = config
         self.report_status = ""
-        assert config.cache is not None
+        if config.cache is None:
+            raise AssertionError("Expected config.cache to not be None")
         self.cache: pytest.Cache = config.cache
         directory = f"{STEPCURRENT_CACHE_DIR}/{config.getoption('stepcurrent')}"
         self.lastrun_location = f"{directory}/lastrun"
-        self.lastrun: Optional[str] = self.cache.get(self.lastrun_location, None)
+        self.lastrun: str | None = self.cache.get(self.lastrun_location, None)
         self.initial_val = self.lastrun
         self.skip: bool = config.getoption("stepcurrent_skip")
         self.run_single: bool = config.getoption("run_single")
@@ -346,7 +351,7 @@ class StepcurrentPlugin:
                 del items[1:]
             config.hook.pytest_deselected(items=deselected)
 
-    def pytest_report_collectionfinish(self) -> Optional[str]:
+    def pytest_report_collectionfinish(self) -> str | None:
         if self.config.getoption("verbose") >= 0 and self.report_status:
             return f"stepcurrent: {self.report_status}"
         return None

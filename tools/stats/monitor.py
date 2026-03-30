@@ -459,6 +459,7 @@ class UsageLogger:
                 self._gpu_lib_detected = "amdsmi"
                 self._gpu_handles = amdsmi.amdsmi_get_processor_handles()
 
+            # pyrefly: ignore[bad-assignment]
             self._num_of_cpus = psutil.cpu_count(logical=True)
             # update summary info
             self._metadata.gpu_count = len(self._gpu_handles)

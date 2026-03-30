@@ -29,7 +29,7 @@ except ImportError:
 #
 # to globally disable CuDNN/MIOpen
 
-__cudnn_version: Optional[int] = None
+__cudnn_version: int | None = None
 
 if _cudnn is not None:
 
@@ -246,4 +246,5 @@ enabled: bool
 deterministic: bool
 benchmark: bool
 allow_tf32: bool
+fp32_precision: str
 benchmark_limit: int

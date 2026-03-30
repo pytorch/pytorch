@@ -13,7 +13,7 @@
 #include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/CUDABlas.h>
-#include <ATen/cuda/CUDAScaledBlas.h>
+#include <ATen/native/ScaledBlasUtils.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <ATen/cuda/tunable/TunableGemm.h>
 #include <ATen/native/Resize.h>
@@ -61,14 +61,36 @@
 using at::blas::ScalingType;
 using at::blas::SwizzleType;
 
-namespace scaled_blas = at::cuda::scaled;
+namespace scaled_blas = at::native::scaled;
 using scaled_blas::ScaledGemmImplementation;
 using scaled_blas::convert_int_to_enum;
-using scaled_blas::_scaled_mm_allowed_device;
 
 namespace at::native {
 
 namespace {
+
+bool _scaled_mm_allowed_device(bool sm90_only=false, bool sm100_only=false) {
+#ifdef USE_ROCM
+  static const std::vector<std::string> archs = {
+    "gfx942",
+#if ROCM_VERSION >= 60300
+    "gfx1200", "gfx1201",
+#endif
+#if ROCM_VERSION >= 60500
+    "gfx950"
+#endif
+};
+  return at::detail::getCUDAHooks().isGPUArch(archs);
+#else
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+
+  if (sm90_only || sm100_only) {
+    return (sm90_only && dprops->major == 9) || (sm100_only && dprops->major == 10);
+  } else {
+    return dprops->major >= 9 || (dprops->major == 8 && dprops->minor == 9);
+  }
+#endif
+}
 
 // 2d-2d and 2d-3d
 // scaling=MXFP8
@@ -110,10 +132,10 @@ _mx8_mx8_bf16_grouped_mm_mslk(
         scale_b,
         offs.value(),
         out);
+    return out;
 #else
     TORCH_CHECK_NOT_IMPLEMENTED(false, "mxfp8_mxfp8 grouped gemm requires compile with USE_MSLK");
 #endif
-    return out;
 }
 
 // 2d-2d and 2d-3d cases
@@ -130,7 +152,7 @@ _f8_f8_bf16_rowwise_grouped_mm_cuda(
           const bool use_fast_accum,
           Tensor& out) {
   TORCH_CHECK_VALUE(mat_a.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_a.scalar_type());
-  TORCH_CHECK_VALUE(mat_b.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_b.scalar_type());
+  TORCH_CHECK_VALUE(mat_b.dtype() == at::kFloat8_e4m3fn, "Expected mat_b to be Float8_e4m3 matrix got ", mat_b.scalar_type());
 
   at::cuda::detail::f8f8bf16_grouped_mm(
       mat_a,
@@ -147,6 +169,7 @@ _f8_f8_bf16_rowwise_grouped_mm_cuda(
 // 2d-2d and 2d-3d cases
 // scaling=rowwise
 // only being called for rocm
+#ifdef USE_ROCM
 Tensor&
 _f8_f8_bf16_rowwise_grouped_mm_rocm(
       const Tensor& mat_a,
@@ -155,8 +178,15 @@ _f8_f8_bf16_rowwise_grouped_mm_rocm(
       const Tensor& scale_b,
       const std::optional<Tensor>& offs,
       Tensor& out) {
-  TORCH_CHECK_VALUE(mat_a.dtype() == at::kFloat8_e4m3fnuz, "Expected mat_a to be Float8_e4m3fnuz matrix got ", mat_a.scalar_type());
-  TORCH_CHECK_VALUE(mat_b.dtype() == at::kFloat8_e4m3fnuz, "Expected mat_a to be Float8_e4m3fnuz matrix got ", mat_b.scalar_type());
+  bool is_gfx942 = at::detail::getCUDAHooks().isGPUArch({"gfx942"});
+
+  if (is_gfx942) {
+    TORCH_CHECK_VALUE(mat_a.dtype() == at::kFloat8_e4m3fnuz, "Expected mat_a to be Float8_e4m3fnuz matrix got ", mat_a.scalar_type());
+    TORCH_CHECK_VALUE(mat_b.dtype() == at::kFloat8_e4m3fnuz, "Expected mat_b to be Float8_e4m3fnuz matrix got ", mat_b.scalar_type());
+  } else {
+    TORCH_CHECK_VALUE(mat_a.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_a.scalar_type());
+    TORCH_CHECK_VALUE(mat_b.dtype() == at::kFloat8_e4m3fn, "Expected mat_b to be Float8_e4m3 matrix got ", mat_b.scalar_type());
+  }
 
 #if defined(USE_MSLK) && defined(USE_ROCM)
   mslk::gemm::f8f8bf16_rowwise_grouped_mm(
@@ -167,12 +197,13 @@ _f8_f8_bf16_rowwise_grouped_mm_rocm(
       scale_b,
       offs,
       out);
+  return out;
 #else
   TORCH_CHECK_NOT_IMPLEMENTED(false, "grouped gemm is not supported without USE_MSLK on ROCM")
 #endif
-  return out;
 
 }
+#endif // USE_ROCM
 
 // Dispatch f8 x f8 -> bf16 row-wise scaled to rocm/cuda
 Tensor&
@@ -260,11 +291,11 @@ _f4_f4_bf16_grouped_mm_mslk(
       out,
       combined_global_scale
   );
+
+  return out;
 #else
   TORCH_CHECK_NOT_IMPLEMENTED(false, "nvfp4 grouped gemm is not supported without USE_MSLK, and only for CUDA")
 #endif
-
-  return out;
 }
 
 void _check_scales_fp8_rowwise(const Tensor& mat, const Tensor& scale, const int dim, const int arg_idx, const int scale_multiplier=1) {

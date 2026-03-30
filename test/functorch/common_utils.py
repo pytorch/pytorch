@@ -31,7 +31,8 @@ def loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values):
     for idx in range(batch_size):
         flat_args, args_spec = pytree.tree_flatten(batched_args)
         flat_dims, dims_spec = pytree.tree_flatten(in_dims)
-        assert args_spec == dims_spec
+        if args_spec != dims_spec:
+            raise AssertionError(f"args_spec {args_spec} != dims_spec {dims_spec}")
         new_args = [
             a.select(in_dim, idx) if in_dim is not None else a
             for a, in_dim in zip(flat_args, flat_dims)
@@ -80,9 +81,14 @@ def loop2(
     flat_args, args_spec = pytree.tree_flatten(batched_args)
     flat_dims1, dims_spec1 = pytree.tree_flatten(in_dims1)
     flat_dims2, dims_spec2 = pytree.tree_flatten(in_dims2)
-    assert args_spec == dims_spec1
-    assert args_spec == dims_spec2
-    assert len(flat_dims1) == len(flat_dims2)
+    if args_spec != dims_spec1:
+        raise AssertionError(f"args_spec {args_spec} != dims_spec1 {dims_spec1}")
+    if args_spec != dims_spec2:
+        raise AssertionError(f"args_spec {args_spec} != dims_spec2 {dims_spec2}")
+    if len(flat_dims1) != len(flat_dims2):
+        raise AssertionError(
+            f"len(flat_dims1) {len(flat_dims1)} != len(flat_dims2) {len(flat_dims2)}"
+        )
     for idx1 in range(batch_size1):
         out_split = []
         arg_split = [
@@ -162,7 +168,10 @@ def get_bdim_choices(num_tensors):
     options = (-1, None)
     choices.extend(itertools.product(options, repeat=num_tensors))
 
-    assert choices[-1] == (None,) * num_tensors
+    if choices[-1] != (None,) * num_tensors:
+        raise AssertionError(
+            f"Expected choices[-1] to be {(None,) * num_tensors}, got {choices[-1]}"
+        )
     return tuple(choices[:-1])
 
 
@@ -193,13 +202,18 @@ def get_bdim_choices_batch_norm(
                 continue
             choices.append(choice)
 
-    assert choices[-1] == (None,) * num_tensors
+    if choices[-1] != (None,) * num_tensors:
+        raise AssertionError(
+            f"Expected choices[-1] to be {(None,) * num_tensors}, got {choices[-1]}"
+        )
     return tuple(choices[:-1])
 
 
 def add_batch_dim(arg, bdim, batch_size=3):
-    assert bdim == 0 or bdim == -1
-    assert isinstance(arg, torch.Tensor)
+    if bdim != 0 and bdim != -1:
+        raise AssertionError(f"Expected bdim to be 0 or -1, got {bdim}")
+    if not isinstance(arg, torch.Tensor):
+        raise AssertionError(f"Expected arg to be a torch.Tensor, got {type(arg)}")
     if bdim == 0:
         shape = [1] * len(arg.shape)
         shape.insert(bdim, batch_size)
@@ -238,7 +252,10 @@ def is_batch_norm_training(op_name, kwarg_values):
     if len(is_training) == 0:
         return default_training
     else:
-        assert len(is_training) == 1
+        if len(is_training) != 1:
+            raise AssertionError(
+                f"Expected len(is_training) to be 1, got {len(is_training)}"
+            )
         return is_training[0]
 
 
@@ -260,8 +277,10 @@ def generate_vmap_inputs(
 
     @memoize
     def get_batched_arg(arg, bdim):
-        assert isinstance(arg, torch.Tensor)
-        assert bdim is not None
+        if not isinstance(arg, torch.Tensor):
+            raise AssertionError(f"Expected arg to be a torch.Tensor, got {type(arg)}")
+        if bdim is None:
+            raise AssertionError("Expected bdim to not be None")
         result, _ = add_batch_dim(arg, bdim, batch_size)
         return result
 
@@ -405,7 +424,10 @@ def get_fallback_and_vmap_exhaustive(
             batch_size,
             compute_loop_out=False,
         ):
-            assert quantities[1] is None
+            if quantities[1] is not None:
+                raise AssertionError(
+                    f"Expected quantities[1] to be None, got {quantities[1]}"
+                )
             yield (quantities[0], expected_batched)
             yield (quantities[2], quantities[3])
 
@@ -429,7 +451,8 @@ DecorateMeta = namedtuple(
 def decorate(
     op_name, variant_name="", *, decorator=None, device_type=None, dtypes=None
 ):
-    assert decorator is not None
+    if decorator is None:
+        raise AssertionError("decorator must not be None")
     return DecorateMeta(
         op_name=op_name,
         variant_name=variant_name,
@@ -489,11 +512,13 @@ def skipOps(test_case_name, base_test_name, to_skip):
             if o.name == decorate_meta.op_name
             and o.variant_test_name == decorate_meta.variant_name
         ]
-        assert len(matching_opinfos) > 0, f"Couldn't find OpInfo for {decorate_meta}"
-        assert len(matching_opinfos) == 1, (
-            "OpInfos should be uniquely determined by their (name, variant_name). "
-            f"Got more than one result for ({decorate_meta.op_name}, {decorate_meta.variant_name})"
-        )
+        if len(matching_opinfos) == 0:
+            raise AssertionError(f"Couldn't find OpInfo for {decorate_meta}")
+        if len(matching_opinfos) != 1:
+            raise AssertionError(
+                "OpInfos should be uniquely determined by their (name, variant_name). "
+                f"Got more than one result for ({decorate_meta.op_name}, {decorate_meta.variant_name})"
+            )
         opinfo = matching_opinfos[0]
         decorators = list(opinfo.decorators)
         new_decorator = DecorateInfo(
@@ -523,15 +548,17 @@ def decorateForModules(decorator, module_classes, device_type=None, dtypes=None)
         dtypes=dtypes,
     ):
         name_parts = fn.__qualname__.split(".")
-        assert len(name_parts) == 2, (
-            "Decorator only applies to a test function of a test class"
-        )
+        if len(name_parts) != 2:
+            raise AssertionError(
+                "Decorator only applies to a test function of a test class"
+            )
         test_case_name, base_test_name = name_parts
         for module_cls in module_classes:
             matching_module_infos = [m for m in module_db if m.module_cls == module_cls]
-            assert len(matching_module_infos) == 1, (
-                f"Couldn't find single ModuleInfo for {module_cls}"
-            )
+            if len(matching_module_infos) != 1:
+                raise AssertionError(
+                    f"Couldn't find single ModuleInfo for {module_cls}"
+                )
             module_info = matching_module_infos[0]
             decorators = list(module_info.decorators)
             new_decorator = DecorateInfo(
@@ -574,7 +601,8 @@ def opsToleranceOverride(test_case_name, base_test_name, overrides):
             for o in all_opinfos
             if o.name == op_name and o.variant_test_name == variant_name
         ]
-        assert len(matching_opinfos) == 1, f"Couldn't find OpInfo for {override}"
+        if len(matching_opinfos) != 1:
+            raise AssertionError(f"Couldn't find OpInfo for {override}")
         opinfo = matching_opinfos[0]
         decorators = list(opinfo.decorators)
         decorators.append(

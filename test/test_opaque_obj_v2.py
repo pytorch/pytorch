@@ -1,35 +1,45 @@
 # Owner(s): ["module: custom-operators"]
 
+import contextlib
 import gc
 import random
+import unittest
 from contextlib import ExitStack
 from dataclasses import dataclass
-from typing import Optional
 
 import torch
+import torch.distributed as dist
 import torch.utils._pytree as pytree
-from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
     CompileCounter,
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
+    InductorAndRecordGraphs,
     normalize_gm,
 )
-from torch._dynamo.utils import counters as dynamo_counters
+from torch._dynamo.utils import counters, counters as dynamo_counters
+from torch._functorch import config as functorch_config
 from torch._functorch.aot_autograd import (
     aot_compile_joint_with_descriptors,
     aot_export_joint_with_descriptors,
     aot_export_module,
 )
+from torch._inductor import config as inductor_config
+from torch._inductor.compile_fx import compile_fx, compile_fx_inner
+from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch._library.effects import EffectType
-from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
 from torch._library.opaque_object import (
     _OPAQUE_TYPES,
+    _OPAQUE_TYPES_BY_NAME,
     get_opaque_type_name,
     is_opaque_type,
     is_opaque_value_type,
     MemberType,
+    OpaqueBase,
     register_opaque_type,
 )
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -40,9 +50,60 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+from torch.testing._internal.inductor_utils import HAS_GPU
 
 
-class OpaqueQueue:
+class Color(OpaqueBase):
+    """Simulates a pybind11-style enum where class attributes are instances of the class."""
+
+    def __init__(self, name: str, value: int) -> None:
+        self._name = name
+        self._value = value
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def value(self) -> int:
+        return self._value
+
+    def __float__(self) -> float:
+        return float(self._value)
+
+    @staticmethod
+    def RED_STATIC() -> "Color":
+        return Color.RED
+
+
+Color.RED = Color("RED", 1)
+Color.GREEN = Color("GREEN", 2)
+Color.BLUE = Color("BLUE", 3)
+Color.DEFAULT_SCALE = 1.5  # Literal class attribute for testing inlining
+
+
+class CustomDescriptor:
+    def __get__(self, obj, objtype=None):
+        return 42
+
+
+# Create a class with an unsupported descriptor
+class ColorWithDescriptor(OpaqueBase):
+    def __init__(self, name: str, value: int) -> None:
+        self._name = name
+        self._value = value
+
+    def __float__(self) -> float:
+        return float(self._value)
+
+    # This is an unsupported descriptor type
+    custom_prop = CustomDescriptor()
+
+
+ColorWithDescriptor.RED = ColorWithDescriptor("RED", 1)
+
+
+class OpaqueQueue(OpaqueBase):
     def __init__(self, queue: list[torch.Tensor], init_tensor_: torch.Tensor) -> None:
         super().__init__()
         self.queue = queue
@@ -68,7 +129,7 @@ class OpaqueQueue:
         return len(self.queue)
 
 
-class NestedQueue:
+class NestedQueue(OpaqueBase):
     def __init__(self, q):
         self.q = q
 
@@ -79,7 +140,7 @@ class NestedQueue:
         return torch.ops._TestOpaqueObject.queue_pop(self.q)
 
 
-class RNGState:
+class RNGState(OpaqueBase):
     def __init__(self, seed):
         self.seed = seed
         self.rng = random.Random(self.seed)
@@ -92,7 +153,14 @@ class RNGState:
         return torch.ops._TestOpaqueObject.noisy_inject(x, self)
 
 
-class Counter:
+class OpaqueMultiplier(OpaqueBase):
+    """Opaque object that holds a multiplier value for backward tests."""
+
+    def __init__(self, multiplier: float):
+        self.multiplier = multiplier
+
+
+class Counter(OpaqueBase):
     def __init__(self, start, end):
         self.start = start
         self.end = end
@@ -107,6 +175,9 @@ class Counter:
     def __hash__(self):
         return hash((self.start, self.end))
 
+    def get_start_tensor(self):
+        return torch.scalar_tensor(self.start, dtype=torch.int64)
+
     @property
     def counter(self):
         return torch.scalar_tensor(self.start, dtype=torch.int64)
@@ -115,9 +186,14 @@ class Counter:
         self.start += 1
 
 
-class NestedCounters:
+class NestedCounters(OpaqueBase):
     def __init__(self, c):
         self.c = c
+
+    def __eq__(self, other):
+        if not isinstance(other, NestedCounters):
+            return False
+        return self.c == other.c
 
     def get_c(self):
         return self.c
@@ -128,13 +204,18 @@ class NestedCounters:
         else:
             return self.c.start
 
+    def __getitem__(self, idx):
+        counter = self.c[idx]
+        # Create a new counter to match device mesh's __getitem__
+        return Counter(counter.start, counter.end)
 
-class AddModule(torch.nn.Module):
+
+class AddModule(OpaqueBase, torch.nn.Module):
     def forward(self, x, y):
         return x * y
 
 
-class ValueConfig:
+class ValueConfig(OpaqueBase):
     def __init__(self, mode: str):
         self.mode = mode
 
@@ -151,12 +232,12 @@ class ValueConfig:
         print(self.mode)
 
 
-class SizeStore:
+class SizeStore(OpaqueBase):
     def __init__(self, size: int):
         self.size = size
 
     def __eq__(self, other):
-        return isinstance(other, ValueConfig) and self.size == other.size
+        return isinstance(other, SizeStore) and self.size == other.size
 
     def __hash__(self):
         return hash(self.size)
@@ -169,7 +250,7 @@ class SizeStore:
         return self.size + 1
 
 
-class NestedValueSize:
+class NestedValueSize(OpaqueBase):
     def __init__(self, size: SizeStore, config: ValueConfig):
         self.size = size
         self.config = config
@@ -194,6 +275,37 @@ class NestedValueSize:
         return repr_str, all_globals
 
 
+class HoistedString(torch._opaque_base.OpaqueBase):
+    def __init__(self, val):
+        self.val = val
+
+    def __eq__(self, other):
+        return self.val == other.val
+
+    def __hash__(self):
+        return hash(self.val)
+
+    def __fx_repr__(self):
+        return (f"HoistedString('{self.val}')", {"HoistedString": HoistedString})
+
+
+register_opaque_type(HoistedString, typ="value", hoist=True)
+
+
+@torch.library.custom_op("mylib::op_with_string", mutates_args=())
+def op_with_string(x: torch.Tensor, s: HoistedString) -> torch.Tensor:
+    if s.val == "double":
+        return x * 2
+    elif s.val == "square":
+        return x**2
+    raise AssertionError("expected double or square")
+
+
+@op_with_string.register_fake
+def _(x, s):
+    return torch.empty_like(x)
+
+
 register_opaque_type(OpaqueQueue, typ="reference")
 register_opaque_type(
     RNGState,
@@ -209,7 +321,7 @@ register_opaque_type(
     Counter,
     typ="reference",
     guard_fn=lambda obj: [obj.start],
-    members={"start": MemberType.USE_REAL},
+    members={"start": MemberType.USE_REAL, "get_start_tensor": MemberType.INLINED},
 )
 register_opaque_type(
     NestedCounters,
@@ -218,6 +330,7 @@ register_opaque_type(
         "c": MemberType.USE_REAL,
         "get_c": MemberType.USE_REAL,
         "get_starts": MemberType.INLINED,
+        "__getitem__": MemberType.INLINED,
     },
 )
 register_opaque_type(
@@ -231,25 +344,27 @@ register_opaque_type(
 )
 register_opaque_type(AddModule, typ="reference")
 register_opaque_type(ValueConfig, typ="value")
-register_opaque_type(
-    SizeStore,
-    typ="value",
-    members={"size": MemberType.USE_REAL, "increment_size": MemberType.USE_REAL},
-)
+register_opaque_type(SizeStore, typ="value")
 register_opaque_type(NestedValueSize, typ="value")
+register_opaque_type(OpaqueMultiplier, typ="reference")
+register_opaque_type(Color, typ="reference")
+register_opaque_type(ColorWithDescriptor, typ="reference")
 
 
 # A tensor subclass (similar to TwoTensor) that also holds an opaque Counter
 # object
 class TensorWithCounter(torch.Tensor):
     @staticmethod
-    def __new__(cls, a, b, counter, outer_size=None, outer_stride=None):
+    def __new__(cls, a, b, counter, size_store, outer_size=None, outer_stride=None):
         if outer_size is None:
             outer_size = a.size()
         if outer_stride is None:
             outer_stride = a.stride()
 
-        assert a.device == b.device and a.dtype == b.dtype
+        if not (a.device == b.device and a.dtype == b.dtype):
+            raise AssertionError(
+                f"device/dtype mismatch: {a.device}/{a.dtype} vs {b.device}/{b.dtype}"
+            )
         kwargs = {}
         kwargs["strides"] = outer_stride
         kwargs["storage_offset"] = a.storage_offset()
@@ -260,22 +375,24 @@ class TensorWithCounter(torch.Tensor):
         out = torch.Tensor._make_wrapper_subclass(cls, outer_size, **kwargs)
         return out
 
-    def __init__(self, a, b, counter, outer_size=None, outer_stride=None):
+    def __init__(self, a, b, counter, size_store, outer_size=None, outer_stride=None):
         self.a = a
         self.b = b
         self._counter = counter
+        self._size_store = size_store
 
     def __repr__(self):
-        return f"TensorWithCounter({self.a}, {self.b}, {self._counter})"
+        return f"TensorWithCounter({self.a}, {self.b}, {self._counter}, {self._size_store})"
 
     def __tensor_flatten__(self):
-        return ["a", "b"], self._counter
+        return ["a", "b", "_counter"], (self._size_store,)
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, ctx, outer_size, outer_stride):
         a, b = inner_tensors["a"], inner_tensors["b"]
-        counter = ctx
-        return TensorWithCounter(a, b, counter, outer_size, outer_stride)
+        counter = inner_tensors["_counter"]
+        (size_store,) = ctx
+        return TensorWithCounter(a, b, counter, size_store, outer_size, outer_stride)
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs):
@@ -285,30 +402,43 @@ class TensorWithCounter(torch.Tensor):
         def unwrap(x):
             return x.a if isinstance(x, TensorWithCounter) else x
 
-        def wrap(x, counter):
+        def wrap(x, counter, size_store):
             return (
-                TensorWithCounter(x, x.clone(), counter)
+                TensorWithCounter(x, x.clone(), counter, size_store)
                 if isinstance(x, torch.Tensor)
                 else x
             )
 
         # Get counter from first TensorWithCounter arg
         counter = None
+        size_store = None
         for arg in torch.utils._pytree.tree_leaves(args):
             if isinstance(arg, TensorWithCounter):
                 counter = arg._counter
+                size_store = arg._size_store
                 break
 
         unwrapped_args = torch.utils._pytree.tree_map(unwrap, args)
         unwrapped_kwargs = torch.utils._pytree.tree_map(unwrap, kwargs)
 
         out = func(*unwrapped_args, **unwrapped_kwargs)
-        return torch.utils._pytree.tree_map(lambda x: wrap(x, counter), out)
+        return torch.utils._pytree.tree_map(lambda x: wrap(x, counter, size_store), out)
+
+    @property
+    def size_store(self):
+        return self._size_store
+
+    def get_size_store(self):
+        return self._size_store
+
+    def get_counter(self):
+        return self._counter
 
 
 class TestOpaqueObject(TestCase):
     def setUp(self):
         self.lib = torch.library.Library("_TestOpaqueObject", "FRAGMENT")  # noqa: TOR901
+        self._opaque_types_before_test = set(_OPAQUE_TYPES_BY_NAME.keys())
 
         torch.library.define(
             "_TestOpaqueObject::queue_push",
@@ -321,7 +451,8 @@ class TestOpaqueObject(TestCase):
             "_TestOpaqueObject::queue_push", "CompositeExplicitAutograd", lib=self.lib
         )
         def push_impl(queue: OpaqueQueue, b: torch.Tensor) -> None:
-            assert isinstance(queue, OpaqueQueue)
+            if not isinstance(queue, OpaqueQueue):
+                raise AssertionError(f"expected OpaqueQueue, got {type(queue)}")
             queue.push(b)
 
         @torch.library.register_fake("_TestOpaqueObject::queue_push", lib=self.lib)
@@ -337,7 +468,8 @@ class TestOpaqueObject(TestCase):
         )
 
         def pop_impl(queue: OpaqueQueue) -> torch.Tensor:
-            assert isinstance(queue, OpaqueQueue)
+            if not isinstance(queue, OpaqueQueue):
+                raise AssertionError(f"expected OpaqueQueue, got {type(queue)}")
             return queue.pop()
 
         self.lib.impl("queue_pop", pop_impl, "CompositeExplicitAutograd")
@@ -360,7 +492,8 @@ class TestOpaqueObject(TestCase):
             mutates_args=[],
         )
         def size_impl(queue: OpaqueQueue) -> int:
-            assert isinstance(queue, OpaqueQueue)
+            if not isinstance(queue, OpaqueQueue):
+                raise AssertionError(f"expected OpaqueQueue, got {type(queue)}")
             return queue.size()
 
         @size_impl.register_fake
@@ -381,7 +514,8 @@ class TestOpaqueObject(TestCase):
             "_TestOpaqueObject::noisy_inject", "CompositeExplicitAutograd", lib=self.lib
         )
         def noisy_inject(x: torch.Tensor, rng_state: RNGState) -> torch.Tensor:
-            assert isinstance(rng_state, RNGState)
+            if not isinstance(rng_state, RNGState):
+                raise AssertionError(f"expected RNGState, got {type(rng_state)}")
             out = x.clone()
             for i in range(out.numel()):
                 out.view(-1)[i] += rng_state.rng.random()
@@ -389,7 +523,10 @@ class TestOpaqueObject(TestCase):
 
         @torch.library.register_fake("_TestOpaqueObject::noisy_inject", lib=self.lib)
         def noisy_inject_fake(x: torch.Tensor, obj: RNGState) -> torch.Tensor:
-            assert obj.seed >= 0
+            if not isinstance(obj, RNGState):
+                raise AssertionError(f"expected RNGState, got {type(obj)}")
+            if obj.seed < 0:
+                raise AssertionError(f"seed must be >= 0, got {obj.seed}")
             return torch.empty_like(x)
 
         @torch.library.custom_op(
@@ -397,7 +534,8 @@ class TestOpaqueObject(TestCase):
             mutates_args=["prev"],
         )
         def increment_counter_impl(c: Counter, prev: torch.Tensor) -> torch.Tensor:
-            assert isinstance(c, Counter)
+            if not isinstance(c, Counter):
+                raise AssertionError(f"expected Counter, got {type(c)}")
             prev.copy_(c.counter)
             c.increment_counter()
             return c.counter
@@ -421,7 +559,8 @@ class TestOpaqueObject(TestCase):
         def process_with_config_impl(
             x: torch.Tensor, config: ValueConfig
         ) -> torch.Tensor:
-            assert isinstance(config, ValueConfig)
+            if not isinstance(config, ValueConfig):
+                raise AssertionError(f"expected ValueConfig, got {type(config)}")
             if config.mode == "square":
                 return x * x
             elif config.mode == "double":
@@ -452,7 +591,8 @@ class TestOpaqueObject(TestCase):
         def process_nested_config_impl(
             x: torch.Tensor, config: NestedValueSize
         ) -> torch.Tensor:
-            assert isinstance(config, NestedValueSize)
+            if not isinstance(config, NestedValueSize):
+                raise AssertionError(f"expected NestedValueSize, got {type(config)}")
             if config.config.mode == "square":
                 return x * x
             elif config.config.mode == "double":
@@ -481,7 +621,7 @@ class TestOpaqueObject(TestCase):
             lib=self.lib,
         )
         def process_multiple_sizes_impl(
-            x: torch.Tensor, config: Optional[list[SizeStore]]
+            x: torch.Tensor, config: list[SizeStore] | None
         ) -> torch.Tensor:
             if config is None:
                 return x.clone()
@@ -495,14 +635,263 @@ class TestOpaqueObject(TestCase):
             "_TestOpaqueObject::process_multiple_sizes", lib=self.lib
         )
         def process_multiple_sizes_fake(
-            x: torch.Tensor, config: Optional[list[SizeStore]]
+            x: torch.Tensor, config: list[SizeStore] | None
         ) -> torch.Tensor:
             return torch.empty_like(x)
+
+        opaque_multiplier_type = get_opaque_type_name(OpaqueMultiplier)
+        color_type = get_opaque_type_name(Color)
+
+        torch.library.define(
+            "_TestOpaqueObject::apply_color_scale",
+            f"({color_type} color, Tensor x) -> Tensor",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::apply_color_scale",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def apply_color_scale_impl(color: Color, x: torch.Tensor) -> torch.Tensor:
+            return x * float(color)
+
+        @torch.library.register_fake(
+            "_TestOpaqueObject::apply_color_scale", lib=self.lib
+        )
+        def apply_color_scale_fake(color: Color, x: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        torch.library.define(
+            "_TestOpaqueObject::mul_with_scale",
+            f"({opaque_multiplier_type} scale_obj, Tensor x) -> Tensor",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        torch.library.define(
+            "_TestOpaqueObject::get_multiplier_tensor",
+            f"({opaque_multiplier_type} scale_obj, Tensor tensor) -> Tensor",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::mul_with_scale",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def mul_with_scale_impl(
+            scale_obj: OpaqueMultiplier, x: torch.Tensor
+        ) -> torch.Tensor:
+            return x * scale_obj.multiplier
+
+        @torch.library.register_fake("_TestOpaqueObject::mul_with_scale", lib=self.lib)
+        def mul_with_scale_fake(
+            scale_obj: OpaqueMultiplier, x: torch.Tensor
+        ) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        @torch.library.impl(
+            "_TestOpaqueObject::get_multiplier_tensor",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def get_multiplier_tensor_impl(
+            scale_obj: OpaqueMultiplier, tensor: torch.Tensor
+        ) -> torch.Tensor:
+            return tensor * scale_obj.multiplier
+
+        @torch.library.register_fake(
+            "_TestOpaqueObject::get_multiplier_tensor", lib=self.lib
+        )
+        def get_multiplier_tensor_fake(
+            scale_obj: OpaqueMultiplier, tensor: torch.Tensor
+        ) -> torch.Tensor:
+            return torch.empty_like(tensor)
+
+        def mul_setup_context(ctx, inputs, output):
+            ctx.scale_obj = inputs[0]
+
+        def mul_backward(ctx, grad) -> tuple[torch.Tensor, None]:
+            scale = torch.ops._TestOpaqueObject.get_multiplier_tensor(
+                ctx.scale_obj, grad
+            )
+            return None, scale
+
+        torch.library.register_autograd(
+            "_TestOpaqueObject::mul_with_scale",
+            mul_backward,
+            setup_context=mul_setup_context,
+            lib=self.lib,
+        )
+
+        rng_state_type = get_opaque_type_name(RNGState)
+        # Define forward custom op that takes two opaque objects
+        torch.library.define(
+            "_TestOpaqueObject::multi_rng",
+            f"(Tensor x, {rng_state_type} rng1, {rng_state_type} rng2) -> Tensor",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::multi_rng",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def multi_rng_impl(
+            x: torch.Tensor, rng1: RNGState, rng2: RNGState
+        ) -> torch.Tensor:
+            val1 = rng1.rng.random()
+            val2 = rng2.rng.random()
+            return x + val1 + val2
+
+        @torch.library.register_fake("_TestOpaqueObject::multi_rng", lib=self.lib)
+        def multi_rng_fake(
+            x: torch.Tensor, rng1: RNGState, rng2: RNGState
+        ) -> torch.Tensor:
+            return torch.zeros_like(x)
+
+        # Define backward custom op that also takes two opaque objects
+        torch.library.define(
+            "_TestOpaqueObject::multi_rng_backward",
+            f"(Tensor grad_output, Tensor saved, {rng_state_type} rng1, {rng_state_type} rng2) -> Tensor",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::multi_rng_backward",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def multi_rng_backward_impl(
+            grad_output: torch.Tensor,
+            saved: torch.Tensor,
+            rng1: RNGState,
+            rng2: RNGState,
+        ) -> torch.Tensor:
+            return grad_output * 1.5
+
+        @torch.library.register_fake(
+            "_TestOpaqueObject::multi_rng_backward", lib=self.lib
+        )
+        def multi_rng_backward_fake(
+            grad_output: torch.Tensor,
+            saved: torch.Tensor,
+            rng1: RNGState,
+            rng2: RNGState,
+        ) -> torch.Tensor:
+            return grad_output
+
+        def setup_context(ctx, inputs, output):
+            """Save opaque objects for backward - tests correct positioning."""
+            x, rng1, rng2 = inputs
+            ctx.save_for_backward(output)
+            ctx.rng1 = rng1
+            ctx.rng2 = rng2
+
+        def backward(ctx, grad_output: torch.Tensor):
+            """Backward pass that uses the opaque objects."""
+            saved = ctx.saved_tensors[0]
+            grad_input = torch.ops._TestOpaqueObject.multi_rng_backward(
+                grad_output, saved, ctx.rng1, ctx.rng2
+            )
+            return grad_input, None, None
+
+        torch.library.register_autograd(
+            "_TestOpaqueObject::multi_rng",
+            backward,
+            setup_context=setup_context,
+            lib=self.lib,
+        )
+
+        torch.library.define(
+            "_TestOpaqueObject::create_multiplier",
+            f"(Tensor scale) -> {opaque_multiplier_type}",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::create_multiplier",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def create_multiplier_impl(scale: torch.Tensor) -> OpaqueMultiplier:
+            return OpaqueMultiplier(scale.item())
+
+        @torch.library.register_fake(
+            "_TestOpaqueObject::create_multiplier", lib=self.lib
+        )
+        def create_multiplier_fake(scale: torch.Tensor) -> OpaqueMultiplier:
+            return OpaqueMultiplier(0.0)
+
+        counter_type = get_opaque_type_name(Counter)
+        torch.library.define(
+            "_TestOpaqueObject::create_counter",
+            f"(SymInt start, SymInt end) -> {counter_type}",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::create_counter",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def create_counter_impl(start: int, end: int) -> Counter:
+            return Counter(start, end)
+
+        @torch.library.register_fake("_TestOpaqueObject::create_counter", lib=self.lib)
+        def create_counter_fake(start: int, end: int) -> Counter:
+            return Counter(start, end)
+
+        @torch.library.custom_op(
+            "_TestOpaqueObject::create_counter2",
+            mutates_args=[],
+        )
+        def create_counter2_impl(start: int, end: int) -> tuple[Counter, Counter]:
+            return Counter(start, end), Counter(end, start)
+
+        @create_counter2_impl.register_fake
+        def create_counter2_fake(start: int, end: int) -> tuple[Counter, Counter]:
+            return Counter(start, end), Counter(end, start)
+
+        counter_type = get_opaque_type_name(Counter)
+        torch.library.define(
+            "_TestOpaqueObject::counter_start",
+            f"({counter_type} a) -> Tensor",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::counter_start",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def counter_start_impl(a: Counter) -> torch.Tensor:
+            return torch.scalar_tensor(a.start, dtype=torch.int64)
+
+        @torch.library.register_fake("_TestOpaqueObject::counter_start", lib=self.lib)
+        def counter_start_fake(a: Counter) -> torch.Tensor:
+            return torch.scalar_tensor(0, dtype=torch.int64)
 
         super().setUp()
 
     def tearDown(self):
         self.lib._destroy()
+
+        # Clean up any opaque types registered during the test
+        types_to_remove = (
+            set(_OPAQUE_TYPES_BY_NAME.keys()) - self._opaque_types_before_test
+        )
+        for name in types_to_remove:
+            torch._C._unregister_opaque_type(name)
+            _OPAQUE_TYPES_BY_NAME.pop(name, None)
 
         super().tearDown()
 
@@ -516,6 +905,69 @@ class TestOpaqueObject(TestCase):
         self.assertEqual(popped, torch.ones(3) + 1)
         size = torch.ops._TestOpaqueObject.queue_size(queue)
         self.assertEqual(size, 0)
+
+    def test_custom_op_reference_return(self):
+        @torch.compile(backend="inductor", fullgraph=True)
+        def f(x):
+            c1 = torch.ops._TestOpaqueObject.create_counter(0, 10)
+            c2, c3 = torch.ops._TestOpaqueObject.create_counter2(0, 10)
+            return (
+                c1,
+                torch.ops._TestOpaqueObject.increment_counter(c1, x),
+                c2,
+                torch.ops._TestOpaqueObject.increment_counter(c2, x),
+                c3,
+                torch.ops._TestOpaqueObject.increment_counter(c3, x),
+            )
+
+        x = torch.scalar_tensor(0, dtype=torch.int64)
+        c1, r1, c2, r2, c3, r3 = f(x)
+        self.assertIsInstance(c1, Counter)
+        self.assertIsInstance(c2, Counter)
+        self.assertIsInstance(c3, Counter)
+        self.assertEqual(c3.start, 11)
+        self.assertEqual(c3.end, 0)
+        self.assertEqual(x, torch.scalar_tensor(10, dtype=torch.int64))
+        self.assertEqual(r1, torch.scalar_tensor(1, dtype=torch.int64))
+        self.assertEqual(r2, torch.scalar_tensor(1, dtype=torch.int64))
+        self.assertEqual(r3, torch.scalar_tensor(11, dtype=torch.int64))
+
+    def test_custom_op_value_return(self):
+        with self.assertRaisesRegex(ValueError, "Return has unsupported type"):
+
+            @torch.library.custom_op(
+                "_TestOpaqueObject::create_value_config",
+                mutates_args=[],
+            )
+            def create_value_config(mode: str) -> ValueConfig:
+                return ValueConfig(mode)
+
+        with self.assertRaisesRegex(ValueError, "Return has unsupported type"):
+
+            @torch.library.custom_op(
+                "_TestOpaqueObject::create_value_config_tuple",
+                mutates_args=[],
+            )
+            def create_value_config_tuple(mode: str) -> tuple[ValueConfig, int]:
+                return ValueConfig(mode), 0
+
+    def test_fake_script_object_isinstance_per_type(self):
+        queue = OpaqueQueue([], torch.zeros(3))
+        rng = RNGState(42)
+
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        with fake_mode:
+            fake_queue = maybe_to_fake_obj(fake_mode, queue)
+            fake_rng = maybe_to_fake_obj(fake_mode, rng)
+
+        self.assertIsInstance(fake_queue, OpaqueQueue)
+        self.assertIsInstance(fake_rng, RNGState)
+
+        self.assertNotIsInstance(fake_queue, RNGState)
+        self.assertNotIsInstance(fake_rng, OpaqueQueue)
+
+        self.assertIsInstance(fake_queue, FakeScriptObject)
+        self.assertIsInstance(fake_rng, FakeScriptObject)
 
     @parametrize("make_fx_tracing_mode", ["fake", "symbolic"])
     def test_make_fx(self, make_fx_tracing_mode):
@@ -562,6 +1014,132 @@ def forward(self, arg0_1, arg1_1):
     return add_1
     """,
         )
+
+    @parametrize("make_fx_tracing_mode", ["fake", "symbolic"])
+    def test_make_fx_value_type(self, make_fx_tracing_mode):
+        def f(x, cfg):
+            return torch.ops._TestOpaqueObject.process_with_config(x, cfg)
+
+        x = torch.randn(3, 3)
+        cfg = ValueConfig("square")
+        gm = make_fx(f, tracing_mode=make_fx_tracing_mode)(x, cfg)
+        self.assertEqual(gm(x, cfg), f(x, cfg))
+
+        self.assertExpectedInline(
+            gm.code.strip("\n"),
+            """\
+def forward(self, x_1, cfg_1):
+    process_with_config = torch.ops._TestOpaqueObject.process_with_config.default(x_1, cfg_1);  x_1 = cfg_1 = None
+    return process_with_config
+    """,  # noqa: B950
+        )
+
+    def test_subclass_opaque_output_reuses_input_proxy(self):
+        # Regression test: when a tensor subclass's __torch_dispatch__ wraps
+        # the output with the real OpaqueBase (not the FakeScriptObject proxy),
+        # the AOTAutograd forward graph should still reference the opaque via
+        # its input placeholder — not create a duplicate get_attr constant.
+        #
+        # This mirrors DTensor where C++ dispatch creates new DTensors storing
+        # the real DeviceMesh, so output flattening calls maybe_to_fake_obj
+        # and mints a fresh FakeScriptObject for the same underlying object.
+
+        class TensorWithRealCounter(torch.Tensor):
+            @staticmethod
+            def __new__(cls, data, counter):
+                return torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    data.size(),
+                    strides=data.stride(),
+                    storage_offset=data.storage_offset(),
+                    device=data.device,
+                    dtype=data.dtype,
+                    layout=data.layout,
+                    requires_grad=data.requires_grad,
+                )
+
+            def __init__(self, data, counter):
+                self._data = data
+                self._counter = counter
+
+            def __repr__(self):
+                return "TensorWithRealCounter(...)"
+
+            def __tensor_flatten__(self):
+                return ["_data", "_counter"], ()
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, ctx, outer_size, outer_stride):
+                return TensorWithRealCounter(
+                    inner_tensors["_data"], inner_tensors["_counter"]
+                )
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if kwargs is None:
+                    kwargs = {}
+
+                counter = None
+                for arg in torch.utils._pytree.tree_leaves(args):
+                    if isinstance(arg, TensorWithRealCounter):
+                        counter = arg._counter
+                        break
+
+                def unwrap(x):
+                    return x._data if isinstance(x, TensorWithRealCounter) else x
+
+                out = func(
+                    *torch.utils._pytree.tree_map(unwrap, args),
+                    **torch.utils._pytree.tree_map(unwrap, kwargs),
+                )
+
+                # Unwrap FakeScriptObject to real OpaqueBase, simulating what
+                # happens in DTensor's C++ dispatch path.
+                real_counter = counter
+                if isinstance(counter, FakeScriptObject):
+                    real_counter = counter.real_obj
+
+                return torch.utils._pytree.tree_map(
+                    lambda x: TensorWithRealCounter(x, real_counter)
+                    if isinstance(x, torch.Tensor)
+                    else x,
+                    out,
+                )
+
+        counter = Counter(start=0, end=10)
+        x = TensorWithRealCounter(torch.randn(4), counter)
+
+        backend = AotEagerAndRecordGraphs()
+        torch.compile(lambda x: x + 1, fullgraph=True, backend=backend)(x)
+
+        fw = backend.fw_graphs[0]
+        get_attr_nodes = [n for n in fw.graph.nodes if n.op == "get_attr"]
+        self.assertEqual(
+            get_attr_nodes,
+            [],
+            "Opaque output should reuse the input placeholder, not create a get_attr constant",
+        )
+
+    def test_guard_pickle_subclass_with_opaque_inner_attr(self):
+        # Regression test: the guard state pickler serializes tensor subclasses
+        # by iterating over __tensor_flatten__ inner attrs.  Opaque inner attrs
+        # (e.g. Counter) must be handled correctly — they are pickled by the
+        # normal pickle machinery alongside tensor inner attrs.
+        from torch._dynamo.guards import GuardsStatePickler
+
+        a = torch.randn(4)
+        b = torch.randn(4)
+        counter = Counter(start=0, end=10)
+        size = SizeStore(4)
+        x = TensorWithCounter(a, b, counter, size)
+
+        import io
+
+        buf = io.BytesIO()
+        pickler = GuardsStatePickler({id(x): x}, {}, {}, buf)
+        func, args = pickler.reducer_override(x)
+        obj = func(*args)
+        self.assertIsInstance(obj, torch.Tensor)
 
     @parametrize("make_fx_tracing_mode", ["fake", "symbolic"])
     def test_bad_fake(self, make_fx_tracing_mode):
@@ -666,8 +1244,29 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 "_TestOpaqueObject::noisy_inject", None
             )
 
+    def test_install_free_opaque_object(self):
+        rng = RNGState(0)
+        x = torch.ones(2, 3)
+
+        def fn(x):
+            return torch.ops._TestOpaqueObject.noisy_inject(x, rng)
+
+        gm = _dynamo_graph_capture_for_export(fn)(x)
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x):
+    arg_0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    l_flat_args_0_ = arg_0
+    l__self____export_root___closure___0_cell_contents = self.L__self____export_root___closure___0_cell_contents
+    res = torch.ops._TestOpaqueObject.noisy_inject(l_flat_args_0_, l__self____export_root___closure___0_cell_contents);  l_flat_args_0_ = l__self____export_root___closure___0_cell_contents = None
+    return pytree.tree_unflatten((res,), self._out_spec)""",  # noqa: B950
+        )
+
     def test_compile1(self):
         def foo(rng_state, x):
+            if not isinstance(rng_state, RNGState):
+                raise AssertionError(f"expected RNGState, got {type(rng_state)}")
             x = torch.ops._TestOpaqueObject.noisy_inject(x, rng_state)
             x = x * x
             x = torch.ops._TestOpaqueObject.noisy_inject(x, rng_state)
@@ -689,9 +1288,9 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         self.assertExpectedInline(
             backend.graphs[0].code.strip(),
             f"""\
-def forward(self, L_x_ : torch.Tensor, L_rng_state_ : {fx_class}):
-    l_x_ = L_x_
+def forward(self, L_rng_state_ : {fx_class}, L_x_ : torch.Tensor):
     l_rng_state_ = L_rng_state_
+    l_x_ = L_x_
     x = torch.ops._TestOpaqueObject.noisy_inject(l_x_, l_rng_state_);  l_x_ = None
     x_1 = x * x;  x = None
     x_2 = torch.ops._TestOpaqueObject.noisy_inject(x_1, l_rng_state_);  x_1 = l_rng_state_ = None
@@ -702,9 +1301,9 @@ def forward(self, L_x_ : torch.Tensor, L_rng_state_ : {fx_class}):
             backend.fw_graphs[0].code.strip(),
             """\
 def forward(self, arg0_1, arg1_1):
-    noisy_inject = torch.ops._TestOpaqueObject.noisy_inject.default(arg0_1, arg1_1);  arg0_1 = None
+    noisy_inject = torch.ops._TestOpaqueObject.noisy_inject.default(arg1_1, arg0_1);  arg1_1 = None
     mul = torch.ops.aten.mul.Tensor(noisy_inject, noisy_inject);  noisy_inject = None
-    noisy_inject_1 = torch.ops._TestOpaqueObject.noisy_inject.default(mul, arg1_1);  mul = arg1_1 = None
+    noisy_inject_1 = torch.ops._TestOpaqueObject.noisy_inject.default(mul, arg0_1);  mul = arg0_1 = None
     add = torch.ops.aten.add.Tensor(noisy_inject_1, noisy_inject_1);  noisy_inject_1 = None
     return (add,)""",  # noqa: B950
         )
@@ -973,23 +1572,107 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 NestedCounters(Counter(1, 5)), torch.ones(2, 3)
             )
 
-        config = ValueConfig("double")
+    def test_compile_fixed_stride_order(self):
+        hs_name = get_opaque_type_name(HoistedString)
 
-        def foo(mode, x):
-            return config.mode
+        torch.library.define(
+            "_TestOpaqueObject::stride_op",
+            f"(Tensor x, {hs_name} s) -> Tensor",
+            tags=(torch.Tag.needs_fixed_stride_order,),
+            lib=self.lib,
+        )
 
-        with self.assertRaisesRegex(
-            RuntimeError, "Attempted to access unregistered member on an OpaqueObject"
-        ):
-            torch.compile(foo, backend="eager")(config, torch.ones(2, 3))
+        @torch.library.impl(
+            "_TestOpaqueObject::stride_op",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def stride_op_impl(x: torch.Tensor, s: HoistedString) -> torch.Tensor:
+            return x * 2.0
 
-        def bar(mode, x):
-            config.print_mode()
+        @torch.library.register_fake("_TestOpaqueObject::stride_op", lib=self.lib)
+        def stride_op_fake(x, s):
+            return torch.empty_like(x)
 
-        with self.assertRaisesRegex(
-            RuntimeError, "Attempted to access unregistered member on an OpaqueObject"
-        ):
-            torch.compile(bar, backend="eager")(config, torch.ones(2, 3))
+        def fn(x, s):
+            return torch.ops._TestOpaqueObject.stride_op(x, s)
+
+        s = HoistedString("double")
+        x = torch.randn(4, 4)
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+        result = compiled_fn(x, s)
+
+        expected = x * 2.0
+        self.assertEqual(result, expected)
+
+    def test_compile_exact_strides(self):
+        hs_name = get_opaque_type_name(HoistedString)
+
+        torch.library.define(
+            "_TestOpaqueObject::exact_op",
+            f"(Tensor x, {hs_name} s) -> Tensor",
+            tags=(torch.Tag.needs_exact_strides,),
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::exact_op",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def exact_op_impl(x: torch.Tensor, s: HoistedString) -> torch.Tensor:
+            return x * 3.0
+
+        @torch.library.register_fake("_TestOpaqueObject::exact_op", lib=self.lib)
+        def exact_op_fake(x, s):
+            return torch.empty_like(x)
+
+        def fn(x, s):
+            return torch.ops._TestOpaqueObject.exact_op(x, s)
+
+        s = HoistedString("double")
+        x = torch.randn(4, 4)
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+        result = compiled_fn(x, s)
+
+        expected = x * 3.0
+        self.assertEqual(result, expected)
+
+    def test_compile_contiguous_strides(self):
+        hs_name = get_opaque_type_name(HoistedString)
+
+        torch.library.define(
+            "_TestOpaqueObject::contig_op",
+            f"(Tensor x, {hs_name} s) -> Tensor",
+            tags=(torch.Tag.needs_contiguous_strides,),
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::contig_op",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def contig_op_impl(x: torch.Tensor, s: HoistedString) -> torch.Tensor:
+            return x * 4.0
+
+        @torch.library.register_fake("_TestOpaqueObject::contig_op", lib=self.lib)
+        def contig_op_fake(x, s):
+            return torch.empty_like(x)
+
+        def fn(x, s):
+            return torch.ops._TestOpaqueObject.contig_op(x, s)
+
+        s = HoistedString("double")
+        x = torch.randn(4, 4)
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+        result = compiled_fn(x, s)
+
+        expected = x * 4.0
+        self.assertEqual(result, expected)
 
     def test_export_joint(self):
         torch.library.define(
@@ -1003,7 +1686,8 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             "_TestOpaqueObject::module_mul", "CompositeExplicitAutograd", lib=self.lib
         )
         def module_mul_impl(m: AddModule, a: torch.Tensor, b: int) -> torch.Tensor:
-            assert isinstance(m, AddModule)
+            if not isinstance(m, AddModule):
+                raise AssertionError(f"expected AddModule, got {type(m)}")
             return m(a, b)
 
         @torch.library.register_fake("_TestOpaqueObject::module_mul", lib=self.lib)
@@ -1053,7 +1737,18 @@ def forward(self, primals, tangents):
         self.assertEqual(compiled_fn(*inp), M()(*inp))
 
     def test_invalid_reference_type(self):
-        class BadMember:
+        # Test that classes without subclassing OpaqueBase are rejected
+        class NoOpaqueBase:
+            def __init__(self, x):
+                self.x = x
+
+        with self.assertRaisesRegex(
+            TypeError,
+            "must subclass torch._opaque_base.OpaqueBase",
+        ):
+            register_opaque_type(NoOpaqueBase, typ="reference")
+
+        class BadMember(OpaqueBase):
             def __init__(self, x):
                 self.x = x
 
@@ -1070,7 +1765,7 @@ def forward(self, primals, tangents):
             torch.compile(foo)(BadMember(1), torch.ones(1))
 
     def test_invalid_value_type(self):
-        class NoEq:
+        class NoEq(OpaqueBase):
             def __init__(self, x):
                 self.x = x
 
@@ -1079,7 +1774,7 @@ def forward(self, primals, tangents):
         ):
             register_opaque_type(NoEq, typ="value")
 
-        class NoHash:
+        class NoHash(OpaqueBase):
             def __init__(self, x):
                 self.x = x
 
@@ -1091,7 +1786,7 @@ def forward(self, primals, tangents):
         ):
             register_opaque_type(NoHash, typ="value")
 
-        class NoRepr:
+        class NoRepr(OpaqueBase):
             def __init__(self, x):
                 self.x = x
 
@@ -1104,7 +1799,7 @@ def forward(self, primals, tangents):
         with self.assertRaisesRegex(TypeError, "expected to have a `__fx_repr__`"):
             register_opaque_type(NoRepr, typ="value")
 
-        class SpecifyMember:
+        class SpecifyMember(OpaqueBase):
             def __init__(self, x):
                 self.x = x
 
@@ -1160,7 +1855,7 @@ def forward(self, primals, tangents):
                 register_opaque_type(t, typ="reference")
 
         @dataclass
-        class Bad1:
+        class Bad1(OpaqueBase):
             x: int
 
         pytree.register_dataclass(Bad1)
@@ -1177,7 +1872,7 @@ def forward(self, primals, tangents):
             pytree.CONSTANT_NODES.discard(Bad1)
 
         @dataclass
-        class Bad2:
+        class Bad2(OpaqueBase):
             x: int
 
         register_opaque_type(Bad2, typ="reference")
@@ -1208,6 +1903,20 @@ def forward(self, primals, tangents):
         res = opt_f(x, ValueConfig("double"))
         self.assertEqual(res, x + x)
         self.assertEqual(cnt.frame_count, 2)
+
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_value_type_graph_output(self, backend):
+        def foo(x):
+            return x * x, ValueConfig("square")
+
+        x = torch.randn(3, 3)
+        opt_f = torch.compile(foo, fullgraph=True, backend=backend)
+        res = opt_f(x)
+        self.assertEqual(res[1], ValueConfig("square"))
+
+        gm = _dynamo_graph_capture_for_export(foo)(x)
+        res = gm(x)
+        self.assertEqual(res[1], ValueConfig("square"))
 
     def test_value_type_graph_input(self):
         # Even though cfg is an input, it should not be an input to the dynamo
@@ -1312,9 +2021,29 @@ def forward(self, arg0_1):
     return (add,)""",  # noqa: B950
         )
 
+    def test_value_type_unregistered_method(self):
+        # Unregistered methods on value types should inline (no error)
+        def foo(x):
+            cfg = ValueConfig("square")
+            return x + len(cfg.mode)
+
+        x = torch.randn(3)
+        backend = AotEagerAndRecordGraphs()
+        opt_f = torch.compile(foo, fullgraph=True, backend=backend)
+        res = opt_f(x)
+        self.assertEqual(res, foo(x))
+
+        self.assertExpectedInline(
+            backend.fw_graphs[0].code.strip(),
+            """\
+def forward(self, arg0_1):
+    add = torch.ops.aten.add.Tensor(arg0_1, 6);  arg0_1 = None
+    return (add,)""",
+        )
+
     def test_weakref_cleanup(self):
         def register_tmp_class():
-            class TmpClass:
+            class TmpClass(OpaqueBase):
                 def __init__(self, value):
                     self.value = value
 
@@ -1393,16 +2122,61 @@ def forward(self, arg0_1):
         x = torch.randn(3, 3)
         self.assertEqual(opt_f(x), foo(x))
 
+    def test_getitem(self):
+        def foo(x):
+            y = x * 2 + 1
+            nested_counter = y.get_counter()
+            s = y.size_store
+            counter = nested_counter[s.size]
+            return y * counter.get_start_tensor()
+
+        x = TensorWithCounter(
+            torch.tensor(1),
+            torch.tensor(1),
+            NestedCounters([Counter(1, 5), Counter(2, 5)]),
+            SizeStore(1),
+        )
+
+        inp = (x,)
+        backend = AotEagerAndRecordGraphs()
+        res = torch.compile(foo, fullgraph=True, backend=backend)(*inp)
+        self.assertEqual(res, torch.tensor(6))
+
+        actual = normalize_gm(backend.graphs[0].print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "TensorWithCounter(i64[])"):
+        l_x_ = L_x_
+
+        mul: "TensorWithCounter(i64[])" = l_x_ * 2;  l_x_ = None
+        y: "TensorWithCounter(i64[])" = mul + 1;  mul = None
+
+        get_counter = y.get_counter()
+
+        getitem = get_counter.__getitem__(1);  get_counter = None
+
+        get_start_tensor: "i64[]" = getitem.get_start_tensor();  getitem = None
+        mul_1: "TensorWithCounter(i64[])" = y * get_start_tensor;  y = get_start_tensor = None
+        return (mul_1,)
+""",  # noqa: B950
+        )
+
     def test_tensor_subclass_with_opaque_attr(self):
         def fn(x):
             y = x * 2 + 1
-            counter = y._counter
-            return y * counter.start
+            c1 = y._counter
+            c2 = y.get_counter()
+            s1 = y.size_store
+            s2 = y.get_size_store()
+            return y * c1.start + c2.start + s1.size + s2.size
 
         a = torch.rand(4, 4)
         b = torch.rand(4, 4)
         counter = Counter(start=3, end=10)
-        x = TensorWithCounter(a, b, counter)
+        size = SizeStore(4)
+        x = TensorWithCounter(a, b, counter, size)
 
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
@@ -1423,8 +2197,15 @@ class GraphModule(torch.nn.Module):
 
         getattr_1 = y._counter;  getattr_1 = None
 
+        get_counter = y.get_counter();  get_counter = None
+
+        get_size_store = y.get_size_store();  get_size_store = None
+
         mul_1: "TensorWithCounter(f32[4, 4])" = y * 3;  y = None
-        return (mul_1,)
+        add_1: "TensorWithCounter(f32[4, 4])" = mul_1 + 3;  mul_1 = None
+        add_2: "TensorWithCounter(f32[4, 4])" = add_1 + 4;  add_1 = None
+        add_3: "TensorWithCounter(f32[4, 4])" = add_2 + 4;  add_2 = None
+        return (add_3,)
 """,
         )
         self.assertEqual(cnt.frame_count, 1)
@@ -1432,11 +2213,1469 @@ class GraphModule(torch.nn.Module):
         a = torch.rand(4, 4)
         b = torch.rand(4, 4)
         counter = Counter(start=1, end=10)
-        x = TensorWithCounter(a, b, counter)
+        x = TensorWithCounter(a, b, counter, SizeStore(4))
         opt_fn(x)
 
         # Recompile since Counter has changed
         self.assertEqual(cnt.frame_count, 2)
+
+        a = torch.rand(4, 4)
+        b = torch.rand(4, 4)
+        counter = Counter(start=1, end=10)
+        x = TensorWithCounter(a, b, counter, SizeStore(5))
+        opt_fn(x)
+
+        # Recompile since SizeStore has changed
+        self.assertEqual(cnt.frame_count, 3)
+
+    def test_tensor_subclass_with_opaque_attr_backward(self):
+        """Test opaque objects in tensor subclass are correctly remapped through backward."""
+
+        def fn(x):
+            return x * 2 + 1
+
+        a = torch.rand(4, 4, requires_grad=True)
+        b = torch.rand(4, 4, requires_grad=True)
+        counter = Counter(start=3, end=10)
+        size = SizeStore(4)
+        x = TensorWithCounter(a, b, counter, size)
+
+        cnt = CompileCounterWithBackend("aot_eager")
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        out = opt_fn(x)
+
+        # Output should be TensorWithCounter with same opaque objects
+        self.assertTrue(isinstance(out, TensorWithCounter))
+        self.assertIs(out._counter, counter)
+        self.assertIs(out._size_store, size)
+
+        # Run backward
+        out.sum().backward()
+        self.assertIsNotNone(x.grad)
+        self.assertTrue(isinstance(x.grad, TensorWithCounter))
+
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Call again with different instances that are __eq__ equal.
+        # Metadata guard uses ==, so equal values pass the guard.
+        # But they're different objects, so assertIs tests the fix.
+        a2 = torch.rand(4, 4, requires_grad=True)
+        b2 = torch.rand(4, 4, requires_grad=True)
+        counter2 = Counter(start=3, end=10)  # Same values, different instance
+        size2 = SizeStore(4)  # Same value, different instance
+        self.assertEqual(counter, counter2)  # Verify they're equal
+        self.assertIsNot(counter, counter2)  # But not the same object
+        x2 = TensorWithCounter(a2, b2, counter2, size2)
+
+        out2 = opt_fn(x2)
+        self.assertEqual(cnt.frame_count, 1)  # No recompilation
+
+        self.assertTrue(isinstance(out2, TensorWithCounter))
+        # Key checks: should use runtime instances, not traced instances
+        self.assertIs(out2._counter, counter2)
+        # Value-type opaques in ctx are baked at compile time
+        self.assertEqual(out2._size_store, size2)
+
+        out2.sum().backward()
+        self.assertIsNotNone(x2.grad)
+        self.assertTrue(isinstance(x2.grad, TensorWithCounter))
+        self.assertIs(x2.grad._counter, counter2)
+        self.assertEqual(x2.grad._size_store, size2)
+
+    def test_tangent_primal_proxy_collision_for_opaque_inner_attr(self):
+        """Regression test for tangent/primal proxy collision.
+
+        When a tensor subclass has an opaque inner attr, joint graph tracing
+        creates separate FakeScriptObject wrappers for the primal and tangent
+        that share the same underlying real object.  set_proxy_slot must map
+        the tangent wrapper to the *primal* proxy so that forward outputs
+        don't spuriously depend on tangent placeholders (which would crash the
+        partitioner with 'Node tangents_N was invalid, but is output').
+        """
+        from torch._library.fake_class_registry import FakeScriptObject
+        from torch.fx.experimental.proxy_tensor import (
+            _GraphAppendingTracerEx,
+            set_proxy_slot,
+        )
+
+        counter = Counter(start=3, end=10)
+        fso_primal = FakeScriptObject(counter, "Counter", counter)
+        fso_tangent = FakeScriptObject(counter, "Counter", counter)
+        # Sanity: different wrappers, same real_obj
+        self.assertIsNot(fso_primal, fso_tangent)
+        self.assertIs(
+            object.__getattribute__(fso_primal, "real_obj"),
+            object.__getattribute__(fso_tangent, "real_obj"),
+        )
+
+        graph = torch.fx.Graph()
+        tracer = _GraphAppendingTracerEx(graph)
+
+        primal_node = graph.placeholder("primals_1")
+        tangent_node = graph.placeholder("tangents_1")
+        primal_proxy = torch.fx.Proxy(primal_node, tracer)
+        tangent_proxy = torch.fx.Proxy(tangent_node, tracer)
+
+        # Register primal first, then tangent (mirrors joint graph tracing)
+        set_proxy_slot(fso_primal, tracer, primal_proxy)
+        set_proxy_slot(fso_tangent, tracer, tangent_proxy)
+
+        # Both wrappers should resolve to the primal proxy
+        self.assertIs(tracer.opaque_tracker[fso_primal].node, primal_node)
+        self.assertIs(tracer.opaque_tracker[fso_tangent].node, primal_node)
+
+    def test_opaque_produced_by_call_function_saved_for_backward(self):
+        """Test that an opaque object produced by a call_function node
+        (not a placeholder) is correctly saved for backward.
+
+        Without is_opaque_node() in the min_cut partitioner, this crashes
+        with 'AOT Autograd failed to partition' because the opaque node
+        is a non-tensor call_function that can't be saved or recomputed."""
+
+        def fn(x):
+            scale = torch.tensor(2.5)
+            multiplier = torch.ops._TestOpaqueObject.create_multiplier(scale)
+            return torch.ops._TestOpaqueObject.mul_with_scale(multiplier, x)
+
+        x = torch.randn(3, 3, requires_grad=True)
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        out = opt_fn(x)
+        self.assertTrue(torch.allclose(out, x * 2.5))
+
+        out.backward(torch.ones_like(out))
+        self.assertIsNotNone(x.grad)
+        expected_grad = torch.ones_like(x) * 2.5
+        self.assertTrue(torch.allclose(x.grad, expected_grad))
+
+    def test_tensor_subclass_opaque_backward_compiled_autograd(self):
+        """Test opaque objects work with compiled autograd backward."""
+        import torch._dynamo.compiled_autograd
+
+        def fn(x):
+            return x * 2
+
+        a = torch.rand(4, 4, requires_grad=True)
+        b = torch.rand(4, 4, requires_grad=True)
+        counter = Counter(start=5, end=10)
+        size = SizeStore(4)
+        x = TensorWithCounter(a, b, counter, size)
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        out = opt_fn(x)
+
+        self.assertTrue(isinstance(out, TensorWithCounter))
+        self.assertIs(out._counter, counter)
+        self.assertIs(out._size_store, size)
+
+        with torch._dynamo.compiled_autograd._enable(torch.compile(backend="eager")):
+            out.sum().backward()
+
+        self.assertIsNotNone(x.grad)
+        self.assertTrue(isinstance(x.grad, TensorWithCounter))
+
+        # Second invocation with different-but-equal opaques
+        a2 = torch.rand(4, 4, requires_grad=True)
+        b2 = torch.rand(4, 4, requires_grad=True)
+        counter2 = Counter(start=5, end=10)
+        size2 = SizeStore(4)
+        x2 = TensorWithCounter(a2, b2, counter2, size2)
+
+        out2 = opt_fn(x2)
+        self.assertTrue(isinstance(out2, TensorWithCounter))
+        self.assertIs(out2._counter, counter2)
+        self.assertEqual(out2._size_store, size2)
+
+        with torch._dynamo.compiled_autograd._enable(torch.compile(backend="eager")):
+            out2.sum().backward()
+
+        self.assertIsNotNone(x2.grad)
+        self.assertTrue(isinstance(x2.grad, TensorWithCounter))
+        self.assertIs(x2.grad._counter, counter2)
+        self.assertEqual(x2.grad._size_store, size2)
+
+    def test_tensor_subclass_shared_opaque_remapping(self):
+        """Test that shared opaques across inputs are correctly handled."""
+
+        def fn(x, y):
+            return x + y
+
+        counter = Counter(start=3, end=10)  # Shared opaque
+        size = SizeStore(4)
+
+        a1 = torch.rand(4, 4, requires_grad=True)
+        b1 = torch.rand(4, 4, requires_grad=True)
+        x = TensorWithCounter(a1, b1, counter, size)
+
+        a2 = torch.rand(4, 4, requires_grad=True)
+        b2 = torch.rand(4, 4, requires_grad=True)
+        y = TensorWithCounter(a2, b2, counter, size)  # Same counter
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        out = opt_fn(x, y)
+
+        self.assertTrue(isinstance(out, TensorWithCounter))
+        self.assertIs(out._counter, counter)
+
+        # Second invocation with different-but-equal shared opaques
+        counter2 = Counter(start=3, end=10)
+        size2 = SizeStore(4)
+
+        a3 = torch.rand(4, 4, requires_grad=True)
+        b3 = torch.rand(4, 4, requires_grad=True)
+        x2 = TensorWithCounter(a3, b3, counter2, size2)
+
+        a4 = torch.rand(4, 4, requires_grad=True)
+        b4 = torch.rand(4, 4, requires_grad=True)
+        y2 = TensorWithCounter(a4, b4, counter2, size2)
+
+        out2 = opt_fn(x2, y2)
+        self.assertTrue(isinstance(out2, TensorWithCounter))
+        self.assertIs(out2._counter, counter2)
+        self.assertEqual(out2._size_store, size2)
+
+    def test_shared_opaque_identity_guard(self):
+        """When inputs share an opaque at trace time, breaking that sharing
+        should trigger recompilation.
+
+        Uses y + x so __torch_dispatch__ picks y's opaque (input 1), but
+        first-occurrence-wins remapping points to x's position (input 0).
+        With broken sharing, the output silently gets the wrong opaque.
+        """
+
+        def fn(x, y):
+            return y + x
+
+        counter = Counter(start=3, end=10)
+        size = SizeStore(4)
+
+        x = TensorWithCounter(torch.rand(4, 4), torch.rand(4, 4), counter, size)
+        y = TensorWithCounter(torch.rand(4, 4), torch.rand(4, 4), counter, size)
+
+        cnt = CompileCounterWithBackend("aot_eager")
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        out = opt_fn(x, y)
+        self.assertEqual(cnt.frame_count, 1)
+        # Shared opaques: output should have the shared counter
+        self.assertIs(out._counter, counter)
+
+        # Same sharing pattern → no recompile
+        counter2 = Counter(start=3, end=10)
+        size2 = SizeStore(4)
+        x2 = TensorWithCounter(torch.rand(4, 4), torch.rand(4, 4), counter2, size2)
+        y2 = TensorWithCounter(torch.rand(4, 4), torch.rand(4, 4), counter2, size2)
+        out2 = opt_fn(x2, y2)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertIs(out2._counter, counter2)
+
+        # Sharing broken → should recompile.
+        # __torch_dispatch__ picks y's opaque, so the output should have
+        # counter3b. Without the guard, the remapping uses x's position
+        # and the output silently gets counter3a.
+        counter3a = Counter(start=3, end=10)
+        counter3b = Counter(start=3, end=10)
+        size3 = SizeStore(4)
+        x3 = TensorWithCounter(torch.rand(4, 4), torch.rand(4, 4), counter3a, size3)
+        y3 = TensorWithCounter(torch.rand(4, 4), torch.rand(4, 4), counter3b, size3)
+        out3 = opt_fn(x3, y3)
+        self.assertIs(out3._counter, counter3b)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_shared_direct_opaque_identity_guard(self):
+        """When the same opaque is passed as multiple direct function
+        arguments, breaking the sharing should trigger recompilation.
+
+        Unlike test_shared_opaque_identity_guard where opaques are inside
+        tensor subclass metadata, here opaques are direct function arguments.
+        The tracer may conflate them when they're the same object, causing
+        counter_start(counter_b) to return counter_a's start instead.
+        """
+        get_start = torch.ops._TestOpaqueObject.counter_start
+
+        def fn(counter_a, counter_b, x):
+            return get_start(counter_a) + x, get_start(counter_b) + x
+
+        counter = Counter(start=3, end=10)
+        x = torch.rand(4, 4)
+
+        cnt = CompileCounterWithBackend("aot_eager")
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        out_a, out_b = opt_fn(counter, counter, x)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(out_a, 3 + x)
+        self.assertEqual(out_b, 3 + x)
+
+        # Same sharing → no recompile
+        counter2 = Counter(start=3, end=10)
+        out_a2, out_b2 = opt_fn(counter2, counter2, x)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(out_a2, 3 + x)
+        self.assertEqual(out_b2, 3 + x)
+
+        # Broken sharing → should recompile.
+        # Both counters have start=3 so the existing guard_fn doesn't catch
+        # the difference — only an identity guard would.
+        counter3a = Counter(start=3, end=10)
+        counter3b = Counter(start=3, end=10)
+        out_a3, out_b3 = opt_fn(counter3a, counter3b, x)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(out_a3, 3 + x)
+        self.assertEqual(out_b3, 3 + x)
+
+    def test_tensor_subclass_shared_opaque_backward(self):
+        """Test backward with multiple subclass inputs sharing the same opaque.
+
+        This tests the case where grad_inputs share an opaque object.
+        The bug was that create_subclass_meta(grad_inputs) would incorrectly
+        build opaque_remappings between grad_inputs, causing an assertion
+        failure in wrap_tensor_subclasses.
+        """
+
+        def fn(x, y):
+            return x + y
+
+        # Create two TensorWithCounter inputs sharing the SAME opaque objects
+        counter = Counter(start=3, end=10)
+        size = SizeStore(4)
+
+        a1 = torch.rand(4, 4, requires_grad=True)
+        b1 = torch.rand(4, 4, requires_grad=True)
+        x = TensorWithCounter(a1, b1, counter, size)
+
+        a2 = torch.rand(4, 4, requires_grad=True)
+        b2 = torch.rand(4, 4, requires_grad=True)
+        y = TensorWithCounter(a2, b2, counter, size)  # Same counter and size
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        out = opt_fn(x, y)
+
+        self.assertTrue(isinstance(out, TensorWithCounter))
+        self.assertIs(out._counter, counter)
+
+        out.sum().backward()
+        self.assertIsNotNone(x.grad)
+        self.assertIsNotNone(y.grad)
+
+        # Second invocation with different-but-equal shared opaques
+        counter2 = Counter(start=3, end=10)
+        size2 = SizeStore(4)
+
+        a3 = torch.rand(4, 4, requires_grad=True)
+        b3 = torch.rand(4, 4, requires_grad=True)
+        x2 = TensorWithCounter(a3, b3, counter2, size2)
+
+        a4 = torch.rand(4, 4, requires_grad=True)
+        b4 = torch.rand(4, 4, requires_grad=True)
+        y2 = TensorWithCounter(a4, b4, counter2, size2)
+
+        out2 = opt_fn(x2, y2)
+        self.assertTrue(isinstance(out2, TensorWithCounter))
+        self.assertIs(out2._counter, counter2)
+        self.assertEqual(out2._size_store, size2)
+
+        out2.sum().backward()
+        self.assertIsNotNone(x2.grad)
+        self.assertIsNotNone(y2.grad)
+        self.assertTrue(isinstance(x2.grad, TensorWithCounter))
+        self.assertIs(x2.grad._counter, counter2)
+        self.assertEqual(x2.grad._size_store, size2)
+
+    def test_deeply_nested_tensor_subclass_with_opaque(self):
+        """Test opaque objects in nested tensor subclasses are correctly remapped."""
+
+        # Outer subclass that wraps TensorWithCounter
+        class NestedSubclass(torch.Tensor):
+            @staticmethod
+            def __new__(cls, inner, scale):
+                # inner is a TensorWithCounter
+                kwargs = {
+                    "strides": inner.stride(),
+                    "storage_offset": inner.storage_offset(),
+                    "device": inner.device,
+                    "layout": inner.layout,
+                    "requires_grad": inner.requires_grad,
+                    "dtype": inner.dtype,
+                }
+                return torch.Tensor._make_wrapper_subclass(cls, inner.size(), **kwargs)
+
+            def __init__(self, inner, scale):
+                self._inner = inner
+                self._scale = scale
+
+            def __repr__(self):
+                return f"NestedSubclass({self._inner}, scale={self._scale})"
+
+            def __tensor_flatten__(self):
+                return ["_inner"], (self._scale,)
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, ctx, outer_size, outer_stride):
+                (scale,) = ctx
+                return NestedSubclass(inner_tensors["_inner"], scale)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if kwargs is None:
+                    kwargs = {}
+
+                def unwrap(x):
+                    return x._inner if isinstance(x, NestedSubclass) else x
+
+                def get_scale(x):
+                    if isinstance(x, NestedSubclass):
+                        return x._scale
+                    return None
+
+                scale = None
+                for arg in torch.utils._pytree.tree_leaves(args):
+                    scale = get_scale(arg)
+                    if scale is not None:
+                        break
+
+                unwrapped_args = torch.utils._pytree.tree_map(unwrap, args)
+                unwrapped_kwargs = torch.utils._pytree.tree_map(unwrap, kwargs)
+                out = func(*unwrapped_args, **unwrapped_kwargs)
+
+                def wrap(x):
+                    if isinstance(x, TensorWithCounter):
+                        return NestedSubclass(x, scale)
+                    return x
+
+                return torch.utils._pytree.tree_map(wrap, out)
+
+        def fn(x):
+            return x * 2 + 1
+
+        # Create nested structure: NestedSubclass -> TensorWithCounter -> tensors
+        a = torch.rand(4, 4, requires_grad=True)
+        b = torch.rand(4, 4, requires_grad=True)
+        counter = Counter(start=3, end=10)
+        size = SizeStore(4)
+        inner = TensorWithCounter(a, b, counter, size)
+        x = NestedSubclass(inner, scale=2.0)
+
+        cnt = CompileCounterWithBackend("aot_eager")
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        out = opt_fn(x)
+
+        # Output should preserve nested structure with same opaque objects
+        self.assertTrue(isinstance(out, NestedSubclass))
+        self.assertTrue(isinstance(out._inner, TensorWithCounter))
+        self.assertIs(out._inner._counter, counter)
+        self.assertIs(out._inner._size_store, size)
+        self.assertEqual(out._scale, 2.0)
+
+        # Test backward
+        out.sum().backward()
+        self.assertIsNotNone(x.grad)
+        self.assertTrue(isinstance(x.grad, NestedSubclass))
+
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Call again with different instances that are __eq__ equal.
+        a2 = torch.rand(4, 4, requires_grad=True)
+        b2 = torch.rand(4, 4, requires_grad=True)
+        counter2 = Counter(start=3, end=10)  # Same values, different instance
+        size2 = SizeStore(4)  # Same value, different instance
+        inner2 = TensorWithCounter(a2, b2, counter2, size2)
+        x2 = NestedSubclass(inner2, scale=2.0)
+
+        out2 = opt_fn(x2)
+        self.assertEqual(cnt.frame_count, 1)  # No recompilation
+
+        self.assertTrue(isinstance(out2, NestedSubclass))
+        # Key checks: should use runtime instances, not traced instances
+        self.assertIs(out2._inner._counter, counter2)
+        # Value-type opaques in ctx are baked at compile time, so identity
+        # is not preserved across re-invocations.
+        self.assertEqual(out2._inner._size_store, size2)
+        self.assertEqual(out2._scale, 2.0)
+
+        out2.sum().backward()
+        self.assertIsNotNone(x2.grad)
+        self.assertTrue(isinstance(x2.grad, NestedSubclass))
+        self.assertTrue(isinstance(x2.grad._inner, TensorWithCounter))
+        self.assertIs(x2.grad._inner._counter, counter2)
+        self.assertEqual(x2.grad._inner._size_store, size2)
+
+    def test_value_type_opaque_in_tensor_attrs_errors(self):
+        """Value-type opaques must go in ctx, not tensor attrs."""
+
+        class BadSubclass(torch.Tensor):
+            @staticmethod
+            def __new__(cls, data, size_store):
+                kwargs = {
+                    "strides": data.stride(),
+                    "storage_offset": data.storage_offset(),
+                    "device": data.device,
+                    "layout": data.layout,
+                    "requires_grad": data.requires_grad,
+                    "dtype": data.dtype,
+                }
+                return torch.Tensor._make_wrapper_subclass(cls, data.size(), **kwargs)
+
+            def __init__(self, data, size_store):
+                self._data = data
+                self._size_store = size_store
+
+            def __tensor_flatten__(self):
+                # BUG: SizeStore is value-type, should be in ctx not tensor attrs
+                return ["_data", "_size_store"], ()
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, ctx, outer_size, outer_stride):
+                return BadSubclass(inner_tensors["_data"], inner_tensors["_size_store"])
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if kwargs is None:
+                    kwargs = {}
+
+                def unwrap(x):
+                    return x._data if isinstance(x, BadSubclass) else x
+
+                size_store = None
+                for arg in torch.utils._pytree.tree_leaves(args):
+                    if isinstance(arg, BadSubclass):
+                        size_store = arg._size_store
+                        break
+
+                unwrapped_args = torch.utils._pytree.tree_map(unwrap, args)
+                unwrapped_kwargs = torch.utils._pytree.tree_map(unwrap, kwargs)
+                out = func(*unwrapped_args, **unwrapped_kwargs)
+
+                def wrap(x):
+                    if isinstance(x, torch.Tensor):
+                        return BadSubclass(x, size_store)
+                    return x
+
+                return torch.utils._pytree.tree_map(wrap, out)
+
+        def fn(x):
+            return x * 2
+
+        x = BadSubclass(torch.rand(4, 4), SizeStore(4))
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "SizeStore.*tensor attrs.*Only tensors and reference-type opaques",
+        ):
+            opt_fn(x)
+
+    def test_multi_reference_opaque_identity(self):
+        """Test identity preservation with multiple reference-type opaques in tensor attrs."""
+
+        class Tag(OpaqueBase):
+            def __init__(self, name):
+                self.name = name
+
+            def __eq__(self, other):
+                return isinstance(other, Tag) and self.name == other.name
+
+            def __hash__(self):
+                return hash(self.name)
+
+        register_opaque_type(Tag, typ="reference")
+
+        class TwoRefSubclass(torch.Tensor):
+            @staticmethod
+            def __new__(cls, data, counter, tag):
+                kwargs = {
+                    "strides": data.stride(),
+                    "storage_offset": data.storage_offset(),
+                    "device": data.device,
+                    "layout": data.layout,
+                    "requires_grad": data.requires_grad,
+                    "dtype": data.dtype,
+                }
+                return torch.Tensor._make_wrapper_subclass(cls, data.size(), **kwargs)
+
+            def __init__(self, data, counter, tag):
+                self._data = data
+                self._counter = counter
+                self._tag = tag
+
+            def __repr__(self):
+                return f"TwoRefSubclass({self._data})"
+
+            def __tensor_flatten__(self):
+                return ["_data", "_counter", "_tag"], ()
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, ctx, outer_size, outer_stride):
+                return TwoRefSubclass(
+                    inner_tensors["_data"],
+                    inner_tensors["_counter"],
+                    inner_tensors["_tag"],
+                )
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if kwargs is None:
+                    kwargs = {}
+
+                def unwrap(x):
+                    return x._data if isinstance(x, TwoRefSubclass) else x
+
+                counter = None
+                tag = None
+                for arg in torch.utils._pytree.tree_leaves(args):
+                    if isinstance(arg, TwoRefSubclass):
+                        counter = arg._counter
+                        tag = arg._tag
+                        break
+
+                unwrapped_args = torch.utils._pytree.tree_map(unwrap, args)
+                unwrapped_kwargs = torch.utils._pytree.tree_map(unwrap, kwargs)
+                out = func(*unwrapped_args, **unwrapped_kwargs)
+
+                def wrap(x):
+                    if isinstance(x, torch.Tensor):
+                        return TwoRefSubclass(x, counter, tag)
+                    return x
+
+                return torch.utils._pytree.tree_map(wrap, out)
+
+        def fn(x):
+            return x * 2 + 1
+
+        counter = Counter(start=3, end=10)
+        tag = Tag("test")
+        x = TwoRefSubclass(torch.rand(4, 4, requires_grad=True), counter, tag)
+
+        cnt = CompileCounterWithBackend("aot_eager")
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        out = opt_fn(x)
+
+        self.assertIsInstance(out, TwoRefSubclass)
+        self.assertIs(out._counter, counter)
+        self.assertIs(out._tag, tag)
+
+        out.sum().backward()
+        self.assertIsNotNone(x.grad)
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Second invocation with different-but-equal opaques
+        counter2 = Counter(start=3, end=10)
+        tag2 = Tag("test")
+        self.assertEqual(counter, counter2)
+        self.assertIsNot(counter, counter2)
+        x2 = TwoRefSubclass(torch.rand(4, 4, requires_grad=True), counter2, tag2)
+
+        out2 = opt_fn(x2)
+        self.assertEqual(cnt.frame_count, 1)  # No recompilation
+
+        self.assertIsInstance(out2, TwoRefSubclass)
+        self.assertIs(out2._counter, counter2)
+        self.assertIs(out2._tag, tag2)
+
+        out2.sum().backward()
+        self.assertIsNotNone(x2.grad)
+        self.assertIsInstance(x2.grad, TwoRefSubclass)
+        self.assertIs(x2.grad._counter, counter2)
+        self.assertIs(x2.grad._tag, tag2)
+
+    def test_opaque_obj_saved_for_backward(self):
+        """Test that opaque objects are correctly saved and passed to backward."""
+        import torch._dynamo.compiled_autograd
+
+        def foo(scale_obj, x):
+            result = torch.ops._TestOpaqueObject.mul_with_scale(scale_obj, x)
+            result = result * 2
+            return result
+
+        def compile_and_run_with_backend(backend):
+            scale_obj = OpaqueMultiplier(2.5)
+            x = torch.randn(3, 3, requires_grad=True)
+
+            opt_f = torch.compile(foo, fullgraph=True, backend=backend)
+            out = opt_f(scale_obj, x)
+            expected = x * 2.5 * 2
+            self.assertTrue(torch.allclose(out, expected))
+
+            upstream_grad = torch.ones_like(out) * 5
+            out.backward(upstream_grad)
+            self.assertIsNotNone(x.grad)
+            expected_grad = torch.ones_like(x) * 5 * 5
+            self.assertTrue(torch.allclose(x.grad, expected_grad))
+
+        backend = InductorAndRecordGraphs()
+        compile_and_run_with_backend(backend)
+        self.assertTrue(len(backend.graphs) > 0)
+        fw_graph = backend.graphs[0]
+        self.assertExpectedInline(
+            fw_graph.code.strip(),
+            f"""\
+def forward(self, L_x_ : torch.Tensor, L_scale_obj_ : {_illegal_char_regex.sub("_", get_opaque_type_name(OpaqueMultiplier))}):
+    l_x_ = L_x_
+    l_scale_obj_ = L_scale_obj_
+    result = torch.ops._TestOpaqueObject.mul_with_scale(l_scale_obj_, l_x_);  l_scale_obj_ = l_x_ = None
+    result_1 = result * 2;  result = None
+    return (result_1,)""",  # noqa: B950
+        )
+
+        backend = AotEagerAndRecordGraphs()
+        compile_and_run_with_backend(backend)
+        self.assertTrue(len(backend.fw_graphs) > 0)
+        fw_graph = backend.fw_graphs[0]
+        self.assertExpectedInline(
+            fw_graph.code.strip(),
+            """\
+def forward(self, primals_1, primals_2):
+    mul_with_scale = torch.ops._TestOpaqueObject.mul_with_scale.default(primals_2, primals_1);  primals_1 = None
+    mul = torch.ops.aten.mul.Tensor(mul_with_scale, 2);  mul_with_scale = None
+    return (mul, primals_2)""",
+        )
+        self.assertTrue(len(backend.bw_graphs) > 0)
+        bw_graph = backend.bw_graphs[0]
+        self.assertExpectedInline(
+            bw_graph.code.strip(),
+            """\
+def forward(self, primals_2, tangents_1):
+    mul_1 = torch.ops.aten.mul.Tensor(tangents_1, 2);  tangents_1 = None
+    get_multiplier_tensor = torch.ops._TestOpaqueObject.get_multiplier_tensor.default(primals_2, mul_1);  primals_2 = mul_1 = None
+    return (get_multiplier_tensor, None)""",
+        )
+
+        for use_compiled_autograd in [False, True]:
+            with self.subTest(use_compiled_autograd=use_compiled_autograd):
+                torch._dynamo.reset()
+
+                def run_with_multiplier(multiplier_value: float):
+                    scale_obj = OpaqueMultiplier(multiplier_value)
+                    x = torch.randn(3, 3, requires_grad=True)
+
+                    opt_f = torch.compile(foo, fullgraph=True, backend="aot_eager")
+                    out = opt_f(scale_obj, x)
+                    expected = x * multiplier_value * 2
+                    self.assertTrue(torch.allclose(out, expected))
+
+                    upstream_grad = torch.ones_like(out) * 5
+                    with (
+                        torch._dynamo.compiled_autograd._enable(
+                            torch.compile(backend="eager")
+                        )
+                        if use_compiled_autograd
+                        else contextlib.nullcontext()
+                    ):
+                        out.backward(upstream_grad)
+
+                    self.assertIsNotNone(x.grad)
+                    # gradient = upstream_grad * 2 * multiplier_value
+                    expected_grad = torch.ones_like(x) * 5 * 2 * multiplier_value
+                    self.assertTrue(torch.allclose(x.grad, expected_grad))
+                    return x.grad.clone()
+
+                grad1 = run_with_multiplier(2.5)
+                torch._dynamo.reset()
+                grad2 = run_with_multiplier(3.0)
+                self.assertFalse(torch.allclose(grad1, grad2))
+
+    def test_subgraph_tracer_create_arg_with_fake_script_object(self):
+        """Test that opaque class attribute access works correctly.
+
+        This tests the code path where:
+        1. An opaque class (like Color) is accessed via OpaqueObjectClassVariable
+        2. Attribute access (Color.RED) goes through var_getattr with static getattr
+        3. The opaque object is correctly lifted as a graph input
+        """
+        from torch._library.opaque_object import is_opaque_reference_type
+
+        self.assertTrue(is_opaque_reference_type(Color))
+        self.assertTrue(is_opaque_reference_type(type(Color.RED)))
+
+        captured = {"graph": None, "example_inputs": None}
+
+        def capture_backend(gm, example_inputs):
+            captured["graph"] = gm
+            captured["example_inputs"] = example_inputs
+            return gm
+
+        @torch.compile(fullgraph=True, backend=capture_backend)
+        def fn(x):
+            return torch.ops._TestOpaqueObject.apply_color_scale(Color.GREEN, x)
+
+        x = torch.randn(3, 3)
+        result = fn(x)
+
+        self.assertIsNotNone(captured["graph"])
+        print(captured["graph"].code.strip())
+
+        expected = x * float(Color.GREEN.value)
+        self.assertTrue(torch.allclose(result, expected))
+
+        graph_code = captured["graph"].code.strip()
+        self.assertExpectedInline(
+            graph_code,
+            f"""\
+def forward(self, L_x_ : torch.Tensor, G_Color_GREEN : {_illegal_char_regex.sub("_", get_opaque_type_name(Color))}):
+    l_x_ = L_x_
+    g_color_green = G_Color_GREEN
+    apply_color_scale = torch.ops._TestOpaqueObject.apply_color_scale(g_color_green, l_x_);  g_color_green = l_x_ = None
+    return (apply_color_scale,)""",  # noqa: B950
+        )
+
+    def test_hoist_basic(self):
+        def f(x):
+            return op_with_string(x, HoistedString("double"))
+
+        x = torch.tensor(3.0)
+
+        # backend = "eager"
+        backend = EagerAndRecordGraphs()
+        _ = torch.compile(f, fullgraph=True, backend=backend)(x)
+        graph = backend.graphs[0]
+        self.assertNotIn("double", str(graph))
+
+        # backend = "aot_eager"
+        backend = AotEagerAndRecordGraphs()
+        _ = torch.compile(f, fullgraph=True, backend=backend)(x)
+        graph = backend.graphs[0]
+        self.assertNotIn("double", str(graph))
+
+        # backend = "inductor"
+        y = torch.compile(f, fullgraph=True)(x)
+        self.assertEqual(y, 2 * x)
+
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @inductor_config.patch(
+        {
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+        }
+    )
+    def test_hoist_cache_hits(self):
+        torch._dynamo.reset()
+        counters.clear()
+
+        with fresh_inductor_cache():
+            # Because HoistedString should not be in the graph, the following
+            # two functions should share AOTAutogradCache and FXGraphCache entries
+
+            @torch.compile(fullgraph=True)
+            def f(x):
+                return op_with_string(x, HoistedString("double"))
+
+            @torch.compile(fullgraph=True)
+            def g(x):
+                return op_with_string(x, HoistedString("square"))
+
+            x = torch.tensor(3.0)
+
+            f(x)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+
+            g(x)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+
+    def test_opaque_class_literal_attribute_inlined(self):
+        """Test that literal attributes on opaque classes are inlined without source tracking.
+
+        When accessing a literal class attribute (like Color.DEFAULT_SCALE = 1.5),
+        the value should be constant-folded directly without creating a graph input.
+        """
+        captured = {"graph": None}
+
+        def capture_backend(gm, example_inputs):
+            captured["graph"] = gm
+            return gm
+
+        @torch.compile(fullgraph=True, backend=capture_backend)
+        def fn(x):
+            return x * Color.DEFAULT_SCALE
+
+        x = torch.randn(3, 3)
+        result = fn(x)
+
+        expected = x * 1.5
+        self.assertTrue(torch.allclose(result, expected))
+
+        self.assertIsNotNone(captured["graph"])
+        graph_code = captured["graph"].code.strip()
+        self.assertExpectedInline(
+            graph_code,
+            """\
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    mul = l_x_ * 1.5;  l_x_ = None
+    return (mul,)""",
+        )
+
+    def test_opaque_class_missing_attribute_graph_break(self):
+        """Test that accessing a non-existent attribute on an opaque class causes a graph break.
+
+        This tests GB7685: "Attribute not found on opaque class"
+        """
+
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return x * Color.NONEXISTENT
+
+        x = torch.randn(3, 3)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Attribute not found on opaque class",
+        ):
+            fn(x)
+
+    def test_opaque_class_unsupported_descriptor_graph_break(self):
+        """Test that accessing an unsupported descriptor on an opaque class causes a graph break.
+
+        This tests GB9567: "Unsupported descriptor on opaque class"
+        """
+
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return x * ColorWithDescriptor.custom_prop
+
+        x = torch.randn(3, 3)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Unsupported descriptor on opaque class",
+        ):
+            fn(x)
+
+    def test_opaque_class_staticmethod(self):
+        """Test that accessing a staticmethod on an opaque class works correctly.
+
+        This verifies that OpaqueObjectClassVariable.var_getattr properly handles
+        staticmethod descriptors (instead of raising 'Unsupported descriptor').
+        """
+        captured = {"graph": None}
+
+        def capture_backend(gm, _):
+            captured["graph"] = gm
+            return gm
+
+        @torch.compile(fullgraph=True, backend=capture_backend)
+        def fn(x):
+            _ = Color.RED_STATIC
+            return x * 2
+
+        x = torch.randn(3, 3)
+        result = fn(x)
+        expected = x * 2
+        self.assertTrue(torch.allclose(result, expected))
+        self.assertIsNotNone(captured["graph"])
+
+    def test_opaque_class_property(self):
+        """Test that accessing a property descriptor on an opaque class works correctly.
+
+        This verifies that OpaqueObjectClassVariable.var_getattr properly handles
+        property descriptors. When accessing a property on the class (not instance),
+        you get the property object back.
+        """
+        captured = {"graph": None}
+
+        def capture_backend(gm, _):
+            captured["graph"] = gm
+            return gm
+
+        @torch.compile(fullgraph=True, backend=capture_backend)
+        def fn(x):
+            _ = Color.name
+            return x * 2
+
+        x = torch.randn(3, 3)
+        result = fn(x)
+        expected = x * 2
+        self.assertTrue(torch.allclose(result, expected))
+        self.assertIsNotNone(captured["graph"])
+
+    def test_multiple_opaque_objects_in_backward(self):
+        """Test that multiple opaque objects are correctly positioned in backward pass.
+
+        This test verifies that when setup_context saves multiple opaque objects,
+        AOTAutograd correctly positions them when calling the backward function.
+        This addresses a bug where opaque objects were placed in the wrong position.
+        """
+        # Test eager mode
+        x = torch.randn(1, requires_grad=True)
+        rng1 = RNGState(123)
+        rng2 = RNGState(456)
+
+        result = torch.ops._TestOpaqueObject.multi_rng(x, rng1, rng2)
+        grad_o = torch.rand_like(result)
+        result.backward(grad_o)
+        self.assertEqual(x.grad, grad_o * 1.5)
+        x.grad = None
+
+        # Test compiled mode - this should not crash with incorrect opaque object positioning
+        x2 = torch.randn(1, requires_grad=True)
+        compiled_fn = torch.compile(
+            torch.ops._TestOpaqueObject.multi_rng,
+            fullgraph=True,
+        )
+        result = compiled_fn(x2, rng1, rng2)
+        grad_o = torch.rand_like(result)
+        result.backward(grad_o)
+        self.assertEqual(x2.grad, grad_o * 1.5)
+
+    def test_invoke_subgraph(self):
+        @torch.compiler.nested_compile_region
+        def fn(scale_obj, x):
+            result = torch.ops._TestOpaqueObject.mul_with_scale(scale_obj, x)
+            result = result * 2
+            return result
+
+        def gn(scale_obj, x):
+            z = fn(scale_obj, x)
+            return z + z
+
+        scale_obj = OpaqueMultiplier(3.0)
+        x = torch.randn(2, 2, requires_grad=True)
+        x_clone = x.detach().clone().requires_grad_(True)
+
+        ref = gn(scale_obj, x_clone)
+        ref.sum().backward()
+
+        backend = AotEagerAndRecordGraphs()
+        opt_outer = torch.compile(gn, fullgraph=True, backend=backend)
+        res = opt_outer(scale_obj, x)
+        res.sum().backward()
+
+        actual = normalize_gm(backend.graphs[0].print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[2, 2]", L_scale_obj_ : __main___OpaqueMultiplier):
+        l_x_ = L_x_
+        l_scale_obj_ = L_scale_obj_
+
+        subgraph_0 = self.subgraph_0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_scale_obj_, l_x_);  subgraph_0 = l_scale_obj_ = l_x_ = None
+        getitem_2: "f32[2, 2]" = invoke_subgraph[0];  invoke_subgraph = None
+
+        add: "f32[2, 2]" = getitem_2 + getitem_2;  getitem_2 = None
+        return (add,)
+
+    class subgraph_0(torch.nn.Module):
+        def forward(self, l_scale_obj_ : __main___OpaqueMultiplier, l_x_: "f32[2, 2]"):
+            result: "f32[2, 2]" = torch.ops._TestOpaqueObject.mul_with_scale(l_scale_obj_, l_x_);  l_scale_obj_ = l_x_ = None
+
+            result_1: "f32[2, 2]" = result * 2;  result = None
+            return (result_1,)
+""",  # noqa: B950
+        )
+
+        self.assertEqual(ref, res)
+        self.assertEqual(ref.grad, res.grad)
+
+    def test_value_type_subclass(self):
+        """Subclasses of registered opaque types should be recognized as opaque."""
+
+        class ExtendedConfig(ValueConfig):
+            def __init__(self, mode: str, scale: float):
+                super().__init__(mode)
+                self.scale = scale
+
+            def __eq__(self, other):
+                return (
+                    isinstance(other, ExtendedConfig)
+                    and self.mode == other.mode
+                    and self.scale == other.scale
+                )
+
+            def __hash__(self):
+                return hash((self.mode, self.scale))
+
+            def __fx_repr__(self):
+                return (
+                    f"ExtendedConfig(mode={self.mode!r}, scale={self.scale!r})",
+                    {"ExtendedConfig": ExtendedConfig},
+                )
+
+        self.assertTrue(is_opaque_type(ExtendedConfig))
+        self.assertTrue(is_opaque_value_type(ExtendedConfig))
+
+        cfg = ExtendedConfig("square", 2.0)
+
+        def foo(x):
+            return torch.ops._TestOpaqueObject.process_with_config(x, cfg)
+
+        x = torch.randn(3, 3)
+        opt_f = torch.compile(foo, fullgraph=True, backend="aot_eager")
+        res = opt_f(x)
+        self.assertEqual(res, foo(x))
+
+    def test_opaque_object_with_inductor_backend(self):
+        """Test that opaque objects work correctly with inductor's get_attr handling."""
+
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.color = Color.RED
+
+            def forward(self, x):
+                return torch.ops._TestOpaqueObject.apply_color_scale(self.color, x)
+
+        mod = TestModule()
+        x = torch.randn(3, 3)
+
+        gm = torch.fx.symbolic_trace(mod)
+
+        has_get_attr = any(node.op == "get_attr" for node in gm.graph.nodes)
+        self.assertTrue(has_get_attr, "expected get_attr node for opaque object")
+
+        compiled_fn = compile_fx(gm, [x])
+        result = compiled_fn(x)
+
+        expected = x * float(Color.RED.value)
+        self.assertTrue(torch.allclose(result, expected))
+
+    def test_captured_opaque_object_export(self):
+        """Test that opaque objects captured from closures work with torch.export.
+
+        When an opaque object is captured via a module hook closure, it gets a
+        CellContentsSource instead of GetItemSource. The export path needs to
+        handle this gracefully.
+        """
+        rng = RNGState(42)
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                torch.ops._TestOpaqueObject.noisy_inject(x, rng)
+                return self.linear(x)
+
+        ep = torch.export.export(Model(), (torch.randn(4, 4),), strict=True)
+        self.assertExpectedInline(
+            ep.graph_module.code.strip(),
+            """\
+def forward(self, p_linear_weight, p_linear_bias, obj_lifted_custom_0, x):
+    noisy_inject = torch.ops._TestOpaqueObject.noisy_inject.default(x, obj_lifted_custom_0);  obj_lifted_custom_0 = noisy_inject = None
+    linear = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  x = p_linear_weight = p_linear_bias = None
+    return (linear,)""",  # noqa: B950
+        )
+
+    def test_hoist_no_recompile_on_different_string(self):
+        cnt = CompileCounter()
+
+        def f(x, label):
+            return op_with_string(x, HoistedString(label))
+
+        opt_f = torch.compile(f, backend=cnt, fullgraph=True)
+        x = torch.tensor(3.0)
+
+        res1 = opt_f(x, "double")
+        self.assertEqual(res1, f(x, "double"))
+        self.assertEqual(cnt.frame_count, 1)
+
+        res2 = opt_f(x, "square")
+        self.assertEqual(res2, f(x, "square"))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_opaque_multi_output_not_tensor_irnode(self):
+        """OpaqueMultiOutput must not be classified as a tensor IR node.
+
+        _is_tensor_irnode is used to select nodes for stride constraint
+        functions (require_stride1, require_contiguous, etc). If
+        OpaqueMultiOutput passes the check, those functions would call
+        get_stride/get_dtype/make_loader on it and crash."""
+        from unittest.mock import MagicMock
+
+        from torch._inductor import ir
+        from torch._inductor.lowering import _is_tensor_irnode
+
+        opaque_multi = ir.OpaqueMultiOutput.__new__(ir.OpaqueMultiOutput)
+        self.assertIsInstance(opaque_multi, ir.IRNode)
+        self.assertFalse(_is_tensor_irnode(opaque_multi))
+
+        non_tensor = MagicMock(spec=ir.NonTensorObj)
+        non_tensor.__class__ = ir.NonTensorObj
+        self.assertFalse(_is_tensor_irnode(non_tensor))
+
+        self.assertFalse(_is_tensor_irnode(42))
+
+    @unittest.skipIf(not dist.is_available(), "requires distributed")
+    def test_fake_script_object_process_group_pybind(self):
+        """FakeScriptObject wrapping ProcessGroup must be unwrapped in the
+        pybind toIValue before casting to c10::intrusive_ptr<ProcessGroup>.
+
+        During Dynamo tracing with CooR, mesh_get_process_group returns a
+        FakeScriptObject-wrapped ProcessGroup. When that flows into a C++
+        custom op, toIValue needs to unwrap real_obj before the pybind
+        cast. This test exercises that path by calling
+        mesh_get_process_group (which returns a wrapped PG during tracing)
+        and passing it to another op that consumes the ProcessGroup."""
+        from torch.distributed.device_mesh import (
+            _register_distributed_opaque_types,
+            DeviceMesh,
+        )
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        already_initialized = dist.is_initialized()
+        if already_initialized:
+            dist.destroy_process_group()
+
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=2)
+        try:
+            _register_distributed_opaque_types()
+            mesh = DeviceMesh("cpu", torch.arange(2))
+
+            def f(mesh, x):
+                pg = torch.ops._dtensor.mesh_get_process_group(mesh, 0)
+                return x + pg.size()
+
+            x = torch.randn(4)
+            compiled_f = torch.compile(f, backend="aot_eager", fullgraph=True)
+            result = compiled_f(mesh, x)
+            expected = f(mesh, x)
+            self.assertEqual(result, expected)
+        finally:
+            dist.destroy_process_group()
+            if already_initialized:
+                dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=2)
+
+    def test_subclass_parametrization_with_opaque_attrs(self):
+        """unwrap_tensor_subclass_parameters should handle non-tensor attrs."""
+        from torch._functorch._aot_autograd.subclass_parametrization import (
+            unwrap_tensor_subclass_parameters,
+        )
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                a = torch.randn(3, 4)
+                b = torch.randn(3, 4)
+                self.p = torch.nn.Parameter(
+                    TensorWithCounter(a, b, Counter(1, 10), SizeStore(4))
+                )
+
+            def forward(self, x):
+                return x + self.p
+
+        m = M()
+        unwrap_tensor_subclass_parameters(m)
+        x = torch.randn(3, 4)
+        m(x)
+
+    def test_export_non_strict_with_opaque_attrs(self):
+        """torch.export with strict=False should handle subclasses with non-tensor attrs."""
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x * 2
+
+        a = torch.randn(4, 4)
+        b = torch.randn(4, 4)
+        x = TensorWithCounter(a, b, Counter(1, 10), SizeStore(4))
+        torch.export.export(M(), (x,), strict=False)
+
+    @unittest.skipIf(not dist.is_available(), "requires distributed")
+    def test_get_untyped_storages_with_opaque_attrs(self):
+        """get_untyped_storages should skip non-tensor attrs without warning."""
+        from torch.distributed._tools.common_utils import get_untyped_storages
+
+        a = torch.randn(4, 4)
+        b = torch.randn(4, 4)
+        x = TensorWithCounter(a, b, Counter(1, 10), SizeStore(4))
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            storages = get_untyped_storages(x)
+        # Should get storages from the two inner tensors (a and b)
+        self.assertTrue(len(storages) > 0)
+
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @inductor_config.patch(
+        {
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+        }
+    )
+    def test_subclass_opaque_attrs_cache_hit(self):
+        """opaque_attrs in SubclassCreationMeta should survive AOTAutograd cache round-trip."""
+        torch._dynamo.reset()
+        counters.clear()
+
+        with fresh_inductor_cache():
+
+            @torch.compile(fullgraph=True)
+            def fn(x):
+                return x * 2
+
+            a = torch.randn(4, 4)
+            b = torch.randn(4, 4)
+            counter = Counter(start=3, end=10)
+            size = SizeStore(4)
+            x = TensorWithCounter(a, b, counter, size)
+
+            out = fn(x)
+            self.assertIsInstance(out, TensorWithCounter)
+            self.assertIs(out._counter, counter)
+            self.assertIs(out._size_store, size)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+            # Reset dynamo to force a fresh compilation that should hit the cache
+            torch._dynamo.reset()
+
+            @torch.compile(fullgraph=True)
+            def fn2(x):
+                return x * 2
+
+            a2 = torch.randn(4, 4)
+            b2 = torch.randn(4, 4)
+            counter2 = Counter(start=3, end=10)
+            size2 = SizeStore(4)
+            x2 = TensorWithCounter(a2, b2, counter2, size2)
+
+            out2 = fn2(x2)
+            self.assertIsInstance(out2, TensorWithCounter)
+            # Runtime opaque values should be used, not the serialized ones
+            self.assertIs(out2._counter, counter2)
+            self.assertEqual(out2._size_store, size2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+    def test_op_passthrough_counter_in_tuple(self):
+        # When a fake kernel returns its Counter input directly, the getitem
+        # proxy's example_value is already a FakeScriptObject.
+        counter_type = get_opaque_type_name(Counter)
+        torch.library.define(
+            "_TestOpaqueObject::passthrough_counter",
+            f"({counter_type} c, Tensor x) -> ({counter_type}, Tensor)",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::passthrough_counter",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def passthrough_impl(c: Counter, x: torch.Tensor):
+            return c, x * c.start
+
+        @torch.library.register_fake(
+            "_TestOpaqueObject::passthrough_counter", lib=self.lib
+        )
+        def passthrough_fake(c: Counter, x: torch.Tensor):
+            return c, torch.empty_like(x)
+
+        def fn(c, x):
+            out_c, out_x = torch.ops._TestOpaqueObject.passthrough_counter(c, x)
+            return torch.ops._TestOpaqueObject.counter_start(out_c) + out_x
+
+        c = Counter(3, 10)
+        x = torch.randn(4)
+        ref = fn(c, x)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+        res = opt_fn(c, x)
+        self.assertEqual(ref, res)
+
+    @torch._dynamo.config.patch(skip_fwd_side_effects_in_bwd_under_checkpoint=True)
+    def test_script_object_intermediate_exposed_from_checkpoint(self):
+        # A TorchScriptObjectVariable created inside an AC region and accessed
+        # outside via a list side effect must be exposed as a subgraph output.
+        import torch.utils.checkpoint
+
+        def gn(x, results):
+            counter = torch.ops._TestOpaqueObject.create_counter(x.shape[0], x.shape[0])
+            results.append(counter)
+            return x * 2
+
+        def fn(x):
+            results = []
+            out = torch.utils.checkpoint.checkpoint(gn, x, results, use_reentrant=False)
+            return torch.ops._TestOpaqueObject.counter_start(results[0]) + out
+
+        x = torch.randn(3, 4)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager_decomp_partition")
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_reference_type_opaque_object_state(self):
+        """When compile_fx_inner receives an FX graph whose placeholder meta['val']
+        is a raw opaque reference type (not wrapped in FakeScriptObject), inductor
+        handles it via OpaqueObjectState. This codepath is used by compile-on-one-rank
+        (COOR) where the FX graph is constructed with real objects."""
+        m = OpaqueMultiplier(2.0)
+        x = torch.ones(3)
+
+        graph = torch.fx.Graph()
+        m_node = graph.placeholder("m")
+        m_node.meta["val"] = m
+        fake_mode = FakeTensorMode()
+        x_node = graph.placeholder("x")
+        x_node.meta["val"] = fake_mode.from_tensor(x)
+        out = graph.call_function(
+            torch.ops._TestOpaqueObject.mul_with_scale.default, (m_node, x_node)
+        )
+        out.meta["val"] = fake_mode.from_tensor(x)
+        graph.output((out,))
+
+        gm = torch.fx.GraphModule({}, graph)
+        compiled = compile_fx_inner(gm, [m, x])
+        result = compiled([m, x])
+        self.assertEqual(result, (x * 2,))
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_benchmark_harness_no_pickle_for_opaque_inputs(self):
+        """Opaque graph inputs must not be pickled in the benchmark harness."""
+        a = torch.randn(4, 4, device="cuda")
+        b = torch.randn(4, 4, device="cuda")
+        twc = TensorWithCounter(a, b, Counter(0, 10), SizeStore(4))
+
+        def fn(x):
+            return x + 1
+
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        _, codes = run_and_get_code(compiled_fn, twc)
+        self.assertGreater(len(codes), 0)
+        for code in codes:
+            self.assertNotIn("pickle", code)
+
+    def test_opaque_object_state_in_graph_output(self):
+        """When compile_fx_inner receives a graph where a raw opaque reference
+        type appears in the outputs (not just inputs), inductor must handle it.
+        This happens in CooR (compile-on-one-rank) precompile: aot_autograd
+        partitions the joint graph so the forward graph saves opaque objects
+        (e.g. DeviceMesh) for the backward graph by including them in forward
+        outputs.  Inductor must:
+          1. Accept OpaqueObjectState in the output type assertion
+             (GraphLowering.output).
+          2. Handle NonTensorObj graph inputs in the memory planner
+             (get_dep_size_hint) without calling get_numel/get_dtype on them."""
+        m = OpaqueMultiplier(2.0)
+        x = torch.ones(3)
+
+        graph = torch.fx.Graph()
+        m_node = graph.placeholder("m")
+        m_node.meta["val"] = m
+        fake_mode = FakeTensorMode()
+        x_node = graph.placeholder("x")
+        x_node.meta["val"] = fake_mode.from_tensor(x)
+        out = graph.call_function(
+            torch.ops._TestOpaqueObject.mul_with_scale.default, (m_node, x_node)
+        )
+        out.meta["val"] = fake_mode.from_tensor(x)
+        # Include the opaque object in the output tuple, simulating how
+        # aot_autograd's forward graph passes saved-for-backward objects
+        # through as outputs.
+        graph.output((out, m_node))
+
+        gm = torch.fx.GraphModule({}, graph)
+        compiled = compile_fx_inner(gm, [m, x])
+        result = compiled([m, x])
+        self.assertEqual(result[0], x * 2)
+        self.assertIs(result[1], m)
 
 
 instantiate_parametrized_tests(TestOpaqueObject)

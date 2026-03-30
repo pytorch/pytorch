@@ -1,7 +1,7 @@
 import logging
 import weakref
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 from torch._guards import CompileId
 
@@ -101,7 +101,7 @@ class CacheSizeRelevantForFrame:
 
 def _get_weakref_from_f_locals(
     frame: DynamoFrameType, local_name: str
-) -> Optional[weakref.ref[Any]]:
+) -> weakref.ref[Any] | None:
     obj = frame.f_locals.get(local_name, None)
     weak_id = None
     try:

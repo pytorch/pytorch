@@ -49,6 +49,10 @@ fi
 # Stable packages are ok here, just to satisfy TorchBench check
 pip_install torch torchvision torchaudio --index-url "${CUDA_INDEX_URL}"
 
+# Pin setuptools<82 to avoid breaking visdom install (setuptools 82 removed
+# pkg_resources which visdom's setup.py depends on)
+pip_install 'setuptools<82'
+
 install_torchbench
 install_huggingface
 install_timm

@@ -183,7 +183,8 @@ std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
       &zero,
       grad_grid_t.data_ptr()));
 
-  return std::tuple<Tensor, Tensor>{grad_input_t, grad_grid_t};
+  return std::tuple<Tensor, Tensor>{
+      std::move(grad_input_t), std::move(grad_grid_t)};
 }
 
 } // namespace at::native

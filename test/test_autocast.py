@@ -377,7 +377,8 @@ class TestTorchAutocast(TestCase):
             with torch.autocast(device_type=dev):
                 _ = torch.tensor(1)
         with self.assertRaisesRegex(RuntimeError, msg):
-            assert torch.amp.is_autocast_available(device_type=dev)
+            if not torch.amp.is_autocast_available(device_type=dev):
+                raise AssertionError(f"autocast should be available for {dev}")
 
     def test_non_string_device(self):
         """Test that `autocast` throws a ValueError when provided a `torch.device` object for `device_type` instead of a string"""
@@ -542,6 +543,13 @@ class TestTorchAutocast(TestCase):
     def test_autocast_mixed_grad_contexts_cuda(self):
         """Test mixed grad contexts on CUDA"""
         self._test_autocast_mixed_grad_contexts_impl("cuda", torch.float16)
+
+    def test_autocast_called_with_non_callable(self):
+        """Test that autocast gives a clear error when misused as a function wrapper"""
+        x = torch.randn(2, 3)
+        msg = r"autocast\(\)\(func\) requires a callable, but got Tensor"
+        with self.assertRaisesRegex(TypeError, msg):
+            torch.autocast(device_type="cpu")(x)
 
 
 if __name__ == "__main__":

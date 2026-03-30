@@ -408,6 +408,23 @@ PyObject* THCPModule_cudaJiteratorCompileAndLaunchKernel(
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THCPModule_allocationTraceback(PyObject* _unused, PyObject* obj) {
+  HANDLE_TH_ERRORS
+  void* ptr = PyLong_AsVoidPtr(obj);
+  if (!ptr && PyErr_Occurred()) {
+    return nullptr;
+  }
+  auto ctx = c10::cuda::CUDACachingAllocator::getContextForPointer(ptr);
+  if (!ctx) {
+    Py_RETURN_NONE;
+  }
+  auto* tb = getCapturedTracebackFromContext(ctx);
+  std::vector<CapturedTraceback*> tbs = {tb};
+  auto frames = py_symbolize(tbs);
+  return frames.at(0).release().ptr();
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THCPModule_cudaCachingAllocator_raw_delete(
     PyObject* _unused,
     PyObject* obj) {
@@ -716,23 +733,41 @@ PyObject* THCPModule_resetPeakHostMemoryStats(
 PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   c10::cuda::MempoolId_t mempool_id = {0, 0};
+  bool include_traces = true;
+
   if (arg && arg != Py_None) {
-    TORCH_CHECK(PyTuple_Check(arg), "mempool_id must be a tuple");
+    TORCH_CHECK(PyTuple_Check(arg), "Expected tuple or None");
     Py_ssize_t size = PyTuple_Size(arg);
-    TORCH_CHECK(size == 2, "mempool_id must be a tuple of 2 integers");
 
-    auto id1 = THPObjectPtr(PyTuple_GetItem(arg, 0));
-    auto id2 = THPObjectPtr(PyTuple_GetItem(arg, 1));
-    TORCH_CHECK(
-        THPUtils_checkLong(id1) && THPUtils_checkLong(id2),
-        "mempool_id elements must be integers");
-
-    mempool_id = c10::cuda::MempoolId_t(
-        THPUtils_unpackLong(id1), THPUtils_unpackLong(id2));
+    if (size == 2) {
+      // (int, int) - mempool_id only
+      auto id1 = THPObjectPtr(PyTuple_GetItem(arg, 0));
+      auto id2 = THPObjectPtr(PyTuple_GetItem(arg, 1));
+      TORCH_CHECK(
+          THPUtils_checkLong(id1) && THPUtils_checkLong(id2),
+          "mempool_id elements must be integers");
+      mempool_id = c10::cuda::MempoolId_t(
+          THPUtils_unpackLong(id1), THPUtils_unpackLong(id2));
+    } else if (size == 3) {
+      // (int, int, bool) - mempool_id + include_traces
+      auto id1 = THPObjectPtr(PyTuple_GetItem(arg, 0));
+      auto id2 = THPObjectPtr(PyTuple_GetItem(arg, 1));
+      auto traces = THPObjectPtr(PyTuple_GetItem(arg, 2));
+      TORCH_CHECK(
+          THPUtils_checkLong(id1) && THPUtils_checkLong(id2),
+          "mempool_id elements must be integers");
+      TORCH_CHECK(
+          PyBool_Check(traces.get()), "include_traces must be a boolean");
+      mempool_id = c10::cuda::MempoolId_t(
+          THPUtils_unpackLong(id1), THPUtils_unpackLong(id2));
+      include_traces = (traces.get() == Py_True);
+    } else {
+      TORCH_CHECK(false, "Expected tuple of size 2 or 3");
+    }
   }
 
-  using c10::cuda::CUDACachingAllocator::BlockInfo;
-  using c10::cuda::CUDACachingAllocator::SegmentInfo;
+  using c10::CachingDeviceAllocator::BlockInfo;
+  using c10::CachingDeviceAllocator::SegmentInfo;
 
   py::str device_s = "device";
   py::str address_s = "address";
@@ -754,9 +789,11 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   py::str blocks_s = "blocks";
   py::str is_expandable_s = "is_expandable";
   py::str frames_s = "frames";
+  py::str forward_frames_s = "forward_frames";
   py::str time_us_s = "time_us";
   py::str compile_context_s = "compile_context";
   py::str user_metadata_s = "user_metadata";
+  py::str pool_id_s = "pool_id";
 
   py::list empty_frames;
   std::vector<CapturedTraceback*> to_gather_frames;
@@ -809,7 +846,8 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
     return segmentDict;
   };
 
-  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot(mempool_id);
+  auto snapshot =
+      c10::cuda::CUDACachingAllocator::snapshot(mempool_id, include_traces);
 
   py::list segments;
 
@@ -831,7 +869,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   py::str oom_s = "oom";
   py::str device_free_s = "device_free";
 
-  using namespace c10::cuda::CUDACachingAllocator;
+  using c10::CachingDeviceAllocator::TraceEntry;
 
   auto action_to_str = [&](TraceEntry::Action action) {
     switch (action) {
@@ -875,6 +913,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
       trace_entry[time_us_s] = te.time_.t_;
       trace_entry[compile_context_s] = te.compile_context_;
       trace_entry[user_metadata_s] = te.user_metadata_;
+      trace_entry[pool_id_s] = te.mempool_;
       trace.append(trace_entry);
     }
     traces.append(trace);
@@ -937,6 +976,17 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   auto frames = py_symbolize(to_gather_frames);
   for (auto i : c10::irange(frames.size())) {
     to_gather_dest.at(i)[frames_s] = frames.at(i);
+
+    // Add forward frames if available
+    auto* tb = to_gather_frames.at(i);
+    const auto& forward_tb = tb->forward_traceback();
+    if (forward_tb.has_value() && !forward_tb->empty()) {
+      py::list forward_list;
+      for (const auto& frame_str : *forward_tb) {
+        forward_list.append(py::str(frame_str));
+      }
+      to_gather_dest.at(i)[forward_frames_s] = forward_list;
+    }
   }
 
   return result.release().ptr();
@@ -1354,6 +1404,13 @@ static void registerCudaPluggableAllocator(PyObject* module) {
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
         storage_impl->release_data_and_set_meta_custom_data_ptr_error_msg_(s);
+      });
+
+  m.def(
+      "_clear_storage_data_ptr_access_error_msg", [](size_t storage_impl_ptr) {
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+        storage_impl->clear_data_ptr_access_error_msg_();
       });
 
   m.def("_has_Standard_Deleter", [](size_t storage_impl_ptr) {
@@ -2055,6 +2112,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
      METH_O,
      nullptr},
     {"_cuda_memorySnapshot", THCPModule_memorySnapshot, METH_O, nullptr},
+    {"_cuda_allocationTraceback",
+     THCPModule_allocationTraceback,
+     METH_O,
+     nullptr},
     {"_cuda_attach_out_of_memory_observer",
      THCPModule_attachOutOfMemoryObserver,
      METH_O,

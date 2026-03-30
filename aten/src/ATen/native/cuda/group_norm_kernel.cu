@@ -3,8 +3,6 @@
 
 #include <type_traits>
 
-#include <thrust/tuple.h>
-
 #include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>

@@ -33,7 +33,8 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
       c10::intrusive_ptr<c10d::Store> store,
       size_t rank,
       size_t worldSize,
-      std::optional<size_t> bufferSize = std::nullopt);
+      std::optional<size_t> bufferSize = std::nullopt,
+      std::string groupName = "");
 
   ~IntraNodeComm() override;
 
@@ -67,6 +68,7 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
   size_t rank_;
   size_t worldSize_;
   size_t bufferSize_;
+  std::string groupName_;
 
   /**
    * Members initialized after rendezvous

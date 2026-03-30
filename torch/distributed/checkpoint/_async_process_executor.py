@@ -85,12 +85,10 @@ class _ProcessGroupInitInfo:
             if self.use_prefix_store:
                 master_addr = os.environ.get("MASTER_ADDR")
                 master_port = os.environ.get("MASTER_PORT")
-                assert master_addr is not None, (
-                    "DCP needs MASTER_ADDR to use prefix store"
-                )
-                assert master_port is not None, (
-                    "DCP needs MASTER_PORT to use prefix store"
-                )
+                if master_addr is None:
+                    raise AssertionError("DCP needs MASTER_ADDR to use prefix store")
+                if master_port is None:
+                    raise AssertionError("DCP needs MASTER_PORT to use prefix store")
                 master_port = int(master_port)
             else:
                 master_addr = os.environ.get("MASTER_ADDR")

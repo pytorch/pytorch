@@ -519,6 +519,35 @@ static PyObject* THPStorage_setFromFile(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPStorage_swapDataPtr(PyObject* self, PyObject* other) {
+  HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
+  TORCH_CHECK(
+      THPStorage_Check(other),
+      "_swap_data_ptr_ expects an UntypedStorage, but got ",
+      THPUtils_typename(other));
+  THPStorage_assertNotNull(other);
+  auto& self_storage = THPStorage_Unpack(self);
+  auto& other_storage = THPStorage_Unpack(other);
+  TORCH_CHECK(
+      self_storage.device() == other_storage.device(),
+      "_swap_data_ptr_: storages must be on the same device, got ",
+      self_storage.device(),
+      " and ",
+      other_storage.device());
+  size_t self_nbytes = self_storage.nbytes();
+  size_t other_nbytes = other_storage.nbytes();
+  TORCH_CHECK(
+      self_nbytes == other_nbytes || self_nbytes == 0 || other_nbytes == 0,
+      "_swap_data_ptr_: storages must have the same nbytes or one must have 0, got ",
+      self_nbytes,
+      " and ",
+      other_nbytes);
+  self_storage.swap_data_ptr(const_cast<c10::Storage&>(other_storage));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPStorage__setCdata(PyObject* _self, PyObject* new_cdata) {
   HANDLE_TH_ERRORS
   auto self = reinterpret_cast<THPStorage*>(_self);
@@ -630,6 +659,7 @@ static PyMethodDef THPStorage_methods[] = {
      castPyCFunctionWithKeywords(THPStorage_fromFile),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
+    {"_swap_data_ptr_", THPStorage_swapDataPtr, METH_O, nullptr},
     {"_set_cdata", THPStorage__setCdata, METH_O, nullptr},
     {"_byteswap", THPStorage_byteswap, METH_VARARGS, nullptr},
     {"_fix_weakref", THPStorage_fix_weakref, METH_NOARGS, nullptr},

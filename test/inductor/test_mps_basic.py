@@ -62,6 +62,25 @@ class MPSBasicTests(TestCase):
     def test_atanh(self):
         self.common(lambda x: x.atanh(), (torch.rand(1024),))
 
+    def test_tanh(self):
+        self.common(lambda x: x.tanh(), (torch.rand(1024),))
+
+    def test_tanh_large_values(self):
+        # Test that tanh handles large values correctly (should saturate to ±1)
+        x = torch.tensor([-100.0, -50.0, -15.0, 0.0, 15.0, 50.0, 100.0], device="mps")
+
+        @torch.compile
+        def fn(x):
+            return x.tanh()
+
+        result = fn(x)
+        if not torch.allclose(result[0], torch.tensor(-1.0, device="mps")):
+            raise AssertionError("tanh(-100) should be -1")
+        if not torch.allclose(result[-1], torch.tensor(1.0, device="mps")):
+            raise AssertionError("tanh(100) should be +1")
+        if torch.isnan(result).any():
+            raise AssertionError("tanh should not produce NaN for large values")
+
     def test_floor(self):
         self.common(lambda x: x.floor(), (torch.rand(1024),))
 
@@ -169,6 +188,63 @@ class MPSBasicTests(TestCase):
             ),
         )
 
+    def test_sdpa_split_qkv(self):
+        # regression test for metal compiler bug where fused (x / A) % B
+        # produces wrong results, causing incorrect reads from non-contiguous.
+        n_head, n_embd, seq_len = 6, 384, 1024
+        x = torch.randn(16, seq_len, n_embd, device="mps")
+        c_attn = torch.nn.Linear(n_embd, 3 * n_embd).to("mps").eval()
+        qkv = c_attn(x)
+        q, k, v = qkv.split(n_embd, dim=2)
+        q = q.view(16, seq_len, n_head, n_embd // n_head).transpose(1, 2)
+        k = k.view(16, seq_len, n_head, n_embd // n_head).transpose(1, 2)
+        v = v.view(16, seq_len, n_head, n_embd // n_head).transpose(1, 2)
+
+        def fn(q, k, v):
+            return torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, is_causal=True
+            )
+
+        self.common(fn, (q, k, v), atol=1e-4, rtol=1e-4, check_lowp=False)
+
+    def test_nested_masked_cat(self):
+        # Regression test for YOLOv3 compilation failure on MPS.
+        # See https://github.com/pytorch/pytorch/actions/runs/23477894502
+        # YOLOv3 detection heads do view/permute/clone, then in-place slice
+        # assignment (sigmoid+grid, exp*anchor, sigmoid) followed by cat across
+        # scales. The slice_scatter decomposition fused with cat produces nested
+        # ops.masked calls in Metal codegen. Without depth-aware variable
+        # prefixes, inner scoped variables shadow outer ones, causing:
+        #   "variable 'tmp_scoped_1' declared with deduced type 'auto'
+        #    cannot appear in its own initializer"
+        na, no = 3, 5
+
+        def head(p, grid, anchor_wh):
+            bs, _, ny, nx = p.shape
+            p = p.view(bs, na, no, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
+            io = p.clone()
+            io[..., :2] = torch.sigmoid(io[..., :2]) + grid
+            io[..., 2:4] = torch.exp(io[..., 2:4]) * anchor_wh
+            torch.sigmoid_(io[..., 4:])
+            return io.view(bs, -1, no)
+
+        def fn(p1, p2, grid1, grid2, anchor_wh1, anchor_wh2):
+            return torch.cat(
+                [head(p1, grid1, anchor_wh1), head(p2, grid2, anchor_wh2)], dim=1
+            )
+
+        self.common(
+            fn,
+            (
+                torch.randn(1, na * no, 4, 4, device="mps"),
+                torch.randn(1, na * no, 8, 8, device="mps"),
+                torch.randn(1, 1, 4, 4, 2, device="mps"),
+                torch.randn(1, 1, 8, 8, 2, device="mps"),
+                torch.randn(1, na, 1, 1, 2, device="mps"),
+                torch.randn(1, na, 1, 1, 2, device="mps"),
+            ),
+        )
+
 
 class MPSBasicTestsAOTI(TestCase):
     def check_model(self, m, inp, dynamic_shapes=None):
@@ -177,7 +253,8 @@ class MPSBasicTestsAOTI(TestCase):
         path = torch._inductor.aoti_compile_and_package(ep)
         m = torch._inductor.aoti_load_package(path)
         res = m(*inp)
-        assert torch.allclose(res, res2)
+        if not torch.allclose(res, res2):
+            raise AssertionError
 
     def test_add_mps(self):
         class M(torch.nn.Module):
@@ -187,6 +264,23 @@ class MPSBasicTestsAOTI(TestCase):
         inp = (torch.ones(3, 3, device="mps"), torch.ones(3, 3, device="mps"))
         m = M().to("mps")
         self.check_model(m, inp)
+
+    def test_tanh_codegen(self):
+        # Verify that tanh uses metal::precise::tanh in generated Metal shader
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x.tanh()
+
+        example_inputs = (torch.randn(1024, device="mps"),)
+        model = Model()
+
+        ep = torch.export.export(model, example_inputs)
+        package_path = torch._export.aot_compile(ep.module(), example_inputs)
+
+        with open(os.path.splitext(package_path)[0] + ".cpp") as cpp:
+            src_code = cpp.read()
+            # Verify metal::precise::tanh is used (not clamped version)
+            FileCheck().check("metal::precise::tanh").run(src_code)
 
     def test_fallback_mps(self):
         class M(torch.nn.Module):

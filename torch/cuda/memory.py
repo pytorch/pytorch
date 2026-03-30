@@ -602,17 +602,30 @@ def max_memory_cached(device: "Device" = None) -> int:
     return max_memory_reserved(device=device)
 
 
-def memory_snapshot(mempool_id=None):
+def memory_snapshot(mempool_id=None, include_traces=True):
     r"""Return a snapshot of the CUDA memory allocator state across all devices.
 
     Interpreting the output of this function requires familiarity with the
     memory allocator internals.
 
+    Args:
+        mempool_id: Optional memory pool ID to get snapshot for a specific pool
+        include_traces: Whether to include trace entries in the snapshot.
+            If True (default), all trace entries are included.
+            If False, no trace entries are included (lightweight/fast snapshot).
+
     .. note::
         See :ref:`cuda-memory-management` for more details about GPU memory
         management.
     """
-    return torch._C._cuda_memorySnapshot(mempool_id)["segments"]
+    if mempool_id is None:
+        # pyrefly: ignore [bad-argument-type]
+        return torch._C._cuda_memorySnapshot((0, 0, include_traces))["segments"]
+    else:
+        return torch._C._cuda_memorySnapshot(
+            # pyrefly: ignore [bad-argument-type]
+            (mempool_id[0], mempool_id[1], include_traces)
+        )["segments"]
 
 
 def memory_summary(device: "Device" = None, abbreviated: bool = False) -> str:
@@ -710,6 +723,7 @@ def memory_summary(device: "Device" = None, abbreviated: bool = False) -> str:
                 freed_prefval = freed
 
             lines.append(
+                # pyrefly: ignore [bad-argument-type]
                 f" {submetric_name:<21} | {formatter(current, current_prefval)} | {formatter(peak, peak_prefval)} | "
                 f"{formatter(allocated, allocated_prefval)} | {formatter(freed, freed_prefval)} ",
             )
@@ -730,6 +744,7 @@ def memory_summary(device: "Device" = None, abbreviated: bool = False) -> str:
         freed = stats[prefix + "freed"]
 
         lines.append(
+            # pyrefly: ignore [bad-argument-type]
             f" {metric_name:<21} | {formatter(current, current)} | {formatter(peak, peak)} | "
             f"{formatter(allocated, allocated)} | {formatter(freed, freed)} ",
         )
@@ -974,6 +989,21 @@ def _record_memory_history_impl(
 _record_memory_history.__signature__ = signature(_record_memory_history_impl)  # type: ignore[attr-defined]
 
 
+def _allocation_traceback(data_ptr: int) -> list[dict[str, Any]] | None:
+    r"""Return the allocation traceback for a currently-allocated CUDA pointer,
+    or ``None`` if the pointer is not found or recording was not enabled.
+
+    ``data_ptr`` must be the base address of a recorded allocation, e.g. the
+    result of ``tensor.untyped_storage().data_ptr()``. Passing the result of
+    ``tensor.data_ptr()`` for a view with a nonzero ``storage_offset`` may
+    return ``None`` even if the underlying allocation is still live.
+
+    Requires :func:`_record_memory_history` to have been called with
+    ``context != None`` beforehand.
+    """
+    return torch._C._cuda_allocationTraceback(data_ptr)
+
+
 def _snapshot(device: "Device" = None, augment_with_fx_traces=False):
     """Save a snapshot of CUDA memory state at the time it was called.
 
@@ -997,6 +1027,9 @@ def _snapshot(device: "Device" = None, augment_with_fx_traces=False):
             total_size: int  #  cudaMalloc'd size of segment
             stream: int
             segment_type: Literal["small", "large"]  # 'large' (>1MB)
+            segment_pool_id: Tuple[
+                int, int
+            ]  # id of the memory pool owning this segment
             allocated_size: int  # size of memory in use
             active_size: int  # size of memory in use or in active_awaiting_free state
             blocks: List[Block]
@@ -1055,6 +1088,7 @@ def _snapshot(device: "Device" = None, augment_with_fx_traces=False):
             stream: int
             device_free: int  # only present for OOM, the amount of
             # memory cuda still reports to be free
+            pool_id: Tuple[int, int]  # id of the memory pool for this entry
 
     Args:
         device: Device to capture snapshot for. If None, captures for current device.
@@ -1253,27 +1287,27 @@ class MemPool(_MemPool):
         r"""Returns the ID of this pool as a tuple of two ints."""
         return super().id
 
-    @property
-    def allocator(self) -> _cuda_CUDAAllocator | None:
-        r"""Returns the allocator this MemPool routes allocations to."""
-        return super().allocator
-
     def use_count(self) -> int:  # pylint: disable=useless-parent-delegation
         r"""Returns the reference count of this pool."""
         return super().use_count()
 
-    def snapshot(self):
+    def snapshot(self, include_traces=True):
         r"""Return a snapshot of the CUDA memory allocator pool state across all
         devices.
 
         Interpreting the output of this function requires familiarity with the
         memory allocator internals.
 
+        Args:
+            include_traces: Whether to include trace entries in the snapshot.
+                If True (default), all trace entries are included.
+                If False, no trace entries are included (lightweight/fast snapshot).
+
         .. note::
             See :ref:`cuda-memory-management` for more details about GPU memory
             management.
         """
-        snapshot = torch.cuda.memory_snapshot(self.id)
+        snapshot = torch.cuda.memory_snapshot(self.id, include_traces=include_traces)
         return snapshot
 
 

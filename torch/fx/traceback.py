@@ -2,6 +2,7 @@
 import copy
 import logging
 import traceback
+from collections import defaultdict
 from contextlib import contextmanager
 from enum import Enum
 from typing import Any, Optional, Union
@@ -35,8 +36,11 @@ __all__ = [
 ]
 
 current_meta: dict[str, Any] = {}
-current_replay_node: Optional[Node] = None
+current_replay_node: Node | None = None
+# Preserve the node meta fields in torch.fx.proxy._COPY_META_FIELDS
 should_preserve_node_meta = False
+# Preserve the "seq_nr" node meta field
+_should_preserve_node_meta = False
 
 GRADIENT_ACC_SPECIAL_STACK = (
     "Gradient addition node due to multiple use of tensor around:"
@@ -87,14 +91,14 @@ class NodeSource:
     action: list["NodeSourceAction"]
     from_node: list["NodeSource"]
     node_info: Optional["NodeInfo"]
-    _dict: Optional[dict[str, Any]]
-    _action_string: Optional[str]
+    _dict: dict[str, Any] | None
+    _action_string: str | None
 
     def __init__(
         self,
-        node: Optional[Node],
+        node: Node | None,
         pass_name: str = "",
-        action: Optional[Union["NodeSourceAction", list["NodeSourceAction"]]] = None,
+        action: Union["NodeSourceAction", list["NodeSourceAction"]] | None = None,
     ):
         self.pass_name = pass_name
 
@@ -103,7 +107,8 @@ class NodeSource:
         elif not isinstance(action, list):
             action = [action]
         for a in action:
-            assert isinstance(a, NodeSourceAction)
+            if not isinstance(a, NodeSourceAction):
+                raise AssertionError(f"Expected NodeSourceAction, got {type(a)}")
         self.action = action
         if node:
             self.node_info = self.NodeInfo(
@@ -119,8 +124,8 @@ class NodeSource:
             self.from_node = []
 
         # cache the action string and dict representation for performance.
-        self._action_string: Optional[str] = None
-        self._dict: Optional[dict[str, Any]] = None
+        self._action_string: str | None = None
+        self._dict: dict[str, Any] | None = None
 
     @property
     def name(self) -> str:
@@ -168,7 +173,8 @@ class NodeSource:
                 "from_node": [node.to_dict() for node in self.from_node],
             }
 
-        assert self._dict is not None
+        if self._dict is None:
+            raise AssertionError("_dict is None after initialization")
         return self._dict
 
     def __eq__(self, other: object):
@@ -190,7 +196,7 @@ class NodeSource:
         return hash(_make_hashable(self.to_dict()))
 
     @classmethod
-    def _from_dict(cls, d: Optional[dict]) -> Optional["NodeSource"]:
+    def _from_dict(cls, d: dict | None) -> Optional["NodeSource"]:
         """
         Recursively deserialize from_node metadata from dictionary data.
         It is used to deserialize the from_node field from serialized metadata.
@@ -199,7 +205,8 @@ class NodeSource:
         if d is None:
             return None
 
-        assert isinstance(d, dict), f"Expected a dict, got {type(d)}"
+        if not isinstance(d, dict):
+            raise AssertionError(f"Expected a dict, got {type(d)}")
 
         # Create a NodeSource object directly without going through the constructor
         # to avoid issues with graph ID and node creation
@@ -260,12 +267,33 @@ def preserve_node_meta(enable=True):
         current_meta = saved_current_meta
 
 
+@contextmanager
+def _preserve_node_seq_nr(preserve_seq_nr=True):
+    """
+    Temporarily enables or disables the preservation of node.meta["seq_nr"] in the
+    tracing context.
+    """
+    global _should_preserve_node_meta
+    saved = _should_preserve_node_meta
+
+    try:
+        _should_preserve_node_meta = preserve_seq_nr
+        yield
+    finally:
+        _should_preserve_node_meta = saved
+
+
 @compatibility(is_backward_compatible=False)
 def set_stack_trace(stack: list[str]):
     global current_meta
 
-    if should_preserve_node_meta and stack:
-        current_meta["stack_trace"] = "".join(stack)
+    if should_preserve_node_meta:
+        if stack:
+            current_meta["stack_trace"] = "".join(stack)
+        else:
+            # when the stack is empty, we explicitly clear the stack_trace to avoid
+            # propagating it to future node.˙
+            current_meta.pop("stack_trace", None)
 
 
 @compatibility(is_backward_compatible=False)
@@ -379,7 +407,8 @@ def reset_grad_fn_seq_nr():
     global current_meta
     if should_preserve_node_meta:
         current_level = current_meta.get("in_grad_fn", 0)
-        assert current_level > 0
+        if current_level <= 0:
+            raise AssertionError(f"Expected current_level > 0, got {current_level}")
         if current_level == 1:
             del current_meta["in_grad_fn"]
             del current_meta["grad_fn_seq_nr"]
@@ -400,6 +429,10 @@ def format_stack() -> list[str]:
 @compatibility(is_backward_compatible=False)
 def has_preserved_node_meta() -> bool:
     return should_preserve_node_meta
+
+
+def _is_preserving_node_seq_nr() -> bool:
+    return _should_preserve_node_meta
 
 
 @compatibility(is_backward_compatible=False)
@@ -486,7 +519,8 @@ def get_graph_provenance_json(graph: Graph) -> dict[str, Any]:
 
 
 def _get_custom_metadata(gm: GraphModule) -> str:
-    assert isinstance(gm, GraphModule)
+    if not isinstance(gm, GraphModule):
+        raise AssertionError(f"Expected GraphModule, got {type(gm)}")
 
     def helper(gm: GraphModule):
         custom_metadata = []
@@ -500,3 +534,35 @@ def _get_custom_metadata(gm: GraphModule) -> str:
         return custom_metadata
 
     return "\n".join(str(x) for x in helper(gm))
+
+
+def _get_ordered_seq_nr_groups(
+    gm: GraphModule | list[GraphModule],
+) -> list[list[str]]:
+    """
+    Group call_function nodes by seq_nr, order by seq_nr value,
+    and return a list of lists of node names (sorted alphabetically).
+
+    Args:
+        gm: A single GraphModule or a list of GraphModules to process.
+            When a list is provided, nodes from all graphs are grouped together.
+
+    Returns:
+        A list of lists, where each inner list contains node names that share the same seq_nr,
+        sorted alphabetically. The outer list is ordered by seq_nr value.
+    """
+    # Normalize input to a list
+    if isinstance(gm, GraphModule):
+        gms = [gm]
+    else:
+        gms = gm
+
+    seq_nr_dict: dict[int, list[str]] = defaultdict(list)
+    for graph_module in gms:
+        for node in graph_module.graph.nodes:
+            if node.op == "call_function":
+                seq_nr = node.meta.get("seq_nr")
+                if seq_nr is not None:
+                    seq_nr_dict[seq_nr].append(node.name)
+    # Sort by seq_nr and return list of sorted lists
+    return [sorted(seq_nr_dict[k]) for k in sorted(seq_nr_dict.keys())]

@@ -2,6 +2,7 @@
 #define C10_UTIL_LOGGING_COMMON_H_
 
 #include <c10/macros/Export.h>
+#include <c10/util/StringUtil.h>
 #include <sstream>
 
 namespace c10 {
@@ -11,8 +12,7 @@ namespace c10 {
 class C10_API MessageLogger {
  public:
   MessageLogger(
-      const char* file,
-      int line,
+      SourceLocation source_location,
       int severity,
       bool exit_on_fatal = true);
   ~MessageLogger() noexcept(false);
@@ -31,6 +31,7 @@ class C10_API MessageLogger {
   std::stringstream stream_;
   int severity_;
   bool exit_on_fatal_;
+  SourceLocation source_location_;
 };
 
 // This class is used to explicitly ignore values in the conditional

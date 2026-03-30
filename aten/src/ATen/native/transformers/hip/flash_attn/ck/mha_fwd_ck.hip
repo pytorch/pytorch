@@ -6,6 +6,72 @@
 #include <fmha_fwd.hpp>
 #include <mask.hpp>
 
+#include <cstdio>
+
+namespace {
+
+const char* mask_enum_str(mask_enum m) {
+    switch (m) {
+        case mask_enum::no_mask:          return "no_mask";
+        case mask_enum::mask_top_left:    return "mask_top_left";
+        case mask_enum::mask_bottom_right:return "mask_bottom_right";
+        case mask_enum::window_generic:   return "window_generic";
+        default:                          return "unknown";
+    }
+}
+
+const char* bias_enum_str(bias_enum b) {
+    switch (b) {
+        case bias_enum::no_bias:          return "no_bias";
+        case bias_enum::elementwise_bias: return "elementwise_bias";
+        case bias_enum::alibi:            return "alibi";
+        default:                          return "unknown";
+    }
+}
+
+const char* qscale_enum_str(quant_scale_enum q) {
+    switch (q) {
+        case quant_scale_enum::no_scale:      return "no_scale";
+        case quant_scale_enum::pertensor:      return "pertensor";
+        case quant_scale_enum::blockscale:     return "blockscale";
+        case quant_scale_enum::kv_blockscale:  return "kv_blockscale";
+        default:                               return "unknown";
+    }
+}
+
+void dump_fmha_fwd_kernel_selection_params(const fmha_fwd_traits& t,
+                                           const fmha_fwd_args& a) {
+    std::printf("=== fmha_fwd kernel selection params ===\n");
+    std::printf("--- traits ---\n");
+    std::printf("  data_type          : %s\n",  t.data_type.c_str());
+    std::printf("  hdim_q             : %d\n",  t.hdim_q);
+    std::printf("  hdim_v             : %d\n",  t.hdim_v);
+    std::printf("  is_group_mode      : %s\n",  t.is_group_mode      ? "true" : "false");
+    std::printf("  is_v_rowmajor      : %s\n",  t.is_v_rowmajor      ? "true" : "false");
+    std::printf("  has_logits_soft_cap: %s\n",  t.has_logits_soft_cap ? "true" : "false");
+    std::printf("  mask_type          : %s (%d)\n", mask_enum_str(t.mask_type),
+                static_cast<int>(t.mask_type));
+    std::printf("  bias_type          : %s (%d)\n", bias_enum_str(t.bias_type),
+                static_cast<int>(t.bias_type));
+    std::printf("  has_lse            : %s\n",  t.has_lse             ? "true" : "false");
+    std::printf("  has_dropout        : %s\n",  t.has_dropout         ? "true" : "false");
+    std::printf("  qscale_type        : %s (%d)\n", qscale_enum_str(t.qscale_type),
+                static_cast<int>(t.qscale_type));
+    std::printf("  skip_min_seqlen_q  : %s\n",  t.skip_min_seqlen_q  ? "true" : "false");
+    std::printf("  has_sink           : %s\n",  t.has_sink            ? "true" : "false");
+    std::printf("--- args ---\n");
+    std::printf("  hdim_q             : %d\n",  static_cast<int>(a.hdim_q));
+    std::printf("  hdim_v             : %d\n",  static_cast<int>(a.hdim_v));
+    std::printf("  seqlen_k           : %d\n",  static_cast<int>(a.seqlen_k));
+    std::printf("  cu_seqlen_k_ptr    : %p\n",  a.cu_seqlen_k_ptr);
+    std::printf("  batch              : %d\n",  static_cast<int>(a.batch));
+    std::printf("  nhead_q            : %d\n",  static_cast<int>(a.nhead_q));
+    std::printf("  max_seqlen_q       : %d\n",  static_cast<int>(a.max_seqlen_q));
+    std::printf("========================================\n");
+    std::fflush(stdout);
+}
+
+} // anonymous namespace
 
 namespace pytorch_flash {
 
@@ -27,7 +93,7 @@ fmha_fwd_traits get_ck_fmha_fwd_traits(const mask_info &mask,
                            enable_bias ? bias_enum::elementwise_bias : bias_enum::no_bias,
                            has_lse,
                            has_dropout,
-                           false}; // do_fp8_static_quant
+                           quant_scale_enum::no_scale};
 }
 
 fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
@@ -100,12 +166,21 @@ fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
                          k.data_ptr(),
                          v.data_ptr(),
                          attn_bias_ptr, // bias
+                         nullptr, // q_descale_ptr
+                         nullptr, // k_descale_ptr
+                         nullptr, // v_descale_ptr
                          has_dropout_randval ? dropout_randval.data_ptr() : nullptr,
                          has_lse ? softmax_lse.data_ptr() : nullptr,
                          out.data_ptr(),
-                         nullptr,                           // seqstart_q
-                         nullptr,                           // seqstart_k
-                         nullptr,
+                         nullptr, // seqstart_q
+                         nullptr, // seqstart_k
+                         nullptr, // seqlen_q_ptr
+                         nullptr, // seqlen_k_ptr
+                         nullptr, // cu_seqlen_q_ptr
+                         nullptr, // cu_seqlen_k_ptr
+                         nullptr, // block_scale_seqstart_q_ptr
+                         nullptr, // block_scale_seqstart_k_ptr
+                         nullptr, // sink_ptr
                          seqlen_q,
                          seqlen_k,
                          b,
@@ -115,8 +190,6 @@ fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
                          h,                                 // nhead
                          h_k,                               // nhead_k
                          softmax_scale,                     // scale_s
-                         1,                                 // scale_p
-                         1,                                 // scale_o
                          0.0f,                              // logits_soft_cap
                          stride_q,
                          stride_k,
@@ -131,6 +204,9 @@ fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
                          nhead_stride_randval,
                          nhead_stride_lse,
                          nhead_stride_o,
+                         0, // nhead_stride_q_descale
+                         0, // nhead_stride_k_descale
+                         0, // nhead_stride_v_descale
                          batch_stride_q,
                          batch_stride_k,
                          batch_stride_v,
@@ -138,13 +214,20 @@ fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
                          batch_stride_randval,
                          batch_stride_lse,
                          batch_stride_o,
+                         0, // batch_stride_q_descale
+                         0, // batch_stride_k_descale
+                         0, // batch_stride_v_descale
                          mask.left,
                          mask.right,
+                         0,                                 // sink_size
                          static_cast<ck_tile::index_t>(mask.type),
                          -1,                                // min_seqlen_q
                          p_dropout,
                          has_dropout_randval,
-                         drop_seed_offset};
+                         drop_seed_offset,
+                         0, // block_scale_size_q
+                         0 // block_scale_size_kv
+                         };
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
@@ -261,7 +344,7 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
 
     // Otherwise the kernel will be launched from cuda:0 device
     // Cast to char to avoid compiler warning about narrowing
-    at::hip::HIPGuardMasqueradingAsCUDA device_guard{(char)q.get_device()};
+    at::cuda::CUDAGuard device_guard{(char)q.get_device()};
 
     auto opts = q.options();
     bool has_lse = true;
@@ -299,7 +382,7 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
 
 
         hipLaunchKernelGGL(
-            flash::ParsePhiloxCudaState, dim3(1), dim3(64), 0, at::hip::getCurrentHIPStreamMasqueradingAsCUDA(), philox_args, rng_state_ptr);
+            flash::ParsePhiloxCudaState, dim3(1), dim3(64), 0, at::cuda::getCurrentCUDAStream(), philox_args, rng_state_ptr);
         seed_t = at::scalar_tensor(at::Scalar(static_cast<uint64_t>(rng_state_ptr[0])), at::dtype(at::kLong));
         offset_t = at::scalar_tensor(at::Scalar(static_cast<uint64_t>(rng_state_ptr[1])), at::dtype(at::kLong));
     }
@@ -317,7 +400,7 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
 
     if (seqlen_k > 0) {
         auto drop_seed_offset = std::make_pair(rng_state_ptr, rng_state_ptr + 1);
-        auto stream = at::cuda::getCurrentHIPStream().stream();
+        auto stream = at::cuda::getCurrentCUDAStream().stream();
         ck_tile::stream_config stream_config{stream};
 
         auto traits =

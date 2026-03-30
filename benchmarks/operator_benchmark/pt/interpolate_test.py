@@ -14,13 +14,14 @@ class InterpolateBenchmark(op_bench.TorchBenchmarkBase):
         channels_last=False,
         mode="linear",
         dtype=torch.float,
+        device="cpu",
     ):
         input_image = torch.randint(
             0,
             256,
             size=input_size,
             dtype=dtype,
-            device="cpu",
+            device=device,
             requires_grad=self.auto_set(),
         )
         if channels_last:
@@ -151,7 +152,29 @@ config_5d = op_bench.config_list(
 )
 
 
-for config in (config_short, config_long, config_3d, config_5d):
+# CUDA bicubic with high channel counts (VLM position embedding workloads).
+# These exercise the parallel batch/channel kernel for small output spatial sizes.
+config_cuda_bicubic = op_bench.config_list(
+    attr_names=["input_size", "output_size"],
+    attrs=[
+        [(64, 768, 16, 16), (6, 6)],
+        [(64, 768, 16, 16), (14, 14)],
+        [(64, 1152, 16, 16), (6, 6)],
+        [(64, 1152, 32, 32), (14, 14)],
+        [(4, 256, 64, 64), (32, 32)],
+        # Regression check: large output with few channels should not regress
+        [(1, 3, 320, 320), (256, 256)],
+        [(1, 3, 500, 500), (800, 800)],
+    ],
+    cross_product_configs={
+        "mode": ["bicubic"],
+        "device": ["cuda"],
+    },
+    tags=["short"],
+)
+
+
+for config in (config_short, config_long, config_3d, config_5d, config_cuda_bicubic):
     op_bench.generate_pt_test(config, InterpolateBenchmark)
 
 
