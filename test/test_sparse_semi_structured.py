@@ -52,7 +52,7 @@ _IS_HIPSPARSELT_AVAILABLE = False
 if torch.cuda.is_available():
     _IS_SM8X = torch.version.cuda is not None and (torch.cuda.get_device_capability(0)[0] == 8)
     _IS_SM9X = torch.version.cuda is not None and (torch.cuda.get_device_capability(0)[0] == 9)
-    _IS_HIPSPARSELT_AVAILABLE = torch.version.hip is not None and tuple(int(v) for v in torch.version.hip.split('.')[:2]) > (6, 4)
+    _IS_HIPSPARSELT_AVAILABLE = torch.version.hip is not None and tuple(int(v) for v in torch.version.hip.split('.')[:2]) >= (7, 12)
     # CUTLASS kernels only work for Ampere
     if _IS_SM8X:
         SEMI_STRUCTURED_SUPPORTED_BACKENDS["cutlass"] = SparseSemiStructuredTensorCUTLASS
@@ -313,6 +313,8 @@ class TestSparseSemiStructured(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "spgemm_cutlass_dispatch_layouts"):
                     sparse_result = torch.mm(A_sparse, B)
             else:
+                if torch.version.hip:
+                    self.skipTest("Skipping int8 sparse mm (NN, cuSPARSELt) test on ROCm")
                 with self.assertRaisesRegex(RuntimeError,
                                             "CUDA error: operation not supported when calling `cusparseLtMatmulDescriptorInit"):
                     sparse_result = torch.mm(A_sparse, B)
@@ -343,6 +345,8 @@ class TestSparseSemiStructured(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "spgemm_cutlass_dispatch_layouts"):
                     sparse_result = torch.mm(A_sparse, B.t())
             else:
+                if torch.version.hip:
+                    self.skipTest("Skipping int8 sparse mm (NT, cusparselt, shape=(1,128)) test on ROCm")
                 with self.assertRaisesRegex(RuntimeError,
                                             "CUDA error: operation not supported when calling `cusparseLtMatmulDescriptorInit"):
                     sparse_result = torch.mm(A_sparse, B.t())
@@ -1130,6 +1134,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         if "cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
             self.skipTest('cuSPARSELt not enabled')
 
+    @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
@@ -1152,6 +1157,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         ):
             dense_result = torch.mm(A_fp8_sparse, B_fp8)
 
+    @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
@@ -1172,6 +1178,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         out_fp32_sparse = out_fp8_sparse.to(torch.float32)
         torch.testing.assert_close(out_fp32, out_fp32_sparse, rtol=1e-1, atol=1e-1)
 
+    @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
@@ -1267,6 +1274,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
 
         torch.testing.assert_close(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
+    @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
     @inference_dtypes
     def test_cslt_sparse_mm_search(self, device, dtype):
         A = rand_sparse_semi_structured_mask(256, 128, dtype=dtype)
@@ -1280,6 +1288,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         dense_result = dense_result.to(dtype)
         torch.testing.assert_close(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
+    @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
     @inference_dtypes
     def test_csrc_cslt_sparse_mm_search(self, device, dtype):
         A = rand_sparse_semi_structured_mask(256, 128, dtype=dtype)
@@ -1296,6 +1305,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         dense_result = dense_result.to(dtype)
         torch.testing.assert_close(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
+    @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
     def test_cusparselt_backend(self):
         if not torch.backends.cusparselt.is_available():
             raise AssertionError("cusparselt backend should be available")

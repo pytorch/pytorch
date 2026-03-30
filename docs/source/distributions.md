@@ -682,7 +682,17 @@
 
 .. py:module:: torch.distributions.uniform
 
-.. py:module:: torch.distributions.utils
+.. automodule:: torch.distributions.utils
+
+.. currentmodule:: torch.distributions.utils
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    logits_to_probs
+    probs_to_logits
+    vec_to_tril_matrix
 
 .. py:module:: torch.distributions.von_mises
 

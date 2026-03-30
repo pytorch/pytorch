@@ -53,8 +53,10 @@ from torch.testing._internal.common_utils import (
     run_tests,
     scoped_load_inline,
     skipIfTorchDynamo,
+    skipIfXpu,
     subtest,
     TemporaryFileName,
+    TEST_XPU,
     TestCase,
 )
 from torch.testing._internal.custom_op_db import numpy_nonzero
@@ -67,6 +69,12 @@ from torch._custom_op.impl import custom_op  # usort: skip
 # Needed by TestTypeConversion.test_string_type:
 MyList = list
 MyTensor = torch.Tensor
+
+device_type = (
+    acc.type
+    if (acc := torch.accelerator.current_accelerator(check_available=True))
+    else "cpu"
+)
 
 
 def requires_compile(fun):
@@ -1585,7 +1593,8 @@ class TestCustomOp(CustomOpTestCaseBase):
         with self.assertRaisesRegex(RuntimeError, "is not a Tensor"):
             op(x)
 
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @skipIfXpu(msg="Deprecated torch.custom_ops API")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires CUDA or XPU")
     def test_impl_separate(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor) -> torch.Tensor:
@@ -1595,7 +1604,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         def foo_cpu(x):
             return x.sin()
 
-        @custom_ops.impl(f"{TestCustomOp.test_ns}::foo", device_types="cuda")
+        @custom_ops.impl(f"{TestCustomOp.test_ns}::foo", device_types=device_type)
         def foo_cuda(x):
             return x.cos()
 
@@ -1604,12 +1613,13 @@ class TestCustomOp(CustomOpTestCaseBase):
         result = op(x)
         self.assertEqual(result, foo_cpu(x))
 
-        x_cuda = x.cuda()
+        x_cuda = x.to(device_type)
         op = self.get_op(f"{self.test_ns}::foo")
         result = op(x_cuda)
         self.assertEqual(result, foo_cuda(x_cuda))
 
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @skipIfXpu(msg="Deprecated torch.custom_ops API")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires CUDA or XPU")
     def test_impl_multiple(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor) -> torch.Tensor:
@@ -1624,7 +1634,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         result = op(x)
         self.assertEqual(result, foo_impl(x))
 
-        x_cuda = x.cuda()
+        x_cuda = x.to(device_type)
         result = op(x_cuda)
         self.assertEqual(result, foo_impl(x_cuda))
 
@@ -2168,11 +2178,11 @@ Dynamic shape operator
         self._test_impl_device("foo2", ["cpu"], "cpu")
         self._test_impl_device("foo3", ["cpu", "cuda"], "cpu")
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires cuda or xpu")
     def test_impl_device_cuda(self):
-        self._test_impl_device("foo4", "default", "cuda")
-        self._test_impl_device("foo5", ["cuda"], "cuda")
-        self._test_impl_device("foo6", ["cpu", "cuda"], "cuda")
+        self._test_impl_device("foo4", "default", device_type)
+        self._test_impl_device("foo5", [device_type], device_type)
+        self._test_impl_device("foo6", ["cpu", device_type], device_type)
 
     def test_impl_device_function(self):
         lib = self.lib()
@@ -4500,6 +4510,32 @@ Please use `add.register_fake` to add an fake impl.""",
                 torch.library.get_kernel("test_invalid_kernel::cpu_only_op", "CUDA")
 
 
+class TestLibrarySourceLocation(TestCase):
+    def test_library_source_location(self):
+        # Library.__init__ uses sys._getframe(1) to capture the caller's
+        # filename and line number. Verify this works correctly by creating
+        # a Library and checking the source location in the error message
+        # that appears when a duplicate DEF library is created.
+        script = """\
+import torch
+lib1 = torch.library.Library("_test_loc", "DEF")
+lib1.define("foo(Tensor x) -> Tensor")
+try:
+    lib2 = torch.library.Library("_test_loc", "DEF")
+except RuntimeError as e:
+    print(str(e))
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # The error message should reference <string>:2, since
+        # lib1 = torch.library.Library(...) is on line 2 of the script.
+        self.assertIn("<string>:2", result.stdout)
+
+
 class MiniOpTestOther(CustomOpTestCaseBase):
     test_ns = "mini_op_test"
 
@@ -4795,10 +4831,10 @@ class TestTypeConversion(TestCase):
 
     def test_mixed_types(self):
         result_type = tuple_to_list(Tuple[int, float])
-        self.assertEqual(result_type, list[typing.Union[int, float]])
+        self.assertEqual(result_type, list[int | float])
 
         result_type = tuple_to_list(Tuple[int, float, str])
-        self.assertEqual(result_type, list[typing.Union[int, float, str]])
+        self.assertEqual(result_type, list[int | float | str])
 
 
 class TestOpProfiles(TestCase):

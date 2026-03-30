@@ -105,8 +105,10 @@ class WorkerSpec:
     virtual_local_rank: bool = False
 
     def __post_init__(self):
-        assert self.local_world_size > 0
-        assert self.monitor_interval > 0
+        if self.local_world_size <= 0:
+            raise AssertionError
+        if self.monitor_interval <= 0:
+            raise AssertionError
 
         if self.fn:
             warnings.warn(
@@ -116,7 +118,8 @@ class WorkerSpec:
                 category=DeprecationWarning,
             )
             self.entrypoint = self.fn
-        assert self.entrypoint
+        if not self.entrypoint:
+            raise AssertionError
 
     def get_entrypoint_name(self):
         """Get the entry point name.
@@ -127,7 +130,8 @@ class WorkerSpec:
         if isinstance(self.entrypoint, str):
             return os.path.basename(self.entrypoint)
         else:
-            assert self.entrypoint is not None
+            if self.entrypoint is None:
+                raise AssertionError
             return self.entrypoint.__qualname__
 
 
@@ -455,12 +459,19 @@ class SimpleElasticAgent(ElasticAgent):
     such as one particular type of worker role.
     """
 
-    def __init__(self, spec: WorkerSpec, exit_barrier_timeout: float = 300):
+    def __init__(
+        self,
+        spec: WorkerSpec,
+        exit_barrier_timeout: float = 300,
+        shutdown_timeout: int = 30,
+    ):
         self._worker_group = WorkerGroup(spec)
         self._remaining_restarts = self._worker_group.spec.max_restarts
         self._store = None
         self._exit_barrier_timeout = exit_barrier_timeout
+        self._shutdown_timeout = shutdown_timeout
         self._total_execution_time = 0
+        self._in_exit_barrier: bool = False
 
     def get_worker_group(self, role: str = DEFAULT_ROLE) -> WorkerGroup:
         return self._worker_group
@@ -493,11 +504,14 @@ class SimpleElasticAgent(ElasticAgent):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def _shutdown(self, death_sig: signal.Signals = signal.SIGTERM) -> None:
+    def _shutdown(
+        self, death_sig: signal.Signals = signal.SIGTERM, timeout: int = 30
+    ) -> None:
         """Clean up any resources that were allocated during the agent's work.
 
         Args:
             death_sig: Signal to send to the child process, SIGTERM is default
+            timeout: Time to wait for graceful shutdown before sending SIGKILL
         """
         raise NotImplementedError
 
@@ -737,12 +751,12 @@ class SimpleElasticAgent(ElasticAgent):
             logger.info("Rendezvous gracefully exited: %s", e)  # noqa: G200
         except SignalException as e:
             logger.warning("Received %s death signal, shutting down workers", e.sigval)
-            self._shutdown(e.sigval)
+            self._shutdown(e.sigval, timeout=self._shutdown_timeout)
             shutdown_called = True
             raise
         finally:
             if not shutdown_called:
-                self._shutdown()
+                self._shutdown(timeout=self._shutdown_timeout)
             # record the execution time in case there were any exceptions during run.
             self._total_execution_time = int(time.monotonic() - start_time)
 
@@ -889,8 +903,18 @@ class SimpleElasticAgent(ElasticAgent):
 
         put_metric(f"workers.{spec.role}.flakiness", int(flakiness))
 
+    def _pre_invoke_run(self) -> None:
+        """Hook called before the worker lifecycle loop in ``_invoke_run``.
+
+        Subclasses can override this to perform setup that must happen
+        before rendezvous and worker initialization (e.g. starting a
+        health check server).  The default implementation is a no-op.
+        """
+
     def _invoke_run(self, role: str = DEFAULT_ROLE) -> RunResult:
         # NOTE: currently only works for a single role
+
+        self._pre_invoke_run()
 
         spec = self._worker_group.spec
         role = spec.role
@@ -904,7 +928,8 @@ class SimpleElasticAgent(ElasticAgent):
         rdzv_handler = spec.rdzv_handler
 
         while True:
-            assert self._worker_group.state != WorkerState.INIT
+            if self._worker_group.state == WorkerState.INIT:
+                raise AssertionError
             time.sleep(monitor_interval)
             run_result = self._monitor_workers(self._worker_group)
             state = run_result.state
@@ -974,6 +999,7 @@ class SimpleElasticAgent(ElasticAgent):
             self._exit_barrier_timeout,
         )
         start = time.time()
+        self._in_exit_barrier = True
         try:
             store_util.barrier(
                 store=self._store,
@@ -993,3 +1019,5 @@ class SimpleElasticAgent(ElasticAgent):
                 "Error waiting on exit barrier. Elapsed: %s seconds",
                 time.time() - start,
             )
+        finally:
+            self._in_exit_barrier = False

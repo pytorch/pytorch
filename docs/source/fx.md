@@ -1100,6 +1100,81 @@ The set of leaf modules can be customized by overriding
 .. autofunction:: torch.fx.passes.tools_common.stable_topological_sort
 ```
 
+## torch.fx.annotate
+
+```{eval-rst}
+.. automodule:: torch.fx.annotate
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.annotate
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    annotate
+```
+
+## torch.fx.node
+
+```{eval-rst}
+.. automodule:: torch.fx.node
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.node
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    has_side_effect
+    map_aggregate
+    map_arg
+```
+
+## torch.fx.operator_schemas
+
+```{eval-rst}
+.. automodule:: torch.fx.operator_schemas
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.operator_schemas
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    check_for_mutable_operation
+    create_type_hint
+    type_matches
+```
+
+## torch.fx.traceback
+
+```{eval-rst}
+.. automodule:: torch.fx.traceback
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.traceback
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    annotate_fn
+```
 
 <!-- The experimental and passes submodules are missing docs. -->
 <!-- Adding it here for coverage but this doesn't add anything to the -->
@@ -1116,12 +1191,8 @@ The set of leaf modules can be customized by overriding
 .. py:module:: torch.fx.experimental.migrate_gradual_types
 .. py:module:: torch.fx.passes.dialect
 .. py:module:: torch.fx.passes.dialect.common
-.. py:module:: torch.fx.annotate
 .. py:module:: torch.fx.config
-.. py:module:: torch.fx.experimental.accelerator_partitioner
 .. py:module:: torch.fx.experimental.const_fold
-.. py:module:: torch.fx.experimental.debug
-.. py:module:: torch.fx.experimental.merge_matmul
 .. py:module:: torch.fx.experimental.migrate_gradual_types.operation
 .. py:module:: torch.fx.experimental.migrate_gradual_types.util
 .. py:module:: torch.fx.experimental.migrate_gradual_types.z3_types
@@ -1131,22 +1202,10 @@ The set of leaf modules can be customized by overriding
 .. py:module:: torch.fx.experimental.rewriter
 .. py:module:: torch.fx.experimental.schema_type_annotation
 .. py:module:: torch.fx.experimental.unification.dispatch
-.. py:module:: torch.fx.experimental.unification.match
-.. py:module:: torch.fx.experimental.unification.more
-.. py:module:: torch.fx.experimental.unification.multipledispatch.conflict
-.. py:module:: torch.fx.experimental.unification.multipledispatch.core
-.. py:module:: torch.fx.experimental.unification.multipledispatch.dispatcher
-.. py:module:: torch.fx.experimental.unification.multipledispatch.variadic
-.. py:module:: torch.fx.experimental.unification.utils
-.. py:module:: torch.fx.experimental.unification.variable
-.. py:module:: torch.fx.experimental.unify_refinements
-.. py:module:: torch.fx.experimental.validator
 .. py:module:: torch.fx.graph
 .. py:module:: torch.fx.graph_module
 .. py:module:: torch.fx.immutable_collections
 .. py:module:: torch.fx.interpreter
-.. py:module:: torch.fx.node
-.. py:module:: torch.fx.operator_schemas
 .. py:module:: torch.fx.passes.annotate_getitem_nodes
 .. py:module:: torch.fx.passes.backends.cudagraphs
 .. py:module:: torch.fx.passes.dialect.common.cse_pass
@@ -1179,5 +1238,4 @@ The set of leaf modules can be customized by overriding
 .. py:module:: torch.fx.proxy
 .. py:module:: torch.fx.subgraph_rewriter
 .. py:module:: torch.fx.tensor_type
-.. py:module:: torch.fx.traceback
 ```

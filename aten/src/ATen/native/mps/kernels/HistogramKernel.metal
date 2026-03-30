@@ -40,9 +40,9 @@ kernel void histogramdd(
     constant T* rightmost_edge [[buffer(8)]],
     constant int64_t* local_out_strides [[buffer(9)]],
     constant uint8_t& algorithm [[buffer(10)]],
-    constant uint8_t& has_weight [[buffer(11)]],
+    constant int64_t& weight_stride [[buffer(11)]],
     uint tid [[thread_position_in_grid]]) {
-  constexpr T eps = 4e-6;
+  constexpr auto eps = T(4e-6);
   bool skip_element = false;
   int64_t hist_index = 0;
   int64_t bin_seq_offset = 0;
@@ -90,7 +90,7 @@ kernel void histogramdd(
   if (!skip_element) {
     // In the unweighted case, the default weight is 1
     local_out[local_out_strides[0] * tid + hist_index] +=
-        has_weight ? weight[tid] : 1;
+        (weight_stride >= 0) ? weight[tid * weight_stride] : 1;
   }
 }
 
@@ -108,11 +108,12 @@ kernel void histogramdd(
       constant DTYPE* rightmost_edge [[buffer(8)]],             \
       constant int64_t* local_out_strides [[buffer(9)]],        \
       constant uint8_t& bin_selection_algorithm [[buffer(10)]], \
-      constant uint8_t& has_weight [[buffer(11)]],              \
+      constant int64_t& weight_stride [[buffer(11)]],           \
       uint tid [[thread_position_in_grid]]);
 
 REGISTER_HISTOGRAMDD_OP(float);
 REGISTER_HISTOGRAMDD_OP(half);
+REGISTER_HISTOGRAMDD_OP(bfloat);
 
 kernel void kernel_index_offset(
     constant uint* strides [[buffer(0)]],

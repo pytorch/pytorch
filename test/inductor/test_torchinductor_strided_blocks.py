@@ -7,7 +7,7 @@ import importlib
 import math
 import unittest
 from collections.abc import Callable
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -93,7 +93,7 @@ class BlockDescriptorTestBase(InductorTestCase):
     block_descriptor_constructor_str = "tl.make_block_ptr"
 
     def _discontiguous_tensor(
-        self, view_size: tuple[int, ...], device: Union[torch.device, str]
+        self, view_size: tuple[int, ...], device: torch.device | str
     ) -> torch.Tensor:
         """
         Create a padded tensor of the given size.
@@ -127,13 +127,13 @@ class BlockDescriptorTestBase(InductorTestCase):
         self: InductorTestCase,
         func: Callable[..., Any],
         *args,
-        compile_kwargs: Optional[dict] = None,
-        expected_num_block_pointers: Optional[int] = None,
+        compile_kwargs: dict | None = None,
+        expected_num_block_pointers: int | None = None,
         expected_num_programs: int = 1,
         expected_num_triton_kernels: int = 1,
-        config_patches: Optional[dict] = None,
-        rtol: Optional[float] = None,
-        atol: Optional[float] = None,
+        config_patches: dict | None = None,
+        rtol: float | None = None,
+        atol: float | None = None,
     ):
         """
         Runs the module through Inductor, comparing to eager reference.
@@ -161,7 +161,7 @@ class BlockDescriptorTestBase(InductorTestCase):
             }
             self.assertTrue(torch.allclose(ref, actual, **tol))
 
-        def count_code(substr: str, expected: Optional[int]):
+        def count_code(substr: str, expected: int | None):
             count = sum(prog.count(substr) for prog in code)
             if expected is not None:
                 self.assertEqual(count, expected)
@@ -248,8 +248,8 @@ class CommonTemplate:
         self,
         full_size: tuple[int, ...],
         view_size: tuple[int, ...],
-        stride: Optional[tuple[int, ...]],
-        offset: Optional[int],
+        stride: tuple[int, ...] | None,
+        offset: int | None,
         require_block_ptr: bool,
         prefer_nd_tiling: bool,
     ):
@@ -1444,7 +1444,7 @@ class CommonTemplate:
         class InputShape:
             x: int
             y: int
-            z: Optional[int] = None
+            z: int | None = None
 
             def to_list(self):
                 out = [self.y, self.x]

@@ -6,7 +6,7 @@ import math
 import operator
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Optional, Union
+from typing import Any
 
 import sympy
 
@@ -562,7 +562,7 @@ try:
                 log.debug("add target guard: %s", z3str(z3expr))
             self._target_exprs.add(z3expr)
 
-        def add_assertion(self, e: Union[z3.BoolRef, sympy.Basic]) -> None:
+        def add_assertion(self, e: z3.BoolRef | sympy.Basic) -> None:
             if isinstance(e, sympy.Basic):
                 self._check_freesymbols(e)
                 ref = self.to_z3_boolean_expr(e)
@@ -784,8 +784,8 @@ def bisect(shape_env):
 
     # Checks whether the given shape_env fails when produce_guards is called.
     def check_shapeenv_fails(
-        shape_env: ShapeEnv, tracked_fakes: Optional[list[Any]]
-    ) -> Optional[ValidationException]:
+        shape_env: ShapeEnv, tracked_fakes: list[Any] | None
+    ) -> ValidationException | None:
         if tracked_fakes is None:
             raise AssertionError("tracked_fakes is None")
         try:
@@ -803,7 +803,7 @@ def bisect(shape_env):
 
     # Checks whether the ShapeEnv reconstructed by replaying the events until
     # node is created fails when produce_guards is called.
-    def check_node_fails(node: torch.fx.Node) -> Optional[ValidationException]:
+    def check_node_fails(node: torch.fx.Node) -> ValidationException | None:
         number = node.meta[SHAPEENV_EVENT_KEY]
         # Reconstruct shape_env until the event at event_number.
         shape_env = replay_shape_env_events(events[: number + 1])

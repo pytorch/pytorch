@@ -11,7 +11,7 @@ from itertools import combinations
 from random import Random
 from shutil import rmtree
 from threading import Event, Lock
-from typing import Any, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 from typing_extensions import TypeVar
 from unittest.mock import patch
 
@@ -635,13 +635,13 @@ class LocksTest(TestMixin, TestCase):
         finally:
             executor.shutdown()
 
-    def is_lock(self, lock_or_flock: Union[Lock, FileLock]) -> bool:
+    def is_lock(self, lock_or_flock: Lock | FileLock) -> bool:
         return hasattr(lock_or_flock, "locked")
 
-    def is_flock(self, lock_or_flock: Union[Lock, FileLock]) -> bool:
+    def is_flock(self, lock_or_flock: Lock | FileLock) -> bool:
         return hasattr(lock_or_flock, "is_locked")
 
-    def lock_or_flock_locked(self, lock_or_flock: Union[Lock, FileLock]) -> bool:
+    def lock_or_flock_locked(self, lock_or_flock: Lock | FileLock) -> bool:
         if self.is_lock(lock_or_flock):
             return lock_or_flock.locked()
         elif self.is_flock(lock_or_flock):
@@ -691,7 +691,7 @@ class LocksTest(TestMixin, TestCase):
         - Different lock types (Lock vs FileLock) behave consistently with their respective APIs
         """
 
-        def inner(lock_or_flock: Union[Lock, FileLock], timeout: int) -> None:
+        def inner(lock_or_flock: Lock | FileLock, timeout: int) -> None:
             if self.is_lock(lock_or_flock):
                 lock: Lock = lock_or_flock
                 if acquisition_mode == "safe":
@@ -724,7 +724,7 @@ class LocksTest(TestMixin, TestCase):
             impls._OnDiskCacheImpl()._cache_dir
             / f"testing-locks-instance-{self.random_string}.lock"
         )
-        lock_or_flock: Union[Lock, FileLock] = (
+        lock_or_flock: Lock | FileLock = (
             Lock() if lock_typename == "Lock" else FileLock(str(flock_fpath))
         )
         lock_exception_type: type = (
@@ -2177,9 +2177,10 @@ class ShouldPadMemoizerTest(TestMixin, TestCase):
 
         return mock_match
 
+    @patch("torch._prims_common.is_contiguous_or_false", return_value=True)
     @patch_on_disk_cache_base_dir
     @set_caching_module_enabled(True)
-    def test_should_pad_memoizer_caches_result(self) -> None:
+    def test_should_pad_memoizer_caches_result(self, mock_is_contiguous) -> None:
         """Test that the should_pad_memoizer caches function results.
 
         Verifies that when a function decorated with should_pad_memoizer.memoize
@@ -2221,10 +2222,11 @@ class ShouldPadMemoizerTest(TestMixin, TestCase):
         self.assertTrue(result1)
         self.assertTrue(result2)
 
+    @patch("torch._prims_common.is_contiguous_or_false", return_value=True)
     @patch_on_disk_cache_base_dir
     @set_caching_module_enabled(True)
     def test_should_pad_memoizer_different_shapes_different_cache_entries(
-        self,
+        self, mock_is_contiguous
     ) -> None:
         """Test that different tensor shapes result in different cache entries.
 
@@ -2272,10 +2274,11 @@ class ShouldPadMemoizerTest(TestMixin, TestCase):
         self.assertFalse(result_small)  # 8 <= 10
         self.assertTrue(result_large)  # 12 > 10
 
+    @patch("torch._prims_common.is_contiguous_or_false", return_value=True)
     @patch_on_disk_cache_base_dir
     @set_caching_module_enabled(True)
     def test_should_pad_memoizer_different_dtypes_different_cache_entries(
-        self,
+        self, mock_is_contiguous
     ) -> None:
         """Test that different tensor dtypes result in different cache entries.
 
@@ -2321,10 +2324,11 @@ class ShouldPadMemoizerTest(TestMixin, TestCase):
         self.assertTrue(result_fp32)
         self.assertFalse(result_fp16)
 
+    @patch("torch._prims_common.is_contiguous_or_false", return_value=True)
     @patch_on_disk_cache_base_dir
     @set_caching_module_enabled(True)
     def test_should_pad_memoizer_different_ops_different_cache_entries(
-        self,
+        self, mock_is_contiguous
     ) -> None:
         """Test that different operations result in different cache entries.
 
@@ -2369,9 +2373,12 @@ class ShouldPadMemoizerTest(TestMixin, TestCase):
         self.assertTrue(result_mm)
         self.assertFalse(result_addmm)
 
+    @patch("torch._prims_common.is_contiguous_or_false", return_value=True)
     @patch_on_disk_cache_base_dir
     @set_caching_module_enabled(True)
-    def test_should_pad_memoizer_replays_from_disk_cache(self) -> None:
+    def test_should_pad_memoizer_replays_from_disk_cache(
+        self, mock_is_contiguous
+    ) -> None:
         """Test that the memoizer replays results from disk cache after memory clear.
 
         Verifies that PersistentMemoizer correctly stores results to disk and
@@ -2414,9 +2421,12 @@ class ShouldPadMemoizerTest(TestMixin, TestCase):
         self.assertEqual(call_count, 1)  # Function should NOT be called again
         self.assertTrue(result2)
 
+    @patch("torch._prims_common.is_contiguous_or_false", return_value=True)
     @patch_on_disk_cache_base_dir
     @set_caching_module_enabled(False)
-    def test_should_pad_memoizer_disabled_does_not_cache(self) -> None:
+    def test_should_pad_memoizer_disabled_does_not_cache(
+        self, mock_is_contiguous
+    ) -> None:
         """Test that the memoizer does not cache when caching is disabled.
 
         Verifies that when IS_CACHING_MODULE_ENABLED is False, the function
@@ -2455,9 +2465,10 @@ class ShouldPadMemoizerTest(TestMixin, TestCase):
         self.assertTrue(result1)
         self.assertTrue(result2)
 
+    @patch("torch._prims_common.is_contiguous_or_false", return_value=True)
     @patch_on_disk_cache_base_dir
     @set_caching_module_enabled(True)
-    def test_should_pad_memoizer_with_input_tensor(self) -> None:
+    def test_should_pad_memoizer_with_input_tensor(self, mock_is_contiguous) -> None:
         """Test that the memoizer correctly handles the optional input tensor.
 
         Verifies that different input tensors (for addmm) result in different
@@ -2501,9 +2512,12 @@ class ShouldPadMemoizerTest(TestMixin, TestCase):
         self.assertTrue(result_with_input)
         self.assertFalse(result_without_input)
 
+    @patch("torch._prims_common.is_contiguous_or_false", return_value=True)
     @patch_on_disk_cache_base_dir
     @set_caching_module_enabled(True)
-    def test_should_pad_params_encoder_produces_consistent_keys(self) -> None:
+    def test_should_pad_params_encoder_produces_consistent_keys(
+        self, mock_is_contiguous
+    ) -> None:
         """Test that the encoder produces consistent keys for the same inputs.
 
         Verifies that calling the encoder with the same tensor metadata produces
@@ -2531,9 +2545,12 @@ class ShouldPadMemoizerTest(TestMixin, TestCase):
         self.assertEqual(encoded1["mat1"]["shape"], tuple(mat1.shape))
         self.assertEqual(encoded1["mat2"]["shape"], tuple(mat2.shape))
 
+    @patch("torch._prims_common.is_contiguous_or_false", return_value=True)
     @patch_on_disk_cache_base_dir
     @set_caching_module_enabled(True)
-    def test_should_pad_memoizer_same_shape_different_data_uses_cache(self) -> None:
+    def test_should_pad_memoizer_same_shape_different_data_uses_cache(
+        self, mock_is_contiguous
+    ) -> None:
         """Test that tensors with the same metadata but different data share cache.
 
         Verifies that the memoizer caches based on tensor metadata (shape, stride,

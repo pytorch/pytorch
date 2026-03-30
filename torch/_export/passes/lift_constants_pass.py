@@ -6,8 +6,12 @@ from typing import Any
 import torch
 from torch._export.verifier import SpecViolationError
 from torch._guards import detect_fake_mode
-from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_reference_type
+from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
+from torch._library.opaque_object import (
+    get_opaque_type_name,
+    is_opaque_reference_type,
+    is_opaque_type,
+)
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.export.exported_program import (
     ArgumentSpec,
@@ -26,9 +30,10 @@ log = logging.getLogger(__name__)
 
 class ConstantAttrMap(collections.abc.MutableMapping):
     """A mapping class that understands how to use module constants (tensors,
-    ScriptObjects, FakeScriptObjects) as keys. We store tensors and FakeScriptObjects normally,
-    but ScriptObjects are stored by hash, because different torch.ScriptObjects can point to
-    the same underlying value (but we guarantee that they will `hash()` to the same value
+    ScriptObjects, FakeScriptObjects, opaque objects) as keys. We store tensors,
+    FakeScriptObjects, and opaque objects normally, but ScriptObjects are stored
+    by hash, because different torch.ScriptObjects can point to the same
+    underlying value (but we guarantee that they will `hash()` to the same value
     if that's the case).
     """
 
@@ -45,9 +50,11 @@ class ConstantAttrMap(collections.abc.MutableMapping):
 
     def __getitem__(self, key: _ConstantAttributeType) -> Any:
         real_key = hash(key) if isinstance(key, torch.ScriptObject) else key
-        if not isinstance(real_key, (int, torch.Tensor, FakeScriptObject)):
+        if not isinstance(
+            real_key, (int, torch.Tensor, FakeScriptObject)
+        ) and not is_opaque_type(type(real_key)):
             raise AssertionError(
-                f"expected int, Tensor, or FakeScriptObject key, got {type(real_key)}"
+                f"expected int, Tensor, FakeScriptObject, or opaque type key, got {type(real_key)}"
             )
         return self._constant_attrs[real_key]
 
@@ -64,7 +71,9 @@ The same key can be mapped to multiple values, for handling constant aliasing.""
                 self._constant_attrs[hash(key)] = []
             self._constant_attrs[hash(key)].append(value)
             self._script_object_map[hash(key)] = key
-        elif isinstance(key, (torch.Tensor, FakeScriptObject)):
+        elif isinstance(key, (torch.Tensor, FakeScriptObject)) or is_opaque_type(
+            type(key)
+        ):
             if key not in self._constant_attrs:
                 self._constant_attrs[key] = []
             self._constant_attrs[key].append(value)
@@ -345,6 +354,23 @@ def lift_constants_pass(
                         name=const_placeholder_node.name,
                         class_fqn=class_fqn,
                         fake_val=constant_val,
+                    )
+                elif is_opaque_type(type(constant_val)):
+                    class_fqn = get_opaque_type_name(type(constant_val))
+                    fake_val = (
+                        maybe_to_fake_obj(fake_mode, constant_val)
+                        if fake_mode
+                        else None
+                    )
+                    const_placeholder_node.meta["val"] = CustomObjArgument(
+                        constant_fqn,
+                        class_fqn,
+                        fake_val,  # pyrefly: ignore[bad-argument-type]
+                    )
+                    input_spec_arg = CustomObjArgument(
+                        name=const_placeholder_node.name,
+                        class_fqn=class_fqn,
+                        fake_val=fake_val,  # pyrefly: ignore[bad-argument-type]
                     )
                 else:
                     raise SpecViolationError(

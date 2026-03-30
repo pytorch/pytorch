@@ -437,6 +437,56 @@ def convert_cubin_to_obj(
     return obj_file
 
 
+def batch_convert_cubins_to_obj(
+    cubins: list[tuple[str, str]],
+    output_dir: str,
+    cpp_compiler: str = "gcc",
+) -> str:
+    """Convert multiple cubin files to a single .o using batched .incbin assembly.
+
+    Instead of spawning 3 subprocesses per cubin (ld + 2x objcopy), generates
+    a single .S file with .incbin directives for all cubins and compiles it
+    with one compiler invocation. Produces bit-identical rodata and symbols
+    as the per-cubin convert_cubin_to_obj approach.
+
+    Args:
+        cubins: list of (cubin_file_path, kernel_name) tuples.
+        output_dir: directory for the generated .S and .o files.
+        cpp_compiler: C compiler to use for assembling (default: gcc).
+
+    Returns:
+        Path to the combined .o file.
+    """
+    asm_path = os.path.join(output_dir, "cubins_combined.S")
+    obj_path = os.path.join(output_dir, "cubins_combined.o")
+
+    with open(asm_path, "w") as f:
+        f.write(".section .rodata\n")
+        for cubin_file, kernel_name in cubins:
+            # Use absolute path to avoid issues with working directory
+            abs_cubin = os.path.abspath(cubin_file)
+            escaped_path = abs_cubin.replace("\\", "\\\\").replace('"', '\\"')
+            f.write(
+                f".balign 16\n"
+                f".global __{kernel_name}_start\n"
+                f".global __{kernel_name}_end\n"
+                f"__{kernel_name}_start:\n"
+                f'.incbin "{escaped_path}"\n'
+                f"__{kernel_name}_end:\n"
+                f".global __{kernel_name}_size\n"
+                f".set __{kernel_name}_size, "
+                f"__{kernel_name}_end - __{kernel_name}_start\n"
+            )
+
+    subprocess.run(
+        [cpp_compiler, "-c", asm_path, "-o", obj_path],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return obj_path
+
+
 @functools.cache
 def _is_apple_clang(cpp_compiler: str) -> bool:
     version_string = subprocess.check_output([cpp_compiler, "--version"]).decode("utf8")
@@ -770,7 +820,7 @@ def _get_warning_all_cflag(warning_all: bool = True) -> list[str]:
         return []
 
 
-def _get_cpp_std_cflag(std_num: str = "c++17") -> list[str]:
+def _get_cpp_std_cflag(std_num: str = "c++20") -> list[str]:
     if _IS_WINDOWS:
         """
         On Windows, only c++20 can support `std::enable_if_t`.
@@ -1063,7 +1113,10 @@ class CppOptions(BuildOptionsBase):
 
 
 def _get_torch_cpp_wrapper_definition() -> list[str]:
-    return ["TORCH_INDUCTOR_CPP_WRAPPER", "STANDALONE_TORCH_HEADER"]
+    defs = ["TORCH_INDUCTOR_CPP_WRAPPER", "STANDALONE_TORCH_HEADER"]
+    if config.cpp_cache_precompile_headers:
+        defs.append("TORCH_INDUCTOR_PRECOMPILE_HEADERS")
+    return defs
 
 
 def _use_custom_generated_macros() -> list[str]:
@@ -1078,6 +1131,11 @@ def _use_fb_internal_macros() -> list[str]:
                 "C10_USE_MINIMAL_GLOG",
                 "C10_DISABLE_TENSORIMPL_EXTENSIBILITY",
             ]
+            if platform.machine() == "x86_64":
+                fb_internal_macros += [
+                    "ATEN_MKL_ENABLED_FBCODE=1",
+                    "ATEN_MKLDNN_ENABLED_FBCODE=1",
+                ]
             return fb_internal_macros
         else:
             return []
@@ -2098,7 +2156,7 @@ class CppBuilder:
         self,
     ) -> None:
         with dynamo_timed("compile_file"):
-            command = self.get_command_line().split()
+            command = shlex.split(self.get_command_line())
             try:
                 output_path = self._target_file
                 # When we build remotely, we need to make sure to carefully copy any files
@@ -2112,9 +2170,14 @@ class CppBuilder:
                         shutil.copy(src, os.path.join(tmp_dir, os.path.basename(src)))
                     dest_include_path = os.path.join(tmp_dir, "include")
                     shutil.copytree(torch_includes_path, dest_include_path)
-                    # Run the build
+                    # Run the build, raising RuntimeError on failure instead of
+                    # SkipFrame so compilation errors propagate rather than
+                    # silently falling back to eager execution.
                     tmp_output_path = _run_build_command(
-                        command, tmp_dir, os.path.basename(output_path)
+                        command,
+                        tmp_dir,
+                        os.path.basename(output_path),
+                        exception_class=RuntimeError,
                     )
                     # Copy output from the build
                     if os.path.exists(output_path):
@@ -2125,8 +2188,7 @@ class CppBuilder:
                     elif output_path.endswith(".so"):
                         os.chmod(output_path, 0o755)
             except subprocess.CalledProcessError as e:
-                output = e.output.decode("utf-8")
-                raise exc.CppCompileError(command, output) from e
+                raise exc.CppCompileError(command, e.output.decode("utf-8")) from e
 
     def build(self) -> None:
         """
@@ -2165,7 +2227,7 @@ class CppBuilder:
             f"""
             cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
             project({self._target_name} LANGUAGES CXX)
-            set(CMAKE_CXX_STANDARD 17)
+            set(CMAKE_CXX_STANDARD 20)
 
             # Set a library target
             add_library({self._target_name} {target_library_type})

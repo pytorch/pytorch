@@ -29,6 +29,7 @@ from typing import (
     get_origin as _get_origin,
     overload as _overload,
     TYPE_CHECKING,
+    TypeGuard as _TypeGuard,
     TypeVar as _TypeVar,
 )
 from typing_extensions import (
@@ -1171,7 +1172,7 @@ def is_tensor(obj: _Any, /) -> _TypeIs["torch.Tensor"]:
     return isinstance(obj, torch.Tensor)
 
 
-def is_storage(obj: _Any, /) -> builtins.bool:
+def is_storage(obj: _Any, /) -> _TypeGuard["TypedStorage | UntypedStorage"]:
     r"""Returns True if `obj` is a PyTorch storage object.
 
     Args:
@@ -2469,10 +2470,11 @@ class _TorchCompileInductorWrapper:
                     )
             self.config[attr_name] = val
 
-    def __call__(self, model_, inputs_):
+    def __call__(self, model_, inputs_, *, config_patches=None):
         from torch._inductor.compile_fx import compile_fx
 
-        return compile_fx(model_, inputs_, config_patches=self.config)
+        all_patches = {**self.config, **(config_patches or {})}
+        return compile_fx(model_, inputs_, config_patches=all_patches)
 
     def get_compiler_config(self):
         from torch._inductor.compile_fx import get_patched_config_dict
@@ -2497,7 +2499,7 @@ class _TorchCompileAOTInductorWrapper(_TorchCompileInductorWrapper):
         self.apply_options({"cpp_wrapper": True})
         self.apply_options({"aot_inductor.package": True})
 
-    def __call__(self, model_, inputs_):
+    def __call__(self, model_, inputs_, *, config_patches=None):
         from contextlib import nullcontext
         from unittest import mock
 
@@ -2515,7 +2517,7 @@ class _TorchCompileAOTInductorWrapper(_TorchCompileInductorWrapper):
             ctx,
             torch._inductor.config.patch("enable_autograd_for_aot", True),
         ):
-            return super().__call__(model_, inputs_)
+            return super().__call__(model_, inputs_, config_patches=config_patches)
 
 
 class _TorchCompileWrapper:
@@ -2592,6 +2594,7 @@ def compile(
     mode: str | None = None,
     options: dict[str, str | builtins.int | builtins.bool | _Callable] | None = None,
     disable: builtins.bool = False,
+    recompile_limit: builtins.int | None = None,
 ) -> (
     _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]
     | _Callable[_InputT, _RetT]
@@ -2775,6 +2778,7 @@ def compile(
         dynamic=dynamic,
         disable=disable,
         guard_filter_fn=guard_filter_fn,
+        recompile_limit=recompile_limit,
     )(model)  # type: ignore[return-value]
 
 
@@ -3013,3 +3017,6 @@ def _as_tensor_fullprec(t):
 # an autoloaded backend are defined
 if _is_device_backend_autoload_enabled():
     _import_device_backends()
+
+# Register all registered custom / override ops in torch/_native
+import torch._native

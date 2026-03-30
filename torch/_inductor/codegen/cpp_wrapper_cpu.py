@@ -147,6 +147,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         inductor_meta=None,
         graph_name="",
         original_fxnode_name=None,
+        current_stream_idx=None,
     ):
         """
         Generates kernel call code.
@@ -217,13 +218,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         if not V.graph.aot_mode:
             self.header.splice(
-                """
+                '''
                 import torch
                 from torch._inductor.codecache import CppWrapperCodeCache
 
                 cpp_wrapper_src = (
-                r'''
-                """
+                r"""
+                '''
             )
 
         for device in V.graph.device_types:
@@ -1175,11 +1176,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         if config.cpp_wrapper_build_separate:
             # Close the wrapper code block, then write any kernel definitions.
-            result.splice("'''\n)")
+            result.splice('"""\n)')
             if self.kernel_declarations:
-                result.splice("\nkernel_src = (\nr'''")
+                result.splice('\nkernel_src = (\nr"""')
                 result.splice(self.kernel_declarations.getvalue())
-                result.splice("'''\n)")
+                result.splice('"""\n)')
             else:
                 result.splice(
                     """
@@ -1191,7 +1192,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             result.splice(self.kernel_declarations.getvalue())
             self.kernel_declarations.clear()
             # Close the wrapper code block
-            result.splice("'''\n)")
+            result.splice('"""\n)')
 
         kernel_code = "kernel_src" if config.cpp_wrapper_build_separate else "None"
         # Cpp entry function for JIT with cpp wrapper
@@ -1581,8 +1582,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def _generate_symbolic_call_arg_helper(
         self, arg: SymbolicCallArg, graph: GraphLowering
     ) -> None:
-        if (arg.inner, graph) not in self.kernel_numel_expr:
-            # declare expr once in each graph (scope)
+        enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
+            "linux",
+            "win32",
+        ]
+        if enable_kernel_profile or (arg.inner, graph) not in self.kernel_numel_expr:
+            # When enable_kernel_profile is on, each kernel call is wrapped in
+            # its own {} scope block, so we must redeclare the variable each
+            # time since prior declarations are no longer visible.
             self.kernel_numel_expr.add((arg.inner, graph))
             self.writeline(f"int64_t {arg.inner} = {cexpr(arg.inner_expr)};")
         else:

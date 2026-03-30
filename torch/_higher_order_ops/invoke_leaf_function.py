@@ -520,7 +520,7 @@ class InvokeLeafFunction(HigherOrderOperator):
         input_spec,
         mutated_arg_indices,
         *flat_args,
-        requires_grad_indices=(),
+        requires_grad_indices="",
     ):
         """
         real_fn_callable: _LeafCallable wrapping the real function
@@ -529,7 +529,8 @@ class InvokeLeafFunction(HigherOrderOperator):
         mutated_arg_indices: comma-separated string of flat-arg indices that are
             declared as mutated (e.g. "1,2"), or "" for no mutations. Encoded as a
             string so it is a pytree leaf for the HOP schema infrastructure.
-        requires_grad_indices: tuple of indices for inputs that require grad
+        requires_grad_indices: comma-separated string of flat-arg indices that
+            require grad (e.g. "0,1"), or "" for none.
         """
         return super().__call__(  # type: ignore[attr-defined]
             real_fn_callable,
@@ -548,7 +549,7 @@ class InvokeLeafFunction(HigherOrderOperator):
         input_spec,
         mutated_arg_indices,
         *flat_args,
-        requires_grad_indices=(),
+        requires_grad_indices="",
     ):
         from torch._higher_order_ops.schema import HopSchemaGenerator
         from torch._higher_order_ops.utils import _maybe_fake_prop_ignore_unbacked
@@ -583,6 +584,12 @@ class InvokeLeafFunction(HigherOrderOperator):
         gen.add_arg("mutated_arg_indices", mutated_arg_indices)
         for i, arg in enumerate(flat_args):
             gen.add_arg(f"arg{i}", arg, is_mutated=i in mutated_set)
+        gen.add_arg(
+            "requires_grad_indices",
+            requires_grad_indices,
+            default_value="",
+            kw_only=True,
+        )
 
         if isinstance(fake_outputs, tuple):
             for out in fake_outputs:
@@ -641,8 +648,8 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
         include_keys = torch._C._dispatch_tls_local_include_set()
         exclude_keys = torch._C._dispatch_tls_local_exclude_set()
 
-        requires_grad_indices = tuple(
-            i
+        requires_grad_indices = ",".join(
+            str(i)
             for i, arg in enumerate(flat_args)
             if isinstance(arg, torch.Tensor) and arg.requires_grad
         )
@@ -722,7 +729,7 @@ def invoke_leaf_function_autograd(
     input_spec,
     mutated_arg_indices,
     *flat_args,
-    requires_grad_indices=(),
+    requires_grad_indices="",
 ):
     return InvokeLeafFunctionAutogradOp.apply(
         real_fn_callable, fake_fn_callable, input_spec, mutated_arg_indices, *flat_args
@@ -848,7 +855,7 @@ def invoke_leaf_function_fake(
     input_spec,
     mutated_arg_indices,
     *flat_args,
-    requires_grad_indices=(),
+    requires_grad_indices="",
 ):
     with unflatten_args_with_modules(flat_args, input_spec) as (args, kwargs):
         return fake_fn_callable(*args, **kwargs)
@@ -861,7 +868,7 @@ def invoke_leaf_function_dense(
     input_spec,
     mutated_arg_indices,
     *flat_args,
-    requires_grad_indices=(),
+    requires_grad_indices="",
 ):
     from torch._dynamo import config as dynamo_config
 
@@ -872,7 +879,7 @@ def invoke_leaf_function_dense(
     flat_args = tuple(
         arg.detach() if isinstance(arg, torch.Tensor) else arg for arg in flat_args
     )
-    requires_grad_indices_set = set(requires_grad_indices)
+    requires_grad_indices_set = _parse_mutated_arg_indices(requires_grad_indices)
     flat_args = tuple(
         arg.requires_grad_(True) if idx in requires_grad_indices_set else arg
         for idx, arg in enumerate(flat_args)

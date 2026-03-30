@@ -1087,9 +1087,10 @@ struct IValueOrDTensorSpec {
   py::object dtensor_spec;
 
   bool operator==(const IValueOrDTensorSpec& rhs) const {
-    return dtensor_spec
-        ? (rhs.dtensor_spec && dtensor_spec.equal(rhs.dtensor_spec))
-        : (iv == rhs.iv);
+    if (dtensor_spec) {
+      return rhs.dtensor_spec && dtensor_spec.equal(rhs.dtensor_spec);
+    }
+    return !rhs.dtensor_spec && iv == rhs.iv;
   }
 };
 
@@ -1162,18 +1163,6 @@ class NativeOpSchema {
   // have no guarantees about its lifetime. This class is cheap anyway.
   c10::OperatorHandle op_;
   std::size_t hash_;
-  // Subtle point: consider clamp.Tensor(Tensor self, Tensor?
-  // min=None, Tensor? max=None). The invocations clamp(t1, None, t2)
-  // and clamp(t1, t2, None) have the same comparison key (t1, t2)
-  // because we drop non-static non-tensor args from comparison. The
-  // only way we happen to be able to tell them apart is that we omit
-  // trailing defaulted arguments from the args tuple passed to
-  // __torch_dispatch__ (and hence to DTensor dispatch as well), so
-  // they have different args_schema_len_.
-  //
-  // I am preserving this existing behavior, but I suspect we should
-  // make an algorithm change to be less brittle, such as including
-  // None defaults for Tensor arguments in the comparison.
   std::size_t args_schema_len_;
   // There is no particular justification for the choice of 8
   // here. Feel free to change it.
@@ -1842,7 +1831,7 @@ static bool DTensor_OpSchema_recompute_comparison_key_impl(
   size_t idx = 0;
   for (const auto& e : args_schema) {
     if (idx >= native_info.static_argnum ||
-        arg_type_tensor_or_tensor_list_like(e)) {
+        arg_type_tensor_or_tensor_list_like(e) || e.is_none()) {
       if (PyList_Check(e.ptr())) {
         args_to_hash.push_back(
             py::reinterpret_steal<py::object>(PyList_AsTuple(e.ptr())));
@@ -2156,6 +2145,19 @@ static py::object try_find_mesh_from_args(
       return py::reinterpret_borrow<py::object>(
           py_tensor.attr(dtensor_interned_strings.device_mesh));
     }
+    if (argument_it->isList()) {
+      const auto list = argument_it->toList();
+      // need to expand list and use first DTensor
+      for (const auto& item : list) {
+        const auto [item_flavor, item_py_tensor] =
+            check_for_dtensor_or_tensor(item);
+        if (item_flavor == TensorFlavor::EXACTLY_DTENSOR ||
+            item_flavor == TensorFlavor::DTENSOR_SUBCLASS) {
+          return py::reinterpret_borrow<py::object>(
+              item_py_tensor.attr(dtensor_interned_strings.device_mesh));
+        }
+      }
+    }
   }
   TORCH_CHECK_VALUE(
       false, "Cannot find device mesh from args for op : ", op.operator_name());
@@ -2258,6 +2260,10 @@ static bool dtensor_spec_has_symints(py::handle spec) {
   return contains_any_symint(shape);
 }
 
+// set to false to bail out of the C++ fast path for ops that need pytree
+// flattening (e.g. future pytree custom ops)
+static constexpr bool kRunPytreeWithFastPath = true;
+
 static std::optional<std::pair<NativeOpSchema, /*ComputeMesh*/ py::object>>
 create_native_op_schema(
     const c10::OperatorHandle& op,
@@ -2267,7 +2273,7 @@ create_native_op_schema(
   // operating on IValues instead of Python stuff.
 
   py::object runtime_schema_info = get_runtime_schema_info_for_op(py_op);
-  if (runtime_schema_info &&
+  if (!kRunPytreeWithFastPath && runtime_schema_info &&
       checked_istrue(py::handle(runtime_schema_info)
                          .attr(dtensor_interned_strings.needs_pytree)
                          .ptr())) {
@@ -2275,7 +2281,6 @@ create_native_op_schema(
     // now since only a minority of ops need it.
     return std::nullopt;
   }
-
   OperatorArgsKwargsView args_kwargs(op, *stack);
   auto native_info = unpack_runtime_schema_info(
       py::handle(runtime_schema_info), args_kwargs.num_positional_args());
@@ -2288,7 +2293,9 @@ create_native_op_schema(
   const auto handle_non_dtensor_arg =
       [&comparison_key, &comparison_key_hash, &native_info](
           size_t idx, c10::IValue arg) {
-        if (idx >= native_info.static_argnum) {
+        bool is_none_or_undefined =
+            arg.isNone() || (arg.isTensor() && !arg.toTensor().defined());
+        if (idx >= native_info.static_argnum || is_none_or_undefined) {
           if (arg.isList()) {
             const auto& list = arg.toList();
             if (list.empty()) {
@@ -2319,58 +2326,99 @@ create_native_op_schema(
     comparison_key.emplace_back(std::move(arg));
   };
 
-  Py_ssize_t idx = 0;
+  const auto handle_non_tensor_or_undefined =
+      [&comparison_key, &comparison_key_hash](c10::IValue arg) {
+        // We reach here when arg is TensorFlavor::NON_TENSOR
+        // (not a Tensor at all or undefined Tensor)
+        // We coerce undefined Tensor to None, just as we do when
+        // converting IValues to PyObject. (same behaviour as
+        // handle_non_dtensor_arg)
+        if (arg.isTensor() && !arg.toTensor().defined()) {
+          arg = c10::IValue();
+        }
+        comparison_key_hash =
+            c10::hash_combine(comparison_key_hash, c10::IValue::hash(arg));
+        comparison_key.emplace_back(std::move(arg));
+      };
+
   const bool allow_implicit_replication =
       at::get_dtensor_allow_implicit_replication();
+
+  const auto handle_exactly_dtensor = [&](const auto py_tensor) {
+    py::object spec = py_tensor.attr(dtensor_interned_strings._spec);
+    if (dtensor_spec_has_symints(spec)) {
+      // Symints are unhashable, so we can't use the cache for
+      // sharding propagation. bail out to slow path.
+      return true;
+    }
+    handle_dtensor_arg(std::move(spec));
+    if (compute_mesh.is_none()) {
+      compute_mesh = py::reinterpret_borrow<py::object>(
+          py_tensor.attr(dtensor_interned_strings.device_mesh));
+    }
+    return false;
+  };
+
+  const auto handle_exactly_tensor = [&](const auto py_tensor) {
+    if (compute_mesh.is_none()) {
+      compute_mesh = try_find_mesh_from_args(op, args_kwargs);
+    }
+    handle_dtensor_arg(try_replicate_spec_for_scalar_tensor(
+        allow_implicit_replication, py_op, py_tensor, compute_mesh));
+  };
+
+  Py_ssize_t idx = 0;
+
   for (auto argument_it = args_kwargs.args_begin();
        argument_it != args_kwargs.args_end();
        ++argument_it) {
     const auto& arg = *argument_it;
     const auto [tensor_flavor, py_tensor] = check_for_dtensor_or_tensor(arg);
+
     switch (tensor_flavor) {
       case TensorFlavor::EXACTLY_DTENSOR:
       case TensorFlavor::DTENSOR_SUBCLASS: {
-        py::object spec = py_tensor.attr(dtensor_interned_strings._spec);
-        if (dtensor_spec_has_symints(spec)) {
-          // Symints are unhashable, so we can't use the cache for
-          // sharding propagation. bail out to slow path.
+        bool is_symint = handle_exactly_dtensor(py_tensor);
+        if (is_symint) {
           return std::nullopt;
-        }
-        handle_dtensor_arg(std::move(spec));
-        if (compute_mesh.is_none()) {
-          compute_mesh = py::reinterpret_borrow<py::object>(
-              py_tensor.attr(dtensor_interned_strings.device_mesh));
         }
         break;
       }
       case TensorFlavor::EXACTLY_TENSOR:
       case TensorFlavor::NON_DTENSOR_TENSOR_SUBCLASS: {
-        if (compute_mesh.is_none()) {
-          compute_mesh = try_find_mesh_from_args(op, args_kwargs);
-        }
-        handle_dtensor_arg(try_replicate_spec_for_scalar_tensor(
-            allow_implicit_replication, py_op, py_tensor, compute_mesh));
+        handle_exactly_tensor(py_tensor);
         break;
       }
       case TensorFlavor::NON_TENSOR: {
         // Check if this is a list/tuple that might contain DTensors (e.g.,
         // torch.cat)
-        if (arg.isList() && compute_mesh.is_none()) {
+        if (arg.isList()) {
           const auto list = arg.toList();
+          comparison_key_hash = hash_combine(comparison_key_hash, list.size());
+          comparison_key.emplace_back(static_cast<int64_t>(list.size()));
+          // pytree unflattening
           for (const auto& item : list) {
             const auto [item_flavor, item_py_tensor] =
                 check_for_dtensor_or_tensor(item);
             if (item_flavor == TensorFlavor::EXACTLY_DTENSOR ||
                 item_flavor == TensorFlavor::DTENSOR_SUBCLASS) {
-              compute_mesh = py::reinterpret_borrow<py::object>(
-                  item_py_tensor.attr(dtensor_interned_strings.device_mesh));
-              break;
+              bool is_symint = handle_exactly_dtensor(item_py_tensor);
+              if (is_symint) {
+                return std::nullopt;
+              }
+            } else if (
+                item_flavor == TensorFlavor::EXACTLY_TENSOR ||
+                item_flavor == TensorFlavor::NON_DTENSOR_TENSOR_SUBCLASS) {
+              handle_exactly_tensor(item_py_tensor);
+            } else { // non-tensor
+              handle_non_tensor_or_undefined(item);
             }
           }
+        } else {
+          // non DTensor/Tensor args (i.e. int/float/bool), just add to
+          // local_args
+          handle_non_dtensor_arg(idx, arg);
         }
-        // non DTensor/Tensor args (i.e. int/float/bool), just add to
-        // local_args
-        handle_non_dtensor_arg(idx, arg);
         break;
       }
       default:
@@ -2416,36 +2464,43 @@ create_native_op_schema(
       switch (tensor_flavor) {
         case TensorFlavor::EXACTLY_DTENSOR:
         case TensorFlavor::DTENSOR_SUBCLASS: {
-          handle_dtensor_arg(py_tensor.attr(dtensor_interned_strings._spec));
-          if (compute_mesh.is_none()) {
-            compute_mesh = py::reinterpret_borrow<py::object>(
-                py_tensor.attr(dtensor_interned_strings.device_mesh));
+          bool is_symint = handle_exactly_dtensor(py_tensor);
+          if (is_symint) {
+            return std::nullopt;
           }
           break;
         }
         case TensorFlavor::EXACTLY_TENSOR:
         case TensorFlavor::NON_DTENSOR_TENSOR_SUBCLASS: {
-          handle_dtensor_arg(try_replicate_spec_for_scalar_tensor(
-              allow_implicit_replication, py_op, py_tensor, compute_mesh));
+          handle_exactly_tensor(py_tensor);
           break;
         }
         case TensorFlavor::NON_TENSOR: {
-          // Check if this is a list/tuple that might contain DTensors (e.g.,
-          // torch.cat)
-          if (argument_it->isList() && compute_mesh.is_none()) {
+          if (argument_it->isList()) {
             const auto list = argument_it->toList();
+            comparison_key_hash =
+                hash_combine(comparison_key_hash, list.size());
+            comparison_key.emplace_back(static_cast<int64_t>(list.size()));
             for (const auto& item : list) {
               const auto [item_flavor, item_py_tensor] =
                   check_for_dtensor_or_tensor(item);
               if (item_flavor == TensorFlavor::EXACTLY_DTENSOR ||
                   item_flavor == TensorFlavor::DTENSOR_SUBCLASS) {
-                compute_mesh = py::reinterpret_borrow<py::object>(
-                    item_py_tensor.attr(dtensor_interned_strings.device_mesh));
-                break;
+                bool is_symint = handle_exactly_dtensor(item_py_tensor);
+                if (is_symint) {
+                  return std::nullopt;
+                }
+              } else if (
+                  item_flavor == TensorFlavor::EXACTLY_TENSOR ||
+                  item_flavor == TensorFlavor::NON_DTENSOR_TENSOR_SUBCLASS) {
+                handle_exactly_tensor(item_py_tensor);
+              } else { // non-tensor
+                handle_non_tensor_or_undefined(item);
               }
             }
+          } else {
+            handle_non_dtensor_arg(native_info.static_argnum, *argument_it);
           }
-          handle_non_dtensor_arg(native_info.static_argnum, *argument_it);
           break;
         }
         default:
@@ -2485,6 +2540,13 @@ static PyObject* clear_DTensor_sharding_propagator_cache(
     PyObject* self,
     PyObject* noargs) {
   native_sharding_propagator_cache_DO_NOT_USE.reset();
+  Py_RETURN_NONE;
+}
+
+static PyObject* reinit_DTensor_dispatch_logger(
+    PyObject* self,
+    PyObject* noargs) {
+  dtensor_dispatch_logger_initialized = false;
   Py_RETURN_NONE;
 }
 
@@ -3480,6 +3542,10 @@ static PyMethodDef extra_dtensor_functions[] = {
      nullptr},
     {"_clear_DTensor_sharding_propagator_cache",
      clear_DTensor_sharding_propagator_cache,
+     METH_NOARGS,
+     nullptr},
+    {"_reinit_DTensor_dispatch_logger",
+     reinit_DTensor_dispatch_logger,
      METH_NOARGS,
      nullptr},
     {nullptr}};

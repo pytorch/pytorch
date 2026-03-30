@@ -12,7 +12,6 @@ import contextlib
 import copy
 import functools
 import itertools
-import logging
 import pprint
 import typing
 import warnings
@@ -37,9 +36,11 @@ from torch._guards import (
     tracing,
     TracingContext,
 )
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_type
 from torch._library.utils import is_builtin
 from torch._logging import getArtifactLogger
+from torch._opaque_base import OpaqueBase
 from torch._ops import OpOverload
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
@@ -79,6 +80,7 @@ from .schemas import (
     InputAliasInfo,
     MemoryFormatMeta,
     MutationType,
+    OpaqueMeta,
     OutputType,
     PlainTensorMeta,
     SubclassCreationMeta,
@@ -112,12 +114,12 @@ def _describe_arg_for_logging(arg: object) -> str:
     from torch._library import opaque_object
 
     try:
-        is_dtensor = isinstance(arg, torch.distributed._tensor.DTensor)
+        is_dtensor = isinstance(arg, torch.distributed.tensor.DTensor)
     except AttributeError:
         is_dtensor = False
 
     if is_dtensor:
-        arg = typing.cast(torch.distributed._tensor.DTensor, arg)
+        arg = typing.cast(torch.distributed.tensor.DTensor, arg)
         mesh = arg.device_mesh
         return (
             f"DTensor(shape={arg.shape}, dtype={arg.dtype}, "
@@ -931,6 +933,17 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
         self.maybe_subclass_meta = subclass_meta
         return new_flat_fn, new_flat_args, new_flat_args_descs, fw_metadata
 
+    @staticmethod
+    def _get_frozen_inp_indices() -> frozenset[int]:
+        # fw_compiler_freezing (compile_fx.py) bakes frozen params into the
+        # graph and sets their TracingContext.params_flat entries to None
+        # before post_compile runs.  We pass these indices to codegen so it
+        # can emit straight-line code instead of a runtime None check.
+        tc = TracingContext.try_get()
+        if tc is None or tc.params_flat is None:
+            return frozenset()
+        return frozenset(i for i, p in enumerate(tc.params_flat) if p is None)
+
     def post_compile(
         self,
         compiled_fn: Callable[..., Any],
@@ -941,50 +954,15 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
         if self.maybe_subclass_meta is None:
             return compiled_fn
 
-        subclass_metas = runtime_metadata.subclass_fw_graph_out_meta
+        from .subclass_codegen import codegen_subclass_wrapper
 
-        @wraps(compiled_fn)
-        def inner_fn(args: list[Any]) -> Any:
-            if aot_graphs_log.isEnabledFor(logging.DEBUG):
-                aot_graphs_log.debug(
-                    "=== AOTDispatchSubclassWrapper.inner_fn START ==="
-                )
-                _log_input_metadata(runtime_metadata)
-                _log_args_list(args, "Incoming args")
-
-            unwrapped_args = runtime_unwrap_tensor_subclasses(
-                args,
-                subclass_metas=runtime_metadata.subclass_inp_meta,
-                append_symints=True,
-            )
-
-            if aot_graphs_log.isEnabledFor(logging.DEBUG):
-                _log_args_list(unwrapped_args, "After unwrapping, unwrapped_args")
-
-            args.clear()
-            # expectation: runtime_fn is a boxed fn
-            unwrapped_outs = compiled_fn(unwrapped_args)
-
-            if aot_graphs_log.isEnabledFor(logging.DEBUG):
-                _log_args_maybe_list(
-                    unwrapped_outs, "After compiled_fn, unwrapped_outs"
-                )
-
-            wrapped_outs = wrap_tensor_subclasses(
-                unwrapped_outs,
-                subclass_metas=subclass_metas,
-                num_fw_outs_saved_for_bw=self.num_fw_outs_saved_for_bw,
-                is_runtime=True,
-                included_subclass_symints=True,
-            )
-
-            if aot_graphs_log.isEnabledFor(logging.DEBUG):
-                _log_args_maybe_list(wrapped_outs, "After wrapping, wrapped_outs")
-                aot_graphs_log.debug("=== AOTDispatchSubclassWrapper.inner_fn END ===")
-
-            return wrapped_outs
-
-        # box it
+        inner_fn = codegen_subclass_wrapper(
+            compiled_fn=compiled_fn,
+            inp_metas=runtime_metadata.subclass_inp_meta,
+            out_metas=runtime_metadata.subclass_fw_graph_out_meta,
+            num_fw_outs_saved_for_bw=self.num_fw_outs_saved_for_bw,
+            frozen_inp_indices=self._get_frozen_inp_indices(),
+        )
         inner_fn._boxed_call = True  # type: ignore[attr-defined]
         return inner_fn
 
@@ -1272,7 +1250,6 @@ class AOTDedupeWrapper(CompilerWrapper):
                 flat_args_descs=deduped_flat_args_descs,
                 static_input_indices=aot_config.static_input_indices,
                 keep_input_mutations=fw_metadata.keep_input_mutations,
-                is_train=fw_metadata.is_train,
             )(*deduped_flat_args)
             if ref_fw_metadata != updated_fw_metadata:
                 raise AssertionError(
@@ -1495,7 +1472,6 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                 flat_args_descs=flat_args_descs_with_synthetic_bases,
                 static_input_indices=aot_config.static_input_indices,
                 keep_input_mutations=fw_metadata.keep_input_mutations,
-                is_train=fw_metadata.is_train,
             )(*flat_args_with_synthetic_bases)
             if ref_fw_metadata != fw_metadata_updated:
                 raise AssertionError(
@@ -2011,7 +1987,7 @@ def _backward_prologue_functional(
 
     bw_tokens = [None] * metadata.num_backward_tokens
 
-    # - note: donated buffer logic requires (*ctx.symints, *ctx.saved_tensors) showing up first
+    # - note: donated buffer logic requires (*ctx.symints, *ctx.saved_tensors, *ctx.opaques) showing up first
     #   in the bw output order.
 
     # Every dereference of ctx.saved_tensors incurs saved_tensors_hooks calls
@@ -2097,23 +2073,23 @@ def _backward_prologue_functional(
             )
         )
 
-        all_args = (
-            runtime_unwrap_tensor_subclasses(
-                all_args[:tangents_start_idx],  # type: ignore[arg-type]
-                # SymInts that are inputs to the backward graph are
-                # already included in the "all_args" list.
-                # Any symints coming from tensor subclasses should always
-                # come from primals, and so they will show up as extra
-                # arguments to the forward graph, and they will be saved
-                # as activation in the backward graph.
-                append_symints=False,
-            )
-            + flat_processed_tangents
-            + runtime_unwrap_tensor_subclasses(
-                all_args[tangents_end_idx:],  # type: ignore[arg-type]
-                append_symints=False,
-            )
+        unwrapped_tangents = runtime_unwrap_tensor_subclasses(
+            all_args[:tangents_start_idx],  # type: ignore[arg-type]
+            # SymInts that are inputs to the backward graph are
+            # already included in the "all_args" list.
+            # Any symints coming from tensor subclasses should always
+            # come from primals, and so they will show up as extra
+            # arguments to the forward graph, and they will be saved
+            # as activation in the backward graph.
+            append_symints=False,
         )
+
+        unwrapped_primals = runtime_unwrap_tensor_subclasses(
+            all_args[tangents_end_idx:],  # type: ignore[arg-type]
+            append_symints=False,
+        )
+
+        all_args = unwrapped_tangents + flat_processed_tangents + unwrapped_primals
     else:
         stack_traces = metadata.tangent_source_stack_traces or ()
 
@@ -2192,6 +2168,7 @@ def _backward_epilogue_functional(
     maybe_subclass_metadata: SubclassMeta | None,
     out: Any,
     *,
+    ctx_opaque_objects: Sequence[Any] = (),
     make_subclass_override: Callable[..., Any] | None = None,
 ) -> tuple[Any, ...]:
     # Toss out the backward output tokens
@@ -2204,6 +2181,23 @@ def _backward_epilogue_functional(
         metadata, out, offset_index=len(out) - 1
     )
     out = tuple(out)
+
+    # Replace compile-time opaque constants in the backward output with the
+    # real runtime opaques saved from the forward pass. During joint graph
+    # tracing, backward output opaques come from tangent constants (baked at
+    # compile time). At runtime we need the actual opaque objects that were
+    # saved for backward from the forward pass.
+    if ctx_opaque_objects:
+        opaque_iter = iter(ctx_opaque_objects)
+        out = tuple(
+            next(opaque_iter) if isinstance(v, FakeScriptObject) else v for v in out
+        )
+        remaining = list(opaque_iter)
+        if remaining:
+            raise AssertionError(
+                f"ctx_opaque_objects had {len(remaining)} leftover entries "
+                "(expected all to be consumed by FakeScriptObject slots in backward output)"
+            )
 
     # TODO: figure out how to refactor the backward properly so I can use aot_dispatch_subclass_wrapper() here.
     if maybe_subclass_metadata is not None:
@@ -2484,6 +2478,10 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
             )
         leaves = []
         for attr, attr_meta in meta.attrs.items():
+            if isinstance(attr_meta, OpaqueMeta):
+                # Opaques aren't differentiable but occupy a flat arg slot.
+                leaves.append(getattr(x, attr))
+                continue
             elem = getattr(x, attr)
             new_elem, elem_leaves = AOTDispatchAutograd.process_runtime_tangent(
                 elem, attr_meta
@@ -2684,7 +2682,10 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
                 opaque_object_outs = fw_outs[
                     CompiledFunction.metadata.opaque_objects_saved_for_backwards_slice
                 ]
-                if not all(is_opaque_type(type(obj)) for obj in opaque_object_outs):
+                if not all(
+                    is_opaque_type(type(obj)) or isinstance(obj, OpaqueBase)
+                    for obj in opaque_object_outs
+                ):
                     raise AssertionError(
                         f"expected all opaque_object_outs to be opaque types, "
                         f"got types: {[type(obj) for obj in opaque_object_outs]}"

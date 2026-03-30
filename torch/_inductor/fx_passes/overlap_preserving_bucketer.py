@@ -139,7 +139,7 @@ class OverlapPreservingBucketer:
         max_coll_distance: int = 1000,
         insert_overlap_deps: bool = False,
         collective_bucketing: bool = True,
-        bucket_mode: BucketMode = "custom_ops_multidtype",
+        bucket_mode: BucketMode = "default",
         bucket_exposed_first: bool | None = None,
         region_of: dict[fx.Node, Any] | None = None,
         bucket_only_internode_comms: bool = False,
@@ -164,7 +164,7 @@ class OverlapPreservingBucketer:
         self.aug_graph = AugmentedGraphHelper(self.graph, self.node_ancestors)
 
         # Build timelines and add constraints to aug_graph
-        self.pg_to_timeline_head: dict[str, Optional[PGEvent]] = self.build_timelines()
+        self.pg_to_timeline_head: dict[str, PGEvent | None] = self.build_timelines()
         self._add_hiding_interval_constraints()
 
     def _compute_node_ancestors(self) -> dict[fx.Node, OrderedSet[fx.Node]]:
@@ -191,20 +191,20 @@ class OverlapPreservingBucketer:
 
         return node_ancestors
 
-    def build_timelines(self) -> dict[str, Optional[PGEvent]]:
+    def build_timelines(self) -> dict[str, PGEvent | None]:
         "Construct each process groups ordered series of event"
         all_pgs: OrderedSet[str] = OrderedSet()
         for start in self.collective_info:
             pg = get_group_name(start)
             all_pgs.add(pg)
 
-        pg_timeline: dict[str, Optional[PGEvent]] = {}
+        pg_timeline: dict[str, PGEvent | None] = {}
         for pg in all_pgs:
             pg_timeline[pg] = self.build_timeline(pg)
 
         return pg_timeline
 
-    def build_timeline(self, pg: str) -> Optional[PGEvent]:
+    def build_timeline(self, pg: str) -> PGEvent | None:
         """
         Build a timeline of important events (starts, waits, hiding compute) for this process group
         and constrain this ordering in the augmented graph.
@@ -336,6 +336,10 @@ class OverlapPreservingBucketer:
         """Apply topological sort and effect tokens to preserve overlap."""
         from torch._dynamo.graph_deduplication import _stable_topological_sort
 
+        # Clean up any remaining erased node references and cycles
+        self.aug_graph.remove_erased_extra_deps()
+        autofix = torch._inductor.config.aten_distributed_optimizations.overlap_scheduling_autofix_cycles
+        self.aug_graph.check_and_maybe_autofix_cyclic_extra_deps(autofix=autofix)
         additional_deps = self.aug_graph.get_all_extra_deps()
 
         for n, deps in additional_deps.items():
@@ -568,7 +572,7 @@ class OverlapPreservingBucketer:
 
     def _get_intervals(
         self, event: PGEvent
-    ) -> tuple[Optional[tuple[int, int]], list[tuple[int, int]]]:
+    ) -> tuple[tuple[int, int] | None, list[tuple[int, int]]]:
         """Get (execution_interval, hiding_intervals) for a collective event.
 
         Returns:
@@ -725,9 +729,7 @@ class OverlapPreservingBucketer:
 
         return True
 
-    def remove_from_event(
-        self, node: fx.Node
-    ) -> tuple[Optional[PGEvent], Optional[PGEvent]]:
+    def remove_from_event(self, node: fx.Node) -> tuple[PGEvent | None, PGEvent | None]:
         """Remove node from timeline and return (prev_event, next_event)."""
         event = self.node_to_event[node]
         assert not event.is_compute, "Cannot remove compute events from timeline"
@@ -749,8 +751,8 @@ class OverlapPreservingBucketer:
     def restore_to_event(
         self,
         node: fx.Node,
-        prev_event: Optional[PGEvent],
-        next_event: Optional[PGEvent],
+        prev_event: PGEvent | None,
+        next_event: PGEvent | None,
     ) -> None:
         """Restore node to timeline after failed merge attempt."""
         event = self.node_to_event[node]
@@ -1000,13 +1002,13 @@ class OverlapPreservingBucketer:
                 self.graph,
                 bucket,
                 insert_before=next_node,
-                mode="custom_ops",
+                mode=self.bucket_mode,
             )
         elif is_all_reduce_tensor(bucket[0]):
             new_nodes, replacements = merge_all_reduce_bucket(
                 self.graph,
                 bucket,
-                mode="custom_ops",
+                mode=self.bucket_mode,
                 insert_before=next_node,
             )
         else:
@@ -1015,7 +1017,7 @@ class OverlapPreservingBucketer:
                 self.graph,
                 bucket,
                 insert_before=next_node,
-                mode="custom_ops",
+                mode=self.bucket_mode,
             )
 
         # Get new nodes
@@ -1036,18 +1038,20 @@ class OverlapPreservingBucketer:
         # Handle convert_element_type nodes that were fused and erased
         # The bucketed operation may have a _pre_bucket op that handles dtype conversion
         if fused_convert_dtypes:
-            # all gather bucketing may fuse in dtype conversion into the bucketing
-            # if so, we need to transfer hiding deps from the old dtype conversion
-            # to the new bucketing node
-            new_convert_dtypes_node = new_start.kwargs["out"]
-            assert isinstance(new_convert_dtypes_node, fx.Node)
-            assert (
-                new_convert_dtypes_node.target
+            # In custom_ops mode, the _pre_bucket_all_gather node handles dtype conversion
+            # In default mode, convert nodes are just erased — map them to new_start
+            new_convert_dtypes_node = new_start.kwargs.get("out")
+            if (
+                isinstance(new_convert_dtypes_node, fx.Node)
+                and new_convert_dtypes_node.target
                 == torch.ops.bucketing._pre_bucket_all_gather.default
-            )
+            ):
+                replacement = new_convert_dtypes_node
+            else:
+                replacement = new_start
 
             for n in fused_convert_dtypes:
-                erased_to_new[n] = new_convert_dtypes_node
+                erased_to_new[n] = replacement
 
         # Transfer all dependencies from old nodes to new nodes
         self.aug_graph.transfer_erased_node_deps(erased_to_new)
@@ -1065,6 +1069,7 @@ def finalize_overlap_scheduling(
     region_of: dict[fx.Node, Any] | None = None,
     bucket_exposed_first: bool | None = None,
     bucket_only_internode_comms: bool = False,
+    bucket_mode: BucketMode = "default",
 ) -> None:
     """
     Finalize overlap scheduling by applying deps, inlining fusions, and optionally bucketing.
@@ -1096,5 +1101,6 @@ def finalize_overlap_scheduling(
         bucket_exposed_first=bucket_exposed_first,
         bucket_only_internode_comms=bucket_only_internode_comms,
         region_of=region_of,
+        bucket_mode=bucket_mode,
     )
     bucketer.bucket_collectives()

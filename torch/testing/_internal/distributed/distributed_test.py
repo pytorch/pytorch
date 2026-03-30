@@ -1018,7 +1018,7 @@ class DistributedTest:
 
             with self.assertRaisesRegex(
                 ValueError,
-                "The new group's rank should be within the world_size set by init_process_group",
+                f"Rank {world_size} is out of range",
             ):
                 dist.new_subgroups_by_enumeration(
                     ranks_per_subgroup_list=[[0, 1], [world_size, 2]]
@@ -1034,7 +1034,7 @@ class DistributedTest:
 
             with self.assertRaisesRegex(
                 ValueError,
-                "The new group's rank should be within the world_size set by init_process_group",
+                r"Rank -\d+ is out of range",
             ):
                 dist.new_subgroups_by_enumeration(
                     ranks_per_subgroup_list=[[-1, -2], [-3, -4]]

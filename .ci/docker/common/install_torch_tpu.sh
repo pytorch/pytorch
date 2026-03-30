@@ -124,7 +124,11 @@ fi
 if ! command -v bazel &> /dev/null; then
     echo "Bazel not found. Installing Bazelisk..."
     temp_dir=$(mktemp -d)
+    # Download Bazelisk v1.27.0
     curl -L https://github.com/bazelbuild/bazelisk/releases/download/v1.27.0/bazelisk-linux-amd64 -o "${temp_dir}/bazel"
+    # Verify Checksum (SHA256 for v1.27.0 linux-amd64)
+    # Source: https://github.com/bazelbuild/bazelisk/releases/tag/v1.27.0
+    echo "e1508323f347ad1465a887bc5d2bfb91cffc232d11e8e997b623227c6b32fb76  ${temp_dir}/bazel" | sha256sum --check
     sudo mv "${temp_dir}/bazel" /usr/local/bin/bazel
     sudo chmod +x /usr/local/bin/bazel
     rm -rf "${temp_dir}"

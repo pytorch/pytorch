@@ -11,13 +11,11 @@ import torch.distributed.tensor._api as dtensor
 import torch.distributed.tensor._random as random
 from torch._library.utils import fill_defaults
 from torch._logging import LazyString
+from torch._prims.rng_prims import run_dtensor_rng_op
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
-from torch.distributed.tensor._nonlinear_redux import (
-    argminmax_handler,
-    minmax_dim_handler,
-)
+from torch.distributed.tensor._nonlinear_redux import argminmax_handler
 from torch.distributed.tensor._op_schema import (
     OpInfo,
     OpSchema,
@@ -49,6 +47,18 @@ except ImportError:
 aten = torch.ops.aten
 logger = logging.getLogger(__name__)
 
+# The C++ DTensor dispatch fast path caches whether debug logging is
+# enabled.  Wrap setLevel so the cached flag is reset automatically.
+_orig_setLevel = logger.setLevel
+
+
+def _setLevel_and_reinit(level: int) -> None:
+    _orig_setLevel(level)
+    torch._C._reinit_DTensor_dispatch_logger()
+
+
+logger.setLevel = _setLevel_and_reinit  # type: ignore[method-assign]
+
 
 def as_strided_handler(
     op_call: torch._ops.OpOverload,
@@ -76,6 +86,15 @@ def is_same_size_handler(
     lhs = cast(torch.Tensor, args[0])
     rhs = cast(torch.Tensor, args[1])
     return lhs.shape == rhs.shape
+
+
+def is_pinned_handler(
+    op_call: torch._ops.OpOverload,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+) -> bool:
+    tensor = cast(dtensor.DTensor, args[0])
+    return tensor._local_tensor.is_pinned()
 
 
 def found_inf_reduce_handler(
@@ -154,16 +173,20 @@ class OpDispatcher:
             aten.bernoulli.default,
             aten.bernoulli_.float,
         }
+        self._squeeze_inplace_ops = {
+            aten.squeeze_.dim,
+            aten.squeeze_.default,
+            aten.squeeze_.dims,
+        }
         self._custom_op_handlers = {
             aten.is_same_size.default: is_same_size_handler,
+            aten.is_pinned.default: is_pinned_handler,
             aten.convolution.default: convolution_handler,
             aten.convolution_backward.default: convolution_backward_handler,
             aten._amp_foreach_non_finite_check_and_unscale_.default: found_inf_reduce_handler,
             aten.as_strided.default: as_strided_handler,
             aten.argmin.default: argminmax_handler,
             aten.argmax.default: argminmax_handler,
-            aten.max.dim: minmax_dim_handler,
-            aten.min.dim: minmax_dim_handler,
         }
 
     # ********************************************************************************************
@@ -302,9 +325,20 @@ class OpDispatcher:
             local_tensor_args = cast(tuple[object, ...], local_tensor_args)
             if op_call in self._random_ops:
                 if not random._rng_tracker and is_rng_supported_mesh(mesh):
-                    # Default to `OffsetBasedRNGTracker` if the parallelism API
-                    # did not already construct one
-                    random._rng_tracker = random.OffsetBasedRNGTracker(mesh)
+                    # Default to `OffsetBasedRNGTracker` if the parallelism API did not already construct one
+                    # Skip RNG state sync during tracing to avoid lazily initializing real RNG state under fake mode.
+                    run_state_sync = not _are_we_tracing()
+                    if not run_state_sync:
+                        logger.info(
+                            "DTensor RNG tracker is being lazily initialized during tracing. "
+                            "RNG states may not be synchronized across ranks, which can lead "
+                            "to silent incorrectness. Please call `torch.manual_seed()` with "
+                            "the same seed on all ranks before compiling DTensor random ops.",
+                            stacklevel=2,
+                        )
+                    random._rng_tracker = random.OffsetBasedRNGTracker(
+                        mesh, run_state_sync
+                    )
 
                 first_arg, first_local_arg = (
                     cast(dtensor.DTensor, args[0]),
@@ -320,21 +354,58 @@ class OpDispatcher:
                     or isinstance(maybe_user_generator, torch.Generator)
                 ):
                     raise AssertionError
-                # maybe_user_generator = None
-                rng_context = (
-                    random._rng_tracker._distribute_region(
-                        first_arg._spec, generator=maybe_user_generator
-                    )
-                    if random._rng_tracker and not first_local_arg.is_meta
-                    else contextlib.nullcontext()
-                )
-                # For DTensor random operator, run it within a RNGTracker context to
-                # ensure the random number generator is properly distributed.
-                with rng_context:
+
+                if (
+                    random._rng_tracker
+                    and not first_local_arg.is_meta
+                    and random._rng_tracker.distribute_region_enabled
+                ):
+                    if (
+                        maybe_user_generator is not None
+                        or first_local_arg.device.type != "cuda"
+                        or (
+                            not _are_we_tracing()
+                            and type(first_local_arg) is not torch.Tensor
+                        )
+                    ):
+                        with random._rng_tracker._distribute_region(
+                            first_arg._spec, generator=maybe_user_generator
+                        ):
+                            local_results = op_call(
+                                *local_tensor_args, **op_info.local_kwargs
+                            )
+                    else:
+                        # CUDA device without user generator, use HOP for traceability
+                        if not isinstance(
+                            random._rng_tracker, random.OffsetBasedRNGTracker
+                        ):
+                            raise AssertionError
+                        start_offset_incr, end_offset_incr = (
+                            random._rng_tracker._compute_rng_offsets(first_arg._spec)
+                        )
+                        local_results = run_dtensor_rng_op(
+                            start_offset_incr,
+                            end_offset_incr,
+                            op_call,
+                            *local_tensor_args,
+                            **op_info.local_kwargs,
+                        )
+                else:
+                    # No rng_tracker, meta tensor, or distribute_region disabled
                     local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
             else:
                 # normal case, run local sharded op computation
-                local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
+                if (
+                    output_sharding.needs_redistribute
+                    and output_sharding.redistribute_schema is not None
+                    and output_sharding.redistribute_schema.op != op_call
+                ):
+                    # Op was rewritten (e.g., squeeze.default → squeeze.dims)
+                    local_results = output_sharding.redistribute_schema.op(
+                        *local_tensor_args, **op_info.local_kwargs
+                    )
+                else:
+                    local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
 
         else:
             # For a non-participating device (happens on rank that does not belong to
@@ -425,11 +496,9 @@ class OpDispatcher:
                 if not isinstance(args[0], dtensor.DTensor):
                     raise AssertionError
 
-                # NOTE: aten.squeeze_.dim is an inplace op but it also may change
-                # the inplace argument's tensor meta. Here we choose to special case
-                # this op because as far as I know this is the only inplace op that
-                # has such as behavior. We can extend this special case if necessary.
-                if op_call == aten.squeeze_.dim:
+                # NOTE: squeeze_ inplace ops may change the tensor's metadata
+                # (shape/strides). We special-case them to update the spec.
+                if op_call in self._squeeze_inplace_ops:
                     # update the spec to handle tensor meta changes
                     args[0]._spec = output_spec
                     # use return_and_correct_aliasing to match the outer and the inner
@@ -536,6 +605,13 @@ class OpDispatcher:
                     new_local_args.append(reshard_arg_spec)
                 else:
                     new_local_args.append(arg_spec)
+
+        # Append extra non-tensor args from rewritten schema (e.g., dims tuple).
+        if use_val_from_redistribute_schema:
+            for i in range(
+                len(op_info.flat_args_schema), len(flatten_args_schema_to_reshard)
+            ):
+                new_local_args.append(flatten_args_schema_to_reshard[i])
 
         op_info.local_args = tuple(new_local_args)
 

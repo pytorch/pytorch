@@ -11,7 +11,7 @@ from abc import abstractmethod
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from tabulate import tabulate
 from tqdm import tqdm
@@ -363,7 +363,7 @@ def generate_experiment_configs(
 
 def calculate_table_data(results: list[ExperimentResults]) -> dict:
     table_data = defaultdict(list)
-    aten_perf: Optional[float] = None
+    aten_perf: float | None = None
 
     for experiment_result in results:
         for key, value in experiment_result.asdict().items():

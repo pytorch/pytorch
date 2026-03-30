@@ -10,31 +10,67 @@ import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._dtensor_spec as dtensor_spec
 from torch._C._distributed_c10d import _resolve_process_group
 from torch._logging import warning_once
+from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed._local_tensor import (
     local_tensor_mode,
     maybe_run_for_local_tensor,
 )
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.distributed_c10d import (
-    _get_group_size_by_name,
     broadcast,
     get_group_rank,
     get_rank,
+    GroupName,
     ProcessGroup,
     scatter,
     Work,
 )
+from torch.fx.experimental.symbolic_shapes import guard_or_false
+from torch.types import IntLikeType
 
 
 logger = logging.getLogger(__name__)
 
+# Opaque types must be registered before defining schemas that reference them,
+# so the schema parser recognizes the type names and uses PyObjectType (which
+# wraps Python objects as ConcretePyObjectHolder) instead of AnyType (which
+# calls toTypeInferredIValue and fails for Python-only opaque types).
+from torch.distributed.device_mesh import _register_distributed_opaque_types
+
+
+_register_distributed_opaque_types()
+
+_dtensor_lib = torch.library.Library("_dtensor", "FRAGMENT")
+_dtensor_lib.define(
+    "mesh_get_process_group("
+    "torch.distributed.device_mesh.DeviceMesh mesh, int dim"
+    ") -> torch.distributed.distributed_c10d.ProcessGroup"
+)
+
+
+@torch.library.impl("_dtensor::mesh_get_process_group", "CompositeExplicitAutograd")
+def _mesh_get_process_group_impl(mesh, dim):
+    return mesh.get_group(dim)
+
+
+@torch.library.register_fake("_dtensor::mesh_get_process_group")
+def _mesh_get_process_group_fake(mesh, dim):
+    from torch._library.fake_class_registry import maybe_unwrap_fake_script_object
+
+    real_mesh = maybe_unwrap_fake_script_object(mesh)
+    return real_mesh.get_group(dim)
+
 
 @torch.library.register_fake("_dtensor::shard_dim_alltoall")
-def _shard_dim_alltoall_meta(input, gather_dim, shard_dim, group_name):
-    group_size = _get_group_size_by_name(group_name)
+def _shard_dim_alltoall_meta(
+    input, gather_dim, shard_dim, group_name: GroupName | ProcessGroup
+):
+    if isinstance(group_name, str):
+        # pyrefly: ignore[bad-argument-type]  # pyrefly bug
+        group_name = _resolve_process_group(group_name)
+    group_size = group_name.size()
     stacked_list = [torch.empty_like(input) for _ in range(group_size)]
-    group = _resolve_process_group(group_name)
-    group_rank = get_group_rank(group, get_rank())
+    group_rank = get_group_rank(group_name, get_rank())
 
     cat_tensor = torch.cat(stacked_list, dim=gather_dim)
     # pyrefly: ignore [unsupported-operation]
@@ -61,10 +97,10 @@ def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
         ]
         return out.contiguous()
 
-    group_name = funcol._resolve_group_name((mesh, mesh_dim))
+    group = funcol._resolve_group((mesh, mesh_dim))
     # TODO: enable async op for shard_dim_alltoall
     return torch.ops._dtensor.shard_dim_alltoall(
-        input, gather_dim, shard_dim, group_name
+        input, gather_dim, shard_dim, funcol._group_or_group_name(group)
     )
 
 
@@ -108,7 +144,8 @@ def mesh_scatter(
     if output.is_meta:
         return None
     dim_group = mesh.get_group(mesh_dim)
-    assert isinstance(dim_group, ProcessGroup)
+    if not isinstance(dim_group, ProcessGroup):
+        raise AssertionError
 
     if group_src == get_rank(dim_group):
         fut = scatter(
@@ -168,27 +205,35 @@ def mesh_broadcast(
     if tensor.is_meta:
         return None
     dim_group = mesh.get_group(mesh_dim)
-    assert isinstance(dim_group, ProcessGroup)
+    if not isinstance(dim_group, ProcessGroup):
+        raise AssertionError
 
     return broadcast(tensor, group=dim_group, async_op=async_op, group_src=group_src)
 
 
 @maybe_run_for_local_tensor
-def pad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Tensor:
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
-
-    if guard_or_false(pad_size == 0):
+def pad_tensor(
+    tensor: torch.Tensor, pad_dim: int, pad_size: IntLikeType
+) -> torch.Tensor:
+    # During tracing, always emit the pad op even when pad_size=0 so all
+    # ranks produce identical FX graph structure (SPMD).
+    # guard_or_false returns False for symbolic sizes, so the pad is always
+    # emitted during tracing. In eager with concrete pad_size=0, it returns
+    # True and we skip the no-op pad.
+    if guard_or_false(pad_size == 0) and not _are_we_tracing():
         return tensor
     pad = [0, 0] * (tensor.ndim - pad_dim)
-    pad[-1] = pad_size
+    pad[-1] = pad_size  # pyrefly: ignore[unsupported-operation]
     return torch.nn.functional.pad(tensor, pad)
 
 
 @maybe_run_for_local_tensor
-def unpad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Tensor:
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
-
-    if guard_or_false(pad_size == 0):
+def unpad_tensor(
+    tensor: torch.Tensor, pad_dim: int, pad_size: IntLikeType
+) -> torch.Tensor:
+    # During tracing, always emit the narrow op even when pad_size=0 so all
+    # ranks produce identical FX graph structure (SPMD).
+    if guard_or_false(pad_size == 0) and not _are_we_tracing():
         return tensor
     return tensor.narrow(
         pad_dim,
@@ -234,7 +279,8 @@ def check_tensor_meta(
 
 
 def spec_to_bytes(spec: "dtensor_spec.DTensorSpec") -> int:
-    assert spec.tensor_meta is not None, "spec should have tensor meta defined!"
+    if spec.tensor_meta is None:
+        raise AssertionError("spec should have tensor meta defined!")
     return spec.tensor_meta.dtype.itemsize * math.prod(spec.shape)
 
 
@@ -420,7 +466,8 @@ def one_step_redistribute_cost(
     if mesh_dim == -1:
         return 0.0
 
-    assert current_placement is not None and target_placement is not None
+    if current_placement is None or target_placement is None:
+        raise AssertionError
 
     mesh_topo = MeshTopoInfo.build_from_mesh(current_spec.mesh)
     comm_bytes_gb = (
@@ -502,9 +549,8 @@ def redistribute_cost(
     else:
         transform_infos = _gen_transform_infos(current_spec, target_spec)
     for transform_info in transform_infos:
-        assert current_spec.tensor_meta is not None, (
-            "spec should have tensor meta defined!"
-        )
+        if current_spec.tensor_meta is None:
+            raise AssertionError("spec should have tensor meta defined!")
         current = transform_info.src_dst_placements[0]
         target = transform_info.src_dst_placements[1]
         mesh_dim = transform_info.mesh_dim

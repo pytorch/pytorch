@@ -1902,5 +1902,39 @@ class CuTeLayoutTest(TestCase):
         self.assertEqual(result7, expected7)
 
 
+class ProcessGroupOpaqueTypeTest(TestCase):
+    """Test that ProcessGroup opaque type members are registered and exist on the class."""
+
+    def test_registered_members_exist_on_process_group(self):
+        from torch._library.opaque_object import get_member_type
+
+        # Every member registered in _register_distributed_opaque_types()
+        # must actually exist on ProcessGroup. This catches renames or
+        # removals of C++ attributes that would cause torch.compile
+        # (fullgraph=True) to silently register a stale name while the
+        # real attribute has moved.
+        registered_members = [
+            "size",
+            "rank",
+            "_get_backend_name",
+            "group_name",
+            "group_desc",
+            "__eq__",
+        ]
+        for member_name in registered_members:
+            self.assertIsNotNone(
+                get_member_type(ProcessGroup, member_name),
+                f"'{member_name}' is not registered as a ProcessGroup opaque "
+                f"type member. Add it to _register_distributed_opaque_types() "
+                f"in torch/distributed/device_mesh.py",
+            )
+            self.assertTrue(
+                hasattr(ProcessGroup, member_name),
+                f"'{member_name}' is registered as a ProcessGroup opaque type "
+                f"member but does not exist on the ProcessGroup class. "
+                f"Was it renamed or removed?",
+            )
+
+
 if __name__ == "__main__":
     run_tests()

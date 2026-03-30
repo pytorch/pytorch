@@ -1,8 +1,10 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import ast
 import collections
 import contextlib
+import copy
 import dataclasses
 import functools
 import itertools
@@ -24,9 +26,15 @@ import torch._logging
 import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import identity, preserve_rng_state
-from torch._prims_common import is_integer_dtype
+from torch._prims_common import is_integer_dtype, type_to_dtype
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import (
+    CeilDiv,
+    FloorDiv,
+    ModularIndexing,
+    TruncToFloat,
+    TruncToInt,
+)
 from torch.utils._triton import (
     get_triton_version,
     has_triton_package,
@@ -50,7 +58,13 @@ from ..runtime.hints import (
     TRITON_MAX_RSPLIT,
 )
 from ..runtime.runtime_utils import get_max_y_grid, next_power_of_2
-from ..scheduler import BaseSchedulerNode, FusedSchedulerNode, Scheduler, SchedulerNode
+from ..scheduler import (
+    BaseSchedulerNode,
+    FusedExternTritonKernelSchedulerNode,
+    FusedSchedulerNode,
+    Scheduler,
+    SchedulerNode,
+)
 from ..shape_propagation import get_broadcasted_shape
 from ..utils import (
     cache_on_self,
@@ -150,6 +164,47 @@ def is_sympy_integer_like(expr: object):
     return isinstance(expr, sympy.Integer) or (
         expr.is_integer and len(expr.free_symbols) == 0
     )
+
+
+def _materialize_trunc_to_float_expr(
+    expr: sympy.Expr, dtype: torch.dtype
+) -> sympy.Expr:
+    if not dtype.is_floating_point or not expr.has(TruncToInt):
+        return expr
+
+    # Preserve float truncation semantics when materializing symbolic scalars
+    # into floating tensors. Casting to the kernel index dtype first can
+    # overflow before the requested floating-point conversion happens. Only
+    # rewrite truncations that are already participating in floating-point
+    # computation; integer subexpressions and predicates must keep exact
+    # integer semantics until the final materialization cast.
+    if expr.func is TruncToInt:
+        return TruncToFloat(*expr.args)
+
+    def is_predicate_expr(node: sympy.Basic) -> bool:
+        return bool(
+            getattr(node, "is_Boolean", False) or getattr(node, "is_Relational", False)
+        )
+
+    def rewrite_float_subexpr(node: sympy.Expr) -> sympy.Expr:
+        if not node.has(TruncToInt):
+            return node
+        if node.func is TruncToInt:
+            return TruncToFloat(*node.args)
+        if is_predicate_expr(node) or node.is_integer:
+            return node
+
+        new_args = tuple(
+            rewrite_float_subexpr(arg)
+            if isinstance(arg, sympy.Expr) and not is_predicate_expr(arg)
+            else arg
+            for arg in node.args
+        )
+        if new_args == node.args:
+            return node
+        return node.func(*new_args)
+
+    return rewrite_float_subexpr(expr)
 
 
 class OpDtypeSupport:
@@ -760,6 +815,15 @@ class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
             f"libdevice.trunc({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
         )
 
+    def _print_TruncToFloat(self, expr: sympy.Expr) -> str:
+        assert len(expr.args) == 1
+        # pyrefly: ignore [missing-attribute]
+        value = self._print(expr.args[0])
+        # Adding +0.0 preserves large floating results while canonicalizing
+        # libdevice.trunc(-0.0) back to Python's +0.0 materialization behavior.
+        # pyrefly: ignore [missing-attribute]
+        return f"(libdevice.trunc({value}) + tl.zeros_like({value}))"
+
     def _print_Float(self, expr: sympy.Expr) -> str:
         if expr.is_integer:
             # sympy considers 0.0 to be integer, but triton doesn't.
@@ -1010,6 +1074,22 @@ def low_precision_fp_var(var: CSEVariable | Any) -> bool:
     return low_precision_fp(dtype) if isinstance(dtype, torch.dtype) else False
 
 
+def triton_arg_dtype(arg: Any) -> torch.dtype | None:
+    if isinstance(arg, CSEVariable):
+        return arg.dtype
+    if isinstance(arg, torch._prims_common.Number):
+        return type_to_dtype(type(arg))
+    return None
+
+
+def needs_upcast_to_float32(arg: Any) -> bool:
+    return (
+        not config.triton.codegen_upcast_to_fp32
+        and isinstance(arg, CSEVariable)
+        and arg.dtype in (torch.float16, torch.bfloat16)
+    )
+
+
 class TritonCSEVariable(CSEVariable):
     def __init__(
         self,
@@ -1050,15 +1130,8 @@ def maybe_upcast_float32(convert_output: bool = True) -> Callable[[_T], _T]:
     This decorates tl.math/libdevice codegen functions.
     """
 
-    def needs_upcast(var) -> bool:
-        return (
-            not config.triton.codegen_upcast_to_fp32
-            and isinstance(var, CSEVariable)
-            and var.dtype in (torch.float16, torch.bfloat16)
-        )
-
     def maybe_upcast_arg(var) -> str:
-        upcast_string = ".to(tl.float32)" if needs_upcast(var) else ""
+        upcast_string = ".to(tl.float32)" if needs_upcast_to_float32(var) else ""
         return f"{var}{upcast_string}"
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -1073,7 +1146,8 @@ def maybe_upcast_float32(convert_output: bool = True) -> Callable[[_T], _T]:
             # Call the decorated function, optionally downcasting the result.
             result = func(*upcast_args, **upcast_kwargs)
             any_needs_upcast = convert_output and any(
-                needs_upcast(var) for var in itertools.chain(args, kwargs.values())
+                needs_upcast_to_float32(var)
+                for var in itertools.chain(args, kwargs.values())
             )
             result_dtype = (
                 None
@@ -1182,6 +1256,14 @@ class TritonOverrides(OpOverrides):
         triton_val = constant_repr(type_(value))
         triton_type = triton_compute_type(dtype)
 
+        # Triton's scalar_constant() treats -0.0 as 0 (since -0.0 == 0 in Python),
+        # Work around by encoding -0.0 as its IEEE 754 hex in uint and bitcasting.
+        if value == 0 and math.copysign(1.0, value) < 0:
+            if triton_type == "tl.float32":
+                return f"tl.full({shape}, 0x80000000, tl.uint32).to({triton_type}, bitcast=True)"
+            elif triton_type == "tl.float64":
+                return f"tl.full({shape}, 0x8000000000000000, tl.uint64).to({triton_type}, bitcast=True)"
+
         # NOTE: We use tl.full here to get the expected type.
         # Otherwise, subnormal float32 values are treated as fp64
         # causing fp32 * fp64 promotion and different numerical results.
@@ -1194,6 +1276,14 @@ class TritonOverrides(OpOverrides):
     @classmethod
     def constant(cls, value, dtype):
         return cls._shaped_constant(value, dtype, shape=[])
+
+    @classmethod
+    def _cast_libdevice_arg(cls, arg, dtype: torch.dtype) -> str:
+        if isinstance(arg, torch._prims_common.Number):
+            return cls.constant(arg, dtype)
+        if triton_arg_dtype(arg) == dtype:
+            return f"{arg}"
+        return f"({arg}).to({triton_type(dtype)})"
 
     @staticmethod
     @maybe_upcast_float32()
@@ -1512,13 +1602,58 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def inline_asm_elementwise(
-        *inputs, asm, constraints=None, dtype=torch.float32, is_pure=True, pack=1
+        *inputs,
+        asm,
+        constraints=None,
+        dtype=torch.float32,
+        is_pure=True,
+        pack=1,
+        input_dtypes=None,
     ):
-        triton_type = triton_compute_type(dtype)
-        input_refs = ", ".join([str(i) for i in inputs])
+        # Use the actual dtype, not the compute type — the asm operates on
+        # specific register types and Triton needs to know the real output type.
+        asm_triton_type = triton_type(dtype)
         if constraints is None:
             constraints = ", ".join(["=r"] + ["r" for _ in inputs])
-        return f"tl.inline_asm_elementwise('{asm}', '{constraints}', [{input_refs}], dtype={triton_type}, is_pure={is_pure}, pack={pack})"  # noqa: B950
+
+        # Inductor computes bf16/fp16 in fp32. For "h" (16-bit register)
+        # constraints, cast back to the original dtype so the asm sees the
+        # right register type.
+        constraint_parts = [p.strip() for p in constraints.split(",")]
+        input_constraints = [p for p in constraint_parts if not p.startswith("=")]
+        cast_inputs = []
+        for i, (inp, c) in enumerate(zip(inputs, input_constraints[: len(inputs)])):
+            if (
+                c == "h"
+                and input_dtypes is not None
+                and isinstance(inp, CSEVariable)
+                and inp.dtype != input_dtypes[i]
+            ):
+                cast_inputs.append(f"{inp}.to({triton_type(input_dtypes[i])})")
+            else:
+                cast_inputs.append(str(inp))
+
+        def asm_call(args):
+            return (
+                f"tl.inline_asm_elementwise('{asm}', '{constraints}', "
+                f"[{args}], dtype={asm_triton_type}, is_pure={is_pure}, pack={pack})"
+            )
+
+        if pack <= 1:
+            return asm_call(", ".join(cast_inputs))
+
+        first_input = inputs[0]
+        compute = V.kernel.compute
+        cse = V.kernel.cse
+        result = cse.newvar(dtype=dtype, shape=first_input.shape)
+        packed_args = ", ".join(
+            f"triton_helpers.inline_asm_pack({inp}, {pack})" for inp in cast_inputs
+        )
+        compute.writeline(f"{result} = {asm_call(packed_args)}")
+        compute.writeline(
+            f"{result} = triton_helpers.inline_asm_unpack({result}, {first_input}, {pack})"
+        )
+        return result
 
     @staticmethod
     @maybe_upcast_float32()
@@ -1747,10 +1882,40 @@ class TritonOverrides(OpOverrides):
     def fmod(a, b):
         return f"libdevice.fmod({a}, {b})"
 
-    @staticmethod
-    @maybe_upcast_float32()
-    def pow(a, b):
-        return f"libdevice.pow({a}, {b})"
+    @classmethod
+    def pow(cls, a, b):
+        result_dtype = get_dtype_handler().pow(a, b)
+        if result_dtype is not None and is_integer_dtype(result_dtype):
+            base = cls._cast_libdevice_arg(a, result_dtype)
+            exponent = (
+                cls.constant(b, torch.int64)
+                if isinstance(b, torch._prims_common.Number)
+                else f"{b}"
+            )
+            return f"triton_helpers.pow_integer({base}, {exponent})"
+
+        any_needs_upcast = needs_upcast_to_float32(a) or needs_upcast_to_float32(b)
+        pow_dtype = result_dtype
+        if pow_dtype not in (torch.float32, torch.float64):
+            # libdevice.pow only accepts fp32/fp64. Keep low-precision floating
+            # cases on the existing fp32 path, and otherwise fall back to fp64
+            # for symbolic integer scalar pow expressions like 2 ** ks0.
+            pow_dtype = (
+                torch.float32
+                if low_precision_fp(result_dtype) or any_needs_upcast
+                else torch.float64
+            )
+
+        cast_a = cls._cast_libdevice_arg(a, pow_dtype)
+        cast_b = cls._cast_libdevice_arg(b, pow_dtype)
+        result = f"libdevice.pow({cast_a}, {cast_b})"
+        if result_dtype is not None and result_dtype != pow_dtype:
+            if low_precision_fp(result_dtype):
+                if any_needs_upcast:
+                    result = f"{result}.to({triton_type(result_dtype)})"
+            else:
+                result = f"{result}.to({triton_type(result_dtype)})"
+        return result
 
     @staticmethod
     @maybe_upcast_float32()
@@ -1780,11 +1945,22 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def floordiv(a, b):
         # See the comment in lowering.div_mode. a and b are integer type.
-        # Similar to div_floor_kernel_cuda in pytorch core.
-        # Notice that // in triton behaves as truncdiv instead of floordiv
-        quot = f"{a} // {b}"
-        rem = f"{a} % {b}"
-        return f"tl.where(({a} < 0) != ({b} < 0), tl.where({rem} != 0, {quot} - 1, {quot}), {quot})"
+        # Notice that // in triton behaves as truncdiv instead of floordiv.
+        #
+        # We avoid feeding negative values into Triton's // operator because
+        # Triton's AxisInfo analysis incorrectly deduplicates signed division
+        # results for contiguous inputs (triton-lang/triton#XXXX). Instead we
+        # use bitwise complement (~) to make the dividend non-negative:
+        #   floor_div(a, b) = ~(~a // b) when a < 0, a // b when a >= 0
+        # For negative b we negate both operands first.
+        zero = ops.constant(0, torch.int32)
+        b_neg = ops.lt(b, zero)
+        a = ops.where(b_neg, ops.sub(zero, a), a)
+        b = ops.where(b_neg, ops.sub(zero, b), b)
+        a_neg = ops.lt(a, zero)
+        a = ops.where(a_neg, ops.bitwise_not(a), a)
+        quot = ops.truncdiv(a, b)
+        return ops.where(a_neg, ops.bitwise_not(quot), quot)
 
     @staticmethod
     def sign(x):
@@ -1811,6 +1987,9 @@ class TritonOverrides(OpOverrides):
         return f"libdevice.ceil({x})"
 
 
+# Register the custom pow override after class creation so type checkers see
+# a plain callable instead of the class-body staticmethod descriptor.
+OpDtypeSupport.register_upcast(TritonOverrides.pow, True)
 TritonOverrides._initialize_pointwise_overrides("triton")
 
 
@@ -1878,6 +2057,7 @@ class TritonKernelOverrides(TritonOverrides):
 
     @classmethod
     def index_expr(cls, expr, dtype):
+        expr = _materialize_trunc_to_float_expr(expr, dtype)
         indexing = V.kernel.indexing(
             expr, block_ptr=False, tma_compatibility_checker=None
         )
@@ -3355,7 +3535,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         )
 
         # workaround https://github.com/triton-lang/triton/issues/2814
-        value = f"{value}.to({triton_store_type(V.graph.get_dtype(name))})"
+        # For inplace-mutated buffers, the block pointer element type comes from
+        # the actual tensor (input buffer), which may differ from the graph dtype
+        # (e.g., _to_copy produces fp32 values stored into a bf16 gradient buffer).
+        store_dtype = V.graph.get_dtype(name)
+        if name in self.args.inplace_buffers:
+            buf = self.args.inplace_buffers[name]
+            if not isinstance(buf, RemovedArg):
+                store_dtype = V.graph.get_dtype(buf.other_names[0])
+        value = f"{value}.to({triton_store_type(store_dtype)})"
         if isinstance(indexing, BlockPtrOptions):
             return f"tl.store({block_ptr}, {value}{other})"
         return f"{block_ptr}.store({V.kernel.index_to_str(indexing.offsets)}, {value})"
@@ -3565,7 +3753,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         has_read_deps = True
         if config.triton.skip_l1_cache:
             buffer_read_counts = self.features.buffer_read_counts()
-            has_read_deps = buffer_read_counts[name] > 1
+            # Graph inputs, primals_*, arg*_* would not be tracked by `buffer_read_counts`
+            # and it'd be fair to expect them to be reused.
+            if name in buffer_read_counts:
+                has_read_deps = buffer_read_counts[name] > 1
         """Skip L1 cache if we're (pretty?) sure the data is used only once
         """
         skip_l1_cache = (
@@ -5311,6 +5502,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "store_cubin": config.triton.store_cubin,
             "deterministic": config.deterministic,
             "force_filter_reduction_configs": config.test_configs.force_filter_reduction_configs,
+            "mix_order_reduction_allow_multi_stages": config.triton.mix_order_reduction_allow_multi_stages,
         }
 
         if config.write_are_deterministic_algorithms_enabled:
@@ -5568,8 +5760,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if flops is not None:
                 inductor_meta["kernel_flop"] = flops
 
-        triton_meta["configs"] = [config_of(signature)]
-
         # Triton compiler includes equal_to_1 args into constants even
         # when they are not constexpr. otherwise there may be a segfault
         # during launching the Inductor-compiled Triton kernel.
@@ -5584,6 +5774,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.codegen_prologue(self.body)
         self.codegen_body()
         self._filter_pdl(self.body)
+
+        # Compute configs after codegen_body() so we know if the kernel
+        # uses atomic ops. On HIP, buffer ops don't support atomics, so
+        # we must not tag any args with pointer_range_32 in that case.
+        if torch.version.hip is not None and self.atomic_add_found:
+            triton_meta["configs"] = [config_of(signature, pointer_range_override=())]
+        else:
+            triton_meta["configs"] = [config_of(signature)]
 
         for helper in self.helper_functions:
             code.writeline("")
@@ -5885,12 +6083,22 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 return True
         elif not self.is_combo_kernel:
             if V.graph.sizevars.statically_known_equals(tree.numel, 1):
-                return True
+                if not (tree.is_reduction and self.persistent_reduction):
+                    return True
 
         # Masks are superfluous if numel is a multiple of BLOCK
         # (We use the fact that BLOCK is required by triton to be a power of 2)
         if tree.is_reduction and self.persistent_reduction:
             max_block = self._get_persistent_RBLOCK(tree.numel)
+            # Triton's auto-tuner can map a full hardware warp along the
+            # reduction axis.  When RBLOCK < warp_size the excess lanes
+            # would execute out-of-bounds global loads.  This results in
+            # faults on AMD hardware.  Keep the dynamic mask so that all
+            # hardware stays correct.
+            device = V.graph.get_current_device_or_throw()
+            warp_size = DeviceProperties.create(device).warp_size or 32
+            if isinstance(max_block, int) and max_block < warp_size:
+                return False
         elif tree.prefix == "x" and self.no_x_dim:
             max_block = 1
         else:
@@ -6032,6 +6240,131 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             code.writeline(f"{x}mask = {entry.name} < {x}numel")
 
 
+class FusedUserDefinedTritonKernel(TritonKernel):
+    """
+    When fusing a user-defined triton kernel with epilogues, we use this class to generate the modified triton kernel source
+    """
+
+    def __init__(
+        self,
+        tiling: dict[str, sympy.Expr],
+        features: SIMDKernelFeatures,
+        scheduler_node: FusedExternTritonKernelSchedulerNode,
+    ) -> None:
+        super().__init__(
+            tiling,
+            features=features,
+            min_elem_per_thread=0,
+            optimize_mask=True,
+            fixed_config=None,
+            hint_override=None,
+            is_combo_kernel=False,
+        )
+        self.scheduler_node = scheduler_node
+        assert isinstance(
+            self.scheduler_node.kernel_node.node, ir.UserDefinedTritonKernel
+        )
+        self.ir_node: ir.UserDefinedTritonKernel = self.scheduler_node.kernel_node.node
+        assert self.ir_node.can_fuse_epilogue()
+
+        # must be true because `self.ir_node.can_fuse_epilogue()`
+        assert len(self.ir_node.kernel_stores.stores) == 1
+        self.original_stored_expr = ast.unparse(
+            self.ir_node.kernel_stores.stores[0].store_value_node
+        )
+        self.original_stored_expr = self.original_stored_expr.replace("\n", "")
+
+    def load(self, name: str, index: sympy.Expr) -> TritonCSEVariable:
+        # must be true because `self.ir_node.can_fuse_epilogue()`
+        assert len(self.ir_node.mutable_args) == 1
+        if name == self.ir_node.mutable_args[0].get_name():
+            # when the fused epilogue nodes tries to load the mutated buffer
+            # we replace the load with the expression stored by the user kernel
+            loaded_expr = self.original_stored_expr
+            indexing = self.indexing(index)
+            dtype = V.graph.get_dtype(name)
+            if indexing.expand_shape:
+                shape = indexing.expand_shape
+            else:
+                shape = TritonSymbols.get_block_shape(indexing.index)
+            result_var = self.cse.generate(
+                self.loads, loaded_expr, dtype=dtype, shape=shape
+            )
+            return result_var
+        else:
+            return super().load(name, index)
+
+    def store(
+        self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
+    ) -> None:
+        assert isinstance(self.scheduler_node.fused_epilogue.node, ir.ComputedBuffer)
+        if name == self.scheduler_node.fused_epilogue.node.get_name():
+            # when the fused epilogue nodes tries to store to its destination buffer
+            # we remember this expr and then later replace it into the `tl.store` call of the original kernel
+            self.new_store_cse_var = value
+        else:
+            super().store(name, index, value, mode)
+
+    # returns a str which is the src code of a modified version of the user kernel that includes the epilogues
+    def codegen(self) -> str:
+        with self:
+            index_vars = self.split_and_set_ranges(
+                self.scheduler_node.fused_epilogue.get_ranges()
+            )
+            self.scheduler_node.fused_epilogue.codegen(index_vars)
+
+        # Generate a new AST where the store value expr is replaced with the new value
+        new_ast = copy.deepcopy(self.ir_node.kernel_ast)
+        from torch._higher_order_ops.triton_kernel_wrap import identify_triton_stores
+
+        kernel_stores = identify_triton_stores(new_ast)
+        assert len(kernel_stores.stores) == 1
+
+        new_store_value_node = ast.Name(self.new_store_cse_var.name)
+
+        def _replace_arg(
+            call_node: ast.Call,
+            arg_name: str,
+            positional_index: int,
+            new_arg,
+        ):
+            if len(call_node.args) > positional_index:
+                call_node.args[positional_index] = new_arg
+
+            # Check keyword args
+            for keyword in call_node.keywords:
+                if keyword.arg == arg_name:
+                    keyword.value = new_arg
+
+        _replace_arg(
+            kernel_stores.stores[0].store_node, "value", 1, new_store_value_node
+        )
+
+        src_with_store_replaced = ast.unparse(new_ast)
+
+        # then, we need to inject the additional `load` and `compute` lines generated when we `codegen` the epilogue nodes
+
+        src_lines = src_with_store_replaced.splitlines()
+
+        # identify the store again, because the previous parse-modify-unparse could've change its location
+        kernel_stores = identify_triton_stores(ast.parse(src_with_store_replaced))
+        # python ast lineno is 1-indexed
+        store_line_index = kernel_stores.stores[0].store_node.lineno - 1
+
+        indentations = " " * kernel_stores.stores[0].store_node.col_offset
+
+        load_lines = [indentations + l for l in self.loads.get_lines_ref()]
+        compute_lines = [indentations + l for l in self.compute.get_lines_ref()]
+
+        new_src_lines = (
+            src_lines[:store_line_index]
+            + load_lines
+            + compute_lines
+            + src_lines[store_line_index:]
+        )
+        return "\n".join(new_src_lines)
+
+
 class TritonScheduling(SIMDScheduling):
     """Scheduling backend for Triton kernel code generation."""
 
@@ -6153,6 +6486,8 @@ class TritonScheduling(SIMDScheduling):
                 if config.triton.descriptive_names
                 else ""
             )
+            if fused_name:
+                fused_name = V.choices.customize_fused_kernel_name(fused_name, src_code)
             kernel_category = get_kernel_category_by_source_code(src_code)[:3]
             kernel_name = "_".join(
                 ["triton", kernel_category, fused_name, wrapper.next_kernel_suffix()]

@@ -1,5 +1,4 @@
 import importlib
-from typing import Optional
 
 from torch.testing._internal.common_utils import TestCase
 
@@ -9,8 +8,8 @@ class AOMigrationTestCase(TestCase):
         self,
         package_name: str,
         function_list: list[str],
-        base: Optional[str] = None,
-        new_package_name: Optional[str] = None,
+        base: str | None = None,
+        new_package_name: str | None = None,
     ):
         r"""Tests individual function list import by comparing the functions
         and their hashes."""
@@ -34,7 +33,7 @@ class AOMigrationTestCase(TestCase):
                 )
 
     def _test_dict_import(
-        self, package_name: str, dict_list: list[str], base: Optional[str] = None
+        self, package_name: str, dict_list: list[str], base: str | None = None
     ):
         r"""Tests individual function list import by comparing the functions
         and their hashes."""

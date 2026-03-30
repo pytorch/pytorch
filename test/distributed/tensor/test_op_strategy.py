@@ -2,7 +2,6 @@
 
 import itertools
 import random
-from contextlib import contextmanager
 from itertools import chain
 from unittest.mock import patch
 
@@ -31,16 +30,14 @@ from torch.distributed.tensor._ops._einsum_strategy import (
     EinsumDims,
     gen_einsum_strategies,
 )
-from torch.distributed.tensor._ops.utils import (
-    register_op_strategy,
-    replicate_op_strategy,
-)
-from torch.distributed.tensor.debug import _clear_sharding_prop_cache, CommDebugMode
+from torch.distributed.tensor._ops.utils import replicate_op_strategy
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorOpTestBase,
     DTensorTestBase,
+    op_strategy_context,
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -493,45 +490,6 @@ torch.library.register_autograd(
 )
 
 
-@contextmanager
-def op_strategy_context(op_overload, strategy_func, schema_info=None):
-    """
-    Context manager for setting and clearing op strategies.
-    Args:
-        op_overload: The operator overload to set or clear the strategy for.
-        strategy_func: The strategy function to set for the operator overload.
-        schema_info: Optional schema information for the operator overload.
-    Yields:
-        None
-    """
-    propagator = DTensor._op_dispatcher.sharding_propagator
-    _origin_op_strategy_funcs = None
-    _origin_op_strategy_schema = None
-    try:
-        # register the op strategy
-        if op_overload in propagator.op_strategy_funcs:
-            _origin_op_strategy_funcs = propagator.op_strategy_funcs[op_overload]
-            del propagator.op_strategy_funcs[op_overload]
-        if op_overload in propagator.op_to_schema_info:
-            _origin_op_strategy_schema = propagator.op_to_schema_info[op_overload]
-            del propagator.op_to_schema_info[op_overload]
-        register_op_strategy(op_overload, schema_info=schema_info)(strategy_func)
-        yield
-    finally:
-        # clear this op strategy cache
-        if _origin_op_strategy_funcs is None:
-            if op_overload in propagator.op_strategy_funcs:
-                del propagator.op_strategy_funcs[op_overload]
-        else:
-            propagator.op_strategy_funcs[op_overload] = _origin_op_strategy_funcs
-        if _origin_op_strategy_schema is None:
-            if op_overload in propagator.op_to_schema_info:
-                del propagator.op_to_schema_info[op_overload]
-        else:
-            propagator.op_to_schema_info[op_overload] = _origin_op_strategy_schema
-        _clear_sharding_prop_cache()
-
-
 def detect_exists_identical_opspec(*args, op, mesh, strategy_function) -> bool:
     """
     Given sample input args, detect if identical OpSpecs exists under the same
@@ -938,6 +896,37 @@ class TestOpSchemaMetaProperties(TestCase):
             out_spec = specs if isinstance(specs, DTensorSpec) else specs[0]
             self.assertEqual(out_spec.tensor_meta.stride, (8, 1))
 
+    def test_max_min_dim_single_dim_strategy(self):
+        """max.dim/min.dim only allow sharding on non-reduction dims."""
+        from torch.distributed.tensor._ops._math_ops import (
+            max_min_dim_single_dim_strategy,
+        )
+
+        input_meta = TensorMeta(
+            shape=torch.Size([8, 4]), stride=(4, 1), dtype=torch.float32
+        )
+        # reduce along dim=1: only dim 0 should be shardable
+        strategies = max_min_dim_single_dim_strategy(
+            torch.ops.aten.max.dim, (input_meta, 1), {}
+        )
+        # Should have exactly 1 strategy: shard on dim 0
+        self.assertEqual(len(strategies), 1)
+        values_plc, indices_plc, input_plc = strategies[0]
+        self.assertEqual(values_plc.dim, 0)
+        self.assertEqual(indices_plc.dim, 0)
+        self.assertEqual(input_plc.dim, 0)
+
+        # reduce along dim=0: only dim 1 should be shardable,
+        # output dim maps to 0 (since reduction collapses dim 0)
+        strategies = max_min_dim_single_dim_strategy(
+            torch.ops.aten.min.dim, (input_meta, 0), {}
+        )
+        self.assertEqual(len(strategies), 1)
+        values_plc, indices_plc, input_plc = strategies[0]
+        self.assertEqual(values_plc.dim, 0)
+        self.assertEqual(indices_plc.dim, 0)
+        self.assertEqual(input_plc.dim, 1)
+
     def test_layer_norm_backward_output_specs_are_tuple(self):
         """layer_norm backward returns (d_input, d_weight, d_bias) tuple."""
         from torch.distributed.tensor._ops._math_ops import (
@@ -986,6 +975,43 @@ class TestOpSchemaMetaProperties(TestCase):
             # d_weight and d_bias have weight shape
             self.assertIsNotNone(d_weight)
             self.assertIsNotNone(d_bias)
+
+    def test_constant_pad_nd_allows_shard_on_non_padded_dim(self):
+        """constant_pad_nd should allow sharding on non-padded dims."""
+        from torch.distributed.tensor._ops._matrix_ops import (
+            constant_pad_nd_single_dim_strategy,
+        )
+
+        input_meta = TensorMeta(
+            shape=torch.Size([8, 4]), stride=(4, 1), dtype=torch.float32
+        )
+        # Pad only dim 1: [1, 1] means pad last dim by 1 on each side
+        strategies = constant_pad_nd_single_dim_strategy(
+            torch.ops.aten.constant_pad_nd.default,
+            (input_meta, [1, 1], 0.0),
+            {},
+        )
+        # Should include a strategy that shards on dim 0
+        shard_dims = {s[0].dim for s in strategies if hasattr(s[0], "dim")}
+        self.assertIn(0, shard_dims)
+
+    def test_constant_pad_nd_bans_shard_on_padded_dim(self):
+        """constant_pad_nd should ban sharding on padded dims."""
+        from torch.distributed.tensor._ops._matrix_ops import (
+            constant_pad_nd_single_dim_strategy,
+        )
+
+        input_meta = TensorMeta(
+            shape=torch.Size([8, 4]), stride=(4, 1), dtype=torch.float32
+        )
+        # Pad only dim 1
+        strategies = constant_pad_nd_single_dim_strategy(
+            torch.ops.aten.constant_pad_nd.default,
+            (input_meta, [1, 1], 0.0),
+            {},
+        )
+        shard_dims = {s[0].dim for s in strategies if hasattr(s[0], "dim")}
+        self.assertNotIn(1, shard_dims, "Should not shard on padded dim")
 
 
 class TestExpandToFullMeshOpStrategy(TestCase):

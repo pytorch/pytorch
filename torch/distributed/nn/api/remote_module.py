@@ -5,7 +5,7 @@ import io
 import sys
 import types
 from collections.abc import Callable, Iterator, Mapping
-from typing import Any, TypeVar, Union
+from typing import Any, TypeVar
 from typing_extensions import Self
 
 import torch
@@ -21,7 +21,7 @@ from torch.utils.hooks import RemovableHandle
 
 __all__ = ["RemoteModule"]
 
-_grad_t = Union[tuple[Tensor, ...], Tensor]
+_grad_t = tuple[Tensor, ...] | Tensor
 # See https://mypy.readthedocs.io/en/latest/generics.html#generic-methods-and-generic-self for the use
 # of `T` to annotate `self`. Many methods of `Module` return `self` and we want those return values to be
 # the type of the subclass, not the looser type of `Module`.
@@ -457,7 +457,8 @@ class _RemoteModule(nn.Module):
     def _prepare_init(self, remote_device_str: str) -> bool:
         """Prepare the initialization and returns whether to enable automatically moving CPU tensors to CUDA devices."""
         # Sanity check.
-        assert rpc._is_current_rpc_agent_set(), "RemoteModule only works in RPC."
+        if not rpc._is_current_rpc_agent_set():
+            raise AssertionError("RemoteModule only works in RPC.")
 
         remote_device = _remote_device(remote_device_str)
         self.on = (

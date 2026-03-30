@@ -47,6 +47,7 @@ from .utils import counters
 if TYPE_CHECKING:
     import types
 
+    from torch._dynamo.variables import VariableTracker
     from torch._guards import CompileId
 
     from .output_graph import DynamoTracerOutput
@@ -108,6 +109,14 @@ class AutogradGradRestartAnalysis(RestartAnalysis):
     """Raised when autograd.grad consumed grad_fns that are returned.
 
     On restart, autograd.grad will graph break instead of being traced.
+    """
+
+
+class RequiresGradRestartAnalysis(RestartAnalysis):
+    """Raised when a source-less requires_grad_() intermediate leaks as output.
+
+    On restart, requires_grad_() will graph break instead of being traced,
+    preserving partial acceleration for code before the call.
     """
 
 
@@ -259,7 +268,7 @@ class UserErrorType(Enum):
     UNSUPPORTED_ALIASED_MUTATED_DYNAMIC_INPUTS = auto()
 
 
-class UserError(Unsupported):
+class UserError(TorchDynamoException):
     def __init__(
         self, error_type: UserErrorType, msg: str, case_name: str | None = None
     ) -> None:
@@ -278,8 +287,12 @@ class UserError(Unsupported):
             else:
                 msg += "\n"
             msg += exportdb_error_message(case_name)
-        super().__init__(msg, case_name if case_name else "UserError")
+        super().__init__(msg)
+        self.real_stack = torch._guards.TracingContext.extract_stack()
+        self.skip_frame = False
+        self.logged = False
         self.error_type = error_type
+        self.msg = msg
         self.message = msg
 
 
@@ -414,8 +427,8 @@ def raise_observed_exception(
     exc_type: type[Exception],
     tx: InstructionTranslatorBase,
     *,
-    args: list[Any] | None = None,
-    kwargs: dict[str, Any] | None = None,
+    args: list[VariableTracker] | None = None,
+    kwargs: dict[str, VariableTracker] | None = None,
 ) -> NoReturn:
     from .symbolic_convert import ExceptionVals
     from .variables.builder import SourcelessBuilder
@@ -423,9 +436,7 @@ def raise_observed_exception(
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
     # stack and raise the exception.
     exception_vt = SourcelessBuilder.create(tx, exc_type).call_function(
-        tx,
-        [SourcelessBuilder.create(tx, a) for a in args] if args else [],
-        kwargs or {},
+        tx, args or [], kwargs or {}
     )
     assert isinstance(exception_vt, ExceptionVals)
     tx._attach_traceback_to_exception(exception_vt)

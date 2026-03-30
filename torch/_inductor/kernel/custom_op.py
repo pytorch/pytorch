@@ -5,13 +5,14 @@ import functools
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.codegen.subgraph import SubgraphTemplate
 from torch._inductor.ir import (
     Buffer,
+    ChoiceCaller,
     FixedLayout,
     ir_node_to_tensor,
     StorageBox,
@@ -36,7 +37,7 @@ class RangeBounds:
     """Inclusive range [start, end] for dimension-based dispatch."""
 
     start: int
-    end: Union[int, float]  # float('inf') for unbounded
+    end: int | float  # float('inf') for unbounded
 
     def __post_init__(self) -> None:
         if self.start < 1:
@@ -154,8 +155,8 @@ class CustomOpConfig:
 
     def __init__(
         self,
-        decomposition: Optional[Callable[..., Any]] = None,
-        config_patches: Optional[dict[str, Any]] = None,
+        decomposition: Callable[..., Any] | None = None,
+        config_patches: dict[str, Any] | None = None,
         **params: Any,
     ):
         if decomposition is not None and not callable(decomposition):
@@ -168,7 +169,7 @@ class CustomOpConfig:
         self.params = params
 
     def get_decomposition(
-        self, default_impl: Optional[Callable[..., Any]] = None
+        self, default_impl: Callable[..., Any] | None = None
     ) -> Callable[..., Any]:
         """Return the decomposition function for this config.
         When decomposition is not specified, return the default implementation.
@@ -372,7 +373,7 @@ def _create_range_input_gen_fn(
     base_gen_fn: Callable[[torch.Tensor], torch.Tensor],
     dim_index: int,
     range_start: int,
-    range_end: Union[int, float],
+    range_end: int | float,
     range_upper_bound: int,
 ) -> Callable[[torch.Tensor], torch.Tensor]:
     """Create input generator that modifies target dimension to top of range.
@@ -440,14 +441,11 @@ def autotune_custom_op(
     inputs: list[torch.fx.Node],
     non_tensor_args: list[dict[str, Any]],
     op_overload: torch._ops.OpOverload,
-    user_input_gen_fns: Optional[
-        dict[str, Callable[[torch.Tensor], torch.Tensor]]
-    ] = None,
-    config_patches_list: Optional[list[dict[str, Any]]] = None,
-    return_choice: bool = False,
+    user_input_gen_fns: dict[str, Callable[[torch.Tensor], torch.Tensor]] | None = None,
+    config_patches_list: list[dict[str, Any]] | None = None,
     min_speedup_threshold: float = 1.0,
     benchmark_with_cudagraphs: bool = False,
-) -> Union[TensorBox, Any, tuple[Any, Any]]:
+) -> tuple[TensorBox, ChoiceCaller]:
     """Autotune custom operations by comparing multiple decomposition implementations.
 
     Currently supports SINGLE OUTPUT custom ops only.
@@ -468,7 +466,7 @@ def autotune_custom_op(
                            and return real tensors for performance measurement.
 
     Returns:
-        IR node representing the optimized operation result
+        Tuple of (IR node representing the optimized operation result, winning ChoiceCaller)
 
     Raises:
         TypeError: If decompositions is not a list/tuple
@@ -545,7 +543,6 @@ def autotune_custom_op(
         input_nodes=list(inputs),
         layout=choices[0].layout,
         input_gen_fns=input_gen_fns,
-        return_choice=True,
         is_collective=is_collective,
         min_speedup_threshold=min_speedup_threshold,
         benchmark_with_cudagraphs=benchmark_with_cudagraphs,
@@ -576,18 +573,8 @@ def autotune_custom_op(
                 selected_result = choice.output_node()
                 break
 
-    # Apply inlining for fusion if winning_choice has graph; otherwise return result as-is(default fallback impl)
+        # Always inline when winning_choice has a graph; callers extract choice metadata separately
     if winning_choice.gm is not None:
-        # Skip inlining when return_choice=True since caller only needs choice metadata
-        # (e.g., range-based dispatch builds its own torch.cond from winning choices)
-        if return_choice:
-            log.debug(
-                "Skipping inline for return_choice: %s (name=%s)",
-                getattr(winning_choice, "name", type(winning_choice).__name__),
-                name,
-            )
-            return selected_result, winning_choice
-
         log.debug(
             "Inlining winning choice: %s (name=%s)",
             getattr(winning_choice, "name", type(winning_choice).__name__),
@@ -599,21 +586,19 @@ def autotune_custom_op(
         result = inline_subgraph_to_ir_nodes(winning_choice.gm, inputs, name)
 
         # Tag inlined operations with config_patches from the winning choice
-        config_patches = getattr(winning_choice, "config_patches", None)
+        config_patches = winning_choice.config_patches
         if config_patches:
             for op in V.graph.operations[ops_before:]:
                 op.set_config_patches(config_patches.copy())
 
-        return result
+        return result, winning_choice
 
     log.debug(
         "Winning choice does not support inlining: %s (name=%s)",
         getattr(winning_choice, "name", type(winning_choice).__name__),
         name,
     )
-    if return_choice:
-        return selected_result, winning_choice
-    return selected_result
+    return selected_result, winning_choice
 
 
 def _generate_dynamic_configs(
@@ -650,10 +635,8 @@ def _generate_dynamic_configs(
 
 
 def _prepare_configs_and_decompositions(
-    processed_configs: Optional[list[CustomOpConfig]],
-    config_generator: Optional[
-        Callable[[dict[str, torch.Tensor]], list[CustomOpConfig]]
-    ],
+    processed_configs: list[CustomOpConfig] | None,
+    config_generator: Callable[[dict[str, torch.Tensor]], list[CustomOpConfig]] | None,
     tensor_inputs: list[Any],
     default_impl: Callable[..., Any],
     op_overload: torch._ops.OpOverload,
@@ -698,12 +681,11 @@ def _standard_lowering_fn(
     default_impl: Callable[..., Any],
     name: str,
     op_overload: torch._ops.OpOverload,
-    input_gen_fns: Optional[dict[str, Callable[[torch.Tensor], torch.Tensor]]],
+    input_gen_fns: dict[str, Callable[[torch.Tensor], torch.Tensor]] | None,
     tensor_inputs: list[Any],
     runtime_kwargs: dict[str, Any],
-    config_generator: Optional[
-        Callable[[dict[str, torch.Tensor]], list[CustomOpConfig]]
-    ] = None,
+    config_generator: Callable[[dict[str, torch.Tensor]], list[CustomOpConfig]]
+    | None = None,
     min_speedup_threshold: float = 1.0,
     benchmark_with_cudagraphs: bool = False,
 ) -> Any:
@@ -728,7 +710,7 @@ def _standard_lowering_fn(
     if not decompositions:
         return None
 
-    result = autotune_custom_op(
+    result, _ = autotune_custom_op(
         name=name,
         decompositions=decompositions,
         inputs=tensor_inputs,
@@ -767,7 +749,7 @@ def _lower_single_impl(
     runtime_kwargs: dict[str, Any],
     tensor_inputs: list[Any],
     name: str,
-    config_patches: Optional[dict[str, Any]] = None,
+    config_patches: dict[str, Any] | None = None,
 ) -> Any:
     """Lower a single implementation by tracing and inlining it.
 
@@ -833,16 +815,15 @@ def _range_based_lowering_fn(
     default_impl: Callable[..., Any],
     name: str,
     op_overload: torch._ops.OpOverload,
-    input_gen_fns: Optional[dict[str, Callable[[torch.Tensor], torch.Tensor]]],
+    input_gen_fns: dict[str, Callable[[torch.Tensor], torch.Tensor]] | None,
     tensor_name: str,
     dim_index: int,
-    ranges: list[tuple[int, Union[int, float]]],
+    ranges: list[tuple[int, int | float]],
     tensor_inputs: list[Any],
     runtime_kwargs: dict[str, Any],
     range_upper_bound: int,
-    config_generator: Optional[
-        Callable[[dict[str, torch.Tensor]], list[CustomOpConfig]]
-    ] = None,
+    config_generator: Callable[[dict[str, torch.Tensor]], list[CustomOpConfig]]
+    | None = None,
     min_speedup_threshold: float = 1.0,
     benchmark_with_cudagraphs: bool = False,
 ) -> Any:
@@ -891,16 +872,12 @@ def _range_based_lowering_fn(
             non_tensor_args=non_tensor_args,
             op_overload=op_overload,
             user_input_gen_fns=range_input_gen_fns,
-            return_choice=True,
             min_speedup_threshold=min_speedup_threshold,
             benchmark_with_cudagraphs=benchmark_with_cudagraphs,
             config_patches_list=config_patches_list,
         )
 
-        if (
-            hasattr(winning_choice, "decomposition")
-            and winning_choice.decomposition is not None
-        ):
+        if winning_choice.decomposition is not None:
             winning_impl = winning_choice.decomposition
             winning_kwargs = winning_choice.decomposition_kwargs
         else:
@@ -913,7 +890,7 @@ def _range_based_lowering_fn(
                 range_end if range_end != float("inf") else "inf",
             )
 
-        winning_config_patches = getattr(winning_choice, "config_patches", None) or {}
+        winning_config_patches = winning_choice.config_patches or {}
 
         # Create dataclass instances for cleaner code
         range_bounds = RangeBounds(range_start, range_end)
@@ -1070,14 +1047,13 @@ def _create_autotuning_lowering(
     default_impl: Callable[..., Any],
     name: str,
     op_overload: torch._ops.OpOverload,
-    input_gen_fns: Optional[dict[str, Callable[[torch.Tensor], torch.Tensor]]],
+    input_gen_fns: dict[str, Callable[[torch.Tensor], torch.Tensor]] | None,
     range_upper_bound: int,
     is_range_based: bool = False,
-    config_generator: Optional[
-        Callable[[dict[str, torch.Tensor]], list[CustomOpConfig]]
-    ] = None,
-    dispatch_on: Optional[tuple[str, int]] = None,
-    split_points: Optional[list[int]] = None,
+    config_generator: Callable[[dict[str, torch.Tensor]], list[CustomOpConfig]]
+    | None = None,
+    dispatch_on: tuple[str, int] | None = None,
+    split_points: list[int] | None = None,
     min_speedup_threshold: float = 1.0,
     benchmark_with_cudagraphs: bool = False,
 ) -> Callable[..., Any]:
@@ -1136,15 +1112,14 @@ def _create_autotuning_lowering(
 
 
 def register_custom_op_autotuning(
-    custom_op: Union[torch._library.custom_ops.CustomOpDef, torch._ops.OpOverload],
-    configs: Optional[Union[list[CustomOpConfig], list[Callable[..., Any]]]] = None,
-    config_generator: Optional[
-        Callable[[dict[str, torch.Tensor]], list[CustomOpConfig]]
-    ] = None,
-    name: Optional[str] = None,
-    input_gen_fns: Optional[dict[str, Callable[[torch.Tensor], torch.Tensor]]] = None,
-    dispatch_on: Optional[dict[str, Any]] = None,
-    split_points: Optional[list[int]] = None,
+    custom_op: torch._library.custom_ops.CustomOpDef | torch._ops.OpOverload,
+    configs: list[CustomOpConfig] | list[Callable[..., Any]] | None = None,
+    config_generator: Callable[[dict[str, torch.Tensor]], list[CustomOpConfig]]
+    | None = None,
+    name: str | None = None,
+    input_gen_fns: dict[str, Callable[[torch.Tensor], torch.Tensor]] | None = None,
+    dispatch_on: dict[str, Any] | None = None,
+    split_points: list[int] | None = None,
     min_speedup_threshold: float = 1.0,
     benchmark_with_cudagraphs: bool = False,
 ) -> None:
@@ -1279,7 +1254,7 @@ def register_custom_op_autotuning(
 
     # Validate range-based parameters
     is_range_based = dispatch_on is not None or split_points is not None
-    dispatch_on_tuple: Optional[tuple[str, int]] = None
+    dispatch_on_tuple: tuple[str, int] | None = None
     range_upper_bound = DEFAULT_RANGE_UPPER_BOUND
     if is_range_based:
         if dispatch_on is None or split_points is None:

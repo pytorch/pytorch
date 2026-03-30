@@ -82,13 +82,14 @@ from torch.onnx import (
 )
 from torch.testing import make_tensor
 from torch.testing._comparison import (
+    _unwrap_dtensor_for_comparison,
     BooleanPair,
     NonePair,
+    not_close_error_metas,
     NumberPair,
     Pair,
     TensorLikePair,
 )
-from torch.testing._comparison import not_close_error_metas
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.utils._import_utils import _check_module_exists
 import torch.utils._pytree as pytree
@@ -1408,15 +1409,9 @@ IS_PPC = platform.machine() == "ppc64le"
 IS_X86 = platform.machine() in ('x86_64', 'i386')
 IS_ARM64 = platform.machine() in ('arm64', 'aarch64')
 IS_S390X = platform.machine() == "s390x"
-
-def is_avx512_vnni_supported():
-    if sys.platform != 'linux':
-        return False
-    with open("/proc/cpuinfo", encoding="ascii") as f:
-        lines = f.read()
-    return "vnni" in lines
-
-IS_AVX512_VNNI_SUPPORTED = is_avx512_vnni_supported()
+IS_AVX512_VNNI_SUPPORTED = torch.cpu.get_capabilities().get("avx512_vnni", False)
+IS_CPU_EXT_SVE_SUPPORTED = torch.cpu.get_capabilities().get("sve", False)
+IS_CPU_CAPABILITY_SVE256 = torch._C._get_cpu_capability() == "SVE256"
 
 if IS_WINDOWS:
     @contextmanager
@@ -4321,6 +4316,8 @@ class TestCase(expecttest.TestCase):
         if isinstance(y, torch.Tensor) and y.is_nested and y.layout == torch.strided:
             y = y.unbind()
 
+        x, y = _unwrap_dtensor_for_comparison(x, y)
+
         error_metas = not_close_error_metas(
             x,
             y,
@@ -6048,3 +6045,17 @@ def patch_test_members(updates: dict[str, Any]):
 
         return wrapper
     return decorator
+
+def get_gcc_major_version():
+    """
+    Return GCC major version as int, or None if GCC is not available.
+    """
+    try:
+        out = subprocess.check_output(
+            ["gcc", "-dumpfullversion", "-dumpversion"],
+            stderr=subprocess.STDOUT,
+            text=True,
+        ).strip()
+        return int(out.split(".")[0])
+    except Exception:
+        return None

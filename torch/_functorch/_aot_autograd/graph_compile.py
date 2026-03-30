@@ -21,6 +21,7 @@ from contextlib import nullcontext
 from typing import Any, TYPE_CHECKING
 
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._opaque_base import OpaqueBase
 
 
 if TYPE_CHECKING:
@@ -40,6 +41,7 @@ from torch._dynamo.utils import (
     lazy_format_graph_code,
 )
 from torch._guards import CompileContext, TracingContext
+from torch._library.opaque_object import is_opaque_value
 from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses import FakeTensor
 from torch._subclasses.meta_utils import is_sparse_any
@@ -99,6 +101,22 @@ from .utils import (
     strict_zip,
     unlift_tokens,
 )
+
+
+def is_opaque_node(node: Any) -> bool:
+    """Check if a node contains an opaque or non-tensor value (e.g., ProcessGroup)."""
+    from torch._library.fake_class_registry import FakeScriptObject
+
+    if not isinstance(node, torch.fx.Node):
+        return False
+    if "val" not in getattr(node, "meta", {}):
+        return False
+    val = node.meta["val"]
+    if is_opaque_value(val):
+        return True
+    if isinstance(val, (torch.ScriptObject, FakeScriptObject)):
+        return True
+    return False
 
 
 _thread_local = threading.local()
@@ -570,6 +588,7 @@ def collect_fw_donated_buffer_idxs(
         t = saved_tensors[i]
         if (
             t is not None
+            and isinstance(t, FakeTensor)
             and not is_sparse_any(t)
             and StorageWeakRef(t.untyped_storage()) not in storage_refs
         ):
@@ -1811,6 +1830,8 @@ def _aot_stage2a_partition(
             for idx, node in enumerate(fw_outs_saved_for_bw):
                 if is_sym_node(node):
                     symint_outs_saved_for_bw.append(node)
+                elif is_opaque_node(node):
+                    opaque_outs_saved_for_bw.append(node)
                 elif isinstance(node, torch.fx.Node) and "val" in getattr(
                     node, "meta", {}
                 ):
@@ -1823,7 +1844,7 @@ def _aot_stage2a_partition(
                         }
                         if dynamic_dims:
                             fw_metadata.dynamic_saved_tensors_idxs[idx] = dynamic_dims
-                    elif isinstance(node.meta["val"], FakeScriptObject):
+                    elif isinstance(node.meta["val"], (FakeScriptObject, OpaqueBase)):
                         opaque_outs_saved_for_bw.append(node)
 
             num_symints_saved_for_bw = len(symint_outs_saved_for_bw)

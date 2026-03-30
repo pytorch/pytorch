@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import typing
 from collections.abc import Callable
-from typing import Optional, overload, TYPE_CHECKING, TypeAlias, Union
+from typing import overload, TYPE_CHECKING, TypeAlias
 from typing_extensions import ParamSpec, Self, TypeVar
 
 import torch
@@ -70,7 +70,7 @@ class XPUGraph(_XPUGraph):
     def __new__(cls, keep_graph: bool = False) -> Self:
         return super().__new__(cls, keep_graph)
 
-    def capture_begin(self, pool: Optional[_POOL_HANDLE] = None) -> None:
+    def capture_begin(self, pool: _POOL_HANDLE | None = None) -> None:
         r"""Begin capturing XPU work on the current xpu stream.
 
         Typically, you shouldn't call ``capture_begin`` yourself.
@@ -164,13 +164,13 @@ class graph:
 
     """  # noqa: B950
 
-    default_capture_stream: Optional[torch.xpu.Stream] = None
+    default_capture_stream: torch.xpu.Stream | None = None
 
     def __init__(
         self,
         xpu_graph: XPUGraph,
-        pool: Optional[_POOL_HANDLE] = None,
-        stream: Optional[torch.xpu.Stream] = None,
+        pool: _POOL_HANDLE | None = None,
+        stream: torch.xpu.Stream | None = None,
     ):
         # Lazy-init of default_capture_stream helps avoid circular-import errors.
         # Not thread safe, but graphs already have the general (explicitly documented)
@@ -178,9 +178,7 @@ class graph:
         if self.__class__.default_capture_stream is None:
             self.__class__.default_capture_stream = torch.xpu.Stream()
 
-        self.pool: Union[tuple[()], tuple[_POOL_HANDLE]] = (
-            () if pool is None else (pool,)
-        )
+        self.pool: tuple[()] | tuple[_POOL_HANDLE] = () if pool is None else (pool,)
         self.capture_stream = (
             stream if stream is not None else self.__class__.default_capture_stream
         )
@@ -203,7 +201,7 @@ class graph:
         self.stream_ctx.__exit__(*args)
 
 
-_ModuleOrCallable: TypeAlias = Union["torch.nn.Module", Callable[..., object]]
+_ModuleOrCallable: TypeAlias = torch.nn.Module | Callable[..., object]
 
 
 @overload
@@ -212,7 +210,7 @@ def make_graphed_callables(
     sample_args: tuple[Tensor, ...],
     num_warmup_iters: int = 3,
     allow_unused_input: bool = False,
-    pool: Optional[_POOL_HANDLE] = None,
+    pool: _POOL_HANDLE | None = None,
 ) -> _ModuleOrCallable: ...
 
 
@@ -222,17 +220,17 @@ def make_graphed_callables(
     sample_args: tuple[tuple[Tensor, ...], ...],
     num_warmup_iters: int = 3,
     allow_unused_input: bool = False,
-    pool: Optional[_POOL_HANDLE] = None,
+    pool: _POOL_HANDLE | None = None,
 ) -> tuple[_ModuleOrCallable, ...]: ...
 
 
 def make_graphed_callables(
-    callables: Union[_ModuleOrCallable, tuple[_ModuleOrCallable, ...]],
-    sample_args: Union[tuple[Tensor, ...], tuple[tuple[Tensor, ...], ...]],
+    callables: _ModuleOrCallable | tuple[_ModuleOrCallable, ...],
+    sample_args: tuple[Tensor, ...] | tuple[tuple[Tensor, ...], ...],
     num_warmup_iters: int = 3,
     allow_unused_input: bool = False,
-    pool: Optional[_POOL_HANDLE] = None,
-) -> Union[_ModuleOrCallable, tuple[_ModuleOrCallable, ...]]:
+    pool: _POOL_HANDLE | None = None,
+) -> _ModuleOrCallable | tuple[_ModuleOrCallable, ...]:
     r"""Accept callables (functions or :class:`nn.Module<torch.nn.Module>`\ s) and returns graphed versions.
 
     Each graphed callable's forward pass runs its source callable's
@@ -444,7 +442,7 @@ def make_graphed_callables(
         output_unflatten_spec: torch.utils._pytree.TreeSpec,
         static_input_surface: tuple[Tensor, ...],
         static_outputs: tuple[Tensor, ...],
-        static_grad_outputs: tuple[Optional[Tensor], ...],
+        static_grad_outputs: tuple[Tensor | None, ...],
         static_grad_inputs: tuple[Tensor, ...],
     ) -> Callable[..., object]:
         class Graphed(torch.autograd.Function):

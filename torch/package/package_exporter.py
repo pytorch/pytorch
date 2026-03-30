@@ -822,10 +822,10 @@ class PackageExporter:
         included in the package and have its dependencies processed recursively.
 
         Args:
-            include (Union[List[str], str]): A string e.g. "my_package.my_subpackage", or list of strings
+            include (list[str] | str): A string e.g. "my_package.my_subpackage", or list of strings
                 for the names of the modules to be externed. This can also be a glob-style pattern, as described in :meth:`mock`.
 
-            exclude (Union[List[str], str]): An optional pattern that excludes some patterns that match the include string.
+            exclude (list[str] | str): An optional pattern that excludes some patterns that match the include string.
 
             allow_empty (bool): An optional flag that specifies whether the intern modules specified by this call
                 to the ``intern`` method must be matched to some module during packaging. If an ``intern`` module glob
@@ -851,7 +851,7 @@ class PackageExporter:
         Use this function to mock this functionality out without having to modify the original code.
 
         Args:
-            include (Union[List[str], str]): A string e.g. ``"my_package.my_subpackage"``, or list of strings
+            include (list[str] | str): A string e.g. ``"my_package.my_subpackage"``, or list of strings
                 for the names of the modules to be mocked out. Strings can also be a glob-style pattern
                 string that may match multiple modules. Any required dependencies that match this pattern
                 string will be mocked out automatically.
@@ -863,7 +863,7 @@ class PackageExporter:
                     ``'torch.*'`` -- matches ``'torch.nn'`` or ``'torch.functional'``, but not
                     ``'torch.nn.functional'``
 
-            exclude (Union[List[str], str]): An optional pattern that excludes some patterns that match the include string.
+            exclude (list[str] | str): An optional pattern that excludes some patterns that match the include string.
                 e.g. ``include='torch.**', exclude='torch.foo'`` will mock all torch packages except ``'torch.foo'``,
                 Default: is ``[]``.
 
@@ -891,11 +891,11 @@ class PackageExporter:
         Code for extern modules must also exist in the process loading the package.
 
         Args:
-            include (Union[List[str], str]): A string e.g. ``"my_package.my_subpackage"``, or list of strings
+            include (list[str] | str): A string e.g. ``"my_package.my_subpackage"``, or list of strings
                 for the names of the modules to be externed. This can also be a glob-style pattern, as
                 described in :meth:`mock`.
 
-            exclude (Union[List[str], str]): An optional pattern that excludes some patterns that match the
+            exclude (list[str] | str): An optional pattern that excludes some patterns that match the
                 include string.
 
             allow_empty (bool): An optional flag that specifies whether the extern modules specified by this call
@@ -914,10 +914,10 @@ class PackageExporter:
         If a dependency on any matching packages is found, a :class:`PackagingError` is raised.
 
         Args:
-            include (Union[List[str], str]): A string e.g. ``"my_package.my_subpackage"``, or list of strings
+            include (list[str] | str): A string e.g. ``"my_package.my_subpackage"``, or list of strings
                 for the names of the modules to be externed. This can also be a glob-style pattern, as described in :meth:`mock`.
 
-            exclude (Union[List[str], str]): An optional pattern that excludes some patterns that match the include string.
+            exclude (list[str] | str): An optional pattern that excludes some patterns that match the include string.
         """
         self.patterns[GlobGroup(include, exclude=exclude)] = _PatternInfo(
             _ModuleProviderAction.DENY, allow_empty=True

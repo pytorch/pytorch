@@ -277,7 +277,6 @@ dependencies as well as the nightly binaries into the repo directory.
   * [core](caffe2/core) - Core files of Caffe2, e.g., tensor, workspace,
     blobs, etc.
   * ...
-* [.circleci](.circleci) - CircleCI configuration management. [README](.circleci/README.md)
 
 ## AI-Assisted Development
 

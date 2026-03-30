@@ -506,6 +506,28 @@ def optim_error_inputs_func_adagrad(device, dtype):
                 error_regex="Invalid lr_decay value: -0.5",
             ),
         ]
+    if _get_device_type(device) == "cuda":
+        sample_tensor = torch.empty((), device=device, dtype=dtype)
+        error_inputs += [
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=[sample_tensor],
+                    kwargs={"foreach": True, "fused": True},
+                    desc="`fused` and `foreach` cannot be `True` together",
+                ),
+                error_type=RuntimeError,
+                error_regex="`fused` and `foreach` cannot be `True` together",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=[sample_tensor],
+                    kwargs={"fused": True, "differentiable": True},
+                    desc="`fused` does not support `differentiable`",
+                ),
+                error_type=RuntimeError,
+                error_regex="`fused` does not support `differentiable`",
+            ),
+        ]
     return error_inputs
 
 
@@ -1535,6 +1557,7 @@ optim_db: list[OptimizerInfo] = [
                 "CompiledOptimizerParityTests",
                 "test_correctness",
                 device_type="xpu",
+                active_if=lambda kwargs: kwargs.get("use_closure", False),
             ),
             DecorateInfo(
                 skipIfTorchDynamo("See #133268 regarding dtype being None"),
@@ -1598,7 +1621,7 @@ optim_db: list[OptimizerInfo] = [
             "maximize",
             "capturable",
         ),
-        supports_fused_on=("cpu",),
+        supports_fused_on=("cpu", "cuda"),
         supports_sparse=True,
         metadata_for_sparse=(
             {"lr": 0.1, "weight_decay": 0, "lr_decay": 0},
@@ -1622,6 +1645,16 @@ optim_db: list[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_fused_matches_forloop",
+            ),
+            DecorateInfo(
+                toleranceOverride(
+                    {  # https://github.com/pytorch/pytorch/issues/116202
+                        torch.float32: tol(atol=5e-04, rtol=0.015),
+                    }
+                ),
+                "TestOptimRenewed",
+                "test_mixed_device_dtype",
+                active_if=TEST_WITH_TORCHDYNAMO,
             ),
         ),
         skips=(

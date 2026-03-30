@@ -665,6 +665,7 @@ Foreach Operations
     _foreach_atan_
     _foreach_ceil
     _foreach_ceil_
+    _foreach_clone
     _foreach_cos
     _foreach_cos_
     _foreach_cosh
@@ -757,6 +758,7 @@ Symbolic Numbers
     sym_min
     sym_not
     sym_ite
+    sym_sqrt
     sym_sum
 
 Export Path

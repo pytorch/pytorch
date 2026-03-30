@@ -658,7 +658,12 @@ def skip_all_guards_unsafe(guard_entries):
     return [False for entry in guard_entries]
 
 
-def nested_compile_region(fn=None, options: NestedCompileRegionOptions | None = None):
+def nested_compile_region(
+    fn=None,
+    *,
+    options: NestedCompileRegionOptions | None = None,
+    max_reuse_entries: int = 8,
+):
     """
     Tells **``torch.compile``** that the marked set of operations forms a nested
     compile region (which is often repeated in the full model) whose code can be
@@ -688,6 +693,9 @@ def nested_compile_region(fn=None, options: NestedCompileRegionOptions | None = 
         options: Optional backend to use for compiling the subgraph.
             Warning: this is an experimental feature under development and
             not ready for use yet.
+        max_reuse_entries: Maximum number of reuse cache entries per function
+            before raising an error. If this limit is hit, guards keep failing
+            across invocations and hierarchical compilation is not effective.
     """
 
     if options is not None:
@@ -702,7 +710,9 @@ def nested_compile_region(fn=None, options: NestedCompileRegionOptions | None = 
         mark_compile_region as _mark_compile_region,
     )
 
-    return _mark_compile_region(fn, options=options)
+    return _mark_compile_region(
+        fn, options=options, max_reuse_entries=max_reuse_entries
+    )
 
 
 def load_compiled_function(

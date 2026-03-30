@@ -15,7 +15,6 @@ import random
 from random import randrange
 from itertools import product
 from functools import reduce, partial
-from typing import Union, Optional
 from torch._prims_common import DimsType
 from packaging import version
 from torch.testing._internal.common_device_type import (
@@ -1045,6 +1044,24 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
+    @dtypes(torch.double, torch.cdouble)
+    def test_det_backward(self, device, dtype):
+        # Regression test for #80761.
+        input = torch.tensor([[0.]], device=device, dtype=dtype, requires_grad=True)
+        self.assertTrue(torch.autograd.gradcheck(torch.det, inputs=input))
+
+        # When A has 0 elements (e.g. empty batch), backward should return a
+        # zeros tensor with the same shape as A, not an undefined tensor.
+        for shape in [(0, 3, 3), (2, 0, 0)]:
+            A = torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
+            det = torch.linalg.det(A)
+            det.backward(torch.ones_like(det))
+            self.assertIsNotNone(A.grad)
+            self.assertEqual(A.grad.shape, A.shape)
+            self.assertEqual(A.grad, torch.zeros_like(A))
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
     def test_eigh(self, device, dtype):
@@ -1478,8 +1495,8 @@ class TestLinalg(TestCase):
                 return tensor_unbacked_size
 
         def test(
-            ord: Union[float, int],
-            dim: Optional[DimsType],
+            ord: float | int,
+            dim: DimsType | None,
             expect_numel_runtime_check: bool,
             expect_index_0_check: bool = False,
         ) -> None:
@@ -3181,41 +3198,45 @@ class TestLinalg(TestCase):
         b = torch.randn(*b_dims, dtype=dtype, device=device)
         A = random_hermitian_pd_matrix(*A_dims, dtype=dtype, device=device)
         L = torch.cholesky(A, upper=upper)
-        return b, A, L
 
-    @skipCUDAIfNoMagma
+        # L should be col-major
+        self.assertTrue(L.mT.is_contiguous())
+
+        yield b, A, L  # L is col-major
+        yield b, A, L.contiguous()  # L is row-major
+
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
     def test_cholesky_solve(self, device, dtype):
         for (k, n), upper in itertools.product(zip([2, 3, 5], [3, 5, 7]), [True, False]):
-            b, A, L = self.cholesky_solve_test_helper((n,), (n, k), upper, device, dtype)
-            x = torch.cholesky_solve(b, L, upper=upper)
-            self.assertEqual(b, np.matmul(A.cpu(), x.cpu()))
+            for b, A, L in self.cholesky_solve_test_helper((n,), (n, k), upper, device, dtype):
+                x = torch.cholesky_solve(b, L, upper=upper)
+                self.assertEqual(b, np.matmul(A.cpu(), x.cpu()))
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
     def test_cholesky_solve_batched(self, device, dtype):
         def cholesky_solve_batch_helper(A_dims, b_dims, upper):
-            b, A, L = self.cholesky_solve_test_helper(A_dims, b_dims, upper, device, dtype)
-            x_exp_list = []
-            for i in range(b_dims[0]):
-                x_exp_list.append(torch.cholesky_solve(b[i], L[i], upper=upper))
-            x_exp = torch.stack(x_exp_list)  # Stacked output
-            x_act = torch.cholesky_solve(b, L, upper=upper)  # Actual output
-            self.assertEqual(x_act, x_exp)  # Equality check
-            Ax = np.matmul(A.cpu(), x_act.cpu())
-            self.assertEqual(b, Ax)  # Correctness check
+            for b, A, L in self.cholesky_solve_test_helper(A_dims, b_dims, upper, device, dtype):
+                x_exp_list = []
+                for i in range(b_dims[0]):
+                    x_exp_list.append(torch.cholesky_solve(b[i], L[i], upper=upper))
+                x_exp = torch.stack(x_exp_list)  # Stacked output
+                x_act = torch.cholesky_solve(b, L, upper=upper)  # Actual output
+                self.assertEqual(x_act, x_exp)  # Equality check
+                Ax = np.matmul(A.cpu(), x_act.cpu())
+                self.assertEqual(b, Ax)  # Correctness check
 
         for upper, batchsize in itertools.product([True, False], [1, 3, 4]):
             cholesky_solve_batch_helper((5, batchsize), (batchsize, 5, 10), upper)
 
-    @slowTest
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
@@ -3223,12 +3244,12 @@ class TestLinalg(TestCase):
     def test_cholesky_solve_batched_many_batches(self, device, dtype):
         for A_dims, b_dims in zip([(5, 256, 256), (5,)], [(5, 10), (512, 512, 5, 10)]):
             for upper in [True, False]:
-                b, A, L = self.cholesky_solve_test_helper(A_dims, b_dims, upper, device, dtype)
-                x = torch.cholesky_solve(b, L, upper)
-                Ax = torch.matmul(A, x)
-                self.assertEqual(Ax, b.expand_as(Ax))
+                for b, A, L in self.cholesky_solve_test_helper(A_dims, b_dims, upper, device, dtype):
+                    x = torch.cholesky_solve(b, L, upper)
+                    Ax = torch.matmul(A, x)
+                    self.assertEqual(Ax, b.expand_as(Ax))
 
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
@@ -3259,7 +3280,7 @@ class TestLinalg(TestCase):
             run_test((4, 4), (2, 1, 3, 4, 2), upper)  # broadcasting A
             run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5), upper)  # broadcasting A & b
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_cholesky_solve_out_errors_and_warnings(self, device, dtype):
@@ -3286,7 +3307,7 @@ class TestLinalg(TestCase):
             self.assertEqual(len(w), 1)
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_cholesky_solve_backward(self, device, dtype):
@@ -5140,9 +5161,6 @@ class TestLinalg(TestCase):
         # We set the TunableOp numerical check environment variable here because it is
         # possible to hit some invalid numerical solutions due to the small matrix sizes.
 
-        if torch.version.hip and isRocmArchAnyOf(MI350_ARCH) and dtype is torch.double:
-            self.skipTest("Currently hangs on rocm mi350")
-
         with self._tunableop_ctx():
             torch.cuda.tunable.set_rotating_buffer_size(0)
             # Numerical check adds significant overhead, unsure if this is needed
@@ -6112,6 +6130,7 @@ class TestLinalg(TestCase):
 
     @onlyCUDA
     @skipCUDAIfNotRocm
+    # Fails with triton 3.7
     @dtypes(torch.float)
     def test_mm_submatrix_offline_tunableop(self, device, dtype):
         import os
@@ -6242,8 +6261,12 @@ class TestLinalg(TestCase):
             # This stores total number of cumulative results
             total_num_results = new_results - ref_results
 
-            # There must be a new tuning results
-            self.assertEqual(total_num_results, 10)
+            preferred_blas = str(torch.backends.cuda.preferred_blas_library())
+            # With hipBLASLt preferred, the two linear/addmm+bias calls are
+            # tracked as GemmAndBias tunables (+2). With rocBLAS preferred,
+            # they fall back to regular GEMM signatures and don't add entries.
+            expected_num_results = 10 if preferred_blas == "_BlasBackend.Cublaslt" else 8
+            self.assertEqual(total_num_results, expected_num_results)
 
             results_filename = torch.cuda.tunable.get_filename()
             self.assertTrue(os.path.exists(results_filename))
@@ -7964,18 +7987,20 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @parametrize("use_transpose_a", [True, False])
     @parametrize("use_transpose_b", [True, False])
     @parametrize("non_contig_type", [0, 1, 2])
-    def test__int_mm_cpu(self, device, m, k, n, use_transpose_a, use_transpose_b, non_contig_type):
+    @parametrize("x_dtype", [torch.int8, torch.uint8])
+    def test__int_mm_cpu(self, device, m, k, n, use_transpose_a, use_transpose_b, non_contig_type, x_dtype):
         # non_contig_type:
         # 0: the whole data buffer is contiguous (can be transposed)
         # 1: stride of one dimension is 1, but the whole buffer is not contiguous
         # 2: Neither stride is 1
 
-        def genf_int_float(x, y, use_transpose, non_contig_type):
+        def genf_int_float(x, y, use_transpose, non_contig_type, dtype):
             if use_transpose:
                 x, y = y, x
             if non_contig_type != 0:
                 y = y * 2
-            x_int8 = torch.randint(-128, 127, (x, y), dtype=torch.int8, device=device)
+            dt_info = torch.iinfo(dtype)
+            x_int8 = torch.randint(dt_info.min, dt_info.max, (x, y), dtype=dtype, device=device)
             x_float = x_int8.to(torch.float32)
             if non_contig_type == 1:
                 x_int8 = x_int8[:, : y // 2]
@@ -7989,8 +8014,8 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
         if non_contig_type != 0 and (m == 0 or k == 0):
             return
-        a_int8, a_float = genf_int_float(m, k, use_transpose_a, non_contig_type)
-        b_int8, b_float = genf_int_float(k, n, use_transpose_b, non_contig_type)
+        a_int8, a_float = genf_int_float(m, k, use_transpose_a, non_contig_type, x_dtype)
+        b_int8, b_float = genf_int_float(k, n, use_transpose_b, non_contig_type, torch.int8)
         c_int32 = torch._int_mm(a_int8, b_int8)
         self.assertTrue(c_int32.dtype is torch.int32)
         self.assertEqual(c_int32.device, torch.device(device))
@@ -9535,7 +9560,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             run_test(matsize, batchdims, mat_chars=['sym', 'sym_pd', 'sym_psd'])
             run_test(matsize, batchdims, mat_chars=['sing', 'non_sing'])
 
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_cholesky_inverse(self, device, dtype):
@@ -9583,7 +9608,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         expected = torch.inverse(A)
         self.assertEqual(expected, out)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_cholesky_inverse_errors_and_warnings(self, device, dtype):

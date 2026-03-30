@@ -346,10 +346,10 @@ def log_sigmoid_backward(grad_output: Tensor, self: Tensor, buffer: Tensor) -> T
     in_negative = self < 0
     max_deriv = torch.where(in_negative, 1, 0)
     sign = torch.where(in_negative, 1, -1)
-    z = torch.exp(-torch.abs(self))
+    # On CPU, forward saves buffer = exp(-|x|); reuse it to match the native kernel.
+    # On CUDA/XPU, buffer is empty so we recompute.
+    z = buffer if buffer.numel() > 0 else torch.exp(-torch.abs(self))
     return grad_output * (max_deriv - sign * (z / (1 + z)))
-    # CPU has a special formula that uses buffer, but disabled for convenience sake
-    # return (max_deriv - sign * (buffer / (1 + buffer))) * grad_output
 
 
 @register_decomposition(aten.ldexp)
@@ -505,6 +505,12 @@ def _nll_loss_backward(
     channel_dim = 0 if self.dim() < 2 else 1
     if reduction == Reduction.MEAN.value:
         grad_output = grad_output / total_weight
+
+    # When self is 1D (no batch dim), the C++ kernel only uses target[0].
+    # Reduce target to a scalar so the subsequent unsqueeze produces a 1D
+    # tensor matching self's dimensionality.
+    if self.dim() == 1 and target.dim() > 0:
+        target = target[0]
 
     target = target.unsqueeze(channel_dim)
     safe_target = torch.where(target != ignore_index, target, 0)
@@ -3947,6 +3953,18 @@ def upsample_bicubic2d_aa_vec(input, output_size, align_corners, scale_factors):
     )
 
 
+@register_decomposition(aten._upsample_lanczos2d_aa.vec)
+@aten._upsample_lanczos2d_aa.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten._upsample_lanczos2d_aa.vec.py_impl(DispatchKey.Autograd)
+def upsample_lanczos2d_aa_vec(input, output_size, align_corners, scale_factors):
+    osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
+    scale_h = get_scale_value(scale_factors, 0)
+    scale_w = get_scale_value(scale_factors, 1)
+    return torch.ops.aten._upsample_lanczos2d_aa(
+        input, osize, align_corners, scale_h, scale_w
+    )
+
+
 @register_decomposition(aten.upsample_bilinear2d.vec)
 @register_decomposition(aten.upsample_trilinear3d.vec)
 @aten.upsample_linear1d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
@@ -4261,9 +4279,10 @@ def nll_loss_forward(
         )
 
     no_batch_dim = self.dim() == 1 and target.dim() == 0
-    if not (no_batch_dim or (self.shape[0] == target.shape[0])):
-        raise AssertionError(
-            f"size mismatch (got input: {self.shape}, target: {target.shape})"
+    if not no_batch_dim:
+        torch._check(
+            self.shape[0] == target.shape[0],
+            lambda: f"size mismatch (got input: {self.shape}, target: {target.shape})",
         )
 
     n_classes = self.shape[-1]
@@ -4624,6 +4643,9 @@ def binary_cross_entropy_with_logits(
     if weight is not None:
         loss = loss * weight
 
+    # this is to align the resulted data type with the in-place
+    # operation in binary_cross_entropy_with_logits of aten/src/ATen/native/Loss.cpp
+    loss = loss.to(target.dtype)
     return apply_loss_reduction(loss, reduction)
 
 
@@ -5377,7 +5399,9 @@ def isin(elements, test_elements, *, assume_unique=False, invert=False):
         else:
             return torch.eq(elements, test_elements)
 
-    if test_elements.numel() < 10.0 * pow(elements.numel(), 0.145):
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if guard_or_false(test_elements.numel() < 10.0 * pow(elements.numel(), 0.145)):
         return isin_default(elements, test_elements, invert=invert)
     else:
         return isin_sorting(
@@ -5462,6 +5486,125 @@ def resize_as(self, other, memory_format=None):
     return aten.resize(self, other.shape, memory_format=memory_format)
 
 
+@register_decomposition(aten.max_pool2d_with_indices_backward)
+def max_pool2d_with_indices_backward(
+    grad_output: Tensor,
+    self: Tensor,
+    kernel_size,
+    stride,
+    padding,
+    dilation,
+    ceil_mode: bool,
+    indices: Tensor,
+):
+    """
+    Decomposition of max_pool2d_with_indices_backward using scatter_add.
+
+    This replaces the native implementation with a high-level decomposition
+    that uses scatter_add for gradient accumulation. The scatter-based approach
+    provides automatic optimization opportunities for Inductor and handles all
+    pooling configurations without requiring specialized fallback paths.
+
+    Algorithm:
+        For each output gradient position, use the corresponding index from the
+        forward pass to scatter the gradient to the input position. When multiple
+        output positions select the same input position as max, scatter_add
+        automatically accumulates their gradients.
+
+    Complexity: O(B * C * H_out * W_out)
+        Independent of kernel size, unlike traditional O(B * C * H_in * W_in * K²)
+        approaches that iterate over input positions and kernel windows.
+
+    Known Limitations:
+        - FP16/BF16: Uses FP32 accumulation internally to preserve precision when
+          many gradients accumulate to the same position (overlapping pooling windows).
+          This adds slight overhead but ensures numerical stability.
+        - Deterministic mode: Falls back to native implementation to ensure
+          consistent results across runs
+
+    Args:
+        grad_output: Gradient w.r.t. pooling output [B, C, H_out, W_out]
+        self: Original input tensor (for shape) [B, C, H_in, W_in]
+        kernel_size: Pooling kernel size
+        stride: Pooling stride
+        padding: Pooling padding
+        dilation: Pooling dilation
+        ceil_mode: Whether to use ceil for output size calculation
+        indices: Indices from forward pass (per-channel linear positions)
+
+    Returns:
+        Gradient w.r.t. input [B, C, H_in, W_in]
+    """
+    # Use native kernel in deterministic mode
+    if torch.are_deterministic_algorithms_enabled():
+        return NotImplemented
+
+    # MPS: Use native kernel. scatter_add has correctness issues on macOS 14
+    # (#163327) and numerical differences on macOS 15+.
+    if grad_output.device.type == "mps":
+        return NotImplemented
+
+    # Get spatial dimensions
+    in_height = self.size(-2)
+    in_width = self.size(-1)
+    out_height = grad_output.size(-2)
+    out_width = grad_output.size(-1)
+
+    # Handle both 3D (C, H, W) and 4D (B, C, H, W) cases by treating 3D as 4D
+    is_batched = self.dim() == 4
+    if not is_batched:
+        self = self.unsqueeze(0)
+        grad_output = grad_output.unsqueeze(0)
+        indices = indices.unsqueeze(0)
+
+    batch_size = self.size(0)
+    channels = self.size(1)
+
+    # For FP16/BF16, use FP32 accumulation to avoid precision loss
+    # This is critical when many gradients accumulate to the same position
+    # (overlapping pooling windows with large kernels or stride < kernel_size)
+    use_fp32_accum = grad_output.dtype in (torch.float16, torch.bfloat16)
+    accum_dtype = torch.float32 if use_fp32_accum else grad_output.dtype
+
+    # Create grad_input with correct accumulation dtype from the start
+    grad_input_flat = torch.zeros(
+        batch_size * channels,
+        in_height * in_width,
+        dtype=accum_dtype,
+        device=grad_output.device,
+    )
+
+    # Reshape grad_output and indices to (B*C, H_out*W_out)
+    grad_output_flat = grad_output.reshape(
+        batch_size * channels, out_height * out_width
+    )
+    indices_flat = indices.reshape(batch_size * channels, out_height * out_width)
+
+    # Convert grad_output to accumulation dtype if needed
+    if use_fp32_accum:
+        grad_output_flat = grad_output_flat.to(torch.float32)
+
+    # Scatter gradients to input positions
+    grad_input_flat = grad_input_flat.scatter_add(1, indices_flat, grad_output_flat)
+
+    # Reshape back to original input shape
+    grad_input = grad_input_flat.reshape(batch_size, channels, in_height, in_width)
+
+    # Convert back to original dtype if we used FP32 accumulation
+    if use_fp32_accum:
+        grad_input = grad_input.to(grad_output.dtype)
+
+    # Preserve memory format from input (channels_last vs channels_first)
+    memory_format = utils.suggest_memory_format(self)
+    grad_input = grad_input.contiguous(memory_format=memory_format)
+
+    # Remove batch dimension for 3D case
+    if not is_batched:
+        grad_input = grad_input.squeeze(0)
+
+    return grad_input
+
+
 register_inplace(aten.addbmm_, aten.addbmm)
 register_inplace(aten.addmm_, aten.addmm)
 register_inplace(aten.addmv_, aten.addmv)
@@ -5488,3 +5631,22 @@ register_inplace(aten.scatter_, aten.scatter)
 register_inplace(aten.scatter_add_, aten.scatter_add)
 register_inplace(aten.scatter_reduce_, aten.scatter_reduce)
 register_inplace(aten.silu_, aten.silu)
+
+
+@aten.one_hot.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+def one_hot(self: Tensor, num_classes: int = -1) -> Tensor:
+    if num_classes == -1:
+        num_classes = int(self.max().item()) + 1
+    # _assert_async is side-effectful and won't be DCE'd
+    aten._assert_async.msg(
+        torch.all(self >= 0),
+        "one_hot: Class values must be non-negative.",
+    )
+    aten._assert_async.msg(
+        torch.all(self < num_classes),
+        "one_hot: Class values must be smaller than num_classes.",
+    )
+    return (
+        self.unsqueeze(-1)
+        == torch.arange(num_classes, dtype=self.dtype, device=self.device)
+    ).to(torch.int64)

@@ -112,6 +112,7 @@ libtorch_profiler_sources = [
     "torch/csrc/profiler/standalone/itt_observer.cpp",
     "torch/csrc/profiler/standalone/nvtx_observer.cpp",
     "torch/csrc/profiler/standalone/privateuse1_observer.cpp",
+    "torch/csrc/profiler/standalone/privateuse1_profiler.cpp",
     "torch/csrc/profiler/stubs/base.cpp",
     "torch/csrc/profiler/orchestration/vulkan.cpp",
     "torch/csrc/profiler/perf.cpp",
@@ -690,7 +691,7 @@ libtorch_lite_cmake_sources = sorted(
     torch_mobile_core,
 )
 
-libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources + libtorch_nativert_sources
+libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources
 
 libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/autograd/TraceTypeManual.cpp",
@@ -946,7 +947,6 @@ libtorch_python_core_sources = [
     "torch/csrc/dynamo/init.cpp",
     "torch/csrc/dynamo/stackref_bridge.c",
     "torch/csrc/functorch/init.cpp",
-    "torch/csrc/fx/graph.cpp",
     "torch/csrc/fx/node.cpp",
     "torch/csrc/mps/Module.cpp",
     "torch/csrc/mtia/Module.cpp",
@@ -1159,6 +1159,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/LegacyVmapMode.cpp",
     "aten/src/ATen/LegacyVmapTransforms.cpp",
     "aten/src/ATen/core/BackendSelectFallbackKernel.cpp",
+    "aten/src/ATen/core/CachingHostAllocator.cpp",
     "aten/src/ATen/core/DeprecatedTypeProperties.cpp",
     "aten/src/ATen/core/DeprecatedTypePropertiesRegistry.cpp",
     "aten/src/ATen/core/Dict.cpp",
@@ -1474,6 +1475,8 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/RowwisePrune.cpp",
     "aten/src/ATen/native/SegmentReduce.cpp",
     "aten/src/ATen/native/Scalar.cpp",
+    "aten/src/ATen/native/ScaledBlas.cpp",
+    "aten/src/ATen/native/ScaledBlasUtils.cpp",
     "aten/src/ATen/native/SobolEngineOps.cpp",
     "aten/src/ATen/native/SobolEngineOpsUtils.cpp",
     "aten/src/ATen/native/SoftMax.cpp",
@@ -1501,6 +1504,7 @@ aten_native_source_non_codegen_list = [
     # "aten/src/ATen/native/UpSample.cpp",
     "aten/src/ATen/native/UpSampleBicubic2d.cpp",
     "aten/src/ATen/native/UpSampleBilinear2d.cpp",
+    "aten/src/ATen/native/UpSampleLanczos2d.cpp",
     "aten/src/ATen/native/UpSampleLinear1d.cpp",
     "aten/src/ATen/native/UpSampleNearest1d.cpp",
     "aten/src/ATen/native/UpSampleNearest2d.cpp",

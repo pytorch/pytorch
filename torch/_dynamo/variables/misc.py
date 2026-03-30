@@ -71,6 +71,7 @@ from ..utils import (
 )
 from .base import (
     AsPythonConstantNotImplementedError,
+    NO_SUCH_SUBOBJ,
     raise_type_error_exc,
     VariableTracker,
 )
@@ -82,10 +83,6 @@ from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObject
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
-
-
-class NO_SUCH_SUBOBJ:
-    pass
 
 
 class SuperVariable(VariableTracker):
@@ -1357,7 +1354,6 @@ class GetAttrVariable(VariableTracker):
             and isinstance(
                 self.obj,
                 (
-                    variables.UserDefinedObjectVariable,
                     variables.NNModuleVariable,
                     variables.UserDefinedClassVariable,
                 ),
@@ -1397,7 +1393,6 @@ class GetAttrVariable(VariableTracker):
             and isinstance(
                 self.obj,
                 (
-                    variables.UserDefinedObjectVariable,
                     variables.NNModuleVariable,
                     variables.UserDefinedClassVariable,
                 ),
@@ -1411,11 +1406,6 @@ class GetAttrVariable(VariableTracker):
                 return variables.CONSTANT_VARIABLE_FALSE
 
         elif name == "__setitem__" and self.name == "__dict__" and not kwargs:
-            if isinstance(self.obj, variables.UserDefinedObjectVariable):
-                # Bypass any custom setattr as we are updating the `__dict__` itself
-                return self.obj.method_setattr_standard(
-                    tx, args[0], args[1], directly_update_dict=True
-                )
             if isinstance(self.obj, variables.NNModuleVariable):
                 # This matches how `setattr` is handled for NNModuleVariable
                 self.obj.convert_to_unspecialized(tx)
@@ -1436,6 +1426,9 @@ class MethodWrapperVariable(VariableTracker):
     def __init__(self, method_wrapper: types.MethodWrapperType, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.method_wrapper = method_wrapper
+
+    def get_real_python_backed_value(self) -> types.MethodWrapperType:
+        return self.method_wrapper
 
     def call_function(
         self,
@@ -1574,6 +1567,9 @@ class GetSetDescriptorVariable(VariableTracker):
         super().__init__(**kwargs)
         self.desc = desc
 
+    def get_real_python_backed_value(self) -> types.GetSetDescriptorType:
+        return self.desc
+
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "__get__" and self.source:
             source = AttrSource(self.source, "__get__")
@@ -1607,6 +1603,9 @@ class PythonModuleVariable(VariableTracker):
         return types.ModuleType
 
     def as_python_constant(self) -> types.ModuleType:
+        return self.value
+
+    def get_real_python_backed_value(self) -> types.ModuleType:
         return self.value
 
     def __repr__(self) -> str:
@@ -1682,6 +1681,9 @@ class TypingVariable(VariableTracker):
             return SourcelessBuilder.create(tx, value)
 
     def as_python_constant(self) -> Any:
+        return self.value
+
+    def get_real_python_backed_value(self) -> Any:
         return self.value
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -1766,6 +1768,9 @@ class NumpyVariable(VariableTracker):
     def __init__(self, value: Any, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
+
+    def get_real_python_backed_value(self) -> Any:
+        return self.value
 
     @classmethod
     def can_constant_fold_through(cls, fn: types.FunctionType) -> bool:
@@ -2009,6 +2014,9 @@ class ObjectVariable(VariableTracker):
         super().__init__(**kwargs)
         self.value = value
 
+    def get_real_python_backed_value(self) -> object:
+        return self.value
+
     def python_type(self) -> type[object]:
         return object
 
@@ -2033,16 +2041,15 @@ class DebuggingVariable(VariableTracker):
             and obj in torch._dynamo.config.reorderable_logging_functions
         )
 
-    # type: ignore[override]
     def call_function(
         self,
         tx: "InstructionTranslator",
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> None:
+    ) -> VariableTracker:
         if tx.export:
             # For export cases, we can just make debugging functions no-ops
-            return
+            return CONSTANT_VARIABLE_NONE
 
         if not self.can_reorder_logs(self.value, args, kwargs):
             unimplemented(
@@ -2056,6 +2063,7 @@ class DebuggingVariable(VariableTracker):
             )
 
         tx.debug_locals.append((self, list(args)))
+        return CONSTANT_VARIABLE_NONE
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         assert self.source is not None
@@ -2091,6 +2099,9 @@ class IgnoredFunctionVariable(VariableTracker):
         super().__init__(**kwargs)
         self.value = value
 
+    def get_real_python_backed_value(self) -> Any:
+        return self.value
+
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -2108,6 +2119,9 @@ class LoggingLoggerVariable(VariableTracker):
     def __init__(self, value: logging.Logger, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
+
+    def get_real_python_backed_value(self) -> logging.Logger:
+        return self.value
 
     def call_method(
         self,

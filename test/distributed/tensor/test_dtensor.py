@@ -343,6 +343,62 @@ class DTensorTest(DTensorTestBase):
         self.assertEqual(comm_mode.get_total_counts(), 0)
 
     @with_comms
+    def test_from_local_grad_placements(self):
+        """Test that from_local with explicit grad_placements overrides the default
+        gradient placement normalization in backward.
+
+        Verifies:
+        - grad_placements=(Partial(),) with Replicate forward keeps gradient as Partial (no all-reduce)
+        - grad_placements=None (default) preserves existing behavior
+        """
+        device_mesh = self.build_device_mesh()
+
+        # Test 1: Replicate(fwd) with grad_placements=(Partial(),)
+        # Default behavior would all-reduce Partial grad to Replicate, but
+        # grad_placements=(Partial(),) should keep gradient as Partial (no all-reduce)
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            local_tensor = torch.randn(
+                3, 3, device=self.device_type, requires_grad=True
+            )
+            dt = DTensor.from_local(
+                local_tensor,
+                device_mesh,
+                [Replicate()],
+                grad_placements=[Partial()],
+            )
+            output = dt * 2
+            grad = DTensor.from_local(
+                torch.ones(3, 3, device=self.device_type), device_mesh, [Partial()]
+            )
+            output.backward(grad)
+            # With grad_placements=(Partial(),), the backward should NOT all-reduce
+            # the Partial gradient to Replicate. The gradient stays Partial, so
+            # each rank gets its local partial gradient (ones * 2) without all-reduce.
+            self.assertEqual(local_tensor.grad, torch.ones(3, 3) * 2)
+        # No all-reduce should happen since grad_placements keeps it as Partial
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+
+        # Test 2: Replicate(fwd) with grad_placements=None (default behavior preserved)
+        # Partial grad_output should be all-reduced to Replicate (default normalization)
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            local_tensor = torch.randn(
+                3, 3, device=self.device_type, requires_grad=True
+            )
+            dt = DTensor.from_local(local_tensor, device_mesh, [Replicate()])
+            output = dt * 2
+            grad = DTensor.from_local(
+                torch.ones(3, 3, device=self.device_type), device_mesh, [Partial()]
+            )
+            output.backward(grad)
+            # Default: Partial grad should be all-reduced to Replicate
+            expected_grad = torch.ones(3, 3) * 2 * self.world_size
+            self.assertEqual(local_tensor.grad, expected_grad)
+        # Verify that an all-reduce happened (default Partial -> Replicate)
+        self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.all_reduce], 1)
+
+    @with_comms
     def test_from_local_uneven_sharding(self):
         device_mesh = self.build_device_mesh()
 
@@ -576,7 +632,9 @@ class DTensorTest(DTensorTestBase):
         # test backward new_empty_strided with sharding works correctly
         my_dtensor.to_local().sum().backward()
         local_tensor.sum().backward()
-        self.assertEqual(my_dtensor.grad, new_strided_dtensor.grad)
+        self.assertEqual(
+            my_dtensor.grad.full_tensor(), new_strided_dtensor.grad.full_tensor()
+        )
         self.assertEqual(
             my_dtensor.grad.redistribute(placements=[Replicate()]).to_local(),
             local_tensor.grad,
@@ -854,6 +912,50 @@ class DTensorTest(DTensorTestBase):
         loss = out1.sum()
         loss.backward()
 
+    @with_comms
+    def test_assert_equal_dtensor(self):
+        mesh = self.build_device_mesh()
+        local = torch.randn(4, 4, device=self.device_type)
+
+        dt1 = DTensor.from_local(local.clone(), mesh, [Replicate()])
+        dt2 = DTensor.from_local(local.clone(), mesh, [Replicate()])
+
+        self.assertEqual(dt1, dt2)
+        torch.testing.assert_close(dt1, dt2)
+
+        dt3 = DTensor.from_local(
+            torch.randn(4, 4, device=self.device_type), mesh, [Replicate()]
+        )
+        with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close"):
+            self.assertEqual(dt1, dt3)
+
+        dt_shard = DTensor.from_local(local.clone(), mesh, [Shard(0)])
+        with self.assertRaisesRegex(AssertionError, "DTensor placements do not match"):
+            self.assertEqual(dt1, dt_shard)
+
+        with self.assertRaisesRegex(
+            TypeError, "Comparing a DTensor to a non-DTensor is ambiguous"
+        ):
+            self.assertEqual(dt1, local)
+        with self.assertRaisesRegex(
+            TypeError, "Comparing a DTensor to a non-DTensor is ambiguous"
+        ):
+            self.assertEqual(local, dt1)
+        with self.assertRaisesRegex(
+            TypeError, "Comparing a DTensor to a non-DTensor is ambiguous"
+        ):
+            torch.testing.assert_close(dt1, local)
+
+        dt_scalar = DTensor.from_local(
+            torch.tensor(42.0, device=self.device_type), mesh, [Replicate()]
+        )
+        with self.assertRaisesRegex(
+            TypeError, "Comparing a DTensor to a non-DTensor is ambiguous"
+        ):
+            self.assertEqual(dt_scalar, 42.0)
+        self.assertEqual(dt_scalar.full_tensor(), 42.0)
+        self.assertEqual(dt_scalar.to_local(), 42.0)
+
 
 DTensorTestWithLocalTensor = create_local_tensor_test_class(
     DTensorTest,
@@ -866,6 +968,73 @@ DTensorTestWithLocalTensor = create_local_tensor_test_class(
         "test_dtensor_save_load_import",
     ],
 )
+
+
+class DTensorSubclassTest(DTensorTestBase):
+    def _make_dtensor(self, cls, mesh):
+        base = DTensor.from_local(
+            torch.randn(4, 4, device=self.device_type), mesh, [Replicate()]
+        )
+        return cls(base._local_tensor, base._spec, requires_grad=False)
+
+    @with_comms
+    def test_subclass_custom_dispatch(self):
+        """Subclass handles the entire dispatch, never calling DTensor dispatch."""
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        called = False
+
+        class MyDTensor(DTensor):
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                nonlocal called
+                called = True
+                self.assertIs(cls, MyDTensor)
+                return NotImplemented
+
+        my_dt = self._make_dtensor(MyDTensor, mesh)
+        try:
+            my_dt + my_dt
+        except TypeError:
+            pass
+        self.assertTrue(called, "MyDTensor.__torch_dispatch__ was not called")
+
+    @with_comms
+    def test_subclass_no_override(self):
+        """Subclass without __torch_dispatch__ override uses C++ fast path."""
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        class MyDTensor(DTensor):
+            pass
+
+        my_dt = self._make_dtensor(MyDTensor, mesh)
+        result = my_dt + my_dt
+        self.assertIsInstance(result, DTensor)
+
+    @with_comms
+    def test_subclass_conditional_dispatch(self):
+        """Subclass handles some ops itself, delegates others to DTensor."""
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        custom_ops: list[torch._ops.OpOverload] = []
+
+        class MyDTensor(DTensor):
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                if func == torch.ops.aten.add.Tensor:
+                    custom_ops.append(func)
+                return super().__torch_dispatch__(func, types, args, kwargs)
+
+        my_dt = self._make_dtensor(MyDTensor, mesh)
+
+        # add: subclass logs it, then delegates to DTensor
+        result = my_dt + my_dt
+        self.assertIsInstance(result, DTensor)
+        self.assertIn(torch.ops.aten.add.Tensor, custom_ops)
+
+        # neg: subclass doesn't do custom handling, just delegates
+        custom_ops.clear()
+        result = -my_dt
+        self.assertIsInstance(result, DTensor)
+        self.assertEqual(len(custom_ops), 0)
 
 
 class DTensorMeshTest(DTensorTestBase):

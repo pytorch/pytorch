@@ -307,25 +307,9 @@ function install_torchao() {
 }
 
 function install_flash_attn_cute() {
-  echo "Installing FlashAttention CuTe from GitHub..."
-  # Grab latest main til we have a pinned commit
-  local flash_attn_commit
-  flash_attn_commit=$(git ls-remote https://github.com/Dao-AILab/flash-attention.git HEAD | cut -f1)
-
-  # Clone the repo to a temporary directory
-  rm -rf flash-attention-build
-  git clone --depth 1 --recursive https://github.com/Dao-AILab/flash-attention.git flash-attention-build
-
-  pushd flash-attention-build
-  git checkout "${flash_attn_commit}"
-
-  # Install only the 'cute' sub-directory
-  pip_install -e flash_attn/cute/
-  popd
-
-  # remove the local repo
-  rm -rf flash-attention-build
-  echo "FlashAttention CuTe installation complete."
+  echo "Installing FlashAttention 4 from PyPI..."
+  pip_install flash-attn-4==4.0.0b5
+  echo "FlashAttention 4 installation complete."
 }
 
 function install_cutlass_dsl() {
@@ -367,7 +351,7 @@ function install_cutlass_api() {
   git checkout "${cutlass_commit}"
 
   # Install cutlass_api with torch extras
-  pip_install -e "python/cutlass_api[torch]"
+  pip_install "python/cutlass_api[torch]"
   popd
 
   rm -rf cutlass-build

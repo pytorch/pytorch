@@ -1922,11 +1922,18 @@ class MultiProcContinuousTest(TestCase):
         if cls._processes_spawned:
             return
 
-        # Handle both method and string attribute for device_type
+        # Handle method, property, and string attribute for device_type
         # (instantiate_device_type_tests sets device_type as a string attribute,
         # making this compatible as a drop-in replacement for MultiProcessTestCase)
-        device_type_attr = cls.device_type
-        if callable(device_type_attr):
+        device_type_attr = cls.__dict__.get("device_type", cls.device_type)
+        if isinstance(device_type_attr, classmethod):
+            device_type = device_type_attr.__func__(cls)
+        elif isinstance(device_type_attr, property):
+            # Note: fget expects an instance but we pass cls since no instance
+            # exists yet. This works because DTensorTestMixin.device_type only
+            # accesses class-level attributes (world_size, module constants).
+            device_type = device_type_attr.fget(cls)
+        elif callable(device_type_attr):
             device_type = device_type_attr()
         else:
             device_type = device_type_attr
@@ -2009,21 +2016,25 @@ class MultiProcContinuousTest(TestCase):
         def wrapper(self):
             if self.rank == self.MAIN_PROCESS_RANK:
                 logger.debug(f"Waiting for workers to finish {self.id()}")  # noqa: G004
-                # Wait for the workers to finish the test
+                # Drain all completion queues before raising any exception,
+                # so stale results don't desync subsequent tests.
+                deferred_exception = None
                 for i, completion_queue in enumerate(self.completion_queues):
                     rv = completion_queue.get()
+                    if deferred_exception is not None:
+                        # Already captured an exception; just drain
+                        continue
                     if isinstance(rv, unittest.SkipTest):
-                        raise rv
+                        deferred_exception = rv
+                        continue
                     if isinstance(rv, BaseException):
-                        # Hit an exception, re-raise it in the main process.
                         logger.warning(
                             f"Detected failure from Rank {i} in: {self.id()}, "  # noqa: G004
                             f"skipping rest of tests in Test class: {self.__class__.__name__}"  # noqa: G004
                         )
-                        # Poison rest of tests (because ProcessGroup may be not
-                        # reusable now)
                         self.__class__.poison_pill = True
-                        raise rv
+                        deferred_exception = rv
+                        continue
 
                     # Success
                     if rv != self.id():
@@ -2033,6 +2044,9 @@ class MultiProcContinuousTest(TestCase):
                     logger.debug(
                         f"Main proc detected rank {i} finished {self.id()}"  # noqa: G004
                     )
+
+                if deferred_exception is not None:
+                    raise deferred_exception
             else:
                 # Worker just runs the test
                 fn()

@@ -38,6 +38,7 @@ from torch._C._functorch import (
 )
 from torch._dispatch.python import enable_python_dispatcher
 from torch._logging import trace_structured
+from torch._opaque_base import OpaqueBase
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import WeakIdKeyDictionary
@@ -365,6 +366,7 @@ class MetaTensorDescriber:
                 pass
 
         attrs = None
+        opaque_attrs = None
         ctx = None
         type_v = None
         if is_traceable_wrapper_subclass_v:
@@ -373,10 +375,23 @@ class MetaTensorDescriber:
                     "Traceable wrapper subclass must have __tensor_flatten__ method"
                 )
             raw_attrs, ctx = t.__tensor_flatten__()
-            attrs = {
-                attr: self.describe_tensor(getattr(t, attr), trace=trace)
-                for attr in raw_attrs
-            }
+            attrs = {}
+            opaque_attrs = {}
+            for attr in raw_attrs:
+                inner = getattr(t, attr)
+                match inner:
+                    case torch.Tensor():
+                        attrs[attr] = self.describe_tensor(inner, trace=trace)
+                    case OpaqueBase():
+                        from torch._library.fake_class_registry import (
+                            maybe_unwrap_fake_script_object,
+                        )
+
+                        opaque_attrs[attr] = maybe_unwrap_fake_script_object(inner)
+                    case _:
+                        raise AssertionError(
+                            f"expected Tensor or OpaqueBase, got {type(inner)}"
+                        )
             type_v = type(t)
 
         from torch.nested._internal.nested_tensor import _tensor_symint_registry
@@ -483,6 +498,7 @@ class MetaTensorDescriber:
             view_func=view_func,
             # pyrefly: ignore [bad-argument-type]
             attrs=attrs,
+            opaque_attrs=opaque_attrs if opaque_attrs else None,
             ctx=ctx,
             type=type_v,
             # NB: even if functorch is enabled, don't actually save the
@@ -670,6 +686,11 @@ class MetaTensorDesc(Generic[_TensorT]):
     bdim: int | None = None  # is_functorch_wrapped
     base: MetaTensorDesc[Any] | None = None  # is_view
     attrs: dict[str, MetaTensorDesc[Any]] | None = None  # is_traceable_wrapper_subclass
+    # A Tensor subclass containing opaque references is almost certainly NOT
+    # serializable.
+    opaque_attrs: dict[str, OpaqueBase] | None = (
+        None  # non-tensor attrs from __tensor_flatten__
+    )
     creation_meta: CreationMeta | None = None
     grad: MetaTensorDesc[Any] | None = None
 
@@ -879,6 +900,73 @@ class MetaConverter(Generic[_TensorT]):
         err = errfn(t)
         return typing.cast(_TensorT, err)
 
+    def _empty_create_subclass(
+        self,
+        t: MetaTensorDesc[Any],
+        outer_size: tuple[int, ...] | None,
+        outer_stride: tuple[int, ...] | None,
+        shape_env: ShapeEnv | None,
+        symbolic_context: torch.fx.experimental.symbolic_shapes.SymbolicContext | None,
+        callback: _MetaTensorCallbackOptDevice[_TensorT],
+        source: torch._guards.Source,
+    ) -> _TensorT:
+        from torch._dynamo.source import AttrSource
+        from torch.fx.experimental.symbolic_shapes import SubclassSymbolicContext
+
+        # We are hitting plain meta_desc tensor so actually
+        # create a tensor here.
+        if t.attrs is None:
+            return self.meta_tensor(
+                t,
+                shape_env,
+                callback,
+                source,
+                symbolic_context,
+            )
+
+        inner_tensors: dict[str, torch.Tensor | OpaqueBase] = {}
+        for attr, meta_tensor_desc in t.attrs.items():
+            current_context = None
+            if symbolic_context is not None:
+                if not isinstance(symbolic_context, SubclassSymbolicContext):
+                    raise AssertionError(
+                        f"Expected SubclassSymbolicContext, got {type(symbolic_context)}"
+                    )
+                if attr not in symbolic_context.inner_contexts:
+                    raise AssertionError(
+                        f"tensor attr {attr!r} missing from inner_contexts"
+                    )
+                if (
+                    current_context_ := symbolic_context.inner_contexts[attr]
+                ) is not None:
+                    current_context = _checked_cast(
+                        torch.fx.experimental.symbolic_shapes.SymbolicContext,
+                        current_context_,
+                    )
+
+            current_source = AttrSource(source, attr)
+            inner_callback = functools.partial(callback, device=meta_tensor_desc.device)
+            new_empty_tensor = self._empty_create_subclass(
+                meta_tensor_desc,
+                meta_tensor_desc.size,
+                meta_tensor_desc.stride,
+                shape_env,
+                current_context,
+                inner_callback,
+                current_source,
+            )
+            inner_tensors[attr] = new_empty_tensor
+
+        # Pass through opaque (non-tensor) attrs
+        if t.opaque_attrs:
+            inner_tensors.update(t.opaque_attrs)
+
+        if t.type is None:
+            raise AssertionError("t.type must not be None for subclass")
+        return t.type.__tensor_unflatten__(  # type: ignore[attr-defined]
+            inner_tensors, t.ctx, outer_size, outer_stride
+        )
+
     # This function assumes that it's possible to do the conversion
     # NB: name here is used in a conventional way by Dynamo; it corresponds
     # precisely to the Source.name of the tensor we're fakeifying and
@@ -1024,7 +1112,6 @@ class MetaConverter(Generic[_TensorT]):
             | None = symbolic_context,
             source: torch._guards.Source | None = source,
         ) -> _TensorT:
-            from torch._dynamo.source import AttrSource
             from torch.fx.experimental.symbolic_shapes import SubclassSymbolicContext
 
             if t.attrs is None:
@@ -1054,66 +1141,16 @@ class MetaConverter(Generic[_TensorT]):
                     f"Expected SubclassSymbolicContext or None, got {type(symbolic_context)}"
                 )
 
-            def _empty_create_subclass(
-                t: MetaTensorDesc[Any],
-                outer_size: tuple[int, ...] | None,
-                outer_stride: tuple[int, ...] | None,
-                symbolic_context: torch.fx.experimental.symbolic_shapes.SymbolicContext
-                | None,
-                callback: _MetaTensorCallbackOptDevice[_TensorT],
-                source: torch._guards.Source,
-            ) -> _TensorT:
-                # We are hitting plain meta_desc tensor so actually
-                # create a tensor here.
-                if t.attrs is None:
-                    return self.meta_tensor(
-                        t,
-                        shape_env,
-                        callback,
-                        source,
-                        symbolic_context,
-                    )
-
-                inner_tensors = {}
-                for attr, meta_tensor_desc in t.attrs.items():
-                    current_context = None
-                    if symbolic_context is not None:
-                        if not isinstance(symbolic_context, SubclassSymbolicContext):
-                            raise AssertionError(
-                                f"Expected SubclassSymbolicContext, got {type(symbolic_context)}"
-                            )
-                        if (
-                            current_context_ := symbolic_context.inner_contexts[attr]
-                        ) is not None:
-                            current_context = _checked_cast(
-                                torch.fx.experimental.symbolic_shapes.SymbolicContext,
-                                current_context_,
-                            )
-
-                    current_source = AttrSource(source, attr)
-                    inner_callback = functools.partial(
-                        callback, device=meta_tensor_desc.device
-                    )
-                    new_empty_tensor = _empty_create_subclass(
-                        meta_tensor_desc,
-                        meta_tensor_desc.size,
-                        meta_tensor_desc.stride,
-                        current_context,
-                        inner_callback,
-                        current_source,
-                    )
-                    inner_tensors[attr] = new_empty_tensor
-
-                if t.type is None:
-                    raise AssertionError("t.type must not be None for subclass")
-                return t.type.__tensor_unflatten__(  # type: ignore[attr-defined]
-                    inner_tensors, t.ctx, outer_size, outer_stride
-                )
-
             if source is None:
                 raise AssertionError("source must not be None")
-            sub = _empty_create_subclass(
-                t, outer_size, outer_stride, symbolic_context, callback, source
+            sub = self._empty_create_subclass(
+                t,
+                outer_size,
+                outer_stride,
+                shape_env,
+                symbolic_context,
+                callback,
+                source,
             )
 
             # NB: Purposefully guard here to simplify the inner / outer symbols.
@@ -1303,7 +1340,10 @@ class MetaConverter(Generic[_TensorT]):
                     )
                     attrs, _ = fake_t.__tensor_flatten__()  # type: ignore[attr-defined]
                     for attr in attrs:
-                        real_to_fake_mapping[t.attrs[attr].id] = getattr(fake_t, attr)
+                        if attr in t.attrs:
+                            real_to_fake_mapping[t.attrs[attr].id] = getattr(
+                                fake_t, attr
+                            )
 
                 def tensor_visitor_fn(
                     visited_t: torch.Tensor,

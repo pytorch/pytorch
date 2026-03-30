@@ -339,7 +339,7 @@ add_docstr(
     r"""
 index_copy(input: Tensor, dim: int, index: Tensor, source: Tensor, *, out: Optional[Tensor]) -> Tensor
 
-See :meth:`~Tensor.index_add_` for function description.
+See :meth:`~Tensor.index_copy_` for function description.
 """,
 )
 
@@ -6743,7 +6743,7 @@ Example::
 add_docstr(
     torch.amax,
     r"""
-amax(input, dim, keepdim=False, *, out=None) -> Tensor
+amax(input, dim=None, keepdim=False, *, out=None) -> Tensor
 
 Returns the maximum value of each slice of the :attr:`input` tensor in the given
 dimension(s) :attr:`dim`.
@@ -7367,7 +7367,7 @@ Example::
 add_docstr(
     torch.amin,
     r"""
-amin(input, dim, keepdim=False, *, out=None) -> Tensor
+amin(input, dim=None, keepdim=False, *, out=None) -> Tensor
 
 Returns the minimum value of each slice of the :attr:`input` tensor in the given
 dimension(s) :attr:`dim`.
@@ -11344,7 +11344,7 @@ are designed to work with this function. See the examples below.
 Args:
     {input}
     indices (LongTensor): the indices into :attr:`input`. Must have long dtype.
-    dim (int, optional): dimension to select along. Default: 0
+    dim (int, optional): dimension to select along. Default: `None`.
 
 Keyword args:
     {out}

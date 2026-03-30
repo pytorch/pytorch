@@ -152,6 +152,7 @@ _TORCH_TO_SERIALIZE_DTYPE = {
     torch.float8_e5m2: ScalarType.FLOAT8E5M2,
     torch.float8_e4m3fnuz: ScalarType.FLOAT8E4M3FNUZ,
     torch.float8_e5m2fnuz: ScalarType.FLOAT8E5M2FNUZ,
+    torch.float8_e8m0fnu: ScalarType.FLOAT8E8M0FNU,
 }
 
 
@@ -1519,6 +1520,12 @@ class GraphModuleSerializer(metaclass=Final):
             ):
                 # list of int tuples
                 return Argument.create(as_int_lists=[list(t) for t in arg])
+            elif all(
+                isinstance(a, (list, tuple)) and all(isinstance(x, float) for x in a)
+                for a in arg
+            ):
+                # list of float lists (List[List[float]])
+                return Argument.create(as_float_lists=[list(t) for t in arg])
             else:
                 raise SerializeError(
                     f"Unsupported list/tuple argument type: {[type(a) for a in arg]}"
@@ -1975,17 +1982,15 @@ class GraphModuleSerializer(metaclass=Final):
                         f"expected ListType with TensorType element, got {type(return_schema.real_type).__name__}"
                     )
                 user_node = self._output_node_at_index(node, idx)
-                if user_node is None:
-                    raise AssertionError(
-                        f"user_node should not be None for list output at index {idx}"
-                    )
-
                 args = []
                 for i, m in enumerate(meta):
                     if m is None:
                         continue
-                    sub_user_node_name = self._output_node_name_at_index(user_node, i)
-                    args.append(self.serialize_tensor_output(sub_user_node_name, m))
+                    if user_node is None:
+                        name = f"{node.name}_unused_{idx}_{i}"
+                    else:
+                        name = self._output_node_name_at_index(user_node, i)
+                    args.append(self.serialize_tensor_output(name, m))
                 output_arguments.append(Argument.create(as_tensors=args))
             elif isinstance(meta, (int, SymInt, float, SymFloat)):
                 user_node_name = self._output_node_name_at_index(node, idx)
@@ -2009,11 +2014,6 @@ class GraphModuleSerializer(metaclass=Final):
                 user_node = self._output_node_at_index(node, i)
                 if isinstance(element_meta_val, list):
                     # e.g "-> Tensor[]"
-                    if user_node is None:
-                        raise AssertionError(
-                            f"user_node should not be None for list output at index {i}"
-                        )
-
                     tensors = []
                     for j, m in enumerate(element_meta_val):
                         if not isinstance(m, torch.Tensor):
@@ -2021,7 +2021,10 @@ class GraphModuleSerializer(metaclass=Final):
                                 f"Serialize list output with type {type(m)} nyi"
                             )
 
-                        name = self._output_node_name_at_index(user_node, j)
+                        if user_node is None:
+                            name = f"{node.name}_unused_{i}_{j}"
+                        else:
+                            name = self._output_node_name_at_index(user_node, j)
                         tensors.append(self.serialize_tensor_output(name, m))
                     outputs.append(Argument.create(as_tensors=tensors))
 
@@ -3074,6 +3077,8 @@ class GraphModuleDeserializer(metaclass=Final):
             elif typ_ == "as_int_lists":
                 # Convert list of lists back to list of tuples for Triton grids
                 return [tuple(dims) for dims in value]
+            elif typ_ == "as_float_lists":
+                return [list(floats) for floats in value]
             elif typ_ == "as_nested_tensors":
                 # nested list of tensors (List[List[Tensor]])
                 return [
@@ -3762,6 +3767,8 @@ def _canonicalize_graph(
         elif a.type == "as_operator":
             return None
         elif a.type == "as_int_lists":
+            return None
+        elif a.type == "as_float_lists":
             return None
         elif a.type == "as_string_to_argument":
             return None

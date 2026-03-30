@@ -5,7 +5,7 @@ description: Review PyTorch pull requests for code quality, test coverage, secur
 
 # PyTorch PR Review Skill
 
-Review PyTorch pull requests focusing on what CI cannot check: code quality, test coverage adequacy, security vulnerabilities, and backward compatibility. Linting, formatting, type checking, and import ordering are handled by CI.
+Review PyTorch pull requests focusing on what CI cannot check: code quality, test coverage adequacy, security vulnerabilities, and backward compatibility.
 
 ## Usage Modes
 
@@ -80,62 +80,79 @@ For local branch reviews:
 
 ### GitHub Actions Mode
 
-When invoked via workflow, PR data is passed as context. The PR number or diff will be available in the prompt.
+When invoked via `@claude /pr-review` on a GitHub PR, the action pre-fetches PR
+metadata and injects it into the prompt. Detect this mode by the presence of
+`<formatted_context>`, `<pr_or_issue_body>`, and `<comments>` tags in the prompt.
+
+The prompt already contains:
+- PR metadata (title, author, branch names, additions/deletions, file count)
+- PR body/description
+- All comments and review comments (with file/line references)
+- List of changed files with paths and change types
+
+Use git commands to get the diff and commit history. The base branch name is in the
+prompt context (look for `PR Branch: <head> -> <base>` or the `baseBranch` field).
+
+```bash
+# Get the full diff against the base branch
+git diff origin/<baseBranch>...HEAD
+
+# Get diff stats
+git diff --stat origin/<baseBranch>...HEAD
+
+# Get commit history for this PR
+git log origin/<baseBranch>..HEAD --oneline
+
+# If the base branch ref is not available, fetch it first
+git fetch origin <baseBranch> --depth=1
+```
+
+Do NOT use `gh` CLI commands in this mode -- only git commands are available.
+All PR metadata, comments, and reviews are already in the prompt context;
+only the diff and commit log need to be fetched via git.
+
+## Review Philosophy
+
+A single line of code can have deep cross-cutting implications: a missing device guard causes silent data corruption on multi-GPU, a missing `Composite` dispatch key breaks every out-of-tree backend, a manual dtype check instead of `TensorIterator` silently skips type promotion. **Treat every line as potentially load-bearing.**
+
+1. **Investigate, don't guess** — When uncertain whether a checklist item applies, spawn a sub-agent to read the relevant code. A reviewer who guesses wrong provides negative value.
+2. **Review the design, not just the implementation** — A PR can have perfectly correct implementation of a bad design. Question side-channel communication, on/off private flags, and demand concrete interface documentation for new contracts between components.
+3. **Focus on what CI cannot check** — Don't comment on formatting, linting, type errors, or CI failures. Focus on design quality, interface correctness, thread safety, BC implications, test adequacy, and pattern adherence.
+4. **Everything is a must-fix** — There are no "nits." If it's worth mentioning, it's worth fixing. Every inconsistency degrades the codebase over time.
+5. **Be specific and actionable** — Reference file paths and line numbers. Name the function/class/file the author should use.
+6. **Match the immediate context** — Read how similar features are already implemented in the same file. Pattern mismatches within a file are always wrong.
+7. **Assume competence** — The author knows PyTorch; explain only non-obvious context.
+8. **No repetition** — Each observation appears in exactly one section of the review output.
+
+### Using sub-agents
+
+The review checklist is large. You cannot hold the full context of every infrastructure system in your head. **Spawn sub-agents** to investigate whether checklist items apply: read surrounding code, infrastructure the PR should be using, or tests that should exist. Spawn them in parallel for independent areas. A typical medium PR should spawn 3-8 sub-agents.
 
 ## Review Workflow
 
-### Step 1: Fetch PR Information
+### Step 1: Understand Context
 
-For local mode, use `gh` commands to get:
-1. PR metadata (title, description, author)
-2. List of changed files
-3. Full diff of changes
-4. Existing comments/reviews
-5. Fetch associated issue information when applicable
-
-### Step 2: Analyze Changes
-
-Read through the diff systematically:
+Before reviewing, build understanding of what the PR touches and why:
 1. Identify the purpose of the change from title/description/issue
 2. Group changes by type (new code, tests, config, docs)
 3. Note the scope of changes (files affected, lines changed)
+4. Spawn sub-agents to read the unchanged code surrounding each significantly changed file to understand existing patterns and infrastructure
 
-### Step 3: Deep Review
+### Step 2: Deep Review
 
-Perform thorough line-by-line analysis using the review checklist. See [review-checklist.md](review-checklist.md) for detailed criteria covering:
-- Code quality and design
-- Testing adequacy
-- Security considerations
-- Thread safety and concurrency (Python, C++, CPython C API, NoGIL)
-- Performance implications
-- Any behavior change not expected by author
+Go through **every changed line** in the diff and evaluate it against the review checklist in [review-checklist.md](review-checklist.md).
 
-### Step 4: Check Backward Compatibility
+### Step 3: Check Backward Compatibility
 
-Evaluate BC implications. See [bc-guidelines.md](bc-guidelines.md) for:
-- What constitutes a BC-breaking change
-- Required deprecation patterns
-- Common BC pitfalls
+Evaluate BC implications per [bc-guidelines.md](bc-guidelines.md). For non-trivial BC questions, spawn a sub-agent to search for existing callers of the modified API.
 
-### Step 5: Formulate Review
+### Step 4: Formulate Review
 
-Structure your review with actionable feedback organized by category.
-
-## Review Areas
-
-| Area | Focus | Reference |
-|------|-------|-----------|
-| Code Quality | Abstractions, patterns, complexity | [review-checklist.md](review-checklist.md) |
-| API Design | New patterns, flag-based access, broader implications | [review-checklist.md](review-checklist.md) |
-| Testing | Coverage, patterns, edge cases | [review-checklist.md](review-checklist.md) |
-| Security | Injection, credentials, input handling | [review-checklist.md](review-checklist.md) |
-| Performance | Regressions, device handling, memory | [review-checklist.md](review-checklist.md) |
-| Thread Safety | Data races, GIL assumptions, NoGIL, CPython C API | [review-checklist.md](review-checklist.md) |
-| BC | Breaking changes, deprecation | [bc-guidelines.md](bc-guidelines.md) |
+Structure your review with actionable feedback organized by category. Every finding should be traceable to a specific line in the diff.
 
 ## Output Format
 
-Structure your review as follows:
+Structure your review as follows. **Omit sections where you have no findings** — don't write "No concerns" for every empty section. Only include sections with actual observations.
 
 ```markdown
 ## PR Review: #<number>
@@ -146,28 +163,29 @@ Structure your review as follows:
 Brief overall assessment of the changes (1-2 sentences).
 
 ### Code Quality
-[Issues and suggestions, or "No concerns" if none]
+[Issues and suggestions]
 
-### API Design
-[Flag new patterns, internal-access flags, or broader implications if any. Otherwise omit this section.]
+### Infrastructure
+[Flag any checklist items from the PyTorch Infrastructure section that apply.
+Reference the specific infrastructure the PR should be using.]
 
 ### Testing
-- [ ] Tests exist for new functionality
-- [ ] Edge cases covered
-- [ ] Tests follow PyTorch patterns (TestCase, assertEqual)
-[Additional testing feedback]
+[Testing adequacy findings — missing OpInfo usage, non-device-generic tests, etc.]
+
+### API Design
+[Flag new patterns, internal-access flags, or broader implications if any.]
 
 ### Security
-[Issues if any, or "No security concerns identified"]
+[Issues if any]
 
 ### Thread Safety
-[Threading concerns if any, or "No thread safety concerns"]
+[Threading concerns if any]
 
 ### Backward Compatibility
-[BC concerns if any, or "No BC-breaking changes"]
+[BC concerns if any]
 
 ### Performance
-[Performance concerns if any, or "No performance concerns"]
+[Performance concerns if any]
 
 ### Recommendation
 **Approve** / **Request Changes** / **Needs Discussion**
@@ -190,19 +208,13 @@ When requested, add file-specific feedback with line references:
 - `torch/nn/modules/linear.py:78` - This allocation could be moved outside the loop
 ```
 
-## Key Principles
-
-1. **No repetition** - Each observation appears in exactly one section. Never repeat the same issue, concern, or suggestion across multiple sections. If an issue spans categories (e.g., a security issue that also affects performance), place it in the most relevant section only.
-2. **Focus on what CI cannot check** - Don't comment on formatting, linting, or type errors
-3. **Be specific** - Reference file paths and line numbers
-4. **Be actionable** - Provide concrete suggestions, not vague concerns
-5. **Be proportionate** - Minor issues shouldn't block, but note them
-6. **Assume competence** - The author knows PyTorch; explain only non-obvious context
-
 ## Files to Reference
 
-When reviewing, consult these project files for context:
+When reviewing, consult these project files for context — read them rather than relying on memory, as they change frequently:
 - `CLAUDE.md` - Coding style philosophy and testing patterns
 - `CONTRIBUTING.md` - PR requirements and review process
 - `torch/testing/_internal/common_utils.py` - Test patterns and utilities
 - `torch/testing/_internal/opinfo/core.py` - OpInfo test framework
+- `aten/src/ATen/native/native_functions.yaml` - Operator declarations (for checking tags, dispatch keys, structured kernels)
+- `tools/autograd/derivatives.yaml` - Backward formulas (for checking if an op should register here)
+- `aten/src/ATen/native/tags.yaml` - Operator semantic tags

@@ -48,6 +48,10 @@ def bundle_triton_into_fx_graph_cache_default() -> bool | None:
     )
 
 
+def autotune_at_compile_time_default() -> bool | None:
+    return get_tristate_env("TORCHINDUCTOR_AUTOTUNE_AT_COMPILE_TIME")
+
+
 def static_cuda_launcher_default() -> bool:
     STATIC_CUDA_LAUNCHER_VERSION = 2
 
@@ -269,6 +273,9 @@ prologue_fusion = prologue_fusion_enabled()
 # do epilogue fusions before other fusions
 epilogue_fusion_first = False
 
+# do epilogue fusions for user defined triton kernels
+epilogue_fusion_user_defined_triton_kernel = False
+
 # enable pattern match+replace optimizations
 pattern_matcher = True
 
@@ -293,7 +300,7 @@ joint_custom_post_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = 
 # Registers a custom pregrad pass. Note that the pre-grad IR is 1.
 # non-functional, 2. non-normalized, and 3. prone to change. Ideally we should
 # use post-grad passes.
-pre_grad_custom_pass: Callable[[torch.fx.graph.Graph], None] | None = None
+pre_grad_custom_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = None
 
 # Registers a custom pass to be run right before fusion in Inductor scheduler.
 # WARNING: Inductor scheduler IR is at prototype stage and subject to change,
@@ -366,6 +373,11 @@ dynamic_scale_rblock = os.environ.get("TORCHINDUCTOR_DYNAMIC_SCALE_RBLOCK", "1")
 # but the mul gets fused with other pointwise ops instead.
 force_fuse_int_mm_with_mul = False
 
+# Prevent unfusing addmm into mm+add for bf16/fp16 to avoid precision loss
+# from extra truncation at the mm output. Set to False to allow unfusing
+# (may improve perf at the cost of accuracy for some models).
+keep_addmm_fused_for_half_dtypes = True
+
 # DEPRECATED. This setting is ignored.
 use_mixed_mm = True
 
@@ -427,9 +439,18 @@ bucket_all_gathers_fx: Literal["none", "all", "only_fsdp"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
 bucket_all_gathers_fx_bucket_size_determinator: Callable[[int], int] | None = None
 
+bucket_all_gathers_bucket_mode: Literal[
+    "default", "custom_ops", "custom_ops_multidtype"
+] = "default"
+
 bucket_reduce_scatters_fx: Literal["none", "all"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
 bucket_reduce_scatters_fx_bucket_size_determinator: Callable[[int], int] | None = None
+
+bucket_reduce_scatters_bucket_mode: Literal[
+    "default", "custom_ops", "custom_ops_multidtype"
+] = "default"
+
 
 bucket_all_reduces_fx: Literal["none", "all"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
@@ -639,6 +660,15 @@ use_dce: bool = True
 
 # Use fx graph passes
 use_pre_grad_passes: bool = True
+
+# "early": pre-grad passes run before cache lookup (every compile).
+# "late": pre-grad passes run after cache lookup (only on cache miss);
+#   requires custom passes to implement uuid() for the cache key.
+# "default": resolves to "late" when possible (no custom pass, or custom pass
+#   with uuid), falls back to "early" otherwise.
+pre_grad_pass_timing: Literal["early", "late", "default"] = "default"
+
+
 use_joint_graph_passes: bool = True
 use_post_grad_passes: bool = True
 
@@ -733,6 +763,13 @@ layout_optimization = (
 
 force_layout_optimization = os.environ.get("TORCHINDUCTOR_FORCE_LAYOUT_OPT", "0") == "1"
 
+# Cache SDPA constraint results keyed by (tensor identity, stride_order) to avoid
+# creating duplicate buffers when the same tensor feeds multiple SDPA positions
+# (e.g., key=value in simplified PMA attention).
+cache_sdpa_constraint = (
+    os.environ.get("TORCHINDUCTOR_CACHE_SDPA_CONSTRAINT", "0") == "1"
+)
+
 
 # Whether to keep the output strides the same as eager after layout optimization.
 keep_output_stride = os.environ.get("TORCHINDUCTOR_KEEP_OUTPUT_STRIDE", "1") == "1"
@@ -753,6 +790,16 @@ realize_opcount_threshold = 30
 realize_acc_reads_threshold = 8
 realize_acc_reads_size_threshold: int | None = (
     None  # TODO(xuanzh): harden this to make it non optional
+)
+
+# Defer early realization of cheap output nodes (0 buffer reads, small opcount)
+# to prevent cascade materialization in fullgraph compilation.
+# Shared constants/indices saved for backward get eagerly materialized because
+# they are graph outputs with multiple users, which inflates downstream read
+# counts and can trigger suboptimal Triton block size heuristics.
+delay_realize_cheap_outputs: bool = Config(
+    env_name_force="TORCHINDUCTOR_DELAY_REALIZE_CHEAP_OUTPUTS",
+    default=True,
 )
 
 # fallback to eager for random/dropout, this is slow but useful for debugging
@@ -818,6 +865,10 @@ max_epilogue_benchmarked_choices = 1
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
 
+# Minimum overlap ratio to consider fusion beneficial when inputs are shared by no indices overlapped.
+# Valid range: [0, 1]. Default to not fusion.
+min_overlap_ratio = 1.1
+
 # how many nodes to attempt pairwise fusion with in a buffer group
 max_fusion_buffer_group_pairwise_attempts = 64
 
@@ -869,6 +920,9 @@ always_keep_tensor_constants = False
 
 # assert that indirect indexing does not read / write out of bounds
 assert_indirect_indexing = True
+
+# skip emitting runtime assertions for unbacked symbols in generated code
+do_not_emit_runtime_assertions = False
 
 # compute CSE bounds on variables that do not appear in the FX graph
 compute_all_bounds = False
@@ -1071,6 +1125,24 @@ class aten_distributed_optimizations:
 
     # Prioritize bucketing during overlap scheduling by grouping candidates by bucket key
     prioritize_bucketing_during_scheduling: bool = True
+
+    # Verify FX graphs are identical across ranks before overlap scheduling.
+    # Detects non-SPMD graphs that would cause NCCL collective ordering
+    # mismatches and hangs.
+    spmd_check: bool = True
+
+    # Action on SPMD graph mismatch: "warn" logs a warning, "error" raises
+    # RuntimeError. "error" fails fast instead of risking silent NCCL hang.
+    # TODO(ivankobzarev): change default to "error" after real-world testing.
+    spmd_mismatch: Literal["warn", "error"] = "warn"
+
+    # Bucket mode for collective bucketing in overlap scheduling
+    bucket_mode: Literal["default", "custom_ops", "custom_ops_multidtype"] | None = None
+
+    # When True, automatically remove extra deps that create cycles instead of
+    # raising an error.  Set this to True as a workaround if overlap scheduling
+    # fails with a cycle error, and file a bug so the root cause can be fixed.
+    overlap_scheduling_autofix_cycles: bool = False
 
 
 def parallel_compile_enabled_internally() -> bool:
@@ -1508,6 +1580,9 @@ class cpp:
         os.environ.get("TORCHINDUCTOR_CPP_USE_CONSTEXPR_FOR_INT_ARRAY", "1") == "1"
     )
 
+    # threshold between two step reduction algorithm and welford reduction algorithm
+    use_two_step_variance_threshold = 1024
+
 
 class triton:
     """
@@ -1527,6 +1602,13 @@ class triton:
     # Specify dynamic shapes to capture cudagraphs and skip cudagraph for other shapes.
     # Default to None, which means we capture cudagraphs for all shapes.
     cudagraph_capture_sizes: tuple[int | tuple[int, ...]] | None = None
+
+    # Minimum number of nodes (kernels) required for a cudagraph partition.
+    # If a partition has fewer nodes than this threshold, it won't be cudagraphed.
+    # This helps avoid overhead for very small partitions where cudagraph
+    # recording/replay cost outweighs the benefits.
+    # Set to 0 to disable this check.
+    cudagraph_min_partition_size = 0
 
     # assertions not on the fast path, steady state
     slow_path_cudagraph_asserts = True
@@ -1617,7 +1699,7 @@ class triton:
 
     # Tune the generated Triton kernels at compile time instead of first time they run
     # Setting to None means uninitialized
-    autotune_at_compile_time: bool | None = None
+    autotune_at_compile_time: bool | None = autotune_at_compile_time_default()
 
     # We use random tensors for autotune by default. Setting this as true will let us
     # use inputs from sample inputs to autotune user defined triton kernels.
@@ -1749,8 +1831,9 @@ class triton:
     # Whether to upcast float16 / bfloat16 to float32 in triton codegen (Experimental)
     codegen_upcast_to_fp32 = True
 
-    # Whether persistent matmul kernels should be enabled this flag only has effect when on h100
-    # with a version of triton new enough to support TMA
+    # Whether persistent matmul kernels should be enabled. On NVIDIA H100+ with TMA support,
+    # this enables TMA persistent kernels. On AMD GPUs without TMA, this enables
+    # non-TMA persistent kernels as a fallback.
     enable_persistent_tma_matmul = (
         os.environ.get("ENABLE_PERSISTENT_TMA_MATMUL", "0") == "1"
     )
@@ -1800,8 +1883,9 @@ class triton:
     # this could be helpful to avoid recompilations in some cases
     mix_order_reduction_non_strict_mode = False
 
-    enable_tlx_templates: bool = (
-        os.environ.get("TORCHINDUCTOR_ENABLE_TLX_TEMPLATES", "0") == "1"
+    # Don't allow multi-stages by default to avoid out of shared memory
+    mix_order_reduction_allow_multi_stages = (
+        os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION_ALLOW_MULTI_STAGES") == "1"
     )
 
     # Map for storing the amount of kernel runs with dumped input tensors
@@ -2283,6 +2367,11 @@ tpu_backend: Literal["pallas"] = "pallas"
 xpu_backend: Literal["triton"] = "triton"
 
 
+class mtia:
+    # Configuration to force inductor to never use welford reductions for MTIA backend
+    disable_welford_reduction = False
+
+
 class halide:
     # Base halide target to use for CPU devices
     cpu_target = "host"
@@ -2418,10 +2507,13 @@ _cache_config_ignore_prefix: list[str] = [
     "post_grad_custom_pre_pass",
     "joint_custom_pre_pass",
     "joint_custom_post_pass",
+    "pre_grad_custom_pass",
     "_fuse_ddp_communication_passes",
     "_pre_fusion_custom_pass",
     # tests assume that changes here don't invalidate cache
     "always_complex_memory_overlap_TESTING_ONLY",
+    # timing affects cache structure, not cache content
+    "pre_grad_pass_timing",
     # cache related options are not relevant to cache results
     "fx_graph_cache",
     "fx_graph_remote_cache",

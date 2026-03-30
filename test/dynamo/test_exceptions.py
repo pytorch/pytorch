@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import contextlib
+import dataclasses
 import sys
 
 import torch
@@ -438,7 +439,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     def test_custom_getattr_on_module_exception(self):
         class Foo(torch.nn.Module):
             def __init__(self, a=3):
@@ -561,6 +561,25 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         ref = fn(x)
         res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_tensor_attribute_error_in_try_except(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.scale = torch.nn.Parameter(torch.tensor([2.0]))
+
+            def forward(self, x):
+                try:
+                    return x.this_attribute_does_not_exist
+                except AttributeError:
+                    return x * self.scale
+
+        m = M()
+        opt_m = torch.compile(m, backend="eager")
+        x = torch.randn(4, 4)
+        ref = m(x)
+        res = opt_m(x)
         self.assertEqual(ref, res)
 
     def test_raise_from_None(self):
@@ -1007,6 +1026,24 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         # The error should point to 'raise Exception("Invalid")' in g()
         self.assertIn("in g", str(ctx.exception))
         self.assertIn('raise Exception("Invalid")', str(ctx.exception))
+
+    def test_frozen_dataclass_setattr_raises(self):
+        @dataclasses.dataclass(frozen=True)
+        class TestDataClass:
+            x: int
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            dc = TestDataClass(1)
+            try:
+                dc.x = 2
+            except dataclasses.FrozenInstanceError:
+                return t + 1
+            except Exception:
+                return t + 2
+            return t + dc.x
+
+        self.assertEqual(fn(torch.zeros(1)), 1)
 
 
 instantiate_parametrized_tests(ExceptionTests)

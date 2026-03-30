@@ -229,7 +229,8 @@ class MetalOverrides(OpOverrides):
             # generates identical variable names. Without this reset, repeated calls to
             # body() would keep incrementing the counter, resulting in different cache key.
             V.kernel.cse.iter_buffer_ids = itertools.count()
-            V.kernel.cse.name_prefix = "tmp_scoped_"
+            # Append "_scoped" to the current prefix so each nesting level gets unique vars
+            V.kernel.cse.name_prefix += "_scoped"
             rc = body()
 
         # Compute cache key manually as variable name is needed to actually generate the code
@@ -243,13 +244,17 @@ class MetalOverrides(OpOverrides):
             )
             with V.kernel.compute.indent():
                 V.kernel.compute.splice(scoped_body)
-                V.kernel.compute.writeline(f"{var} = {rc};")
-            V.kernel.compute.writeline(f"}} else {var} = {other_str};")
+                V.kernel.compute.writeline(
+                    f"{var} = static_cast<decltype({var})>({rc});"
+                )
+            V.kernel.compute.writeline(
+                f"}} else {var} = static_cast<decltype({var})>({other_str});"
+            )
         return var
 
     @staticmethod
     def where(a: OpVarT, b: OpVarT, c: OpVarT) -> str:
-        return f"{a} ? {b} : {value_to_metal(c)}"
+        return f"{a} ? {b} : static_cast<decltype({b})>({value_to_metal(c)})"
 
     @staticmethod
     def remainder(a: OpVarT, b: OpVarT) -> str:
@@ -1092,6 +1097,20 @@ class MetalKernel(SIMDKernel):
             triton=False,
             arg_types=arg_types,
         )
+
+    def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
+        if V.graph.cpp_wrapper:
+            self.cse.generate(self.compute, f"if (!{cond}) return", assignment=False)
+        else:
+            self.headers.add("error")
+            self.compute.writelines(
+                [
+                    f"if (!{cond}) {{",
+                    f"    TORCH_REPORT_ERROR(error_buf, {repr(msg)});",
+                    "    return;",
+                    "}",
+                ]
+            )
 
     def check_bounds(
         self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool

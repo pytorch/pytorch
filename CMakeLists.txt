@@ -40,7 +40,7 @@ string(FIND "${CMAKE_CXX_FLAGS}" "-std=c++" env_cxx_standard)
 if(env_cxx_standard GREATER -1)
   message(
     WARNING
-      "C++ standard version definition detected in environment variable."
+      "C++ standard version definition detected in environment variable. "
       "PyTorch requires -std=c++20. Please remove -std=c++ settings in your environment."
   )
 endif()
@@ -590,7 +590,7 @@ if(MSVC)
   # https://learn.microsoft.com/en-us/cpp/build/reference/zc-cplusplus?view=msvc-170
   # * https://en.cppreference.com/w/cpp/preprocessor/replace#Predefined_macros
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:__cplusplus")
-  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler  /Zc:__cplusplus")
+  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler /Zc:__cplusplus -Xcompiler /Zc:preprocessor")
 
   set(CMAKE_NINJA_CMCLDEPS_RC OFF)
   if(MSVC_Z7_OVERRIDE)
@@ -813,6 +813,7 @@ if(INTERN_BUILD_MOBILE)
 endif()
 
 # ---[ Version numbers for generated libraries
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS version.txt)
 file(READ version.txt TORCH_DEFAULT_VERSION)
 # Strip trailing newline
 string(REGEX REPLACE "\n$" "" TORCH_DEFAULT_VERSION "${TORCH_DEFAULT_VERSION}")
@@ -824,16 +825,10 @@ if("${TORCH_DEFAULT_VERSION} " STREQUAL " ")
 endif()
 set(TORCH_BUILD_VERSION
     "${TORCH_DEFAULT_VERSION}"
-    CACHE STRING "Torch build version")
+    CACHE STRING "Torch build version" FORCE)
 if(DEFINED ENV{PYTORCH_BUILD_VERSION})
   set(TORCH_BUILD_VERSION
       "$ENV{PYTORCH_BUILD_VERSION}"
-      CACHE STRING "Torch build version" FORCE)
-endif()
-if(NOT TORCH_BUILD_VERSION)
-  # An empty string was specified so force version to the default
-  set(TORCH_BUILD_VERSION
-      "${TORCH_DEFAULT_VERSION}"
       CACHE STRING "Torch build version" FORCE)
 endif()
 caffe2_parse_version_str(TORCH ${TORCH_BUILD_VERSION})
@@ -1185,6 +1180,12 @@ if(NOT MSVC)
   else()
     string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
     string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
+  endif()
+  # aarch64 C++ stack unwinding uses frame-pointer chain walking, so frame
+  # pointers must be present in all build types.  The cost is negligible on
+  # aarch64 (31 GPRs vs x86-64's 16, so dedicating x29 rarely spills).
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+    append_cxx_flag_if_supported("-fno-omit-frame-pointer" CMAKE_CXX_FLAGS)
   endif()
   append_cxx_flag_if_supported("-fno-math-errno" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-fno-trapping-math" CMAKE_CXX_FLAGS)

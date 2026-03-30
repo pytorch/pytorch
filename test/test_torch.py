@@ -2313,8 +2313,7 @@ class TestTorchDeviceType(TestCase):
                     self.assertTrue(res.statistic < 0.1)
 
     @skipIfNoSciPy
-    @dtypes(*floating_types_and(torch.half))
-    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @dtypes(*floating_types_and(torch.half, torch.bfloat16))
     def test_normal_kstest(self, device, dtype):
         from scipy import stats
         size = 1000
@@ -2323,6 +2322,74 @@ class TestTorchDeviceType(TestCase):
                 t = torch.empty(size, dtype=dtype, device=device).normal_(mean=mean, std=std)
                 res = stats.kstest(t.cpu().to(torch.double), 'norm', args=(mean, std))
                 self.assertTrue(res.statistic < 0.1)
+
+    @skipIfNoSciPy
+    @dtypes(torch.half, torch.bfloat16)
+    def test_normal_small_std_kstest(self, device, dtype):
+        from scipy import stats
+        size = 50000
+        for std in [0.005, 0.01]:
+            t = torch.empty(size, dtype=dtype, device=device).normal_(mean=0, std=std)
+            res = stats.kstest(t.cpu().to(torch.double), 'norm', args=(0, std))
+            self.assertTrue(
+                res.statistic < 0.01,
+                msg=f"KS statistic {res.statistic:.4f} for {dtype} std={std}",
+            )
+
+    @skipIfNoSciPy
+    @dtypes(torch.half, torch.bfloat16)
+    def test_normal_kurtosis(self, device, dtype):
+        from scipy import stats
+        size = 50000
+        for std in [0.01, 0.1, 1.0]:
+            t = torch.empty(size, dtype=dtype, device=device).normal_(mean=0, std=std)
+            kurtosis = stats.kurtosis(t.cpu().to(torch.double).numpy())
+            self.assertAlmostEqual(
+                kurtosis, 0.0, delta=0.15,
+                msg=f"Excess kurtosis {kurtosis:.3f} too far from 0 for {dtype} std={std}",
+            )
+
+    @dtypes(torch.bfloat16)
+    def test_normal_tail_reach(self, device, dtype):
+        # With the broken bf16 Box-Muller (256 uniform inputs), the maximum
+        # output is capped at sqrt(-2*log(1/256)) ≈ 3.33 sigma. A correct
+        # implementation generates in float and reaches 4+ sigma.
+        size = 1000000
+        t = torch.empty(size, dtype=dtype, device=device).normal_(mean=0, std=1.0)
+        max_sigma = t.float().abs().max().item()
+        self.assertGreater(
+            max_sigma, 3.5,
+            msg=f"Max |z| = {max_sigma:.2f} sigma, expected > 3.5 (tail truncation)",
+        )
+
+    @dtypes(torch.half, torch.bfloat16)
+    def test_normal_unique_values(self, device, dtype):
+        size = 10000
+        t = torch.empty(size, dtype=dtype, device=device).normal_(mean=0, std=0.01)
+        n_unique = t.unique().numel()
+        # bf16 has ~200 representable values in [-0.03, 0.03] (3-sigma range).
+        # fp16 has ~60 representable values in [-0.03, 0.03].
+        # A correct implementation generates in fp32 and casts, so we should
+        # hit most representable values. The broken implementation produces
+        # far fewer due to quantized Box-Muller inputs.
+        if dtype == torch.bfloat16:
+            self.assertGreater(n_unique, 100)
+        else:
+            self.assertGreater(n_unique, 50)
+
+    @dtypes(torch.half, torch.bfloat16)
+    def test_uniform_unique_values(self, device, dtype):
+        size = 10000
+        t = torch.empty(size, dtype=dtype, device=device).uniform_(-100, 100)
+        n_unique = t.unique().numel()
+        # With a correct implementation (generate in float, cast to dtype),
+        # bf16 gives ~1400 unique and fp16 gives ~5200 for this range/size.
+        # The broken implementation (generate directly in dtype) gives only
+        # 256 for bf16 and ~2000 for fp16 due to using too few random bits.
+        if dtype == torch.bfloat16:
+            self.assertGreater(n_unique, 1000)
+        else:
+            self.assertGreater(n_unique, 4000)
 
     @skipIfMPS
     @skipIfNoSciPy
@@ -6286,6 +6353,60 @@ class TestTorchDeviceType(TestCase):
         grad_f = torch.func.grad(f)
         result = grad_f(x)
         self.assertEqual(result.tolist() , [1.0, 1.0, 1.0])
+
+    def test_swap_data_ptr_with_empty(self, device):
+        x = torch.randn(4, device=device)
+        y = torch.randn(4, device=device)
+        y_data = y.clone()
+        x_storage = x.untyped_storage()
+        y_storage = y.untyped_storage()
+        x_storage.resize_(0)
+        self.assertEqual(x_storage.nbytes(), 0)
+        x_storage._swap_data_ptr_(y_storage)
+        self.assertEqual(x, y_data)
+        self.assertEqual(y_storage.nbytes(), 0)
+
+    def test_swap_data_ptr_non_empty(self, device):
+        x = torch.randn(4, device=device)
+        y = torch.randn(4, device=device)
+        x_data = x.clone()
+        y_data = y.clone()
+        x_storage = x.untyped_storage()
+        y_storage = y.untyped_storage()
+        x_storage._swap_data_ptr_(y_storage)
+        self.assertEqual(x, y_data)
+        self.assertEqual(y, x_data)
+
+    def test_swap_data_ptr_preserves_views(self, device):
+        x = torch.randn(4, 4, device=device)
+        x_view = x[1:3]
+        y = torch.randn(4, 4, device=device)
+        y_data = y.clone()
+        x_storage = x.untyped_storage()
+        y_storage = y.untyped_storage()
+        x_storage.resize_(0)
+        x_storage._swap_data_ptr_(y_storage)
+        self.assertEqual(x, y_data)
+        self.assertEqual(x_view, y_data[1:3])
+
+    def test_swap_data_ptr_self(self, device):
+        x = torch.randn(4, device=device)
+        x_data = x.clone()
+        s = x.untyped_storage()
+        s._swap_data_ptr_(s)
+        self.assertEqual(x, x_data)
+
+    def test_swap_data_ptr_device_mismatch(self, device):
+        x = torch.randn(4, device=device)
+        y = torch.randn(4, device="meta")
+        with self.assertRaisesRegex(RuntimeError, "same device"):
+            x.untyped_storage()._swap_data_ptr_(y.untyped_storage())
+
+    def test_swap_data_ptr_nbytes_mismatch(self, device):
+        x = torch.randn(4, device=device)
+        y = torch.randn(8, device=device)
+        with self.assertRaisesRegex(RuntimeError, "same nbytes"):
+            x.untyped_storage()._swap_data_ptr_(y.untyped_storage())
 
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
@@ -10549,6 +10670,23 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                     self.assertEqual(expect, res2)
         finally:
             torch.set_num_threads(num_threads)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    def test_bmm_matmul_mixed_dtype_error(self):
+        a = torch.randn(2, 8, 8, device="cuda", dtype=torch.float16)
+        b = torch.randn(2, 8, 64, device="cuda", dtype=torch.float32)
+
+        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
+            torch.bmm(a, b)
+
+        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
+            torch.compile(lambda x, y: torch.bmm(x, y), fullgraph=True)(a, b)
+
+        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
+            torch.matmul(a, b)
+
+        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
+            torch.compile(lambda x, y: torch.matmul(x, y), fullgraph=True)(a, b)
 
     def test_conj_neg_tolist(self):
         x = torch.randn(2, dtype=torch.cfloat)

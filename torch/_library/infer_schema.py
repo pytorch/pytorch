@@ -8,7 +8,7 @@ import torch
 from torch import device, dtype, Tensor, types
 from torch.utils._exposed_in import exposed_in
 
-from .opaque_object import _OPAQUE_TYPES, is_opaque_type
+from .opaque_object import _OPAQUE_TYPES, is_opaque_reference_type, is_opaque_type
 
 
 # This is used as a negative test for
@@ -299,6 +299,8 @@ def parse_return(annotation, error_fn):
     origin = typing.get_origin(annotation)
     if origin is not tuple:
         if annotation not in SUPPORTED_RETURN_TYPES:
+            if is_opaque_reference_type(annotation):
+                return _OPAQUE_TYPES[annotation].class_name
             error_fn(
                 f"Return has unsupported type {annotation}. "
                 f"The valid types are: {SUPPORTED_RETURN_TYPES}."
@@ -308,12 +310,18 @@ def parse_return(annotation, error_fn):
 
     args = typing.get_args(annotation)
     for arg in args:
-        if arg not in SUPPORTED_RETURN_TYPES:
+        if arg not in SUPPORTED_RETURN_TYPES and not is_opaque_reference_type(arg):
             error_fn(
                 f"Return has unsupported type {annotation}. "
                 f"The valid types are: {SUPPORTED_RETURN_TYPES}."
             )
-    output_ty = ", ".join([SUPPORTED_RETURN_TYPES[arg] for arg in args])
+
+    def _return_type_str(arg):
+        if ty := SUPPORTED_RETURN_TYPES.get(arg):
+            return ty
+        return _OPAQUE_TYPES[arg].class_name
+
+    output_ty = ", ".join(_return_type_str(arg) for arg in args)
 
     # use (()) to represent tuple with single element
     if len(args) == 1:
@@ -352,4 +360,4 @@ def tuple_to_list(tuple_type: type[tuple]) -> type[list]:
     elif len(type_args) == 2 and type_args[1] is Ellipsis:
         return list[type_args[0]]  # type: ignore[valid-type]
     else:
-        return list[typing.Union[tuple(type_args)]]  # type: ignore[misc, return-value]  # noqa: UP045
+        return list[typing.Union[tuple(type_args)]]  # type: ignore[misc, return-value]  # noqa: UP007

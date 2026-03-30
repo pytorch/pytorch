@@ -108,6 +108,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"Any", c10::TypeFactory::get<c10::AnyType>()},
       {"AnyClassType", c10::TypeFactory::get<c10::AnyClassType>()},
       {"AnyEnumType", c10::TypeFactory::get<c10::AnyEnumType>()},
+      {"PyObject", c10::TypeFactory::get<c10::PyObjectType>()},
   };
   auto tok = L.cur();
   if (!L.nextIf(TK_NONE) && !L.nextIf(TK_NONE_TYPE)) {

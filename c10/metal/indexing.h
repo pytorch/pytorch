@@ -182,10 +182,16 @@ inline T val_at_offs(P ptr, long offs, ScalarType type) {
       return cast_to<T>(val_at_offs<char>(ptr, offs));
     case ScalarType::Short:
       return cast_to<T>(val_at_offs<short>(ptr, offs));
+    case ScalarType::UInt16:
+      return cast_to<T>(val_at_offs<uint16_t>(ptr, offs));
     case ScalarType::Int:
       return cast_to<T>(val_at_offs<int>(ptr, offs));
+    case ScalarType::UInt32:
+      return cast_to<T>(val_at_offs<uint32_t>(ptr, offs));
     case ScalarType::Long:
       return cast_to<T>(val_at_offs<long>(ptr, offs));
+    case ScalarType::UInt64:
+      return cast_to<T>(val_at_offs<uint64_t>(ptr, offs));
     // Floats
     case ScalarType::Float:
       return cast_to<T>(val_at_offs<float>(ptr, offs));

@@ -4,7 +4,7 @@ import itertools
 import math
 from collections import defaultdict, namedtuple
 from operator import attrgetter
-from typing import Any, Optional
+from typing import Any
 from typing_extensions import deprecated
 
 import torch
@@ -637,7 +637,13 @@ class FunctionEvent(FormattedTimesMixin):
         concrete_inputs=None,
         kwinputs=None,
         is_user_annotation=False,
+        is_python_function=False,
         metadata_json=None,
+        flow_id=None,
+        flow_type=None,
+        flow_start=None,
+        external_id=0,
+        linked_correlation_id=0,
     ):
         self.id: int = id
         self.node_id: int = node_id
@@ -648,11 +654,11 @@ class FunctionEvent(FormattedTimesMixin):
         self.trace_name: str = trace_name
         self.time_range: Interval = Interval(start_us, end_us)
         self.thread: int = thread
-        self.fwd_thread: Optional[int] = fwd_thread
+        self.fwd_thread: int | None = fwd_thread
         self.kernels: list[Kernel] = []
         self.count: int = 1
         self.cpu_children: list[FunctionEvent] = []
-        self.cpu_parent: Optional[FunctionEvent] = None
+        self.cpu_parent: FunctionEvent | None = None
         # pyrefly: ignore [bad-assignment]
         self.input_shapes: tuple[int, ...] = input_shapes
         # pyrefly: ignore [bad-assignment]
@@ -662,7 +668,7 @@ class FunctionEvent(FormattedTimesMixin):
         # pyrefly: ignore [bad-assignment]
         self.stack: list = stack
         self.scope: int = scope
-        self.use_device: Optional[str] = use_device
+        self.use_device: str | None = use_device
         self.cpu_memory_usage: int = cpu_memory_usage
         self.device_memory_usage: int = device_memory_usage
         self.is_async: bool = is_async
@@ -674,12 +680,18 @@ class FunctionEvent(FormattedTimesMixin):
             thread if device_resource_id is None else device_resource_id
         )
         self.is_legacy: bool = is_legacy
-        self.flops: Optional[int] = flops
-        self.is_user_annotation: Optional[bool] = is_user_annotation
+        self.flops: int | None = flops
+        self.is_user_annotation: bool | None = is_user_annotation
+        self.is_python_function: bool = is_python_function
         self.self_cpu_percent = -1
         self.total_cpu_percent = -1
         self.total_device_percent = -1
         self.metadata_json = metadata_json
+        self.flow_id: int | None = flow_id
+        self.flow_type: int | None = flow_type
+        self.flow_start: bool | None = flow_start
+        self.external_id: int = external_id
+        self.linked_correlation_id: int = linked_correlation_id
 
     def append_kernel(self, name, device, duration):
         if self.device_type != DeviceType.CPU:
@@ -885,26 +897,26 @@ class FunctionEventAvg(FormattedTimesMixin):
     """
 
     def __init__(self) -> None:
-        self.key: Optional[str] = None
+        self.key: str | None = None
         self.count: int = 0
         self.node_id: int = 0
         self.is_async: bool = False
         self.is_remote: bool = False
-        self.use_device: Optional[str] = None
+        self.use_device: str | None = None
         self.cpu_time_total: int = 0
         self.device_time_total: int = 0
         self.self_cpu_time_total: int = 0
         self.self_device_time_total: int = 0
-        self.input_shapes: Optional[list[list[int]]] = None
-        self.overload_name: Optional[str] = None
-        self.stack: Optional[list] = None
-        self.scope: Optional[int] = None
+        self.input_shapes: list[list[int]] | None = None
+        self.overload_name: str | None = None
+        self.stack: list | None = None
+        self.scope: int | None = None
         self.cpu_memory_usage: int = 0
         self.device_memory_usage: int = 0
         self.self_cpu_memory_usage: int = 0
         self.self_device_memory_usage: int = 0
-        self.cpu_children: Optional[list[FunctionEvent]] = None
-        self.cpu_parent: Optional[FunctionEvent] = None
+        self.cpu_children: list[FunctionEvent] | None = None
+        self.cpu_parent: FunctionEvent | None = None
         self.device_type: DeviceType = DeviceType.CPU
         self.is_legacy: bool = False
         self.flops: int = 0

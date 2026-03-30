@@ -106,7 +106,7 @@ std::tuple<Tensor, Tensor> _pack_padded_sequence(const Tensor& _input, const Ten
     TORCH_CHECK(l >= prev_l);
   }
 
-  return std::make_tuple(at::cat(steps), batch_sizes_t);
+  return std::make_tuple(at::cat(steps), std::move(batch_sizes_t));
 }
 
 // `grad` could be on arbitrary device and of arbitrary dtype, but `_batch_sizes`
@@ -200,7 +200,7 @@ std::tuple<Tensor, Tensor> _pad_packed_sequence(const Tensor& data, const Tensor
     output = output.transpose(0, 1);
   }
 
-  return std::make_tuple(output, lengths_t);
+  return std::make_tuple(std::move(output), std::move(lengths_t));
 }
 
 Tensor pad_sequence(TensorList sequences, bool batch_first, double padding_value, const std::string_view padding_side) {

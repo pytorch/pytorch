@@ -22,7 +22,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
-    TEST_WITH_ROCM, decorateIf
+    TEST_WITH_ROCM, decorateIf, skipIfXpu
 )
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
@@ -2396,6 +2396,7 @@ class TestImports(TestCase):
             # fail, so just set CWD to this script's directory
             cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
 
+    @skipIfXpu(msg="The test is flaky on XPU, see https://github.com/pytorch/pytorch/issues/110040")
     # The test is flaky on ROCm/XPU and has been open and close multiple times
     # https://github.com/pytorch/pytorch/issues/110040
     def test_circular_dependencies(self) -> None:
@@ -2418,7 +2419,7 @@ class TestImports(TestCase):
                            "torch.distributed._tools.sac_ilp",  # depends on pulp
                            "torch.csrc",  # files here are devtools, not part of torch
                            "torch.include",  # torch include files after install
-                           "torch._inductor.kernel.vendored_templates.cutedsl_grouped_gemm",  # depends on cutlass
+                           "torch._inductor.kernel.vendored_templates.cutedsl",  # depends on cutlass
                            ]
         if IS_WINDOWS or IS_MACOS or IS_JETSON:
             # Distributed should be importable on Windows(except nn.api.), but not on Mac
@@ -2474,6 +2475,10 @@ class TestImports(TestCase):
                          "  - Refactor your code to avoid depending on sympy files you may not need to depend\n"
                          "  - Use TYPE_CHECKING if you are using sympy + strings if you are using sympy on type annotations\n"
                          "  - Import things that depend on SymPy locally")
+
+    def test_not_import_triton(self) -> None:
+        out = self._check_python_output("import torch;import sys;print('triton' not in sys.modules)")
+        self.assertEqual(out.strip(), "True")
 
     @parametrize('path', ['torch', 'functorch'])
     def test_no_mutate_global_logging_on_import(self, path) -> None:
