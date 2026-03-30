@@ -967,7 +967,6 @@ Example:
   // `c10d::ReduceOp::RedOpType` in Python.
   py::implicitly_convertible<::c10d::ReduceOp::RedOpType, ::c10d::ReduceOp>();
 
-  // Keep the private _make_nccl_premul_sum for backward compatibility
   module
       .def(
           "_make_nccl_premul_sum",
