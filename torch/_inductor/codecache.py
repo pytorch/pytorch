@@ -82,6 +82,7 @@ from torch._inductor.custom_graph_pass import (
     CustomGraphPassType,
     CustomPartitionerFn,
     CustomPartitionerFnType,
+    get_active_passes,
 )
 from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
 from torch._inductor.runtime.compile_tasks import _reload_python_module
@@ -797,17 +798,22 @@ def resolve_pre_grad_pass_timing() -> Literal["early", "late"]:
     """
     timing: Literal["early", "late", "default"] = config.pre_grad_pass_timing
     custom_pass = config.pre_grad_custom_pass
+    active_custom_passes = get_active_passes().pre_grad_passes
     has_uuid = (
         custom_pass
         and isinstance(custom_pass, CustomGraphPass)
         and custom_pass.uuid() is not None
     )
+    active_have_uuids = all(
+        isinstance(custom_pass, CustomGraphPass) and custom_pass.uuid() is not None
+        for custom_pass in active_custom_passes
+    )
 
     if timing == "default":
-        supports_late = custom_pass is None or has_uuid
+        supports_late = (custom_pass is None or has_uuid) and active_have_uuids
         timing = "late" if supports_late else "early"
 
-    if timing == "late" and custom_pass and not has_uuid:
+    if timing == "late" and ((custom_pass and not has_uuid) or not active_have_uuids):
         raise RuntimeError(
             "pre_grad_custom_pass must implement uuid() to run late "
             "(after cache lookup). Either implement uuid() or set "
@@ -963,10 +969,10 @@ class FxGraphHashDetails:
         self.joint_custom_post_pass = self._get_custom_pass_detail(
             config.joint_custom_post_pass
         )
-        self._pre_fusion_custom_pass = self._get_custom_pass_detail_unsafe(
+        self._pre_fusion_custom_pass = self._get_scheduler_pass_detail(
             config._pre_fusion_custom_pass
         )
-        self._fuse_ddp_communication_passes = self._get_custom_pass_detail_unsafe(
+        self._fuse_ddp_communication_passes = self._get_scheduler_pass_details(
             config._fuse_ddp_communication_passes
         )
 
@@ -987,6 +993,37 @@ class FxGraphHashDetails:
         self._custom_partitioner_fn = self._get_custom_partitioner_fn_detail(
             config.custom_partitioner_fn
         )
+        active_passes = get_active_passes()
+        # Include context-manager based passes in the cache key.
+        if resolve_pre_grad_pass_timing() != "early":
+            self.active_pre_grad_custom_passes = self._get_custom_pass_details(
+                active_passes.pre_grad_passes
+            )
+        self.active_joint_custom_pre_passes = self._get_custom_pass_details(
+            active_passes.joint_pre_passes
+        )
+        self.active_joint_custom_post_passes = self._get_custom_pass_details(
+            active_passes.joint_post_passes
+        )
+        self.active_post_grad_custom_pre_passes = self._get_custom_pass_details(
+            active_passes.post_grad_pre_passes
+        )
+        self.active_post_grad_custom_post_passes = self._get_custom_pass_details(
+            active_passes.post_grad_post_passes
+        )
+        self.active_custom_backend_passes = tuple(
+            (
+                device,
+                self._get_custom_pass_detail_maybe(custom_backend_pass),
+            )
+            for device, custom_backend_pass in active_passes.custom_backend_passes
+        )
+        self.active_pre_fusion_custom_passes = self._get_scheduler_pass_details(
+            active_passes.pre_fusion_custom_passes
+        )
+        self.active_post_fusion_custom_passes = self._get_scheduler_pass_details(
+            active_passes.post_fusion_custom_passes
+        )
 
         # Include hint overrides in the cache key because _reduce_symint
         # only hashes symbol names, not hint values.
@@ -1000,20 +1037,15 @@ class FxGraphHashDetails:
                 )
             }
 
-    # This is mainly added to handle these two inductor configs, which are (unfortunately)
-    # sometimes cache safe:
-    # - _pre_fusion_custom_pass
-    # - _fuse_ddp_communication_passes
-    # Their types can be found in `torch/_inductor/config.py`, but:
-    # - if they are string names, we can cache them safely (one is by default)
-    # - if any of them are set to custom callables, we will need to cache miss
-    # Future work is for someone to find any places where these functions are used
-    # and force them to be of type CustomGraphPass, so we can guarantee serialization.
-    def _get_custom_pass_detail_unsafe(self, custom_pass: Any) -> Any | None:
+    # Scheduler/comms pass hooks intentionally accept string pass names in
+    # addition to CustomGraphPass instances. For hashing:
+    # - strings are stable and can be included directly
+    # - CustomGraphPass uses uuid()
+    # - arbitrary callables are normalized to None and subsequently rejected
+    #   by FxGraphCache._check_can_cache, which triggers explicit cache bypass
+    def _get_scheduler_pass_detail(self, custom_pass: Any) -> Any | None:
         if not custom_pass:
             return None
-        if isinstance(custom_pass, list):
-            return [self._get_custom_pass_detail_unsafe(x) for x in custom_pass]
         if isinstance(custom_pass, str):
             return custom_pass
         if isinstance(custom_pass, CustomGraphPass):
@@ -1022,7 +1054,7 @@ class FxGraphHashDetails:
             # Returning None is safe here because we raise an explicit bypass error
             # later if we detect these passes are set to callables
             return None
-        raise AssertionError(f"unknown config type: {str(type(custom_pass))}")
+        raise AssertionError(f"unknown scheduler pass type: {str(type(custom_pass))}")
 
     def _get_custom_pass_detail(
         self, custom_pass: CustomGraphPassType | CustomGraphModulePass
@@ -1031,6 +1063,27 @@ class FxGraphHashDetails:
             return None
         assert isinstance(custom_pass, (CustomGraphPass, CustomGraphModulePass))
         return custom_pass.uuid()
+
+    def _get_custom_pass_detail_maybe(self, custom_pass: Any) -> Any | None:
+        if not custom_pass:
+            return None
+        if isinstance(custom_pass, (CustomGraphPass, CustomGraphModulePass)):
+            return custom_pass.uuid()
+        raise AssertionError(f"unknown custom pass type: {str(type(custom_pass))}")
+
+    def _get_custom_pass_details(self, custom_passes: Sequence[Any]) -> tuple[Any, ...]:
+        return tuple(
+            self._get_custom_pass_detail_maybe(custom_pass)
+            for custom_pass in custom_passes
+        )
+
+    def _get_scheduler_pass_details(
+        self, scheduler_passes: Sequence[Any]
+    ) -> tuple[Any, ...]:
+        return tuple(
+            self._get_scheduler_pass_detail(scheduler_pass)
+            for scheduler_pass in scheduler_passes
+        )
 
     def _get_custom_partitioner_fn_detail(
         self, custom_partitioner_fn: CustomPartitionerFnType
@@ -1622,6 +1675,8 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         Check some conditions that would preclude caching and raise BypassFxGraphCache
         to bypass in case caching is not possible.
         """
+        active_passes = get_active_passes()
+
         # Custom passes must implement the CustomGraphPass or we don't
         # know how to include them in the cache key calculation.
         # When timing is EARLY, pre-grad passes already ran before the cache
@@ -1631,13 +1686,36 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
                 isinstance(config.pre_grad_custom_pass, CustomGraphPass)
                 and config.pre_grad_custom_pass.uuid()
             ), "Unsupported pre grad custom pass"
+            for p in active_passes.pre_grad_passes:
+                if not isinstance(p, CustomGraphPass) or not p.uuid():
+                    raise BypassFxGraphCache("Unsupported pre grad custom pass")
         for p in (config.post_grad_custom_pre_pass, config.post_grad_custom_post_pass):
             if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
+                raise BypassFxGraphCache("Unsupported post grad custom pass")
+        for p in (
+            *active_passes.post_grad_pre_passes,
+            *active_passes.post_grad_post_passes,
+        ):
+            if not isinstance(p, CustomGraphPass) or not p.uuid():
                 raise BypassFxGraphCache("Unsupported post grad custom pass")
         # Same with the joint custom passes
         for p in (config.joint_custom_pre_pass, config.joint_custom_post_pass):
             if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
                 raise BypassFxGraphCache("Unsupported joint custom pass")
+        for p in (*active_passes.joint_pre_passes, *active_passes.joint_post_passes):
+            if not isinstance(p, CustomGraphPass) or not p.uuid():
+                raise BypassFxGraphCache("Unsupported joint custom pass")
+
+        for _, p in active_passes.custom_backend_passes:
+            if not isinstance(p, CustomGraphModulePass) or not p.uuid():
+                raise BypassFxGraphCache("Unsupported custom backend pass")
+
+        for p in (
+            *active_passes.pre_fusion_custom_passes,
+            *active_passes.post_fusion_custom_passes,
+        ):
+            if callable(p) and not isinstance(p, CustomGraphPass):
+                raise BypassFxGraphCache("Unsupported scheduler custom pass")
         # We should find any users of _pre_fusion_custom_pass and _fuse_ddp_communication_passes
         # and ensure they are not passing us raw callables
         if config._pre_fusion_custom_pass is not None:

@@ -16,7 +16,11 @@ from torch import fx
 from torch._decomp import register_decomposition
 from torch._dynamo.utils import counters
 from torch._inductor import comms
-from torch._inductor.custom_graph_pass import CustomInferenceAwareGraphPass
+from torch._inductor.custom_graph_pass import (
+    CustomGraphModulePass,
+    CustomInferenceAwareGraphPass,
+    get_active_passes,
+)
 from torch._inductor.virtualized import ops  # noqa: F401
 from torch._logging import trace_structured
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
@@ -137,12 +141,16 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     fake_tensor_updater = FakeTensorUpdater(gm.graph)
 
+    post_grad_pre_custom_passes = []
     if post_grad_custom_pre_pass := config.post_grad_custom_pre_pass:
+        post_grad_pre_custom_passes.append(post_grad_custom_pre_pass)
+    post_grad_pre_custom_passes.extend(get_active_passes().post_grad_pre_passes)
+    for idx, post_grad_custom_pre_pass in enumerate(post_grad_pre_custom_passes):
         if isinstance(post_grad_custom_pre_pass, CustomInferenceAwareGraphPass):
             post_grad_custom_pre_pass = functools.partial(
                 post_grad_custom_pre_pass, is_inference=is_inference
             )
-        GraphTransformObserver(gm, "post_grad_custom_pre_pass").apply_graph_pass(
+        GraphTransformObserver(gm, f"post_grad_custom_pre_pass_{idx}").apply_graph_pass(
             post_grad_custom_pre_pass
         )
 
@@ -221,14 +229,19 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             )
         )
 
+    post_grad_post_custom_passes = []
     if post_grad_custom_post_pass := config.post_grad_custom_post_pass:
+        post_grad_post_custom_passes.append(post_grad_custom_post_pass)
+    active_passes = get_active_passes()
+    post_grad_post_custom_passes.extend(active_passes.post_grad_post_passes)
+    for idx, post_grad_custom_post_pass in enumerate(post_grad_post_custom_passes):
         if isinstance(post_grad_custom_post_pass, CustomInferenceAwareGraphPass):
             post_grad_custom_post_pass = functools.partial(
                 post_grad_custom_post_pass, is_inference=is_inference
             )
-        GraphTransformObserver(gm, "post_grad_custom_post_pass").apply_graph_pass(
-            post_grad_custom_post_pass
-        )
+        GraphTransformObserver(
+            gm, f"post_grad_custom_post_pass_{idx}"
+        ).apply_graph_pass(post_grad_custom_post_pass)
 
     GraphTransformObserver(gm, "stable_sort").apply_graph_pass(stable_topological_sort)
 
@@ -238,12 +251,18 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     fake_tensor_updater.incremental_update()
 
+    backend_passes_by_device: list[
+        tuple[str, CustomGraphModulePass | Callable[[torch.fx.GraphModule], None]]
+    ] = []
     for device, custom_backend_pass in custom_backend_passes.items():
         if custom_backend_pass is not None:
-            gm_devices = [d.type for d in get_all_devices(gm)]
-            if device in gm_devices:
-                pass_name = "custom_backend_passes_" + device
-                GraphTransformObserver(gm, pass_name).apply_gm_pass(custom_backend_pass)
+            backend_passes_by_device.append((device, custom_backend_pass))
+    backend_passes_by_device.extend(active_passes.custom_backend_passes)
+    gm_devices = [d.type for d in get_all_devices(gm)]
+    for idx, (device, custom_backend_pass) in enumerate(backend_passes_by_device):
+        if device in gm_devices:
+            pass_name = f"custom_backend_passes_{device}_{idx}"
+            GraphTransformObserver(gm, pass_name).apply_gm_pass(custom_backend_pass)
 
     collectives_bucketing: bool = False
 

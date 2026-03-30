@@ -33,6 +33,7 @@ from torch._inductor.codecache import (
 from torch._inductor.codegen.cuda.compile_utils import cuda_compile_command
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.custom_graph_pass import (
+    custom_pass_context,
     CustomGraphModulePass,
     CustomGraphPass,
     CustomPartitionerFn,
@@ -2433,6 +2434,47 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             self.assertEqual(fn(a, b), compiled_fn(a, b))
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    def test_custom_pass_context_uuid_cache_hit_miss(self):
+        class TestContextPass(CustomGraphPass):
+            def __init__(self) -> None:
+                self._uuid = "v1"
+
+            def __call__(self, graph: torch.fx.graph.Graph) -> None:
+                return None
+
+            def uuid(self) -> bytes | str | None:
+                return self._uuid
+
+        def fn(a, b):
+            return torch.mm(a, b)
+
+        a = torch.rand(8, 32, device="cpu")
+        b = torch.rand(32, 8, device="cpu")
+        compiled_fn = torch.compile(fn)
+        custom_pass = TestContextPass()
+
+        with custom_pass_context(post_grad_pre_passes=[custom_pass]):
+            self.reset()
+            counters.clear()
+            compiled_fn(a, b)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+            self.reset()
+            counters.clear()
+            compiled_fn(a, b)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+            custom_pass._uuid = "v2"
+            self.reset()
+            counters.clear()
+            compiled_fn(a, b)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
 
 class TestCustomPartitionerFn(CustomPartitionerFn):
