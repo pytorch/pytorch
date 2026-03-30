@@ -883,12 +883,14 @@ class {module_name}(torch.nn.Module):
         if not dump_dir:
             return
         code_hash = hashlib.sha256(self._code.encode("utf-8")).hexdigest()[:16]
-        dump_filename = f"fx_{code_hash}.py"
+        rank_suffix = ""
+        if torch.distributed.is_initialized():
+            rank_suffix = f"_rank{torch.distributed.get_rank()}"
+        dump_filename = f"fx_{code_hash}{rank_suffix}.py"
         dump_path = os.path.join(dump_dir, dump_filename)
         os.makedirs(dump_dir, exist_ok=True)
         if not os.path.exists(dump_path):
-            with open(dump_path, "w") as f:
-                f.write(self._code)
+            self._atomic_write(dump_path, self._code)
         self._codegen_dump_path = dump_path
         self._codegen_dump_hash = code_hash
         self._codegen_dump_mtime = os.path.getmtime(dump_path)
@@ -928,6 +930,26 @@ class {module_name}(torch.nn.Module):
             return True
         self._codegen_dump_mtime = current_mtime
         return False
+
+    @staticmethod
+    def _atomic_write(path: str, content: str) -> None:
+        """Write file atomically to avoid partial reads in distributed setups."""
+        import tempfile
+
+        dir_path = os.path.dirname(path)
+        with tempfile.NamedTemporaryFile(
+            mode="w", dir=dir_path, delete=False, suffix=".py.tmp"
+        ) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+        try:
+            os.replace(tmp_path, path)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     def _codegen_reload_from_disk(self, python_code_globals: dict[str, Any]) -> None:
         """Reload forward() from the on-disk codegen file.

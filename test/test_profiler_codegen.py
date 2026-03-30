@@ -341,6 +341,42 @@ class TestProfilerCodeGen(TestCase):
             finally:
                 fx_config.codegen_dump_dir = ""
 
+    def test_dump_rank_suffix(self):
+        """When dist is initialized, dump filename includes _rank{N} suffix."""
+        from torch.fx.experimental import _config as fx_config
+        from unittest.mock import patch
+
+        model = torch.nn.Linear(4, 4)
+        inp = torch.randn(1, 4)
+        gm = self._trace_and_recompile(model, (inp,))
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fx_config.codegen_dump_dir = tmpdir
+            try:
+                with patch("torch.distributed.is_initialized", return_value=True), \
+                     patch("torch.distributed.get_rank", return_value=3):
+                    gm.recompile()
+                files = os.listdir(tmpdir)
+                self.assertEqual(len(files), 1)
+                self.assertIn("_rank3", files[0])
+                self.assertTrue(files[0].endswith(".py"))
+            finally:
+                fx_config.codegen_dump_dir = ""
+
+    def test_atomic_write(self):
+        """_atomic_write produces a valid file and cleans up on success."""
+        from torch.fx.graph_module import GraphModule
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "test_atomic.py")
+            content = "x = 42\n"
+            GraphModule._atomic_write(path, content)
+            with open(path) as f:
+                self.assertEqual(f.read(), content)
+            # No leftover .tmp files
+            tmp_files = [f for f in os.listdir(tmpdir) if f.endswith(".tmp")]
+            self.assertEqual(len(tmp_files), 0)
+
 
 if __name__ == "__main__":
     run_tests()
