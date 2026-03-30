@@ -246,7 +246,8 @@ def sig_for_ops(opname: str) -> list[str]:
 
     # we have to do this by hand, because they are hand-bound in Python
 
-    assert opname.endswith("__") and opname.startswith("__"), f"Unexpected op {opname}"
+    if not (opname.endswith("__") and opname.startswith("__")):
+        raise AssertionError(f"Unexpected op {opname}")
 
     name = opname[2:-2]
     if name == "rpow":
@@ -422,6 +423,19 @@ def gen_nn_functional(fm: FileManager) -> None:
                         "Tensor",
                     )
                 ],
+                f"max_pool{d}d_with_indices": [
+                    defs(
+                        f"max_pool{d}d_with_indices",
+                        [
+                            INPUT,
+                            KERNEL_SIZE,
+                            *STRIDE_PADDING,
+                            "dilation: _int | _size = 1",
+                            "ceil_mode: bool = False",
+                        ],
+                        "tuple[Tensor, Tensor]",
+                    )
+                ],
             }
         )
 
@@ -547,6 +561,255 @@ def gen_nn_functional(fm: FileManager) -> None:
                         KERNEL_SIZE,
                         "dilation: _int | _size",
                         *STRIDE_PADDING,
+                    ],
+                    "Tensor",
+                )
+            ],
+            "elu": [
+                defs(
+                    "elu",
+                    [
+                        INPUT,
+                        "alpha: float = 1.0",
+                        "scale: float = 1.0",
+                        "input_scale: float = 1.0",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "glu": [
+                defs(
+                    "glu",
+                    [
+                        INPUT,
+                        "dim: int = -1",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "max_unpool2d": [
+                defs(
+                    "max_unpool2d",
+                    [
+                        INPUT,
+                        "indices: Tensor",
+                        "output_size: Sequence[int] | None",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "max_unpool3d": [
+                defs(
+                    "max_unpool3d",
+                    [
+                        INPUT,
+                        "indices: Tensor",
+                        "output_size: Sequence[int] | None",
+                        "stride: _int | _size",
+                        "padding: _int | _size",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "cross_entropy_loss": [
+                defs(
+                    "cross_entropy_loss",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "weight: Tensor | None = None",
+                        "reduction: str = ...",
+                        "ignore_index: int = -100",
+                        "label_smoothing: float = 0.0",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "hardsigmoid_": [
+                defs(
+                    "hardsigmoid_",
+                    [
+                        INPUT,
+                    ],
+                    "Tensor",
+                )
+            ],
+            "hardswish": [
+                defs(
+                    "hardswish",
+                    [
+                        INPUT,
+                    ],
+                    "Tensor",
+                )
+            ],
+            "hardswish_": [
+                defs(
+                    "hardswish_",
+                    [
+                        INPUT,
+                    ],
+                    "Tensor",
+                )
+            ],
+            "huber_loss": [
+                defs(
+                    "huber_loss",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "reduction: str = ...",
+                        "delta: float = 1.0",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "im2col": [
+                defs(
+                    "im2col",
+                    [
+                        INPUT,
+                        KERNEL_SIZE,
+                        "dilation: _int | _size",
+                        "padding: _int | _size",
+                        "stride: _int | _size",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "l1_loss": [
+                defs(
+                    "l1_loss",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "reduction: str = ...",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "mish": [
+                defs(
+                    "mish",
+                    [
+                        INPUT,
+                    ],
+                    "Tensor",
+                )
+            ],
+            "mish_": [
+                defs(
+                    "mish_",
+                    [
+                        INPUT,
+                    ],
+                    "Tensor",
+                )
+            ],
+            "mse_loss": [
+                defs(
+                    "mse_loss",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "reduction: str = ...",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "multilabel_margin_loss": [
+                defs(
+                    "multilabel_margin_loss",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "reduction: str = ...",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "multi_margin_loss": [
+                defs(
+                    "multi_margin_loss",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "p: float = 1.0",
+                        "margin: float = 1.0",
+                        "weight: Tensor | None = None",
+                        "reduction: str = ...",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "nll_loss_nd": [
+                defs(
+                    "nll_loss_nd",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "weight: Tensor | None = None",
+                        "reduction: str = ...",
+                        "ignore_index: int = -100",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "relu6": [
+                defs(
+                    "relu6",
+                    [
+                        INPUT,
+                    ],
+                    "Tensor",
+                )
+            ],
+            "relu6_": [
+                defs(
+                    "relu6_",
+                    [
+                        INPUT,
+                    ],
+                    "Tensor",
+                )
+            ],
+            "silu": [
+                defs(
+                    "silu",
+                    [
+                        INPUT,
+                    ],
+                    "Tensor",
+                )
+            ],
+            "silu_": [
+                defs(
+                    "silu_",
+                    [
+                        INPUT,
+                    ],
+                    "Tensor",
+                )
+            ],
+            "smooth_l1_loss": [
+                defs(
+                    "smooth_l1_loss",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "reduction: str = ...",
+                        "beta: float = 1.0",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "soft_margin_loss": [
+                defs(
+                    "soft_margin_loss",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "reduction: str = ...",
                     ],
                     "Tensor",
                 )
@@ -728,10 +991,12 @@ def gather_docstrs() -> dict[str, str]:
 def add_docstr_to_hint(docstr: str, hint: str) -> str:
     docstr = inspect.cleandoc(docstr).strip()
     if "..." in hint:  # function or method
-        assert hint.endswith("..."), f"Hint `{hint}` does not end with '...'"
+        if not hint.endswith("..."):
+            raise AssertionError(f"Hint `{hint}` does not end with '...'")
         hint = hint.removesuffix("...").rstrip()  # remove "..."
         content = hint + "\n" + textwrap.indent(f'r"""\n{docstr}\n"""', prefix="    ")
         # Remove trailing whitespace on each line
+        # pyrefly: ignore [no-matching-overload]
         return "\n".join(map(str.rstrip, content.splitlines())).rstrip()
 
     # attribute or property
@@ -1221,7 +1486,10 @@ def gen_pyi(
             # deprecated structseqs are currently not included for torch functions
             tuple_name, tuple_def = structseq
             if tuple_name in structseqs:
-                assert structseqs[tuple_name] == tuple_def
+                if structseqs[tuple_name] != tuple_def:
+                    raise AssertionError(
+                        f"Duplicate structseq {tuple_name} with different definition"
+                    )
             else:
                 structseqs[tuple_name] = tuple_def
 
@@ -1314,6 +1582,19 @@ def gen_pyi(
                         "dispatch_layout: _bool = False",
                         "_extra_dispatch_keys: torch.DispatchKeySet | None = None",
                         "storage_size: _int | SymInt | None = None",
+                    ],
+                    "S",
+                )
+            ],
+            "_dtensor__new__": [
+                "@staticmethod\n"
+                + defs(
+                    "_dtensor__new__",
+                    [
+                        "cls: type[S]",
+                        "local_tensor: Tensor",
+                        "spec: torch.distributed.tensor._dtensor_spec.DTensorSpec",
+                        "requires_grad: _bool",
                     ],
                     "S",
                 )
@@ -1628,7 +1909,10 @@ def gen_pyi(
             # deprecated structseqs are currently not included for torch functions
             tuple_name, tuple_def = structseq
             if tuple_name in structseqs:
-                assert structseqs[tuple_name] == tuple_def
+                if structseqs[tuple_name] != tuple_def:
+                    raise AssertionError(
+                        f"Duplicate structseq {tuple_name} with different definition"
+                    )
             else:
                 structseqs[tuple_name] = tuple_def
 
@@ -1826,8 +2110,15 @@ def main() -> None:
         default=".",
         help="path to output directory",
     )
+    parser.add_argument(
+        "--template-dir",
+        default=".",
+        help="path to template directory",
+    )
     args = parser.parse_args()
-    fm = FileManager(install_dir=args.out, template_dir=".", dry_run=False)
+    fm = FileManager(
+        install_dir=args.out, template_dir=args.template_dir, dry_run=False
+    )
     gen_pyi(
         args.native_functions_path,
         args.tags_path,

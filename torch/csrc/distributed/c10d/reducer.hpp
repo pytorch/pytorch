@@ -26,8 +26,8 @@
 
 namespace c10d {
 
-constexpr int kDefaultFirstBucketBytes = int(1024 * 1024);
-constexpr int kDefaultBucketBytesCap = int(25 * 1024 * 1024);
+constexpr int kDefaultFirstBucketBytes = 1024 * 1024;
+constexpr int kDefaultBucketBytesCap = 25 * 1024 * 1024;
 // Collect runtime stats once for every kDDPRuntimeLoggingSampleRate iterations.
 constexpr int kDDPRuntimeLoggingSampleRate = 100;
 
@@ -59,7 +59,8 @@ class TORCH_API Reducer {
       std::unordered_map<size_t, std::string> param_names,
       int64_t first_bucket_bytes_cap,
       bool skip_all_reduce_unused_params,
-      bool use_python_reducer);
+      bool use_python_reducer,
+      std::vector<int64_t> bucket_bytes_cap_list);
 
   ~Reducer() noexcept(false);
 
@@ -386,6 +387,9 @@ class TORCH_API Reducer {
     // If no hook is registered, a temporary vanilla allreduce hook is used.
     c10::intrusive_ptr<at::ivalue::Future> future_work;
 
+    // if this bucket contains complex parameters
+    bool is_complex_bucket = false;
+
     // If this bucket should expect a single sparse gradient
     // If `true`, then this implies that `bucket.variables.size() == 1`.
     bool expect_sparse_gradient = false;
@@ -566,6 +570,8 @@ class TORCH_API Reducer {
   // Python reducer keeps C++ reducer initialized. To remove this flag,
   // we need to refactor the DDP wrapper's initialization.
   bool use_python_reducer_;
+
+  const std::vector<int64_t> bucket_bytes_cap_list_;
 
   // Cached bucket index to model parameter mapping. Populated after buckets
   // are rebuilt after which this mapping is static.

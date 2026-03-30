@@ -48,7 +48,8 @@ class BaseHOPTest(torch._dynamo.test_case.TestCase):
         out = f(x, y)
         self.assertEqual(out, inner(x, y))
 
-        assert len(backend.graphs) == 1
+        if len(backend.graphs) != 1:
+            raise AssertionError(f"Expected 1 graph, got {len(backend.graphs)}")
         self.assertExpectedInline(
             normalize_graph(backend.graphs[0]),
             """\
@@ -222,13 +223,13 @@ class GraphModule(torch.nn.Module):
 
             matmul: "f32[3, 3]" = l_x_ @ l_y_
             sin: "f32[3, 3]" = matmul.sin();  matmul = None
-            child: "f32[3, 3]" = sin.cos();  sin = None
+            cos: "f32[3, 3]" = sin.cos();  sin = None
 
-            child_1: "f32[3, 3]" = l_x_ + l_y_
-            child_2: "f32[3, 3]" = l_x_ - l_y_
+            add: "f32[3, 3]" = l_x_ + l_y_
+            sub: "f32[3, 3]" = l_x_ - l_y_
 
-            child_3: "f32[3, 3]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
-            return (child, child_1, child_2, child_3)
+            matmul_1: "f32[3, 3]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
+            return (cos, add, sub, matmul_1)
 """,  # noqa: B950
         )
         self.assertExpectedInline(
@@ -370,7 +371,8 @@ class <lambda>(torch.nn.Module):
         expected = torch.autograd.grad(out, x, y)
         self.assertEqual(result, expected)
 
-        assert len(backend.fw_graphs) == 1
+        if len(backend.fw_graphs) != 1:
+            raise AssertionError(f"Expected 1 fw_graph, got {len(backend.fw_graphs)}")
         self.assertExpectedInline(
             normalize_graph(backend.fw_graphs[0]),
             """\
@@ -390,7 +392,8 @@ class GraphModule(torch.nn.Module):
 """,  # NOQA: B950
         )
 
-        assert len(backend.bw_graphs) == 1
+        if len(backend.bw_graphs) != 1:
+            raise AssertionError(f"Expected 1 bw_graph, got {len(backend.bw_graphs)}")
         self.assertExpectedInline(
             normalize_graph(backend.bw_graphs[0]),
             """\

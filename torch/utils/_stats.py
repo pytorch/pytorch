@@ -4,7 +4,8 @@
 import collections
 import functools
 from collections import OrderedDict
-from typing import Callable, TypeVar
+from collections.abc import Callable
+from typing import TypeVar
 from typing_extensions import ParamSpec
 
 

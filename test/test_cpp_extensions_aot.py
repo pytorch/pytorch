@@ -148,7 +148,8 @@ class TestCppExtensionAOT(common.TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "Not available on Windows")
     def test_no_python_abi_suffix_sets_the_correct_library_name(self):
-        # For this test, run_test.py will call `python -m pip install .` in the
+        # For this test, run_test.py will call
+        # `python -m pip install . -v --no-build-isolation` in the
         # cpp_extensions/no_python_abi_suffix_test folder, where the
         # `BuildExtension` class has a `no_python_abi_suffix` option set to
         # `True`. This *should* mean that on Python 3, the produced shared
@@ -239,7 +240,8 @@ class TestPybindTypeCasters(common.TestCase):
         """
         # Verify that all functions have the same return type.
         union_type = {self.expected_return_type(f) for f in funcs}
-        assert len(union_type) == 1
+        if len(union_type) != 1:
+            raise AssertionError(f"expected 1 union type, got {len(union_type)}")
         union_type = union_type.pop()
         self.assertIs(Union, get_origin(union_type))
         # SymInt is inconvenient to test, so don't require it

@@ -5,6 +5,10 @@ pushd %SRC_DIR%\..
 if not "%CUDA_VERSION%" == "cpu" if not "%CUDA_VERSION%" == "xpu" call internal\driver_update.bat
 if errorlevel 1 exit /b 1
 
+echo "Check if CUDA and CUDNN versions need to be updated"
+call internal\cuda_install.bat
+if errorlevel 1 exit /b 1
+
 if "%CUDA_VERSION%" == "xpu" (
     call internal\xpu_install.bat
     if errorlevel 1 exit /b 1
@@ -131,13 +135,13 @@ set INCLUDE=%INCLUDE%;%install_root%\include;%install_root%\include\torch\csrc\a
 set LIB=%LIB%;%install_root%\lib
 set PATH=%PATH%;%install_root%\lib
 
-cl %PYTORCH_ROOT%\.ci\pytorch\test_example_code\simple-torch-test.cpp c10.lib torch_cpu.lib /EHsc /std:c++17
+cl %PYTORCH_ROOT%\.ci\pytorch\test_example_code\simple-torch-test.cpp c10.lib torch_cpu.lib /EHsc /std:c++20
 if ERRORLEVEL 1 exit /b 1
 
 .\simple-torch-test.exe
 if ERRORLEVEL 1 exit /b 1
 
-cl %PYTORCH_ROOT%\.ci\pytorch\test_example_code\check-torch-mkl.cpp c10.lib torch_cpu.lib /EHsc /std:c++17
+cl %PYTORCH_ROOT%\.ci\pytorch\test_example_code\check-torch-mkl.cpp c10.lib torch_cpu.lib /EHsc /std:c++20
 if ERRORLEVEL 1 exit /b 1
 
 .\check-torch-mkl.exe
@@ -148,7 +152,7 @@ if "%NVIDIA_GPU_EXISTS%" == "0" (
     goto end
 )
 
-cl %PYTORCH_ROOT%\.ci\pytorch\test_example_code\check-torch-cuda.cpp torch_cpu.lib c10.lib torch_cuda.lib /EHsc /std:c++17 /link /INCLUDE:?warp_size@cuda@at@@YAHXZ
+cl %PYTORCH_ROOT%\.ci\pytorch\test_example_code\check-torch-cuda.cpp torch_cpu.lib c10.lib torch_cuda.lib /EHsc /std:c++20 /link /INCLUDE:?warp_size@cuda@at@@YAHXZ
 .\check-torch-cuda.exe
 if ERRORLEVEL 1 exit /b 1
 

@@ -39,7 +39,8 @@ else
 fi
 
 echo "Building for Python: $desired_python Version: $build_version Build: $build_number"
-python_nodot="$(echo $desired_python | tr -d m.u)"
+python_tag="cp$(echo $desired_python | tr -d m.ut)"
+abi_tag="cp$(echo $desired_python | tr -d .)"
 
 # Version: setup.py uses $PYTORCH_BUILD_VERSION.post$PYTORCH_BUILD_NUMBER if
 # PYTORCH_BUILD_NUMBER > 1
@@ -85,7 +86,7 @@ mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR" || true
 # Create an isolated directory to store this builds pytorch checkout and conda
 # installation
 if [[ -z "$MAC_PACKAGE_WORK_DIR" ]]; then
-    MAC_PACKAGE_WORK_DIR="$(pwd)/tmp_wheel_conda_${DESIRED_PYTHON}_$(date +%H%M%S)"
+    MAC_PACKAGE_WORK_DIR="$(pwd)/tmp_wheel_${DESIRED_PYTHON}_$(date +%H%M%S)"
 fi
 mkdir -p "$MAC_PACKAGE_WORK_DIR" || true
 if [[ -n ${GITHUB_ACTIONS} ]]; then
@@ -96,11 +97,11 @@ fi
 whl_tmp_dir="${MAC_PACKAGE_WORK_DIR}/dist"
 mkdir -p "$whl_tmp_dir"
 
-mac_version='macosx_11_0_arm64'
+mac_version='macosx-11.0-arm64'
 libtorch_arch='arm64'
 
 # Create a consistent wheel package name to rename the wheel to
-wheel_filename_new="${TORCH_PACKAGE_NAME}-${build_version}${build_number_prefix}-cp${python_nodot}-none-${mac_version}.whl"
+wheel_filename_new="${TORCH_PACKAGE_NAME}-${build_version}${build_number_prefix}-${python_tag}-${abi_tag}-${mac_version//[-,.]/_}.whl"
 
 ###########################################################
 
@@ -124,94 +125,62 @@ popd
 
 export TH_BINARY_BUILD=1
 export INSTALL_TEST=0 # dont install test binaries into site-packages
-export MACOSX_DEPLOYMENT_TARGET=10.15
-export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+export MACOSX_DEPLOYMENT_TARGET=11.0
 
-SETUPTOOLS_PINNED_VERSION="==70.1.0"
-PYYAML_PINNED_VERSION="==5.3"
 EXTRA_CONDA_INSTALL_FLAGS=""
 CONDA_ENV_CREATE_FLAGS=""
-RENAME_WHEEL=true
+RENAME_WHEEL=false
+VERIFY_WHEELNAME=true
 case $desired_python in
     3.14t)
         echo "Using 3.14 deps"
-        SETUPTOOLS_PINNED_VERSION=">=70.1.0"
-        PYYAML_PINNED_VERSION=">=6.0.1"
         NUMPY_PINNED_VERSION="==2.1.0"
-        CONDA_ENV_CREATE_FLAGS="python-freethreading"
-        EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
-        desired_python="3.14.0rc1"
-        RENAME_WHEEL=false
         ;;
     3.14)
         echo "Using 3.14t deps"
-        SETUPTOOLS_PINNED_VERSION=">=70.1.0"
-        PYYAML_PINNED_VERSION=">=6.0.1"
         NUMPY_PINNED_VERSION="==2.1.0"
-        EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
-        desired_python="3.14.0rc1"
-        RENAME_WHEEL=false
         ;;
     3.13t)
-        echo "Using 3.13 deps"
-        SETUPTOOLS_PINNED_VERSION=">=70.1.0"
-        PYYAML_PINNED_VERSION=">=6.0.1"
+        echo "Using 3.13t deps"
         NUMPY_PINNED_VERSION="==2.1.0"
-        CONDA_ENV_CREATE_FLAGS="python-freethreading"
-        EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge"
-        desired_python="3.13"
-        RENAME_WHEEL=false
         ;;
     3.13)
         echo "Using 3.13 deps"
-        SETUPTOOLS_PINNED_VERSION=">=70.1.0"
-        PYYAML_PINNED_VERSION=">=6.0.1"
         NUMPY_PINNED_VERSION="==2.1.0"
         ;;
     3.12)
         echo "Using 3.12 deps"
-        SETUPTOOLS_PINNED_VERSION=">=70.1.0"
-        PYYAML_PINNED_VERSION=">=6.0.1"
         NUMPY_PINNED_VERSION="==2.0.2"
         ;;
     3.11)
         echo "Using 3.11 deps"
-        SETUPTOOLS_PINNED_VERSION=">=70.1.0"
-        PYYAML_PINNED_VERSION=">=5.3"
         NUMPY_PINNED_VERSION="==2.0.2"
         ;;
     3.10)
         echo "Using 3.10 deps"
-        SETUPTOOLS_PINNED_VERSION=">=70.1.0"
-        PYYAML_PINNED_VERSION=">=5.3"
-        NUMPY_PINNED_VERSION="==2.0.2"
-        ;;
-    3.9)
-        echo "Using 3.9 deps"
-        SETUPTOOLS_PINNED_VERSION=">=70.1.0"
-        PYYAML_PINNED_VERSION=">=5.3"
         NUMPY_PINNED_VERSION="==2.0.2"
         ;;
     *)
-        echo "Using default deps"
-        NUMPY_PINNED_VERSION="==1.11.3"
+        echo "Unsupported version $desired_python"
+        exit 1
         ;;
 esac
 
-# Install into a fresh env
-tmp_env_name="wheel_py$python_nodot"
-conda create ${EXTRA_CONDA_INSTALL_FLAGS} -yn "$tmp_env_name" python="$desired_python" ${CONDA_ENV_CREATE_FLAGS}
-source activate "$tmp_env_name"
-
 PINNED_PACKAGES=(
-    "setuptools${SETUPTOOLS_PINNED_VERSION}"
-    "pyyaml${PYYAML_PINNED_VERSION}"
     "numpy${NUMPY_PINNED_VERSION}"
 )
-retry pip install "${PINNED_PACKAGES[@]}" -r "${pytorch_rootdir}/requirements-build.txt"
-pip install requests ninja typing-extensions
-retry pip install -r "${pytorch_rootdir}/requirements.txt" || true
-retry brew install libomp
+python -mvenv ~/${desired_python}-build
+source ~/${desired_python}-build/bin/activate
+retry pip install "${PINNED_PACKAGES[@]}" -r "${pytorch_rootdir}/requirements.txt"
+
+# Use openmp from conda which supports 11.0. Otherwise we'll end up with
+# whatever version comes with homebrew which only supports the build machine's
+# OS version or higher
+if [[ -d "/opt/llvm-openmp" ]]; then
+  export OMP_PREFIX=/opt/llvm-openmp
+else
+  retry brew install libomp
+fi
 
 # For USE_DISTRIBUTED=1 on macOS, need libuv, which is build as part of tensorpipe submodule
 export USE_DISTRIBUTED=1
@@ -221,11 +190,11 @@ export USE_QNNPACK=OFF
 export BUILD_TEST=OFF
 
 pushd "$pytorch_rootdir"
-echo "Calling setup.py bdist_wheel at $(date)"
+echo "Calling -m build --wheel --no-isolation at $(date)"
 
-python setup.py bdist_wheel -d "$whl_tmp_dir"
+_PYTHON_HOST_PLATFORM=${mac_version} ARCHFLAGS="-arch arm64" python -m build --wheel --no-isolation --outdir "$whl_tmp_dir" -C--plat-name="${mac_version//[-.]/_}"
 
-echo "Finished setup.py bdist_wheel at $(date)"
+echo "Finished -m build --wheel --no-isolation at $(date)"
 
 if [[ $package_type != 'libtorch' ]]; then
     echo "delocating wheel dependencies"
@@ -248,9 +217,13 @@ if [[ -z "$BUILD_PYTHONLESS" && $RENAME_WHEEL == true  ]]; then
     # Copy the whl to a final destination before tests are run
     echo "Renaming Wheel file: $wheel_filename_gen to $wheel_filename_new"
     cp "$whl_tmp_dir/$wheel_filename_gen" "$PYTORCH_FINAL_PACKAGE_DIR/$wheel_filename_new"
-elif [[ $RENAME_WHEEL == false ]]; then
+elif [[ -z "$BUILD_PYTHONLESS" && $RENAME_WHEEL == false ]]; then
     echo "Copying Wheel file: $wheel_filename_gen to $PYTORCH_FINAL_PACKAGE_DIR"
     cp "$whl_tmp_dir/$wheel_filename_gen" "$PYTORCH_FINAL_PACKAGE_DIR/$wheel_filename_gen"
+    if [[ "$VERIFY_WHEELNAME" == "true" && "$wheel_filename_gen" != "$wheel_filename_new" ]]; then
+        echo "Got wheelname: $wheel_filename_gen. Expected: $wheel_filename_new"
+        exit 1
+    fi
 else
     pushd "$pytorch_rootdir"
 

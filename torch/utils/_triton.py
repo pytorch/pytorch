@@ -1,5 +1,6 @@
 import functools
 import hashlib
+import os
 from typing import Any
 
 
@@ -11,6 +12,17 @@ def has_triton_package() -> bool:
         return True
     except ImportError:
         return False
+
+
+@functools.cache
+def get_triton_version(fallback: tuple[int, int] = (0, 0)) -> tuple[int, int]:
+    try:
+        import triton
+
+        major, minor = tuple(int(v) for v in triton.__version__.split(".")[:2])
+        return (major, minor)
+    except ImportError:
+        return fallback
 
 
 @functools.cache
@@ -34,7 +46,12 @@ def has_triton_experimental_host_tma() -> bool:
                     create_2d_tma_descriptor,
                 )
 
-                return True
+                try:
+                    from triton.tools.experimental_descriptor import enable_in_pytorch
+
+                    return enable_in_pytorch()
+                except ImportError:
+                    return True
             except ImportError:
                 pass
 
@@ -71,7 +88,7 @@ def has_triton_tma_device() -> bool:
             torch.cuda.is_available()
             and torch.cuda.get_device_capability() >= (9, 0)
             and not torch.version.hip
-        ):
+        ) or torch.xpu.is_available():
             # old API
             try:
                 from triton.language.extra.cuda import (  # noqa: F401
@@ -94,6 +111,21 @@ def has_triton_tma_device() -> bool:
     return False
 
 
+@functools.cache
+def has_datacenter_blackwell_tma_device() -> bool:
+    import torch
+
+    if (
+        torch.cuda.is_available()
+        and torch.cuda.get_device_capability() >= (10, 0)
+        and torch.cuda.get_device_capability() < (11, 0)
+        and not torch.version.hip
+    ):
+        return has_triton_tma_device() and has_triton_tensor_descriptor_host_tma()
+
+    return False
+
+
 @functools.lru_cache(None)
 def has_triton_stable_tma_api() -> bool:
     if has_triton_package():
@@ -103,7 +135,7 @@ def has_triton_stable_tma_api() -> bool:
             torch.cuda.is_available()
             and torch.cuda.get_device_capability() >= (9, 0)
             and not torch.version.hip
-        ):
+        ) or torch.xpu.is_available():
             try:
                 from triton.language import make_tensor_descriptor  # noqa: F401
 
@@ -116,6 +148,11 @@ def has_triton_stable_tma_api() -> bool:
 @functools.cache
 def has_triton() -> bool:
     if not has_triton_package():
+        return False
+
+    from torch._inductor.config import triton_disable_device_detection
+
+    if triton_disable_device_detection:
         return False
 
     from torch._dynamo.device_interface import get_interface_for_device
@@ -155,6 +192,24 @@ def triton_backend() -> Any:
 
     target = driver.active.get_current_target()
     return make_backend(target)
+
+
+def _extern_libs_key(backend: Any) -> str:
+    """Return a cache key fragment for extern libs (e.g. libdevice.10.bc).
+
+    These files affect codegen but are not covered by triton_key() (Python
+    sources only) or backend.hash() (ptxas version and arch only).
+    """
+    opts = backend.parse_options({})
+    extern_libs = getattr(opts, "extern_libs", None)
+    if not extern_libs:
+        return ""
+    parts = []
+    for name, path in sorted(extern_libs):
+        if os.path.isfile(path):
+            with open(path, "rb") as f:
+                parts.append(f"{name}-{hashlib.sha256(f.read()).hexdigest()}")
+    return "-".join(parts)
 
 
 @functools.cache

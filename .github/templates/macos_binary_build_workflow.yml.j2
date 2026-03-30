@@ -22,6 +22,15 @@ name: !{{ build_environment }}
           echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
 {%- endmacro %}
 
+{%- macro setup_python(py_ver) -%}
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          # .4 version is min minor for 3.10, and also no-gil version of 3.13 needs at least 3.13.3
+          python-version: "!{{ py_ver.strip('t') + ('.4' if '3.14' not in py_ver else '.0') }}"
+          freethreaded: !{{ "true" if py_ver.endswith('t') else "false" }}
+{%- endmacro %}
+
 on:
 # TODO: Migrate to new ciflow trigger, reference https://github.com/pytorch/pytorch/pull/70321
   push:
@@ -61,28 +70,13 @@ jobs:
     {%- endif %}
     steps:
       !{{ set_runner_specific_vars() }}
-      - name: Install conda and dependencies
-        run: |
-          # Install conda, setup-miniconda messes with the path that messes with the ruby stuff we do later on
-          curl --retry 3 --retry-all-errors -o "${RUNNER_TEMP}/conda.sh" "https://repo.anaconda.com/miniconda/Miniconda3-py310_23.5.2-0-MacOSX-$(uname -m).sh"
-          chmod +x "${RUNNER_TEMP}/conda.sh"
-          /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
-          echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
-          if [ -d "/Applications/Xcode_14.3.1.app" ]; then
-            echo "DEVELOPER_DIR=/Applications/Xcode_14.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
-          elif [ -d "/Applications/Xcode_13.3.1.app" ]; then
-            echo "DEVELOPER_DIR=/Applications/Xcode_13.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
-          fi
-      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
+      !{{ setup_python(config.get("python_version", "3.10")) }}
+      !{{ common.checkout(deep_clone=False) }}
       - name: Populate binary env
         run: |
-          # shellcheck disable=SC1091
-          source "${RUNNER_TEMP}/anaconda/bin/activate"
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
+          "${PYTORCH_ROOT}/.ci/pytorch/binary_populate_env.sh"
       - name: Build PyTorch binary
         run: |
-          # shellcheck disable=SC1091
-          source "${RUNNER_TEMP}/anaconda/bin/activate"
           set -eux -o pipefail
           # shellcheck disable=SC1090
           source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
@@ -95,12 +89,11 @@ jobs:
           export USE_PYTORCH_METAL_EXPORT
           export USE_COREML_DELEGATE
           export TORCH_PACKAGE_NAME
+          "${PYTORCH_ROOT}/.ci/wheel/install_libomp.sh"
           "${PYTORCH_ROOT}/.ci/wheel/build_wheel.sh"
 {%- if config["package_type"] == "wheel" %}
       - name: Test PyTorch wheel
         run: |
-          # shellcheck disable=SC1091
-          source "${RUNNER_TEMP}/anaconda/bin/activate"
           set -eux -o pipefail
           # shellcheck disable=SC1090
           source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
@@ -111,33 +104,9 @@ jobs:
 
           SMOKE_TEST_PARAMS=""
 
-          EXTRA_CONDA_INSTALL_FLAGS=""
-          CONDA_ENV_CREATE_FLAGS=""
-          # shellcheck disable=SC2153
-          case $DESIRED_PYTHON in
-            3.14t)
-              CONDA_ENV_CREATE_FLAGS="python-freethreading"
-              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
-              desired_python="3.14.0rc1"
-              ;;
-            3.14)
-              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
-              desired_python="3.14.0rc1"
-              ;;
-            3.13t)
-              CONDA_ENV_CREATE_FLAGS="python-freethreading"
-              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge"
-              desired_python="3.13"
-              ;;
-            *)
-              # shellcheck disable=SC2153
-              desired_python=${DESIRED_PYTHON}
-              ;;
-          esac
-
           # shellcheck disable=SC2086
-          conda create -yn "test_conda_env" python="$desired_python" ${CONDA_ENV_CREATE_FLAGS} ${EXTRA_CONDA_INSTALL_FLAGS}
-          conda activate test_conda_env
+          python -mvenv test_venv
+          source test_venv/bin/activate
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
 
           # shellcheck disable=SC2086
@@ -151,4 +120,46 @@ jobs:
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   !{{ upload.upload_binaries(config, has_test=False, use_s3=False) }}
+{%- endfor %}
+
+{%- for lt_config in libtorch_extraction_configs %}
+  !{{ lt_config["build_name"] }}-extract:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: !{{ lt_config["source_wheel_build_name"] }}-build
+    runs-on: !{{ macos_runner }}
+    timeout-minutes: 60
+    env:
+      DESIRED_CUDA: !{{ lt_config["desired_cuda"] }}
+      LIBTORCH_VARIANT: !{{ lt_config["libtorch_variant"] }}
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          sparse-checkout: .ci/libtorch/
+          show-progress: false
+      !{{ setup_python("3.10") }}
+      - uses: actions/download-artifact@v4.1.7
+        name: Download Wheel Artifact
+        with:
+          name: !{{ lt_config["source_wheel_build_name"] }}
+          path: "${{ runner.temp }}/wheel_artifact/"
+      - name: Extract libtorch from wheel
+        run: |
+          set -eux
+          mkdir -p "${{ runner.temp }}/libtorch_output"
+          python3 .ci/libtorch/extract_libtorch_from_wheel.py \
+            --wheel-dir "${{ runner.temp }}/wheel_artifact" \
+            --output-dir "${{ runner.temp }}/libtorch_output" \
+            --platform macos \
+            --desired-cuda "$DESIRED_CUDA" \
+            --libtorch-variant "$LIBTORCH_VARIANT"
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: !{{ lt_config["build_name"] }}
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ runner.temp }}/libtorch_output/"
+  !{{ upload.upload_extracted_libtorch(lt_config, use_s3=False) }}
 {%- endfor %}

@@ -2309,7 +2309,8 @@ class TestShardedTensorFromLocalTensor(ShardedTensorTestBase):
 
         # TODO: figure out what the API should behave when some rank have no shard
         # see https://github.com/pytorch/pytorch/issues/73133
-        assert local_tensor is not None
+        if local_tensor is None:
+            raise AssertionError("Expected local_tensor to not be None")
         st = ShardedTensor._init_from_local_tensor(
             local_tensor,
             sharding_spec,
@@ -3074,7 +3075,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
                 wrong_dtype_shards, [10, 10], init_rrefs=True
             )
 
-        tensor_requires_grad = True if self.rank == 0 else False
+        tensor_requires_grad = self.rank == 0
         wrong_requires_grad_shards = [
             sharded_tensor.Shard(
                 torch.randn(
@@ -3121,7 +3122,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
                 wrong_pin_memory_local_shards, [10, 10], init_rrefs=True
             )
 
-        tensor_pin_memory = True if self.rank == 0 else False
+        tensor_pin_memory = self.rank == 0
         wrong_pin_memory_shards_cross_ranks = [
             sharded_tensor.Shard(
                 torch.randn(5, 5, pin_memory=tensor_pin_memory), local_shard_metadata

@@ -812,7 +812,7 @@ std::tuple<Tensor, Tensor> kthvalue(
   Tensor values = at::empty({0}, self.options());
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
   at::kthvalue_out(values, indices, self, k, dim, keepdim);
-  return std::make_tuple(values, indices);
+  return std::make_tuple(std::move(values), std::move(indices));
 }
 
 std::tuple<Tensor, Tensor> kthvalue(
@@ -877,7 +877,7 @@ std::tuple<Tensor, Tensor> median(
   Tensor values = at::empty({0}, self.options());
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
   at::median_out(values, indices, self, dim, keepdim);
-  return std::make_tuple(values, indices);
+  return std::make_tuple(std::move(values), std::move(indices));
 }
 
 std::tuple<Tensor, Tensor> median(
@@ -924,7 +924,7 @@ std::tuple<Tensor, Tensor> nanmedian(
   Tensor values = at::empty({0}, self.options());
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
   at::nanmedian_out(values, indices, self, dim, keepdim);
-  return std::make_tuple(values, indices);
+  return std::make_tuple(std::move(values), std::move(indices));
 }
 
 std::tuple<Tensor, Tensor> nanmedian(

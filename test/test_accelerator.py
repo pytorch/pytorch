@@ -5,16 +5,21 @@ import sys
 import unittest
 
 import torch
-from torch.testing._internal.common_utils import NoTest, run_tests, TEST_MPS, TestCase
+from torch.testing._internal.common_utils import (
+    NoTest,
+    run_tests,
+    TEST_ACCELERATOR,
+    TEST_MPS,
+    TEST_MULTIACCELERATOR,
+    TestCase,
+)
 
 
-if not torch.accelerator.is_available():
+if not TEST_ACCELERATOR:
     print("No available accelerator detected, skipping tests", file=sys.stderr)
     TestCase = NoTest  # noqa: F811
     # Skip because failing when run on cuda build with no GPU, see #150059 for example
     sys.exit()
-
-TEST_MULTIACCELERATOR = torch.accelerator.device_count() > 1
 
 
 class TestAccelerator(TestCase):
@@ -104,6 +109,21 @@ class TestAccelerator(TestCase):
         prev_stream = torch.accelerator.current_stream()
         with torch.Stream() as s:
             self.assertEqual(torch.accelerator.current_stream(), s)
+        self.assertEqual(torch.accelerator.current_stream(), prev_stream)
+
+    def test_stream_context_manager_reentrance(self):
+        prev_stream = torch.accelerator.current_stream()
+        s0 = torch.Stream()
+        with s0, s0:
+            self.assertEqual(torch.accelerator.current_stream(), s0)
+        self.assertEqual(torch.accelerator.current_stream(), prev_stream)
+        s1 = torch.Stream()
+        with s0:
+            self.assertEqual(torch.accelerator.current_stream(), s0)
+            with s1:
+                self.assertEqual(torch.accelerator.current_stream(), s1)
+                with s0:
+                    self.assertEqual(torch.accelerator.current_stream(), s0)
         self.assertEqual(torch.accelerator.current_stream(), prev_stream)
 
     @unittest.skipIf(not TEST_MULTIACCELERATOR, "only one accelerator detected")
@@ -233,6 +253,12 @@ class TestAccelerator(TestCase):
         torch.accelerator.reset_peak_memory_stats()
         self.assertEqual(torch.accelerator.max_memory_allocated(), prev_max_allocated)
         self.assertEqual(torch.accelerator.max_memory_reserved(), prev_max_reserved)
+
+    @unittest.skipIf(TEST_MPS, "MPS doesn't support torch.accelerator memory API!")
+    def test_get_memory_info(self):
+        free_bytes, total_bytes = torch.accelerator.get_memory_info()
+        self.assertGreaterEqual(free_bytes, 0)
+        self.assertGreaterEqual(total_bytes, 0)
 
 
 if __name__ == "__main__":

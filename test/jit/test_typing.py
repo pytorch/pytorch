@@ -210,7 +210,7 @@ class TestTyping(JitTestCase):
         li_1, li_2, li_3 = stuff4([True])
         li_3 = li_3[0]
         for li in [li_1, li_2, li_3]:
-            self.assertTrue(type(li[0]) == bool)
+            self.assertTrue(type(li[0]) is bool)
 
     def test_nested_list(self):
         def foo(z):
@@ -342,7 +342,7 @@ class TestTyping(JitTestCase):
             # type: (Dict[str, int]) -> Tuple[str, int]
             key_str = ""
             sum = 0
-            for key in x.keys():
+            for key in x:
                 key_str += key
             for val in x.values():
                 sum += val

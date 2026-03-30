@@ -2,7 +2,7 @@
 
 import os
 import sys
-from typing import Any, cast, Optional, Union
+from typing import Any, cast
 
 import torch
 import torch.distributed as dist
@@ -32,12 +32,18 @@ from torch.distributed.checkpoint.planner import (
 )
 from torch.distributed.checkpoint.storage import WriteResult
 from torch.futures import Future
-from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    requires_accelerator_dist_backend,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     with_comms,
 )
+
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -53,8 +59,8 @@ class TestModule(torch.nn.Module):
         super().__init__()
         self.sharded: ShardedTensor = sharded_tensor.zeros(self.spec(), 4, 4)
         self.regular = torch.nn.Parameter(torch.ones(4, 4))
-        self.extra_sharded: Optional[ShardedTensor] = None
-        self.extra_param: Optional[torch.nn.Parameter] = None
+        self.extra_sharded: ShardedTensor | None = None
+        self.extra_param: torch.nn.Parameter | None = None
         self._register_state_dict_hook(state_dict_hook)
 
     def spec(self) -> ChunkShardingSpec:
@@ -62,8 +68,8 @@ class TestModule(torch.nn.Module):
         return ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
+                f"rank:0/{device_type}:0",
+                f"rank:1/{device_type}:1",
             ],
         )
 
@@ -75,12 +81,12 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
-    @requires_nccl()
+    @requires_accelerator_dist_backend()
     def test_tensor_metadata_with_missing_rank_spec(self) -> None:
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:1/cuda:1",
+                f"rank:1/{device_type}:1",
             ],
         )
 
@@ -92,14 +98,14 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
-    @requires_nccl()
+    @requires_accelerator_dist_backend()
     def test_default_metadata(self) -> None:
-        device = f"cuda:{dist.get_rank()}"
+        device = f"{device_type}:{dist.get_rank()}"
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
+                f"rank:0/{device_type}:0",
+                f"rank:1/{device_type}:1",
             ],
         )
 
@@ -146,7 +152,7 @@ class TestStorageBase:
         self.rank = 0 if not dist.is_initialized() else dist.get_rank()
 
     def _get_ranks(self, name):
-        return self.fail_conf[name] if name in self.fail_conf else None
+        return self.fail_conf.get(name, None)
 
     def _fail_rank(self, name):
         ranks = self._get_ranks(name)
@@ -167,7 +173,7 @@ class FaultyStorageWriter(TestStorageBase, StorageWriter):
     def __init__(self, fail_conf):
         super().__init__(fail_conf)
 
-    def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
+    def reset(self, checkpoint_id: str | os.PathLike | None = None) -> None:
         return
 
     def set_up_storage_writer(
@@ -193,7 +199,7 @@ class FaultyStorageWriter(TestStorageBase, StorageWriter):
         self._fail_rank("fail_finish")
 
     @classmethod
-    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+    def validate_checkpoint_id(cls, checkpoint_id: str | os.PathLike) -> bool:
         return True
 
 
@@ -202,7 +208,7 @@ class FaultyStorageReader(TestStorageBase, StorageReader):
         super().__init__(fail_conf)
         self.metadata = metadata
 
-    def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
+    def reset(self, checkpoint_id: str | os.PathLike | None = None) -> None:
         return
 
     def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool) -> None:
@@ -225,7 +231,7 @@ class FaultyStorageReader(TestStorageBase, StorageReader):
         return self.metadata
 
     @classmethod
-    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+    def validate_checkpoint_id(cls, checkpoint_id: str | os.PathLike) -> bool:
         return True
 
 
@@ -233,12 +239,14 @@ class TestDistributedFailure(ShardedTensorTestBase):
     def get_spec(self):
         return ChunkShardingSpec(
             dim=0,
-            placements=[f"rank:{r}/cuda:{r}" for r in range(dist.get_world_size())],
+            placements=[
+                f"rank:{r}/{device_type}:{r}" for r in range(dist.get_world_size())
+            ],
         )
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
-    @requires_nccl()
+    @requires_accelerator_dist_backend()
     def test_dummy_writer_works(self) -> None:
         state_dict = {
             "sharded": sharded_tensor.rand(self.get_spec(), 20, 20),
@@ -250,7 +258,7 @@ class TestDistributedFailure(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
-    @requires_nccl()
+    @requires_accelerator_dist_backend()
     def test_dummy_reader_works(self) -> None:
         state_dict = {
             "sharded": sharded_tensor.rand(self.get_spec(), 20, 20),
@@ -313,7 +321,7 @@ class TestDistributedFailure(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
+    @requires_accelerator_dist_backend()
     def test_save_error_handling(self) -> None:
         state_dict = {
             "sharded": sharded_tensor.rand(self.get_spec(), 20, 20),
@@ -347,7 +355,7 @@ class TestDistributedFailure(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
+    @requires_accelerator_dist_backend()
     def test_load_error_handling(self) -> None:
         state_dict = {
             "sharded": sharded_tensor.rand(self.get_spec(), 20, 20),

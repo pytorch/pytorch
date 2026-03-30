@@ -7,18 +7,19 @@ import os
 import re
 import sys
 import textwrap
-from dataclasses import fields, is_dataclass
+from dataclasses import is_dataclass
 from enum import auto, Enum
 from pathlib import Path
-from typing import Any, Callable, Generic, Literal, NoReturn, TYPE_CHECKING, TypeVar
-from typing_extensions import assert_never, deprecated, Self
+from pprint import pformat
+from typing import Any, Generic, TYPE_CHECKING, TypeVar
+from typing_extensions import assert_never, Self
 
 from torchgen.code_template import CodeTemplate
 
 
 if TYPE_CHECKING:
     from argparse import Namespace
-    from collections.abc import Iterable, Iterator, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Sequence
 
 
 TORCHGEN_ROOT = Path(__file__).absolute().parent
@@ -97,15 +98,6 @@ def context(msg_fn: Callable[[], str]) -> Iterator[None]:
         raise
 
 
-if TYPE_CHECKING:
-    # A little trick from https://github.com/python/mypy/issues/6366
-    # for getting mypy to do exhaustiveness checking
-    # TODO: put this somewhere else, maybe
-    @deprecated("Use typing_extensions.assert_never instead")
-    def assert_never(x: NoReturn) -> NoReturn:  # type: ignore[misc] # noqa: F811
-        raise AssertionError(f"Unhandled type: {type(x).__name__}")
-
-
 @functools.cache
 def _read_template(template_fn: str) -> CodeTemplate:
     return CodeTemplate.from_file(template_fn)
@@ -154,9 +146,8 @@ class FileManager:
         template_fn: str | Path,
         env_callable: Callable[[], str | dict[str, Any]],
     ) -> str:
-        assert not Path(template_fn).is_absolute(), (
-            f"template_fn must be relative: {template_fn}"
-        )
+        if Path(template_fn).is_absolute():
+            raise AssertionError(f"template_fn must be relative: {template_fn}")
         template_path = self.template_dir / template_fn
         env = env_callable()
         if isinstance(env, dict):
@@ -210,9 +201,11 @@ class FileManager:
         env_callable: Callable[[], str | dict[str, Any]],
     ) -> None:
         filename = Path(filename)
-        assert not filename.is_absolute(), f"filename must be relative: {filename}"
+        if filename.is_absolute():
+            raise AssertionError(f"filename must be relative: {filename}")
         file = self.install_dir / filename
-        assert file not in self.files, f"duplicate file write {file}"
+        if file in self.files:
+            raise AssertionError(f"duplicate file write {file}")
         self.files.add(file)
         if not self.dry_run:
             substitute_out = self.substitute_with_template(
@@ -263,7 +256,8 @@ class FileManager:
         sharded_keys: set[str],
     ) -> None:
         file = Path(filename)
-        assert not file.is_absolute(), f"filename must be relative: {filename}"
+        if file.is_absolute():
+            raise AssertionError(f"filename must be relative: {filename}")
         everything: dict[str, Any] = {"shard_id": "Everything"}
         shards: list[dict[str, Any]] = [
             {"shard_id": f"_{i}"} for i in range(num_shards)
@@ -277,16 +271,16 @@ class FileManager:
         for key in sharded_keys:
             for shard in all_shards:
                 if key in shard:
-                    assert isinstance(shard[key], list), (
-                        "sharded keys in base_env must be a list"
-                    )
+                    if not isinstance(shard[key], list):
+                        raise AssertionError("sharded keys in base_env must be a list")
                     shard[key] = shard[key].copy()
                 else:
                     shard[key] = []
 
         def merge_env(into: dict[str, list[str]], from_: dict[str, list[str]]) -> None:
             for k, v in from_.items():
-                assert k in sharded_keys, f"undeclared sharded key {k}"
+                if k not in sharded_keys:
+                    raise AssertionError(f"undeclared sharded key {k}")
                 into[k] += v
 
         if self.dry_run:
@@ -354,48 +348,7 @@ def dataclass_repr(
     indent: int = 0,
     width: int = 80,
 ) -> str:
-    # built-in pprint module support dataclasses from python 3.10
-    if sys.version_info >= (3, 10):
-        from pprint import pformat
-
-        return pformat(obj, indent, width)
-
-    return _pformat(obj, indent=indent, width=width)
-
-
-def _pformat(
-    obj: Any,
-    indent: int,
-    width: int,
-    curr_indent: int = 0,
-) -> str:
-    assert is_dataclass(obj), f"obj should be a dataclass, received: {type(obj)}"
-
-    class_name = obj.__class__.__name__
-    # update current indentation level with class name
-    curr_indent += len(class_name) + 1
-
-    fields_list = [(f.name, getattr(obj, f.name)) for f in fields(obj) if f.repr]
-
-    fields_str = []
-    for name, attr in fields_list:
-        # update the current indent level with the field name
-        # dict, list, set and tuple also add indent as done in pprint
-        _curr_indent = curr_indent + len(name) + 1
-        if is_dataclass(attr):
-            str_repr = _pformat(attr, indent, width, _curr_indent)
-        elif isinstance(attr, dict):
-            str_repr = _format_dict(attr, indent, width, _curr_indent)
-        elif isinstance(attr, (list, set, tuple)):
-            str_repr = _format_list(attr, indent, width, _curr_indent)
-        else:
-            str_repr = repr(attr)
-
-        fields_str.append(f"{name}={str_repr}")
-
-    indent_str = curr_indent * " "
-    body = f",\n{indent_str}".join(fields_str)
-    return f"{class_name}({body})"
+    return pformat(obj, indent, width)
 
 
 def _format_dict(
@@ -409,7 +362,7 @@ def _format_dict(
     for k, v in attr.items():
         k_repr = repr(k)
         v_str = (
-            _pformat(v, indent, width, curr_indent + len(k_repr))
+            pformat(v, indent, width, curr_indent + len(k_repr))
             if is_dataclass(v)
             else repr(v)
         )
@@ -426,7 +379,7 @@ def _format_list(
 ) -> str:
     curr_indent += indent + 1
     list_repr = [
-        _pformat(l, indent, width, curr_indent) if is_dataclass(l) else repr(l)
+        pformat(l, indent, width, curr_indent) if is_dataclass(l) else repr(l)
         for l in attr
     ]
     start, end = ("[", "]") if isinstance(attr, list) else ("(", ")")
@@ -474,9 +427,11 @@ class NamespaceHelper:
     ) -> None:
         # cpp_namespace can be a colon joined string such as torch::lazy
         cpp_namespaces = namespace_str.split("::")
-        assert len(cpp_namespaces) <= max_level, (
-            f"Codegen doesn't support more than {max_level} level(s) of custom namespace. Got {namespace_str}."
-        )
+        if len(cpp_namespaces) > max_level:
+            raise AssertionError(
+                f"Codegen doesn't support more than {max_level} level(s) of "
+                f"custom namespace. Got {namespace_str}."
+            )
         self.cpp_namespace_ = namespace_str
         self.prologue_ = "\n".join([f"namespace {n} {{" for n in cpp_namespaces])
         self.epilogue_ = "\n".join(
@@ -522,7 +477,7 @@ class NamespaceHelper:
 
 
 class OrderedSet(Generic[T]):
-    storage: dict[T, Literal[None]]
+    storage: dict[T, None]
 
     def __init__(self, iterable: Iterable[T] | None = None) -> None:
         if iterable is None:

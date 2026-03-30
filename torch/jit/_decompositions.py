@@ -6,7 +6,8 @@ from torch import Tensor
 aten = torch.ops.aten
 import inspect
 import warnings
-from typing import Callable, Optional, TypeVar
+from collections.abc import Callable
+from typing import TypeVar
 from typing_extensions import ParamSpec
 
 from torch.types import Number
@@ -19,17 +20,17 @@ _T = TypeVar("_T")
 _P = ParamSpec("_P")
 
 
-def check_decomposition_has_type_annotations(f):
+def check_decomposition_has_type_annotations(f) -> None:
     inspect_empty = inspect._empty  # type: ignore[attr-defined]
     sig = inspect.signature(f)
     for param in sig.parameters.values():
-        assert param.annotation != inspect_empty, (
-            f"No signature on param {param.name} for function {f.name}"
-        )
+        if param.annotation == inspect_empty:
+            raise AssertionError(
+                f"No signature on param {param.name} for function {f.name}"
+            )
 
-    assert sig.return_annotation != inspect_empty, (
-        f"No return annotation for function {f.name}"
-    )
+    if sig.return_annotation == inspect_empty:
+        raise AssertionError(f"No return annotation for function {f.name}")
 
 
 def signatures_match(decomposition_sig, torch_op_sig):
@@ -47,7 +48,9 @@ def signatures_match(decomposition_sig, torch_op_sig):
         inspect_empty = inspect._empty  # type: ignore[attr-defined]
         for field in ["name", "annotation"]:
             if field == "name" and decomp_param.name == "self":
-                warnings.warn("PyTorch uses 'input' instead of 'self' on public api")
+                warnings.warn(
+                    "PyTorch uses 'input' instead of 'self' on public api", stacklevel=2
+                )
 
             if getattr(decomp_param, field) != getattr(op_param, field):
                 return False
@@ -65,19 +68,21 @@ def signatures_match(decomposition_sig, torch_op_sig):
 
 def register_decomposition(
     aten_op: torch._ops.OpOverload,
-    registry: Optional[dict[str, torch.jit.ScriptFunction]] = None,
+    registry: dict[str, torch.jit.ScriptFunction] | None = None,
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     def decomposition_decorator(f: Callable[_P, _T]) -> Callable[_P, _T]:
         nonlocal registry
         if registry is None:
             registry = decomposition_table
 
-        assert isinstance(aten_op, torch._ops.OpOverload)
+        if not isinstance(aten_op, torch._ops.OpOverload):
+            raise AssertionError(
+                f"Expected aten_op to be OpOverload, got {type(aten_op)}"
+            )
 
         # Need unique name for jit function serialization
-        assert f.__name__ not in function_name_set, (
-            f"Duplicated function name {f.__name__}"
-        )
+        if f.__name__ in function_name_set:
+            raise AssertionError(f"Duplicated function name {f.__name__}")
         function_name_set.add(f.__name__)
 
         scripted_func = torch.jit.script(f)
@@ -99,8 +104,8 @@ def register_decomposition(
 @register_decomposition(aten.var.correction)
 def var_decomposition(
     input: Tensor,
-    dim: Optional[list[int]] = None,
-    correction: Optional[Number] = None,
+    dim: list[int] | None = None,
+    correction: Number | None = None,
     keepdim: bool = False,
 ) -> Tensor:
     if dim is None:
@@ -129,6 +134,7 @@ def var_decomposition(
         else:
             raise RuntimeError("correction must be int or float")
 
+    # pyrefly: ignore [no-matching-overload]
     return sum / max(0, denom)
 
 

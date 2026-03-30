@@ -85,7 +85,7 @@ class WeightOnlyInt8QuantHandler:
                 cur_state_dict[f"{fqn}.weight"] = int8_weight
                 cur_state_dict[f"{fqn}.scales"] = scales.to(mod.weight.dtype)
             elif isinstance(mod, ConditionalFeedForward):
-                for weight_idx in range(0, 3):
+                for weight_idx in range(3):
                     weight_name = f"w{weight_idx + 1}"
                     scales_name = f"scales{weight_idx + 1}"
                     weight = getattr(mod, weight_name)
@@ -131,7 +131,8 @@ class WeightOnlyInt8Linear(torch.nn.Module):
         dtype=None,
         target_dtype=None,
     ) -> None:
-        assert target_dtype is not None
+        if target_dtype is None:
+            raise AssertionError("target_dtype must not be None")
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features

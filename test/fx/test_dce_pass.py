@@ -1,7 +1,6 @@
 # Owner(s): ["module: fx"]
 import copy
 import unittest
-from typing import Optional
 
 import torch
 import torch.fx
@@ -42,7 +41,7 @@ class TestDCE(TestCase):
         self,
         m: torch.nn.Module,
         expect_dce_changes: bool,
-        modules_to_be_leafs: Optional[set[type]] = None,
+        modules_to_be_leafs: set[type] | None = None,
         custom: bool = False,
     ):
         class TestTracer(torch.fx.Tracer):
@@ -338,8 +337,6 @@ class TestDCE(TestCase):
         Test that DCE doesn't remote collective ops even the results are not used.
         """
 
-        from torch.testing._internal.distributed.fake_pg import FakeStore
-
         class TestModule(torch.nn.Module):
             def forward(
                 self, a: torch.Tensor, b: torch.Tensor, c: torch.Tensor
@@ -354,7 +351,6 @@ class TestDCE(TestCase):
             backend="fake",
             world_size=2,
             rank=0,
-            store=FakeStore(),
         )
         # collective nodes should not be removed because they have side effects.
         self._run_dce_and_test(TestModule(), expect_dce_changes=False, custom=False)
@@ -365,8 +361,6 @@ class TestDCE(TestCase):
         """
         Test that DCE doesn't remote collective ops (no overload version) even the results are not used.
         """
-
-        from torch.testing._internal.distributed.fake_pg import FakeStore
 
         class TestModule(torch.nn.Module):
             def forward(
@@ -382,7 +376,6 @@ class TestDCE(TestCase):
             backend="fake",
             world_size=2,
             rank=0,
-            store=FakeStore(),
         )
         # collective nodes should not be removed because they have side effects.
         self._run_dce_and_test(TestModule(), expect_dce_changes=False, custom=False)

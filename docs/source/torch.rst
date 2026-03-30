@@ -146,7 +146,7 @@ Indexing, Slicing, Joining, Mutating Ops
 Accelerators
 ----------------------------------
 Within the PyTorch repo, we define an "Accelerator" as a :class:`torch.device` that is being used
-alongside a CPU to speed up computation. These device use an asynchronous execution scheme,
+alongside a CPU to speed up computation. These devices use an asynchronous execution scheme,
 using :class:`torch.Stream` and :class:`torch.Event` as their main way to perform synchronization.
 We also assume that only one such accelerator can be available at once on a given host. This allows
 us to use the current accelerator as the default device for relevant concepts such as pinned memory,
@@ -320,8 +320,10 @@ Constants
 ~~~~~~~~~~~~~~~~~~~~~~
 
 ======================================= ===========================================
+``e``                                       Euler's number, the base of natural logarithms (~2.7183). Alias for :attr:`math.e`.
 ``inf``                                     A floating-point positive infinity. Alias for :attr:`math.inf`.
 ``nan``                                     A floating-point "not a number" value. This value is not a legal number. Alias for :attr:`math.nan`.
+``pi``                                      The ratio of a circle's circumference to its diameter (~3.1416). Alias for :attr:`math.pi`.
 ======================================= ===========================================
 
 Pointwise Ops
@@ -731,6 +733,7 @@ Utilities
     is_warn_always_enabled
     vmap
     _assert
+    typename
 
 Symbolic Numbers
 ----------------
@@ -754,6 +757,7 @@ Symbolic Numbers
     sym_min
     sym_not
     sym_ite
+    sym_sqrt
     sym_sum
 
 Export Path
@@ -788,7 +792,7 @@ Optimizations
 
     compile
 
-`torch.compile documentation <https://pytorch.org/docs/main/torch.compiler.html>`__
+`torch.compile documentation <https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler.html>`__
 
 Operator Tags
 ------------------------------------
@@ -815,6 +819,10 @@ Operator Tags
 .. py:module:: torch.torch_version
 .. py:module:: torch.types
 .. py:module:: torch.version
+
+.. Compiler configuration module - documented in torch.compiler.config.md
+.. py:module:: torch.compiler.config
+   :noindex:
 
 .. Hidden aliases (e.g. torch.functional.broadcast_tensors()). We want `torch.broadcast_tensors()` to
    be visible only.

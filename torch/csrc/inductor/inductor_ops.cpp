@@ -8,8 +8,6 @@
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/library.h>
 
-#include <ATen/FunctionalTensorWrapper.h>
-
 namespace torch::inductor {
 using namespace at;
 
@@ -107,6 +105,13 @@ TORCH_LIBRARY_FRAGMENT(inductor, m) {
   m.def(
       "accumulate_grad_(Tensor variable, Tensor new_grad) -> ()",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, accumulate_grad_),
+      {at::Tag::pt2_compliant_tag});
+}
+
+TORCH_LIBRARY_FRAGMENT(inductor_prims, m) {
+  m.def(
+      "inductor_reserve_rng_state(Generator? generator, SymInt increment) "
+      "-> (Tensor, Tensor, Tensor)",
       {at::Tag::pt2_compliant_tag});
 }
 

@@ -37,11 +37,12 @@ class ConcaterMapDataPipe(MapDataPipe):
 
     datapipes: tuple[MapDataPipe]
 
-    def __init__(self, *datapipes: MapDataPipe):
+    def __init__(self, *datapipes: MapDataPipe) -> None:
         if len(datapipes) == 0:
             raise ValueError("Expected at least one DataPipe, but got nothing")
         if not all(isinstance(dp, MapDataPipe) for dp in datapipes):
             raise TypeError("Expected all inputs to be `MapDataPipe`")
+        # pyrefly: ignore [unsafe-overlap]
         if not all(isinstance(dp, Sized) for dp in datapipes):
             raise TypeError("Expected all inputs to be `Sized`")
         self.datapipes = datapipes  # type: ignore[assignment]
@@ -49,13 +50,16 @@ class ConcaterMapDataPipe(MapDataPipe):
     def __getitem__(self, index) -> _T_co:  # type: ignore[type-var]
         offset = 0
         for dp in self.datapipes:
+            # pyrefly: ignore [bad-argument-type]
             if index - offset < len(dp):
                 return dp[index - offset]
             else:
+                # pyrefly: ignore [bad-argument-type]
                 offset += len(dp)
         raise IndexError(f"Index {index} is out of range.")
 
     def __len__(self) -> int:
+        # pyrefly: ignore [bad-argument-type]
         return sum(len(dp) for dp in self.datapipes)
 
 
@@ -86,6 +90,7 @@ class ZipperMapDataPipe(MapDataPipe[tuple[_T_co, ...]]):
             raise ValueError("Expected at least one DataPipe, but got nothing")
         if not all(isinstance(dp, MapDataPipe) for dp in datapipes):
             raise TypeError("Expected all inputs to be `MapDataPipe`")
+        # pyrefly: ignore [unsafe-overlap]
         if not all(isinstance(dp, Sized) for dp in datapipes):
             raise TypeError("Expected all inputs to be `Sized`")
         self.datapipes = datapipes
@@ -102,4 +107,5 @@ class ZipperMapDataPipe(MapDataPipe[tuple[_T_co, ...]]):
         return tuple(res)
 
     def __len__(self) -> int:
+        # pyrefly: ignore [bad-argument-type]
         return min(len(dp) for dp in self.datapipes)

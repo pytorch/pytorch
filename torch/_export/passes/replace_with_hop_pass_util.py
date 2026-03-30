@@ -4,7 +4,7 @@ from __future__ import annotations
 import contextlib
 import copy
 import operator
-from typing import Callable, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -12,6 +12,8 @@ from ..utils import node_replace_, nodes_map
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torch._ops import HigherOrderOperator
     from torch.export.graph_signature import ExportGraphSignature
 
@@ -22,9 +24,11 @@ def _replace_with_hop_helper(
     wrap_hoo: HigherOrderOperator,
 ) -> None:
     graph: torch.fx.Graph = node.graph
-    assert graph.owning_module is not None
+    if graph.owning_module is None:
+        raise AssertionError("graph.owning_module must not be None")
     gm: torch.fx.GraphModule = graph.owning_module
-    assert isinstance(node.target, str)
+    if not isinstance(node.target, str):
+        raise AssertionError(f"expected str target, got {type(node.target)}")
     sub_gm = getattr(gm, node.target)
 
     def set_hoo_node_meta(call_func_node):
@@ -33,6 +37,7 @@ def _replace_with_hop_helper(
         )
         call_func_node.meta["torch_fn"] = (
             f"{wrap_hoo.__name__}",
+            # pyrefly: ignore [missing-attribute]
             f"{wrap_hoo.__class__.__name__}.{wrap_hoo.__name__}",
         )
         if isinstance(output_args, (tuple, list)):
@@ -53,7 +58,10 @@ def _replace_with_hop_helper(
         if isinstance(output_node, torch.fx.Node) and output_node.op != "output":
             output_node = None
         if output_node is not None:
-            assert len(output_node.args) == 1
+            if len(output_node.args) != 1:
+                raise AssertionError(
+                    f"expected 1 output arg, got {len(output_node.args)}"
+                )
             output_args = output_node.args[0]
             enter_block_node_args = enter_block_node.args
             if isinstance(output_args, (tuple, list)):
@@ -68,7 +76,7 @@ def _replace_with_hop_helper(
 
                 # Rename the name of getitem nodes to the actual name of its contents
                 # for passing verifier and better readability, also propagate metadata
-                for get_item_node in call_func_node.users.keys():
+                for get_item_node in call_func_node.users:
                     idx: int = get_item_node.args[1]  # type: ignore[assignment]
                     output_node = output_args[idx]
                     get_item_node._rename(output_node.name)
@@ -106,9 +114,9 @@ def _replace_with_hop_helper(
 
 def _sequential_split_and_maybe_inline_subgraphs_helper(
     new_gm: torch.fx.GraphModule,
-    graph_signature: Optional[ExportGraphSignature],
+    graph_signature: ExportGraphSignature | None,
     maybe_inline_or_replace_with_hop: Callable[[torch.fx.Node], None],
-) -> tuple[torch.fx.GraphModule, Optional[ExportGraphSignature]]:
+) -> tuple[torch.fx.GraphModule, ExportGraphSignature | None]:
     """
     Helper function for replacing graph nodse with higher order nodes.
     For each subgraph in `new_gm`, decides whether to construct a HOO subgraph, or inline the calls
@@ -124,14 +132,21 @@ def _sequential_split_and_maybe_inline_subgraphs_helper(
         # against accidental mutation to original graph_signature.
         new_signature = copy.copy(graph_signature)
         new_gm_out_node = next(reversed(new_gm.graph.find_nodes(op="output")))
-        assert new_gm_out_node.op == "output" and len(new_gm_out_node.args[0]) == len(
+        if new_gm_out_node.op != "output" or len(new_gm_out_node.args[0]) != len(
             new_signature.output_specs
-        )
+        ):
+            raise AssertionError(
+                f"output node mismatch: {new_gm_out_node.op}, "
+                f"{len(new_gm_out_node.args[0])} vs {len(new_signature.output_specs)}"
+            )
         for arg_node, out_spec in zip(
             new_gm_out_node.args[0], new_signature.output_specs
         ):
             if arg_node is None:
-                assert out_spec.arg.value is None  # type: ignore[union-attr]
+                if out_spec.arg.value is not None:  # type: ignore[union-attr]
+                    raise AssertionError(
+                        f"expected None out_spec.arg.value, got {out_spec.arg.value}"  # type: ignore[union-attr]
+                    )
             elif (
                 isinstance(arg_node, torch.fx.Node)
                 and out_spec.arg.name != arg_node.name
@@ -156,12 +171,12 @@ def _sequential_split_and_maybe_inline_subgraphs_helper(
 
 def _replace_with_hop_pass_helper(
     gm: torch.fx.GraphModule,
-    graph_signature: Optional[ExportGraphSignature],
+    graph_signature: ExportGraphSignature | None,
     sequential_split_and_maybe_inline_subgraphs: Callable[
-        [torch.fx.GraphModule, Optional[ExportGraphSignature]],
-        tuple[torch.fx.GraphModule, Optional[ExportGraphSignature]],
+        [torch.fx.GraphModule, ExportGraphSignature | None],
+        tuple[torch.fx.GraphModule, ExportGraphSignature | None],
     ],
-) -> tuple[torch.fx.GraphModule, Optional[ExportGraphSignature]]:
+) -> tuple[torch.fx.GraphModule, ExportGraphSignature | None]:
     """
     Split gm into sub-graph-modules using `sequential_split_and_maybe_inline_subgraphs`, and
     then recursively call itself on each of the submodules.

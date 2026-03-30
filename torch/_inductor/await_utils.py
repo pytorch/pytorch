@@ -2,10 +2,10 @@ import asyncio
 import sys
 import weakref
 from asyncio import AbstractEventLoop, Future
-from collections.abc import Awaitable, Coroutine, Generator, Iterator
+from collections.abc import Awaitable, Callable, Coroutine, Generator, Iterator
 from contextlib import contextmanager, ExitStack
 from contextvars import Context
-from typing import Any, Callable, Optional, Protocol, TypeVar
+from typing import Any, Protocol, TypeVar
 
 from torch.utils._ordered_set import OrderedSet
 
@@ -81,7 +81,7 @@ def get_loop(
 
 @contextmanager
 def _new_loop(
-    task_factory: Optional[TaskFactoryType] = None,
+    task_factory: TaskFactoryType | None = None,
 ) -> Iterator[asyncio.AbstractEventLoop]:
     loop = asyncio.new_event_loop()
     tasks = _patch_loop(loop)
@@ -114,6 +114,7 @@ def _cancel_all_tasks(
     for task in to_cancel:
         task.cancel()
 
+    # pyrefly: ignore [bad-argument-type]
     loop.run_until_complete(asyncio.gather(*to_cancel, return_exceptions=True))
 
     for task in to_cancel:
@@ -132,12 +133,12 @@ def _cancel_all_tasks(
 def _patch_loop(loop: AbstractEventLoop) -> OrderedSet[Future]:  # type: ignore[type-arg]
     tasks: weakref.WeakSet[Future] = weakref.WeakSet()  # type: ignore[type-arg]
 
-    task_factories: list[Optional[TaskFactoryType]] = [None]
+    task_factories: list[TaskFactoryType | None] = [None]
 
-    def _set_task_factory(factory: Optional[TaskFactoryType]) -> None:
+    def _set_task_factory(factory: TaskFactoryType | None) -> None:
         task_factories[0] = factory
 
-    def _get_task_factory() -> Optional[TaskFactoryType]:
+    def _get_task_factory() -> TaskFactoryType | None:
         return task_factories[0]
 
     def _safe_task_factory(
@@ -149,6 +150,7 @@ def _patch_loop(loop: AbstractEventLoop) -> OrderedSet[Future]:  # type: ignore[
         task_factory = task_factories[0]
         if task_factory is None:
             if sys.version_info >= (3, 11):
+                # pyrefly: ignore [bad-argument-type]
                 task = asyncio.Task(coro, loop=loop, context=context)
             else:
                 task = asyncio.Task(coro, loop=loop)

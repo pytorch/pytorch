@@ -4,10 +4,12 @@ import copy
 import csv
 import logging
 import os
+from unittest.mock import MagicMock, patch
 
 from model_registry import MultiMLP
 
 import torch
+from torch._dynamo import OptimizedModule
 from torch.distributed.pipelining import (
     Schedule1F1B,
     ScheduleDualPipeV,
@@ -20,8 +22,10 @@ from torch.distributed.pipelining import (
 from torch.distributed.pipelining._utils import generate_stage_to_rank_mapping
 from torch.distributed.pipelining.schedules import (
     _Action,
+    _add_reduce_grad,
     _add_send_recv,
     _add_unshard_reshard,
+    _batch_p2p,
     _format_pipeline_order,
     _merge_bw,
     _PipelineSchedule,
@@ -53,7 +57,11 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 
 ARTIFACTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifacts")
 
-device = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device = (
+    acc.type
+    if (acc := torch.accelerator.current_accelerator(check_available=True))
+    else "cpu"
+)
 logger = logging.getLogger(__name__)
 torch.manual_seed(0)
 
@@ -65,7 +73,7 @@ class MockPipelineStage(_PipelineStageBase):
         self.num_stages = kwargs.get("num_stages", 1)
         self.group_size = kwargs.get("group_size", 1)
         self.group_rank = kwargs.get("group_rank", 0)
-        self.group = kwargs.get("group", None)
+        self.group = kwargs.get("group")
 
     def _create_grad_recv_info(self, *args, **kwargs):
         return None
@@ -202,7 +210,71 @@ class ScheduleTest(TestCase):
 
         torch.distributed.destroy_process_group()
 
-    def test_zero_bubble_schedule_errors_with_compile(self):
+    @parametrize(
+        "ScheduleClass",
+        [
+            Schedule1F1B,
+            ScheduleGPipe,
+            ScheduleInterleaved1F1B,
+            ScheduleInterleavedZeroBubble,
+            ScheduleLoopedBFS,
+        ],
+    )
+    def test_schedule_eval_then_train(self, ScheduleClass):
+        """
+        Test that simply runs evaluation followed by training.
+        """
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=1, store=store
+        )
+        d_hid, batch_size = 512, 256
+        n_stages = 1
+        device = "cpu"
+        full_mod = MultiMLP(d_hid, n_layers=n_stages)
+        full_mod.to(device)
+
+        x = torch.randn(batch_size, d_hid, device=device)
+        target = torch.randn(batch_size, d_hid, device=device)
+
+        def loss_fn(y, target):
+            return torch.nn.functional.cross_entropy(y, target)
+
+        submod_name = "layers.0"
+        stage_module = full_mod.get_submodule(submod_name)
+
+        # Create a pipeline stage to wrap that submodule
+        num_microbatches = 2
+        stages = [PipelineStage(stage_module, 0, n_stages, device)]
+
+        if issubclass(ScheduleClass, PipelineScheduleSingle):
+            stages = stages[0]
+
+        # Attach to a schedule
+        schedule = ScheduleClass(stages, num_microbatches, loss_fn=loss_fn)
+        # Run eval
+        for _ in range(2):
+            # Zero gradients
+            stage_module.zero_grad()
+            losses = []
+            schedule.eval(x, target=target, losses=losses)
+        # Run training
+        try:
+            for _ in range(2):
+                losses = []
+                schedule.step(x, target=target, losses=losses)
+        finally:
+            torch.distributed.destroy_process_group()
+
+    @parametrize(
+        "ScheduleClass",
+        [
+            ScheduleInterleavedZeroBubble,
+            ScheduleZBVZeroBubble,
+            ScheduleDualPipeV,
+        ],
+    )
+    def test_zero_bubble_schedule_errors_with_compile(self, ScheduleClass):
         """
         Test that zero bubble schedules raise an error when used with torch.compile.
         """
@@ -215,16 +287,18 @@ class ScheduleTest(TestCase):
         model = MultiMLP(8, n_layers=n_stages)
         # full_mod
         compiled_model = torch.compile(model)
+        self.assertTrue(isinstance(compiled_model, OptimizedModule))
         stage = PipelineStage(
             compiled_model,
             0,
             n_stages,
             device,
         )
-        with self.assertRaises(RuntimeError):
-            ScheduleInterleavedZeroBubble([stage], 2)
-
-        torch.distributed.destroy_process_group()
+        try:
+            with self.assertRaises(RuntimeError):
+                ScheduleClass([stage], 2)
+        finally:
+            torch.distributed.destroy_process_group()
 
 
 instantiate_parametrized_tests(ScheduleTest)
@@ -469,6 +543,23 @@ class TestScheduleLowering(TestCase):
                 "compute": ["0F0", "0F1", "   ", "0B0", "0B1"],
                 "comms": ["0UNSHARD", "0F0", "0F1", "0B0", "0B1", "0RESHARD"],
             },
+            {
+                "compute": ["0F0", "0F1", "1F0", "1F1", "1B0", "1B1", "0B0", "0B1"],
+                "comms": [
+                    "0UNSHARD",
+                    "1UNSHARD",
+                    "0F0",
+                    "0F1",
+                    "1F0",
+                    "1F1",
+                    "1B0",
+                    "1B1",
+                    "1RESHARD",
+                    "0B0",
+                    "0B1",
+                    "0RESHARD",
+                ],
+            },
         ],
     )
     def test_unshard_reshard(self, test_info):
@@ -481,6 +572,45 @@ class TestScheduleLowering(TestCase):
 
         comms_sch = _add_unshard_reshard(compute_sch)
         for expected, actual in zip(expected_comms_sch, comms_sch):
+            self.assertEqual(
+                expected,
+                actual,
+                (
+                    f"Mismatch: expected action {expected} but found {actual}."
+                    f"\nWhole Schedule: {comms_sch}"
+                ),
+            )
+
+    @parametrize(
+        "test_info",
+        [
+            {
+                "compute": ["0F0", "0F1", "   ", "0B0", "0B1"],
+                "comms": ["0F0", "0F1", "0B0", "0B1", "0REDUCE_GRAD"],
+            },
+            {
+                "compute": ["0F0", "0F1", "1F0", "1F1", "1B0", "1B1", "0B0", "0B1"],
+                "comms": [
+                    "0F0",
+                    "0F1",
+                    "1F0",
+                    "1F1",
+                    "1B0",
+                    "1B1",
+                    "1REDUCE_GRAD",
+                    "0B0",
+                    "0B1",
+                    "0REDUCE_GRAD",
+                ],
+            },
+        ],
+    )
+    def test_reduce_grad(self, test_info):
+        compute_sch = self._parse_actions(test_info["compute"])
+        expected_comms_sch = self._parse_actions(test_info["comms"])
+
+        comms_sch = _add_reduce_grad(compute_sch, 2)
+        for expected, actual in zip(expected_comms_sch, comms_sch, strict=True):
             self.assertEqual(
                 expected,
                 actual,
@@ -913,6 +1043,7 @@ class TestScheduleLowering(TestCase):
             stages,
             num_microbatches,
             loss_fn=loss_fn,
+            scale_grads=False,
         )
         schedule._prepare_schedule_with_comms(
             {
@@ -1077,6 +1208,73 @@ class ScheduleUtilTests(TestCase):
 
 
 instantiate_parametrized_tests(TestScheduleLowering)
+
+
+class TestBatchP2P(TestCase):
+    """Tests that _batch_p2p dispatches homogeneous ops individually to avoid
+    head-of-line blocking, while still batching mixed ops for deadlock avoidance."""
+
+    def _make_p2p_op(self, op, group_peer=0):
+        p = MagicMock()
+        p.op = op
+        p.tensor = torch.zeros(1)
+        p.group = MagicMock()
+        p.tag = 0
+        p.group_peer = group_peer
+        return p
+
+    def test_empty_ops(self):
+        self.assertEqual(_batch_p2p([]), [])
+
+    @patch("torch.distributed.pipelining.schedules.dist.batch_isend_irecv")
+    @patch("torch.distributed.pipelining.schedules.dist.isend")
+    def test_all_isend_dispatched_individually(self, mock_isend, mock_batch):
+        mock_isend.return_value = MagicMock()
+        ops = [self._make_p2p_op(mock_isend, group_peer=i) for i in range(3)]
+
+        result = _batch_p2p(ops)
+
+        mock_batch.assert_not_called()
+        self.assertEqual(len(result), 3)
+        self.assertEqual(mock_isend.call_count, 3)
+        for p in ops:
+            mock_isend.assert_any_call(
+                p.tensor, group=p.group, tag=p.tag, group_dst=p.group_peer
+            )
+
+    @patch("torch.distributed.pipelining.schedules.dist.batch_isend_irecv")
+    @patch("torch.distributed.pipelining.schedules.dist.irecv")
+    def test_all_irecv_dispatched_individually(self, mock_irecv, mock_batch):
+        mock_irecv.return_value = MagicMock()
+        ops = [self._make_p2p_op(mock_irecv, group_peer=i) for i in range(3)]
+
+        result = _batch_p2p(ops)
+
+        mock_batch.assert_not_called()
+        self.assertEqual(len(result), 3)
+        self.assertEqual(mock_irecv.call_count, 3)
+        for p in ops:
+            mock_irecv.assert_any_call(
+                p.tensor, group=p.group, tag=p.tag, group_src=p.group_peer
+            )
+
+    @patch("torch.distributed.pipelining.schedules.dist.batch_isend_irecv")
+    @patch("torch.distributed.pipelining.schedules.dist.irecv")
+    @patch("torch.distributed.pipelining.schedules.dist.isend")
+    def test_mixed_ops_use_batch(self, mock_isend, mock_irecv, mock_batch):
+        mock_batch.return_value = [MagicMock(), MagicMock()]
+        ops = [
+            self._make_p2p_op(mock_isend, group_peer=0),
+            self._make_p2p_op(mock_irecv, group_peer=1),
+        ]
+
+        result = _batch_p2p(ops)
+
+        mock_batch.assert_called_once_with(ops)
+        mock_isend.assert_not_called()
+        mock_irecv.assert_not_called()
+        self.assertEqual(len(result), 2)
+
 
 if __name__ == "__main__":
     run_tests()

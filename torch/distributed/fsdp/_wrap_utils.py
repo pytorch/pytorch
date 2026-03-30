@@ -3,8 +3,9 @@ import collections
 import functools
 import inspect
 import warnings
+from collections.abc import Callable
 from functools import partial
-from typing import Any, Callable, Union
+from typing import Any
 
 import torch.nn as nn
 from torch.distributed.fsdp._common_utils import (
@@ -24,7 +25,7 @@ from torch.distributed.fsdp.wrap import (
 
 def _auto_wrap(
     root_module: nn.Module,
-    policy: Union[Callable, _Policy],
+    policy: Callable | _Policy,
     ignored_modules: set[nn.Module],
     ignored_params: set[nn.Parameter],
     root_kwargs: dict[str, Any],
@@ -119,7 +120,8 @@ def _warn_on_overridden_mixed_precision(
         "Both mixed precision and an auto_wrap_policy were specified to FSDP, "
         f"where the wrapped module has submodules of type:\n{overridden_module_classes}\n"
         "These modules will be wrapped as separate FSDP instacnes with mixed "
-        "precision disabled."
+        "precision disabled.",
+        stacklevel=2,
     )
 
 
@@ -171,7 +173,7 @@ def _validate_frozen_params(
                     f"The following parameters have requires_grad=False:\n{frozen_param_fqns}"
                 )
                 if use_orig_params:
-                    warnings.warn(msg)
+                    warnings.warn(msg, stacklevel=2)
                 else:
                     raise ValueError(msg)
 

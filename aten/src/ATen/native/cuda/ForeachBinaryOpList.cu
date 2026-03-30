@@ -51,7 +51,7 @@ std::vector<Tensor> foreach_tensor_list_op(
       Op<opmath_t>(),
       alpha.to<opmath_t>());
 
-  return tensor_lists[2];
+  return std::move(tensor_lists[2]);
 }
 
 template <typename T, template <class> class Op>
@@ -420,8 +420,14 @@ void foreach_tensor_copy_list_kernel_cuda_(
         std::all_of(
             src.cbegin(),
             src.cend(),
-            [&](const auto& t) -> bool {
+            [&src](const auto& t) -> bool {
               return t.dtype() == src[0].dtype();
+            }) &&
+        std::all_of(
+            self.cbegin(),
+            self.cend(),
+            [&self](const auto& t) -> bool {
+              return t.dtype() == self[0].dtype();
             }) &&
         _check_tensors_share_sizes_and_strides({self, src}))) {
     return at::native::foreach_tensor_copy_list_kernel_slow_(

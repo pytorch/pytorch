@@ -1,12 +1,13 @@
 import re
-from typing import Any, Callable, Union
+from collections.abc import Callable
+from typing import Any
 
 import torch
 from torch.utils._pytree import tree_flatten_with_path, tree_map
 
 
 KeyPath = tuple[Any, ...]
-NonTensorShapeFn = Callable[[Union[int, float]], tuple[Any, ...]]
+NonTensorShapeFn = Callable[[int | float], tuple[Any, ...]]
 
 __all__ = [
     "normalize_source_name",

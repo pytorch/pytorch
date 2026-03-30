@@ -49,7 +49,7 @@ static void check_unique_names(DimnameList names) {
 }
 
 void check_names_valid_for(const TensorBase& tensor, DimnameList names) {
-  return impl::check_names_valid_for(tensor.unsafeGetTensorImpl(), names);
+  impl::check_names_valid_for(tensor.unsafeGetTensorImpl(), names);
 }
 
 void check_names_valid_for(size_t tensor_dim, DimnameList names) {

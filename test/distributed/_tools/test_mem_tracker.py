@@ -1,4 +1,4 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["oncall: distributed"]
 import gc
 import unittest
 
@@ -7,8 +7,6 @@ import torch.nn as nn
 from torch.distributed._tools.mem_tracker import MemTracker
 from torch.testing._internal.common_utils import (
     run_tests,
-    skipIfRocm,
-    skipIfTorchDynamo,
     TEST_CUDA,
     TEST_XPU,
     TestCase,
@@ -30,11 +28,9 @@ class TestMemTracker(TestCase):
         mod.reset_accumulated_memory_stats(dev)
         mod.reset_peak_memory_stats(dev)
 
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
     @unittest.skipIf(
         not TEST_CUDA and not TEST_XPU, "Neither CUDA or XPU is not available"
     )
-    @skipIfRocm()
     def test_accelerator_tracker_equivalence(
         self,
     ):
@@ -84,7 +80,6 @@ class TestMemTracker(TestCase):
         accuracy = tracker_max / acc_max
         self.assertAlmostEqual(accuracy, 1.0, delta=0.1)
 
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
     @unittest.skipIf(
         not TEST_CUDA and not TEST_XPU, "Neither CUDA or XPU is not available"
     )
@@ -157,7 +152,6 @@ class TestMemTracker(TestCase):
         accuracy = tracker_max / acc_max
         self.assertAlmostEqual(accuracy, 1.0, delta=0.1)
 
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
     def test_tracker_attribution(self):
         """
         Tests that the tracker correctly categorizes params, gradients, and optimizer states.

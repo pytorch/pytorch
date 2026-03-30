@@ -5,7 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import logging
-import sys
+from importlib.metadata import entry_points
 
 from .api import (
     rendezvous_handler_registry as handler_registry,
@@ -14,11 +14,6 @@ from .api import (
 )
 from .dynamic_rendezvous import create_handler
 
-
-if sys.version_info < (3, 10):
-    from importlib_metadata import entry_points
-else:
-    from importlib.metadata import entry_points
 
 log = logging.getLogger(__name__)
 
@@ -65,6 +60,7 @@ def _register_out_of_tree_handlers() -> None:
 
     for handler_generator in discovered_handler_generators:
         try:
+            # pyrefly: ignore [bad-index]
             get_handler = discovered_handler_generators[handler_generator.name].load()
             handler_registry.register(handler_generator.name, get_handler())
         except Exception:

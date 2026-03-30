@@ -8,6 +8,7 @@
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/native/cuda/jit_utils.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/resource_guard.h>
 
 #include <cuda_runtime.h>
@@ -121,7 +122,7 @@ FusedKernelCUDA::FusedKernelCUDA(
       &program, code_.c_str(), nullptr, 0, nullptr, nullptr));
 
 #if defined(USE_ROCM)
-  std::vector<const char*> args = {"--std=c++17"};
+  std::vector<const char*> args = {"--std=c++20"};
   args.push_back("-hip-pch");
 #else
   const std::string compute = std::string("--gpu-architecture=") +
@@ -139,7 +140,7 @@ FusedKernelCUDA::FusedKernelCUDA(
 #endif
       std::to_string(major) + std::to_string(minor);
   const std::vector<const char*> args = {
-      "--std=c++17", compute.c_str(), "-default-device"};
+      "--std=c++20", compute.c_str(), "-default-device"};
 #endif
   const auto result =
       nvrtc().nvrtcCompileProgram(program, args.size(), args.data());
@@ -148,9 +149,7 @@ FusedKernelCUDA::FusedKernelCUDA(
     AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetProgramLogSize(program, &logsize));
     std::vector<char> log(logsize);
     AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetProgramLog(program, log.data()));
-    std::stringstream cu;
-    cu << log.data();
-    throw std::runtime_error(cu.str());
+    TORCH_CHECK(false, std::string(log.data(), log.size()));
   }
   ResourceGuard holdProgram(
       [&] { AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcDestroyProgram(&program)); });

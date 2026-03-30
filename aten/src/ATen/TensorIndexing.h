@@ -112,10 +112,10 @@ TORCH_API std::ostream& operator<<(std::ostream& stream, const Slice& slice);
 // `torch.tensor([1, 2])`) | `torch::tensor({1, 2})`
 struct TORCH_API TensorIndex final {
   // Case 1: `at::indexing::None`
-  TensorIndex(std::nullopt_t) : type_(TensorIndexType::None) {}
+  TensorIndex(std::nullopt_t /*unused*/) : type_(TensorIndexType::None) {}
 
   // Case 2: "..." / `at::indexing::Ellipsis`
-  TensorIndex(at::indexing::EllipsisIndexType)
+  TensorIndex(at::indexing::EllipsisIndexType /*unused*/)
       : type_(TensorIndexType::Ellipsis) {}
   TensorIndex(const char* str) : TensorIndex(at::indexing::Ellipsis) {
     TORCH_CHECK_VALUE(
@@ -214,7 +214,7 @@ inline Tensor applySlice(
       "step must be greater than zero");
 
   // See NOTE [nested tensor size for indexing]
-  if (self_sizes.has_value() && self_sizes.value().size() > 0) {
+  if (self_sizes.has_value() && !self_sizes.value().empty()) {
     // Skip this optimization if we are tracing, as the trace may be polymorphic
     // over the shape of the `self` tensor, and we still want to record
     // the slice.
@@ -495,7 +495,10 @@ inline Tensor handleDimInMultiDimIndexing(
     Tensor result = prev_dim_result;
     const Tensor& tensor = index.tensor();
     auto scalar_type = tensor.scalar_type();
-    if (tensor.dim() == 0 &&
+    bool is_batched = tensor.key_set().has_any(c10::DispatchKeySet(
+        {c10::DispatchKey::FuncTorchBatched,
+         c10::DispatchKey::BatchedNestedTensor}));
+    if (tensor.dim() == 0 && !is_batched &&
         at::isIntegralType(scalar_type, /*includeBool=*/true)) {
       if (scalar_type != at::kByte && scalar_type != at::kBool) {
         result = impl::applySelect(

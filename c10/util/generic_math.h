@@ -4,12 +4,13 @@
 #include <c10/util/TypeSafeSignMath.h>
 #include <cmath>
 
+#if defined(__CUDA_ARCH__) || defined(__HIPCC__)
 #if defined(__CUDA_ARCH__)
 #include <c10/cuda/CUDAMathCompat.h>
-#define C10_COMPAT_COPYSIGN c10::cuda::compat::copysign
 #elif defined(__HIPCC__)
 #include <c10/hip/HIPMathCompat.h>
-#define C10_COMPAT_COPYSIGN c10::hip::compat::copysign
+#endif
+#define C10_COMPAT_COPYSIGN c10::cuda::compat::copysign
 #else
 #include <c10/util/copysign.h>
 #define C10_COMPAT_COPYSIGN c10::copysign
@@ -58,6 +59,12 @@ inline C10_HOST_DEVICE scalar_t div_floor_floating(scalar_t a, scalar_t b)
 
 template <typename scalar_t>
 inline C10_HOST_DEVICE scalar_t div_floor_integer(scalar_t a, scalar_t b) {
+  if (C10_UNLIKELY(
+          std::is_signed<scalar_t>::value &&
+          a == std::numeric_limits<scalar_t>::min() && b == scalar_t(-1))) {
+    return a;
+  }
+
   if (c10::signs_differ(a, b)) {
     // Subtracts one from the results of truncation division if the
     // divisor and dividend have different sign(bit)s and the remainder of

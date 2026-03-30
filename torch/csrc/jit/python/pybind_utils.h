@@ -370,6 +370,13 @@ using InferredType = c10::InferredType;
 
 InferredType tryToInferContainerType(py::handle input, bool primitiveTypeOnly);
 
+namespace detail {
+
+// Additional implementations for tryToInferType().
+std::optional<InferredType> _tryToInferTypeImpl(py::handle input);
+
+} // namespace detail
+
 // Try to infer the type of a Python object
 // The type cannot be inferred if:
 //   input is an empty container (list, dict)
@@ -509,6 +516,11 @@ inline InferredType tryToInferType(py::handle input) {
   py::bool_ is_module = py::isinstance(input, module_type);
   if (py::cast<bool>(is_module)) {
     return InferredType("Cannot infer concrete type of torch.nn.Module");
+  }
+
+  auto ty = detail::_tryToInferTypeImpl(input);
+  if (ty.has_value()) {
+    return ty.value();
   }
 
   // Try container types
@@ -1277,8 +1289,23 @@ TORCH_PYTHON_API std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
     const py::args& args,
     const py::kwargs& kwargs);
 
+// Efficient overload (does not require vector allocation) of the
+// above for use from C++ code.
+std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
+    c10::ArrayRef<std::shared_ptr<Operator>> operations,
+    const py::args& args,
+    const py::kwargs& kwargs);
+
 TORCH_PYTHON_API py::object invokeOperatorFromPython(
     const std::vector<std::shared_ptr<Operator>>& operations,
+    const py::args& args,
+    const py::kwargs& kwargs,
+    std::optional<c10::DispatchKey> dk = std::nullopt);
+
+// Efficient overload (does not require vector allocation) of the
+// above for use from C++ code.
+py::object invokeOperatorFromPython(
+    c10::ArrayRef<std::shared_ptr<Operator>> operations,
     const py::args& args,
     const py::kwargs& kwargs,
     std::optional<c10::DispatchKey> dk = std::nullopt);
@@ -1298,6 +1325,16 @@ TORCH_PYTHON_API bool checkSchemaAllowFakeScriptObject(
 
 TORCH_PYTHON_API py::object _get_operation_for_overload_or_packet(
     const std::vector<std::shared_ptr<Operator>>& operations,
+    Symbol symbol,
+    const py::args& args,
+    const py::kwargs& kwargs,
+    bool is_overload,
+    std::optional<c10::DispatchKey> dk = std::nullopt);
+
+// Efficient overload (does not require vector allocation) of the
+// above for use from C++ code.
+py::object _get_operation_for_overload_or_packet(
+    c10::ArrayRef<std::shared_ptr<Operator>> operations,
     Symbol symbol,
     const py::args& args,
     const py::kwargs& kwargs,

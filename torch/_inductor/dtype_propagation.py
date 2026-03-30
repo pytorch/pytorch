@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, Protocol, TYPE_CHECKING, TypeVar, Union
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, Protocol, TYPE_CHECKING, TypeVar
 
 import sympy
 
@@ -22,7 +22,7 @@ class DTypeVar(Protocol):
     def dtype(self) -> torch.dtype: ...
 
 
-DTypeArg = Union[DTypeVar, torch.types.Number, str, OpsValue]
+DTypeArg = DTypeVar | torch.types.Number | str | OpsValue
 
 
 # Inputs need to be cacheable (e.g., not a CSEVar) in order for the cache to be effective
@@ -32,7 +32,7 @@ DTypeArg = Union[DTypeVar, torch.types.Number, str, OpsValue]
 @functools.cache
 def get_promoted_dtype(
     *args: Sequence[tuple[torch.dtype, bool]],
-    type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND] = None,
+    type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND | None = None,
 ):
     def construct_input(inp):
         if inp[1]:
@@ -54,7 +54,7 @@ def get_promoted_dtype(
 
 def promote_types(
     args: Sequence[DTypeArg],
-    type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND] = None,
+    type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND | None = None,
 ):
     dtype_prop_candidates = []
 
@@ -68,6 +68,7 @@ def promote_types(
             dtype_prop_candidates.append((type_to_dtype(type(arg)), True))
             continue
 
+        # pyrefly: ignore [missing-attribute]
         dtype_prop_candidates.append((arg.dtype, getattr(arg, "is_scalar", False)))
 
     dtype = get_promoted_dtype(
@@ -187,7 +188,7 @@ class DtypePropagationOpsHandler:
     def to_dtype(
         x: DTypeArg,
         dtype: torch.dtype,
-        src_dtype: Optional[torch.dtype] = None,
+        src_dtype: torch.dtype | None = None,
         use_compute_types=True,
     ) -> torch.dtype:
         return upcast_compute_type(dtype) if use_compute_types else dtype
@@ -208,6 +209,10 @@ class DtypePropagationOpsHandler:
 
     @staticmethod
     def truediv(a: DTypeArg, b: DTypeArg) -> torch.dtype:
+        return promote_types([a, b])
+
+    @staticmethod
+    def div_rn(a: DTypeArg, b: DTypeArg) -> torch.dtype:
         return promote_types([a, b])
 
     @staticmethod
@@ -233,6 +238,10 @@ class DtypePropagationOpsHandler:
         return torch.float
 
     @staticmethod
+    def rand_eager(seed, offset, threads_per_round, tid, vec) -> torch.dtype:
+        return torch.float
+
+    @staticmethod
     def store_reduction(name: str, index, value: DTypeArg) -> None:
         return None
 
@@ -243,7 +252,16 @@ class DtypePropagationOpsHandler:
         return dtype
 
     @staticmethod
-    def store(name: str, index, value: DTypeArg, mode: Optional[str] = None) -> None:
+    def store(name: str, index, value: DTypeArg, mode: str | None = None) -> None:
+        return None
+
+    @staticmethod
+    def partial_accumulate(
+        name: str,
+        reduction_type: str,
+        value: DTypeArg,
+        extra_meta: dict[str, Any],
+    ) -> None:
         return None
 
     @staticmethod
@@ -311,8 +329,8 @@ class DtypePropagationOpsHandler:
         boundary_indices: DTypeArg,
         indexing_dtype: torch.dtype,
         right: bool,
-        sorter: Optional[tuple[str, sympy.Expr]] = None,
-        sorter_indices: Optional[T] = None,
+        sorter: tuple[str, sympy.Expr] | None = None,
+        sorter_indices: T | None = None,
     ) -> torch.dtype:
         return indexing_dtype
 
@@ -348,6 +366,11 @@ class DtypePropagationOpsHandler:
         return torch.int32
 
     @staticmethod
+    def dot(x: DTypeArg, y: DTypeArg) -> torch.dtype:
+        # triton tl.dot out_dtype is tl.float32 by default.
+        return torch.float32
+
+    @staticmethod
     def inline_asm_elementwise(
         *inputs, asm, constraints=None, dtype=torch.float32, is_pure=True, pack=1
     ):
@@ -374,11 +397,11 @@ class DtypePropagationOpsHandler:
         )
 
     @staticmethod
-    def device_assert_async(cond, msg: str) -> torch.dtype:
-        return torch.bool
+    def device_assert_async(cond, msg: str) -> None:
+        return None
 
 
 if TYPE_CHECKING:
-
+    # pyrefly: ignore [inconsistent-inheritance]
     class _typecheck_DtypePropagation(DtypePropagationOpsHandler, OpsHandler[Any]):
         pass  # mypy will error if we got any of the signatures wrong

@@ -4,7 +4,6 @@
 
 #include <c10/core/CPUAllocator.h>
 #include <c10/util/Enumerate.h>
-#include <c10/util/FbcodeMaps.h>
 
 namespace torch::nativert {
 

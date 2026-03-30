@@ -53,8 +53,15 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
   Stream exchangeStream(Stream s) const override {
     return impl_->exchangeStream(s);
   }
+  void* getStreamNativeHandle(const Stream s) const override {
+    return impl_->getStreamNativeHandle(s);
+  }
   DeviceIndex deviceCount() const noexcept override {
     return impl_->deviceCount();
+  }
+
+  DeviceCapability getDeviceCapability(Device d) const override {
+    return impl_->getDeviceCapability(d);
   }
 
   // Event functions
@@ -94,11 +101,11 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
   }
 
   void synchronizeEvent(void* event) const override {
-    return impl_->synchronizeEvent(event);
+    impl_->synchronizeEvent(event);
   }
 
   void synchronizeDevice(const DeviceIndex device_index) const override {
-    return impl_->synchronizeDevice(device_index);
+    impl_->synchronizeDevice(device_index);
   }
 
  private:

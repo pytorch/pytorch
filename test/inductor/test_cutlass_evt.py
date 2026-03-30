@@ -4,18 +4,20 @@ import unittest
 import sympy
 
 import torch
-import torch._inductor.config as config
 from torch._dynamo.test_case import TestCase
-from torch._inductor.codegen.cuda.cutlass_utils import (
+from torch._inductor.codegen.cutlass.utils import (
     torch_dtype_to_cutlass_type,
     try_import_cutlass,
 )
-from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import ComputedBuffer, FixedLayout, PermuteView, Pointwise
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.utils import OrderedSet
 from torch.testing._internal.common_cuda import SM90OrLater
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA_AND_TRITON
+from torch.testing._internal.inductor_utils import (
+    HAS_CPU,
+    HAS_CUDA_AND_TRITON,
+    MockGraphHandler,
+)
 
 
 if try_import_cutlass():
@@ -24,17 +26,13 @@ if try_import_cutlass():
 
     LayoutType = cutlass_lib.LayoutType
     DataType = cutlass_lib.DataType
-    from torch._inductor.codegen.cuda.cutlass_lib_extensions.evt_extensions import (
+    from cutlass_cppgen.backend.evt.ir.tensor import Tensor as CutlassTensor
+
+    from torch._inductor.codegen.cutlass.lib_extensions.evt_extensions import (
         _render_argument_type,
         _trace,
         trace,
     )
-
-    if config.is_fbcode():
-        import python_cutlass  # type: ignore[import-untyped, import-not-found]  # noqa: F401
-    else:
-        import cutlass as python_cutlass  # type: ignore[import-untyped, import-not-found]  # noqa: F401
-    CutlassTensor = python_cutlass.backend.evt.ir.tensor.Tensor
 
     BIAS_CODE = """def example_epilogue(accum, C, aux, bias):
         F = accum + C + aux
@@ -105,22 +103,11 @@ class MockComputedBuffer(ComputedBuffer):
         return 1
 
 
-class MockGraphHandler(GraphLowering):
-    def __init__(self, name_to_buffer):
-        import torch._inductor.sizevars
-
-        self.sizevars = torch._inductor.sizevars.SizeVarAllocator()
-        self.name_to_buffer = name_to_buffer
-        self.graph_inputs = dict()
-        self.mutated_buffers = OrderedSet()
-        self.constants = dict()
-
-
 class TestCutlassEVT(TestCase):
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen_accumulator_return(self):
-        from torch._inductor.codegen.cuda.cutlass_python_evt import CutlassEVTCodegen
+        from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
         from torch._inductor.virtualized import V
 
         size = (100, 300, 200)
@@ -177,7 +164,7 @@ return tmp_0, tmp_2, D""",
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen_disjoint_read_indexing(self):
-        from torch._inductor.codegen.cuda.cutlass_python_evt import CutlassEVTCodegen
+        from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
         from torch._inductor.virtualized import V
 
         size = (100, 300, 200)
@@ -226,7 +213,7 @@ index strides [200, 60000, 1], and layout stride [60000, 200, 1]""",
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen_broadcasting(self):
-        from torch._inductor.codegen.cuda.cutlass_python_evt import CutlassEVTCodegen
+        from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
         from torch._inductor.virtualized import V
 
         size = (100, 300, 200)
@@ -286,7 +273,7 @@ return tmp_0, tmp_2, D""",
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen(self):
-        from torch._inductor.codegen.cuda.cutlass_python_evt import CutlassEVTCodegen
+        from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
         from torch._inductor.virtualized import V
 
         size = (100, 300, 200)
@@ -342,7 +329,7 @@ return tmp_1, D""",
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_example_tensor_creation(self):
-        from torch._inductor.codegen.cuda.cutlass_lib_extensions.evt_extensions import (
+        from torch._inductor.codegen.cutlass.lib_extensions.evt_extensions import (
             create_example_tensors,
         )
         from torch._inductor.virtualized import V

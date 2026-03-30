@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import math
-from typing import Optional
 
 import torch
 from torch import Tensor
@@ -86,6 +85,7 @@ class LowRankMultivariateNormal(Distribution):
             capacitance = I + cov_factor.T @ inv(cov_diag) @ cov_factor
     """
 
+    # pyrefly: ignore [bad-override]
     arg_constraints = {
         "loc": constraints.real_vector,
         "cov_factor": constraints.independent(constraints.real, 2),
@@ -99,7 +99,7 @@ class LowRankMultivariateNormal(Distribution):
         loc: Tensor,
         cov_factor: Tensor,
         cov_diag: Tensor,
-        validate_args: Optional[bool] = None,
+        validate_args: bool | None = None,
     ) -> None:
         if loc.dim() < 1:
             raise ValueError("loc must be at least one-dimensional.")
@@ -135,6 +135,7 @@ class LowRankMultivariateNormal(Distribution):
         self._unbroadcasted_cov_factor = cov_factor
         self._unbroadcasted_cov_diag = cov_diag
         self._capacitance_tril = _batch_capacitance_tril(cov_factor, cov_diag)
+        # pyrefly: ignore [bad-argument-type]
         super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):

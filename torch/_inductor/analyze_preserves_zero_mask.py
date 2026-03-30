@@ -1,6 +1,6 @@
 import dataclasses
 import itertools
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import sympy
 
@@ -29,7 +29,7 @@ class PreservesZeros(SymPyOps, DefaultHandler):
 
     def __init__(self) -> None:
         self.count = itertools.count(0)
-        self.store_preserves_zeros: Optional[bool] = None
+        self.store_preserves_zeros: bool | None = None
         self.dtype_prop = DtypePropagationOpsHandler()
 
     def load(self, name: str, index: sympy.Expr) -> TypedExpr:
@@ -106,6 +106,7 @@ class RecordLowPrecisionOps(DefaultHandler):
         pass
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def indirect_indexing(*args: Any, **kwargs: Any) -> sympy.Expr:
         return sympy.S.Zero
 

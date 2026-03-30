@@ -19,6 +19,98 @@
     swap_tensors
 ```
 
+# torch.utils.collect_env
+```{eval-rst}
+.. automodule:: torch.utils.collect_env
+```
+
+```{eval-rst}
+.. currentmodule:: torch.utils.collect_env
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    check_release_file
+    is_xnnpack_available
+    main
+    pretty_str
+    run
+    run_and_parse_first_match
+    run_and_read_all
+    run_and_return_first_line
+```
+
+# torch.utils.flop_counter
+```{eval-rst}
+.. automodule:: torch.utils.flop_counter
+```
+
+```{eval-rst}
+.. currentmodule:: torch.utils.flop_counter
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    baddbmm_flop
+    bmm_flop
+    conv_backward_flop
+    conv_flop
+    conv_flop_count
+    register_flop_formula
+    sdpa_backward_flop
+    sdpa_backward_flop_count
+    sdpa_flop
+    sdpa_flop_count
+    shape_wrapper
+```
+
+# torch.utils.hipify.hipify_python
+```{eval-rst}
+.. automodule:: torch.utils.hipify.hipify_python
+```
+
+```{eval-rst}
+.. currentmodule:: torch.utils.hipify.hipify_python
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    compute_stats
+    extract_arguments
+    file_add_header
+    file_specific_replacement
+    find_bracket_group
+    find_closure_group
+    find_parentheses_group
+    fix_static_global_kernels
+    hip_header_magic
+    hipify
+    is_caffe2_gpu_file
+    is_cusparse_file
+    is_out_of_place
+    is_pytorch_file
+    is_special_file
+    match_extensions
+    matched_files_iter
+    openf
+    preprocess_file_and_save_result
+    preprocessor
+    processKernelLaunches
+    replace_extern_shared
+    replace_math_functions
+    str2bool
+```
+
+
 <!-- This module needs to be documented. Adding here in the meantime
 for tracking purposes -->
 ```{eval-rst}
@@ -27,7 +119,6 @@ for tracking purposes -->
 .. py:module:: torch.utils.benchmark.examples.fuzzer
 .. py:module:: torch.utils.benchmark.examples.op_benchmark
 .. py:module:: torch.utils.benchmark.examples.simple_timeit
-.. py:module:: torch.utils.benchmark.examples.spectral_ops_fuzz_test
 .. py:module:: torch.utils.benchmark.op_fuzzers.binary
 .. py:module:: torch.utils.benchmark.op_fuzzers.sparse_binary
 .. py:module:: torch.utils.benchmark.op_fuzzers.sparse_unary
@@ -43,7 +134,6 @@ for tracking purposes -->
 .. py:module:: torch.utils.benchmark.utils.valgrind_wrapper.timer_interface
 .. py:module:: torch.utils.bundled_inputs
 .. py:module:: torch.utils.checkpoint
-.. py:module:: torch.utils.collect_env
 .. py:module:: torch.utils.cpp_backtrace
 .. py:module:: torch.utils.cpp_extension
 .. py:module:: torch.utils.data.backward_compatibility
@@ -80,13 +170,10 @@ for tracking purposes -->
 .. py:module:: torch.utils.data.sampler
 .. py:module:: torch.utils.dlpack
 .. py:module:: torch.utils.file_baton
-.. py:module:: torch.utils.flop_counter
 .. py:module:: torch.utils.hipify.constants
 .. py:module:: torch.utils.hipify.cuda_to_hip_mappings
-.. py:module:: torch.utils.hipify.hipify_python
 .. py:module:: torch.utils.hipify.version
 .. py:module:: torch.utils.hooks
-.. py:module:: torch.utils.jit.log_extract
 .. py:module:: torch.utils.mkldnn
 .. py:module:: torch.utils.mobile_optimizer
 .. py:module:: torch.utils.show_pickle

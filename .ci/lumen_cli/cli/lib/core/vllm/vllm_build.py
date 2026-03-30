@@ -1,9 +1,10 @@
+from __future__ import annotations
+
 import logging
 import os
 import textwrap
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from cli.lib.common.cli_helper import BaseRunner
 from cli.lib.common.docker_helper import local_image_exists
@@ -13,6 +14,11 @@ from cli.lib.common.envs_helper import (
     env_str_field,
     with_params_help,
 )
+from cli.lib.common.gh_summary import (
+    gh_summary_path,
+    summarize_content_from_file,
+    summarize_wheels,
+)
 from cli.lib.common.path_helper import (
     copy,
     ensure_dir_exists,
@@ -21,7 +27,7 @@ from cli.lib.common.path_helper import (
     is_path_exist,
 )
 from cli.lib.common.utils import run_command
-from cli.lib.core.vllm.lib import clone_vllm
+from cli.lib.core.vllm.lib import clone_vllm, summarize_build_info
 
 
 logger = logging.getLogger(__name__)
@@ -58,7 +64,12 @@ class VllmBuildParameters:
     # DOCKERFILE_PATH: path to Dockerfile used when use_local_dockerfile is True"
     use_local_dockerfile: bool = env_bool_field("USE_LOCAL_DOCKERFILE", True)
     dockerfile_path: Path = env_path_field(
-        "DOCKERFILE_PATH", ".github/ci_configs/vllm/Dockerfile.tmp_vllm"
+        "DOCKERFILE_PATH", ".github/ci_configs/vllm/Dockerfile"
+    )
+
+    # the cleaning script to remove torch dependencies from pip
+    cleaning_script: Path = env_path_field(
+        "cleaning_script", ".github/ci_configs/vllm/use_existing_torch.py"
     )
 
     # OUTPUT_DIR: where docker buildx (local exporter) will write artifacts
@@ -153,18 +164,44 @@ class VllmBuildRunner(BaseRunner):
         """
         inputs = VllmBuildParameters()
         logger.info("Running vllm build with inputs: %s", inputs)
-        clone_vllm()
+        vllm_commit = clone_vllm()
 
+        self.cp_torch_cleaning_script(inputs)
         self.cp_dockerfile_if_exist(inputs)
-
         # cp torch wheels from root direct to vllm workspace if exist
         self.cp_torch_whls_if_exist(inputs)
 
-        ensure_dir_exists(inputs.output_dir)
+        # make sure the output dir to store the build artifacts exist
+        ensure_dir_exists(Path(inputs.output_dir))
 
         cmd = self._generate_docker_build_cmd(inputs)
         logger.info("Running docker build: \n %s", cmd)
-        run_command(cmd, cwd="vllm", env=os.environ.copy())
+
+        try:
+            run_command(cmd, cwd="vllm", env=os.environ.copy())
+        finally:
+            self.genearte_vllm_build_summary(vllm_commit, inputs)
+
+    def genearte_vllm_build_summary(
+        self, vllm_commit: str, inputs: VllmBuildParameters
+    ):
+        if not gh_summary_path():
+            return logger.info("Skipping, not detect GH Summary env var....")
+        logger.info("Generate GH Summary ...")
+        # summarize vllm build info
+        summarize_build_info(vllm_commit)
+
+        # summarize vllm build artifacts
+        vllm_artifact_dir = inputs.output_dir / "wheels"
+        summarize_content_from_file(
+            vllm_artifact_dir,
+            "build_summary.txt",
+            title="Vllm build env pip package summary",
+        )
+        summarize_wheels(
+            inputs.torch_whls_path, max_depth=3, title="Torch Wheels Artifacts"
+        )
+        summarize_wheels(vllm_artifact_dir, max_depth=3, title="Vllm Wheels Artifacts")
 
     def cp_torch_whls_if_exist(self, inputs: VllmBuildParameters) -> str:
         if not inputs.use_torch_whl:
@@ -174,6 +211,11 @@ class VllmBuildRunner(BaseRunner):
         force_create_dir(tmp_path)
         copy(inputs.torch_whls_path, tmp_dir)
         return tmp_dir
+
+    def cp_torch_cleaning_script(self, inputs: VllmBuildParameters):
+        script = get_path(inputs.cleaning_script, resolve=True)
+        vllm_script = Path(f"./{self.work_directory}/use_existing_torch.py")
+        copy(script, vllm_script)
 
     def cp_dockerfile_if_exist(self, inputs: VllmBuildParameters):
         if not inputs.use_local_dockerfile:
@@ -194,7 +236,7 @@ class VllmBuildRunner(BaseRunner):
         abs_path = get_path(path, resolve=True)
         return abs_path
 
-    def _get_torch_wheel_path_arg(self, torch_whl_dir: Optional[Path]) -> str:
+    def _get_torch_wheel_path_arg(self, torch_whl_dir: Path | None) -> str:
         if not torch_whl_dir:
             return ""
         return f"--build-arg TORCH_WHEELS_PATH={_VLLM_TEMP_FOLDER}"

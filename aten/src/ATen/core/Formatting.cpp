@@ -9,7 +9,6 @@
 #include <iostream>
 #include <iterator>
 #include <string>
-#include <tuple>
 
 namespace c10 {
 std::ostream& operator<<(std::ostream& out, Backend b) {
@@ -303,6 +302,9 @@ std::ostream& print(
     tensor = tensor_.to_dense().to(kCPU, kDouble).contiguous();
   } else if (tensor_.is_mps()) {
     // MPS does not support double tensors, so first copy then convert
+    tensor = tensor_.to(kCPU).to(kDouble).contiguous();
+  } else if (tensor_.is_privateuseone()) {
+    // PrivateUseOne backends may not support double tensors
     tensor = tensor_.to(kCPU).to(kDouble).contiguous();
   } else {
     tensor = tensor_.to(kCPU, kDouble).contiguous();

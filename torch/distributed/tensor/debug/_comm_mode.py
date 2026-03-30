@@ -172,7 +172,7 @@ class _CommModeModuleTracker(ModTracker):
                 self._fw_set_module_hook
             )
 
-    def _fw_post_hook(self, mod, input, output):
+    def _fw_post_hook(self, mod, input, output):  # pylint: disable=useless-parent-delegation
         """
         This function is called when the forward pass of a module is called.
         It updates the module tracker and removes the module from parent data
@@ -240,6 +240,8 @@ class CommDebugMode(TorchDispatchMode):
     """
 
     def __init__(self):
+        super().__init__()
+        self.supports_higher_order_operators = True
         self.comm_counts: dict[Any, int] = defaultdict(int)
         self.comm_module_counts = {}
         self.comm_module_operation_counts = {}
@@ -594,6 +596,7 @@ class CommDebugMode(TorchDispatchMode):
         self.advanced_module_tracker.__enter__()
         return self
 
+    # pyrefly: ignore [bad-override]
     def __exit__(self, *args):
         self.advanced_module_tracker.__exit__()
         super().__exit__(*args)
@@ -641,6 +644,12 @@ class CommDebugMode(TorchDispatchMode):
         # run **before** subclasses get a chance to run.
         # Returning NotImplemented here gives us a chance to let DTensor
         # run and desugar into comms ops, before CommDebugMode sees them.
+
+        # Higher-order operators (e.g. run_dtensor_rng_op) don't have
+        # _overloadpacket and aren't collectives — just redispatch.
+        if isinstance(func, torch._ops.HigherOrderOperator):
+            kwargs = kwargs if kwargs else {}
+            return func(*args, **kwargs)
 
         # sets up operation-level collective count
         if self.advanced_module_tracker.name not in self.comm_module_operation_counts:
@@ -733,3 +742,6 @@ class CommDebugMode(TorchDispatchMode):
         ].append(operation_dict)
 
         return out
+
+    def __repr__(self):
+        return f"CommDebugMode(get_total_counts()={self.get_total_counts()})"

@@ -6,7 +6,6 @@
 #include <ATen/core/class_type.h>
 #include <ATen/core/op_registration/infer_schema.h>
 #include <ATen/core/stack.h>
-#include <c10/util/C++17.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/TypeTraits.h>
@@ -90,7 +89,7 @@ class class_ : public ::torch::detail::class_base {
   /// constructor taking an `int` and a `std::string` as argument.
   template <typename... Types>
   class_& def(
-      torch::detail::types<void, Types...>,
+      torch::detail::types<void, Types...> /*unused*/,
       std::string doc_string = "",
       std::initializer_list<arg> default_args =
           {}) { // Used in combination with
@@ -457,8 +456,8 @@ inline class_<CurClass> selective_class_(
 
 template <class CurClass>
 inline detail::ClassNotSelected selective_class_(
-    const std::string&,
-    detail::SelectiveStr<false>) {
+    const std::string& /*unused*/,
+    detail::SelectiveStr<false> /*unused*/) {
   return detail::ClassNotSelected();
 }
 
@@ -512,7 +511,7 @@ inline class_<CurClass> Library::class_(detail::SelectiveStr<true> className) {
 }
 
 template <class CurClass>
-inline detail::ClassNotSelected Library::class_(detail::SelectiveStr<false>) {
+inline detail::ClassNotSelected Library::class_(detail::SelectiveStr<false> /*unused*/) {
   return detail::ClassNotSelected();
 }
 

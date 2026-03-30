@@ -3,8 +3,8 @@
 import copy
 import functools
 import sys
-from itertools import chain
-from typing import Callable, Union
+from collections.abc import Callable
+from itertools import chain, product
 
 import torch
 import torch.distributed as dist
@@ -255,7 +255,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
     def _test_fsdp2(
         self,
         *,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool | int,
         optimizer_class: type[Optimizer],
         compile_model: bool,
         foreach: bool = True,
@@ -707,29 +707,43 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
     @with_comms
     @skip_if_lt_x_gpu(2)
     def test_flattened_osd(self) -> None:
-        device_mesh = init_device_mesh(device_type, (self.world_size,))
-        model = CompositeParamModel(device=torch.device(device_type))
-        fsdp_model = fully_shard(copy.deepcopy(model), mesh=device_mesh)
-        fsdp_optim = torch.optim.AdamW(fsdp_model.parameters())
-        batch = torch.rand(8, 100, device=device_type)
-        fsdp_model(batch).sum().backward()
-        fsdp_optim.step()
-        fsdp_optim.zero_grad()
-        osd1 = get_optimizer_state_dict(fsdp_model, fsdp_optim)
-        osd2 = get_optimizer_state_dict(
-            fsdp_model,
-            fsdp_optim,
-            options=StateDictOptions(flatten_optimizer_state_dict=True),
-        )
-        fsdp_optim2 = torch.optim.AdamW(fsdp_model.parameters())
-        set_optimizer_state_dict(
-            fsdp_model, optimizers=fsdp_optim2, optim_state_dict=osd2
-        )
-        self.assertEqual(fsdp_optim.state_dict(), fsdp_optim2.state_dict())
-        set_optimizer_state_dict(
-            fsdp_model, optimizers=fsdp_optim2, optim_state_dict=osd1
-        )
-        self.assertEqual(fsdp_optim.state_dict(), fsdp_optim2.state_dict())
+        """
+        Test flattened optimizer state dictionaries with different combinations of
+        flatten_optimizer_state_dict flag for saving and loading.
+
+        This test verifies that:
+        1. We can save optimizer state dict with/without flattening
+        2. We can load optimizer state dict with/without flattening
+        3. The resulting optimizer state is equivalent regardless of flattening options
+        """
+        for flatten_to_save, flatten_to_load in product([True, False], repeat=2):
+            device_mesh = init_device_mesh(device_type, (self.world_size,))
+            model = CompositeParamModel(device=torch.device(device_type))
+            fsdp_model = fully_shard(copy.deepcopy(model), mesh=device_mesh)
+            fsdp_optim = torch.optim.AdamW(fsdp_model.parameters())
+            batch = torch.rand(8, 100, device=device_type)
+            fsdp_model(batch).sum().backward()
+            fsdp_optim.step()
+            fsdp_optim.zero_grad()
+
+            # Get optimizer state dict with/without flattening option
+            osd = get_optimizer_state_dict(
+                fsdp_model,
+                fsdp_optim,
+                options=StateDictOptions(flatten_optimizer_state_dict=flatten_to_save),
+            )
+
+            # Create a new optimizer and load the state from osd
+            fsdp_optim2 = torch.optim.AdamW(fsdp_model.parameters())
+            set_optimizer_state_dict(
+                fsdp_model,
+                optimizers=fsdp_optim2,
+                optim_state_dict=osd,
+                options=StateDictOptions(flatten_optimizer_state_dict=flatten_to_load),
+            )
+
+            # Verify the loaded optimizer state matches the original
+            self.assertEqual(fsdp_optim.state_dict(), fsdp_optim2.state_dict())
 
     def _test_deprecate_partial(self) -> None:
         model = CompositeParamModel(device=torch.device(device_type))
@@ -754,7 +768,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         model_state_dict3 = copy.deepcopy(model_state_dict3)
         self.assertEqual(len(model_state_dict2), 2)
         self.assertEqual(len(model_state_dict3), 2)
-        for key in model_state_dict3.keys():
+        for key in model_state_dict3:
             full_fqn = f"l.{key}"
             value1 = model_state_dict1[full_fqn]
             value2 = model_state_dict2[full_fqn]
@@ -871,7 +885,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             self.assertEqual(cpu_model_value, meta_model_value)
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(4)
     def test_setting_meta_device_model_broadcasting_and_memory(self) -> None:
         # This test verifies that we can set model state dict by a meta device model
         # With the correlated changes in state_dict, meta device model should be accepted
@@ -937,7 +951,10 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             model.state_dict().items(),
             expected_state_dict.items(),
         ):
-            assert actual_name == expected_name
+            if actual_name != expected_name:
+                raise AssertionError(
+                    f"Expected name {expected_name}, got {actual_name}"
+                )
             torch.testing.assert_close(tensor, expected_tensor, msg=expected_name)
 
     @with_comms

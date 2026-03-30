@@ -3,7 +3,6 @@
 # Test to ensure sparsity information propagates properly into traced graph.
 #
 
-import sys
 import unittest
 
 import torch
@@ -91,12 +90,9 @@ class SparseActivationCSR(torch.nn.Module):
 
 
 @unittest.skipIf(is_fbcode(), "See torch._dynamo.config")
-@unittest.skipIf(
-    sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-)
 class TestSparseProp(TestCase):
     def setUp(self):
-        TestCase.setUp(self)
+        super().setUp()
 
     def assertEqualMeta(self, x, y):
         self.assertIsInstance(x, FakeTensor)
@@ -124,7 +120,7 @@ class TestSparseProp(TestCase):
                 x_meta1, y_meta1 = (x.ccol_indices(), y.ccol_indices())
                 x_meta2, y_meta2 = (x.row_indices(), y.row_indices())
             else:
-                assert 0  # unreachable
+                raise AssertionError(f"Unexpected layout: {x.layout}")
             self.assertEqual(x_meta1, y_meta1, exact_layout=True)
             self.assertEqual(x_meta2, y_meta2, exact_layout=True)
             self.assertEqual(x.values(), y.values(), exact_layout=True)

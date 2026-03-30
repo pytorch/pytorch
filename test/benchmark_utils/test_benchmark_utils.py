@@ -93,7 +93,8 @@ def load_callgrind_artifacts() -> tuple[
             # Storing entries as f"{c} {fn}" rather than [c, fn] adds some work
             # reviving the artifact, but it makes the json much easier to read.
             match = pattern.search(cs)
-            assert match is not None
+            if match is None:
+                raise AssertionError(f"Pattern did not match: {cs}")
             c, fn = match.groups()
             data.append(benchmark_utils.FunctionCount(count=int(c), function=fn))
 
@@ -552,7 +553,8 @@ class TestBenchmarkUtils(TestCase):
         )
 
         stats = timer.collect_callgrind(number=1000, repeats=20)
-        assert isinstance(stats, tuple)
+        if not isinstance(stats, tuple):
+            raise AssertionError(f"Expected tuple, got {type(stats)}")
 
         # Check that the repeats are at least somewhat repeatable. (within 10 instructions per iter)
         counts = collections.Counter(
@@ -600,7 +602,8 @@ class TestBenchmarkUtils(TestCase):
             )
 
         stats = timer.collect_callgrind(number=1000, repeats=20)
-        assert isinstance(stats, tuple)
+        if not isinstance(stats, tuple):
+            raise AssertionError(f"Expected tuple, got {type(stats)}")
 
         # NB: Unlike the example above, there is no expectation that all
         #     repeats will be identical.

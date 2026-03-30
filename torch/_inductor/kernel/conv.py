@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional, TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
 import torch
 from torch._inductor.codegen.rocm.ck_conv_template import CKGroupedConvFwdTemplate
@@ -29,6 +29,7 @@ from ..utils import (
     use_triton_template,
 )
 from ..virtualized import V
+from .mm_common import load_kernel_template
 
 
 if TYPE_CHECKING:
@@ -59,6 +60,29 @@ def conv3d_grid(n, c, d, h, w, meta, *, cdiv):
         meta["GROUPS"],
     )
 
+
+# =============================================================================
+# Depthwise conv1d (groups == in_channels == out_channels)
+# Uses direct element-wise multiply-accumulate instead of implicit GEMM.
+# Channels-last (NLC) layout with 3D tiling: BLOCK_N x BLOCK_L x BLOCK_C.
+# =============================================================================
+
+
+@SymbolicGridFn
+def depthwise_conv1d_grid(n, c, l, meta, *, cdiv):
+    return (
+        cdiv(n, meta["BLOCK_N"]),
+        cdiv(l, meta["BLOCK_L"]),
+        cdiv(c, meta["BLOCK_C"]),
+    )
+
+
+depthwise_conv1d_template = TritonTemplate(
+    name="depthwise_conv1d",
+    grid=depthwise_conv1d_grid,
+    source=load_kernel_template("triton_depthwise_conv"),
+    cache_codegen_enabled_for_template=True,
+)
 
 LOOP_BODY_2D = """
         idx_x_h = i - PADDING_H + idx_y_h * STRIDE_H
@@ -117,19 +141,19 @@ conv2d_template = TritonTemplate(
     stride_wh = {{stride("W", 2)}}
     stride_ww = {{stride("W", 3)}}
 
-    nhw = tl.program_id(0) * BLOCK_M + tl.arange(0, BLOCK_M)
+    nhw = tl.program_id(0).to(INDEX_DTYPE) * BLOCK_M + tl.arange(0, BLOCK_M)
     idx_y_w = nhw % OUT_W
     nh = nhw // OUT_W
     idx_y_h = nh % OUT_H
     idx_n = nh // OUT_H
-    idx_y_c = tl.program_id(1) * BLOCK_N + tl.arange(0, BLOCK_N)
+    idx_y_c = tl.program_id(1).to(INDEX_DTYPE) * BLOCK_N + tl.arange(0, BLOCK_N)
 
 {% if GROUPS == 1 %}
     group = 0
     GROUP_IN_C = IN_C
     GROUP_OUT_C = OUT_C
 {% else %}
-    group = tl.program_id(2)
+    group = tl.program_id(2).to(INDEX_DTYPE)
     GROUP_IN_C = IN_C // GROUPS
     GROUP_OUT_C = OUT_C // GROUPS
 {% endif %}
@@ -180,7 +204,7 @@ conv2d_template = TritonTemplate(
     idx_w = idx_y_w[:, None]
 
     # inductor generates a suffix
-    {{store_output(("idx_n", "idx_c", "idx_h", "idx_w"), "acc", "mask")}}
+    {{store_output(("idx_n", "idx_c", "idx_h", "idx_w"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
 """,
 )
 
@@ -245,21 +269,21 @@ conv3d_template = TritonTemplate(
     stride_wh = {{stride("W", 3)}}
     stride_ww = {{stride("W", 4)}}
 
-    ndhw = tl.program_id(0) * BLOCK_M + tl.arange(0, BLOCK_M)
+    ndhw = tl.program_id(0).to(INDEX_DTYPE) * BLOCK_M + tl.arange(0, BLOCK_M)
     idx_y_w = ndhw % OUT_W
     ndh = ndhw // OUT_W
     idx_y_h = ndh % OUT_H
     nd = ndh // OUT_H
     idx_y_d = nd % OUT_D
     idx_n = nd // OUT_D
-    idx_y_c = tl.program_id(1) * BLOCK_N + tl.arange(0, BLOCK_N)
+    idx_y_c = tl.program_id(1).to(INDEX_DTYPE) * BLOCK_N + tl.arange(0, BLOCK_N)
 
 {% if GROUPS == 1 %}
     group = 0
     GROUP_IN_C = IN_C
     GROUP_OUT_C = OUT_C
 {% else %}
-    group = tl.program_id(2)
+    group = tl.program_id(2).to(INDEX_DTYPE)
     GROUP_IN_C = IN_C // GROUPS
     GROUP_OUT_C = OUT_C // GROUPS
 {% endif %}
@@ -318,7 +342,7 @@ conv3d_template = TritonTemplate(
     idx_w = idx_y_w[:, None]
 
     # inductor generates a suffix
-    {{store_output(("idx_n", "idx_c", "idx_d", "idx_h", "idx_w"), "acc", "mask")}}
+    {{store_output(("idx_n", "idx_c", "idx_d", "idx_h", "idx_w"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
 """,
 )
 
@@ -352,7 +376,7 @@ class ConvLayoutParams(TypedDict):
 def conv_layout(
     x: TensorBox,
     weight: TensorBox,
-    bias: Optional[TensorBox],
+    bias: TensorBox | None,
     stride: Sequence[int],
     padding: tuple[int, ...],
     dilation: tuple[int, ...],
@@ -361,16 +385,24 @@ def conv_layout(
     groups: int,
 ) -> ir.Layout:
     """Determine output layout for a convolution"""
+    # We use guard_int_seq rather than size_hints because the output shape
+    # depends on these values — if they ever contained symbols, size_hints
+    # would silently substitute a hint that could be wrong, producing an
+    # incorrect layout. guard_int_seq will install a proper guard instead.
+    # Note: stride and padding are already guarded via guard_int_seq in
+    # convolution() above, but we guard all four here so conv_layout is
+    # self-contained and doesn't rely on callers.
+    guard = V.graph.sizevars.guard_int_seq
     with V.graph.fake_mode:
         output = torch.ops.aten.convolution(
-            ir.ir_node_to_tensor(x, guard_shape=True),
-            ir.ir_node_to_tensor(weight, guard_shape=True),
-            ir.ir_node_to_tensor(bias, guard_shape=True),
-            V.graph.sizevars.size_hints(stride),  # type: ignore[arg-type]
-            V.graph.sizevars.size_hints(padding),  # type: ignore[arg-type]
-            V.graph.sizevars.size_hints(dilation),  # type: ignore[arg-type]
+            ir.ir_node_to_tensor(x),
+            ir.ir_node_to_tensor(weight),
+            ir.ir_node_to_tensor(bias),
+            guard(stride),
+            guard(padding),
+            guard(dilation),
             transposed,
-            V.graph.sizevars.size_hints(output_padding),  # type: ignore[arg-type]
+            guard(output_padding),
             groups,
         )
         sizes = ir.convert_shape_to_inductor(output.size())
@@ -417,7 +449,7 @@ def convert_1x1_conv_to_mm(x, weight, bias):
 def convolution(
     x: TensorBox,
     weight: TensorBox,
-    bias: Optional[TensorBox],
+    bias: TensorBox | None,
     stride: Sequence[int],
     padding: Sequence[int],
     dilation: Sequence[int],
@@ -494,8 +526,10 @@ def convolution(
             return True
 
         layout = conv_layout(x, weight, None, **kwargs)
+        # TODO: This does not guard on the stride order decision,
+        # shall we use optimization_hint to handle unbacked?
         req_stride_order = ir.get_stride_order(
-            V.graph.sizevars.size_hints(layout.stride)
+            V.graph.sizevars.guarding_hints_or_throw(layout.stride)
         )
         return req_stride_order == ir.NHWC_STRIDE_ORDER
 
@@ -536,8 +570,10 @@ def convolution(
         layout = conv_layout(x, weight, None, **kwargs)
     else:
         layout = conv_layout(x, weight, None, **kwargs)
+        # TODO: This does not guard on the stride order decision,
+        # shall we use optimization_hint to handle unbacked?
         req_stride_order = ir.get_stride_order(
-            V.graph.sizevars.size_hints(layout.stride)
+            V.graph.sizevars.guarding_hints_or_throw(layout.stride)
         )
         x = ir.ExternKernel.require_stride_order(x, req_stride_order)  # type: ignore[assignment]
         weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)  # type: ignore[assignment]
@@ -579,7 +615,7 @@ def convolution(
         and not transposed
         and is_zeros(output_padding)
         # there are some odd models where this check fails (e.g. shufflenet_v2_x1_0)
-        and V.graph.sizevars.statically_known_equals(in_chan, x.get_size()[1])  # type: ignore[arg-type]
+        and V.graph.sizevars.statically_known_equals(in_chan * groups, x.get_size()[1])  # type: ignore[arg-type]
     ):
         if (
             is_ones(kernel_shape)
@@ -589,12 +625,30 @@ def convolution(
         ):
             choices.append(aten_conv1x1_via_mm.bind(args, layout))
 
+        is_depthwise = groups > 1 and in_chan == 1 and out_chan == groups
+        if is_depthwise and ndim == 1:
+            depthwise_configs = V.choices.get_depthwise_conv_configs(device_type)
+            for cfg in depthwise_configs:
+                depthwise_conv1d_template.maybe_append_choice(
+                    choices,
+                    input_nodes=(x, weight),
+                    layout=layout,
+                    KERNEL_SIZE=kernel_shape[0],
+                    CONV_STRIDE=stride[0],
+                    PADDING=padding[0],
+                    num_stages=cfg.num_stages,
+                    num_warps=cfg.num_warps,
+                    **cfg.kwargs,
+                )
+
         conv_configs = V.choices.get_conv_configs(device_type)
 
+        dtype_size = x.get_dtype().itemsize
         for cfg in conv_configs(
             sympy_product([x.get_size()[0], *x.get_size()[2:]]),
             out_chan,
             in_chan,
+            dtype_size=dtype_size,
         ):
             if ndim == 2:
                 conv2d_template.maybe_append_choice(
@@ -611,7 +665,7 @@ def convolution(
                     # TODO(jansel): try unroll for bigger kernels once fixed:
                     #               https://github.com/triton-lang/triton/issues/1254
                     UNROLL=is_ones(kernel_shape),
-                    ALLOW_TF32=torch.backends.cudnn.allow_tf32,
+                    ALLOW_TF32=torch.backends.cudnn.fp32_precision == "tf32",
                     num_stages=cfg.num_stages,
                     num_warps=cfg.num_warps,
                     **cfg.kwargs,
@@ -634,7 +688,7 @@ def convolution(
                     # TODO(jansel): try unroll for bigger kernels once fixed:
                     #               https://github.com/triton-lang/triton/issues/1254
                     UNROLL=is_ones(kernel_shape),
-                    ALLOW_TF32=torch.backends.cudnn.allow_tf32,
+                    ALLOW_TF32=torch.backends.cudnn.fp32_precision == "tf32",
                     num_stages=cfg.num_stages,
                     num_warps=cfg.num_warps,
                     **cfg.kwargs,
@@ -650,7 +704,8 @@ def convolution(
             groups=groups,
             n_spatial_dimensions=ndim,
         )
-    return autotune_select_algorithm("convolution", choices, args, layout)
+    node, _ = autotune_select_algorithm("convolution", choices, args, layout)
+    return node
 
 
 @register_lowering(aten._convolution)
@@ -675,7 +730,7 @@ def _convolution(
 
 
 def constrain_conv_to_fx_strides(fx_node, *args, **kwargs):
-    assert fx_node.target == torch.ops.aten.convolution.default
+    assert fx_node.target is torch.ops.aten.convolution.default
     if V.graph.layout_opt:
         return args, kwargs
     else:

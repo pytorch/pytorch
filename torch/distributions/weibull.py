@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -35,13 +34,14 @@ class Weibull(TransformedDistribution):
         "scale": constraints.positive,
         "concentration": constraints.positive,
     }
+    # pyrefly: ignore [bad-override]
     support = constraints.positive
 
     def __init__(
         self,
-        scale: Union[Tensor, float],
-        concentration: Union[Tensor, float],
-        validate_args: Optional[bool] = None,
+        scale: Tensor | float,
+        concentration: Tensor | float,
+        validate_args: bool | None = None,
     ) -> None:
         self.scale, self.concentration = broadcast_all(scale, concentration)
         self.concentration_reciprocal = self.concentration.reciprocal()
@@ -52,6 +52,7 @@ class Weibull(TransformedDistribution):
             PowerTransform(exponent=self.concentration_reciprocal),
             AffineTransform(loc=0, scale=self.scale),
         ]
+        # pyrefly: ignore [bad-argument-type]
         super().__init__(base_dist, transforms, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):

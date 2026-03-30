@@ -8,19 +8,9 @@ from torch._dynamo.graph_deduplication import apply_graph_deduplication
 from torch._dynamo.graph_utils import _detect_cycles
 from torch._dynamo.output_graph import FakeRootModule
 from torch._dynamo.test_case import TestCase
-from torch._dynamo.testing import (
-    AotEagerAndRecordGraphs,
-    extract_graph_and_tracker,
-    normalize_gm,
-)
+from torch._dynamo.testing import extract_graph, extract_graph_and_tracker, normalize_gm
 from torch.compiler import allow_in_graph
 from torch.utils._ordered_set import OrderedSet
-
-
-def extract_graph(fn, *args, **kwargs):
-    backend = AotEagerAndRecordGraphs()
-    result = torch.compile(backend=backend)(fn)(*args, **kwargs)
-    return result, backend.graphs, backend.fw_graphs
 
 
 def graph_str(gm):
@@ -40,7 +30,7 @@ class GraphDededuplicationTests(TestCase):
         super().tearDown()
 
     def run_and_return_graphs(self, fn, *args, **kwargs):
-        return extract_graph(fn, *args, **kwargs)
+        return extract_graph(fn, *args, **kwargs)[0:3]
 
     def run_and_get_simple_graph(self):
         def fn(x, y):
@@ -1125,7 +1115,7 @@ def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
             x2 = inner_fn(x2, y2)
             return x0, x1, x2
 
-        fn_opt = torch.compile(fn, fullgraph=True)
+        fn_opt = torch.compile(fn, fullgraph=True, backend="eager")
         inps = [torch.rand(10, 10) for _ in range(6)]
         result_compiled = fn_opt(*inps)
         result_eager = fn(*inps)
@@ -1164,7 +1154,7 @@ def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
             splits = [
                 n
                 for n in graph.nodes
-                if n.op == "call_function" and n.target == torch.split
+                if n.op == "call_function" and n.target is torch.split
             ]
             for split in splits:
                 tracker.node_to_duplicates.pop(split)
@@ -1217,7 +1207,7 @@ graph():
             x2 = inner_fn(x2, y2)
             return x0.sum() + x1.sum() + x2.sum()
 
-        fn_opt = torch.compile(fn, fullgraph=True)
+        fn_opt = torch.compile(fn, fullgraph=True, backend="eager")
         args = [torch.rand(10, 10) for _ in range(6)]
         for arg in args:
             torch._dynamo.mark_static_address(arg)

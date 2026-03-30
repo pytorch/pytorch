@@ -12,7 +12,7 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, slowTest
 
 __TestCase = CPythonTestCase
 
@@ -102,7 +102,7 @@ class TestBase(__TestCase):
             sizes.extend(range(n-1, n+2))
         sizes.extend([10, 100, 1000])
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class Complains(object):
                 maybe_complain = True
 
@@ -183,6 +183,7 @@ class TestBase(__TestCase):
             x = [e for e, i in augmented] # a stable sort of s
             check("stability", x, s)
 
+    @slowTest
     def test_small_stability(self):
         from itertools import product
         from operator import itemgetter
@@ -213,7 +214,7 @@ class TestBugs(__TestCase):
         # If this fails, the most likely outcome is a core dump.
         # Mutations during a list sort should raise a ValueError.
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class C:
                 def __lt__(self, other):
                     if L and random.random() < 0.75:
@@ -284,7 +285,7 @@ class TestDecorateSortUndecorate(__TestCase):
 
     def test_key_with_mutating_del(self):
         data = list(range(10))
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class SortKiller(object):
                 def __init__(self, x):
                     pass
@@ -298,7 +299,7 @@ class TestDecorateSortUndecorate(__TestCase):
     def test_key_with_mutating_del_and_exception(self):
         data = list(range(10))
         ## dup = data[:]
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class SortKiller(object):
                 def __init__(self, x):
                     if x > 2:
@@ -389,7 +390,7 @@ class TestOptimizedCompares(__TestCase):
         # This test is by ppperry. It ensures that unsafe_object_compare is
         # verifying ms->key_richcompare == tp->richcompare before comparing.
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class WackyComparator(int):
                 def __lt__(self, other):
                     elem.__class__ = WackyList2
@@ -414,7 +415,7 @@ class TestOptimizedCompares(__TestCase):
 
         # The following test is also by ppperry. It ensures that
         # unsafe_object_compare handles Py_NotImplemented appropriately.
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class PointlessComparator:
                 def __lt__(self, other):
                     return NotImplemented

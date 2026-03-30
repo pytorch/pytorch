@@ -1,9 +1,10 @@
 # mypy: allow-untyped-defs
-from typing import Any, Optional
+from typing import Any
 
 import sympy
 
 import torch
+from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config
 from ..runtime.hints import AttrsDescriptorWrapper
@@ -31,7 +32,7 @@ def should_unwrap_unspec_arg(name: str):
     return False
 
 
-def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
+def signature_of(arg: KernelArgType, *, size_dtype: str | None) -> str:
     if isinstance(arg, TensorArg):
         # TODO: Remove fp8 special handling when Triton supports PyTorch fp8 dtypes.
         # Related PR: https://github.com/triton-lang/triton/pull/2279/
@@ -70,7 +71,13 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
             # it should be marked as "constexpr" in the signature.
             return "constexpr"
         elif isinstance(arg.expr, (float, sympy.Float)):
-            return "fp32"
+            # Python floats are natively fp64, so use fp64 to preserve precision
+            return "fp64" if config._use_fp64_for_unbacked_floats else "fp32"
+        elif isinstance(arg.expr, sympy.Symbol) and symbol_is_type(
+            arg.expr, (SymT.UNBACKED_FLOAT)
+        ):
+            # Unbacked floats from .item() should preserve fp64 precision
+            return "fp64" if config._use_fp64_for_unbacked_floats else "fp32"
         elif isinstance(arg.expr, bool):
             return "i1"
 
@@ -118,9 +125,9 @@ def non_constexpr_signature(signature):
 def signature_to_meta(
     signature: list[KernelArgType],
     *,
-    size_dtype: Optional[str],
+    size_dtype: str | None,
     argdefs: list[ArgName],
-    indices: Optional[list[int]] = None,
+    indices: list[int] | None = None,
     is_template: bool = False,
 ) -> dict[str, str]:
     if indices is None:
@@ -196,7 +203,7 @@ def _arg_equals_1(arg: KernelArgType) -> bool:
 def equal_1_arg_indices(
     args: list[KernelArgType],
     *,
-    indices: Optional[list[int]] = None,
+    indices: list[int] | None = None,
 ) -> tuple[int, ...]:
     if indices is None:
         indices = list(range(len(args)))
@@ -209,7 +216,7 @@ def equal_1_arg_indices(
 def config_of(
     args: list[KernelArgType],
     *,
-    indices: Optional[list[int]] = None,
+    indices: list[int] | None = None,
 ) -> Any:
     if indices is None:
         indices = list(range(len(args)))
@@ -235,7 +242,7 @@ def config_of(
                 return False
             if x.expr is None:
                 return False
-            if isinstance(x.expr, float):
+            if isinstance(x.expr, (float, bool)):
                 return False
             return V.graph.sizevars.statically_known_multiple_of(x.expr, alignment)  # type: ignore[arg-type]
         if isinstance(x, WorkspaceArg):
@@ -256,4 +263,5 @@ def config_of(
 
     equal_to_1 = equal_1_arg_indices(args, indices=indices)
 
+    # pyrefly: ignore [bad-argument-type]
     return AttrsDescriptorWrapper(divisible_by_16, equal_to_1)

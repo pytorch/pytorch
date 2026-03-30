@@ -96,7 +96,10 @@ def model_training_evaluation(
 
 
 def check_loss(ref_loss, res_loss):
-    assert len(ref_loss) == len(res_loss)
+    if len(ref_loss) != len(res_loss):
+        raise AssertionError(
+            f"Expected loss lists to have equal length, but got {len(ref_loss)} and {len(res_loss)}"
+        )
     length = len(ref_loss)
     x = min(length, 10)
     return sum(res_loss[-x:]) / 10 <= sum(ref_loss[-x:]) / 10 + 0.1
@@ -153,7 +156,7 @@ def main():
         "bert-base-cased", num_labels=5
     )
     optimizer_cls = getattr(sys.modules["torch.optim"], args.optimizer)
-    if "capturable" in inspect.signature(optimizer_cls).parameters.keys():
+    if "capturable" in inspect.signature(optimizer_cls).parameters:
         optimizer = optimizer_cls(model.parameters(), lr=args.lr, capturable=True)
     else:
         optimizer = optimizer_cls(model.parameters(), lr=args.lr)

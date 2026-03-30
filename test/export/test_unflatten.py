@@ -359,9 +359,10 @@ class TestUnflatten(TestCase):
 
         export_module = torch.export.export(Mod(), (torch.randn((2, 3)),), strict=True)
         with self.assertRaisesRegex(
-            RuntimeError,
-            escape("Expected input at *args[0].shape[0] to be equal to 2, but got 6"),
+            AssertionError,
+            escape("Guard failed: x.size()[0] == 2"),
         ):
+            # expected 2, but got 6
             export_module.module()(torch.randn(6, 6))
 
         unflattened = unflatten(export_module)
@@ -933,7 +934,7 @@ def forward(self, x):
         fn_count_sym_size = lambda graph: [node.target for node in graph.nodes].count(
             torch.ops.aten.sym_size.int
         )
-        self.assertEqual(fn_count_sym_size(unflat.graph), 3)
+        self.assertEqual(fn_count_sym_size(unflat.graph), 1)
         self.assertEqual(fn_count_sym_size(unflat.m1.graph), 1)
         self.assertEqual(fn_count_sym_size(unflat.m2.graph), 0)
 
@@ -1057,6 +1058,27 @@ def forward(self, x):
         )
         unf = torch.export.unflatten(ep)
         inp = (torch.randn(3), None)
+        self.assertTrue(torch.allclose(unf(*inp), M1()(*inp)))
+
+    def test_unflatten_root_module_type(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return x + x
+
+        class M1(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.m = M()
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return self.m(x)
+
+        inp = (torch.randn(3),)
+        ep = torch.export.export(M1(), inp)
+        unf = torch.export.unflatten(ep)
+        self.assertIsNotNone(unf.type_name())
+        self.assertEqual(unf.type_name().split(".")[-1], "M1")
+        self.assertEqual(unf.m.type_name().split(".")[-1], "M")
         self.assertTrue(torch.allclose(unf(*inp), M1()(*inp)))
 
 

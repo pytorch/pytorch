@@ -54,6 +54,9 @@ from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 from torch.testing._internal.distributed.common_state_dict import VerifyStateDictMixin
 
 
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
+
 # Simple and boring model
 class TestDummyModel(torch.nn.Module):
     def __init__(self) -> None:
@@ -72,12 +75,12 @@ class TestDummyModel(torch.nn.Module):
         return x
 
     def get_input(self):
-        return torch.rand(8, 8, device="cuda")
+        return torch.rand(8, 8, device=device_type)
 
 
 class TestStatefulObj:
     def __init__(self) -> None:
-        self.data = torch.rand(10, 10, device="cuda")
+        self.data = torch.rand(10, 10, device=device_type)
 
     def state_dict(self):
         return {"data": self.data}
@@ -151,12 +154,14 @@ def _train(model, optim, train_steps=1):
 class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     @property
     def backend(self):
-        return "cpu:gloo,cuda:nccl"
+        curr_backend = dist.get_default_backend_for_device(self.device_type)
+        return f"cpu:gloo,{self.device_type}:{curr_backend}"
 
     def _create_model(self, compile, model_type, state_dict_options=None):
-        dummy_model = TestDummyModel().cuda()
+        dummy_model = TestDummyModel().to(self.device_type)
 
-        assert model_type in ModelType, f"{model_type} is not supported."
+        if model_type not in ModelType:
+            raise AssertionError(f"{model_type} is not supported.")
         if model_type == ModelType.FSDP:
             device_mesh = init_device_mesh(self.device_type, (self.world_size,))
             model = FSDP(
@@ -207,8 +212,8 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     def _optim(self, model):
         return torch.optim.Adam(model.parameters(), lr=0.1)
 
-    @with_comms
     @skip_if_lt_x_gpu(4)
+    @with_comms
     @with_temp_dir
     @parametrize("compile", [True, False])
     # TODO: Previously PairwiseParallel does not shard properly, passing ModelType.FSDP_TP test where it
@@ -217,8 +222,8 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     def test_e2e(self, compile, model_type):
         self._run_e2e_test(compile, model_type)
 
-    @with_comms
     @skip_if_lt_x_gpu(4)
+    @with_comms
     @with_temp_dir
     @parametrize(
         "cache_staged_state_dict, async_checkpointer_type, zoc",
@@ -295,7 +300,10 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
             if isinstance(async_save_response_or_future, Future):
                 save_future = async_save_response_or_future
             else:
-                assert isinstance(async_save_response_or_future, AsyncSaveResponse)
+                if not isinstance(async_save_response_or_future, AsyncSaveResponse):
+                    raise AssertionError(
+                        f"Expected AsyncSaveResponse, got {type(async_save_response_or_future)}"
+                    )
                 save_future = async_save_response_or_future.upload_completion
             # wait for the future to complete
             t = time.monotonic()
@@ -378,9 +386,9 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         # Validate that the non-stateful state dict was replaced with the loaded state dict
         self.assertTrue(sd.set_sd_item_called)
 
+    @skip_if_lt_x_gpu(4)
     @with_comms
     @with_temp_dir
-    @skip_if_lt_x_gpu(4)
     def test_different_ordered_state_dict_keys(self):
         """Tests that the order of keys in the state dict does not matter when loading
         If order was not accounted for, the following test would cause a deadlock.
@@ -394,11 +402,11 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 
             def load_state_dict(self, state_dict):
                 tl = [
-                    torch.ones(2, dtype=torch.int64, device="cuda")
+                    torch.ones(2, dtype=torch.int64, device=device_type)
                     for _ in range(world_size)
                 ]
                 t = (
-                    torch.arange(2, dtype=torch.int64, device="cuda")
+                    torch.arange(2, dtype=torch.int64, device=device_type)
                     + 1
                     + 2 * dist.get_rank()
                 )
@@ -410,7 +418,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 
             def load_state_dict(self, state_dict):
                 tensor = (
-                    torch.arange(2, dtype=torch.int64, device="cuda")
+                    torch.arange(2, dtype=torch.int64, device=device_type)
                     + 1
                     + 2 * dist.get_rank()
                 )
@@ -437,8 +445,8 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         DCP.save({}, checkpoint_id=self.temp_dir)
         DCP.load({}, checkpoint_id=self.temp_dir)
 
-    @with_comms
     @skip_if_lt_x_gpu(4)
+    @with_comms
     @with_temp_dir
     def test_partial_load(self):
         model, optim = self._create_model(compile=False, model_type=ModelType.NONE)
@@ -476,8 +484,8 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
                     loaded_optim_state[k][optim_key], v[optim_key], offload_to_cpu=True
                 )
 
-    @with_comms
     @skip_if_lt_x_gpu(4)
+    @with_comms
     @with_temp_dir
     def test_overwrite(self):
         t1, t2 = torch.randn(10), torch.randn(10)

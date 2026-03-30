@@ -3,11 +3,12 @@ import collections
 import inspect
 import typing
 from types import GenericAlias
-from typing import Optional, Union
 
 import torch
 from torch import device, dtype, Tensor, types
 from torch.utils._exposed_in import exposed_in
+
+from .opaque_object import _OPAQUE_TYPES, is_opaque_reference_type, is_opaque_type
 
 
 # This is used as a negative test for
@@ -21,7 +22,7 @@ def infer_schema(
     /,
     *,
     mutates_args,
-    op_name: Optional[str] = None,
+    op_name: str | None = None,
 ) -> str:
     r"""Parses the schema of a given function with type hints. The schema is inferred from the
     function's type hints, and can be used to define a new operator.
@@ -77,7 +78,7 @@ def infer_schema(
             )
 
     def unstringify_types(
-        tys: tuple[Union[type[object], str], ...],
+        tys: tuple[type[object] | str, ...],
     ) -> tuple[tuple[typing.Any, ...], bool]:
         res = []
         changed = False
@@ -90,7 +91,7 @@ def infer_schema(
         else:
             return tys, False  # type: ignore[return-value]
 
-    def unstringify_type(ty: Union[type[object], str]) -> tuple[typing.Any, bool]:
+    def unstringify_type(ty: type[object] | str) -> tuple[typing.Any, bool]:
         # Dig through a generic type and if it contains a stringified type
         # convert that to a real type. The second return value indicates if the
         # type contained a string or not.
@@ -123,12 +124,24 @@ def infer_schema(
         # we convert it to the actual type.
         annotation_type, _ = unstringify_type(param.annotation)
 
+        schema_type = None
         if annotation_type not in SUPPORTED_PARAM_TYPES:
-            if annotation_type.__origin__ is tuple:
+            if is_opaque_type(annotation_type):
+                schema_type = _OPAQUE_TYPES[annotation_type].class_name
+            elif annotation_type == torch._C.ScriptObject:
+                error_fn(
+                    f"Parameter {name}'s type cannot be inferred from the schema "
+                    "as it is a ScriptObject. Please manually specify the schema "
+                    "using the `schema=` kwarg with the actual type of the ScriptObject."
+                )
+            elif (
+                hasattr(annotation_type, "__origin__")
+                and annotation_type.__origin__ is tuple
+            ):
                 list_type = tuple_to_list(annotation_type)
                 example_type_str = "\n\n"
                 # Only suggest the list type if this type is supported.
-                if list_type in SUPPORTED_PARAM_TYPES.keys():
+                if list_type in SUPPORTED_PARAM_TYPES:
                     example_type_str = f"For example, {list_type}.\n\n"
                 error_fn(
                     f"Parameter {name} has unsupported type {param.annotation}. "
@@ -141,9 +154,13 @@ def infer_schema(
                     f"Parameter {name} has unsupported type {param.annotation}. "
                     f"The valid types are: {SUPPORTED_PARAM_TYPES.keys()}."
                 )
+        else:
+            schema_type = SUPPORTED_PARAM_TYPES[annotation_type]
 
-        schema_type = SUPPORTED_PARAM_TYPES[annotation_type]
-        if type(mutates_args) == str:
+        if schema_type is None:
+            raise AssertionError(f"schema_type is None for param {name}")
+
+        if type(mutates_args) is str:
             if mutates_args != UNKNOWN_MUTATES:
                 raise ValueError(
                     "mutates_args must either be a sequence of the names of "
@@ -159,6 +176,7 @@ def infer_schema(
             schema_type = f"Tensor(a{idx}!){schema_type[len('Tensor') :]}"
         seen_args.add(name)
         if param.default is inspect.Parameter.empty:
+            # pyrefly: ignore [bad-argument-type]
             params.append(f"{schema_type} {name}")
         else:
             default_repr = None
@@ -169,13 +187,17 @@ def infer_schema(
             elif isinstance(param.default, torch.dtype):
                 dtype_repr = str(param.default)
                 torch_dot = "torch."
-                assert dtype_repr.startswith(torch_dot)
+                if not dtype_repr.startswith(torch_dot):
+                    raise AssertionError(
+                        f"dtype repr {dtype_repr!r} must start with 'torch.'"
+                    )
                 default_repr = dtype_repr[len(torch_dot) :]
             else:
                 error_fn(
                     f"Parameter {name} has an unsupported default value type {type(param.default)}. "
                     f"Please file an issue on GitHub so we can prioritize this."
                 )
+            # pyrefly: ignore [bad-argument-type]
             params.append(f"{schema_type} {name}={default_repr}")
     if mutates_args != UNKNOWN_MUTATES:
         mutates_args_not_seen = set(mutates_args) - seen_args
@@ -194,18 +216,19 @@ def infer_schema(
 
 
 def derived_types(
-    base_type: Union[type, typing._SpecialForm],
+    base_type: type | typing._SpecialForm,
     cpp_type: str,
     list_base: bool,
     optional_base_list: bool,
     optional_list_base: bool,
 ):
-    result: list[tuple[Union[type, typing._SpecialForm, GenericAlias], str]] = [
+    result: list[tuple[type | typing._SpecialForm | GenericAlias, str]] = [
         (base_type, cpp_type),
-        (typing.Optional[base_type], f"{cpp_type}?"),
+        # pyrefly: ignore [not-a-type]
+        (typing.Optional[base_type], f"{cpp_type}?"),  # noqa: UP045
     ]
 
-    def derived_seq_types(typ: Union[type, typing._SpecialForm]):
+    def derived_seq_types(typ: type | typing._SpecialForm):
         return (
             typing.Sequence[typ],  # type: ignore[valid-type]  # noqa: UP006
             typing.List[typ],  # type: ignore[valid-type]  # noqa: UP006
@@ -220,18 +243,19 @@ def derived_types(
     if optional_base_list:
         result.extend(
             (seq_typ, f"{cpp_type}?[]")
-            for seq_typ in derived_seq_types(typing.Optional[base_type])
+            # pyrefly: ignore [not-a-type]
+            for seq_typ in derived_seq_types(typing.Optional[base_type])  # noqa: UP045
         )
     if optional_list_base:
         result.extend(
-            (typing.Optional[seq_typ], f"{cpp_type}[]?")
+            (typing.Optional[seq_typ], f"{cpp_type}[]?")  # noqa: UP045
             for seq_typ in derived_seq_types(base_type)
         )
     return result
 
 
 def get_supported_param_types():
-    data: list[tuple[Union[type, typing._SpecialForm], str, bool, bool, bool]] = [
+    data: list[tuple[type | typing._SpecialForm, str, bool, bool, bool]] = [
         # (python type, schema type, type[] variant, type?[] variant, type[]? variant
         (Tensor, "Tensor", True, True, False),
         (int, "SymInt", True, False, True),
@@ -242,6 +266,12 @@ def get_supported_param_types():
         (dtype, "ScalarType", False, False, False),
         (device, "Device", False, False, False),
     ]
+
+    if torch.distributed.is_available():
+        from torch.distributed.distributed_c10d import GroupName
+
+        data.append((typing.cast(type, GroupName), "str", False, False, False))
+
     result = []
     for line in data:
         result.extend(derived_types(*line))
@@ -268,21 +298,30 @@ def parse_return(annotation, error_fn):
 
     origin = typing.get_origin(annotation)
     if origin is not tuple:
-        if annotation not in SUPPORTED_RETURN_TYPES.keys():
+        if annotation not in SUPPORTED_RETURN_TYPES:
+            if is_opaque_reference_type(annotation):
+                return _OPAQUE_TYPES[annotation].class_name
             error_fn(
                 f"Return has unsupported type {annotation}. "
                 f"The valid types are: {SUPPORTED_RETURN_TYPES}."
             )
+
         return SUPPORTED_RETURN_TYPES[annotation]
 
     args = typing.get_args(annotation)
     for arg in args:
-        if arg not in SUPPORTED_RETURN_TYPES:
+        if arg not in SUPPORTED_RETURN_TYPES and not is_opaque_reference_type(arg):
             error_fn(
                 f"Return has unsupported type {annotation}. "
                 f"The valid types are: {SUPPORTED_RETURN_TYPES}."
             )
-    output_ty = ", ".join([SUPPORTED_RETURN_TYPES[arg] for arg in args])
+
+    def _return_type_str(arg):
+        if ty := SUPPORTED_RETURN_TYPES.get(arg):
+            return ty
+        return _OPAQUE_TYPES[arg].class_name
+
+    output_ty = ", ".join(_return_type_str(arg) for arg in args)
 
     # use (()) to represent tuple with single element
     if len(args) == 1:
@@ -321,4 +360,4 @@ def tuple_to_list(tuple_type: type[tuple]) -> type[list]:
     elif len(type_args) == 2 and type_args[1] is Ellipsis:
         return list[type_args[0]]  # type: ignore[valid-type]
     else:
-        return list[typing.Union[tuple(type_args)]]  # type: ignore[misc, return-value]
+        return list[typing.Union[tuple(type_args)]]  # type: ignore[misc, return-value]  # noqa: UP007

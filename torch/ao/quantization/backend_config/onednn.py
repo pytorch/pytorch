@@ -88,9 +88,10 @@ def _fuse_linear_bn_leaky_relu(is_qat, linear, bn, leaky_relu):
         >>> lr = nn.LeakyReLU(0.01)
         >>> m2 = _fuse_linear_bn_leaky_relu(m1, b1, lr)
     """
-    assert linear.training == bn.training and bn.training == leaky_relu.training, (
-        "Linear, BN and LeakyReLU all must be in the same mode (train or eval)."
-    )
+    if linear.training != bn.training or bn.training != leaky_relu.training:
+        raise AssertionError(
+            "Linear, BN and LeakyReLU all must be in the same mode (train or eval)."
+        )
 
     if is_qat:
         raise NotImplementedError(
@@ -100,7 +101,7 @@ def _fuse_linear_bn_leaky_relu(is_qat, linear, bn, leaky_relu):
         map_to_fused_module_eval = {
             nn.Linear: nni.LinearLeakyReLU,
         }
-        fused_module = map_to_fused_module_eval.get(type(linear), None)
+        fused_module = map_to_fused_module_eval.get(type(linear))
         if fused_module is not None:
             fused_linear = nn.utils.fusion.fuse_linear_bn_eval(linear, bn)
             fm = fused_module(fused_linear, leaky_relu)

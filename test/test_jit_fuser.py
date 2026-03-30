@@ -9,6 +9,13 @@ import torch.nn.functional as F
 from torch.testing import FileCheck
 from unittest import skipIf
 
+if __name__ == "__main__":
+    from torch.testing._internal.common_utils import parse_cmd_line_args
+
+    # The value of GRAPH_EXECUTOR depends on command line arguments so make sure they're parsed
+    # before instantiating tests.
+    parse_cmd_line_args()
+
 from torch.testing._internal.common_utils import run_tests, IS_SANDCASTLE, ProfilingMode, GRAPH_EXECUTOR, \
     enable_profiling_mode_for_profiling_tests, IS_WINDOWS, TemporaryDirectoryName, shell
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, _inline_everything, \
@@ -980,7 +987,8 @@ class TestFuser(JitTestCase):
             # in order for Python 2
             for g in all_backward_graphs(module):
                 if str(g) not in old_plans:
-                    assert backward is None
+                    if backward is not None:
+                        raise AssertionError("backward should be None")
                     backward = g
                     old_plans.add(str(backward))
             num_grads = 1 if i > 0 else 0
@@ -988,4 +996,5 @@ class TestFuser(JitTestCase):
 
 
 if __name__ == '__main__':
-    run_tests()
+    if sys.version_info < (3, 14):
+        run_tests()

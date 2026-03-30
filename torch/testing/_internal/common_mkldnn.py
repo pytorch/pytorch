@@ -18,7 +18,7 @@ def bf32_is_not_fp32():
 def tf32_is_not_fp32():
     if not torch.backends.mkldnn.is_available():
         return False
-    if not torch._C._cpu._is_amx_fp16_supported():
+    if not torch.cpu._is_amx_fp16_supported():
         return False
     return True
 
@@ -91,7 +91,7 @@ def reduced_f32_on_and_off(bf32_precision=1e-2, tf32_precision=1e-5):
 
         @functools.wraps(f)
         def wrapped(*args, **kwargs):
-            kwargs.update(zip(arg_names, args))
+            kwargs.update(zip(arg_names, args, strict=False))
             cond = True
             if "device" in kwargs:
                 cond = cond and (torch.device(kwargs["device"]).type == "cpu")

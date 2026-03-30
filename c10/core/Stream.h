@@ -82,14 +82,15 @@ class C10_API Stream final {
   /// should use the provided APIs to get a stream.  In particular,
   /// we don't require backends to give any guarantees about non-zero
   /// StreamIds; they are welcome to allocate in whatever way they like.
-  explicit Stream(Unsafe, Device device, StreamId id)
+  explicit Stream(Unsafe /*unused*/, Device device, StreamId id)
       : device_(device), id_(id) {}
 
   /// Construct the default stream of a Device.  The default stream is
   /// NOT the same as the current stream; default stream is a fixed stream
   /// that never changes, whereas the current stream may be changed by
   /// StreamGuard.
-  explicit Stream(Default, Device device) : device_(device), id_(0) {}
+  explicit Stream(Default /*unused*/, Device device)
+      : device_(device), id_(0) {}
 
   bool operator==(const Stream& other) const noexcept {
     return this->device_ == other.device_ && this->id_ == other.id_;
@@ -110,6 +111,11 @@ class C10_API Stream final {
   StreamId id() const noexcept {
     return id_;
   }
+
+  // Returns an opaque, backend-specific handle to the underlying stream.
+  // The handle is non-owning and its concrete type is backend-defined
+  // (e.g., a CUDA stream or a SYCL queue).
+  void* native_handle() const;
 
   // Enqueues a wait instruction in the stream's work queue.
   // This instruction is a no-op unless the event is marked

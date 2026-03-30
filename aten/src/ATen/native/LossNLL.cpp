@@ -47,10 +47,18 @@ TORCH_META_FUNC(nll_loss_forward)
   TORCH_CHECK(
       target.dim() <= 1,
       "0D or 1D target tensor expected, multi-target not supported");
-
-  auto no_batch_dim = self.dim() == 1  && target.dim() == 0;
   TORCH_CHECK(
-      no_batch_dim || (self.size(0) == target.size(0)),
+      target.scalar_type() == kLong || target.scalar_type() == kByte,
+      "expected target dtype to be Long or Byte, but got ",
+      target.scalar_type());
+  if (self.dim() == 1 && target.dim() == 1) {
+      TORCH_CHECK_VALUE(
+          target.size(0) == 1,
+          "For 1D input, 1D target must have size 1, but got target size: ",
+          target.size(0));
+  }
+  TORCH_CHECK(
+      self.dim() == 1 || (self.size(0) == target.size(0)),
       "size mismatch (got input: ",
       self.sizes(),
       ", target: ",
@@ -155,7 +163,7 @@ inline scalar_t* optional_data(const Tensor& source) {
 }
 
 template <typename scalar_t, typename target_t>
-static void nll_loss_out_frame(
+void nll_loss_out_frame(
     const Tensor& output,
     const Tensor& total_weight,
     const Tensor& input,
@@ -231,7 +239,7 @@ static void nll_loss_out_frame(
 
   constexpr int64_t cascade_sum_num_levels = 8;
   const int64_t level_power =
-      std::max(int64_t(4), utils::CeilLog2(batch_size) / cascade_sum_num_levels);
+      std::max(static_cast<int64_t>(4), utils::CeilLog2(batch_size) / cascade_sum_num_levels);
   const int64_t level_step = (1 << level_power);
   const int64_t level_mask = level_step - 1;
 
@@ -334,7 +342,7 @@ void nll_loss_forward_out_cpu_template(
 }
 
 template <typename scalar_t, typename target_t>
-static void nll_loss_backward_out_frame(
+void nll_loss_backward_out_frame(
     const Tensor& grad_input,
     const Tensor& grad_output,
     const Tensor& input,
@@ -678,9 +686,21 @@ Tensor nll_loss_nd_symint(
         false, "Expected 1 or more dimensions (got ", self.dim(), ")");
   }
 
-  if (self.dim() != 1 && self.sym_sizes()[0] != target.sym_sizes()[0]) {
-    TORCH_CHECK_VALUE(
-        false,
+  if (self.dim() != 1) {
+    auto sizes_match = self.sym_sizes()[0].sym_eq(target.sym_sizes()[0]);
+    if (TORCH_GUARD_OR_FALSE(sizes_match.sym_not())) {
+      // Statically known mismatch - raise ValueError for eager mode
+      TORCH_CHECK_VALUE(
+          false,
+          "Expected input batch_size (",
+          self.sym_sizes()[0],
+          ") to match target batch_size (",
+          target.sym_sizes()[0],
+          ").");
+    }
+    // For unbacked symbolic shapes, emit runtime check.
+    TORCH_SYM_CHECK(
+        sizes_match,
         "Expected input batch_size (",
         self.sym_sizes()[0],
         ") to match target batch_size (",

@@ -11,7 +11,6 @@ import logging
 import operator
 from collections import defaultdict, deque
 from collections.abc import Generator, Iterable
-from typing import Optional
 
 import torch
 import torch.fx
@@ -31,7 +30,7 @@ UsageIndex = tuple[int, int]
 
 log = logging.getLogger(__name__)
 
-last_node_to_additional_deps: Optional[dict[Node, OrderedSet[Node]]] = None
+last_node_to_additional_deps: dict[Node, OrderedSet[Node]] | None = None
 
 
 def apply_graph_deduplication(output_graph) -> dict[str, torch.fx.GraphModule]:  # type: ignore[no-untyped-def]
@@ -324,10 +323,11 @@ def _create_subgraph(
     return subgraph, external_node_usages, node_usage_to_tuple_elems, ind_to_tuple_spec
 
 
-def _stable_topological_sort(
+def _stable_topological_sort_impl(
     graph: torch.fx.Graph,
     node_to_additional_deps: dict[Node, OrderedSet[Node]],
-) -> None:
+    do_sort: bool = True,
+) -> bool:
     # Nodes are in exactly one of these four collections:
 
     # - Nodes in `pending` are waiting to be processed (in reverse order):
@@ -366,7 +366,7 @@ def _stable_topological_sort(
             waiting[waiting_for[-1]].append(node)
         else:
             ready.add(node)
-            if cursor and cursor.next is not node:
+            if cursor and cursor.next is not node and do_sort:
                 cursor.append(node)
             cursor = node
             # Mark the nodes that have been waiting for this node to finish as
@@ -374,7 +374,23 @@ def _stable_topological_sort(
             pending.extend(reversed(waiting.pop(node, ())))
 
     ready.update(outputs)
-    assert not waiting and len(ready) == len(graph.nodes)
+    return not waiting and len(ready) == len(graph.nodes)
+
+
+def _stable_topological_sort(
+    graph: torch.fx.Graph,
+    node_to_additional_deps: dict[Node, OrderedSet[Node]],
+) -> None:
+    assert _stable_topological_sort_impl(graph, node_to_additional_deps)
+
+
+def _has_cycle(
+    graph: torch.fx.Graph,
+    node_to_additional_deps: dict[Node, OrderedSet[Node]],
+) -> bool:
+    return not _stable_topological_sort_impl(
+        graph, node_to_additional_deps, do_sort=False
+    )
 
 
 def _populate_additional_deps(
@@ -439,8 +455,10 @@ def _add_mutation_dependencies(
             for user in mutated_arg.users:
                 if user is node:
                     continue
+
                 elif user < node:
                     node_to_additional_deps[node].add(user)
+
                 elif user > node:
                     node_to_additional_deps[user].add(node)
 
@@ -510,7 +528,7 @@ def _is_tuple_node(node: Node) -> bool:
 
 def _get_children_getitems(node: Node) -> Generator[Node, None, None]:
     for user in node.users:
-        if user.target == operator.getitem and isinstance(user.args[1], int):
+        if user.target is operator.getitem and isinstance(user.args[1], int):
             yield user
 
 

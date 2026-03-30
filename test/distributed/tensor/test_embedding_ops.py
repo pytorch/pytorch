@@ -13,6 +13,7 @@ from torch.distributed.tensor import (
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
     with_comms,
 )
@@ -167,7 +168,7 @@ class TestEmbeddingOp(DTensorTestBase):
         self._run_embedding_op_test(mesh, 0, [6, 7, 6], 13, 22)
         self._run_embedding_op_test(mesh, 0, [34], 15, 14, padding_idx=10)
 
-        from torch.distributed.tensor._ops._embedding_ops import _MaskPartial
+        from torch.distributed.tensor.placement_types import _MaskPartial
 
         # test collectives
         embedding_mod = torch.nn.Embedding(10, 20, device=self.device_type)
@@ -191,7 +192,7 @@ class TestEmbeddingOp(DTensorTestBase):
         inp = torch.randint(0, 10, (4, 4), device=self.device_type)
         replicated_inp = DTensor.from_local(inp, mesh, [Replicate()], run_check=False)
 
-        from torch.distributed.tensor._ops._embedding_ops import _MaskPartial
+        from torch.distributed.tensor.placement_types import _MaskPartial
 
         # case 1: two embeddings with the same shape, thus sharing the underlying _MaskPartial
         # and MaskBuffer, because of cache hit from sharding propagation
@@ -200,7 +201,7 @@ class TestEmbeddingOp(DTensorTestBase):
         sharded_emb1 = self._apply_sharding(emb1, 0, mesh)
         output1 = sharded_emb1(replicated_inp)
 
-        emb2 = torch.nn.Embedding(10, 29, device=self.device_type)
+        emb2 = torch.nn.Embedding(10, 23, device=self.device_type)
         sharded_emb2 = self._apply_sharding(emb2, 0, mesh)
         output2 = sharded_emb2(replicated_inp)
 
@@ -212,7 +213,7 @@ class TestEmbeddingOp(DTensorTestBase):
         self.assertIsInstance(partial_placement2, _MaskPartial)
         output2.full_tensor()
 
-        self.assertTrue(id(partial_placement1), id(partial_placement2))
+        self.assertEqual(id(partial_placement1), id(partial_placement2))
 
         # case 2: two embeddings with the same logical_dim_size, but different logical_shape
         # thus they will have different _MaskPartial placements (with no cache hit)
@@ -222,11 +223,46 @@ class TestEmbeddingOp(DTensorTestBase):
         output3 = sharded_emb3(replicated_inp)
         partial_placement3 = output3.placements[0]
         self.assertIsInstance(partial_placement3, _MaskPartial)
-        output2.full_tensor()
+        output3.full_tensor()
 
         # not equal because of different logical_shape, despite of same logical_dim_size
         self.assertNotEqual(partial_placement1, partial_placement3)
 
+    @with_comms
+    def test_embedding_backward_different_num_embeddings(self):
+        # Regression test: embedding_dense_backward op strategy must include
+        # num_weights in its cache key. Without this, multiple embeddings with
+        # different num_embeddings share a cached strategy, producing gradients
+        # with the wrong shape.
+        mesh = self.build_device_mesh()
+        torch.manual_seed(0)
+
+        emb_small = torch.nn.Embedding(16, 12, device=self.device_type)
+        emb_large = torch.nn.Embedding(32, 12, device=self.device_type)
+        sharded_emb_small = self._apply_sharding(emb_small, 1, mesh)
+        sharded_emb_large = self._apply_sharding(emb_large, 1, mesh)
+
+        inp_small = torch.randint(0, 16, (4, 4), device=self.device_type)
+        inp_large = torch.randint(0, 32, (4, 4), device=self.device_type)
+        dist_inp_small = DTensor.from_local(
+            inp_small, mesh, [Replicate()], run_check=False
+        )
+        dist_inp_large = DTensor.from_local(
+            inp_large, mesh, [Replicate()], run_check=False
+        )
+
+        out_large = sharded_emb_large(dist_inp_large)
+        out_small = sharded_emb_small(dist_inp_small)
+        loss = out_large.sum() + out_small.sum()
+        loss.backward()
+
+        self.assertEqual(sharded_emb_small.weight.grad.full_tensor().shape, (16, 12))
+        self.assertEqual(sharded_emb_large.weight.grad.full_tensor().shape, (32, 12))
+
+
+TestEmbeddingOpWithLocalTensor = create_local_tensor_test_class(
+    TestEmbeddingOp,
+)
 
 if __name__ == "__main__":
     run_tests()

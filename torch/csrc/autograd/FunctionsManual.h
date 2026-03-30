@@ -43,6 +43,7 @@ inline std::optional<Tensor> wrap_opt_if(const Tensor& t, const bool cond) {
 TORCH_API Tensor
 apply_loss_reduction(const Tensor& unreduced, int64_t reduction);
 TORCH_API bool any_variable_defined(const variable_list& variables);
+TORCH_API void update_wrapped_number(Tensor& input, Tensor& output);
 TORCH_API void copy_range(
     variable_list& out,
     IndexRange range,
@@ -279,7 +280,7 @@ std::tuple<at::Tensor, at::Tensor> clamp_backward_min_max(
     const at::Tensor& self,
     const at::Tensor& min,
     const at::Tensor& max,
-    const std::array<bool, 2>&);
+    const std::array<bool, 2>& /*grad_input_mask*/);
 at::Tensor clamp_jvp(
     const Tensor& self_p,
     const Tensor& self_t,
@@ -603,6 +604,11 @@ at::Tensor _cudnn_ctc_loss_backward(
     const at::Tensor& loss,
     const at::Tensor& raw_grad,
     bool zero_infinity);
+at::Tensor _miopen_ctc_loss_backward(
+    const at::Tensor& grad_out,
+    const at::Tensor& loss,
+    const at::Tensor& raw_grad,
+    bool zero_infinity);
 at::Tensor elu_double_backward(
     const Tensor& grad,
     const Tensor& grad_output,
@@ -896,8 +902,7 @@ Tensor linalg_solve_jvp(
     const Tensor& X,
     const Tensor& LU,
     const Tensor& pivots,
-    const bool left,
-    const bool use_A_T);
+    const bool left);
 Tensor lu_unpack_backward(
     const Tensor& L_grad,
     const Tensor& U_grad,

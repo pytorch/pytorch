@@ -12,7 +12,7 @@ from torch.distributed.fsdp._flat_param import (
     HandleShardingStrategy,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest
+from torch.testing._internal.common_fsdp import FSDPTestContinuous
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -33,7 +33,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-class TestFlattenParams(FSDPTest):
+class TestFlattenParams(FSDPTestContinuous):
     """Tests parameter flattening and shard metadata logic."""
 
     @property
@@ -44,8 +44,11 @@ class TestFlattenParams(FSDPTest):
         return 1
 
     def _get_default_config(self):
+        device_type = (
+            acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+        )
         return {
-            "device": torch.device("cuda"),
+            "device": torch.device(device_type),
             "sharding_strategy": HandleShardingStrategy.FULL_SHARD,
             "offload_params": False,
             "mp_param_dtype": None,

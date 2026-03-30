@@ -1,19 +1,13 @@
 # Owner(s): ["module: inductor"]
-import functools
-import unittest
 from unittest import mock
 from unittest.mock import MagicMock
 
 import torch
-from torch._dispatch.python import enable_python_dispatcher
-from torch._inductor.codegen.subgraph import SubgraphTemplate
-from torch._inductor.decomposition import select_decomp_table
 from torch._inductor.ir import Buffer, FixedLayout, FlexibleLayout
 from torch._inductor.lowering import register_lowering
 from torch._inductor.select_algorithm import autotune_select_algorithm
 from torch._inductor.test_case import run_tests, TestCase
-from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_utils import skipIfXpu, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 
@@ -42,7 +36,6 @@ class TestSubgraphChoice(TestCase):
         )
 
     @skipIfXpu
-    @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
     def test_subgraph_decompose_k(self):
         from torch._inductor.kernel.mm import aten_mm
         from torch._inductor.kernel.mm_common import mm_args
@@ -64,20 +57,14 @@ class TestSubgraphChoice(TestCase):
             choices = [aten_mm.bind((mat1, mat2), layout)]
 
             kPartitions = 256
-            with enable_python_dispatcher():
-                decompositions = select_decomp_table()
 
-                decompose_k_subgraph_template = SubgraphTemplate(
-                    name="decompose_k_mm",
-                    make_fx_graph=make_fx(
-                        functools.partial(decomposeK, kPartitions=kPartitions),
-                        decompositions,
-                        tracing_mode="real",
-                    ),
-                )
+            decompose_k_subgraph_template = (
+                torch._inductor.kernel.mm.DecomposeKSugraphTemplate()
+            )
 
             decompose_k_subgraph_template.maybe_append_choice(
                 choices,
+                k_split=kPartitions,
                 input_nodes=(mat1, mat2),
                 layout=layout,
             )
@@ -87,9 +74,10 @@ class TestSubgraphChoice(TestCase):
 
             # Only return decomposeK case for codegen
             choices = [choices[1]]
-            return autotune_select_algorithm(
+            node, _ = autotune_select_algorithm(
                 "test_subgraph_choice", choices, [a, b], layout
             )
+            return node
 
         a_in = torch.randn(
             mat1_shape, dtype=torch.float16, device=torch.device(f"{GPU_TYPE}:0")
@@ -109,7 +97,6 @@ class TestSubgraphChoice(TestCase):
         torch.testing.assert_close(res, a_in @ b_in, atol=1e-1, rtol=1e-1)
 
     @skipIfXpu
-    @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
     def test_subgraph_freeze_layout(self):
         from torch._inductor.kernel.mm_common import mm_args
 
@@ -133,45 +120,45 @@ class TestSubgraphChoice(TestCase):
         def _(a, b):
             _, _, _, layout, mat1, mat2 = mm_args(a, b)
             mat1_layout = mat1.layout
-            assert isinstance(mat1_layout, FlexibleLayout)
+            if not isinstance(mat1_layout, FlexibleLayout):
+                raise AssertionError
             mat1_stride = mat1_layout.stride
 
             choices = []
 
             kPartitions = 2
-            with enable_python_dispatcher():
-                decompositions = select_decomp_table()
 
-                decompose_k_subgraph_template = SubgraphTemplate(
-                    name="decompose_k_mm",
-                    make_fx_graph=make_fx(
-                        functools.partial(decomposeK, kPartitions=kPartitions),
-                        decompositions,
-                    ),
-                )
+            decompose_k_subgraph_template = (
+                torch._inductor.kernel.mm.DecomposeKSugraphTemplate()
+            )
 
             decompose_k_subgraph_template.maybe_append_choice(
                 choices,
+                k_split=kPartitions,
                 input_nodes=(mat1, mat2),
                 layout=layout,
             )
 
             choice = choices[0]
-            assert isinstance(mat1.layout, FixedLayout)
+            if not isinstance(mat1.layout, FixedLayout):
+                raise AssertionError
 
             # Creating the subgraph choice should have frozen the layout
             # We ensure padding so the stride should differ
-            assert mat1.layout.stride != mat1_stride
+            if mat1.layout.stride == mat1_stride:
+                raise AssertionError
 
             for example_stride, layout_stride in zip(
                 choice.example_inputs[0].stride(), mat1.layout.stride
             ):
                 # Example inputs should have same stride as current layout
-                assert example_stride == layout_stride
+                if example_stride != layout_stride:
+                    raise AssertionError
 
-            return autotune_select_algorithm(
+            node, _ = autotune_select_algorithm(
                 "test_subgraph_choice", choices, [a, b], layout
             )
+            return node
 
         def func(mat1, mat2):
             return torch.ops.mylib.matmul_decompose_padding((mat1 + 1.0), mat2)

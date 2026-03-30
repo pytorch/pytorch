@@ -1,6 +1,7 @@
 import enum
 import types
-from typing import Optional, overload
+from collections.abc import Callable
+from typing import overload
 
 from torch._dynamo.guards import GuardManagerWrapper
 from torch._dynamo.types import DynamoCallback, DynamoGuardCompleteHook, DynamoGuardHook
@@ -16,9 +17,11 @@ def set_code_exec_strategy(
 ) -> None: ...
 def set_guard_error_hook(hook: DynamoGuardHook) -> None: ...
 def set_guard_complete_hook(
-    hook: Optional[DynamoGuardCompleteHook],
-) -> Optional[DynamoGuardCompleteHook]: ...
+    hook: DynamoGuardCompleteHook | None,
+) -> DynamoGuardCompleteHook | None: ...
 def raise_sigtrap() -> None: ...
+def set_c_recursion_limit(limit: int) -> None: ...
+def get_c_recursion_limit() -> int: ...
 
 class _CacheEntry:
     def check_fn(self, *args: object, **kwargs: object) -> bool: ...
@@ -27,6 +30,7 @@ class _CacheEntry:
     compile_id: CompileId
     # If we run into circular issues, just use object
     guard_manager: GuardManagerWrapper
+    backend: Callable
     next: _CacheEntry | None
 
 class _PrecompileEntry:
@@ -67,10 +71,23 @@ class _PyInterpreterFrame:
     closure: tuple[types.CellType]
 
 def _debug_get_cache_entry_list(code: types.CodeType) -> list[_CacheEntry]: ...
+def _get_frame_value_stack_with_depth(
+    frame: types.FrameType, depth: int
+) -> list[object]: ...
+def set_bytecode_debugger_callback(
+    callback: Callable[[types.CodeType], None] | None,
+) -> None: ...
+def get_bytecode_debugger_callback() -> Callable[[types.CodeType], None] | None: ...
+def register_breakpoint_code(code: types.CodeType) -> None: ...
+
+# Sentinel for NULL stack values returned by _get_frame_value_stack_at_depth
+class NullStackValue: ...
+
+NULL_STACK_VALUE: NullStackValue
 
 py_opcode_caches: list[int]
 
-def code_framelocals_names(code: types.CodeType) -> tuple[str]: ...
+def code_framelocals_names(code: types.CodeType) -> tuple[str, ...]: ...
 def _load_precompile_entry(
     code: types.CodeType,
     guard_manager: GuardManagerWrapper,
@@ -78,3 +95,10 @@ def _load_precompile_entry(
 ) -> None: ...
 def _reset_precompile_entries(code: types.CodeType) -> None: ...
 def _debug_get_precompile_entries(code: types.CodeType) -> list[_PrecompileEntry]: ...
+
+class _EvalFrameOverride(enum.IntEnum):
+    NONE = 0
+    SKIP = 1
+    ERROR = 2
+
+def set_eval_frame_override(override: _EvalFrameOverride) -> _EvalFrameOverride: ...

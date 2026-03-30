@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <c10/util/tempfile.h>
+#include <c10/util/Exception.h>
 
 #include <libshm/err.h>
 #include <libshm/socket.h>
@@ -26,10 +27,10 @@ const int SHUTDOWN_TIMEOUT = 2000; // 2s
 #endif
 
 struct ClientSession {
-  ClientSession(ManagerSocket s) : socket(std::move(s)), pid(0) {}
+  ClientSession(ManagerSocket s) : socket(std::move(s)) {}
 
   ManagerSocket socket;
-  pid_t pid;
+  pid_t pid{0};
 };
 
 static std::vector<struct pollfd> pollfds;
@@ -96,21 +97,20 @@ int main(int argc, char* argv[]) {
   std::optional<c10::TempDir> tempdir;
   try {
     tempdir = c10::try_make_tempdir(/*name_prefix=*/"torch-shm-dir-");
-    if (!tempdir.has_value()) {
-      throw std::runtime_error(
-          "could not generate a random directory for manager socket");
-    }
+    TORCH_CHECK(
+        tempdir.has_value(),
+        "could not generate a random directory for manager socket");
 
     std::string tempfile = tempdir->name + "/manager.sock";
 
     srv_socket = std::make_unique<ManagerServerSocket>(tempfile);
     register_fd(srv_socket->socket_fd);
-    print_init_message(tempfile.c_str());
+    print_init_message(tempfile);
     DEBUG("opened socket %s", tempfile.c_str());
   } catch (const std::exception& e) {
     std::string message("ERROR: ");
     message += e.what();
-    print_init_message(message.c_str());
+    print_init_message(message);
     return 1;
   } catch (...) {
     print_init_message("ERROR: unhandled exception");

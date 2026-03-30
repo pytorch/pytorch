@@ -193,22 +193,22 @@ Tensor _nnpack_spatial_convolution(
   const size_t input_channels = input.size(1);
   const size_t output_channels = weight.size(0);
   const struct nnp_size input_size = {
-      .width = (size_t)input.size(3),
-      .height = (size_t)input.size(2),
+      .width = static_cast<size_t>(input.size(3)),
+      .height = static_cast<size_t>(input.size(2)),
   };
   const struct nnp_padding input_padding = {
-      .top = (size_t)padding[0],
-      .right = (size_t)padding[1],
-      .bottom = (size_t)padding[0],
-      .left = (size_t)padding[1],
+      .top = static_cast<size_t>(padding[0]),
+      .right = static_cast<size_t>(padding[1]),
+      .bottom = static_cast<size_t>(padding[0]),
+      .left = static_cast<size_t>(padding[1]),
   };
   const struct nnp_size kernel_size = {
-      .width = (size_t)weight.size(3),
-      .height = (size_t)weight.size(2),
+      .width = static_cast<size_t>(weight.size(3)),
+      .height = static_cast<size_t>(weight.size(2)),
   };
   const struct nnp_size output_size = {
-      .width = (size_t)output.size(3),
-      .height = (size_t)output.size(2),
+      .width = static_cast<size_t>(output.size(3)),
+      .height = static_cast<size_t>(output.size(2)),
   };
   const nnp_size output_subsample = {
       .width = static_cast<std::size_t>(stride[1]),

@@ -53,18 +53,22 @@ void check_input_variables(
   if (required_args == -1) {
     required_args = args;
   }
-  if (inputs.size() != static_cast<size_t>(args)) {
-    std::stringstream ss;
-    ss << name << ": expected " << args << " arguments (got " << inputs.size();
-    ss << ")";
-    throw std::runtime_error(ss.str());
-  }
+  TORCH_CHECK(
+      inputs.size() == static_cast<size_t>(args),
+      name,
+      ": expected ",
+      args,
+      " arguments (got ",
+      inputs.size(),
+      ")");
+
   for (const auto i : c10::irange(required_args)) {
-    if (!inputs[i].defined() && !allow_undefined) {
-      std::stringstream ss;
-      ss << name << ": expected Tensor at argument " << i << " (got None)";
-      throw std::runtime_error(ss.str());
-    }
+    TORCH_CHECK(
+        inputs[i].defined() || allow_undefined,
+        name,
+        ": expected Tensor at argument ",
+        i,
+        " (got None)");
   }
 }
 } // namespace torch::autograd

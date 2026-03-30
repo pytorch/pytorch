@@ -14,6 +14,11 @@ Utils
 
     sdpa_kernel
     SDPBackend
+    register_flash_attention_impl
+    activate_flash_attention_impl
+    list_flash_attention_impls
+    current_flash_attention_impl
+    restore_flash_attention_impl
 
 Submodules
 ----------
@@ -23,6 +28,7 @@ Submodules
     flex_attention
     bias
     experimental
+    varlen
 
 .. toctree::
     :hidden:
@@ -30,3 +36,4 @@ Submodules
     nn.attention.flex_attention
     nn.attention.bias
     nn.attention.experimental
+    nn.attention.varlen

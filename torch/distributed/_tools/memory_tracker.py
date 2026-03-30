@@ -2,9 +2,9 @@
 import operator
 import pickle
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from itertools import chain
-from typing import Any, Callable, no_type_check, TYPE_CHECKING
+from typing import Any, no_type_check, TYPE_CHECKING
 
 import torch
 import torch.nn as nn
@@ -26,7 +26,7 @@ class MemoryProfileDispatchMode(TorchDispatchMode):
 
     def __torch_dispatch__(self, func, types, args=..., kwargs=None):
         rs = func(*args, **kwargs)
-        if func == torch.ops.aten.detach.default:
+        if func is torch.ops.aten.detach.default:
             return rs
         func_name: str = (
             self.memory_tracker._cur_module_name
@@ -108,7 +108,8 @@ class MemoryTracker:
             # h3 = m.register_backward_hook(self._create_backward_hook(name))
             self._hooks.extend([h1, h2])
         self._device_module.empty_cache()
-        assert getattr(self, "profile_mode", None) is None
+        if getattr(self, "profile_mode", None) is not None:
+            raise AssertionError
         self.profile_mode = MemoryProfileDispatchMode(self)
         self.profile_mode.__enter__()
 
@@ -126,7 +127,8 @@ class MemoryTracker:
         for h in self._hooks:
             h.remove()
         self._hooks.clear()
-        assert getattr(self, "profile_mode", None) is not None
+        if getattr(self, "profile_mode", None) is None:
+            raise AssertionError
         self.profile_mode.__exit__(None, None, None)
         self.profile_mode = None
 

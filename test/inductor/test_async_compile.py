@@ -4,6 +4,7 @@ from unittest.mock import patch
 import torch
 from torch._inductor import config
 from torch._inductor.async_compile import AsyncCompile, shutdown_compile_workers
+from torch._inductor.compile_worker.subproc_pool import SubprocException
 from torch._inductor.runtime.triton_compat import Config
 from torch._inductor.runtime.triton_heuristics import (
     generate_lookup_hash_from_source_code,
@@ -43,6 +44,29 @@ class TestAsyncCompile(TestCase):
 
     @requires_gpu()
     @requires_triton()
+    def test_bad_kernel(self):
+        shutdown_compile_workers()
+
+        with config.patch(worker_start_method="subprocess", compile_threads=8):
+            async_compile = AsyncCompile()
+            AsyncCompile.wait_pool_ready()
+            with self.assertRaises(SubprocException):
+                async_compile.triton(
+                    "fake_kernel_name", source_code="This definitely doesn't exist"
+                ).result()
+
+    @requires_gpu()
+    @requires_triton()
+    def test_wait_pool_ready(self):
+        shutdown_compile_workers()
+
+        with config.patch(worker_start_method="subprocess", compile_threads=8):
+            AsyncCompile.wait_pool_ready()
+            self.assertTrue(AsyncCompile._ready_future.done())
+            self.assertTrue(AsyncCompile.use_process_pool())
+
+    @requires_gpu()
+    @requires_triton()
     @patch("torch._inductor.runtime.coordinate_descent_tuner.CoordescTuner.autotune")
     @parametrize("method", ("subprocess", "fork", "spawn"))
     def test_autotune_lookup_table(self, mock_autotune, method):
@@ -50,7 +74,14 @@ class TestAsyncCompile(TestCase):
             return (a @ b).to(torch.float32).sum(dim=1)
 
         # Fake name to make sure the lookup table is name agnostic
-        func_def = """
+        # When codegen/triton.py is changed, func_def must be updated
+        loop_header = (
+            "for r0_offset in tl.range(0, r0_numel, R0_BLOCK, num_stages = 2):"
+            if torch.version.hip
+            else "for r0_offset in tl.range(0, r0_numel, R0_BLOCK):"
+        )
+
+        func_def = f"""
 def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.constexpr, R0_BLOCK : tl.constexpr):
     xnumel = 1024
     r0_numel = 11776
@@ -63,7 +94,7 @@ def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.cons
     rbase = r0_base
     x0 = xindex
     _tmp3 = tl.full([XBLOCK, R0_BLOCK], 0, tl.float32)
-    for r0_offset in range(0, r0_numel, R0_BLOCK):
+    {loop_header}
         r0_index = r0_offset + r0_base
         r0_mask = r0_index < r0_numel
         roffset = r0_offset

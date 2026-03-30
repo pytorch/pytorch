@@ -109,6 +109,10 @@ struct THPFunction {
   // Default is true.
   bool materialize_grads;
 
+  // boolean indicating whether the function is a "pure view", meaning that
+  // replaying the view is enough to get a correct backward.
+  bool pure_view;
+
   // boolean indicating whether to materialize output grad tensors
   // corresponding to non-differentiable outputs. Normally, someone would
   // already get this behavior by switching off materialize_grads,
@@ -125,6 +129,10 @@ struct THPFunction {
   // For each input, true if the input is a THPVariable
   std::vector<bool> is_variable_input;
   char has_freed_buffers;
+
+  // Flag for clear_saved_tensors_on_access feature
+  bool clear_saved_tensors_on_access;
+  bool saved_tensors_accessed_and_cleared;
 
   PyObject* saved_for_forward;
   // The actual PyNode (in the autograd graph) that this data was

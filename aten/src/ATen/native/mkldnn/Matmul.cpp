@@ -111,11 +111,16 @@ static bool use_mkldnn_fp16_matmul() {
 }
 
 static bool use_mkldnn_bf32_matmul() {
-  return use_mkldnn_bf16_matmul() && at::globalContext().float32Precision("mkldnn", "matmul") == "bf16";
+  return use_mkldnn_bf16_matmul() && at::globalContext().float32Precision(at::Float32Backend::MKLDNN, at::Float32Op::MATMUL) == at::Float32Precision::BF16;
 }
 
+
 static bool use_mkldnn_tf32_matmul() {
-  return cpuinfo_has_x86_amx_fp16() && at::globalContext().float32Precision("mkldnn", "matmul") == "tf32";
+#if defined(__x86_64__) || defined(_M_X64)
+    return cpuinfo_has_x86_amx_fp16() && at::globalContext().float32Precision(at::Float32Backend::MKLDNN, at::Float32Op::MATMUL) == at::Float32Precision::TF32;
+#else
+    return false;  // TF32 not supported on power system
+#endif
 }
 
 // returns an ideep::tensor
@@ -318,15 +323,27 @@ void mkldnn_matmul(
               "mkldnn_matmul:  unsupported dims for mat and mat2");
 
 #if defined(__aarch64__)
-  // oneDNN fast-maths mode (enabled by setting the environment variable ONEDNN_DEFAULT_FPMATH_MODE=BF16) will dispatch
-  // fp32 inputs to bf16 kernels where HW permits. So, both fp32 and bf16 inputs are permitted.
-  TORCH_CHECK((mat1.scalar_type() == mat2.scalar_type()) && (mat1.scalar_type() == result.scalar_type()) &&
-              ((mat1.scalar_type() == at::kFloat) || (mat1.scalar_type() == at::kBFloat16)),
-              "mkldnn_matmul:  only enabled for fp32 and bf16 path");
+  // oneDNN fast-maths mode (enabled by setting the environment variable
+  // ONEDNN_DEFAULT_FPMATH_MODE=BF16) will dispatch fp32 inputs to bf16 kernels
+  // where HW permits. So, both fp32 and bf16 inputs are permitted.
+  TORCH_CHECK(
+      (mat1.scalar_type() == mat2.scalar_type()) &&
+          (mat1.scalar_type() == result.scalar_type()) &&
+          ((mat1.scalar_type() == at::kFloat) ||
+           (mat1.scalar_type() == at::kBFloat16) ||
+           (mat1.scalar_type() == at::kHalf)),
+      "mkldnn_matmul:  only enabled for fp32, bf16 and fp16 path");
   // device needs to support bf16 if the inputs are of bf16 type
   if (mat1.scalar_type() == at::kBFloat16) {
-    TORCH_CHECK(mkldnn_bf16_device_check_arm(),
-                "mkldnn_matmul: mkldnn_matmul bf16 path needs a cpu with bf16 support");
+    TORCH_CHECK(
+        mkldnn_bf16_device_check_arm(),
+        "mkldnn_matmul: mkldnn_matmul bf16 path needs a cpu with bf16 support");
+  }
+  // device needs to support fp16 if the inputs are of fp16 type
+  if (mat1.scalar_type() == at::kHalf) {
+    TORCH_CHECK(
+        mkldnn_fp16_device_check_arm(),
+        "mkldnn_matmul: mkldnn_matmul fp16 path needs a cpu with fp16 support");
   }
 #else
   TORCH_CHECK(
@@ -411,14 +428,14 @@ static inline bool checksize(const Tensor& mat1, const Tensor& mat2){
   // else if dim = 3, mat1's size = (b * m * n), mat2's size = (b * n * k)
   // else called from aten::mv, mat1.size = (m * n), mat2.size = (n)
   // only m * n * b * k(if exist) are large enough we can get benefit from mkldnn optimized gemm kernel
-  static const int64_t mkldnn_gemm_min_size = 16 * 16 * 16;
+  constexpr int64_t mkldnn_gemm_min_size = 16 * 16 * 16;
   if (mat1.dim() == 1 && mat2.dim() == 1) {
     // aten::dot
     return mat1.size(0) > mkldnn_gemm_min_size;
   } else if (mat1.dim() == 2 && mat2.dim() == 1) {
     // aten::mv
     return mat1.size(0) * mat1.size(1) > mkldnn_gemm_min_size;
-  } else if (mat2.dim() == 2 && mat2.dim() == 2) {
+  } else if (mat1.dim() == 2 && mat2.dim() == 2) {
     // aten::addmm
     return mat1.size(0) * mat1.size(1) * mat2.size(1) > mkldnn_gemm_min_size;
   } else {
@@ -502,9 +519,15 @@ static void _mkldnn_matmul_i8i8i32_with_primitive(
     const Tensor &mat2,
     const Tensor &result) {
   // Create ideep tensors for oneDNN computation
+  ideep::tensor::data_type src_dtype;
+  if (mat1.scalar_type() == at::kByte) {
+    src_dtype = ideep::tensor::data_type::u8;
+  } else {
+    src_dtype = ideep::tensor::data_type::s8;
+  }
   auto src = ideep::tensor(
       {mat1.sizes().vec(),
-       ideep::tensor::data_type::s8,
+       src_dtype,
        mat1.strides().vec()},
       mat1.data_ptr());
   auto wei = ideep::tensor(
@@ -535,11 +558,12 @@ static void _mkldnn_matmul_i8i8i32_with_primitive(
   args.insert({DNNL_ARG_WEIGHTS, expected_weight});
   args.insert({DNNL_ARG_DST, dst});
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad});
-  // Create primitve and execute
+  // Create primitive and execute
   auto primitive = dnnl::matmul(prim_desc);
   primitive.execute(ideep::stream::default_stream(), args);
 }
 
+template <typename a_type>
 static void _mkldnn_gemm_i8i8i32_with_blas(
   const Tensor& self,
   const Tensor& mat2,
@@ -559,42 +583,42 @@ static void _mkldnn_gemm_i8i8i32_with_blas(
     const float alpha = 1;
     const float beta = 0;
 
-    int8_t ao = 0;
+    a_type ao = 0;
     int8_t bo = 0;
     int32_t co = 0;
 
-    dnnl::gemm_s8s8s32(
-        transa,
-        transb,
-        offsetc,
-        m,
-        n,
-        k,
-        alpha,
-        (int8_t*)self.data_ptr(),
-        lda,
-        ao,
-        (int8_t*)mat2.data_ptr(),
-        ldb,
-        bo,
-        beta,
-        (int32_t*)result.data_ptr(),
-        ldc,
-        &co);
+    #define CALL_DNNL_GEMM(gemm_func, a_ptr_type, a_data_ptr) \
+      gemm_func(                                              \
+        transa, transb, offsetc, m, n, k,                     \
+        alpha,                                                \
+        static_cast<a_ptr_type>(a_data_ptr), lda, ao,         \
+        static_cast<int8_t*>(mat2.data_ptr()), ldb, bo,       \
+        beta,                                                 \
+        static_cast<int32_t*>(result.data_ptr()), ldc, &co)
+
+    if (self.scalar_type() == at::kByte) { //uint8
+      CALL_DNNL_GEMM(dnnl::gemm_u8s8s32, uint8_t*, self.data_ptr());
+    } else { //int8
+      CALL_DNNL_GEMM(dnnl::gemm_s8s8s32, int8_t*, self.data_ptr());
+    }
   }
 
 void mkldnn_matmul_i8i8i32(
     const Tensor &mat1,
     const Tensor &mat2,
     const Tensor &result) {
-  // x:s8 * w:s8 -> y:s32
+  // x:u8 or s8 * w:s8 -> y:s32
   // both inputs should be 2d
   // In most cases, using DNNL blas API is faster but it requires a/b contiguous along one dimentsion
   bool a_is_contigous = (mat1.stride(0) == 1 || mat1.stride(1) == 1);
   bool b_is_contigous = (mat2.stride(0) == 1 || mat2.stride(1) == 1);
 
   if (a_is_contigous && b_is_contigous) {
-    _mkldnn_gemm_i8i8i32_with_blas(mat1, mat2, result);
+    if (mat1.scalar_type() == at::kByte) {
+      _mkldnn_gemm_i8i8i32_with_blas<uint8_t>(mat1, mat2, result);
+    } else {
+      _mkldnn_gemm_i8i8i32_with_blas<int8_t>(mat1, mat2, result);
+    }
   } else {
     _mkldnn_matmul_i8i8i32_with_primitive(mat1, mat2, result);
   }

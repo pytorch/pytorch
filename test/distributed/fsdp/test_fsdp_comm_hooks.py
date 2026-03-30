@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
-from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -34,11 +33,7 @@ device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
 
-# bfloat16 is only supported by CUDA 11+ or XPU
-BFLOAT16_AVAILABLE = (
-    torch.cuda.is_available()
-    and (torch.version.cuda is not None or torch.version.hip is not None)
-) or torch.xpu.is_available()
+BFLOAT16_AVAILABLE = torch.cuda.is_bf16_supported() or torch.xpu.is_bf16_supported()
 
 
 class Net(nn.Module):
@@ -124,7 +119,7 @@ class TestCommunicationHooks(FSDPTest):
         ],
     )
     def test_default_communication_hook_behavior(
-        self, sharding_strategy: Optional[ShardingStrategy]
+        self, sharding_strategy: ShardingStrategy | None
     ):
         """
         Tests FSDP's default communication hook's behavior and correctness.
@@ -196,7 +191,7 @@ class TestCommunicationHooks(FSDPTest):
         ],
     )
     def test_default_communication_hook_initialization(
-        self, has_wrapping: bool, sharding_strategy: Optional[ShardingStrategy]
+        self, has_wrapping: bool, sharding_strategy: ShardingStrategy | None
     ):
         """
         Tests FSDP's communication hook interface behavior.
@@ -246,7 +241,7 @@ class TestCommunicationHooks(FSDPTest):
         ],
     )
     def test_registering_hook_non_root(
-        self, sharding_strategy: Optional[ShardingStrategy]
+        self, sharding_strategy: ShardingStrategy | None
     ):
         """
         Tests FSDP's communication hook registering for submodules.
@@ -306,7 +301,7 @@ class TestCommunicationHooks(FSDPTest):
         ],
     )
     def test_registering_hook_submodules(
-        self, sharding_strategy: Optional[ShardingStrategy]
+        self, sharding_strategy: ShardingStrategy | None
     ):
         """
         Tests FSDP's communication hook registering for submodules.
@@ -395,7 +390,7 @@ class TestCommunicationHooks(FSDPTest):
         ],
     )
     def test_fp16_hook(
-        self, has_wrapping: bool, sharding_strategy: Optional[ShardingStrategy]
+        self, has_wrapping: bool, sharding_strategy: ShardingStrategy | None
     ):
         state = default_hooks.LowPrecisionState(process_group=_get_default_group())
         hook = default_hooks.fp16_compress_hook
@@ -421,7 +416,7 @@ class TestCommunicationHooks(FSDPTest):
         ],
     )
     def test_bf16_hook(
-        self, has_wrapping: bool, sharding_strategy: Optional[ShardingStrategy]
+        self, has_wrapping: bool, sharding_strategy: ShardingStrategy | None
     ):
         state = default_hooks.LowPrecisionState(process_group=_get_default_group())
         hook = default_hooks.bf16_compress_hook

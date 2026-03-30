@@ -159,7 +159,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(l1_loss);
   m.impl("layer_norm", native::layer_norm_symint);
   m.impl("_fused_rms_norm", native::rms_norm_composite);
-  OP_DECOMPOSE2(ldexp, Tensor);
   OP_DECOMPOSE2(less_equal, Tensor );
   OP_DECOMPOSE2(less, Tensor );
   OP_DECOMPOSE(linear);

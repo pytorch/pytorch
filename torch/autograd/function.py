@@ -4,8 +4,9 @@ import inspect
 import itertools
 import warnings
 from collections import OrderedDict
-from typing import Any, Callable, Optional, TypeVar
-from typing_extensions import Concatenate, deprecated, ParamSpec
+from collections.abc import Callable
+from typing import Any, Concatenate, TypeVar
+from typing_extensions import deprecated, ParamSpec
 
 import torch
 import torch._C as _C
@@ -145,10 +146,11 @@ class FunctionCtx:
 
         """
         for tensor in tensors:
-            assert isinstance(tensor, torch.Tensor) or tensor is None, (
-                "save_for_forward expects all arguments to be tensors; you should "
-                "save non-tensors as attributes on ctx."
-            )
+            if not (isinstance(tensor, torch.Tensor) or tensor is None):
+                raise AssertionError(
+                    "save_for_forward expects all arguments to be tensors; you should "
+                    "save non-tensors as attributes on ctx."
+                )
 
         self.saved_for_forward = tensors
 
@@ -443,6 +445,19 @@ class _SingleLevelFunction(
     # vjp and backward are alias of each other
     vjp = backward
 
+    """
+    Bool that specifies if PyTorch should clear saved tensors after the first
+    access to ``ctx.saved_tensors``. When set to True, accessing saved_tensors
+    clears the internal references, allowing the tensors to be cleared as soon
+    as the Tensor returned by saved_tensors is deleted.
+
+    This is useful for reducing memory pressure in backward passes when you
+    only need to access saved tensors once.
+
+    Default is False.
+    """
+    clear_saved_tensors_on_access = False
+
     @staticmethod
     def jvp(ctx: Any, *grad_inputs: Any) -> Any:
         r"""Define a formula for differentiating the operation with forward mode automatic differentiation.
@@ -732,7 +747,7 @@ def _unflatten(input, proto):
     # unflatten a list or tuple input into a nested list/tuple structure
     # specified by proto
     def unflatten_helper(input, proto):
-        res: list[Optional[torch.Tensor]] = []
+        res: list[torch.Tensor | None] = []
         if hasattr(proto, "_jit_wrap"):
             return proto._jit_wrap(input)
         if not isinstance(proto, (list, tuple)):

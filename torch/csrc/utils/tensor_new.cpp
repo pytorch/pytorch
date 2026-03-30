@@ -689,7 +689,7 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
     return new_with_sizes(
         options, scalar_type, deviceOptional, r.symintlist(0));
   }
-  throw std::runtime_error("new(): invalid arguments");
+  TORCH_CHECK(false, "new(): invalid arguments");
 }
 
 // NB: device_idx here is NOT a DeviceIndex, but index into PythonArgs
@@ -808,7 +808,7 @@ static Tensor legacy_tensor_generic_ctor_new(
     return legacy_new_from_sequence(
         options, scalar_type, deviceOptional, r.pyobject(0));
   }
-  throw std::runtime_error("new(): invalid arguments");
+  TORCH_CHECK(false, "new(): invalid arguments");
 }
 
 // Handles ONLY torch.Tensor
@@ -878,7 +878,8 @@ Tensor indexing_tensor_from_data(
 class CheckSparseTensorInvariantsContext {
  public:
   CheckSparseTensorInvariantsContext()
-      : state{at::globalContext().checkSparseTensorInvariants()} {}
+      : state{at::globalContext().checkSparseTensorInvariants(
+            /*warn_when_uninitialized=*/true)} {}
   ~CheckSparseTensorInvariantsContext() {
     at::globalContext().setCheckSparseTensorInvariants(state);
   }
@@ -892,7 +893,7 @@ class CheckSparseTensorInvariantsContext {
       CheckSparseTensorInvariantsContext&&) = delete;
 
  private:
-  bool state;
+  std::optional<bool> state;
 };
 
 static Tensor sparse_compressed_tensor_ctor_worker(
@@ -955,8 +956,6 @@ static Tensor sparse_compressed_tensor_ctor_worker(
       : kInt;
   CheckSparseTensorInvariantsContext
       restores_check_sparse_tensor_invariants_global_state{};
-  bool default_check_invariants =
-      at::globalContext().checkSparseTensorInvariants();
 
   if (r.idx == 0) {
     const bool pin_memory = r.toBool(ARG_PIN_MEMORY);
@@ -969,8 +968,10 @@ static Tensor sparse_compressed_tensor_ctor_worker(
     at::OptionalDeviceGuard device_guard(deviceOptional);
     // the global state of invariants check flag will be restored via
     // CheckSparseTensorInvariantsContext destructor
-    at::globalContext().setCheckSparseTensorInvariants(
-        r.toBoolWithDefault(ARG_CHECK_INVARIANTS, default_check_invariants));
+    if (auto check_invariants = r.toBoolOptional(ARG_CHECK_INVARIANTS);
+        check_invariants.has_value()) {
+      at::globalContext().setCheckSparseTensorInvariants(check_invariants);
+    }
     Tensor values = internal_new_from_data(
         inferred_options,
         inferred_scalar_type,
@@ -1026,8 +1027,10 @@ static Tensor sparse_compressed_tensor_ctor_worker(
     const bool pin_memory = r.toBool(ARG_PIN_MEMORY1);
     // the global state of invariants check flag will be restored via
     // CheckSparseTensorInvariantsContext destructor
-    at::globalContext().setCheckSparseTensorInvariants(
-        r.toBoolWithDefault(ARG_CHECK_INVARIANTS1, default_check_invariants));
+    if (auto check_invariants = r.toBoolOptional(ARG_CHECK_INVARIANTS1);
+        check_invariants.has_value()) {
+      at::globalContext().setCheckSparseTensorInvariants(check_invariants);
+    }
     Tensor values = internal_new_from_data(
         inferred_options,
         inferred_scalar_type,
@@ -1072,7 +1075,7 @@ static Tensor sparse_compressed_tensor_ctor_worker(
                values.options().layout(layout).pinned_memory(pin_memory))
         .set_requires_grad(r.toBool(ARG_REQUIRES_GRAD1));
   }
-  throw std::runtime_error(name + ": invalid arguments");
+  TORCH_CHECK(false, name + ": invalid arguments");
 }
 
 Tensor sparse_compressed_tensor_ctor(
@@ -1185,9 +1188,6 @@ Tensor sparse_coo_tensor_ctor(
 
   CheckSparseTensorInvariantsContext
       restores_check_sparse_tensor_invariants_global_state{};
-  bool default_check_invariants =
-      at::globalContext().checkSparseTensorInvariants();
-
   if (r.idx == 0) {
     bool pin_memory = r.toBool(ARG_PIN_MEMORY);
     bool type_inference = r.isNone(ARG_TYPE);
@@ -1197,8 +1197,10 @@ Tensor sparse_coo_tensor_ctor(
         r.scalartypeWithDefault(ARG_TYPE, scalar_type);
     auto deviceOptional = r.deviceOptional(ARG_DEVICE);
     at::OptionalDeviceGuard device_guard(deviceOptional);
-    at::globalContext().setCheckSparseTensorInvariants(
-        r.toBoolWithDefault(ARG_CHECK_INVARIANTS, default_check_invariants));
+    if (auto check_invariants = r.toBoolOptional(ARG_CHECK_INVARIANTS);
+        check_invariants.has_value()) {
+      at::globalContext().setCheckSparseTensorInvariants(check_invariants);
+    }
 
     // if no dtype provided, infer type based on value type.
     Tensor values = internal_new_from_data(
@@ -1233,8 +1235,10 @@ Tensor sparse_coo_tensor_ctor(
         r.scalartypeWithDefault(ARG_TYPE1, scalar_type);
     auto deviceOptional = r.deviceOptional(ARG_DEVICE1);
     at::OptionalDeviceGuard device_guard(deviceOptional);
-    at::globalContext().setCheckSparseTensorInvariants(
-        r.toBoolWithDefault(ARG_CHECK_INVARIANTS1, default_check_invariants));
+    if (auto check_invariants = r.toBoolOptional(ARG_CHECK_INVARIANTS1);
+        check_invariants.has_value()) {
+      at::globalContext().setCheckSparseTensorInvariants(check_invariants);
+    }
 
     Tensor values = internal_new_from_data(
         inferred_options,
@@ -1266,15 +1270,16 @@ Tensor sparse_coo_tensor_ctor(
     const auto inferred_scalar_type =
         r.scalartypeWithDefault(ARG_TYPE2, scalar_type);
     at::OptionalDeviceGuard device_guard(r.deviceOptional(ARG_DEVICE2));
-    at::globalContext().setCheckSparseTensorInvariants(
-        r.toBoolWithDefault(ARG_CHECK_INVARIANTS2, default_check_invariants));
-
+    if (auto check_invariants = r.toBoolOptional(ARG_CHECK_INVARIANTS2);
+        check_invariants.has_value()) {
+      at::globalContext().setCheckSparseTensorInvariants(check_invariants);
+    }
     return at::sparse_coo_tensor(
                r.intlist(ARG_SIZE2),
                inferred_options.dtype(inferred_scalar_type).layout(at::kSparse))
         .set_requires_grad(r.toBool(ARG_REQUIRES_GRAD2));
   }
-  throw std::runtime_error("sparse_coo_tensor(): invalid arguments");
+  TORCH_CHECK(false, "sparse_coo_tensor(): invalid arguments");
 }
 
 void _validate_sparse_coo_tensor_args(
@@ -1497,14 +1502,14 @@ Tensor tensor_ctor(
         pin_memory);
     auto names = r.toDimnameListOptional(5);
     if (names) {
-      at::namedinference::propagate_names(
+      at::namedinference::propagate_names_if_nonempty(
           new_tensor, *names, /*validate_names=*/true);
     }
     new_tensor.detach_(); // ensure new_tensor a leaf node
     new_tensor.set_requires_grad(args_requires_grad);
     return new_tensor;
   }
-  throw std::runtime_error("tensor(): invalid arguments");
+  TORCH_CHECK(false, "tensor(): invalid arguments");
 }
 
 Tensor as_tensor(
@@ -1523,7 +1528,7 @@ Tensor as_tensor(
         /*copy_numpy=*/false,
         /*type_inference=*/type_inference);
   }
-  throw std::runtime_error("tensor(): invalid arguments");
+  TORCH_CHECK(false, "tensor(): invalid arguments");
 }
 
 Tensor new_tensor(
@@ -1561,7 +1566,7 @@ Tensor new_tensor(
     new_tensor.set_requires_grad(args_requires_grad);
     return new_tensor;
   }
-  throw std::runtime_error("new_tensor(): invalid arguments");
+  TORCH_CHECK(false, "new_tensor(): invalid arguments");
 }
 
 Tensor tensor_frombuffer(
@@ -1708,9 +1713,9 @@ bool isValidDLPackCapsule(PyObject* data) {
 
 Tensor tensor_fromDLPack(PyObject* data) {
   const char* bad_capsule =
-      ("from_dlpack received an invalid capsule. "
-       "Note that DLTensor capsules can be consumed only once, "
-       "so you might have already constructed a tensor from it once.");
+      "from_dlpack received an invalid capsule. "
+      "Note that DLTensor capsules can be consumed only once, "
+      "so you might have already constructed a tensor from it once.";
 
   if (PyCapsule_IsValid(
           data, at::DLPackTraits<DLManagedTensorVersioned>::capsule)) {

@@ -14,6 +14,7 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
 from torch._dynamo.utils import counters
+from torch._functorch import config as functorch_config
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_cuda import tf32_on_and_off
@@ -96,6 +97,7 @@ class MultiUserConvOp(nn.Module):
 class EfficientConvBNEvalTemplate(TestCase):
     @tf32_on_and_off(0.003)
     @inductor_config.patch({"efficient_conv_bn_eval_fx_passes": True})
+    @functorch_config.patch({"enable_autograd_cache": False})
     def test_basic(self):
         def test_conv_bn_eval(
             test_class, use_bias, module, sync_bn, decompose_nn_module
@@ -127,11 +129,11 @@ class EfficientConvBNEvalTemplate(TestCase):
             spatial_d = (
                 4 if issubclass(module[0], nn.modules.conv._ConvTransposeNd) else 96
             )
-            if module[0] == nn.Conv1d or module[0] == nn.ConvTranspose1d:
+            if module[0] is nn.Conv1d or module[0] is nn.ConvTranspose1d:
                 inps += [spatial_d] * 1
-            if module[0] == nn.Conv2d or module[0] == nn.ConvTranspose2d:
+            if module[0] is nn.Conv2d or module[0] is nn.ConvTranspose2d:
                 inps += [spatial_d] * 2
-            if module[0] == nn.Conv3d or module[0] == nn.ConvTranspose3d:
+            if module[0] is nn.Conv3d or module[0] is nn.ConvTranspose3d:
                 inps += [spatial_d] * 3
             inp = torch.rand(inps).to(self.device)
 

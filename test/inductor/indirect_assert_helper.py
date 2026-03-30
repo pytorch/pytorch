@@ -52,17 +52,22 @@ if __name__ == "__main__":
     ]
 
     _, fn_name, dims, dyn_shape, one_size = sys.argv
-    assert fn_name in fns
-    assert one_size in ("True", "False")
+    if fn_name not in fns:
+        raise AssertionError(f"Unknown function: {fn_name}")
+    if one_size not in ("True", "False"):
+        raise AssertionError(f"one_size must be 'True' or 'False', got {one_size}")
     one_size = one_size == "True"
-    assert dims in ("2", "3")
+    if dims not in ("2", "3"):
+        raise AssertionError(f"dims must be '2' or '3', got {dims}")
     shape_x = [3, 2, 4] if dims == "3" else [3, 2]
     if one_size:
-        assert fn_name == "first_arg", (
-            "only first_arg can be tested for a special case of 1-size tensor"
-        )
+        if fn_name != "first_arg":
+            raise AssertionError(
+                "only first_arg can be tested for a special case of 1-size tensor"
+            )
         shape_x[0] = 1
-    assert dyn_shape in ("True", "False")
+    if dyn_shape not in ("True", "False"):
+        raise AssertionError(f"dyn_shape must be 'True' or 'False', got {dyn_shape}")
     dynamic_shapes = dyn_shape == "True"
 
     x = torch.randn(shape_x, device=GPU_TYPE)
@@ -73,7 +78,10 @@ if __name__ == "__main__":
         shape = (y.numel(),) + x.shape[2:]
         z = torch.randn(shape, device=GPU_TYPE)
         fn(x, y, z)
+        # On Windows, Python will optimize away a function call if its updated value is not used.
+        # Touch the memory of x so that the fn(x, y, z) will not be optimized away
+        print(x)
     elif fn_name in ("upper1", "upper2", "lower1", "lower2"):
-        fn(x)
+        print(fn(x))
     else:
-        fn(x, y)
+        print(fn(x, y))

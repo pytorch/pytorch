@@ -21,6 +21,16 @@ CodeGen::CodeGen(
   allocIntermediateBufs();
 }
 
+CodeGen::CodeGen(const CodeGen& rhs) = default;
+
+CodeGen::CodeGen(CodeGen&& rhs) = default;
+
+CodeGen::~CodeGen() = default;
+
+CodeGen& CodeGen::operator=(const CodeGen& rhs) = default;
+
+CodeGen& CodeGen::operator=(CodeGen&& rhs) = default;
+
 RegisterCodeGenList& RegisterCodeGenList::GetInstance() {
   static RegisterCodeGenList codegen_list;
   return codegen_list;
@@ -41,7 +51,7 @@ RegisterCodeGenList::StmtFactoryMethod RegisterCodeGenList::
       oss << entry.first;
       index++;
     }
-    oss << "]";
+    oss << ']';
     throw std::runtime_error(oss.str());
   }
   return iter->second;
@@ -320,7 +330,7 @@ void CodeGen::allocIntermediateBufs() {
     set_stmt(stmt_new);
   }
 
-  GRAPH_DEBUG("\nMemory Allocation:\n\n", *stmt(), "\n");
+  GRAPH_DEBUG("\nMemory Allocation:\n\n", *stmt(), '\n');
 }
 
 } // namespace torch::jit::tensorexpr

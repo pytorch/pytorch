@@ -2,11 +2,13 @@
 # mypy: allow-untyped-defs
 import math as pymath
 import warnings
-from typing import Any, Callable, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 from .triton_compat import (  # noqa: F401
     _log2,
     builtins_use_semantic_kwarg,
+    JITFunction,
     libdevice,
     math,
     tl,
@@ -57,6 +59,10 @@ def get_backend_options():
     backend = triton.compiler.compiler.make_backend(target)
     options = backend.parse_options(dict())
     return options.__dict__
+
+
+def get_constexprs(kernel: JITFunction) -> list[int]:
+    return [p.num for p in kernel.params if p.is_constexpr]
 
 
 @triton.jit
@@ -168,15 +174,15 @@ def max_with_index(value, index, dim):
 @triton.jit
 def exp(x, use_fast_math: tl.constexpr):
     if use_fast_math:
-        return libdevice.exp2(x * _LOG_2_E)
-    else:
         return math.exp(x)
+    else:
+        return libdevice.exp(x)
 
 
 @triton.jit
 def online_softmax_reduce(lhs_max, lhs_sum, dim, use_fast_math: tl.constexpr):
     out_max = max2(lhs_max, dim)
-    out_max_keepdim = out_max[:, None]
+    out_max_keepdim = tl.expand_dims(out_max, dim)
     delta = tl.where(out_max_keepdim == float("-inf"), 0, lhs_max - out_max_keepdim)
     out_sum = tl.sum(lhs_sum * exp(delta, use_fast_math), dim)
     return out_max, out_sum
@@ -241,6 +247,34 @@ def welford(mean, m2, weight, dim):
 def device_assert_then(cond, msg, r):
     tl.device_assert(cond, msg)
     return r
+
+
+@triton.jit
+def rand_eager_kernel(seed, offset_blocks, tid: tl.tensor, VEC: tl.constexpr):
+    inv = 1.0 / 4294967296.0
+    half = inv * 0.5
+
+    tid_u64 = tid.to(tl.uint64)
+
+    subseq = tid_u64 // VEC
+    which4 = (tid_u64 % VEC) // 4
+    lane = tid_u64 % 4
+
+    offblk = offset_blocks.to(tl.uint64) + which4
+
+    u0, u1, u2, u3 = tl.philox(
+        seed,
+        (offblk & 0xFFFFFFFF).to(tl.uint32),
+        ((offblk >> 32) & 0xFFFFFFFF).to(tl.uint32),
+        (subseq & 0xFFFFFFFF).to(tl.uint32),
+        ((subseq >> 32) & 0xFFFFFFFF).to(tl.uint32),
+    )
+
+    v01 = tl.where(lane == 0, u0, u1)
+    v23 = tl.where(lane == 2, u2, u3)
+    rand_int = tl.where((lane == 0) | (lane == 1), v01, v23)
+
+    return 1.0 - (rand_int.to(tl.float32) * inv + half)
 
 
 @triton.jit
@@ -314,8 +348,8 @@ def bucketize_binary_search(
     while full_range > 1:
         mid = (high + low) // 2
         mask = (
-            mid * BOUNDARIES_STRIDE + boundary_indices
-        ) < BOUNDARIES_UNDERLYING_NUMEL and mid < BOUNDARIES_SIZE
+            (mid * BOUNDARIES_STRIDE + boundary_indices) < BOUNDARIES_UNDERLYING_NUMEL
+        ).logical_and(mid < BOUNDARIES_SIZE)
         mid_indices = (
             mid
             if sorter_ptr is None or SORTER_STRIDE is None
@@ -335,6 +369,9 @@ def bucketize_binary_search(
             is_above = values >= bucket_upper_bound
         else:
             is_above = values > bucket_upper_bound
+
+        if is_floating(values):
+            is_above = is_above | (values != values)
 
         low = tl.where(is_above & mask, mid + 1, low)
         high = tl.where(is_above, high, mid)
@@ -487,7 +524,7 @@ def exclusive_scan_decoupled_lookback_64(scratch_base, block_value, index, combi
             prefix_valid = True
 
         if flag == 2:
-            test_target = -1
+            test_target = tl.full([], -1, index.dtype)  # Match the original type
         else:
             test_target = test_target - 1
 
@@ -673,7 +710,7 @@ def select_one(x, mask, dim, keep_dims=False):
     idtype = tl.core.get_int_dtype(x.dtype.primitive_bitwidth, signed=False)
     ix = x.to(idtype, bitcast=True)
     iy = tl.sum(ix * mask, dim, keep_dims=keep_dims)
-    return iy.to(x.dtype, bitcast=True)
+    return iy.to(idtype).to(x.dtype, bitcast=True)
 
 
 @triton.jit

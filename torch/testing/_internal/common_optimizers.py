@@ -6,7 +6,7 @@ import sys
 import unittest
 from copy import deepcopy
 from enum import Enum
-from typing import Any, Union
+from typing import Any
 
 import torch
 from torch import Tensor
@@ -43,10 +43,12 @@ from torch.testing._internal.common_utils import (
     _TestParametrizer,
     skipIfMPS,
     skipIfTorchDynamo,
-    skipIfXpu,
     TEST_WITH_TORCHDYNAMO,
 )
 from torch.utils._foreach_utils import _get_foreach_kernels_supported_devices
+
+
+CUDA_CONFIG_GPUS = ["cuda", "xpu"]
 
 
 class OptimizerInput:
@@ -56,9 +58,7 @@ class OptimizerInput:
 
     def __init__(
         self,
-        params: Union[
-            list[Parameter], list[Tensor], dict[Any, Any], list[dict[str, Any]]
-        ],
+        params: list[Parameter] | list[Tensor] | dict[Any, Any] | list[dict[str, Any]],
         kwargs: dict[str, Any],
         desc: str = "",
     ):
@@ -369,7 +369,7 @@ def optim_inputs_func_adadelta(device, dtype=None):
         OptimizerInput(
             params=None, kwargs={"rho": 0.95, "weight_decay": 0.9}, desc="rho"
         ),
-    ] + (cuda_supported_configs if _get_device_type(device) == "cuda" else [])
+    ] + (cuda_supported_configs if _get_device_type(device) in CUDA_CONFIG_GPUS else [])
 
 
 def optim_error_inputs_func_adadelta(device, dtype):
@@ -528,7 +528,7 @@ def optim_inputs_func_adam(device, dtype=None):
             params=None,
             kwargs={
                 "lr": torch.tensor(0.001),
-                "betas": (torch.tensor(0.9), torch.tensor(0.99)),
+                "betas": (torch.tensor([[[0.9]]]), torch.tensor([[0.99]])),
                 "amsgrad": True,
                 "capturable": True,
             },
@@ -569,10 +569,14 @@ def optim_inputs_func_adam(device, dtype=None):
                 desc="amsgrad",
             ),
         ]
-        + (cuda_supported_configs if _get_device_type(device) == "cuda" else [])
+        + (
+            cuda_supported_configs
+            if _get_device_type(device) in CUDA_CONFIG_GPUS
+            else []
+        )
         + (mps_supported_configs if _get_device_type(device) == "mps" else [])
     )
-    if dtype in (torch.float16,):
+    if dtype == torch.float16:
         for input in total:
             """
             Too small eps will make denom to be zero for low precision dtype
@@ -650,7 +654,7 @@ def optim_error_inputs_func_adam(device, dtype):
                 error_regex=r"betas\[0\] as a Tensor is not supported for capturable=False and foreach=True",
             ),
         ]
-    if _get_device_type(device) == "cuda":
+    if _get_device_type(device) in CUDA_CONFIG_GPUS:
         sample_tensor = torch.empty((), device=device, dtype=dtype)
         error_inputs += [
             ErrorOptimizerInput(
@@ -721,7 +725,7 @@ def optim_inputs_func_adamax(device, dtype=None):
             kwargs={"weight_decay": 0.1, "maximize": True},
             desc="maximize, weight_decay",
         ),
-    ] + (cuda_supported_configs if _get_device_type(device) == "cuda" else [])
+    ] + (cuda_supported_configs if _get_device_type(device) in CUDA_CONFIG_GPUS else [])
 
 
 def optim_error_inputs_func_adamax(device, dtype):
@@ -792,7 +796,7 @@ def optim_inputs_func_asgd(device, dtype=None):
             kwargs={"weight_decay": 0.1, "maximize": True},
             desc="maximize, nonzero weight_decay",
         ),
-    ] + (cuda_supported_configs if _get_device_type(device) == "cuda" else [])
+    ] + (cuda_supported_configs if _get_device_type(device) in CUDA_CONFIG_GPUS else [])
 
 
 def optim_error_inputs_func_asgd(device, dtype):
@@ -974,7 +978,7 @@ def optim_inputs_func_nadam(device, dtype=None):
             kwargs={"weight_decay": 0.1, "maximize": True},
             desc="maximize",
         ),
-    ] + (cuda_supported_configs if _get_device_type(device) == "cuda" else [])
+    ] + (cuda_supported_configs if _get_device_type(device) in CUDA_CONFIG_GPUS else [])
 
 
 def optim_error_inputs_func_nadam(device, dtype):
@@ -1052,7 +1056,7 @@ def optim_inputs_func_radam(device=None, dtype=None):
             kwargs={"weight_decay": 0.1, "maximize": True},
             desc="maximize",
         ),
-    ] + (cuda_supported_configs if _get_device_type(device) == "cuda" else [])
+    ] + (cuda_supported_configs if _get_device_type(device) in CUDA_CONFIG_GPUS else [])
 
 
 def optim_error_inputs_func_radam(device, dtype):
@@ -1137,7 +1141,7 @@ def optim_inputs_func_rmsprop(device, dtype=None):
             },
             desc="maximize, centered, weight_decay, w/ momentum",
         ),
-    ] + (cuda_supported_configs if _get_device_type(device) == "cuda" else [])
+    ] + (cuda_supported_configs if _get_device_type(device) in CUDA_CONFIG_GPUS else [])
 
 
 def optim_error_inputs_func_rmsprop(device, dtype):
@@ -1179,7 +1183,7 @@ def optim_inputs_func_rprop(device, dtype=None):
             desc="non-default step_sizes",
         ),
         OptimizerInput(params=None, kwargs={"maximize": True}, desc="maximize"),
-    ] + (cuda_supported_configs if _get_device_type(device) == "cuda" else [])
+    ] + (cuda_supported_configs if _get_device_type(device) in CUDA_CONFIG_GPUS else [])
 
 
 def optim_error_inputs_func_rprop(device, dtype):
@@ -1323,11 +1327,12 @@ def optim_error_inputs_func_sparseadam(device, dtype):
     return error_inputs
 
 
-def _get_device_type(device: Union[str, torch.device]) -> str:
+def _get_device_type(device: str | torch.device) -> str:
     # Returns the device type as a string, e.g., "cpu" or "cuda"
     if isinstance(device, torch.device):
         device = str(device.type)
-    assert isinstance(device, str)
+    if not isinstance(device, str):
+        raise AssertionError(f"Expected device to be a str, got {type(device)}")
     return device.split(":")[0]
 
 
@@ -1345,9 +1350,10 @@ def _get_optim_inputs_including_global_cliquey_kwargs(
     trivial. That said, we sometimes want to test for all possible configs on an
     optimizer including all supported flags, so this helper returns all optim inputs.
     """
-    assert all(x in ["foreach", "fused", "differentiable"] for x in skip), (
-        "skip must be a subset of ['foreach', 'fused', 'differentiable']"
-    )
+    if not all(x in ["foreach", "fused", "differentiable"] for x in skip):
+        raise AssertionError(
+            "skip must be a subset of ['foreach', 'fused', 'differentiable']"
+        )
 
     optim_inputs = optim_info.optim_inputs_func(device)
 
@@ -1671,7 +1677,7 @@ optim_db: list[OptimizerInfo] = [
             "maximize",
             "capturable",
         ),
-        supports_fused_on=("cpu", "cuda", "mps"),
+        supports_fused_on=("cpu", "cuda", "xpu", "mps"),
         decorators=(
             # Expected floating point error between fused and compiled forloop
             DecorateInfo(
@@ -1695,17 +1701,6 @@ optim_db: list[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_fused_matches_forloop",
-            ),
-            DecorateInfo(
-                # Note on tolerances:
-                # Tracking through #127000
-                toleranceOverride(
-                    {
-                        torch.float32: tol(atol=3e-5, rtol=1.3e-06),
-                    }
-                ),
-                "TestCudaOptims",
-                "test_grad_scaling_autocast_fused_optimizers",
             ),
         ),
         skips=(
@@ -1802,20 +1797,6 @@ optim_db: list[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_fused_matches_forloop",
-            ),
-            # Note on tolerances:
-            # Tracking through #127000
-            DecorateInfo(
-                toleranceOverride(
-                    {
-                        torch.float32: tol(
-                            atol=3e-5,
-                            rtol=1.3e-06,
-                        )
-                    }
-                ),
-                "TestCudaOptims",
-                "test_grad_scaling_autocast_fused_optimizers",
             ),
         ),
         skips=(
@@ -1955,7 +1936,7 @@ optim_db: list[OptimizerInfo] = [
         supports_complex=False,
         skips=(
             # Note on numerical differences: `compile` applies different matmul tuning,
-            # which leads to deviations compared to eager mode. In the Newton–Schulz
+            # which leads to deviations compared to eager mode. In the Newton-Schulz
             # iteration for orthogonalization, computations are done in bfloat16, further
             # amplifying these numerical differences.
             DecorateInfo(
@@ -2161,6 +2142,7 @@ optim_db: list[OptimizerInfo] = [
         supports_fused_on=(
             "cpu",
             "cuda",
+            "xpu",
             "mps",
         ),
         skips=(
@@ -2177,16 +2159,6 @@ optim_db: list[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_complex_2d",
-            ),
-            DecorateInfo(
-                toleranceOverride(
-                    {  # previously atol=5-05, rtol=0.001, https://github.com/pytorch/pytorch/issues/116202
-                        torch.float32: tol(atol=5e-04, rtol=0.007),
-                    }
-                ),
-                "TestOptimRenewed",
-                "test_mixed_device_dtype",
-                active_if=TEST_WITH_TORCHDYNAMO,
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -2210,9 +2182,6 @@ optim_db: list[OptimizerInfo] = [
                 skipIfMPS,  # SparseAdam does not support MPS
                 "TestOptimRenewed",
                 device_type="mps",
-            ),
-            DecorateInfo(
-                skipIfXpu(msg="SparseAdam is not yet supported on the XPU stack"),
             ),
             DecorateInfo(
                 skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),
@@ -2290,7 +2259,7 @@ class TensorTracker:
         self.tensors.append(tensor.detach().clone())
 
     # pops from beginning, like a queue and not a stack!
-    def pop_check_set(self, tensor_to_set, testcase):
+    def pop_check_set(self, tensor_to_set, testcase, override_assert_eq_kwargs=None):
         """
         Pop the first element in the tensor tracker, assert equality between the popped tensor and
         the input tensor, and then set the input tensor to have the same values as the popped tensor
@@ -2300,7 +2269,12 @@ class TensorTracker:
         ref = self.tensors.pop(0)
 
         testcase.assertTrue(isinstance(ref, Tensor), f"{type(ref)=}")
-        testcase.assertEqual(tensor_to_set, ref, **self.assert_eq_kwargs)
+        assert_eq_kwargs = (
+            override_assert_eq_kwargs
+            if override_assert_eq_kwargs is not None
+            else self.assert_eq_kwargs
+        )
+        testcase.assertEqual(tensor_to_set, ref, **assert_eq_kwargs)
 
         with torch.no_grad():
             tensor_to_set.copy_(ref)

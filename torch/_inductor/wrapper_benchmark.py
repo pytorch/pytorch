@@ -4,7 +4,7 @@ import tempfile
 from collections import defaultdict
 from dataclasses import dataclass
 from types import ModuleType
-from typing import Any, Optional, Protocol
+from typing import Any, Protocol
 
 import torch
 from torch.autograd import DeviceType
@@ -73,7 +73,7 @@ def get_triton_kernel(mod: ModuleType):  # type: ignore[no-untyped-def]
 
 
 def benchmark_all_kernels(
-    benchmark_name: str, benchmark_all_configs: Optional[dict[Any, Any]]
+    benchmark_name: str, benchmark_all_configs: dict[Any, Any] | None
 ) -> None:
     """
     An experimental API used only when config.benchmark_kernel is true.
@@ -93,6 +93,7 @@ def benchmark_all_kernels(
             continue
 
         triton_kernel = get_triton_kernel(kernel_mod)
+        device_type = triton_kernel.device_props.type
         kernel_category = get_kernel_category(kernel_mod)
         args = kernel_mod.get_args()
         num_in_out_ptrs = len(
@@ -108,9 +109,9 @@ def benchmark_all_kernels(
 
         def get_info_str(
             ms: float,
-            n_regs: Optional[Any],
-            n_spills: Optional[Any],
-            shared: Optional[Any],
+            n_regs: Any | None,
+            n_spills: Any | None,
+            shared: Any | None,
             prefix: str = "",
         ) -> str:
             if not any(x is None for x in [n_regs, n_spills, shared]):
@@ -137,7 +138,11 @@ def benchmark_all_kernels(
                     f"  {get_info_str(ms, launcher.n_regs, launcher.n_spills, launcher.shared)} @ {launcher.config}"
                 )
         else:
-            ms = benchmarker.benchmark_gpu(lambda: kernel_mod.call(args), rep=40)
+            ms = benchmarker.benchmark(
+                lambda: kernel_mod.call(args),
+                device=device_type,
+                rep=40,
+            )
             assert len(triton_kernel.launchers) == 1, (
                 "Autotuner should have selected the best config"
             )

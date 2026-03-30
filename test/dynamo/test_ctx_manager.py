@@ -7,7 +7,6 @@ from contextlib import contextmanager
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo.exc import InternalTorchDynamoError
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm, same
 from torch._dynamo.utils import counters
 from torch.nn import functional as F
@@ -77,7 +76,7 @@ def customized_ctx_manager_with_graph_break(mode):
         torch._C._set_grad_enabled(prev)
 
 
-class CtxManagerTests(torch._dynamo.test_case.TestCase):
+class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
     def test_no_grad(self):
         def fn1(a, b):
             x = a + 1
@@ -155,9 +154,9 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
                     x = torch.mul(x, 5)
                     torch._dynamo.graph_break()
                     x = torch.sqrt(x)
-                    assert torch.is_grad_enabled()
-                assert not torch.is_grad_enabled()
-            assert torch.is_grad_enabled() == before
+                    assert torch.is_grad_enabled()  # noqa: S101
+                assert not torch.is_grad_enabled()  # noqa: S101
+            assert torch.is_grad_enabled() == before  # noqa: S101
             return x
 
         a = torch.randn([3, 4])
@@ -230,7 +229,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 12)
+        self.assertExpectedInline(str(cnts.op_count), """9""")
 
     @unittest.expectedFailure  # https://github.com/pytorch/pytorch/issues/118204
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
@@ -335,7 +334,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 21)
+        self.assertExpectedInline(str(cnts.op_count), """15""")
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_stream_compared_with_constant(self):
@@ -408,6 +407,9 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref0, res0)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skip(
+        "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
+    )
     def test_cuda_event_reconstruct(self):
         def fn(x):
             e = torch.cuda.Event()
@@ -425,6 +427,9 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.op_count, 3)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skip(
+        "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
+    )
     def test_cuda_event_across_graph_break(self):
         def fn(x):
             e = torch.cuda.Event()
@@ -446,9 +451,12 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref[0], res[0])
         self.assertEqual(cnts.frame_count, 2)
-        self.assertEqual(cnts.op_count, 9)
+        self.assertEqual(cnts.op_count, 10)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skip(
+        "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
+    )
     def test_cuda_event_created_outside_of_graph(self):
         user_stream = torch.cuda.Stream()
         event = torch.cuda.Event()
@@ -478,9 +486,12 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         res = run_iters(func, compile=True)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 3)
+        self.assertEqual(cnts.op_count, 4)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skip(
+        "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
+    )
     def test_cuda_event_method_create_stream_outside_of_compile(self):
         def fn(x, cur_stream, new_stream):
             x = torch.mul(x, 1)
@@ -517,7 +528,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, cur_stream, new_stream)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 19)
+        self.assertExpectedInline(str(cnts.op_count), """16""")
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_event_method(self):
@@ -537,7 +548,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             with torch.cuda.stream(new_stream):
                 x = torch.add(x, 4)
 
-            new_event = torch.cuda.Event()
+            new_event = torch.Event()
             new_event.record(new_stream)
 
             new_event.wait(cur_stream)
@@ -557,7 +568,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 19)
+        self.assertExpectedInline(str(cnts.op_count), """16""")
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_device(self):
@@ -585,13 +596,15 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         if torch.autograd._profiler_enabled():
             torch.autograd._disable_profiler()
-        assert not torch.autograd._profiler_enabled()
+        if torch.autograd._profiler_enabled():
+            raise AssertionError("Expected profiler to be disabled")
         ref = fn(x)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
         with torch.autograd.profiler.profile():
-            assert torch.autograd._profiler_enabled()
+            if not torch.autograd._profiler_enabled():
+                raise AssertionError("Expected profiler to be enabled")
             ref = fn(x)
             res = opt_fn(x)
             self.assertTrue(same(ref, res))
@@ -804,7 +817,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
                     # We remember to exit the inner autocast correctly to outer
                     # even after graph breaks
                     f_float16 = self.mm_breaks(a_float32, b_float32)
-                    assert f_float16.dtype == f_float16_1.dtype
+                    assert f_float16.dtype == f_float16_1.dtype  # noqa: S101
                 return f_float16, g_float32
 
         module = MyModule()
@@ -850,7 +863,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
                         g_float32 = torch.mm(a_float32, b_float32)
                     f_float16 = self.mm_breaks(a_float32, b_float32)
 
-                    assert (
+                    assert (  # noqa: S101
                         f_float16[0][0] == self.mm_not_break(a_float32, b_float32)[0][0]
                     )
                 return f_float16, g_float32
@@ -1455,7 +1468,7 @@ class GraphModule(torch.nn.Module):
                             inner_func = ctx_wrapper(inner_func)
 
                         # Calling no_grad or enabled_grad should not mutate global state
-                        assert torch.is_grad_enabled() == mode_inverse
+                        assert torch.is_grad_enabled() == mode_inverse  # noqa: S101
 
                     with ctx_wrapper_inverse():
                         return inner_func(x)
@@ -1490,7 +1503,7 @@ class GraphModule(torch.nn.Module):
                                 return x.sin()
 
                         # Calling no_grad or enabled_grad should not mutate global state
-                        assert torch.is_grad_enabled() == mode_inverse
+                        assert torch.is_grad_enabled() == mode_inverse  # noqa: S101
 
                     with ctx_wrapper_inverse():
                         return inner_func(x)
@@ -1526,7 +1539,7 @@ class GraphModule(torch.nn.Module):
 
                         # Consuming set_grad_enabled by calling it on a function
                         # should not mutate global state
-                        assert torch.is_grad_enabled() == mode_inverse
+                        assert torch.is_grad_enabled() == mode_inverse  # noqa: S101
 
                     with torch.set_grad_enabled(mode_inverse):
                         return inner_func(x)
@@ -1706,7 +1719,7 @@ class GraphModule(torch.nn.Module):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_f = torch.compile(f, backend=cnts)
         opt_f(torch.randn(2, 2, 2, 2).to(dtype=torch.float16))
-        self.assertEqual(cnts.frame_count, 3)
+        self.assertEqual(cnts.frame_count, 2)
 
     # test sdpa_kernel graph break with 2 arguments
     def test_sdpa_kernel_ctx_manager3(self):
@@ -1835,15 +1848,72 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref, res)
         self.assertEqual(len(counters["graph_break"]), 1)
 
+    def test_311_resume_block_keyerror(self):
+        # https://github.com/pytorch/pytorch/issues/162313
+        flag = True
 
-class ContextlibContextManagerTests(torch._dynamo.test_case.TestCase):
+        def fn(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            x = x + 2
+            if flag:
+                with torch.no_grad():
+                    torch._dynamo.graph_break()
+                x = x + 4
+            else:
+                with torch.no_grad():
+                    torch._dynamo.graph_break()
+                x = x + 8
+            return x + 16
+
+        inp = torch.ones(3)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(inp), opt_fn(inp))
+        flag = False
+        self.assertEqual(fn(inp), opt_fn(inp))
+
+    def test_311_resume_block_keyerror2(self):
+        # https://github.com/pytorch/pytorch/issues/166176
+        def fn(x):
+            torch._dynamo.graph_break()
+            with torch.no_grad():
+                with torch.no_grad():
+                    torch._dynamo.graph_break()
+            return x + 1
+
+        inp = torch.ones(3)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(inp), opt_fn(inp))
+
+    def test_store_attr_graph_break_key_error(self):
+        # STORE_ATTR on dummy should result in graph break
+        def dummy():
+            pass
+
+        def fn(x):
+            x = x + 2
+            with torch.no_grad():
+                dummy.attr1 = x
+            return x + 4
+
+        inp = torch.ones(3)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(inp), opt_fn(inp))
+        self.assertGreater(len(counters["graph_break"]), 0)
+
+
+class ContextlibContextManagerTests(
+    torch._dynamo.test_case.TestCaseWithNestedGraphBreaks
+):
     def setUp(self):
+        super().setUp()
         self._prev = torch._dynamo.config.enable_trace_contextlib
         self._u_prev = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_contextlib = True
         torch._dynamo.config.enable_trace_unittest = True
 
     def tearDown(self):
+        super().tearDown()
         torch._dynamo.config.enable_trace_contextlib = self._prev
         torch._dynamo.config.enable_trace_unittest = self._u_prev
 
@@ -2259,8 +2329,9 @@ class GraphModule(torch.nn.Module):
             return y
 
         x = torch.tensor([1.0])
-        with self.assertRaises(InternalTorchDynamoError):
-            torch.compile(fn, backend="eager", fullgraph=False)(x)
+        expected = fn(x)
+        result = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual(expected, result)
 
     def test_graph_break_in_finally(self):
         z = []
@@ -2415,8 +2486,9 @@ class GraphModule(torch.nn.Module):
             return y
 
         x = torch.tensor([1.0])
-        with self.assertRaises(InternalTorchDynamoError):
-            torch.compile(fn, backend="eager", fullgraph=False)(x)
+        expected = fn(x)
+        result = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual(expected, result)
 
     def test_disable___exit__(self):
         def h(x):
@@ -2442,8 +2514,9 @@ class GraphModule(torch.nn.Module):
             return y
 
         x = torch.tensor([1.0])
-        with self.assertRaises(InternalTorchDynamoError):
-            torch.compile(fn, backend="eager", fullgraph=False)(x)
+        expected = fn(x)
+        result = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual(expected, result)
 
     def test_contextmanager_as_argument(self):
         def h(x):
@@ -2488,8 +2561,10 @@ class GraphModule(torch.nn.Module):
             return x + 1, ctx
 
         x = torch.tensor([1.0])
-        with self.assertRaises(InternalTorchDynamoError):
-            torch.compile(fn, backend="eager", fullgraph=False)(x)
+        expected = fn(x)
+        result = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual(expected[0], result[0])
+        self.assertEqual(type(expected[1]).__name__, type(result[1]).__name__)
 
     def test_return_advanced_contextmanager(self):
         L = []
@@ -2511,8 +2586,10 @@ class GraphModule(torch.nn.Module):
             return x + y, ctx
 
         x = torch.tensor([1.0])
-        with self.assertRaises(InternalTorchDynamoError):
-            torch.compile(fn, backend="eager", fullgraph=False)(x)
+        expected = fn(x)
+        result = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual(expected[0], result[0])
+        self.assertEqual(type(expected[1]).__name__, type(result[1]).__name__)
 
     def test_contextmanager_as_argument_only___enter__(self):
         L = []
@@ -2723,7 +2800,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(expected, out)
         self.assertEqual(len(eager.graphs), 2)
 
-    @parametrize("name", ("suppress", "stdout", "stderr"))
+    @parametrize("name", ("stdout", "stderr"))
     def test_contextlib_suppress(self, name):
         counters.clear()
         eager = EagerAndRecordGraphs()
@@ -2731,9 +2808,7 @@ class GraphModule(torch.nn.Module):
         def fn(t):
             y = t.sin()
             # ensure we graph break on the suppress call below
-            if name == "suppress":
-                ctx = contextlib.suppress(ValueError)
-            elif name == "stdout":
+            if name == "stdout":
                 ctx = contextlib.redirect_stdout(sys.stderr)
             else:
                 ctx = contextlib.redirect_stderr(sys.stdout)

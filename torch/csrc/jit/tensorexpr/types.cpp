@@ -1,9 +1,6 @@
 #include <torch/csrc/jit/tensorexpr/types.h>
 
-#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
-
-#include <c10/util/Logging.h>
 
 namespace torch::jit::tensorexpr {
 
@@ -57,7 +54,7 @@ Dtype ToDtype(ScalarType type) {
 TORCH_API std::ostream& operator<<(std::ostream& stream, const Dtype& dtype) {
   stream << dtype.scalar_type_;
   if (dtype.lanes() > 1) {
-    stream << "x" << dtype.lanes();
+    stream << 'x' << dtype.lanes();
     ;
   }
   return stream;

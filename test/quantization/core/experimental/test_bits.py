@@ -3,7 +3,7 @@
 import torch
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
-from torch.testing._internal.common_utils import run_tests, TestCase, skipIfRocm
+from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._pytree import tree_map
 
@@ -11,7 +11,8 @@ import itertools
 
 class Int16Tensor(torch.Tensor):
     def __new__(cls, elem):
-        assert elem.dtype == torch.bits16
+        if elem.dtype != torch.bits16:
+            raise AssertionError(f"Expected dtype torch.bits16, got {elem.dtype}")
         return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
 
     def __init__(self, elem):
@@ -51,7 +52,6 @@ class Int16Tensor(torch.Tensor):
 
 
 class TestBits(TestCase):
-    @skipIfRocm
     def test_types(self, device):
         bits_types = [torch.bits1x8, torch.bits2x4, torch.bits4x2, torch.bits8, torch.bits16]
         for bits_type in bits_types:

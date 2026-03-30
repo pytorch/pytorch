@@ -254,6 +254,46 @@ class TestIndexingSimplification(InductorTestCase):
             ms = benchmarker.benchmark_gpu(lambda: f(x))
             print(f"{ms=:.03f}")
 
+    @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
+    def test_floordiv_div_sympy_is_integer_bug(self):
+        def foo(arg0, arg1, arg2, arg3, arg4, sentinel):
+            t0 = arg0
+            t1 = t0.reshape((28, 24, 3, 127))
+            t2 = t1.var(dim=2)
+            t3 = arg1
+            t4 = arg2
+            t5 = torch.nn.functional.embedding(
+                torch.clamp(t3, 0, t4.size(0) - 1).to(torch.long), t4
+            )
+            t6 = arg3
+            t7 = torch.nn.functional.pad(t6, [0, 1], mode="constant", value=0.0)
+            t8 = arg4
+            t9 = t8.sum(dim=1)
+            t10 = torch.baddbmm(t5, t7, t9)
+            t11 = torch.cat([t2, t10], dim=0)
+            output = t11 + sentinel
+            return output
+
+        arg0 = torch.rand(
+            [36, 7112, 1, 1], dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+        )
+        arg1 = torch.randint(0, 512, [30, 24], dtype=torch.int64, device=GPU_TYPE)
+        arg2 = torch.rand(
+            [512, 127], dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+        )
+        arg3 = torch.rand(
+            [30, 24, 15], dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+        )
+        arg4 = torch.rand(
+            [30, 4, 16, 127], dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+        )
+        sentinel = torch.tensor(
+            0.0, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+        )
+        compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)
+        out_compiled = compiled_foo(arg0, arg1, arg2, arg3, arg4, sentinel)
+        out_compiled.sum().backward()
+
 
 class ExprPrinterTests(InductorTestCase):
     def test_print_pow(self):
@@ -403,10 +443,16 @@ class ExprPrinterTests(InductorTestCase):
         s2 = sympy.S(-1)
         expr = FloorDiv(s1, s2)
         self.assertEqual(pexpr(expr), "(-1)*s1")
-        self.assertEqual(cexpr(expr), "(-1LL)*s1") if sys.platform in [
-            "darwin",
-            "win32",
-        ] else "(-1L)*s1"
+        self.assertEqual(
+            cexpr(expr),
+            "(-1LL)*s1"
+            if sys.platform
+            in [
+                "darwin",
+                "win32",
+            ]
+            else "(-1L)*s1",
+        )
 
         s0 = sympy.Symbol("s0", integer=True)
         s2 = sympy.S(2)
@@ -446,6 +492,53 @@ class ExprPrinterTests(InductorTestCase):
 
 
 instantiate_parametrized_tests(ExprPrinterTests)
+
+
+class TestEvaluateMinMax(InductorTestCase):
+    def test_evaluate_min_multiple(self):
+        """min(u0, k*u0) resolves via GCD: gcd(u0, k*u0)=u0.
+        UNSOUND: if u0 < 0 (e.g. u0=-1) true min is 10*u0=-10, not -1."""
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+        self.assertEqual(sizevars.evaluate_min(u0, 10 * u0), u0)
+        self.assertEqual(sizevars.evaluate_min(10 * u0, u0), u0)
+        self.assertEqual(sizevars.evaluate_max(u0, 10 * u0), 10 * u0)
+
+    def test_evaluate_max_concrete(self):
+        """works with concrete values even when negative.  Sound."""
+        sizevars = SizeVarAllocator()
+        self.assertEqual(sizevars.evaluate_max(-5, 3), 3)
+        self.assertEqual(sizevars.evaluate_min(-5, 3), -5)
+
+    def test_evaluate_min_product_gcd(self):
+        """evaluate_min(u0, u0*u1) resolves via GCD fallback: gcd(u0, u0*u1)=u0.
+        UNSOUND: when u1=0 the true min is 0, not u0; when u0<0 ordering inverts."""
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+        u1 = sizevars.shape_env.create_unbacked_symint().node.expr
+        self.assertEqual(sizevars.evaluate_min(u0, u0 * u1), u0)
+
+    def test_evaluate_min_product_with_both_gt_gcd(self):
+        """evaluate_min(u0, u0*u1) with u0>0, u1>0 resolves via GCD.
+        Sound: u1>=1 guarantees u0*u1 >= u0."""
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+        u1 = sizevars.shape_env.create_unbacked_symint().node.expr
+        sizevars.check(sympy.Gt(u0, 0))
+        sizevars.check(sympy.Gt(u1, 0))
+        self.assertEqual(sizevars.evaluate_min(u0, u0 * u1), u0)
+
+    def test_guard_or_false_le_unbacked_symint_with_check(self):
+        """guard_or_false(Le(u0, k*u0)) resolves after constraining u0 >= 0."""
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+        sizevars.check(sympy.Ge(u0, 0))
+        # Le(u0, 10*u0) => 9*u0 >= 0, provable with u0 >= 0
+        self.assertTrue(sizevars.guard_or_false(sympy.Le(u0, 10 * u0)))
+        # Le(10*u0, u0) => -9*u0 >= 0 => u0 <= 0, not provable with u0 >= 0
+        self.assertFalse(sizevars.guard_or_false(sympy.Le(10 * u0, u0)))
+        # Lt(u0, 10*u0) => 9*u0 > 0 => u0 > 0, not provable (u0 could be 0)
+        self.assertFalse(sizevars.guard_or_false(sympy.Lt(u0, 10 * u0)))
 
 
 if __name__ == "__main__":

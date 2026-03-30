@@ -38,33 +38,14 @@
   - Lint
   - pull
 
-- name: NVFuser
-  patterns:
-  - test/test_jit_cuda_fuser.py
-  - torch/csrc/jit/codegen/fuser/cuda/**
-  - torch/csrc/jit/codegen/cuda/**
-  - benchmarks/cpp/nvfuser/**
-  approved_by:
-  - csarofeen
-  - ngimel
-  - jjsjann123
-  - kevinstephano
-  - ptrblck
-  mandatory_checks_name:
-  - EasyCLA
-  - Lint
-  - pull
-
 - name: OSS CI
   patterns:
   - .github/**
-  - .circleci/**
   - .ci/**
   - scripts/**
   - tools/**
   approved_by:
   - alband
-  - dagitses
   - pytorch/pytorch-dev-infra
   mandatory_checks_name:
   - EasyCLA
@@ -216,15 +197,17 @@
 - name: MPS
   patterns:
   - test/test_mps.py
+  - test/inductor/test_mps_basic.py
+  - torch/testing/_internal/common_mps.py
   - aten/src/ATen/native/native_functions.yaml
   - aten/src/ATen/mps/**
   - aten/src/ATen/native/mps/**
+  - c10/metal/**
   approved_by:
-  - kulinseth
-  - alband
   - malfet
-  - razarmehr
   - DenisVieriu97
+  - kurtamohler
+
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -525,6 +508,43 @@
   - Lint
   - pull
 
+- name: typechecking
+  patterns:
+  - 'pyrefly.toml'
+  - 'mypy.ini'
+  - 'mypy-strict.ini'
+  approved_by:
+  - lolpack
+  - maggiemoss
+  - ndmitchell
+  - kinto0
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: Accelerator / PrivateUse1
+  patterns:
+  - torch/accelerator/**
+  - torch/utils/backend_registration.py
+  - torch/csrc/acc/**
+  - torch/csrc/DeviceAccelerator.*
+  - torch/csrc/profiler/standalone/privateuse1_observer.*
+  - aten/src/ATen/DeviceAccelerator.*
+  - aten/src/ATen/core/GeneratorForPrivateuseone.*
+  - aten/src/ATen/detail/PrivateUse1HooksInterface.*
+  - docs/source/accelerator/**
+  - test/cpp_extensions/open_registration_extension/torch_openreg/**
+  approved_by:
+  - albanD
+  - fffrog
+  - EikanWang
+  - guangyey
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 - name: superuser
   patterns:
   - '*'
@@ -565,10 +585,12 @@
   - soumith
   - gchanan
   - ezyang
-  - dzhulgakov
   - malfet
   - albanD
   - ptrblck
+  - jspisak
+  - ngimel
+  - Chillee
   mandatory_checks_name:
   - EasyCLA
   - Lint

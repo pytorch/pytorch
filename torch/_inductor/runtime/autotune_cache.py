@@ -31,11 +31,10 @@ import logging
 import os
 import os.path
 import re
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 from typing_extensions import override
 
 import torch
-from torch._dynamo.precompile_context import PrecompileContext
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.compiler._cache import (
     CacheArtifact,
@@ -116,14 +115,14 @@ class AutotuneCacheArtifact(CacheArtifact):
 @dataclasses.dataclass
 class AutotuneCache:
     configs_hash: str
-    local_cache: Optional[tuple[RemoteCache[JsonDataTy], str]] = None
-    remote_cache: Optional[tuple[RemoteCache[JsonDataTy], str]] = None
+    local_cache: tuple[RemoteCache[JsonDataTy], str] | None = None
+    remote_cache: tuple[RemoteCache[JsonDataTy], str] | None = None
 
     # Create a AutotuneCache. Returns None if none of the caches can be used.
     @staticmethod
     def create(
         inductor_meta: _InductorMetaTy, filename: str, configs_hash: str
-    ) -> Optional[AutotuneCache]:
+    ) -> AutotuneCache | None:
         cache = AutotuneCache(configs_hash)
         key = AutotuneCache._prepare_key(filename)
 
@@ -143,7 +142,7 @@ class AutotuneCache:
         return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
     # Read the best config options from the most local cache and return it.
-    def _read(self) -> Optional[dict[str, JsonDataTy]]:
+    def _read(self) -> dict[str, JsonDataTy] | None:
         if local_cache := self.local_cache:
             cache, key = local_cache
             if best_config := cache.get(key):
@@ -162,7 +161,7 @@ class AutotuneCache:
     # which `configs` represents that option.
     def read_best(
         self, inductor_meta: _InductorMetaTy, configs: list[Config]
-    ) -> Optional[Config]:
+    ) -> Config | None:
         if best := self._read():
             return _load_cached_autotuning(
                 best, self.configs_hash, configs, inductor_meta
@@ -273,17 +272,24 @@ class AutotuneCache:
         config: Config,
         time_taken_ns: int,
         found_by_coordesc: bool = False,
-        triton_cache_hash: Optional[str] = None,
+        triton_cache_hash: str | None = None,
     ) -> None:
         data = {
+            # pyrefly: ignore [missing-attribute]
             **config.kwargs,
+            # pyrefly: ignore [missing-attribute]
             "num_warps": config.num_warps,
+            # pyrefly: ignore [missing-attribute]
             "num_stages": config.num_stages,
             "configs_hash": self.configs_hash,
             "found_by_coordesc": found_by_coordesc,
             "time_taken_ms": time_taken_ns // 1000000,  # Convert from NS to MS
             "triton_cache_hash": triton_cache_hash,
         }
+        # Save extra_options if present on the config. This allows third-party
+        # backends to store custom tuned options alongside the standard config.
+        if extra_options := getattr(config, "extra_options", None):
+            data["extra_options"] = extra_options
         if HAS_WARP_SPEC:
             data.update(
                 {
@@ -296,16 +302,14 @@ class AutotuneCache:
 
         if local_cache := self.local_cache:
             cache, key = local_cache
+            # pyrefly: ignore [bad-argument-type]
             cache.put(key, data)
+            # pyrefly: ignore [bad-argument-type]
             AutotuneCacheBundler.put(key, data)
             autotune_artifact_key = os.path.join(*key.split(os.sep)[-2:])
             CacheArtifactManager.record_artifact(
                 AutotuneCacheArtifact.type(), autotune_artifact_key, data
             )
-            if torch._dynamo.config.caching_precompile:
-                PrecompileContext.record_artifact(
-                    AutotuneCacheArtifact.type(), autotune_artifact_key, data
-                )
 
             if log.isEnabledFor(logging.DEBUG):
                 type_str = "coordesc" if found_by_coordesc else "heuristic"
@@ -313,6 +317,7 @@ class AutotuneCache:
 
         if remote_cache := self.remote_cache:
             cache, key = remote_cache
+            # pyrefly: ignore [bad-argument-type]
             cache.put(key, data)
 
 
@@ -419,7 +424,7 @@ class _AutotuneCacheBundlerImpl:
 
 
 class AutotuneCacheBundler:
-    _bundler: Optional[_AutotuneCacheBundlerImpl] = None
+    _bundler: _AutotuneCacheBundlerImpl | None = None
 
     def __init__(self) -> None:
         pass
@@ -432,8 +437,8 @@ class AutotuneCacheBundler:
         cls,
         inductor_meta: _InductorMetaTy,
         *,
-        code: Optional[str] = None,
-        code_hash: Optional[str] = None,
+        code: str | None = None,
+        code_hash: str | None = None,
     ) -> None:
         assert cls._bundler is None
 
@@ -541,7 +546,7 @@ def _load_cached_autotuning(
     configs_hash: str,
     configs: list[Config],
     inductor_meta: _InductorMetaTy,
-) -> Optional[Config]:
+) -> Config | None:
     if best_config is None:
         return None
     if best_config.pop("configs_hash", None) != configs_hash:
@@ -551,6 +556,10 @@ def _load_cached_autotuning(
     best_config.pop("time_taken_ms", None)
 
     best_config.pop("triton_cache_hash", None)
+
+    # Extract extra_options if present. This allows third-party backends
+    # to restore custom tuned options from the cache.
+    extra_options = best_config.pop("extra_options", None)
 
     if inductor_meta.get("coordinate_descent_tuning") and best_config.pop(
         "found_by_coordesc", False
@@ -575,26 +584,38 @@ def _load_cached_autotuning(
             )
 
         # Create the triton_config with the appropriate arguments
+        # pyrefly: ignore [bad-argument-count, unexpected-keyword]
         triton_config = Config(best_config, **config_args)
+        # pyrefly: ignore [missing-attribute]
         triton_config.found_by_coordesc = True
+        # Restore extra_options (may be None if not used by backend)
+        # pyrefly: ignore [missing-attribute]
+        triton_config.extra_options = extra_options
         return triton_config
 
     matching_configs = [
         cfg
         for cfg in configs
+        # pyrefly: ignore [missing-attribute]
         if all(val == best_config.get(key) for key, val in cfg.kwargs.items())
+        # pyrefly: ignore [missing-attribute]
         and cfg.num_warps == best_config.get("num_warps")
+        # pyrefly: ignore [missing-attribute]
         and cfg.num_stages == best_config.get("num_stages")
     ]
     if len(matching_configs) != 1:
         return None
 
-    return matching_configs[0]
+    matched_config = matching_configs[0]
+    # Restore extra_options (may be None if not used by backend)
+    # pyrefly: ignore [missing-attribute]
+    matched_config.extra_options = extra_options
+    return matched_config
 
 
 class _LocalAutotuneCacheBackend(RemoteCacheBackend[bytes]):
     @override
-    def _get(self, key: str) -> Optional[bytes]:
+    def _get(self, key: str) -> bytes | None:
         try:
             with open(key, "rb") as fd:
                 return fd.read()
@@ -616,7 +637,7 @@ class LocalAutotuneCache(RemoteCache[JsonDataTy]):
         super().__init__(backend, serde)
 
     @override
-    def _get(self, key: str, sample: Optional[Sample]) -> Optional[JsonDataTy]:
+    def _get(self, key: str, sample: Sample | None) -> JsonDataTy | None:
         AutotuneCacheBundler.sync()
         result = super()._get(key, sample)
         if result is not None:
@@ -631,14 +652,10 @@ class LocalAutotuneCache(RemoteCache[JsonDataTy]):
             CacheArtifactManager.record_artifact(
                 AutotuneCacheArtifact.type(), autotune_artifact_key, result
             )
-            if torch._dynamo.config.caching_precompile:
-                PrecompileContext.record_artifact(
-                    AutotuneCacheArtifact.type(), autotune_artifact_key, result
-                )
         return result
 
     @override
-    def _put(self, key: str, value: JsonDataTy, sample: Optional[Sample]) -> None:
+    def _put(self, key: str, value: JsonDataTy, sample: Sample | None) -> None:
         AutotuneCacheBundler.put(key, value)
         super()._put(key, value, sample)
 

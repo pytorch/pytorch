@@ -57,6 +57,8 @@ C10_DECLARE_bool(caffe2_keep_on_shrink);
 // respect caffe2_keep_on_shrink.
 C10_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-default")
+
 namespace at {
 class Tensor;
 class TensorBase;
@@ -359,7 +361,7 @@ struct C10_API VariableVersion {
   // https://cplusplus.github.io/LWG/issue2334.
   VariableVersion(uint32_t version)
       : version_counter_(c10::make_intrusive<VersionCounter>(version)) {}
-  VariableVersion(Disabled = DISABLED) {}
+  VariableVersion(Disabled /*unused*/ = DISABLED) {}
 
   bool enabled() const {
     return version_counter_;
@@ -522,21 +524,21 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   TensorImpl(
       Storage&& storage,
-      DispatchKeySet,
+      DispatchKeySet /*key_set*/,
       const caffe2::TypeMeta data_type);
 
   // See Note [Enum ImplType]
   TensorImpl(
-      ImplType,
+      ImplType /*unused*/,
       Storage&& storage,
-      DispatchKeySet,
+      DispatchKeySet /*key_set*/,
       const caffe2::TypeMeta data_type);
 
   /**
    * Construct a 1-dim 0 size tensor that doesn't have a storage.
    */
   TensorImpl(
-      DispatchKeySet,
+      DispatchKeySet /*key_set*/,
       const caffe2::TypeMeta data_type,
       std::optional<c10::Device> device_opt);
 
@@ -563,9 +565,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // from under us.
   TensorImpl(
       Storage&& storage,
-      DispatchKeySet,
+      DispatchKeySet /*key_set*/,
       const caffe2::TypeMeta data_type,
-      std::optional<c10::Device>);
+      std::optional<c10::Device> /*device_opt*/);
 
  public:
   TensorImpl(const TensorImpl&) = delete;
@@ -2064,10 +2066,16 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // be ignored.
 
   /**
-   * One TensorImpl can be copied to another TensorImpl if they have the same
-   * DispatchKeySet. The only two special cases (for legacy reason) are:
-   * CPU is compatible with CUDA and SparseCPU is
-   * compatible with SparseCUDA.
+   * One TensorImpl can be copied to another TensorImpl if
+   * - They have the same DispatchKeySet.
+   * - Or both have DispatchKey::Dense and a supported dense backend
+   *   (CPU, CUDA, MPS, HIP, XPU, HPU, MTIA)
+   * - Or both have DispatchKey::Sparse and a supported sparse backend
+   *   (CPU, CUDA, MPS, HIP, XPU)
+   * - Or both have DispatchKey::SparseCsr
+   * For PrivateUse1 backend, user can implement their own
+   * `_has_compatible_shallow_copy_type` operator.
+   * See OpenRegMinimal.cpp for an example of overriding this operator.
    */
   inline bool has_compatible_shallow_copy_type(DispatchKeySet from) {
     auto is_dense = [](DispatchKeySet ts) {
@@ -2175,6 +2183,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   const impl::PyObjectSlot* pyobj_slot() const {
     return &pyobj_slot_;
   }
+
+  void incref_pyobject() const noexcept final;
+
+  void decref_pyobject() const noexcept final;
+
+  bool try_incref_pyobject() const noexcept final;
 
  private:
   // See NOTE [std::optional operator usage in CUDA]
@@ -3077,6 +3091,19 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   friend class C10_TensorImpl_Size_Check_Dummy_Class;
 };
 
+namespace detail {
+
+#ifndef C10_MOBILE
+template <class T>
+struct TargetTraits<
+    T,
+    std::enable_if_t<std::is_base_of_v<c10::TensorImpl, std::remove_cv_t<T>>>> {
+  static constexpr bool can_have_pyobject = true;
+};
+#endif
+
+} // namespace detail
+
 // Note [TensorImpl size constraints]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Changed the size of TensorImpl?  If the size went down, good for
@@ -3303,3 +3330,5 @@ static_assert(
 #undef C10_GCC_VERSION_MINOR
 
 } // namespace c10
+
+C10_DIAGNOSTIC_POP()

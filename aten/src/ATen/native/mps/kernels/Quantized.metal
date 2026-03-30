@@ -112,7 +112,7 @@ kernel void int4pack_mm(constant T *A [[buffer(0)]],
   constant uchar *B_ptr = B + ((n * K) / k_pack_factor);
 
   thread float4 result = float4(0.0);
-  // We multipy group of 4 channels with these scales.
+  // We multiply group of 4 channels with these scales.
   // Because corresponding values from weight matrix are effectively left
   // shifted. This is to avoid doing right shift on those values which ends up
   // affecting performance. This is the trick applied in MLX kernels.

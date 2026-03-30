@@ -9,15 +9,16 @@ import logging
 import math
 import os
 import warnings
+from collections.abc import Callable
 from itertools import chain
 from types import CodeType, FunctionType, ModuleType
-from typing import Any, Callable, get_args, NamedTuple, Optional, Union
-from typing_extensions import TypeAlias
+from typing import Any, get_args, NamedTuple, TypeAlias
 
 import torch
 import torch.utils._pytree as pytree
 from torch._C import ScriptObject  # type: ignore[attr-defined]
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_reference_type, is_opaque_type
 
 from ._compatibility import compatibility
 from ._lazy_graph_module import _make_graph_module
@@ -39,20 +40,26 @@ _proxyable_classes: dict[type, None] = {}
 
 _is_fx_tracing_flag = False
 
-_ConstantAttributeType: TypeAlias = Union[
-    torch.Tensor, torch.ScriptObject, FakeScriptObject, pytree.TreeSpec
-]
+_ConstantAttributeType: TypeAlias = (
+    torch.Tensor | torch.ScriptObject | FakeScriptObject | pytree.TreeSpec
+)
 
 _constant_attribute_types = get_args(_ConstantAttributeType)
 
 
-def is_fx_tracing():
+# We only want to print this once to avoid flooding logs
+@functools.lru_cache
+def is_fx_tracing_warning():
     log.warning(
         "is_fx_tracing will return true for both fx.symbolic_trace and "
         "torch.export. Please use "
         "is_fx_tracing_symbolic_tracing() for specifically fx.symbolic_trace "
         "or torch.compiler.is_compiling() for specifically torch.export/compile."
     )
+
+
+def is_fx_tracing():
+    is_fx_tracing_warning()
     return _is_fx_tracing_flag
 
 
@@ -229,7 +236,7 @@ class PHWithMeta(PHBase):
     Object representing an input placeholder to `concrete_args`
     """
 
-    def __init__(self, ph_key: Optional[str] = None):
+    def __init__(self, ph_key: str | None = None):
         super().__init__()
 
         # Provide a hey for user to identify placeholder node during analysis
@@ -319,7 +326,7 @@ class Tracer(TracerBase):
         self._autowrap_search: list[ModuleType] = list(autowrap_modules)
         self.param_shapes_constant = param_shapes_constant
 
-        self.submodule_paths: Optional[dict[torch.nn.Module, str]] = None
+        self.submodule_paths: dict[torch.nn.Module, str] | None = None
         self.root_module_name: str = ""
         # Maps the containing module's name to the operator name
         self.scope = Scope("", None)
@@ -415,8 +422,10 @@ class Tracer(TracerBase):
         # a get_attr to retrieve that tensor. Otherwise, we'll store away the
         # tensor value into a special attribute on the Module s.t. we can
         # retrieve it with a get_attr.
-        if isinstance(a, _constant_attribute_types):
-            qualname: Optional[str] = self.tensor_attrs.get(a)
+        if isinstance(a, _constant_attribute_types) or (
+            is_opaque_reference_type(type(a))
+        ):
+            qualname: str | None = self.tensor_attrs.get(a)
 
             # Tensor was not found in the Module hierarchy, stow it away in a
             # special attribute and set the qualname to refer to that
@@ -427,12 +436,17 @@ class Tracer(TracerBase):
                     base_name = "_torchbind_obj"
                 elif isinstance(a, pytree.TreeSpec):
                     base_name = "_tree_spec_constant"
+                elif is_opaque_type(type(a)):
+                    base_name = "_opaque_obj"
                 else:
                     raise RuntimeError(
                         f"cannot create constant arg for {a} of type {type(a)}."
                     )
                 qualname = self.get_fresh_qualname(base_name)
-                assert isinstance(qualname, str)
+                if not isinstance(qualname, str):
+                    raise AssertionError(
+                        f"Expected qualname to be str, got {type(qualname)}"
+                    )
                 self.tensor_attrs[a] = qualname
                 setattr(self.root, qualname, a)
 
@@ -444,7 +458,10 @@ class Tracer(TracerBase):
 
             # TODO: binary search
             qualname = self.get_fresh_qualname(f"_{a.__class__.__name__}_constant_")
-            assert isinstance(qualname, str)
+            if not isinstance(qualname, str):
+                raise AssertionError(
+                    f"Expected qualname to be str, got {type(qualname)}"
+                )
             setattr(self.root, qualname, a)
 
             return self.create_node("get_attr", qualname, (), {})
@@ -492,7 +509,8 @@ class Tracer(TracerBase):
             path = self.submodule_paths.get(mod)
             if path is None:
                 raise NameError("module is not installed as a submodule")
-            assert isinstance(path, str)
+            if not isinstance(path, str):
+                raise AssertionError(f"Expected path to be str, got {type(path)}")
             return path
         # O(N^2) fallback in the case that we didn't store the submodule
         # paths.
@@ -557,7 +575,8 @@ class Tracer(TracerBase):
                     "call_module", module_qualified_name, args, kwargs
                 )
             key, _ = self.module_stack.popitem(last=True)
-            assert key == module_key, f" Unexpected key {key}"
+            if key != module_key:
+                raise AssertionError(f"Unexpected key {key}, expected {module_key}")
 
         return ret_val
 
@@ -597,6 +616,7 @@ class Tracer(TracerBase):
                             in inspect.signature(self.create_proxy).parameters
                         ):
                             kwargs["proxy_factory_fn"] = (
+                                # pyrefly: ignore [unsupported-operation]
                                 None
                                 if not self.param_shapes_constant
                                 else lambda node: ParameterProxy(
@@ -702,7 +722,7 @@ class Tracer(TracerBase):
             root_fn = _patch_function(root_fn, len(args))
 
         flat_args, in_spec = pytree.tree_flatten(tuple(args))
-        if not all(child.is_leaf() for child in in_spec.children_specs):
+        if not all(child.is_leaf() for child in in_spec.children()):
             # In the case that we have pytree-flattened inputs in
             # `concrete_args`, generate a flattening wrapper around the
             # original root function and return that.
@@ -714,7 +734,11 @@ class Tracer(TracerBase):
                 tree_args = pytree.tree_unflatten(list(args), in_spec)
                 tree_out = root_fn(*tree_args)
                 out_args, out_spec = pytree.tree_flatten(tree_out)
-                assert isinstance(self.graph._codegen, _PyTreeCodeGen)  # type: ignore[has-type]
+                if not isinstance(self.graph._codegen, _PyTreeCodeGen):  # type: ignore[has-type]
+                    raise AssertionError(
+                        f"Expected _codegen to be _PyTreeCodeGen, got "
+                        f"{type(self.graph._codegen)}"
+                    )
                 self.graph._codegen.pytree_info = (
                     self.graph._codegen.pytree_info._replace(out_spec=out_spec)
                 )
@@ -726,8 +750,8 @@ class Tracer(TracerBase):
     @compatibility(is_backward_compatible=True)
     def trace(
         self,
-        root: Union[torch.nn.Module, Callable[..., Any]],
-        concrete_args: Optional[dict[str, Any]] = None,
+        root: torch.nn.Module | Callable[..., Any],
+        concrete_args: dict[str, Any] | None = None,
     ) -> Graph:
         """
         Trace ``root`` and return the corresponding FX ``Graph`` representation. ``root``
@@ -767,9 +791,11 @@ class Tracer(TracerBase):
 
                 self.root = root
 
-                assert hasattr(type(root), self.traced_func_name), (
-                    f"traced_func_name={self.traced_func_name} doesn't exist in {type(root).__name__}"
-                )
+                if not hasattr(type(root), self.traced_func_name):
+                    raise AssertionError(
+                        f"traced_func_name={self.traced_func_name} doesn't exist in "
+                        f"{type(root).__name__}"
+                    )
 
                 fn = getattr(type(root), self.traced_func_name)
                 self.root_module_name = root._get_name()
@@ -778,7 +804,7 @@ class Tracer(TracerBase):
                 self.root = torch.nn.Module()
                 fn = root
 
-            tracer_cls: Optional[type[Tracer]] = getattr(self, "__class__", None)
+            tracer_cls: type[Tracer] | None = getattr(self, "__class__", None)
             self.graph = Graph(tracer_cls=tracer_cls)
             if hasattr(fn, "__code__"):
                 code = fn.__code__
@@ -806,7 +832,8 @@ class Tracer(TracerBase):
 
             collect_tensor_attrs(self.root, [])
 
-            assert isinstance(fn, FunctionType)
+            if not isinstance(fn, FunctionType):
+                raise AssertionError(f"Expected FunctionType, got {type(fn)}")
 
             fn_globals = fn.__globals__  # run before it gets patched
             fn, args = self.create_args_for_root(
@@ -856,17 +883,18 @@ class Tracer(TracerBase):
                     _autowrap_check(
                         patcher, module.__dict__, self._autowrap_function_ids
                     )
+                ann = inspect.get_annotations(inspect.unwrap(fn))
                 self.create_node(
                     "output",
                     "output",
                     (self.create_arg(fn(*args)),),
                     {},
-                    type_expr=fn.__annotations__.get("return", None),
+                    type_expr=ann.get("return", None),
                 )
 
             self.submodule_paths = None
         except RuntimeError as e:
-            if isinstance(e.args[0], str) and "data-dependent" in e.args[0]:
+            if e.args and isinstance(e.args[0], str) and "data-dependent" in e.args[0]:
                 partial_fx_graph = self.graph.python_code(
                     root_module="self",
                     verbose=True,
@@ -884,7 +912,7 @@ class Tracer(TracerBase):
         new_tracer = Tracer.__new__(Tracer)
 
         for k, v in self.__dict__.items():
-            if k in {"_autowrap_search"}:
+            if k == "_autowrap_search":
                 new_obj = copy.copy(v)
             else:
                 new_obj = copy.deepcopy(v, memo)
@@ -920,7 +948,11 @@ class Tracer(TracerBase):
 
                     return out
                 # Union[int, bool] == bool in Python <= 3.6
-                if type(x) == bool or type(x) in base_types and type(x) != torch.Tensor:
+                if (
+                    type(x) is bool
+                    or type(x) in base_types
+                    and type(x) is not torch.Tensor
+                ):
                     torch._assert(
                         out == x,
                         f"{name} has been specialized to have value {x} but got another value",
@@ -1147,7 +1179,7 @@ class _Patcher:
         self.visited.clear()
 
 
-CURRENT_PATCHER: Optional[_Patcher] = None
+CURRENT_PATCHER: _Patcher | None = None
 
 
 @contextlib.contextmanager
@@ -1159,7 +1191,8 @@ def _new_patcher():
         yield CURRENT_PATCHER
     finally:
         # Clear all the patches made by when using current patcher.
-        assert CURRENT_PATCHER is not None
+        if CURRENT_PATCHER is None:
+            raise AssertionError("CURRENT_PATCHER is None in finally block")
         CURRENT_PATCHER.revert_all_patches()
         CURRENT_PATCHER = prior_patcher
 
@@ -1176,9 +1209,10 @@ def _maybe_revert_all_patches():
     finally:
         if current_patcher is not None:
             patches_made = current_patcher.reapply_all_patches()
-        assert patches_made == patches_removed, (
-            "CURRENT_PATCHER was changed during a revert_all_patches"
-        )
+        if patches_made != patches_removed:
+            raise AssertionError(
+                "CURRENT_PATCHER was changed during a revert_all_patches"
+            )
 
 
 def _patch_wrapped_functions(patcher: _Patcher):
@@ -1215,7 +1249,7 @@ def _autowrap_check(
 
 
 @compatibility(is_backward_compatible=True)
-def wrap(fn_or_name: Union[str, Callable]):
+def wrap(fn_or_name: str | Callable):
     """
     This function can be called at module-level scope to register fn_or_name as a "leaf function".
     A "leaf function" will be preserved as a CallFunction node in the FX trace instead of being
@@ -1257,18 +1291,23 @@ def wrap(fn_or_name: Union[str, Callable]):
         )
 
     if callable(fn_or_name):
-        assert not isinstance(fn_or_name, str)  # to make mypy happy
+        if isinstance(fn_or_name, str):  # to make mypy happy
+            raise AssertionError("Unexpected: fn_or_name is both callable and str")
         fn_name = fn_or_name.__name__
     else:
-        assert isinstance(fn_or_name, str), (
-            "fn_or_name must be a global function or string name"
-        )
+        if not isinstance(fn_or_name, str):
+            raise AssertionError(
+                f"fn_or_name must be a global function or string name, got "
+                f"{type(fn_or_name)}"
+            )
         fn_name = fn_or_name
 
     currentframe = inspect.currentframe()
-    assert currentframe is not None
+    if currentframe is None:
+        raise AssertionError("inspect.currentframe() returned None")
     f = currentframe.f_back
-    assert f is not None
+    if f is None:
+        raise AssertionError("currentframe.f_back is None")
     if f.f_code.co_name != "<module>":
         raise NotImplementedError("wrap must be called at the top level of a module")
 
@@ -1280,8 +1319,8 @@ def wrap(fn_or_name: Union[str, Callable]):
 
 @compatibility(is_backward_compatible=True)
 def symbolic_trace(
-    root: Union[torch.nn.Module, Callable[..., Any]],
-    concrete_args: Optional[dict[str, Any]] = None,
+    root: torch.nn.Module | Callable[..., Any],
+    concrete_args: dict[str, Any] | None = None,
 ) -> GraphModule:
     """
     Symbolic tracing API
@@ -1344,4 +1383,5 @@ def symbolic_trace(
 
 @wrap
 def _assert_is_none(value, msg):
-    assert value is None, msg
+    if value is not None:
+        raise AssertionError(msg)

@@ -561,7 +561,7 @@ struct wrap_kernel_functor_unboxed_<
   // doesn't use &&
   static ReturnType call(
       OperatorKernel* functor,
-      DispatchKeySet,
+      DispatchKeySet /*unused*/,
       ParameterTypes... args) {
     KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
     // Note [Plumbing Keys Through The Dispatcher 2]
@@ -629,10 +629,10 @@ call_functor_with_args_from_stack_(
     OperatorKernel* functor,
     DispatchKeySet dispatchKeySet,
     Stack* stack,
-    std::index_sequence<ivalue_arg_indices...>,
-    guts::typelist::typelist<ArgTypes...>*) {
-  (void)(stack); // when sizeof...(ivalue_arg_indices) == 0, this argument would
-                 // be unused and we have to silence the compiler warning.
+    std::index_sequence<ivalue_arg_indices...> /*unused*/,
+    guts::typelist::typelist<ArgTypes...>* /*unused*/) {
+  (void)stack; // when sizeof...(ivalue_arg_indices) == 0, this argument would
+               // be unused and we have to silence the compiler warning.
 
   // We're explicitly filtering out DispatchKeySet from the argument list.
   // Some kernels take a DispatchKeySet as their first argument in order to
@@ -708,7 +708,7 @@ struct push_outputs<std::tuple<OutputTypes...>, AllowDeprecatedTypes> final {
   static void call_(
       std::tuple<OutputTypes...>&& output,
       Stack* stack,
-      std::index_sequence<indices...>) {
+      std::index_sequence<indices...> /*unused*/) {
     torch::jit::push(
         *stack,
         return_to_ivalue<OutputTypes, AllowDeprecatedTypes>::call(
@@ -718,7 +718,7 @@ struct push_outputs<std::tuple<OutputTypes...>, AllowDeprecatedTypes> final {
   static void copy_(
       const std::tuple<OutputTypes...>& output,
       Stack* stack,
-      std::index_sequence<indices...>) {
+      std::index_sequence<indices...> /*unused*/) {
     torch::jit::push(
         *stack,
         return_to_ivalue<OutputTypes, AllowDeprecatedTypes>::copy(
@@ -731,6 +731,22 @@ struct push_outputs<void, AllowDeprecatedTypes> final {
   static void copy(int /*dummy*/, Stack* /*stack*/) {}
 };
 
+// decay_if_tuple ensures that if T is a tuple, all of its elements are decayed.
+// This is useful for kernels that return a tuple of references (e.g., Tensor&),
+// to avoid dangling references after the stack is dropped.
+template <typename T>
+struct decay_if_tuple {
+  using type = std::decay_t<T>;
+};
+
+template <typename... Args>
+struct decay_if_tuple<std::tuple<Args...>> {
+  using type = std::tuple<std::decay_t<Args>...>;
+};
+
+template <typename T>
+using decay_if_tuple_t = typename decay_if_tuple<T>::type;
+
 // make_boxed_from_unboxed_functor
 
 template <class KernelFunctor, bool AllowDeprecatedTypes>
@@ -741,7 +757,7 @@ struct make_boxed_from_unboxed_functor final {
 
   static void call(
       OperatorKernel* functor,
-      const OperatorHandle&,
+      const OperatorHandle& /*unused*/,
       DispatchKeySet dispatchKeySet,
       Stack* stack) {
     using ReturnType =
@@ -761,7 +777,7 @@ struct make_boxed_from_unboxed_functor final {
       // we actually store it by value and don't get a dangling reference. This
       // is only required because some kernels still return `Tensor&`. [Note:
       // VC++ and 'std': ambiguous symbol]
-      using ReturnType_ = ::std::decay_t<ReturnType>;
+      using ReturnType_ = decay_if_tuple_t<ReturnType>;
       ReturnType_ output = call_functor_with_args_from_stack<
           KernelFunctor,
           AllowDeprecatedTypes>(functor, dispatchKeySet, stack);

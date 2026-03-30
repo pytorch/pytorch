@@ -15,8 +15,9 @@ for better performance while maintaining correct semantics.
 import bisect
 import dataclasses
 import dis
+import itertools
 import sys
-from typing import Any, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
@@ -36,6 +37,7 @@ if sys.version_info >= (3, 11):
     TERMINAL_OPCODES.add(dis.opmap["JUMP_FORWARD"])
 else:
     TERMINAL_OPCODES.add(dis.opmap["JUMP_ABSOLUTE"])
+
 if (3, 12) <= sys.version_info < (3, 14):
     TERMINAL_OPCODES.add(dis.opmap["RETURN_CONST"])
 if sys.version_info >= (3, 13):
@@ -53,6 +55,7 @@ def get_indexof(insts: list["Instruction"]) -> dict["Instruction", int]:
     Get a mapping from instruction memory address to index in instruction list.
     Additionally checks that each instruction only appears once in the list.
     """
+    # pyrefly: ignore [implicit-any]
     indexof = {}
     for i, inst in enumerate(insts):
         assert inst not in indexof
@@ -110,7 +113,7 @@ def remove_pointless_jumps(instructions: list["Instruction"]) -> list["Instructi
     """Eliminate jumps to the next instruction"""
     pointless_jumps = {
         id(a)
-        for a, b in zip(instructions, instructions[1:])
+        for a, b in itertools.pairwise(instructions)
         if a.opname == "JUMP_ABSOLUTE" and a.target is b
     }
     return [inst for inst in instructions if id(inst) not in pointless_jumps]
@@ -200,8 +203,8 @@ class FixedPointBox:
 
 @dataclasses.dataclass
 class StackSize:
-    low: Union[int, float]
-    high: Union[int, float]
+    low: int | float
+    high: int | float
     fixed_point: FixedPointBox
 
     def zero(self) -> None:
@@ -224,7 +227,7 @@ class StackSize:
             self.fixed_point.value = False
 
 
-def stacksize_analysis(instructions: list["Instruction"]) -> Union[int, float]:
+def stacksize_analysis(instructions: list["Instruction"]) -> int | float:
     assert instructions
     fixed_point = FixedPointBox()
     stack_sizes = {

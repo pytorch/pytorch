@@ -8,7 +8,12 @@ import torch
 from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard, OffloadPolicy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
-from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TEST_HPU
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_CUDA,
+    TEST_HPU,
+    TEST_XPU,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -54,15 +59,30 @@ class TestFullyShardMemory(FSDPTest):
             )
         ):
             return  # skip since not a common use case
-        assert self.world_size == 2, (
-            f"Requires world size of 2 since some values are hard coded: {self.world_size}"
-        )
+        if self.world_size != 2:
+            raise AssertionError(
+                f"Requires world size of 2 since some values are hard coded: {self.world_size}"
+            )
         torch.manual_seed(42)
         # Pre-run a linear forward (gemm and bias) and backward (gemm) to
         # allocate the cuBLAS workspaces before measuring the memory usage
         # since the workspace size can differ between hardwares
         lin = torch.nn.Linear(768, 768, device=device_type)
-        inp = torch.randn(1, 768, device=device_type)
+        # NOTE: before https://github.com/pytorch/pytorch/pull/163955,
+        # the input shape was (1, 768), so that the forward gemm used
+        # cublaslt, and the backward used cublas.
+        # With the aforementioned PR, and with shape (1, 768),
+        # the cublas path is used both in forward and in backward,
+        # altering peak memory usage not accounting for cublaslt.
+        # Here we change the input shape to (2, 768), and that swaps
+        # the cublas/cublaslt selection in the forward/backward,
+        # but that does not affect the peak memory usage stored in `base_mem_mb`.
+        # Reasons for the flip:
+        # before PR: no Lt in addmm when mat2 has nrows/ncols <= 1,
+        # after PR: no Lt in addmm when either mat1 or mat2 have nrows/ncols <= 1,
+        # since the input preparation can swap matrices based on output
+        # row-/col-majorness.
+        inp = torch.randn(2, 768, device=device_type)
         lin(inp).sum().backward()
         torch.get_device_module(device_type).empty_cache()
         base_mem_mb = self._get_peak_active_memory_mb()
@@ -135,7 +155,8 @@ class TestFullyShardMemory(FSDPTest):
                 # Sharded parameters
                 expected_mem_mb += model_sharded_numel * 4 / 1e6
         else:
-            assert not use_cpu_offload
+            if use_cpu_offload:
+                raise AssertionError("Expected use_cpu_offload to be False")
             # Sharded parameters, unsharded parameters, 1x max unsharded block parameters
             # (copy-out) and other (peak at end of forward)
             expected_mem_mb = (
@@ -165,7 +186,8 @@ class TestFullyShardMemory(FSDPTest):
                     # 2x sharded parameters/gradients
                     expected_mem_mb += 2 * model_sharded_numel * 4 / 1e6
         else:
-            assert not use_cpu_offload
+            if use_cpu_offload:
+                raise AssertionError("Expected use_cpu_offload to be False")
             # Sharded parameters, unsharded parameters, 1.5x max unsharded
             # block parameters (reduce-scatter input/output), and other (peak
             # at beginning of backward)
@@ -205,6 +227,65 @@ class TestFullyShardMemory(FSDPTest):
         self.assertLessEqual(mem_mb - base_mem_mb, expected_mem_mb)
 
     @skip_if_lt_x_gpu(2)
+    def test_fully_shard_training_memory_no_gc(self):
+        """Memory should not grow across training steps when GC is disabled.
+
+        Regression test: reference cycles in FSDP's autograd integration can
+        hold GPU tensors alive when Python's cyclic GC is disabled. This
+        catches leaks like the one introduced in #173415.
+        """
+        torch.manual_seed(42)
+        gc.disable()
+        try:
+            vocab_size = 1024
+            model_args = ModelArgs(
+                vocab_size=vocab_size,
+                n_layers=6,
+                dim=2048,
+                n_heads=16,
+                weight_tying=False,
+            )
+            model = Transformer(model_args)
+            for module in model.modules():
+                if isinstance(module, TransformerBlock):
+                    fully_shard(module.attention)
+                    fully_shard(module.feed_forward)
+                    fully_shard(module)
+            fully_shard(model)
+            optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=False)
+            inp = torch.randint(0, vocab_size, (2, 16), device=device_type.type)
+
+            # Warm-up step to stabilize memory (cuBLAS workspaces, etc.)
+            loss = model(inp)
+            loss.sum().backward()
+            optim.step()
+            optim.zero_grad()
+            gc.collect()  # one-time collection after warm-up
+            torch.get_device_module(device_type).synchronize()
+            mem_after_warmup = self._get_curr_active_memory_mb()
+
+            num_steps = 10
+            for _ in range(num_steps):
+                loss = model(inp)
+                loss.sum().backward()
+                optim.step()
+                optim.zero_grad()
+
+            torch.get_device_module(device_type).synchronize()
+            mem_after_steps = self._get_curr_active_memory_mb()
+            # Allow a small buffer (2 MB) for non-determinism, but no
+            # per-step growth should occur.
+            self.assertLessEqual(
+                mem_after_steps - mem_after_warmup,
+                2,
+                f"Memory grew by {mem_after_steps - mem_after_warmup} MB over "
+                f"{num_steps} steps with gc disabled, indicating a reference "
+                f"cycle leak in FSDP's autograd graph",
+            )
+        finally:
+            gc.enable()
+
+    @skip_if_lt_x_gpu(2)
     def test_fully_shard_del_memory(self):
         base_mem_mb = self._get_peak_active_memory_mb()
         vocab_size = 32
@@ -236,14 +317,15 @@ class TestFullyShardMemory(FSDPTest):
 
     def _get_peak_active_memory_mb(self) -> int:
         mem_stats = torch.get_device_module(device_type).memory_stats()
-        if TEST_CUDA:
+
+        if TEST_CUDA or TEST_XPU:
             return round(mem_stats["active_bytes.all.peak"] / 1e6)
         if TEST_HPU:
             return round(mem_stats["MaxInUse"] / 1e6)
 
     def _get_curr_active_memory_mb(self) -> int:
         mem_stats = torch.get_device_module(device_type).memory_stats()
-        if TEST_CUDA:
+        if TEST_CUDA or TEST_XPU:
             return round(mem_stats["active_bytes.all.current"] / 1e6)
         if TEST_HPU:
             return round(mem_stats["InUse"] / 1e6)

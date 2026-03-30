@@ -164,13 +164,13 @@ at::Tensor view(const at::Tensor& self, c10::SymIntArrayRef size) {
 
 // LITERALINCLUDE START: FALLBACK IMPL
 void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  static const std::unordered_set<c10::OperatorName> cpu_fallback_blacklist = {
+  static const std::unordered_set<c10::OperatorName> cpu_fallback_blocklist = {
       c10::OperatorName("aten::abs", ""),
       c10::OperatorName("aten::abs", "out"),
   };
 
   const auto& op_name = op.schema().operator_name();
-  if (cpu_fallback_blacklist.count(op_name)) {
+  if (cpu_fallback_blocklist.count(op_name)) {
     TORCH_CHECK(
         false,
         "Operator '",

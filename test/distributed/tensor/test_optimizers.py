@@ -14,6 +14,7 @@ from torch.distributed.tensor import (
 )
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
     MLPModule,
     with_comms,
@@ -43,7 +44,8 @@ def input_fn(mod, inputs, device_mesh):
 
 # prepare output to be local torch.Tensor
 def output_fn(mod, outputs, device_mesh):
-    assert isinstance(outputs, DTensor)
+    if not isinstance(outputs, DTensor):
+        raise AssertionError(f"Expected DTensor, got {type(outputs)}")
     return outputs.redistribute(placements=[Replicate()] * device_mesh.ndim).to_local()
 
 
@@ -715,6 +717,10 @@ class TestDTensorOptimizer(DTensorTestBase):
             inp = torch.ones(8, 10, device=self.device_type)
             self._assert_optimizer(None, mod, opt, mod_copy, dist_opt, inp)
 
+
+TestDTensorOptimizerWithLocalTensor = create_local_tensor_test_class(
+    TestDTensorOptimizer,
+)
 
 if __name__ == "__main__":
     run_tests()

@@ -6,6 +6,7 @@ import ctypes
 import errno
 import functools
 import json
+import locale
 import logging
 import os
 import platform
@@ -22,7 +23,7 @@ from collections.abc import Sequence
 from ctypes import cdll, wintypes
 from ctypes.util import find_library
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 from torch._dynamo.utils import dynamo_timed
@@ -67,7 +68,9 @@ _IS_LINUX = sys.platform.startswith("linux")
 _IS_MACOS = sys.platform.startswith("darwin")
 _IS_WINDOWS = sys.platform == "win32"
 
-SUBPROCESS_DECODE_ARGS = ("utf-8",) if _IS_WINDOWS else ()
+MINGW_GXX = "x86_64-w64-mingw32-g++"
+
+SUBPROCESS_DECODE_ARGS = (locale.getpreferredencoding(),) if _IS_WINDOWS else ()
 
 log = logging.getLogger(__name__)
 
@@ -331,7 +334,49 @@ def check_msvc_cl_language_id(compiler: str) -> None:
         )
 
 
+@functools.cache
+def check_mingw_win32_flavor(compiler: str) -> str:
+    """
+    Check if MinGW `compiler` exists and return it's flavor (win32 or posix).
+    """
+    try:
+        out = subprocess.check_output(
+            [compiler, "-v"], stderr=subprocess.STDOUT, text=True
+        )
+    except FileNotFoundError as e:
+        raise RuntimeError(f"Compiler: {compiler} is not found.") from e
+    except Exception as e:
+        raise RuntimeError(f"Failed to run {compiler} -v") from e
+
+    flavor: str | None = None
+    for line in out.splitlines():
+        if "Thread model" in line:
+            flavor = line.split(":", 1)[-1].strip().lower()
+
+    if flavor is None:
+        raise RuntimeError(
+            f"Cannot determine the flavor of {compiler} (win32 or posix). No Thread model found in {compiler} -v"
+        )
+
+    if flavor not in ("win32", "posix"):
+        raise RuntimeError(
+            f"Only win32 and pofix flavor of {compiler} is supported. The flavor is {flavor}"
+        )
+
+    return flavor
+
+
 def get_cpp_compiler() -> str:
+    if (
+        config.aot_inductor.cross_target_platform == "windows"
+        and sys.platform != "win32"
+    ):
+        # we're doing cross-compilation
+        compiler = MINGW_GXX
+        if not config.aot_inductor.package_cpp_only:
+            check_mingw_win32_flavor(compiler)
+        return compiler
+
     if _IS_WINDOWS:
         compiler = os.environ.get("CXX", "cl")
         compiler = normalize_path_separator(compiler)
@@ -436,6 +481,7 @@ def _is_msvc_cl(cpp_compiler: str) -> bool:
     except FileNotFoundError:
         return False
 
+    # pyrefly: ignore [unreachable]
     return False
 
 
@@ -480,6 +526,7 @@ def _is_intel_compiler(cpp_compiler: str) -> bool:
         # --version args not support.
         return False
 
+    # pyrefly: ignore [unreachable]
     return False
 
 
@@ -548,9 +595,7 @@ def _create_if_dir_not_exist(path_dir: str) -> None:
             Path(path_dir).mkdir(parents=True, exist_ok=True)
         except OSError as exc:  # Guard against race condition
             if exc.errno != errno.EEXIST:
-                raise RuntimeError(  # noqa: TRY200 (Use `raise from`)
-                    f"Fail to create path {path_dir}"
-                )
+                raise RuntimeError(f"Fail to create path {path_dir}") from exc
 
 
 def _remove_dir(path_dir: str) -> None:
@@ -572,7 +617,7 @@ def _run_compile_cmd(cmd_line: str, cwd: str) -> None:
             cmd, cwd=cwd, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
         )
     except subprocess.CalledProcessError as e:
-        output = e.stdout.decode("utf-8")
+        output = e.stdout.decode(*SUBPROCESS_DECODE_ARGS)
         openmp_problem = "'omp.h' file not found" in output or "libomp" in output
         if openmp_problem and sys.platform == "darwin":
             instruction = (
@@ -609,13 +654,13 @@ class BuildOptionsBase:
     def __init__(
         self,
         compiler: str = "",
-        definitions: Optional[list[str]] = None,
-        include_dirs: Optional[list[str]] = None,
-        cflags: Optional[list[str]] = None,
-        ldflags: Optional[list[str]] = None,
-        libraries_dirs: Optional[list[str]] = None,
-        libraries: Optional[list[str]] = None,
-        passthrough_args: Optional[list[str]] = None,
+        definitions: list[str] | None = None,
+        include_dirs: list[str] | None = None,
+        cflags: list[str] | None = None,
+        ldflags: list[str] | None = None,
+        libraries_dirs: list[str] | None = None,
+        libraries: list[str] | None = None,
+        passthrough_args: list[str] | None = None,
         aot_mode: bool = False,
         use_relative_path: bool = False,
         compile_only: bool = False,
@@ -634,7 +679,7 @@ class BuildOptionsBase:
 
         # Optionally, the path to a precompiled header which should be included on the
         # build command line.
-        self.precompiled_header: Optional[str] = None
+        self.precompiled_header: str | None = None
 
         self._aot_mode: bool = aot_mode
         self._use_relative_path: bool = use_relative_path
@@ -725,7 +770,7 @@ def _get_warning_all_cflag(warning_all: bool = True) -> list[str]:
         return []
 
 
-def _get_cpp_std_cflag(std_num: str = "c++17") -> list[str]:
+def _get_cpp_std_cflag(std_num: str = "c++20") -> list[str]:
     if _IS_WINDOWS:
         """
         On Windows, only c++20 can support `std::enable_if_t`.
@@ -782,8 +827,6 @@ def _get_os_related_cpp_definitions(cpp_compiler: str) -> list[str]:
         # On Windows, we need disable min/max macro to avoid C2589 error, as PyTorch CMake:
         # https://github.com/pytorch/pytorch/blob/9a41570199155eee92ebd28452a556075e34e1b4/CMakeLists.txt#L1118-L1119
         os_definitions.append("NOMINMAX")
-    else:
-        pass
     return os_definitions
 
 
@@ -840,23 +883,34 @@ def _get_optimization_cflags(
     cflags: list[str] = []
     ldflags: list[str] = []
 
-    b_debug_build = (
+    should_use_optimized_flags = not (
         config.aot_inductor.debug_compile
+        or os.environ.get("TORCHINDUCTOR_DEBUG_COMPILE", "0") == "1"
+    )
+    should_add_debug_symbol_flags = (
+        config.aot_inductor.debug_compile
+        or config.aot_inductor.debug_symbols
+        or os.environ.get("TORCHINDUCTOR_DEBUG_COMPILE", "0") == "1"
         or os.environ.get("TORCHINDUCTOR_DEBUG_SYMBOL", "0") == "1"
     )
-    wrapper_opt_level = config.aot_inductor.compile_wrapper_opt_level
-
-    if b_debug_build:
-        cflags, ldflags = _get_inductor_debug_symbol_cflags()
+    if should_use_optimized_flags:
+        if _IS_WINDOWS:
+            cflags += ["O1" if min_optimize else "O2"]
+        else:
+            cflags += [
+                config.aot_inductor.compile_wrapper_opt_level if min_optimize else "O3",
+                "DNDEBUG",
+            ]
+    else:
         if _IS_WINDOWS:
             cflags += ["Od", "Ob0", "Oy-"]
         else:
-            cflags.append("O0")
-    else:
-        if _IS_WINDOWS:
-            cflags = ["O1" if min_optimize else "O2"]
-        else:
-            cflags = [wrapper_opt_level if min_optimize else "O3", "DNDEBUG"]
+            cflags += ["O0"]
+
+    if should_add_debug_symbol_flags:
+        debug_cflags, debug_ldflags = _get_inductor_debug_symbol_cflags()
+        cflags += debug_cflags
+        ldflags += debug_ldflags
 
     cflags += _get_ffast_math_flags()
 
@@ -872,6 +926,10 @@ def _get_optimization_cflags(
             if not config.is_fbcode():
                 if platform.machine() == "ppc64le":
                     cflags.append("mcpu=native")
+                elif platform.machine() == "riscv64":
+                    cflags.append("march=rv64gc")
+                elif platform.machine() == "riscv32":
+                    cflags.append("march=rv32gc")
                 else:
                     cflags.append("march=native")
 
@@ -888,12 +946,15 @@ def _get_shared_cflags(do_link: bool) -> list[str]:
         https://learn.microsoft.com/en-us/cpp/c-runtime-library/crt-library-features?view=msvc-170
         """
         return ["DLL", "MD"]
-    if not do_link:
-        return ["fPIC"]
     if platform.system() == "Darwin" and "clang" in get_cpp_compiler():
         # This causes undefined symbols to behave the same as linux
         return ["shared", "fPIC", "undefined dynamic_lookup"]
-    return ["shared", "fPIC"]
+    flags = []
+    if do_link:
+        flags.append("shared")
+
+    flags.append("fPIC")
+    return flags
 
 
 def get_cpp_options(
@@ -928,6 +989,11 @@ def get_cpp_options(
         ldflags.append("flto=thin")
 
     passthrough_args.append(" ".join(extra_flags))
+
+    if config.aot_inductor.cross_target_platform == "windows":
+        passthrough_args.extend(["-static-libstdc++", "-static-libgcc"])
+        if check_mingw_win32_flavor(MINGW_GXX) == "posix":
+            passthrough_args.append("-Wl,-Bstatic -lwinpthread -Wl,-Bdynamic")
 
     return (
         definitions,
@@ -1086,13 +1152,35 @@ def _get_torch_related_args(
 ) -> tuple[list[str], list[str], list[str]]:
     from torch.utils.cpp_extension import include_paths, TORCH_LIB_PATH
 
-    include_dirs = include_paths()
-    libraries_dirs = [TORCH_LIB_PATH]
     libraries = []
-    if sys.platform != "darwin" and not config.is_fbcode():
-        libraries = ["torch", "torch_cpu"]
-        if not aot_mode:
-            libraries.append("torch_python")
+    include_dirs = include_paths()
+
+    if config.aot_inductor.link_libtorch:
+        libraries_dirs = [TORCH_LIB_PATH]
+        if sys.platform != "darwin" and not config.is_fbcode():
+            libraries.extend(["torch", "torch_cpu"])
+            if not aot_mode:
+                libraries.append("torch_python")
+    else:
+        libraries_dirs = []
+        if config.aot_inductor.cross_target_platform == "windows":
+            aoti_shim_library = config.aot_inductor.aoti_shim_library
+
+            assert aoti_shim_library, (
+                "'config.aot_inductor.aoti_shim_library' must be set when 'cross_target_platform' is 'windows'."
+            )
+            if isinstance(aoti_shim_library, str):
+                libraries.append(aoti_shim_library)
+            else:
+                assert isinstance(aoti_shim_library, list)
+                libraries.extend(aoti_shim_library)
+
+    if config.aot_inductor.cross_target_platform == "windows":
+        assert config.aot_inductor.aoti_shim_library_path, (
+            "'config.aot_inductor.aoti_shim_library_path' must be set to the path of the AOTI shim library",
+            " when 'cross_target_platform' is 'windows'.",
+        )
+        libraries_dirs.append(config.aot_inductor.aoti_shim_library_path)
 
     if _IS_WINDOWS:
         libraries.append("sleef")
@@ -1223,6 +1311,9 @@ def _get_openmp_args(
     lib_dir_paths: list[str] = []
     libs: list[str] = []
     passthrough_args: list[str] = []
+
+    if config.aot_inductor.cross_target_platform == "windows":
+        return cflags, ldflags, include_dir_paths, lib_dir_paths, libs, passthrough_args
     if _IS_MACOS:
         # Per https://mac.r-project.org/openmp/ right way to pass `openmp` flags to MacOS is via `-Xclang`
         cflags.append("Xclang")
@@ -1334,10 +1425,28 @@ def _get_libstdcxx_args() -> tuple[list[str], list[str]]:
     return lib_dir_paths, libs
 
 
-def get_mmap_self_macro(use_mmap_weights: bool) -> list[str]:
+def get_mmap_self_macro(
+    use_mmap_weights: bool, use_mmap_weights_external: bool
+) -> list[str]:
     macros = []
+
+    if use_mmap_weights and use_mmap_weights_external:
+        raise RuntimeError(
+            "Only one of use_mmap_weights and use_mmap_weights_external should be true"
+        )
     if use_mmap_weights:
         macros.append(" USE_MMAP_SELF")
+    elif use_mmap_weights_external:
+        macros.append(" USE_MMAP_EXTERNAL")
+    return macros
+
+
+def get_caching_allocator_macro() -> list[str]:
+    from torch._inductor import config
+
+    macros = []
+    if config.aot_inductor.weight_use_caching_allocator:
+        macros.append(" AOT_INDUCTOR_USE_CACHING_ALLOCATOR")
     return macros
 
 
@@ -1348,6 +1457,7 @@ def get_cpp_torch_options(
     aot_mode: bool,
     use_relative_path: bool,
     use_mmap_weights: bool,
+    use_mmap_weights_external: bool,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str], list[str]]:
     """
     This function is used to get the build args of torch related build options.
@@ -1396,7 +1506,8 @@ def get_cpp_torch_options(
 
     fb_macro_passthrough_args = _use_fb_internal_macros()
 
-    mmap_self_macros = get_mmap_self_macro(use_mmap_weights)
+    mmap_self_macros = get_mmap_self_macro(use_mmap_weights, use_mmap_weights_external)
+    caching_allocator_macros = get_caching_allocator_macro()
 
     definitions = (
         torch_cpp_wrapper_definitions
@@ -1404,6 +1515,7 @@ def get_cpp_torch_options(
         + isa_macros
         + fb_macro_passthrough_args
         + mmap_self_macros
+        + caching_allocator_macros
     )
     include_dirs = (
         sys_libs_include_dirs
@@ -1451,6 +1563,7 @@ class CppTorchOptions(CppOptions):
         compile_only: bool = False,
         use_relative_path: bool = False,
         use_mmap_weights: bool = False,
+        use_mmap_weights_external: bool = False,
         shared: bool = True,
         extra_flags: Sequence[str] = (),
         compiler: str = "",
@@ -1486,6 +1599,7 @@ class CppTorchOptions(CppOptions):
             aot_mode=aot_mode,
             use_relative_path=use_relative_path,
             use_mmap_weights=use_mmap_weights,
+            use_mmap_weights_external=use_mmap_weights_external,
         )
 
         _append_list(self._definitions, torch_definitions)
@@ -1509,7 +1623,7 @@ def _set_gpu_runtime_env() -> None:
 
 
 @functools.lru_cache(8)
-def _find_libcudart_static(path: str) -> Optional[Path]:
+def _find_libcudart_static(path: str) -> Path | None:
     lib_dirs = list(Path(path).rglob("libcudart_static.a"))
     if lib_dirs:
         return lib_dirs[0].resolve().parent
@@ -1524,7 +1638,7 @@ def _transform_cuda_paths(lpaths: list[str]) -> None:
     # 2. Linux machines may have CUDA installed under either lib64/ or lib/
     for i, path in enumerate(lpaths):
         if "CUDA_HOME" in os.environ and path.startswith(os.environ["CUDA_HOME"]):
-            lib_dir: Optional[Path] = _find_libcudart_static(path)
+            lib_dir: Path | None = _find_libcudart_static(path)
             if lib_dir is None:
                 continue
             lpaths[i] = str(lib_dir)
@@ -1562,24 +1676,31 @@ def get_cpp_torch_device_options(
     _set_gpu_runtime_env()
     from torch.utils import cpp_extension
 
-    include_dirs = cpp_extension.include_paths(device_type)
-    libraries_dirs = cpp_extension.library_paths(device_type)
-    if not config.is_fbcode():
-        libraries += ["c10"]
+    include_dirs = cpp_extension.include_paths(
+        device_type, config.aot_inductor.link_libtorch is None
+    )
+    link_libtorch = config.aot_inductor.link_libtorch
+    libraries_dirs = cpp_extension.library_paths(
+        device_type,
+        torch_include_dirs=link_libtorch,
+        cross_target_platform=config.aot_inductor.cross_target_platform,
+    )
     if device_type == "cuda":
         definitions.append(" USE_ROCM" if torch.version.hip else " USE_CUDA")
 
         if torch.version.hip is not None:
-            if config.is_fbcode():
+            if config.is_fbcode() or not link_libtorch:
                 libraries += ["amdhip64"]
             else:
-                libraries += ["c10_hip", "torch_hip"]
+                libraries += ["torch_hip"]
             definitions.append(" __HIP_PLATFORM_AMD__")
         else:
-            if config.is_fbcode():
+            if config.is_fbcode() or not link_libtorch:
                 libraries += ["cuda"]
             else:
-                libraries += ["c10_cuda", "cuda", "torch_cuda"]
+                libraries += ["cuda", "torch_cuda"]
+            if config.aot_inductor.cross_target_platform == "windows":
+                libraries += ["cudart"]
             _transform_cuda_paths(libraries_dirs)
 
     if device_type == "xpu":
@@ -1594,14 +1715,15 @@ def get_cpp_torch_device_options(
                 raise OSError(xpu_error_string)
             include_dirs += [os.path.join(ze_root, "include")]
             libraries_dirs += [os.path.join(ze_root, "lib")]
-            libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
         else:
             # Suppress multi-line comment warnings in sycl headers
             cflags += ["Wno-comment"]
-            libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
-
             if not find_library("ze_loader"):
                 raise OSError(xpu_error_string)
+
+        libraries += ["ze_loader", "sycl"]
+        if link_libtorch:
+            libraries += ["torch_xpu"]
 
     if device_type == "mps":
         definitions.append(" USE_MPS")
@@ -1653,6 +1775,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
         compile_only: bool = False,
         use_relative_path: bool = False,
         use_mmap_weights: bool = False,
+        use_mmap_weights_external: bool = False,
         shared: bool = True,
         extra_flags: Sequence[str] = (),
         min_optimize: bool = False,
@@ -1666,6 +1789,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
             compile_only=compile_only,
             use_relative_path=use_relative_path,
             use_mmap_weights=use_mmap_weights,
+            use_mmap_weights_external=use_mmap_weights_external,
             extra_flags=extra_flags,
             min_optimize=min_optimize,
             precompiling=precompiling,
@@ -1689,7 +1813,9 @@ class CppTorchDeviceOptions(CppTorchOptions):
             device_libraries,
             device_passthrough_args,
         ) = get_cpp_torch_device_options(
-            device_type=device_type, aot_mode=aot_mode, compile_only=compile_only
+            device_type=device_type,
+            aot_mode=aot_mode,
+            compile_only=compile_only,
         )
         _append_list(self._definitions, device_definitions)
         _append_list(self._include_dirs, device_include_dirs)
@@ -1780,7 +1906,7 @@ class CppBuilder:
     def __init__(
         self,
         name: str,
-        sources: Union[str, list[str]],
+        sources: str | list[str],
         BuildOption: BuildOptionsBase,
         output_dir: str = "",
     ) -> None:
@@ -2032,7 +2158,7 @@ class CppBuilder:
 
         definitions = " ".join(self._build_option.get_definitions())
         target_library_type = (
-            "STATIC" if config.aot_inductor.compile_standalone else "SHARED"
+            "STATIC" if not config.aot_inductor.dynamic_linkage else "SHARED"
         )
 
         contents = textwrap.dedent(
@@ -2047,10 +2173,7 @@ class CppBuilder:
             """
         )
 
-        if (
-            not config.aot_inductor.compile_standalone
-            or config.test_configs.use_libtorch
-        ):
+        if config.aot_inductor.link_libtorch or config.test_configs.use_libtorch:
             # When compile_standalone is True, the generated cpp project should
             # not use Torch. But for unit testing purpose, we need to use Torch here.
             contents += textwrap.dedent(
@@ -2090,7 +2213,9 @@ class CppBuilder:
             )
 
         if device_type == "cuda" and torch.version.hip is None:
-            from torch._inductor.codecache import _nvcc_arch_as_compile_option
+            from torch._inductor.codegen.cuda.compile_utils import (
+                _nvcc_arch_as_compile_option,
+            )
 
             current_arch = _nvcc_arch_as_compile_option()
             contents += textwrap.dedent(
@@ -2156,6 +2281,52 @@ class CppBuilder:
 
                 """
             )
+        elif device_type == "xpu":
+            contents += textwrap.dedent(
+                """
+                find_program(OBJCOPY_EXECUTABLE objcopy)
+                if(NOT OBJCOPY_EXECUTABLE)
+                    message(FATAL_ERROR "objcopy not found. Cannot embed spv as object file")
+                endif()
+
+                set(KERNEL_TARGETS "")
+                set(KERNEL_OBJECT_FILES "")
+                # Function to embed a single kernel
+                function(embed_gpu_kernel KERNEL_NAME SPV_FILE)
+                    set(OBJECT_BASENAME ${KERNEL_NAME}.spv.o)
+                    set(OBJECT_FILE ${CMAKE_CURRENT_BINARY_DIR}/${OBJECT_BASENAME})
+
+                    # --- Define UNIQUE C symbol names ---
+                    set(SYMBOL_START __${KERNEL_NAME}_start)
+                    set(SYMBOL_END __${KERNEL_NAME}_end)
+                    set(SYMBOL_SIZE __${KERNEL_NAME}_size)
+                    string(REGEX REPLACE "[^a-zA-Z0-9]" "_" MANGLED_BASENAME ${SPV_FILE})
+                    set(OBJCOPY_START_SYM _binary_${MANGLED_BASENAME}_start)
+                    set(OBJCOPY_END_SYM _binary_${MANGLED_BASENAME}_end)
+                    set(OBJCOPY_SIZE_SYM _binary_${MANGLED_BASENAME}_size)
+
+                    # --- SPV_FILE to Object File (.o) Command ---
+                    add_custom_command(
+                        OUTPUT ${OBJECT_FILE}
+                        COMMAND ${CMAKE_LINKER} -r -b binary -z noexecstack -o ${OBJECT_FILE} ${SPV_FILE}
+                        COMMAND ${OBJCOPY_EXECUTABLE} --rename-section .data=.rodata,alloc,load,readonly,data,contents
+                                ${OBJECT_FILE}
+                        COMMAND ${OBJCOPY_EXECUTABLE}
+                                --redefine-sym ${OBJCOPY_START_SYM}=${SYMBOL_START}
+                                --redefine-sym ${OBJCOPY_END_SYM}=${SYMBOL_END}
+                                --redefine-sym ${OBJCOPY_SIZE_SYM}=${SYMBOL_SIZE}
+                                ${OBJECT_FILE}
+                        DEPENDS ${SPV_FILE}
+                    )
+                    add_custom_target(build_kernel_object_${KERNEL_NAME} DEPENDS ${OBJECT_FILE})
+
+                    # --- Add to a list for linking later ---
+                    set(KERNEL_TARGETS ${KERNEL_TARGETS} build_kernel_object_${KERNEL_NAME} PARENT_SCOPE)
+                    set(KERNEL_OBJECT_FILES ${KERNEL_OBJECT_FILES} ${OBJECT_FILE} PARENT_SCOPE)
+                endfunction()
+
+                """
+            )
 
         with open(cmake_path, "w") as f:
             f.write(contents)
@@ -2185,13 +2356,6 @@ class CppBuilder:
                 )
 
     def save_link_cmd_to_cmake(self, cmake_path: str) -> None:
-        if (
-            config.aot_inductor.compile_standalone
-            and not config.test_configs.use_libtorch
-        ):
-            # When compile_standalone is True, do not link with libtorch
-            return
-
         lflags = " ".join(self._build_option.get_ldflags())
         libs = " ".join(self._build_option.get_libraries())
         contents = textwrap.dedent(
