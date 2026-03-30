@@ -80,7 +80,7 @@ on:
         required: false
         default: false
         type: boolean
-        description: Use ARC (OSDC) runners instead of EC2
+        description: If true, use ARC (OSDC) runner path instead of EC2.
       docker-image-name:
         required: false
         default: ""
@@ -98,8 +98,9 @@ permissions:
 
 jobs:
   build:
-    if: ${{ !inputs.use-arc }}
-    runs-on: ${{ inputs.runner_prefix}}${{ inputs.runs_on }}
+    # Don't run on forked repos
+    if: github.repository_owner == 'pytorch' && !inputs.use-arc
+    runs-on: ${{ inputs.runner_prefix }}${{ inputs.runs_on }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     env:
       PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
@@ -166,8 +167,11 @@ jobs:
           no-sudo: ${{ inputs.build_environment == 'linux-aarch64-binary-manywheel' || inputs.build_environment == 'linux-s390x-binary-manywheel' }}
 
       - name: Setup Linux
+        id: setup-linux
         if: inputs.build_environment != 'linux-s390x-binary-manywheel'
-        uses: ./.github/actions/setup-linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        with:
+          github-token: ${{ secrets.github-token }}
 
       - name: Login to ECR
         if: inputs.build_environment != 'linux-s390x-binary-manywheel'
@@ -314,8 +318,13 @@ jobs:
           docker stop $(docker ps -q) || true
 
   build-osdc:
-    if: ${{ inputs.use-arc }}
-    runs-on: ${{ inputs.runs_on }}
+    permissions:
+      id-token: write
+      contents: read
+      actions: read
+    # Don't run on forked repos
+    if: github.repository_owner == 'pytorch' && inputs.use-arc
+    runs-on: ${{ inputs.runner_prefix }}${{ inputs.runs_on }}
     container:
       image: ${{ inputs.docker-image-name }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
@@ -339,46 +348,22 @@ jobs:
       PYTORCH_FINAL_PACKAGE_DIR: /artifacts
       SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
-      - name: Make the env permanent during this workflow (but not the secrets)
-        shell: bash
-        run: |
-          {
-            echo "PYTORCH_ROOT=${{ env.PYTORCH_ROOT }}"
-            echo "PACKAGE_TYPE=${{ env.PACKAGE_TYPE }}"
-            echo "DESIRED_CUDA=${{ env.DESIRED_CUDA }}"
-            echo "GPU_ARCH_VERSION=${{ env.GPU_ARCH_VERSION }}"
-            echo "GPU_ARCH_TYPE=${{ env.GPU_ARCH_TYPE }}"
-            echo "DOCKER_IMAGE=${{ env.DOCKER_IMAGE }}"
-            echo "SKIP_ALL_TESTS=${{ env.SKIP_ALL_TESTS }}"
-            echo "LIBTORCH_CONFIG=${{ env.LIBTORCH_CONFIG }}"
-            echo "LIBTORCH_VARIANT=${{ env.LIBTORCH_VARIANT }}"
-            echo "DESIRED_PYTHON=${{ env.DESIRED_PYTHON }}"
-            echo "PYTORCH_EXTRA_INSTALL_REQUIREMENTS=${{ env.PYTORCH_EXTRA_INSTALL_REQUIREMENTS }}"
-            echo "AWS_DEFAULT_REGION=${{ env.AWS_DEFAULT_REGION }}"
-            echo "BINARY_ENV_FILE=${{ env.BINARY_ENV_FILE }}"
-            echo "BUILD_ENVIRONMENT=${{ env.BUILD_ENVIRONMENT }}"
-            echo "BUILD_NAME=${{ env.BUILD_NAME }}"
-            echo "PR_NUMBER=${{ env.PR_NUMBER }}"
-            echo "PYTORCH_FINAL_PACKAGE_DIR=${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-            echo "SHA1=${{ env.SHA1 }}"
-          } >> "${GITHUB_ENV}"
-
-      - name: List the env
-        shell: bash
-        run: env
-
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        continue-on-error: true
-        with:
-          github-secret: ${{ secrets.github-token }}
-
       - name: Setup Linux
         id: setup-linux
         uses: pytorch/pytorch/.github/actions/setup-linux@main
         with:
           use-arc: true
           github-token: ${{ secrets.github-token }}
+
+      - name: Check if the job is disabled
+        id: filter
+        uses: pytorch/pytorch/.github/actions/filter-test-configs@main
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: |
+            { include: [
+              { config: "default" },
+            ]}
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7
@@ -402,25 +387,22 @@ jobs:
           git clean -fxd
         working-directory: pytorch
 
-      - name: Check if the job is disabled
-        id: filter
-        uses: pytorch/pytorch/.github/actions/filter-test-configs@main
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          test-matrix: |
-            { include: [
-              { config: "default" },
-            ]}
-
       - name: Build PyTorch binary
         if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
+        id: build
+        env:
+          SKIP_SCCACHE_INITIALIZATION: 1
+        shell: bash
         run: |
           set -x
+          START_TIME=$(date +%s)
           mkdir -p artifacts/
           mkdir -p "${RUNNER_TEMP}/artifacts"
+          cd pytorch
           bash .ci/pytorch/binary_populate_env.sh
           source "${BINARY_ENV_FILE}" && bash .ci/${{ inputs.PACKAGE_TYPE }}/build.sh
-        working-directory: pytorch
+          END_TIME=$(date +%s)
+          echo "build_time=$((END_TIME - START_TIME))" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
@@ -429,3 +411,10 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
+
+      - name: Upload sccache stats
+        if: steps.build.outcome != 'skipped'
+        uses: pytorch/pytorch/.github/actions/upload-sccache-stats@main
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          build-time: ${{ steps.build.outputs.build_time }}
