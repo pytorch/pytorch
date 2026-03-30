@@ -62,7 +62,15 @@ runs:
     - name: Parse ref
       id: parse-ref
       shell: bash
-      run: python3 .github/scripts/parse_ref.py
+      run: |
+        if [ -f "${{ github.action_path }}/../../scripts/parse_ref.py" ]; then
+          python3 "${{ github.action_path }}/../../scripts/parse_ref.py"
+        elif [ -f .github/scripts/parse_ref.py ]; then
+          python3 .github/scripts/parse_ref.py
+        else
+          echo "ERROR: parse_ref.py not found" >&2
+          exit 1
+        fi
 
     - name: Get workflow job id
       id: get-job-id
