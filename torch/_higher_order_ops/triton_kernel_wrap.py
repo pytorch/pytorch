@@ -41,6 +41,7 @@ if TYPE_CHECKING:
         operation as TritonIROperation,
     )
 
+    from torch._dynamo.source import Source
     from torch._dynamo.symbolic_convert import InstructionTranslator
     from torch._dynamo.variables.constant import ConstantVariable
     from torch._dynamo.variables.functions import TritonKernelVariable
@@ -2319,15 +2320,18 @@ class TraceableTritonKernelWrapper:
     kernel: "TritonKernelType"
     kernel_idx: int | None
     grid: Optional["TritonGridType"]
+    kernel_source: Optional["Source"]
 
     def __init__(
         self,
         kernel: "TritonKernelType",
         kernel_idx: int | None,
         grid: Optional["TritonGridType"],
+        kernel_source: Optional["Source"] = None,
     ) -> None:
         self.kernel = None
         self.grid = None
+        self.kernel_source = kernel_source
         tracing_triton_hopifier_singleton.init_variable(self, kernel, kernel_idx, grid)
         if self.kernel is None:
             raise AssertionError("kernel was not initialized properly")
