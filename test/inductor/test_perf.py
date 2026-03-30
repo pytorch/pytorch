@@ -555,7 +555,10 @@ class FusionTests(TestCase):
         expected_numel = (
             1 + hidden_size * 2 + 4 * 2048 * hidden_size * 2 + 4 * 2048 * 2 + 1
         )
-        if config.triton.cooperative_reductions:
+        if (
+            config.triton.cooperative_reductions
+            or config.triton.force_cooperative_reductions
+        ):
             expected_numel = 134225922
 
         self.assertExpectedInline(count_numel(f, *inp, True), str(expected_numel))
