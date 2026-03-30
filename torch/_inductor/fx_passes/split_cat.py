@@ -2010,7 +2010,8 @@ def merge_unbind_stack_aten(match: Match, *args, **kwargs):
         return
     select_nodes = [
         # pyrefly: ignore [bad-argument-type]
-        get_arg_value(unsqueeze_node, 0, "input") for unsqueeze_node in unsqueeze_nodes
+        get_arg_value(unsqueeze_node, 0, "input")
+        for unsqueeze_node in unsqueeze_nodes
     ]
     parent_of_select_node = get_arg_value(select_nodes[0], 0, "input")
     # check the target of select_nodes are the same

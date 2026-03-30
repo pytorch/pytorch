@@ -643,7 +643,9 @@ def as_sparse_gradcheck(gradcheck):
                         # pyrefly: ignore [no-matching-overload]
                         d.update(
                             # pyrefly: ignore [bad-argument-type]
-                            indices=obj._indices(), is_coalesced=obj.is_coalesced()
+                            indices=obj._indices(),
+                            # pyrefly: ignore [bad-argument-type]
+                            is_coalesced=obj.is_coalesced(),
                         )
                         values = obj._values()
                     elif obj.layout in {torch.sparse_csr, torch.sparse_bsr}:
