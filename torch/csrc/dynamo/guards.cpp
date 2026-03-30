@@ -907,9 +907,9 @@ static uint64_t get_dict_version_unchecked(PyObject* dict) {
       !PyDict_Watch(dict_version_watcher_id, dict),
       "failed to add version watcher to dict!");
   return dict_version_state.withLock([&](DictVersionState& state) -> uint64_t {
-    auto it = state.map.find(dict);
-    if (it == state.map.end()) {
-      it = state.map.emplace(dict, state.next_id++).first;
+    auto [it, inserted] = state.map.try_emplace(dict, state.next_id);
+    if (inserted) {
+      state.next_id++;
     }
     return it->second;
   });
