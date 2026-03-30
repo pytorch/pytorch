@@ -21,6 +21,120 @@ Features described in this documentation are classified by release status:
 {bdg-link-secondary}`FSDP <search.html?q=FSDP>`
 {bdg-link-secondary}`torch.export <search.html?q=torch.export>`
 
+:::{dropdown} Browse all APIs
+:icon: list-unordered
+
+**Core**
+
+- [torch](torch.html)
+- [torch.nn](nn.html)
+- [torch.nn.functional](nn.functional.html)
+- [torch.nn.init](nn.init.html)
+- [torch.nn.attention](nn.attention.html)
+- [torch.Tensor](tensors.html)
+- [Tensor Attributes](tensor_attributes.html)
+- [Tensor Views](tensor_view.html)
+- [torch.autograd](autograd.html)
+- [torch.optim](optim.html)
+- [torch.utils.data](data.html)
+- [torch.library](library.html)
+
+**Math & Signal**
+
+- [torch.fft](fft.html)
+- [torch.linalg](linalg.html)
+- [torch.special](special.html)
+- [torch.signal](signal.html)
+- [Complex Numbers](complex_numbers.html)
+
+**Hardware Acceleration**
+
+- [torch.accelerator](accelerator.html)
+- [torch.cpu](cpu.html)
+- [torch.cuda](cuda.html)
+- [torch.cuda.memory](torch_cuda_memory.html)
+- [torch.mps](mps.html)
+- [torch.xpu](xpu.html)
+- [torch.mtia](mtia.html)
+- [torch.mtia.memory](mtia.memory.html)
+- [torch.mtia.mtia_graph](mtia.mtia_graph.html)
+- [Meta device](meta.html)
+- [torch.amp](amp.html)
+- [torch.backends](backends.html)
+
+**Compiler & Export**
+
+- [torch.compiler](torch.compiler_api.html)
+- [torch.export](user_guide/torch_compiler/export.html)
+- [torch.fx](fx.html)
+- [torch.fx.experimental](fx.experimental.html)
+- [torch.func](func.html)
+- [torch.onnx](onnx.html)
+- [torch.nativert](nativert.html)
+
+**Distributed**
+
+- [torch.distributed](distributed.html)
+- [torch.distributed.tensor](distributed.tensor.html)
+- [torch.distributed.algorithms.join](distributed.algorithms.join.html)
+- [torch.distributed.elastic](distributed.elastic.html)
+- [torch.distributed.fsdp](fsdp.html)
+- [torch.distributed.fsdp.fully_shard](distributed.fsdp.fully_shard.html)
+- [torch.distributed.tensor.parallel](distributed.tensor.parallel.html)
+- [torch.distributed.optim](distributed.optim.html)
+- [torch.distributed.pipelining](distributed.pipelining.html)
+- [torch.distributed._symmetric_memory](symmetric_memory.html)
+- [torch.distributed.checkpoint](distributed.checkpoint.html)
+- [DDP Communication Hooks](ddp_comm_hooks.html)
+- [Distributed RPC Framework](rpc.html)
+
+**Quantization & Performance**
+
+- [Quantization](quantization.html)
+- [torch.profiler](profiler.html)
+- [torch.sparse](sparse.html)
+- [torch.utils.benchmark](benchmark_utils.html)
+
+**Utilities**
+
+- [torch.distributions](distributions.html)
+- [torch.futures](futures.html)
+- [torch.hub](hub.html)
+- [torch.monitor](monitor.html)
+- [torch.overrides](torch.overrides.html)
+- [torch.package](package.html)
+- [torch.random](random.html)
+- [torch.masked](masked.html)
+- [torch.nested](nested.html)
+- [torch.Size](size.html)
+- [torch.Storage](storage.html)
+- [torch.testing](testing.html)
+- [torch.utils](utils.html)
+- [torch.utils.benchmark](benchmark_utils.html)
+- [torch.utils.checkpoint](checkpoint.html)
+- [torch.utils.cpp_extension](cpp_extension.html)
+- [torch.utils.data](data.html)
+- [torch.utils.deterministic](deterministic.html)
+- [torch.utils.jit](jit_utils.html)
+- [torch.utils.dlpack](dlpack.html)
+- [torch.utils.mobile_optimizer](mobile_optimizer.html)
+- [torch.utils.model_zoo](model_zoo.html)
+- [torch.utils.tensorboard](tensorboard.html)
+- [torch.utils.module_tracker](module_tracker.html)
+- [Multiprocessing](multiprocessing.html)
+
+**Other**
+
+- [C++](https://docs.pytorch.org/cppdocs/)
+- [Type Info](type_info.html)
+- [Named Tensors](named_tensor.html)
+- [Named Tensors operator coverage](name_inference.html)
+- [torch.\_\_config\_\_](config_mod.html)
+- [torch.\_\_future\_\_](future_mod.html)
+- [torch.\_logging](logging.html)
+- [Torch Environment Variables](torch_environment_variables.html)
+:::
+
 ---
 
 ## Get Started
@@ -407,6 +521,12 @@ Full C++ frontend and library reference.
 :link: torch_environment_variables.html
 
 Comprehensive list of PyTorch environment variables.
+:::
+
+:::{grid-item-card} {octicon}`list-unordered;1.5em` Full API Reference
+:link: pytorch-api.html
+
+Complete list of all PyTorch Python and C++ APIs.
 :::
 
 ::::
