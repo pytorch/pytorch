@@ -186,8 +186,10 @@ def _generate_module_methods_for_privateuse1_backend(custom_backend_name: str) -
         )
 
     def wrap_module_to(
+        # pyrefly: ignore [invalid-type-var]
         self: torch.nn.modules.module.T,
         device: int | torch.device | None = None,
+    # pyrefly: ignore [invalid-type-var]
     ) -> torch.nn.modules.module.T:
         r"""Move all model parameters and buffers to the custom device.
 
