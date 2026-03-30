@@ -356,6 +356,7 @@ def cublaslt_workspace_size(size: None | int = None) -> int:
 
     When called with no arguments, returns the current workspace size.
     When called with a size argument, sets the workspace size and returns the new value.
+    Setting the workspace size will take precedence over the CUBLASLT_WORKSPACE_SIZE environment variable.
     Changes take effect lazily: only handles used after the change get new workspaces.
 
     Args:
@@ -379,8 +380,8 @@ def blas_workspace_size(
     :func:`cublaslt_workspace_size` depending on the backend.
 
     When *backend* is ``None`` the current :func:`preferred_blas_library` is
-    used.  ``Default`` is treated as cuBLAS (the resolution target on NVIDIA
-    hardware).
+    used.  ``Default`` is resolved to the platform's default backend (cuBLAS
+    on NVIDIA, potentially hipBLASLt on supported ROCm architectures).
 
     .. note::
 
@@ -416,12 +417,14 @@ def blas_workspace_size(
     else:
         raise RuntimeError("Unknown backend type.")
 
+    if resolved == torch._C._BlasBackend.Default:
+        resolved = torch._C._get_blas_default_backend()
+
     if resolved == torch._C._BlasBackend.Ck:
         raise RuntimeError("CK backend does not use a workspace.")
 
     if resolved == torch._C._BlasBackend.Cublaslt:
         return cublaslt_workspace_size(size)
-    # Default and Cublas both use the cuBLAS workspace
     return cublas_workspace_size(size)
 
 

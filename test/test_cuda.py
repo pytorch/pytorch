@@ -804,9 +804,13 @@ print(t.is_pinned())
         self.assertEqual(torch.backends.cuda.cublaslt_workspace_size(), new_lt_size)
 
         # Test validation rejects negative values
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(
+            RuntimeError, "cublas workspace size must be non-negative"
+        ):
             torch.backends.cuda.cublas_workspace_size(-1)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(
+            RuntimeError, "cublaslt workspace size must be non-negative"
+        ):
             torch.backends.cuda.cublaslt_workspace_size(-1)
 
     @setBlasBackendsToDefaultFinally
@@ -845,15 +849,20 @@ print(t.is_pinned())
         self.assertEqual(torch.backends.cuda.cublaslt_workspace_size(), new_size)
 
         # CK backend has no workspace
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(
+            RuntimeError, "CK backend does not use a workspace."
+        ):
             torch.backends.cuda.blas_workspace_size(backend="ck")
 
         # Invalid string
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Unknown backend string. Choose from: default, cublas, hipblas, cublaslt, hipblaslt, ck.",
+        ):
             torch.backends.cuda.blas_workspace_size(backend="invalid")
 
         # Invalid type
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "Unknown backend type."):
             torch.backends.cuda.blas_workspace_size(backend=42)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")

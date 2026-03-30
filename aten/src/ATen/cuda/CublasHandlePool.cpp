@@ -167,7 +167,7 @@ void clearCublasWorkspacesForStream(cudaStream_t stream) {
 }
 
 size_t parseChosenWorkspaceSize() {
-  int64_t ov = cublas_workspace_override.load(std::memory_order_acquire);
+  int64_t ov = cublas_workspace_override.load(std::memory_order_relaxed);
   if (ov >= 0) {
     return static_cast<size_t>(ov);
   }
@@ -228,7 +228,7 @@ inline bool unified_cublas_and_lt_workspaces() {
 #endif
 
 size_t parseCUDABlasLtWorkspaceSize() {
-  int64_t ov = cublaslt_workspace_override.load(std::memory_order_acquire);
+  int64_t ov = cublaslt_workspace_override.load(std::memory_order_relaxed);
   if (ov >= 0) {
     return static_cast<size_t>(ov);
   }
@@ -271,19 +271,19 @@ size_t getChosenWorkspaceSize() {
 }
 
 void setChosenWorkspaceSize(size_t size) {
-  cublas_workspace_override.store(static_cast<int64_t>(size), std::memory_order_release);
+  cublas_workspace_override.store(static_cast<int64_t>(size), std::memory_order_relaxed);
 }
 
 void setCUDABlasLtWorkspaceSize(size_t size) {
-  cublaslt_workspace_override.store(static_cast<int64_t>(size), std::memory_order_release);
+  cublaslt_workspace_override.store(static_cast<int64_t>(size), std::memory_order_relaxed);
 }
 
 void resetChosenWorkspaceSize() {
-  cublas_workspace_override.store(-1, std::memory_order_release);
+  cublas_workspace_override.store(-1, std::memory_order_relaxed);
 }
 
 void resetCUDABlasLtWorkspaceSize() {
-  cublaslt_workspace_override.store(-1, std::memory_order_release);
+  cublaslt_workspace_override.store(-1, std::memory_order_relaxed);
 }
 
 size_t getCUDABlasLtWorkspaceSize() {
