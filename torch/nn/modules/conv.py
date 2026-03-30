@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import math
-from typing import Any, Generic, Literal
+from typing import Generic, Literal
 from typing_extensions import TypeVarTuple, Unpack, deprecated
 
 import torch
