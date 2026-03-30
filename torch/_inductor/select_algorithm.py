@@ -2703,7 +2703,8 @@ class TritonTemplate(KernelTemplate):
 
         assert code is not None and extra is not None
 
-        mod = PyCodeCache.load(code, extra)
+        # Benchmark template modules do not need global import registration.
+        mod = PyCodeCache.load(code, extra, set_sys_modules=False)
 
         input_call_args = tuple(kernel.args.input_buffers.keys())
         prologue_supported_inputs = kernel.prologue_supported_inputs.copy()
@@ -4014,6 +4015,7 @@ class AlgorithmSelectorCache(PersistentCache):
         input_gen_fns,
         hint_override: int | None = None,
         is_collective=False,
+        precompile_key: str | None = None,
     ):
         counters["inductor"]["select_algorithm_autotune"] += 1
         # TODO(nmacchioni): remove this layer of abstraction
@@ -4032,11 +4034,11 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # Evict benchmark template modules from PyCodeCache so their
         # CachingAutotuner -> compile_results -> CompiledKernel chains become
-        # unreachable. Without this, PyCodeCache.modules (a class-level list)
-        # and PyCodeCache.modules_no_attr (a class-level dict) hold strong
+        # unreachable. Benchmark-only module loads skip sys.modules
+        # registration, so the PyCodeCache collections are the remaining strong
         # references that prevent GC from collecting CompiledKernel objects and
         # triggering hipModuleUnload / cuModuleUnload via __del__.
-        evict_paths = set()
+        evict_paths = OrderedSet()
         for choice in choices:
             bmreq = getattr(choice, "bmreq", None)
             if bmreq is not None:
@@ -4044,29 +4046,16 @@ class AlgorithmSelectorCache(PersistentCache):
                 if path is not None:
                     evict_paths.add(path)
         if evict_paths:
-            evict_mod_names = set()
             for path in evict_paths:
                 PyCodeCache.modules_no_attr.pop(path, None)
-            new_modules = []
-            for m in PyCodeCache.modules:
-                if getattr(m, "__file__", None) in evict_paths:
-                    name = getattr(m, "__name__", None)
-                    if name:
-                        evict_mod_names.add(name)
-                else:
-                    new_modules.append(m)
-            PyCodeCache.modules[:] = new_modules
-            # _reload_python_module also inserts each module into sys.modules
-            # (compile_tasks.py:37). This is the last strong reference keeping
-            # benchmark template modules (and their CachingAutotuner ->
-            # compile_results -> CompiledKernel chains) alive after the
-            # PyCodeCache eviction above.
-            for name in evict_mod_names:
-                sys.modules.pop(name, None)
+            PyCodeCache.modules[:] = [
+                m for m in PyCodeCache.modules if getattr(m, "__file__", None) not in evict_paths
+            ]
 
-        # Also clear the precompile cache to release any futures holding
-        # references to compiled kernels from this round.
-        self.precompile_cache.clear()
+        # Release the precompile closure for just this autotune site so other
+        # cached sites can keep sharing their precompile work.
+        if precompile_key is not None:
+            self.precompile_cache.pop(precompile_key, None)
 
         gc.collect()
 
@@ -4081,6 +4070,7 @@ class AlgorithmSelectorCache(PersistentCache):
         choices,
         hint_override: int | None = None,
         is_collective=False,
+        precompile_key: str | None = None,
     ):
         log.debug("Starting autotuning")
 
@@ -4097,6 +4087,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 input_gen_fns,
                 hint_override=hint_override,
                 is_collective=is_collective,
+                precompile_key=precompile_key,
             )
             if config.max_autotune_report_choices_stats:
                 _log_autotune_choices_stats(
@@ -4183,6 +4174,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         precompile_elapse = time.time() - precompile_start_ts
         log.debug("Precompilation elapsed time: %.02fs", precompile_elapse)
+        precompile_key = getattr(precompile_fn, "precompile_key", None)
         # Prune anything that failed to compile
         choices = [c for c in choices if not c.failed]
         if len(choices) == 0:
@@ -4207,6 +4199,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     input_gen_fns,
                     choices,
                     hint_override=hint_override,
+                    precompile_key=precompile_key,
                 ),
                 hint_override=hint_override,
             )
@@ -4263,6 +4256,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 choices,
                 hint_override=hint_override,
                 is_collective=is_collective,
+                precompile_key=precompile_key,
             )
 
         timings = self.lookup(
@@ -4548,6 +4542,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     precompile_times[choice] = elapsed_times[future]
             return precompile_times
 
+        wait_on_futures.precompile_key = precompile_key  # type: ignore[attr-defined]
         self.precompile_cache[precompile_key] = wait_on_futures
 
         return wait_on_futures

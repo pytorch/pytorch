@@ -654,7 +654,11 @@ class TritonBenchmarkRequest(BenchmarkRequest):
     def make_run_fn(
         self, *input_tensors: torch.Tensor, out: torch.Tensor
     ) -> Callable[[], None]:
-        mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
+        mod = PyCodeCache.load_by_key_path(
+            self.module_cache_key,
+            self.module_path,
+            set_sys_modules=False,
+        )
         autotuning_log.debug(
             "benchmark module key: %s, path: %s",
             self.module_cache_key,
@@ -723,7 +727,11 @@ class TritonBenchmarkRequest(BenchmarkRequest):
             )
 
     def precompile(self):
-        mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
+        mod = PyCodeCache.load_by_key_path(
+            self.module_cache_key,
+            self.module_path,
+            set_sys_modules=False,
+        )
         kernel = getattr(mod, self.kernel_name)
         kernel.precompile()
 
@@ -1071,7 +1079,11 @@ class CuteDSLBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         Create a function to run the CuteDSL kernel with the given input and output tensors.
         Similar to TritonBenchmarkRequest.make_run_fn but for CuteDSL kernels.
         """
-        mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
+        mod = PyCodeCache.load_by_key_path(
+            self.module_cache_key,
+            self.module_path,
+            set_sys_modules=False,
+        )
 
         # Logic replicated async_compile
         from .codegen.cutedsl.cutedsl_kernel import MAIN_SUFFIX
