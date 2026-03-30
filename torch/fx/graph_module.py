@@ -16,6 +16,7 @@ from typing import Any
 import torch
 import torch.nn as nn
 import torch.overrides
+from torch._logging._internal import trace_structured
 from torch.nn.modules.module import _addindent
 from torch.package import Importer, PackageExporter, PackageImporter, sys_importer
 
@@ -865,6 +866,38 @@ class {module_name}(torch.nn.Module):
             )
         return self._code
 
+    def _dump_codegen_to_disk(self) -> None:
+        """Write generated source to content-addressed file for debugging.
+
+        When ``codegen_dump_dir`` is set or ``profiler_codegen`` is enabled,
+        dump ``self._code`` to disk with a SHA-256-based filename.
+        """
+        dump_dir = fx_experimental_config.codegen_dump_dir
+        if not dump_dir and fx_experimental_config.profiler_codegen:
+            import tempfile
+
+            dump_dir = os.path.join(tempfile.gettempdir(), "torch_fx_codegen")
+        if not dump_dir:
+            return
+        code_hash = hashlib.sha256(self._code.encode("utf-8")).hexdigest()[:16]
+        dump_filename = f"fx_{code_hash}.py"
+        dump_path = os.path.join(dump_dir, dump_filename)
+        os.makedirs(dump_dir, exist_ok=True)
+        if not os.path.exists(dump_path):
+            with open(dump_path, "w") as f:
+                f.write(self._code)
+        self._codegen_dump_path = dump_path
+
+        trace_structured(
+            "fx_codegen_dump",
+            lambda: {
+                "filename": dump_filename,
+                "file_path": os.path.abspath(dump_path),
+            },
+            payload_fn=lambda: self._code,
+            expect_trace_id=False,
+        )
+
     @compatibility(is_backward_compatible=True)
     def recompile(self) -> PythonCode:
         """
@@ -878,18 +911,35 @@ class {module_name}(torch.nn.Module):
             self._in_spec = self._graph._codegen.pytree_info.in_spec
             self._out_spec = self._graph._codegen.pytree_info.out_spec
 
+        # Auto-enable ProfilerCodeGen when TORCH_FX_PROFILER_CODEGEN=1
+        # Lazy import: only import when flag is on to avoid perf regression.
+        if fx_experimental_config.profiler_codegen:
+            from torch.fx.profiler_codegen import ProfilerCodeGen
+
+            if not isinstance(self._graph._codegen, ProfilerCodeGen):
+                self._graph.set_codegen(ProfilerCodeGen())
+
+        # ProfilerCodeGen has its own dual-path profiler instrumentation,
+        # skip the old record_func / enrich_profiler_metadata path.
+        use_record_func = (
+            fx_experimental_config.enrich_profiler_metadata
+            and not fx_experimental_config.profiler_codegen
+        )
         python_code = self._graph.python_code(
             root_module="self",
-            record_func=fx_experimental_config.enrich_profiler_metadata,
+            record_func=use_record_func,
         )
         self._code = python_code.src
         self._lineno_map = python_code._lineno_map
         self._prologue_start = python_code._prologue_start
 
+        # Disk dump: write generated source to content-addressed file for debugging.
+        self._dump_codegen_to_disk()
+
         cls = type(self)
         co_fields = self._graph._co_fields if hasattr(self._graph, "_co_fields") else {}
 
-        if fx_experimental_config.enrich_profiler_metadata:
+        if use_record_func:
             # Generate metadata and register for profiler augmentation
             node_metadata: dict[int, dict[str, Any]] = {}
             for i, node in enumerate(self._graph.nodes):

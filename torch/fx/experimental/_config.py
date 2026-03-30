@@ -125,6 +125,20 @@ soft_pending_unbacked_not_found_error = False
 aggressive_guard_free_semantics = 0
 
 
+# Directory for dumping generated FX code. Defaults to a temp directory
+# matching the inductor cache pattern. Set to empty string to disable.
+codegen_dump_dir: str = Config(  # type: ignore[var-annotated]
+    default="",
+    env_name_default="TORCH_FX_CODEGEN_DUMP_DIR",
+)
+
+# When True, recompile() automatically uses ProfilerCodeGen for dual-path
+# forward generation (_forward_impl + _forward_profiled). Off by default.
+profiler_codegen: bool = Config(  # type: ignore[var-annotated]
+    default=False,
+    env_name_default="TORCH_FX_PROFILER_CODEGEN",
+)
+
 install_config_module(sys.modules[__name__])
 
 

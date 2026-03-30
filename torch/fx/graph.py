@@ -338,6 +338,30 @@ def _parse_stack_trace(
     return None
 
 
+@dataclass
+class _CodeGenContext:
+    """Bundles shared state used by extracted codegen helper methods.
+
+    These fields were previously captured as closure locals in
+    ``CodeGen._gen_python_code``. Bundling them in a dataclass allows
+    the helper methods to be regular (overridable) methods on ``CodeGen``
+    instead of closures, so that subclasses like ``ProfilerCodeGen`` can
+    reuse them without copy-pasting.
+    """
+
+    free_vars: list[str]
+    globals_: dict[str, Any]
+    wrapped_fns: dict[str, None]
+    maybe_return_annotation: list[str]
+    namespace: "_Namespace"
+    root_module: str
+    expanded_def: bool
+    node_to_last_use: dict["Node", "Node"]
+    user_to_last_uses: dict["Node", list["Node"]]
+
+
+
+
 @compatibility(is_backward_compatible=False)
 class CodeGen:
     # This is an override hook so we can customize the SymNode printer.
@@ -989,6 +1013,337 @@ class CodeGen:
             _lineno_map=lineno_map,
             _prologue_start=prologue_start,
         )
+
+
+    # ------------------------------------------------------------------
+    # Extracted helper methods for subclass reuse (e.g. ProfilerCodeGen).
+    #
+    # These mirror the closure logic in _gen_python_code() but operate on
+    # an explicit _CodeGenContext instead of captured locals.  The base
+    # _gen_python_code() keeps its own closures unchanged.
+    # ------------------------------------------------------------------
+
+    def _create_codegen_context(
+        self,
+        nodes,
+        root_module: str,
+        namespace: _Namespace,
+        *,
+        expanded_def: bool = False,
+    ) -> _CodeGenContext:
+        """Create a codegen context with pre-registered builtins and last-use maps."""
+        free_vars: list[str] = []
+        globals_: dict[str, Any] = {}
+        wrapped_fns: dict[str, None] = {}
+        maybe_return_annotation: list[str] = [""]
+
+        node_to_last_use: dict[Node, Node] = {}
+        user_to_last_uses: dict[Node, list[Node]] = {}
+
+        ctx = _CodeGenContext(
+            free_vars=free_vars,
+            globals_=globals_,
+            wrapped_fns=wrapped_fns,
+            maybe_return_annotation=maybe_return_annotation,
+            namespace=namespace,
+            root_module=root_module,
+            expanded_def=expanded_def,
+            node_to_last_use=node_to_last_use,
+            user_to_last_uses=user_to_last_uses,
+        )
+
+        for name, (_, obj) in _custom_builtins.items():
+            self._codegen_add_global(ctx, name, obj)
+
+        for node in reversed(nodes):
+            for input_node in node._input_nodes:
+                if input_node not in node_to_last_use:
+                    node_to_last_use[input_node] = node
+                    user_to_last_uses.setdefault(node, []).append(input_node)
+
+        return ctx
+
+    def _codegen_add_global(
+        self, ctx: _CodeGenContext, name_hint: str, obj: Any
+    ) -> str:
+        """Add an obj to be tracked as a global (extracted from ``add_global`` closure)."""
+        if _is_from_torch(obj) and obj != torch.device:
+            return _get_qualified_name(obj)
+
+        global_name = ctx.namespace.create_name(name_hint, obj)
+
+        if global_name in ctx.globals_:
+            if ctx.globals_[global_name] != obj:
+                raise AssertionError(
+                    f"Global name {global_name} already assigned to different object"
+                )
+            return global_name
+        ctx.globals_[global_name] = obj
+        return global_name
+
+    def _codegen_type_repr(self, ctx: _CodeGenContext, o: Any) -> str:
+        """Type repr (extracted from ``type_repr`` closure, uncolored)."""
+        if o == ():
+            return "()"
+
+        typename = _type_repr(o)
+        if isinstance(o, types.UnionType) and "|" in typename:
+            args = [self._codegen_type_repr(ctx, arg) for arg in o.__args__]
+            return "|".join(args)
+
+        if origin_type := getattr(o, "__origin__", None):
+            if isinstance(o, typing._GenericAlias):  # type: ignore[attr-defined]
+                origin_type = _origin_type_map.get(origin_type, origin_type)
+
+            origin_typename = self._codegen_add_global(
+                ctx, _type_repr(origin_type), origin_type
+            )
+
+            if hasattr(o, "__args__") and o.__args__:
+                args = [self._codegen_type_repr(ctx, arg) for arg in o.__args__]
+                return f"{origin_typename}[{','.join(args)}]"
+            else:
+                return origin_typename
+
+        return self._codegen_add_global(ctx, typename, o)
+
+    def _codegen_get_repr(self, ctx: _CodeGenContext, arg: Any) -> str:
+        """Get repr (extracted from ``_get_repr`` closure, uncolored)."""
+        if isinstance(arg, Node):
+            return repr(arg)
+        elif isinstance(arg, tuple) and hasattr(arg, "_fields"):
+            qualified_name = _get_qualified_name(type(arg))
+            global_name = self._codegen_add_global(ctx, qualified_name, type(arg))
+            return f"{global_name}{repr(tuple(arg))}"
+        elif isinstance(arg, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
+            qualified_name = _get_qualified_name(arg)
+            global_name = self._codegen_add_global(ctx, qualified_name, arg)
+            return f"{global_name}"
+        elif isinstance(arg, enum.Enum):
+            cls = arg.__class__
+            clsname = self._codegen_add_global(ctx, cls.__name__, cls)
+            return f"{clsname}.{arg.name}"
+        elif isinstance(arg, torch.Tensor):
+            size = list(arg.size())
+            dtype = str(arg.dtype).split(".")[-1]
+            return f"torch.Tensor(size={size}, dtype={dtype})"
+        elif isinstance(arg, tuple):
+            if len(arg) == 1:
+                return f"({self._codegen_get_repr(ctx, arg[0])},)"
+            else:
+                return (
+                    "(" + ", ".join(self._codegen_get_repr(ctx, a) for a in arg) + ")"
+                )
+        elif isinstance(arg, list):
+            return "[" + ", ".join(self._codegen_get_repr(ctx, a) for a in arg) + "]"
+        elif isinstance(arg, slice):
+            return (
+                f"slice({self._codegen_get_repr(ctx, arg.start)}, "
+                f"{self._codegen_get_repr(ctx, arg.stop)}, "
+                f"{self._codegen_get_repr(ctx, arg.step)})"
+            )
+        elif is_opaque_value_type(type(arg)):
+            obj_repr, opaque_types = get_opaque_obj_repr(arg)
+            for n, t in opaque_types.items():
+                self._codegen_add_global(ctx, n, t)
+            return obj_repr
+        else:
+            return repr(arg)
+
+    def _codegen_format_args(
+        self,
+        ctx: _CodeGenContext,
+        args: tuple[Argument, ...],
+        kwargs: dict[str, Argument],
+    ) -> str:
+        """Format args (extracted from ``_format_args`` closure)."""
+        res = [self._codegen_get_repr(ctx, a) for a in args]
+        res.extend(
+            [f"{k} = {self._codegen_get_repr(ctx, v)}" for k, v in kwargs.items()]
+        )
+        return ", ".join(res)
+
+    def _codegen_emit_node(
+        self,
+        ctx: _CodeGenContext,
+        node: Node,
+        body: list[str],
+        *,
+        maybe_type_annotation: str | None = None,
+        maybe_comment: str | None = None,
+    ) -> None:
+        """Emit node code into *body* (extracted from ``emit_node`` closure, uncolored).
+
+        If *maybe_type_annotation* or *maybe_comment* are not supplied they
+        are computed from the node's type info.  The base class passes
+        verbose-overridden values when calling from its own coloured path.
+        """
+        if maybe_type_annotation is None:
+            maybe_type_annotation = (
+                ""
+                if node.type is None
+                else f" : {self._codegen_type_repr(ctx, node.type)}"
+            )
+        if maybe_comment is None:
+            maybe_comment = ""
+
+        desc = None
+        if ctx.expanded_def:
+            desc = node.meta.get("desc", None)
+            if desc is not None and node.op == "placeholder":
+                maybe_comment += f"  # {desc}"
+
+        if node.op == "placeholder":
+            if not isinstance(node.target, str):
+                raise AssertionError(
+                    f"Expected node.target to be str, got {type(node.target)}"
+                )
+            maybe_default_arg = (
+                ""
+                if not node.args
+                else f" = {self._codegen_get_repr(ctx, node.args[0])}"
+            )
+            ctx.free_vars.append(
+                f"{node.target}{maybe_type_annotation}{maybe_default_arg}{maybe_comment}"
+            )
+            raw_name = node.target.replace("*", "")
+            if raw_name != repr(node):
+                body.append(f"{repr(node)} = {raw_name}\n")
+            return
+        elif node.op == "call_method":
+            if not isinstance(node.target, str):
+                raise AssertionError(
+                    f"Expected node.target to be str for call_method, got {type(node.target)}"
+                )
+            body.append(
+                f"{repr(node)}{maybe_type_annotation} = "
+                f"{_format_target(self._codegen_get_repr(ctx, node.args[0]), node.target)}"
+                f"({self._codegen_format_args(ctx, node.args[1:], node.kwargs)})"
+            )
+            return
+        elif node.op == "call_function":
+            if not callable(node.target):
+                raise AssertionError(
+                    f"Expected node.target to be callable, got {type(node.target)}"
+                )
+            if (
+                getattr(node.target, "__module__", "") == "_operator"
+                and node.target.__name__ in magic_methods
+            ):
+                if not isinstance(node.args, tuple):
+                    raise AssertionError(
+                        f"Expected node.args to be tuple, got {type(node.args)}"
+                    )
+                body.append(
+                    f"{repr(node)}{maybe_type_annotation} = "
+                    f"{magic_methods[node.target.__name__].format(*(self._codegen_get_repr(ctx, a) for a in node.args))}"
+                )
+                return
+
+            if (
+                getattr(node.target, "__module__", "") == "_operator"
+                and node.target.__name__ in inplace_methods
+            ):
+                body.append(
+                    f"{inplace_methods[node.target.__name__].format(*(self._codegen_get_repr(ctx, a) for a in node.args))};  "
+                    f"{repr(node)}{maybe_type_annotation} = {self._codegen_get_repr(ctx, node.args[0])}"
+                )
+                return
+
+            qualified_name = _get_qualified_name(node.target)
+            global_name = self._codegen_add_global(ctx, qualified_name, node.target)
+            if (
+                global_name == "getattr"
+                and isinstance(node.args, tuple)
+                and isinstance(node.args[1], str)
+                and node.args[1].isidentifier()
+                and len(node.args) == 2
+            ):
+                body.append(
+                    f"{repr(node)}{maybe_type_annotation} = "
+                    f"{_format_target(self._codegen_get_repr(ctx, node.args[0]), node.args[1])}"
+                )
+                return
+            body.append(
+                f"{repr(node)}{maybe_type_annotation} = "
+                f"{global_name}({self._codegen_format_args(ctx, node.args, node.kwargs)})"
+            )
+            if node.meta.get("is_wrapped", False):
+                ctx.wrapped_fns.setdefault(global_name)
+            return
+        elif node.op == "call_module":
+            if not isinstance(node.target, str):
+                raise AssertionError(
+                    f"Expected node.target to be str for call_module, got {type(node.target)}"
+                )
+            body.append(
+                f"{repr(node)}{maybe_type_annotation} = "
+                f"{_format_target(ctx.root_module, node.target)}"
+                f"({self._codegen_format_args(ctx, node.args, node.kwargs)})"
+            )
+            return
+        elif node.op == "get_attr":
+            if not isinstance(node.target, str):
+                raise AssertionError(
+                    f"Expected node.target to be str for get_attr, got {type(node.target)}"
+                )
+            body.append(
+                f"{repr(node)}{maybe_type_annotation} = "
+                f"{_format_target(ctx.root_module, node.target)}"
+            )
+            return
+        elif node.op == "output":
+            if node.type is not None:
+                ctx.maybe_return_annotation[0] = (
+                    f" -> {self._codegen_type_repr(ctx, node.type)}"
+                )
+            body.append(
+                self._call_method_with_signature_check(
+                    self.generate_output,
+                    node.args[0],
+                    descs=desc if ctx.expanded_def else None,
+                )
+            )
+            return
+        raise NotImplementedError(f"node: {node.op} {node.target}")
+
+    def _codegen_delete_unused_values(
+        self,
+        ctx: _CodeGenContext,
+        user: Node,
+        bodies: list[list[str]],
+    ) -> None:
+        """Delete unused values — writes to ALL provided body lists.
+
+        The base class passes ``[body]``; ``ProfilerCodeGen`` passes
+        ``[impl_body, profiled_body]``.
+        """
+        if user.op == "placeholder":
+            return
+        if user.op == "output":
+            for body in bodies:
+                body.append("\n")
+            return
+        nodes_to_delete = ctx.user_to_last_uses.get(user, [])
+
+        if len(user.users.keys()) == 0:
+            nodes_to_delete.append(user)
+
+        if len(nodes_to_delete):
+            to_delete_str = " = ".join([repr(n) for n in nodes_to_delete] + ["None"])
+            cleanup = f";  {to_delete_str}\n"
+            for body in bodies:
+                body.append(cleanup)
+        else:
+            for body in bodies:
+                body.append("\n")
+
+
+# Ideally, we'd like to refactor all of the pytree logic into this codegen
+# class. Unfortunately, there are 3 areas we currently need extra logic in FX.
+# 1. In the initial symbolic trace, the pytree logic is tied up with `concrete_args`.
+# 2. In the FX graph, we need to access 2 attributes - in_spec and out_spec.
+#    Since we can't access .graph within the FX forward, we need to copy the attribute to the module.
 
 
 # Ideally, we'd like to refactor all of the pytree logic into this codegen
