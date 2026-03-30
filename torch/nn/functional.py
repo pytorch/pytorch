@@ -2378,13 +2378,18 @@ _original_linear = linear
 def linear(input: Tensor, weight: Tensor, bias: Optional[Tensor] = None) -> Tensor:
   """Fallback linear for MPS RDNA2 GPUs when input_features >= 256."""
   if input.is_mps and input.shape[-1] >= 256:
-    orig_shape = input.shape
-    inp_2d = input.reshape(-1, orig_shape[-1])
+  orig_shape = input.shape
+  inp_2d = input.reshape(-1, orig_shape[-1])
+  if weight.dim() == 1:
+    # 1-D weight (dot-product) case
+    out = torch.mv(inp_2d, weight)
+    out = out.reshape(*orig_shape[:-1])
+  else:
     out = torch.mm(inp_2d, weight.t().contiguous())
     out = out.reshape(*orig_shape[:-1], weight.shape[0])
-    if bias is not None:
-      out = out + bias
-    return out
+  if bias is not None:
+    out = out + bias
+  return out
   return _original_linear(input, weight, bias)
 
 def silu(input: Tensor, inplace: bool = False) -> Tensor:
