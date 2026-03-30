@@ -1477,7 +1477,7 @@ def check_and_add_duplicate_pattern(
 def register_replacement(
     search_fn: SearchFn,
     replace_fn: ReplaceFn,
-    example_inputs: Iterable[Any],
+    example_inputs: list[Any] | tuple[Any, ...],
     trace_fn: TraceFn,
     pass_dicts: _PassDictsType | Sequence[_PassDictsType],
     extra_check: Callable[[Match], bool] = _return_true,
@@ -1509,6 +1509,11 @@ def register_replacement(
     if inspect.ismethod(replace_fn):
         replace_argnames = [*inspect.signature(replace_fn).parameters.keys()]
         replace_fn = _wrap_bound_method(replace_fn, replace_argnames)
+
+    if not isinstance(example_inputs, (list, tuple)):
+        raise TypeError(
+            f"example_inputs must be a list or tuple, got {type(example_inputs)}"
+        )
 
     def check_fn(match: Match) -> bool:
         """
