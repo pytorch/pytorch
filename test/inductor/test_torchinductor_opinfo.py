@@ -1233,6 +1233,7 @@ class TestInductorOpInfo(TestCase):
     )
     @torch._inductor.config.patch("test_configs.runtime_triton_dtype_assert", True)
     @torch._inductor.config.patch("test_configs.static_cpp_dtype_assert", True)
+    @torch._inductor.config.patch("shape_padding", False)
     @collection_decorator
     def test_comprehensive(self, device, dtype, op):
         device_type = torch.device(device).type
