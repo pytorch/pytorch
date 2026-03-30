@@ -2917,7 +2917,9 @@ def bucketize(
 
 
 def _is_tensor_irnode(x):
-    return isinstance(x, ir.IRNode) and not isinstance(x, ir.NonTensorObj)
+    return isinstance(x, ir.IRNode) and not isinstance(
+        x, (ir.NonTensorObj, ir.OpaqueMultiOutput)
+    )
 
 
 def require_dense(_, *args, **kwargs):
