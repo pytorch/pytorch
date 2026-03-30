@@ -3642,6 +3642,41 @@ def forward(self, p_linear_weight, p_linear_bias, obj_lifted_custom_0, x):
         for code in codes:
             self.assertNotIn("pickle", code)
 
+    def test_opaque_object_state_in_graph_output(self):
+        """When compile_fx_inner receives a graph where a raw opaque reference
+        type appears in the outputs (not just inputs), inductor must handle it.
+        This happens in CooR (compile-on-one-rank) precompile: aot_autograd
+        partitions the joint graph so the forward graph saves opaque objects
+        (e.g. DeviceMesh) for the backward graph by including them in forward
+        outputs.  Inductor must:
+          1. Accept OpaqueObjectState in the output type assertion
+             (GraphLowering.output).
+          2. Handle NonTensorObj graph inputs in the memory planner
+             (get_dep_size_hint) without calling get_numel/get_dtype on them."""
+        m = OpaqueMultiplier(2.0)
+        x = torch.ones(3)
+
+        graph = torch.fx.Graph()
+        m_node = graph.placeholder("m")
+        m_node.meta["val"] = m
+        fake_mode = FakeTensorMode()
+        x_node = graph.placeholder("x")
+        x_node.meta["val"] = fake_mode.from_tensor(x)
+        out = graph.call_function(
+            torch.ops._TestOpaqueObject.mul_with_scale.default, (m_node, x_node)
+        )
+        out.meta["val"] = fake_mode.from_tensor(x)
+        # Include the opaque object in the output tuple, simulating how
+        # aot_autograd's forward graph passes saved-for-backward objects
+        # through as outputs.
+        graph.output((out, m_node))
+
+        gm = torch.fx.GraphModule({}, graph)
+        compiled = compile_fx_inner(gm, [m, x])
+        result = compiled([m, x])
+        self.assertEqual(result[0], x * 2)
+        self.assertIs(result[1], m)
+
 
 instantiate_parametrized_tests(TestOpaqueObject)
 
