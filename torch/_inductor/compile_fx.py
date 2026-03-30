@@ -2768,7 +2768,7 @@ def _maybe_wrap_and_compile_fx_main(
 
 
 def _compile_fx_main(
-    model_: GraphModule | GmWrapper,
+    model_: GraphModule,
     example_inputs_: Sequence[InputType],
     inner_compile: Callable[..., OutputCode],
     ignore_shape_env: bool,
@@ -2802,7 +2802,6 @@ def _compile_fx_main(
 
         num_example_inputs = len(example_inputs_)
 
-        assert isinstance(model_, (GraphModule, GmWrapper))
         compiler_config_extra = create_compiler_config_extra(model_)
 
         decompositions = get_decomp_fn()
