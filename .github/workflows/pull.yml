@@ -76,20 +76,20 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-py3.10-gcc11
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "docs_test", shard: 1, num_shards: 1,  runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "backwards_compat", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
-          { config: "distributed", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "numpy_2_x", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
-          { config: "libtorch_agnostic_targetting", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "gcc11", python: "3.10" },
+          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "gcc11", python: "3.10" },
+          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "gcc11", python: "3.10" },
+          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "gcc11", python: "3.10" },
+          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "gcc11", python: "3.10" },
+          { config: "docs_test", shard: 1, num_shards: 1,  runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "gcc11", python: "3.10" },
+          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "gcc11", python: "3.10" },
+          { config: "backwards_compat", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "gcc11", python: "3.10" },
+          { config: "distributed", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "gcc11", python: "3.10" },
+          { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "gcc11", python: "3.10" },
+          { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "gcc11", python: "3.10" },
+          { config: "numpy_2_x", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "gcc11", python: "3.10" },
+          { config: "libtorch_agnostic_targetting", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "gcc11", python: "3.10" },
+          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "gcc11", python: "3.10" },
         ]}
     secrets: inherit
 
@@ -119,18 +119,18 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-py3.14t-clang15
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "crossref", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "crossref", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "einops", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.14t" },
+          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.14t" },
+          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.14t" },
+          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.14t" },
+          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.14t" },
+          { config: "crossref", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.14t" },
+          { config: "crossref", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.14t" },
+          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.14t" },
+          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.14t" },
+          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.14t" },
+          { config: "einops", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.14t" },
+          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.14t" },
         ]}
     secrets: inherit
 
@@ -171,7 +171,7 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-py3.10-gcc11
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 1 },
+          { config: "default", shard: 1, num_shards: 1, os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "gcc11", python: "3.10", variances: ["no-ops"] },
         ]}
     secrets: inherit
 
@@ -189,14 +189,14 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-py3-clang18-asan
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 2, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 3, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 4, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 5, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 6, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 7, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 1, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang18", python: "3.10", variances: ["asan"] },
+          { config: "default", shard: 2, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang18", python: "3.10", variances: ["asan"] },
+          { config: "default", shard: 3, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang18", python: "3.10", variances: ["asan"] },
+          { config: "default", shard: 4, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang18", python: "3.10", variances: ["asan"] },
+          { config: "default", shard: 5, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang18", python: "3.10", variances: ["asan"] },
+          { config: "default", shard: 6, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang18", python: "3.10", variances: ["asan"] },
+          { config: "default", shard: 7, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang18", python: "3.10", variances: ["asan"] },
+          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang18", python: "3.10", variances: ["asan"] },
         ]}
       sync-tag: asan-build
     secrets: inherit
@@ -230,8 +230,8 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-py3-clang15-onnx
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
-          { config: "default", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+          { config: "default", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.10", variances: ["onnx"] },
+          { config: "default", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.10" },
         ]}
     secrets: inherit
 
@@ -263,18 +263,18 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang15
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "crossref", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "crossref", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "einops", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.10" },
+          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.10" },
+          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.10" },
+          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.10" },
+          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.10" },
+          { config: "crossref", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.10" },
+          { config: "crossref", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.10" },
+          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.10" },
+          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.10" },
+          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.10" },
+          { config: "einops", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.10" },
+          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.10" },
         ]}
     secrets: inherit
 
@@ -306,18 +306,18 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-py3.14-clang15
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "crossref", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "crossref", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "einops", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.14" },
+          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.14" },
+          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.14" },
+          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.14" },
+          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.14" },
+          { config: "crossref", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.14" },
+          { config: "crossref", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.14" },
+          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.14" },
+          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.14" },
+          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.14" },
+          { config: "einops", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.14" },
+          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.14" },
         ]}
     secrets: inherit
 
@@ -348,7 +348,7 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-clang15
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 1 },
+          { config: "default", shard: 1, num_shards: 1, os: "linux", arch: "x86_64", accelerator: "cuda12.8", compiler: "clang15", python: "3.10", variances: ["cudnn9"] },
         ]}
     secrets: inherit
 
@@ -366,7 +366,7 @@ jobs:
       cuda-version: cpu
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "gcc11", python: "3.10", variances: ["bazel-test"] },
         ]}
     secrets: inherit
 
@@ -384,7 +384,7 @@ jobs:
       build-generates-artifacts: false
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 1 },
+          { config: "default", shard: 1, num_shards: 1, os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "gcc11", python: "3.10", variances: ["mobile-lightweight-dispatch-build"] },
         ]}
     secrets: inherit
 
@@ -403,9 +403,9 @@ jobs:
       sync-tag: rocm-build
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.2" },
-          { config: "default", shard: 2, num_shards: 3, runner: "linux.rocm.gpu.2" },
-          { config: "default", shard: 3, num_shards: 3, runner: "linux.rocm.gpu.2" },
+          { config: "default", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.2", os: "linux", arch: "x86_64", accelerator: "rocm", compiler: null, python: "3.10" },
+          { config: "default", shard: 2, num_shards: 3, runner: "linux.rocm.gpu.2", os: "linux", arch: "x86_64", accelerator: "rocm", compiler: null, python: "3.10" },
+          { config: "default", shard: 3, num_shards: 3, runner: "linux.rocm.gpu.2", os: "linux", arch: "x86_64", accelerator: "rocm", compiler: null, python: "3.10" },
         ]}
     secrets: inherit
 
@@ -422,7 +422,7 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
       test-matrix: |
         { include: [
-          { config: "pr_time_benchmarks", shard: 1, num_shards: 1, runner: "linux.g4dn.metal.nvidia.gpu" },
+          { config: "pr_time_benchmarks", shard: 1, num_shards: 1, runner: "linux.g4dn.metal.nvidia.gpu", os: "linux", arch: "x86_64", accelerator: "cuda13.0", compiler: "gcc11", python: "3.10", variances: ["sm75"] },
         ]}
     secrets: inherit
 
@@ -456,10 +456,10 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-noble-xpu-n-py3
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 4, runner: "linux.idc.xpu" },
-          { config: "default", shard: 2, num_shards: 4, runner: "linux.idc.xpu" },
-          { config: "default", shard: 3, num_shards: 4, runner: "linux.idc.xpu" },
-          { config: "default", shard: 4, num_shards: 4, runner: "linux.idc.xpu" },
+          { config: "default", shard: 1, num_shards: 4, runner: "linux.idc.xpu", os: "linux", arch: "x86_64", accelerator: "xpu", compiler: null, python: "3.10", variances: ["n"] },
+          { config: "default", shard: 2, num_shards: 4, runner: "linux.idc.xpu", os: "linux", arch: "x86_64", accelerator: "xpu", compiler: null, python: "3.10", variances: ["n"] },
+          { config: "default", shard: 3, num_shards: 4, runner: "linux.idc.xpu", os: "linux", arch: "x86_64", accelerator: "xpu", compiler: null, python: "3.10", variances: ["n"] },
+          { config: "default", shard: 4, num_shards: 4, runner: "linux.idc.xpu", os: "linux", arch: "x86_64", accelerator: "xpu", compiler: null, python: "3.10", variances: ["n"] },
         ]}
     secrets: inherit
 
@@ -473,7 +473,7 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-py3.13-clang15
       test-matrix: |
         { include: [
-          { config: "dynamo_cpython", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+          { config: "dynamo_cpython", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.13" },
         ]}
     secrets: inherit
 
@@ -486,6 +486,6 @@ jobs:
       docker-image: ci-image:pytorch-linux-jammy-py3.13-clang15
       test-matrix: |
         { include: [
-          { config: "dynamo_cpython", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+          { config: "dynamo_cpython", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge", os: "linux", arch: "x86_64", accelerator: "cpu", compiler: "clang15", python: "3.13" },
         ]}
     secrets: inherit

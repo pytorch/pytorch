@@ -335,6 +335,12 @@ jobs:
           TEST_CONFIG: ${{ matrix.config }}
           SHARD_NUMBER: ${{ matrix.shard }}
           NUM_TEST_SHARDS: ${{ matrix.num_shards }}
+          ENV_OS: ${{ matrix.os || '' }}
+          ENV_ARCH: ${{ matrix.arch || '' }}
+          ENV_ACCELERATOR: ${{ matrix.accelerator || '' }}
+          ENV_COMPILER: ${{ matrix.compiler || '' }}
+          ENV_PYTHON: ${{ matrix.python || '' }}
+          ENV_VARIANCES: ${{ join(matrix.variances, ',') }}
           EXTRA_FLAGS: ${{ matrix.extra_flags || '' }}
           OP_BENCHMARK_TESTS: ${{ matrix.op_benchmark_tests }}
           REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
