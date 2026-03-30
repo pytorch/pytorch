@@ -62,7 +62,7 @@ runs:
     - name: Parse ref
       id: parse-ref
       shell: bash
-      run: python3 .github/scripts/parse_ref.py
+      run: python3 "${{ github.action_path }}/../../scripts/parse_ref.py"
 
     - name: Get workflow job id
       id: get-job-id
