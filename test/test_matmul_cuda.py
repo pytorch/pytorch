@@ -713,7 +713,6 @@ class TestMatmulCuda(InductorTestCase):
 
     @skipCUDAIfNotRocm
     # Fails with triton 3.7
-    @skipIfRocmArch(NAVI_ARCH)
     def test_grouped_gemm_rocm_ck_flag(self):
         CK_EQUAL_K_HINT = "kernel_grouped_gemm_xdl_splitk"
         CK_UNEQUAL_K_HINT = "kernel_grouped_gemm_xdl_splitk"
