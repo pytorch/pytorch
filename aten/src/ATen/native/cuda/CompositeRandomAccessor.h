@@ -25,7 +25,7 @@ void swap(
   references_holder<Values, References> rh1,
   references_holder<Values, References> rh2
 ) {
-  return thrust::swap(rh1.data(), rh2.data());
+  thrust::swap(rh1.data(), rh2.data());
 }
 
 template <int N, typename Values, typename References>
