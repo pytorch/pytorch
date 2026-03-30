@@ -514,13 +514,12 @@ class OpDispatcher:
                             f"Please redistribute explicitly first."
                         )
 
-                # Fast path: spec unchanged (common case: add_, mul_, etc.)
-                if args[0]._spec == output_spec:
+                # Fast path: placements unchanged (common case: add_, mul_, etc.)
+                if args[0]._spec.placements == output_spec.placements:
                     return args[0]
 
-                # Spec changed without redistribution (e.g. dim reindexing
+                # Placement changed without redistribution (e.g. dim reindexing
                 # in squeeze_: Shard(1) → Shard(0) after removing dim 0).
-                # Currently only squeeze_ inplace ops hit this path.
                 args[0]._spec = output_spec
                 return return_and_correct_aliasing(op_call, args, kwargs, args[0])
             else:
