@@ -1839,7 +1839,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
 at time_step %s when running action %s",
                     self.rank,
                     self.__class__.__name__,
-                    str(e),
+                    e,
                     time_step,
                     action,
                 )

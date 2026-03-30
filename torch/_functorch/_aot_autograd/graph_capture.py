@@ -262,9 +262,9 @@ def aot_dispatch_base_graph(
 
     aot_graphs_log.debug(
         "aot_config id: %s, fw_metadata=%s,subclass_metadata=%s",
-        str(aot_config.aot_id),
-        str(fw_metadata),
-        str(maybe_subclass_meta),
+        aot_config.aot_id,
+        fw_metadata,
+        maybe_subclass_meta,
     )
 
     # We track buffer assignments when exporting in non-strict mode.
