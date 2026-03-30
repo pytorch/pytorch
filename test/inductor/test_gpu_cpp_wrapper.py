@@ -261,9 +261,6 @@ if device_type == "xpu":
     test_failures_gpu_wrapper["test_add_complex_xpu"] = test_torchinductor.TestFailure(
         ("gpu_wrapper",), is_skip=True
     )
-    test_failures_gpu_wrapper["test_addmm"] = test_torchinductor.TestFailure(
-        ("gpu_wrapper",), is_skip=True
-    )
     test_failures_gpu_wrapper["test_adding_tensor_offsets_xpu"] = (
         test_torchinductor.TestFailure(("gpu_wrapper",), is_skip=True)
     )
