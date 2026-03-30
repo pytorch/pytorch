@@ -21,8 +21,10 @@ class XPUArch(enum.Enum):
 
 
 # device_id -> GPU codename
+# From https://github.com/intel/intel-graphics-compiler/blob/master/inc/common/igfxfmid.h
 _DEVICE_ID_TO_CODENAME = {
     0x0BD0: XPUCodename.PVC,
+    0x0BD4: XPUCodename.PVC,
     0x0BD5: XPUCodename.PVC,
     0x0BD6: XPUCodename.PVC,
     0x0BD7: XPUCodename.PVC,
@@ -32,12 +34,18 @@ _DEVICE_ID_TO_CODENAME = {
     0x0BDB: XPUCodename.PVC,
     0x0B69: XPUCodename.PVC,
     0x0B6E: XPUCodename.PVC,
+    0xE202: XPUCodename.BMG,
     0xE20B: XPUCodename.BMG,
     0xE20C: XPUCodename.BMG,
-    0xE211: XPUCodename.BMG,
+    0xE20D: XPUCodename.BMG,
+    0xE210: XPUCodename.BMG,
     0xE212: XPUCodename.BMG,
-    0xE223: XPUCodename.BMG,
+    0xE215: XPUCodename.BMG,
+    0xE216: XPUCodename.BMG,
+    0xE220: XPUCodename.BMG,
+    0xE221: XPUCodename.BMG,
     0xE222: XPUCodename.BMG,
+    0xE223: XPUCodename.BMG,
 }
 
 # GPU codename -> architecture
