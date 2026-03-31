@@ -330,7 +330,7 @@ bool THPCppFunction_Check(PyObject* obj) {
   if (type == get_default_type()) {
     return true;
   }
-  return cpp_function_types_set.find(type) != cpp_function_types_set.end();
+  return cpp_function_types_set.contains(type);
 }
 
 static PyObject* callRegisterFn(PyObject* dict, PyObject* hook) {
