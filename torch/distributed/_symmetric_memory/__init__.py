@@ -2270,6 +2270,54 @@ def reduce_scatter_offset(
         )
 
 
+def all_to_all_permute(
+    input: torch.Tensor,
+    out: torch.Tensor,
+    scatter_dim: int,
+    gather_dim: int,
+    *,
+    group: str,
+) -> None:
+    r"""
+    all_to_all_permute(input, out, scatter_dim, gather_dim, *, group) -> None
+
+    Permute-free all-to-all: shards along ``scatter_dim`` of ``input`` are exchanged
+    so each rank receives one shard per peer; results are laid out along ``gather_dim``
+    of ``out``. Supported pairs are ``(scatter_dim=1, gather_dim=0)`` and
+    ``(scatter_dim=0, gather_dim=1)``.
+
+    For ``scatter_dim=1``, ``gather_dim=0`` (let ``G`` be the group size): ``input`` is
+    ``[rows, G * local_cols]`` or equivalently ``[rows, G, local_cols]``;
+    each rank ``r`` reads column block ``r`` from every peer and writes peer ``j`` into
+    ``out[j]``. ``out`` must be contiguous with shape ``[G, rows, local_cols]`` or the
+    flattened equivalent ``[G * rows, local_cols]``.
+
+    For ``scatter_dim=0``, ``gather_dim=1`` (``G`` is the group size): ``input`` is
+    ``[G * local_rows, cols]`` or equivalently ``[G, local_rows, cols]``;
+    each rank ``r`` reads row block ``r`` from every peer; peer ``j`` is stored in
+    ``out[:, j, :]``. ``out`` must be contiguous with shape ``[local_rows, G, cols]`` or
+    ``[local_rows, G * cols]`` (flattened gather and inner dims).
+
+    Args:
+        input (Tensor): For ``(scatter_dim=1, gather_dim=0)``, 2-D ``[rows, G*local_cols]`` or
+            3-D ``[rows, G, local_cols]`` in symmetric memory (innermost dimension contiguous).
+            For ``(scatter_dim=0, gather_dim=1)``, 2-D ``[G*local_rows, cols]`` or 3-D
+            ``[G, local_rows, cols]`` (same layout).
+        out (Tensor): Contiguous buffer (see shapes above; 2-D allowed where noted).
+        scatter_dim (int): ``0`` or ``1`` — dimension along which the input is partitioned.
+        gather_dim (int): ``0`` or ``1`` — dimension along which peer chunks are
+            concatenated in ``out``.
+        group (str): The name of the ``ProcessGroup`` to perform the operation on.
+    """
+    backend = get_backend(input.device)
+    if backend == "NCCL":
+        torch.ops.symm_mem.nccl_all_to_all_permute(
+            input, out, scatter_dim, gather_dim, group
+        )
+    else:
+        raise NotImplementedError(f"all_to_all_permute: unsupported backend: {backend}")
+
+
 __all__ = [
     "empty",
     "rendezvous",
@@ -2280,4 +2328,5 @@ __all__ = [
     "get_signal_pad_size",
     "get_mem_pool",
     "reduce_scatter_offset",
+    "all_to_all_permute",
 ]

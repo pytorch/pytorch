@@ -581,6 +581,107 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_nccl_version((2, 28, 0), "nccl_all_to_all_permute requires nccl 2.28")
+    @skip_if_lt_x_gpu(2)
+    @parametrize(
+        "scatter_gather,out_2d,input_3d",
+        [
+            ((1, 0), False, False),
+            ((1, 0), True, False),
+            ((1, 0), False, True),
+            ((1, 0), True, True),
+            ((0, 1), False, False),
+            ((0, 1), True, False),
+            ((0, 1), False, True),
+            ((0, 1), True, True),
+        ],
+    )
+    def test_all_to_all_permute(self, scatter_gather, out_2d, input_3d):
+        """all_to_all_permute: (1,0)/(0,1); 3-D input [rows,G,loc] or [G,loc,cols] where supported."""
+        scatter_dim, gather_dim = scatter_gather
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        group_name = c10d.group.WORLD.group_name
+
+        p = self.world_size
+        dtype = torch.float
+
+        if scatter_dim == 1 and gather_dim == 0:
+            local_cols = 4
+            rows = 8
+            if input_3d:
+                buf = symm_mem.empty(
+                    rows, p, local_cols, dtype=dtype, device=self.device
+                ).fill_(float(self.rank))
+            else:
+                buf = symm_mem.empty(
+                    rows, p * local_cols, dtype=dtype, device=self.device
+                ).fill_(float(self.rank))
+            symm_mem.rendezvous(buf, group=group_name)
+            if out_2d:
+                out = torch.empty(p * rows, local_cols, dtype=dtype, device=self.device)
+            else:
+                out = torch.empty(p, rows, local_cols, dtype=dtype, device=self.device)
+            symm_mem.all_to_all_permute(
+                buf,
+                out,
+                scatter_dim=scatter_dim,
+                gather_dim=gather_dim,
+                group=group_name,
+            )
+            torch.cuda.synchronize()
+            out_view = out.view(p, rows, local_cols) if out_2d else out
+            for j in range(p):
+                self.assertEqual(
+                    out_view[j],
+                    torch.full(
+                        (rows, local_cols),
+                        float(j),
+                        dtype=dtype,
+                        device=self.device,
+                    ),
+                    msg=f"rank {self.rank}: out[{j}] should be peer {j}'s column block",
+                )
+        else:
+            local_rows = 4
+            cols = 4
+            if input_3d:
+                buf = symm_mem.empty(
+                    p, local_rows, cols, dtype=dtype, device=self.device
+                ).fill_(float(self.rank))
+            else:
+                buf = symm_mem.empty(
+                    p * local_rows, cols, dtype=dtype, device=self.device
+                ).fill_(float(self.rank))
+            symm_mem.rendezvous(buf, group=group_name)
+            if out_2d:
+                out = torch.empty(local_rows, p * cols, dtype=dtype, device=self.device)
+            else:
+                out = torch.empty(local_rows, p, cols, dtype=dtype, device=self.device)
+            symm_mem.all_to_all_permute(
+                buf,
+                out,
+                scatter_dim=scatter_dim,
+                gather_dim=gather_dim,
+                group=group_name,
+            )
+            torch.cuda.synchronize()
+            out_view = out.view(local_rows, p, cols) if out_2d else out
+            for j in range(p):
+                self.assertEqual(
+                    out_view[:, j, :],
+                    torch.full(
+                        (local_rows, cols),
+                        float(j),
+                        dtype=dtype,
+                        device=self.device,
+                    ),
+                    msg=f"rank {self.rank}: out[:, {j}, :] should be peer {j}'s row block",
+                )
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_nccl_version((2, 29), "NCCL one-sided host API support from nccl 2.29")
     @skip_if_lt_x_gpu(2)
     def test_put_wait_signal(self):
