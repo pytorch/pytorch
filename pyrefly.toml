@@ -44,6 +44,8 @@ project-excludes = [
   "torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**",
   "torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py",
   "torch/_native/ops/_oink_utils/lite_quack.py",
+  "torch/_native/ops/oink_rmsnorm/rmsnorm_kernels.py",
+  "torch/_native/ops/oink_rmsnorm/rmsnorm_with_stage2_kernels.py",
 ]
 ignore-missing-imports = [
     # XPU memory symbols not present for builds without XPU support
