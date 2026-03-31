@@ -68,19 +68,12 @@ class CustomPreGradPassRemoveIdentMuls(CustomGraphPass):
     """
 
     def __call__(self, g: torch.fx.Graph) -> None:
-        changed = False
         for n in g.nodes:
             if n.op == "call_function" and n.target is operator.mul:
                 lhs, rhs = n.args
                 if lhs == 1:
                     n.replace_all_uses_with(rhs)
                     g.erase_node(n)
-                    changed = True
-        if not changed:
-            raise RuntimeError(
-                "Custom pass did not change the graph. "
-                "All test cases expect the pass to modify the graph."
-            )
 
     def uuid(self):
         return "custom_pre_grad_pass_remove_ident_muls_v1"
@@ -2638,18 +2631,35 @@ class AOTAutogradCacheTests(InductorTestCase):
             ),
         ],
     )
+    @parametrize(
+        "use_module",
+        [
+            subtest(False, name="function"),
+            subtest(True, name="module"),
+        ],
+    )
     def test_pre_grad_passes_timing(
         self,
         pre_grad_pass_timing: Literal["early", "late", "default"],
         pre_grad_custom_pass: CustomGraphPassType,
         expect_pre_grad_call_count: tuple[int, int],
+        use_module: bool,
     ):
         from torch._inductor.compile_fx import compile_fx_forward, run_pre_grad_passes
 
         def fn(x, y):
             return 1 * x + y
 
+        class LinearModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return 1 * self.linear(x)
+
         pre_grad_call_count = 0
+        pre_grad_input_graphs: list[str] = []
         inductor_input_graphs: list[str] = []
 
         def wrap_run_pre_grad_passes(
@@ -2657,15 +2667,21 @@ class AOTAutogradCacheTests(InductorTestCase):
         ) -> GraphModule:
             nonlocal pre_grad_call_count
             pre_grad_call_count += 1
+            pre_grad_input_graphs.append(model.print_readable(print_output=False))
             run_pre_grad_passes(model, example_inputs)
             return model
 
-        def wrap_compile_fx_forward(gm, example_inputs, **kwargs):
+        @torch.utils._typing_utils.copy_func_params(compile_fx_forward)
+        def wrap_compile_fx_forward(gm, *args, **kwargs):
             inductor_input_graphs.append(gm.print_readable(print_output=False))
-            return compile_fx_forward(gm, example_inputs, **kwargs)
+            return compile_fx_forward(gm, *args, **kwargs)
 
-        x = torch.randn(10)
-        y = torch.randn(10)
+        if use_module:
+            target = LinearModel()
+            inputs = (torch.randn(10),)
+        else:
+            target = fn
+            inputs = (torch.randn(10), torch.randn(10))
 
         with (
             unittest.mock.patch(
@@ -2678,29 +2694,36 @@ class AOTAutogradCacheTests(InductorTestCase):
             ),
             inductor_config.patch("pre_grad_pass_timing", pre_grad_pass_timing),
             inductor_config.patch("pre_grad_custom_pass", pre_grad_custom_pass),
+            # Autograd cache doesn't save entries for modules with trainable
+            # parameters, so disable grad to get consistent cache hit counts
+            # across the function and module variants.
+            torch.no_grad(),
         ):
             self._clear_all_caches()
 
             # First compilation - expect cache miss.
-            compiled_fn = torch.compile(fn)
-            result1 = compiled_fn(x, y)
+            compiled = torch.compile(target)
+            result1 = compiled(*inputs)
 
             # Assert cache miss.
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
 
-            # Assert #invocation of pre-grad passe
+            # Assert #invocation of pre-grad passes.
             self.assertEqual(pre_grad_call_count, expect_pre_grad_call_count[0])
 
-            # Assert the pre-grad pass removed the identity mul before inductor.
+            # The pre-grad graph should contain the identity mul (= 1 * ...)
+            # before the custom pass removes it.
+            self.assertEqual(len(pre_grad_input_graphs), 1)
+            self.assertIn("= 1 * ", pre_grad_input_graphs[0])
             self.assertEqual(len(inductor_input_graphs), 1)
-            self.assertNotIn("mul", inductor_input_graphs[0])
+            self.assertNotIn("= 1 * ", inductor_input_graphs[0])
 
             torch._dynamo.reset()
 
             # Second compilation - expect cache hit.
-            compiled_fn2 = torch.compile(fn)
-            result2 = compiled_fn2(x, y)
+            compiled2 = torch.compile(target)
+            result2 = compiled2(*inputs)
 
             # Assert cache hit.
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
@@ -2746,8 +2769,9 @@ class AOTAutogradCacheTests(InductorTestCase):
     def test_pre_grad_pass_default_timing_without_uuid_warns(self):
         """
         Default timing with a pass that has no UUID should log a warning about
-        the pre-grad pass cache being bypassed.
+        the pre-grad pass cache being bypassed, only once per pass class.
         """
+        from torch._inductor.codecache import _warned_pre_grad_pass_missing_uuid
 
         class NoUuidPass(CustomGraphPass):
             def __call__(self, g: torch.fx.Graph) -> None:
@@ -2766,15 +2790,25 @@ class AOTAutogradCacheTests(InductorTestCase):
             inductor_config.patch("pre_grad_custom_pass", NoUuidPass()),
             inductor_config.patch("pre_grad_pass_timing", "default"),
         ):
+            _warned_pre_grad_pass_missing_uuid.clear()
             self._clear_all_caches()
+
+            # First compilation — should warn.
             compiled_fn = torch.compile(fn)
             with self.assertLogs(
                 "torch._inductor.codecache", level="WARNING"
             ) as log_cm:
                 compiled_fn(x, y)
-            self.assertTrue(
-                any("does not implement uuid()" in msg for msg in log_cm.output)
-            )
+            uuid_warnings = [
+                m for m in log_cm.output if "does not implement uuid()" in m
+            ]
+            self.assertEqual(len(uuid_warnings), 1)
+
+            # Second compilation — same pass class, should not warn again.
+            torch._dynamo.reset()
+            compiled_fn2 = torch.compile(fn)
+            with self.assertNoLogs("torch._inductor.codecache", level="WARNING"):
+                compiled_fn2(x, y)
 
     @parametrize(
         "pre_grad_pass_timing,has_uuid,expect_miss_on_different_uuid",
