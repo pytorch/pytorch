@@ -14755,6 +14755,36 @@ fn
         self.assertRaises(Unsupported, f, [])
         self.assertRaises(Unsupported, f, "1 + j")
 
+    def test_builtin_class_method_constant_fold(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return (
+                bool.__new__(bool),
+                bool.__new__(bool, 1),
+                bool.__new__(bool, 0),
+                bool.from_bytes(b"\x00" * 8, "big"),
+                bool.from_bytes(b"abcd", "little"),
+                int.__new__(int),
+                int.__new__(int, 42),
+                int.from_bytes(b"\x00\x03", "big"),
+                int.from_bytes(b"\xff", byteorder="big", signed=True),
+                float.fromhex("0x1.ffffp10"),
+                float.hex(1.5),
+            )
+
+        res = fn()
+        self.assertIs(res[0], False)
+        self.assertIs(res[1], True)
+        self.assertIs(res[2], False)
+        self.assertIs(res[3], False)
+        self.assertIs(res[4], True)
+        self.assertEqual(res[5], 0)
+        self.assertEqual(res[6], 42)
+        self.assertEqual(res[7], 3)
+        self.assertEqual(res[8], -1)
+        self.assertEqual(res[9], float.fromhex("0x1.ffffp10"))
+        self.assertEqual(res[10], "0x1.8000000000000p+0")
+
     def test_guard_string_escaped(self):
         d = {frozenset({0}): {frozenset({0}): 1}}
 
