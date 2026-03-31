@@ -62,6 +62,7 @@ PARTIAL_REDUCE_OPS = ["sum", "avg", "min", "max"]
 SKIP_OPS: dict[str, str] = {
     "bernoulli": "non-deterministic (random sampling)",
     "empty_like": "uninitialized memory",
+    "exponential": "non-deterministic (random sampling)",
     "new_empty": "uninitialized memory",
     "new_empty_strided": "uninitialized memory",
     "nn.functional.dropout": "non-deterministic (random masking)",
