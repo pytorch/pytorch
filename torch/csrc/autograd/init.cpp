@@ -320,8 +320,12 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
           "is_hidden_event",
           [](const KinetoEvent& e) { return e.isHiddenEvent(); })
       // KinetoEvent metadata
-      .def("metadata_json", [](const KinetoEvent& e) {
-        return e.metadataJson();
+      .def(
+          "metadata_json",
+          [](const KinetoEvent& e) { return e.metadataJson(); })
+      .def("activity_type", [](const KinetoEvent& e) {
+        return libkineto::toString(
+            static_cast<libkineto::ActivityType>(e.activityType()));
       });
 
   m.def("_soft_assert_raises", &setSoftAssertRaises);
