@@ -139,7 +139,9 @@ class TestDeviceTypeOpenReg(TestCase):
 # Modify PrivateUse1TestBase which is automatically included for OpenReg
 PrivateUse1TestBase.op_skips = {
     "op_skip": [DecorateInfo(unittest.skip("skip op_skip"))],
-    "op_skip_f32": [DecorateInfo(unittest.skip("skip op_skip"), dtypes=(torch.float32,))],
+    "op_skip_f32": [
+        DecorateInfo(unittest.skip("skip op_skip"), dtypes=(torch.float32,))
+    ],
 }
 PrivateUse1TestBase.op_decorators = {
     "op_xfail": [DecorateInfo(unittest.expectedFailure)],
