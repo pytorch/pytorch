@@ -676,6 +676,16 @@ class ConstDictVariable(VariableTracker):
             return self.clone(
                 items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
             )
+        elif name == "__len__":
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            self.install_dict_keys_match_guard()
+            return VariableTracker.build(tx, len(self.items))
         elif name == "__setitem__" and self.is_mutable():
             arg_hashable = args and is_hashable(args[0])
             if not arg_hashable:
@@ -968,10 +978,6 @@ class ConstDictVariable(VariableTracker):
     def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
         self.install_dict_keys_match_guard()
         return [x.vt for x in self.items]
-
-    def len_impl(self, tx: "InstructionTranslator") -> VariableTracker:
-        self.install_dict_keys_match_guard()
-        return VariableTracker.build(tx, len(self.items))
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
@@ -1826,7 +1832,9 @@ class DictViewVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "__iter__":
+        if name == "__len__":
+            return self.dv_dict.call_method(tx, name, args, kwargs)
+        elif name == "__iter__":
             from .lists import ListIteratorVariable
 
             return ListIteratorVariable(
@@ -1835,9 +1843,6 @@ class DictViewVariable(VariableTracker):
         elif name == "__repr__":
             return VariableTracker.build(tx, self.debug_repr())
         return super().call_method(tx, name, args, kwargs)
-
-    def len_impl(self, tx: "InstructionTranslator") -> VariableTracker:
-        return self.dv_dict.len_impl(tx)
 
 
 class DictKeysVariable(DictViewVariable):

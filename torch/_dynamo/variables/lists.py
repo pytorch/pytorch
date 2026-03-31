@@ -165,9 +165,6 @@ class BaseListVariable(VariableTracker):
         self._install_list_length_guard()
         return list(self.items)
 
-    def len_impl(self, tx: "InstructionTranslator") -> VariableTracker:
-        return VariableTracker.build(tx, len(self.items))
-
     def call_tree_map_branch(
         self,
         tx: "InstructionTranslator",
@@ -661,12 +658,6 @@ class RangeVariable(BaseListVariable):
     ) -> list[VariableTracker]:
         return [variables.ConstantVariable.create(x) for x in self.as_python_constant()]
 
-    def len_impl(self, tx: "InstructionTranslator") -> VariableTracker:
-        length = self.range_length()
-        if length > sys.maxsize:
-            raise_observed_exception(OverflowError, tx)
-        return VariableTracker.build(tx, length)
-
     def reconstruct(self, codegen: "PyCodegen") -> None:
         assert "range" not in codegen.tx.f_globals
         codegen.add_push_null(
@@ -733,6 +724,11 @@ class RangeVariable(BaseListVariable):
             return RangeIteratorVariable(
                 self.start(), self.stop(), self.step(), self.range_length()
             )
+        elif name == "__len__":
+            length = self.range_length()
+            if length > sys.maxsize:
+                raise_observed_exception(OverflowError, tx)
+            return VariableTracker.build(tx, self.range_length())
         elif name in ("count", "__contains__"):
             return SourcelessBuilder.create(tx, self.range_count(*args))
         elif name == "index":
