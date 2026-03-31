@@ -154,6 +154,53 @@ if HAS_CUDA_AND_TRITON:
     def all_live_block_count():
         return len(all_live_blocks())
 
+    class _AssertOutputStackTraces(torch._inductor.custom_graph_pass.CustomGraphPass):
+        """Asserts all non-placeholder output args have stack traces.
+
+        Only fires on graphs that were traced by Dynamo (which captures
+        stack traces). Graphs from make_fx or compiled autograd may not
+        have stack traces at all, and compiler-synthesized ops (like
+        empty_strided from decompositions) won't have user stack traces.
+        """
+
+        def __init__(self, pass_name: str) -> None:
+            self.pass_name = pass_name
+
+        def __call__(self, graph: torch.fx.Graph) -> None:
+            # Skip graphs where no call_function node has a stack trace,
+            # which indicates the graph wasn't traced by Dynamo (e.g.,
+            # make_fx, compiled autograd).
+            has_any_stack_trace = any(
+                n.meta.get("stack_trace")
+                for n in graph.nodes
+                if n.op == "call_function"
+            )
+            if not has_any_stack_trace:
+                return
+
+            for node in graph.nodes:
+                if node.op != "output":
+                    continue
+                for arg in node.args[0]:
+                    if not isinstance(arg, torch.fx.Node):
+                        continue
+                    if arg.op == "placeholder":
+                        continue
+                    # Skip compiler-synthesized ops that don't originate
+                    # from user code (e.g., empty_strided from decomps).
+                    if not arg.meta.get("source_fn_stack") and not arg.meta.get(
+                        "nn_module_stack"
+                    ):
+                        continue
+                    stack_trace = arg.meta.get("stack_trace")
+                    assert stack_trace, (
+                        f"[{self.pass_name}] Missing stack trace on output "
+                        f"'{arg.name}' (op={arg.op}, target={arg.target})"
+                    )
+
+        def uuid(self):
+            return "assert_output_stack_traces"
+
     class CudaGraphTreeTests(TestCase):
         def setUp(self):
             super().setUp()
@@ -165,6 +212,14 @@ if HAS_CUDA_AND_TRITON:
                         "triton.cudagraph_trees": True,
                         "triton.fast_path_cudagraph_asserts": True,  # too slow
                         "triton.slow_path_cudagraph_asserts": True,
+                        "test_configs.cudagraph_assert_stack_traces": True,
+                        "pre_grad_custom_pass": _AssertOutputStackTraces("pre_grad"),
+                        "joint_custom_post_pass": _AssertOutputStackTraces(
+                            "joint_graph"
+                        ),
+                        "post_grad_custom_pre_pass": _AssertOutputStackTraces(
+                            "post_grad"
+                        ),
                     }
                 )
             )
@@ -2296,61 +2351,45 @@ if HAS_CUDA_AND_TRITON:
             FileCheck().check("overwritten").check("x * x * x").run(repr(exc.exception))
 
         def test_output_node_has_stack_traces_inference(self):
-            """Test that output_stack_traces on the output node provides
-            stack traces even when a post-grad pass strips them from arg nodes
-            in inference mode."""
+            """Test that cudagraph error messages include user stack traces
+            for inference mode."""
 
-            def strip_stack_traces(graph):
-                for node in graph.nodes:
-                    if node.op not in ("placeholder", "output"):
-                        node.meta.pop("stack_trace", None)
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x * x * x
 
-            with config.patch(post_grad_custom_post_pass=strip_stack_traces):
+            inp = torch.rand([4], device="cuda")
+            out = foo(inp).detach()
+            out2 = foo(inp).detach()
 
-                @torch.compile(mode="reduce-overhead")
-                def foo(x):
-                    return x * x * x
+            with self.assertRaises(Exception) as exc:
+                out + out
 
-                inp = torch.rand([4], device="cuda")
-                out = foo(inp).detach()
-                out2 = foo(inp).detach()
-
-                with self.assertRaises(Exception) as exc:
-                    out + out
-
-                self.assertIn("x * x * x", repr(exc.exception))
+            self.assertIn("x * x * x", repr(exc.exception))
 
         def test_output_node_has_stack_traces_training(self):
-            """Test that output_stack_traces on the output node provides
-            stack traces even when a post-grad pass strips them from arg nodes
-            in training mode (fwd/bwd graph split via partitioner)."""
+            """Test that cudagraph error messages include user stack traces
+            for training mode (fwd/bwd graph split via partitioner)."""
 
-            def strip_stack_traces(graph):
-                for node in graph.nodes:
-                    if node.op not in ("placeholder", "output"):
-                        node.meta.pop("stack_trace", None)
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x * x * x
 
-            with config.patch(post_grad_custom_post_pass=strip_stack_traces):
+            inp = torch.rand([4], device="cuda", requires_grad=True)
+            # Complete fwd+bwd to compile both graphs
+            torch.compiler.cudagraph_mark_step_begin()
+            foo(inp).sum().backward()
 
-                @torch.compile(mode="reduce-overhead")
-                def foo(x):
-                    return x * x * x
+            # Now trigger the dealloc error
+            torch.compiler.cudagraph_mark_step_begin()
+            out = foo(inp).detach()
+            torch.compiler.cudagraph_mark_step_begin()
+            out2 = foo(inp).detach()
 
-                inp = torch.rand([4], device="cuda", requires_grad=True)
-                # Complete fwd+bwd to compile both graphs
-                torch.compiler.cudagraph_mark_step_begin()
-                foo(inp).sum().backward()
+            with self.assertRaises(Exception) as exc:
+                out + out
 
-                # Now trigger the dealloc error
-                torch.compiler.cudagraph_mark_step_begin()
-                out = foo(inp).detach()
-                torch.compiler.cudagraph_mark_step_begin()
-                out2 = foo(inp).detach()
-
-                with self.assertRaises(Exception) as exc:
-                    out + out
-
-                self.assertIn("x * x * x", repr(exc.exception))
+            self.assertIn("x * x * x", repr(exc.exception))
 
         @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
         def test_conv_benchmark(self):

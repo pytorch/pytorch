@@ -226,6 +226,9 @@ class GraphPartitionMap:
     # name of constants read/written by the graph partition
     constant_names: list[str]
 
+    # stack traces for each partition output, populated from IR node origins
+    stack_traces: list[str | None] = dataclasses.field(default_factory=list)
+
 
 def fp8_bench(fn: Callable[[], Any], warmup: int = 25, rep: int = 100) -> float:
     """

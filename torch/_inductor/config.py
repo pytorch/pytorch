@@ -2541,6 +2541,9 @@ class lookup_table:
 
 
 class test_configs:
+    # assert that stack traces are always present on cudagraph outputs
+    cudagraph_assert_stack_traces = False
+
     force_extern_kernel_in_multi_template: bool = False
 
     # Force custom op autotuning choice selection:

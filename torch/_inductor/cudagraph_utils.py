@@ -405,9 +405,12 @@ def get_partition_cudagraph_metadata(
         partition_placeholders.append(placeholder)
 
     partition_stack_traces = []
-    for graph_output_idx in partition_map.output_index_mapping:
+    for i, graph_output_idx in enumerate(partition_map.output_index_mapping):
         if graph_output_idx is not None:
             partition_stack_traces.append(metadata.stack_traces[graph_output_idx])
+        elif partition_map.stack_traces and i < len(partition_map.stack_traces):
+            # For partition-internal outputs, use stack traces from IR nodes
+            partition_stack_traces.append(partition_map.stack_traces[i])
         else:
             partition_stack_traces.append(None)
 

@@ -142,7 +142,7 @@ def get_stack_traces(gm: torch.fx.GraphModule) -> list[str | None]:
     args = output.args[0]
     if not hasattr(args, "__iter__"):
         return []
-    return [
+    return output.meta.get("output_stack_traces") or [
         (arg.stack_trace if isinstance(arg, torch.fx.node.Node) else None)
         for arg in args  # type: ignore[union-attr]
     ]

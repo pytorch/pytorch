@@ -2585,6 +2585,10 @@ class CUDAGraphTreeManager:
 
     @staticmethod
     def format_dealloc_msg(stack_trace: str | None) -> str:
+        if config.test_configs.cudagraph_assert_stack_traces:
+            assert stack_trace is not None, (
+                "Expected stack trace to be set for all cudagraph outputs"
+            )
         stack_trace = (
             stack_trace.strip() if stack_trace else "[Could not find stack trace]"
         )

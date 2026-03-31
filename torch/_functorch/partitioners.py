@@ -278,6 +278,14 @@ def _find_input_for_invalid_output(
     return None
 
 
+def _get_first_user_stack_trace(node: fx.Node) -> str | None:
+    """Get a stack trace from the first user of a node (skipping output nodes)."""
+    for user in node.users:
+        if user.op != "output" and (st := user.meta.get("stack_trace")):
+            return st
+    return None
+
+
 def _extract_graph_with_inputs_outputs(
     joint_graph: fx.Graph,
     inputs: list[fx.Node],
@@ -385,9 +393,15 @@ def _extract_graph_with_inputs_outputs(
     out.meta["desc"] = outputs_descs
     # Snapshot stack traces on the output node before passes run,
     # as later passes may strip stack_trace from individual nodes.
+    # Use `x` (original joint graph node) for the fallback since its users
+    # span the full joint graph, not just the extracted subgraph.
     out.meta["output_stack_traces"] = [
-        v.meta.get("stack_trace") if isinstance(v, fx.Node) else None
-        for v in output_values
+        (
+            x.meta.get("stack_trace") or _get_first_user_stack_trace(x)
+            if isinstance(x, fx.Node)
+            else None
+        )
+        for x in outputs
     ]
 
     new_graph.eliminate_dead_code()
