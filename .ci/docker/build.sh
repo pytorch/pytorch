@@ -128,14 +128,10 @@ case "$tag" in
     KATEX=yes
     TRITON=yes
     ;;
-  pytorch-linux-jammy-py3-clang18-onnx)
-    ANACONDA_PYTHON_VERSION=3.10
-    CLANG_VERSION=18
-    ONNX=yes
-    ;;
   pytorch-linux-jammy-py3.10-clang18)
     ANACONDA_PYTHON_VERSION=3.10
     CLANG_VERSION=18
+    ONNX=yes
     ;;
   pytorch-linux-jammy-py3.11-clang18)
     ANACONDA_PYTHON_VERSION=3.11
@@ -214,10 +210,6 @@ case "$tag" in
     CUDA_VERSION=12.8.1
     CLANG_VERSION=18
     TRITON=yes
-    ;;
-  pytorch-linux-jammy-py3-clang18-asan)
-    ANACONDA_PYTHON_VERSION=3.10
-    CLANG_VERSION=18
     ;;
   pytorch-linux-jammy-py3.10-gcc11)
     ANACONDA_PYTHON_VERSION=3.10
