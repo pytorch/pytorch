@@ -7096,7 +7096,11 @@ class TestMemPool(TestCase):
                 self.allocated_addrs = []
                 self.buffer_size = 1 * 1024 * 1024 * 1024  # 1GB
                 err, base_ptr = runtime.cudaMalloc(self.buffer_size)
-                assert err == runtime.cudaError_t.cudaSuccess
+                self.assertEqual(
+                    err,
+                    runtime.cudaError_t.cudaSuccess,
+                    "init allocation for test_nccl_mem_alloc_addresses_in_random_order should be successful",
+                )
                 self.base_ptr = base_ptr
                 self.head = base_ptr
                 self.tail = base_ptr + self.buffer_size
@@ -7108,6 +7112,7 @@ class TestMemPool(TestCase):
         state = AllocState()
 
         def my_alloc(size, device, stream, _runtime=runtime):
+            nonlocal state
             if state.first_stream is None:
                 state.first_stream = stream
             elif state.second_stream is None:
@@ -7173,15 +7178,23 @@ class TestMemPool(TestCase):
         del second_round_tensors
 
         mem_snapshot = pool.snapshot()
-        assert len(mem_snapshot) == len(tensor_ptrs), (
-            f"expected to have {len(tensor_ptrs)} segments, but actually got {len(mem_snapshot)}"
+        self.assertEqual(
+            len(mem_snapshot),
+            len(tensor_ptrs),
+            f"expected to have {len(tensor_ptrs)} segments, but actually got {len(mem_snapshot)}",
         )
 
         for idx, first_addr in enumerate(tensor_ptrs):
             second_addr = second_round_tensor_ptrs[idx]
-            assert second_addr == first_addr
-            assert second_addr == state.allocated_addrs[idx], (
-                f"{second_round_tensor_ptrs[idx]=} != {state.allocated_addrs[idx]=}"
+            self.assertEqual(
+                second_addr,
+                first_addr,
+                "mem addr allocated for second round should be same with first round",
+            )
+            self.assertEqual(
+                second_addr,
+                state.allocated_addrs[idx],
+                f"{second_round_tensor_ptrs[idx]=} != {state.allocated_addrs[idx]=}",
             )
         del pool
         del state
