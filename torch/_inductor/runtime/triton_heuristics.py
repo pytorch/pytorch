@@ -4342,7 +4342,11 @@ class Grid2DWithYZOverflow(GridExpr):
                 ),
             ]
         )
-        self.y_grid = self.ceildiv("y_grid_raw_", "y_grid_div_")
+        ceildiv_expr = self.ceildiv("y_grid_raw_", "y_grid_div_")
+        if self.mode == "python":
+            self.y_grid = f"(0 if y_grid_div_ == 0 else {ceildiv_expr})"
+        else:
+            self.y_grid = f"(y_grid_div_ == 0 ? 0 : {ceildiv_expr})"
         self.z_grid = "y_grid_div_"
 
 
@@ -4429,7 +4433,11 @@ class ComboKernelGrid(GridExpr):
                     ),
                 ]
             )
-            self.y_grid = self.ceildiv("y_grid_raw_", "y_grid_div_")
+            ceildiv_expr = self.ceildiv("y_grid_raw_", "y_grid_div_")
+            if self.mode == "python":
+                self.y_grid = f"(0 if y_grid_div_ == 0 else {ceildiv_expr})"
+            else:
+                self.y_grid = f"(y_grid_div_ == 0 ? 0 : {ceildiv_expr})"
             self.z_grid = "y_grid_div_"
 
     def combo_x_grid(

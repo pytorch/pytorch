@@ -709,6 +709,56 @@ class TestGridExprMaximum(TestCase):
         self.assertEqual(grid.maximum([10, 20, 5]), 20)
 
 
+class TestGrid2DWithYZOverflowZeroYnumel(TestCase):
+    """Regression test for https://github.com/pytorch/pytorch/issues/178530"""
+
+    def test_grid2d_yz_overflow_zero_ynumel_python(self):
+        from torch._inductor.runtime.triton_heuristics import Grid2DWithYZOverflow
+
+        grid = Grid2DWithYZOverflow(inductor_meta={}, mode="python")
+        grid.generate({"XBLOCK": 128, "YBLOCK": 128})
+        # ynumel=0 must not raise ZeroDivisionError
+        x, y, z = grid.eval_slow(
+            {"xnumel": 256, "ynumel": 0, "XBLOCK": 128, "YBLOCK": 128}
+        )
+        self.assertEqual(y, 0)
+        self.assertEqual(z, 0)
+
+    def test_grid2d_yz_overflow_zero_ynumel_cpp(self):
+        from torch._inductor.runtime.triton_heuristics import Grid2DWithYZOverflow
+
+        grid = Grid2DWithYZOverflow(inductor_meta={}, mode="cpp")
+        grid.generate({"XBLOCK": 128, "YBLOCK": 128})
+        # cpp mode: the generated expression should contain a zero-guard
+        self.assertIn("== 0", str(grid.y_grid))
+
+    def test_grid2d_yz_overflow_nonzero_ynumel_unchanged(self):
+        from torch._inductor.runtime.triton_heuristics import Grid2DWithYZOverflow
+
+        grid = Grid2DWithYZOverflow(inductor_meta={}, mode="python")
+        grid.generate({"XBLOCK": 128, "YBLOCK": 128})
+        # Normal case: ynumel > 0 still works correctly
+        x, y, z = grid.eval_slow(
+            {"xnumel": 256, "ynumel": 256, "XBLOCK": 128, "YBLOCK": 128}
+        )
+        self.assertEqual(x, 2)
+        self.assertEqual(y, 2)
+        self.assertEqual(z, 1)
+
+    def test_grid2d_yz_overflow_large_ynumel(self):
+        from torch._inductor.runtime.triton_heuristics import Grid2DWithYZOverflow
+
+        grid = Grid2DWithYZOverflow(inductor_meta={}, mode="python")
+        grid.generate({"XBLOCK": 128, "YBLOCK": 128})
+        # Large ynumel that requires overflow splitting across y and z
+        x, y, z = grid.eval_slow(
+            {"xnumel": 128, "ynumel": 128 * 131070, "XBLOCK": 128, "YBLOCK": 128}
+        )
+        self.assertEqual(x, 1)
+        # y * z must cover all y blocks
+        self.assertGreaterEqual(y * z, 131070)
+
+
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:
         run_tests()
