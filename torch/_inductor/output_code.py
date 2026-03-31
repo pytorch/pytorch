@@ -902,6 +902,15 @@ class CompiledAOTI(OutputCode):
                     True,
                 ).run  # type: ignore[attr-defined]
             )  # type: ignore[attr-defined]
+        elif self.device_type.startswith("xpu"):
+            current_callable = (
+                torch._C._aoti.AOTIModelContainerRunnerXpu(  # type: ignore[call-arg]
+                    current_callable,
+                    1,
+                    self.device_type,
+                    "",
+                ).run  # type: ignore[attr-defined]
+            )  # type: ignore[attr-defined]
         elif self.device_type == "cpu":
             current_callable = (
                 torch._C._aoti.AOTIModelContainerRunnerCpu(  # type: ignore[call-arg]
