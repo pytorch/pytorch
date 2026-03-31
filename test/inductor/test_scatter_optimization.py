@@ -143,6 +143,27 @@ class TestScatterOpt(TestCase):
         )
         self.assertGreaterEqual(metrics.num_bytes_accessed, expected_num_bytes)
 
+    def test_scatter_reduce_scalar_broadcast_non_power_of_2(self):
+        def f(x, bias, idx):
+            src = x + bias
+            out = torch.zeros(1, 1, device=x.device, dtype=x.dtype)
+            return out.scatter_reduce(
+                0,
+                idx.unsqueeze(-1).expand_as(src),
+                src,
+                "sum",
+                include_self=True,
+            )
+
+        n = 33
+        x = torch.randn(n, 1, device=GPU_TYPE)
+        bias = torch.tensor([0.020368], device=GPU_TYPE)
+        idx = torch.zeros(n, dtype=torch.long, device=GPU_TYPE)
+
+        expected = f(x, bias, idx)
+        actual = torch.compile(f, fullgraph=True, dynamic=False)(x, bias, idx)
+        self.assertTrue(same(expected, actual, tol=1e-5), f"{expected=}\n{actual=}\n")
+
         # the second kernel and third kernel are both mutation kernel. So we
         # overestimated the memory accessed
         # Update the test once the overestimiation is fixed.

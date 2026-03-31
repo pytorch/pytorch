@@ -33,8 +33,16 @@ class PreservesZeros(SymPyOps, DefaultHandler):
         self.dtype_prop = DtypePropagationOpsHandler()
 
     def load(self, name: str, index: sympy.Expr) -> TypedExpr:
-        # In prologue fusion, all loads get broadcasted
         dtype = self.dtype_prop.load(name, index)
+        buf = V.graph.try_get_buffer(name)
+        if (
+            buf is not None
+            and hasattr(buf, "get_numel")
+            and V.graph.sizevars.statically_known_equals(buf.get_numel(), 1)
+        ):
+            return TypedExpr(construct_symbol(next(self.count), dtype), dtype)
+
+        # In prologue fusion, masked tensor loads get broadcasted.
         return TypedExpr(
             sympy.Float(0) if dtype.is_floating_point else sympy.Integer(0), dtype
         )
