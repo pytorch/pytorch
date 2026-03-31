@@ -111,7 +111,6 @@ class TestDeviceTypeOpenReg(TestCase):
 
     @ops([op_normal, op_skip, op_xfail, op_precision])
     def test_op(self, device, dtype, op):
-        type(self)._executed[op.name] += 1
         if op.name in ("op_skip", "op_xfail"):
             self.fail(f"{op.name} deliberately fails")
         if op.name == "op_precision" and dtype == torch.float32:
@@ -123,6 +122,7 @@ class TestDeviceTypeOpenReg(TestCase):
                     f"OpInfo precisionOverride (1e-5), but got {self.precision}"
                 ),
             )
+        type(self)._executed[op.name] += 1
 
     @ops([op_normal])
     def test_op_narrow_ops(self, device, dtype, op):
