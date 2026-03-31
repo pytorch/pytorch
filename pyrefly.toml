@@ -47,6 +47,7 @@ project-excludes = [
   "torch/_native/ops/oink_rmsnorm/rmsnorm_kernels.py",
   "torch/_native/ops/oink_rmsnorm/rmsnorm_with_stage2_kernels.py",
   "torch/_native/ops/oink_softmax/softmax_kernels.py",
+  "torch/_native/ops/oink_layernorm/layernorm_kernels.py",
 ]
 ignore-missing-imports = [
     # XPU memory symbols not present for builds without XPU support

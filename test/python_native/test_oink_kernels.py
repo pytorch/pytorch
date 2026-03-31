@@ -198,5 +198,85 @@ class TestOinkSoftmaxCorrectness(TestCase):
             )
 
 
+class TestOinkLayernormGating(TestCase):
+    """Test that the layernorm gating function correctly accepts/rejects inputs."""
+
+    def _get_gating_fn(self):
+        from torch._native.ops.oink_layernorm.layernorm import (
+            _should_use_oink_layernorm,
+        )
+
+        return _should_use_oink_layernorm
+
+    def test_rejects_cpu_tensor(self):
+        fn = self._get_gating_fn()
+        x = torch.randn(4, 128, dtype=torch.bfloat16)
+        self.assertFalse(fn(x))
+
+    def test_rejects_non_2d(self):
+        fn = self._get_gating_fn()
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+        x = torch.randn(2, 4, 128, dtype=torch.bfloat16, device="cuda")
+        self.assertFalse(fn(x))
+
+    def test_rejects_wrong_dtype(self):
+        fn = self._get_gating_fn()
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+        x = torch.randn(4, 128, dtype=torch.float64, device="cuda")
+        self.assertFalse(fn(x))
+
+
+class TestOinkLayernormRegistration(TestCase):
+    """Verify that layernorm is registered in the override graph."""
+
+    def test_layernorm_registered(self):
+        from torch._native.registry import _graphs
+
+        self.assertIn(("native_layer_norm", "CUDA"), _graphs)
+
+
+@unittest.skipIf(
+    not (_IS_SM100 and _CUTEDSL_AVAILABLE),
+    "Requires SM100 and CuTeDSL runtime",
+)
+class TestOinkLayernormCorrectness(TestCase):
+    """Correctness tests: compare oink layernorm against reference."""
+
+    def test_layernorm_matches_reference(self):
+        torch.manual_seed(42)
+        M, N = 32, 256
+        x = torch.randn(M, N, device="cuda", dtype=torch.bfloat16)
+        w = torch.randn(N, device="cuda", dtype=torch.float32)
+        b = torch.randn(N, device="cuda", dtype=torch.float32)
+        eps = 1e-5
+
+        ref = torch.nn.functional.layer_norm(x.float(), [N], w, b, eps).to(x.dtype)
+        result, mean, rstd = torch.native_layer_norm(x, [N], w, b, eps)
+
+        torch.testing.assert_close(result, ref, atol=1e-2, rtol=1e-2)
+        self.assertEqual(mean.shape, (M, 1))
+        self.assertEqual(rstd.shape, (M, 1))
+
+    def test_layernorm_various_shapes(self):
+        torch.manual_seed(42)
+        for M, N in [(1, 512), (64, 1024), (128, 4096)]:
+            x = torch.randn(M, N, device="cuda", dtype=torch.bfloat16)
+            w = torch.randn(N, device="cuda", dtype=torch.float32)
+            b = torch.randn(N, device="cuda", dtype=torch.float32)
+            eps = 1e-5
+
+            ref = torch.nn.functional.layer_norm(x.float(), [N], w, b, eps).to(x.dtype)
+            result, _, _ = torch.native_layer_norm(x, [N], w, b, eps)
+            torch.testing.assert_close(
+                result,
+                ref,
+                atol=1e-2,
+                rtol=1e-2,
+                msg=f"Failed for shape ({M}, {N})",
+            )
+
+
 if __name__ == "__main__":
     run_tests()
