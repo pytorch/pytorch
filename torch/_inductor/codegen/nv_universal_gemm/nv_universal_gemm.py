@@ -88,6 +88,55 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         self.swizzle_type_a = swizzle_type_a
         self.swizzle_type_b = swizzle_type_b
 
+    def precompile(self):
+        """Pre-compile the kernel in a subprocess to populate the disk cache.
+
+        Like CUTLASSBenchmarkRequest.precompile() spawns nvcc in a subprocess,
+        this spawns a CuTeDSL compilation subprocess. Thread-safe because each
+        call gets its own process. The ThreadPoolExecutor in make_precompile_fn
+        runs multiple precompile() calls in parallel.
+        """
+        from torch._inductor.codegen.nv_universal_gemm.compile_cache import (
+            precompile_in_subprocess,
+        )
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils import (
+            to_cutlass_scale_mode,
+        )
+
+        input_metas = [
+            {"shape": list(tm.sizes), "stride": list(tm.strides), "dtype": str(tm.dtype)}
+            for tm in self.input_tensor_meta
+        ]
+        output_meta = {
+            "shape": list(self.output_tensor_meta.sizes),
+            "stride": list(self.output_tensor_meta.strides),
+            "dtype": str(self.output_tensor_meta.dtype),
+        }
+
+        scale_info = None
+        if self.variant == GemmVariant.SCALED_GEMM:
+            scale_mode_a, swizzle_mode_a = to_cutlass_scale_mode(
+                self.scale_type_a, self.swizzle_type_a
+            )
+            scale_mode_b, swizzle_mode_b = to_cutlass_scale_mode(
+                self.scale_type_b, self.swizzle_type_b
+            )
+            scale_info = {
+                "scale_mode_a": scale_mode_a.name if scale_mode_a else "TENSORWISE",
+                "scale_mode_b": scale_mode_b.name if scale_mode_b else "TENSORWISE",
+                "swizzle_mode_a": swizzle_mode_a.name if swizzle_mode_a else "NONE",
+                "swizzle_mode_b": swizzle_mode_b.name if swizzle_mode_b else "NONE",
+            }
+
+        precompile_in_subprocess(
+            kernel_name=self.kernel.metadata.kernel_name,
+            input_tensor_metas=input_metas,
+            output_tensor_meta=output_meta,
+            accumulator_type=str(self.accumulator_type),
+            variant=self.variant.name,
+            scale_info=scale_info,
+        )
+
     def benchmark(
         self,
         *input_tensors: torch.Tensor,
@@ -115,10 +164,20 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         """Create a function to run the NVIDIA Universal GEMM kernel."""
         import cutlass_api
 
+        from torch._inductor.codegen.nv_universal_gemm.compile_cache import (
+            nvgemm_compile_and_cache,
+        )
+
         args = self._create_gemm_arguments(cutlass_api, input_tensors, out)
 
         if self._compiled_artifact is None:
-            self._compiled_artifact = self.kernel.compile(args)
+            self._compiled_artifact = nvgemm_compile_and_cache(
+                self.kernel,
+                args,
+                kernel_name=self.kernel.metadata.kernel_name,
+                input_tensors=input_tensors,
+                out_tensor=out,
+            )
         artifact = self._compiled_artifact
         kernel = self.kernel
 
@@ -243,6 +302,9 @@ class NVUniversalGemmCaller(ChoiceCaller):
 
     def __str__(self) -> str:
         return f"NVUniversalGemmCaller({self.kernel.metadata.kernel_name})"
+
+    def precompile(self):
+        self.bmreq.precompile()
 
     def benchmark(self, *args, out) -> float:
         return self.bmreq.benchmark(*args, out=out)
