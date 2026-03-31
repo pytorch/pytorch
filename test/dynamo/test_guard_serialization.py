@@ -1685,9 +1685,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         ref, loaded = self._test_serialization(
             "TENSOR_MATCH", foo, Inputs(x, torch.Stream())
         )
-        self._test_check_fn(
-            ref, loaded, {"inputs": Inputs(x, torch.Stream())}, True
-        )
+        self._test_check_fn(ref, loaded, {"inputs": Inputs(x, torch.Stream())}, True)
 
     def test_unused_process_group(self):
         import torch.distributed as dist
