@@ -1536,6 +1536,13 @@ class BuiltinVariable(VariableTracker):
                     tx, getattr(float, name)(args[0].as_python_constant())
                 )
 
+        if name == "__len__" and len(args) == 1 and not kwargs:
+            # type.__len__(instance) → len(instance)
+            # e.g. list.__len__(my_list) → len(my_list)
+            from .object_protocol import generic_len
+
+            return generic_len(tx, args[0])
+
         return super().call_method(tx, name, args, kwargs)
 
     def _call_int_float(
