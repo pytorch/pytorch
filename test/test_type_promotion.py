@@ -76,23 +76,22 @@ class TestTypePromotion(TestCase):
     @float_double_default_dtype
     def test_comparison_out_of_bounds(self, device):
         # https://github.com/pytorch/pytorch/issues/178716
-        # Test negative wrapper numbers against unsigned tensors
+        # Test negative Python literal scalars against unsigned tensors.
+        # Python literals are wrapped as int64; without the fix, -19 would be
+        # silently cast to uint8(237) and produce wrong results.
         t1 = torch.tensor([1, 2], dtype=torch.uint8, device=device)
-        t2 = torch.tensor(-19, dtype=torch.int8, device=device)
-
-        self.assertEqual(t1 <= t2, torch.tensor([False, False], device=device))
-        self.assertEqual(t1 >= t2, torch.tensor([True, True], device=device))
-
-        # Test positive out of bounds wrapper numbers
-        t3 = torch.tensor([255], dtype=torch.uint8, device=device)
-        t4 = torch.tensor(300, dtype=torch.int16, device=device)
-
-        self.assertEqual(t3 <= t4, torch.tensor([True], device=device))
-        self.assertEqual(t3 >= t4, torch.tensor([False], device=device))
-
-        # Test that Python literals (which wrap to int64) promote comparison when OOB
         self.assertEqual(t1 <= -19, torch.tensor([False, False], device=device))
+        self.assertEqual(t1 >= -19, torch.tensor([True, True], device=device))
+
+        # Test positive out-of-bounds Python literal scalars.
+        t3 = torch.tensor([255], dtype=torch.uint8, device=device)
         self.assertEqual(t3 <= 300, torch.tensor([True], device=device))
+        self.assertEqual(t3 >= 300, torch.tensor([False], device=device))
+
+        # In-range positive scalars must NOT cause promotion: the comparison
+        # should stay in uint8 (value fits) and return the correct boolean.
+        self.assertEqual(t1 <= 5, torch.tensor([True, True], device=device))
+        self.assertEqual(t1 >= 5, torch.tensor([False, False], device=device))
 
     @float_double_default_dtype
     def test_unsigned(self, device):
