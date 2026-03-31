@@ -132,5 +132,71 @@ class TestOinkRmsnormCorrectness(TestCase):
             )
 
 
+class TestOinkSoftmaxGating(TestCase):
+    """Test that the softmax gating function correctly accepts/rejects inputs."""
+
+    def _get_gating_fn(self):
+        from torch._native.ops.oink_softmax.softmax import _should_use_oink_softmax
+
+        return _should_use_oink_softmax
+
+    def test_rejects_cpu_tensor(self):
+        fn = self._get_gating_fn()
+        x = torch.randn(4, 128, dtype=torch.bfloat16)
+        self.assertFalse(fn(x, -1))
+
+    def test_rejects_non_2d(self):
+        fn = self._get_gating_fn()
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+        x = torch.randn(2, 4, 128, dtype=torch.bfloat16, device="cuda")
+        self.assertFalse(fn(x, -1))
+
+    def test_rejects_wrong_dim(self):
+        fn = self._get_gating_fn()
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+        x = torch.randn(4, 128, dtype=torch.bfloat16, device="cuda")
+        self.assertFalse(fn(x, 0))
+
+
+class TestOinkSoftmaxRegistration(TestCase):
+    """Verify that softmax is registered in the override graph."""
+
+    def test_softmax_registered(self):
+        from torch._native.registry import _graphs
+
+        self.assertIn(("_softmax.out", "CUDA"), _graphs)
+
+
+@unittest.skipIf(
+    not (_IS_SM100 and _CUTEDSL_AVAILABLE),
+    "Requires SM100 and CuTeDSL runtime",
+)
+class TestOinkSoftmaxCorrectness(TestCase):
+    """Correctness tests: compare oink softmax against reference."""
+
+    def test_softmax_matches_reference(self):
+        torch.manual_seed(42)
+        x = torch.randn(64, 512, device="cuda", dtype=torch.bfloat16)
+        ref = torch.softmax(x.float(), dim=-1).to(x.dtype)
+        result = torch._softmax(x, -1, False)
+        torch.testing.assert_close(result, ref, atol=1e-3, rtol=1e-3)
+
+    def test_softmax_various_shapes(self):
+        torch.manual_seed(42)
+        for M, N in [(1, 256), (32, 1024), (128, 4096)]:
+            x = torch.randn(M, N, device="cuda", dtype=torch.bfloat16)
+            ref = torch.softmax(x.float(), dim=-1).to(x.dtype)
+            result = torch._softmax(x, -1, False)
+            torch.testing.assert_close(
+                result,
+                ref,
+                atol=1e-3,
+                rtol=1e-3,
+                msg=f"Failed for shape ({M}, {N})",
+            )
+
+
 if __name__ == "__main__":
     run_tests()
