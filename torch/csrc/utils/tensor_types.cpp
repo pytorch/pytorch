@@ -81,13 +81,6 @@ at::TensorOptions options_from_string(const std::string& str) {
   static std::string xpu_prefix("torch.xpu.");
   static std::string privateUser_prefix(
       std::string(parse_privateuseone_backend()) + ".");
-  static std::unordered_map<std::string, at::DeprecatedTypeProperties*> cpu_map;
-  static std::unordered_map<std::string, at::DeprecatedTypeProperties*> xpu_map;
-  static std::unordered_map<std::string, at::DeprecatedTypeProperties*>
-      cuda_map;
-  static std::unordered_map<std::string, at::DeprecatedTypeProperties*>
-      privateUser1_map;
-
   const std::unordered_map<std::string, at::DeprecatedTypeProperties*>* map =
       nullptr;
 
@@ -101,22 +94,22 @@ at::TensorOptions options_from_string(const std::string& str) {
   if (std::mismatch(cuda_prefix.begin(), cuda_prefix.end(), str.begin())
           .first == cuda_prefix.end()) {
     // torch.cuda. is prefix of str
-    static bool cuda_once [[maybe_unused]] = []() {
-      for (auto type : autograd::VariableType::allCUDATypes()) {
-        cuda_map.emplace(type_to_string(*type), type);
-      }
-      return true;
+    static const auto cuda_map = []() {
+      std::unordered_map<std::string, at::DeprecatedTypeProperties*> m;
+      for (auto type : autograd::VariableType::allCUDATypes())
+        m.emplace(type_to_string(*type), type);
+      return m;
     }();
     map = &cuda_map;
   } else if (
       std::mismatch(xpu_prefix.begin(), xpu_prefix.end(), str.begin()).first ==
       xpu_prefix.end()) {
     // torch.xpu. is prefix of str
-    static bool xpu_once [[maybe_unused]] = []() {
-      for (auto type : autograd::VariableType::allXPUTypes()) {
-        xpu_map.emplace(type_to_string(*type), type);
-      }
-      return true;
+    static const auto xpu_map = []() {
+      std::unordered_map<std::string, at::DeprecatedTypeProperties*> m;
+      for (auto type : autograd::VariableType::allXPUTypes())
+        m.emplace(type_to_string(*type), type);
+      return m;
     }();
     map = &xpu_map;
   } else if (
@@ -124,19 +117,19 @@ at::TensorOptions options_from_string(const std::string& str) {
           privateUser_prefix.begin(), privateUser_prefix.end(), str.begin())
           .first == privateUser_prefix.end()) {
     // torch.foo. foo is privateUser1 name
-    static bool privateUser1_once [[maybe_unused]] = []() {
-      for (auto type : autograd::VariableType::allPrivateUser1Types()) {
-        privateUser1_map.emplace(type_to_string(*type), type);
-      }
-      return true;
+    static const auto privateUser1_map = []() {
+      std::unordered_map<std::string, at::DeprecatedTypeProperties*> m;
+      for (auto type : autograd::VariableType::allPrivateUser1Types())
+        m.emplace(type_to_string(*type), type);
+      return m;
     }();
     map = &privateUser1_map;
   } else {
-    static bool cpu_once [[maybe_unused]] = []() {
-      for (auto type : autograd::VariableType::allCPUTypes()) {
-        cpu_map.emplace(type_to_string(*type), type);
-      }
-      return true;
+    static const auto cpu_map = []() {
+      std::unordered_map<std::string, at::DeprecatedTypeProperties*> m;
+      for (auto type : autograd::VariableType::allCPUTypes())
+        m.emplace(type_to_string(*type), type);
+      return m;
     }();
     map = &cpu_map;
   }
