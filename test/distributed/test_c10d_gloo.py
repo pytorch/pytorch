@@ -813,6 +813,31 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertTrue(torch.allclose(output, expect))
 
     @requires_gloo()
+    def test_allgather_into_tensor_stacked(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="gloo",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+        # 1-D input with stacked (world_size, N) output
+        input_1d = torch.arange(12, dtype=torch.float32) + self.rank
+        output_1d = torch.empty(self.world_size, *input_1d.shape, dtype=input_1d.dtype)
+        dist.all_gather_into_tensor(output_1d, input_1d)
+        for i in range(self.world_size):
+            expected = torch.arange(12, dtype=torch.float32) + i
+            self.assertEqual(output_1d[i], expected)
+
+        # 2-D input with stacked (world_size, M, N) output
+        input_2d = torch.arange(12, dtype=torch.float32).reshape(3, 4) + self.rank
+        output_2d = torch.empty(self.world_size, *input_2d.shape, dtype=input_2d.dtype)
+        dist.all_gather_into_tensor(output_2d, input_2d)
+        for i in range(self.world_size):
+            expected = torch.arange(12, dtype=torch.float32).reshape(3, 4) + i
+            self.assertEqual(output_2d[i], expected)
+
+    @requires_gloo()
     def test_reduce_scatter(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
