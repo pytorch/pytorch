@@ -31,8 +31,7 @@ function do_install() {
         cd ${tmp_dir}/rocm-systems/projects/rocshmem
         mkdir build
         cd build
-        INSTALL_PREFIX="${rocm_dir}" ../scripts/build_configs/all_backends
-
+        INSTALL_PREFIX="${rocm_dir}" CXXFLAGS="-fvisibility=default" ../scripts/build_configs/all_backends
         cd ${curr_dir}
 
     )
