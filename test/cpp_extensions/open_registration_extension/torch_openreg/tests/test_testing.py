@@ -4,7 +4,6 @@ import unittest
 from collections import defaultdict
 
 import torch
-import torch.testing._internal.common_device_type as common_device_type
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
@@ -60,23 +59,26 @@ class TestBypassDeviceRestrictions(TestCase):
         )
 
 
-dummy_op1 = OpInfo(
-    "dummy_op1", op=lambda x: x, dtypes=common_device_type.get_all_dtypes()
-)
-dummy_op2 = OpInfo(
-    "dummy_op2", op=lambda x: x, dtypes=common_device_type.get_all_dtypes()
-)
-dummy_op3 = OpInfo(
-    "dummy_op3", op=lambda x: x, dtypes=common_device_type.get_all_dtypes()
-)
-# dummy_op4 starts with a low precision override (1e-5) declared in the OpInfo itself.
+def _make_dummy_op(name, **kwargs):
+    return OpInfo(
+        name,
+        op=lambda x: x,
+        dtypes={torch.float32, torch.float64},
+        sample_inputs_func=lambda op, device, dtype, requires_grad, **kw: [],
+        **kwargs,
+    )
+
+
+op_normal = _make_dummy_op("op_normal")
+op_skip = _make_dummy_op("op_skip")
+op_skip_f32 = _make_dummy_op("op_skip_f32")
+op_xfail = _make_dummy_op("op_xfail")
+# op_precision starts with a low precision override (1e-5) declared in the OpInfo itself.
 # op_decorators will later register a higher override (1e-2) for float32 to verify
 # that the op_decorators entry takes precedence (because it is appended last to
 # op.decorators and therefore applied last, overwriting precision_overrides).
-dummy_op4 = OpInfo(
-    "dummy_op4",
-    op=lambda x: x,
-    dtypes=common_device_type.get_all_dtypes(),
+op_precision = _make_dummy_op(
+    "op_precision",
     decorators=[DecorateInfo(precisionOverride({torch.float32: 1e-5}))],
 )
 
@@ -89,54 +91,30 @@ class TestDeviceTypeOpenReg(TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        # dummy_op1: all dtypes must run (no skips/xfails).
-        if cls._executed["dummy_op1"] <= 0:
+        should_run = ("op_normal", "op_precision")
+        should_not_run = ("op_skip", "op_xfail")
+        for op_name in should_run:
+            if op_name not in cls._executed or cls._executed[op_name] == 0:
+                raise AssertionError(f"{op_name} tests should have run")
+        for op_name in should_not_run:
+            if op_name in cls._executed and cls._executed[op_name] != 0:
+                raise AssertionError(f"{op_name} test body should never run")
+        if cls._executed["op_skip_f32"] != 1:
             raise AssertionError(
-                "dummy_op1 tests should have run, but executed count is 0"
-            )
-        # dummy_op2: all variants are skipped, so the test body must never run.
-        if cls._executed["dummy_op2"] != 0:
-            raise AssertionError(
-                "dummy_op2 test body should never run because all variants are op_skipped"
-            )
-        # dummy_op3: all variants are expectedFailure, so the test body must always
-        # fail (and therefore never reach the counter increment).
-        if cls._executed["dummy_op3"] != 0:
-            raise AssertionError(
-                "dummy_op3 test body should always fail (expectedFailure), never increment counter"
-            )
-        # dummy_op4: op_decorators precisionOverride must have been applied.
-        if cls._executed["dummy_op4_precision_ok"] <= 0:
-            raise AssertionError(
-                "dummy_op4 float32 variant must have verified op_decorators precisionOverride wins"
+                "op_skip_f32 should have run exactly once,"
+                f"but ran {cls._executed['op_skip_f32']} times"
             )
         super().tearDownClass()
 
     def test_normal(self, device):
         pass
 
-    @ops([dummy_op1, dummy_op2, dummy_op3])
+    @ops([op_normal, op_skip, op_xfail, op_precision])
     def test_op(self, device, dtype, op):
-        if op.name == "dummy_op2":
-            self.fail("dummy_op2 should be skipped via op_skips")
-        if op.name == "dummy_op3":
-            # This should fail, but since we decorated it with expectedFailure, the test will pass!
-            self.fail("dummy_op3 fails but is decorated with expectedFailure")
         type(self)._executed[op.name] += 1
-
-    @ops([dummy_op4])
-    def test_op_precision_override(self, device, dtype, op):
-        """Verify that a precisionOverride registered via op_decorators takes
-        precedence over the one declared inside the OpInfo.
-
-        dummy_op4's OpInfo sets precisionOverride({torch.float32: 1e-5}).
-        PrivateUse1TestBase.op_decorators additionally registers
-        precisionOverride({torch.float32: 1e-2}) for dummy_op4.
-        Because op_decorators entries are appended *after* the OpInfo's own
-        decorators, the op_decorators value is the last to be applied and
-        therefore wins.
-        """
-        if dtype == torch.float32:
+        if op.name in ("op_skip", "op_xfail"):
+            self.fail(f"{op.name} deliberately fails")
+        if op.name == "op_precision" and dtype == torch.float32:
             self.assertEqual(
                 self.precision,
                 1e-2,
@@ -145,15 +123,14 @@ class TestDeviceTypeOpenReg(TestCase):
                     f"OpInfo precisionOverride (1e-5), but got {self.precision}"
                 ),
             )
-            type(self)._executed["dummy_op4_precision_ok"] += 1
 
-    @ops([dummy_op1])
+    @ops([op_normal])
     def test_op_narrow_ops(self, device, dtype, op):
         """Verify that having extra entries in op_skips that are NOT present in
         the @ops list does not raise a KeyError (safety check in update_op_list).
 
-        op_skips includes dummy_op2 and PrivateUse1TestBase.op_skips also
-        lists dummy_op2; here @ops only exposes dummy_op1.  The safety check
+        op_skips includes op_skip and PrivateUse1TestBase.op_skips also
+        lists op_skip; here @ops only exposes op_normal.  The safety check
         introduced in update_op_list must silently ignore the missing keys.
         """
         # If we reach here without a KeyError the safety check worked.
@@ -161,12 +138,13 @@ class TestDeviceTypeOpenReg(TestCase):
 
 # Modify PrivateUse1TestBase which is automatically included for OpenReg
 PrivateUse1TestBase.op_skips = {
-    "dummy_op2": [DecorateInfo(unittest.skip("skip dummy_op2"))],
+    "op_skip": [DecorateInfo(unittest.skip("skip op_skip"))],
+    "op_skip_f32": [DecorateInfo(unittest.skip("skip op_skip"), dtypes=(torch.float32,))],
 }
 PrivateUse1TestBase.op_decorators = {
-    "dummy_op3": [DecorateInfo(unittest.expectedFailure)],
-    # This overrides the 1e-5 precision already declared on dummy_op4's OpInfo.
-    "dummy_op4": [DecorateInfo(precisionOverride({torch.float32: 1e-2}))],
+    "op_xfail": [DecorateInfo(unittest.expectedFailure)],
+    # This overrides the 1e-5 precision already declared on op_precision's OpInfo.
+    "op_precision": [DecorateInfo(precisionOverride({torch.float32: 1e-2}))],
 }
 
 instantiate_device_type_tests(TestDeviceTypeOpenReg, globals(), only_for=("openreg",))
