@@ -296,13 +296,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def can_constant_fold_through(self) -> bool:
         return self.value in self._constant_fold_classes()
 
-    def has_key_in_generic_dict(self, tx: "InstructionTranslator", key: str) -> bool:
-        if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
-            mutated_attr = tx.output.side_effects.load_attr(self, key, deleted_ok=True)
-            return not isinstance(mutated_attr, variables.DeletedVariable)
-
-        return key in self.value.__dict__
-
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         from . import ConstantVariable
 
@@ -313,8 +306,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif name == "__qualname__":
             return VariableTracker.build(tx, self.value.__qualname__)
         elif name == "__dict__":
-            options = {"source": source}
-            return variables.GetAttrVariable(self, name, None, **options)
+            return VariableTracker.build(
+                tx,
+                self.value.__dict__,
+                # Should this be a TypeDictSource?
+                source=self.source and AttrSource(self.source, "__dict__"),
+            )
         elif name == "__mro__":
             attr_source = self.source and TypeMROSource(self.source)
             return VariableTracker.build(tx, self.value.__mro__, attr_source)
@@ -335,13 +332,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
             obj = inspect.getattr_static(self.value, name)
         except AttributeError:
             if type(self.value) is type:
-                error_message = VariableTracker.build(
-                    tx, f"type object '{self.value.__name__}' has no attribute '{name}'"
-                )
                 raise_observed_exception(
                     AttributeError,
                     tx,
-                    args=[error_message],
+                    args=[
+                        f"type object '{self.value.__name__}' has no attribute '{name}'"
+                    ],
                 )
 
         if name == "__new__" and UserDefinedClassVariable.is_supported_new_method(obj):
@@ -1258,16 +1254,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def get_dict_vt(self, tx: "InstructionTranslator") -> "DunderDictVariable":
         if self.dict_vt is None:
-            dict_proxy = {
-                key: VariableTracker.build(
-                    tx,
-                    value,
-                    source=self.source
-                    and DictGetItemSource(AttrSource(self.source, "__dict__"), key),
-                )
-                for key, value in self.value.__dict__.items()
-            }
-            self.dict_vt = variables.DunderDictVariable.create(tx, self, dict_proxy)
+            self.dict_vt = variables.DunderDictVariable.create(tx, self)
         return self.dict_vt
 
     def is_underlying_vt_modified(self, side_effects: "SideEffects") -> bool:
@@ -1850,14 +1837,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
             if isinstance(result, variables.DeletedVariable):
-                error_message = VariableTracker.build(
-                    tx,
-                    f"'{type(self.value).__name__}' object has no attribute '{name}'",
-                )
                 raise_observed_exception(
                     AttributeError,
                     tx,
-                    args=[error_message],
+                    args=[
+                        f"'{type(self.value).__name__}' object has no attribute '{name}'",
+                    ],
                 )
             return result
 
@@ -1982,13 +1967,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
 
         # Step 7: AttributeError.
-        error_message = VariableTracker.build(
-            tx, f"'{type(self.value).__name__}' object has no attribute '{name}'"
-        )
         raise_observed_exception(
             AttributeError,
             tx,
-            args=[error_message],
+            args=[f"'{type(self.value).__name__}' object has no attribute '{name}'"],
         )
 
     def resolve_data_descriptor(
@@ -2023,13 +2005,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         try:
             resolved = type(self.value).__getattribute__(self.value, name)
         except AttributeError:
-            error_message = VariableTracker.build(
-                tx, f"'{type(self.value).__name__}' object has no attribute '{name}'"
-            )
             raise_observed_exception(
                 AttributeError,
                 tx,
-                args=[error_message],
+                args=[
+                    f"'{type(self.value).__name__}' object has no attribute '{name}'"
+                ],
             )
         return VariableTracker.build(tx, resolved, source)
 

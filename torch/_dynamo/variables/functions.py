@@ -394,17 +394,7 @@ class BaseUserFunctionVariable(VariableTracker):
 
     def get_dict_vt(self, tx: "InstructionTranslator") -> "DunderDictVariable":
         if self.dict_vt is None:
-            dict_proxy: dict[str, VariableTracker] = {}
-
-            if not istype(self, NestedUserFunctionVariable):
-                fn = self.get_function()
-                dict_proxy = {
-                    name: VariableTracker.build(
-                        tx, value, source=self.source and AttrSource(self.source, name)
-                    )
-                    for name, value in fn.__dict__.items()
-                }
-            self.dict_vt = variables.DunderDictVariable.create(tx, self, dict_proxy)
+            self.dict_vt = variables.DunderDictVariable.create(tx, self)
         return self.dict_vt
 
     def call_method(
@@ -1522,6 +1512,9 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
             source=self.source,
         )
 
+    def get_real_python_backed_value(self) -> object:
+        return self.vt.get_real_python_backed_value()
+
 
 class FunctionDecoratedByContextlibContextManagerVariable(
     LocalGeneratorFunctionVariable
@@ -1672,6 +1665,9 @@ class UserMethodVariable(UserFunctionVariable):
             # variable tracker.
             return VariableTracker.build(tx, self.fn, self.source_fn)  # type: ignore[arg-type]
         return super().var_getattr(tx, name)
+
+    def get_real_python_backed_value(self) -> Any:
+        return self.fn
 
 
 class WrappedUserMethodVariable(UserMethodVariable):
@@ -2454,6 +2450,9 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
             kwargs,
         )
 
+    def get_real_python_backed_value(self) -> object:
+        return getattr(self.wrapper_obj, self.attr_to_trace)
+
 
 class WrapperUserMethodVariable(WrapperUserFunctionVariable):
     """
@@ -2690,7 +2689,7 @@ class CollectionsNamedTupleFunction(UserFunctionVariable):
                 raise_observed_exception(
                     type(exc),
                     tx,
-                    args=[VariableTracker.build(tx, a) for a in exc.args],
+                    args=list(exc.args),
                 )
             return variables.UserDefinedClassVariable(
                 value,

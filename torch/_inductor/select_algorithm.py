@@ -3759,7 +3759,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         if len(choices) == 0:
             raise self.create_no_valid_choices(name, "No choices exist for backend.")
-        log.debug("Max autotune selects from %s choices.", str(len(choices)))
+        log.debug("Max autotune selects from %s choices.", len(choices))
 
         if len(choices) == 1:
             if not isinstance(choices[0], CUTLASSTemplateCaller):

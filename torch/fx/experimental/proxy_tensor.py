@@ -2420,7 +2420,7 @@ class _ModuleStackTracer(PythonKeyTracer):
                 "This might be because the module was not properly registered "
                 "as a submodule, which is not good practice. We will trace "
                 "through the module without recording stack information.",
-                str(m),
+                m,
             )
             return forward(*args, **kwargs)
 

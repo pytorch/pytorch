@@ -709,7 +709,7 @@ class BuiltinVariable(VariableTracker):
                 raise_observed_exception(
                     type(exc),
                     tx,
-                    args=[VariableTracker.build(tx, a) for a in exc.args],
+                    args=list(exc.args),
                 )
 
         list_like_expansion_handlers: list[
@@ -737,7 +737,7 @@ class BuiltinVariable(VariableTracker):
                     raise_observed_exception(
                         type(exc),
                         tx,
-                        args=[VariableTracker.build(tx, a) for a in exc.args],
+                        args=list(exc.args),
                     )
 
             result: list[
@@ -1117,7 +1117,7 @@ class BuiltinVariable(VariableTracker):
                         raise_observed_exception(
                             type(exc),
                             tx,
-                            args=[VariableTracker.build(tx, a) for a in exc.args],
+                            args=list(exc.args),
                         )
                     except AsPythonConstantNotImplementedError as exc:
                         unimplemented(
@@ -1157,7 +1157,7 @@ class BuiltinVariable(VariableTracker):
                             raise_observed_exception(
                                 type(exc),
                                 tx,
-                                args=[VariableTracker.build(tx, a) for a in exc.args],
+                                args=list(exc.args),
                             )
                         return VariableTracker.build(tx, res)
                     return None
@@ -1490,7 +1490,7 @@ class BuiltinVariable(VariableTracker):
                     raise_observed_exception(
                         type(e),
                         tx,
-                        args=[VariableTracker.build(tx, a) for a in e.args],
+                        args=list(e.args),
                     )
 
         if self.fn is object and name == "__init__":
@@ -2123,16 +2123,6 @@ class BuiltinVariable(VariableTracker):
         **kwargs: VariableTracker,
     ) -> VariableTracker:
         args_list = list(args)
-        if (
-            len(args_list) == 1
-            and isinstance(args_list[0], variables.GetAttrVariable)
-            and isinstance(args_list[0].obj, variables.UserDefinedClassVariable)
-            and not tx.output.side_effects.has_pending_mutation(args_list[0].obj)
-        ):
-            # Forward the GetAttrVariable(foo, "__dict__") to a realized vt of
-            # VT(foo.__dict__). This simplifies the construction of the new
-            # dict.
-            args_list[0] = args_list[0].get_forwarded_dict(tx)
         return tx.inline_user_function_return(
             VariableTracker.build(tx, polyfills.construct_dict),
             [VariableTracker.build(tx, user_cls), *args_list],
@@ -2238,12 +2228,7 @@ class BuiltinVariable(VariableTracker):
             raise_observed_exception(
                 TypeError,
                 tx,
-                args=[
-                    VariableTracker.build(
-                        tx,
-                        f"set() takes 1 positional argument but {len(args)} were given",
-                    )
-                ],
+                args=[f"set() takes 1 positional argument but {len(args)} were given"],
             )
         arg = args[0]
         if istype(arg, variables.SetVariable):
@@ -2263,7 +2248,7 @@ class BuiltinVariable(VariableTracker):
         raise_observed_exception(
             TypeError,
             tx,
-            args=[VariableTracker.build(tx, "failed to construct builtin set()")],
+            args=["failed to construct builtin set()"],
         )
 
     def call_frozenset(
@@ -2280,10 +2265,7 @@ class BuiltinVariable(VariableTracker):
                 TypeError,
                 tx,
                 args=[
-                    VariableTracker.build(
-                        tx,
-                        f"frozenset() takes 1 positional argument but {len(args)} were given",
-                    )
+                    f"frozenset() takes 1 positional argument but {len(args)} were given"
                 ],
             )
         arg = args[0]
@@ -2295,7 +2277,7 @@ class BuiltinVariable(VariableTracker):
         raise_observed_exception(
             TypeError,
             tx,
-            args=[VariableTracker.build(tx, "failed to construct builtin frozenset()")],
+            args=["failed to construct builtin frozenset()"],
         )
 
     def call_zip(
@@ -2429,13 +2411,12 @@ class BuiltinVariable(VariableTracker):
         ):
             isinstance_type_tuple = isinstance_type
         else:
-            msg = VariableTracker.build(
-                tx, "isinstance() arg 2 must be a type, a tuple of types, or a union"
-            )
             raise_observed_exception(
                 TypeError,
                 tx,
-                args=[msg],
+                args=[
+                    "isinstance() arg 2 must be a type, a tuple of types, or a union"
+                ],
             )
 
         try:

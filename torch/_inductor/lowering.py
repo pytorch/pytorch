@@ -1432,6 +1432,9 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
             return size
         elif fn(sympy.Lt(index, -size)):
             return 0
+        elif fn(sympy.Ge(index, 0)):
+            # If index >= 0, the resolved index is at most min(index, size).
+            return sympy.Min(index, size)
         return None
 
     start_index, end_index = None, None
@@ -2917,7 +2920,9 @@ def bucketize(
 
 
 def _is_tensor_irnode(x):
-    return isinstance(x, ir.IRNode) and not isinstance(x, ir.NonTensorObj)
+    return isinstance(x, ir.IRNode) and not isinstance(
+        x, (ir.NonTensorObj, ir.OpaqueMultiOutput)
+    )
 
 
 def require_dense(_, *args, **kwargs):
