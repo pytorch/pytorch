@@ -7532,7 +7532,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return x
 
         x = torch.randn(16, 256, device=self.device)
-        if config.cpp_wrapper and config.triton.autotune_at_compile_time is False:
+        if config.cpp_wrapper and config.triton.autotune_at_compile_time is not True:
             # With lazy compile, both graph segments produce identical code
             # (no unique .cubin paths), so run_and_get_code deduplicates them
             # and only 1 kernel is returned.
@@ -15347,7 +15347,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(fn(*args), torch.compile(fn)(*args))
 
     @unittest.skipIf(
-        config.triton.autotune_at_compile_time is not False,
+        config.triton.autotune_at_compile_time is True,
         "autotune_at_compile_time doesn't work for test with indexing",
     )
     @parametrize("dtype", [torch.int32, torch.int64])
@@ -15558,7 +15558,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         torch.testing.assert_close(out, fn(x))
 
     @unittest.skipIf(
-        config.triton.autotune_at_compile_time is not False,
+        config.triton.autotune_at_compile_time is True,
         "autotune_at_compile_time doesn't work for test with indexing",
     )
     @requires_gpu_and_triton
