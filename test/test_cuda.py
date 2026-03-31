@@ -7080,7 +7080,6 @@ class TestMemPool(TestCase):
         symmetric memory alignment.
         """
 
-
         from cuda.bindings import runtime
 
         ALLOC_FN = ctypes.CFUNCTYPE(
@@ -7095,19 +7094,20 @@ class TestMemPool(TestCase):
                 self.first_stream = None
                 self.second_stream = None
                 self.allocated_addrs = []
-                self.buffer_size = 1 * 1024 * 1024 * 1024 # 1GB
+                self.buffer_size = 1 * 1024 * 1024 * 1024  # 1GB
                 err, base_ptr = runtime.cudaMalloc(self.buffer_size)
                 assert err == runtime.cudaError_t.cudaSuccess
                 self.base_ptr = base_ptr
                 self.head = base_ptr
                 self.tail = base_ptr + self.buffer_size
+
             def __del__(self):
                 runtime.cudaFree(self.base_ptr)
-                print('AllocState deleted')
+                print("AllocState deleted")
 
         state = AllocState()
-        def my_alloc(size, device, stream, _runtime=runtime):
 
+        def my_alloc(size, device, stream, _runtime=runtime):
             if state.first_stream is None:
                 state.first_stream = stream
             elif state.second_stream is None:
@@ -7117,12 +7117,14 @@ class TestMemPool(TestCase):
                 ptr = state.head
                 state.head += size
             else:
-                state.tail -=size
+                state.tail -= size
                 ptr = state.tail
             state.allocated_addrs.append(ptr)
             return ptr
+
         def my_free(ptr, size, device, stream, _runtime=runtime):
             pass
+
         # Must keep these alive for the lifetime of the allocator
         c_alloc = ALLOC_FN(my_alloc)
         c_free = FREE_FN(my_free)
@@ -7143,7 +7145,9 @@ class TestMemPool(TestCase):
                 reverse_order = stream_idx % 2 == 1
                 tensor_sizes.sort(reverse=reverse_order)
                 for size in tensor_sizes:
-                    alloc_cases.append({"stream": stream, "size": size, "case_no": case_no})
+                    alloc_cases.append(
+                        {"stream": stream, "size": size, "case_no": case_no}
+                    )
                     case_no += 1
 
         # Test allocation and deallocation patterns
@@ -7151,27 +7155,34 @@ class TestMemPool(TestCase):
             all_tensors = []
             for case in alloc_cases:
                 with torch.cuda.stream(case["stream"]):
-                    all_tensors.append(torch.empty(case["size"], dtype=torch.uint8, device="cuda"))
+                    all_tensors.append(
+                        torch.empty(case["size"], dtype=torch.uint8, device="cuda")
+                    )
             return all_tensors
+
         with torch.cuda.use_mem_pool(pool):
             first_round_tensors = alloc_tensors()
-        tensor_ptrs = [ t.data_ptr() for t in first_round_tensors]
-        #for t in first_round_tensors:
+        tensor_ptrs = [t.data_ptr() for t in first_round_tensors]
+        # for t in first_round_tensors:
         #    del t
         del first_round_tensors
 
         with torch.cuda.use_mem_pool(pool):
             second_round_tensors = alloc_tensors()
-        second_round_tensor_ptrs = [ t.data_ptr() for t in second_round_tensors]
+        second_round_tensor_ptrs = [t.data_ptr() for t in second_round_tensors]
         del second_round_tensors
 
         mem_snapshot = pool.snapshot()
-        assert len(mem_snapshot) == len(tensor_ptrs), f"expected to have {len(tensor_ptrs)} segments, but actually got {len(mem_snapshot)}"
+        assert len(mem_snapshot) == len(tensor_ptrs), (
+            f"expected to have {len(tensor_ptrs)} segments, but actually got {len(mem_snapshot)}"
+        )
 
         for idx, first_addr in enumerate(tensor_ptrs):
             second_addr = second_round_tensor_ptrs[idx]
             assert second_addr == first_addr
-            assert second_addr == state.allocated_addrs[idx], f"{second_round_tensor_ptrs[idx]=} != {state.allocated_addrs[idx]=}"
+            assert second_addr == state.allocated_addrs[idx], (
+                f"{second_round_tensor_ptrs[idx]=} != {state.allocated_addrs[idx]=}"
+            )
         del pool
         del state
         torch.cuda.empty_cache()
