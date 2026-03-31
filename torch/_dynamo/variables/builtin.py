@@ -1868,15 +1868,6 @@ class BuiltinVariable(VariableTracker):
     def call_index(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
-        if arg.is_tensor():
-            # TODO - Support __index__ on tensors
-            # https://github.com/pytorch/pytorch/blob/7cfd054075b/tools/autograd/templates/python_variable_methods.cpp#L372-L385
-            unimplemented(
-                gb_type="unsupported index(Tensor)",
-                context="",
-                explanation="Dynamo does not support tracing builtin index() on a Tensor",
-                hints=[],
-            )
         # Specialize SymNodeVariable to a constant first, matching CPython's
         # PyNumber_Index which forces a concrete int.
         arg = specialize_symnode(arg)
