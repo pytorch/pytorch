@@ -316,7 +316,7 @@ DEVICE_REQUIREMENT: dict[int, _CompatSet | _CompatInterval] = {
 PYTORCH_RELEASES_CODE_CC: dict[str, set[int]] = {
     "12.6": {50, 60, 70, 80, 86, 90},
     "12.8": {70, 80, 86, 90, 100, 120},
-    "13.0": {75, 80, 86, 90, 100, 110, 120},
+    "13.0": {75, 80, 86, 90, 100, 110, 120, 121},
 }
 
 
