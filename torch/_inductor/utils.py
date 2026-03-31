@@ -1340,7 +1340,9 @@ def fresh_cache(
 
     from torch._inductor.cpp_builder import normalize_path_separator
 
-    inductor_cache_dir = normalize_path_separator(tempfile.mkdtemp(dir=dir))
+    inductor_cache_dir = normalize_path_separator(
+        os.getenv("TORCHINDUCTOR_CACHE_DIR") or tempfile.mkdtemp(dir=dir)
+    )
     try:
         with _set_env("TORCHINDUCTOR_CACHE_DIR", inductor_cache_dir):
             log.debug("Using inductor cache dir %s", inductor_cache_dir)

@@ -3444,6 +3444,27 @@ class TestUtils(TestCase):
         self.assertEqual(res1, res2)
         self.assertNotEqual(cache_dir1, cache_dir2)
 
+    @config.patch({"fx_graph_remote_cache": False})
+    def test_fresh_cache_respects_env_var(self):
+        """Test that fresh_cache uses TORCHINDUCTOR_CACHE_DIR when set."""
+        with tempfile.TemporaryDirectory() as user_cache_dir:
+            with mock.patch.dict(
+                os.environ, {"TORCHINDUCTOR_CACHE_DIR": user_cache_dir}
+            ):
+                with fresh_cache(delete=False):
+                    # When TORCHINDUCTOR_CACHE_DIR is pre-set, fresh_cache should
+                    # honor it instead of creating a new temp directory.
+                    actual = normalize_path_separator(
+                        os.environ["TORCHINDUCTOR_CACHE_DIR"]
+                    )
+                    expected = normalize_path_separator(user_cache_dir)
+                    self.assertEqual(
+                        actual,
+                        expected,
+                        f"fresh_cache ignored TORCHINDUCTOR_CACHE_DIR: "
+                        f"expected {expected}, got {actual}",
+                    )
+
     # This combination of settings exposed a bug where we cleared the
     # PyCodeCache disk artifacts while they were still needed:
     @requires_gpu_and_triton
