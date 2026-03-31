@@ -20,7 +20,9 @@ from torch.distributed.tensor._sharding_prop import ShardingPropagator
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     MI200_ARCH,
+    parametrize,
     run_tests,
     serialTest,
     skipIfRocmArch,
@@ -898,6 +900,84 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         output_dt = torch.index_put(input_dt, [idx_dt], value_dt)
         self.assertEqual(output_dt.full_tensor(), ref)
 
+    def _test_index_op_partial_propagation(self, op, reduce_op):
+        """Helper: verify Partial placement propagates correctly through an
+        index op that decomposes to index_put."""
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        global_input = torch.randn(4, 8, device=self.device_type)
+        idx = torch.tensor([1, 3], device=self.device_type)
+        global_source = torch.randn(4, 2, device=self.device_type)
+
+        # Create Partial tensors — each rank holds partial contribution
+        if reduce_op == "sum":
+            local_input = global_input / self.world_size
+            local_source = global_source / self.world_size
+        else:
+            # avg/max/min: each rank holds the full value
+            local_input = global_input.clone()
+            local_source = global_source.clone()
+
+        input_dt = DTensor.from_local(
+            local_input, device_mesh, [Partial(reduce_op)], run_check=False
+        )
+        source_dt = DTensor.from_local(
+            local_source, device_mesh, [Partial(reduce_op)], run_check=False
+        )
+
+        idx_dt = distribute_tensor(idx, device_mesh, [Replicate()])
+
+        ref = op(global_input, 1, idx, global_source)
+        output_dt = op(input_dt, 1, idx_dt, source_dt)
+        self.assertIsInstance(output_dt, DTensor)
+        self.assertEqual(output_dt.full_tensor(), ref)
+
+    @parametrize("reduce_op", ["sum", "avg", "max", "min"])
+    def test_index_copy_partial_propagation(self, reduce_op):
+        self._test_index_op_partial_propagation(torch.index_copy, reduce_op)
+
+    @parametrize("reduce_op", ["sum", "avg"])
+    def test_index_add_partial_propagation(self, reduce_op):
+        self._test_index_op_partial_propagation(torch.index_add, reduce_op)
+
+    @parametrize(
+        "op",
+        [torch.ops.aten.index_put, torch.index_copy, torch.index_add],
+    )
+    def test_index_ops_leading_none_dim_mapping(self, op):
+        """Regression: index_put dim-mapping bug when indexed dim is not dim 0.
+
+        When indices = (None, index), indexed_dims=[1] is contiguous so
+        broadcast replaces dim 1 in-place:
+            values shape = (self.size(0), len(index))  i.e. (non_indexed, broadcast)
+
+        The buggy strategy assumed broadcast at front, so it wrongly allowed
+        S(0) on self + S(1) on values (sharding the broadcast dim).
+        We force that exact placement — if the strategy accepts it without
+        redistributing, the numerics will be wrong.
+
+        index_copy and index_add decompose to index_put with leading None,
+        so they hit the same bug.
+        """
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        n = self.world_size
+        global_input = torch.randn(n, 2 * n, device=self.device_type)
+        idx = torch.arange(n, device=self.device_type)
+        global_source = torch.randn(n, n, device=self.device_type)
+
+        input_dt = distribute_tensor(global_input, device_mesh, [Shard(0)])
+        idx_dt = distribute_tensor(idx, device_mesh, [Replicate()])
+        source_dt = distribute_tensor(global_source, device_mesh, [Shard(1)])
+
+        if op is torch.ops.aten.index_put:
+            ref = op(global_input, [None, idx], global_source)
+            output_dt = op(input_dt, [None, idx_dt], source_dt)
+        else:
+            ref = op(global_input, 1, idx, global_source)
+            output_dt = op(input_dt, 1, idx_dt, source_dt)
+
+        self.assertIsInstance(output_dt, DTensor)
+        self.assertEqual(output_dt.full_tensor(), ref)
+
     def test_where_type_promotion(self):
         mesh = self.build_device_mesh()  # 1D mesh
 
@@ -1292,6 +1372,7 @@ DistArgMaxArgMinTestWithLocalTensor = create_local_tensor_test_class(
     base_class=LocalDTensorContinuousTestBase,
 )
 
+instantiate_parametrized_tests(DistTensorOpsTest)
 DistTensorOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistTensorOpsTest,
     base_class=LocalDTensorContinuousTestBase,
