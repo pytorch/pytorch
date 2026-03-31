@@ -1050,11 +1050,28 @@ def extract_subclass_metadata(guard: Any, value: Any) -> tuple[Any, ...]:
 
 
 # Used by TENSOR_SUBCLASS_METADATA_MATCH guard check spec
+def _compare_subclass_metadata(current_metadata: Any, saved_metadata: Any) -> bool:
+    try:
+        return current_metadata == saved_metadata
+    except RuntimeError as error:
+        if "Boolean value of Tensor with more than one value is ambiguous" not in str(
+            error
+        ):
+            raise
+
+        raise exc.InternalTorchDynamoError(
+            "Tensor subclass metadata returned from __tensor_flatten__() cannot "
+            "contain non-scalar tensors unless the subclass defines "
+            "__metadata_guard__ to compare that metadata explicitly"
+        ) from error
+
+
+# Used by TENSOR_SUBCLASS_METADATA_MATCH guard check spec
 def check_subclass_metadata(value: Any, metadata: tuple[Any, ...]) -> bool:
     saved_metadata, cls, has_custom_guard = metadata
     if has_custom_guard:
         return cls.__metadata_guard__(saved_metadata, value.__tensor_flatten__()[1])
-    return value.__tensor_flatten__()[1] == saved_metadata
+    return _compare_subclass_metadata(value.__tensor_flatten__()[1], saved_metadata)
 
 
 # Used by DTENSOR_SPEC_MATCH guard check spec
@@ -2458,7 +2475,9 @@ class GuardBuilder(GuardBuilderBase):
         else:
 
             def metadata_checker(x: Any) -> bool:
-                return x.__tensor_flatten__()[1] == original_metadata
+                return _compare_subclass_metadata(
+                    x.__tensor_flatten__()[1], original_metadata
+                )
 
         global_name = f"___check_metadata_{id(metadata_checker)}_c{CompileContext.current_compile_id()}"
         self.get_guard_manager(guard).add_lambda_guard(

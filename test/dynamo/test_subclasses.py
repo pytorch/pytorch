@@ -1922,6 +1922,66 @@ s50 > 3""",
             lambda: torch.compile(lambda x: x * x, backend="eager")(x),
         )
 
+    def test_tensor_subclass_ctx_tensor_metadata_error_message(self):
+        import torch._dynamo.exc
+
+        class TensorMetadataSubclass(torch.Tensor):
+            @staticmethod
+            def __new__(cls, data, weights):
+                return torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    data.shape,
+                    strides=data.stride(),
+                    storage_offset=data.storage_offset(),
+                    dtype=data.dtype,
+                    layout=data.layout,
+                    device=data.device,
+                    requires_grad=data.requires_grad,
+                )
+
+            def __init__(self, data, weights):
+                self._data = data
+                self._weights = weights
+
+            def __tensor_flatten__(self):
+                return ["_data"], {"weights": self._weights}
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+                return TensorMetadataSubclass(inner_tensors["_data"], meta["weights"])
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+
+                args_data = pytree.tree_map(
+                    lambda x: x._data if isinstance(x, TensorMetadataSubclass) else x,
+                    args,
+                )
+                kwargs_data = pytree.tree_map(
+                    lambda x: x._data if isinstance(x, TensorMetadataSubclass) else x,
+                    kwargs,
+                )
+                out_data = func(*args_data, **kwargs_data)
+                out = pytree.tree_map(
+                    lambda x: (
+                        TensorMetadataSubclass(x, args[0]._weights)
+                        if isinstance(x, torch.Tensor)
+                        and not isinstance(x, TensorMetadataSubclass)
+                        else x
+                    ),
+                    out_data,
+                )
+                return return_and_correct_aliasing(func, args, kwargs, out)
+
+        x = TensorMetadataSubclass(torch.ones(4), torch.randn(5))
+        self.assertRaisesRegex(
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "non-scalar tensors.*__metadata_guard__",
+            lambda: torch.compile(lambda x: x * 2, backend="eager")(x),
+        )
+
     def test_tensor_subclass_metadata_with_symint(self):
         # TENSOR_SUBCLASS_METADATA_MATCH replaces SymInts in metadata with
         # _AnyCompare sentinels so that (a) deepcopy doesn't pull in the
