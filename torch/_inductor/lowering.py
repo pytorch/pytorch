@@ -3796,8 +3796,6 @@ make_fallback(aten.masked_scatter_backward)
 make_fallback(aten.view_as_complex, require_contiguous)
 make_fallback(aten.angle)  # needs complex
 
-# Needs efficentzerotensor
-make_fallback(aten._efficientzerotensor)
 
 # Needs Sparse
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
@@ -4535,6 +4533,12 @@ def full(size, fill_value, **kwargs):
     if kwargs.get("dtype") is None:
         raise AssertionError("dtype should be handled by decomposition")
     return tensor_constructor(fill_value)(size, **kwargs)
+
+
+@register_lowering(aten._efficientzerotensor)
+def _efficientzerotensor(size, **kwargs):
+    kwargs.setdefault("dtype", torch.get_default_dtype())
+    return tensor_constructor(0)(size, **kwargs)
 
 
 @register_lowering(aten.gather, type_promotion_kind=None)
