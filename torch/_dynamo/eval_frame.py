@@ -330,6 +330,7 @@ def _create_delayed_compile_callback(
     def callback_fn(*args: Any, **kwargs: Any) -> convert_frame.ConvertFrameReturn:
         frame = args[0]
         example_inputs = _get_or_add_example_inputs(frame)
+        current_example_inputs = clone_and_convert_to_meta(frame.f_locals)
 
         if len(example_inputs) == 1:
             if stance == "eager_then_compile":
@@ -342,7 +343,9 @@ def _create_delayed_compile_callback(
                 aot_eager_fn = get_compiler_fn("aot_eager")
                 return _create_wrapped_callback(aot_eager_fn)(*args, **kwargs)
 
-        dynamism = track_dynamism_across_examples(example_inputs)
+        dynamism = track_dynamism_across_examples(
+            [*example_inputs, current_example_inputs]
+        )
         code_context.get_context(frame.f_code)["dynamism"] = dynamism
         compiler_fn = callback._torchdynamo_orig_backend._torchdynamo_orig_backend  # type: ignore[union-attr]
         return _create_wrapped_callback(compiler_fn)(*args, **kwargs)
