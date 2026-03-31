@@ -376,18 +376,15 @@ Tensor& addmv_out(
 
   Tensor vec_v = vec.view({vec.size(0), 1});
 
-  bool is_float64 =
-      mat.scalar_type() == at::kDouble || vec.scalar_type() == at::kDouble;
+  // Use a temporary 2D tensor for addmm output to avoid resize_ of out,
+  // which corrupts non-contiguous tensors (e.g. from vmap fallback).
+  // Also clone self_v when inplace (self aliases out) to prevent oneDNN
+  // post-ops from reading overwritten data.
   bool is_inplace = self.is_same(out);
-  if (is_float64 && is_inplace) {
-    Tensor self_v_copy = self_v.clone();
-    at::native::xpu::addmm_out(self_v_copy, mat, vec_v, beta, alpha, out);
-    out.resize_({mat.size(0)});
-    return out;
-  }
-
-  at::native::xpu::addmm_out(self_v, mat, vec_v, beta, alpha, out);
-  out.resize_({mat.size(0)});
+  Tensor self_v_safe = is_inplace ? self_v.clone() : self_v;
+  Tensor result_2d = at::empty({mat.size(0), 1}, out.options());
+  at::native::xpu::addmm_out(self_v_safe, mat, vec_v, beta, alpha, result_2d);
+  out.copy_(result_2d.view({mat.size(0)}));
   return out;
 }
 
