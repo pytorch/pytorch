@@ -2179,15 +2179,14 @@ def get_cpp_wrapper_config() -> dict[str, object]:
             format_default_skip_message("cpp wrapper enabled")
         )
 
-    autotune_at_compile_time = (
-        config.triton.autotune_at_compile_time
-        if config.triton.autotune_at_compile_time is not None
-        # Default to True for AOTI. Subject to change in future.
-        else has_triton() and V.aot_compilation
-    )
     return {
-        "triton.autotune_at_compile_time": autotune_at_compile_time,
-        "triton.autotune_cublasLt": not autotune_at_compile_time,
+        # Set autotune_at_compile_time to True as default if the option is not explicitly set
+        "triton.autotune_at_compile_time": (
+            config.triton.autotune_at_compile_time
+            if config.triton.autotune_at_compile_time is not None
+            else has_triton()
+        ),
+        "triton.autotune_cublasLt": False,
         "triton.cudagraphs": False,  # TODO: to be removed
         "triton.store_cubin": True,
     }
