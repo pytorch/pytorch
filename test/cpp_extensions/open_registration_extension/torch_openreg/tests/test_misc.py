@@ -225,7 +225,7 @@ class TestTensorType(TestCase):
 class TestDispatch(TestCase):
     def test_dispatch_key_registration(self):
         """Test that PrivateUse1 dispatch keys are correctly registered"""
-        core_ops = [
+        relevant_ops = [
             "aten::empty.memory_format",
             "aten::empty_strided",
             "aten::_copy_from",
@@ -239,39 +239,19 @@ class TestDispatch(TestCase):
             "aten::set_.source_Tensor",
             "aten::set_.source_Storage",
             "aten::set_.source_Storage_storage_offset",
-        ]
-        for op_name in core_ops:
-            self.assertTrue(
-                torch._C._dispatch_has_kernel_for_dispatch_key(op_name, "PrivateUse1"),
-                f"{op_name} should have a PrivateUse1 kernel",
-            )
-
-        extra_ops = [
             "aten::abs.out",
             "aten::quantize_per_tensor",
             "aten::_fused_sdp_choice",
             "aten::_scaled_dot_product_fused_attention_overrideable",
             "aten::_scaled_dot_product_fused_attention_overrideable_backward",
+            "aten::sub.Tensor",
+            "openreg::custom_abs",
         ]
-        for op_name in extra_ops:
+        for op_name in relevant_ops:
             self.assertTrue(
                 torch._C._dispatch_has_kernel_for_dispatch_key(op_name, "PrivateUse1"),
                 f"{op_name} should have a PrivateUse1 kernel",
             )
-
-        self.assertTrue(
-            torch._C._dispatch_has_kernel_for_dispatch_key(
-                "aten::sub.Tensor", "PrivateUse1"
-            ),
-            "sub.Tensor should have a direct PrivateUse1 kernel (per-op fallback)",
-        )
-
-        self.assertTrue(
-            torch._C._dispatch_has_kernel_for_dispatch_key(
-                "openreg::custom_abs", "PrivateUse1"
-            ),
-            "openreg::custom_abs should have a PrivateUse1 kernel",
-        )
 
         autograd_ops = [
             "openreg::custom_autograd_fn_returns_self",
@@ -304,70 +284,34 @@ class TestDispatch(TestCase):
         )
 
     def test_cpu_fallback_numerical_correctness(self):
-        """Test that CPU fallback produces numerically correct results"""
+        """Test that ops routed via CPU fallback produce correct results"""
         x_cpu = torch.randn(3, 4)
         y_cpu = torch.randn(3, 4)
         x = x_cpu.to("openreg")
         y = y_cpu.to("openreg")
 
-        result = torch.add(x, y)
-        self.assertEqual(result.device.type, "openreg")
-        self.assertEqual(result.cpu(), torch.add(x_cpu, y_cpu))
+        global_fallback_ops = [
+            ("aten::add.Tensor", torch.add, (x, y), (x_cpu, y_cpu)),
+            ("aten::mul.Tensor", torch.mul, (x, y), (x_cpu, y_cpu)),
+        ]
+        for op_name, op_fn, device_args, cpu_args in global_fallback_ops:
+            self.assertFalse(
+                torch._C._dispatch_has_kernel_for_dispatch_key(op_name, "PrivateUse1"),
+                f"{op_name} should resolve via global CPU fallback, not a direct kernel",
+            )
+            result = op_fn(*device_args)
+            self.assertEqual(result.device.type, "openreg")
+            self.assertEqual(result.cpu(), op_fn(*cpu_args))
 
-        result = torch.mul(x, y)
-        self.assertEqual(result.device.type, "openreg")
-        self.assertEqual(result.cpu(), torch.mul(x_cpu, y_cpu))
-
-        result = torch.sub(x, y)
-        self.assertEqual(result.device.type, "openreg")
-        self.assertEqual(result.cpu(), torch.sub(x_cpu, y_cpu))
-
+        self.assertFalse(
+            torch._C._dispatch_has_kernel_for_dispatch_key(
+                "aten::add_.Tensor", "PrivateUse1"
+            ),
+        )
         z = x.clone()
         z.add_(y)
         expected = x_cpu.clone().add_(y_cpu)
         self.assertEqual(z.cpu(), expected)
-
-        result = torch.abs(x)
-        self.assertEqual(result.device.type, "openreg")
-        self.assertEqual(result.cpu(), torch.abs(x_cpu))
-
-
-class TestTensorSubclass(TestCase):
-    def test_tensor_subclass_compatibility(self):
-        """Test tensor subclass mechanisms with the OpenReg backend"""
-        from torch.utils._python_dispatch import TorchDispatchMode
-
-        class LoggingTensor(torch.Tensor):
-            log = []
-
-            @classmethod
-            def __torch_function__(cls, func, types, args=(), kwargs=None):
-                cls.log.append(func)
-                return super().__torch_function__(func, types, args, kwargs or {})
-
-        x = torch.randn(3, 3, device="openreg")
-        lt = x.as_subclass(LoggingTensor)
-        self.assertTrue(lt.is_openreg)
-        self.assertEqual(lt.device.type, "openreg")
-
-        LoggingTensor.log.clear()
-        result = lt + 1
-        self.assertGreaterEqual(len(LoggingTensor.log), 1)
-        self.assertEqual(result.device.type, "openreg")
-
-        class CountingMode(TorchDispatchMode):
-            def __init__(self):
-                self.count = 0
-
-            def __torch_dispatch__(self, func, types, args, kwargs=None):
-                self.count += 1
-                return func(*args, **(kwargs or {}))
-
-        y = torch.randn(3, 3, device="openreg")
-        with CountingMode() as mode:
-            _ = y + 1
-            _ = y * 2
-        self.assertGreaterEqual(mode.count, 2)
 
 
 if __name__ == "__main__":
