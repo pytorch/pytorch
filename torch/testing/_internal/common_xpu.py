@@ -14,7 +14,7 @@ class XPUCodename(enum.Enum):
     BMG = "BMG"  # Intel® Arc™ Pro Battlemage Graphics
 
 
-class XPUArch(enum.Enum):
+class XPUArch(enum.IntEnum):
     Unknown = 0
     Xe = 1  # Xe HPC
     Xe2 = 2
