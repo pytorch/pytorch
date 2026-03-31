@@ -1,5 +1,6 @@
 import functools
 import os
+from typing import Any
 
 import torch
 from torch.types import Storage
@@ -23,31 +24,6 @@ def is_available() -> bool:
     (``USE_CUFILE=1``), and a functional cuFile driver at runtime.
     """
     return torch.cuda.is_available() and torch._C._gds_is_available()
-
-
-_GDS_BINDINGS = [
-    "_gds_is_available",
-    "_gds_register_buffer",
-    "_gds_deregister_buffer",
-    "_gds_register_handle",
-    "_gds_deregister_handle",
-    "_gds_load_storage",
-    "_gds_save_storage",
-]
-
-if not hasattr(torch._C, "_gds_is_available"):
-    for _name in _GDS_BINDINGS:
-        if hasattr(torch._C, _name):
-            raise AssertionError(
-                f"Partial GDS bindings: {_name} exists but _gds_is_available does not"
-            )
-
-    def _gds_unavailable(*args: object, **kwargs: object) -> None:
-        raise RuntimeError("GDS is not supported on this platform")
-
-    torch._C.__dict__["_gds_is_available"] = lambda: False
-    for _name in _GDS_BINDINGS[1:]:
-        torch._C.__dict__[_name] = _gds_unavailable
 
 
 def gds_register_buffer(s: Storage) -> None:
@@ -141,7 +117,7 @@ class GdsFile:
         self.close()
 
     def register_handle(self) -> None:
-        """Registers file descriptor to cuFile Driver.
+        """Registers file descriptor to cuFile driver.
 
         This is a wrapper around ``cuFileHandleRegister``.
         """
@@ -150,7 +126,7 @@ class GdsFile:
         self.handle = torch._C._gds_register_handle(self.fd)
 
     def deregister_handle(self) -> None:
-        """Deregisters file descriptor from cuFile Driver.
+        """Deregisters file descriptor from cuFile driver.
 
         This is a wrapper around ``cuFileHandleDeregister``.
         """
@@ -192,7 +168,12 @@ class GdsFile:
         torch._C._gds_save_storage(self.handle, storage, offset)
 
 
-def save(obj: object, f: str | os.PathLike[str]) -> None:
+def save(
+    obj: object,
+    f: str | os.PathLike[str],
+    *,
+    pickle_protocol: int = torch.serialization.DEFAULT_PROTOCOL,
+) -> None:
     """Saves an object to a file using GPUDirect Storage.
 
     Tensor data is written directly from GPU memory to storage via DMA,
@@ -200,19 +181,18 @@ def save(obj: object, f: str | os.PathLike[str]) -> None:
     :func:`torch.save` and the file is backward-compatible with
     :func:`torch.load`.
 
-    .. note::
-        This function is not thread-safe due to temporarily modifying
-        the global ``serialization_config.save.storage_alignment``.
+    This is equivalent to calling
+    ``torch.save(obj, f, use_gds=True)``.
 
     Args:
         obj: Object to save. CUDA tensors are written via GDS; CPU tensors
             are serialized normally.
         f: Path to the file to save to. Should be on a GDS-compatible
             filesystem (e.g. ext4/XFS on NVMe) for optimal performance.
+        pickle_protocol: Protocol version for pickling metadata.
     """
     from torch.serialization import _serialization_tls
     from torch.utils._pytree import tree_flatten
-    from torch.utils.serialization import config as serialization_config
 
     f = os.fspath(f)
     leaves, _ = tree_flatten(obj)
@@ -223,49 +203,57 @@ def save(obj: object, f: str | os.PathLike[str]) -> None:
     for d in devices:
         torch.cuda.current_stream(d).synchronize()
 
-    pending_writes: list[tuple[str, Storage]] = []
+    pending_writes: list[tuple[str, torch.UntypedStorage]] = []
 
     def _gds_save_hook(
-        zip_file: object, name: str, storage: Storage, num_bytes: int
+        zip_file: torch._C.PyTorchFileWriter,
+        name: str,
+        storage: torch.UntypedStorage,
+        num_bytes: int,
     ) -> bool:
         if storage.device.type == "cuda":
-            zip_file.write_record_metadata(name, num_bytes)  # type: ignore[union-attr]
+            zip_file.write_record_metadata(name, num_bytes)  # type: ignore[attr-defined]
             pending_writes.append((name, storage))
             return True
         return False
 
-    old_alignment = serialization_config.save.storage_alignment
-    serialization_config.save.storage_alignment = 4096
+    _serialization_tls.storage_alignment = 4096
     _serialization_tls.storage_save_hook = _gds_save_hook
     try:
-        torch.save(obj, f)
+        torch.save(obj, f, pickle_protocol=pickle_protocol, use_gds=False)
     finally:
-        serialization_config.save.storage_alignment = old_alignment
+        _serialization_tls.storage_alignment = None
         _serialization_tls.storage_save_hook = None
 
     if pending_writes:
         reader = torch._C.PyTorchFileReader(f)  # type: ignore[attr-defined]
-        with GdsFile(f, os.O_RDWR) as gds_f:
-            written_offsets: set[int] = set()
-            for name, storage in pending_writes:
-                offset = reader.get_record_offset(name)  # type: ignore[attr-defined]
-                if offset not in written_offsets:
-                    written_offsets.add(offset)
-                    gds_f.save_storage(storage, offset)
+        try:
+            with GdsFile(f, os.O_RDWR) as gds_f:
+                written_offsets: set[int] = set()
+                for name, storage in pending_writes:
+                    offset = reader.get_record_offset(name)  # type: ignore[attr-defined]
+                    if offset not in written_offsets:
+                        written_offsets.add(offset)
+                        gds_f.save_storage(storage, offset)
+        except (OSError, RuntimeError):
+            os.unlink(f)
+            raise
 
 
 def load(
     f: str | os.PathLike[str],
     map_location: "torch.serialization.MAP_LOCATION" = None,
+    *,
+    weights_only: bool = True,
+    **kwargs: Any,
 ) -> object:
     """Loads an object from a file using GPUDirect Storage.
 
     Tensor data for CUDA storages is read directly from storage into GPU
     memory via DMA, bypassing CPU and system memory. Non-CUDA storages
-    are loaded normally. For best results, the file should have been saved
-    with :func:`torch.cuda.gds.save` or with :func:`torch.save` using
-    4096-byte storage alignment; otherwise GDS falls back to normal loading
-    per storage.
+    are loaded normally. The file should have been saved with
+    :func:`torch.cuda.gds.save` or with :func:`torch.save` using
+    4096-byte storage alignment.
 
     Args:
         f: Path to the file to load from. Should be on a GDS-compatible
@@ -273,6 +261,9 @@ def load(
         map_location: Passed through to :func:`torch.load`. GDS reads
             into the current CUDA device; ``restore_location`` handles
             any remapping afterward.
+        weights_only: Passed through to :func:`torch.load`. Defaults to
+            ``True`` for safety.
+        **kwargs: Additional keyword arguments forwarded to :func:`torch.load`.
 
     Returns:
         The loaded object with tensors on the specified device.
@@ -285,20 +276,27 @@ def load(
     with GdsFile(f, os.O_RDONLY) as gds_reader:
 
         def _gds_load_hook(
-            zip_file: object, name: str, nbytes: int, location: str
+            zip_file: torch._C.PyTorchFileReader,
+            name: str,
+            nbytes: int,
+            location: str,
         ) -> torch.UntypedStorage | None:
             if not location.startswith("cuda"):
                 return None
-            try:
-                offset = zip_file.get_record_offset(name)  # type: ignore[union-attr]
-                storage = torch.UntypedStorage(nbytes, device=gds_device)
-                gds_reader.load_storage(storage, offset)  # noqa: F821
-                return storage
-            except RuntimeError:
-                return None
+            offset = zip_file.get_record_offset(name)  # type: ignore[attr-defined]
+            storage = torch.UntypedStorage(nbytes, device=gds_device)
+            gds_reader.load_storage(storage, offset)  # noqa: F821
+            return storage
 
+        kwargs.pop("use_gds", None)
         _serialization_tls.storage_load_hook = _gds_load_hook
         try:
-            return torch.load(f, map_location=map_location, weights_only=True)
+            return torch.load(
+                f,
+                map_location=map_location,
+                weights_only=weights_only,
+                use_gds=False,
+                **kwargs,
+            )
         finally:
             _serialization_tls.storage_load_hook = None

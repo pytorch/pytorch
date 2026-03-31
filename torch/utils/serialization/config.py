@@ -10,6 +10,7 @@ from torch.utils._config_module import install_config_module as _install_config_
 
 class load:
     mmap: bool = False
+    use_gds: bool = False
     endianness: _Optional["_LoadEndianess"] = None
     # MAP_PRIVATE = 2
     mmap_flags: int | None = None if sys.platform == "win32" else 2
@@ -18,6 +19,7 @@ class load:
 
 class save:
     compute_crc32: bool = True
+    use_gds: bool = False
     use_pinned_memory_for_d2h: bool = False
     storage_alignment: int = 64
 
