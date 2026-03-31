@@ -299,14 +299,24 @@ class BaseListVariable(VariableTracker):
             else:
                 value = args[0]
 
-            if value.python_type() not in (int, slice):
-                raise_observed_exception(
-                    TypeError,
-                    tx,
-                    args=[
-                        f"indices must be integers or slices, not {value.python_type()}"
-                    ],
-                )
+            try:
+                value_type = value.python_type()
+            except NotImplementedError:
+                value_type = None
+            if value_type not in (int, bool, slice):
+                # CPython: list_subscript checks _PyIndex_Check first, and
+                # raises its own error if the type doesn't have nb_index.
+                # Only if the type has __index__ does it call PyNumber_AsSsize_t.
+                if value_type is not None and not hasattr(value_type, "__index__"):
+                    container_name = self.python_type_name()
+                    raise_observed_exception(
+                        TypeError,
+                        tx,
+                        args=[
+                            f"{container_name} indices must be integers or slices, not {value.python_type_name()}"
+                        ],
+                    )
+                value = value.nb_index_impl(tx)
 
             return self.getitem_const(tx, value)
         elif name == "__contains__":
