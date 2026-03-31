@@ -17043,9 +17043,8 @@ op_db: list[OpInfo] = [
            supports_expanded_weight=True,
            skips=(
                # RuntimeError: MPS device does not support linear for non-float inputs
-               # RuntimeError: mps linear does not support complex types
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64, torch.int64)),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.int64,)),
            ),
            decorators=(
                # Strides are not the same!

@@ -1127,21 +1127,48 @@ def index_put_single_dim_strategy(
     index_shapes = [idx.shape for idx in indices_meta if idx is not None]
     broadcast_ndim = len(torch.broadcast_shapes(*index_shapes)) if index_shapes else 0
 
-    # values shape = (*broadcast_shape, *non_indexed_dim_sizes)
     # Strategy format: [output, input, *indices, value]
     # The infra flattens the indices list and drops None entries, so only
     # non-None index tensors get a placement slot (all Replicate).
+    #
+    # Values dim mapping depends on whether indexed dims are contiguous:
+    #   Contiguous (e.g., (None, idx0, idx1)): broadcast replaces indexed block in-place.
+    #     values shape = (*non_indexed_before, *broadcast_shape, *non_indexed_after)
+    #   Non-contiguous (e.g., (idx0, None, idx1)): broadcast goes to front.
+    #     values shape = (*broadcast_shape, *non_indexed_dim_sizes)
+    indexed_dims_sorted = sorted(indexed_dims)
+    contiguous_indexed = len(indexed_dims_sorted) <= 1 or (
+        indexed_dims_sorted[-1] - indexed_dims_sorted[0] + 1 == len(indexed_dims_sorted)
+    )
+
     strategies: list[list[Placement | _ShardingPlaceholder]] = []
-    for values_dim in range(broadcast_ndim, values_ndim):
-        self_dim = non_indexed_dims[values_dim - broadcast_ndim]
+    for i, self_dim in enumerate(non_indexed_dims):
+        if contiguous_indexed and indexed_dims_sorted:
+            # Broadcast replaces the indexed block in-place.
+            first_indexed = indexed_dims_sorted[0]
+            if self_dim < first_indexed:
+                values_dim = self_dim
+            else:
+                values_dim = self_dim - n_indexed + broadcast_ndim
+        else:
+            # Broadcast goes to front (non-contiguous or no indexed dims).
+            values_dim = broadcast_ndim + i
+
+        # values may have fewer dims than expected (implicit broadcast).
+        # In that case, the missing leading dims are size 1, so require Replicate.
+        if values_dim >= values_ndim:
+            values_placement: Placement | _ShardingPlaceholder = Replicate()
+        elif values_meta.shape[values_dim] == 1:
+            values_placement = Replicate()
+        else:
+            values_placement = _ShardingPlaceholder(values_dim)
+
         strategies.append(
             [
                 _ShardingPlaceholder(self_dim),
                 _ShardingPlaceholder(self_dim),
                 *([Replicate()] * n_indexed),
-                Replicate()
-                if values_meta.shape[values_dim] == 1
-                else _ShardingPlaceholder(values_dim),
+                values_placement,
             ]
         )
 

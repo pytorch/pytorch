@@ -627,6 +627,24 @@ Available options:
   on all the CUDA devices to a specified fraction of the available memory. This is a value
   between 0 and 1. Attempting to allocate more memory will raise an out of memory error.
 
+* ``throw_on_cudamalloc_oom`` (default: ``False``)
+  When set to ``True``, the allocator will preemptively reject allocations that would
+  exceed the ``per_process_memory_fraction`` limit by throwing an ``OutOfMemoryError``
+  instead of attempting the allocation through the driver, which could trigger a fatal
+  GPU runtime abort (e.g., ``HSA_STATUS_ERROR_OUT_OF_RESOURCES`` on ROCm). The rejected
+  allocation skips the retry chain and throws immediately, allowing the caller to catch
+  the exception and handle it gracefully.
+
+  Example configuration:
+
+  .. code-block:: bash
+
+      PYTORCH_CUDA_ALLOC_CONF=per_process_memory_fraction:0.95,throw_on_cudamalloc_oom:True
+
+  This is particularly useful for inference serving, where a fatal GPU OOM would crash the
+  server process. With this option, the serving framework can catch the ``OutOfMemoryError``
+  and reject the individual request while continuing to serve subsequent requests.
+
 .. note::
 
     Some stats reported by the

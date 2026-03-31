@@ -2680,8 +2680,35 @@ def inductor_lookup_seed(seeds, index):
     )
 
 
+def get_threads_per_round(device: torch.device):
+    if not isinstance(device, torch.device):
+        device = torch.device(device)
+
+    if device.type == "cuda":
+        idx = device.index
+        if idx is None:
+            idx = torch.cuda.current_device()
+
+        prop = torch.cuda.get_device_properties(idx)
+        threads_per_round = (
+            prop.multi_processor_count * prop.max_threads_per_multi_processor
+        )
+    else:
+        _CPU_GRAIN_SIZE = 32768
+        threads_per_round = _CPU_GRAIN_SIZE
+
+    return threads_per_round
+
+
 @register_lowering(inductor_prims.random, type_promotion_kind=None)
-def inductor_random(size: list[int], seed: TensorBox, mode: str, *, offset: int = 0):
+def inductor_random(
+    size: list[int],
+    seed: TensorBox,
+    mode: str,
+    *,
+    offset: int = 0,
+    align_dtype: torch.dtype = torch.float32,
+):
     assert not config.fallback_random
     assert mode in ("rand", "randn")
     size = [*size]
@@ -2692,11 +2719,33 @@ def inductor_random(size: list[int], seed: TensorBox, mode: str, *, offset: int 
     ).make_indexer()
     seed_loader = seed.make_loader()
 
-    def inner_fn(index):
-        return getattr(ops, mode)(
-            seed_loader([]),
-            ops.index_expr(random_pos(index), torch.int32),
-        )
+    if config.align_random_eager and device.type == "cuda":
+        threads_per_round = get_threads_per_round(device)
+
+        def _vec_from_dtype(dt: torch.dtype) -> int:
+            if dt in (torch.float16, torch.bfloat16):
+                return 8
+            return 4
+
+        vec = _vec_from_dtype(align_dtype)
+
+        def inner_fn(index):
+            rng_seed = seed_loader([0])
+            base_offset = seed_loader([1])
+            return ops.rand_eager(
+                rng_seed,
+                base_offset,
+                threads_per_round,
+                ops.index_expr(random_pos(index), torch.int32),
+                vec=int(vec),
+            )
+    else:
+
+        def inner_fn(index):
+            return getattr(ops, mode)(
+                seed_loader([]),
+                ops.index_expr(random_pos(index), torch.int32),
+            )
 
     result = Pointwise.create(
         device=device,
@@ -2706,6 +2755,10 @@ def inductor_random(size: list[int], seed: TensorBox, mode: str, *, offset: int 
     )
     result.realize()
     return result
+
+
+make_fallback(inductor_prims.rand_eager_offset)
+make_fallback(inductor_prims.rand_eager_offsets)
 
 
 @register_lowering(inductor_prims.randint, type_promotion_kind=None)

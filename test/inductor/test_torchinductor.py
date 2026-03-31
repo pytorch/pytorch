@@ -10780,6 +10780,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @xfail_if_mps
     def test_dropout2(self):
+        if is_mps_backend(self.device) and torch._inductor.config.align_random_eager:
+            raise AssertionError(
+                "MPS + align_random_eager: will pass but force failure for xfail_if_mps"
+            )
         n = 100000
         weight = torch.ones(
             n, device=self.device, dtype=torch.float32, requires_grad=True
@@ -10817,10 +10821,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         torch.manual_seed(1234)
         weight.grad.zero_()
         r2, (fw_code, bw_code) = run_fw_bw_and_get_code(lambda: run(ones))
-        if is_halide_backend(self.device):
+        if (
+            is_halide_backend(self.device)
+            and not torch._inductor.config.align_random_eager
+        ):
             self.assertEqual(fw_code.count("halide_helpers.rand"), 1)
             self.assertEqual(bw_code.count("halide_helpers.rand"), 0)
-        elif self.device == GPU_TYPE:
+        elif self.device == GPU_TYPE and not torch._inductor.config.align_random_eager:
             self.assertEqual(fw_code.count("tl.rand"), 1)
             self.assertEqual(bw_code.count("tl.rand"), 0)
         g2 = weight.grad.clone()
@@ -10840,6 +10847,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @xfail_if_mps
     @config.patch(search_autotune_cache=False)
     def test_dropout3(self):
+        if is_mps_backend(self.device) and torch._inductor.config.align_random_eager:
+            raise AssertionError(
+                "MPS + align_random_eager + dynamic shapes: will pass but force failure for xfail_if_mps"
+            )
         m = torch.nn.Sequential(
             torch.nn.Linear(32, 32, bias=False),
             torch.nn.Dropout(),
@@ -10857,10 +10868,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             lambda: run(torch.randn([8, 32], device=self.device))
         )
 
-        if is_halide_backend(self.device):
+        if (
+            is_halide_backend(self.device)
+            and not torch._inductor.config.align_random_eager
+        ):
             self.assertEqual(fw_code.count("halide_helpers.rand"), 2)
             self.assertEqual(bw_code.count("halide_helpers.rand"), 0)
-        elif self.device == GPU_TYPE:
+        elif self.device == GPU_TYPE and not torch._inductor.config.align_random_eager:
             # the load_seed_offset arg can be 1 or non-1; depending on whether
             # the triton signature specializes on 1 vs non-1, you might get 1
             # or 2 kernels. In newer versions of triton, there's no specialization
@@ -13339,6 +13353,29 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         tensor = torch.empty((16, 32))
         with self.assertRaisesRegex(AssertionError, "torch.ops.dummy.op_name"):
             assert_alignment(tensor, 0, "torch.ops.dummy.op_name")
+
+    @requires_gpu()
+    @skip_if_not_triton
+    @unittest.skipIf(
+        config.cpp_wrapper,
+        "Inductor does not generate size/stride asserts for cpp_wrapper",
+    )
+    def test_input_asserts_deferred_to_first_use(self):
+        def fn(x, y, z):
+            a = torch.mm(x, y)
+            b = torch.mm(a, z)
+            return b
+
+        x = torch.randn(16, 32, device=self.device)
+        y = torch.randn(32, 64, device=self.device)
+        z = torch.randn(64, 8, device=self.device)
+
+        _, code = run_and_get_code(torch.compile(fn), x, y, z)
+        # z's assert should appear after the first mm, not at the top
+        # with all the other asserts
+        FileCheck().check("def call").check_count(
+            "assert_size_stride", 2, exactly=True
+        ).check("extern_kernels.mm(").run(code[0])
 
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     @torch._inductor.config.patch(implicit_fallbacks=True)
@@ -16248,7 +16285,10 @@ if RUN_GPU:
             if config.triton.multi_kernel:
                 self.assertEqual(len(kernels), 4)
                 expected_divisible[2] = expected_divisible.pop(1)
-            elif config.triton.cooperative_reductions:
+            elif (
+                config.triton.cooperative_reductions
+                or config.triton.force_cooperative_reductions
+            ):
                 self.assertEqual(len(kernels), 1)
                 expected_divisible = {
                     # one kernel, with extra workspace/semaphore args
@@ -17337,8 +17377,15 @@ if RUN_GPU:
 
         @torch._functorch.config.patch("donated_buffer", True)
         # The inplace updating does not happen after we fused the
-        # layernorm backward
-        @torch._inductor.config.patch("triton.mix_order_reduction", False)
+        # layernorm backward, or if we do cooperative reductions (due to the change in
+        # optimal peak memory ordering).
+        @torch._inductor.config.patch(
+            {
+                "triton.cooperative_reductions": False,
+                "triton.force_cooperative_reductions": False,
+                "triton.mix_order_reduction": False,
+            }
+        )
         def test_donated_buffer_inplace(self):
             batch_size = 32
             seq_length = 50

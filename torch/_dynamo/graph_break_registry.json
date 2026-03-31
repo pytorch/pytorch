@@ -1407,6 +1407,16 @@
       "Hints": []
     }
   ],
+  "GB7650": [
+    {
+      "Gb_type": "torch.Generator method",
+      "Context": "torch.Generator.{name}",
+      "Explanation": "torch.Generator.{name}() is a stateful RNG operation that cannot be soundly traced in the FX graph.",
+      "Hints": [
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    }
+  ],
   "GB0118": [
     {
       "Gb_type": "Unimplemented next() call",

@@ -805,6 +805,9 @@ delay_realize_cheap_outputs: bool = Config(
 # fallback to eager for random/dropout, this is slow but useful for debugging
 fallback_random = False
 
+# align random/dropout as eager mode(aten) behavior, maintaining fused possibility and faster gpu kernel
+align_random_eager = False
+
 # fallback embedding_bag_byte_unpack to eager
 fallback_embedding_bag_byte_unpack = False
 
@@ -1183,11 +1186,7 @@ def decide_compile_threads() -> int:
         compile_threads = 1
         log.info("compile_threads set to 1 in fbcode")
     else:
-        cpu_count = (
-            len(os.sched_getaffinity(0))
-            if hasattr(os, "sched_getaffinity")
-            else os.cpu_count()
-        )
+        cpu_count = torch._utils.cpu_count()
         assert cpu_count
         compile_threads = min(32, cpu_count)
         log.info("compile_threads set to %d", compile_threads)

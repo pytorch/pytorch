@@ -668,6 +668,13 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         "If you need it, please file an issue describing your use case.");
   }
 
+  void attachOomRejectionObserver(OomRejectionObserver observer) override {
+    TORCH_CHECK(
+        false,
+        "cudaMallocAsync does not yet support attachOomRejectionObserver. "
+        "If you need it, please file an issue describing your use case.");
+  }
+
   void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) override {
     TORCH_CHECK(
         false,
