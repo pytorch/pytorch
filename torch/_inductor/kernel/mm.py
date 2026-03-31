@@ -665,8 +665,10 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
     if use_aten_gemm_kernels():
         aten_templates: list[ExternKernelChoice | KernelTemplate] = [aten_addmm]
+        # For ROCm, check original inp since kernel_inputs_aten uses inp (not inp_expanded)
+        bias_to_check = inp if torch.version.hip else inp_expanded
         if (
-            inp_expanded.get_stride()[0] == 0
+            bias_to_check.get_stride()[0] == 0
             and inductor_config.triton.autotune_cublasLt
         ):
             aten_templates.append(aten_bias_addmm)
