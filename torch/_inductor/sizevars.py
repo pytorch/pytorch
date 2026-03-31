@@ -601,17 +601,6 @@ class SizeVarAllocator:
         if right == gcd:
             return right
 
-        # Min/Max fallback: we can prove Min(a, b) <= c when any arg <= c, but
-        # sympy doesn't simplify this yet. So, evaluate it here.
-        for lhs, rhs in [(left, right), (right, left)]:
-
-            def le_rhs(a: Expr) -> bool:
-                return self.guard_or_false(sympy.Le(a, rhs))
-
-            # Min(Min(a, b), c) ==> Min(a, b) if (a <= c) or (b <= c).
-            if isinstance(lhs, sympy.Min) and any(le_rhs(a) for a in lhs.args):
-                return lhs
-
         raise TypeError(
             f"evaluate_min({left}, {right}) with unbacked symints"
         ) from None
