@@ -216,9 +216,9 @@ conv_depthwise3d_cuda_backward_weight_kernel(
     return;
   }
 
-  const int laneid = threadIdx.x % warpSize;
-  const int warpid = threadIdx.x / warpSize;
-  const int nwarps = blockDim.x / warpSize;
+  const int laneid = threadIdx.x % C10_WARP_SIZE;
+  const int warpid = threadIdx.x / C10_WARP_SIZE;
+  const int nwarps = blockDim.x / C10_WARP_SIZE;
 
   accscalar_t grad = 0;
   int batch = warpid / oT;
@@ -241,7 +241,7 @@ conv_depthwise3d_cuda_backward_weight_kernel(
 
     for (; gout_row < oH; ) {
       const accscalar_t op1 = *(gout_ptr);
-      gout_ptr += warpSize;
+      gout_ptr += C10_WARP_SIZE;
 
       const int in_col = (gout_col * strideW) + (k_col * dilationW) - paddingW;
       const int in_row = (gout_row * strideH) + (k_row * dilationH) - paddingH;
@@ -252,7 +252,7 @@ conv_depthwise3d_cuda_backward_weight_kernel(
         op2 = *(input_ptr + in_pos);
       }
 
-      gout_col += warpSize;
+      gout_col += C10_WARP_SIZE;
       while (gout_col >= oW) {
         gout_col -= oW; gout_row ++;
       }

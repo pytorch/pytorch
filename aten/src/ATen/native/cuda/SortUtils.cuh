@@ -170,8 +170,7 @@ bitonicSortKVInPlace(at::cuda::detail::TensorInfo<K, IndexType> keys,
 // warpMergeSortKVInPlace was written assuming C10_WARP_SIZE is a constexpr.
 // In torch/headeronly/macros/Macros.h, C10_WARP_SIZE is 32 for CUDA, and on
 // ROCm it will be 32 or 64 based on the current compile-time gfx target.
-// However, to support amdgcnspirv, C10_WARP_SIZE will default to 64. Ideally,
-// warpSize should be used instead of C10_WARP_SIZE in device code, but
+// Ideally, warpSize should be used instead of C10_WARP_SIZE in device code, but
 // C10_WARP_SIZE within this kernel has been used as a template parameter for
 // some device functions. Therefore, a template param for WARP_SIZE was added.
 template <int KeyDims, int ValueDims, int sort_size, int max_block_dim_y,

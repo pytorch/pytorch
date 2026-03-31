@@ -319,7 +319,7 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
   }
   __syncthreads();
   // All threads within the warp need to participate in the loop, so rounding up to a multiple of the warp size.
-  IndexType numIterations = round_up(inputSliceSize, (IndexType) warpSize);
+  IndexType numIterations = round_up(inputSliceSize, (IndexType) C10_WARP_SIZE);
 
   // phase 1: write actual > `pattern` (or < `pattern`, depending on the sort direction) values to the output.
   // prefetching data from global memory.
@@ -848,13 +848,13 @@ __global__ void computeBlockwiseWithinKCounts(
   // do warp reduction followed by shared memory reduction to get the total count
   // non-active thread should not load, and non-active warp should not do reduction.
   bool warp_is_active, thread_is_active;
-  int warp = tidx / warpSize;
+  int warp = tidx / C10_WARP_SIZE;
   if (largest) {
-    int end_of_warp = warp * warpSize + warpSize - 1;
+    int end_of_warp = warp * C10_WARP_SIZE + C10_WARP_SIZE - 1;
     warp_is_active = end_of_warp > desired_digit;
     thread_is_active = tidx > desired_digit;
   } else {
-    int start_of_warp = warp * warpSize;
+    int start_of_warp = warp * C10_WARP_SIZE;
     warp_is_active = start_of_warp < desired_digit;
     thread_is_active = tidx < desired_digit;
   }
@@ -863,15 +863,15 @@ __global__ void computeBlockwiseWithinKCounts(
     if (thread_is_active) {
       count = doLdg(counts + block_idx * RADIX_DIGITS + tidx);
     }
-    for (int offset = warpSize / 2; offset > 0; offset /= 2) {
+    for (int offset = C10_WARP_SIZE / 2; offset > 0; offset /= 2) {
       count += WARP_SHFL_DOWN(count, offset);
     }
   }
 
-  constexpr int SHMEM_SIZE = RADIX_DIGITS / 32;  // max shmem size on ROCm
-  const int num_warps = RADIX_DIGITS / warpSize;
+  constexpr int SHMEM_SIZE = RADIX_DIGITS / C10_WARP_SIZE_LOWER_BOUND;  // max shmem size on ROCm
+  const int num_warps = RADIX_DIGITS / C10_WARP_SIZE;
   __shared__ uint32_t warp_counts[SHMEM_SIZE];
-  if (tidx % warpSize == 0) {
+  if (tidx % C10_WARP_SIZE == 0) {
     warp_counts[warp] = count;
   }
   __syncthreads();
@@ -1023,13 +1023,13 @@ __global__ void computeBlockwiseWithinKCounts(
   // do warp reduction followed by shared memory reduction to get the total count
   // non-active thread should not load, and non-active warp should not do reduction.
   bool warp_is_active, thread_is_active;
-  int warp = tidx / warpSize;
+  int warp = tidx / C10_WARP_SIZE;
   if (largest) {
-    int end_of_warp = warp * warpSize + warpSize - 1;
+    int end_of_warp = warp * C10_WARP_SIZE + C10_WARP_SIZE - 1;
     warp_is_active = end_of_warp > desired_digit;
     thread_is_active = tidx > desired_digit;
   } else {
-    int start_of_warp = warp * warpSize;
+    int start_of_warp = warp * C10_WARP_SIZE;
     warp_is_active = start_of_warp < desired_digit;
     thread_is_active = tidx < desired_digit;
   }
@@ -1038,20 +1038,20 @@ __global__ void computeBlockwiseWithinKCounts(
     if (thread_is_active) {
       count = doLdg(counts + block_idx * RADIX_DIGITS + tidx);
     }
-    for (int offset = warpSize / 2; offset > 0; offset /= 2) {
+    for (int offset = C10_WARP_SIZE / 2; offset > 0; offset /= 2) {
       count += WARP_SHFL_DOWN(count, offset);
     }
   }
 
-  constexpr int SHMEM_SIZE = RADIX_DIGITS / 32; // max shmem size on ROCm
-  const int num_warps = RADIX_DIGITS / warpSize;
+  constexpr int SHMEM_SIZE = RADIX_DIGITS / C10_WARP_SIZE_LOWER_BOUND; // max shmem size on ROCm
+  const int num_warps = RADIX_DIGITS / C10_WARP_SIZE;
   __shared__ uint32_t warp_counts[SHMEM_SIZE];
-  if (tidx % warpSize == 0) {
+  if (tidx % C10_WARP_SIZE == 0) {
     warp_counts[warp] = count;
   }
   __syncthreads();
 
-  CUDA_KERNEL_ASSERT(RADIX_DIGITS < warpSize * warpSize);
+  CUDA_KERNEL_ASSERT(RADIX_DIGITS < C10_WARP_SIZE * C10_WARP_SIZE);
   if (warp != 0) {
     return;
   }

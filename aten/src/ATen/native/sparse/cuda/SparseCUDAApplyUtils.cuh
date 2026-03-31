@@ -223,7 +223,7 @@ __global__ void coalesceValuesKernel(
       #pragma unroll
       for (int ii = 0; ii < SZ; ii++)
       {
-        int featureDim = startFeature + ii * warpSize;
+        int featureDim = startFeature + ii * C10_WARP_SIZE;
         if (featureDim < stride)
         {
           tmp[ii] += static_cast<Acctype>(values[valueRow + featureDim]);
@@ -233,7 +233,7 @@ __global__ void coalesceValuesKernel(
     #pragma unroll
     for (int ii = 0; ii < SZ; ii++)
     {
-      int featureDim = startFeature + ii * warpSize;
+      int featureDim = startFeature + ii * C10_WARP_SIZE;
       if (featureDim < stride)
       {
         newValues[newValueRow + featureDim] = static_cast<Dtype>(tmp[ii]);
@@ -246,11 +246,7 @@ __global__ void coalesceValuesKernel(
 // `if constexpr` when CUDA codes will be compiled under C++-17, see
 // gh-56055 for blockers.
 template<typename Dtype>
-#ifdef USE_ROCM
-C10_LAUNCH_BOUNDS_1(C10_WARP_SIZE_STATIC*4)
-#else
-C10_LAUNCH_BOUNDS_1(C10_WARP_SIZE*4)
-#endif
+C10_LAUNCH_BOUNDS_1(C10_WARP_SIZE_UPPER_BOUND*4)
 __global__ void coalesceValuesKernel(
   int64_t *segment_offsets, int64_t *value_indices,
   bool *values, bool *newValues,
@@ -289,7 +285,7 @@ __global__ void coalesceValuesKernel(
       #pragma unroll
       for (int ii = 0; ii < SZ; ii++)
       {
-        int featureDim = startFeature + ii * warpSize;
+        int featureDim = startFeature + ii * C10_WARP_SIZE;
         if (featureDim < stride)
         {
           tmp[ii] |= values[valueRow + featureDim];
@@ -299,7 +295,7 @@ __global__ void coalesceValuesKernel(
     #pragma unroll
     for (int ii = 0; ii < SZ; ii++)
     {
-      int featureDim = startFeature + ii * warpSize;
+      int featureDim = startFeature + ii * C10_WARP_SIZE;
       if (featureDim < stride)
       {
         newValues[newValueRow + featureDim] = tmp[ii];

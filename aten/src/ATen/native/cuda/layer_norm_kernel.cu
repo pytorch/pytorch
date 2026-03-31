@@ -61,7 +61,7 @@ __global__ void RowwiseMomentsCUDAKernel(
 
   __shared__
       typename std::aligned_storage<sizeof(WelfordType), alignof(WelfordType)>::
-          type val_shared[C10_WARP_SIZE];
+          type val_shared[C10_WARP_SIZE_UPPER_BOUND];
   WelfordType* val_shared_ptr = reinterpret_cast<WelfordType*>(val_shared);
 
   const int64_t i = blockIdx.x;
@@ -198,7 +198,7 @@ __device__ WelfordDataLN compute_stats(
       }
     }
     // intra-warp reduction
-    for (int offset = (warpSize >> 1); offset > 0; offset >>= 1) {
+    for (int offset = (C10_WARP_SIZE >> 1); offset > 0; offset >>= 1) {
         WelfordDataLN wdB{WARP_SHFL_DOWN(wd.mean, offset), WARP_SHFL_DOWN(wd.sigma2, offset), WARP_SHFL_DOWN(wd.count, offset)};
         wd = cuWelfordCombine<rms_norm>(wd, wdB);
     }
@@ -656,7 +656,7 @@ blockReduceGammaBetaBackwardsHelper(
   constexpr int rows_per_thread_y = rows_per_block_y / block_dim_y;
   int64_t thread_x = blockIdx.x * block_dim_x + threadIdx.x;
 
-    int lane_id = (threadIdx.y * blockDim.x + threadIdx.x) & (warpSize - 1);
+    int lane_id = (threadIdx.y * blockDim.x + threadIdx.x) & (C10_WARP_SIZE - 1);
     int64_t mean_index = M_start + threadIdx.y * rows_per_thread_y;
     T_ACC warp_mean = 0, warp_rstd = 0;
     if (lane_id < rows_per_thread_y && mean_index + lane_id < M) {
@@ -689,9 +689,9 @@ blockReduceGammaBetaBackwardsHelper(
 
     #pragma unroll
     for (int i = 0; i < rows_per_thread_y; ++i) {
-      T_ACC rstd_reg = WARP_SHFL(warp_rstd, i, warpSize);
+      T_ACC rstd_reg = WARP_SHFL(warp_rstd, i, C10_WARP_SIZE);
       if constexpr (!rms_norm){
-        T_ACC mean_reg = WARP_SHFL(warp_mean, i, warpSize);
+        T_ACC mean_reg = WARP_SHFL(warp_mean, i, C10_WARP_SIZE);
         dg_sum += dY_regs[i] * (X_regs[i] - mean_reg) * rstd_reg;
         db_sum += dY_regs[i];
       } else{
@@ -770,7 +770,7 @@ __launch_bounds__(block_dim_x * block_dim_y)
   // This assert is a compile-time check only.
   constexpr int rows_per_thread_y = rows_per_block_y / block_dim_y;
 #ifdef USE_ROCM
-  CUDA_KERNEL_ASSERT(rows_per_thread_y <= warpSize);
+  CUDA_KERNEL_ASSERT(rows_per_thread_y <= C10_WARP_SIZE);
 #else
   static_assert(rows_per_thread_y <= C10_WARP_SIZE);
 #endif
@@ -817,7 +817,7 @@ __launch_bounds__(block_dim_x * block_dim_y)
     // The caller requested a full reduction so we must reduce across
     // warps using shared memory and warp shuffles.
 #ifdef USE_ROCM
-    CUDA_KERNEL_ASSERT(rows_per_thread_y <= warpSize);
+    CUDA_KERNEL_ASSERT(rows_per_thread_y <= C10_WARP_SIZE);
 #else
     static_assert(rows_per_thread_y <= C10_WARP_SIZE);
 #endif
@@ -837,14 +837,14 @@ __launch_bounds__(block_dim_x * block_dim_y)
     // Because block_dim_x != block_dim_y in the general case, we need
     // some code to handle the general case.
 #ifdef USE_ROCM
-    CUDA_KERNEL_ASSERT(block_dim_x * block_dim_y % warpSize == 0);
+    CUDA_KERNEL_ASSERT(block_dim_x * block_dim_y % C10_WARP_SIZE == 0);
 #else
     static_assert(block_dim_x * block_dim_y % C10_WARP_SIZE == 0);
 #endif
-    const int warps_available_to_reduce = block_dim_x * block_dim_y / warpSize;
+    const int warps_available_to_reduce = block_dim_x * block_dim_y / C10_WARP_SIZE;
     int thread_id = threadIdx.y * block_dim_x + threadIdx.x;
-    int warp_id = thread_id / warpSize;
-    int lane_id = thread_id & (warpSize - 1);
+    int warp_id = thread_id / C10_WARP_SIZE;
+    int lane_id = thread_id & (C10_WARP_SIZE - 1);
     #pragma unroll
     for (int i = warp_id; i < block_dim_x; i += warps_available_to_reduce) {
       T_ACC reg_db, reg_dg;
@@ -854,8 +854,8 @@ __launch_bounds__(block_dim_x * block_dim_y)
       }
       #pragma unroll
       for (unsigned delta = block_dim_y >> 1; delta >= 1; delta >>= 1) {
-        reg_dg += WARP_SHFL_XOR(reg_dg, delta, warpSize);
-        reg_db += WARP_SHFL_XOR(reg_db, delta, warpSize);
+        reg_dg += WARP_SHFL_XOR(reg_dg, delta, C10_WARP_SIZE);
+        reg_db += WARP_SHFL_XOR(reg_db, delta, C10_WARP_SIZE);
       }
       // Reduce is done. Now write it out to global memory.
       int64_t out_index = ((int64_t)blockIdx.x) * block_dim_x + i;
