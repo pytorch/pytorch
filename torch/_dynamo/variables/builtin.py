@@ -2137,7 +2137,7 @@ class BuiltinVariable(VariableTracker):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        if user_cls not in {dict, OrderedDict, defaultdict}:
+        if not issubclass(user_cls, (dict, OrderedDict, defaultdict)):
             unimplemented(
                 gb_type="Unsupported dict type for fromkeys()",
                 context=f"{user_cls.__name__}.fromkeys(): {args} {kwargs}",
@@ -2150,7 +2150,7 @@ class BuiltinVariable(VariableTracker):
         if kwargs:
             # Only `OrderedDict.fromkeys` accepts `value` passed by keyword
             if (
-                user_cls is not OrderedDict
+                not issubclass(user_cls, OrderedDict)
                 or len(args) != 1
                 or len(kwargs) != 1
                 or "value" not in kwargs
@@ -2181,7 +2181,9 @@ class BuiltinVariable(VariableTracker):
 
         arg, value = args
         DictVariableType = (
-            ConstDictVariable if user_cls is not defaultdict else DefaultDictVariable
+            ConstDictVariable
+            if not issubclass(user_cls, defaultdict)
+            else DefaultDictVariable
         )
 
         if isinstance(arg, dict):

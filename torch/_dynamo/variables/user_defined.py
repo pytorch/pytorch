@@ -322,10 +322,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # Otherwise, it would be wrapped as UserDefinedObjectVariable(collections.OrderedDict.fromkeys),
         # and we need duplicate code to handle both cases.
         if (
-            self.value in {collections.OrderedDict, collections.defaultdict}
+            issubclass(
+                self.value, (dict, collections.OrderedDict, collections.defaultdict)
+            )
             and name == "fromkeys"
         ):
-            return super().var_getattr(tx, name)
+            m = inspect.getattr_static(self.value, name)
+            if m in dict_methods:
+                return super().var_getattr(tx, name)
+            else:
+                return variables.UserDefinedDictVariable(self.value()).var_getattr(
+                    tx, name
+                )
 
         obj = None
         try:
@@ -476,12 +484,26 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 source = CallFunctionNoArgsSource(source)
             return VariableTracker.build(tx, self.value.__subclasses__(), source)
         elif (
-            self.value in {collections.OrderedDict, collections.defaultdict}
+            issubclass(
+                self.value, (dict, collections.OrderedDict, collections.defaultdict)
+            )
             and name == "fromkeys"
         ):
-            return variables.BuiltinVariable.call_custom_dict_fromkeys(
-                tx, self.value, *args, **kwargs
-            )
+            # Figure out if self.value has overridden fromkeys.
+            overridden_fromkeys = False
+            for klass in type(self.value).__mro__:
+                if klass in (dict, collections.OrderedDict, collections.defaultdict):
+                    break
+                elif "fromkeys" in klass.__dict__:
+                    overridden_fromkeys = True
+                    break
+
+            if overridden_fromkeys:
+                return super().call_method(tx, name, args, kwargs)
+            else:
+                return variables.BuiltinVariable.call_custom_dict_fromkeys(
+                    tx, self.value, *args, **kwargs
+                )
         elif self.value is collections.OrderedDict and name == "move_to_end":
             return args[0].call_method(tx, name, [*args[1:]], kwargs)
         elif name == "__eq__" and len(args) == 1 and hasattr(args[0], "value"):
