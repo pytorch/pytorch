@@ -2,6 +2,7 @@
 
 import argparse
 import logging
+import sys
 
 from cli.build_cli.register_build import register_build_commands
 from cli.lib.common.logger import setup_logging
@@ -31,7 +32,11 @@ def main():
     logger.debug("Parsed args: %s", args)
 
     if hasattr(args, "func"):
-        args.func(args)
+        try:
+            args.func(args)
+        except RuntimeError as e:
+            logger.error("%s", e)  # noqa: G200
+            sys.exit(1)
     else:
         parser.print_help()
 

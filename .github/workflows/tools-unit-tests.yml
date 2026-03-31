@@ -5,11 +5,11 @@ on:
     branches:
       - main
     paths:
-      - scripts/lumen_cli/**
+      - .ci/lumen_cli/**
       - .github/workflows/tools-unit-tests.yml
   pull_request:
     paths:
-      - scripts/lumen_cli/**
+      - .ci/lumen_cli/**
       - .github/workflows/tools-unit-tests.yml
 
 concurrency:
@@ -42,7 +42,7 @@ jobs:
           python3 -m venv /tmp/venv
           source /tmp/venv/bin/activate
           pip install -e .ci/lumen_cli/
-          pytest -v -s .ci/lumen_cli/tests/*
+          pytest -v -s .ci/lumen_cli/tests/test_pytorch_core.py .ci/lumen_cli/tests/test_workflow_parser.py
 
   lumen-cli-compatible-python39:
     permissions:

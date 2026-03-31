@@ -1902,22 +1902,17 @@ test_openreg() {
   assert_git_not_dirty
 }
 
+
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
 if [[ "${TEST_CONFIG}" == *numpy_2* ]]; then
-  # Install numpy-2.0.2 and compatible scipy & numba versions
-  # Force re-install of pandas to avoid error where pandas checks numpy version from initial install and fails upon import
-  TMP_PANDAS_VERSION=$(python -c "import pandas; print(pandas.__version__)" 2>/dev/null)
-  if [ -n "$TMP_PANDAS_VERSION" ]; then
-    python -m pip install --pre numpy==2.0.2 scipy==1.13.1 numba==0.60.0 pandas=="$TMP_PANDAS_VERSION" --force-reinstall
-  else
-    python -m pip install --pre numpy==2.0.2 scipy==1.13.1 numba==0.60.0
-  fi
-  python test/run_test.py --include dynamo/test_functions.py dynamo/test_unspec.py test_binary_ufuncs.py test_fake_tensor.py test_linalg.py test_numpy_interop.py test_tensor_creation_ops.py test_torch.py torch_np/test_basic.py
-elif [[ "${BUILD_ENVIRONMENT}" == *aarch64* && "${TEST_CONFIG}" == 'default' ]]; then
-  test_linux_aarch64
+  (cd .ci/lumen_cli && python -m pip install -e .)
+  python -m cli.run test pytorch-core --group-id pytorch_numpy_2 --build-env "$BUILD_ENVIRONMENT"
+ elif [[ "${BUILD_ENVIRONMENT}" == *aarch64* && "${TEST_CONFIG}" == 'default' ]]; then
+  (cd .ci/lumen_cli && python -m pip install -e .)
+  python -m cli.run test pytorch-core --group-id pytorch_linux_aarch64 --build-env "$BUILD_ENVIRONMENT" --shard-id "$SHARD_NUMBER" --num-shards "$NUM_TEST_SHARDS"
 elif [[ "${TEST_CONFIG}" == *backward* ]]; then
   test_forward_backward_compatibility
   # Do NOT add tests after bc check tests, see its comment.
@@ -1928,17 +1923,19 @@ elif [[ "${TEST_CONFIG}" == *xla* ]]; then
   build_xla
   test_xla
 elif [[ "$TEST_CONFIG" == *vllm* ]]; then
-    echo "vLLM CI uses TORCH_CUDA_ARCH_LIST: $TORCH_CUDA_ARCH_LIST"
-    (cd .ci/lumen_cli && python -m pip install -e .)
-
-    python -m cli.run test external vllm --test-plan "$TEST_CONFIG" --shard-id "$SHARD_NUMBER" --num-shards "$NUM_TEST_SHARDS"
+  echo "vLLM CI uses TORCH_CUDA_ARCH_LIST: $TORCH_CUDA_ARCH_LIST"
+  (cd .ci/lumen_cli && python -m pip install -e .)
+  python -m cli.run test external vllm --test-plan "$TEST_CONFIG" --shard-id "$SHARD_NUMBER" --num-shards "$NUM_TEST_SHARDS"
 elif [[ "$TEST_CONFIG" == *torchtitan* ]]; then
-    (cd .ci/lumen_cli && python -m pip install -e .)
-    python -m cli.run test external torchtitan --test-plan "$TEST_CONFIG" --shard-id "$SHARD_NUMBER" --num-shards "$NUM_TEST_SHARDS"
+  (cd .ci/lumen_cli && python -m pip install -e .)
+  python -m cli.run test external torchtitan --test-plan "$TEST_CONFIG" --shard-id "$SHARD_NUMBER" --num-shards "$NUM_TEST_SHARDS"
 elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
   test_executorch
 elif [[ "$TEST_CONFIG" == 'jit_legacy' ]]; then
-  test_python_legacy_jit
+  echo "===== test_python_legacy_jit uses lumen_cli ====="
+  (cd .ci/lumen_cli && python -m pip install -e .)
+  python -m cli.run test pytorch-core --group-id pytorch_jit_legacy --build-env "$BUILD_ENVIRONMENT"
+  assert_git_not_dirty
 elif [[ "$TEST_CONFIG" == 'quantization' ]]; then
   test_quantization
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
@@ -2044,13 +2041,17 @@ elif [[ "${TEST_CONFIG}" == *dynamo_wrapped* ]]; then
   fi
 elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
   install_torchvision
-  test_python_shard "$SHARD_NUMBER"
+  echo "Print execute default command"
+  LUMEN_DRY_RUN=1 lumen test pytorch-core --group-id pytorch_default_test --build-env "$BUILD_ENVIRONMENT" --shard-id 1 --num-shards "$NUM_TEST_SHARDS"
+  lumen test pytorch-core --group-id pytorch_default_test --build-env "$BUILD_ENVIRONMENT" --shard-id 1 --num-shards "$NUM_TEST_SHARDS"
+  assert_git_not_dirty
   test_aten
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_lazy_tensor_meta_reference_disabled
   test_without_numpy
   install_torchvision
-  test_python_shard 1
+  (cd .ci/lumen_cli && python -m pip install -e .)
+  lumen test pytorch-core --test-config default --build-env "$BUILD_ENVIRONMENT" --shard-id 1 --num-shards "$NUM_TEST_SHARDS"
   test_aten
   test_libtorch 1
   if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
@@ -2058,7 +2059,9 @@ elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   fi
 elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
-  test_python_shard 2
+  echo "Print execute default command"
+  LUMEN_DRY_RUN=1 lumen test pytorch-core --group-id pytorch_default_test --build-env "$BUILD_ENVIRONMENT" --shard-id 2 --num-shards "$NUM_TEST_SHARDS"
+  lumen test pytorch-core --group-id pytorch_default_test --build-env "$BUILD_ENVIRONMENT" --shard-id 2 --num-shards "$NUM_TEST_SHARDS"
   test_libtorch 2
   test_aot_compilation
   test_custom_script_ops
@@ -2068,7 +2071,8 @@ elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
 elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
   # Handle arbitrary number of shards
   install_torchvision
-  test_python_shard "$SHARD_NUMBER"
+  LUMEN_DRY_RUN=1 lumen test pytorch-core --group-id pytorch_default_test --build-env "$BUILD_ENVIRONMENT" --shard-id "$SHARD_NUMBER" --num-shards "$NUM_TEST_SHARDS"
+  lumen test pytorch-core --group-id pytorch_default_test --build-env "$BUILD_ENVIRONMENT" --shard-id "$SHARD_NUMBER" --num-shards "$NUM_TEST_SHARDS"
 elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
   test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then

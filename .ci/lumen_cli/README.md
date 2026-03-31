@@ -29,3 +29,6 @@ To add a new external build, for instance, add a new external build logics:
 1. create the build function in cli/lib folder
 2. register your target and the main build function at  EXTERNAL_BUILD_TARGET_DISPATCH in `cli/build_cli/register_build.py`
 3. [optional] create your ci config file in .github/ci_configs/${EXTERNAL_PACKAGE_NAME}.yaml
+
+all build_env since 2026-03-24
+https://github.com/pytorch/pytorch/issues/178345

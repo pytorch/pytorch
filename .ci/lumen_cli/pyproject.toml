@@ -1,5 +1,5 @@
 [project]
-name = "lumen-ci"
+name = "lumen"
 version = "0.1.0"
 dependencies = [
     "pyyaml==6.0.2",
@@ -8,6 +8,9 @@ dependencies = [
     "pytest==7.3.2",
     "uv==0.9.6"
 ]
+
+[project.scripts]
+lumen = "cli.run:main"
 
 [tool.setuptools]
 packages = ["cli"]

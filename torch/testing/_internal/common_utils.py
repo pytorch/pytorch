@@ -2769,11 +2769,14 @@ def print_repro_on_failure(repro_parts):
                 }
             ),
         )
-
+        # add lumen repro prefix  if any
+        extra = os.environ.get("PYTORCH_EXTRA_REPRO_MESSAGE", "")
+        if extra:
+            extra = "\n" + extra.format(repro=repro_str)
         repro_msg = f"""
 To execute this test, run the following from the base repo dir:
     {repro_str}
-
+{extra}
 This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
 
         # NB: Hacking the exception args is the cleanest way I've found to append
