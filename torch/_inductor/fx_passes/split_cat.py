@@ -2034,6 +2034,11 @@ def merge_unbind_stack_aten(match: Match, *args, **kwargs):
         [get_arg_value(select_node, 2, "index") for select_node in select_nodes]
     ):
         return
+    if (
+        "val" not in parent_of_select_node.meta
+        or len(select_nodes) != parent_of_select_node.meta["val"].shape[cat_dim]
+    ):
+        return
     # check the users of parent of select node only from unsqueeze nodes that go to the cat node
     # we simply check the number of users of the parent of select node
     if len(parent_of_select_node.users.keys()) != len(node.args[0]):  # type: ignore[arg-type]
