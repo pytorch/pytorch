@@ -10,6 +10,66 @@ namespace at::native {
 
 enum class ADAM_MODE : uint8_t { ORIGINAL = 0, ADAMW = 1 };
 
+// Validates the dtype configuration for mixed-precision fused Adam/AdamW.
+//
+// Currently the only supported configuration is:
+//   params/grads: float32, optimizer states (exp_avg, exp_avg_sq, ...):
+//   bfloat16
+//
+// This specific configuration (fp32 params + bf16 optimizer states) has been
+// validated end-to-end in large-scale training runs (e.g. DeepSeek-V3 671B)
+// and is the only one for which training convergence has been demonstrated.
+// Additional mixed-precision configurations (e.g. float16 states) can be
+// enabled here once convergence is verified for those as well.
+//
+// Only [0] is checked because within-list dtype homogeneity is guaranteed by
+// _check_tensors_share_device_and_dtype (with skip_cross_list_dtype_check)
+// and the Python-side grouping in
+// _group_tensors_by_first_tensors_device_and_dtype.
+inline void validate_mixed_precision_dtypes(
+    at::TensorList params,
+    at::TensorList grads,
+    at::TensorList exp_avgs,
+    at::TensorList exp_avg_sqs,
+    const char* op_name) {
+  TORCH_CHECK(
+      params[0].scalar_type() == at::kFloat,
+      op_name,
+      " requires float32 params, got ",
+      params[0].scalar_type());
+  TORCH_CHECK(
+      grads[0].scalar_type() == at::kFloat,
+      op_name,
+      " requires float32 grads, got ",
+      grads[0].scalar_type());
+  TORCH_CHECK(
+      exp_avgs[0].scalar_type() == at::kBFloat16,
+      op_name,
+      " requires bfloat16 optimizer states, got ",
+      exp_avgs[0].scalar_type());
+  TORCH_CHECK(
+      exp_avg_sqs[0].scalar_type() == at::kBFloat16,
+      op_name,
+      " requires bfloat16 optimizer states, got ",
+      exp_avg_sqs[0].scalar_type());
+}
+
+inline void validate_mixed_precision_dtypes(
+    at::TensorList params,
+    at::TensorList grads,
+    at::TensorList exp_avgs,
+    at::TensorList exp_avg_sqs,
+    at::TensorList max_exp_avg_sqs,
+    const char* op_name) {
+  validate_mixed_precision_dtypes(
+      params, grads, exp_avgs, exp_avg_sqs, op_name);
+  TORCH_CHECK(
+      max_exp_avg_sqs[0].scalar_type() == at::kBFloat16,
+      op_name,
+      " requires bfloat16 max_exp_avg_sqs, got ",
+      max_exp_avg_sqs[0].scalar_type());
+}
+
 namespace {
 
 constexpr uint8_t kParamIdx = 0;
@@ -404,8 +464,8 @@ struct FusedAdamMathFunctorMP {
           if constexpr (!std::is_same_v<scalar_type, max_exp_avg_sq_type>) {
             max_exp_avg_sq_type casted[kILP];
             for (int ii = 0; ii < kILP; ii++) {
-              casted[ii] = static_cast<max_exp_avg_sq_type>(
-                  r_args[kMaxExpAvgSqIdx][ii]);
+              casted[ii] =
+                  static_cast<max_exp_avg_sq_type>(r_args[kMaxExpAvgSqIdx][ii]);
             }
             load_store(max_exp_avg_sq_args, casted, i_start, 0);
           } else {

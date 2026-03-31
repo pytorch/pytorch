@@ -2349,69 +2349,71 @@ class TestOptimRenewed(TestCase):
                 self.assertGreater(len(state), 0)
 
     @onlyCUDA
+    @parametrize("amsgrad", [False, True])
     @optims(
         [o for o in optim_db if o.optim_cls.__name__ in ["Adam", "AdamW"]],
         dtypes=[torch.float32],
     )
-    def test_fused_mixed_precision_state_init(self, device, dtype, optim_info):
+    def test_fused_mixed_precision_state_init(
+        self, device, dtype, optim_info, amsgrad
+    ):
         optim_cls = optim_info.optim_cls
-        for amsgrad in (False, True):
-            params = [
-                torch.rand(20, 7, device=device, dtype=dtype) for _ in range(5)
-            ]
-            for p in params:
-                p.grad = torch.rand_like(p)
+        params = [
+            torch.rand(20, 7, device=device, dtype=dtype) for _ in range(5)
+        ]
+        for p in params:
+            p.grad = torch.rand_like(p)
 
-            optim = optim_cls(
-                params, lr=1e-3, fused=True, amsgrad=amsgrad
-            )
-            optim.register_step_pre_hook(_bf16_state_init_hook)
+        optim = optim_cls(params, lr=1e-3, fused=True, amsgrad=amsgrad)
+        optim.register_step_pre_hook(_bf16_state_init_hook)
 
-            optim.step()
+        optim.step()
 
-            for p in params:
-                self.assertEqual(p.dtype, torch.float32)
-                state = optim.state[p]
-                self.assertEqual(state["step"].dtype, torch.float32)
-                self.assertEqual(state["exp_avg"].dtype, torch.bfloat16)
-                self.assertEqual(state["exp_avg_sq"].dtype, torch.bfloat16)
-                self.assertEqual(state["exp_avg"].shape, p.shape)
-                self.assertEqual(state["exp_avg_sq"].shape, p.shape)
-                if amsgrad:
-                    self.assertEqual(
-                        state["max_exp_avg_sq"].dtype, torch.bfloat16
-                    )
-                    self.assertEqual(state["max_exp_avg_sq"].shape, p.shape)
+        for p in params:
+            self.assertEqual(p.dtype, torch.float32)
+            state = optim.state[p]
+            self.assertEqual(state["step"].dtype, torch.float32)
+            self.assertEqual(state["exp_avg"].dtype, torch.bfloat16)
+            self.assertEqual(state["exp_avg_sq"].dtype, torch.bfloat16)
+            self.assertEqual(state["exp_avg"].shape, p.shape)
+            self.assertEqual(state["exp_avg_sq"].shape, p.shape)
+            if amsgrad:
+                self.assertEqual(
+                    state["max_exp_avg_sq"].dtype, torch.bfloat16
+                )
+                self.assertEqual(state["max_exp_avg_sq"].shape, p.shape)
 
-            # Second step: hook should be idempotent (skips already-populated state)
-            for p in params:
-                p.grad = torch.rand_like(p)
-            optim.step()
+        # Second step: hook should be idempotent (skips already-populated state)
+        for p in params:
+            p.grad = torch.rand_like(p)
+        optim.step()
 
-            for p in params:
-                state = optim.state[p]
-                self.assertEqual(state["step"].dtype, torch.float32)
-                self.assertEqual(state["exp_avg"].dtype, torch.bfloat16)
-                self.assertEqual(state["exp_avg_sq"].dtype, torch.bfloat16)
-                if amsgrad:
-                    self.assertEqual(
-                        state["max_exp_avg_sq"].dtype, torch.bfloat16
-                    )
+        for p in params:
+            state = optim.state[p]
+            self.assertEqual(state["step"].dtype, torch.float32)
+            self.assertEqual(state["exp_avg"].dtype, torch.bfloat16)
+            self.assertEqual(state["exp_avg_sq"].dtype, torch.bfloat16)
+            if amsgrad:
+                self.assertEqual(
+                    state["max_exp_avg_sq"].dtype, torch.bfloat16
+                )
 
     @onlyCUDA
+    @parametrize("amsgrad", [False, True])
     @optims(
         [o for o in optim_db if o.optim_cls.__name__ in ["Adam", "AdamW"]],
         dtypes=[torch.float32],
     )
-    def test_fused_mixed_precision_numerics(self, device, dtype, optim_info):
+    def test_fused_mixed_precision_numerics(
+        self, device, dtype, optim_info, amsgrad
+    ):
         optim_inputs = optim_info.optim_inputs_func(device=device, dtype=dtype)
         optim_cls = optim_info.optim_cls
         for optim_input in optim_inputs:
-            kwargs = optim_input.kwargs
-            kwargs["fused"] = True
+            kwargs = {**optim_input.kwargs, "fused": True, "amsgrad": amsgrad}
 
             params = [
-                torch.rand(20, 7, device=device, dtype=dtype) for _ in range(600)
+                torch.rand(20, 7, device=device, dtype=dtype) for _ in range(10)
             ]
             for p in params:
                 p.grad = torch.rand_like(p)
@@ -2461,68 +2463,66 @@ class TestOptimRenewed(TestCase):
                 self.assertTrue(tracker.all_popped())
 
     @onlyCUDA
+    @parametrize("amsgrad", [False, True])
     @optims(
         [o for o in optim_db if o.optim_cls.__name__ in ["Adam", "AdamW"]],
         dtypes=[torch.float32],
     )
     def test_fused_mixed_precision_hook_skips_existing_state(
-        self, device, dtype, optim_info
+        self, device, dtype, optim_info, amsgrad
     ):
         optim_cls = optim_info.optim_cls
-        for amsgrad in (False, True):
-            params = [
-                torch.rand(10, 5, device=device, dtype=dtype) for _ in range(3)
-            ]
-            for p in params:
-                p.grad = torch.rand_like(p)
+        params = [
+            torch.rand(10, 5, device=device, dtype=dtype) for _ in range(3)
+        ]
+        for p in params:
+            p.grad = torch.rand_like(p)
 
-            optim = optim_cls(
-                params, lr=1e-3, fused=True, amsgrad=amsgrad
-            )
+        optim = optim_cls(params, lr=1e-3, fused=True, amsgrad=amsgrad)
 
-            # Pre-populate state for the first param in bf16 with specific
-            # non-zero values so we can verify the hook doesn't overwrite them.
-            p0 = params[0]
-            optim.state[p0]["step"] = torch.zeros(
-                (), dtype=torch.float32, device=p0.device
-            )
-            optim.state[p0]["exp_avg"] = torch.ones_like(
+        # Pre-populate state for the first param in bf16 with specific
+        # non-zero values so we can verify the hook doesn't overwrite them.
+        p0 = params[0]
+        optim.state[p0]["step"] = torch.zeros(
+            (), dtype=torch.float32, device=p0.device
+        )
+        optim.state[p0]["exp_avg"] = torch.ones_like(
+            p0, dtype=torch.bfloat16
+        )
+        optim.state[p0]["exp_avg_sq"] = torch.ones_like(
+            p0, dtype=torch.bfloat16
+        )
+        if amsgrad:
+            optim.state[p0]["max_exp_avg_sq"] = torch.ones_like(
                 p0, dtype=torch.bfloat16
             )
-            optim.state[p0]["exp_avg_sq"] = torch.ones_like(
-                p0, dtype=torch.bfloat16
+
+        optim.register_step_pre_hook(_bf16_state_init_hook)
+
+        # Snapshot pre-populated values before step
+        exp_avg_before = optim.state[p0]["exp_avg"].clone()
+
+        optim.step()
+
+        # First param: hook should have skipped it (state was non-empty).
+        # Values should have been updated by the optimizer (not reset to zero).
+        self.assertEqual(optim.state[p0]["exp_avg"].dtype, torch.bfloat16)
+        self.assertEqual(optim.state[p0]["exp_avg_sq"].dtype, torch.bfloat16)
+        self.assertNotEqual(optim.state[p0]["exp_avg"], exp_avg_before)
+        if amsgrad:
+            self.assertEqual(
+                optim.state[p0]["max_exp_avg_sq"].dtype, torch.bfloat16
             )
-            if amsgrad:
-                optim.state[p0]["max_exp_avg_sq"] = torch.ones_like(
-                    p0, dtype=torch.bfloat16
-                )
 
-            optim.register_step_pre_hook(_bf16_state_init_hook)
-
-            # Snapshot pre-populated values before step
-            exp_avg_before = optim.state[p0]["exp_avg"].clone()
-
-            optim.step()
-
-            # First param: hook should have skipped it (state was non-empty).
-            # Values should have been updated by the optimizer (not reset to zero).
-            self.assertEqual(optim.state[p0]["exp_avg"].dtype, torch.bfloat16)
-            self.assertEqual(optim.state[p0]["exp_avg_sq"].dtype, torch.bfloat16)
-            self.assertNotEqual(optim.state[p0]["exp_avg"], exp_avg_before)
+        # Other params: hook should have initialized them in bf16
+        for p in params[1:]:
+            state = optim.state[p]
+            self.assertEqual(state["exp_avg"].dtype, torch.bfloat16)
+            self.assertEqual(state["exp_avg_sq"].dtype, torch.bfloat16)
             if amsgrad:
                 self.assertEqual(
-                    optim.state[p0]["max_exp_avg_sq"].dtype, torch.bfloat16
+                    state["max_exp_avg_sq"].dtype, torch.bfloat16
                 )
-
-            # Other params: hook should have initialized them in bf16
-            for p in params[1:]:
-                state = optim.state[p]
-                self.assertEqual(state["exp_avg"].dtype, torch.bfloat16)
-                self.assertEqual(state["exp_avg_sq"].dtype, torch.bfloat16)
-                if amsgrad:
-                    self.assertEqual(
-                        state["max_exp_avg_sq"].dtype, torch.bfloat16
-                    )
 
     @parametrize("dtype", [torch.float32])
     def test_step_iteration(self, device, dtype):

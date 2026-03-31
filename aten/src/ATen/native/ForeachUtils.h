@@ -93,22 +93,27 @@ inline void check_foreach_api_restrictions(
 // same device and dtype.
 inline bool _check_tensors_share_device_and_dtype(
     ArrayRef<TensorList> tensorLists,
-    const bool skip_dtype_check = false) {
+    const bool skip_cross_list_dtype_check = false) {
   const auto expected_dtype = tensorLists[0][0].dtype();
   const auto expected_device = tensorLists[0][0].device();
-
-  auto is_tensor_okay = [&](const Tensor& tensor) {
-    return (skip_dtype_check || tensor.dtype() == expected_dtype) &&
-        tensor.device() == expected_device && tensor.layout() == at::kStrided &&
-        tensor.is_non_overlapping_and_dense();
-  };
 
   return std::all_of(
       tensorLists.cbegin(),
       tensorLists.cend(),
       [&](const TensorList& tensorList) {
+        if (tensorList.empty()) {
+          return true;
+        }
+        const auto list_dtype = tensorList[0].dtype();
         return std::all_of(
-            tensorList.cbegin(), tensorList.cend(), is_tensor_okay);
+            tensorList.cbegin(), tensorList.cend(), [&](const Tensor& tensor) {
+              return tensor.device() == expected_device &&
+                  tensor.layout() == at::kStrided &&
+                  tensor.is_non_overlapping_and_dense() &&
+                  tensor.dtype() == list_dtype &&
+                  (skip_cross_list_dtype_check ||
+                   tensor.dtype() == expected_dtype);
+            });
       });
 }
 
@@ -203,8 +208,9 @@ inline bool check_fast_path_restrictions(
 
 inline bool check_fast_path_restrictions(
     ArrayRef<TensorList> tensorLists,
-    bool skip_dtype_check) {
-  return _check_tensors_share_device_and_dtype(tensorLists, skip_dtype_check) &&
+    bool skip_cross_list_dtype_check) {
+  return _check_tensors_share_device_and_dtype(
+             tensorLists, skip_cross_list_dtype_check) &&
       _check_tensors_share_sizes_and_strides(tensorLists) &&
       _check_tensors_do_type_promotion_with_scalars(tensorLists[0]);
 }
@@ -326,7 +332,13 @@ inline FlatMap _group_tensors_by_first_tensors_device_and_dtype(
                 const auto s = tensor->scalar_type();
                 const auto d = tensor->device();
                 // Note: `step` or `state_step` is float32 by default.
-                // BFloat16 is allowed for mixed-precision optimizer states.
+                // BFloat16 is allowed here for mixed-precision optimizer
+                // states (e.g. fp32 params with bf16 exp_avg/exp_avg_sq).
+                // Currently only BFloat16 is permitted because it is the
+                // only low-precision state dtype validated end-to-end in
+                // large-scale training (e.g. DeepSeek-V3 671B).
+                // TBD: make the set of allowed extra dtypes configurable
+                // per optimizer so this function stays dtype-agnostic.
                 if (key.first == d) {
                   return key.second == s || s == at::ScalarType::Float ||
                       s == at::ScalarType::Double ||

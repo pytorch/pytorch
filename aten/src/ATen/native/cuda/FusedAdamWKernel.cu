@@ -29,11 +29,13 @@ void _fused_adamw_kernel_cuda_(
     const bool maximize,
     const std::optional<at::Tensor>& grad_scale,
     const std::optional<at::Tensor>& found_inf) {
+  const bool is_mixed_precision =
+      params[0].scalar_type() != exp_avgs[0].scalar_type();
   if (amsgrad) {
     TORCH_CHECK(
         at::native::check_fast_path_restrictions(
             {params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs},
-            /*skip_dtype_check=*/true),
+            /*skip_cross_list_dtype_check=*/is_mixed_precision),
         "params, grads, exp_avgs, exp_avg_sqs, and max_exp_avg_sqs must be on "
         "the same device with compatible sizes and strides");
     _fused_adamw_amsgrad_cuda_impl_(
@@ -54,7 +56,8 @@ void _fused_adamw_kernel_cuda_(
   } else {
     TORCH_CHECK(
         at::native::check_fast_path_restrictions(
-            {params, grads, exp_avgs, exp_avg_sqs}, /*skip_dtype_check=*/true),
+            {params, grads, exp_avgs, exp_avg_sqs},
+            /*skip_cross_list_dtype_check=*/is_mixed_precision),
         "params, grads, exp_avgs, and exp_avg_sqs must be on the same device "
         "with compatible sizes and strides");
     _fused_adamw_cuda_impl_(
@@ -128,11 +131,13 @@ void _fused_adamw_kernel_cuda_(
       lr.device() == param_device,
       "lr must be on the same GPU device as the params");
 
+  const bool is_mixed_precision =
+      params[0].scalar_type() != exp_avgs[0].scalar_type();
   if (amsgrad) {
     TORCH_CHECK(
         at::native::check_fast_path_restrictions(
             {params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs},
-            /*skip_dtype_check=*/true),
+            /*skip_cross_list_dtype_check=*/is_mixed_precision),
         "params, grads, exp_avgs, exp_avg_sqs, and max_exp_avg_sqs must be on "
         "the same device with compatible sizes and strides");
     _fused_adamw_amsgrad_cuda_impl_(
@@ -153,7 +158,8 @@ void _fused_adamw_kernel_cuda_(
   } else {
     TORCH_CHECK(
         at::native::check_fast_path_restrictions(
-            {params, grads, exp_avgs, exp_avg_sqs}, /*skip_dtype_check=*/true),
+            {params, grads, exp_avgs, exp_avg_sqs},
+            /*skip_cross_list_dtype_check=*/is_mixed_precision),
         "params, grads, exp_avgs, and exp_avg_sqs must be on the same device "
         "with compatible sizes and strides");
     _fused_adamw_cuda_impl_(

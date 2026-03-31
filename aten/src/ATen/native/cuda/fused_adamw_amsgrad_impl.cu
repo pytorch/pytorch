@@ -1,6 +1,7 @@
 #include <ATen/native/cuda/fused_adamw_amsgrad_impl.cuh>
 
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/cuda/MultiTensorApply.cuh>
 #include <ATen/native/cuda/fused_adam_utils.cuh>
@@ -37,42 +38,27 @@ void _fused_adamw_amsgrad_cuda_impl_(
   const float* lr_ptr = nullptr;
 
   if (params[0].scalar_type() != exp_avgs[0].scalar_type()) {
-    TORCH_CHECK(
-        params[0].scalar_type() == at::kFloat,
-        "Mixed-precision fused AdamW requires float32 params, got ",
-        params[0].scalar_type());
-    TORCH_CHECK(
-        grads[0].scalar_type() == at::kFloat,
-        "Mixed-precision fused AdamW requires float32 grads, got ",
-        grads[0].scalar_type());
-    TORCH_CHECK(
-        exp_avgs[0].scalar_type() == at::kBFloat16,
-        "Mixed-precision fused AdamW requires bfloat16 optimizer states, got ",
-        exp_avgs[0].scalar_type());
-    TORCH_CHECK(
-        exp_avg_sqs[0].scalar_type() == at::kBFloat16,
-        "Mixed-precision fused AdamW requires bfloat16 optimizer states, got ",
-        exp_avg_sqs[0].scalar_type());
-    TORCH_CHECK(
-        max_exp_avg_sqs[0].scalar_type() == at::kBFloat16,
-        "Mixed-precision fused AdamW requires bfloat16 optimizer states, got ",
-        max_exp_avg_sqs[0].scalar_type());
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-        kHalf,
-        kBFloat16,
-        params[0].scalar_type(),
+    validate_mixed_precision_dtypes(
+        params,
+        grads,
+        exp_avgs,
+        exp_avg_sqs,
+        max_exp_avg_sqs,
+        "Mixed-precision fused AdamW");
+    AT_DISPATCH_V2(
+        exp_avgs[0].scalar_type(),
         "fused_adamw_amsgrad_mp_kernel_cuda",
-        [&]() {
+        AT_WRAP([&]() {
           multi_tensor_apply_for_fused_optimizer<5>(
               tensor_lists,
               state_steps,
               FusedAdamMathFunctorMP<
+                  float,
+                  float,
+                  float,
                   scalar_t,
-                  float,
-                  float,
-                  BFloat16,
-                  BFloat16,
-                  BFloat16,
+                  scalar_t,
+                  scalar_t,
                   5,
                   ADAM_MODE::ADAMW,
                   true>(),
@@ -85,7 +71,8 @@ void _fused_adamw_amsgrad_cuda_impl_(
               maximize,
               grad_scale_ptr,
               found_inf_ptr);
-        });
+        }),
+        kBFloat16);
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(
         kHalf,
@@ -140,42 +127,27 @@ void _fused_adamw_amsgrad_cuda_impl_(
   const float* lr_ptr = lr.const_data_ptr<float>();
 
   if (params[0].scalar_type() != exp_avgs[0].scalar_type()) {
-    TORCH_CHECK(
-        params[0].scalar_type() == at::kFloat,
-        "Mixed-precision fused AdamW requires float32 params, got ",
-        params[0].scalar_type());
-    TORCH_CHECK(
-        grads[0].scalar_type() == at::kFloat,
-        "Mixed-precision fused AdamW requires float32 grads, got ",
-        grads[0].scalar_type());
-    TORCH_CHECK(
-        exp_avgs[0].scalar_type() == at::kBFloat16,
-        "Mixed-precision fused AdamW requires bfloat16 optimizer states, got ",
-        exp_avgs[0].scalar_type());
-    TORCH_CHECK(
-        exp_avg_sqs[0].scalar_type() == at::kBFloat16,
-        "Mixed-precision fused AdamW requires bfloat16 optimizer states, got ",
-        exp_avg_sqs[0].scalar_type());
-    TORCH_CHECK(
-        max_exp_avg_sqs[0].scalar_type() == at::kBFloat16,
-        "Mixed-precision fused AdamW requires bfloat16 optimizer states, got ",
-        max_exp_avg_sqs[0].scalar_type());
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-        kHalf,
-        kBFloat16,
-        params[0].scalar_type(),
+    validate_mixed_precision_dtypes(
+        params,
+        grads,
+        exp_avgs,
+        exp_avg_sqs,
+        max_exp_avg_sqs,
+        "Mixed-precision fused AdamW");
+    AT_DISPATCH_V2(
+        exp_avgs[0].scalar_type(),
         "fused_adamw_amsgrad_mp_kernel_cuda",
-        [&]() {
+        AT_WRAP([&]() {
           multi_tensor_apply_for_fused_optimizer<5>(
               tensor_lists,
               state_steps,
               FusedAdamMathFunctorMP<
+                  float,
+                  float,
+                  float,
                   scalar_t,
-                  float,
-                  float,
-                  BFloat16,
-                  BFloat16,
-                  BFloat16,
+                  scalar_t,
+                  scalar_t,
                   5,
                   ADAM_MODE::ADAMW,
                   true>(),
@@ -188,7 +160,8 @@ void _fused_adamw_amsgrad_cuda_impl_(
               maximize,
               grad_scale_ptr,
               found_inf_ptr);
-        });
+        }),
+        kBFloat16);
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(
         kHalf,
