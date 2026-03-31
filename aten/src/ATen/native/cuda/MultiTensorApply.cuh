@@ -85,11 +85,14 @@ struct TensorListScalarListMetadata<c10::complex<double>, 2> {
 // NOTE(crcrpar): This is a conservative resolution to handle `state_steps`
 // whose each element is `at::Tensor` of 1 element representing the number of
 // `step`s called so far.
+// We're aware this struct overflows the kernel arg limit at n=1 (4244 bytes),
+// but our current fused optimizers only instantiate at n>=4 so it's not a
+// concern (yet).
 template <int n>
 struct FusedOptimizerTensorListMetadata {
   const void* addresses[n][depth_to_max_tensors[n - 1]];
   int64_t numel_for_tensor[depth_to_max_tensors[n - 1]];
-  const void* state_steps_addresses[depth_to_max_tensors_scalarlist[n - 1]];
+  const void* state_steps_addresses[depth_to_max_tensors[n - 1]];
   unsigned char block_to_tensor[depth_to_max_blocks[n - 1]];
   int block_to_chunk[depth_to_max_blocks[n - 1]];
   int start_tensor_this_launch;
