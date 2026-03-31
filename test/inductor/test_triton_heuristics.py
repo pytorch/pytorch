@@ -303,6 +303,21 @@ class TestTritonHeuristics(TestCase):
             )
             self.assertEqual(len(configs), expected_count)
 
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_post_init_hook_fires_on_init(self):
+        saved_hooks = CachingAutotuner._post_init_hooks[:]
+        CachingAutotuner._post_init_hooks.clear()
+        try:
+            hook = MagicMock()
+            CachingAutotuner.register_post_init_hook(hook)
+
+            args = self._get_cos_kernel_caching_autotuner_args()
+            autotuner = CachingAutotuner(**args)
+
+            hook.assert_called_once_with(autotuner)
+        finally:
+            CachingAutotuner._post_init_hooks[:] = saved_hooks
+
 
 class TestArgumentCloneAndRestore(TestCase):
     # Our tensor is large enough. If a unexpected copy happens, the

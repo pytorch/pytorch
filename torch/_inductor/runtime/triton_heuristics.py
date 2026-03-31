@@ -19,7 +19,7 @@ import sys
 import threading
 import time
 from collections import namedtuple
-from typing import Any, Generic, Literal, TYPE_CHECKING, TypeVar
+from typing import Any, ClassVar, Generic, Literal, TYPE_CHECKING, TypeVar
 
 import torch
 from torch._dynamo.utils import counters, set_feature_use
@@ -327,6 +327,17 @@ class CachingAutotuner(KernelInterface):
     configs, and does not rely on the Triton JIT.
     """
 
+    _post_init_hooks: ClassVar[list[Callable[[CachingAutotuner], None]]] = []
+
+    @classmethod
+    def register_post_init_hook(cls, hook: Callable[[CachingAutotuner], None]) -> None:
+        """Register a hook called on every new CachingAutotuner instance.
+
+        Hooks fire at the end of __init__ (including subclasses that call
+        super().__init__). They receive the fully-initialized instance.
+        """
+        cls._post_init_hooks.append(hook)
+
     def __init__(
         self,
         fn,
@@ -440,6 +451,9 @@ class CachingAutotuner(KernelInterface):
 
         # Mode for launch grid calculation
         self.grid_mode: Literal["python", "cpp"] = "python"
+
+        for hook in self._post_init_hooks:
+            hook(self)
 
     def is_statically_launchable(self):
         """
