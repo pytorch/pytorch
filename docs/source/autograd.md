@@ -249,8 +249,6 @@ Base custom {class}`Function` used to build PyTorch utilities
     :toctree: generated
     :nosignatures:
 
-    function.FunctionCtx
-    function.FunctionMeta
     function.BackwardCFunction
     function.InplaceFunction
     function.NestedIOFunction
