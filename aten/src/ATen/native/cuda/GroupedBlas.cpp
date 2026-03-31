@@ -23,6 +23,7 @@
 #include <ATen/native/cuda/ScaledGroupMM.h>
 #include <ATen/native/cuda/GroupMM.h>
 #include <ATen/native/cuda/WindowsROCmBridge.h>
+#include <torch/headeronly/macros/Export.h>
 #ifdef USE_ROCM
 #include <ATen/native/hip/ck_group_gemm.h>
 #endif
@@ -733,7 +734,7 @@ std::optional<c10::ScalarType> out_dtype) {
 // Windows ROCm ABI Bridge - uses extern "C" to avoid ABI issues
 extern "C" {
 
-C10_EXPORT Tensor _scaled_grouped_mm_cuda_v2_bridge(
+TORCH_CUDA_CPP_API Tensor _scaled_grouped_mm_cuda_v2_bridge(
     const Tensor& a, const Tensor& b,
     const Tensor* sa, int64_t sa_n, const int64_t* ra, int64_t ra_n, const int64_t* wa, int64_t wa_n,
     const Tensor* sb, int64_t sb_n, const int64_t* rb, int64_t rb_n, const int64_t* wb, int64_t wb_n,
@@ -746,7 +747,7 @@ C10_EXPORT Tensor _scaled_grouped_mm_cuda_v2_bridge(
         ABI_ARRAYREF(int64_t, cd, cd_n), fast_accum);
 }
 
-C10_EXPORT Tensor _grouped_mm_cuda_bridge(
+TORCH_CUDA_CPP_API Tensor _grouped_mm_cuda_bridge(
     const Tensor& a, const Tensor& b,
     const Tensor* offs, const Tensor* bias, const c10::ScalarType* dtype) {
     return _grouped_mm_cuda(a, b, ABI_OPTIONAL(offs), ABI_OPTIONAL(bias), ABI_OPTIONAL(dtype));
