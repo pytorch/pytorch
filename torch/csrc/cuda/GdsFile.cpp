@@ -130,13 +130,19 @@ void initGdsBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
 #if defined(USE_CUFILE)
-  m.def("_gds_is_available", []() { return true; });
+  m.def("_gds_is_available", []() {
+    CUfileError_t status = cuFileDriverOpen();
+    return status.err == CU_FILE_SUCCESS ||
+        status.err == CU_FILE_DRIVER_ALREADY_OPEN;
+  });
   m.def("_gds_register_handle", &gds_register_handle);
   m.def("_gds_deregister_handle", &gds_deregister_handle);
   m.def("_gds_register_buffer", &gds_register_buffer);
   m.def("_gds_deregister_buffer", &gds_deregister_buffer);
   m.def("_gds_load_storage", &gds_load_storage);
   m.def("_gds_save_storage", &gds_save_storage);
+#else
+  m.def("_gds_is_available", []() { return false; });
 #endif
 }
 
