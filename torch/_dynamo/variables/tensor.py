@@ -1488,9 +1488,6 @@ class TensorVariable(VariableTracker):
         )
 
     def method___len__(self, tx: "InstructionTranslator") -> VariableTracker:
-        return self.len_impl(tx)
-
-    def len_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         return self.call_method(tx, "size", [VariableTracker.build(tx, 0)], {})
 
     def method___iter__(self, tx: "InstructionTranslator") -> ListIteratorVariable:
