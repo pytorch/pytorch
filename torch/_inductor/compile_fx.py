@@ -3169,7 +3169,8 @@ def autograd_cache_key(
         decompositions if decompositions is not None else select_decomp_table()
     )
     # compile_fx applies these graph transforms before reaching _compile_fx_main.
-    # The standalone cache key API does not support them.
+    # Neither occurs on the torch.compile/Dynamo path (which always produces
+    # tuple-returning, pre-flattened graphs). Not supported by this API.
     if isinstance(graph, GraphModule) and not graph_returns_tuple(graph):
         raise NotImplementedError(
             "autograd_cache_key does not support graphs that don't return a tuple"
