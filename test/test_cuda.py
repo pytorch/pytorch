@@ -7107,7 +7107,6 @@ class TestMemPool(TestCase):
 
             def __del__(self):
                 runtime.cudaFree(self.base_ptr)
-                print("AllocState deleted")
 
         state = AllocState()
 
