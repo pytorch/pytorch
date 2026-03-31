@@ -128,6 +128,46 @@ jobs:
           path: /tmp/verdict/verdict.json
           retention-days: 30
 
+      - name: Upload verdict to S3 for ClickHouse ingestion
+        if: always() && steps.claude.outputs.structured_output != ''
+        env:
+          VERDICT_JSON: ${{ steps.claude.outputs.structured_output }}
+          SIGNAL_PATTERN: ${{ inputs.signal_pattern }}
+        run: |
+          # Build enriched verdict JSON with signal metadata for CH ingestion
+          jq -n \
+            --arg repo "${{ github.repository }}" \
+            --argjson run_id "${{ github.run_id }}" \
+            --argjson run_attempt "${{ github.run_attempt }}" \
+            --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%S.000)" \
+            --arg suspect_commit "${{ inputs.suspect_commit }}" \
+            --argjson pr_number "${{ inputs.pr_number }}" \
+            --arg signal_key "$(echo "$SIGNAL_PATTERN" | jq -r '.signal_key // ""')" \
+            --arg signal_source "$(echo "$SIGNAL_PATTERN" | jq -r '.signal_source // ""')" \
+            --arg workflow_name "$(echo "$SIGNAL_PATTERN" | jq -r '.workflow_name // ""')" \
+            --arg verdict "$(echo "$VERDICT_JSON" | jq -r '.verdict // ""')" \
+            --argjson confidence "$(echo "$VERDICT_JSON" | jq -r '.confidence // 0')" \
+            --arg summary "$(echo "$VERDICT_JSON" | jq -r '.summary // ""')" \
+            --arg causal_reasoning "$(echo "$VERDICT_JSON" | jq -r '.causal_reasoning // ""')" \
+            '{
+              repo: $repo,
+              run_id: $run_id,
+              run_attempt: $run_attempt,
+              timestamp: $timestamp,
+              suspect_commit: $suspect_commit,
+              pr_number: $pr_number,
+              signal_key: $signal_key,
+              signal_source: $signal_source,
+              workflow_name: $workflow_name,
+              verdict: $verdict,
+              confidence: $confidence,
+              summary: $summary,
+              causal_reasoning: $causal_reasoning
+            }' > /tmp/advisor_verdict.json
+
+          aws s3 cp /tmp/advisor_verdict.json \
+            "s3://ossci-raw-job-status/autorevert_advisor_verdicts/${{ github.repository }}/${{ github.run_id }}_${{ github.run_attempt }}.json"
+
       - name: Upload usage metrics
         if: always()
         uses: pytorch/test-infra/.github/actions/upload-claude-usage@main
