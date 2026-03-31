@@ -703,17 +703,6 @@ def _take_tensors(tensors, size_limit):
             yield buf
 
 
-# annotation decorator to get annotations in a way that is compatible
-# with both Python 2 and 3
-def annotate(ret, **kwargs):
-    def dec(fun):
-        fun.__annotations__ = dict(kwargs)
-        fun.__annotations__["return"] = ret
-        return fun
-
-    return dec
-
-
 def render_call(fn, args, kwargs):
     str_fn = torch.overrides.resolve_name(fn)
     if str_fn is None:
