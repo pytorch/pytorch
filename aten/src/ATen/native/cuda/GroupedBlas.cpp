@@ -22,6 +22,7 @@
 #include <ATen/native/cuda/RowwiseScaledMM.h>
 #include <ATen/native/cuda/ScaledGroupMM.h>
 #include <ATen/native/cuda/GroupMM.h>
+#include <ATen/native/cuda/WindowsROCmBridge.h>
 #ifdef USE_ROCM
 #include <ATen/native/hip/ck_group_gemm.h>
 #endif
@@ -727,5 +728,31 @@ std::optional<c10::ScalarType> out_dtype) {
 #endif //ifndef USE_ROCM
   return out;
 }
+
+#if WINDOWS_ROCM_BRIDGE
+// Windows ROCm ABI Bridge - uses extern "C" to avoid ABI issues
+extern "C" {
+
+C10_EXPORT Tensor _scaled_grouped_mm_cuda_v2_bridge(
+    const Tensor& a, const Tensor& b,
+    const Tensor* sa, int64_t sa_n, const int64_t* ra, int64_t ra_n, const int64_t* wa, int64_t wa_n,
+    const Tensor* sb, int64_t sb_n, const int64_t* rb, int64_t rb_n, const int64_t* wb, int64_t wb_n,
+    const Tensor* offs, const Tensor* bias, const c10::ScalarType* dtype,
+    const int64_t* cd, int64_t cd_n, bool fast_accum) {
+    return _scaled_grouped_mm_cuda_v2(a, b,
+        ABI_ARRAYREF(Tensor, sa, sa_n), ABI_ARRAYREF(int64_t, ra, ra_n), ABI_ARRAYREF(int64_t, wa, wa_n),
+        ABI_ARRAYREF(Tensor, sb, sb_n), ABI_ARRAYREF(int64_t, rb, rb_n), ABI_ARRAYREF(int64_t, wb, wb_n),
+        ABI_OPTIONAL(offs), ABI_OPTIONAL(bias), ABI_OPTIONAL(dtype),
+        ABI_ARRAYREF(int64_t, cd, cd_n), fast_accum);
+}
+
+C10_EXPORT Tensor _grouped_mm_cuda_bridge(
+    const Tensor& a, const Tensor& b,
+    const Tensor* offs, const Tensor* bias, const c10::ScalarType* dtype) {
+    return _grouped_mm_cuda(a, b, ABI_OPTIONAL(offs), ABI_OPTIONAL(bias), ABI_OPTIONAL(dtype));
+}
+
+}  // extern "C"
+#endif  // WINDOWS_ROCM_BRIDGE
 
 } // namespace at::native

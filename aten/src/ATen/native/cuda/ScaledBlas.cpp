@@ -6,6 +6,7 @@
 #include <c10/core/ScalarType.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
+#include <ATen/native/cuda/WindowsROCmBridge.h>
 #include <ATen/core/NamedTensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
@@ -1504,36 +1505,34 @@ _scaled_mm_cuda_v2(
                       out);
 }
 
-// Windows ROCm: C-bridge export for ABI compatibility
-#if defined(_WIN32) && defined(USE_ROCM)
+#if WINDOWS_ROCM_BRIDGE
+// Windows ROCm ABI Bridge - uses extern "C" to avoid ABI issues
+extern "C" {
 
-extern "C" __declspec(dllexport) at::Tensor _scaled_mm_cuda_v2_c_bridge(
-    const at::Tensor& mat_a, const at::Tensor& mat_b,
-    const at::Tensor* scale_a_data, int64_t scale_a_size,
-    const int64_t* recipe_a_data, int64_t recipe_a_size,
-    const int64_t* swizzle_a_data, int64_t swizzle_a_size,
-    const at::Tensor* scale_b_data, int64_t scale_b_size,
-    const int64_t* recipe_b_data, int64_t recipe_b_size,
-    const int64_t* swizzle_b_data, int64_t swizzle_b_size,
-    const at::Tensor* bias_ptr,
-    const c10::ScalarType* out_dtype_ptr,
-    const int64_t* contraction_dim_data, int64_t contraction_dim_size,
-    bool use_fast_accum) {
-
-  return _scaled_mm_cuda_v2(
-      mat_a, mat_b,
-      c10::ArrayRef<at::Tensor>(scale_a_data, scale_a_size),
-      c10::ArrayRef<int64_t>(recipe_a_data, recipe_a_size),
-      c10::ArrayRef<int64_t>(swizzle_a_data, swizzle_a_size),
-      c10::ArrayRef<at::Tensor>(scale_b_data, scale_b_size),
-      c10::ArrayRef<int64_t>(recipe_b_data, recipe_b_size),
-      c10::ArrayRef<int64_t>(swizzle_b_data, swizzle_b_size),
-      bias_ptr ? std::make_optional(*bias_ptr) : std::nullopt,
-      out_dtype_ptr ? std::make_optional(*out_dtype_ptr) : std::nullopt,
-      c10::ArrayRef<int64_t>(contraction_dim_data, contraction_dim_size),
-      use_fast_accum);
+C10_EXPORT Tensor& _scaled_mm_cuda_v2_bridge(
+    const Tensor& a, const Tensor& b,
+    const Tensor* sa, int64_t sa_n, const int64_t* ra, int64_t ra_n, const int64_t* wa, int64_t wa_n,
+    const Tensor* sb, int64_t sb_n, const int64_t* rb, int64_t rb_n, const int64_t* wb, int64_t wb_n,
+    const Tensor* bias, const c10::ScalarType* dtype, const int64_t* cd, int64_t cd_n,
+    bool fast_accum, Tensor& out) {
+    return _scaled_mm_cuda_v2_out(a, b,
+        ABI_ARRAYREF(Tensor, sa, sa_n), ABI_ARRAYREF(int64_t, ra, ra_n), ABI_ARRAYREF(int64_t, wa, wa_n),
+        ABI_ARRAYREF(Tensor, sb, sb_n), ABI_ARRAYREF(int64_t, rb, rb_n), ABI_ARRAYREF(int64_t, wb, wb_n),
+        ABI_OPTIONAL(bias), ABI_OPTIONAL(dtype), ABI_ARRAYREF(int64_t, cd, cd_n), fast_accum, out);
 }
 
-#endif // defined(_WIN32) && defined(USE_ROCM)
+C10_EXPORT Tensor _scaled_mm_cuda_v2_functional_bridge(
+    const Tensor& a, const Tensor& b,
+    const Tensor* sa, int64_t sa_n, const int64_t* ra, int64_t ra_n, const int64_t* wa, int64_t wa_n,
+    const Tensor* sb, int64_t sb_n, const int64_t* rb, int64_t rb_n, const int64_t* wb, int64_t wb_n,
+    const Tensor* bias, const c10::ScalarType* dtype, const int64_t* cd, int64_t cd_n,
+    bool fast_accum) {
+    return _scaled_mm_cuda_v2(a, b,
+        ABI_ARRAYREF(Tensor, sa, sa_n), ABI_ARRAYREF(int64_t, ra, ra_n), ABI_ARRAYREF(int64_t, wa, wa_n),
+        ABI_ARRAYREF(Tensor, sb, sb_n), ABI_ARRAYREF(int64_t, rb, rb_n), ABI_ARRAYREF(int64_t, wb, wb_n),
+        ABI_OPTIONAL(bias), ABI_OPTIONAL(dtype), ABI_ARRAYREF(int64_t, cd, cd_n), fast_accum);
+}
 
+}  // extern "C"
+#endif  // WINDOWS_ROCM_BRIDGE
 } // namespace at::native
