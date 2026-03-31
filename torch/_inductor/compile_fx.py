@@ -144,7 +144,7 @@ def _json_friendly_for_hash(obj: Any) -> Any:
         }
     if isinstance(obj, (list, tuple)):
         return [_json_friendly_for_hash(value) for value in obj]
-    if isinstance(obj, (OrderedSet, frozenset, OrderedSet)):  # noqa: set_linter
+    if isinstance(obj, (OrderedSet, frozenset, set)):  # noqa: set_linter
         return sorted((_json_friendly_for_hash(value) for value in obj), key=repr)
     return obj
 
