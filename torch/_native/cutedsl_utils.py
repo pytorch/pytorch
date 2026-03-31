@@ -24,6 +24,7 @@ _CUTEDSL_REQUIRED_VERSIONS: set[Version] = {
     # Current version - Note Version.from_part(release=(4.4.1)) is better
     #                   but > v26 of packaging.
     Version(f"{4}.{4}.{1}"),
+    Version(f"{4}.{4}.{2}"),
 }
 
 
