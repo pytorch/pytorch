@@ -1143,7 +1143,7 @@ class DefaultDictVariable(ConstDictVariable):
         return isinstance(
             arg,
             (
-                variables.BuiltinVariable,
+                variables.BaseBuiltinVariable,
                 variables.functions.BaseUserFunctionVariable,
                 variables.functions.PolyfilledFunctionVariable,
             ),
