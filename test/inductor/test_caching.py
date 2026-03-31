@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError, wait
 from contextlib import contextmanager
 from functools import wraps
@@ -2100,6 +2101,39 @@ class FreshCacheIntegrationTest(TestMixin, TestCase):
             self.assertFalse(disk_cache_dir.exists())
             # And memory cache was cleared (via the underlying Memoizer)
             self.assertEqual(len(persistent._memoizer._cache._memory), 0)
+
+    def test_fresh_cache_respects_user_cache_dir(self) -> None:
+        from torch._inductor.cpp_builder import normalize_path_separator
+        from torch._inductor.utils import fresh_cache
+
+        with tempfile.TemporaryDirectory() as custom_dir, patch.dict(
+            os.environ,
+            {"TORCHINDUCTOR_CACHE_DIR": custom_dir},
+            clear=False,
+        ):
+            original_triton_cache_dir = os.environ.pop("TRITON_CACHE_DIR", None)
+            try:
+                expected_inductor_cache_dir = normalize_path_separator(custom_dir)
+                expected_triton_cache_dir = normalize_path_separator(
+                    os.path.join(custom_dir, "triton")
+                )
+
+                with fresh_cache():
+                    self.assertEqual(
+                        os.environ["TORCHINDUCTOR_CACHE_DIR"],
+                        expected_inductor_cache_dir,
+                    )
+                    self.assertEqual(
+                        os.environ["TRITON_CACHE_DIR"],
+                        expected_triton_cache_dir,
+                    )
+
+                self.assertTrue(os.path.isdir(custom_dir))
+            finally:
+                if original_triton_cache_dir is None:
+                    os.environ.pop("TRITON_CACHE_DIR", None)
+                else:
+                    os.environ["TRITON_CACHE_DIR"] = original_triton_cache_dir
 
     @patch_on_disk_cache_base_dir
     @set_caching_module_enabled(True)

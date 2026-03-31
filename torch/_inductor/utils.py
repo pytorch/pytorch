@@ -1333,6 +1333,9 @@ def fresh_cache(
     """
     Contextmanager that provides a clean tmp cachedir for pt2 caches.
 
+    If TORCHINDUCTOR_CACHE_DIR is already set and dir is not provided, reuse the
+    existing cache directory instead of creating a new temporary one.
+
     Optionally, pass a dict as 'cache_entries' to get a list of filenames and sizes
     generated with this cache instance.
     """
@@ -1340,13 +1343,21 @@ def fresh_cache(
 
     from torch._inductor.cpp_builder import normalize_path_separator
 
-    inductor_cache_dir = normalize_path_separator(tempfile.mkdtemp(dir=dir))
+    inductor_cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
+    owns_inductor_cache_dir = dir is not None or inductor_cache_dir is None
+    if owns_inductor_cache_dir:
+        inductor_cache_dir = tempfile.mkdtemp(dir=dir)
+    else:
+        os.makedirs(inductor_cache_dir, exist_ok=True)
+
+    inductor_cache_dir = normalize_path_separator(inductor_cache_dir)
     try:
         with _set_env("TORCHINDUCTOR_CACHE_DIR", inductor_cache_dir):
             log.debug("Using inductor cache dir %s", inductor_cache_dir)
-            triton_cache_dir = normalize_path_separator(
-                os.path.join(inductor_cache_dir, "triton")
-            )
+            triton_cache_dir = os.environ.get("TRITON_CACHE_DIR")
+            if owns_inductor_cache_dir or triton_cache_dir is None:
+                triton_cache_dir = os.path.join(inductor_cache_dir, "triton")
+            triton_cache_dir = normalize_path_separator(triton_cache_dir)
             with _set_env("TRITON_CACHE_DIR", triton_cache_dir):
                 yield
                 if isinstance(cache_entries, dict):
@@ -1360,7 +1371,7 @@ def fresh_cache(
                                 if ".lock" not in f
                             }
                         )
-        if delete:
+        if delete and owns_inductor_cache_dir:
             if is_windows() and torch.xpu.is_available():
                 unload_xpu_triton_pyds()
 
