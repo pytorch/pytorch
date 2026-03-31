@@ -11,10 +11,17 @@ function do_install() {
         rocm_dir="${ROCM_HOME:-}"
     fi
     rocm_dir="${rocm_dir:-/opt/rocm}"
+    amdgpu_targets="${ROCSHMEM_AMDGPU_TARGETS:-${PYTORCH_ROCM_ARCH:-}}"
+
+    echo "install_rocSHMEM.sh: building rocm-systems@${ROCSHMEM_VERSION}"
     echo "install_rocSHMEM.sh: using ROCM install prefix ${rocm_dir}"
+    if [[ -n "${amdgpu_targets}" ]]; then
+        echo "install_rocSHMEM.sh: using explicit GPU targets ${amdgpu_targets}"
+    else
+        echo "install_rocSHMEM.sh: no explicit GPU targets provided, using rocSHMEM defaults"
+    fi
     if [[ -f "${rocm_dir}/lib/librocshmem.a" ]]; then
-        echo "install_rocSHMEM.sh: librocshmem.a already present in ${rocm_dir}/lib, skipping build"
-        return
+        echo "install_rocSHMEM.sh: librocshmem.a already present in ${rocm_dir}/lib, rebuilding from pinned source"
     fi
     (
         set -x
@@ -23,17 +30,25 @@ function do_install() {
 
         sudo apt update -y && sudo apt install -y libibverbs-dev
 
-        git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git ${tmp_dir}/rocm-systems
-        cd ${tmp_dir}/rocm-systems
+        git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git "${tmp_dir}/rocm-systems"
+        cd "${tmp_dir}/rocm-systems"
         git sparse-checkout set --cone projects/rocshmem
-        git checkout ${ROCSHMEM_VERSION}
+        git checkout "${ROCSHMEM_VERSION}"
 
-        cd ${tmp_dir}/rocm-systems/projects/rocshmem
+        cd "${tmp_dir}/rocm-systems/projects/rocshmem"
         mkdir build
         cd build
-        INSTALL_PREFIX="${rocm_dir}" ../scripts/build_configs/all_backends
+        if [[ -n "${amdgpu_targets}" ]]; then
+            INSTALL_PREFIX="${rocm_dir}" AMDGPU_TARGETS="${amdgpu_targets}" GPU_TARGETS="${amdgpu_targets}" ../scripts/build_configs/all_backends
+        else
+            INSTALL_PREFIX="${rocm_dir}" ../scripts/build_configs/all_backends
+        fi
 
-        cd ${curr_dir}
+        echo "install_rocSHMEM.sh: installed rocSHMEM artifacts"
+        ls -l "${rocm_dir}/lib"/librocshmem* || true
+
+        cd "${curr_dir}"
+        rm -rf "${tmp_dir}"
 
     )
 }
