@@ -1299,6 +1299,30 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return self.value
         return super().guard_as_python_constant()
 
+    def nb_index_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        # CPython: PyNumber_Index checks tp_as_number->nb_index.
+        # For user-defined types, __index__ in tp_dict means nb_index is set.
+        type_attr = inspect.getattr_static(type(self.value), "__index__", None)
+        if type_attr is None:
+            return super().nb_index_impl(tx)
+        method_var = self.resolve_type_attr(tx, "__index__", type_attr, source=None)
+        result = method_var.call_function(tx, [], {})
+        # CPython validates that __index__ returns an int (abstract.c:1433-1438).
+        if result.is_python_constant() and not isinstance(
+            result.as_python_constant(), int
+        ):
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    f"__index__ returned non-int (type {type(result.as_python_constant()).__name__})"
+                ],
+            )
+        return result
+
     def torch_function_check(self) -> None:
         assert has_torch_function(self), (
             f"calling torch function on object without __torch_function__ {self}"
