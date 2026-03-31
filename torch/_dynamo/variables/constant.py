@@ -380,6 +380,16 @@ its type to `common_constant_types`.
     def get_real_python_backed_value(self) -> object:
         return self.value
 
+    def nb_index_impl(
+        self,
+        tx: Any,
+    ) -> "VariableTracker":
+        # CPython: int and bool define nb_index (returns self for int,
+        # int(self) for bool). All other constant types do not.
+        if isinstance(self.value, (int, bool)):
+            return ConstantVariable.create(operator.index(self.value))
+        return super().nb_index_impl(tx)
+
 
 CONSTANT_VARIABLE_NONE = ConstantVariable(None)
 CONSTANT_VARIABLE_TRUE = ConstantVariable(True)
