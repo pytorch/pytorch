@@ -35,6 +35,7 @@ import torch.nn as nn
 from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory
 from torch._logging._internal import trace_log
+from torch.distributed.distributed_c10d import _TORCHCOMM_AVAILABLE
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
@@ -57,6 +58,28 @@ from torch.testing._internal.distributed.multi_threaded_pg import (
     ProcessLocalGroup,
 )
 
+
+TORCHCOMM_HAS_GLOO = False
+TORCHCOMM_HAS_XCCL = False
+TORCHCOMM_HAS_NCCL = False
+TORCHCOMM_HAS_RCCL = False
+TORCHCOMM_HAS_NCCLX = False
+TORCHCOMM_HAS_RCCLX = False
+if _TORCHCOMM_AVAILABLE:
+    import torchcomms
+
+    for _backend, _flag in [
+        ("gloo", "TORCHCOMM_HAS_GLOO"),
+        ("xccl", "TORCHCOMM_HAS_XCCL"),
+        ("nccl", "TORCHCOMM_HAS_NCCL"),
+        ("rcclx", "TORCHCOMM_HAS_RCCLX"),
+        ("ncclx", "TORCHCOMM_HAS_NCCLX"),
+    ]:
+        try:
+            torchcomms._load_backend(_backend)
+            globals()[_flag] = True
+        except ImportError:
+            pass
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -1213,12 +1236,56 @@ class DistributedTestBase(MultiProcessTestCase):
             store=store,
         )
         if "nccl" in self.backend(device) or "xccl" in self.backend(device):
-            torch.accelerator.set_device_index(self.rank)
+            accelerator = torch.accelerator.current_accelerator()
+            if accelerator:
+                device_type = accelerator.type
+                device = torch.device(f"{device_type}:{self.rank}")
+                torch.set_default_device(device)
+                torch.accelerator.set_device_index(device)
+            else:
+                raise RuntimeError(
+                    f"Expected to find an accelerator when initializing process group"
+                    f" with {self.backend(device)} backend, but got None"
+                )
         return torch.distributed.distributed_c10d._get_default_group()
 
     def rank_to_device(self, device):
         num_visible_devices = torch.get_device_module(device).device_count()
         return {i: [i % num_visible_devices] for i in range(self.world_size)}
+
+
+class C10dTorchCommsTestBase(DistributedTestBase):
+    def _skip_if_backend_unavailable(self, test_name: str, device: str) -> None:
+        backend_flags = {
+            "gloo": TORCHCOMM_HAS_GLOO,
+            "xccl": TORCHCOMM_HAS_XCCL,
+            "nccl": TORCHCOMM_HAS_NCCL,
+            "rccl": TORCHCOMM_HAS_RCCL,
+            "ncclx": TORCHCOMM_HAS_NCCLX,
+            "rcclx": TORCHCOMM_HAS_RCCLX,
+        }
+        backend = self.backend(device)
+        if backend in backend_flags and not backend_flags[backend]:
+            self.skipTest(
+                f"Skipping {test_name} since torchcomms does not have {backend} support"
+            )
+
+    def setUp(self) -> None:
+        super().setUp()
+        device = getattr(self, "device_type", getattr(self, "device", "cpu"))
+        self._skip_if_backend_unavailable(self._current_test_name(), device)
+
+    @retry_on_connect_failures
+    def run_test(self, test_name: str, parent_pipe) -> None:
+        torch.distributed.config.use_torchcomms = True
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = str(find_free_port())
+        os.environ["TORCHCOMM_RANK"] = str(self.rank)
+        os.environ["TORCHCOMM_SIZE"] = str(self.world_size)
+        os.environ["TORCHCOMM_STORE_PATH"] = self.file_name
+        device = getattr(self, "device_type", getattr(self, "device", "cpu"))
+        self.pg = self.create_pg(device)
+        super().run_test(test_name, parent_pipe)
 
 
 def run_subtests(
