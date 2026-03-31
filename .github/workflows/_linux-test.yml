@@ -414,6 +414,13 @@ jobs:
             export HF_DATASETS_OFFLINE=0
           fi
 
+          # Override Python environment if python-version is specified
+          PYTHON_OVERRIDE_ARGS=""
+          if [ -n "${{ inputs.python-version }}" ]; then
+            PY_INPUT="${{ inputs.python-version }}"
+            PYTHON_OVERRIDE_ARGS="-e PATH=/opt/conda/envs/py_${PY_INPUT}/bin:/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+          fi
+
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG, SHM_OPTS, JENKINS_USER and DOCKER_SHELL_CMD since that doesn't play nice
@@ -471,6 +478,7 @@ jobs:
             -e TORCH_TPU \
             -e TORCH_TPU_TEXT_FILE \
             ${TPU_DOCKER_FLAGS:-} \
+            ${PYTHON_OVERRIDE_ARGS} \
             --memory="${TOTAL_AVAILABLE_MEMORY_IN_GB%.*}g" \
             --memory-swap="${TOTAL_MEMORY_WITH_SWAP}g" \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \

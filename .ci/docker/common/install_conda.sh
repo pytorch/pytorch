@@ -96,6 +96,43 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     pip_install -r /opt/conda/requirements-docs.txt
   fi
 
+  # Install additional Python environments if requested
+  if [ -n "$EXTRA_CONDA_PYTHON_VERSIONS" ]; then
+    for EXTRA_VER in $EXTRA_CONDA_PYTHON_VERSIONS; do
+      ENV_NAME="py_${EXTRA_VER}"
+      ACTUAL_VER="$EXTRA_VER"
+      EXTRA_FREE=""
+      if [[ "$EXTRA_VER" == *t ]]; then
+        ACTUAL_VER="${EXTRA_VER%t}"
+        EXTRA_FREE="1"
+      fi
+      if [[ "$EXTRA_FREE" == "1" ]]; then
+        EXTRA_PYTHON_DEP="python-freethreading=${ACTUAL_VER}"
+      else
+        EXTRA_PYTHON_DEP="python=${ACTUAL_VER}"
+      fi
+      as_jenkins conda create -n "${ENV_NAME}" -y \
+        ${EXTRA_PYTHON_DEP} ${SYSROOT_DEP} "icu<78"
+
+      # Install packages directly (not via helpers which assume primary env naming)
+      as_jenkins conda install -q -n "${ENV_NAME}" -y \
+        llvmdev=8.0.0 "libpython-static=${ACTUAL_VER}"
+
+      if [ -n "$CUDA_VERSION" ]; then
+        as_jenkins conda run -n "${ENV_NAME}" --no-capture-output \
+          ${SCRIPT_FOLDER}/install_magma_conda.sh $(cut -f1-2 -d'.' <<< ${CUDA_VERSION})
+      fi
+
+      if [[ "$UBUNTU_VERSION" == "24.04"* ]]; then
+        as_jenkins conda install -c conda-forge -q -n "${ENV_NAME}" -y libstdcxx-ng=14
+      fi
+
+      as_jenkins conda install -q -n "${ENV_NAME}" -y cmake=3.31.6
+      as_jenkins conda run -n "${ENV_NAME}" pip install --progress-bar off \
+        -r /opt/conda/requirements-ci.txt
+    done
+  fi
+
   # Clean conda package cache
   as_jenkins conda clean -ya
 

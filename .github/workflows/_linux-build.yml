@@ -313,6 +313,13 @@ jobs:
             RISCV_DOCKER_ARGS=
           fi
 
+          # Override Python environment if python-version is specified
+          PYTHON_OVERRIDE_ARGS=""
+          if [ -n "${{ inputs.python-version }}" ]; then
+            PY_INPUT="${{ inputs.python-version }}"
+            PYTHON_OVERRIDE_ARGS="-e PATH=/opt/conda/envs/py_${PY_INPUT}/bin:/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+          fi
+
           # detached container should get cleaned up by teardown_ec2_linux
           # Used for JENKINS_USER and DOCKER_SHELL_CMD, which can be empty
           # shellcheck disable=SC2086
@@ -334,6 +341,7 @@ jobs:
             -e HUGGING_FACE_HUB_TOKEN \
             -e BUILD_ADDITIONAL_PACKAGES \
             -e RUNNER \
+            ${PYTHON_OVERRIDE_ARGS} \
             --memory="${TOTAL_AVAILABLE_MEMORY_IN_GB%.*}g" \
             --memory-swap="${TOTAL_MEMORY_WITH_SWAP}g" \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \

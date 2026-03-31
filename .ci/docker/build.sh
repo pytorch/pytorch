@@ -132,22 +132,7 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.10
     CLANG_VERSION=18
     ONNX=yes
-    ;;
-  pytorch-linux-jammy-py3.11-clang18)
-    ANACONDA_PYTHON_VERSION=3.11
-    CLANG_VERSION=18
-    ;;
-  pytorch-linux-jammy-py3.12-clang18)
-    ANACONDA_PYTHON_VERSION=3.12
-    CLANG_VERSION=18
-    ;;
-  pytorch-linux-jammy-py3.13-clang18)
-    ANACONDA_PYTHON_VERSION=3.13
-    CLANG_VERSION=18
-    ;;
-  pytorch-linux-jammy-py3.14-clang18)
-    ANACONDA_PYTHON_VERSION=3.14
-    CLANG_VERSION=18
+    EXTRA_CONDA_PYTHON_VERSIONS="3.11 3.12 3.13 3.14 3.14t"
     ;;
   pytorch-linux-jammy-rocm-n-py3 | pytorch-linux-jammy-rocm-n-py3-benchmarks | pytorch-linux-noble-rocm-n-py3)
     if [[ $tag =~ "jammy" ]]; then
@@ -347,6 +332,7 @@ docker buildx build \
        --build-arg "CLANG_VERSION=${CLANG_VERSION}" \
        --build-arg "ANACONDA_PYTHON_VERSION=${ANACONDA_PYTHON_VERSION}" \
        --build-arg "PYTHON_FREETHREADED=${PYTHON_FREETHREADED}" \
+       --build-arg "EXTRA_CONDA_PYTHON_VERSIONS=${EXTRA_CONDA_PYTHON_VERSIONS}" \
        --build-arg "PYTHON_VERSION=${PYTHON_VERSION}" \
        --build-arg "GCC_VERSION=${GCC_VERSION}" \
        --build-arg "CUDA_VERSION=${CUDA_VERSION}" \
