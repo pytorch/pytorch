@@ -321,6 +321,33 @@ class NbIndexTests(TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
         self.assertEqual(result, "custom error")
 
+    # --- Tensor __index__ ---
+
+    def test_tensor_int_index(self):
+        def fn(x):
+            return operator.index(x)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(5))
+        self.assertEqual(result, 5)
+
+    def test_tensor_float_index_raises(self):
+        def fn(x):
+            try:
+                return operator.index(x)
+            except TypeError as e:
+                return str(e)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(1.5))
+        self.assertIn("only integer tensors", result)
+
+    def test_list_subscript_with_tensor(self):
+        def fn(x):
+            lst = [10, 20, 30]
+            return lst[x]
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(2))
+        self.assertEqual(result, 30)
+
 
 if __name__ == "__main__":
     run_tests()
