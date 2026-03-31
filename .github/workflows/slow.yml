@@ -137,7 +137,7 @@ jobs:
       runner: linux.c7i.4xlarge
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.10-clang18-asan
-      docker-image-name: ci-image:pytorch-linux-jammy-py3-clang18-asan
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang18
       test-matrix: |
         { include: [
           { config: "slow", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },

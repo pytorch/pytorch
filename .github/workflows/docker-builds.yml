@@ -74,8 +74,6 @@ jobs:
           pytorch-linux-noble-xpu-n-py3,
           pytorch-linux-noble-xpu-n-py3-client,
           pytorch-linux-noble-xpu-n-py3-inductor-benchmarks,
-          pytorch-linux-jammy-py3-clang18-asan,
-          pytorch-linux-jammy-py3-clang18-onnx,
           pytorch-linux-jammy-linter,
           pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-linter,
           # TODO: Re-enable me when docker pin update happens

@@ -45,6 +45,10 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   fi
 fi
 
+# Remove onnxruntime if present to avoid interference with non-ONNX tests
+# (ONNX tests use .ci/onnx/test.sh which has its own setup)
+pip uninstall -y onnxruntime 2>/dev/null || true
+
 echo "Environment variables:"
 env
 
