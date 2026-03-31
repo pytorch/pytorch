@@ -62,6 +62,9 @@ def _make_script_builder_class():
             )
             return self
 
+        def add_debug_session(self) -> LumenScriptBuilder:
+            return self._add_script("debug_session", "debug_session")
+
     return LumenScriptBuilder
 
 
@@ -74,6 +77,7 @@ def submit_command(
     no_follow: bool = False,
     image: str = DEFAULT_IMAGE,
     bootstrap: list[str] | None = None,
+    idle_timeout: int | None = None,
 ) -> None:
     """Submit a command to Remote Execution."""
     from re_cli.core.core_types import StepConfig
@@ -86,13 +90,22 @@ def submit_command(
     resolver = CommitResolver(REPO)
     resolved = resolver.resolve(pr, commit)
 
+    tail = ["run_script"]
+    if idle_timeout:
+        tail.append("debug_session")
+    tail.append("upload_outputs")
+
     modules_list = (
         ["header", "find_script", "git_clone", "git_checkout"]
         + bootstrap
-        + ["run_script", "upload_outputs"]
+        + tail
     )
     seen: set[str] = set()
     modules = [m for m in modules_list if not (m in seen or seen.add(m))]
+
+    env = {"REPO_URL": resolved["repo"], "COMMIT_SHA": resolved["sha"]}
+    if idle_timeout:
+        env["IDLE_TIMEOUT"] = str(idle_timeout * 60)
 
     step = StepConfig(
         name=name,
@@ -100,7 +113,7 @@ def submit_command(
         task_type="cpu-large",
         image=image,
         runner_modules=modules,
-        env_vars={"REPO_URL": resolved["repo"], "COMMIT_SHA": resolved["sha"]},
+        env_vars=env,
     )
 
     client = K8sClient(K8sConfig(namespace="remote-execution-system", timeout=60))
