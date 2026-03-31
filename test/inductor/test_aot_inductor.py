@@ -2261,6 +2261,18 @@ class AOTInductorTestsTemplate:
         aot_model = torch._export.aot_load(path, device=self.device)
         torch.testing.assert_close(m(*inputs), aot_model(*inputs))
 
+    def test_aoti_fp8(self):
+        class M(torch.nn.Module):
+            def forward(self, x1, x2):
+                return x1.to(torch.float32) + x2.to(torch.float32)
+
+        m = M().eval().to(self.device)
+        x = torch.randn(16, 16, device=self.device)
+        x1 = x.to(torch.float8_e4m3fn)
+        x2 = x.to(torch.float8_e5m2)
+
+        self.check_model(m, (x1, x2))
+
     def test_aoti_constant_tensor(self):
         class Foo(torch.nn.Module):
             def __init__(self, device):
