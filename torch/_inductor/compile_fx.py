@@ -3194,10 +3194,6 @@ def autograd_cache_key(
         V.set_fake_mode(fake_mode),
         torch._guards.tracing(tracing_context),
         compiled_autograd._disable(),
-        functorch_config.patch(
-            unlift_effect_tokens=True,
-            selective_decompose=config.selective_decompose,
-        ),
     ):
         return aot_autograd.autograd_cache_key(
             graph,
