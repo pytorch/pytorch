@@ -177,6 +177,12 @@ its type to `common_constant_types`.
         except TypeError as e:
             raise NotImplementedError from e
 
+    def len_impl(self, tx: "InstructionTranslator") -> "VariableTracker":
+        try:
+            return ConstantVariable.create(len(self.value))
+        except TypeError as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+
     def const_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if not hasattr(self.value, name):
             raise_observed_exception(AttributeError, tx, args=[name])
@@ -279,12 +285,7 @@ its type to `common_constant_types`.
             except Exception as e:
                 raise_observed_exception(type(e), tx)
 
-        if name == "__len__" and not (args or kwargs):
-            try:
-                return ConstantVariable.create(len(self.value))
-            except TypeError as e:
-                raise_observed_exception(type(e), tx, args=list(e.args))
-        elif name == "__round__" and len(args) == 1 and args[0].is_python_constant():
+        if name == "__round__" and len(args) == 1 and args[0].is_python_constant():
             try:
                 return ConstantVariable.create(
                     round(self.value, args[0].as_python_constant())
