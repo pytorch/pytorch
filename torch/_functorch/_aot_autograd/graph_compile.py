@@ -68,6 +68,7 @@ from .logging_utils import track_graph_compiling
 from .runtime_wrappers import (
     AOTDedupeWrapper,
     AOTDispatchAutograd,
+    AOTDispatchAutogradCompileSpec,
     AOTDispatchSubclassWrapper,
     AOTSyntheticBaseWrapper,
     AutogradLazyBackwardCompileInfo,
@@ -2289,19 +2290,20 @@ def _aot_stage2c_make_autograd_function(
         )
 
     disable_amp = torch._C._is_any_autocast_enabled()
-    compiled_fn = AOTDispatchAutograd.post_compile(
-        compiled_fw_func,
-        compiled_bw_func,
-        maybe_subclass_meta,
-        num_symints_saved_for_bw,
-        backward_state_indices,
-        disable_amp,
-        _indices_of_inps_to_detach,
-        lazy_backward_info,
-        aot_config,
+    compile_spec = AOTDispatchAutogradCompileSpec(
+        compiled_fw_func=compiled_fw_func,
+        compiled_bw_func=compiled_bw_func,
+        maybe_subclass_meta=maybe_subclass_meta,
+        num_symints_saved_for_bw=num_symints_saved_for_bw,
+        backward_state_indices=backward_state_indices,
+        disable_amp=disable_amp,
+        indices_of_inps_to_detach=_indices_of_inps_to_detach,
+        lazy_backward_info=lazy_backward_info,
+        aot_config=aot_config,
         fw_metadata=fw_metadata,
         try_save_cache_entry=try_save_cache_entry,
     )
+    compiled_fn = AOTDispatchAutograd.post_compile(compile_spec)
 
     if entry is not None:
         compiled_fn = SerializableCompiledFunction(compiled_fn, lambda: entry)
