@@ -125,6 +125,68 @@ class TestAvgPool(TestCase):
                         expected = self._sum_pool3d(input, (i, j, k)) / divisor
                         self.assertEqual(actual, expected, rtol=0, atol=1e-5)
 
+    def test_avg_pool3d_legacy_vs_new_forward_backward(self):
+        test_cases = [
+            # 4d Contiguous:
+            ((2, 5, 6, 7), torch.contiguous_format, (2, 3, 2), (1, 2, 1), (1, 1, 0), False, None),
+            # 4d ChannelsLast:
+            ((2, 4, 5, 6), torch.channels_last, (2, 2, 2), (1, 1, 1), (0, 1, 1), True, None),
+            # 5d Contiguous:
+            ((2, 2, 5, 6, 7), torch.contiguous_format, (2, 3, 2), (1, 2, 1), (1, 1, 0), False, None),
+            # 5d ChannelsLast3d:
+            ((2, 3, 4, 4, 5), torch.channels_last_3d, (2, 2, 2), (1, 1, 1), (1, 0, 1), False, 7),
+        ]
+
+        for input_shape, memory_format, kernel_size, stride, padding, count_include_pad, divisor_override in test_cases:
+            input = torch.randn(input_shape, dtype=torch.float)
+            input = input.contiguous(memory_format=memory_format)
+
+            actual_out = F.avg_pool3d(
+                input,
+                kernel_size,
+                stride=stride,
+                padding=padding,
+                ceil_mode=False,
+                count_include_pad=count_include_pad,
+                divisor_override=divisor_override,
+            )
+            expected_out = torch.ops.aten.avg_pool3d_legacy(
+                input,
+                kernel_size,
+                stride,
+                padding,
+                False,
+                count_include_pad,
+                divisor_override,
+            )
+            self.assertEqual(actual_out, expected_out, rtol=0, atol=1e-5)
+
+            grad_output = torch.randn_like(actual_out)
+
+            actual = torch.ops.aten.avg_pool3d_backward(
+                grad_output,
+                input,
+                kernel_size,
+                stride,
+                padding,
+                False,
+                count_include_pad,
+                divisor_override,
+            )
+
+            expected = torch.ops.aten.avg_pool3d_backward_legacy(
+                grad_output,
+                input,
+                kernel_size,
+                stride,
+                padding,
+                False,
+                count_include_pad,
+                divisor_override,
+            )
+
+            self.assertEqual(actual, expected, rtol=0, atol=1e-5)
+
     def test_avg_pool1d_ceil_mode(self):
         # Regression test for gh-36977
         x = 10 * torch.randn((1, 16, 4))
