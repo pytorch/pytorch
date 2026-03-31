@@ -9,8 +9,10 @@ This package is lazily initialized, so you can always import it, and use
 
 from __future__ import annotations
 
+import os
 import threading
 import traceback
+import warnings
 from functools import lru_cache
 from typing import Any, NewType, TYPE_CHECKING
 
@@ -44,6 +46,7 @@ _queued_calls: list[
 _is_in_bad_fork = getattr(torch._C, "_xpu_isInBadFork", lambda: False)
 _lazy_seed_tracker = _LazySeedTracker()
 default_generators: tuple[torch._C.Generator] = ()  # type: ignore[assignment]
+_cached_device_count: int | None = None
 
 
 def _is_compiled() -> bool:
@@ -66,12 +69,174 @@ else:
         raise NotImplementedError("PyTorch was compiled without XPU support")
 
 
-@lru_cache(maxsize=1)
+def _parse_visible_devices() -> list[int]:
+    r"""Parse ``ZE_AFFINITY_MASK`` and return visible device ordinals.
+
+    Returns a list of non-negative device ordinals specified by the mask.
+    When the mask is unset, returns ``[0, 1, ..., 127]`` (the maximum range
+    for ``int8_t`` device indices).  Returns an empty list for unsupported
+    COMPOSITE-style masks (e.g. ``"0.0,0.1"``).
+    """
+    var = os.getenv("ZE_AFFINITY_MASK")
+    if var is None:
+        # DeviceIndex is stored as int8_t, so valid indices are 0–127
+        # (up to 128 devices). Return the full range when no mask is set.
+        return list(range(128))
+
+    visible_devices: list[int] = []
+    for elem in var.split(","):
+        try:
+            x = int(elem.strip())
+        except ValueError:
+            # A non-integer token (e.g. "0.0" in COMPOSITE-mode format)
+            # means the mask is unsupported here; signal that by returning
+            # an empty list.
+            return []
+        if x >= 0 and x not in visible_devices:
+            visible_devices.append(x)
+    return visible_devices
+
+
+def _raw_device_count_zes(visible_mask: list[int]) -> int:
+    r"""Return the number of visible XPU devices via Level Zero Sysman.
+
+    Enumerates devices from the first Level Zero Sysman driver and counts those
+    whose logical index appears in *visible_mask*.  Only devices listed in
+    the visible mask participate in counting.
+
+    Discrete GPUs (dGPUs) take priority: if any visible dGPU is found, only
+    dGPUs are counted; integrated GPUs (iGPUs) are counted only when no
+    visible dGPU exists.
+
+    For tiled dGPUs (``numSubdevices > 0``), the counting depends on
+    ``ZE_FLAT_DEVICE_HIERARCHY``:
+
+    - **FLAT / COMBINED** (default): each sub-device is exposed as a
+      separate top-level device and counted individually.
+    - **COMPOSITE**: sub-devices are hidden; the whole physical device
+      counts as one.
+
+    Returns a negative value on initialization or enumeration failure.
+    """
+    from ctypes import byref, c_uint32
+
+    try:
+        import pyzes  # type: ignore[import]
+    except ImportError:
+        return -1
+
+    def _zes_check(rc: int, msg: str) -> bool:
+        """Return True if the call failed (rc != 0) after issuing a warning."""
+        if rc != 0:
+            warnings.warn(msg, stacklevel=3)
+        return rc != 0
+
+    if _zes_check(pyzes.zesInit(0), "Can't initialize Level Zero Sysman"):
+        return -1
+
+    driver_count = c_uint32(0)
+    if _zes_check(
+        pyzes.zesDriverGet(byref(driver_count), None),
+        "Can't get Level Zero Sysman driver count",
+    ):
+        return -1
+    if driver_count.value == 0:
+        return 0
+
+    drivers = (pyzes.zes_driver_handle_t * driver_count.value)()
+    if _zes_check(
+        pyzes.zesDriverGet(byref(driver_count), drivers),
+        "Can't get Level Zero Sysman driver handles",
+    ):
+        return -1
+
+    device_count = c_uint32(0)
+    if _zes_check(
+        pyzes.zesDeviceGet(drivers[0], byref(device_count), None),
+        "Can't get Level Zero Sysman device count",
+    ):
+        return -1
+
+    devices = (pyzes.zes_device_handle_t * device_count.value)()
+    if _zes_check(
+        pyzes.zesDeviceGet(drivers[0], byref(device_count), devices),
+        "Can't get Level Zero Sysman device handles",
+    ):
+        return -1
+
+    # --- Count visible dGPUs and iGPUs ---
+    ZE_DEVICE_PROPERTY_FLAG_INTEGRATED = 1 << 0
+    hierarchy = os.getenv("ZE_FLAT_DEVICE_HIERARCHY")
+    expose_sub_devices = hierarchy != "COMPOSITE"
+
+    visible = set(visible_mask)
+    logical_index = 0
+    num_igpu = 0
+    num_dgpu = 0
+
+    for device in devices:
+        props = pyzes.zes_device_properties_t()
+        props.stype = pyzes.ZES_STRUCTURE_TYPE_DEVICE_PROPERTIES
+        if _zes_check(
+            pyzes.zesDeviceGetProperties(device, byref(props)),
+            "Can't get Level Zero Sysman device properties",
+        ):
+            return -1
+
+        is_integrated = bool(props.core.flags & ZE_DEVICE_PROPERTY_FLAG_INTEGRATED)
+
+        # Determine how many logical indices this physical device occupies.
+        # Tiled dGPUs in FLAT/COMBINED mode expose each sub-device separately;
+        # everything else (iGPU, non-tiled dGPU, COMPOSITE mode) counts as one.
+        num_slots = (
+            props.numSubdevices
+            if not is_integrated and props.numSubdevices > 0 and expose_sub_devices
+            else 1
+        )
+
+        for _ in range(num_slots):
+            if logical_index in visible:
+                if is_integrated:
+                    num_igpu += 1
+                else:
+                    num_dgpu += 1
+            logical_index += 1
+
+    # Prefer dGPU count; fall back to iGPU count only when no dGPU is visible.
+    return num_dgpu or num_igpu
+
+
+def _device_count_zes() -> int:
+    r"""Return the number of visible XPU devices, or -1 on failure."""
+    visible_devices = _parse_visible_devices()
+    if not visible_devices:
+        return -1
+    return _raw_device_count_zes(visible_devices)
+
+
 def device_count() -> int:
-    r"""Return the number of XPU device available."""
+    r"""
+    Return the number of XPU device available.
+
+    .. note:: This API will NOT poison fork if Level Zero Sysman discovery succeeds.
+        See :ref:`multiprocessing-poison-fork-note` for more details.
+    """
     if not _is_compiled():
         return 0
-    return torch._C._xpu_getDeviceCount()
+    global _cached_device_count
+    if _cached_device_count is not None:
+        return _cached_device_count
+    if _initialized or hasattr(_tls, "is_initializing"):
+        count = torch._C._xpu_getDeviceCount()
+    else:
+        zes_count = _device_count_zes()
+        count = torch._C._xpu_getDeviceCount() if zes_count < 0 else zes_count
+    # Do not cache the device count prior to XPU initialization, because
+    # the number of devices can change due to changes to ZE_AFFINITY_MASK
+    # setting prior to XPU initialization.
+    if _initialized:
+        _cached_device_count = count
+    return count
 
 
 def is_available() -> bool:
