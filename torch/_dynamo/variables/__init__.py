@@ -64,6 +64,7 @@ from .dicts import (
 )
 from .distributed import BackwardHookVariable, DistributedVariable
 from .functions import (
+    BaseUserFunctionVariable,
     BuiltinMethodVariable,
     CollectionsNamedTupleFunction,
     CreateTMADescriptorExperimentalVariable,
@@ -81,7 +82,7 @@ from .functions import (
     SparseTensorCreationSkipVariable,
     TMADescriptorExperimentalVariable,
     TMADescriptorStableVariable,
-    TritonSetAllocatorSkipVariable,
+    TritonSetAllocatorVariable,
     UserFunctionVariable,
     UserMethodVariable,
     WrapperUserFunctionVariable,
@@ -145,7 +146,12 @@ from .nn_module import (
 )
 from .optimizer import OptimizerVariable
 from .sdpa import SDPAParamsVariable
-from .streams import EventVariable, StreamContextVariable, StreamVariable
+from .streams import (
+    CudaStreamVariable,
+    EventVariable,
+    StreamContextVariable,
+    StreamVariable,
+)
 from .tensor import (
     DataPtrVariable,
     FakeItemVariable,
@@ -169,6 +175,7 @@ from .user_defined import (
     UserDefinedObjectVariable,
     UserDefinedSetVariable,
     UserDefinedTupleVariable,
+    UserDefinedVariable,
 )
 
 

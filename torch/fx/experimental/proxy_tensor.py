@@ -40,7 +40,11 @@ import torch.utils._pytree as pytree
 from torch import SymBool, SymInt, Tensor
 from torch._dispatch.python import enable_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_value, OpaqueType
+from torch._library.opaque_object import (
+    is_opaque_value,
+    is_opaque_value_type,
+    OpaqueType,
+)
 from torch._logging import trace_structured
 from torch._opaque_base import OpaqueBase
 from torch._ops import HigherOrderOperator
@@ -286,7 +290,6 @@ def set_proxy_slot(
         ):
             tracer.tensor_tracker[obj] = proxy
     elif isinstance(obj, (_AnyScriptObject)) or is_opaque_value(obj):
-        # We DO want to clobber proxies, with a similar rationale as for tensors.
         if not isinstance(proxy, Proxy):
             raise AssertionError(f"Expected Proxy, got {type(proxy)}")
         # ScriptObject (actual C++ torchbind) uses _WeakHashRef-keyed tracker
@@ -296,7 +299,30 @@ def set_proxy_slot(
         if isinstance(obj, torch.ScriptObject):
             tracer.script_object_tracker[obj] = proxy
         else:
-            tracer.opaque_tracker[obj] = proxy
+            # NB: Never clobber a pre-existing proxy for the same
+            # underlying real object.  Multiple FakeScriptObject wrappers
+            # can share the same real_obj (e.g. primal vs tangent
+            # placeholders during joint graph tracing).  We always keep the
+            # first proxy registered, with the same rationale as the
+            # symnode_tracker first-one-wins policy below: primals are
+            # registered first, so this avoids spurious tangent dependencies
+            # in forward outputs (which would break the partitioner).
+            real_obj = None
+            if isinstance(obj, FakeScriptObject):
+                try:
+                    real_obj = object.__getattribute__(obj, "real_obj")
+                except AttributeError:
+                    pass
+
+            if real_obj is not None:
+                existing = tracer._opaque_real_obj_proxy.get(id(real_obj))
+                if existing is not None:
+                    tracer.opaque_tracker[obj] = existing
+                else:
+                    tracer.opaque_tracker[obj] = proxy
+                    tracer._opaque_real_obj_proxy[id(real_obj)] = proxy
+            else:
+                tracer.opaque_tracker[obj] = proxy
     else:
         # NB: Never clobber pre-existing proxy.  Although the proxies
         # are in principle equivalent, when we do graph partitioning
@@ -459,6 +485,13 @@ def get_proxy_slot(
                 _build_proxy_for_sym_expr(tracer, obj.node.expr, obj)
                 # pyrefly: ignore [no-matching-overload]
                 value = tracker.get(obj)
+
+    if value is None and isinstance(obj, FakeScriptObject):
+        # A new FakeScriptObject wrapping the same real_obj may have been
+        # created (e.g. output flattening in unwrap_tensor_subclasses calls
+        # maybe_to_fake_obj which always mints a fresh wrapper).  Fall back
+        # to the real-object dedup map that set_proxy_slot maintains.
+        value = tracer._opaque_real_obj_proxy.get(id(obj.real_obj))
 
     if value is None:
         # We don't know this value - return the default.
@@ -1335,6 +1368,9 @@ class PythonKeyTracer(Tracer):
     # FakeScriptObject/OpaqueBase uses WeakIdRef because distinct objects that
     # are value-equal (e.g. primal vs tangent opaques) must be tracked separately.
     opaque_tracker: MutableMapping[FakeScriptObject | OpaqueBase | OpaqueType, Proxy]
+    # Maps id(real_obj) -> proxy for opaque FSOs, so that multiple FSO wrappers
+    # of the same real object (e.g. primal vs tangent) resolve to one proxy.
+    _opaque_real_obj_proxy: dict[int, Proxy]
     symnode_tracker: _SymNodeDict
     sympy_expr_tracker: dict[sympy.Symbol, _SympyExprTrackerValue]
     tensor_tracker: MutableMapping[Tensor, _ProxyTensor]
@@ -1349,6 +1385,7 @@ class PythonKeyTracer(Tracer):
             dict=None, ref_type=_WeakHashRef
         )
         self.opaque_tracker = WeakIdKeyDictionary()
+        self._opaque_real_obj_proxy = {}
         self.sympy_expr_tracker = {}
 
         # Stores the torch function that was called during tracing
@@ -1905,6 +1942,9 @@ def _compute_proxy(
 class _GraphAppendingTracerEx(fx.proxy.GraphAppendingTracer):
     script_object_tracker: MutableMapping[torch.ScriptObject, Proxy]
     opaque_tracker: MutableMapping[FakeScriptObject | OpaqueBase | OpaqueType, Proxy]
+    # Maps id(real_obj) -> proxy for opaque FSOs, so that multiple FSO wrappers
+    # of the same real object (e.g. primal vs tangent) resolve to one proxy.
+    _opaque_real_obj_proxy: dict[int, Proxy]
     symnode_tracker: MutableMapping[PySymType, _PySymProxyType]
     tensor_tracker: MutableMapping[Tensor, _ProxyTensor]
     sympy_expr_tracker: dict[sympy.Symbol, _SympyExprTrackerValue]
@@ -1921,6 +1961,7 @@ class _GraphAppendingTracerEx(fx.proxy.GraphAppendingTracer):
             dict=None, ref_type=_WeakHashRef
         )
         self.opaque_tracker = WeakIdKeyDictionary()
+        self._opaque_real_obj_proxy = {}
         # Stores the torch function that was called during tracing
         self.torch_fn_metadata = None
         # Stores the counts for every torch function called. This is to help
@@ -2379,7 +2420,7 @@ class _ModuleStackTracer(PythonKeyTracer):
                 "This might be because the module was not properly registered "
                 "as a submodule, which is not good practice. We will trace "
                 "through the module without recording stack information.",
-                str(m),
+                m,
             )
             return forward(*args, **kwargs)
 
@@ -2655,6 +2696,10 @@ class _MakefxTracer:
                         source=source,
                     )
                 elif isinstance(x, torch.ScriptObject) or is_opaque_value(x):
+                    if is_opaque_value_type(
+                        type(x)  # pyrefly: ignore[bad-argument-type]
+                    ):
+                        return x
                     return torch._library.fake_class_registry.maybe_to_fake_obj(
                         self.fake_tensor_mode, x
                     )

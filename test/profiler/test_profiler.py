@@ -62,6 +62,7 @@ from torch.testing._internal.common_utils import (
     IS_JETSON,
     IS_LINUX,
     IS_WINDOWS,
+    IS_X86,
     parametrize,
     run_tests,
     serialTest,
@@ -485,11 +486,11 @@ class TestProfiler(TestCase):
         self.assertEqual(len(observed_during_run), worker_threads)
         self.assertEqual(len(observed_during_run), len(set(observed_during_run)))
 
-    def payload(self, use_cuda=False):
-        x = torch.randn(10, 10)
+    def payload(self, use_cuda=False, tensor_size=10):
+        x = torch.randn(tensor_size, tensor_size)
         if use_cuda:
             x = x.cuda()
-        y = torch.randn(10, 10)
+        y = torch.randn(tensor_size, tensor_size)
         if use_cuda:
             y = y.cuda()
         z = torch.mm(x, y)
@@ -1438,6 +1439,32 @@ class TestProfiler(TestCase):
                     args = e["args"]
                     if e["name"] == "aten::add":
                         self.assertEqual(args["Input Strides"], [[17, 1], [25, 2], []])
+
+    def test_profiler_strides_without_concrete_inputs(self):
+        torch._C._profiler._set_record_concrete_inputs_enabled_val(False)
+        try:
+            base_tensor = torch.randn(1024, dtype=torch.float32)
+            a = base_tensor.as_strided((16, 16), (17, 1), 0)
+            b = base_tensor.as_strided((16, 16), (25, 2), 272)
+            with _profile(record_shapes=True) as prof:
+                c = torch.add(a, b)
+
+            with TemporaryFileName(mode="w+") as fname:
+                prof.export_chrome_trace(fname)
+                with open(fname) as f:
+                    j = json.load(f)
+                    op_events = [
+                        e for e in j["traceEvents"] if e.get("cat", "") == "cpu_op"
+                    ]
+                    for e in op_events:
+                        args = e["args"]
+                        if e["name"] == "aten::add":
+                            self.assertIn("Input Strides", args)
+                            self.assertEqual(
+                                args["Input Strides"], [[17, 1], [25, 2], []]
+                            )
+        finally:
+            torch._C._profiler._set_record_concrete_inputs_enabled_val(True)
 
     def test_profiler_fwd_bwd_link(self):
         with _profile(use_kineto=True) as prof:
@@ -2426,7 +2453,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                     disable_external_correlation=disable_external_correlation
                 ),
             ) as prof:
-                self.payload(use_cuda=True)
+                self.payload(use_cuda=True, tensor_size=256)
             validate_json(prof, disable_external_correlation)
 
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
@@ -2698,6 +2725,118 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                 x = torch.randn(10, 10)
                 y = torch.randn(10, 10)
                 z = torch.mm(x, y)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_activity_filter_backward_compat(self):
+        """Plain activities=[CPU] still works unchanged."""
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as p:
+            x = torch.randn(10, 10).to("cuda")
+            y = torch.mm(x, x)
+        events = p.events()
+        self.assertGreater(len(events), 0)
+        has_overhead = any(
+            "Lazy Function Loading" in e.name for e in events
+        )  # Lazy Function Loading is an OVERHEAD event
+        self.assertTrue(has_overhead)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_activity_filter_dict_syntax(self):
+        """Dict syntax collects only the requested activity types."""
+        with profile(
+            activities=[{ProfilerActivity.CUDA: ["GPU_MEMCPY", "CUDA_RUNTIME"]}],
+        ) as p:
+            x = torch.randn(10, 10).to("cuda")
+            y = torch.mm(x, x)
+        events = p.events()
+        self.assertGreater(len(events), 0)
+        print(events)
+        # Verify we got GPU_MEMCPY events (HtoD copy from .to("cuda")).
+        has_memcpy = any("Memcpy" in e.name for e in events)
+        self.assertTrue(has_memcpy, "Expected GPU_MEMCPY events")
+        # Verify we got CUDA_RUNTIME events (e.g. cudaLaunchKernel).
+        has_runtime = any("cuda" in e.name for e in events)
+        self.assertTrue(has_runtime, "Expected CUDA_RUNTIME events")
+        # OVERHEAD events (e.g. Lazy Function Loading) should NOT appear.
+        has_overhead = any("Lazy Function Loading" in e.name for e in events)
+        self.assertFalse(has_overhead)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_activity_filter_mixed_syntax(self):
+        """Enum and dict entries can coexist for different activity groups."""
+        activities = [ProfilerActivity.CPU, {ProfilerActivity.CUDA: ["GPU_MEMCPY"]}]
+        with profile(activities=activities) as p:
+            with record_function("test_annotation"):
+                x = torch.randn(10, 10).to("cuda")
+                y = torch.mm(x, x)
+        self.assertGreater(len(p.events()), 0)
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_activity_filter_duplicate_raises(self):
+        """Same activity appearing more than once raises ValueError."""
+        with self.assertRaises(ValueError):
+            with profile(
+                activities=[
+                    ProfilerActivity.CPU,
+                    {ProfilerActivity.CPU: ["CPU_OP"]},
+                ],
+            ) as p:
+                pass
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_activity_filter_invalid_type_name(self):
+        """Invalid activity type name raises RuntimeError."""
+        with self.assertRaises(RuntimeError):
+            with profile(
+                activities=[{ProfilerActivity.CPU: ["NONEXISTENT_TYPE"]}],
+            ) as p:
+                x = torch.randn(10, 10)
+                y = torch.mm(x, x)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_activity_filter_nonmember_type_name(self):
+        """Activity type name that is not a member of the requested activity group raises RuntimeError."""
+        with self.assertRaises(RuntimeError):
+            with profile(
+                activities=[{ProfilerActivity.CUDA: ["CPU_OP"]}],
+            ) as p:
+                x = torch.randn(10, 10)
+                y = torch.mm(x, x)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_activity_filter_empty_list(self):
+        """Passing an empty list to activities means not collecting for the specified activity."""
+        with profile(
+            activities=[{ProfilerActivity.CUDA: []}],
+        ) as p:
+            x = torch.randn(10, 10).to("cuda")
+            y = torch.mm(x, x)
+        self.assertEqual(len(p.events()), 0)
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @unittest.skipIf(not TEST_CUDA, "CUDA is required")
+    def test_kineto_kernel_metadata_in_trace(self):
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            self.payload(use_cuda=True)
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                trace = json.load(f)
+            events = trace["traceEvents"]
+            kernel_events = [e for e in events if e.get("cat", "") == "kernel"]
+            self.assertGreater(
+                len(kernel_events), 0, "Error: No kernel events in trace"
+            )
+            for ke in kernel_events:
+                args = ke.get("args", {})
+                name = ke.get("name", "<unknown>")
+                for key in ["device", "stream", "correlation", "grid", "block"]:
+                    self.assertIn(key, args, f"kernel '{name}' missing '{key}'")
 
 
 class SimpleNet(nn.Module):
@@ -3324,7 +3463,9 @@ aten::mm""",
                 actual_fields = sorted(event.keys())
                 self.assertEqual(expected_fields, actual_fields)
 
-    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "x86 linux only cpp unwinding")
+    @unittest.skipIf(
+        not IS_LINUX or not (IS_X86 or IS_ARM64), "linux x86/aarch64 only cpp unwinding"
+    )
     def test_fuzz_symbolize(self):
         # generate some random addresses in the text section and make sure the
         # symbolizers do not throw exceptions/crash
@@ -3614,6 +3755,237 @@ class TestPrivateUse1ProfilerState(TestCase):
                     use_cpu=False,
                     use_device="custom_backend",
                     use_kineto=False,
+                )
+
+
+@unittest.skipIf(not kineto_available(), "Kineto is required")
+@unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+class TestProfilerEventsParity(TestCase):
+    """Tests validating parity between events() and export_chrome_trace() JSON."""
+
+    def test_python_function_events_in_events(self):
+        with profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            with_stack=True,
+        ) as prof:
+            x = torch.randn(10, 10, device="cuda")
+            torch.mm(x, x)
+
+        events = prof.events()
+        python_events = [e for e in events if e.is_python_function]
+        self.assertGreater(len(python_events), 0)
+        for e in python_events:
+            self.assertIsInstance(e.name, str)
+            self.assertGreater(e.time_range.end - e.time_range.start, 0)
+
+        # Parity: count should match python_function events in Chrome trace
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                trace = json.load(f)
+
+            json_py = [
+                e
+                for e in trace["traceEvents"]
+                if e.get("cat") == "python_function" and e.get("ph") == "X"
+            ]
+            self.assertEqual(len(python_events), len(json_py))
+
+    def test_profiler_flow_events_parity(self):
+        """Verify that async CPU->GPU flow fields on events() match Chrome trace JSON."""
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            x = torch.randn(32, 32, device="cuda")
+            torch.mm(x, x)
+
+        # Collect async CPU->GPU flow info from events()
+        events_with_flow = [
+            e for e in prof.events() if e.flow_id is not None and e.flow_id != 0
+        ]
+        self.assertGreater(
+            len(events_with_flow), 0, "No flow events found via events()"
+        )
+
+        for e in events_with_flow:
+            self.assertIsInstance(e.flow_id, int)
+            self.assertIsInstance(e.flow_type, int)
+            self.assertIsInstance(e.flow_start, bool)
+
+        # Verify parity with Chrome trace JSON for async CPU->GPU flow
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                j = json.load(f)
+
+            json_flow_events = [
+                e
+                for e in j["traceEvents"]
+                if e.get("ph") in ("s", "f") and e.get("cat") == "ac2g"
+            ]
+            json_flow_starts = {e["id"] for e in json_flow_events if e["ph"] == "s"}
+            json_flow_ends = {e["id"] for e in json_flow_events if e["ph"] == "f"}
+
+            # kLinkAsyncCpuGpu = 2
+            ac2g_events = [e for e in events_with_flow if e.flow_type == 2]
+            events_flow_starts = {e.flow_id for e in ac2g_events if e.flow_start}
+            events_flow_ends = {e.flow_id for e in ac2g_events if not e.flow_start}
+
+            self.assertEqual(
+                json_flow_starts,
+                events_flow_starts,
+                "Async CPU->GPU flow start IDs differ between events() and Chrome trace",
+            )
+            self.assertEqual(
+                json_flow_ends,
+                events_flow_ends,
+                "Async CPU->GPU flow end IDs differ between events() and Chrome trace",
+            )
+
+    def test_profiler_fwdbwd_flow_events_parity(self):
+        """Verify that fwd->bwd flow fields on events() match Chrome trace JSON."""
+        with profile(activities=[ProfilerActivity.CPU]) as prof:
+            t1 = torch.ones(1, requires_grad=True)
+            t2 = torch.ones(1, requires_grad=True)
+            z = torch.add(t1, t2)
+            y = torch.ones(1)
+            loss = torch.nn.functional.binary_cross_entropy_with_logits(z, y)
+            loss.backward()
+
+        fwdbwd_events = [
+            e for e in prof.events() if e.flow_type == 1 and e.flow_id != 0
+        ]
+        self.assertGreater(
+            len(fwdbwd_events), 0, "No fwdbwd flow events found via events()"
+        )
+
+        events_flow_starts = {e.flow_id for e in fwdbwd_events if e.flow_start}
+        events_flow_ends = {e.flow_id for e in fwdbwd_events if not e.flow_start}
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                j = json.load(f)
+
+            json_flow_events = [
+                e
+                for e in j["traceEvents"]
+                if e.get("ph") in ("s", "f") and e.get("cat") == "fwdbwd"
+            ]
+            json_flow_starts = {e["id"] for e in json_flow_events if e["ph"] == "s"}
+            json_flow_ends = {e["id"] for e in json_flow_events if e["ph"] == "f"}
+
+            self.assertEqual(
+                json_flow_starts,
+                events_flow_starts,
+                "fwdbwd flow start IDs differ between events() and Chrome trace",
+            )
+            self.assertEqual(
+                json_flow_ends,
+                events_flow_ends,
+                "fwdbwd flow end IDs differ between events() and Chrome trace",
+            )
+
+    def test_profiler_timestamp_consistency(self):
+        """Verify that FunctionEvent timestamps can reconstruct Chrome trace ts values."""
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            x = torch.randn(32, 32, device="cuda")
+            torch.mm(x, x)
+
+        trace_start_ns = prof.profiler.kineto_results.trace_start_ns()
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                j = json.load(f)
+
+            # Chrome trace is relative to a different base time which is not exposed in Python.
+            # It's probably not important to do so as we still have the relative differences
+            # in duration.
+            base_time_ns = j.get("baseTimeNanoseconds", 0)
+
+            # Grab mm timestamp from events() and json
+            fe_mm = next((e for e in prof.events() if e.name == "aten::mm"), None)
+            json_mm = next(
+                (
+                    e
+                    for e in j["traceEvents"]
+                    if e.get("name") == "aten::mm" and e.get("ph") == "X"
+                ),
+                None,
+            )
+
+            # Reconstruct Chrome trace ts from events():
+            # absolute_ns = mm_op_start_us * 1000 + trace_start_ns
+            # chrome_ts = (absolute_ns - base_time_ns) / 1000 -> realign with json timeframe
+            absolute_ns = int(fe_mm.time_range.start * 1000) + trace_start_ns
+            recovered_ts = (absolute_ns - base_time_ns) / 1000
+            self.assertEqual(
+                recovered_ts,
+                json_mm["ts"],
+                msg="Recovered Chrome trace ts doesn't match JSON for aten::mm",
+            )
+
+    def test_profiler_external_id_parity(self):
+        """Verify that FunctionEvent.external_id matches External id in Chrome trace JSON."""
+        from collections import Counter
+
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            with torch.profiler.record_function("test_region"):
+                x = torch.randn(32, 32, device="cuda")
+                y = torch.mm(x, x)
+                z = y + x
+                z.cpu()
+                torch.cuda.synchronize()
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                j = json.load(f)
+
+            json_name_ext = Counter(
+                (e["name"], e["args"]["External id"])
+                for e in j["traceEvents"]
+                if e.get("args", {}).get("External id") is not None
+            )
+            events_name_ext = Counter(
+                (ev.name, ev.external_id) for ev in prof.events() if ev.external_id != 0
+            )
+
+            self.assertEqual(
+                events_name_ext,
+                json_name_ext,
+                "(name, external_id) pairs differ between events() and Chrome trace JSON",
+            )
+
+    def test_profiler_activity_type_parity(self):
+        """Verify activity_type on events() matches Chrome trace cat field."""
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            x = torch.randn(32, 32, device="cuda")
+            torch.mm(x, x)
+
+        events = prof.events()
+        for e in events:
+            self.assertIsInstance(e.activity_type, str)
+            self.assertGreater(len(e.activity_type), 0)
+
+        mm_event = next((e for e in events if e.name == "aten::mm"), None)
+        self.assertIsNotNone(mm_event)
+        self.assertEqual(mm_event.activity_type, "cpu_op")
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                j = json.load(f)
+
+            json_name_cats = {
+                (e["name"], e["cat"])
+                for e in j["traceEvents"]
+                if e.get("ph") == "X" and "cat" in e
+            }
+            for e in events:
+                self.assertIn(
+                    (e.name, e.activity_type),
+                    json_name_cats,
+                    f"activity_type mismatch for {e.name}",
                 )
 
 

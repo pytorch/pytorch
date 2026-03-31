@@ -945,7 +945,7 @@ class MultiProcessTestCase(TestCase):
                 "Process %s skipping test %s for following reason: %s",
                 self.rank,
                 test_name,
-                str(se),
+                se,
             )
             sys.exit(TEST_SKIPS["generic"].exit_code)
         except Exception:
@@ -1496,7 +1496,7 @@ class MultiThreadedTestCase(TestCase):
                     "Thread %s skipping test %s for following reason: %s",
                     rank,
                     fn,
-                    str(exc),
+                    exc,
                 )
                 if skip_code < 0:
                     skip_code = TEST_SKIPS["generic"].exit_code

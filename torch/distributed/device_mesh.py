@@ -6,12 +6,14 @@ import threading
 import warnings
 from collections.abc import Iterator
 from itertools import zip_longest
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
+from torch._opaque_base import OpaqueBase
 from torch.distributed import is_available
 from torch.distributed._mesh_layout import _MeshLayout
 from torch.distributed._pycute import IntTuple, is_int, suffix_product
+from torch.types import IntLikeType
 from torch.utils._typing_utils import not_none
 
 
@@ -148,7 +150,7 @@ else:
         """
         return getattr(torch, device_type, None)
 
-    class DeviceMesh(torch._opaque_base.OpaqueBase):
+    class DeviceMesh(OpaqueBase):
         """
         DeviceMesh represents a mesh of devices, where layout of devices could be
         represented as a n-d dimension array, and each value of the n-d dimensional
@@ -202,6 +204,7 @@ else:
         _mesh_dim_names: tuple[str, ...] | None
         _layout: _MeshLayout
         _root_mesh: "DeviceMesh | None" = None
+        _thread_id: int | None
         # Record flatten mesh name to its flattened mesh in root mesh.
         _flatten_mapping: dict[str, "DeviceMesh"]
         # Registry mapping group names to ProcessGroup objects (to avoid C++ lookup)
@@ -546,10 +549,12 @@ else:
                     getattr(default_group, "bound_device_id", None) is not None
                     or dist_config.use_torchcomms
                 )
-                and torch.cuda.is_available()
+                and torch.accelerator.is_available()
                 and (
                     backend is None
-                    or default_group._get_backend(torch.device("cuda")).name()
+                    or default_group._get_backend(
+                        torch.accelerator.current_accelerator()  # pyrefly: ignore[bad-argument-type]
+                    ).name()
                     == backend
                 )
             ):
@@ -643,19 +648,21 @@ else:
                 device_mesh_repr += f", Mesh: {self.mesh.tolist()}"
             return f"{device_mesh_repr})"
 
+        def _hash_key(self) -> tuple[Any, ...]:
+            """Return the tuple used for hashing. Used by both __hash__ and _stable_hash."""
+            return (
+                self._flatten_rank_map,
+                self._layout,
+                self._device_type,
+                self._mesh_dim_names,
+                self._thread_id,
+            )
+
         def __hash__(self):
             # lazily compute hash
             self._hash = getattr(self, "_hash", None)
             if not self._hash:
-                self._hash = hash(
-                    (
-                        self._flatten_rank_map,
-                        self._layout,
-                        self._device_type,
-                        self._mesh_dim_names,
-                        self._thread_id,
-                    )
-                )
+                self._hash = hash(self._hash_key())
             return self._hash
 
         def __eq__(self, other: object) -> bool:
@@ -670,6 +677,17 @@ else:
                 and self._mesh_dim_names == other._mesh_dim_names
                 and self._thread_id == other._thread_id
             )
+
+        def _stable_hash(self) -> str:
+            """
+            Return a stable hash for AOT autograd caching.
+            [See note: Tensor subclass stable hashing for AOT autograd cache]
+            """
+            import hashlib
+
+            return hashlib.blake2b(
+                repr(self._hash_key()).encode(), digest_size=16
+            ).hexdigest()
 
         def __getitem__(self, mesh_dim_names: str | tuple[str, ...]) -> "DeviceMesh":
             """
@@ -1220,11 +1238,15 @@ else:
             """
             return self._coordinate_on_dim
 
-        def _sym_get_coordinate(self, index: int) -> int:
+        def _sym_get_coordinate(self, index: int) -> IntLikeType:
             import torch.distributed.config as config
             from torch._guards import detect_fake_mode
 
-            if not detect_fake_mode() or not config.compile_on_one_rank:
+            if (
+                not config.compile_on_one_rank
+                or not (fake_mode := detect_fake_mode())
+                or not fake_mode.shape_env
+            ):
                 # This is only valid when the current rank is part of the mesh.
                 if self._coordinate_on_dim is None:
                     raise AssertionError
@@ -1532,14 +1554,14 @@ else:
         if mesh_dim_names is not None:
             if len(set(mesh_dim_names)) != len(mesh_dim_names):
                 raise RuntimeError(
-                    "Each mesh_dim_name must be unique.",
-                    f"Found repeated mesh_dim_name in mesh_dim_names {mesh_dim_names}",
+                    "Each mesh_dim_name must be unique. "
+                    f"Found repeated mesh_dim_name in mesh_dim_names {mesh_dim_names}"
                 )
 
             if len(mesh_shape) != len(mesh_dim_names):
                 raise RuntimeError(
-                    "mesh_shape and mesh_dim_names should have same length!",
-                    f"Found len(mesh_dim_names): {len(mesh_dim_names)} and len(mesh_shape):{len(mesh_shape)}.",
+                    "mesh_shape and mesh_dim_names should have same length! "
+                    f"Found len(mesh_dim_names): {len(mesh_dim_names)} and len(mesh_shape):{len(mesh_shape)}."
                 )
 
         if backend_override is not None:
@@ -1574,12 +1596,20 @@ else:
         return device_mesh
 
 
+_distributed_opaque_types_registered = False
+
+
 def _register_distributed_opaque_types():
     """
     Register DeviceMesh as an opaque type for torch.compile.
     This must happen before any custom ops that use DeviceMesh in their schema.
     Called lazily to avoid circular import issues.
     """
+    global _distributed_opaque_types_registered
+    if _distributed_opaque_types_registered:
+        return
+    _distributed_opaque_types_registered = True
+
     from torch._library.opaque_object import MemberType, register_opaque_type
 
     register_opaque_type(
@@ -1590,7 +1620,9 @@ def _register_distributed_opaque_types():
             "rank": MemberType.USE_REAL,
             "_get_backend_name": MemberType.USE_REAL,
             "group_name": MemberType.USE_REAL,
+            "group_desc": MemberType.USE_REAL,
             "__eq__": MemberType.USE_REAL,
+            "__ne__": MemberType.USE_REAL,
         },
     )
 
@@ -1617,6 +1649,7 @@ def _register_distributed_opaque_types():
             "get_coordinate": MemberType.USE_REAL,
             "get_local_rank": MemberType.USE_REAL,
             "__eq__": MemberType.USE_REAL,
+            "__ne__": MemberType.USE_REAL,
             "ndim": MemberType.USE_REAL,
             "shape": MemberType.USE_REAL,
             "mesh_dim_names": MemberType.USE_REAL,

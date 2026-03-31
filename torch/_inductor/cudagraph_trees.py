@@ -878,10 +878,7 @@ class CUDAGraphNode:
 
         # Enable re-record a cudagraph when static tensor address changed.
         # if not we should error when it changed.
-        self.rerecord_if_static_inputs_change = (
-            torch._dynamo.config.inline_inbuilt_nn_modules
-            or torch._inductor.config.triton.cudagraph_support_input_mutation
-        )
+        self.rerecord_if_static_inputs_change = True
 
         # if this is a root parent will be None. use weakref to prevent reference cycle
         self._parent = weakref.ref(parent) if parent is not None else None
@@ -2169,13 +2166,7 @@ class CUDAGraphTreeManager:
     def exceed_rerecord_limit(
         self, node_id: GraphID | None, function_id: FunctionID
     ) -> bool:
-        if torch._dynamo.config.inline_inbuilt_nn_modules:
-            return False
-
-        return (
-            self.num_rerecord[node_id][function_id]
-            > torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit
-        )
+        return False
 
     def _run(self, new_inputs: list[InputType], function_id: FunctionID) -> OutputType:
         # we will try to end the current execution lazily, since
@@ -2587,9 +2578,9 @@ class CUDAGraphTreeManager:
 
         self.warned_functions.add(function_id)
         warnings.warn(
-            "Unable to hit fast path of CUDAGraphs because of pending, uninvoked backwards. "
-            "Consider running with torch.no_grad() or using torch.compiler.cudagraph_mark_step_begin() "
-            "before each model invocation"
+            "Unable to hit fast path of CUDAGraphs because outputs from a previous step "
+            "still require backward. Ensure backward() is invoked or detach outputs. "
+            "You may also call torch.compiler.cudagraph_mark_step_begin() before each model invocation."
         )
 
     @staticmethod

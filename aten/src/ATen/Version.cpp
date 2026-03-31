@@ -218,8 +218,9 @@ std::string get_cxx_flags() {
     "Buck does not populate the `CXX_FLAGS` field of Caffe2 build options. "
     "As a result, `get_cxx_flags` is OSS only."
   );
-  #endif
+  #else
   return caffe2::GetBuildOptions().at("CXX_FLAGS");
+  #endif
 }
 
 }

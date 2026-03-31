@@ -173,9 +173,10 @@ register_op_override(
     implementation_fn: _OpOverrideFn,
     *,
     allow_multiple_override: bool = False,
-    unconditional_override: bool = False,
-) -> None
+    unconditional_override: bool = False,) -> None
 ```
-Register a given implementation to a library - `lib_symbol = "aten"` for most cases, `op_symbol` refers to the library method you wish to override (ex. `"_scaled_grouped_mm_v2"` from above), and dispatch key will generally be one of `("CPU", "CUDA")` depending on what backend you're overriding. For all arguments, please see the comments for `_register_op_override` in [registry.py](registry.py).
+Register a given implementation to a library - `lib_symbol = "aten"` for most cases, `op_symbol` refers to the library method you wish to override (ex. `"_scaled_grouped_mm_v2"` from above), and dispatch key will generally be one of `("CPU", "CUDA")` depending on what backend you're overriding. For all arguments, please see the comments for `register_op_override` in [registry.py](registry.py).
+
+`deregister_op_overrides() -> None` : De-register all operators that are currently registered by this DSL. Note that `torch._native.registry` has a `deregister_op_overrides` method to enable this in a centralized fashion.
 
 An example of an implementation of this spec can be found in [cutedsl_utils.py](cutedsl_utils.py), but please talk to us if you're planning on adding a new DSL.

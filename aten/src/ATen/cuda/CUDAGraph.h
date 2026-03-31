@@ -9,6 +9,7 @@
 #include <c10/util/flat_hash_map.h>
 
 #include <limits>
+#include <optional>
 #include <stack>
 
 #if defined(USE_ROCM) || !(defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
@@ -29,6 +30,16 @@ namespace cuda {
 // Standalone way to get a unique mempool id usable as a pool=... argument
 // to CUDAGraph::capture_begin
 TORCH_CUDA_CPP_API MempoolId_t graph_pool_handle();
+
+// Returns true if any CUDAGraph capture is currently active in this process.
+// Used by ProcessGroupNCCL's ROCm watchdog workaround to avoid calling
+// hipEventQuery during active capture on HIP runtimes without the
+// event-query capture-mode fix (https://github.com/ROCm/clr/pull/3176).
+// Not needed on CUDA/NVIDIA where cross-thread event query does not have this
+// restriction.
+#if defined(USE_ROCM)
+TORCH_CUDA_CPP_API bool is_graph_capture_active();
+#endif // defined(USE_ROCM)
 
 struct TORCH_CUDA_CPP_API CUDAGraph {
   CUDAGraph(bool keep_graph=false);
@@ -78,7 +89,8 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
       const Tensor& scalar_cuda_pred_tensor);
 
  private:
-  std::function<bool(cudaStream_t)> create_allocate_filter();
+  template <typename StreamType>
+  std::function<bool(StreamType)> create_allocate_filter() const;
   std::function<bool(cudaStream_t)> create_child_allocate_filter();
 
  protected:
@@ -141,6 +153,11 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
       conditional_rng_snapshots_;
 #endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12040
 };
+
+template <>
+std::function<bool(cudaStream_t)> CUDAGraph::create_allocate_filter<cudaStream_t>() const;
+template <>
+std::function<bool(c10::Stream)> CUDAGraph::create_allocate_filter<c10::Stream>() const;
 
 } // namespace cuda
 } // namespace at

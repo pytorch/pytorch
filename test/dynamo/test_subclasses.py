@@ -376,6 +376,41 @@ class CtxSubclassTensor(torch.Tensor):
         return return_and_correct_aliasing(func, args, kwargs, out)
 
 
+class DeferredInitSubclass(torch.Tensor):
+    """
+    A traceable wrapper subclass that calls super().__init__() BEFORE
+    setting instance attributes (similar to torchao patterns).
+    """
+
+    @staticmethod
+    def __new__(cls, data, scale):
+        return torch.Tensor._make_wrapper_subclass(
+            cls, data.shape, dtype=data.dtype, device=data.device
+        )
+
+    def __init__(self, data, scale):
+        super().__init__()
+        self._data = data
+        self._scale = scale
+
+    def __tensor_flatten__(self):
+        return ["_data"], {"_scale": self._scale}
+
+    @classmethod
+    def __tensor_unflatten__(cls, inner_tensors, ctx, outer_size, outer_stride):
+        return cls(inner_tensors["_data"], ctx["_scale"])
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+        args_inner = pytree.tree_map_only(DeferredInitSubclass, lambda x: x._data, args)
+        out = func(*args_inner, **kwargs)
+        if isinstance(out, torch.Tensor):
+            return DeferredInitSubclass(out, args[0]._scale)
+        return out
+
+
 def func(a):
     return a.sin()
 
@@ -1887,6 +1922,37 @@ s50 > 3""",
             lambda: torch.compile(lambda x: x * x, backend="eager")(x),
         )
 
+    def test_tensor_subclass_metadata_with_symint(self):
+        # TENSOR_SUBCLASS_METADATA_MATCH replaces SymInts in metadata with
+        # _AnyCompare sentinels so that (a) deepcopy doesn't pull in the
+        # ShapeEnv, (b) dynamic dims aren't over-guarded, and (c) unbacked
+        # SymInts don't cause errors.
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        sym_ctx = StatelessSymbolicContext(
+            dynamic_sizes=[DimDynamic.DYNAMIC],
+        )
+        fake_t = fake_mode.from_tensor(torch.randn(8), symbolic_context=sym_ctx)
+        sym_int = fake_t.shape[0]  # SymInt with hint 8
+
+        # Construct a real tensor whose metadata contains a SymInt.
+        x1 = CtxSubclassTensor(torch.randn(8, 8), sym_int)
+
+        @torch.compile(backend="eager", dynamic=True, fullgraph=True)
+        def f(x):
+            return x * x
+
+        f(x1)
+
+        # Without the fix, the guard stores the SymInt's hint value (8)
+        # and recompiles when it sees a different constant. With the fix,
+        # the SymInt position is replaced by _AnyCompare so the guard
+        # passes for any constant value.
+        x2 = CtxSubclassTensor(torch.randn(8, 8), 3)
+        _check_recompiles(self, f, (x1,), (x2,), False)
+
     def test_subclass_constructor_proxying(self):
         import dataclasses
         from collections import namedtuple
@@ -2219,7 +2285,6 @@ class GraphModule(torch.nn.Module):
                 out_test = compiled_f(view)
                 self.assertEqual(out_ref, out_test)
 
-    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     @parametrize("dynamic", [True, False])
     def test_mark_static_with_subclass_desugaring(self, dynamic):
         from collections.abc import Callable
@@ -2247,6 +2312,7 @@ class GraphModule(torch.nn.Module):
             boxed_forward_device_index: BoxedDeviceIndex | None = None,
             layout_opt: bool | None = None,
             extern_node_serializer: Callable[[list[Any]], Any] | None = None,
+            **kwargs: Any,
         ):
             if dynamic:
                 self.assertEqual(static_input_idxs, [2, 3, 4])
@@ -2262,7 +2328,6 @@ class GraphModule(torch.nn.Module):
 
         fn(torch.ones(4), x, torch.ones(4))
 
-    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     def test_subclass_parameters_are_static_under_training(self):
         from collections.abc import Callable
         from typing import Any
@@ -2284,6 +2349,7 @@ class GraphModule(torch.nn.Module):
             boxed_forward_device_index: BoxedDeviceIndex | None = None,
             layout_opt: bool | None = None,
             extern_node_serializer: Callable[[list[Any]], Any] | None = None,
+            **kwargs: Any,
         ):
             # Important bit: there are 3 params: linear.weight.a, linear.weight.b, linear.bias,
             # which are the first 3 args of the graph.
@@ -3382,6 +3448,33 @@ class <lambda>(torch.nn.Module):
         )
 """,  # noqa: B950
         )
+
+    def test_deferred_init_subclass_init_not_traced(self):
+        """
+        Tracing a function that constructs a DeferredInitSubclass must not crash.
+
+        The bug: when Dynamo's frame hook intercepts __init__ as a root frame,
+        self is partially initialised (attributes not yet set by __init__).
+        Previously, wrap_tensor would call __tensor_flatten__ on this
+        partially-initialised self and raise AttributeError.
+
+        The fix skips tracing __init__ of traceable wrapper subclasses at the
+        frame level (convert_frame.py), so __init__ runs eagerly like
+        @torch._disable_dynamo would.
+        """
+        # Compile __init__ directly, simulating the root-frame interception
+        # scenario that occurs in practice (e.g. Diffusers + TorchAO + Dynamo).
+        compiled_init = torch.compile(
+            DeferredInitSubclass.__init__, backend="eager", fullgraph=False
+        )
+        data = torch.randn(4, 4)
+        shell = DeferredInitSubclass.__new__(DeferredInitSubclass, data, 2.0)
+
+        # Should not raise AttributeError from __tensor_flatten__ on partial self
+        compiled_init(shell, data, 2.0)
+
+        self.assertEqual(shell._data, data)
+        self.assertEqual(shell._scale, 2.0)
 
 
 instantiate_parametrized_tests(SubclassTests)

@@ -9,7 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from types import TracebackType
 from typing import Any, overload, TYPE_CHECKING, TypeVar
-from typing_extensions import deprecated, ParamSpec
+from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
@@ -178,11 +178,6 @@ def assume_constant_result(fn):  # type: ignore[no-untyped-def]
     return fn
 
 
-@deprecated(
-    "torch._dynamo.allow_in_graph is deprecated and will be removed in a future version. "
-    "Use torch._dynamo.nonstrict_trace instead.",
-    category=FutureWarning,
-)
 def allow_in_graph(fn):  # type: ignore[no-untyped-def]
     """
     Tells the compiler frontend (Dynamo) to skip symbolic introspection of the function

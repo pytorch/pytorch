@@ -128,9 +128,7 @@ def strict_export_and_aot_export_joint_with_descriptors(model, args, kwargs=None
     torch.utils._pytree.register_constant(DTensorSpec)
     try:
         # install_free_tensors is required for dynamo to work
-        with torch._dynamo.config.patch(
-            install_free_tensors=True, inline_inbuilt_nn_modules=True
-        ):
+        with torch._dynamo.config.patch(install_free_tensors=True):
             with torch._export.utils._disable_aten_to_metadata_assertions():
                 ep = torch.export.export(model, args, kwargs, strict=True)
 

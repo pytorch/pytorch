@@ -34,11 +34,12 @@ import random
 import re
 import sys
 import types
+import typing
 import unittest
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import torch
 import torch._inductor.test_operators
@@ -235,18 +236,13 @@ manual_torch_name_rule_map: dict[
     "torch.Tensor#split": TorchInGraphFunctionVariable,
     "torch.cuda.set_device": SkipFunctionVariable,
     "torch.cuda.current_device": TorchInGraphFunctionVariable,
-    "torch._C.autocast_decrement_nesting": SkipFunctionVariable,
-    "torch._C.autocast_increment_nesting": SkipFunctionVariable,
     "torch.autograd.grad": TorchInGraphFunctionVariable,
     "torch.autograd.backward": SkipFunctionVariable,
-    "torch._C.clear_autocast_cache": SkipFunctionVariable,
     "torch.distributions.constraints.is_dependent": SkipFunctionVariable,
     "torch.jit.isinstance": SkipFunctionVariable,
     "torch._C.set_anomaly_enabled": SkipFunctionVariable,
-    "torch._C.set_autocast_cache_enabled": SkipFunctionVariable,
     "torch._C.set_autocast_cpu_dtype": SkipFunctionVariable,
     "torch._C.set_autocast_cpu_enabled": SkipFunctionVariable,
-    "torch._C.set_autocast_enabled": SkipFunctionVariable,
     "torch._C.set_autocast_gpu_dtype": SkipFunctionVariable,
     "torch._C.set_autocast_ipu_dtype": SkipFunctionVariable,
     "torch._C.set_autocast_ipu_enabled": SkipFunctionVariable,
@@ -362,7 +358,8 @@ manual_torch_name_rule_map: dict[
     "torch._dynamo.override_cudagraphs": UserFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.is_nested_int": UserFunctionVariable,
-    "torch.fx.experimental.symbolic_shapes.size_hint": TorchInGraphFunctionVariable,
+    "torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw": TorchInGraphFunctionVariable,
+    "torch.fx.experimental.symbolic_shapes.optimization_hint": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_or_true": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_or_false": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.statically_known_true": TorchInGraphFunctionVariable,
@@ -468,6 +465,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._accelerator_getAccelerator",
         "torch._C._accelerator_getDeviceIndex",
         "torch._C._accelerator_getStream",
+        "torch._C._accelerator_getAllocatorSettings",
         "torch._C._accelerator_setAllocatorSettings",
         "torch._C._accelerator_setStream",
         "torch._C._accelerator_synchronizeDevice",
@@ -476,6 +474,8 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._add_docstr",
         "torch._C._are_functorch_transforms_active",
         "torch._C._autograd_init",
+        "torch._C._autograd._saved_tensors_hooks_disable",
+        "torch._C._autograd._saved_tensors_hooks_enable",
         "torch._C._awaitable_nowait",
         "torch._C._awaitable_wait",
         "torch._C._awaitable",
@@ -742,6 +742,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._initExtension",
         "torch._C._is_alias_of",
         "torch._C._is_any_autocast_enabled",
+        "torch._C._is_autocast_available",
         "torch._C._is_cached_tensor",
         "torch._C._is_flash_attention_available",
         "torch._C._is_fwd_grad_enabled",
@@ -1079,6 +1080,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._nn._test_warn_in_autograd",
         "torch._C._nn._upsample_bicubic2d_aa",
         "torch._C._nn._upsample_bilinear2d_aa",
+        "torch._C._nn._upsample_lanczos2d_aa",
         "torch._C._nn._upsample_nearest_exact1d",
         "torch._C._nn._upsample_nearest_exact2d",
         "torch._C._nn._upsample_nearest_exact3d",
@@ -1396,6 +1398,9 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._xpu_resetPeakMemoryStats",
         "torch._C._xpu_setStream",
         "torch._C._xpu_synchronize",
+        "torch._C.autocast_decrement_nesting",
+        "torch._C.autocast_increment_nesting",
+        "torch._C.clear_autocast_cache",
         "torch._C.fork",
         "torch._C.get_autocast_cpu_dtype",
         "torch._C.get_autocast_dtype",
@@ -1422,6 +1427,8 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C.parse_schema",
         "torch._C.parse_type_comment",
         "torch._C.read_vitals",
+        "torch._C.set_autocast_cache_enabled",
+        "torch._C.set_autocast_enabled",
         "torch._C.set_vital",
         "torch._C.unify_type_list",
         "torch._C.vitals_enabled",
@@ -1503,6 +1510,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._foreach_clamp_max",
         "torch._foreach_clamp_min_",
         "torch._foreach_clamp_min",
+        "torch._foreach_clone",
         "torch._foreach_copy_",
         "torch._foreach_cos_",
         "torch._foreach_cos",
@@ -1585,6 +1593,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functionalize_replace",
         "torch._functionalize_sync",
         "torch._functionalize_was_storage_changed",
+        "torch._fused_adagrad_",
         "torch._fused_adam_",
         "torch._fused_adamw_",
         "torch._fused_dropout",
@@ -2220,6 +2229,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.select",
         "torch.selu_",
         "torch.selu",
+        "torch.set_autocast_dtype",
         "torch.sgn",
         "torch.sigmoid_",
         "torch.sigmoid",
@@ -2443,8 +2453,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.accelerator.set_stream",
         "torch.accelerator.synchronize",
         "torch.align_tensors",
-        "torch.amp.autocast_mode._enter_autocast",
-        "torch.amp.autocast_mode._exit_autocast",
         "torch.amp.autocast_mode.autocast_decorator",
         "torch.amp.autocast_mode.custom_bwd",
         "torch.amp.autocast_mode.custom_fwd",
@@ -2618,6 +2626,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cuda.get_device_properties",
         "torch.cuda.get_gencode_flags",
         "torch.cuda.get_sync_debug_mode",
+        "torch.cuda.synchronize",
         "torch.cuda.graphs.graph_pool_handle",
         "torch.cuda.graphs.is_current_stream_capturing",
         "torch.cuda.graphs.make_graphed_callables",
@@ -3173,12 +3182,6 @@ def _builtin_function_ids() -> dict[int, str]:
             if not k.startswith("_") and callable(v)
         }
     )
-    rv.update(
-        {
-            id(cast): "typing.cast",
-            id(copy.deepcopy): "copy.deepcopy",
-        }
-    )
     return rv
 
 
@@ -3321,6 +3324,13 @@ BUILTIN_SKIPLIST = (
     random,
     linecache,
 )
+
+# Builtin modules that should be skipped at the top-level (PEP 523 frame
+# evaluation) but inlined when called from code dynamo is already tracing.
+# For example, copy.deepcopy should be inlined when the user calls it inside
+# a compiled function, but copy module frames should be skipped when they
+# appear as top-level frames (e.g. called internally by autograd).
+BUILTIN_INLINE_WHEN_CALLED: set[str] = set()
 
 # third party libraries skiplist is defined by str, because users may not use these libraries.
 # we should use lazy import & skip in the future.
@@ -3634,6 +3644,8 @@ SKIP_DIRS = [
 ]
 SKIP_DIRS.extend(map(_as_posix_path, filter(None, map(_module_dir, BUILTIN_SKIPLIST))))
 
+BUILTIN_INLINE_WHEN_CALLED.update(filter(None, (_module_dir(copy),)))
+
 SKIP_DIRS_RE = re.compile(r"match nothing^")
 
 # Skip fbcode paths(including torch.package paths) containing
@@ -3719,6 +3731,12 @@ def check_file(filename: str | None, is_inlined_call: bool = False) -> SkipResul
             return SkipResult(False, f"file matches LEGACY_MOD_INLINELIST ({d})")
     if is_inlined_call and is_torch_inline_allowed(filename):
         return SkipResult(False, f"file matches MOD_INLINELIST ({filename})")
+    if is_inlined_call and any(
+        filename.startswith(d) for d in BUILTIN_INLINE_WHEN_CALLED
+    ):
+        return SkipResult(
+            False, f"file matches BUILTIN_INLINE_WHEN_CALLED ({filename})"
+        )
     if (
         is_fbcode()
         and FBCODE_SKIP_DIRS
@@ -3883,6 +3901,12 @@ def check_verbose(
         filename = getfile(obj)
         assert filename is not None
         fi = FunctionInfo(obj, None, filename, None)
+
+    # typing.cast is a polyfilled no-op, but unlike C builtins it has a code
+    # object that PEP 523 can intercept as a standalone frame after a graph
+    # break. Skip it at the top level to avoid installing unnecessary guards.
+    if fi.code is not None and fi.code is typing.cast.__code__:
+        return SkipResult(True, "typing.cast is a no-op, skip at top level")
 
     # Consulte the central trace rules defined in torch._dynamo.trace_rules.
     reasons: set[str] = set()

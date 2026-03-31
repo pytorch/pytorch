@@ -32,6 +32,7 @@ import re
 import sys
 import time
 import traceback
+import types
 import warnings
 import weakref
 from collections.abc import Callable, Generator, Sequence
@@ -741,6 +742,14 @@ class OutputGraph(OutputGraphCommon):
         # and restore_graphstate
         self.timestamp = 0
 
+        # Maps stream id (id(stream_value)) → user stack trace for input
+        # mutations on that stream.  Used to error when an event records on a
+        # stream that already has an input mutation (the epilogue copy_()
+        # wouldn't be captured).  We key by id() of the underlying
+        # torch.Stream so we can peek lazy variables without realizing them.
+        self._input_mutation_streams: dict[int, traceback.StackSummary] = {}
+        self._last_checked_input_versions: dict[int, int] | None = None
+
         # A list of register_finalizer_fns to apply to the output graph module
         self.register_finalizer_fns: list[Callable[[fx.GraphModule], None]] = []
 
@@ -1091,6 +1100,75 @@ class OutputGraph(OutputGraphCommon):
     def is_root_tracer(self) -> bool:
         # Helper to tell if we are inside the higher order operator tracing.
         return len(self.tracers) == 1
+
+    def check_input_mutation_on_current_stream(
+        self, tx: "InstructionTranslatorBase"
+    ) -> None:
+        """Record which stream index has input mutations by comparing current
+        tensor versions against the versions captured at graph input creation."""
+        if not hasattr(tx, "symbolic_stream_state"):
+            return
+        if not tx.symbolic_stream_state.in_stream_context():
+            return
+
+        tracer = self.root_tracer
+        if self._last_checked_input_versions is None:
+            self._last_checked_input_versions = dict(
+                enumerate(tracer._input_versions_at_beginning)
+            )
+
+        cur_stream_index = tx.symbolic_stream_state.cur_stream_id()
+        input_idx = 0
+        for node in tracer.graph.nodes:
+            if node.op != "placeholder":
+                break
+            example_value = node.meta.get("example_value")
+            if not isinstance(example_value, torch.Tensor):
+                continue
+            prev_version = self._last_checked_input_versions.get(input_idx)
+            cur_version = example_value._version
+            if prev_version is not None and cur_version > prev_version:
+                if cur_stream_index not in self._input_mutation_streams:
+                    self._input_mutation_streams[cur_stream_index] = (
+                        TracingContext.extract_stack()
+                    )
+                self._last_checked_input_versions[input_idx] = cur_version
+            input_idx += 1
+
+    _EVENT_INPUT_MUTATION_FIX = (
+        "To fix this, either:\n"
+        "  1. Move the input mutation after the event.record() call.\n"
+        "  2. Record the event outside the compiled region:\n"
+        "       compiled_fn(x)\n"
+        "       event.record(stream)  # after torch.compile returns\n"
+        "  3. Insert a graph break before recording:\n"
+        "       torch._dynamo.graph_break()\n"
+        "       event.record(stream)\n"
+        "  4. Record the event on a stream that has no input mutations."
+    )
+
+    def check_event_record_after_input_mutation(self, stream_index: int) -> None:
+        """Error if an event is being recorded on a stream that already has
+        an input mutation. Called at record time so ordering is naturally
+        respected — records before mutations won't trigger this."""
+        if stream_index not in self._input_mutation_streams:
+            return
+
+        mutation_stack = self._input_mutation_streams[stream_index]
+        record_stack = TracingContext.extract_stack()
+
+        msg = (
+            "An event was recorded on a stream where a graph input was "
+            "previously mutated. The input mutation is applied via copy_() "
+            "in the runtime epilogue after the graph executes, so the event "
+            "would not capture the mutation, leading to incorrect "
+            "synchronization.\n\n"
+            "Input mutation occurred here:\n"
+            f"{''.join(mutation_stack.format())}\n"
+            "Event record occurred here:\n"
+            f"{''.join(record_stack.format())}\n" + self._EVENT_INPUT_MUTATION_FIX
+        )
+        raise RuntimeError(msg)
 
     @property
     def graph(self) -> torch.fx.Graph:
@@ -2387,6 +2465,70 @@ class OutputGraph(OutputGraphCommon):
                     restart_reason="autograd.grad consumed grad_fns of returned tensors"
                 )
 
+    def _check_requires_grad_intermediate_outputs(
+        self, rv: list["VariableTracker"], tx: "InstructionTranslatorBase"
+    ) -> None:
+        """Skip frame if a source-less requires_grad_() intermediate leaks as output.
+
+        AOTAutograd's functionalization drops requires_grad_() on intermediates,
+        so returning them (or tensors derived from them) produces wrong results.
+        We detect this via FX graph reachability: find the requires_grad_() nodes
+        for source-less intermediates, then check if any output is downstream.
+        """
+        from .variables.tensor import TensorVariable
+
+        # Collect FX nodes for source-less requires_grad_() intermediates
+        tainted_nodes: set[torch.fx.Node] = set()
+        for v in self.leaf_var_creation_order:
+            if isinstance(v, TensorVariable) and not v.source:
+                tainted_nodes.add(v.as_proxy().node)
+
+        if not tainted_nodes:
+            return
+
+        # Propagate taint forward through the FX graph
+        for node in self.graph.nodes:
+            if node in tainted_nodes:
+                continue
+            if any(inp in tainted_nodes for inp in node.all_input_nodes):
+                tainted_nodes.add(node)
+
+        # Check leaked outputs: tainted + requires_grad means the output
+        # carries autograd state that AOTAutograd would silently drop.
+        # Detached outputs (requires_grad=False) are fine — no autograd to lose.
+        for var in rv:
+            if (
+                isinstance(var, TensorVariable)
+                and var.requires_grad
+                and var.as_proxy().node in tainted_nodes
+            ):
+                msg = (
+                    "An intermediate tensor that had requires_grad_() called "
+                    "on it (or a tensor derived from it) is being returned "
+                    "from the compiled region. AOTAutograd's functionalization "
+                    "drops the requires_grad_() effect on graph outputs, "
+                    "producing wrong results. If you only need the tensor "
+                    "values without gradients, call .detach() before returning."
+                )
+                if tx.one_graph:
+                    unimplemented(
+                        gb_type="returning intermediate with requires_grad_()",
+                        context="graph output depends on source-less requires_grad_()",
+                        explanation=msg,
+                        hints=[
+                            "If you only need the tensor values without gradients, "
+                            "call .detach() before returning.",
+                            "Consume the gradient inside the compiled function "
+                            "(call backward() and use .grad), "
+                            "or move requires_grad_() outside torch.compile.",
+                        ],
+                    )
+                else:
+                    tx.speculation_log.graph_break_on_requires_grad_ = True
+                    raise exc.RequiresGradRestartAnalysis(
+                        restart_reason="source-less requires_grad_() intermediate leaked as output"
+                    )
+
     def compile_and_call_fx_graph(
         self,
         tx: "InstructionTranslatorBase",
@@ -2413,6 +2555,11 @@ class OutputGraph(OutputGraphCommon):
 
             assert isinstance(rv, list)
             assert isinstance(root, FakeRootModule)
+
+            # Error on source-less requires_grad_() outputs.
+            # Must run before autograd validation since detaching resolves the
+            # "consumed grad_fn" conflict for backward-consumed intermediates.
+            self._check_requires_grad_intermediate_outputs(rv, tx)
 
             # Check if autograd.grad is used with outputs that require grad
             # This would cause double backward issues in aot_autograd
@@ -2483,8 +2630,7 @@ class OutputGraph(OutputGraphCommon):
                 # If dynamo produces a graph with parameters, skip package stuff
                 # Bypass output graph
                 self.bypass_package(
-                    "Graph contains named parameters: either inline_inbuilt_nn_modules=False or there are static addresses.",
-                    inline_builtin_nn_modules=torch._dynamo.config.inline_inbuilt_nn_modules,
+                    "Graph contains named parameters due to static addresses.",
                     gm=gm.print_readable(
                         print_output=False, include_stride=True, include_device=True
                     ),
@@ -3035,6 +3181,34 @@ class OutputGraph(OutputGraphCommon):
         self.output_instructions.extend(prefix)
         self.should_exit = True
 
+    def install_resume_function_global(
+        self,
+        name: str,
+        code: types.CodeType,
+        f_globals: dict[str, Any],
+    ) -> None:
+        """Install a resume function as a global.
+
+        When the code has freevars, installs a factory that creates the
+        function with correct globals and closure (since MAKE_FUNCTION
+        inherits the current frame's globals, which is wrong for resume
+        functions from inlined frames). Otherwise installs the function
+        directly.
+        """
+        if code.co_freevars:
+
+            def _make_fn(
+                closure: tuple[types.CellType, ...],
+            ) -> types.FunctionType:
+                return types.FunctionType(code, f_globals, name, None, closure)
+
+            self.install_global_unsafe(name, _make_fn)
+        else:
+            self.install_global_unsafe(
+                name,
+                types.FunctionType(code, f_globals, name),
+            )
+
     def install_global_unsafe(self, name: str, value: Any) -> None:
         """
         WARNING: prefer the safer `install_global_by_id/install_global`.
@@ -3403,10 +3577,10 @@ class SubgraphTracer(fx.Tracer):
                 "Inference mode is supposed to be disabled during compilation. Please open an issue."
             )
 
-        self.tracked_tensor_or_symint_vt: OrderedSet[VariableTracker] = OrderedSet()
+        self.tracked_proxyable_vt: OrderedSet[VariableTracker] = OrderedSet()
 
-    def record_tensor_or_symint_vt(self, vt: VariableTracker) -> None:
-        self.tracked_tensor_or_symint_vt.add(vt)
+    def record_proxyable_vt(self, vt: VariableTracker) -> None:
+        self.tracked_proxyable_vt.add(vt)
 
     # preserve original meta if it is available
     def _maybe_preserve_original_meta(
@@ -3579,7 +3753,6 @@ class SubgraphTracer(fx.Tracer):
             rv.node.meta["source_fn_stack"] = self.source_fn_stack + [stack]
         elif kind == "call_module":
             if self.parent is not None:
-                # TODO can remove once inline_inbuilt_nn_modules is always True
                 unimplemented(
                     gb_type="Invoking an nn.Module inside a higher order operator",
                     context=f"Higher order op name: {self.source_target}",
@@ -3613,7 +3786,6 @@ class SubgraphTracer(fx.Tracer):
                     ]
                 elif kind == "call_module":
                     if self.parent is not None:
-                        # TODO can remove once inline_inbuilt_nn_modules is always True
                         unimplemented(
                             gb_type="Invoking an nn.Module inside a HigherOrderOperator",
                             context="",

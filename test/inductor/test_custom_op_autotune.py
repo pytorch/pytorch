@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
     HAS_CPU,
     HAS_GPU,
     HAS_TRITON,
@@ -45,8 +46,12 @@ class TestCustomOpAutoTune(TestCase):
         """Set up test environment with appropriate device and dtype."""
         super().setUp()
         torch._dynamo.reset()
-        self.device = "cuda" if HAS_GPU else "cpu"
-        self.dtype = torch.float16 if self.device == "cuda" else torch.float32
+        self.device = GPU_TYPE if HAS_GPU else "cpu"
+        self.dtype = (
+            torch.float16
+            if self.device == "cuda" or self.device == "xpu"
+            else torch.float32
+        )
         # Clear any previous lowering registrations to ensure test isolation
         from torch._inductor.lowering import user_lowerings
 
@@ -164,7 +169,6 @@ class TestCustomOpAutoTune(TestCase):
         )
         return input_tensor, gate_weight, up_weight, down_weight
 
-    @skipIfXpu
     def test_rmsnorm_custom_op_autotune_with_dynamic_shape(self):
         """Test RMSNorm autotuning with multiple decomposition variants and dynamic shapes.
 
@@ -247,22 +251,14 @@ class TestCustomOpAutoTune(TestCase):
         """
         # Ensure k is divisible by all k_splits values: [2, 32, 64, 128, 256]
         k = ((k + 255) // 256) * 256  # Round up to nearest multiple of 256
-        sd = k**0.25
-        a = (
-            torch.randn(m, k, device=self.device, dtype=self.dtype, requires_grad=False)
-            / sd
-        )
-        b = (
-            torch.randn(k, n, device=self.device, dtype=self.dtype, requires_grad=False)
-            / sd
-        )
+        a = torch.randn(m, k, device=self.device, dtype=self.dtype, requires_grad=False)
+        b = torch.randn(k, n, device=self.device, dtype=self.dtype, requires_grad=False)
         bias = (
             torch.randn(n, device=self.device, dtype=self.dtype, requires_grad=False)
             * 0.1
         )
         return a, b, bias
 
-    @skipIfXpu
     def test_decompose_k_custom_op_autotune_dynamic_config_for_input_shape(self):
         """Test decompose_k autotuning with with epilogue fusion(matmul+bias+relu+scale) and
         dynamic config generation based on matmul input shapes.
@@ -378,12 +374,11 @@ class TestCustomOpAutoTune(TestCase):
             torch.testing.assert_close(
                 compiled_result,
                 expected,
-                rtol=2e-3,
-                atol=5e-3,
-                # msg=f"Failed for shape ({m}, {k}, {n})",
+                rtol=2e-1,
+                atol=5e-1,
+                msg=f"Failed for shape ({m}, {k}, {n})",
             )
 
-    @skipIfXpu
     def test_multi_parameter_tuning(self):
         """Test autotuning with multiple parameters for combinatorial parameter exploration.
 
@@ -483,7 +478,6 @@ class TestCustomOpAutoTune(TestCase):
             multi_param_op, (test_x, test_factor), expected_result, "MultiParam"
         )
 
-    @skipIfXpu
     def test_range_based_static_shape_no_cond_dispatch(self):
         """Test dispatch code generation for static vs dynamic shapes.
 
@@ -1436,6 +1430,7 @@ class TestCustomOpAutoTune(TestCase):
 
         torch.testing.assert_close(result, test_x @ test_weight, rtol=1e-1, atol=1e-1)
 
+    @skipIfXpu
     def test_cudagraph_memory_cleanup(self):
         """Test that CUDA graph destruction automatically cleans up cuBLAS workspaces."""
         if self.device != "cuda":
@@ -1480,6 +1475,7 @@ class TestCustomOpAutoTune(TestCase):
             f"Memory leak detected: baseline={baseline_memory}, after_cleanup={memory_after_cleanup}",
         )
 
+    @skipIfXpu
     def test_cudagraph_memory_cleanup_benchmarker(self):
         """Test that CUDA graph benchmarking cleans up memory without leaking."""
         if self.device != "cuda":

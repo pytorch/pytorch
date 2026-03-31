@@ -82,6 +82,7 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
     slowTest,
     TEST_WITH_TORCHDYNAMO,
+    TEST_XPU,
     TestCase,
 )
 from torch.utils._mode_utils import no_dispatch
@@ -5075,6 +5076,19 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
             self.assertTrue(torch.autograd.is_view_replay_enabled())
         self.assertFalse(torch.autograd.is_view_replay_enabled())
 
+        prev = torch.autograd.is_view_replay_enabled()
+        ctx = torch.autograd._force_original_view_tracking(not prev)
+        # Construction eagerly sets state (function-form behavior).
+        self.assertEqual(torch.autograd.is_view_replay_enabled(), not prev)
+        with ctx:
+            self.assertEqual(torch.autograd.is_view_replay_enabled(), not prev)
+            out = f(x)
+            self.assertTrue(
+                ("ViewBackward" if not prev else "AsStridedBackward")
+                in str(out.grad_fn)
+            )
+        self.assertEqual(torch.autograd.is_view_replay_enabled(), prev)
+
         # Test as a function
         torch.autograd._force_original_view_tracking(False)
         out = f(x)
@@ -5085,6 +5099,20 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
         out = f(x)
         self.assertTrue("ViewBackward" in str(out.grad_fn))
         self.assertTrue(torch.autograd.is_view_replay_enabled())
+
+        prev = torch.autograd.is_view_replay_enabled()
+
+        @torch.autograd._force_original_view_tracking(not prev)
+        def g(x):
+            return f(x)
+
+        # __call__ undoes the __init__ mutation, so ambient state is restored.
+        self.assertEqual(torch.autograd.is_view_replay_enabled(), prev)
+        out = g(x)
+        self.assertTrue(
+            ("ViewBackward" if not prev else "AsStridedBackward") in str(out.grad_fn)
+        )
+        self.assertEqual(torch.autograd.is_view_replay_enabled(), prev)
 
     def test_unsafe_set_version_counter(self):
         x = torch.ones(2, requires_grad=True).clone()
@@ -7356,10 +7384,10 @@ for shape in [(1,), ()]:
             x = torch.randn(3, 3, requires_grad=True)
             y = torch.randn(3, 3, requires_grad=True)
             z = torch.randn(3, 3, requires_grad=True)
-            if device_type == "cuda":
-                x = x.cuda()
-                y = y.cuda()
-                z = z.cuda()
+            if device_type in ("cuda", "xpu"):
+                x = x.to(device_type)
+                y = y.to(device_type)
+                z = z.to(device_type)
 
             with torch.autocast(
                 enabled=enabled, device_type=device_type, dtype=torch.bfloat16
@@ -7379,15 +7407,17 @@ for shape in [(1,), ()]:
         self._test_checkpointing_non_reentrant_autocast(device_type="cpu")
 
     @unittest.skipIf(
-        not torch.cuda.is_available() or not torch.cuda.is_bf16_supported(),
-        "Test requires CUDA bf16 support",
+        (not torch.cuda.is_available() or not torch.cuda.is_bf16_supported())
+        and (not torch.xpu.is_available() or not torch.xpu.is_bf16_supported()),
+        "Test requires CUDA or XPU bf16 support",
     )
     def test_checkpointing_non_reentrant_autocast_gpu(self):
         """
         Test that autocast args/kwargs such as the dtype are preserved during
         non-reentrant checkpoint recomputation on GPU.
         """
-        self._test_checkpointing_non_reentrant_autocast(device_type="cuda")
+        device_type = "cuda" if torch.cuda.is_available() else "xpu"
+        self._test_checkpointing_non_reentrant_autocast(device_type=device_type)
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
     @slowTest
@@ -7735,9 +7765,159 @@ for shape in [(1,), ()]:
             error_msg,
         )
         self.assertIn(
-            "Set torch._dynamo.config.cache_entry_use_lru = False to disable LRU cache",
+            "Call torch._C._dynamo.eval_frame._set_lru_cache(False) to disable LRU cache",
             error_msg,
         )
+
+    @torch._dynamo.config.patch(
+        automatic_dynamic_shapes=True,
+        assume_static_by_default=True,
+    )
+    def test_checkpoint_automatic_dynamic_graph_shadowing(self):
+        """Activation checkpointing + automatic dynamic shapes graph shadowing.
+
+        When a compiled function is used inside checkpoint and another call
+        with a different input size triggers automatic dynamic recompilation,
+        the new dynamic graph is inserted at the front of the Dynamo cache
+        and shadows the original static graph. During backward, checkpoint's
+        recompute may hit the dynamic graph instead of the static graph used
+        in the original forward, causing a saved-tensor mismatch.
+
+        This test exercises the scenario described in PR #174993: the forward
+        of a checkpointed layer uses a static graph (G0), then a subsequent
+        call with a different batch size triggers automatic dynamic (G1 at
+        cache front). During backward, checkpoint's recompute for the first
+        layer hits G1 instead of G0.
+        """
+        import torch._dynamo
+        from torch.utils.checkpoint import checkpoint
+
+        torch._dynamo.reset()
+
+        @torch.compile(backend="aot_eager")
+        def fn(x):
+            # Multiple ops so the partitioner has save/recompute choices.
+            # With static shapes the partitioner sees exact costs; with
+            # dynamic shapes it uses size_hint fallbacks, potentially
+            # making different save-vs-recompute decisions.
+            a = x.sin()
+            b = a.cos()
+            c = (a * b).exp()
+            return c
+
+        # Step 1: Checkpointed forward with batch_size=4 → static graph G0
+        x = torch.randn(4, 8, requires_grad=True)
+        cp_out = checkpoint(fn, x, use_reentrant=False)
+
+        # Step 2: Non-checkpointed call with batch_size=7 triggers automatic
+        # dynamic recompilation → dynamic graph G1 inserted at cache front,
+        # shadowing G0 for any future call (including checkpoint recompute).
+        y = torch.randn(7, 8, requires_grad=True)
+        plain_out = fn(y)
+
+        loss = cp_out.sum() + plain_out.sum()
+
+        # Step 3: Backward. Checkpoint recomputes fn(x) but now hits G1
+        # (dynamic) instead of G0 (static). If the graphs save different
+        # tensors, this raises CheckpointError with our diagnostic message.
+        try:
+            loss.backward()
+        except RuntimeError as e:
+            error_msg = str(e)
+            # If the mismatch triggers, verify the error message includes
+            # the automatic dynamic shapes suggestions.
+            self.assertIn(
+                "Use torch._dynamo.mark_dynamic() to explicitly mark varying "
+                "dimensions",
+                error_msg,
+            )
+            self.assertIn(
+                "Call torch._C._dynamo.eval_frame._set_lru_cache(False) to "
+                "disable LRU cache",
+                error_msg,
+            )
+
+        torch._dynamo.reset()
+
+    @torch._dynamo.config.patch(
+        automatic_dynamic_shapes=True,
+        assume_static_by_default=True,
+    )
+    def test_checkpoint_automatic_dynamic_mark_dynamic_workaround(self):
+        """mark_dynamic avoids the graph shadowing problem.
+
+        By marking the varying dimension as dynamic upfront, both the
+        checkpointed forward and the subsequent call compile a single
+        dynamic graph from the start — no static-to-dynamic transition,
+        no cache shadowing, no saved-tensor mismatch.
+        """
+        import torch._dynamo
+        from torch.utils.checkpoint import checkpoint
+
+        torch._dynamo.reset()
+
+        @torch.compile(backend="aot_eager")
+        def fn(x):
+            a = x.sin()
+            b = a.cos()
+            c = (a * b).exp()
+            return c
+
+        x = torch.randn(4, 8, requires_grad=True)
+        torch._dynamo.mark_dynamic(x, 0)
+        cp_out = checkpoint(fn, x, use_reentrant=False)
+
+        y = torch.randn(7, 8, requires_grad=True)
+        torch._dynamo.mark_dynamic(y, 0)
+        plain_out = fn(y)
+
+        loss = cp_out.sum() + plain_out.sum()
+        # Should succeed — both calls use the same dynamic graph.
+        loss.backward()
+
+        torch._dynamo.reset()
+
+    @torch._dynamo.config.patch(
+        automatic_dynamic_shapes=True,
+        assume_static_by_default=True,
+    )
+    def test_checkpoint_automatic_dynamic_lru_disabled_workaround(self):
+        """Disabling LRU cache reordering avoids the graph shadowing problem.
+
+        With LRU disabled, new dynamic graphs are appended to the back of
+        the cache instead of the front. The original static graph is still
+        checked first, so checkpoint's recompute hits the same graph that
+        the forward used.
+        """
+        import torch._dynamo
+        from torch.utils.checkpoint import checkpoint
+
+        torch._dynamo.reset()
+        # Disable LRU cache reordering so static graphs stay at the front.
+        torch._C._dynamo.eval_frame._set_lru_cache(False)
+
+        try:
+
+            @torch.compile(backend="aot_eager")
+            def fn(x):
+                a = x.sin()
+                b = a.cos()
+                c = (a * b).exp()
+                return c
+
+            x = torch.randn(4, 8, requires_grad=True)
+            cp_out = checkpoint(fn, x, use_reentrant=False)
+
+            y = torch.randn(7, 8, requires_grad=True)
+            plain_out = fn(y)
+
+            loss = cp_out.sum() + plain_out.sum()
+            # Should succeed — LRU disabled means static graph G0 stays
+            # first in cache, so checkpoint recompute still hits G0.
+            loss.backward()
+        finally:
+            torch._C._dynamo.eval_frame._set_lru_cache(True)
+            torch._dynamo.reset()
 
     def test_access_saved_tensor_twice_without_recomputation_works(self):
         count = [0]
@@ -10695,25 +10875,31 @@ for shape in [(1,), ()]:
                 )
                 test(lambda: x, cuda, pin_memory)
 
-    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "test requires CUDA or XPU")
     def test_graph_save_on_cpu_cuda(self):
+        device_type = torch.accelerator.current_accelerator().type
+
         def f(x):
             a = x + 1
             return a * a
 
         # with grad
-        a = torch.ones(1, requires_grad=True, device="cuda")
+        a = torch.ones(1, requires_grad=True, device=device_type)
         y = f(a)
-        memory_with_grad = torch.cuda.memory_allocated()
+        memory_with_grad = (
+            torch.cuda.memory_allocated() if TEST_CUDA else torch.xpu.memory_allocated()
+        )
 
         del a
         del y
 
         # without grad
-        a = torch.ones(1, requires_grad=True, device="cuda")
+        a = torch.ones(1, requires_grad=True, device=device_type)
         with torch.no_grad():
             y = f(a)
-        memory_without_grad = torch.cuda.memory_allocated()
+        memory_without_grad = (
+            torch.cuda.memory_allocated() if TEST_CUDA else torch.xpu.memory_allocated()
+        )
 
         self.assertGreater(memory_with_grad, memory_without_grad)
 
@@ -10722,15 +10908,20 @@ for shape in [(1,), ()]:
 
         # with hooks
         with torch.autograd.graph.save_on_cpu():
-            a = torch.ones(1, requires_grad=True, device="cuda")
+            a = torch.ones(1, requires_grad=True, device=device_type)
             y = f(a)
-            memory_with_hooks = torch.cuda.memory_allocated()
+            memory_with_hooks = (
+                torch.cuda.memory_allocated()
+                if TEST_CUDA
+                else torch.xpu.memory_allocated()
+            )
             self.assertEqual(memory_with_hooks, memory_without_grad)
 
-    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "test requires CUDA and XPU")
     def test_scalar_grad_mixed_device(self):
+        device_type = torch.accelerator.current_accelerator().type
         x = torch.tensor(1.0, requires_grad=True)
-        y = torch.randn(2, 2, device="cuda")
+        y = torch.randn(2, 2, device=device_type)
         out = x * y
         out.sum().backward()
 

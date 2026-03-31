@@ -179,8 +179,7 @@ its type to `common_constant_types`.
 
     def const_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if not hasattr(self.value, name):
-            name_variable = variables.ConstantVariable.create(name)
-            raise_observed_exception(AttributeError, tx, args=[name_variable])
+            raise_observed_exception(AttributeError, tx, args=[name])
         member = getattr(self.value, name)
         if callable(member):
             raise NotImplementedError
@@ -248,7 +247,7 @@ its type to `common_constant_types`.
                     raise_observed_exception(
                         type(exc),
                         tx,
-                        args=list(map(ConstantVariable.create, exc.args)),
+                        args=list(exc.args),
                     )
             if (
                 hasattr(operator, name)
@@ -269,9 +268,7 @@ its type to `common_constant_types`.
                     try:
                         return ConstantVariable.create(op(self.value, add_target))
                     except Exception as e:
-                        raise_observed_exception(
-                            type(e), tx, args=list(map(ConstantVariable.create, e.args))
-                        )
+                        raise_observed_exception(type(e), tx, args=list(e.args))
         elif isinstance(self.value, bytes) and name == "decode":
             method = getattr(self.value, name)
             return ConstantVariable.create(method(*const_args, **const_kwargs))
@@ -293,9 +290,7 @@ its type to `common_constant_types`.
                     round(self.value, args[0].as_python_constant())
                 )
             except Exception as e:
-                raise_observed_exception(
-                    type(e), tx, args=list(map(ConstantVariable.create, e.args))
-                )
+                raise_observed_exception(type(e), tx, args=list(e.args))
         elif name == "__contains__" and len(args) == 1 and args[0].is_python_constant():
             assert not kwargs
             search = args[0].as_python_constant()
@@ -303,9 +298,7 @@ its type to `common_constant_types`.
                 result = search in self.value
                 return ConstantVariable.create(result)
             except TypeError as e:
-                raise_observed_exception(
-                    type(e), tx, args=list(map(ConstantVariable.create, e.args))
-                )
+                raise_observed_exception(type(e), tx, args=list(e.args))
         return super().call_method(tx, name, args, kwargs)
 
     def call_tree_map(
@@ -384,10 +377,63 @@ its type to `common_constant_types`.
             and self.as_python_constant() == other.as_python_constant()
         )
 
+    def get_real_python_backed_value(self) -> object:
+        return self.value
+
 
 CONSTANT_VARIABLE_NONE = ConstantVariable(None)
 CONSTANT_VARIABLE_TRUE = ConstantVariable(True)
 CONSTANT_VARIABLE_FALSE = ConstantVariable(False)
+
+
+class FakeIdVariable(VariableTracker):
+    """A compile-time-only id value that can be used as a dict key but cannot
+    be reconstructed across graph breaks.
+
+    When dynamo evaluates ``id(x)`` on a variable tracker that has no
+    corresponding runtime object (e.g. a ``ConstDictVariable`` created during
+    tracing), we mint a fake integer id.  This variable holds that id and
+    supports the minimal interface needed to participate as a dict key
+    (hashing and equality).  It intentionally blocks reconstruction so that a
+    graph break does not silently bake a stale id into the resumed bytecode.
+    """
+
+    def __init__(self, value: int, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.value = value
+
+    def as_python_constant(self) -> int:
+        return self.value
+
+    def is_python_constant(self) -> bool:
+        return False
+
+    def python_type(self) -> type:
+        return int
+
+    def is_python_hashable(self) -> bool:
+        return True
+
+    def get_python_hash(self) -> int:
+        return hash(self.value)
+
+    def is_python_equal(self, other: object) -> bool:
+        if isinstance(other, (FakeIdVariable, ConstantVariable)):
+            return self.value == other.as_python_constant()
+        return False
+
+    def reconstruct(self, codegen: Any) -> None:
+        unimplemented(
+            gb_type="Reconstruction of FakeIdVariable",
+            context=str(self.value),
+            explanation=(
+                "A fake id produced by id() on a compile-time container "
+                "cannot be reconstructed across a graph break."
+            ),
+            hints=[
+                "Avoid using id() on containers in code that may graph-break.",
+            ],
+        )
 
 
 class EnumVariable(VariableTracker):
@@ -427,6 +473,9 @@ class EnumVariable(VariableTracker):
         return f"EnumVariable({type(self.value)})"
 
     def as_python_constant(self) -> enum.Enum | enum.IntEnum:
+        return self.value
+
+    def get_real_python_backed_value(self) -> enum.Enum | enum.IntEnum:
         return self.value
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:

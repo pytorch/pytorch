@@ -1063,6 +1063,8 @@ if(USE_ROCM)
     list(APPEND HIP_HIPCC_FLAGS -fclang-abi-compat=17)
 
     set(HIP_CLANG_FLAGS ${HIP_CXX_FLAGS})
+    string(JOIN " " HIP_HIPCC_FLAGS_STR ${HIP_HIPCC_FLAGS})
+    set(HIP_HIPCC_FLAGS ${HIP_HIPCC_FLAGS_STR})
     set(CMAKE_HIP_FLAGS ${HIP_HIPCC_FLAGS})
     # Ask hcc to generate device code during compilation so we can use
     # host linker to link.
@@ -1086,6 +1088,16 @@ if(USE_ROCM)
     if(hipsparselt_FOUND)
       list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
         roc::hipsparselt
+      )
+      if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "7.12.0")
+          set(CAFFE2_USE_HIPSPARSELT ON)
+      endif()
+    endif()
+
+    # ROCM-SMI needed to support symmetric memory
+    if(USE_DISTRIBUTED AND UNIX)
+      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
+        rocm_smi64
       )
     endif()
 
@@ -1639,7 +1651,7 @@ if(USE_KINETO)
 
   if(NOT LIBKINETO_NOROCTRACER)
     if("$ENV{ROCM_SOURCE_DIR}" STREQUAL "")
-      set(ENV{ROCM_SOURCE_DIR} "/opt/rocm")
+      set(ENV{ROCM_SOURCE_DIR} "${ROCM_PATH}")
     endif()
   endif()
 

@@ -859,12 +859,12 @@ class TestForeach(TestCase):
 
     # note: Below three tests (postfixed with `_tensors_on_different_devices`)
     # checks whether foreach works with lists of tensors on different devices
-    # but tensors of the same index are on the same device, e.g., ['cuda', 'cpu].
+    # but tensors of the same index are on the same device, e.g., ['cuda', 'cpu'].
     @onlyCUDA
     @ops(foreach_unary_op_db)
     def test_unary_op_tensors_on_different_devices(self, device, dtype, op):
         method, ref, inplace_method, ref_inplace = self._get_funcs(op)
-        # tensors: ['cuda', 'cpu]
+        # tensors: ['cuda', 'cpu']
         tensors = next(
             iter(
                 op.sample_inputs(
@@ -876,26 +876,28 @@ class TestForeach(TestCase):
             )
         ).input
         tensors[1] = tensors[1].to("cpu")
-        if not op.supports_out:
-            try:
-                actual = method((tensors,), False, False, zero_size=False)
-            except RuntimeError as e:
-                with self.assertRaisesRegex(type(e), str(e).splitlines()[0]):
-                    ref((tensors,))
-            else:
-                expected = ref((tensors,))
-                self.assertEqual(expected, actual)
 
         try:
-            inplace_method((tensors,), False, False, zero_size=False)
+            actual = method((tensors,), False, False, zero_size=False)
         except RuntimeError as e:
             with self.assertRaisesRegex(type(e), str(e).splitlines()[0]):
-                ref_inplace((tensors,))
+                ref((tensors,))
         else:
-            if not op.supports_out:
-                self.assertEqual(expected, tensors)
+            expected = ref((tensors,))
+            self.assertEqual(expected, actual)
+
+        # Some foreach functions (e.g. _foreach_clone) don't have an inplace variant, so
+        # we explicitly test for that here.
+        if not inplace_method.is_inplace:
+            self.assertIsNone(ref_inplace.func)
+        else:
+            try:
+                inplace_method((tensors,), False, False, zero_size=False)
+            except RuntimeError as e:
+                with self.assertRaisesRegex(type(e), str(e).splitlines()[0]):
+                    ref_inplace((tensors,))
             else:
-                self.assertEqual([torch.zeros_like(t) for t in tensors], tensors)
+                self.assertEqual(expected, tensors)
 
     @onlyCUDA
     @ops(filter(lambda op: op.supports_out, foreach_binary_op_db))

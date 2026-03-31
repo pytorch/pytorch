@@ -141,8 +141,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             if isinstance(sym_var, sympy.Symbol) and sym_var.name in sym_name_to_value:
                 result.append(sym_name_to_value[sym_var.name])
             else:
-                hint = V.graph.sizevars.shape_env.size_hint(sym_var)
-                result.append(int(hint) if hint is not None else 1)
+                hint = V.graph.sizevars.shape_env.optimization_hint(sym_var, fallback=1)
+                result.append(int(hint))
         return result
 
     def cache_decomposition(

@@ -1017,7 +1017,6 @@ def forward(self, L_x_ : torch.Tensor):
                     x.grad = None
                     run(i).sum().backward()
 
-    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     def test_no_recompile_on_same_hook(self):
         cnts = torch._dynamo.testing.CompileCounter()
 

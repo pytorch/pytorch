@@ -8,7 +8,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    HAS_CUDA_AND_TRITON,
+    HAS_GPU_AND_TRITON,
     requires_gpu,
 )
 
@@ -259,5 +259,5 @@ class TestControlDeps(InductorTestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA_AND_TRITON:
+    if IS_LINUX and HAS_GPU_AND_TRITON:
         run_tests(needs="filelock")

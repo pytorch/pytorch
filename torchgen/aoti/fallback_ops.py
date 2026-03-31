@@ -42,6 +42,7 @@ inductor_fallback_ops: dict[str, dict[str, list[str]]] = {
     "aten._fused_moving_avg_obs_fq_helper_functional.default": {},
     "aten._fused_moving_avg_obs_fq_helper.default": {},
     "aten._fused_rms_norm.default": {},
+    "aten._grouped_mm.default": {},
     "aten._histogramdd_from_bin_cts.default": {},
     "aten._int_mm.out": {},
     "aten._pdist_backward.default": {},

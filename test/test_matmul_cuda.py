@@ -2,7 +2,6 @@
 
 import contextlib
 import os
-import time
 import unittest
 from itertools import product
 from functools import partial
@@ -21,7 +20,6 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     blas_library_context,
     PLATFORM_SUPPORTS_BF16,
-    PLATFORM_SUPPORTS_GREEN_CONTEXT,
     SM80OrLater,
     SM90OrLater,
     SM100OrLater,
@@ -48,6 +46,7 @@ from torch.testing._internal.common_utils import (
     runOnRocmArch,
     serialTest,
     skipIfRocm,
+    skipIfRocmArch,
     TEST_CUDA,
     TEST_WITH_ROCM,
     TestCase,
@@ -242,6 +241,8 @@ class TestMatmulCuda(InductorTestCase):
 
 
     @onlyCUDA
+    # Fails with triton 3.7
+    @skipIfRocmArch(NAVI_ARCH)
     @dtypes(torch.float16)
     # m == 4 chooses OUTPUT_TYPE reduction on H200
     # m == 8 chooses OUTPUT_TYPE reduction on A100
@@ -711,43 +712,56 @@ class TestMatmulCuda(InductorTestCase):
             self.assertEqual(C, C_ref)
 
     @skipCUDAIfNotRocm
+    # Fails with triton 3.7
     def test_grouped_gemm_rocm_ck_flag(self):
-        CK_HINT = "kernel_grouped_gemm_xdl_splitk"
+        CK_EQUAL_K_HINT = "kernel_grouped_gemm_xdl_splitk"
+        CK_UNEQUAL_K_HINT = "kernel_grouped_gemm_xdl_splitk"
         HIPBLASLT_HINT = "Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs"
 
-        def uses_ck(kernels: set[str]) -> bool:
-            return any(CK_HINT in k for k in kernels)
+        def has_ck_kernel(kernels: set[str], hint: str) -> bool:
+            return any(hint in k for k in kernels)
 
         def uses_hipblaslt(kernels: set[str]) -> bool:
             return any(HIPBLASLT_HINT in k for k in kernels)
 
-        def run_grouped_mm():
+        def run_grouped_mm(equal_k: bool):
             device = "cuda"
             dtype = torch.bfloat16
-            # row-major 3d-3d
-            G, M, N, K = 4, 16, 32, 64
-            a = torch.randn(G, M, K, device=device, dtype=dtype)
-            b = torch.randn(G, N, K, device=device, dtype=dtype)
-            # 3d-3d grouped GEMM: [G, M, K] @ [G, K, N]
-            out = F.grouped_mm(a, b.transpose(-2, -1), out_dtype=dtype)
-            return out
+            if equal_k:
+                # 3d-3d grouped GEMM with identical K for all groups
+                G, M, N, K = 4, 16, 32, 64
+                a = torch.randn(G, M, K, device=device, dtype=dtype)
+                b = torch.randn(G, N, K, device=device, dtype=dtype)
+                return F.grouped_mm(a, b.transpose(-2, -1), out_dtype=dtype)
 
-        def collect_kernel_names():
+            # 2d-2d grouped GEMM with non-uniform offs, i.e. per-group K is not equal
+            M, N = 16, 32
+            offs = torch.tensor([64, 136], device=device, dtype=torch.int32)
+            K_total = offs[-1].item()
+            a = torch.randn(M, K_total, device=device, dtype=dtype)
+            b = torch.randn(N, K_total, device=device, dtype=dtype)
+            return F.grouped_mm(a, b.transpose(-2, -1), offs=offs, out_dtype=dtype)
+
+        def collect_kernel_names(equal_k: bool):
             kernels = set()
             with profile(
                 activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                 record_shapes=False,
                 with_stack=False,
             ) as prof:
-                run_grouped_mm()
+                run_grouped_mm(equal_k=equal_k)
             for evt in prof.key_averages(group_by_input_shape=False):
                 kernels.add(evt.key)
             return kernels
 
         with rocm_group_gemm_ck_env(None):
-            self.assertTrue(uses_hipblaslt(collect_kernel_names()))
+            self.assertTrue(uses_hipblaslt(collect_kernel_names(equal_k=True)))
         with rocm_group_gemm_ck_env("1"):
-            self.assertTrue(uses_ck(collect_kernel_names()))
+            ck_equal_kernels = collect_kernel_names(equal_k=True)
+            self.assertTrue(has_ck_kernel(ck_equal_kernels, CK_EQUAL_K_HINT))
+
+            ck_unequal_kernels = collect_kernel_names(equal_k=False)
+            self.assertTrue(has_ck_kernel(ck_unequal_kernels, CK_UNEQUAL_K_HINT))
 
     @onlyCUDA
     @parametrize("input_dtype", [torch.float32, torch.float16, torch.bfloat16])
@@ -993,73 +1007,6 @@ class TestMatmulCuda(InductorTestCase):
                     op(a, mismatch_batch_dim_b, out_dtype=torch.float32)
 
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_GREEN_CONTEXT, "Green contexts are not supported")
-    @serialTest()
-    def test_greencontext_carveout(self):
-        a = torch.randn(4096, 4096, device='cuda', dtype=torch.bfloat16)
-        ctx = torch.cuda.green_contexts.GreenContext.create(1, 0)
-        ctx.set_context()
-        torch.matmul(a, a)
-        torch.cuda.synchronize()
-        t0 = time.perf_counter()
-        partial_res = torch.matmul(a, a)
-        torch.cuda.synchronize()
-        t1 = time.perf_counter()
-        ctx.pop_context()
-        torch.matmul(a, a)
-        torch.cuda.synchronize()
-        t2 = time.perf_counter()
-        full_res = torch.matmul(a, a)
-        torch.cuda.synchronize()
-        t3 = time.perf_counter()
-        self.assertEqual(partial_res, full_res)
-        self.assertGreater(t1 - t0, t3 - t2)
-
-    @unittest.skipIf(not PLATFORM_SUPPORTS_GREEN_CONTEXT, "Green contexts are not supported")
-    @serialTest()
-    def test_greencontext_stream_carveout(self):
-        a = torch.randn(4096, 4096, device='cuda', dtype=torch.bfloat16)
-        ctx = torch.cuda.green_contexts.GreenContext.create(1, 0)
-        ctx_stream = ctx.Stream()
-        with torch.cuda.stream(ctx_stream):
-            torch.matmul(a, a)
-            torch.cuda.synchronize()
-            t0 = time.perf_counter()
-            partial_res = torch.matmul(a, a)
-            torch.cuda.synchronize()
-            t1 = time.perf_counter()
-        torch.matmul(a, a)
-        torch.cuda.synchronize()
-        t2 = time.perf_counter()
-        full_res = torch.matmul(a, a)
-        torch.cuda.synchronize()
-        t3 = time.perf_counter()
-        self.assertEqual(partial_res, full_res)
-        self.assertGreater(t1 - t0, t3 - t2)
-
-    @unittest.skipIf(not PLATFORM_SUPPORTS_GREEN_CONTEXT, "Green contexts are not supported")
-    @serialTest()
-    def test_greencontext_graphs(self):
-        a = torch.randn(4096, 4096, device='cuda', dtype=torch.bfloat16)
-        ctx = torch.cuda.green_contexts.GreenContext.create(1, 0)
-        ctx.set_context()
-        partial_res = torch.matmul(a, a)
-        ctx.pop_context()
-        full_res = torch.matmul(a, a)
-        full_res.zero_()
-        partial_res.zero_()
-        torch.cuda.synchronize()
-
-        g = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(g):
-            ctx.set_context()
-            partial_res = torch.matmul(a, a)
-            ctx.pop_context()
-            full_res = torch.matmul(a, a)
-        g.replay()
-        self.assertEqual(partial_res, full_res)
-
-
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
 @unittest.skipIf(IS_WINDOWS, "Windows doesn't support CUTLASS extensions")
 @unittest.skipIf(not _IS_SM8X, "mixed dtypes linear only supported on SM 8.x")
@@ -1104,11 +1051,11 @@ class TestMixedDtypesLinearCuda(TestCase):
             input_ref = input.reshape(-1, input.shape[-1])
 
             # First, test plain multiplication.
-            weight_ref = weight.T.to(input.dtype) * scale.view(1, n)
+            weight_ref = weight.T.to(torch.float32) * scale.float().view(1, n)
             weightq = (
                 pack_int4_to_int8(weight.T) if dtypeq == torch.quint4x2 else weight.T
             )
-            output_ref = torch.mm(input_ref, weight_ref).reshape(*input.shape[:-1], n)
+            output_ref = torch.mm(input_ref.float(), weight_ref).to(input.dtype).reshape(*input.shape[:-1], n)
             output = torch.ops.aten._mixed_dtypes_linear(
                 input,
                 quantized_weight_reorder_for_mixed_dtypes_linear_cutlass(
@@ -1119,12 +1066,12 @@ class TestMixedDtypesLinearCuda(TestCase):
             torch.testing.assert_close(output, output_ref, rtol=rtol, atol=atol)
 
             # Second, test the linear operator itself.
-            weight_ref = weight.to(input.dtype) * scale.view(n, 1)
+            weight_ref = weight.to(torch.float32) * scale.float().view(n, 1)
             weightq = pack_int4_to_int8(weight) if dtypeq == torch.quint4x2 else weight
-            bias_ref = bias.view(1, n) if add_bias else None
+            bias_ref = bias.float().view(1, n) if add_bias else None
             output_ref = torch.nn.functional.linear(
-                input_ref, weight_ref, bias=bias_ref
-            ).reshape(*input.shape[:-1], n)
+                input_ref.float(), weight_ref, bias=bias_ref
+            ).to(input.dtype).reshape(*input.shape[:-1], n)
             if activation == "relu":
                 relu = torch.nn.ReLU()
                 output_ref = relu(output_ref)

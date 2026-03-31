@@ -1063,6 +1063,24 @@ def forward(self, scores_1, mask_1, value_1):
                     "only backwards is decomposed, but dtype doesn't support AD"
                 )
 
+    def test_binary_cross_entropy_with_logits_decomp(self, device):
+        op_config = {
+            "self": torch.randn([4, 5, 6], dtype=torch.bfloat16, device=device),
+            "target": torch.randn([4, 5, 6], dtype=torch.bfloat16, device=device),
+            "weight": torch.randn([6], dtype=torch.float32, device=device),
+            "reduction": 2,
+        }
+
+        ref = torch.ops.aten.binary_cross_entropy_with_logits.default(**op_config)
+
+        decomp_table = torch._inductor.decomposition.select_decomp_table()
+        bce_decomp = decomp_table[
+            torch.ops.aten.binary_cross_entropy_with_logits.default
+        ]
+        res = bce_decomp(**op_config)
+
+        torch.testing.assert_close(ref, res, check_dtype=True)
+
 
 instantiate_device_type_tests(TestDecomp, globals())
 

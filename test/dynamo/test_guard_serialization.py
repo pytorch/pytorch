@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import dataclasses
+import itertools
 import pickle
 import sys
 import tempfile
@@ -9,7 +10,6 @@ import unittest
 import weakref
 from collections.abc import Iterator
 from typing import NamedTuple
-from unittest.mock import patch
 
 import torch
 import torch._dynamo.testing
@@ -790,22 +790,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # guard should fail for different y value
         self._test_check_fn(ref, loaded, {"x": torch.randn(3), "y": 6}, False)
 
-    def test_nn_module(self):
-        def fn(m, x):
-            return m(x)
-
-        m = GlobalModule()
-        x = torch.randn(3)
-
-        # config setting controls whether the NN_MODULE guard is installed
-        with patch("torch._dynamo.config.inline_inbuilt_nn_modules", False):
-            # we don't support NN_MODULE because it adds an ID_MATCH guard, and we don't
-            # support that in serialization
-            with self.assertRaisesRegex(
-                PackageError, "NN_MODULE guard cannot be serialized."
-            ):
-                self._test_serialization("NN_MODULE", fn, m, x)
-
     def test_class_match(self):
         def fn(x):
             # usage of this context manager installs a FUNCTION_MATCH guard
@@ -944,6 +928,35 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"x": x, "r": iter(range(2, 15, 4))}, False)
         self._test_check_fn(
             ref, loaded, {"x": torch.randn(4), "r": iter(range(2, 15, 4))}, False
+        )
+
+    def test_count_iterator_match(self):
+        def fn(x, counter):
+            return x + next(counter)
+
+        x = torch.randn(3)
+
+        def _gen_kwargs(x=x):
+            return {"x": x, "counter": itertools.count(2, 3)}
+
+        ref, loaded = self._test_serialization(
+            "COUNT_ITERATOR_MATCH", fn, _gen_fn=_gen_kwargs
+        )
+
+        self._test_check_fn(
+            ref, loaded, {"x": x, "counter": itertools.count(2, 3)}, True
+        )
+        self._test_check_fn(
+            ref,
+            loaded,
+            {"x": torch.randn(4), "counter": itertools.count(2, 3)},
+            True,
+        )
+        self._test_check_fn(
+            ref, loaded, {"x": x, "counter": itertools.count(5, 3)}, False
+        )
+        self._test_check_fn(
+            ref, loaded, {"x": x, "counter": itertools.count(2, 4)}, False
         )
 
     def test_dict_version(self):
