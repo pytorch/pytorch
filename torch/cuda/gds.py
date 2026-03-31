@@ -2,7 +2,7 @@ import functools
 import os
 
 import torch
-from torch.types import Device, Storage
+from torch.types import Storage
 
 
 __all__: list[str] = [
@@ -19,8 +19,8 @@ __all__: list[str] = [
 def is_available() -> bool:
     """Returns ``True`` if GPUDirect Storage is available.
 
-    GDS requires a CUDA-capable device and a PyTorch build with cuFile support
-    (``USE_CUFILE=1``).
+    GDS requires a CUDA-capable device, a PyTorch build with cuFile support
+    (``USE_CUFILE=1``), and a functional cuFile driver at runtime.
     """
     return torch.cuda.is_available() and torch._C._gds_is_available()
 
@@ -51,7 +51,7 @@ if not hasattr(torch._C, "_gds_is_available"):
 
 
 def gds_register_buffer(s: Storage) -> None:
-    """Registers a storage on a CUDA device as a cufile buffer.
+    """Registers a storage on a CUDA device as a cuFile buffer.
 
     Example::
 
@@ -67,7 +67,7 @@ def gds_register_buffer(s: Storage) -> None:
 
 
 def gds_deregister_buffer(s: Storage) -> None:
-    """Deregisters a previously registered storage on a CUDA device as a cufile buffer.
+    """Deregisters a previously registered storage on a CUDA device as a cuFile buffer.
 
     Example::
 
@@ -88,7 +88,7 @@ class GdsFile:
 
     cuFile is a file-like interface to the GPUDirect Storage (GDS) API.
 
-    See the `cufile docs <https://docs.nvidia.com/gpudirect-storage/api-reference-guide/index.html#cufile-io-api>`_
+    See the `cuFile docs <https://docs.nvidia.com/gpudirect-storage/api-reference-guide/index.html#cufile-io-api>`_
     for more details.
 
     Args:
@@ -123,12 +123,22 @@ class GdsFile:
         self.register_handle()
 
     def __del__(self) -> None:
+        self.close()
+
+    def close(self) -> None:
         try:
             if self.handle is not None:
                 self.deregister_handle()
         finally:
-            if hasattr(self, "fd"):
+            if getattr(self, "fd", -1) >= 0:
                 os.close(self.fd)
+                self.fd = -1
+
+    def __enter__(self) -> "GdsFile":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
 
     def register_handle(self) -> None:
         """Registers file descriptor to cuFile Driver.
@@ -182,16 +192,7 @@ class GdsFile:
         torch._C._gds_save_storage(self.handle, storage, offset)
 
 
-def _resolve_device(map_location: Device) -> torch.device:
-    if map_location is None:
-        return torch.device("cuda", torch.cuda.current_device())
-    device = torch.device(map_location)
-    if device.type != "cuda":
-        raise ValueError(f"GDS load requires a CUDA device, got {device}")
-    return device
-
-
-def save(obj: object, f: str) -> None:
+def save(obj: object, f: str | os.PathLike[str]) -> None:
     """Saves an object to a file using GPUDirect Storage.
 
     Tensor data is written directly from GPU memory to storage via DMA,
@@ -213,6 +214,7 @@ def save(obj: object, f: str) -> None:
     from torch.utils._pytree import tree_flatten
     from torch.utils.serialization import config as serialization_config
 
+    f = os.fspath(f)
     leaves, _ = tree_flatten(obj)
     devices: set[torch.device] = set()
     for v in leaves:
@@ -243,59 +245,60 @@ def save(obj: object, f: str) -> None:
 
     if pending_writes:
         reader = torch._C.PyTorchFileReader(f)  # type: ignore[attr-defined]
-        gds_f = GdsFile(f, os.O_RDWR)
-        try:
+        with GdsFile(f, os.O_RDWR) as gds_f:
             written_offsets: set[int] = set()
             for name, storage in pending_writes:
                 offset = reader.get_record_offset(name)  # type: ignore[attr-defined]
                 if offset not in written_offsets:
                     written_offsets.add(offset)
                     gds_f.save_storage(storage, offset)
-        finally:
-            del gds_f
 
 
 def load(
-    f: str,
-    map_location: Device = None,
+    f: str | os.PathLike[str],
+    map_location: "torch.serialization.MAP_LOCATION" = None,
 ) -> object:
     """Loads an object from a file using GPUDirect Storage.
 
     Tensor data for CUDA storages is read directly from storage into GPU
     memory via DMA, bypassing CPU and system memory. Non-CUDA storages
-    are loaded normally. The file must have been saved with
-    :func:`torch.cuda.gds.save` or with :func:`torch.save` using
-    4096-byte storage alignment.
+    are loaded normally. For best results, the file should have been saved
+    with :func:`torch.cuda.gds.save` or with :func:`torch.save` using
+    4096-byte storage alignment; otherwise GDS falls back to normal loading
+    per storage.
 
     Args:
         f: Path to the file to load from. Should be on a GDS-compatible
             filesystem (e.g. ext4/XFS on NVMe) for optimal performance.
-        map_location: Device to load tensors onto. Defaults to the current
-            CUDA device.
+        map_location: Passed through to :func:`torch.load`. GDS reads
+            into the current CUDA device; ``restore_location`` handles
+            any remapping afterward.
 
     Returns:
         The loaded object with tensors on the specified device.
     """
     from torch.serialization import _serialization_tls
 
-    device = _resolve_device(map_location)
-    gds_reader = GdsFile(f, os.O_RDONLY)
+    f = os.fspath(f)
+    gds_device = torch.device("cuda", torch.cuda.current_device())
 
-    def _gds_load_hook(
-        zip_file: object, name: str, nbytes: int, location: str
-    ) -> torch.UntypedStorage | None:
-        if not location.startswith("cuda"):
-            return None
-        offset = zip_file.get_record_offset(name)  # type: ignore[union-attr]
-        storage = torch.UntypedStorage(nbytes, device=device)
-        gds_reader.load_storage(storage, offset)  # noqa: F821
-        return storage
+    with GdsFile(f, os.O_RDONLY) as gds_reader:
 
-    _serialization_tls.storage_load_hook = _gds_load_hook
-    try:
-        obj = torch.load(f, map_location=device, weights_only=True)
-    finally:
-        _serialization_tls.storage_load_hook = None
-        del gds_reader
+        def _gds_load_hook(
+            zip_file: object, name: str, nbytes: int, location: str
+        ) -> torch.UntypedStorage | None:
+            if not location.startswith("cuda"):
+                return None
+            try:
+                offset = zip_file.get_record_offset(name)  # type: ignore[union-attr]
+                storage = torch.UntypedStorage(nbytes, device=gds_device)
+                gds_reader.load_storage(storage, offset)  # noqa: F821
+                return storage
+            except RuntimeError:
+                return None
 
-    return obj
+        _serialization_tls.storage_load_hook = _gds_load_hook
+        try:
+            return torch.load(f, map_location=map_location, weights_only=True)
+        finally:
+            _serialization_tls.storage_load_hook = None
