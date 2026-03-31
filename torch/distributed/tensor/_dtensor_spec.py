@@ -19,6 +19,13 @@ from torch.utils._debug_mode import _stringify_shape
 from torch.utils._dtype_abbrs import dtype_abbrs
 
 
+# Defined here (not in placement_types.py) because decoding split_factor into
+# a shard order is a DTensorSpec concern — placement_types doesn't know about
+# shard orders.
+class _StridedShardNotDecodableError(ValueError):
+    """Raised when _StridedShard split_factor cannot be decoded into a shard order."""
+
+
 class ShardOrderEntry(NamedTuple):
     """
     Represents how a single tensor dimension is sharded across mesh dimensions.
@@ -130,10 +137,9 @@ class DTensorSpec:
                 placements, mesh
             )
             if shard_order is None:
-                raise ValueError(
-                    "use_strided_shard_as_shard_order is True, but placements: "
-                    f"{placements} is unable to be interpreted into a corresponding "
-                    "shard_order"
+                raise _StridedShardNotDecodableError(
+                    f"_StridedShard placements {placements} cannot be decoded "
+                    "into a corresponding shard_order"
                 )
             normalized_placements = tuple(
                 [
