@@ -2586,7 +2586,8 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
 class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
     def __init__(self, value: object, **kwargs: Any) -> None:
         super().__init__(value, **kwargs)
-        self.exc_vt = variables.ExceptionVariable(self.value_type, ())
+        init_args = kwargs.get("init_args", [])
+        self.exc_vt = variables.ExceptionVariable(self.value_type, init_args)
 
     @property
     def fn(self) -> Callable[..., object]:
@@ -2605,9 +2606,6 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             and inspect.ismethoddescriptor(method)
             and len(kwargs) == 0
         ):
-            self.exc_vt.args = tuple(args)
-            # pyrefly: ignore[missing-attribute]
-            self.value.args = args
             return variables.CONSTANT_VARIABLE_NONE
         elif (
             name == "__setattr__"
@@ -2621,13 +2619,24 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             return self.exc_vt.call_method(tx, name, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
 
+    def var_getattr(self, tx: "InstructionTranslator", name: str):
+        if name in (
+            "args",
+            "__cause__",
+            "__context__",
+            "__suppress_context__",
+            "__traceback__",
+        ):
+            return self.exc_vt.var_getattr(tx, name)
+        return super().var_getattr(tx, name)
+
     @property
     def __context__(self) -> "ConstantVariable":
         # type: ignore[return-value]
         return self.exc_vt.__context__
 
     @property
-    def args(self) -> tuple[VariableTracker, ...]:
+    def args(self) -> list[VariableTracker]:
         return self.exc_vt.args
 
     def set_context(self, context: "variables.ExceptionVariable") -> None:

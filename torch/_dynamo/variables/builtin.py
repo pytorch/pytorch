@@ -977,7 +977,7 @@ class BuiltinVariable(VariableTracker):
     ) -> Callable[
         [
             "InstructionTranslator",
-            tuple[VariableTracker, ...],
+            list[VariableTracker],
             dict[str, VariableTracker],
         ],
         VariableTracker | None,
@@ -1002,7 +1002,7 @@ class BuiltinVariable(VariableTracker):
 
             def create_exception_class_object(
                 tx: "InstructionTranslator",
-                args: tuple[VariableTracker, ...],
+                args: list[VariableTracker],
                 kwargs: dict[str, VariableTracker],
             ) -> VariableTracker:
                 if fn is AssertionError and not all(
