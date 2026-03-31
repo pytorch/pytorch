@@ -1092,7 +1092,22 @@ void avg_pool3d_kernel_impl(
     }
     case at::MemoryFormat::ChannelsLast: {
       AT_DISPATCH_FLOATING_TYPES_AND3(kLong, kBFloat16, kHalf, input.scalar_type(), "avg_pool3d", [&] {
-        cpu_avg_pool3d<scalar_t>(output, input, kW, kH, kD, dW, dH, dD, padW, padH, padD, count_include_pad, divisor_override);
+        auto output_5d = output.unsqueeze(0);
+        auto input_5d = input.unsqueeze(0);
+        cpu_avg_pool3d_channels_last<scalar_t>(
+            output_5d,
+            input_5d,
+            kW,
+            kH,
+            kD,
+            dW,
+            dH,
+            dD,
+            padW,
+            padH,
+            padD,
+            count_include_pad,
+            divisor_override);
       });
       break;
     }
@@ -1125,7 +1140,22 @@ void avg_pool3d_backward_kernel_impl(
     }
     case at::MemoryFormat::ChannelsLast: {
       AT_DISPATCH_FLOATING_TYPES_AND3(kLong, kBFloat16, kHalf, grad_output.scalar_type(), "avg_pool3d_backward", [&] {
-        cpu_avg_pool3d_backward<scalar_t>(grad_input, grad_output, kW, kH, kD, dW, dH, dD, padW, padH, padD, count_include_pad, divisor_override);
+        auto grad_input_5d = grad_input.unsqueeze(0);
+        auto grad_output_5d = grad_output.unsqueeze(0);
+        cpu_avg_pool3d_backward_channels_last<scalar_t>(
+            grad_input_5d,
+            grad_output_5d,
+            kW,
+            kH,
+            kD,
+            dW,
+            dH,
+            dD,
+            padW,
+            padH,
+            padD,
+            count_include_pad,
+            divisor_override);
       });
       break;
     }

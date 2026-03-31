@@ -79,7 +79,11 @@ TORCH_META_FUNC(avg_pool3d) (
 
   /* resize output */
   if (input.ndimension() == 4) {
-    set_output_raw_strided(0, {nslices, odepth, oheight, owidth}, {}, input.options());
+    set_output_raw_strided(
+        0,
+        {nslices, odepth, oheight, owidth},
+        {},
+        input.options().memory_format(memory_format));
   }
   else {
     set_output_raw_strided(
