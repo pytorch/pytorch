@@ -298,6 +298,7 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_overrides",
     "test_show_pickle",
     "test_tensorexpr",
+    "test_cuda_gds",
     "test_cuda_primary_ctx",
     "test_cuda_trace",
     "inductor/test_benchmark_fusion",
