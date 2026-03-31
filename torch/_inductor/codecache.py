@@ -835,11 +835,11 @@ def resolve_pre_grad_pass_timing() -> Literal["early", "late"]:
                     "Implement uuid() on your CustomGraphPass to enable caching.",
                     pass_name,
                 )
-            CompileEventLogger.try_add_pt2_compile(
-                "backend_compile",
-                pre_grad_pass_missing_uuid=True,
-                pre_grad_pass_name=pass_name,
-            )
+                CompileEventLogger.try_add_pt2_compile(
+                    "backend_compile",
+                    pre_grad_pass_missing_uuid=True,
+                    pre_grad_pass_name=pass_name,
+                )
 
     if timing == "late" and custom_pass and not has_uuid:
         raise RuntimeError(
