@@ -47,7 +47,7 @@ cusolverDnHandle_t getCurrentCUDASolverDnHandle() {
 }
 
 extern "C" C10_EXPORT void* at_cuda_getCurrentCUDASolverDnHandle() {
-  return reinterpret_cast<void*>(getCurrentCUDASolverDnHandle());
+  return getCurrentCUDASolverDnHandle();
 }
 
 } // namespace at::cuda

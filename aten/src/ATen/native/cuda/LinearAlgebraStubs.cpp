@@ -13,8 +13,8 @@
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/TransposeType.h>
-#include <ATen/native/cuda/linalg/BatchLinearAlgebraLib.h>
 #if defined(BUILD_LAZY_CUDA_LINALG)
+#include <ATen/native/cuda/linalg/BatchLinearAlgebraLib.h>
 #if AT_MAGMA_ENABLED()
 #include <ATen/cuda/detail/CUDAHooks.h>
 

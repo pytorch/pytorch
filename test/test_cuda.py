@@ -850,7 +850,15 @@ print(t.is_pinned())
             _check_default()
 
     def test_current_solver_handle(self):
-        handle = torch.cuda.current_solver_handle()
+        try:
+            handle = torch.cuda.current_solver_handle()
+        except RuntimeError as err:
+            if (
+                "at_cuda_getCurrentCUDASolverDnHandle" in str(err)
+                or "libtorch_cuda_linalg.so" in str(err)
+            ):
+                self.skipTest(f"cuSOLVER handle is unavailable in this build: {err}")
+            raise
         self.assertIsInstance(handle, int)
         self.assertNotEqual(handle, 0)
 
