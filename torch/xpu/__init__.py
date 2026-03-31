@@ -256,10 +256,30 @@ def device_count() -> int:
     return count
 
 
+def _zes_based_avail() -> bool:
+    return os.getenv("PYTORCH_ZES_BASED_XPU_CHECK") == "1"
+
+
 def is_available() -> bool:
-    r"""Return a bool indicating if XPU is currently available."""
-    # This function never throws.
-    return device_count() > 0
+    r"""Return a bool indicating if XPU is currently available.
+
+    .. note:: This function will NOT poison fork if the environment variable
+        ``PYTORCH_ZES_BASED_XPU_CHECK=1`` is set. For more details, see
+        :ref:`multiprocessing-poison-fork-note`.
+    """
+    if not _is_compiled():
+        return False
+    if _zes_based_avail():
+        # The user has opted into a lightweight availability check via the environment variable.
+        # This avoids fork poisoning at the cost of a weaker guarantee: it only verifies that
+        # the driver can enumerate XPU devices, not that the XPU runtime can be fully initialized.
+        # If the lightweight check fails, it falls back to the default check below.
+        return device_count() > 0
+    else:
+        # The default check fully initializes the XPU driver to confirm the device is actually
+        # usable, but this initialization can poison fork. It never throws and returns 0 if the
+        # driver is missing or cannot be initialized.
+        return torch._C._xpu_getDeviceCount() > 0
 
 
 def is_bf16_supported(including_emulation: bool = True) -> bool:
