@@ -142,7 +142,6 @@ jobs:
       - name: Setup Linux
         id: setup-linux
         uses: pytorch/pytorch/.github/actions/setup-linux@main
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && !contains(matrix.runner, 'b200')
         with:
           python-version: ${{ inputs.python-version }}
           compiler: ${{ inputs.compiler }}
