@@ -56,6 +56,7 @@ def _varlen_attn(
     window_size: list[int] | None = None,
     seqused_k: torch.Tensor | None = None,
     block_table: torch.Tensor | None = None,
+    num_splits: int | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Private custom op for variable-length attention.
@@ -69,6 +70,9 @@ def _varlen_attn(
     if use_cudnn:
         log.info("Using cuDNN backend for varlen_attn")
 
+        if num_splits is not None:
+            # TODO: check this
+            raise RuntimeError("num_splits is not supported with the cuDNN backend.")
         if window_size[0] != -1 or window_size[1] != -1:
             raise RuntimeError(
                 "cuDNN backend does not support window attention. Please use Flash Attention backend."
@@ -115,6 +119,7 @@ def _varlen_attn(
             window_size_right=window_size[1],
             seqused_k=seqused_k,
             block_table=block_table,
+            num_splits=num_splits,
         )
 
     rng_state_ = torch.zeros(
@@ -137,6 +142,7 @@ def _varlen_attn_fake(
     window_size: list[int] | None = None,
     seqused_k: torch.Tensor | None = None,
     block_table: torch.Tensor | None = None,
+    num_splits: int | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.
@@ -183,6 +189,7 @@ def varlen_attn(
     window_size: tuple[int, int] = (-1, -1),
     seqused_k: torch.Tensor | None = None,
     block_table: torch.Tensor | None = None,
+    num_splits: int | None = None,
 ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     r"""Compute variable-length attention using Flash Attention.
 
@@ -219,6 +226,17 @@ def varlen_attn(
 
             ``seqused_k[i]`` tells the kernel how many tokens in sequence *i* are
             actually valid, since the last page is typically only partially filled.
+        num_splits (int, optional): Number of splits for split-KV. Set to ``1``
+            to disable split-KV which enables batch invariance. Split-KV
+            parallelizes the key/value sequence dimension across multiple thread
+            blocks and combines partial results. The split decision depends
+            on ``max_k`` (the longest sequence in the batch), so different batch
+            compositions can change the reduction order and produce different
+            floating-point results for the same sequence. When this is disabled,
+            bitwise identical outputs are guaranteed for a given sequence
+            regardless of what other sequences are in the batch, at the
+            cost of lower GPU utilization when there are few queries. When
+            ``None`` (default), the kernel chooses automatically.
 
     Returns:
         output (Tensor): Output tensor from attention computation; shape :math:`(T_q, H, D)`.
@@ -281,6 +299,7 @@ def varlen_attn(
         list(window_size),
         seqused_k,
         block_table,
+        num_splits,
     )
     if return_aux is not None and return_aux.lse:
         return out, lse
@@ -302,6 +321,7 @@ def _varlen_attn_out(
     window_size: list[int] | None = None,
     seqused_k: torch.Tensor | None = None,
     block_table: torch.Tensor | None = None,
+    num_splits: int | None = None,
 ) -> torch.Tensor:
     """
     Private custom op for variable-length attention with pre-allocated output.
@@ -333,6 +353,7 @@ def _varlen_attn_out(
         window_size_right=window_size[1],
         seqused_k=seqused_k,
         block_table=block_table,
+        num_splits=num_splits,
     )
 
     return softmax_lse
@@ -353,6 +374,7 @@ def _varlen_attn_out_fake(
     window_size: list[int] | None = None,
     seqused_k: torch.Tensor | None = None,
     block_table: torch.Tensor | None = None,
+    num_splits: int | None = None,
 ) -> torch.Tensor:
     """
     Fake implementation for meta tensor computation and tracing.
@@ -389,6 +411,7 @@ def varlen_attn_out(
     window_size: tuple[int, int] = (-1, -1),
     seqused_k: torch.Tensor | None = None,
     block_table: torch.Tensor | None = None,
+    num_splits: int | None = None,
 ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     r"""Compute variable-length attention using Flash Attention with a pre-allocated output tensor.
 
@@ -411,6 +434,7 @@ def varlen_attn_out(
         list(window_size),
         seqused_k,
         block_table,
+        num_splits,
     )
     if return_aux is not None and return_aux.lse:
         return out, lse
@@ -431,6 +455,7 @@ def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
         window_size,
         seqused_k,
         block_table,
+        num_splits,
     ) = inputs
     out, lse, rng_state = output
 
@@ -573,7 +598,7 @@ def _backward(
         scale,
         window_size,
     )
-    num_params = 9  # cu_seq_q, cu_seq_k, max_q, max_k, is_causal, scale, window_size, seqused_k, block_table
+    num_params = 10  # cu_seq_q, cu_seq_k, max_q, max_k, is_causal, scale, window_size, seqused_k, block_table, num_splits
     return (dq, dk, dv, *((None,) * num_params))
 
 

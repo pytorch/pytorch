@@ -219,6 +219,10 @@ def is_side_effect_safe(m: MutationType) -> bool:
     return m.scope == scope_id
 
 
+class NO_SUCH_SUBOBJ:
+    """Sentinel indicating no concrete Python object is available."""
+
+
 # This helps users of `as_python_constant` to catch unimplemented error with
 # more information; it inherits `NotImplementedError` for backward
 # compatibility reasons.
@@ -598,7 +602,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 raise_observed_exception(
                     type(e),
                     tx,
-                    args=list(map(variables.ConstantVariable.create, e.args)),
+                    args=list(e.args),
                 )
         hints = [
             f"Avoid calling `{self.python_type_name()}.{name}` in your code.",
@@ -879,6 +883,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             ],
         )
 
+    def get_real_python_backed_value(self) -> object:
+        """Return the Python object this VT wraps, for `is` comparison.
+
+        Returns NO_SUCH_SUBOBJ if no concrete Python object is available.
+        """
+        return NO_SUCH_SUBOBJ
+
     def is_python_equal(self, other: object) -> bool:
         """
         NB - Deliberately not overriding the __eq__ method because that can
@@ -994,8 +1005,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
 
 def raise_type_error_exc(tx: Any, msg_str: str) -> NoReturn:
-    msg = variables.ConstantVariable.create(msg_str)
-    raise_observed_exception(TypeError, tx, args=[msg])
+    raise_observed_exception(TypeError, tx, args=[msg_str])
 
 
 def typestr(*objs: object) -> str:

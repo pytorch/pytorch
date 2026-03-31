@@ -38,7 +38,7 @@ from torch._inductor.codegen.common import WorkspaceArg
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, FlexibleLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
-from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+from torch._inductor.runtime.triton_heuristics import CachingAutotuner, pointwise
 from torch._inductor.scheduler import Scheduler
 from torch._inductor.select_algorithm import (
     add_feedback_saver,
@@ -60,6 +60,7 @@ from torch._inductor.template_heuristics.triton import (
     CUDAPersistentTMATemplateConfigHeuristic,
     GemmConfig,
     get_shared_memory_checker_opts,
+    ROCmMMTemplateConfigHeuristic,
     XPUMMTemplateConfigHeuristic,
     XPUPersistentTMATemplateConfigHeuristic,
 )
@@ -93,7 +94,7 @@ from torch._inductor.utils import (
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import MI300_ARCH, runOnRocmArch, skipIfXpu
+from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import (
     get_func_call,
     get_kernel_launch,
@@ -175,6 +176,42 @@ class TestMaxAutotune(TestCase):
         ):
             torch.compile(mm_plus_mm, dynamic=dynamic)(a, b, c, d)
 
+    def test_max_autotune_includes_max_autotune_pointwise_configs(self):
+        """
+        Verify that `max_autotune` includes all pointwise configs from
+        `max_autotune_pointwise` for 1D, 2D, and 3D pointwise kernels.
+        """
+        triton_meta = {"device": object()}
+        inductor_meta_common = {"autotune_pointwise": False}
+
+        for size_hints in (
+            {"x": 2048},
+            {"x": 128, "y": 256},
+            {"x": 64, "y": 64, "z": 64},
+        ):
+            with self.subTest(size_hints=size_hints):
+                max_autotune_configs = pointwise(
+                    size_hints,
+                    triton_meta=triton_meta,
+                    inductor_meta={**inductor_meta_common, "max_autotune": True},
+                    return_configs=True,
+                )
+                max_autotune_pointwise_configs = pointwise(
+                    size_hints,
+                    triton_meta=triton_meta,
+                    inductor_meta={
+                        **inductor_meta_common,
+                        "max_autotune_pointwise": True,
+                    },
+                    return_configs=True,
+                )
+
+                self.assertEqual(
+                    len(max_autotune_configs),
+                    len(max_autotune_pointwise_configs),
+                    "max_autotune should include all pointwise configs from max_autotune_pointwise",
+                )
+
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
@@ -249,6 +286,55 @@ class TestMaxAutotune(TestCase):
         FileCheck().check("triton_tem_fused_mm").check(make_desc_api).check(
             read_api
         ).check(write_api).run(code[0])
+
+        torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
+
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @parametrize("a_transposed", (False, True))
+    @parametrize("b_transposed", (False, True))
+    @parametrize("dynamic", (False, True))
+    def test_max_autotune_regular_mm_persistent(
+        self,
+        a_transposed: bool,
+        b_transposed: bool,
+        dynamic: bool,
+    ):
+        def mm(a, b):
+            a = a.repeat(8, 8)
+            b = b.repeat(8, 8)
+
+            if a_transposed:
+                a = a.T
+            if b_transposed:
+                b = b.T
+
+            return torch.mm(a, b)
+
+        M, N, K = 21, 31, 11
+        a = (
+            torch.randn(*((K, M) if a_transposed else (M, K)))
+            .to(torch.float16)
+            .to(GPU_TYPE)
+        )
+        b = (
+            torch.randn(*((N, K) if b_transposed else (K, N)))
+            .to(torch.float16)
+            .to(GPU_TYPE)
+        )
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "triton.enable_persistent_tma_matmul": "1",
+                "triton.native_matmul": False,
+                "test_configs.autotune_choice_name_regex": "mm_persistent",
+            }
+        ):
+            c_actual, code = run_and_get_code(torch.compile(mm, dynamic=dynamic), a, b)
+            c_expected = mm(a, b)
+
+        # Verify that we are using the non-TMA persistent implementation
+        FileCheck().check("triton_tem_fused_mm").check("NUM_SMS").run(code[0])
 
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
@@ -489,6 +575,41 @@ class TestMaxAutotune(TestCase):
             c_expected = mm(a, b)
 
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
+
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    def test_persistent_tma_epilogue_fusion_store_cache(self):
+        # Regression test: when epilogue fusion runs with TMA store, the
+        # store_cache must be updated so that a subsequent epilogue load from
+        # the same buffer hits the cache. Otherwise remove_kernel_local_buffers
+        # strips the buffer pointer from the kernel signature, causing a
+        # NameError at Triton compile time.
+        def f(a, b):
+            a = a.repeat(8, 8)
+            b = b.repeat(8, 8)
+            mm = torch.mm(a, b)
+            return mm.relu()
+
+        M, N, K = 21, 31, 11
+        a = torch.randn(M, K, dtype=torch.float16, device=GPU_TYPE)
+        b = torch.randn(K, N, dtype=torch.float16, device=GPU_TYPE)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "epilogue_fusion": True,
+                "triton.enable_persistent_tma_matmul": "1",
+                "triton.native_matmul": False,
+                "triton.enable_template_tma_store": True,
+                "triton.disallow_failing_autotune_kernels_TESTING_ONLY": True,
+                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+            }
+        ):
+            actual = torch.compile(f)(a, b)
+            expected = f(a, b)
+
+        torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
 
     @parametrize("dynamic", (False, True))
     def test_max_autotune_regular_mm_zero_size_input(self, dynamic: bool):
@@ -1016,8 +1137,12 @@ class TestMaxAutotune(TestCase):
         f_c = torch.compile(mode="max-autotune-no-cudagraphs")(f)
         _, code = run_and_get_code(f_c, inps[0], inps[1])
         self.assertEqual(f_c(*inps), f(*inps), atol=0.03, rtol=0.25)
+        # x has multi-consumers (cat + add), so cat skips pointwise_cat
+        # and uses ConcatKernel.  cos is no longer fused into cat, giving
+        # one extra kernel launch compared to the single-consumer case.
+        count = 3 if (using_triton_mm or config.triton.native_matmul) else 2
         FileCheck().check(get_func_call()).check_count(
-            get_kernel_launch(), 2, exactly=True
+            get_kernel_launch(), count, exactly=True
         ).run(code[0])
 
         def f(x, y):
@@ -1293,6 +1418,7 @@ class TestMaxAutotune(TestCase):
             if not same(expect, actual, tol=1e-2):
                 raise AssertionError(f"ref:\n{expect}\nact:\n{actual}")
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -1416,6 +1542,7 @@ class TestMaxAutotune(TestCase):
                 bf16_red_setting
             )
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -1469,6 +1596,7 @@ class TestMaxAutotune(TestCase):
                     rtol=1e-4,
                 )
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -1524,6 +1652,7 @@ class TestMaxAutotune(TestCase):
                     code[1]
                 )
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -1575,6 +1704,7 @@ class TestMaxAutotune(TestCase):
                     f" empty_strided_{GPU_TYPE}((256, 1096), (1096, 1), torch.bfloat16)"
                 ).run(code[0])
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))
     @parametrize("sizes", ((64, 128, 256), (128, 256, 512), (256, 512, 1024)))
@@ -1618,6 +1748,7 @@ class TestMaxAutotune(TestCase):
             # Check that contiguous transform was used
             FileCheck().check("contiguous_mm").run(code[0])
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))
     @parametrize("sizes", ((64, 128, 256), (128, 256, 512), (256, 512, 1024)))
@@ -1729,6 +1860,7 @@ class TestMaxAutotune(TestCase):
             out2, expected2_fp64.to(torch.float32), atol=1e-2, rtol=1e-2
         )
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @config.patch(
         max_autotune=True,
@@ -2179,7 +2311,7 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(misses(), 4)
 
     @fresh_cache()
-    @skipIfXpu
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -2229,9 +2361,6 @@ class TestMaxAutotune(TestCase):
                     self.assertTrue(decompose_count <= num_decompose_k_splits)
 
     @unittest.skipIf(
-        TEST_WITH_ROCM, "exhaustive currently only thoroughly tested on NVIDIA"
-    )
-    @unittest.skipIf(
         config.triton.native_matmul,
         "native matmul takes different tuning configs",
     )
@@ -2248,11 +2377,15 @@ class TestMaxAutotune(TestCase):
         with mock.patch(
             "torch._inductor.template_heuristics.registry.get_template_heuristic"
         ) as config_mock:
-            config_heuristics = (
-                XPUMMTemplateConfigHeuristic()
-                if GPU_TYPE == "xpu"
-                else CUDAMMTemplateConfigHeuristic()
-            )
+            # Create heuristic instance and modify it before setting as mock return value
+            # On ROCm, use ROCmMMTemplateConfigHeuristic; on XPU use XPUMMTemplateConfigHeuristic;
+            # otherwise use CUDAMMTemplateConfigHeuristic
+            if GPU_TYPE == "xpu":
+                config_heuristics = XPUMMTemplateConfigHeuristic()
+            elif torch.version.hip:
+                config_heuristics = ROCmMMTemplateConfigHeuristic()
+            else:
+                config_heuristics = CUDAMMTemplateConfigHeuristic()
 
             # Traditionally, this would be set of all possible configs
             # We mock out the code path for the sake of the unit test
@@ -2401,6 +2534,72 @@ class TestMaxAutotune(TestCase):
         finally:
             clear_preprocessing_fns(clear_defaults=False)
 
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "ATEN",
+            "triton.autotune_cublasLt": True,
+            "triton.native_matmul": False,
+        }
+    )
+    def test_rocm_addmm_aten_bias_input_is_1d(self):
+        """
+        ROCm regression test for addmm autotune input wiring.
+        A 1D bias is required for hipBLASLt bias-fused addmm kernels; expanded 2D
+        bias disables that fused path.
+        """
+        bias_input_ranks: dict[str, set[int]] = {"addmm": set(), "bias_addmm": set()}
+
+        def capture_bias_input_rank(choices):
+            for choice in choices:
+                if isinstance(choice, ExternKernelCaller) and choice.name in (
+                    "addmm",
+                    "bias_addmm",
+                ):
+                    bias_node = choice.input_nodes[0]
+                    bias_input_ranks[choice.name].add(len(bias_node.get_size()))
+            return choices
+
+        add_preprocessing_fn(capture_bias_input_rank)
+        try:
+            bias = torch.randn(64, device=GPU_TYPE)
+            mat1 = torch.randn(32, 128, device=GPU_TYPE)
+            mat2 = torch.randn(128, 64, device=GPU_TYPE)
+
+            from torch._inductor.template_heuristics.aten import (
+                ATenAddMMConfigHeuristics,
+            )
+
+            def allow_bias_addmm_configs(self, kernel_inputs, op_name):
+                yield from ATenAddMMConfigHeuristics._get_template_configs_impl(
+                    self, kernel_inputs, op_name
+                )
+
+            # Relax bias_addmm heuristics here so this test can assert 1D vs 2D bias wiring.
+            with mock.patch(
+                "torch._inductor.template_heuristics.aten.ATenBiasAddMMConfigHeuristics._get_template_configs_impl",
+                autospec=True,
+                side_effect=allow_bias_addmm_configs,
+            ):
+                compiled_fn = torch.compile(
+                    lambda b, x, w: torch.addmm(b, x, w),
+                    dynamic=False,
+                )
+                _ = compiled_fn(bias, mat1, mat2)
+
+            self.assertTrue(
+                bias_input_ranks["addmm"], "Expected ATen addmm choice to be generated"
+            )
+            self.assertTrue(
+                bias_input_ranks["bias_addmm"],
+                "Expected ATen bias_addmm choice to be generated",
+            )
+            self.assertEqual(bias_input_ranks["addmm"], {1})
+            self.assertEqual(bias_input_ranks["bias_addmm"], {1})
+        finally:
+            clear_preprocessing_fns()
+
     @config.patch(
         {"test_configs.max_mm_configs": 4, "max_autotune_gemm_backends": "TRITON"}
     )
@@ -2480,6 +2679,7 @@ class TestMaxAutotune(TestCase):
         self.assertObjectIn(k, (15, 16))
         self.assertEqual("'EVEN_K': True" in cache_key, k == 16 and not dynamic)
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @config.patch(
         {
             "max_autotune": True,
@@ -2999,7 +3199,6 @@ class TestMaxAutotunePrecompile(TestCase):
         self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
 
     @config.patch(autotune_local_cache=False, autotune_remote_cache=False)
-    @runOnRocmArch(MI300_ARCH)
     @unittest.skipIf(config.triton.native_matmul, "native matmul has counter 0")
     def test_precompilations(self):
         def fn(a, b, c):
@@ -3008,7 +3207,9 @@ class TestMaxAutotunePrecompile(TestCase):
             return (a @ b) @ c
 
         fn_c = torch.compile(mode="max-autotune-no-cudagraphs")(fn)
-        inputs = [torch.rand([256, 256], device=GPU_TYPE) for _ in range(3)]
+        # Scale down so float16 doesn't overflow: rand [0,1) -> (a@b)@c has elements in [0, 256^2).
+        # float16 max ~65504, so we keep values in a safe range (e.g. scale by 1/256).
+        inputs = [torch.rand([256, 256], device=GPU_TYPE) / 256.0 for _ in range(3)]
 
         torch.testing.assert_close(fn_c(*inputs), fn(*inputs), atol=1e-2, rtol=1e-2)
 
@@ -4288,6 +4489,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                 tma_heuristic.mm_configs = original_tma_mm_configs
                 mm_heuristic.mm_configs = original_mm_mm_configs
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(
         not HAS_CUDA_AND_TRITON, "Scheduler static analysis only tested on cuda"
     )
@@ -4350,9 +4552,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                 _, code = run_and_get_code(compiled_f, a, b)
 
                 if expect_fusion:
-                    FileCheck().check("triton_tem_fused__to_copy_add_mm_0.run").run(
-                        code[0]
-                    )
+                    FileCheck().check("triton_tem_fused__to_copy_add_mm_0").run(code[0])
                 elif triton_time < aten_time:
                     FileCheck().check("triton_tem_fused_mm").check(
                         "triton_poi_fused__to_copy"
@@ -4605,6 +4805,7 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
         "test_non_contiguous_input_mm_plus_mm": "Flaky on trunk",
         "test_autotune_device_guard": "Flaky on trunk",
         "test_template_bad_epilogue_fusion": "Benchmarking path is different",
+        "test_persistent_tma_epilogue_fusion_store_cache": "Epilogue fusion disabled in async pipelining",
         # Contiguous transform tests - SubgraphChoiceCaller not supported with async pipelining
         "test_max_autotune_contiguous_transform_mm": "Subgraphs not supported with async pipelining",
         "test_max_autotune_contiguous_transform_addmm": "Subgraphs not supported with async pipelining",

@@ -82,13 +82,14 @@ from torch.onnx import (
 )
 from torch.testing import make_tensor
 from torch.testing._comparison import (
+    _unwrap_dtensor_for_comparison,
     BooleanPair,
     NonePair,
+    not_close_error_metas,
     NumberPair,
     Pair,
     TensorLikePair,
 )
-from torch.testing._comparison import not_close_error_metas
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.utils._import_utils import _check_module_exists
 import torch.utils._pytree as pytree
@@ -1401,14 +1402,6 @@ def run_tests(argv=None):
     else:
         unittest.main(argv=argv)
 
-def cpu_supports_feature(feature):
-    if sys.platform != 'linux':
-        return False
-    with open("/proc/cpuinfo") as f:
-        flags = {t for k, v in (line.split(":", 1) for line in f if ":" in line)
-                 if k.strip().lower() in ("flags", "features") for t in v.split()}
-    return feature.lower() in flags
-
 IS_LINUX = sys.platform == "linux"
 IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
@@ -1416,8 +1409,8 @@ IS_PPC = platform.machine() == "ppc64le"
 IS_X86 = platform.machine() in ('x86_64', 'i386')
 IS_ARM64 = platform.machine() in ('arm64', 'aarch64')
 IS_S390X = platform.machine() == "s390x"
-IS_AVX512_VNNI_SUPPORTED = cpu_supports_feature("vnni")
-IS_CPU_EXT_SVE_SUPPORTED = cpu_supports_feature("sve")
+IS_AVX512_VNNI_SUPPORTED = torch.cpu.get_capabilities().get("avx512_vnni", False)
+IS_CPU_EXT_SVE_SUPPORTED = torch.cpu.get_capabilities().get("sve", False)
 IS_CPU_CAPABILITY_SVE256 = torch._C._get_cpu_capability() == "SVE256"
 
 if IS_WINDOWS:
@@ -4322,6 +4315,8 @@ class TestCase(expecttest.TestCase):
             x = x.unbind()
         if isinstance(y, torch.Tensor) and y.is_nested and y.layout == torch.strided:
             y = y.unbind()
+
+        x, y = _unwrap_dtensor_for_comparison(x, y)
 
         error_metas = not_close_error_metas(
             x,

@@ -57,7 +57,6 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from torch._guards import Source
-    from torch._library.opaque_object import OpaqueType
     from torch._ops import OpOverload
     from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
 
@@ -183,8 +182,8 @@ def disable_fake_tensor_cache(fake_mode: FakeTensorMode) -> Generator[None, None
 
 
 def get_plain_tensors(
-    subclass: Tensor, *, out: list[Tensor | int | SymInt | OpaqueType]
-) -> list[Tensor | int | SymInt | OpaqueType]:
+    subclass: Tensor, *, out: list[Tensor | int | SymInt | OpaqueBase]
+) -> list[Tensor | int | SymInt | OpaqueBase]:
     # This function is used in Runtime, do not add redundant asserts
     todo = [subclass]
     while todo:
@@ -965,16 +964,25 @@ class FakeTensor(Tensor):
             aten._foreach_copy.default,
         )
 
+        # These in-place ops keep the destination tensor's device even if the
+        # rhs was explicitly constructed on meta.
+        meta_rhs_mixed_device_fns = ordered_set(
+            aten.add_.Tensor,
+        )
+
         # list of ops not using zero dim cpu tensor logic to align with the eager mode.
         bypass_zero_dim_cpu_tensor_check_ops = ordered_set(
             aten.nextafter.default,
         )
 
-        def check_cpu_device(device: torch.device) -> bool:
+        def is_device_cpu(device: torch.device) -> bool:
             return device.type == "cpu"
 
+        def is_device_meta(device: torch.device) -> bool:
+            return device.type == "meta"
+
         def cpu_zero_dim(t: Tensor) -> bool:
-            return check_cpu_device(t.device) and t.dim() == 0
+            return is_device_cpu(t.device) and t.dim() == 0
 
         def merge_devices(t: object) -> None:
             nonlocal common_device
@@ -1013,7 +1021,11 @@ class FakeTensor(Tensor):
             # device must be cpu in this case we will return from here without
             # throwing an error
             if func in mixed_device_fns:
-                if any(map(check_cpu_device, (common_device, t.device))):
+                if any(map(is_device_cpu, (common_device, t.device))):
+                    return
+
+            if func in meta_rhs_mixed_device_fns:
+                if any(map(is_device_meta, (common_device, t.device))):
                     return
 
             # if prefer_device_type is set, prefer that device type over others

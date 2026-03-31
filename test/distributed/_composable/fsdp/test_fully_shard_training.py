@@ -3,6 +3,7 @@
 import contextlib
 import copy
 import functools
+import gc
 import itertools
 import unittest
 from collections import defaultdict
@@ -1127,6 +1128,47 @@ class TestFullyShardSharedParams(FSDPTest):
         with self.assertRaisesRegex(ValueError, "already managed by another"):
             model(ids)
 
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_layer_by_layer_shard_no_false_positive(self):
+        """
+        Test that layer-by-layer materialize+shard+GC does not trigger a
+        false-positive duplicate parameter error from id() reuse.
+        """
+        dim = 16
+        n_blocks = 8
+
+        class SimpleBlock(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.norm = nn.LayerNorm(dim)
+                self.linear = nn.Linear(dim, dim, bias=False)
+
+            def forward(self, x):
+                return self.linear(self.norm(x))
+
+        class LayerByLayerModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.blocks = nn.ModuleList()
+
+            def forward(self, x):
+                for block in self.blocks:
+                    x = block(x)
+                return x
+
+        model = LayerByLayerModel().to(device_type)
+        for _ in range(n_blocks):
+            block = SimpleBlock().to(device_type)
+            model.blocks.append(block)
+            fully_shard(block)
+            gc.collect()
+
+        fully_shard(model)
+
+        x = torch.randn(2, 4, dim, device=device_type.type)
+        out = model(x)
+        out.sum().backward()
+
 
 class TestFullyShardGradientAccumulation(FSDPTest):
     @property
@@ -1969,6 +2011,7 @@ class TestFullyShardShareCommContext(FSDPTest):
             all_gather_stream: torch.Stream,
             device: torch.device,
             all_gather_comm: AllGather,
+            module_fqn: str | None = None,
         ):
             nonlocal all_gather_streams
             all_gather_streams.add(all_gather_stream)
@@ -1980,6 +2023,7 @@ class TestFullyShardShareCommContext(FSDPTest):
                 all_gather_stream,
                 device,
                 all_gather_comm,
+                module_fqn,
             )
 
         orig_foreach_reduce = foreach_reduce
@@ -2001,6 +2045,7 @@ class TestFullyShardShareCommContext(FSDPTest):
             partial_reduce_output: torch.Tensor | None,  # only used for HSDP
             all_reduce_hook: Callable[[torch.Tensor], None] | None,
             force_sum_reduction_for_comms: bool = False,
+            module_fqn: str | None = None,
         ):
             nonlocal reduce_scatter_streams
             reduce_scatter_streams.add(reduce_scatter_stream)
@@ -2020,6 +2065,7 @@ class TestFullyShardShareCommContext(FSDPTest):
                 partial_reduce_output,
                 all_reduce_hook,
                 force_sum_reduction_for_comms,
+                module_fqn,
             )
 
         with (

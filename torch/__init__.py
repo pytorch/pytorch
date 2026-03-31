@@ -29,6 +29,7 @@ from typing import (
     get_origin as _get_origin,
     overload as _overload,
     TYPE_CHECKING,
+    TypeGuard as _TypeGuard,
     TypeVar as _TypeVar,
 )
 from typing_extensions import (
@@ -1171,7 +1172,7 @@ def is_tensor(obj: _Any, /) -> _TypeIs["torch.Tensor"]:
     return isinstance(obj, torch.Tensor)
 
 
-def is_storage(obj: _Any, /) -> builtins.bool:
+def is_storage(obj: _Any, /) -> _TypeGuard["TypedStorage | UntypedStorage"]:
     r"""Returns True if `obj` is a PyTorch storage object.
 
     Args:
@@ -2593,6 +2594,7 @@ def compile(
     mode: str | None = None,
     options: dict[str, str | builtins.int | builtins.bool | _Callable] | None = None,
     disable: builtins.bool = False,
+    recompile_limit: builtins.int | None = None,
 ) -> (
     _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]
     | _Callable[_InputT, _RetT]
@@ -2776,6 +2778,7 @@ def compile(
         dynamic=dynamic,
         disable=disable,
         guard_filter_fn=guard_filter_fn,
+        recompile_limit=recompile_limit,
     )(model)  # type: ignore[return-value]
 
 

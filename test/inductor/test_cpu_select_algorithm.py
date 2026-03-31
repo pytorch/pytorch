@@ -26,6 +26,8 @@ from torch.testing._internal.common_quantized import (
     _calculate_dynamic_per_channel_qparams,
 )
 from torch.testing._internal.common_utils import (
+    IS_ARM64,
+    IS_CPU_EXT_SVE_SUPPORTED,
     IS_MACOS,
     IS_WINDOWS,
     parametrize,
@@ -66,7 +68,6 @@ def patches(fn):
 
     for patcher in [
         dynamo_config.patch(verbose=True),
-        dynamo_config.patch(inline_inbuilt_nn_modules=True),
         inductor_config.patch(
             debug=True,
             max_autotune=True,
@@ -1630,6 +1631,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     )
     @parametrize("in_features", (128, 144, 1024))
     @parametrize("out_features", (64, 65, 1024))
+    @unittest.skipIf(
+        IS_ARM64 and not IS_CPU_EXT_SVE_SUPPORTED, "flaky on AArch64 (no SVE)"
+    )
     def test_int8_woq_mm(self, dtype, batch_size, mid_dim, in_features, out_features):
         def _convert_weight_to_int8pack(w):
             scale, zp = _calculate_dynamic_per_channel_qparams(
@@ -1692,6 +1696,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     )
     @parametrize("in_features", (128,))
     @parametrize("out_features", (64,))
+    @unittest.skipIf(
+        IS_ARM64 and not IS_CPU_EXT_SVE_SUPPORTED, "flaky on AArch64 (no SVE)"
+    )
     def test_int8_woq_mm_concat(
         self, dtype, batch_size, mid_dim, in_features, out_features
     ):
@@ -2436,6 +2443,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             ["silu", "mul"],
         ),
     )
+    @parametrize("loop_ordering_after_fusion", (True, False))
     def test_grouped_linear_epilogue(
         self,
         batch_size,
@@ -2444,6 +2452,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         input_3d,
         bias,
         epilogue,
+        loop_ordering_after_fusion,
     ):
         class M(torch.nn.Module):
             def __init__(self, in_feature, out_feature, bias, epilogue):
@@ -2484,6 +2493,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 verify(dtype) as (atol, rtol),
                 torch.autocast(device_type="cpu", dtype=dtype),
                 torch.no_grad(),
+                inductor_config.patch(
+                    {"loop_ordering_after_fusion": loop_ordering_after_fusion}
+                ),
             ):
                 self.common(mod, (v,), atol=atol, rtol=rtol)
             self.assertEqual(counters["inductor"]["cpp_grouped_gemm_template"], 1)

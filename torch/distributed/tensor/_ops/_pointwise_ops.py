@@ -26,7 +26,6 @@ from torch.distributed.tensor._ops.utils import (
     infer_broadcast_dims_map,
     map_placements_after_broadcast,
     normalize_dim,
-    register_op_strategy,
 )
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
@@ -66,7 +65,12 @@ def _common_pointwise_single_dim_strategy(
 ) -> Callable[
     [OpOverload, ArgsType, KwargsType], list[list[Placement | _ShardingPlaceholder]]
 ]:
-    """Factory for single-dim strategies that add partial placement rules."""
+    """Factory for single-dim strategies that add partial placement rules.
+
+    Returns strategies shaped [output, *args] only.  Tensor kwarg placements
+    (e.g. ``out``, ``lr``) are appended by the wrapper in
+    ``_register_single_dim_pointwise``.
+    """
 
     def strategy(
         op: OpOverload,
@@ -116,46 +120,61 @@ def _common_pointwise_single_dim_strategy(
     return strategy
 
 
+def _is_list_op(op: OpOverload) -> bool:
+    """Returns True if op is a foreach, amp_foreach, or fused op."""
+    name = op.name()
+    return name.startswith(("aten::_foreach_", "aten::_amp_foreach_", "aten::_fused_"))
+
+
+# The state_steps arg of fused adam / adamw is a Replicate scalar tensor, which will be put on
+# the compute_mesh of an op across all parameter groups, even when not all parameter groups
+# are on the same device mesh. This idx will help avoid hitting exceptions or unnecessary
+# redistribute during sharding propagation.
+_FUSED_OP_SCALAR_IDX = 5
+
+
 def _register_single_dim_pointwise(
     op: OpOverload,
     partial_extra_rules: list[list[Placement]] | None = None,
     static_argnum: int = 0,
 ) -> None:
-    strategy_fn = _common_pointwise_single_dim_strategy(
+    inner_fn = _common_pointwise_single_dim_strategy(
         partial_extra_rules=partial_extra_rules  # pyrefly: ignore[bad-argument-type]
     )
-    # For .out ops, append output placement as the out kwarg placement.
-    # Strategy functions author [output, *args] without kwargs. The out tensor
-    # must match the output placement, so we duplicate strategy[0] (output).
-    # This makes strategies [output, *args, out_kwarg] so _get_num_tensor_inputs
-    # (which counts the out kwarg) computes num_outputs correctly.
-    if "out" in op._schema.overload_name:
-        inner_fn = strategy_fn
 
-        def _out_wrapper(
-            op: OpOverload,
-            args: ArgsType,
-            kwargs: KwargsType,
-            _fn: Callable = inner_fn,
-        ) -> list[list[Placement | _ShardingPlaceholder]]:
-            strategies = _fn(op, args, kwargs)
-            n_tensor_args = sum(1 for a in args if isinstance(a, TensorMeta))
-            n_outputs = sum(1 for r in op._schema.returns if "Tensor" in str(r.type))
-            for s in strategies:
-                if len(s) != n_outputs + n_tensor_args:
-                    raise AssertionError(
-                        f"Strategy length {len(s)} != expected {n_outputs + n_tensor_args} "
-                        f"({n_outputs} output(s) + {n_tensor_args} args) for {op}. "
-                        f"out kwarg will be appended by infra."
-                    )
-            return [s + [s[0]] for s in strategies]
+    # Wrap to append tensor kwarg placements in schema declaration order.
+    # out = output placement (s[0]); everything else (e.g. lr) = Replicate.
+    # TODO: move kwargs handling upstream if this works
+    def strategy_fn(
+        op: OpOverload,
+        args: ArgsType,
+        kwargs: KwargsType,
+        _fn: Callable = inner_fn,
+    ) -> list[list[Placement | _ShardingPlaceholder]]:
+        strategies = _fn(op, args, kwargs)
+        kw_names = [k for k, v in kwargs.items() if isinstance(v, TensorMeta)]
+        if not kw_names:
+            return strategies
+        return [
+            s + [s[0] if name == "out" else Replicate() for name in kw_names]
+            for s in strategies
+        ]
 
-        strategy_fn = _out_wrapper
+    if _is_list_op(op):
+        schema_info = RuntimeSchemaInfo(needs_pytree=True)
+    else:
+        schema_info = RuntimeSchemaInfo(static_argnum, static_kwargkey=["out"])
+    # Fused ops (e.g. _fused_adam_) have state_steps on a potentially different
+    # mesh; see the note in expand_to_full_mesh_op_strategy for details.
+    different_mesh_args: list[int] | None = None
+    if op.name().startswith("aten::_fused_"):
+        different_mesh_args = [_FUSED_OP_SCALAR_IDX]
     register_single_dim_strategy(
         op,
-        schema_info=RuntimeSchemaInfo(static_argnum, static_kwargkey=["out"]),
+        schema_info=schema_info,
         allow_uneven_sharding=True,
         allow_unbacked_sharding=True,
+        different_mesh_args=different_mesh_args,
     )(strategy_fn)
 
 
@@ -171,6 +190,11 @@ binary_additive_ops = [
     aten.sub.Tensor,
     aten.sub_.Tensor,
     aten.sub.out,
+    # foreach variants
+    aten._foreach_add.List,
+    aten._foreach_add_.List,
+    aten._foreach_sub.List,
+    aten._foreach_sub_.List,
 ]
 
 _BINARY_ADDITIVE_RULES: list[list[Placement]] = [
@@ -191,8 +215,26 @@ for op in binary_additive_ops:
     _register_single_dim_pointwise(op, _BINARY_ADDITIVE_RULES)
 
 # mul: partials propagate through either arg. div: only through numerator.
-binary_mul_ops = [aten.mul.Tensor, aten.mul_.Tensor, aten.mul.out]
-binary_div_ops = [aten.div.Tensor, aten.div_.Tensor, aten.div.out]
+binary_mul_ops = [
+    aten.mul.Tensor,
+    aten.mul_.Tensor,
+    aten.mul.out,
+    # foreach variants
+    aten._foreach_mul.List,
+    aten._foreach_mul_.List,
+    aten._foreach_mul.Tensor,
+    aten._foreach_mul_.Tensor,
+]
+binary_div_ops = [
+    aten.div.Tensor,
+    aten.div_.Tensor,
+    aten.div.out,
+    # foreach variants
+    aten._foreach_div.List,
+    aten._foreach_div_.List,
+    aten._foreach_div.Tensor,
+    aten._foreach_div_.Tensor,
+]
 
 # _UNARY_LINEAR_RULES handles the scalar promotion case: Python's __mul__/__truediv__
 # promote scalars to 0-dim tensors, so aten.mul.Scalar dispatches as aten.mul.Tensor
@@ -220,6 +262,15 @@ scalar_linear_ops = [
     aten.div_.Scalar,
     aten.mul.Scalar,
     aten.mul_.Scalar,
+    # foreach variants
+    aten._foreach_div.Scalar,
+    aten._foreach_div_.Scalar,
+    aten._foreach_mul.Scalar,
+    aten._foreach_mul_.Scalar,
+    aten._foreach_div.ScalarList,
+    aten._foreach_div_.ScalarList,
+    aten._foreach_mul.ScalarList,
+    aten._foreach_mul_.ScalarList,
 ]
 
 for op in scalar_linear_ops:
@@ -293,6 +344,11 @@ non_decreasing_unary_ops = [
     aten.nan_to_num.default,
     aten.nan_to_num_.default,
     aten.nan_to_num.out,
+    # foreach variants
+    aten._foreach_exp.default,
+    aten._foreach_exp_.default,
+    aten._foreach_clamp_max_.Scalar,
+    aten._foreach_clamp_min_.Scalar,
 ]
 
 _NON_DECREASING_RULES: list[list[Placement]] = [
@@ -322,7 +378,14 @@ for op in non_increasing_unary_ops:
     _register_single_dim_pointwise(op, _NON_INCREASING_RULES)
 
 # neg is linear: -(A1 + A2) = -A1 + -A2
-neg_ops = [aten.neg.default, aten.neg_.default, aten.neg.out]
+neg_ops = [
+    aten.neg.default,
+    aten.neg_.default,
+    aten.neg.out,
+    # foreach variants
+    aten._foreach_neg.default,
+    aten._foreach_neg_.default,
+]
 
 _NEG_RULES: list[list[Placement]] = _UNARY_LINEAR_RULES + _NON_INCREASING_RULES
 
@@ -383,6 +446,8 @@ monotonic_max_preserving_binary_ops = [
     aten.maximum.default,
     aten.maximum.out,
     prims.fmax.default,
+    # foreach variants
+    aten._foreach_maximum_.List,
 ]
 
 _MONOTONE_MAX_PRESERVING_BINARY_BASE_RULES: list[list[Placement]] = [
@@ -721,6 +786,45 @@ pointwise_ops = [
     prims.ne.default,
     prims.spherical_bessel_j0.default,
     prims.zeta.default,
+    # foreach variants
+    aten._foreach_abs.default,
+    aten._foreach_abs_.default,
+    aten._foreach_addcdiv_.Scalar,
+    aten._foreach_addcdiv_.ScalarList,
+    aten._foreach_addcdiv_.Tensor,
+    aten._foreach_addcmul.Scalar,
+    aten._foreach_addcmul_.Scalar,
+    aten._foreach_addcmul_.ScalarList,
+    aten._foreach_addcmul_.Tensor,
+    aten._foreach_lerp_.Scalar,
+    aten._foreach_pow.List,
+    aten._foreach_pow.ScalarList,
+    aten._foreach_reciprocal_.default,
+    aten._foreach_sub.Scalar,
+    aten._foreach_sub_.Scalar,
+    aten._foreach_sub.ScalarList,
+    aten._foreach_sub_.ScalarList,
+    aten._foreach_sqrt.default,
+    aten._foreach_sqrt_.default,
+    aten._foreach_zero_.default,
+    aten._foreach_cos.default,
+    aten._foreach_cos_.default,
+    aten._foreach_log.default,
+    aten._foreach_log_.default,
+    aten._amp_foreach_non_finite_check_and_unscale_.default,
+    # foreach linearity variants
+    aten._foreach_add.Scalar,
+    aten._foreach_add_.Scalar,
+    aten._foreach_add_.ScalarList,
+    # fused optimizer ops
+    aten._fused_adam_.default,
+    aten._fused_adam.default,
+    aten._fused_adam.tensor_lr,
+    aten._fused_adam_.tensor_lr,
+    aten._fused_adamw_.default,
+    aten._fused_adamw.default,
+    aten._fused_adamw.tensor_lr,
+    aten._fused_adamw_.tensor_lr,
 ]
 
 
@@ -1227,16 +1331,6 @@ def list_linear_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
     return list_pointwise_strategy(op_schema, linearity=True)
 
 
-for op in for_each_ops:
-    register_op_strategy(op, schema_info=RuntimeSchemaInfo(needs_pytree=True))(
-        list_pointwise_strategy
-    )
-
-for op in for_each_linearity_ops:
-    register_op_strategy(op, schema_info=RuntimeSchemaInfo(needs_pytree=True))(
-        list_linear_pointwise_strategy
-    )
-
 fused_ops = [
     aten._fused_adam_.default,
     aten._fused_adam.default,
@@ -1249,13 +1343,13 @@ fused_ops = [
 ]
 
 
-# The state_steps arg of fused adam / adamw is a Replicate scalar tensor, which will be put on
-# the compute_mesh of an op across all parameter groups, even when not all parameter groups
-# are on the same device mesh. This idx will help avoid hitting exceptions or unnecessary
-# redistribute during sharding propagation.
-_FUSED_OP_SCALAR_IDX = 5
+def register_inductor_prims() -> None:
+    """Register DTensor sharding strategies for inductor prims ops.
 
-for op in fused_ops:
-    register_op_strategy(op, schema_info=RuntimeSchemaInfo(needs_pytree=True))(
-        list_pointwise_strategy
-    )
+    Called lazily because inductor prims are created via make_prim() in
+    torch._inductor.inductor_prims, which is imported after this module.
+    """
+    # TODO: handle other inductor prims ops that may need DTensor sharding
+    # strategies (e.g. mul_rn, div_rn). Those are more complicated and not
+    # necessarily pointwise.
+    _register_single_dim_pointwise(prims.fma.default)

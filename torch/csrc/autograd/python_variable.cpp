@@ -227,6 +227,14 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
       }
       return false;
     };
+    auto matchList = [&](c10::TypeKind kind) {
+      const auto& t = arg.real_type();
+      if (auto list_t = t->cast<c10::ListType>()) {
+        if (list_t->getElementType()->kind() == kind)
+          return true;
+      }
+      return false;
+    };
     if (argument.isNone()) {
       return py::none();
     } else if (match(c10::ScalarTypeType::Kind)) {
@@ -239,6 +247,31 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
           reinterpret_cast<PyObject*>(obj));
     } else if (match(c10::MemoryFormatType::Kind)) {
       return py::cast(static_cast<c10::MemoryFormat>(argument.toInt()));
+    } else if (matchList(c10::ScalarTypeType::Kind)) {
+      const auto& list = argument.toListRef();
+      py::list result(list.size());
+      for (const auto i : c10::irange(list.size())) {
+        auto* obj = getTHPDtype(static_cast<c10::ScalarType>(list[i].toInt()));
+        result[i] = py::reinterpret_borrow<py::object>(
+            reinterpret_cast<PyObject*>(obj));
+      }
+      return result;
+    } else if (matchList(c10::LayoutType::Kind)) {
+      const auto& list = argument.toListRef();
+      py::list result(list.size());
+      for (const auto i : c10::irange(list.size())) {
+        auto* obj = getTHPLayout(static_cast<c10::Layout>(list[i].toInt()));
+        result[i] = py::reinterpret_borrow<py::object>(
+            reinterpret_cast<PyObject*>(obj));
+      }
+      return result;
+    } else if (matchList(c10::MemoryFormatType::Kind)) {
+      const auto& list = argument.toListRef();
+      py::list result(list.size());
+      for (const auto i : c10::irange(list.size())) {
+        result[i] = py::cast(static_cast<c10::MemoryFormat>(list[i].toInt()));
+      }
+      return result;
     } else {
       return torch::jit::toPyObject(argument);
     }
@@ -1087,9 +1120,10 @@ struct IValueOrDTensorSpec {
   py::object dtensor_spec;
 
   bool operator==(const IValueOrDTensorSpec& rhs) const {
-    return dtensor_spec
-        ? (rhs.dtensor_spec && dtensor_spec.equal(rhs.dtensor_spec))
-        : (iv == rhs.iv);
+    if (dtensor_spec) {
+      return rhs.dtensor_spec && dtensor_spec.equal(rhs.dtensor_spec);
+    }
+    return !rhs.dtensor_spec && iv == rhs.iv;
   }
 };
 
@@ -1162,18 +1196,6 @@ class NativeOpSchema {
   // have no guarantees about its lifetime. This class is cheap anyway.
   c10::OperatorHandle op_;
   std::size_t hash_;
-  // Subtle point: consider clamp.Tensor(Tensor self, Tensor?
-  // min=None, Tensor? max=None). The invocations clamp(t1, None, t2)
-  // and clamp(t1, t2, None) have the same comparison key (t1, t2)
-  // because we drop non-static non-tensor args from comparison. The
-  // only way we happen to be able to tell them apart is that we omit
-  // trailing defaulted arguments from the args tuple passed to
-  // __torch_dispatch__ (and hence to DTensor dispatch as well), so
-  // they have different args_schema_len_.
-  //
-  // I am preserving this existing behavior, but I suspect we should
-  // make an algorithm change to be less brittle, such as including
-  // None defaults for Tensor arguments in the comparison.
   std::size_t args_schema_len_;
   // There is no particular justification for the choice of 8
   // here. Feel free to change it.
@@ -1842,7 +1864,7 @@ static bool DTensor_OpSchema_recompute_comparison_key_impl(
   size_t idx = 0;
   for (const auto& e : args_schema) {
     if (idx >= native_info.static_argnum ||
-        arg_type_tensor_or_tensor_list_like(e)) {
+        arg_type_tensor_or_tensor_list_like(e) || e.is_none()) {
       if (PyList_Check(e.ptr())) {
         args_to_hash.push_back(
             py::reinterpret_steal<py::object>(PyList_AsTuple(e.ptr())));
@@ -2304,7 +2326,9 @@ create_native_op_schema(
   const auto handle_non_dtensor_arg =
       [&comparison_key, &comparison_key_hash, &native_info](
           size_t idx, c10::IValue arg) {
-        if (idx >= native_info.static_argnum) {
+        bool is_none_or_undefined =
+            arg.isNone() || (arg.isTensor() && !arg.toTensor().defined());
+        if (idx >= native_info.static_argnum || is_none_or_undefined) {
           if (arg.isList()) {
             const auto& list = arg.toList();
             if (list.empty()) {

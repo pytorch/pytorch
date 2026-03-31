@@ -15,6 +15,7 @@ import signal
 import sys
 import tempfile
 import time
+import unittest
 from collections.abc import Callable
 from itertools import product
 from unittest import mock
@@ -42,6 +43,7 @@ from torch.testing._internal.common_utils import (
     skip_if_pytest,
     TEST_WITH_ASAN,
     TEST_WITH_DEV_DBG_ASAN,
+    TEST_WITH_ROCM,
     TEST_WITH_TSAN,
     TestCase,
 )
@@ -447,6 +449,10 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                     for i in range(pc.nprocs):
                         self.assertEqual(size, len(results.return_values[i]))
 
+        @unittest.skipIf(
+            TEST_WITH_ROCM,
+            "Skipped on ROCm due to hang in MultiprocessContext.wait after Kineto bump (PR #177101, 1fd9c49); investigating",
+        )
         def test_function_raise(self):
             """
             run 2x copies of echo2, raise an exception on the first

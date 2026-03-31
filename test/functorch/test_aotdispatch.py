@@ -6909,7 +6909,6 @@ def forward(self, primals_1, tangents_1):
                 subclass_inp_meta=[],
                 subclass_fw_graph_out_meta=[],
                 subclass_tangent_meta=[],
-                is_train=False,
                 traced_tangents_descs=[],
             )
             meta.tokens = {EffectType.ORDERED: torch.tensor([])}
@@ -6937,6 +6936,148 @@ def forward(self, primals_1, tangents_1):
             )
         finally:
             handle.destroy()
+
+    def test_collect_metadata_subclass_fw_outs_follow_input_mutation_type(self):
+        from torch._functorch._aot_autograd.collect_metadata_analysis import (
+            run_functionalized_fw_and_collect_metadata,
+        )
+        from torch._functorch._aot_autograd.descriptors import PlainAOTInput
+        from torch._functorch._aot_autograd.schemas import SubclassCreationMeta
+
+        def f(x):
+            x.add_(1)
+            return [torch.sin(x)]
+
+        fake_mode = FakeTensorMode()
+        subclass_arg = TwoTensor(
+            fake_mode.from_tensor(torch.ones(2)),
+            fake_mode.from_tensor(torch.ones(2)),
+        )
+
+        keep_input_mutations_meta = run_functionalized_fw_and_collect_metadata(
+            f,
+            flat_args_descs=[PlainAOTInput(0)],
+            keep_input_mutations=True,
+            static_input_indices=[],
+        )(subclass_arg)
+        self.assertEqual(keep_input_mutations_meta.mutated_inp_runtime_indices, [])
+        self.assertEqual(len(keep_input_mutations_meta.subclass_fw_graph_out_meta), 1)
+        self.assertIsInstance(
+            keep_input_mutations_meta.subclass_fw_graph_out_meta[0],
+            SubclassCreationMeta,
+        )
+        self.assertEqual(
+            keep_input_mutations_meta.subclass_fw_graph_out_meta[
+                0
+            ].flat_tensor_start_idx,
+            0,
+        )
+
+        out_of_graph_mutation_meta = run_functionalized_fw_and_collect_metadata(
+            f,
+            flat_args_descs=[PlainAOTInput(0)],
+            keep_input_mutations=False,
+            static_input_indices=[],
+        )(subclass_arg)
+        self.assertEqual(out_of_graph_mutation_meta.mutated_inp_runtime_indices, [0])
+        self.assertEqual(len(out_of_graph_mutation_meta.subclass_fw_graph_out_meta), 2)
+        self.assertIsInstance(
+            out_of_graph_mutation_meta.subclass_fw_graph_out_meta[0],
+            SubclassCreationMeta,
+        )
+        self.assertIsInstance(
+            out_of_graph_mutation_meta.subclass_fw_graph_out_meta[1],
+            SubclassCreationMeta,
+        )
+        self.assertEqual(
+            out_of_graph_mutation_meta.subclass_fw_graph_out_meta[
+                0
+            ].flat_tensor_start_idx,
+            0,
+        )
+        self.assertEqual(
+            out_of_graph_mutation_meta.subclass_fw_graph_out_meta[
+                1
+            ].flat_tensor_start_idx,
+            2,
+        )
+
+    def test_collect_metadata_subclass_fw_outs_include_metadata_only_mutation(self):
+        from torch._functorch._aot_autograd.collect_metadata_analysis import (
+            run_functionalized_fw_and_collect_metadata,
+        )
+        from torch._functorch._aot_autograd.descriptors import PlainAOTInput
+        from torch._functorch._aot_autograd.schemas import (
+            PlainTensorMeta,
+            SubclassCreationMeta,
+        )
+
+        def f(x):
+            x.transpose_(0, 1)
+            return [TwoTensor(torch.sin(x), torch.cos(x))]
+
+        fake_mode = FakeTensorMode()
+        arg = fake_mode.from_tensor(torch.ones(2, 3))
+
+        metadata = run_functionalized_fw_and_collect_metadata(
+            f,
+            flat_args_descs=[PlainAOTInput(0)],
+            keep_input_mutations=True,
+            static_input_indices=[],
+        )(arg)
+
+        self.assertEqual(metadata.mutated_inp_runtime_indices, [0])
+        self.assertEqual(len(metadata.subclass_fw_graph_out_meta), 2)
+        self.assertIsInstance(metadata.subclass_fw_graph_out_meta[0], PlainTensorMeta)
+        self.assertEqual(metadata.subclass_fw_graph_out_meta[0].unwrapped_idx, 0)
+        self.assertIsInstance(
+            metadata.subclass_fw_graph_out_meta[1],
+            SubclassCreationMeta,
+        )
+        self.assertEqual(
+            metadata.subclass_fw_graph_out_meta[1].flat_tensor_start_idx,
+            1,
+        )
+
+    def test_collect_metadata_subclass_fw_outs_include_intermediate_bases(self):
+        from torch._functorch._aot_autograd.collect_metadata_analysis import (
+            run_functionalized_fw_and_collect_metadata,
+        )
+        from torch._functorch._aot_autograd.descriptors import PlainAOTInput
+        from torch._functorch._aot_autograd.schemas import PlainTensorMeta
+
+        def f(x):
+            y = x.a + x.b
+            return [y.view(-1), y.view(-1)]
+
+        fake_mode = FakeTensorMode()
+        subclass_arg = TwoTensor(
+            fake_mode.from_tensor(torch.ones(2, 3, requires_grad=True)),
+            fake_mode.from_tensor(torch.ones(2, 3, requires_grad=True)),
+        )
+
+        metadata = run_functionalized_fw_and_collect_metadata(
+            f,
+            flat_args_descs=[PlainAOTInput(0)],
+            keep_input_mutations=True,
+            static_input_indices=[],
+        )(subclass_arg)
+
+        self.assertEqual(metadata.num_intermediate_bases, 1)
+        self.assertEqual(len(metadata.subclass_fw_graph_out_meta), 3)
+        self.assertTrue(
+            all(
+                isinstance(out_meta, PlainTensorMeta)
+                for out_meta in metadata.subclass_fw_graph_out_meta
+            )
+        )
+        self.assertEqual(
+            [
+                out_meta.unwrapped_idx
+                for out_meta in metadata.subclass_fw_graph_out_meta
+            ],
+            [0, 1, 2],
+        )
 
 
 class TestAOTDispatch(AOTTestCase):
@@ -8745,8 +8886,6 @@ aot_autograd_failures = {
     xfail("nn.functional.gaussian_nll_loss"),
     xfail("tensor_split"),
     xfail("corrcoef"),
-    xfail("quantile"),
-    xfail("nanquantile"),
     skip("narrow"),
     xfail("istft"),
     xfail("linalg.eig"),
@@ -8780,6 +8919,14 @@ aot_autograd_failures = {
         # This delta is coming entirely from the clone() on tangents
         # in AOTDispatcher to make them contiguous
         decorator=toleranceOverride({torch.float32: tol(atol=1e-02, rtol=1e-02)}),
+    ),
+    decorate(
+        "cholesky_inverse",
+        # Numerical differences due to tangent stride differences between
+        # eager (.sum().backward() uses contiguous tangent) and compiled
+        # (tangent strides match output strides). With ill-conditioned inputs,
+        # matmul accumulates rounding errors differently for different layouts.
+        decorator=toleranceOverride({torch.float32: tol(atol=3e02, rtol=2e-03)}),
     ),
     decorate(
         "nn.functional.interpolate",
@@ -9191,6 +9338,45 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
         def _inps():
             dummy = torch.zeros((2,), requires_grad=True)
             inplace_tensor = torch.zeros((2,), requires_grad=False)
+            return dummy, inplace_tensor
+
+        inps = _inps()
+        out = fn(*inps)
+        ref_inps_after_fw = [x.clone().detach() for x in inps]
+        out.sum().backward()
+        ref_inps_after_bw = [x.clone().detach() for x in inps]
+
+        inps = _inps()
+        out = torch.compile(fn, backend="aot_eager", fullgraph=True)(*inps)
+        inps_after_fw = [x.clone().detach() for x in inps]
+        out.sum().backward()
+        inps_after_bw = [x.clone().detach() for x in inps]
+
+        self.assertEqual(ref_inps_after_fw, inps_after_fw)
+        self.assertEqual(ref_inps_after_bw, inps_after_bw)
+
+    def test_mutations_in_bw_requires_grad_input(self):
+        # Inplace mutation of a requires_grad=True forward input during the
+        # backward pass should not trigger the check_inplace error
+        class AF(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, dummy, inplace_tensor):
+                ctx.save_for_backward(inplace_tensor)
+                return dummy.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (inplace_tensor,) = ctx.saved_tensors
+                inplace_tensor.mul_(2.0)
+                return grad_output, None
+
+        def fn(dummy, inplace_tensor):
+            return AF.apply(dummy, inplace_tensor)
+
+        def _inps():
+            dummy = torch.zeros((2,), requires_grad=True)
+            # requires_grad=True is what triggered the bug
+            inplace_tensor = torch.ones((2,), requires_grad=True)
             return dummy, inplace_tensor
 
         inps = _inps()

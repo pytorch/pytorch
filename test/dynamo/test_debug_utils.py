@@ -325,9 +325,12 @@ class TestBackendOverrideIntegration(TestCase):
         result = self._run_with_override(device, "0:aot_eager;1:inductor;3:eager")
         self.assertEqual(result, ["aot_eager", "inductor", "eager"])
 
-    def test_first_rule_wins(self, device):
-        result = self._run_with_override(device, ">=0:aot_eager;>=1:inductor")
-        self.assertEqual(result, ["aot_eager", "aot_eager", "aot_eager", "aot_eager"])
+    def test_conflicting_rules_raise(self, device):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "Conflicting backend override",
+        ):
+            self._run_with_override(device, ">=0:aot_eager;>=1:inductor")
 
     def test_complex_config(self, device):
         result = self._run_with_override(device, "0:aot_eager;>=2:inductor")
@@ -468,6 +471,18 @@ class TestInductorConfigOverrideIntegration(TestCase):
         self.assertEqual(router.get_value_for_graph(1), {"b": 2, "c": 3})
         self.assertEqual(router.get_value_for_graph(2), {"c": 3})
 
+    def test_backend_router_conflict_raises(self, device):
+        from torch._dynamo.graph_id_filter import GraphBackendRouter
+
+        with self.assertRaisesRegex(ValueError, "Conflicting backend override"):
+            GraphBackendRouter("0-5:eager;3-10:inductor")
+
+    def test_backend_router_same_backend_no_conflict(self, device):
+        from torch._dynamo.graph_id_filter import GraphBackendRouter
+
+        router = GraphBackendRouter("0:eager;>=0:eager")
+        self.assertIsNotNone(router.get_value_for_graph(0))
+
     def test_get_inductor_config_override_empty(self, device):
         from torch._dynamo.graph_id_filter import (
             get_inductor_config_override_for_compile_id,
@@ -486,12 +501,12 @@ class TestInductorConfigOverrideIntegration(TestCase):
         """
         from torch._dynamo.graph_id_filter import (
             _create_backend_router,
-            _create_config_router,
+            _create_inductor_config_router,
         )
 
         torch._dynamo.reset()
         _create_backend_router.cache_clear()
-        _create_config_router.cache_clear()
+        _create_inductor_config_router.cache_clear()
 
         backends_used: list[str] = []
         configs_applied: list[dict] = []
@@ -571,12 +586,12 @@ class TestInductorConfigOverrideIntegration(TestCase):
         """
         from torch._dynamo.graph_id_filter import (
             _create_backend_router,
-            _create_config_router,
+            _create_inductor_config_router,
         )
 
         torch._dynamo.reset()
         _create_backend_router.cache_clear()
-        _create_config_router.cache_clear()
+        _create_inductor_config_router.cache_clear()
 
         backends_used: list[str] = []
         configs_applied: list[dict] = []
@@ -661,14 +676,14 @@ class TestInductorConfigOverrideIntegration(TestCase):
         time for both forward and backward, across multiple graph breaks.
         """
         import torch._functorch.config
-        from torch._dynamo.graph_id_filter import _create_config_router
+        from torch._dynamo.graph_id_filter import _create_inductor_config_router
         from torch._inductor import (
             compile_fx as compile_fx_mod,
             config as inductor_config,
         )
 
         torch._dynamo.reset()
-        _create_config_router.cache_clear()
+        _create_inductor_config_router.cache_clear()
 
         TRACKED_CONFIGS = [
             "triton.cudagraphs",
@@ -761,6 +776,122 @@ class TestInductorConfigOverrideIntegration(TestCase):
 instantiate_device_type_tests(
     TestInductorConfigOverrideIntegration, globals(), only_for=["cpu", "cuda"]
 )
+
+
+class TestConfigOverrideValidation(TestCase):
+    def setUp(self):
+        super().setUp()
+        from torch._dynamo.graph_id_filter import (
+            _validate_backend_names,
+            _validate_dynamo_config_keys,
+            _validate_inductor_config_keys,
+        )
+
+        _validate_backend_names.cache_clear()
+        _validate_dynamo_config_keys.cache_clear()
+        _validate_inductor_config_keys.cache_clear()
+        torch._dynamo.reset()
+
+    def tearDown(self):
+        torch._dynamo.reset()
+        super().tearDown()
+
+    @torch._dynamo.config.patch(
+        debug_backend_override="0:not_a_real_backend",
+    )
+    def test_invalid_backend_raises_on_compile(self):
+        def fn(x):
+            return x + 1
+
+        with self.assertRaisesRegex(ValueError, "not_a_real_backend"):
+            torch.compile(fn, backend="eager")(torch.randn(4))
+
+    @torch._dynamo.config.patch(
+        debug_dynamo_config_override="0:nonexistent_dynamo_option=True",
+    )
+    def test_invalid_dynamo_config_raises_on_compile(self):
+        def fn(x):
+            return x + 1
+
+        with self.assertRaisesRegex(ValueError, "nonexistent_dynamo_option"):
+            torch.compile(fn, backend="eager")(torch.randn(4))
+
+    @torch._dynamo.config.patch(
+        debug_inductor_config_override="0:nonexistent_inductor_option=True",
+    )
+    def test_invalid_inductor_config_raises_on_compile(self):
+        def fn(x):
+            return x + 1
+
+        with self.assertRaisesRegex(ValueError, "nonexistent_inductor_option"):
+            torch.compile(fn, backend="eager")(torch.randn(4))
+
+
+class TestDynamoConfigOverrideIntegration(TestCase):
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+
+    def tearDown(self):
+        torch._dynamo.reset()
+        super().tearDown()
+
+    @torch._dynamo.config.patch(
+        specialize_float=False,
+        verbose=False,
+        debug_dynamo_config_override=(
+            "0:specialize_float=True;1:verbose=True,recompile_limit=10"
+        ),
+    )
+    def test_dynamo_config_override_per_graph(self):
+        """Per-graph dynamo config overrides target the right graphs.
+
+        Graph 0: specialize_float overridden True (base False)
+        Graph 1: verbose+recompile_limit overridden (multiple keys)
+        Graph 2: no override, keeps base values
+        """
+        from torch._dynamo.graph_id_filter import _create_dynamo_config_router
+
+        _create_dynamo_config_router.cache_clear()
+
+        observed: dict[int, dict] = {}
+
+        def capturing_backend(gm, example_inputs):
+            fid = torch._guards.CompileContext.current_compile_id().frame_id
+            observed[fid] = {
+                "specialize_float": torch._dynamo.config.specialize_float,
+                "verbose": torch._dynamo.config.verbose,
+                "recompile_limit": torch._dynamo.config.recompile_limit,
+            }
+            return gm
+
+        def fn(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            x = x * 2
+            torch._dynamo.graph_break()
+            return x - 1
+
+        torch.compile(fn, backend=capturing_backend)(torch.randn(4))
+
+        self.assertTrue(observed[0]["specialize_float"])
+        self.assertFalse(observed[0]["verbose"])
+
+        self.assertFalse(observed[1]["specialize_float"])
+        self.assertTrue(observed[1]["verbose"])
+        self.assertEqual(observed[1]["recompile_limit"], 10)
+
+        self.assertFalse(observed[2]["specialize_float"])
+        self.assertFalse(observed[2]["verbose"])
+
+    def test_dynamo_config_override_warning(self):
+        from torch._dynamo.graph_id_filter import _create_dynamo_config_router
+
+        _create_dynamo_config_router.cache_clear()
+        with self.assertWarnsRegex(
+            UserWarning, "TORCH_COMPILE_OVERRIDE_DYNAMO_CONFIGS"
+        ):
+            _create_dynamo_config_router("0:specialize_float=True")
 
 
 if __name__ == "__main__":

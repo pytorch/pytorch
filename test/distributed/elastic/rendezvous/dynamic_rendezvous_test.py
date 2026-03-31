@@ -1829,7 +1829,7 @@ class IntegrationTest(TestCase):
             def set(self, key, value):
                 pass
 
-        prefix_store = CustomPrefixStore(spec=dist.PrefixStore)
+        prefix_store = CustomPrefixStore()
         prefix_store_class_mock.return_value = prefix_store
         tcp_store = Mock(spec=dist.TCPStore)
         original_addr = "original_addr"

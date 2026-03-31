@@ -157,6 +157,7 @@ un_ops_under_test = [
     torch._foreach_abs,
     torch._foreach_sqrt,
     torch._foreach_rsqrt,
+    torch._foreach_clone,
     *foreach_map_un_ops_under_test,
 ]
 

@@ -494,6 +494,34 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
             self.assertIn("e_deprecated_alias", str(w[0].message))
             self.assertIn("use something else instead", str(w[0].message))
 
+    def test_no_warnings_for_normal_user_code(self):
+        """Test that normal user operations don't produce deprecation warnings."""
+        import torch
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+
+            # Simple user code - compile and run a function
+            @torch.compile(backend="eager")
+            def fn(x):
+                return x + 1
+
+            _ = fn(torch.ones(3))
+
+            # No deprecation warnings should be issued from config system
+            deprecation_warnings = [
+                warning
+                for warning in w
+                if issubclass(warning.category, FutureWarning)
+                and "deprecated" in str(warning.message).lower()
+                and "config" in str(warning.message).lower()
+            ]
+            self.assertEqual(
+                len(deprecation_warnings),
+                0,
+                f"Unexpected config deprecation warnings: {[str(x.message) for x in deprecation_warnings]}",
+            )
+
 
 if __name__ == "__main__":
     run_tests()

@@ -277,6 +277,8 @@ def memory_stats(device: "Device" = None) -> dict[str, Any]:
       cuMemMap and cudaMalloc.
     - ``"num_device_free"``: number of CUDA free calls. This includes both cuMemUnmap
       and cudaFree.
+    - ``"num_oom_rejections"``: number of allocations preemptively rejected by the
+        throw_on_cudamalloc_oom + per_process_memory_fraction policy.
 
     The caching allocator can be configured via ENV to not split blocks larger than a
     defined size (see Memory Management section of the Cuda Semantics documentation).
@@ -1027,6 +1029,9 @@ def _snapshot(device: "Device" = None, augment_with_fx_traces=False):
             total_size: int  #  cudaMalloc'd size of segment
             stream: int
             segment_type: Literal["small", "large"]  # 'large' (>1MB)
+            segment_pool_id: Tuple[
+                int, int
+            ]  # id of the memory pool owning this segment
             allocated_size: int  # size of memory in use
             active_size: int  # size of memory in use or in active_awaiting_free state
             blocks: List[Block]
@@ -1085,6 +1090,7 @@ def _snapshot(device: "Device" = None, augment_with_fx_traces=False):
             stream: int
             device_free: int  # only present for OOM, the amount of
             # memory cuda still reports to be free
+            pool_id: Tuple[int, int]  # id of the memory pool for this entry
 
     Args:
         device: Device to capture snapshot for. If None, captures for current device.

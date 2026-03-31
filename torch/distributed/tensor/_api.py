@@ -2,6 +2,7 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import copy
+import hashlib
 import inspect
 import warnings
 from collections.abc import Callable, Sequence
@@ -360,7 +361,12 @@ class DTensor(torch.Tensor):
         protocol to inform how to flatten a DTensor to local tensor
         for PT2 tracing
         """
-        return ["_local_tensor"], (self._spec, self.requires_grad)
+        return ["_local_tensor", "device_mesh"], (
+            self._spec.placements,
+            self._spec.tensor_meta,
+            self._spec.shard_order,
+            self.requires_grad,
+        )
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, flatten_spec, outer_size, outer_stride):
@@ -369,16 +375,18 @@ class DTensor(torch.Tensor):
                 "Expecting spec to be not None from `__tensor_flatten__` return value!"
             )
         local_tensor = inner_tensors["_local_tensor"]
-        spec, requires_grad = flatten_spec
+        mesh = inner_tensors["device_mesh"]
+        placements, old_tensor_meta, shard_order, requires_grad = flatten_spec
         unflatten_tensor_meta = TensorMeta(
             shape=outer_size,
             stride=outer_stride,
-            dtype=spec.tensor_meta.dtype,
+            dtype=old_tensor_meta.dtype,
         )
         unflatten_spec = DTensorSpec(
-            spec.mesh,
-            spec.placements,
+            mesh,
+            placements,
             tensor_meta=unflatten_tensor_meta,
+            shard_order=shard_order,
         )
         # pyrefly: ignore [bad-argument-type]
         return DTensor(
@@ -388,6 +396,15 @@ class DTensor(torch.Tensor):
             # pyrefly: ignore [unexpected-keyword]
             requires_grad=requires_grad,
         )
+
+    def _stable_hash_for_caching(self) -> str:
+        """
+        Return a stable hash for AOT autograd caching.
+        [See note: Tensor subclass stable hashing for AOT autograd cache]
+        """
+        # Combine spec's stable hash with requires_grad
+        cache_data = self._spec._stable_hash() + str(self.requires_grad)
+        return hashlib.blake2b(cache_data.encode(), digest_size=16).hexdigest()
 
     def __coerce_tangent_metadata__(self):
         if not any(isinstance(p, Partial) for p in self.placements):
@@ -401,22 +418,34 @@ class DTensor(torch.Tensor):
         if expected_type is not None:
             return None
 
-        (spec, _) = flatten_spec  # Result of tensor_flatten()
+        (placements, _, _, _) = flatten_spec
         return self.redistribute(
             device_mesh=self.device_mesh,
-            placements=spec.placements,
+            placements=placements,
         )
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
-        # We just need to have an implementation here; the __torch_dispatch__ machinery
-        # calls into a specific C++ fast path that doesn't call here.
-        # See #167051 for details
-        # python_arg_parser.cpp: dispatch_on_subclass()
-        # -> python_variable.cpp: dispatchDTensorOp()
-        raise NotImplementedError(
-            "DTensor.__torch_dispatch__ should not actually get called"
-        )
+        # Base DTensor is normally dispatched via a C++ fast path (see #167051)
+        # and never reaches here. This implementation exists so that DTensor
+        # subclasses can delegate back via super().__torch_dispatch__().
+        # It unwraps subclass instances to base DTensor and re-calls the op,
+        # which re-enters dispatch and hits the C++ fast path.
+        def unwrap(t):
+            if isinstance(t, DTensor) and type(t) is not DTensor:
+                # pyrefly: ignore [bad-argument-type]
+                return DTensor(
+                    # pyrefly: ignore [bad-argument-count]
+                    t._local_tensor,
+                    t._spec,
+                    # pyrefly: ignore [unexpected-keyword]
+                    requires_grad=t.requires_grad,
+                )
+            return t
+
+        args = torch.utils._pytree.tree_map(unwrap, args)
+        kwargs = torch.utils._pytree.tree_map(unwrap, kwargs or {})
+        return func(*args, **kwargs)
 
     @staticmethod
     def from_local(
@@ -776,19 +805,6 @@ class DTensor(torch.Tensor):
             return self.to_local()
         else:
             raise RuntimeError("Unsupported tensor type!")
-
-    @classmethod
-    def __metadata_guard__(
-        cls, orig: tuple[DTensorSpec, bool], other: tuple[DTensorSpec, bool]
-    ) -> bool:
-        # TODO - delete this - This is now unused after the PR -
-        # https://github.com/pytorch/pytorch/pull/165824
-        orig_spec, orig_requires_grad = orig
-        other_spec, other_requires_grad = other
-        return (
-            orig_spec._check_equals(other_spec, skip_shapes=True)
-            and orig_requires_grad == other_requires_grad
-        )
 
 
 def distribute_tensor(

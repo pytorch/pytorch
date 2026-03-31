@@ -24,6 +24,27 @@ if TEST_SCIPY:
     from scipy import stats
 
 
+# (init_fn, shape, extra kwargs) covering every public init function.
+# Shapes satisfy each function's dimensionality requirements.
+# The 0-element variant is derived by replacing dim-0 with 0.
+ALL_INIT_FNS = [
+    (init.uniform_, (3, 5), {}),
+    (init.normal_, (3, 5), {}),
+    (init.trunc_normal_, (3, 5), {}),
+    (init.constant_, (3, 5), {"val": 0.3}),
+    (init.ones_, (3, 5), {}),
+    (init.zeros_, (3, 5), {}),
+    (init.eye_, (3, 5), {}),
+    (init.dirac_, (3, 16, 5), {}),
+    (init.xavier_uniform_, (3, 5), {}),
+    (init.xavier_normal_, (3, 5), {}),
+    (init.kaiming_uniform_, (3, 5), {}),
+    (init.kaiming_normal_, (3, 5), {}),
+    (init.orthogonal_, (3, 5), {}),
+    (init.sparse_, (3, 5), {"sparsity": 0.1}),
+]
+
+
 class TestNNInit(TestCase):
     def setUp(self):
         super().setUp()
@@ -149,10 +170,19 @@ class TestNNInit(TestCase):
         if not self._is_trunc_normal(input_tensor, mean=0, std=1, a=0, b=1):
             raise AssertionError("Expected truncated normal distribution")
 
-    def test_trunc_normal_meta(self):
-        t = torch.empty(3, 5, device="meta")
-        result = init.trunc_normal_(t)
-        self.assertIs(result, t)
+    def test_init_methods_meta(self):
+        for fn, shape, kwargs in ALL_INIT_FNS:
+            with self.subTest(init_fn=fn.__name__):
+                t = torch.empty(shape, device="meta")
+                result = fn(t, **kwargs)
+                self.assertIs(result, t)
+
+    def test_init_methods_meta_zero_element(self):
+        for fn, shape, kwargs in ALL_INIT_FNS:
+            with self.subTest(init_fn=fn.__name__):
+                t = torch.empty((0,) + shape[1:], device="meta")
+                result = fn(t, **kwargs)
+                self.assertIs(result, t)
 
     def test_constant(self):
         for dims in [1, 2, 4]:
@@ -695,6 +725,24 @@ class TestNNInitDeviceType(TestCase):
             0,
             f"{dtype}: {at_upper} values clamped to upper bound b=2.0",
         )
+
+    def _run_init_test(self, device, zero_element=False):
+        for fn, shape, kwargs in ALL_INIT_FNS:
+            if zero_element:
+                shape = (0,) + shape[1:]
+            with self.subTest(init_fn=fn.__name__):
+                t = torch.empty(shape, device=device)
+                result = fn(t, **kwargs)
+                self.assertIs(result, t)
+
+    def test_init_methods_no_error(self, device):
+        # Smoke test: every public init function must run without error on all
+        # devices (including meta where the ops are no-ops).
+        self._run_init_test(device)
+
+    def test_init_methods_zero_element(self, device):
+        # Every init function should handle 0-element tensors as a no-op.
+        self._run_init_test(device, zero_element=True)
 
 
 instantiate_device_type_tests(TestNNInitDeviceType, globals())

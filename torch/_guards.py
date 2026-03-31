@@ -14,7 +14,7 @@ from abc import abstractmethod
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Generic, NamedTuple, Optional, overload, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, NamedTuple, overload, TYPE_CHECKING, TypeVar
 from typing_extensions import dataclass_transform
 
 import torch
@@ -36,7 +36,9 @@ if TYPE_CHECKING:
 
     from torch._dynamo.backends.distributed import DDPOptimizerContext
     from torch._dynamo.codegen import PyCodegen
+    from torch._dynamo.guards import GuardCheckSpec
     from torch._functorch._aot_autograd.schemas import ViewAndMutationMeta
+    from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
     from torch._subclasses.fake_tensor import FakeTensorMode
 
 
@@ -512,7 +514,7 @@ class GuardsCheckpointState:
     def __init__(self, dynamo_guards: OrderedSet[Guard]) -> None:
         self.dynamo_guards = dynamo_guards
 
-    def diff(self, other: GuardsCheckpointState) -> Optional[OrderedSet[Guard]]:
+    def diff(self, other: GuardsCheckpointState) -> OrderedSet[Guard] | None:
         """
         Produces a delta against another GuardsCheckpointState.
 
@@ -635,7 +637,7 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
 # Like a Set[Guard] but will record the user stack on all guards at the
 # time they were installed at their destination
 class GuardsSet:
-    def __init__(self, inner: Optional[OrderedSet[Guard]] = None) -> None:
+    def __init__(self, inner: OrderedSet[Guard] | None = None) -> None:
         if inner is None:
             self.inner: OrderedSet[Guard] = OrderedSet()
         else:
@@ -770,6 +772,59 @@ class HopSubgraphCache:
     ) -> tuple[torch.fx.GraphModule | None, int | None]: ...
 
 
+@dataclass
+class InvokeSubgraphReuseEntry:
+    body_name: str
+    body_gmod: torch.fx.GraphModule
+    config: NestedCompileRegionOptions | None
+    subgraph_input_mapping: list[
+        Any
+    ]  # list[LiftedArgOrigin] - defined in invoke_subgraph.py
+    single_tensor_output: bool
+    # Per-output tensor metadata (shape, stride, dtype, device, requires_grad)
+    # cached from the first trace so we can construct fresh FakeTensors on
+    # cache hit without re-running body_gmod.
+    output_metadata: list[
+        tuple[torch.Size, tuple[int, ...], torch.dtype, torch.device, bool]
+    ]
+    # 1-1 mapping to flat_vts: source for each flattened arg/kwarg, or None if
+    # the VT has no source. On cache hit, we build a source replacement mapping
+    # (old arg sources → new arg sources) to rewrite captured variable sources
+    # for the current invocation.
+    arg_sources: list[Source | None]
+    # Number of user-visible outputs (from the function return value).
+    # The graph may have additional outputs from side-effect intermediates;
+    # stamp_out_subgraph uses this to return only the user-visible slice.
+    num_user_outputs: int = 0
+
+
+@dataclass
+class InvokeSubgraphReuseCondition:
+    # Per flattened input VT: (InputTag, metadata).
+    #   (InputTag.TENSOR, TensorMetadata)
+    #   (InputTag.SYMNODE, sym_num — same object implies same symbol)
+    #   (InputTag.CONSTANT, value)
+    #   (InputTag.MODULE, None)
+    # Tensor metadata is checked here because TENSOR_MATCH guards for
+    # subgraph inputs may already exist before tracing and thus won't
+    # appear in the guard delta.
+    input_checks: list[tuple[Any, object]]  # list[tuple[InputTag, object]]
+
+    # Guards captured during the trace (delta + source-mapped).
+    # Each entry: (source, handler, expected_value, guard)
+    # handler is a pre-resolved GuardCheckSpec from GUARD_VALUE_DISPATCH.
+    guards: list[tuple[Source, GuardCheckSpec, object, Guard]]
+
+    # TreeSpec from pytree.tree_flatten of the (args, kwargs) structure.
+    # On cache hit, we verify the new call has the same treespec.
+    treespec: pytree.TreeSpec | None = None
+
+    # All sources accessed via VariableBuilder during the subgraph trace.
+    # On cache hit, we check if any modified VT's source is a base of one
+    # of these to detect mutations on captured variables.
+    traced_sources: OrderedSet[Source] = dataclasses.field(default_factory=OrderedSet)
+
+
 class InvokeSubgraphCache(HopSubgraphCache):
     def __init__(self) -> None:
         self.autograd_cache: dict[str, Callable] = {}
@@ -781,6 +836,11 @@ class InvokeSubgraphCache(HopSubgraphCache):
         self.effects_cache: dict[
             str, set
         ] = {}  # Maps identifier -> set of effect types
+        # fn_id → list of (condition, cache_entry) pairs. Walked linearly
+        # on lookup; first matching condition wins.
+        self.subgraph_reuse_cache: dict[
+            int, list[tuple[InvokeSubgraphReuseCondition, InvokeSubgraphReuseEntry]]
+        ] = defaultdict(list)
 
     def add_dynamo_installed_submodule(self, fn_id: int, identifier: str) -> None:
         self.dynamo_installed_submodules[fn_id].append(identifier)
@@ -834,6 +894,43 @@ class InvokeSubgraphCache(HopSubgraphCache):
     def get_effects(self, identifier: str) -> set | None:
         """Retrieve the effect types for a given invoke_subgraph identifier."""
         return self.effects_cache.get(identifier, None)
+
+    def add_reuse_entry(
+        self,
+        fn_id: int,
+        condition: InvokeSubgraphReuseCondition,
+        entry: InvokeSubgraphReuseEntry,
+        max_reuse_entries: int = 8,
+    ) -> None:
+        entries = self.subgraph_reuse_cache[fn_id]
+        if len(entries) >= max_reuse_entries:
+            raise RuntimeError(
+                f"invoke_subgraph: exceeded maximum reuse entries "
+                f"({max_reuse_entries}) for function id {fn_id}. "
+                f"This most likely means a guard keeps failing on every "
+                f"invocation, preventing subgraph reuse. "
+                f"Set TORCH_LOGS='+hierarchical_compile' to identify which "
+                f"guard is failing. If reuse is genuinely not possible and "
+                f"you need more cache entries, increase the limit via the "
+                f"max_reuse_entries argument to nested_compile_region()."
+            )
+        entries.append((condition, entry))
+
+    def find_reuse_entry(
+        self,
+        fn_id: int,
+        evaluator: Callable[
+            [InvokeSubgraphReuseCondition, InvokeSubgraphReuseEntry], bool
+        ],
+    ) -> InvokeSubgraphReuseEntry | None:
+        entries = self.subgraph_reuse_cache.get(fn_id, [])
+        for i, (condition, entry) in enumerate(entries):
+            if evaluator(condition, entry):
+                # MRU: move the hit entry to the front for faster future lookups
+                if i > 0:
+                    entries.insert(0, entries.pop(i))
+                return entry
+        return None
 
 
 class HopDispatchSetCache:
@@ -1240,7 +1337,7 @@ class Source:
         self,
         globals: dict[str, Any],
         locals: dict[str, Any],
-        cache: weakref.WeakKeyDictionary[Source, Any],
+        cache: dict[Source, Any],
     ) -> Any:
         if self in cache:
             return cache[self]
@@ -1298,7 +1395,7 @@ class ChainedSource(Source):
         self,
         globals: dict[str, Any],
         locals: dict[str, Any],
-        cache: weakref.WeakKeyDictionary[Source, Any],
+        cache: dict[Source, Any],
     ) -> Any:
         if self in cache:
             return cache[self]

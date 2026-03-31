@@ -476,7 +476,7 @@ std::tuple<Tensor, Tensor> get_atol_rtol(
            ? at::where(atol_opt.value() > 0, at::zeros({}, options), default_rtol)
            : std::move(default_rtol);
   }
-  return std::make_tuple(atol, rtol);
+  return std::make_tuple(std::move(atol), std::move(rtol));
 }
 
 std::tuple<Tensor, Tensor> get_atol_rtol(
@@ -502,7 +502,7 @@ std::tuple<Tensor, Tensor> get_atol_rtol(
   }
   auto atol_tensor = at::full({}, atol, options);
   auto rtol_tensor = at::full({}, rtol, options);
-  return std::make_tuple(atol_tensor, rtol_tensor);
+  return std::make_tuple(std::move(atol_tensor), std::move(rtol_tensor));
 }
 
 } // anonymous namespace

@@ -1154,6 +1154,7 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
         dtype: torch.dtype = torch.float32,
         is_pure: bool = True,
         pack: int = 1,
+        input_dtypes: tuple[torch.dtype, ...] | None = None,
     ) -> OpVarT:
         raise NotImplementedError(
             f"{type(self).__name__}: inline_asm_elementwise only implemented for Triton backend"
@@ -2850,7 +2851,8 @@ class CSEProxy(DefaultHandler):
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
     ) -> None:
         self.kernel.store_buffer_names.add(name)
-        if mode is None:
+        # Update store cache when mode is None or "tma"
+        if mode != "atomic_add":
             self._update_store_cache(name, value)
         if name not in V.graph.removed_buffers:
             self.kernel.store(name, index, value, mode=mode)

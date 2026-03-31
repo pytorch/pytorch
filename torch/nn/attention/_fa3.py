@@ -266,6 +266,7 @@ def _fa3_run_forward(
     k_descale: torch.Tensor | None = None,
     v_descale: torch.Tensor | None = None,
     block_table: torch.Tensor | None = None,
+    num_splits: int | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Run the FA3 forward pass by calling the C++ kernel directly.
@@ -320,7 +321,8 @@ def _fa3_run_forward(
         0.0,  # softcap,
         True,  # rotary_interleaved,
         None,  # scheduler_metadata,
-        1 if torch.are_deterministic_algorithms_enabled() else 0,  # num_splits,
+        num_splits
+        or (1 if torch.are_deterministic_algorithms_enabled() else 0),  # num_splits,
         None,  # pack_gqa,
         torch._C._get_sm_carveout_experimental() or 0,  # sm_margin,
     )
@@ -409,6 +411,7 @@ def _fa3_flash_attention_forward_impl(
     out: torch.Tensor | None = None,
     block_table: torch.Tensor | None = None,
     compute_auxiliary: bool = True,
+    num_splits: int | None = None,
 ):
     error = _fa3_forward_support_error(
         query,
@@ -443,6 +446,7 @@ def _fa3_flash_attention_forward_impl(
         k_descale,
         v_descale,
         block_table,
+        num_splits,
     )
     if compute_auxiliary:
         rng_state = torch.zeros((2,), dtype=torch.uint64, device=query.device)
@@ -474,6 +478,7 @@ def _fa3_flash_attention_forward_no_dropout_inplace_impl(
     seqused_k: torch.Tensor | None = None,
     alibi_slopes: torch.Tensor | None = None,
     block_table: torch.Tensor | None = None,
+    num_splits: int | None = None,
 ):
     _, lse, _, _, _ = _fa3_flash_attention_forward_impl(
         query,
@@ -497,6 +502,7 @@ def _fa3_flash_attention_forward_no_dropout_inplace_impl(
         out=out,
         block_table=block_table,
         compute_auxiliary=False,
+        num_splits=num_splits,
     )
     return lse
 
@@ -520,6 +526,7 @@ def _fa3_flash_attention_forward_impl_default(
     alibi_slopes: torch.Tensor | None = None,
     block_table: torch.Tensor | None = None,
     out: torch.Tensor | None = None,
+    num_splits: int | None = None,
 ):
     return _fa3_flash_attention_forward_impl(
         query,
@@ -542,6 +549,7 @@ def _fa3_flash_attention_forward_impl_default(
         alibi_slopes=alibi_slopes,
         out=out,
         block_table=block_table,
+        num_splits=num_splits,
     )
 
 

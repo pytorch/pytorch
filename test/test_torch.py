@@ -6354,6 +6354,60 @@ class TestTorchDeviceType(TestCase):
         result = grad_f(x)
         self.assertEqual(result.tolist() , [1.0, 1.0, 1.0])
 
+    def test_swap_data_ptr_with_empty(self, device):
+        x = torch.randn(4, device=device)
+        y = torch.randn(4, device=device)
+        y_data = y.clone()
+        x_storage = x.untyped_storage()
+        y_storage = y.untyped_storage()
+        x_storage.resize_(0)
+        self.assertEqual(x_storage.nbytes(), 0)
+        x_storage._swap_data_ptr_(y_storage)
+        self.assertEqual(x, y_data)
+        self.assertEqual(y_storage.nbytes(), 0)
+
+    def test_swap_data_ptr_non_empty(self, device):
+        x = torch.randn(4, device=device)
+        y = torch.randn(4, device=device)
+        x_data = x.clone()
+        y_data = y.clone()
+        x_storage = x.untyped_storage()
+        y_storage = y.untyped_storage()
+        x_storage._swap_data_ptr_(y_storage)
+        self.assertEqual(x, y_data)
+        self.assertEqual(y, x_data)
+
+    def test_swap_data_ptr_preserves_views(self, device):
+        x = torch.randn(4, 4, device=device)
+        x_view = x[1:3]
+        y = torch.randn(4, 4, device=device)
+        y_data = y.clone()
+        x_storage = x.untyped_storage()
+        y_storage = y.untyped_storage()
+        x_storage.resize_(0)
+        x_storage._swap_data_ptr_(y_storage)
+        self.assertEqual(x, y_data)
+        self.assertEqual(x_view, y_data[1:3])
+
+    def test_swap_data_ptr_self(self, device):
+        x = torch.randn(4, device=device)
+        x_data = x.clone()
+        s = x.untyped_storage()
+        s._swap_data_ptr_(s)
+        self.assertEqual(x, x_data)
+
+    def test_swap_data_ptr_device_mismatch(self, device):
+        x = torch.randn(4, device=device)
+        y = torch.randn(4, device="meta")
+        with self.assertRaisesRegex(RuntimeError, "same device"):
+            x.untyped_storage()._swap_data_ptr_(y.untyped_storage())
+
+    def test_swap_data_ptr_nbytes_mismatch(self, device):
+        x = torch.randn(4, device=device)
+        y = torch.randn(8, device=device)
+        with self.assertRaisesRegex(RuntimeError, "same nbytes"):
+            x.untyped_storage()._swap_data_ptr_(y.untyped_storage())
+
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
@@ -10616,6 +10670,23 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                     self.assertEqual(expect, res2)
         finally:
             torch.set_num_threads(num_threads)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    def test_bmm_matmul_mixed_dtype_error(self):
+        a = torch.randn(2, 8, 8, device="cuda", dtype=torch.float16)
+        b = torch.randn(2, 8, 64, device="cuda", dtype=torch.float32)
+
+        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
+            torch.bmm(a, b)
+
+        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
+            torch.compile(lambda x, y: torch.bmm(x, y), fullgraph=True)(a, b)
+
+        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
+            torch.matmul(a, b)
+
+        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
+            torch.compile(lambda x, y: torch.matmul(x, y), fullgraph=True)(a, b)
 
     def test_conj_neg_tolist(self):
         x = torch.randn(2, dtype=torch.cfloat)

@@ -23,10 +23,10 @@ log = logging.getLogger(__name__)
 autotuning_log = getArtifactLogger(__name__, "autotuning")
 
 # Type alias for kernel config key tuple.
-# Currently matches on (tile_m, tile_n, tile_k, cluster_m, cluster_n).
-# #TODO(nikhilap) When cutlass_api adds support for stages/split_k, extend this tuple and
-# update the _make_config_key_* helper functions below.
-ConfigKey = tuple[int, int, int, int, int]
+# Currently matches on (tile_m, tile_n, cluster_m, cluster_n).
+# tile_k excluded because nvMatmulHeuristics and cutlass_api use it to mean different things.
+# TODO(nikhilap): Extend config key for stages/split_k https://github.com/pytorch/pytorch/issues/177578
+ConfigKey = tuple[int, int, int, int]
 
 
 @dataclass
@@ -48,21 +48,20 @@ class HeuristicConfig:
 
 def _make_config_key_from_heuristic(cfg: HeuristicConfig) -> ConfigKey:
     """Build config key from HeuristicConfig returned by nvMatmulHeuristics."""
-    return (cfg.tile_m, cfg.tile_n, cfg.tile_k, cfg.cluster_m, cfg.cluster_n)
+    return (cfg.tile_m, cfg.tile_n, cfg.cluster_m, cfg.cluster_n)
 
 
 def _make_config_key_from_kernel_design(design) -> ConfigKey | None:
     """Build config key from cutlass_api kernel metadata.design."""
     if (
         hasattr(design, "tile_shape")
-        and len(design.tile_shape) >= 3
+        and len(design.tile_shape) >= 2
         and hasattr(design, "cluster_shape")
         and len(design.cluster_shape) >= 2
     ):
         return (
             design.tile_shape[0],
             design.tile_shape[1],
-            design.tile_shape[2],
             design.cluster_shape[0],
             design.cluster_shape[1],
         )
@@ -74,7 +73,6 @@ def _make_config_key_from_heuristics_kernel(kernel) -> ConfigKey:
     return (
         kernel.cta[0],
         kernel.cta[1],
-        kernel.cta[2],
         kernel.cluster[0],
         kernel.cluster[1],
     )
