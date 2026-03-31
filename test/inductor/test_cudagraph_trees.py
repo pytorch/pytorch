@@ -5139,6 +5139,136 @@ if HAS_CUDA_AND_TRITON:
             run(10)
             run(25)
 
+        def test_cloned_output_basic(self):
+            """Cloned outputs get fresh storage on every replay."""
+
+            def foo(args):
+                x = args[0]
+                args.clear()
+                return x * 2, x + 1
+
+            inp = torch.randn(4, device="cuda")
+            foo_cg = self.cudagraphify_impl(foo, [inp], (0,), cloned_output_idxs=(0,))
+
+            # warmup + record
+            foo_cg([inp])
+            out1_a, out1_b = foo_cg([inp])
+
+            # replay — cloned output should have different storage
+            out2_a, out2_b = foo_cg([inp])
+            self.assertNotEqual(out1_a.data_ptr(), out2_a.data_ptr())
+
+            # values should be correct
+            self.assertEqual(out2_a, inp * 2)
+            self.assertEqual(out2_b, inp + 1)
+
+        def test_cloned_output_survives_replay(self):
+            """Cloned outputs remain valid after subsequent replays."""
+
+            def foo(args):
+                x = args[0]
+                args.clear()
+                return (x * 3,)
+
+            inp = torch.randn(4, device="cuda")
+            foo_cg = self.cudagraphify_impl(foo, [inp], (0,), cloned_output_idxs=(0,))
+
+            foo_cg([inp])
+            (first,) = foo_cg([inp])
+            expected = first.clone()
+
+            # replay again — first should still hold correct data
+            foo_cg([inp])
+            self.assertEqual(first, expected)
+
+        def test_cloned_output_multiple_idxs(self):
+            """Multiple outputs can be cloned."""
+
+            def foo(args):
+                x = args[0]
+                args.clear()
+                return x + 1, x + 2, x + 3
+
+            inp = torch.randn(4, device="cuda")
+            foo_cg = self.cudagraphify_impl(foo, [inp], (0,), cloned_output_idxs=(0, 2))
+
+            foo_cg([inp])
+            a1, b1, c1 = foo_cg([inp])
+            a2, b2, c2 = foo_cg([inp])
+
+            # idxs 0 and 2 are cloned — different storage each call
+            self.assertNotEqual(a1.data_ptr(), a2.data_ptr())
+            self.assertNotEqual(c1.data_ptr(), c2.data_ptr())
+
+            self.assertEqual(a2, inp + 1)
+            self.assertEqual(b2, inp + 2)
+            self.assertEqual(c2, inp + 3)
+
+        def test_cloned_output_compile(self):
+            """End-to-end test with torch.compile."""
+            from torch._inductor import cudagraph_prims  # noqa: F401
+
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                y = x * 2
+                z = x + 1
+                torch.ops.aten_cudagraphs.exclude_from_cudagraphs(
+                    y, clone=True
+                )
+                return y, z
+
+            inp = torch.randn(4, device="cuda")
+            for _ in range(3):
+                foo(inp)
+
+            out1_y, _ = foo(inp)
+            out2_y, _ = foo(inp)
+
+            # cloned output should have different storage
+            self.assertNotEqual(out1_y.data_ptr(), out2_y.data_ptr())
+
+            # values correct
+            self.assertEqual(out2_y, inp * 2)
+
+            # cloned output survives further replays
+            expected_y = out1_y.clone()
+            foo(inp)
+            self.assertEqual(out1_y, expected_y)
+
+        def test_cloned_output_with_cpu_partition(self):
+            """Cloned output works when graph has CPU ops causing partitions."""
+            from torch._inductor import cudagraph_prims  # noqa: F401
+
+            def foo(x):
+                y = x * 2
+                torch.ops.aten_cudagraphs.exclude_from_cudagraphs(
+                    y, clone=True
+                )
+                cpu_val = x.sum().cpu()
+                z = x + cpu_val.to("cuda")
+                return y, z
+
+            inp = torch.randn(4, device="cuda")
+            f_compiled = torch.compile(foo, mode="reduce-overhead")
+
+            for _ in range(3):
+                f_compiled(inp)
+
+            out1_y, out1_z = f_compiled(inp)
+            out2_y, out2_z = f_compiled(inp)
+
+            # cloned output has different storage
+            self.assertNotEqual(out1_y.data_ptr(), out2_y.data_ptr())
+
+            # values correct
+            self.assertEqual(out2_y, inp * 2)
+            self.assertEqual(out2_z, inp + inp.sum())
+
+            # cloned output survives
+            expected = out1_y.clone()
+            f_compiled(inp)
+            self.assertEqual(out1_y, expected)
+
     class TestSAC(TestCase):
         def _make_observer_mode(self):
             class ObserverMode(TorchDispatchMode):
@@ -5614,6 +5744,54 @@ if HAS_CUDA_AND_TRITON:
         instantiate_device_type_tests(
             TestCudagraphIndexingOps, globals(), only_for=("cuda",)
         )
+
+
+if torch.cuda.is_available():
+
+    class TestMarkOutputsMeta(InductorTestCase):
+        """Tests for mark_outputs_meta tracing (no triton needed)."""
+
+        def test_no_annotation(self):
+            """make_fx works normally when no cudagraph annotations exist."""
+            gm = make_fx(lambda x: x * 2, tracing_mode="fake")(
+                torch.randn(4, device="cuda")
+            )
+            out = next(reversed(gm.graph.find_nodes(op="output")))
+            self.assertNotIn("cloned_idxs", out.meta)
+
+        def test_clone_annotation(self):
+            """exclude_from_cudagraphs with clone=True sets cloned_idxs."""
+            from torch._inductor import cudagraph_prims  # noqa: F401
+
+            def f(x):
+                y = x * 2
+                torch.ops.aten_cudagraphs.exclude_from_cudagraphs(
+                    y, clone=True
+                )
+                return y, x + 1
+
+            gm = make_fx(f, tracing_mode="fake")(torch.randn(4, device="cuda"))
+            out = next(reversed(gm.graph.find_nodes(op="output")))
+            self.assertEqual(out.meta["cloned_idxs"], {0})
+
+            # custom op must be erased
+            for node in gm.graph.nodes:
+                self.assertNotIn("exclude", str(node.target))
+
+        def test_single_output(self):
+            """mark_outputs_meta handles single (non-tuple) output."""
+            from torch._inductor import cudagraph_prims  # noqa: F401
+
+            def f(x):
+                y = x * 2
+                torch.ops.aten_cudagraphs.exclude_from_cudagraphs(
+                    y, clone=True
+                )
+                return y
+
+            gm = make_fx(f, tracing_mode="fake")(torch.randn(4, device="cuda"))
+            out = next(reversed(gm.graph.find_nodes(op="output")))
+            self.assertEqual(out.meta["cloned_idxs"], {0})
 
 
 if __name__ == "__main__":

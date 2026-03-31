@@ -486,6 +486,7 @@ def cudagraphify(
     placeholders: tuple[PlaceholderInfo, ...] = (),
     mutated_input_idxs: tuple[int, ...] = (),
     compile_id: CompileId | None = None,
+    cloned_output_idxs: tuple[int, ...] = (),
 ) -> tuple[ModelType, OutputType]:
     assert not (is_backward and is_inference)
     mode = (
@@ -507,6 +508,7 @@ def cudagraphify(
         placeholders,
         mutated_input_idxs,
         compile_id,
+        cloned_output_idxs,
     )
 
 
@@ -743,7 +745,10 @@ class CUDAWarmupNode:
         assert len(new_inputs) == 0
 
         # sdpa returns cpu tensors when not recording cuda graph
-        def add_ref(o: Any) -> bool:
+        def add_ref(i: int, o: Any) -> bool:
+            if i in self.wrapped_function.cloned_output_idxs:
+                return False
+
             return (
                 isinstance(o, torch.Tensor)
                 and o.is_cuda
@@ -752,15 +757,21 @@ class CUDAWarmupNode:
             )
 
         self.outputs_weakrefs.extend(
-            [map_to_ref(o) if add_ref(o) else None for o in out]
+            [map_to_ref(o) if add_ref(i, o) else None for i, o in enumerate(out)]
         )
         self.tensor_weakrefs.extend(
-            [TensorWeakRef(o) if add_ref(o) else None for o in out]
+            [TensorWeakRef(o) if add_ref(i, o) else None for i, o in enumerate(out)]
         )
 
         if config.triton.slow_path_cudagraph_asserts and not self.already_warm:
             out_refs = list(self.path_live_weakrefs())
+            for i in self.wrapped_function.cloned_output_idxs:
+                out_refs.append(StorageWeakRefWrapper(out[i]))
+
             check_memory_pool(self.device_index, self.cuda_graphs_pool, out_refs)
+
+        if idxs := self.wrapped_function.cloned_output_idxs:
+            out = tuple(o.clone() if i in idxs else o for i, o in enumerate(out))
 
         return out
 
@@ -888,6 +899,11 @@ class CUDAGraphNode:
         # A single wrapped function may be recorded multiple times if memory patterns or
         # invariants change from one execution to the next
         self.children: dict[FunctionID, list[CUDAGraphNode]] = defaultdict(list)
+
+        # user annotated cloned outputs
+        self.cloned_output_idxs: OrderedSet[int] = OrderedSet(
+            wrapped_function.cloned_output_idxs
+        )
 
         # StorageWeakRef maintains whether the Storage C++ object remains allocated,
         # not whether the corresponding memory has been deallocated. In order
@@ -1142,6 +1158,12 @@ class CUDAGraphNode:
         outputs = self.recording_outputs
         self.recording_outputs = None
         assert outputs is not None
+
+        if idxs := self.cloned_output_idxs:
+            outputs = tuple(
+                o.clone() if i in idxs else o for i, o in enumerate(outputs)
+            )
+
         return outputs
 
     def run(self, new_inputs: list[InputType]) -> OutputType:
@@ -1186,6 +1208,10 @@ class CUDAGraphNode:
 
             cached_t = self.cached_tensor_outputs[i]
             if cached_t is not None:
+                if i in self.cloned_output_idxs:
+                    outputs.append(cached_t.clone())
+                    continue
+
                 # this output represents a fresh allocated tensor.
                 # We return the same TensorImpl from run to run to avoid overhead.
                 # autograd.Function will reset the Autograd meta of output tensors
@@ -1215,6 +1241,10 @@ class CUDAGraphNode:
                 out = self._reconstruct_from_tensor_metadata(
                     metadata, cast(torch.Tensor, outputs[storage]).untyped_storage()
                 )
+
+            if i in self.cloned_output_idxs:
+                outputs.append(out.clone())
+                continue
 
             outputs.append(out)
             w = self.outputs_weakrefs[i]
@@ -1357,6 +1387,10 @@ class CUDAGraphNode:
                 self.output_storage_alias.append(UnaliasedStorage)
                 continue
 
+            if i in self.cloned_output_idxs:
+                self.output_storage_alias.append(UnaliasedStorage)
+                continue
+
             torch._check(
                 o.is_cuda or o.untyped_storage().data_ptr() == 0,
                 lambda: (
@@ -1406,8 +1440,14 @@ class CUDAGraphNode:
             )
 
         assert not self.outputs_weakrefs
-        for out, static_output_tensor in zip(outputs, self.static_output_tensors):
-            if not isinstance(out, torch.Tensor) or static_output_tensor is not None:
+        for idx, (out, static_output_tensor) in enumerate(
+            zip(outputs, self.static_output_tensors)
+        ):
+            # Skip weakref tracking for cloned outputs - we'll clone them fresh each time
+            if idx in self.cloned_output_idxs:
+                self.outputs_weakrefs.append(None)
+                self.tensor_weakrefs.append(None)
+            elif not isinstance(out, torch.Tensor) or static_output_tensor is not None:
                 self.outputs_weakrefs.append(None)
                 self.tensor_weakrefs.append(None)
             else:
@@ -1427,9 +1467,15 @@ class CUDAGraphNode:
 
         self.debug_check_invariants_after_invocation()
         if config.triton.slow_path_cudagraph_asserts:
-            check_memory_pool(
-                self.device, self.cuda_graphs_pool, list(self.path_live_weakrefs())
-            )
+            # In this memory check after initial recording, we still want to
+            # make sure that the memory pool is in a good state, which includes
+            # the tensors we will clone later. We need to manually add them now,
+            # because we do not track their liveness after running.
+            all_refs = list(self.path_live_weakrefs())
+            for idx in self.cloned_output_idxs:
+                all_refs.append(StorageWeakRefWrapper(outputs[idx]))
+
+            check_memory_pool(self.device, self.cuda_graphs_pool, all_refs)
 
     def _mark_prior_graph_output_as_aliased(self, index: PathOutputIndex) -> None:
         "Remove a graph output from the unaliased, cached tensors in an ancestor node"
@@ -1460,6 +1506,9 @@ class CUDAGraphNode:
             assert isinstance(metadata, dict)
             s = self.create_storage(metadata)
             out = self._reconstruct_from_tensor_metadata(metadata, storage=s)  # type: ignore[arg-type]
+            if i in self.cloned_output_idxs:
+                self.cached_tensor_outputs.append(out)
+                continue
 
             # XXX: let autograd know that there will be an additional reference to the tensor
             # that can be ignored when deciding whether to do gradient buffer inplacing.
@@ -2425,6 +2474,7 @@ class CUDAGraphTreeManager:
         placeholders: tuple[PlaceholderInfo, ...],
         mutated_input_idxs: tuple[int, ...],
         compile_id: CompileId | None,
+        cloned_output_idxs: tuple[int, ...],
     ) -> tuple[
         ModelType,
         OutputType,
@@ -2438,6 +2488,7 @@ class CUDAGraphTreeManager:
             tuple(t for t in constants if isinstance(t, torch.Tensor) and t.is_cuda),
             placeholders,
             mutated_input_idxs,
+            cloned_output_idxs,
         )
         self.id_to_mode[id] = mode
         self.id_to_compile_id[id] = compile_id

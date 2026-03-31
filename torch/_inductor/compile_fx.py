@@ -1848,6 +1848,7 @@ def cudagraphify(
     constants: tuple[torch.Tensor, ...] = (),
     placeholders: Sequence[PlaceholderInfo] = (),
     mutated_input_idxs: tuple[int, ...] = (),
+    cloned_output_idxs: tuple[int, ...] = (),
 ) -> Callable[..., Any]:
     from torch._inductor.cudagraph_trees import (
         cudagraphify_impl as new_cudagraphify_impl,
@@ -1865,6 +1866,7 @@ def cudagraphify(
             placeholders=placeholders,
             mutated_input_idxs=mutated_input_idxs,
             compile_id=torch._guards.CompileContext.current_compile_id(),
+            cloned_output_idxs=cloned_output_idxs,
         )
     else:
         cudagraphify_fn = cudagraphify_impl

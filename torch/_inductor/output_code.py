@@ -252,6 +252,7 @@ def cudagraph_post_compile(
             constants=tuple(tensor_constants.values()),
             placeholders=placeholders,
             mutated_input_idxs=tuple(compiled_graph.mutated_input_idxs),
+            cloned_output_idxs=tuple(compiled_graph.cudagraph_cloned_idxs),
         )
 
     else:
@@ -330,6 +331,7 @@ def cudagraph_partition_post_compile(
         mutated_input_idxs,
         compiled_graph.cudagraph_info.stack_traces,
         tensor_constants,
+        compiled_graph.cudagraph_cloned_idxs,
     )
 
     prepare_cudagraph_post_compile(
@@ -356,6 +358,7 @@ def cudagraph_partition_post_compile(
             constants=tuple(partition_metadata.constants.values()),
             placeholders=partition_metadata.placeholders,
             mutated_input_idxs=tuple(partition_metadata.mutated_input_idxs),
+            cloned_output_idxs=tuple(partition_metadata.cloned_output_idxs),
         )
         cudagraphify_fns.append(cudagraphify_fn)
 
@@ -520,6 +523,13 @@ class CompiledFxGraph(OutputCode):
         self.device_idxs = OrderedSet(graph.device_idxs)
         self.mutated_inputs = OrderedSet(graph.mutated_inputs)
         self.mutated_input_idxs = OrderedSet(graph.mutated_input_idxs)
+        cloned_bufs = getattr(graph, "cudagraph_cloned_bufs", OrderedSet())
+        self.cudagraph_cloned_idxs: OrderedSet[int] = OrderedSet()
+        if cloned_bufs:
+            output_names = graph.get_output_names()
+            for i, name in enumerate(output_names):
+                if name in cloned_bufs:
+                    self.cudagraph_cloned_idxs.add(i)
 
         # We store the constant attributes in the cache entry and re-attach them
         # to the module created in PyCodeCache.load_by_key_path. In the case that

@@ -65,6 +65,7 @@ class WrappedFunction:
     constants: tuple[torch.Tensor, ...]
     placeholders: Sequence[PlaceholderInfo]
     mutated_input_idxs: Sequence[int]
+    cloned_output_idxs: Sequence[int]
 
 
 def get_mutating_use_stack_trace_from_node(
@@ -368,6 +369,7 @@ class CudagraphMetadata:
     mutated_input_idxs: OrderedSet[int]
     stack_traces: list[str | None]
     constants: dict[str, torch.Tensor]
+    cloned_output_idxs: OrderedSet[int]
 
 
 def get_partition_cudagraph_metadata(
@@ -405,11 +407,13 @@ def get_partition_cudagraph_metadata(
         partition_placeholders.append(placeholder)
 
     partition_stack_traces = []
+    partition_cloned_idxs: OrderedSet[int] = OrderedSet()
     for i, graph_output_idx in enumerate(partition_map.output_index_mapping):
         if graph_output_idx is not None:
             partition_stack_traces.append(metadata.stack_traces[graph_output_idx])
+            if graph_output_idx in metadata.cloned_output_idxs:
+                partition_cloned_idxs.add(i)
         elif partition_map.stack_traces and i < len(partition_map.stack_traces):
-            # For partition-internal outputs, use stack traces from IR nodes
             partition_stack_traces.append(partition_map.stack_traces[i])
         else:
             partition_stack_traces.append(None)
@@ -424,6 +428,7 @@ def get_partition_cudagraph_metadata(
         partition_mutated_input_idxs,
         partition_stack_traces,
         partition_constants,
+        partition_cloned_idxs,
     )
 
 

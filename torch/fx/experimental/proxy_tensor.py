@@ -65,9 +65,11 @@ from torch.fx.node import (
     Argument,
     Target,
 )
+from torch.fx.operator_schemas import normalize_function
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.nn import Module
 from torch.overrides import TorchFunctionMode
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import (
     _disable_infra_mode,
     _push_mode,
@@ -1578,6 +1580,59 @@ def _make_temp_remove_mode_context_manager(
     return context_manager_fn
 
 
+def mark_outputs_meta(graph: torch.fx.Graph):
+    op = getattr(
+        getattr(torch.ops, "aten_cudagraphs", None),
+        "exclude_from_cudagraphs",
+        None,
+    )
+    if op is None:
+        return
+
+    excluded_outputs = graph.find_nodes(
+        op="call_function",
+        target=op.default,
+    )
+    if not excluded_outputs:
+        return
+
+    from torch._inductor.fx_utils import get_node_storage
+
+    cloned_metas = OrderedSet()
+
+    for op in excluded_outputs:
+        _, new_kwargs = normalize_function(
+            op.target, args=op.args, kwargs=op.kwargs, normalize_to_only_use_kwargs=True
+        )
+        storage = get_node_storage(new_kwargs["inp"])
+        if storage is None:
+            continue
+
+        if new_kwargs["clone"]:
+            cloned_metas.add(storage)
+
+    output_nodes = graph.find_nodes(op="output")
+    torch._check(len(output_nodes) == 1)
+
+    output_args = output_nodes[0].args[0]
+    if not isinstance(output_args, (tuple, list)):
+        output_args = (output_args,)
+
+    cloned_idxs: OrderedSet[int] = OrderedSet()
+
+    for i, inp in enumerate(output_args):
+        if not isinstance(inp, torch.fx.Node):
+            continue
+        stor = get_node_storage(inp)
+        if stor in cloned_metas:
+            cloned_idxs.add(i)
+
+    output_nodes[0].meta["cloned_idxs"] = cloned_idxs
+
+    for n in excluded_outputs:
+        n.graph.erase_node(n)
+
+
 @torch._disable_dynamo
 def dispatch_trace(
     root: Module | Callable,
@@ -1615,6 +1670,7 @@ def dispatch_trace(
         # No idea, just assume it's not OK
         return True
 
+    mark_outputs_meta(graph)
     graph.eliminate_dead_code(impure_pred)
     from torch._inductor.fx_passes.dedupe_symint_uses import dedupe_symints
 

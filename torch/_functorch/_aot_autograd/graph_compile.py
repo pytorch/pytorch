@@ -22,6 +22,7 @@ from typing import Any, TYPE_CHECKING
 
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._opaque_base import OpaqueBase
+from torch.utils._ordered_set import OrderedSet
 
 
 if TYPE_CHECKING:
@@ -1190,6 +1191,58 @@ def prepare_hook_gm(
     return gm
 
 
+def propagate_output_meta_to_fw_module(
+    fx_g: torch.fx.GraphModule,
+    fw_module: torch.fx.GraphModule,
+    num_inner_fwd_outputs: int,
+):
+    """
+    Propagate cloned_idxs from joint graph to forward module.
+    Maps the indices from joint graph outputs to fw_module outputs.
+    """
+    from torch._inductor.fx_utils import get_node_storage
+
+    # Get metadata from joint graph output node
+    joint_output_node = next(reversed(fx_g.graph.find_nodes(op="output")))
+    cloned_idxs = joint_output_node.meta.get("cloned_idxs", OrderedSet())
+
+    if not cloned_idxs:
+        return  # Nothing to propagate
+
+    # Get joint graph outputs
+    joint_outs = joint_output_node.args[0]
+
+    # Build storage -> joint_idx mapping for user outputs only
+    joint_storage_to_idx = {}
+    for i in range(num_inner_fwd_outputs):
+        node = joint_outs[i]
+        if isinstance(node, torch.fx.Node):
+            storage = get_node_storage(node)
+            if storage is not None:
+                joint_storage_to_idx[storage] = i
+
+    # Get fw_module outputs
+    fw_output_node = next(reversed(fw_module.graph.find_nodes(op="output")))
+    fw_outs = fw_output_node.args[0]
+
+    # Map indices from joint graph to fw_module
+    fw_cloned_idxs: OrderedSet[int] = OrderedSet()
+
+    for fw_idx, fw_node in enumerate(fw_outs):
+        if not isinstance(fw_node, torch.fx.Node):
+            continue
+
+        fw_storage = get_node_storage(fw_node)
+        if fw_storage is None:
+            continue
+
+        joint_idx = joint_storage_to_idx.get(fw_storage)
+        if joint_idx is not None and joint_idx in cloned_idxs:
+            fw_cloned_idxs.add(fw_idx)
+
+    fw_output_node.meta["cloned_idxs"] = fw_cloned_idxs
+
+
 # Inline Autograd saved_tensors_hooks into epilogue of forward graph
 # and prologue of backward graph.
 # This changes forward graph outputs and inputs.
@@ -1788,6 +1841,8 @@ def _aot_stage2a_partition(
                 num_fwd_outputs=num_inner_fwd_outputs,
                 static_lifetime_input_indices=static_lifetime_input_indices,
             )
+            propagate_output_meta_to_fw_module(fx_g, fw_module, num_inner_fwd_outputs)
+
             rng_states = [
                 n
                 for n in fw_module.graph.find_nodes(op="placeholder")
