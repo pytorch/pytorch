@@ -769,11 +769,7 @@ __launch_bounds__(block_dim_x * block_dim_y)
     T* __restrict__ db) {
   // This assert is a compile-time check only.
   constexpr int rows_per_thread_y = rows_per_block_y / block_dim_y;
-#ifdef USE_ROCM
-  CUDA_KERNEL_ASSERT(rows_per_thread_y <= C10_WARP_SIZE);
-#else
-  static_assert(rows_per_thread_y <= C10_WARP_SIZE);
-#endif
+  static_assert(rows_per_thread_y <= C10_WARP_SIZE_LOWER_BOUND);
 
   T_ACC dg_sum = 0;
   T_ACC db_sum = 0;
@@ -816,11 +812,7 @@ __launch_bounds__(block_dim_x * block_dim_y)
   } else {
     // The caller requested a full reduction so we must reduce across
     // warps using shared memory and warp shuffles.
-#ifdef USE_ROCM
-    CUDA_KERNEL_ASSERT(rows_per_thread_y <= C10_WARP_SIZE);
-#else
-    static_assert(rows_per_thread_y <= C10_WARP_SIZE);
-#endif
+    static_assert(rows_per_thread_y <= C10_WARP_SIZE_LOWER_BOUND);
     alignas(sizeof(double)) extern __shared__ char s_data1[];
     T_ACC* s_data_typed = reinterpret_cast<T_ACC*>(&s_data1);
     T_ACC* s_dg;
@@ -836,11 +828,7 @@ __launch_bounds__(block_dim_x * block_dim_y)
     // Load transposed so that a warp holds an entire column
     // Because block_dim_x != block_dim_y in the general case, we need
     // some code to handle the general case.
-#ifdef USE_ROCM
-    CUDA_KERNEL_ASSERT(block_dim_x * block_dim_y % C10_WARP_SIZE == 0);
-#else
-    static_assert(block_dim_x * block_dim_y % C10_WARP_SIZE == 0);
-#endif
+    static_assert(block_dim_x * block_dim_y % C10_WARP_SIZE_LOWER_BOUND == 0);
     const int warps_available_to_reduce = block_dim_x * block_dim_y / C10_WARP_SIZE;
     int thread_id = threadIdx.y * block_dim_x + threadIdx.x;
     int warp_id = thread_id / C10_WARP_SIZE;
