@@ -1349,6 +1349,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         args: list[Any],
         kwargs: dict[str, Any],
     ) -> VariableTracker:
+        from .. import trace_rules
         from . import CONSTANT_VARIABLE_NONE, UserMethodVariable
 
         method = self._maybe_get_baseclass_method(name)
@@ -1386,6 +1387,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         "may cause silent incorrectness, since we will eagerly unpack generators instead of lazily "
                         "evaluating them.",
                     ],
+                )
+
+            # torch.Generator methods like manual_seed(), get_state(), etc.
+            # are stateful RNG operations that cannot be soundly traced.
+            if (
+                isinstance(self.value, torch._C.Generator)
+                and name in trace_rules._GENERATOR_METHODS_THAT_GRAPH_BREAK
+            ):
+                unimplemented(
+                    gb_type="torch.Generator method",
+                    context=f"torch.Generator.{name}",
+                    explanation=f"torch.Generator.{name}() is a stateful RNG "
+                    "operation that cannot be soundly traced in the FX graph.",
+                    hints=[*graph_break_hints.FUNDAMENTAL],
                 )
 
             # check for methods implemented in C++
