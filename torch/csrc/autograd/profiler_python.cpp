@@ -1194,7 +1194,10 @@ PythonTracer::~PythonTracer() {
     TORCH_WARN("`PythonTracer::stop()` was not called.");
     stop();
   }
-  Py_XDECREF((PyObject*)shared_ctx_);
+  if (Py_IsInitialized() && !Py_IsFinalizing()) {
+    pybind11::gil_scoped_acquire gil;
+    Py_XDECREF((PyObject*)shared_ctx_);
+  }
 }
 
 void PythonTracer::recordPyCall(
