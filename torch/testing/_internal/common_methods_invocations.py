@@ -7001,8 +7001,6 @@ def skips_mvlgamma(skip_redundant=False):
         DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                      'test_reference_numerics_small',
                      dtypes=(torch.int8,)),
-        # NotImplementedError: The operator 'aten::mvlgamma.out' is not currently implemented for the MPS device
-        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
     )
     if skip_redundant:
         # Redundant tests
@@ -18001,30 +17999,15 @@ op_db: list[OpInfo] = [
            sample_inputs_func=sample_inputs_mode,),
     make_mvlgamma_opinfo(variant_test_name='mvlgamma_p_1',
                          domain=(1, None),
-                         skips=skips_mvlgamma() + (
-                             # NotImplementedError: The operator 'aten::mvlgamma.out' is not currently
-                             # implemented for the MPS device
-                             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
-                             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
-                         ),
+                         skips=skips_mvlgamma(),
                          sample_kwargs=lambda device, dtype, input: ({'p': 1}, {'d': 1})),
     make_mvlgamma_opinfo(variant_test_name='mvlgamma_p_3',
                          domain=(2, None),
-                         skips=skips_mvlgamma() + (
-                             # NotImplementedError: The operator 'aten::mvlgamma.out' is not currently
-                             # implemented for the MPS device
-                             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
-                             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
-                         ),
+                         skips=skips_mvlgamma(),
                          sample_kwargs=lambda device, dtype, input: ({'p': 3}, {'d': 3})),
     make_mvlgamma_opinfo(variant_test_name='mvlgamma_p_5',
                          domain=(3, None),
-                         skips=skips_mvlgamma() + (
-                             # NotImplementedError: The operator 'aten::mvlgamma.out' is not currently
-                             # implemented for the MPS device
-                             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
-                             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
-                         ),
+                         skips=skips_mvlgamma(),
                          sample_kwargs=lambda device, dtype, input: ({'p': 5}, {'d': 5})),
     BinaryUfuncInfo('ne',
                     ref=np.not_equal,
