@@ -1832,6 +1832,8 @@ def get_selected_tests(options) -> list[str]:
                     # Output mismatch errors and long running tests
                     "test_linalg",
                     "test_matmul_cuda",
+                    "functorch/test_ops",
+                    "test_scaled_matmul_cuda",
                 ]
             )
 
@@ -1840,11 +1842,6 @@ def get_selected_tests(options) -> list[str]:
         if SM120OrLater:
             WINDOWS_BLOCKLIST.extend(
                 [
-                    # Windows fatal exception / access violation
-                    "test_fake_tensor",
-                    "test_cpp_extensions_jit",
-                    # TDR, BSOD observed
-                    "functorch/test_ops",
                     # test_api fails on Windows SM120+. Triage pending.
                     "cpp/test_api",
                 ]
