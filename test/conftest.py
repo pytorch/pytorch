@@ -35,7 +35,7 @@ def _call_parse_cmd_line_args():
         from torch.testing._internal.common_utils import parse_cmd_line_args
     except ImportError:
         # torch may not be importable in lint-only CI environments where
-        # PyTorch hasn't been built (torch.version is a generated module).
+        # PyTorch hasn't been built.
         return
 
     parse_cmd_line_args()
