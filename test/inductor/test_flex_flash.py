@@ -940,8 +940,12 @@ class TestFlexFlash(InductorTestCase):
 
         with DeterministicGuard(True):
             with self.assertRaisesRegex(
-                BackendCompilerFailed,
-                "Deterministic backward for flex_attention with block_mask using the FLASH backend",
+                (BackendCompilerFailed if not SM120OrLater else AssertionError),
+                (
+                    "Deterministic backward for flex_attention with block_mask using the FLASH backend"
+                    if not SM120OrLater
+                    else "Block sparsity not supported on SM 12.0"
+                ),
             ):
                 out = compiled_fn(
                     q,
