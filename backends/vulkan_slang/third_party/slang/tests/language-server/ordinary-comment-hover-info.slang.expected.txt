@@ -1,0 +1,35 @@
+--------
+range: 7,4 - 7,9
+content:
+```
+(global variable) int value
+```
+
+#1: Ordindary comment for `value`.  
+
+{REDACTED}.slang(8)
+
+--------
+range: 12,5 - 12,9
+content:
+```
+func main() -> void
+```
+
+ #2: Ordinary block comment for main func.  
+   #3: This func doesn't return anything.  
+
+{REDACTED}.slang(13)
+
+--------
+range: 19,3 - 19,8
+content:
+```
+E E.Green = 1
+```
+
+#5 green color  
+
+{REDACTED}.slang(20)
+
+

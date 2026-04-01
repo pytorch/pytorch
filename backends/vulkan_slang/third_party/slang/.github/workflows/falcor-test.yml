@@ -1,0 +1,95 @@
+name: Falcor Tests
+
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - "docs/**"
+      - "LICENSES/**"
+      - "LICENSE"
+      - "CONTRIBUTING.md"
+      - "README.md"
+  pull_request:
+    branches: [master]
+    paths-ignore:
+      - "docs/**"
+      - "LICENSES/**"
+      - "LICENSE"
+      - "CONTRIBUTING.md"
+      - "README.md"
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    timeout-minutes: 100
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows]
+        config: [release]
+        compiler: [cl]
+        platform: [x86_64]
+        include:
+          # Self-hosted falcor tests
+          - warnings-as-errors: true
+            test-category: full
+            full-gpu-tests: false
+            runs-on: [Windows, self-hosted, falcor]
+    runs-on: ${{ matrix.runs-on }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: "recursive"
+          fetch-depth: "0"
+      - name: Setup
+        uses: ./.github/actions/common-setup
+        with:
+          os: ${{matrix.os}}
+          compiler: ${{matrix.compiler}}
+          platform: ${{matrix.platform}}
+          config: ${{matrix.config}}
+          build-llvm: true
+      - name: setup-falcor
+        shell: pwsh
+        run: |
+          mkdir FalcorBin
+          cd FalcorBin
+          Copy-Item -Path 'C:\Falcor\build\windows-vs2022\bin' -Destination '.\build\windows-vs2022\bin' -Recurse -Exclude ("*.pdb")
+          Copy-Item -Path 'C:\Falcor\tests' -Destination '.\' -Recurse
+          Copy-Item -Path 'C:\Falcor\tools' -Destination '.\' -Recurse
+          Copy-Item -Path 'C:\Falcor\media' -Destination '.\' -Recurse
+          Copy-Item -Path 'C:\Falcor\media_internal' -Destination '.\' -Recurse
+          Copy-Item -Path 'C:\Falcor\scripts' -Destination '.\' -Recurse
+          cd ..\
+      - name: Build Slang
+        run: |
+          cmake --preset default --fresh \
+            -DSLANG_SLANG_LLVM_FLAVOR=USE_SYSTEM_LLVM \
+            -DCMAKE_COMPILE_WARNING_AS_ERROR=${{matrix.warnings-as-errors}} \
+            -DSLANG_ENABLE_CUDA=1 \
+            -DSLANG_ENABLE_EXAMPLES=0 \
+            -DSLANG_ENABLE_GFX=0 \
+            -DSLANG_ENABLE_TESTS=0
+          cmake --workflow --preset "${{matrix.config}}"
+      - name: Copy Slang to Falcor
+        run: |
+          cp --verbose --recursive --target-directory ./FalcorBin/build/windows-vs2022/bin/Release build/Release/bin/*
+      - name: falcor-unit-test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "SilentlyContinue"
+          cd .\FalcorBin\tests
+          python ./testing/run_unit_tests.py --config windows-vs2022-Release -t "-slow"
+          cd ../../
+      - name: falcor-image-test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "SilentlyContinue"
+          cd .\FalcorBin\tests
+          python ./testing/run_image_tests.py --config windows-vs2022-Release --run-only
+          cd ../../

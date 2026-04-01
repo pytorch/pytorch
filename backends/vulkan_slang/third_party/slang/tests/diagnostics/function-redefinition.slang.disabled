@@ -1,0 +1,5 @@
+//TEST:SIMPLE:
+// redefining a function
+
+int foo(int a) { return 0; }
+int foo(int b) { return 1; }

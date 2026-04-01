@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+ "https://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:xlink="http://www.w3.org/1999/xlink"
+   viewBox="0 0 20 19"
+   height="19"
+   width="20"
+   id="svg2"
+   version="1.1">
+  <defs
+     id="defs6" />
+  <circle
+     r="3.5"
+     cy="8.5"
+     cx="5.5"
+     id="path4611"
+     style="fill:#000000;fill-opacity:0;stroke:#C5C5C5;stroke-width:1.4;stroke-opacity:1;stroke-miterlimit:4;stroke-dasharray:none" />
+  <path
+     id="path4630"
+     d="m 8.1085854,11.109059 2.7823556,2.782356"
+     style="fill:none;stroke:#C5C5C5;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" />
+</svg>

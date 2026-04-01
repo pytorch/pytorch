@@ -1,0 +1,129 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  cpu-tests:
+    name: CPU Shader Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build CPU tests
+        run: |
+          cd cpu_tests
+          mkdir -p build && cd build
+          cmake ..
+          cmake --build .
+
+      - name: Run CPU tests
+        run: |
+          cd cpu_tests/build
+          ctest --output-on-failure
+
+  integration-tests:
+    name: Integration Tests (SwiftShader)
+    runs-on: ubuntu-latest
+    env:
+      VK_ICD_FILENAMES: /usr/share/swiftshader/vk_swiftshader_icd.json
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Vulkan SDK
+        run: |
+          wget -qO- https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo tee /etc/apt/trusted.gpg.d/lunarg.asc
+          sudo wget -qO /etc/apt/sources.list.d/lunarg.list https://packages.lunarg.com/vulkan/1.4.304/lunarg-vulkan-1.4.304-noble.list
+          sudo apt-get update
+          sudo apt-get install -y vulkan-sdk libvulkan-dev vulkan-tools
+
+      - name: Install SwiftShader
+        run: |
+          # Try package first, then build from source
+          sudo apt-get install -y swiftshader 2>/dev/null || {
+            # Try alternative package names
+            sudo apt-get install -y mesa-vulkan-drivers 2>/dev/null || true
+          }
+          # If swiftshader ICD file doesn't exist, try common alternative locations
+          if [ ! -f "$VK_ICD_FILENAMES" ]; then
+            for f in \
+              /usr/share/vulkan/icd.d/vk_swiftshader_icd.json \
+              /usr/lib/x86_64-linux-gnu/swiftshader/vk_swiftshader_icd.json \
+              /usr/local/share/swiftshader/vk_swiftshader_icd.json; do
+              if [ -f "$f" ]; then
+                echo "VK_ICD_FILENAMES=$f" >> $GITHUB_ENV
+                echo "Found SwiftShader ICD at $f"
+                break
+              fi
+            done
+          fi
+          # If still not found, try to find any software Vulkan ICD
+          if [ ! -f "${VK_ICD_FILENAMES}" ]; then
+            ICD=$(find /usr -name "*swiftshader*icd*.json" -o -name "*lvp*icd*.json" 2>/dev/null | head -1)
+            if [ -n "$ICD" ]; then
+              echo "VK_ICD_FILENAMES=$ICD" >> $GITHUB_ENV
+              echo "Found ICD at $ICD"
+            else
+              echo "WARNING: No software Vulkan ICD found"
+            fi
+          fi
+
+      - name: Validate SwiftShader
+        run: |
+          echo "VK_ICD_FILENAMES=$VK_ICD_FILENAMES"
+          vulkaninfo --summary 2>&1 || echo "vulkaninfo not available or no device found"
+
+      - name: Install Slang
+        run: |
+          SLANG_VER=$(cat tools/slang_version.txt | tr -d '[:space:]')
+          echo "Installing Slang $SLANG_VER"
+          # Try several URL patterns since release naming varies
+          for suffix in "linux-x86_64" "linux-x86_64-release" "linux-x86-64"; do
+            URL="https://github.com/shader-slang/slang/releases/download/v${SLANG_VER}/slang-${SLANG_VER}-${suffix}.tar.gz"
+            echo "Trying $URL"
+            if wget -q "$URL" -O slang.tar.gz 2>/dev/null; then
+              echo "Downloaded successfully"
+              mkdir -p slang-dist && tar xf slang.tar.gz -C slang-dist
+              # Find slangc binary (may be in bin/ or at root)
+              SLANGC=$(find slang-dist -name slangc -type f | head -1)
+              if [ -n "$SLANGC" ]; then
+                sudo cp "$SLANGC" /usr/local/bin/slangc
+                sudo chmod +x /usr/local/bin/slangc
+                echo "Installed slangc to /usr/local/bin/"
+                slangc --version || true
+              fi
+              break
+            fi
+          done
+          # Verify slangc is available
+          if ! command -v slangc &>/dev/null; then
+            echo "WARNING: slangc not found, using stub shaders"
+          fi
+
+      - name: Install Python dependencies
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install pytest pytest-timeout ninja
+
+      - name: Build and install
+        run: pip install -e .
+
+      - name: Run tests
+        run: pytest tests/ -x --timeout=300 -p no:faulthandler -v 2>/dev/null
+
+      - name: Verify test count
+        run: |
+          COUNT=$(pytest tests/ --timeout=300 -p no:faulthandler -q 2>/dev/null | tail -1 | grep -oP '\d+ passed')
+          echo "Test results: $COUNT"

@@ -1,0 +1,11 @@
+{
+  "source": [
+    "./bin/macosx-*/release/libslang.dylib",
+    "./bin/macosx-*/release/slangc",
+    "./bin/macosx-*/release/slangd"
+  ],
+  "bundle_id": "shader-slang.slang",
+  "sign": {
+    "application_identity": "d6ada82a113e4204aaad914e1013e9548ffd30d0"
+  }
+}

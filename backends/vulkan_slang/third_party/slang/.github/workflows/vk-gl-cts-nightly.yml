@@ -1,0 +1,121 @@
+name: VK-GL-CTS Nightly
+
+on:
+  schedule:
+    - cron: "00 07 * * *"
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  DISABLE_CTS_SLANG: 0
+  ACTIONS_RUNNER_DEBUG: true
+  ACTIONS_STEP_DEBUG: true
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          # Self-hosted falcor tests
+          - os: windows
+            compiler: cl
+            platform: x86_64
+            config: release
+            warnings-as-errors: true
+            test-category: full
+            full-gpu-tests: false
+            runs-on: [Windows, self-hosted]
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: "true"
+          fetch-depth: "0"
+      - name: Setup
+        uses: ./.github/actions/common-setup
+        with:
+          os: ${{matrix.os}}
+          compiler: ${{matrix.compiler}}
+          platform: ${{matrix.platform}}
+          config: ${{matrix.config}}
+          build-llvm: true
+      - name: Build Slang
+        run: |
+          cmake --preset default --fresh \
+            -DSLANG_SLANG_LLVM_FLAVOR=USE_SYSTEM_LLVM \
+            -DCMAKE_COMPILE_WARNING_AS_ERROR=${{matrix.warnings-as-errors}} \
+            -DSLANG_ENABLE_CUDA=1 \
+            -DSLANG_ENABLE_EXAMPLES=0 \
+            -DSLANG_ENABLE_GFX=1 \
+            -DSLANG_ENABLE_TESTS=1
+          cmake --workflow --preset "${{matrix.config}}"
+      - uses: robinraju/release-downloader@v1.11
+        with:
+          latest: true
+          repository: "shader-slang/VK-GL-CTS"
+          fileName: "VK-GL-CTS_WithSlang-0.0.7-win64.zip"
+      - uses: actions/checkout@v4
+        with:
+          repository: "shader-slang/VK-GL-CTS"
+          sparse-checkout: |
+            test-lists/slang-passing-tests.txt
+            test-lists/slang-waiver-tests.xml
+          path: test-lists
+          sparse-checkout-cone-mode: false
+      - name: vkcts setup
+        shell: pwsh
+        run: |
+          Expand-Archive VK-GL-CTS_WithSlang-0.0.7-win64.zip
+
+          copy ${{ github.workspace }}\build\Release\bin\slang.dll ${{ github.workspace }}\VK-GL-CTS_WithSlang-0.0.7-win64\slang.dll
+          copy ${{ github.workspace }}\build\Release\bin\slang-glslang.dll ${{ github.workspace }}\VK-GL-CTS_WithSlang-0.0.7-win64\slang-glslang.dll
+          copy ${{ github.workspace }}\build\Release\bin\slang-glsl-module.dll ${{ github.workspace }}\VK-GL-CTS_WithSlang-0.0.7-win64\slang-glsl-module.dll
+          copy ${{ github.workspace }}\build\Release\bin\test-server.exe ${{ github.workspace }}\VK-GL-CTS_WithSlang-0.0.7-win64\test-server.exe
+
+          copy ${{ github.workspace }}\test-lists\test-lists\slang-passing-tests.txt ${{ github.workspace }}\VK-GL-CTS_WithSlang-0.0.7-win64\slang-passing-tests.txt
+          copy ${{ github.workspace }}\test-lists\test-lists\slang-waiver-tests.xml ${{ github.workspace }}\VK-GL-CTS_WithSlang-0.0.7-win64\slang-waiver-tests.xml
+
+      - name: dump device info
+        shell: pwsh
+        working-directory: ${{ github.workspace }}\VK-GL-CTS_WithSlang-0.0.7-win64
+        run: |
+          .\deqp-vk.exe --deqp-case=dEQP-VK.info.device
+          Get-Content -Path TestResults.qpa
+
+      - name: vkcts run
+        shell: pwsh
+        working-directory: ${{ github.workspace }}\VK-GL-CTS_WithSlang-0.0.7-win64
+        run: |
+          .\deqp-vk.exe --deqp-archive-dir=${{ github.workspace }}\VK-GL-CTS_WithSlang-0.0.7-win64 --deqp-caselist-file=${{ github.workspace }}\VK-GL-CTS_WithSlang-0.0.7-win64\slang-passing-tests.txt --deqp-waiver-file=${{ github.workspace }}\VK-GL-CTS_WithSlang-0.0.7-win64\slang-waiver-tests.xml
+
+      - name: Dump TestResults.qpa if failed
+        shell: pwsh
+        if: ${{ !success() }}
+        working-directory: ${{ github.workspace }}\VK-GL-CTS_WithSlang-0.0.7-win64
+        run: Get-Content TestResults.qpa -Tail 1000
+
+      - name: success notification
+        id: slack-notify-success
+        if: ${{ success() }}
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "CTS-Nightly": ":green-check-mark: CTS nightly status: ${{ job.status }}"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      - name: failure notification
+        id: slack-notify-failure
+        if: ${{ !success() }}
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "CTS-Nightly": ":alert: :alert: :alert: :alert: :alert: :alert:\nCTS nightly status: ${{ job.status }}: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

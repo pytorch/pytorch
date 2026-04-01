@@ -1,0 +1,144 @@
+name: Common setup
+
+description: Performs setup common to all our actions
+
+inputs:
+  os:
+    required: true
+  compiler:
+    required: true
+  platform:
+    required: true
+  config:
+    required: true
+  build-llvm:
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Add bash to PATH
+      shell: pwsh
+      if: ${{inputs.os == 'windows'}}
+      run: |
+        Add-Content -Path $env:GITHUB_PATH -Value "C:\\Program Files\\Git\\bin"
+        Add-Content -Path $env:GITHUB_PATH -Value "C:\\Program Files\\Git\\usr\\bin"
+
+    - name: Set up MSVC dev tools on Windows
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        sdk: "10.0.19041.0"
+
+    - shell: bash
+      run: |
+        # Set up system dependencies
+
+        # Install Ninja
+        if ! command -v ninja; then
+          case "${{inputs.os}}" in
+            linux*) sudo apt-get install -y ninja-build;;
+            windows*) choco install ninja;;
+            macos*) brew install ninja;;
+          esac
+        fi
+
+        # Install cross tools on Ubuntu
+        if [[ "${{inputs.os}}" == linux* && "${{inputs.platform}}" == "aarch64" && "$(uname -m)" != "aarch64" ]]; then
+          sudo apt-get install -y crossbuild-essential-arm64
+        fi
+
+        # Set compiler
+        CC=${{inputs.compiler}}
+        CXX=${{inputs.compiler}}
+        # infer C++ compiler
+        CXX=${CXX/gcc/g++}
+        CXX=${CXX/clang/clang++}
+        # Correct gcc version on older ubuntu
+        if [[ "${{inputs.os}}" == linux* ]]; then
+          gcc_version=$(gcc -dumpversion | cut -d'.' -f1)
+          if [ "$gcc_version" -lt 10 ]; then
+            CC=${CC/gcc/gcc-10}
+            CXX=${CXX/g++/g++-10}
+          fi
+        fi
+        # Export
+        echo "CC=$CC" >> "$GITHUB_ENV"
+        echo "CXX=$CXX" >> "$GITHUB_ENV"
+
+        # Some useful variables
+        config=${{inputs.config}}
+        cmake_config=$(echo "${{inputs.config}}" | sed '
+            s/^debug$/Debug/
+            s/^release$/Release/
+            s/^releaseWithDebugInfo$/RelWithDebInfo/
+            s/^minSizeRelease$/MinSizeRel/
+        ')
+        bin_dir=$(pwd)/build/$cmake_config/bin
+        lib_dir=$(pwd)/build/$cmake_config/lib
+        echo "config=$config" >> "$GITHUB_ENV"
+        echo "cmake_config=$cmake_config" >> "$GITHUB_ENV"
+        echo "bin_dir=$bin_dir" >> "$GITHUB_ENV"
+        echo "lib_dir=$lib_dir" >> "$GITHUB_ENV"
+
+    # Try to restore an LLVM install, and build it otherwise
+    - uses: actions/cache/restore@v4
+      id: cache-llvm
+      if: inputs.build-llvm == 'true'
+      with:
+        path: ${{ github.workspace }}/build/llvm-project-install
+        # Use os*compiler*platform in lieu of an ABI key here, which is what we really want
+        key: llvm-${{ inputs.os }}-${{ inputs.compiler }}-${{ inputs.platform }}-${{ hashFiles('external/build-llvm.sh') }}
+    - name: Build LLVM
+      if: inputs.build-llvm == 'true' && steps.cache-llvm.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        ./external/build-llvm.sh \
+          --install-prefix "${{github.workspace}}/build/llvm-project-install" \
+          --repo "https://${{github.token}}@github.com/llvm/llvm-project"
+    - uses: actions/cache/save@v4
+      if: inputs.build-llvm == 'true' && steps.cache-llvm.outputs.cache-hit != 'true'
+      with:
+        path: ${{ github.workspace }}/build/llvm-project-install
+        key: ${{ steps.cache-llvm.outputs.cache-primary-key }}
+
+    - name: Set environment variable for CMake and sccache
+      shell: bash
+      run: |
+        if [ "${{inputs.build-llvm}}" == "true" ]; then
+          echo "LLVM_DIR=${{ github.workspace }}/build/llvm-project-install" >> "$GITHUB_ENV"
+          echo "Clang_DIR=${{ github.workspace }}/build/llvm-project-install" >> "$GITHUB_ENV"
+        fi
+
+        # Set CMake to use sccache if it's available
+        if command -v sccache; then
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+        fi
+        echo SCCACHE_IGNORE_SERVER_IO_ERROR=1 >> "$GITHUB_ENV"
+
+    # Install swiftshader
+    - uses: robinraju/release-downloader@v1.11
+      continue-on-error: true
+      with:
+        latest: true
+        repository: "shader-slang/swiftshader"
+        out-file-path: "swiftshader"
+        extract: true
+        fileName: "vk_swiftshader_${{inputs.os}}_${{inputs.platform}}.zip"
+
+    - name: Install SwiftShader
+      shell: bash
+      run: |
+        case "${{inputs.os}}" in
+          windows*) echo "${{github.workspace}}/swiftshader/" >> "$GITHUB_PATH";;
+          *) echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH:+${LD_LIBRARY_PATH}:}${{github.workspace}}/swiftshader" >> "$GITHUB_ENV";;
+        esac
+
+    # Put spirv-tools in path
+    - shell: bash
+      run: |
+        win_platform="${{ inputs.platform }}"
+        win_platform="${win_platform//x86_64/x64}"
+        case "${{inputs.os}}" in
+          windows*) echo "${{github.workspace}}/external/slang-binaries/spirv-tools/windows-$win_platform/bin" >> "$GITHUB_PATH";;
+          linux*) echo "${{github.workspace}}/external/slang-binaries/spirv-tools/$(uname -m)-linux/bin" >> "$GITHUB_PATH";;
+        esac

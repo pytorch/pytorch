@@ -1,0 +1,61 @@
+name: Add Issue Labels
+
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+    inputs:
+      test_username:
+        description: "GitHub username to test with"
+        required: true
+        type: string
+
+jobs:
+  add-dev-opened-label:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+    steps:
+      - name: Check if issue creator is in Nvidia dev team
+        id: check_team
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.SLANGBOT_MEMBERS_READONLY }}
+          script: |
+            const response = await github.rest.teams.listMembersInOrg({
+              org: 'shader-slang',
+              team_slug: 'dev'
+            });
+
+            // For testing, use the provided username otherwise use the actual issue creator
+            const username = '${{ github.event.inputs.test_username || github.event.issue.user.login }}';
+
+            // Check if user is in the Nvidia dev team
+            const isTeamMember = response.data.some(member =>
+              member.login === username &&
+              member.login !== 'fairywreath'
+            );
+
+            console.log(`Checking membership for: ${username}`);
+            console.log(`Is Nvidia dev team member: ${isTeamMember}`);
+
+            core.setOutput('is_team_member', isTeamMember);
+
+      - name: Add Dev Opened Label
+        if: steps.check_team.outputs.is_team_member == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.SLANGBOT_ISSUES_WRITE }}
+          script: |
+            // Only add label if this is a real issue and not a test run
+            if (context.eventName === 'issues') {
+              github.rest.issues.addLabels({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                labels: ['Dev Opened']
+              });
+            } else {
+              console.log('Test run - would add label to issue if this was a real issue');
+            }

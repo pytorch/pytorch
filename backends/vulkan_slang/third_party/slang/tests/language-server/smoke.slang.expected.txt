@@ -1,0 +1,25 @@
+--------
+first: 6  ,.;:()[]<>{}*&^%!-=+|/? 
+second: 6  ,.;:()[]<>{}*&^%!-=+|/? 
+getSum: 2  ,.;:()[]<>{}*&^%!-=+|/? 
+This: 14  ,.;:()[]<>{}*&^%!-=+|/? 
+--------
+range: 24,26 - 24,31
+content:
+```
+(field) T Pair<T, U>.first
+```
+
+
+{REDACTED}.slang(20)
+
+--------
+activeParameter: 0
+activeSignature: 0
+func IFoo.getSum() -> int:
+
+Returns the sum of the contents.  
+
+{REDACTED}.slang(10)
+
+

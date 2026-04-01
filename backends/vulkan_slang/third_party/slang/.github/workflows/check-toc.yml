@@ -1,0 +1,18 @@
+name: Check Table of Contents (comment /regenerate-toc to auto-fix)
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+jobs:
+  check-formatting:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Mono
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mono-complete
+
+      - run: ./docs/build_toc.sh --check-only

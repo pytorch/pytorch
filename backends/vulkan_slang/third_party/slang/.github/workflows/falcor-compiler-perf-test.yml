@@ -1,0 +1,104 @@
+# This is a basic workflow to help you get started with Actions
+
+name: Falcor Compiler Perf-Test
+
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - "docs/**"
+      - "LICENSES/**"
+      - "LICENSE"
+      - "CONTRIBUTING.md"
+      - "README.md"
+  pull_request:
+    branches: [master]
+    paths-ignore:
+      - "docs/**"
+      - "LICENSES/**"
+      - "LICENSE"
+      - "CONTRIBUTING.md"
+      - "README.md"
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    timeout-minutes: 100
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows]
+        config: [release]
+        compiler: [cl]
+        platform: [x86_64]
+        include:
+          # Self-hosted falcor tests
+          - warnings-as-errors: true
+            test-category: full
+            full-gpu-tests: false
+            runs-on: [Windows, self-hosted, perf]
+    runs-on: ${{ matrix.runs-on }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: "recursive"
+          fetch-depth: "0"
+
+      - name: Setup
+        uses: ./.github/actions/common-setup
+        with:
+          os: ${{matrix.os}}
+          compiler: ${{matrix.compiler}}
+          platform: ${{matrix.platform}}
+          config: ${{matrix.config}}
+          build-llvm: true
+
+      - name: Build Slang
+        run: |
+          cmake --preset default --fresh \
+            -DSLANG_SLANG_LLVM_FLAVOR=USE_SYSTEM_LLVM \
+            -DCMAKE_COMPILE_WARNING_AS_ERROR=${{matrix.warnings-as-errors}} \
+            -DSLANG_ENABLE_CUDA=1
+          cmake --workflow --preset "${{matrix.config}}"
+
+      - uses: robinraju/release-downloader@v1.11
+        id: download
+        with:
+          # The source repository path.
+          # Expected format {owner}/{repo}
+          # Default: ${{ github.repository }}
+          repository: "shader-slang/falcor-compile-perf-test"
+
+          # A flag to set the download target as latest release
+          # The default value is 'false'
+          latest: true
+
+          # The name of the file to download.
+          # Use this field only to specify filenames other than tarball or zipball, if any.
+          # Supports wildcard pattern (eg: '*', '*.deb', '*.zip' etc..)
+          fileName: "falcor_perf_test-*-win-64.zip"
+
+          # Download the attached zipball (*.zip)
+          zipBall: true
+
+          # Relative path under $GITHUB_WORKSPACE to place the downloaded file(s)
+          # It will create the target directory automatically if not present
+          # eg: out-file-path: "my-downloads" => It will create directory $GITHUB_WORKSPACE/my-downloads
+          out-file-path: "./falcor-perf-test"
+
+          # Somehow there is a bug in this flag, the executable extracted is not runnable. We have to
+          # extract ourselves.
+          extract: false
+
+      - name: run falcor-compiler-perf-test
+        shell: pwsh
+        run: |
+          $filename = '${{ fromJson(steps.download.outputs.downloaded_files)[0] }}'
+          Expand-Archive $filename -DestinationPath .\falcor-perf-test
+          $env:PATH = ".\build\${{matrix.config}}\bin;" + $env:PATH
+          .\falcor-perf-test\bin\Release\falcor_perftest.exe

@@ -1,0 +1,65 @@
+name: Push MDL Benchmark Results
+
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - "docs/**"
+      - "LICENSES/**"
+      - "LICENSE"
+      - "CONTRIBUTING.md"
+      - "README.md"
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: [Windows, benchmark, self-hosted]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: "true"
+          fetch-depth: "0"
+      - name: Common setup
+        uses: ./.github/actions/common-setup
+        with:
+          os: windows
+          compiler: cl
+          platform: x86_64
+          config: release
+          build-llvm: true
+      - name: Build Slang
+        run: |
+          cmake --preset default --fresh -DSLANG_SLANG_LLVM_FLAVOR=USE_SYSTEM_LLVM -DCMAKE_COMPILE_WARNING_AS_ERROR=false
+          cmake --workflow --preset release
+      - uses: actions/checkout@v4
+        with:
+          repository: "shader-slang/MDL-SDK"
+          path: "external/MDL-SDK"
+          sparse-checkout: |
+            ./examples/mdl_sdk/dxr/content/slangified
+      - name: Run benchmark
+        run: |
+          cd tools/benchmark
+          cp ../../external/MDL-SDK/examples/mdl_sdk/dxr/content/slangified/*.slang .
+          pip install prettytable argparse
+          python compile.py --samples 16 --target dxil
+      - uses: actions/checkout@v4
+        with:
+          repository: "shader-slang/slang-material-modules-benchmark"
+          path: "external/slang-material-modules-benchmark"
+          token: ${{ secrets.SLANG_MDL_BENCHMARK_RESULTS_PAT }}
+      - name: Push results
+        run: |
+          cp tools/benchmark/benchmarks.json external\slang-material-modules-benchmark
+          echo $(Invoke-Expression "git log -1 --pretty=%s") > external\slang-material-modules-benchmark\commit
+          echo $(Invoke-Expression "git log -1 --pretty=%H") > external\slang-material-modules-benchmark\commit-hash
+          echo $(Invoke-Expression "git log -1 --pretty=%s") > external\slang-material-modules-benchmark\current
+          echo $(Invoke-Expression "git log -1 --pretty=%H") >> external\slang-material-modules-benchmark\current
+          cd external\slang-material-modules-benchmark
+          ls
+          git add benchmarks.json current
+          git commit -m "$(cat commit)" -m "https://github.com/shader-slang/slang/commit/$(cat commit-hash)"
+          git log
+          git push

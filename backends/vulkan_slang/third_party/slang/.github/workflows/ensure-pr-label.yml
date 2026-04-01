@@ -1,0 +1,24 @@
+name: Verify PR Labels
+on:
+  pull_request:
+    types: [opened, labeled, unlabeled, synchronize]
+    paths-ignore:
+      - "docs/**"
+      - "LICENSES/**"
+      - "LICENSE"
+      - "CONTRIBUTING.md"
+      - "README.md"
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: mheap/github-action-required-labels@v5
+        with:
+          mode: exactly
+          count: 1
+          labels: |
+            pr: non-breaking
+            pr: breaking change

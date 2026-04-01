@@ -1,0 +1,36 @@
+# This file sets up basic text editor behavior
+# using EditorConfig: http://EditorConfig.org.
+#
+# Some editors will import and use the settings from
+# this file automatically, while others need a plugin.
+
+# Editors are supposed to search upwards from a source
+# file to find configuration settings until they see
+# a "root" file. This file should be a root:
+#
+root = true
+
+# Shared configuration for all C/C++ and Slang code
+#
+[*.{c,cpp,h,slang}]
+
+# Use UTF-8 encoding
+#
+charset = utf-8
+
+# Indent using 4 spaces.
+#
+indent_style = space
+indent_size = 4
+
+# Insert a newline at the end of the file
+# if one is missing (this used to be officially
+# required by C, but it is also just a tidyness thing)
+#
+insert_final_newline = true
+
+# Removing end of line whitespace is somewhat desirable, but 
+# seems to add unwanted noise to PRs. This is especially when different
+# contributors source editors may or may not honor this setting. 
+# So disable for now.
+trim_trailing_whitespace = false

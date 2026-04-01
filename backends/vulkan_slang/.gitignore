@@ -1,0 +1,36 @@
+# Build
+build/
+*.so
+*.o
+*.a
+*.dylib
+dist/
+*.egg-info/
+__pycache__/
+*.pyc
+
+# Generated
+csrc/generated/
+cpu_tests/generated/
+cpu_tests/build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.venv/
+venv/
+.env
+
+# SPIR-V binaries
+*.spv
+
+# Pipeline cache
+*.pipeline_cache
+
+# OS
+.DS_Store
+Thumbs.db

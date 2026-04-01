@@ -1,0 +1,9 @@
+--------
+range: 7,11 - 7,14
+content:
+```
+(local variable) vector<float,3>[3] arr
+```
+{REDACTED}.slang(8)
+
+

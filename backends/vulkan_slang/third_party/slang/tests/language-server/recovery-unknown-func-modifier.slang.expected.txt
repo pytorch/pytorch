@@ -1,0 +1,12 @@
+--------
+range: 8,5 - 8,13
+content:
+```
+func nextFunc() -> void
+```
+
+HOVER:9,10  
+
+{REDACTED}.slang(9)
+
+

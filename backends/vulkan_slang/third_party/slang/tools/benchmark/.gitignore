@@ -1,0 +1,4 @@
+slang-benchmarks
+targets/
+modules/
+*.json

@@ -1,0 +1,57 @@
+Checks:
+  - cert-*
+  - clang-analyzer-*
+  - bugprone-*
+  - performance-*
+  - readability-*
+  - modernize-*
+  - cppcoreguidelines-*
+  - misc-*
+  - '-altera-unroll-loops'
+  - '-bugprone-easily-swappable-parameters'
+  - '-bugprone-sizeof-expression'
+  - '-cppcoreguidelines-avoid-do-while'
+  - '-cppcoreguidelines-macro-usage'
+  - '-cppcoreguidelines-no-malloc'
+  - '-cppcoreguidelines-owning-memory'
+  - '-cppcoreguidelines-pro-bounds-array-to-pointer-decay'
+  - '-cppcoreguidelines-pro-bounds-constant-array-index'
+  - '-cppcoreguidelines-pro-bounds-pointer-arithmetic'
+  - '-cppcoreguidelines-pro-type-union-access'
+  - '-cppcoreguidelines-pro-type-vararg'
+  - '-llvmlibc-implementation-in-namespace'
+  - '-llvmlibc-restrict-system-libc-headers'
+  - '-misc-const-correctness'
+  - '-misc-definitions-in-headers'
+  - '-misc-no-recursion'
+  - '-misc-static-assert'
+  - '-misc-unused-parameters'
+  - '-modernize-use-auto'
+  - '-modernize-use-nodiscard'
+  - '-modernize-use-using'
+  - '-modernize-use-trailing-return-type'
+  - '-performance-enum-size'
+  - '-readability-braces-around-statements'
+  - '-readability-function-cognitive-complexity'
+  - '-readability-implicit-bool-conversion'
+  - '-readability-simplify-boolean-expr'
+  - '-readability-static-accessed-through-instance'
+  - '-readability-identifier-naming'
+  - '-readability-identifier-length'
+
+HeaderFilterRegex: '.*\.(cpp|h)$'
+FormatStyle: file
+
+CheckOptions:
+  - key: 'modernize-loop-convert.MaxCopySize'
+    value: '16'
+  - key: 'readability-identifier-naming.VariableCase'
+    value: 'camelBack'
+  - key: 'readability-identifier-naming.ClassCase'
+    value: 'CamelCase'
+  - key: 'readability-identifier-naming.FunctionCase'
+    value: 'camelBack'
+  - key: 'cppcoreguidelines-avoid-magic-numbers.IgnoreEnums'
+    value: '1'
+  - key: 'cppcoreguidelines-avoid-magic-numbers.IgnoreOctalLiterals'
+    value: '1'

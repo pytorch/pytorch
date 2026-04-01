@@ -1,0 +1,12 @@
+--------
+range: 5,10 - 5,16
+content:
+```
+interface IValue
+```
+
+Test that we can specialize a generic method called through a dynamic interface.  
+
+{REDACTED}.slang(6)
+
+

@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=61.0", "torch>=2.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "torch_vulkan"
+version = "0.1.0"
+description = "PyTorch Vulkan backend with Slang shaders for full training support"
+requires-python = ">=3.9"
+dependencies = ["torch>=2.1"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+timeout = 300

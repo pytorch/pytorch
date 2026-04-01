@@ -1,0 +1,6 @@
+[submodule "third_party/VulkanMemoryAllocator"]
+	path = third_party/VulkanMemoryAllocator
+	url = https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
+[submodule "third_party/slang"]
+	path = third_party/slang
+	url = https://github.com/shader-slang/slang.git

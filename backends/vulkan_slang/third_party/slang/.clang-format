@@ -1,0 +1,41 @@
+BasedOnStyle: LLVM
+
+# Whitespace
+MaxEmptyLinesToKeep: 2
+IndentWidth: 4
+ColumnLimit: 100
+
+# Preprocessor
+AlignEscapedNewlines: Left
+IncludeBlocks: Regroup
+
+# Functions
+AllowAllArgumentsOnNextLine: false
+BinPackArguments: false
+BinPackParameters: false
+AllowAllParametersOfDeclarationOnNextLine: false
+PenaltyReturnTypeOnItsOwnLine: 9999999
+PenaltyBreakBeforeFirstCallParameter: 6
+AllowShortFunctionsOnASingleLine: Inline
+
+# Brackets and braces
+AlignAfterOpenBracket: AlwaysBreak
+BreakBeforeBraces: Allman
+
+# Pointers
+PointerAlignment: Left
+
+# Classes
+PackConstructorInitializers: NextLineOnly
+BreakConstructorInitializers: BeforeComma
+AccessModifierOffset: -4
+
+# Switch statements
+IndentCaseBlocks: true
+
+# Templates
+SpaceAfterTemplateKeyword: false
+AlwaysBreakTemplateDeclarations: true
+
+# Misc
+SortUsingDeclarations: false

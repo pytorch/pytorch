@@ -1,0 +1,6 @@
+/bin/*
+/build/*
+!/bin/VmaSample_Release_vs2019.exe
+!/bin/VmaSample_Release_vs2022.exe
+!/bin/Shader*.spv
+.vscode/

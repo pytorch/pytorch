@@ -1,0 +1,20 @@
+
+@PACKAGE_INIT@
+
+if (NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+  include("${CMAKE_CURRENT_LIST_DIR}/slangTargets.cmake")
+  check_required_components("slang")
+endif()
+
+if(@SLANG_ENABLE_SLANGC@)
+
+  find_program(SLANGC_EXECUTABLE "slangc" HINTS ENV PATH "${PACKAGE_PREFIX_DIR}/bin")
+
+  if (NOT SLANGC_EXECUTABLE)
+      message(STATUS "slangc executable not found; ensure it is available in your PATH.")
+  endif()
+    
+  set(SLANG_EXECUTABLE ${SLANGC_EXECUTABLE} CACHE STRING "Path to the slangc executable")
+
+endif()
+

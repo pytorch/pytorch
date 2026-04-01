@@ -1,0 +1,2227 @@
+// This file is the single source of truth for all capabilities
+// supported by the Slang language.
+//
+// This file will be parsed and processed by the slang-capability-generator
+// tool during the build process to produce slang-generated-capability-defs.h
+// and slang-generated-capability-defs-impl.h files that constitute the final
+// C++ source of the compiler. New capabilities should be added by editing
+// this file instead of the generated .h files.
+//
+// A capability atom represent a basic unit that characterizes a single code-gen target or
+// a platform-specific API/feature, e.g. _GL_EXT_ray_tracing represents the GLSL ray tracing
+// extension, and `glsl` represents the GLSL code gen target.
+//
+// A capability name is defined by a unique disjunction of conjunction of capability atoms.
+// For example, `raytracing` is a name that expands to
+// glsl + _GL_EXT_ray_tracing | spirv_1_4 + SPV_KHR_ray_tracing | hlsl + _sm_6_4
+// which means it requires the `_GL_EXT_ray_tracing` extension when generating code for glsl,
+// requires SPV_KHR_ray_tracing for spirv, and requires sm_6_4 when generating hlsl.
+//
+// There are three types of capability definitions:
+// - `def`: this will introduce an new capability atom. If there is an inheritance clause,
+//    the capability name will expand to all inherited atoms plus the newly introduced atom.
+// - `abstract`: an abstract capability does not introduce an actual atom. Primarily used to 
+//   make disjunctions using the following rules:
+//      1. Each type of abstract atom defines a "keyhole". `target` and `stage` are distinct "keyholes".
+//      2. Any atom immediately derived off of an abstract atom is a "key atom". 
+//      3. Every conjunction may only populate each "keyhole" once, else the set is incompatible.
+//          * If joining ('+') incompatible sets, an invalid capability is made.
+//          * If Inclusive joining ('|') incompatible sets, a disjunction is made.
+//      4. ex: `hlsl + glsl` both populate the same "keyhole" of `target`, this is incompatible. 
+//      5. ex: `hlsl + _sm_6_0` both populate same keyholes of `hlsl` and `hlsl`, this is compatible.
+//      6. ex: `hlsl | glsl` creates a disjunction of 2 sets: `hlsl` and `glsl`. This is due to the 
+//         2 sets being incompatible.
+//      7. Having a not populated "keyhole" means your set is compatible with any "key atom" of 
+//         distinct "keyhole".
+//      8. ex: `vertex + glsl` works because 'vertex' has a unpopulated `target` "keyhole", and 
+//         therefore is compatible with all `target` "key atoms"
+
+// - `alias`: this defines an alias and does not introduce actual atoms.
+
+// How auto-doc works (automatic filling of `a3-02-reference-capability-atoms.md`):
+//
+// 1. `def`/`alias` are considered 'documentable atoms'
+//
+// 2. Any successive lines of `///` before a 'documentable atom' is assigned as a
+//    doc-comment for the 'documentable atom', for example:
+//
+//    a. "my comment" will be associated with `textualTarget`
+//      ```
+//      /// my comment
+//      def textualTarget; 
+//      ```
+//
+//    b. "" will be associated with `textualTarget`
+//      ```
+//      /// my comment
+//      //
+//      def textualTarget; 
+//      ```
+//
+//    c. "my comment\n additional info" will be associated with `textualTarget`
+//      ```
+//      /// my comment
+//      /// additional info
+//      def textualTarget; 
+//      ```
+//
+// 3. If `[GROUP]` is found apart of a `///[GROUP]` string, this is treated as a "header group".
+//    Only these "header groups" are allowed: [Target] [Stage] [EXT] [Version] [Compound] [Other].
+//    Example(s) are provided below:
+//
+//    a. `textualTarget` will be emitted under header 'Target' with text "my comment"
+//      ```
+//      /// [Target]
+//      /// my comment
+//      def textualTarget; 
+//      ```
+// 4. All 'documentable atoms' must a documentation comment assigned to them. `[GROUP]` does not count as a documentation comment.
+
+/// Represents a non-assembly code generation target.
+/// [Target]
+def textualTarget;
+
+abstract target;
+
+/// Represents the HLSL code generation target.
+/// [Target]
+def hlsl : target + textualTarget;
+
+/// Represents the GLSL code generation target.
+/// [Target]
+def glsl : target + textualTarget;
+
+/// Represents the C programming language code generation target.
+/// [Target]
+def c : target + textualTarget;
+
+/// Represents the C++ programming language code generation target.
+/// [Target]
+def cpp : target + textualTarget;
+
+/// Represents the CUDA code generation target.
+/// [Target]
+def cuda : target + textualTarget;
+
+/// Represents the Metal programming language code generation target.
+/// [Target]
+def metal : target + textualTarget;
+
+/// Represents the SPIR-V code generation target.
+/// [Target]
+def spirv : target;
+
+/// Represents the WebGPU shading language code generation target.
+/// [Target]
+def wgsl : target + textualTarget;
+
+/// Represents the Slang VM bytecode target.
+/// [Target]
+def slangvm : target;
+
+// Capabilities that stand for target SPIR-V versions for the GLSL backend.
+// These are not compilation targets. We will convert `_spirv_*` to `glsl_spirv_*` during compilation.
+
+/// Represents SPIR-V 1.0 through glslang.
+/// [Version]
+def glsl_spirv_1_0 : glsl;
+
+/// Represents SPIR-V 1.1 through glslang.
+/// [Version]
+def glsl_spirv_1_1 : glsl_spirv_1_0;
+
+/// Represents SPIR-V 1.2 through glslang.
+/// [Version]
+def glsl_spirv_1_2 : glsl_spirv_1_1;
+
+/// Represents SPIR-V 1.3 through glslang.
+/// [Version]
+def glsl_spirv_1_3 : glsl_spirv_1_2;
+
+/// Represents SPIR-V 1.4 through glslang.
+/// [Version]
+def glsl_spirv_1_4 : glsl_spirv_1_3;
+
+/// Represents SPIR-V 1.5 through glslang.
+/// [Version]
+def glsl_spirv_1_5 : glsl_spirv_1_4;
+
+/// Represents SPIR-V 1.6 through glslang.
+/// [Version]
+def glsl_spirv_1_6 : glsl_spirv_1_5;
+
+// We have multiple capabilities for the various SPIR-V versions,
+// arranged so that they inherit from one another to represent which versions
+// provide a super-set of the features of earlier ones (e.g., SPIR-V 1.4 is
+// expressed as inheriting from SPIR-V 1.3).
+
+def _spirv_1_0 : spirv;
+def _spirv_1_1 : _spirv_1_0;
+def _spirv_1_2 : _spirv_1_1;
+def _spirv_1_3 : _spirv_1_2;
+def _spirv_1_4 : _spirv_1_3;
+def _spirv_1_5 : _spirv_1_4;
+def _spirv_1_6 : _spirv_1_5;
+alias _spirv_latest = _spirv_1_6;
+
+def _GLSL_130 : glsl;
+def _GLSL_140 : _GLSL_130;
+def _GLSL_150 : _GLSL_140;
+def _GLSL_330 : _GLSL_150;
+def _GLSL_400 : _GLSL_330;
+def _GLSL_410 : _GLSL_400;
+def _GLSL_420 : _GLSL_410;
+def _GLSL_430 : _GLSL_420;
+def _GLSL_440 : _GLSL_430;
+def _GLSL_450 : _GLSL_440;
+def _GLSL_460 : _GLSL_450;
+
+// Metal versions
+
+/// Represents MetalLib 2.3.
+/// [Version]
+def metallib_2_3 : metal;
+
+/// Represents MetalLib 2.4.
+/// [Version]
+def metallib_2_4 : metallib_2_3;
+
+/// Represents MetalLib 3.0.
+/// [Version]
+def metallib_3_0 : metallib_2_4;
+
+/// Represents MetalLib 3.1.
+/// [Version]
+def metallib_3_1 : metallib_3_0;
+
+/// Represents the latest MetalLib version.
+/// [Version]
+alias metallib_latest = metallib_3_1;
+
+// HLSL versions
+
+def _sm_4_0 : hlsl;
+def _sm_4_1 : _sm_4_0;
+def _sm_5_0 : _sm_4_1;
+def _sm_5_1 : _sm_5_0;
+def _sm_6_0 : _sm_5_1;
+def _sm_6_1 : _sm_6_0;
+def _sm_6_2 : _sm_6_1;
+def _sm_6_3 : _sm_6_2;
+def _sm_6_4 : _sm_6_3;
+def _sm_6_5 : _sm_6_4;
+def _sm_6_6 : _sm_6_5;
+def _sm_6_7 : _sm_6_6;
+def _sm_6_8 : _sm_6_7;
+def _sm_6_9 : _sm_6_8;
+
+/// Represents HLSL NVAPI support.
+/// [Version]
+def hlsl_nvapi : hlsl;
+
+
+/// Represet HLSL compatibility support.
+/// [Version]
+def hlsl_2018 : _sm_5_1;
+
+/// Represents capabilities required for DXIL Library compilation.
+/// [Version]
+alias dxil_lib = _sm_6_3;
+
+// CUDA versions
+
+def _cuda_sm_1_0 : cuda;
+def _cuda_sm_2_0 : _cuda_sm_1_0;
+def _cuda_sm_3_0 : _cuda_sm_2_0;
+def _cuda_sm_3_5 : _cuda_sm_3_0;
+def _cuda_sm_4_0 : _cuda_sm_3_5;
+def _cuda_sm_5_0 : _cuda_sm_4_0;
+def _cuda_sm_6_0 : _cuda_sm_5_0;
+def _cuda_sm_7_0 : _cuda_sm_6_0;
+def _cuda_sm_8_0 : _cuda_sm_7_0;
+def _cuda_sm_9_0 : _cuda_sm_8_0;
+
+/// All code-gen targets
+/// [Compound]
+alias any_target = hlsl | metal | glsl | c | cpp | cuda | spirv | wgsl;
+
+/// All non-asm code-gen targets
+/// [Compound]
+alias any_textual_target = hlsl | metal | glsl | c | cpp | cuda | wgsl;
+
+/// All slang-gfx compatible code-gen targets
+/// [Compound]
+alias any_gfx_target = hlsl | metal | glsl | spirv | wgsl;
+
+/// All "cpp syntax" code-gen targets
+/// [Compound]
+alias any_cpp_target = cpp | cuda;
+
+/// CPP and CUDA code-gen targets
+/// [Compound]
+alias cpp_cuda = cpp | cuda;
+
+/// CPP, CUDA and SPIRV code-gen targets
+/// [Compound]
+alias cpp_cuda_spirv = cpp | cuda | spirv;
+
+/// CUDA and SPIRV code-gen targets
+/// [Compound]
+alias cuda_spirv = cuda | spirv;
+
+/// CPP, CUDA, GLSL and SPIRV code-gen targets
+/// [Compound]
+alias cpp_cuda_glsl_spirv = cpp | cuda | glsl | spirv;
+
+/// CPP, CUDA, GLSL, and HLSL code-gen targets
+/// [Compound]
+alias cpp_cuda_glsl_hlsl = cpp | cuda | glsl | hlsl;
+
+/// CPP, CUDA, GLSL, HLSL, and SPIRV code-gen targets
+/// [Compound]
+alias cpp_cuda_glsl_hlsl_spirv = cpp | cuda | glsl | hlsl | spirv;
+
+/// CPP, CUDA, GLSL, HLSL, SPIRV and WGSL code-gen targets
+/// [Compound]
+alias cpp_cuda_glsl_hlsl_spirv_wgsl = cpp | cuda | glsl | hlsl | spirv | wgsl;
+
+/// CPP, CUDA, GLSL, HLSL, Metal and SPIRV code-gen targets
+/// [Compound]
+alias cpp_cuda_glsl_hlsl_metal_spirv = cpp | cuda | glsl | hlsl | metal | spirv;
+
+/// CPP, CUDA, GLSL, HLSL, Metal, SPIRV and WGSL code-gen targets
+/// [Compound]
+alias cpp_cuda_glsl_hlsl_metal_spirv_wgsl = cpp | cuda | glsl | hlsl | metal | spirv | wgsl;
+
+/// CPP, CUDA, and HLSL code-gen targets
+/// [Compound]
+alias cpp_cuda_hlsl = cpp | cuda | hlsl;
+
+/// CPP, CUDA, HLSL, and SPIRV code-gen targets
+/// [Compound]
+alias cpp_cuda_hlsl_spirv = cpp | cuda | hlsl | spirv;
+
+/// CPP, CUDA, HLSL, Metal, and SPIRV code-gen targets
+/// [Compound]
+alias cpp_cuda_hlsl_metal_spirv = cpp | cuda | hlsl | metal | spirv;
+
+/// CPP, and GLSL code-gen targets
+/// [Compound]
+alias cpp_glsl = cpp | glsl;
+
+/// CPP, GLSL, HLSL, and SPIRV code-gen targets
+/// [Compound]
+alias cpp_glsl_hlsl_spirv = cpp | glsl | hlsl | spirv;
+
+/// CPP, GLSL, HLSL, SPIRV and WGSL code-gen targets
+/// [Compound]
+alias cpp_glsl_hlsl_spirv_wgsl = cpp | glsl | hlsl | spirv | wgsl;
+
+/// CPP, GLSL, HLSL, Metal, and SPIRV code-gen targets
+/// [Compound]
+alias cpp_glsl_hlsl_metal_spirv = cpp | glsl | hlsl | metal | spirv;
+
+/// CPP, GLSL, HLSL, Metal, SPIRV and WGSL code-gen targets
+/// [Compound]
+alias cpp_glsl_hlsl_metal_spirv_wgsl = cpp | glsl | hlsl | metal | spirv | wgsl;
+
+/// CPP, and HLSL code-gen targets
+/// [Compound]
+alias cpp_hlsl = cpp | hlsl;
+
+/// CUDA, GLSL, and HLSL code-gen targets
+/// [Compound]
+alias cuda_glsl_hlsl = cuda | glsl | hlsl;
+
+/// CUDA, HLSL, Metal, and SPIRV code-gen targets
+/// [Compound]
+alias cuda_hlsl_metal_spirv = cuda | hlsl | metal | spirv;
+
+/// CUDA, GLSL, HLSL, and SPIRV code-gen targets
+/// [Compound]
+alias cuda_glsl_hlsl_spirv = cuda | glsl | hlsl | spirv;
+
+/// CUDA, GLSL, HLSL, SPIRV, and WGSL code-gen targets
+/// [Compound]
+alias cuda_glsl_hlsl_spirv_wgsl = cuda | glsl | hlsl | spirv | wgsl;
+
+/// CUDA, GLSL, HLSL, Metal, and SPIRV code-gen targets
+/// [Compound]
+alias cuda_glsl_hlsl_metal_spirv = cuda | glsl | hlsl | metal | spirv;
+
+/// CUDA, GLSL, HLSL, Metal, SPIRV and WGSL code-gen targets
+/// [Compound]
+alias cuda_glsl_hlsl_metal_spirv_wgsl = cuda | glsl | hlsl | metal | spirv | wgsl;
+
+/// CUDA, GLSL, and SPIRV code-gen targets
+/// [Compound]
+alias cuda_glsl_spirv = cuda | glsl | spirv;
+
+/// CUDA, GLSL, Metal, and SPIRV code-gen targets
+/// [Compound]
+alias cuda_glsl_metal_spirv = cuda | glsl | metal | spirv;
+
+/// CUDA, GLSL, Metal, SPIRV and WGSL code-gen targets
+/// [Compound]
+alias cuda_glsl_metal_spirv_wgsl = cuda | glsl | metal | spirv | wgsl;
+
+/// CUDA, and HLSL code-gen targets
+/// [Compound]
+alias cuda_hlsl = cuda | hlsl;
+
+/// CUDA, HLSL, SPIRV code-gen targets
+/// [Compound]
+alias cuda_hlsl_spirv = cuda | hlsl | spirv;
+
+/// GLSL, HLSL, and SPIRV code-gen targets
+/// [Compound]
+alias glsl_hlsl_spirv = glsl | hlsl | spirv;
+
+/// GLSL, HLSL, SPIRV and WGSL code-gen targets
+/// [Compound]
+alias glsl_hlsl_spirv_wgsl = glsl | hlsl | spirv | wgsl;
+
+/// GLSL, HLSL, Metal, and SPIRV code-gen targets
+/// [Compound]
+alias glsl_hlsl_metal_spirv = glsl | hlsl | metal | spirv;
+
+/// GLSL, HLSL, Metal, SPIRV and WGSL code-gen targets
+/// [Compound]
+alias glsl_hlsl_metal_spirv_wgsl = glsl | hlsl | metal | spirv | wgsl;
+
+/// GLSL, Metal, and SPIRV code-gen targets
+/// [Compound]
+alias glsl_metal_spirv = glsl | metal | spirv;
+
+/// GLSL, Metal, SPIRV and WGSL code-gen targets
+/// [Compound]
+alias glsl_metal_spirv_wgsl = glsl | metal | spirv | wgsl;
+
+/// GLSL, and SPIRV code-gen targets
+/// [Compound]
+alias glsl_spirv = glsl | spirv;
+
+/// GLSL, SPIRV, and WGSL code-gen targets
+/// [Compound]
+alias glsl_spirv_wgsl = glsl | spirv | wgsl;
+
+/// HLSL, and SPIRV code-gen targets
+/// [Compound]
+alias hlsl_spirv = hlsl | spirv;
+
+// stages
+//
+abstract stage;
+
+/// Vertex shader stage
+/// [Stage]
+def vertex : stage;
+
+/// Fragment shader stage
+/// [Stage]
+def fragment : stage;
+
+/// Compute shader stage
+/// [Stage]
+def compute : stage;
+
+/// Hull shader stage
+/// [Stage]
+def hull : stage;
+
+/// Domain shader stage
+/// [Stage]
+def domain : stage;
+
+/// Geometry shader stage
+/// [Stage]
+def geometry : stage;
+
+/// Dispatch shader stage
+/// [Stage]
+def dispatch : stage;
+
+def _raygen : stage;
+alias _raygeneration = _raygen;
+def _intersection : stage;
+def _anyhit : stage;
+def _closesthit: stage;
+def _callable : stage;
+def _miss : stage;
+def _mesh : stage;
+def _amplification : stage;
+
+// SPIRV extensions
+
+/// Represents the SPIR-V extension for fragment shader interlock operations.
+/// [EXT]
+def SPV_EXT_fragment_shader_interlock : _spirv_1_0;
+
+/// Represents the SPIR-V extension for physical storage buffer.
+/// [EXT]
+def SPV_EXT_physical_storage_buffer : _spirv_1_3;
+
+/// Represents the SPIR-V extension for SPV_EXT_fragment_fully_covered.
+/// [EXT]
+def SPV_EXT_fragment_fully_covered : _spirv_1_0;
+
+/// Represents the SPIR-V extension for descriptor indexing.
+/// [EXT]
+def SPV_EXT_descriptor_indexing : _spirv_1_0;
+
+/// Represents the SPIR-V extension for atomic float add operations.
+/// [EXT]
+def SPV_EXT_shader_atomic_float_add : _spirv_1_0;
+
+/// Represents the SPIR-V extension for atomic float16 add operations.
+/// [EXT]
+def SPV_EXT_shader_atomic_float16_add : SPV_EXT_shader_atomic_float_add;
+
+/// Represents the SPIR-V extension for atomic float min/max operations.
+/// [EXT]
+def SPV_EXT_shader_atomic_float_min_max : _spirv_1_0;
+
+/// Represents the SPIR-V extension for mesh shaders.
+/// [EXT]
+def SPV_EXT_mesh_shader : _spirv_1_4;
+
+/// Represents the SPIR-V extension for demoting to helper invocation.
+/// [EXT]
+def SPV_EXT_demote_to_helper_invocation : _spirv_1_4;
+
+/// Represents the SPIR-V extension for maximal reconvergence.
+/// [EXT]
+def SPV_KHR_maximal_reconvergence : _spirv_1_0;
+
+/// Represents the SPIR-V extension for quad group control.
+/// [EXT]
+def SPV_KHR_quad_control : _spirv_1_3;
+
+/// Represents the SPIR-V extension for fragment shader barycentric.
+/// [EXT]
+def SPV_KHR_fragment_shader_barycentric : _spirv_1_0;
+
+/// Represents the SPIR-V extension for non-semantic information.
+/// [EXT]
+def SPV_KHR_non_semantic_info : _spirv_1_0;
+
+/// Represents the SPIR-V extension for ray tracing.
+/// [EXT]
+def SPV_KHR_ray_tracing : _spirv_1_4;
+
+/// Represents the SPIR-V extension for ray queries.
+/// [EXT]
+def SPV_KHR_ray_query : _spirv_1_0;
+
+/// Represents the SPIR-V extension for ray tracing position fetch.
+/// Should be used with either SPV_KHR_ray_query or SPV_KHR_ray_tracing.
+/// [EXT]
+def SPV_KHR_ray_tracing_position_fetch : _spirv_1_0;
+
+/// Represents the SPIR-V extension for shader clock.
+/// [EXT]
+def SPV_KHR_shader_clock : _spirv_1_0;
+
+/// Represents the SPIR-V extension for shader subgroup partitioned.
+/// [EXT]
+def SPV_NV_shader_subgroup_partitioned : _spirv_1_0;
+
+/// Represents the SPIR-V extension enables rotating values across invocations within a subgroup.
+/// [EXT]
+def SPV_KHR_subgroup_rotate : _spirv_1_3;
+
+/// Represents the SPIR-V extension for ray tracing motion blur.
+/// [EXT]
+def SPV_NV_ray_tracing_motion_blur : _spirv_1_0;
+
+/// Represents the SPIR-V extension for shader invocation reorder.
+/// Requires SPV_KHR_ray_tracing.
+/// [EXT]
+def SPV_NV_shader_invocation_reorder : _spirv_1_5 + SPV_KHR_ray_tracing;
+
+/// Represents the SPIR-V extension for shader image footprint.
+/// [EXT]
+def SPV_NV_shader_image_footprint : _spirv_1_0;
+
+/// Represents the SPIR-V extension for compute shader derivatives.
+/// [EXT]
+def SPV_KHR_compute_shader_derivatives : _spirv_1_0;
+
+/// Represents the SPIR-V extension for compute shader derivatives.
+/// [EXT]
+alias SPV_NV_compute_shader_derivatives = SPV_KHR_compute_shader_derivatives;
+
+/// Represents the SPIR-V extension for SPV_GOOGLE_user_type.
+/// [EXT]
+def SPV_GOOGLE_user_type : _spirv_1_0;
+
+/// Represents the SPIR-V extension for SPV_EXT_replicated_composites.
+/// [EXT]
+def SPV_EXT_replicated_composites : _spirv_1_0;
+
+/// Represents the SPIR-V extension for SPV_NV_cooperative_vector.
+/// [EXT]
+def SPV_NV_cooperative_vector : _spirv_1_6 + SPV_EXT_replicated_composites;
+
+/// Represents the SPIR-V extension for SPV_KHR_cooperative_matrix.
+/// [EXT]
+def SPV_KHR_cooperative_matrix : _spirv_1_6 + SPV_EXT_physical_storage_buffer;
+
+// SPIRV Capabilities.
+
+/// Represents the SPIR-V capability for atomic float 32 add operations.
+/// [EXT]
+def spvAtomicFloat32AddEXT : SPV_EXT_shader_atomic_float_add;
+
+/// Represents the SPIR-V capability for atomic float 16 add operations.
+/// [EXT]
+def spvAtomicFloat16AddEXT : SPV_EXT_shader_atomic_float16_add;
+
+/// Represents the SPIR-V capability for atomic float 64 add operations.
+/// [EXT]
+def spvAtomicFloat64AddEXT : SPV_EXT_shader_atomic_float_add;
+
+/// Represents the SPIR-V capability for 64-bit integer atomics.
+/// [EXT]
+def spvInt64Atomics : _spirv_1_0;
+
+/// Represents the SPIR-V capability for atomic float 32 min/max operations.
+/// [EXT]
+def spvAtomicFloat32MinMaxEXT : SPV_EXT_shader_atomic_float_min_max;
+
+/// Represents the SPIR-V capability for atomic float 16 min/max operations.
+/// [EXT]
+def spvAtomicFloat16MinMaxEXT : SPV_EXT_shader_atomic_float_min_max;
+
+/// Represents the SPIR-V capability for atomic float 64 min/max operations.
+/// [EXT]
+def spvAtomicFloat64MinMaxEXT : SPV_EXT_shader_atomic_float_min_max;
+
+/// Represents the SPIR-V capability for 'derivative control' operations.
+/// [EXT]
+def spvDerivativeControl : _spirv_1_0;
+
+/// Represents the SPIR-V capability for image query operations.
+/// [EXT]
+def spvImageQuery : _spirv_1_0;
+
+/// Represents the SPIR-V capability for extended image gather operations.
+/// [EXT]
+def spvImageGatherExtended : _spirv_1_0;
+
+/// Represents the SPIR-V capability for sparse residency.
+/// [EXT]
+def spvSparseResidency : _spirv_1_0;
+
+/// Represents the SPIR-V capability for image footprint.
+/// [EXT]
+def spvImageFootprintNV : SPV_NV_shader_image_footprint;
+
+/// Represents the SPIR-V capability for using minimum LOD operations.
+/// [EXT]
+def spvMinLod : _spirv_1_0;
+
+/// Represents the SPIR-V capability for using SPV_EXT_fragment_shader_interlock.
+/// [EXT]
+def spvFragmentShaderPixelInterlockEXT : SPV_EXT_fragment_shader_interlock;
+
+/// Represents the SPIR-V capability for using SPV_KHR_fragment_shader_barycentric.
+/// [EXT]
+def spvFragmentBarycentricKHR : SPV_KHR_fragment_shader_barycentric;
+
+/// Represents the SPIR-V capability for using SPV_EXT_fragment_fully_covered functionality.
+/// [EXT]
+def spvFragmentFullyCoveredEXT : SPV_EXT_fragment_fully_covered;
+
+/// Represents the SPIR-V capability for group non-uniform ballot operations.
+/// [EXT]
+def spvGroupNonUniformBallot : _spirv_1_3;
+
+/// Represents the SPIR-V capability for group non-uniform shuffle operations.
+/// [EXT]
+def spvGroupNonUniformShuffle : _spirv_1_3;
+
+/// Represents the SPIR-V capability for group non-uniform arithmetic operations.
+/// [EXT]
+def spvGroupNonUniformArithmetic : _spirv_1_3;
+
+/// Represents the SPIR-V capability for group non-uniform quad operations.
+/// [EXT]
+def spvGroupNonUniformQuad : _spirv_1_3;
+
+/// Represents the SPIR-V capability for group non-uniform vote operations.
+/// [EXT]
+def spvGroupNonUniformVote : _spirv_1_3;
+
+/// Represents the SPIR-V capability for group non-uniform partitioned operations.
+/// [EXT]
+def spvGroupNonUniformPartitionedNV : _spirv_1_3 + SPV_NV_shader_subgroup_partitioned;
+
+/// Represents the SPIR-V capability for group non-uniform rotate operations.
+/// [EXT]
+def spvGroupNonUniformRotateKHR : _spirv_1_3;
+
+/// Represents the SPIR-V capability for ray tracing motion blur.
+/// [EXT]
+def spvRayTracingMotionBlurNV : SPV_NV_ray_tracing_motion_blur;
+
+/// Represents the SPIR-V capability for mesh shading.
+/// [EXT]
+def spvMeshShadingEXT : SPV_EXT_mesh_shader;
+
+/// Represents the SPIR-V capability for ray tracing.
+/// [EXT]
+def spvRayTracingKHR : SPV_KHR_ray_tracing;
+
+/// Represents the SPIR-V capability for ray tracing position fetch.
+/// [EXT]
+def spvRayTracingPositionFetchKHR : SPV_KHR_ray_tracing_position_fetch + spvRayTracingKHR;
+
+/// Represents the SPIR-V capability for ray query.
+/// [EXT]
+def spvRayQueryKHR : SPV_KHR_ray_query;
+
+/// Represents the SPIR-V capability for ray query position fetch.
+/// [EXT]
+def spvRayQueryPositionFetchKHR : SPV_KHR_ray_tracing_position_fetch + spvRayQueryKHR;
+
+/// Represents the SPIR-V capability for shader invocation reorder.
+/// [EXT]
+def spvShaderInvocationReorderNV : SPV_NV_shader_invocation_reorder;
+
+/// Represents the SPIR-V capability for shader clock.
+/// [EXT]
+def spvShaderClockKHR : SPV_KHR_shader_clock;
+
+/// Represents the SPIR-V capability for non-uniform resource indexing.
+/// [EXT]
+def spvShaderNonUniformEXT : SPV_EXT_descriptor_indexing;
+
+/// Represents the SPIR-V capability for non-uniform resource indexing.
+/// [EXT]
+def spvShaderNonUniform : spvShaderNonUniformEXT;
+
+/// Represents the SPIR-V capability for demoting to helper invocation.
+/// [EXT]
+def spvDemoteToHelperInvocationEXT : SPV_EXT_demote_to_helper_invocation;
+
+/// Represents the SPIR-V capability for demoting to helper invocation.
+/// [EXT]
+def spvDemoteToHelperInvocation : spvDemoteToHelperInvocationEXT;
+
+/// Represents the SPIR-V capability for replicated composites
+/// [EXT]
+def spvReplicatedCompositesEXT : SPV_EXT_replicated_composites;
+
+/// Represents the SPIR-V capability for cooperative vectors
+/// [EXT]
+def spvCooperativeVectorNV : SPV_NV_cooperative_vector;
+
+/// Represents the SPIR-V capability for cooperative vector training
+/// [EXT]
+def spvCooperativeVectorTrainingNV : SPV_NV_cooperative_vector;
+
+/// Represents the SPIR-V capability for cooperative matrices
+/// [EXT]
+def spvCooperativeMatrixKHR : SPV_KHR_cooperative_matrix;
+
+/// Represents the SPIR-V capability for maximal reconvergence.
+/// [EXT]
+def spvMaximalReconvergenceKHR : SPV_KHR_maximal_reconvergence;
+
+/// Represents the SPIR-V capability for quad group control.
+/// [EXT]
+def spvQuadControlKHR : SPV_KHR_quad_control;
+
+// The following capabilities all pertain to how ray tracing shaders are translated
+// to GLSL, where there are two different extensions that can provide the core
+// functionality of `TraceRay` and the related operations.
+//
+// The two extensions are expressed as distinct capabilities that both are marked
+// as conflicting on the `RayTracingExtension` axis, so that a compilation target
+// cannot have both enabled at once.
+//
+// The `_GL_EXT_ray_tracing` extension should be favored, so it has a rank of `1`
+// instead of `0`, which means that when comparing overloads that require these
+// extensions, the `EXT` extension will be favored over the `NV` extension, if
+// all other factors are equal.
+//
+// If a user enabled a GL_ARB/GL_NV/GL_KHR, the user will also be-able to enable any equal GL_EXT
+// To describe this relationship, all GL_EXT which were promoted (or originally not an EXT)
+// will be set as a derived atom.
+
+def _GL_EXT_buffer_reference : _GLSL_450;
+def _GL_EXT_buffer_reference_uvec2 : _GLSL_450;
+def _GL_EXT_debug_printf : glsl;
+def _GL_EXT_demote_to_helper_invocation : _GLSL_140;
+def _GL_EXT_fragment_shader_barycentric : _GLSL_450;
+def _GL_EXT_mesh_shader : _GLSL_450;
+def _GL_EXT_nonuniform_qualifier : glsl;
+def _GL_EXT_ray_query : _GLSL_460 + glsl_spirv_1_4; // spirv_1_4 is required due to glslang bug which enables `SPV_KHR_ray_tracing` regardless of context
+def _GL_EXT_ray_tracing : _GLSL_460;
+def _GL_EXT_ray_tracing_position_fetch : _GL_EXT_ray_query; // requires _GL_EXT_ray_tracing or _GL_EXT_ray_query
+def _GL_EXT_samplerless_texture_functions : _GLSL_140;
+def _GL_EXT_shader_atomic_float : glsl;
+def _GL_EXT_shader_atomic_float_min_max : glsl;
+def _GL_EXT_shader_atomic_float2 : glsl;
+def _GL_EXT_shader_atomic_int64 : glsl;
+def _GL_EXT_shader_explicit_arithmetic_types_int64 : _GLSL_140;
+def _GL_EXT_shader_image_load_store : _GLSL_130;
+def _GL_EXT_shader_realtime_clock : glsl;
+def _GL_EXT_texture_query_lod : glsl;
+def _GL_EXT_texture_shadow_lod : _GLSL_130;
+def _GL_EXT_maximal_reconvergence : _GLSL_140;
+def _GL_EXT_shader_quad_control : _GLSL_140;
+
+def _GL_ARB_derivative_control : _GLSL_400;
+def _GL_ARB_fragment_shader_interlock : _GLSL_450;
+def _GL_ARB_gpu_shader5 : _GLSL_150;
+def _GL_ARB_shader_image_load_store : _GL_EXT_shader_image_load_store;
+def _GL_ARB_shader_image_size : _GLSL_420;
+def _GL_ARB_texture_multisample : _GLSL_140;
+def _GL_ARB_shader_texture_image_samples : _GLSL_150;
+def _GL_ARB_sparse_texture : glsl;
+def _GL_ARB_sparse_texture2 : _GL_ARB_sparse_texture;
+def _GL_ARB_sparse_texture_clamp : _GL_ARB_sparse_texture2;
+def _GL_ARB_texture_gather : _GLSL_130;
+def _GL_ARB_texture_query_levels : _GLSL_130;
+def _GL_ARB_shader_clock : _GLSL_450;
+def _GL_ARB_gpu_shader_int64 : _GLSL_400;
+def _GL_ARB_shader_clock64 : _GL_ARB_shader_clock + _GL_ARB_gpu_shader_int64;
+
+def _GL_KHR_memory_scope_semantics : _GLSL_420;
+def _GL_KHR_shader_subgroup_arithmetic : _GLSL_140;
+def _GL_KHR_shader_subgroup_ballot : _GLSL_140;
+def _GL_KHR_shader_subgroup_basic : _GLSL_140;
+def _GL_KHR_shader_subgroup_clustered : _GLSL_140;
+def _GL_KHR_shader_subgroup_quad : _GLSL_140;
+def _GL_KHR_shader_subgroup_shuffle : _GLSL_140;
+def _GL_KHR_shader_subgroup_shuffle_relative : _GLSL_140;
+def _GL_KHR_shader_subgroup_vote : _GLSL_140;
+def _GL_KHR_shader_subgroup_rotate : _GLSL_140;
+
+def _GL_NV_compute_shader_derivatives : _GLSL_450;
+def _GL_NV_fragment_shader_barycentric : _GL_EXT_fragment_shader_barycentric;
+def _GL_NV_gpu_shader5 : _GL_ARB_gpu_shader5;
+def _GL_NV_ray_tracing : _GL_EXT_ray_tracing;
+def _GL_NV_ray_tracing_motion_blur : _GLSL_460;
+def _GL_NV_shader_atomic_fp16_vector : _GL_NV_gpu_shader5;
+def _GL_NV_shader_invocation_reorder : _GLSL_460;
+def _GL_NV_shader_subgroup_partitioned : _GLSL_140;
+def _GL_NV_shader_texture_footprint : _GLSL_450;
+
+// GLSL extension and SPV extension associations.
+
+/// Represents the GL_EXT_buffer_reference extension.
+/// [EXT]
+alias GL_EXT_buffer_reference = _GL_EXT_buffer_reference | SPV_EXT_physical_storage_buffer;
+
+/// Represents the GL_EXT_buffer_reference_uvec2 extension.
+/// [EXT]
+alias GL_EXT_buffer_reference_uvec2 = _GL_EXT_buffer_reference_uvec2 | _spirv_1_0;
+
+/// Represents the GL_EXT_debug_printf extension.
+/// [EXT]
+alias GL_EXT_debug_printf = _GL_EXT_debug_printf | SPV_KHR_non_semantic_info;
+
+/// Represents the GL_EXT_demote_to_helper_invocation extension.
+/// [EXT]
+alias GL_EXT_demote_to_helper_invocation = _GL_EXT_demote_to_helper_invocation | spvDemoteToHelperInvocationEXT;
+
+/// Represents the GL_EXT_maximal_reconvergence extension.
+/// [EXT]
+alias GL_EXT_maximal_reconvergence = _GL_EXT_maximal_reconvergence | spvMaximalReconvergenceKHR;
+
+/// Represents the GL_EXT_shader_quad_control extension.
+/// [EXT]
+alias GL_EXT_shader_quad_control = _GL_EXT_shader_quad_control | spvQuadControlKHR;
+
+/// Represents the GL_EXT_fragment_shader_barycentric extension.
+/// [EXT]
+alias GL_EXT_fragment_shader_barycentric = _GL_EXT_fragment_shader_barycentric | spvFragmentBarycentricKHR;
+
+/// Represents the GL_EXT_mesh_shader extension.
+/// [EXT]
+alias GL_EXT_mesh_shader = _GL_EXT_mesh_shader | spvMeshShadingEXT;
+
+/// Represents the GL_EXT_nonuniform_qualifier extension.
+/// [EXT]
+alias GL_EXT_nonuniform_qualifier = _GL_EXT_nonuniform_qualifier | spvShaderNonUniformEXT;
+
+/// Represents the GL_EXT_ray_query extension.
+/// [EXT]
+alias GL_EXT_ray_query = _GL_EXT_ray_query | spvRayQueryKHR;
+
+/// Represents the GL_EXT_ray_tracing extension.
+/// [EXT]
+alias GL_EXT_ray_tracing = _GL_EXT_ray_tracing | spvRayTracingKHR;
+
+/// Represents the GL_EXT_ray_tracing_position_fetch_ray_tracing extension.
+/// [EXT]
+alias GL_EXT_ray_tracing_position_fetch_ray_tracing = _GL_EXT_ray_tracing_position_fetch | spvRayTracingPositionFetchKHR;
+
+/// Represents the GL_EXT_ray_tracing_position_fetch_ray_query extension.
+/// [EXT]
+alias GL_EXT_ray_tracing_position_fetch_ray_query = _GL_EXT_ray_tracing_position_fetch | spvRayQueryPositionFetchKHR;
+
+/// Represents the GL_EXT_ray_tracing_position_fetch extension.
+/// [EXT]
+alias GL_EXT_ray_tracing_position_fetch = GL_EXT_ray_tracing_position_fetch_ray_tracing + GL_EXT_ray_tracing_position_fetch_ray_query;
+
+/// Represents the GL_EXT_samplerless_texture_functions extension.
+/// [EXT]
+alias GL_EXT_samplerless_texture_functions = _GL_EXT_samplerless_texture_functions | _spirv_1_0;
+
+/// Represents the GL_EXT_shader_atomic_float extension.
+/// [EXT]
+alias GL_EXT_shader_atomic_float = _GL_EXT_shader_atomic_float | spvAtomicFloat32AddEXT + spvAtomicFloat32MinMaxEXT;
+
+/// Represents the GL_EXT_shader_atomic_float_min_max extension.
+/// [EXT]
+alias GL_EXT_shader_atomic_float_min_max = _GL_EXT_shader_atomic_float_min_max | spvAtomicFloat32MinMaxEXT + spvAtomicFloat16MinMaxEXT;
+
+/// Represents the GL_EXT_shader_atomic_float2 extension.
+/// [EXT]
+alias GL_EXT_shader_atomic_float2 = _GL_EXT_shader_atomic_float2 | spvAtomicFloat32AddEXT + spvAtomicFloat32MinMaxEXT + spvAtomicFloat16AddEXT + spvAtomicFloat16MinMaxEXT;
+
+/// Represents the GL_EXT_shader_atomic_int64 extension.
+/// [EXT]
+alias GL_EXT_shader_atomic_int64 = _GL_EXT_shader_atomic_int64 | spvInt64Atomics;
+
+/// Represents the GL_EXT_shader_explicit_arithmetic_types_int64 extension.
+/// [EXT]
+alias GL_EXT_shader_explicit_arithmetic_types_int64 = _GL_EXT_shader_explicit_arithmetic_types_int64 | _spirv_1_0;
+
+/// Represents the GL_EXT_shader_image_load_store extension.
+/// [EXT]
+alias GL_EXT_shader_image_load_store = _GL_EXT_shader_image_load_store | _spirv_1_0;
+
+/// Represents the GL_EXT_shader_realtime_clock extension.
+/// [EXT]
+alias GL_EXT_shader_realtime_clock = _GL_EXT_shader_realtime_clock | spvShaderClockKHR;
+
+/// Represents the GL_EXT_texture_query_lod extension.
+/// [EXT]
+alias GL_EXT_texture_query_lod = _GL_EXT_texture_query_lod | spvImageQuery | metal;
+
+/// Represents the GL_EXT_texture_shadow_lod extension.
+/// [EXT]
+alias GL_EXT_texture_shadow_lod = _GL_EXT_texture_shadow_lod | _spirv_1_0;
+
+/// Represents the GL_ARB_derivative_control extension.
+/// [EXT]
+alias GL_ARB_derivative_control = _GL_ARB_derivative_control | spvDerivativeControl;
+
+/// Represents the GL_ARB_fragment_shader_interlock extension.
+/// [EXT]
+alias GL_ARB_fragment_shader_interlock = _GL_ARB_fragment_shader_interlock | spvFragmentShaderPixelInterlockEXT;
+
+/// Represents the GL_ARB_gpu_shader5 extension.
+/// [EXT]
+alias GL_ARB_gpu_shader5 = _GL_ARB_gpu_shader5 | _spirv_1_0;
+
+/// Represents the GL_ARB_shader_image_load_store extension.
+/// [EXT]
+alias GL_ARB_shader_image_load_store = GL_EXT_shader_image_load_store;
+
+/// Represents the GL_ARB_shader_image_size extension.
+/// [EXT]
+alias GL_ARB_shader_image_size = _GL_ARB_shader_image_size | spvImageQuery | metal;
+
+/// Represents the GL_ARB_texture_multisample extension.
+/// [EXT]
+alias GL_ARB_texture_multisample = _GL_ARB_texture_multisample | _spirv_1_0;
+
+/// Represents the GL_ARB_shader_texture_image_samples extension.
+/// [EXT]
+alias GL_ARB_shader_texture_image_samples = _GL_ARB_shader_texture_image_samples | spvImageQuery | metal;
+
+/// Represents the GL_ARB_sparse_texture extension.
+/// [EXT]
+alias GL_ARB_sparse_texture = _GL_ARB_sparse_texture | spvSparseResidency;
+
+/// Represents the GL_ARB_sparse_texture2 extension.
+/// [EXT]
+alias GL_ARB_sparse_texture2 = _GL_ARB_sparse_texture2 | spvSparseResidency;
+
+/// Represents the GL_ARB_sparse_texture_clamp extension.
+/// [EXT]
+alias GL_ARB_sparse_texture_clamp = _GL_ARB_sparse_texture_clamp | spvSparseResidency;
+
+/// Represents the GL_ARB_texture_gather extension.
+/// [EXT]
+alias GL_ARB_texture_gather = _GL_ARB_texture_gather | spvImageGatherExtended | metal;
+
+/// Represents the GL_ARB_texture_query_levels extension.
+/// [EXT]
+alias GL_ARB_texture_query_levels = _GL_ARB_texture_query_levels | spvImageQuery | metal;
+
+/// Represents the GL_ARB_shader_clock extension.
+/// [EXT]
+alias GL_ARB_shader_clock = _GL_ARB_shader_clock | spvShaderClockKHR;
+
+/// Represents the GL_ARB_shader_clock64 extension.
+/// [EXT]
+alias GL_ARB_shader_clock64 = _GL_ARB_shader_clock64 | spvShaderClockKHR;
+
+/// Represents the GL_ARB_gpu_shader_int64 extension.
+/// [EXT]
+alias GL_ARB_gpu_shader_int64 = _GL_ARB_gpu_shader_int64;
+
+/// Represents the GL_KHR_memory_scope_semantics extension.
+/// [EXT]
+alias GL_KHR_memory_scope_semantics = _GL_KHR_memory_scope_semantics | _spirv_1_0;
+
+/// Represents the GL_KHR_shader_subgroup_arithmetic extension.
+/// [EXT]
+alias GL_KHR_shader_subgroup_arithmetic = _GL_KHR_shader_subgroup_arithmetic | spvGroupNonUniformArithmetic;
+
+/// Represents the GL_KHR_shader_subgroup_ballot extension.
+/// [EXT]
+alias GL_KHR_shader_subgroup_ballot = _GL_KHR_shader_subgroup_ballot | spvGroupNonUniformBallot;
+
+/// Represents the GL_KHR_shader_subgroup_basic extension.
+/// [EXT]
+alias GL_KHR_shader_subgroup_basic = _GL_KHR_shader_subgroup_basic | spvGroupNonUniformBallot;
+
+/// Represents the GL_KHR_shader_subgroup_clustered extension.
+/// [EXT]
+alias GL_KHR_shader_subgroup_clustered = _GL_KHR_shader_subgroup_clustered | spvGroupNonUniformShuffle;
+
+/// Represents the GL_KHR_shader_subgroup_quad extension.
+/// [EXT]
+alias GL_KHR_shader_subgroup_quad = _GL_KHR_shader_subgroup_quad | spvGroupNonUniformQuad;
+
+/// Represents the GL_KHR_shader_subgroup_shuffle extension.
+/// [EXT]
+alias GL_KHR_shader_subgroup_shuffle = _GL_KHR_shader_subgroup_shuffle | spvGroupNonUniformShuffle;
+
+/// Represents the GL_KHR_shader_subgroup_shuffle_relative extension.
+/// [EXT]
+alias GL_KHR_shader_subgroup_shuffle_relative = _GL_KHR_shader_subgroup_shuffle_relative | spvGroupNonUniformShuffle;
+
+/// Represents the GL_KHR_shader_subgroup_vote extension.
+/// [EXT]
+alias GL_KHR_shader_subgroup_vote = _GL_KHR_shader_subgroup_vote | spvGroupNonUniformVote;
+
+/// Represents the GL_KHR_shader_subgroup_rotate extension.
+/// [EXT]
+alias GL_KHR_shader_subgroup_rotate = _GL_KHR_shader_subgroup_rotate | spvGroupNonUniformRotateKHR;
+
+/// Represents the GL_NV_compute_shader_derivatives extension.
+/// [EXT]
+alias GL_NV_compute_shader_derivatives = _GL_NV_compute_shader_derivatives | SPV_KHR_compute_shader_derivatives | _sm_6_6;
+
+/// Represents the GL_NV_fragment_shader_barycentric extension.
+/// [EXT]
+alias GL_NV_fragment_shader_barycentric = GL_EXT_fragment_shader_barycentric;
+
+/// Represents the GL_NV_gpu_shader5 extension.
+/// [EXT]
+alias GL_NV_gpu_shader5 = GL_ARB_gpu_shader5;
+
+/// Represents the GL_NV_ray_tracing extension.
+/// [EXT]
+alias GL_NV_ray_tracing = GL_EXT_ray_tracing;
+
+/// Represents the GL_NV_ray_tracing_motion_blur extension.
+/// [EXT]
+alias GL_NV_ray_tracing_motion_blur = _GL_NV_ray_tracing_motion_blur | spvRayTracingMotionBlurNV;
+
+/// Represents the GL_NV_shader_atomic_fp16_vector extension.
+/// [EXT]
+alias GL_NV_shader_atomic_fp16_vector = _GL_NV_shader_atomic_fp16_vector + _GL_NV_gpu_shader5 | _spirv_1_0;
+
+/// Represents the GL_NV_shader_invocation_reorder extension.
+/// [EXT]
+alias GL_NV_shader_invocation_reorder = _GL_NV_shader_invocation_reorder + _GL_EXT_buffer_reference_uvec2 | spvShaderInvocationReorderNV;
+
+/// Represents the GL_NV_shader_subgroup_partitioned extension.
+/// [EXT]
+alias GL_NV_shader_subgroup_partitioned = _GL_NV_shader_subgroup_partitioned | spvGroupNonUniformPartitionedNV;
+
+/// Represents the GL_NV_shader_texture_footprint extension.
+/// [EXT]
+alias GL_NV_shader_texture_footprint = _GL_NV_shader_texture_footprint | spvImageFootprintNV;
+
+// Define feature names not reliant on shader stages
+
+/// NVAPI capability for HLSL
+/// [Compound]
+alias nvapi = hlsl_nvapi;
+
+/// Capabilities needed for minimal raytracing support
+/// [Compound]
+alias raytracing = GL_EXT_ray_tracing | _sm_6_3 | cuda;
+/// Capabilities needed for shader-execution-reordering
+/// [Compound]
+alias ser = raytracing + GL_NV_shader_invocation_reorder | raytracing + hlsl_nvapi | cuda;
+/// Capabilities needed for raytracing-motionblur
+/// [Compound]
+alias motionblur = GL_NV_ray_tracing_motion_blur | _sm_6_3 + hlsl_nvapi | cuda;
+/// Capabilities needed for compute-shader rayquery
+/// [Compound]
+alias rayquery = GL_EXT_ray_query | _sm_6_3;
+/// Capabilities needed for compute-shader rayquery and motion-blur
+/// [Compound]
+alias raytracing_motionblur =  raytracing + motionblur | cuda;
+/// Capabilities needed for shader-execution-reordering and motion-blur
+/// [Compound]
+alias ser_motion = ser + motionblur;
+/// Capabilities needed for realtime clocks
+/// [Compound]
+alias shaderclock = GL_EXT_shader_realtime_clock | hlsl_nvapi | cpp | cuda;
+alias _meshshading = GL_EXT_mesh_shader | _sm_6_5 | metal;
+/// Capabilities needed for interlocked-fragment operations
+/// [Compound]
+alias fragmentshaderinterlock = _GL_ARB_fragment_shader_interlock | hlsl_nvapi | spvFragmentShaderPixelInterlockEXT;
+/// Capabilities needed for int64/uint64 atomic operations
+/// [Compound]
+alias atomic64 = GL_EXT_shader_atomic_int64 | _sm_6_6 | cpp | cuda;
+/// Capabilities needed to use GLSL-tier-1 float-atomic operations
+/// [Compound]
+alias atomicfloat = GL_EXT_shader_atomic_float | _sm_6_0 + hlsl_nvapi | cpp | cuda;
+/// Capabilities needed to use GLSL-tier-2 float-atomic operations
+/// [Compound]
+alias atomicfloat2 = GL_EXT_shader_atomic_float2 | _sm_6_6 + hlsl_nvapi | cpp | cuda;
+/// Capabilities needed to use fragment-shader-barycentric's
+/// [Compound]
+alias fragmentshaderbarycentric = GL_EXT_fragment_shader_barycentric | _sm_6_1;
+///  (gfx targets) Capabilities needed to use memory barriers
+/// [Compound]
+alias shadermemorycontrol = glsl | _spirv_1_0 | _sm_5_0;
+/// Capabilities needed to use HLSL tier wave operations
+/// [Compound]
+alias wave_multi_prefix = _sm_6_5
+                 | _cuda_sm_7_0
+                 | GL_KHR_shader_subgroup_ballot + GL_KHR_shader_subgroup_arithmetic + GL_NV_shader_subgroup_partitioned;
+/// Capabilities needed to use GLSL buffer-reference's
+/// [Compound]
+alias bufferreference = GL_EXT_buffer_reference;
+/// Capabilities needed to use GLSL buffer-reference's with int64
+/// [Compound]
+alias bufferreference_int64 = bufferreference + GL_EXT_shader_explicit_arithmetic_types_int64;
+/// Capabilities needed to use cooperative vectors
+/// Note that cpp and cuda are supported via a fallback non-cooperative implementation
+/// No HLSL shader model bound yet
+/// [Compound]
+alias cooperative_vector = _sm_6_8 | cpp | _cuda_sm_9_0 | spvCooperativeVectorNV;
+/// Capabilities needed to train cooperative vectors
+/// [Compound]
+alias cooperative_vector_training = spvCooperativeVectorTrainingNV;
+
+/// Capabilities needed to use cooperative matrices
+alias cooperative_matrix = spvCooperativeMatrixKHR;
+
+// Non-internal shader stages
+//
+/// Pixel shader stage
+/// [Stage]
+alias pixel = fragment;
+
+/// Tessellation Control shader stage
+/// [Stage]
+alias tesscontrol = hull;
+
+/// Tessellation Evaluation shader stage
+/// [Stage]
+alias tesseval = domain;
+
+/// Ray-Generation shader stage & ray-tracing capabilities
+/// [Stage]
+alias raygen = _raygen + raytracing;
+
+/// Ray-Generation shader stage & ray-tracing capabilities
+/// [Stage]
+alias raygeneration = _raygeneration + raytracing;
+
+/// Intersection shader stage & ray-tracing capabilities
+/// [Stage]
+alias intersection = _intersection + raytracing;
+
+/// Any-Hit shader stage & ray-tracing capabilities
+/// [Stage]
+alias anyhit = _anyhit + raytracing;
+
+/// Closest-Hit shader stage & ray-tracing capabilities
+/// [Stage]
+alias closesthit = _closesthit + raytracing;
+
+/// Callable shader stage & ray-tracing capabilities
+/// [Stage]
+alias callable = _callable + raytracing;
+
+/// Ray-Miss shader stage & ray-tracing capabilities
+/// [Stage]
+alias miss = _miss + raytracing;
+
+/// Mesh shader stage & mesh shader capabilities
+/// [Stage]
+alias mesh = _mesh + _meshshading;
+
+/// Amplification shader stage & mesh shader capabilities
+/// [Stage]
+alias amplification = _amplification + _meshshading;
+
+// shader stage groups
+/// Collection of all shader stages
+/// [Compound]
+alias any_stage = vertex | fragment | compute | hull | domain | geometry 
+                 | raygen | intersection | anyhit | closesthit | miss | mesh
+                 | amplification | callable
+                 ;
+
+/// Collection of shader stages
+/// [Compound]
+alias amplification_mesh = amplification | mesh;
+
+/// Collection of shader stages
+/// [Compound]
+alias raytracing_stages = raygen | intersection | anyhit | closesthit | miss | callable;
+
+/// Collection of shader stages
+/// [Compound]
+alias anyhit_closesthit = anyhit | closesthit;
+
+/// Collection of shader stages
+/// [Compound]
+alias raygen_closesthit_miss = raygen | closesthit | miss;
+
+/// Collection of shader stages
+/// [Compound]
+alias anyhit_closesthit_intersection = anyhit | closesthit | intersection;
+
+/// Collection of shader stages
+/// [Compound]
+alias anyhit_closesthit_intersection_miss = anyhit | closesthit | intersection | miss;
+
+/// Collection of shader stages
+/// [Compound]
+alias raygen_closesthit_miss_callable = raygen | closesthit | miss | callable;
+
+/// Collection of shader stages
+/// [Compound]
+alias compute_tesscontrol_tesseval = compute | tesscontrol | tesseval;
+
+/// Collection of shader stages
+/// [Compound]
+alias compute_fragment = compute | fragment;
+
+/// Collection of shader stages
+/// [Compound]
+alias compute_fragment_geometry_vertex = compute | fragment | geometry | vertex;
+
+/// Collection of shader stages
+/// [Compound]
+alias domain_hull = domain | hull;
+
+/// Collection of shader stages
+/// [Compound]
+alias raytracingstages_fragment = raytracing_stages | fragment;
+
+/// Collection of shader stages
+/// [Compound]
+alias raytracingstages_compute = raytracing_stages | compute;
+
+/// Collection of shader stages
+/// [Compound]
+alias raytracingstages_compute_amplification_mesh = raytracingstages_compute | amplification_mesh;
+
+/// Collection of shader stages
+/// [Compound]
+alias raytracingstages_compute_fragment = raytracing_stages | compute_fragment;
+
+/// Collection of shader stages
+/// [Compound]
+alias raytracingstages_compute_fragment_geometry_vertex = raytracing_stages | compute_fragment_geometry_vertex;
+
+// Define feature names reliant on shader stages
+
+/// Ccapabilities required to use mesh shading features
+/// [Compound]
+alias meshshading = amplification_mesh + _meshshading;
+
+/// (gfx targets) Capabilities required to use memory barriers that only work for raytracing & compute shader stages
+/// [Compound]
+alias shadermemorycontrol_compute = raytracingstages_compute + shadermemorycontrol;
+
+/// Capabilities required to use Subpass-Input's
+/// [Compound]
+alias subpass = fragment + _sm_6_0 | fragment + any_gfx_target;
+
+// Define what each shader model means on different targets.
+
+// SPIR-V profile capabilities
+//
+/// Represents SPIR-V 1.0 version.
+/// [Version]
+alias spirv_1_0 = _spirv_1_0;
+
+/// Represents SPIR-V 1.1 version, which includes SPIR-V 1.0.
+/// [Version]
+alias spirv_1_1 = _spirv_1_1
+                | spirv_1_0
+                ;
+
+/// Represents SPIR-V 1.2 version, which includes SPIR-V 1.1.
+/// [Version]
+alias spirv_1_2 = _spirv_1_2
+                | spirv_1_1
+                ;
+
+/// Represents SPIR-V 1.3 version, which includes SPIR-V 1.2.
+/// [Version]
+alias spirv_1_3 = _spirv_1_3
+                | spirv_1_2
+                ;
+
+/// Represents SPIR-V 1.4 version, which includes SPIR-V 1.3.
+/// [Version]
+alias spirv_1_4 = _spirv_1_4
+                | spirv_1_3
+                ;
+
+/// Represents SPIR-V 1.5 version, which includes SPIR-V 1.4 and additional extensions.
+/// [Version]
+alias spirv_1_5 = _spirv_1_5 + GL_EXT_nonuniform_qualifier + GL_EXT_buffer_reference
+                | spirv_1_4
+                ;
+
+/// Represents SPIR-V 1.6 version, which includes SPIR-V 1.5 and additional extensions.
+/// [Version]
+alias spirv_1_6 = _spirv_1_6 + GL_EXT_debug_printf + GL_EXT_demote_to_helper_invocation
+                | spirv_1_5
+                ;
+
+/// Represents the latest SPIR-V version.
+/// [Version]
+alias spirv_latest = _spirv_1_6;
+
+// Aliases for SPIR-V versions
+
+/// Use `spirv_1_0` instead
+/// [Other]
+alias SPIRV_1_0 = spirv_1_0;
+
+/// Use `spirv_1_1` instead
+/// [Other]
+alias SPIRV_1_1 = spirv_1_1;
+
+/// Use `spirv_1_2` instead
+/// [Other]
+alias SPIRV_1_2 = spirv_1_2;
+
+/// Use `spirv_1_3` instead
+/// [Other]
+alias SPIRV_1_3 = spirv_1_3;
+
+/// Use `spirv_1_4` instead
+/// [Other]
+alias SPIRV_1_4 = spirv_1_4;
+
+/// Use `spirv_1_5` instead
+/// [Other]
+alias SPIRV_1_5 = spirv_1_5;
+
+/// Use `spirv_1_6` instead
+/// [Other]
+alias SPIRV_1_6 = spirv_1_6;
+
+// HLSL profile capabilities
+//
+/// HLSL shader model 4.0 and related capabilities of other targets.
+/// Does not include related GLSL/SPIRV extensions.
+/// [Version]
+alias sm_4_0_version = _sm_4_0
+             | _GLSL_150
+             | spirv_1_0
+             | _cuda_sm_2_0
+             | metal
+             | wgsl
+             | cpp
+             ;
+
+
+/// HLSL shader model 4.0 and related capabilities of other targets.
+/// Includes related GLSL/SPIRV extensions.
+/// [Version]
+alias sm_4_0 = sm_4_0_version
+             | SPV_GOOGLE_user_type + spvMinLod
+             | GL_ARB_sparse_texture_clamp + GL_EXT_samplerless_texture_functions + GL_EXT_texture_query_lod + GL_EXT_texture_shadow_lod + GL_EXT_debug_printf + GL_ARB_shader_image_size
+             ;
+
+/// HLSL shader model 4.1 and related capabilities of other targets.
+/// Does not include related GLSL/SPIRV extensions.
+/// [Version]
+alias sm_4_1_version = _sm_4_1
+             | _GLSL_150
+             | spirv_1_0
+             | _cuda_sm_6_0
+             | metal
+             | wgsl
+             | cpp
+             ;
+/// HLSL shader model 4.1 and related capabilities of other targets.
+/// Includes related GLSL/SPIRV extensions.
+/// [Version]
+alias sm_4_1 = sm_4_1_version
+             | GL_ARB_texture_gather + GL_ARB_texture_query_levels + GL_ARB_shader_texture_image_samples
+             // previous
+             | sm_4_0
+             ;
+
+/// HLSL shader model 5.0 and related capabilities of other targets.
+/// Does not include related GLSL/SPIRV extensions.
+/// [Version]
+alias sm_5_0_version = _sm_5_0 
+             | _GLSL_330
+             | spirv_1_0
+             | _cuda_sm_9_0
+             | metal
+             | wgsl
+             | cpp
+             ;
+/// HLSL shader model 5.0 and related capabilities of other targets.
+/// Includes related GLSL/SPIRV extensions.
+/// [Version]
+alias sm_5_0 = sm_5_0_version
+             | GL_KHR_memory_scope_semantics + GL_ARB_gpu_shader5 + GL_ARB_derivative_control
+             | spvFragmentFullyCoveredEXT
+             // previous
+             | sm_4_1
+             ;
+
+/// HLSL shader model 5.1 and related capabilities of other targets.
+/// Does not include related GLSL/SPIRV extensions.
+/// [Version]
+alias sm_5_1_version = _sm_5_1
+             | _GLSL_330
+             | spirv_1_0
+             | _cuda_sm_9_0
+             | metal
+             | cpp
+             ;
+/// HLSL shader model 5.1 and related capabilities of other targets.
+/// Includes related GLSL/SPIRV extensions.
+/// [Version]
+alias sm_5_1 = sm_5_1_version 
+             | GL_EXT_nonuniform_qualifier + GL_ARB_gpu_shader5
+             // previous
+             | sm_5_0
+             ;
+
+/// HLSL shader model 6.0 and related capabilities of other targets.
+/// Does not include related GLSL/SPIRV extensions.
+/// [Version]
+alias sm_6_0_version = _sm_6_0 
+             | _GLSL_450
+             | spirv_1_3
+             | _cuda_sm_9_0 
+             | metal
+             | cpp
+             ;
+/// HLSL shader model 6.0 and related capabilities of other targets.
+/// Includes related GLSL/SPIRV extensions.
+/// [Version]
+alias sm_6_0 = sm_6_0_version 
+             |  GL_KHR_shader_subgroup_ballot + GL_KHR_shader_subgroup_shuffle + GL_KHR_shader_subgroup_arithmetic + GL_KHR_shader_subgroup_quad + GL_KHR_shader_subgroup_vote
+             // previous
+             | sm_5_1
+             ;
+
+/// HLSL shader model 6.1 and related capabilities of other targets.
+/// Does not include related GLSL/SPIRV extensions.
+/// [Version]
+alias sm_6_1_version = _sm_6_1 
+             | _GLSL_450 
+             | spirv_1_3 
+             | _cuda_sm_9_0
+             | metal
+             | cpp
+             ;
+/// HLSL shader model 6.1 and related capabilities of other targets.
+/// Includes related GLSL/SPIRV extensions.
+/// [Version]
+alias sm_6_1 = sm_6_1_version 
+             | GL_EXT_fragment_shader_barycentric 
+             // previous
+             | sm_6_0
+             ;
+
+/// HLSL shader model 6.2 and related capabilities of other targets.
+/// Does not include related GLSL/SPIRV extensions.
+/// [Version]
+alias sm_6_2_version = _sm_6_2
+             | _GLSL_450
+             | spirv_1_3
+             | _cuda_sm_9_0
+             | metal
+             | cpp
+             ;
+/// HLSL shader model 6.2 and related capabilities of other targets.
+/// Includes related GLSL/SPIRV extensions.
+/// [Version]
+alias sm_6_2 = sm_6_2_version
+             // previous
+             | sm_6_1
+             ;
+
+/// HLSL shader model 6.3 and related capabilities of other targets.
+/// Does not include related GLSL/SPIRV extensions.
+/// [Version]
+alias sm_6_3_version = _sm_6_3
+             | _GLSL_460 
+             | spirv_1_4
+             | _cuda_sm_9_0
+             | metal
+             | cpp
+             ;
+/// HLSL shader model 6.3 and related capabilities of other targets.
+/// Includes related GLSL/SPIRV extensions.
+/// [Version]
+alias sm_6_3 = sm_6_3_version
+             | GL_EXT_ray_tracing + GL_EXT_ray_tracing_position_fetch_ray_tracing
+             // previous
+             | sm_6_2
+             ;
+
+/// HLSL shader model 6.4 and related capabilities of other targets.
+/// Does not include related GLSL/SPIRV extensions.
+/// [Version]
+alias sm_6_4_version = _sm_6_4
+             | _GLSL_460
+             | spirv_1_4
+             | _cuda_sm_9_0
+             | metal
+             | cpp
+             ;
+/// HLSL shader model 6.4 and related capabilities of other targets.
+/// Includes related GLSL/SPIRV extensions.
+/// [Version]
+alias sm_6_4 = sm_6_4_version
+             // previous
+             | sm_6_3
+             ;
+
+/// HLSL shader model 6.5 and related capabilities of other targets.
+/// Does not include related GLSL/SPIRV extensions.
+/// [Version]
+alias sm_6_5_version = _sm_6_5
+             | _GLSL_460
+             | spirv_1_4
+             | _cuda_sm_9_0
+             | metal
+             | cpp
+             ;
+/// HLSL shader model 6.5 and related capabilities of other targets.
+/// Includes related GLSL/SPIRV extensions.
+/// [Version]
+alias sm_6_5 = sm_6_5_version
+             // also requires: GL_NV_shader_subgroup_partitioned
+             | GL_EXT_mesh_shader + GL_EXT_ray_query + GL_EXT_ray_tracing_position_fetch_ray_query
+             // previous
+             | sm_6_4
+             ;
+
+/// HLSL shader model 6.6 and related capabilities of other targets.
+/// Does not include related GLSL/SPIRV extensions.
+/// [Version]
+alias sm_6_6_version = _sm_6_6
+             | _GLSL_460
+             | spirv_1_4
+             | _cuda_sm_9_0
+             | metal
+             | cpp
+             ;
+/// HLSL shader model 6.6 and related capabilities of other targets.
+/// Includes related GLSL/SPIRV extensions.
+/// [Version]
+alias sm_6_6 = sm_6_6_version
+             | GL_EXT_shader_atomic_int64 + GL_EXT_shader_atomic_float2 + GL_EXT_shader_atomic_float + _GL_EXT_shader_atomic_float_min_max
+             | sm_6_5
+             ;
+
+/// HLSL shader model 6.7 and related capabilities of other targets.
+/// Does not include related GLSL/SPIRV extensions.
+/// [Version]
+alias sm_6_7_version = _sm_6_7
+             | _GLSL_460
+             | spirv_1_4
+             | _cuda_sm_9_0
+             | metal
+             | cpp
+             ;
+/// HLSL shader model 6.7 and related capabilities of other targets.
+/// Includes related GLSL/SPIRV extensions.
+/// [Version]
+alias sm_6_7 = sm_6_7_version
+             | sm_6_6
+             ;
+
+/// HLSL shader model 6.8 and related capabilities of other targets.
+/// Does not include related GLSL/SPIRV extensions.
+/// [Version]
+alias sm_6_8_version = _sm_6_8
+             | _GLSL_460
+             | spirv_1_5
+             | _cuda_sm_9_0
+             | metal
+             | cpp
+             ;
+
+/// HLSL shader model 6.8 and related capabilities of other targets.
+/// Includes related GLSL/SPIRV extensions.
+/// [Version]
+alias sm_6_8 = sm_6_8_version
+             | sm_6_7
+             ;
+
+/// HLSL shader model 6.9 and related capabilities of other targets.
+/// Does not include related GLSL/SPIRV extensions.
+/// [Version]
+alias sm_6_9_version = _sm_6_9
+             | _GLSL_460
+             | spirv_1_5
+             | _cuda_sm_9_0
+             | metal
+             | cpp
+             ;
+
+/// HLSL shader model 6.9 and related capabilities of other targets.
+/// Includes related GLSL/SPIRV extensions.
+/// [Version]
+alias sm_6_9 = sm_6_9_version
+             | sm_6_8
+             ;
+
+// Profiles
+/// Use `sm_4_0` instead
+/// [Other]
+alias DX_4_0 = sm_4_0;
+
+/// Use `sm_4_1` instead
+/// [Other]
+alias DX_4_1 = sm_4_1;
+
+/// Use `sm_5_0` instead
+/// [Other]
+alias DX_5_0 = sm_5_0;
+
+/// Use `sm_5_1` instead
+/// [Other]
+alias DX_5_1 = sm_5_1;
+
+/// Use `sm_6_0` instead
+/// [Other]
+alias DX_6_0 = sm_6_0;
+
+/// Use `sm_6_1` instead
+/// [Other]
+alias DX_6_1 = sm_6_1;
+
+/// Use `sm_6_2` instead
+/// [Other]
+alias DX_6_2 = sm_6_2;
+
+/// Use `sm_6_3` instead
+/// [Other]
+alias DX_6_3 = sm_6_3;
+
+/// Use `sm_6_4` instead
+/// [Other]
+alias DX_6_4 = sm_6_4;
+
+/// Use `sm_6_5` instead
+/// [Other]
+alias DX_6_5 = sm_6_5;
+
+/// Use `sm_6_6` instead
+/// [Other]
+alias DX_6_6 = sm_6_6;
+
+/// Use `sm_6_7` instead
+/// [Other]
+alias DX_6_7 = sm_6_7;
+
+/// Use `sm_6_8` instead
+/// [Other]
+alias DX_6_8 = sm_6_8;
+
+/// Use `sm_6_9` instead
+/// [Other]
+alias DX_6_9 = sm_6_9;
+
+// GLSL profile capabilities
+//
+/// GLSL 130 and related capabilities of other targets.
+/// [Version]
+alias GLSL_130 = _GLSL_130
+               | _sm_4_0
+               | _cuda_sm_2_0
+               | spirv_1_0
+               | metal
+               | cpp
+               ;
+/// GLSL 140 and related capabilities of other targets.
+/// [Version]
+alias GLSL_140 = _GLSL_140
+               | _sm_4_1
+               | _cuda_sm_2_0
+               | spirv_1_0
+               | metal
+               | cpp
+               // previous
+               | GLSL_130
+               ;
+/// GLSL 150 and related capabilities of other targets.
+/// [Version]
+alias GLSL_150 = _GLSL_150
+               | _sm_4_1
+               | _cuda_sm_2_0
+               | spirv_1_0
+               | metal
+               | cpp
+               // extensions to propagate
+               | glsl_spirv + GL_ARB_texture_multisample
+               // previous
+               | GLSL_140
+               ;
+/// GLSL 330 and related capabilities of other targets.
+/// [Version]
+alias GLSL_330 = _GLSL_330
+               | _sm_5_0
+               | _cuda_sm_6_0
+               | spirv_1_0
+               | metal
+               | cpp
+               // previous
+               | GLSL_150
+               ;
+/// GLSL 400 and related capabilities of other targets.
+/// [Version]
+alias GLSL_400 = _GLSL_400
+               | _sm_5_1
+               | _cuda_sm_6_0
+               | spirv_1_3
+               | metal
+               | cpp
+               // extensions to propagate
+               | glsl_spirv + GL_ARB_gpu_shader5 + GL_ARB_texture_gather
+               // previous
+               | GLSL_330
+               ;
+/// GLSL 410 and related capabilities of other targets.
+/// [Version]
+alias GLSL_410 = _GLSL_410
+               | _sm_5_1
+               | _cuda_sm_6_0
+               | spirv_1_3
+               | metal
+               | cpp
+               // previous
+               | GLSL_400
+               ;
+/// GLSL 420 and related capabilities of other targets.
+/// [Version]
+alias GLSL_420 = _GLSL_420
+               | _sm_5_1
+               | _cuda_sm_6_0
+               | spirv_1_3
+               | metal
+               | cpp
+               // extensions to propagate
+               | glsl_spirv + GL_ARB_shader_image_load_store
+               // previous
+               | GLSL_410
+               ;
+/// GLSL 430 and related capabilities of other targets.
+/// [Version]
+alias GLSL_430 = _GLSL_430
+               | _sm_5_1
+               | _cuda_sm_6_0
+               | spirv_1_3
+               | metal
+               | cpp
+               // extensions to propagate
+               | glsl_spirv + GL_ARB_shader_image_size + GL_ARB_texture_query_levels
+               // previous
+               | GLSL_420
+               ;
+/// GLSL 440 and related capabilities of other targets.
+/// [Version]
+alias GLSL_440 = _GLSL_440
+               | _sm_6_0
+               | _cuda_sm_6_0
+               | spirv_1_3
+               | metal
+               | cpp
+               // previous
+               | GLSL_430
+               ;
+/// GLSL 450 and related capabilities of other targets.
+/// [Version]
+alias GLSL_450 = _GLSL_450 
+               | _sm_6_0
+               | _cuda_sm_6_0
+               | spirv_1_3
+               | metal
+               | cpp
+               // extensions to propagate
+               | glsl_spirv + GL_ARB_derivative_control + GL_ARB_shader_texture_image_samples
+               // previous
+               | GLSL_440
+               ;
+/// GLSL 460 and related capabilities of other targets.
+/// [Version]
+alias GLSL_460 = _GLSL_460
+               | _sm_6_6
+               | _cuda_sm_6_0
+               | spirv_1_3
+               | metal
+               | cpp
+               // previous
+               | GLSL_450
+               ;
+
+/// User should not use this capability
+/// [Other]
+alias GLSL_410_SPIRV_1_0 = _GLSL_410 | spirv_1_0;
+
+/// User should not use this capability
+/// [Other]
+alias GLSL_420_SPIRV_1_0 = _GLSL_420 + GLSL_410_SPIRV_1_0 | GLSL_410_SPIRV_1_0;
+
+/// User should not use this capability
+/// [Other]
+alias GLSL_430_SPIRV_1_0 = _GLSL_430 + GLSL_420_SPIRV_1_0 | GLSL_420_SPIRV_1_0;
+
+// CUDA profile capabilities
+//
+/// cuda 1.0 and related capabilities of other targets.
+/// [Version]
+alias cuda_sm_1_0 = _cuda_sm_1_0 | sm_4_0;
+
+/// cuda 2.0 and related capabilities of other targets.
+/// [Version]
+alias cuda_sm_2_0 = _cuda_sm_2_0 | sm_4_1;
+
+/// cuda 3.0 and related capabilities of other targets.
+/// [Version]
+alias cuda_sm_3_0 = _cuda_sm_3_0 | sm_6_0;
+
+/// cuda 3.5 and related capabilities of other targets.
+/// [Version]
+alias cuda_sm_3_5 = _cuda_sm_3_5 | sm_6_0;
+
+/// cuda 4.0 and related capabilities of other targets.
+/// [Version]
+alias cuda_sm_4_0 = _cuda_sm_4_0 | sm_6_0;
+
+/// cuda 5.0 and related capabilities of other targets.
+/// [Version]
+alias cuda_sm_5_0 = _cuda_sm_5_0 | sm_6_0;
+
+/// cuda 6.0 and related capabilities of other targets.
+/// [Version]
+alias cuda_sm_6_0 = _cuda_sm_6_0 | sm_6_0;
+
+/// cuda 7.0 and related capabilities of other targets.
+/// [Version]
+alias cuda_sm_7_0 = _cuda_sm_7_0 | sm_5_1;
+
+/// cuda 8.0 and related capabilities of other targets.
+/// [Version]
+alias cuda_sm_8_0 = _cuda_sm_8_0 | sm_5_1;
+
+/// cuda 9.0 and related capabilities of other targets.
+/// [Version]
+alias cuda_sm_9_0 = _cuda_sm_9_0 | sm_5_1;
+
+// Metal profile capabilities
+//
+/// Use `metallib_2_3` instead
+/// [Other]
+alias METAL_2_3 = metallib_2_3;
+
+/// Use `metallib_2_4` instead
+/// [Other]
+alias METAL_2_4 = metallib_2_4;
+
+/// Use `metallib_3_0` instead
+/// [Other]
+alias METAL_3_0 = metallib_3_0;
+
+/// Use `metallib_3_1` instead
+/// [Other]
+alias METAL_3_1 = metallib_3_1;
+
+// Capabilities of convenience
+//
+/// Capabilities required to use AppendStructuredBuffer
+/// [Compound]
+alias appendstructuredbuffer = sm_5_0_version;
+/// (hlsl only) Capabilities required to use hlsl atomic operations
+/// [Compound]
+alias atomic_hlsl = _sm_4_0;
+/// (hlsl only) Capabilities required to use hlsl NVAPI atomics 
+/// [Compound]
+alias atomic_hlsl_nvapi = _sm_4_0 + hlsl_nvapi;
+/// (hlsl only) Capabilities required to use hlsl sm_6_6 atomics 
+/// [Compound]
+alias atomic_hlsl_sm_6_6 = _sm_6_6;
+/// Capabilities required to use ByteAddressBuffer 
+/// [Compound]
+alias byteaddressbuffer = sm_4_0_version;
+/// Capabilities required to use RWByteAddressBuffer 
+/// [Compound]
+alias byteaddressbuffer_rw = sm_4_0_version;
+/// Capabilities required to use ConsumeStructuredBuffer 
+/// [Compound]
+alias consumestructuredbuffer = sm_5_0_version;
+/// Capabilities required to use StructuredBuffer
+/// [Compound]
+alias structuredbuffer = sm_4_0_version;
+/// Capabilities required to use RWStructuredBuffer
+/// [Compound]
+alias structuredbuffer_rw = sm_4_0_version;
+
+/// Capabilities required to use fragment derivative operations (without GLSL derivativecontrol)
+/// [Compound]
+alias fragmentprocessing = fragment + _sm_5_0
+                         | fragment + glsl_spirv
+                         | raytracingstages_compute_amplification_mesh + GL_NV_compute_shader_derivatives
+                         | fragment + metal
+                         | fragment + cpp
+                         | fragment + cuda
+                         | fragment + wgsl
+                         ;
+/// Capabilities required to use fragment derivative operations (with GLSL derivativecontrol)
+/// [Compound]
+alias fragmentprocessing_derivativecontrol = fragment + _sm_5_0
+                                           | fragment + GL_ARB_derivative_control
+                                           | raytracingstages_compute_amplification_mesh + GL_NV_compute_shader_derivatives
+                                           ;
+/// Capabilities required to use 'getAttributeAtVertex'
+/// [Compound]
+alias getattributeatvertex = fragment + _sm_6_1 | fragment + GL_EXT_fragment_shader_barycentric;
+/// Capabilities required to use sm_5_0 style memory barriers
+/// [Compound]
+alias memorybarrier = sm_5_0_version;
+/// Capabilities required to use sm_4_0 texture operations
+/// [Compound]
+alias texture_sm_4_0 = sm_4_0_version
+                     ;
+/// Capabilities required to use sm_4_1 texture operations
+/// [Compound]
+alias texture_sm_4_1 = sm_4_1_version
+                     ;
+/// Capabilities required to use sm_4_1 samplerless texture operations
+/// [Compound]
+alias texture_sm_4_1_samplerless = texture_sm_4_1
+                              // add samplerless to all targets that need an extension
+                              | GL_EXT_samplerless_texture_functions
+                              ;
+
+// Supposedly only works for some shader stages, we support all stages for now since this
+// seems wrong.
+/// Capabilities required to use 'compute/fragment shader only' texture operations. 
+/// We do not require 'compute'/'fragment' shader capabilities since this seems to be incorrect behavior despite what official documentation says.
+/// [Compound]
+alias texture_sm_4_1_compute_fragment = texture_sm_4_1;
+/// Capabilities required to use 'fragment shader only' texture operations
+/// [Compound]
+alias texture_sm_4_0_fragment = texture_sm_4_0;
+/// Capabilities required to use 'fragment shader only' texture clamp operations
+/// [Compound]
+alias texture_sm_4_1_clamp_fragment = texture_sm_4_0_fragment | GL_ARB_sparse_texture_clamp;
+/// Capabilities required to use 'fragment/geometry shader only' texture clamp operations
+/// [Compound]
+alias texture_sm_4_1_vertex_fragment_geometry = texture_sm_4_1;
+/// Capabilities required to use 'vertex/fragment/geometry shader only' texture gather operations
+/// [Compound]
+alias texture_gather = texture_sm_4_1_vertex_fragment_geometry | GL_ARB_texture_gather;
+/// Capabilities required to query image (RWTexture) sample info
+/// [Compound]
+alias image_samples = texture_sm_4_1_compute_fragment | GL_ARB_shader_texture_image_samples;
+/// Capabilities required to query image (RWTexture) size info
+/// [Compound]
+alias image_size = texture_sm_4_1_compute_fragment | GL_ARB_shader_image_size;
+/// Capabilities required to query texture sample info
+/// [Compound]
+alias texture_size = texture_sm_4_1 | GL_ARB_shader_image_size;
+/// Capabilities required to query texture LOD info
+/// [Compound]
+alias texture_querylod = texture_sm_4_1 | GL_EXT_texture_query_lod;
+/// Capabilities required to query texture level info
+/// [Compound]
+alias texture_querylevels = texture_sm_4_1 | GL_ARB_texture_query_levels;
+/// Capabilities required to query shadow texture lod info
+/// [Compound]
+alias texture_shadowlod = texture_sm_4_1 | GL_EXT_texture_shadow_lod
+                        | texture_sm_4_1;
+
+/// (GLSL/SPIRV) Capabilities required to use GLSL-tier-1 float-atomic operations
+/// [Compound]
+alias atomic_glsl_float1 = GL_EXT_shader_atomic_float;
+/// (GLSL/SPIRV) Capabilities required to use GLSL-tier-2 float-atomic operations
+/// [Compound]
+alias atomic_glsl_float2 = GL_EXT_shader_atomic_float2;
+/// (GLSL/SPIRV) Capabilities required to use NVAPI GLSL-fp16 float-atomic operations
+/// [Compound]
+alias atomic_glsl_halfvec = GL_NV_shader_atomic_fp16_vector;
+/// (GLSL/SPIRV) Capabilities required to use GLSL-400 atomic operations
+/// [Compound]
+alias atomic_glsl = spirv_1_0 | _GLSL_400;
+/// (GLSL/SPIRV) Capabilities required to use int64/uint64 atomic operations
+/// [Compound]
+alias atomic_glsl_int64 = atomic_glsl + GL_EXT_shader_atomic_int64;
+/// User should not use this capability
+/// [Other]
+alias GLSL_430_SPIRV_1_0_compute = GLSL_430_SPIRV_1_0 + compute;
+/// (GLSL/SPIRV) Capabilities required to use image load/image store operations
+/// [Compound]
+alias image_loadstore = GL_EXT_shader_image_load_store + GLSL_420;
+/// Capabilities required to use NonUniform qualifier
+/// [Compound]
+alias nonuniformqualifier = sm_5_1;
+/// Capabilities required to use 'printf'
+/// [Compound]
+alias printf = GL_EXT_debug_printf | _sm_4_0 | _cuda_sm_2_0 | cpp;
+/// Capabilities required to use basic TextureFootprint operations
+/// [Compound]
+alias texturefootprint = GL_NV_shader_texture_footprint + GLSL_450 | hlsl_nvapi + _sm_4_0;
+/// Capabilities required to use TextureFootprint clamp operations
+/// [Compound]
+alias texturefootprintclamp = texturefootprint + GL_ARB_sparse_texture_clamp;
+
+/// Capabilities required to use sm_4_0 features apart of GL_ARB_gpu_shader5 
+/// [Compound]
+alias shader5_sm_4_0 = GL_ARB_gpu_shader5 | sm_4_0_version;
+/// Capabilities required to use sm_5_0 features apart of GL_ARB_gpu_shader5 
+/// [Compound]
+alias shader5_sm_5_0 = GL_ARB_gpu_shader5 | sm_5_0_version;
+
+/// Capabilities required to use pack/unpack intrinsics on packed vector data
+/// [Compound]
+alias pack_vector = GL_ARB_gpu_shader5
+                  | _sm_6_6
+                  | _cuda_sm_9_0
+                  | wgsl
+                  | metal
+                  | cpp
+                  ;
+
+/// Capabilities required to use GLSL-style subgroup operations 'subgroup_basic'
+/// [Compound]
+alias subgroup_basic = GL_KHR_shader_subgroup_basic
+                     | _sm_6_0
+                     | _cuda_sm_7_0
+                     | wgsl
+                     | metal
+                     ;
+/// Capabilities required to use GLSL-style subgroup operations 'subgroup_ballot'
+/// [Compound]
+alias subgroup_ballot = spirv_1_0 + GL_KHR_shader_subgroup_ballot
+                      | glsl + GL_KHR_shader_subgroup_ballot + shader5_sm_5_0 
+                      | _sm_6_0  + shader5_sm_5_0 
+                      | _cuda_sm_7_0 + shader5_sm_5_0
+                      | wgsl
+                      | metal
+                      ;
+/// Capabilities required to use GLSL-style subgroup operations 'subgroup_ballot_activemask'
+/// [Compound]
+alias subgroup_ballot_activemask = spirv_1_0 + GL_KHR_shader_subgroup_ballot
+                      | glsl + GL_KHR_shader_subgroup_ballot 
+                      | _sm_6_0
+                      | _cuda_sm_7_0
+                      ;
+/// Capabilities required to use GLSL-style subgroup operations 'subgroup_basic_ballot'
+/// [Compound]
+alias subgroup_basic_ballot = glsl + GL_KHR_shader_subgroup_basic + subgroup_ballot 
+                            | spirv + GL_KHR_shader_subgroup_basic + subgroup_ballot
+                            | hlsl + subgroup_ballot
+                            | cuda + subgroup_ballot
+                            | wgsl
+                            | metal
+                            ;
+/// Capabilities required to use GLSL-style subgroup operations 'subgroup_vote'
+/// [Compound]
+alias subgroup_vote = GL_KHR_shader_subgroup_vote 
+                    | _sm_6_0
+                    | _cuda_sm_7_0
+                    | wgsl
+                    | metal
+                    ;
+/// Capabilities required to use GLSL-style subgroup operations 'subgroup_vote'
+/// [Compound]
+alias shaderinvocationgroup = subgroup_vote;
+/// Capabilities required to use GLSL-style subgroup operations 'subgroup_arithmetic'
+/// [Compound]
+alias subgroup_arithmetic = GL_KHR_shader_subgroup_arithmetic 
+                          | _sm_6_0
+                          | _cuda_sm_7_0
+                          | wgsl
+                          | metal
+                          ;
+
+/// Capabilities required to use GLSL-style subgroup operations 'subgroup_shuffle'
+/// [Compound]
+alias subgroup_shuffle = GL_KHR_shader_subgroup_shuffle 
+                       | _sm_6_0
+                       | _cuda_sm_7_0
+                       | wgsl
+                       | metal
+                       ;
+/// Capabilities required to use GLSL-style subgroup operations 'subgroup_shuffle_relative'
+/// [Compound]
+alias subgroup_shufflerelative = GL_KHR_shader_subgroup_shuffle_relative
+                               | _sm_6_0
+                               | _cuda_sm_7_0
+                               | wgsl
+                               | metal
+                               ;
+/// Capabilities required to use GLSL-style subgroup operations 'subgroup_clustered'
+/// [Compound]
+alias subgroup_clustered = GL_KHR_shader_subgroup_clustered | _sm_6_0 | _cuda_sm_7_0;
+/// Capabilities required to use GLSL-style subgroup operations 'subgroup_quad'
+/// [Compound]
+alias subgroup_quad = GL_KHR_shader_subgroup_quad
+                    | _sm_6_0
+                    | _cuda_sm_7_0
+                    | wgsl
+                    | metal
+                    ;
+/// Capabilities required to use GLSL-style subgroup operations 'subgroup_partitioned'
+/// [Compound]
+alias subgroup_partitioned = GL_NV_shader_subgroup_partitioned + subgroup_ballot_activemask | _sm_6_5 | _cuda_sm_7_0;
+
+
+/// Capabilities required to use GLSL-style subgroup rotate operations 'subgroup_rotate'
+/// [Compound]
+alias subgroup_rotate = GL_KHR_shader_subgroup_rotate 
+                       | metal
+                       ;
+
+/// (All implemented targets) Capabilities required to use atomic operations of GLSL tier-1 float atomics
+/// [Compound]
+alias atomic_glsl_hlsl_nvapi_cuda_metal_float1 = atomic_glsl_float1 | hlsl_nvapi + _sm_4_0 | _cuda_sm_2_0 | metal;
+/// (All implemented targets) Capabilities required to use atomic operations of int64 (cuda_sm_5 tier atomics)
+/// [Compound]
+alias atomic_glsl_hlsl_nvapi_cuda5_int64 = atomic_glsl_int64 | hlsl_nvapi + _sm_4_0 | _cuda_sm_6_0;
+/// (All implemented targets) Capabilities required to use atomic operations of int64 (cuda_sm_6 tier atomics)
+/// [Compound]
+alias atomic_glsl_hlsl_nvapi_cuda6_int64 = atomic_glsl_int64 | hlsl_nvapi + _sm_4_0 | _cuda_sm_6_0;
+/// (All implemented targets) Capabilities required to use atomic operations of int64 (cuda_sm_9 tier atomics)
+/// [Compound]
+alias atomic_glsl_hlsl_nvapi_cuda9_int64 = atomic_glsl_int64 | hlsl_nvapi + _sm_4_0 | _cuda_sm_9_0;
+
+/// (All implemented targets) Capabilities required to use atomic operations
+/// [Compound]
+alias atomic_glsl_hlsl_cuda_metal = atomic_glsl | _sm_5_0 | _cuda_sm_2_0 | metal;
+/// (All implemented targets) Capabilities required to use atomic operations (cuda_sm_9 tier atomics)
+/// [Compound]
+alias atomic_glsl_hlsl_cuda9_int64 = atomic_glsl_int64 | _sm_6_6 | _cuda_sm_9_0 | metal;
+
+/// Capabilities required to enable helper-lane demotion
+/// [Compound]
+alias helper_lane = _sm_6_0 + fragment
+                   | GL_EXT_demote_to_helper_invocation + fragment
+                   | metal + fragment
+                   ;
+
+/// Capabilities required to enable quad group control
+/// [Compound]
+alias quad_control = _sm_6_7
+                    | GL_EXT_shader_quad_control + GL_EXT_maximal_reconvergence + GL_KHR_shader_subgroup_vote
+                    | metal
+                    ;
+
+/// Capabilities required to enable shader breakpoints
+/// [Compound]
+alias breakpoint = GL_EXT_debug_printf | hlsl | _cuda_sm_8_0 | cpp;
+
+/// Collection of capabilities for raytracing with all raytracing stages.
+/// [Compound]
+alias raytracing_allstages = raytracing_stages + raytracing;
+
+/// Collection of capabilities for raytracing with the shader stage of anyhit.
+/// [Compound]
+alias raytracing_anyhit = anyhit + raytracing;
+
+/// Collection of capabilities for raytracing with the shader stage of intersection.
+/// [Compound]
+alias raytracing_intersection = intersection + raytracing;
+
+/// Collection of capabilities for raytracing with the shader stages of anyhit and closesthit.
+/// [Compound]
+alias raytracing_anyhit_closesthit = anyhit_closesthit + raytracing;
+
+/// Collection of capabilities for raytracing with the shader stages of anyhit, closesthit, and intersection.
+/// [Compound]
+alias raytracing_anyhit_closesthit_intersection = anyhit_closesthit_intersection + raytracing;
+
+/// Collection of capabilities for raytracing with the shader stages of raygen, closesthit, and miss.
+/// [Compound]
+alias raytracing_raygen_closesthit_miss = raygen_closesthit_miss + raytracing;
+
+/// Collection of capabilities for raytracing with the shader stages of anyhit, closesthit, intersection, and miss.
+/// [Compound]
+alias raytracing_anyhit_closesthit_intersection_miss = anyhit_closesthit_intersection_miss + raytracing;
+
+/// Collection of capabilities for raytracing the shader stages of raygen, closesthit, miss, and callable.
+/// [Compound]
+alias raytracing_raygen_closesthit_miss_callable = raygen_closesthit_miss_callable + raytracing;
+
+/// Collection of capabilities for raytracing + ray_tracing_position_fetch and the shader stages of anyhit and closesthit.
+/// [Compound]
+alias raytracing_position = raytracing + GL_EXT_ray_tracing_position_fetch_ray_tracing + anyhit_closesthit;
+
+/// Collection of capabilities for raytracing + motion blur and the shader stages of anyhit, closesthit, intersection, and miss.
+/// [Compound]
+alias raytracing_motionblur_anyhit_closesthit_intersection_miss = anyhit_closesthit_intersection_miss + raytracing_motionblur;
+
+/// Collection of capabilities for raytracing + motion blur and the shader stages of raygen, closesthit, and miss.
+/// [Compound]
+alias raytracing_motionblur_raygen_closesthit_miss = raygen_closesthit_miss + raytracing_motionblur;
+
+/// Collection of capabilities for rayquery + ray_tracing_position_fetch.
+/// [Compound]
+alias rayquery_position = rayquery + GL_EXT_ray_tracing_position_fetch_ray_query;
+
+/// Collection of capabilities for raytracing + shader execution reordering and the shader stage of raygen.
+/// [Compound]
+alias ser_raygen = raygen + ser;
+
+/// Collection of capabilities for raytracing + shader execution reordering and the shader stages of raygen, closesthit, and miss.
+/// [Compound]
+alias ser_raygen_closesthit_miss = raygen_closesthit_miss + ser;
+
+/// Collection of capabilities for raytracing + shader execution reordering and the shader stages of anyhit, closesthit, intersection, and miss.
+/// [Compound]
+alias ser_any_closesthit_intersection_miss = anyhit_closesthit_intersection_miss + ser;
+
+/// Collection of capabilities for raytracing + shader execution reordering and the shader stages of anyhit, closesthit, and intersection.
+/// [Compound]
+alias ser_anyhit_closesthit_intersection = anyhit_closesthit_intersection + ser;
+
+/// Collection of capabilities for raytracing + shader execution reordering and the shader stages of anyhit and closesthit.
+/// [Compound]
+alias ser_anyhit_closesthit = anyhit_closesthit + ser;
+
+/// Collection of capabilities for raytracing + motion blur + shader execution reordering and the shader stages of raygen, closesthit, and miss.
+/// [Compound]
+alias ser_motion_raygen_closesthit_miss = raygen_closesthit_miss + ser_motion;
+
+/// Collection of capabilities for raytracing raytracing + motion blur + shader execution reordering and the shader stage of raygen.
+/// [Compound]
+alias ser_motion_raygen = raygen + ser_motion;
+
+/// User should not use this capability
+/// [Other]
+alias all = _sm_6_9 + hlsl_nvapi
+          | glsl_spirv_1_5 + sm_6_9
+             + ser + shaderclock + texturefootprint + fragmentshaderinterlock + _GL_NV_shader_subgroup_partitioned
+             + _GL_NV_ray_tracing_motion_blur + _GL_NV_shader_texture_footprint
+          | spirv_1_5 + sm_6_9
+             + ser + shaderclock + texturefootprint + fragmentshaderinterlock + spvGroupNonUniformPartitionedNV
+             + spvRayTracingMotionBlurNV + spvRayTracingMotionBlurNV;

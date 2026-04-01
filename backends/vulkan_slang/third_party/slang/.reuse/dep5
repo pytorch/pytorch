@@ -1,0 +1,43 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: Slang
+Upstream-Contact: The Khronos Group, Inc.
+Source: https://github.com/shader-slang/slang
+
+Files: *
+Copyright: 2016, Carnegie Mellon University and NVIDIA Corporation
+           2024 The Khronos Group, Inc.
+License: Apache-2.0 WITH LLVM-exception
+
+Files: docs/_includes/anchor_headings.html
+Copyright: 2018 Vladimir "allejo" Jimenez
+License: Apache-2.0 WITH LLVM-exception
+
+Files: external/spirv/spirv.h
+       external/glext.h
+       external/wglext.h
+       external/spirv-tools-generated/OpenCLDebugInfo100.h
+       external/spirv-tools-generated/DebugInfo.h
+       external/spirv-tools-generated/NonSemanticShaderDebugInfo100.h
+       external/glslang-generated/glslang/build_info.h
+Copyright: The Khronos Group, Inc.
+License: Apache-2.0
+
+Files: tests/fcpw/*
+Copyright: 2020 Rohan Sawhney
+License: MIT
+
+Files: external/renderdoc_app.h
+Copyright: 2019-2021 Baldur Karlsson
+License: MIT
+
+Files: external/dxc/dxcapi.h
+Copyright: Microsoft Corporation. All rights reserved.
+License: UOI-NCSA
+
+Files: source/core/slang-crypto.cpp
+Copyright: 2001 Alexander Peslyak
+License: Apache-2.0
+
+Files: *.md
+Copyright: 2024 The Khronos Group, Inc.
+License: CC-BY-4.0

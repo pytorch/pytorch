@@ -1,0 +1,42 @@
+//SLANG_TEST_OPTS:-profile ps_5_0 -entry main
+
+// Confirm that resources inside `struct` types work reasonably well,
+
+#ifdef __SLANG__
+#define R(X) /**/
+#else
+#define R(X) X
+#endif
+
+float4 use(float  val) { return val; };
+float4 use(float2 val) { return float4(val,0.0,0.0); };
+float4 use(float3 val) { return float4(val,0.0); };
+float4 use(float4 val) { return val; };
+float4 use(Texture2D t, SamplerState s) { return t.Sample(s, 0.0); }
+float4 use(Texture2D t, SamplerComparisonState s) { return t.SampleCmp(s, 0.0, 0.0); }
+
+struct FooData
+{
+	float4 f;
+	Texture2D t;
+	SamplerState s;
+	SamplerComparisonState c;	
+};
+
+cbuffer CA R(: register(b0))
+{
+	FooData foo  R(: register(c0) : register(t0) : register(s0));
+};
+
+Texture2D t R(: register(t1));
+SamplerState s R(: register(s2));
+
+float4 main() : SV_Target
+{
+	// Go ahead and use everything in this case:
+	return use(foo.t,  foo.s)
+	    +  use(foo.t,  foo.c)
+		+  use(t, s)
+		+  use(foo.f)
+		;
+}

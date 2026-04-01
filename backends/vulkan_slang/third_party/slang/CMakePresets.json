@@ -1,0 +1,314 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "default",
+      "description": "Default build using Ninja Multi-Config generator",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded$<$<CONFIG:Debug>:Debug>",
+        "SLANG_ENABLE_IR_BREAK_ALLOC": "$<$<CONFIG:Debug>:TRUE>$<$<NOT:$<CONFIG:Debug>>:FALSE>",
+        "CMAKE_CONFIGURATION_TYPES": "Debug;Release;RelWithDebInfo;MinSizeRel"
+      }
+    },
+    {
+      "name": "emscripten",
+      "description": "Emscripten-based Wasm build",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build.em",
+      "cacheVariables": {
+        "SLANG_SLANG_LLVM_FLAVOR": "DISABLE",
+        "SLANG_ENABLE_AFTERMATH": "OFF",
+        "SLANG_ENABLE_CUDA": "OFF",
+        "SLANG_ENABLE_GFX": "OFF",
+        "SLANG_ENABLE_OPTIX": "OFF",
+        "SLANG_ENABLE_REPLAYER": "OFF",
+        "SLANG_ENABLE_SLANG_RHI": "OFF",
+        "SLANG_ENABLE_SPLIT_DEBUG_INFO": "OFF",
+        "SLANG_ENABLE_TESTS": "OFF",
+        "CMAKE_C_FLAGS_INIT": "-fwasm-exceptions -Os",
+        "CMAKE_CXX_FLAGS_INIT": "-fwasm-exceptions -Os",
+        "CMAKE_EXE_LINKER_FLAGS": "-sASSERTIONS -sALLOW_MEMORY_GROWTH -fwasm-exceptions --export=__cpp_exception"
+      }
+    },
+    {
+      "name": "msvc-base",
+      "hidden": true,
+      "inherits": "default",
+      "description": "Options specific for MSVC",
+      "cacheVariables": {
+        "CMAKE_C_FLAGS_INIT": "-D_ITERATOR_DEBUG_LEVEL=0 /MP",
+        "CMAKE_CXX_FLAGS_INIT": "-D_ITERATOR_DEBUG_LEVEL=0 /MP"
+      }
+    },
+    {
+      "name": "vs2019",
+      "inherits": "msvc-base",
+      "description": "Visual Studio 2019 project",
+      "generator": "Visual Studio 16 2019"
+    },
+    {
+      "name": "vs2019-dev",
+      "inherits": "msvc-base",
+      "description": "Visual Studio 2019 project with debug assisting features",
+      "generator": "Visual Studio 16 2019",
+      "cacheVariables": {
+        "SLANG_ENABLE_IR_BREAK_ALLOC": "TRUE"
+      }
+    },
+    {
+      "name": "vs2022",
+      "inherits": "msvc-base",
+      "description": "Visual Studio 2022 project",
+      "generator": "Visual Studio 17 2022"
+    },
+    {
+      "name": "vs2022-dev",
+      "inherits": "msvc-base",
+      "description": "Visual Studio 2022 project with debug assisting features",
+      "generator": "Visual Studio 17 2022",
+      "cacheVariables": {
+        "SLANG_ENABLE_IR_BREAK_ALLOC": "TRUE"
+      }
+    },
+    {
+      "name": "slang-llvm",
+      "inherits": "default",
+      "description": "Build slang-llvm from the system LLVM",
+      "cacheVariables": {
+        "SLANG_SLANG_LLVM_FLAVOR": "USE_SYSTEM_LLVM"
+      }
+    },
+    {
+      "name": "generators",
+      "inherits": "default",
+      "description": "Build the compile time generators used in building Slang",
+      "cacheVariables": {
+        "SLANG_SLANG_LLVM_FLAVOR": "DISABLE",
+        "SLANG_ENABLE_SLANG_RHI": false
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "default",
+      "configuration": "Debug"
+    },
+    {
+      "name": "release",
+      "configurePreset": "default",
+      "configuration": "Release"
+    },
+    {
+      "name": "releaseWithDebugInfo",
+      "configurePreset": "default",
+      "configuration": "RelWithDebInfo"
+    },
+    {
+      "name": "minSizeRel",
+      "configurePreset": "default",
+      "configuration": "MinSizeRel"
+    },
+    {
+      "name": "vs2022-debug",
+      "configurePreset": "vs2022",
+      "configuration": "Debug"
+    },
+    {
+      "name": "vs2022-release",
+      "configurePreset": "vs2022",
+      "configuration": "Release"
+    },
+    {
+      "name": "vs2022-releaseWithDebugInfo",
+      "configurePreset": "vs2022",
+      "configuration": "RelWithDebInfo"
+    },
+    {
+      "name": "emscripten",
+      "configurePreset": "emscripten",
+      "configuration": "Release",
+      "targets": ["slang-wasm"]
+    },
+    {
+      "name": "generators",
+      "inherits": "release",
+      "configurePreset": "generators",
+      "targets": ["all-generators"]
+    },
+    {
+      "name": "slang-llvm",
+      "inherits": "release",
+      "configurePreset": "slang-llvm",
+      "targets": ["slang-llvm"]
+    }
+  ],
+  "packagePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "configurePreset": "default",
+      "generators": ["ZIP"],
+      "variables": {
+        "CPACK_PACKAGE_FILE_NAME": "slang",
+        "CPACK_COMPONENTS_ALL": "Unspecified;metadata;slang-llvm"
+      }
+    },
+    {
+      "name": "base-debug-info",
+      "inherits": "base",
+      "variables": {
+        "CPACK_PACKAGE_FILE_NAME": "slang-debug-info",
+        "CPACK_COMPONENTS_ALL": "debug-info"
+      }
+    },
+    {
+      "name": "release",
+      "inherits": "base",
+      "configurations": ["Release"],
+      "packageDirectory": "dist-release"
+    },
+    {
+      "name": "releaseWithDebugInfo",
+      "inherits": "base",
+      "configurations": ["RelWithDebInfo"],
+      "packageDirectory": "dist-releaseWithDebugInfo"
+    },
+    {
+      "name": "debug",
+      "inherits": "base",
+      "configurations": ["Debug"],
+      "packageDirectory": "dist-debug"
+    },
+    {
+      "name": "release-debug-info",
+      "inherits": "base-debug-info",
+      "configurations": ["Release"],
+      "packageDirectory": "dist-release-debug-info"
+    },
+    {
+      "name": "releaseWithDebugInfo-debug-info",
+      "inherits": "base-debug-info",
+      "configurations": ["RelWithDebInfo"],
+      "packageDirectory": "dist-releaseWithDebugInfo-debug-info"
+    },
+    {
+      "name": "debug-debug-info",
+      "inherits": "base-debug-info",
+      "configurations": ["Debug"],
+      "packageDirectory": "dist-debug-debug-info"
+    },
+    {
+      "name": "generators",
+      "inherits": "release",
+      "configurePreset": "generators",
+      "variables": {
+        "CPACK_PACKAGE_FILE_NAME": "slang-generators",
+        "CPACK_COMPONENTS_ALL": "generators"
+      }
+    },
+    {
+      "name": "slang-llvm",
+      "inherits": "release",
+      "configurePreset": "slang-llvm",
+      "variables": {
+        "CPACK_PACKAGE_FILE_NAME": "slang-llvm",
+        "CPACK_COMPONENTS_ALL": "slang-llvm"
+      }
+    }
+  ],
+  "workflowPresets": [
+    {
+      "name": "debug",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "default"
+        },
+        {
+          "type": "build",
+          "name": "debug"
+        },
+        {
+          "type": "package",
+          "name": "debug"
+        }
+      ]
+    },
+    {
+      "name": "release",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "default"
+        },
+        {
+          "type": "build",
+          "name": "release"
+        },
+        {
+          "type": "package",
+          "name": "release"
+        }
+      ]
+    },
+    {
+      "name": "releaseWithDebugInfo",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "default"
+        },
+        {
+          "type": "build",
+          "name": "releaseWithDebugInfo"
+        },
+        {
+          "type": "package",
+          "name": "releaseWithDebugInfo"
+        }
+      ]
+    },
+    {
+      "name": "generators",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "generators"
+        },
+        {
+          "type": "build",
+          "name": "generators"
+        },
+        {
+          "type": "package",
+          "name": "generators"
+        }
+      ]
+    },
+    {
+      "name": "slang-llvm",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "slang-llvm"
+        },
+        {
+          "type": "build",
+          "name": "slang-llvm"
+        },
+        {
+          "type": "package",
+          "name": "slang-llvm"
+        }
+      ]
+    }
+  ]
+}

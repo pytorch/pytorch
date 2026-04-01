@@ -1,0 +1,238 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [linux, macos, windows]
+        config: [debug, release]
+        compiler: [gcc, clang, cl]
+        platform: [x86_64, aarch64, wasm]
+        exclude:
+          # Default to x64, but aarch64 on osx
+          - { os: linux, platform: aarch64 }
+          - { os: windows, platform: aarch64 }
+          - { os: macos, platform: x86_64 }
+          - { os: linux, config: debug, platform: wasm }
+          - { os: windows, platform: wasm }
+          - { os: macos, platform: wasm }
+          # Unused compiler configs
+          - { os: linux, compiler: clang }
+          - { os: linux, compiler: cl }
+          - { os: windows, compiler: gcc }
+          - { os: windows, compiler: clang }
+          - { os: macos, compiler: gcc }
+          - { os: macos, compiler: cl }
+        include:
+          - { os: linux, runs-on: ubuntu-latest }
+          - { os: macos, runs-on: macos-latest }
+          - { os: windows, runs-on: windows-latest }
+          # Warnings are treated as errors by default.
+          # But we may want to disable it temporarily.
+          - { os: linux, warnings-as-errors: true }
+          - { os: macos, warnings-as-errors: true }
+          - { os: windows, warnings-as-errors: true }
+          # Set a test category depending on the config, smoke by default,
+          # quick or full conditionally otherwise
+          - test-category: smoke
+          - { os: windows, test-category: quick }
+          - { config: release, test-category: full }
+          # default not full gpu tests
+          - full-gpu-tests: false
+          - build-llvm: true
+          - { platform: wasm, build-llvm: false }
+          # The runners don't have a GPU by default except for the self-hosted ones
+          - has-gpu: false
+          # Self-hosted aarch64 build
+          - os: linux
+            config: release
+            compiler: gcc
+            platform: aarch64
+            test-category: smoke
+            full-gpu-tests: false
+            runs-on: ubuntu-24.04-arm
+            has-gpu: false
+            build-llvm: false
+          # Self-hosted full gpu build
+          - os: windows
+            config: release
+            compiler: cl
+            platform: x86_64
+            test-category: full
+            full-gpu-tests: true
+            runs-on: [Windows, self-hosted]
+            has-gpu: true
+      fail-fast: false
+    runs-on: ${{ matrix.runs-on }}
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Add bash to PATH
+        shell: pwsh
+        if: ${{matrix.os == 'windows'}}
+        run: |
+          Add-Content -Path $env:GITHUB_PATH -Value "C:\\Program Files\\Git\\bin"
+          Add-Content -Path $env:GITHUB_PATH -Value "C:\\Program Files\\Git\\usr\\bin"
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: "recursive"
+          fetch-depth: "2"
+      - id: filter
+        run: |
+          # This step prevents subsequent steps from running if only documentation was changed
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git fetch origin ${{ github.base_ref }}
+            BASE=origin/${{ github.base_ref }}
+          else
+            BASE=HEAD^1
+          fi
+          if git diff --name-only -z $BASE...HEAD | 
+            grep --null-data -qvE '^(docs/|LICENSES/|LICENSE$|CONTRIBUTING\.md$|README\.md$)'; then
+            echo "should-run=true" >> $GITHUB_OUTPUT
+          else
+            echo "Only documentation files changed, skipping remaining steps"
+            echo "should-run=false" >> $GITHUB_OUTPUT
+          fi
+      - name: Install dependencies
+        run: |
+          if [[ "${{ matrix.os }}" = "linux" ]]; then
+              sudo apt-get update
+              sudo apt-get install -y libx11-dev
+          fi
+      - name: Setup
+        if: steps.filter.outputs.should-run == 'true'
+        uses: ./.github/actions/common-setup
+        with:
+          os: ${{matrix.os}}
+          compiler: ${{matrix.compiler}}
+          platform: ${{matrix.platform}}
+          config: ${{matrix.config}}
+          build-llvm: ${{ matrix.build-llvm }}
+      - name: Build Slang
+        if: steps.filter.outputs.should-run == 'true'
+        run: |
+          if [[ "${{ matrix.platform }}" = "wasm" ]]; then
+              git clone https://github.com/emscripten-core/emsdk.git
+              pushd emsdk
+                ./emsdk install latest
+                ./emsdk activate latest
+                source ./emsdk_env.sh
+              popd
+              cmake --workflow --preset generators --fresh
+              mkdir generators
+              cmake --install build --config Release --component generators --prefix generators
+              emcmake cmake -DSLANG_GENERATORS_PATH=generators/bin --preset emscripten -DSLANG_SLANG_LLVM_FLAVOR=DISABLE
+              cmake --build --preset emscripten --config "$cmake_config" --target slang-wasm
+              mkdir "build.em/$cmake_config/bin/smoke"
+              cp tests/wasm/smoke/* "build.em/$cmake_config/bin/smoke/"
+              cd "build.em/$cmake_config/bin"
+              [ -f "slang-wasm.wasm" ]
+              [ -f "slang-wasm.js" ]
+              node smoke/smoke-test.js smoke/rand_float.slang computeMain
+          else
+            if [[ "${{ matrix.os }}" =~ "windows" && "${{ matrix.config }}" != "release" && "${{ matrix.config }}" != "releaseWithDebugInfo" ]]; then
+              # Doing a debug build will try to link against a release built llvm, this
+              # is a problem on Windows, so make slang-llvm in release build and use
+              # that as though it's a fetched binary via these presets.
+              cmake --workflow --preset slang-llvm
+              # Configure, pointing to our just-generated slang-llvm archive
+              cmake --preset default --fresh \
+                -DSLANG_SLANG_LLVM_FLAVOR=FETCH_BINARY \
+                "-DSLANG_SLANG_LLVM_BINARY_URL=$(pwd)/build/dist-release/slang-llvm.zip" \
+                "-DCMAKE_COMPILE_WARNING_AS_ERROR=${{matrix.warnings-as-errors}}"
+              cmake --workflow --preset "${{matrix.config}}"
+            elif [[ "${{ matrix.build-llvm }}" = "false" ]]; then
+              # linux aarch64 cannot build llvm.
+              cmake --preset default --fresh \
+                -DSLANG_SLANG_LLVM_FLAVOR=DISABLE \
+                -DCMAKE_COMPILE_WARNING_AS_ERROR=${{matrix.warnings-as-errors}}
+              cmake --workflow --preset "${{matrix.config}}"
+            else
+              # Otherwise, use the "system" llvm we have just build or got from the
+              # cache in the setup phase
+              cmake --preset default --fresh \
+                -DSLANG_SLANG_LLVM_FLAVOR=USE_SYSTEM_LLVM \
+                -DCMAKE_COMPILE_WARNING_AS_ERROR=${{matrix.warnings-as-errors}}
+              cmake --workflow --preset "${{matrix.config}}"
+            fi
+          fi
+      - name: Test Slang
+        if: steps.filter.outputs.should-run == 'true' && matrix.platform != 'wasm' && (matrix.platform != 'aarch64' || matrix.os == 'macos')
+        run: |
+          export SLANG_RUN_SPIRV_VALIDATION=1
+          export SLANG_USE_SPV_SOURCE_LANGUAGE_UNKNOWN=1
+          if [[ "${{matrix.full-gpu-tests}}" == "true" ]]; then
+            "$bin_dir/slang-test" \
+              -use-test-server \
+              -server-count 8 \
+              -category ${{ matrix.test-category }} \
+              -api all-cpu \
+              -expected-failure-list tests/expected-failure-github.txt \
+              -skip-reference-image-generation \
+              -show-adapter-info
+          elif [[ "${{matrix.has-gpu}}" == "true" ]]; then
+            "$bin_dir/slang-test" \
+              -use-test-server \
+              -category ${{ matrix.test-category }} \
+              -api all-dx12 \
+              -expected-failure-list tests/expected-failure-github.txt \
+              -expected-failure-list tests/expected-failure-record-replay-tests.txt \
+              -expected-failure-list tests/expected-failure-github-runner.txt \
+              -skip-reference-image-generation \
+              -show-adapter-info
+          else
+            "$bin_dir/slang-test" \
+              -use-test-server \
+              -category ${{ matrix.test-category }} \
+              -api all-dx12 \
+              -expected-failure-list tests/expected-failure-github.txt \
+              -expected-failure-list tests/expected-failure-record-replay-tests.txt \
+              -expected-failure-list tests/expected-failure-github-runner.txt \
+              -skip-reference-image-generation \
+              -show-adapter-info
+          fi
+      - name: Run Slang examples
+        if: steps.filter.outputs.should-run == 'true' && matrix.platform != 'wasm' && matrix.full-gpu-tests
+        run: |
+          .github/workflows/ci-examples.sh \
+           --bin-dir "$bin_dir" \
+           --os "${{matrix.os}}" \
+           --platform "${{matrix.platform}}" \
+           --config "${{matrix.config}}" \
+           --skip-file tests/expected-example-failure-github.txt
+      - name: Run slangc tests
+        if: steps.filter.outputs.should-run == 'true' && matrix.platform != 'wasm'
+        run: |
+          PATH=$bin_dir:$PATH tools/slangc-test/test.sh
+      - name: Test Slang via glsl
+        if: steps.filter.outputs.should-run == 'true' && matrix.full-gpu-tests && matrix.platform != 'wasm'
+        run: |
+          export SLANG_RUN_SPIRV_VALIDATION=1
+          export SLANG_USE_SPV_SOURCE_LANGUAGE_UNKNOWN=1
+          "$bin_dir/slang-test" \
+            -use-test-server \
+            -server-count 8 \
+            -category ${{ matrix.test-category }} \
+            -emit-spirv-via-glsl \
+            -api vk \
+            -expected-failure-list tests/expected-failure.txt \
+            -skip-reference-image-generation \
+            -show-adapter-info
+      - uses: actions/upload-artifact@v4
+        if: steps.filter.outputs.should-run == 'true' && ! matrix.full-gpu-tests
+        with:
+          name: slang-build-${{matrix.os}}-${{matrix.platform}}-${{matrix.compiler}}-${{matrix.config}}
+          # The install directory used in the packaging step
+          path: build/dist-${{matrix.config}}/**/ZIP/slang/*

@@ -1,0 +1,2 @@
+BasedOnStyle: InheritParentConfig
+IndentPPDirectives: BeforeHash

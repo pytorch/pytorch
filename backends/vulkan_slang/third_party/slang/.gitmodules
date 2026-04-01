@@ -1,0 +1,46 @@
+[submodule "external/glslang"]
+	path = external/glslang
+	url = https://github.com/KhronosGroup/glslang
+[submodule "external/tinyobjloader"]
+	path = external/tinyobjloader
+	url = https://github.com/syoyo/tinyobjloader
+[submodule "external/glm"]
+	path = external/glm
+	url = https://github.com/g-truc/glm.git
+[submodule "external/imgui"]
+	path = external/imgui
+	url = https://github.com/ocornut/imgui.git
+[submodule "external/slang-binaries"]
+	path = external/slang-binaries
+	url = https://github.com/shader-slang/slang-binaries
+[submodule "external/spirv-tools"]
+	path = external/spirv-tools
+	url = https://github.com/KhronosGroup/SPIRV-Tools.git
+[submodule "external/spirv-headers"]
+	path = external/spirv-headers
+	url = https://github.com/KhronosGroup/SPIRV-Headers.git
+[submodule "external/miniz"]
+	path = external/miniz
+	url = https://github.com/richgel999/miniz
+  ignore = untracked
+[submodule "external/lz4"]
+	path = external/lz4
+	url = https://github.com/lz4/lz4
+[submodule "external/unordered_dense"]
+	path = external/unordered_dense
+	url = https://github.com/martinus/unordered_dense.git
+[submodule "external/vulkan-headers"]
+	path = external/vulkan
+	url = https://github.com/KhronosGroup/Vulkan-Headers
+[submodule "external/metal-cpp"]
+	path = external/metal-cpp
+	url = https://github.com/bkaradzic/metal-cpp
+[submodule "external/slang-rhi"]
+	path = external/slang-rhi
+	url = https://github.com/shader-slang/slang-rhi.git
+[submodule "external/WindowsToolchain"]
+	path = external/WindowsToolchain
+	url = https://github.com/MarkSchofield/WindowsToolchain/
+[submodule "external/lua"]
+	path = external/lua
+	url = https://github.com/lua/lua.git

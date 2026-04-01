@@ -1,0 +1,14 @@
+name: Check Formatting (comment /format to auto-fix)
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+jobs:
+  check-formatting:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/format-setup
+      - run: ./extras/formatting.sh --check-only

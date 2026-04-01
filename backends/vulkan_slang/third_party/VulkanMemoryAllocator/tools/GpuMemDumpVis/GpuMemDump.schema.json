@@ -1,0 +1,163 @@
+{
+    "$id": "https://gpuopen.com/vulkan-memory-allocator/schemas/GpuMemDump",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+        "General": {
+            "type": "object",
+            "properties": {
+                "API": {"type": "string", "enum": ["Vulkan", "Direct3D 12"]},
+                "GPU": {"type": "string"}
+            },
+            "required": ["API", "GPU"]
+        },
+        "Total": {"$ref": "#/$defs/Stats"},
+        "MemoryInfo": {
+            "type": "object",
+            "additionalProperties": {
+                "type": "object",
+                "properties": {
+                    "Flags": {
+                        "type": "array",
+                        "items": {"type": "string"}
+                    },
+                    "Size": {"type": "integer"},
+                    "Budget": {
+                        "type": "object",
+                        "properties": {
+                            "BudgetBytes": {"type": "integer"},
+                            "UsageBytes": {"type": "integer"}
+                        },
+                        "additionalProperties": false
+                    },
+                    "Stats": {"$ref": "#/$defs/Stats"},
+                    "MemoryPools": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                                "Flags": {
+                                    "type": "array",
+                                    "items": {"type": "string"}
+                                },
+                                "Stats": {"$ref": "#/$defs/Stats"}
+                            },
+                            "additionalProperties": false
+                        }
+                    }
+                },
+                "required": ["Budget", "Stats"],
+                "additionalProperties": false
+            }
+        },
+        "DefaultPools": {
+            "type": "object",
+            "additionalProperties": {
+                "type": "object",
+                "properties": {
+                    "PreferredBlockSize": {"type": "integer"},
+                    "Blocks": {
+                        "type": "object",
+                        "propertyNames": {"pattern": "[0-9]+"},
+                        "additionalProperties": {"$ref": "#/$defs/Block"}
+                    },
+                    "DedicatedAllocations": {
+                        "type": "array",
+                        "items": {"$ref": "#/$defs/DedicatedAllocation"}
+                    }
+                }
+            }
+        },
+        "CustomPools": {
+            "type": "object",
+            "additionalProperties": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "Name": {"type": "string"},
+                        "Flags": {"type": "array"},
+                        "PreferredBlockSize": {"type": "integer"},
+                        "Blocks": {
+                            "type": "object",
+                            "additionalProperties": {"$ref": "#/$defs/Block"}
+                        },
+                        "DedicatedAllocations": {
+                            "type": "array",
+                            "items": {"$ref": "#/$defs/DedicatedAllocation"}
+                        }
+                    },
+                    "required": ["PreferredBlockSize"],
+                    "additionalProperties": false
+                }
+            }
+        }
+    },
+    "required": ["General", "Total", "MemoryInfo"],
+    "additionalProperties": false,
+    "$defs": {
+        "CustomData": {
+            "type": "string",
+            "pattern": "^[0-9a-zA-Z]+$"
+        },
+        "Stats": {
+            "type": "object",
+            "properties": {
+                "BlockCount": {"type": "integer"},
+                "BlockBytes": {"type": "integer"},
+                "AllocationCount": {"type": "integer"},
+                "AllocationBytes": {"type": "integer"},
+                "UnusedRangeCount": {"type": "integer"},
+                "AllocationSizeMin": {"type": "integer"},
+                "AllocationSizeMax": {"type": "integer"},
+                "UnusedRangeSizeMin": {"type": "integer"},
+                "UnusedRangeSizeMax": {"type": "integer"}
+            },
+            "required": [
+                "BlockCount", "BlockBytes",
+                "AllocationCount", "AllocationBytes",
+                "UnusedRangeCount"
+            ],
+            "additionalProperties": false
+        },
+        "Block": {
+            "type": "object",
+            "properties": {
+                "MapRefCount": {"type": "integer"},
+                "TotalBytes": {"type": "integer"},
+                "UnusedBytes": {"type": "integer"},
+                "Allocations": {"type": "integer"},
+                "UnusedRanges": {"type": "integer"},
+                "Suballocations": {"type": "array", "items": {"$ref": "#/$defs/Suballocation"}}
+            },
+            "required": ["TotalBytes", "UnusedBytes", "Allocations", "UnusedRanges"]
+        },
+        "DedicatedAllocation": {
+            "type": "object",
+            "properties": {
+                "Type": {"type": "string"},
+                "Size": {"type": "integer"},
+                "Usage": {"type": "integer"},
+                "CustomData": {"$ref": "#/$defs/CustomData"},
+                "Name": {"type": "string"},
+                "Layout": {"type": "integer"}
+            },
+            "required": ["Type", "Size"],
+            "additionalProperties": false
+        },
+        "Suballocation": {
+            "type": "object",
+            "properties": {
+                "Offset": {"type": "integer"},
+                "Type": {"type": "string"},
+                "Size": {"type": "integer"},
+                "Usage": {"type": "integer"},
+                "CustomData": {"$ref": "#/$defs/CustomData"},
+                "Name": {"type": "string"},
+                "Layout": {"type": "integer"}
+            },
+            "required": ["Offset", "Type", "Size"],
+            "additionalProperties": false
+        }
+    }
+}

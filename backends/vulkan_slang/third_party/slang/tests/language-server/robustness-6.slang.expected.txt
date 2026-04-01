@@ -1,0 +1,13 @@
+--------
+range: 3,6 - 3,10
+content:
+```
+func dsqr<T>(T obj, float x) -> float
+```
+
+TEST:LANG_SERVER:  
+HOVER:4,8  
+
+{REDACTED}.slang(4)
+
+

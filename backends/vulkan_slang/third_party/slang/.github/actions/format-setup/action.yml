@@ -1,0 +1,37 @@
+name: Formatting tools setup
+
+description: Performs setup common to the code formatting actions
+
+runs:
+  using: composite
+  steps:
+    - name: install gersemi
+      shell: bash
+      run: |
+        pip3 install gersemi colorama
+
+    - name: install clang-format
+      shell: bash
+      run: |
+        tmpdir=$(mktemp -d)
+        curl -L -H "Authorization: token ${{github.token}}" \
+          -o "$tmpdir/clang-format" \
+          https://github.com/shader-slang/slang-binaries/raw/306d22efc0f5f72c7230b0b6b7c99f03c46995bd/clang-format/x86_64-linux/bin/clang-format
+        chmod +x "$tmpdir/clang-format"
+        echo "$tmpdir" >> $GITHUB_PATH
+
+    - name: install prettier
+      shell: bash
+      run: |
+        npm install -g prettier@3.3.3
+        echo "$(npm bin -g)" >> $GITHUB_PATH
+
+    - name: install shfmt
+      shell: bash
+      run: |
+        tmpdir=$(mktemp -d)
+        curl -L -H "Authorization: token ${{github.token}}" \
+          -o "$tmpdir/shfmt" \
+          https://github.com/mvdan/sh/releases/download/v3.10.0/shfmt_v3.10.0_linux_amd64
+        chmod +x "$tmpdir/shfmt"
+        echo "$tmpdir" >> $GITHUB_PATH

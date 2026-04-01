@@ -1,0 +1,53 @@
+//TEST:SIMPLE:
+// `HullShader` without `Domain` attribute
+
+pipeline P
+{
+    world CoarseVertex;
+    world ControlPoint;
+    world CornerPoint;
+    world TessPatch;
+    world FineVertex;
+    
+    require @FineVertex vec4 RS_Position; 
+    require @ControlPoint vec2 tessLevelInner;
+    require @ControlPoint vec4 tessLevelOuter;
+        
+    // implicit import operator CoarseVertex->CornerPoint
+    extern @CornerPoint CoarseVertex[] CoarseVertex_ControlPoint;
+    [PerCornerIterator]
+    extern @CornerPoint int HS_CornerID;
+    
+    extern @ControlPoint CoarseVertex[] CoarseVertex_ControlPoint;
+    extern @TessPatch CoarseVertex[] CoarseVertex_ControlPoint;
+    [InvocationId]
+    extern @ControlPoint int invocationId;
+    extern @FineVertex ControlPoint[] ControlPoint_tes;
+    extern @FineVertex Patch<TessPatch> perPatch_tes;
+    
+    extern @FineVertex Patch<CornerPoint[3]> perCorner_tes;
+    [TessCoord]
+    extern @FineVertex vec3 tessCoord;
+      
+    stage hs : HullShader
+    {
+        PatchWorld: TessPatch;
+        ControlPointWorld: ControlPoint;
+        CornerPointWorld: CornerPoint;
+        InputControlPointCount: 3;
+        ControlPointCount: 1;
+//        Domain: triangles;
+        TessLevelOuter: tessLevelOuter;
+        TessLevelInner: tessLevelInner;
+		Partitioning: integer;
+		OutputTopology: triangle_ccw;
+    }
+}
+
+shader S
+    targets P
+{
+	@FineVertex float4 RS_Position = float4(0.0);
+	@ControlPoint float2 tessLevelInner = float2(2.0);
+	@ControlPoint float4 tessLevelOuter = float4(2.0);
+}

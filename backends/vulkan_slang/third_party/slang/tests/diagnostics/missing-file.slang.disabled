@@ -1,0 +1,3 @@
+// trying to import a non-existant file
+
+using "does-not-exist.slang"

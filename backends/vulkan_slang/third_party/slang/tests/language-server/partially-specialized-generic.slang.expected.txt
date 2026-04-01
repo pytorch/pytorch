@@ -1,0 +1,13 @@
+--------
+range: 8,24 - 8,30
+content:
+```
+struct MyType
+```
+
+TEST:LANG_SERVER:  
+HOVER:9,29  
+
+{REDACTED}.slang(4)
+
+

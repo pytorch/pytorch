@@ -1,0 +1,87 @@
+name: Regenerate TOC
+on:
+  repository_dispatch:
+    types: [regenerate-toc-command]
+jobs:
+  regenerate-toc:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.SLANGBOT_PAT }}
+          repository: ${{ github.event.client_payload.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.client_payload.pull_request.head.ref }}
+          path: pr-branch
+
+      - name: Checkout target branch
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.SLANGBOT_PAT }}
+          repository: ${{ github.event.client_payload.pull_request.base.repo.full_name }}
+          ref: ${{ github.event.client_payload.pull_request.base.ref }}
+          path: target-branch
+
+      - name: Install Mono
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mono-complete
+
+      - name: Regenerate Table of Contents
+        id: regen
+        run: |
+          ./target-branch/docs/build_toc.sh --source ./pr-branch
+
+      - name: Configure Git commit signing
+        id: git-info
+        run: |
+          echo "${{ secrets.SLANGBOT_SIGNING_KEY }}" > "${{runner.temp}}"/signing_key
+          chmod 600 "${{runner.temp}}"/signing_key
+          git -C pr-branch config commit.gpgsign true
+          git -C pr-branch config gpg.format ssh
+          git -C pr-branch config user.signingkey "${{runner.temp}}"/signing_key
+          bot_info=$(curl -s -H "Authorization: Bearer ${{ secrets.SLANGBOT_PAT }}" \
+            "https://api.github.com/user")
+          echo "bot_identity=$(echo $bot_info | jq --raw-output '.login + " <" + (.id|tostring) + "+" + .login + "@users.noreply.github.com>"')" >> $GITHUB_OUTPUT
+          echo "bot_name=$(echo $bot_info | jq --raw-output '.login')" >> $GITHUB_OUTPUT
+
+      - name: Create Pull Request
+        id: create-pr
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.SLANGBOT_PAT }}
+          path: pr-branch
+          commit-message: "regenerate documentation Table of Contents"
+          title: "Regenerate documentation ToC for PR #${{ github.event.client_payload.pull_request.number }}"
+          body: "Automated ToC generation for ${{ github.event.client_payload.pull_request.html_url }}"
+          committer: ${{ steps.git-info.outputs.bot_identity }}
+          author: ${{ steps.git-info.outputs.bot_identity }}
+          branch: regenerate-toc-${{ github.event.client_payload.pull_request.number }}-${{ github.event.client_payload.pull_request.head.ref }}
+          base: ${{ github.event.client_payload.pull_request.head.ref }}
+          push-to-fork: ${{ steps.git-info.outputs.bot_name }}/slang
+          delete-branch: true
+
+      - name: Comment on PR
+        uses: peter-evans/create-or-update-comment@v4
+        if: always()
+        with:
+          token: ${{ secrets.SLANGBOT_PAT }}
+          repository: ${{ github.event.client_payload.github.payload.repository.full_name }}
+          issue-number: ${{ github.event.client_payload.pull_request.number }}
+          body: |
+            ${{ 
+              steps.regen.conclusion == 'failure'
+              && format('❌ Table of Contents generation failed. Please check the [workflow run](https://github.com/{0}/actions/runs/{1})', github.repository, github.run_id)
+              || (steps.create-pr.conclusion == 'failure' 
+                  && format('❌ Failed to create regenerate ToC pull request. Please check the [workflow run](https://github.com/{0}/actions/runs/{1})', github.repository, github.run_id)
+                  || format('🌈 Regenerated Table of Contents, please merge the changes from [this PR]({0})', steps.create-pr.outputs.pull-request-url))
+            }}
+
+      - name: Add reaction
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          token: ${{ secrets.SLANGBOT_PAT }}
+          repository: ${{ github.event.client_payload.github.payload.repository.full_name }}
+          comment-id: ${{ github.event.client_payload.github.payload.comment.id }}
+          reactions-edit-mode: replace
+          reactions: hooray

@@ -1,0 +1,426 @@
+{
+  "General": {
+    "API": "Vulkan", 
+    "apiVersion": "1.3.203", 
+    "GPU": "AMD Radeon RX 6600 XT", 
+    "deviceType": 2, 
+    "maxMemoryAllocationCount": 4096, 
+    "bufferImageGranularity": 1, 
+    "nonCoherentAtomSize": 128, 
+    "memoryHeapCount": 2, 
+    "memoryTypeCount": 8
+  }, 
+  "Total": {
+    "BlockCount": 69, 
+    "BlockBytes": 201392128, 
+    "AllocationCount": 132, 
+    "AllocationBytes": 73401500, 
+    "UnusedRangeCount": 11, 
+    "AllocationSizeMin": 60, 
+    "AllocationSizeMax": 6095200, 
+    "UnusedRangeSizeMin": 196, 
+    "UnusedRangeSizeMax": 33550336
+  }, 
+  "MemoryInfo": {
+    "Heap 0": {
+      "Flags": [], 
+      "Size": 16862150656, 
+      "Budget": {
+        "BudgetBytes": 16325847040, 
+        "UsageBytes": 122392576
+      }, 
+      "Stats": {
+        "BlockCount": 35, 
+        "BlockBytes": 117473280, 
+        "AllocationCount": 64, 
+        "AllocationBytes": 33619968, 
+        "UnusedRangeCount": 5, 
+        "AllocationSizeMin": 1024, 
+        "AllocationSizeMax": 2097152, 
+        "UnusedRangeSizeMin": 49152, 
+        "UnusedRangeSizeMax": 33550336
+      }, 
+      "MemoryPools": {
+        "Type 1": {
+          "Flags": ["HOST_VISIBLE", "HOST_COHERENT"], 
+          "Stats": {
+            "BlockCount": 5, 
+            "BlockBytes": 33558528, 
+            "AllocationCount": 8, 
+            "AllocationBytes": 8192, 
+            "UnusedRangeCount": 1, 
+            "AllocationSizeMin": 1024, 
+            "AllocationSizeMax": 1024
+          }
+        }, 
+        "Type 3": {
+          "Flags": ["HOST_VISIBLE", "HOST_COHERENT", "HOST_CACHED"], 
+          "Stats": {
+            "BlockCount": 30, 
+            "BlockBytes": 83914752, 
+            "AllocationCount": 56, 
+            "AllocationBytes": 33611776, 
+            "UnusedRangeCount": 4, 
+            "AllocationSizeMin": 1024, 
+            "AllocationSizeMax": 2097152, 
+            "UnusedRangeSizeMin": 49152, 
+            "UnusedRangeSizeMax": 25100288
+          }
+        }, 
+        "Type 5": {
+          "Flags": ["HOST_VISIBLE", "HOST_COHERENT", "DEVICE_COHERENT_AMD", "DEVICE_UNCACHED_AMD"], 
+          "Stats": {
+            "BlockCount": 0, 
+            "BlockBytes": 0, 
+            "AllocationCount": 0, 
+            "AllocationBytes": 0, 
+            "UnusedRangeCount": 0
+          }
+        }, 
+        "Type 7": {
+          "Flags": ["HOST_VISIBLE", "HOST_COHERENT", "HOST_CACHED", "DEVICE_COHERENT_AMD", "DEVICE_UNCACHED_AMD"], 
+          "Stats": {
+            "BlockCount": 0, 
+            "BlockBytes": 0, 
+            "AllocationCount": 0, 
+            "AllocationBytes": 0, 
+            "UnusedRangeCount": 0
+          }
+        }
+      }
+    }, 
+    "Heap 1": {
+      "Flags": ["DEVICE_LOCAL", "MULTI_INSTANCE"], 
+      "Size": 8573157376, 
+      "Budget": {
+        "BudgetBytes": 7737008128, 
+        "UsageBytes": 155025408
+      }, 
+      "Stats": {
+        "BlockCount": 34, 
+        "BlockBytes": 83918848, 
+        "AllocationCount": 68, 
+        "AllocationBytes": 39781532, 
+        "UnusedRangeCount": 6, 
+        "AllocationSizeMin": 60, 
+        "AllocationSizeMax": 6095200, 
+        "UnusedRangeSizeMin": 196, 
+        "UnusedRangeSizeMax": 25100288
+      }, 
+      "MemoryPools": {
+        "Type 0": {
+          "Flags": ["DEVICE_LOCAL"], 
+          "Stats": {
+            "BlockCount": 34, 
+            "BlockBytes": 83918848, 
+            "AllocationCount": 68, 
+            "AllocationBytes": 39781532, 
+            "UnusedRangeCount": 6, 
+            "AllocationSizeMin": 60, 
+            "AllocationSizeMax": 6095200, 
+            "UnusedRangeSizeMin": 196, 
+            "UnusedRangeSizeMax": 25100288
+          }
+        }, 
+        "Type 2": {
+          "Flags": ["DEVICE_LOCAL", "HOST_VISIBLE", "HOST_COHERENT"], 
+          "Stats": {
+            "BlockCount": 0, 
+            "BlockBytes": 0, 
+            "AllocationCount": 0, 
+            "AllocationBytes": 0, 
+            "UnusedRangeCount": 0
+          }
+        }, 
+        "Type 4": {
+          "Flags": ["DEVICE_LOCAL", "DEVICE_COHERENT_AMD", "DEVICE_UNCACHED_AMD"], 
+          "Stats": {
+            "BlockCount": 0, 
+            "BlockBytes": 0, 
+            "AllocationCount": 0, 
+            "AllocationBytes": 0, 
+            "UnusedRangeCount": 0
+          }
+        }, 
+        "Type 6": {
+          "Flags": ["DEVICE_LOCAL", "HOST_VISIBLE", "HOST_COHERENT", "DEVICE_COHERENT_AMD", "DEVICE_UNCACHED_AMD"], 
+          "Stats": {
+            "BlockCount": 0, 
+            "BlockBytes": 0, 
+            "AllocationCount": 0, 
+            "AllocationBytes": 0, 
+            "UnusedRangeCount": 0
+          }
+        }
+      }
+    }
+  }, 
+  "DefaultPools": {
+    "Type 0": {
+      "PreferredBlockSize": 268435456, 
+      "Blocks": {
+        "0": {
+          "MapRefCount": 0, 
+          "TotalBytes": 33554432, 
+          "UnusedBytes": 18987876, 
+          "Allocations": 20, 
+          "UnusedRanges": 4, 
+          "Suballocations": [
+            {"Offset": 0, "Type": "IMAGE_OPTIMAL", "Size": 65536, "Usage": 6}, 
+            {"Offset": 65536, "Type": "BUFFER", "Size": 768, "Usage": 130}, 
+            {"Offset": 66304, "Type": "BUFFER", "Size": 60, "Usage": 66}, 
+            {"Offset": 66364, "Type": "UNKNOWN", "Size": 1024, "Usage": 0}, 
+            {"Offset": 67388, "Type": "UNKNOWN", "Size": 1024, "Usage": 0, "CustomData": "0000000000F5D987"}, 
+            {"Offset": 68412, "Type": "UNKNOWN", "Size": 1024, "Usage": 0, "Name": "SHEPURD"}, 
+            {"Offset": 69436, "Type": "UNKNOWN", "Size": 1024, "Usage": 0, "CustomData": "00000000018CE96A", "Name": "JOKER"}, 
+            {"Offset": 70460, "Type": "BUFFER", "Size": 1024, "Usage": 3}, 
+            {"Offset": 71484, "Type": "BUFFER", "Size": 1024, "Usage": 3, "CustomData": "0000000000F5D987"}, 
+            {"Offset": 72508, "Type": "BUFFER", "Size": 1024, "Usage": 3, "Name": "SHEPURD"}, 
+            {"Offset": 73532, "Type": "BUFFER", "Size": 1024, "Usage": 3, "CustomData": "00000000018CE96A", "Name": "JOKER"}, 
+            {"Offset": 74556, "Type": "FREE", "Size": 196}, 
+            {"Offset": 74752, "Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7}, 
+            {"Offset": 76800, "Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7, "CustomData": "0000000000F5D987"}, 
+            {"Offset": 78848, "Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7, "Name": "SHEPURD"}, 
+            {"Offset": 80896, "Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7, "CustomData": "00000000018CE96A", "Name": "JOKER"}, 
+            {"Offset": 82944, "Type": "FREE", "Size": 48128}, 
+            {"Offset": 131072, "Type": "IMAGE_OPTIMAL", "Size": 6095200, "Usage": 32}, 
+            {"Offset": 6226272, "Type": "FREE", "Size": 65184}, 
+            {"Offset": 6291456, "Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7}, 
+            {"Offset": 8388608, "Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7, "CustomData": "0000000000F5D987"}, 
+            {"Offset": 10485760, "Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7, "Name": "SHEPURD"}, 
+            {"Offset": 12582912, "Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7, "CustomData": "00000000018CE96A", "Name": "JOKER"}, 
+            {"Offset": 14680064, "Type": "FREE", "Size": 18874368}
+          ]
+        }
+      }, 
+      "DedicatedAllocations": [
+        {"Type": "UNKNOWN", "Size": 1024, "Usage": 0}, 
+        {"Type": "UNKNOWN", "Size": 1024, "Usage": 0, "CustomData": "0000000000F5D987"}, 
+        {"Type": "UNKNOWN", "Size": 1024, "Usage": 0, "Name": "SHEPURD"}, 
+        {"Type": "UNKNOWN", "Size": 1024, "Usage": 0, "CustomData": "00000000018CE96A", "Name": "JOKER"}, 
+        {"Type": "BUFFER", "Size": 1024, "Usage": 3}, 
+        {"Type": "BUFFER", "Size": 1024, "Usage": 3, "CustomData": "0000000000F5D987"}, 
+        {"Type": "BUFFER", "Size": 1024, "Usage": 3, "Name": "SHEPURD"}, 
+        {"Type": "BUFFER", "Size": 1024, "Usage": 3, "CustomData": "00000000018CE96A", "Name": "JOKER"}, 
+        {"Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7}, 
+        {"Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7, "CustomData": "0000000000F5D987"}, 
+        {"Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7, "Name": "SHEPURD"}, 
+        {"Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7, "CustomData": "00000000018CE96A", "Name": "JOKER"}, 
+        {"Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7}, 
+        {"Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7, "CustomData": "0000000000F5D987"}, 
+        {"Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7, "Name": "SHEPURD"}, 
+        {"Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7, "CustomData": "00000000018CE96A", "Name": "JOKER"}
+      ]
+    }, 
+    "Type 1": {
+      "PreferredBlockSize": 268435456, 
+      "Blocks": {
+        "0": {
+          "MapRefCount": 0, 
+          "TotalBytes": 33554432, 
+          "UnusedBytes": 33550336, 
+          "Allocations": 4, 
+          "UnusedRanges": 1, 
+          "Suballocations": [
+            {"Offset": 0, "Type": "UNKNOWN", "Size": 1024, "Usage": 0}, 
+            {"Offset": 1024, "Type": "UNKNOWN", "Size": 1024, "Usage": 0, "CustomData": "0000000000F5D987"}, 
+            {"Offset": 2048, "Type": "UNKNOWN", "Size": 1024, "Usage": 0, "Name": "SHEPURD"}, 
+            {"Offset": 3072, "Type": "UNKNOWN", "Size": 1024, "Usage": 0, "CustomData": "00000000018CE96A", "Name": "JOKER"}, 
+            {"Offset": 4096, "Type": "FREE", "Size": 33550336}
+          ]
+        }
+      }, 
+      "DedicatedAllocations": [
+        {"Type": "UNKNOWN", "Size": 1024, "Usage": 0}, 
+        {"Type": "UNKNOWN", "Size": 1024, "Usage": 0, "CustomData": "0000000000F5D987"}, 
+        {"Type": "UNKNOWN", "Size": 1024, "Usage": 0, "Name": "SHEPURD"}, 
+        {"Type": "UNKNOWN", "Size": 1024, "Usage": 0, "CustomData": "00000000018CE96A", "Name": "JOKER"}
+      ]
+    }, 
+    "Type 2": {
+      "PreferredBlockSize": 268435456, 
+      "Blocks": {
+      }, 
+      "DedicatedAllocations": [
+      ]
+    }, 
+    "Type 3": {
+      "PreferredBlockSize": 268435456, 
+      "Blocks": {
+        "0": {
+          "MapRefCount": 0, 
+          "TotalBytes": 33554432, 
+          "UnusedBytes": 25153536, 
+          "Allocations": 12, 
+          "UnusedRanges": 2, 
+          "Suballocations": [
+            {"Offset": 0, "Type": "BUFFER", "Size": 1024, "Usage": 3}, 
+            {"Offset": 1024, "Type": "BUFFER", "Size": 1024, "Usage": 3, "CustomData": "0000000000F5D987"}, 
+            {"Offset": 2048, "Type": "BUFFER", "Size": 1024, "Usage": 3, "Name": "SHEPURD"}, 
+            {"Offset": 3072, "Type": "BUFFER", "Size": 1024, "Usage": 3, "CustomData": "00000000018CE96A", "Name": "JOKER"}, 
+            {"Offset": 4096, "Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7}, 
+            {"Offset": 6144, "Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7, "CustomData": "0000000000F5D987"}, 
+            {"Offset": 8192, "Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7, "Name": "SHEPURD"}, 
+            {"Offset": 10240, "Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7, "CustomData": "00000000018CE96A", "Name": "JOKER"}, 
+            {"Offset": 12288, "Type": "FREE", "Size": 53248}, 
+            {"Offset": 65536, "Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7}, 
+            {"Offset": 2162688, "Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7, "CustomData": "0000000000F5D987"}, 
+            {"Offset": 4259840, "Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7, "Name": "SHEPURD"}, 
+            {"Offset": 6356992, "Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7, "CustomData": "00000000018CE96A", "Name": "JOKER"}, 
+            {"Offset": 8454144, "Type": "FREE", "Size": 25100288}
+          ]
+        }
+      }, 
+      "DedicatedAllocations": [
+        {"Type": "BUFFER", "Size": 1024, "Usage": 3}, 
+        {"Type": "BUFFER", "Size": 1024, "Usage": 3, "CustomData": "0000000000F5D987"}, 
+        {"Type": "BUFFER", "Size": 1024, "Usage": 3, "Name": "SHEPURD"}, 
+        {"Type": "BUFFER", "Size": 1024, "Usage": 3, "CustomData": "00000000018CE96A", "Name": "JOKER"}, 
+        {"Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7}, 
+        {"Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7, "CustomData": "0000000000F5D987"}, 
+        {"Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7, "Name": "SHEPURD"}, 
+        {"Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7, "CustomData": "00000000018CE96A", "Name": "JOKER"}, 
+        {"Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7}, 
+        {"Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7, "CustomData": "0000000000F5D987"}, 
+        {"Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7, "Name": "SHEPURD"}, 
+        {"Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7, "CustomData": "00000000018CE96A", "Name": "JOKER"}
+      ]
+    }, 
+    "Type 4": {
+      "PreferredBlockSize": 268435456, 
+      "Blocks": {
+      }, 
+      "DedicatedAllocations": [
+      ]
+    }, 
+    "Type 5": {
+      "PreferredBlockSize": 268435456, 
+      "Blocks": {
+      }, 
+      "DedicatedAllocations": [
+      ]
+    }, 
+    "Type 6": {
+      "PreferredBlockSize": 268435456, 
+      "Blocks": {
+      }, 
+      "DedicatedAllocations": [
+      ]
+    }, 
+    "Type 7": {
+      "PreferredBlockSize": 268435456, 
+      "Blocks": {
+      }, 
+      "DedicatedAllocations": [
+      ]
+    }
+  }, 
+  "CustomPools": {
+    "Type 0": [
+      {
+        "Name": "0", 
+        "PreferredBlockSize": 268435456, 
+        "Blocks": {
+          "0": {
+            "MapRefCount": 0, 
+            "TotalBytes": 33554432, 
+            "UnusedBytes": 25149440, 
+            "Allocations": 16, 
+            "UnusedRanges": 2, 
+            "Suballocations": [
+              {"Offset": 0, "Type": "UNKNOWN", "Size": 1024, "Usage": 0}, 
+              {"Offset": 1024, "Type": "UNKNOWN", "Size": 1024, "Usage": 0, "CustomData": "0000000000F5D987"}, 
+              {"Offset": 2048, "Type": "UNKNOWN", "Size": 1024, "Usage": 0, "Name": "SHEPURD"}, 
+              {"Offset": 3072, "Type": "UNKNOWN", "Size": 1024, "Usage": 0, "CustomData": "00000000018CE96A", "Name": "JOKER"}, 
+              {"Offset": 4096, "Type": "BUFFER", "Size": 1024, "Usage": 3}, 
+              {"Offset": 5120, "Type": "BUFFER", "Size": 1024, "Usage": 3, "CustomData": "0000000000F5D987"}, 
+              {"Offset": 6144, "Type": "BUFFER", "Size": 1024, "Usage": 3, "Name": "SHEPURD"}, 
+              {"Offset": 7168, "Type": "BUFFER", "Size": 1024, "Usage": 3, "CustomData": "00000000018CE96A", "Name": "JOKER"}, 
+              {"Offset": 8192, "Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7}, 
+              {"Offset": 10240, "Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7, "CustomData": "0000000000F5D987"}, 
+              {"Offset": 12288, "Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7, "Name": "SHEPURD"}, 
+              {"Offset": 14336, "Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7, "CustomData": "00000000018CE96A", "Name": "JOKER"}, 
+              {"Offset": 16384, "Type": "FREE", "Size": 49152}, 
+              {"Offset": 65536, "Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7}, 
+              {"Offset": 2162688, "Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7, "CustomData": "0000000000F5D987"}, 
+              {"Offset": 4259840, "Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7, "Name": "SHEPURD"}, 
+              {"Offset": 6356992, "Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7, "CustomData": "00000000018CE96A", "Name": "JOKER"}, 
+              {"Offset": 8454144, "Type": "FREE", "Size": 25100288}
+            ]
+          }
+        }, 
+        "DedicatedAllocations": [
+          {"Type": "UNKNOWN", "Size": 1024, "Usage": 0}, 
+          {"Type": "UNKNOWN", "Size": 1024, "Usage": 0, "CustomData": "0000000000F5D987"}, 
+          {"Type": "UNKNOWN", "Size": 1024, "Usage": 0, "Name": "SHEPURD"}, 
+          {"Type": "UNKNOWN", "Size": 1024, "Usage": 0, "CustomData": "00000000018CE96A", "Name": "JOKER"}, 
+          {"Type": "BUFFER", "Size": 1024, "Usage": 3}, 
+          {"Type": "BUFFER", "Size": 1024, "Usage": 3, "CustomData": "0000000000F5D987"}, 
+          {"Type": "BUFFER", "Size": 1024, "Usage": 3, "Name": "SHEPURD"}, 
+          {"Type": "BUFFER", "Size": 1024, "Usage": 3, "CustomData": "00000000018CE96A", "Name": "JOKER"}, 
+          {"Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7}, 
+          {"Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7, "CustomData": "0000000000F5D987"}, 
+          {"Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7, "Name": "SHEPURD"}, 
+          {"Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7, "CustomData": "00000000018CE96A", "Name": "JOKER"}, 
+          {"Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7}, 
+          {"Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7, "CustomData": "0000000000F5D987"}, 
+          {"Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7, "Name": "SHEPURD"}, 
+          {"Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7, "CustomData": "00000000018CE96A", "Name": "JOKER"}
+        ]
+      }
+    ], 
+    "Type 3": [
+      {
+        "Name": "0", 
+        "PreferredBlockSize": 268435456, 
+        "Blocks": {
+          "0": {
+            "MapRefCount": 0, 
+            "TotalBytes": 33554432, 
+            "UnusedBytes": 25149440, 
+            "Allocations": 16, 
+            "UnusedRanges": 2, 
+            "Suballocations": [
+              {"Offset": 0, "Type": "UNKNOWN", "Size": 1024, "Usage": 0}, 
+              {"Offset": 1024, "Type": "UNKNOWN", "Size": 1024, "Usage": 0, "CustomData": "0000000000F5D987"}, 
+              {"Offset": 2048, "Type": "UNKNOWN", "Size": 1024, "Usage": 0, "Name": "SHEPURD"}, 
+              {"Offset": 3072, "Type": "UNKNOWN", "Size": 1024, "Usage": 0, "CustomData": "00000000018CE96A", "Name": "JOKER"}, 
+              {"Offset": 4096, "Type": "BUFFER", "Size": 1024, "Usage": 3}, 
+              {"Offset": 5120, "Type": "BUFFER", "Size": 1024, "Usage": 3, "CustomData": "0000000000F5D987"}, 
+              {"Offset": 6144, "Type": "BUFFER", "Size": 1024, "Usage": 3, "Name": "SHEPURD"}, 
+              {"Offset": 7168, "Type": "BUFFER", "Size": 1024, "Usage": 3, "CustomData": "00000000018CE96A", "Name": "JOKER"}, 
+              {"Offset": 8192, "Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7}, 
+              {"Offset": 10240, "Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7, "CustomData": "0000000000F5D987"}, 
+              {"Offset": 12288, "Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7, "Name": "SHEPURD"}, 
+              {"Offset": 14336, "Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7, "CustomData": "00000000018CE96A", "Name": "JOKER"}, 
+              {"Offset": 16384, "Type": "FREE", "Size": 49152}, 
+              {"Offset": 65536, "Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7}, 
+              {"Offset": 2162688, "Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7, "CustomData": "0000000000F5D987"}, 
+              {"Offset": 4259840, "Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7, "Name": "SHEPURD"}, 
+              {"Offset": 6356992, "Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7, "CustomData": "00000000018CE96A", "Name": "JOKER"}, 
+              {"Offset": 8454144, "Type": "FREE", "Size": 25100288}
+            ]
+          }
+        }, 
+        "DedicatedAllocations": [
+          {"Type": "UNKNOWN", "Size": 1024, "Usage": 0}, 
+          {"Type": "UNKNOWN", "Size": 1024, "Usage": 0, "CustomData": "0000000000F5D987"}, 
+          {"Type": "UNKNOWN", "Size": 1024, "Usage": 0, "Name": "SHEPURD"}, 
+          {"Type": "UNKNOWN", "Size": 1024, "Usage": 0, "CustomData": "00000000018CE96A", "Name": "JOKER"}, 
+          {"Type": "BUFFER", "Size": 1024, "Usage": 3}, 
+          {"Type": "BUFFER", "Size": 1024, "Usage": 3, "CustomData": "0000000000F5D987"}, 
+          {"Type": "BUFFER", "Size": 1024, "Usage": 3, "Name": "SHEPURD"}, 
+          {"Type": "BUFFER", "Size": 1024, "Usage": 3, "CustomData": "00000000018CE96A", "Name": "JOKER"}, 
+          {"Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7}, 
+          {"Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7, "CustomData": "0000000000F5D987"}, 
+          {"Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7, "Name": "SHEPURD"}, 
+          {"Type": "IMAGE_LINEAR", "Size": 2048, "Usage": 7, "CustomData": "00000000018CE96A", "Name": "JOKER"}, 
+          {"Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7}, 
+          {"Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7, "CustomData": "0000000000F5D987"}, 
+          {"Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7, "Name": "SHEPURD"}, 
+          {"Type": "IMAGE_OPTIMAL", "Size": 2097152, "Usage": 7, "CustomData": "00000000018CE96A", "Name": "JOKER"}
+        ]
+      }
+    ]
+  }
+}

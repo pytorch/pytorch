@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+ "https://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg
+   xmlns="http://www.w3.org/2000/svg"
+   version="1.1"
+   id="svg2"
+   width="20"
+   height="19"
+   viewBox="0 0 20 19"
+  >
+  <defs
+     id="defs6" />
+  <circle
+     style="fill:#000000;fill-opacity:0;stroke:#c5C5C5;stroke-width:1.4;stroke-opacity:1;stroke-miterlimit:4;stroke-dasharray:none"
+     id="path4611"
+     cx="5.5"
+     cy="8.5"
+     r="3.5" />
+  <path
+     style="fill:#c5C5C5;fill-opacity:1;stroke:none;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+     d="M 11,7 13.5,10 16,7 Z"
+     id="path4609"
+     />
+  <path
+     style="fill:none;stroke:#c5C5C5;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+     d="m 8.1085854,11.109059 2.7823556,2.782356"
+     id="path4630"
+     />
+</svg>

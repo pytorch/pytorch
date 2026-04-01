@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
+
+<Type Name="Slang::String">
+    <DisplayString>{((char*) (m_buffer.pointer+1)),s}</DisplayString>
+	<StringView>((char*) (m_buffer.pointer+1)),s</StringView>
+</Type>
+
+<Type Name="Slang::ArrayView&lt;*&gt;">
+  <DisplayString>{{ size={m_count} }}</DisplayString>
+  <Expand>
+    <Item Name="[size]">m_count</Item>
+    <ArrayItems>
+      <Size>m_count</Size>
+      <ValuePointer>m_buffer</ValuePointer>
+    </ArrayItems>
+  </Expand>
+</Type>
+
+<Type Name="Slang::List&lt;*,*&gt;">
+    <DisplayString>{{ size={m_count} }}</DisplayString>
+    <Expand>
+        <Item Name="[size]">m_count</Item>
+        <Item Name="[capacity]">m_capacity</Item>
+        <ArrayItems>
+            <Size>m_count</Size>
+            <ValuePointer>m_buffer</ValuePointer>
+        </ArrayItems>
+    </Expand>
+</Type>
+
+<Type Name="Slang::ShortList&lt;*,*,*&gt;">
+    <DisplayString>{{ size={m_count} }}</DisplayString>
+    <Expand>
+        <Item Name="[size]">m_count</Item>
+        <Item Name="[capacity]">m_capacity</Item>
+        <IndexListItems>
+            <Size>m_count</Size>
+            <ValueNode Condition="$i&lt;$T2">m_shortBuffer + $i</ValueNode>
+            <ValueNode Condition="$i&gt;=$T2">m_buffer + $i - $T2</ValueNode>
+        </IndexListItems>
+    </Expand>
+</Type>
+
+<Type Name="Slang::Array&lt;*,*&gt;">
+  <DisplayString>{{ size={m_count} }}</DisplayString>
+  <Expand>
+    <Item Name="[size]">m_count</Item>
+    <ArrayItems>
+      <Size>m_count</Size>
+      <ValuePointer>m_buffer</ValuePointer>
+    </ArrayItems>
+  </Expand>
+</Type>
+  
+<Type Name="Slang::Dictionary&lt;*,*&gt;">
+    <DisplayString>{{ {map.m_values} }}</DisplayString>
+    <Expand>
+        <Item Name="[items]">map.m_values</Item>
+        <Item Name="map">map</Item>
+    </Expand>
+</Type>
+
+<Type Name="Slang::HashSet&lt;*&gt;">
+    <DisplayString>{{ {dict} }}</DisplayString>
+    <Expand>
+        <Item Name="dict">dict</Item>
+    </Expand>
+</Type>
+    
+<Type Name="Slang::OrderedHashSet&lt;*&gt;">
+    <DisplayString>{{ size={dict._count} }}</DisplayString>
+    <Expand>
+        <LinkedListItems>
+            <Size>m_dict._count</Size>
+            <HeadPointer>m_dict.kvPairs.head</HeadPointer>
+            <NextPointer>next</NextPointer>
+            <ValueNode>value</ValueNode>
+        </LinkedListItems>
+    </Expand>
+</Type>
+
+<Type Name="Slang::OrderedDictionary&lt;*,*&gt;">
+    <DisplayString>{{ size={m_count} }}</DisplayString>
+    <Expand>
+        <LinkedListItems>
+            <Size>m_count</Size>
+            <HeadPointer>m_kvPairs.head</HeadPointer>
+            <NextPointer>next</NextPointer>
+            <ValueNode>value</ValueNode>
+        </LinkedListItems>
+    </Expand>
+</Type>
+
+<Type Name="Slang::RefPtr&lt;*&gt;">
+    <SmartPointer Usage="Minimal">pointer</SmartPointer>
+    <DisplayString Condition="pointer == 0">empty</DisplayString>
+    <DisplayString Condition="pointer != 0">RefPtr {*pointer}</DisplayString>
+    <Expand>
+      <ExpandedItem>pointer</ExpandedItem>
+    </Expand>
+</Type>
+
+
+<Type Name="Slang::Safe32Ptr&lt;*&gt;">
+    <Expand>
+        <ExpandedItem>($T1*)(m_base->m_data + m_offset)</ExpandedItem>
+    </Expand>
+</Type>
+
+<Type Name="Slang::Relative32Ptr&lt;*&gt;">
+    <Expand>
+        <ExpandedItem>(m_offset == 0x80000000) ? nullptr : ($T1*)(((char*)this) + m_offset)</ExpandedItem>
+    </Expand>
+</Type>
+
+
+<Type Name="Slang::Safe32Array&lt;*&gt;">
+    <Expand>
+        <Item Name="[count]">m_count</Item>
+        <ArrayItems>
+            <Size>m_count</Size>
+            <ValuePointer>($T1*)(m_data.m_base->m_data + m_data.m_offset)</ValuePointer>
+        </ArrayItems>
+    </Expand>
+</Type>
+
+
+<Type Name="Slang::Relative32Array&lt;*&gt;">
+    <Expand>
+        <Item Name="[count]">m_count</Item>
+        <ArrayItems>
+            <Size>m_count</Size>
+            <ValuePointer>(m_data.m_offset == 0x80000000) ? nullptr : ($T1*)(((char*)&amp;m_data) + m_data.m_offset)</ValuePointer>
+        </ArrayItems>
+    </Expand>
+</Type>
+
+<Type Name="Slang::RelativeString">
+    <DisplayString>{(m_sizeThenContents + 1),s}</DisplayString>
+    <StringView>(m_sizeThenContents + 1),s</StringView>
+</Type>
+
+<Type Name="Slang::UnownedStringSlice">
+    <DisplayString>{m_begin,[m_end-m_begin]s}</DisplayString>
+    <StringView>m_begin,[m_end-m_begin]s</StringView>
+
+</Type>
+
+</AutoVisualizer>

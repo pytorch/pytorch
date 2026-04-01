@@ -1,0 +1,5 @@
+# indicate generated files so they don't appear in GitHub diffs
+*.slang.cpp linguist-generated
+
+# Set the line endings to LF for shell scripts
+*.sh text eol=lf

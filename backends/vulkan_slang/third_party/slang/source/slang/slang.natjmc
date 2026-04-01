@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<NonUserCode xmlns="http://schemas.microsoft.com/vstudio/debugger/jmc/2015">
+
+  <!-- Functions -->
+  <Function Name="Slang::Expr::accept" />
+  <Function Name="Slang::DeclBase::accept" />
+
+  <Function Name="Slang::Val::accept" />
+  <Function Name="Slang::Type::accept" />
+  <Function Name="Slang::Stmt::accept" />
+  <Function Name="Slang::NodeBase::getClassInfo" />
+  <Function Name="Slang::ASTClassInfo::getInfo" />
+
+  <Function Name="Slang::*Visitor&lt;*,*&gt;::dispatch_*" />
+  <Function Name="Slang::*Visitor&lt;*,*&gt;::dispatch" />
+  <Function Name="Slang::SemanticsVisitor::dispatch*" />
+  <Function Name="Slang::Semantics*Visitor::Semantics*Visitor" />
+
+</NonUserCode>

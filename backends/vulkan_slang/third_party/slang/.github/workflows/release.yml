@@ -1,0 +1,254 @@
+name: Release
+
+on:
+  push:
+    # Also run on pushes to the main branch so that we can keep the llvm and sccache
+    # caches filled in a scope available to everyone
+    branches:
+      - master
+    paths-ignore:
+      - "docs/**"
+      - "LICENSES/**"
+      - "LICENSE"
+      - "CONTRIBUTING.md"
+      - "README.md"
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    strategy:
+      matrix:
+        os: [linux, macos, windows]
+        config: [release]
+        platform: [x86_64, aarch64]
+        test-category: [smoke]
+        include:
+          - {
+              os: linux,
+              platform: x86_64,
+              runs-on: ubuntu-latest,
+              compiler: gcc,
+            }
+          - {
+              os: linux,
+              platform: aarch64,
+              runs-on: ubuntu-24.04-arm,
+              compiler: gcc,
+            }
+          - { os: windows, runs-on: windows-latest, compiler: cl }
+          - { os: macos, runs-on: macos-latest, compiler: clang }
+
+          - { build-slang-llvm: false }
+          - { os: linux, platform: x86_64, build-slang-llvm: true }
+          - { os: windows, platform: x86_64, build-slang-llvm: true }
+          - { os: macos, platform: aarch64, build-slang-llvm: true }
+      fail-fast: false
+    runs-on: ${{ matrix.runs-on }}
+    container: ${{ matrix.image || '' }}
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: "recursive"
+          fetch-depth: "0"
+      - name: Install dependencies
+        run: |
+          if [[ "${{ matrix.os }}" = "linux" ]]; then
+              sudo apt-get update
+              sudo apt-get install -y libx11-dev
+          fi
+      - name: Setup
+        uses: ./.github/actions/common-setup
+        with:
+          os: ${{matrix.os}}
+          compiler: ${{matrix.compiler}}
+          platform: ${{matrix.platform}}
+          config: ${{matrix.config}}
+          build-llvm: ${{matrix.build-slang-llvm}}
+
+      - name: Build slang generators
+        run: |
+          cmake --workflow --preset generators --fresh
+          mkdir build-platform-generators
+          cmake --install build --config Release --component generators --prefix build-platform-generators
+
+      - name: Change dev tools to host arch (windows)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{matrix.platform == 'aarch64' && 'amd64_arm64' || 'amd64'}}
+          sdk: "10.0.19041.0"
+
+      - name: Change dev tools to host arch (linux and macos)
+        run: |
+          if [[ "${{matrix.os}}" == linux* && "${{matrix.platform}}" == "aarch64" && "$(uname -m)" != "aarch64" ]]; then
+            export CC=aarch64-linux-gnu-gcc
+            export CXX=aarch64-linux-gnu-g++
+          fi
+          CMAKE_OSX_ARCHITECTURES="${{matrix.platform}}"
+          CMAKE_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES//aarch64/arm64}
+
+          echo "CC=$CC" >> "$GITHUB_ENV"
+          echo "CXX=$CXX" >> "$GITHUB_ENV"
+          echo "CMAKE_OSX_ARCHITECTURES=$CMAKE_OSX_ARCHITECTURES" >> "$GITHUB_ENV"
+
+      - name: Build Slang
+        run: |
+          if [[ "${{ matrix.os }}" == "windows" && "${{ matrix.config }}" != "release" && "${{ matrix.config }}" != "releaseWithDebugInfo" ]]; then
+              echo "Please see ci.yml for the steps to make non-release builds work on Windows" >&2
+              exit 1
+          fi
+
+          cmake --preset default --fresh \
+            -DSLANG_GENERATORS_PATH=build-platform-generators/bin \
+            -DSLANG_ENABLE_EXAMPLES=OFF \
+            "-DSLANG_SLANG_LLVM_FLAVOR=$(
+              [[ "${{matrix.build-slang-llvm}}" = "true" ]] && echo "USE_SYSTEM_LLVM" || echo "DISABLE")"
+
+          cmake --build --preset "${{matrix.config}}"
+
+      - name: Sign and notarize binaries
+        if: matrix.os == 'macos' && startsWith(github.ref, 'refs/tags/v')
+        id: notarize
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          IDENTITY_ID: d6ada82a113e4204aaad914e1013e9548ffd30d0
+          AC_PASSWORD: ${{secrets.APPLE_ID_PASSWORD}}
+          AC_PROVIDER: ${{secrets.APPLE_ID_PPOVIDER}}
+          AC_USERNAME: ${{secrets.APPLE_ID_USERNAME}}
+        run: |
+          brew install Bearer/tap/gon
+          security find-identity -v
+          brew install coreutils
+          # create variables
+          CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          # import certificate and provisioning profile from secrets
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode --output "$CERTIFICATE_PATH"
+          # create temporary keychain
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          # import certificate to keychain
+          security import "$CERTIFICATE_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${KEYCHAIN_PASSWORD}" "$KEYCHAIN_PATH"
+
+          binaries=(
+            "${lib_dir}/libslang.dylib"
+            "${lib_dir}/libslang-rt.dylib"
+            "${lib_dir}/libslang-glslang.dylib"
+            "${lib_dir}/libslang-glsl-module.dylib"
+            "${lib_dir}/libslang-llvm.dylib"
+            "${lib_dir}/libgfx.dylib"
+            "${bin_dir}/slangd"
+            "${bin_dir}/slangc"
+          )
+
+          # Sign main binaries
+          for b in "${binaries[@]}"; do
+            if [[ -f "$b" ]]; then
+              echo "Signing binary '$b'..."
+              /usr/bin/codesign --force --options runtime -s "${IDENTITY_ID}" "$b" -v
+              7z a "slang-macos-dist.zip" "$b"
+            fi
+          done
+
+          timeout 1000 gon ./extras/macos-notarize.json
+          cp slang-macos-dist.zip "slang-macos-dist-${{matrix.platform}}.zip"
+          echo "SLANG_NOTARIZED_DIST=slang-macos-dist-${{matrix.platform}}.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Package Slang
+        id: package
+        run: |
+          # Package main binaries
+          cpack --preset "$config" -G ZIP
+          cpack --preset "$config" -G TGZ
+          # Package debug info
+          cpack --preset "$config-debug-info" -G ZIP
+          cpack --preset "$config-debug-info" -G TGZ
+
+          triggering_ref=${{ github.ref_name }}
+          if [[ $triggering_ref =~ ^v[0-9] ]]; then
+            version=${triggering_ref#v}
+          else
+            version=$triggering_ref
+          fi
+          base=slang-${version}-${{matrix.os}}-${{matrix.platform}}
+
+          # Move main packages
+          mv "$(pwd)/build/dist-${config}/slang.zip" "${base}.zip"
+          echo "SLANG_BINARY_ARCHIVE_ZIP=${base}.zip" >> "$GITHUB_OUTPUT"
+          mv "$(pwd)/build/dist-${config}/slang.tar.gz" "${base}.tar.gz"
+          echo "SLANG_BINARY_ARCHIVE_TAR=${base}.tar.gz" >> "$GITHUB_OUTPUT"
+
+          # Move debug info packages
+          mv "$(pwd)/build/dist-${config}-debug-info/slang-debug-info.zip" "${base}-debug-info.zip"
+          echo "SLANG_DEBUG_INFO_ARCHIVE_ZIP=${base}-debug-info.zip" >> "$GITHUB_OUTPUT"
+          mv "$(pwd)/build/dist-${config}-debug-info/slang-debug-info.tar.gz" "${base}-debug-info.tar.gz"
+          echo "SLANG_DEBUG_INFO_ARCHIVE_TAR=${base}-debug-info.tar.gz" >> "$GITHUB_OUTPUT"
+
+          # For some reason, the binaries packed by cpack for macos is modified
+          # by cpack and considered damanged by macos. For now we workaround this
+          # by repacking all the binaries into the release package.
+          if [[ "${{ matrix.os }}"  == "macos" ]]; then
+            mkdir ./ttmp
+            unzip "${base}.zip" -d ./ttmp
+
+            # Copy only existing files from build directory
+            find ./ttmp/{bin,lib} -type f | while read -r file; do
+              src_file="build/$cmake_config/${file#./ttmp/}"
+              if [ -f "$src_file" ]; then
+                cp "$src_file" "$file"
+              fi
+            done
+
+            rm ${base}.zip
+            rm ${base}.tar.gz
+            cd ./ttmp
+            7z a ../${base}.zip .
+            tar -czvf ../${base}.tar.gz .
+            cd ../
+          fi
+
+      - name: File check
+        run: |
+          find "build/dist-$config" -print0 ! -iname '*.md' ! -iname '*.h' -type f | xargs -0 file
+
+      - name: UploadBinary
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          draft: ${{contains(github.ref, 'draft')}}
+          prerelease: ${{contains(github.ref, 'draft')}}
+          files: |
+            ${{ steps.package.outputs.SLANG_BINARY_ARCHIVE_ZIP }}
+            ${{ steps.package.outputs.SLANG_BINARY_ARCHIVE_TAR }}
+            ${{ steps.package.outputs.SLANG_DEBUG_INFO_ARCHIVE_ZIP }}
+            ${{ steps.package.outputs.SLANG_DEBUG_INFO_ARCHIVE_TAR }}
+            ${{ steps.notarize.outputs.SLANG_NOTARIZED_DIST }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout stdlib reference
+        if: matrix.os == 'windows' && matrix.platform == 'x86_64'
+        uses: actions/checkout@v4
+        with:
+          repository: shader-slang/stdlib-reference
+          path: docs/stdlib-reference/
+          token: ${{ secrets.UPDATE_STDLIB_REFERENCE_PAT }}
+      - name: Update stdlib reference
+        if: matrix.os == 'windows' && matrix.platform == 'x86_64'
+        shell: powershell
+        run: |
+          cd docs/
+          ls
+          & ".\build_reference.ps1"
+        env:
+          GITHUB_TOKEN: ${{ secrets.UPDATE_STDLIB_REFERENCE_PAT }}

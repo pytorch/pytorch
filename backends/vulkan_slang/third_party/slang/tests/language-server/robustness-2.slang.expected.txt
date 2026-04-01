@@ -1,0 +1,12 @@
+--------
+range: 14,4 - 14,7
+content:
+```
+Kind Kind.Foo = 0
+```
+
+HOVER:15,6  
+
+{REDACTED}.slang(15)
+
+

@@ -1,0 +1,2 @@
+type: float
+18.0

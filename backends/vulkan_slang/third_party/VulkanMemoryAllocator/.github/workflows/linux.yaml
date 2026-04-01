@@ -1,0 +1,112 @@
+name: Build code
+
+on:
+  push:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cxx: [g++-12, clang++-15]
+        build_type: [Debug, Release]
+        include:
+          - cxx: g++-12
+            install: sudo apt install g++-12
+          - cxx: clang++-15
+            cxxflags: -stdlib=libc++
+            install: sudo apt install clang-15 libc++-15-dev libc++abi-15-dev
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set Vulkan SDK Version
+      id: set-version
+      run: echo "VULKAN_SDK_VERSION=1.3.283.0" >> $GITHUB_ENV
+
+    - name: Create Build Environment
+      run: |
+        sudo apt update
+        ${{matrix.install}}
+        cmake -E make_directory ${{runner.workspace}}/build
+
+    - name: Check for Vulkan SDK Cache
+      id: cache-vulkan
+      uses: actions/cache@v4
+      with:
+        path: vulkan_sdk
+        key: vulkan-sdk-${{env.VULKAN_SDK_VERSION}}
+
+    - name: Download Vulkan SDK
+      if: steps.cache-vulkan.outputs.cache-hit != 'true'
+      run: |
+        curl -LS -o vulkansdk.tar.xz https://sdk.lunarg.com/sdk/download/${{env.VULKAN_SDK_VERSION}}/linux/vulkansdk-linux-x86_64-${{env.VULKAN_SDK_VERSION}}.tar.xz
+        mkdir -p vulkan_sdk
+        tar xf vulkansdk.tar.xz -C vulkan_sdk
+
+    - name: Set environment variables
+      run: |
+        export VULKAN_SDK=$GITHUB_WORKSPACE/vulkan_sdk/${{env.VULKAN_SDK_VERSION}}/x86_64
+        echo "VULKAN_SDK=$VULKAN_SDK" >> $GITHUB_ENV
+        echo "PATH=$VULKAN_SDK/bin:$PATH" >> $GITHUB_ENV
+        echo "LD_LIBRARY_PATH=$VULKAN_SDK/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
+        echo "VK_ICD_FILENAMES=$VULKAN_SDK/etc/vulkan/icd.d" >> $GITHUB_ENV
+        echo "VK_LAYER_PATH=$VULKAN_SDK/etc/vulkan/layer.d" >> $GITHUB_ENV
+
+    - name: Configure
+      working-directory: ${{runner.workspace}}/build
+      env:
+        CXX: ${{matrix.cxx}}
+        CXXFLAGS: ${{matrix.cxxflags}}
+      run: |
+        cmake -DCMAKE_BUILD_TYPE=${{matrix.build_type}} \
+          -DVMA_BUILD_SAMPLES=YES \
+          -DCMAKE_CXX_FLAGS="$CXXFLAGS \
+              -Wall \
+              -Wextra \
+              -Wpedantic \
+              -Wconversion \
+              -Wsign-conversion \
+              -Wshadow \
+              -Wnull-dereference \
+              -Wdouble-promotion \
+              -Wformat=2 \
+              -Wimplicit-fallthrough \
+              -Wundef \
+              -Wcast-align \
+              -Woverloaded-virtual \
+              -Wnon-virtual-dtor \
+              -Wstrict-overflow=5 \
+              -Wuseless-cast \
+              -Wduplicated-cond \
+              -Wduplicated-branches \
+              -Wlogical-op \
+              -Wredundant-decls \
+              -Wstrict-null-sentinel \
+              -Wold-style-cast" \
+              -Wcast-qual \
+              -Wconversion-extra \
+              -Wstack-usage=2048 \
+              -Wsuggest-final-types \
+              -Wsuggest-final-methods \
+              -Wsuggest-override \
+              -Wvector-operation-performance \
+              -Wzero-as-null-pointer-constant \
+              -Wextra-semi \
+              -Wmissing-declarations \
+              -Wmissing-include-dirs \
+              -Winit-self \
+              -Wuninitialized \
+              -Wunused \
+              -Wunused-parameter \
+              -Wshadow=local \
+          $GITHUB_WORKSPACE
+
+    - name: Build
+      working-directory: ${{runner.workspace}}/build
+      run: |
+        threads=`nproc`
+        cmake --build . --config ${{matrix.build_type}} --parallel $threads

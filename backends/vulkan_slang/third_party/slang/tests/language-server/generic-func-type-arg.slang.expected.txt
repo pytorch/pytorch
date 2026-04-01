@@ -1,0 +1,11 @@
+--------
+range: 6,16 - 6,22
+content:
+```
+struct MyType
+```
+
+
+{REDACTED}.slang(2)
+
+

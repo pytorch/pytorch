@@ -1,0 +1,65 @@
+on:
+  push:
+    tags:
+      - "v*"
+
+name: centos7-gcc9 Release
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: "recursive"
+          fetch-depth: "0"
+
+      # build the binary in docker image
+      - name: Run the build process with Docker
+        uses: addnab/docker-run-action@v3
+        with:
+          image: slangdeveloper/centos7-gcc9:cmake
+          options: -v ${{ github.workspace }}:/home/app -v /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt
+          run: |
+            export PATH=$PATH:/cmake-3.30.0-linux-x86_64/bin/
+
+            source /opt/rh/devtoolset-9/enable
+
+            cd /home/app
+            git config --global --add safe.directory /home/app
+            cmake --preset default --fresh -DSLANG_SLANG_LLVM_FLAVOR=DISABLE
+            cmake --build --preset release
+            cpack --preset release -G ZIP
+            cpack --preset release -G TGZ
+
+      - name: Package Slang
+        id: package
+        run: |
+          triggering_ref=${{ github.ref_name }}
+          if [[ $triggering_ref =~ ^v[0-9] ]]; then
+            version=${triggering_ref#v}
+          else
+            version=$triggering_ref
+          fi
+          base=$(pwd)/slang-${version}-linux-x86_64-glibc-2.17
+
+          sudo mv "$(pwd)/build/dist-release/slang.zip" "${base}.zip"
+          echo "SLANG_BINARY_ARCHIVE_ZIP=${base}.zip" >> "$GITHUB_OUTPUT"
+
+          sudo mv "$(pwd)/build/dist-release/slang.tar.gz" "${base}.tar.gz"
+          echo "SLANG_BINARY_ARCHIVE_TAR=${base}.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - name: File check
+        run: |
+          find "build/dist-release" -print0 ! -iname '*.md' ! -iname '*.h' -type f | xargs -0 file
+
+      - name: UploadBinary
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          draft: ${{contains(github.ref, 'draft')}}
+          prerelease: ${{contains(github.ref, 'draft')}}
+          files: |
+            ${{ steps.package.outputs.SLANG_BINARY_ARCHIVE_ZIP }}
+            ${{ steps.package.outputs.SLANG_BINARY_ARCHIVE_TAR }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

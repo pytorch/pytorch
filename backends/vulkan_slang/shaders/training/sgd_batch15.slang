@@ -1,0 +1,96 @@
+// Batched SGD without momentum: update up to 15 params in one dispatch.
+// 2D dispatch: X = element index (256 threads/wg), Y = param index (0..n_params-1)
+// Push constants: 4 + 15*12 = 184 bytes (within Vulkan's 256-byte minimum guarantee on NVIDIA).
+// Reduces optimizer step from N dispatches to ceil(N/15) dispatches.
+// Use when device maxPushConstantsSize >= 192 (NVIDIA GPUs support 256).
+
+struct ParamConfig {
+    uint  numel;
+    float lr;
+    float weight_decay;
+};
+
+struct PushConstants {
+    uint n_params;           // how many params in this batch (1..15)
+    ParamConfig cfg[15];     // per-param config (3 floats each)
+};
+[[vk::push_constant]] PushConstants pc;
+
+[[vk::binding(0)]]  RWStructuredBuffer<float> param0;
+[[vk::binding(1)]]  StructuredBuffer<float>   grad0;
+[[vk::binding(2)]]  RWStructuredBuffer<float> param1;
+[[vk::binding(3)]]  StructuredBuffer<float>   grad1;
+[[vk::binding(4)]]  RWStructuredBuffer<float> param2;
+[[vk::binding(5)]]  StructuredBuffer<float>   grad2;
+[[vk::binding(6)]]  RWStructuredBuffer<float> param3;
+[[vk::binding(7)]]  StructuredBuffer<float>   grad3;
+[[vk::binding(8)]]  RWStructuredBuffer<float> param4;
+[[vk::binding(9)]]  StructuredBuffer<float>   grad4;
+[[vk::binding(10)]] RWStructuredBuffer<float> param5;
+[[vk::binding(11)]] StructuredBuffer<float>   grad5;
+[[vk::binding(12)]] RWStructuredBuffer<float> param6;
+[[vk::binding(13)]] StructuredBuffer<float>   grad6;
+[[vk::binding(14)]] RWStructuredBuffer<float> param7;
+[[vk::binding(15)]] StructuredBuffer<float>   grad7;
+[[vk::binding(16)]] RWStructuredBuffer<float> param8;
+[[vk::binding(17)]] StructuredBuffer<float>   grad8;
+[[vk::binding(18)]] RWStructuredBuffer<float> param9;
+[[vk::binding(19)]] StructuredBuffer<float>   grad9;
+[[vk::binding(20)]] RWStructuredBuffer<float> param10;
+[[vk::binding(21)]] StructuredBuffer<float>   grad10;
+[[vk::binding(22)]] RWStructuredBuffer<float> param11;
+[[vk::binding(23)]] StructuredBuffer<float>   grad11;
+[[vk::binding(24)]] RWStructuredBuffer<float> param12;
+[[vk::binding(25)]] StructuredBuffer<float>   grad12;
+[[vk::binding(26)]] RWStructuredBuffer<float> param13;
+[[vk::binding(27)]] StructuredBuffer<float>   grad13;
+[[vk::binding(28)]] RWStructuredBuffer<float> param14;
+[[vk::binding(29)]] StructuredBuffer<float>   grad14;
+
+[shader("compute")]
+[numthreads(256, 1, 1)]
+void computeMain(uint3 gid : SV_GroupID, uint3 lid : SV_GroupThreadID)
+{
+    uint param_idx = gid.y;
+    if (param_idx >= pc.n_params) return;
+
+    ParamConfig cfg = pc.cfg[param_idx];
+    uint elem = gid.x * 256 + lid.x;
+    if (elem >= cfg.numel) return;
+
+    float p, g;
+    if      (param_idx == 0)  { p = param0[elem];  g = grad0[elem];  }
+    else if (param_idx == 1)  { p = param1[elem];  g = grad1[elem];  }
+    else if (param_idx == 2)  { p = param2[elem];  g = grad2[elem];  }
+    else if (param_idx == 3)  { p = param3[elem];  g = grad3[elem];  }
+    else if (param_idx == 4)  { p = param4[elem];  g = grad4[elem];  }
+    else if (param_idx == 5)  { p = param5[elem];  g = grad5[elem];  }
+    else if (param_idx == 6)  { p = param6[elem];  g = grad6[elem];  }
+    else if (param_idx == 7)  { p = param7[elem];  g = grad7[elem];  }
+    else if (param_idx == 8)  { p = param8[elem];  g = grad8[elem];  }
+    else if (param_idx == 9)  { p = param9[elem];  g = grad9[elem];  }
+    else if (param_idx == 10) { p = param10[elem]; g = grad10[elem]; }
+    else if (param_idx == 11) { p = param11[elem]; g = grad11[elem]; }
+    else if (param_idx == 12) { p = param12[elem]; g = grad12[elem]; }
+    else if (param_idx == 13) { p = param13[elem]; g = grad13[elem]; }
+    else                      { p = param14[elem]; g = grad14[elem]; }
+
+    if (cfg.weight_decay != 0.0f) g = g + cfg.weight_decay * p;
+    float p_new = p - cfg.lr * g;
+
+    if      (param_idx == 0)  param0[elem]  = p_new;
+    else if (param_idx == 1)  param1[elem]  = p_new;
+    else if (param_idx == 2)  param2[elem]  = p_new;
+    else if (param_idx == 3)  param3[elem]  = p_new;
+    else if (param_idx == 4)  param4[elem]  = p_new;
+    else if (param_idx == 5)  param5[elem]  = p_new;
+    else if (param_idx == 6)  param6[elem]  = p_new;
+    else if (param_idx == 7)  param7[elem]  = p_new;
+    else if (param_idx == 8)  param8[elem]  = p_new;
+    else if (param_idx == 9)  param9[elem]  = p_new;
+    else if (param_idx == 10) param10[elem] = p_new;
+    else if (param_idx == 11) param11[elem] = p_new;
+    else if (param_idx == 12) param12[elem] = p_new;
+    else if (param_idx == 13) param13[elem] = p_new;
+    else                      param14[elem] = p_new;
+}
