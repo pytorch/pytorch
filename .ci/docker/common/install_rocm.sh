@@ -29,11 +29,8 @@ install_ubuntu() {
     # When ROCM_VERSION=nightly, install ROCm from TheRock nightly tarballs
     # Mirrors: https://github.com/ROCm/TheRock/blob/main/dockerfiles/install_rocm_tarball.sh
     if [[ "${ROCM_VERSION}" == "nightly" ]]; then
-      # TheRock tarball consumers need system -dev packages whose .pc files
-      # are not on the default pkg-config search path:
-      #   libdrm  - rocm_smi cmake config (pkg_check_modules)
-      #   liblzma - aotriton cmake config  (pkg_search_module)
-      apt-get install -y --no-install-recommends libdrm-dev liblzma-dev pkg-config
+      # aotriton cmake config uses pkg_search_module(liblzma)
+      apt-get install -y --no-install-recommends liblzma-dev pkg-config
 
       if [[ -d /opt/rocm ]]; then
         rm -rf /opt/rocm
@@ -139,6 +136,8 @@ export C_INCLUDE_PATH=/opt/rocm/lib/rocm_sysdeps/include:\${C_INCLUDE_PATH:-}
 # Device library path
 export HIP_DEVICE_LIB_PATH=/opt/rocm/amdgcn/bitcode
 export MAGMA_HOME=/opt/rocm/magma
+# Tarball bundles libdrm; expose its .pc files so cmake pkg_check_modules finds them
+export PKG_CONFIG_PATH=/opt/rocm/lib/rocm_sysdeps/lib/pkgconfig:\${PKG_CONFIG_PATH:-}
 # Disable MSLK for theRock nightly (not yet supported)
 export USE_MSLK=0
 ROCM_ENV
