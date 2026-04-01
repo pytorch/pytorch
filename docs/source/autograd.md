@@ -220,6 +220,12 @@ like the following:
 When creating a new {class}`Function`, the following methods are available to `ctx`.
 
 ```{eval-rst}
+.. autoclass:: torch.autograd.function.FunctionCtx
+    :no-members:
+
+.. autoclass:: torch.autograd.function.FunctionMeta
+    :no-members:
+
 .. autosummary::
     :toctree: generated
     :nosignatures:

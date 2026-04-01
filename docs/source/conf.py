@@ -2389,8 +2389,17 @@ def coverage_post_process(app, exception):
                 continue
             if getattr(obj, "__module__", mod_name) != mod_name:
                 continue
-            if full_name not in objects:
-                undocumented.append(full_name)
+            if full_name in objects:
+                continue
+            # Check if documented under a parent module (e.g.
+            # torch.distributed.distributed_c10d.get_rank is documented
+            # as torch.distributed.get_rank via currentmodule).
+            parts = mod_name.split(".")
+            if any(
+                f"{'.'.join(parts[:i])}.{name}" in objects for i in range(1, len(parts))
+            ):
+                continue
+            undocumented.append(full_name)
 
     if undocumented:
         items = "\n".join(f"  - {u}" for u in sorted(undocumented))
