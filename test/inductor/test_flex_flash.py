@@ -1025,24 +1025,98 @@ class TestFlexFlash(InductorTestCase):
             device=device,
             requires_grad=case.requires_grad,
         )
-        flash_vs_triton(
-            q,
-            k,
-            v,
-            score_mod=(
-                case.score_mod_factory(dtype, device)
-                if case.score_mod_factory
-                else None
-            ),
-            block_mask=_create_block_mask_for_device(
-                case.mask_mod_factory(dtype, device),
-                case.batch_size,
-                case.block_mask_num_heads or case.num_heads,
-                case.seq_len,
-                case.seq_len,
-                device=device,
-            ),
-        )
+        if not SM120OrLater:
+            flash_vs_triton(
+                q,
+                k,
+                v,
+                score_mod=(
+                    case.score_mod_factory(dtype, device)
+                    if case.score_mod_factory
+                    else None
+                ),
+                block_mask=_create_block_mask_for_device(
+                    case.mask_mod_factory(dtype, device),
+                    case.batch_size,
+                    case.block_mask_num_heads or case.num_heads,
+                    case.seq_len,
+                    case.seq_len,
+                    device=device,
+                ),
+            )
+        else:
+            if "head_dim128" in case.name:
+                # note: [SM120 forward tile selection failure]
+                # Basically currently block sparsity is not supported on SM12.0 but this tile selection
+                # comes before the arch check of
+                # https://github.com/Dao-AILab/flash-attention/blob/f6a16e1b/flash_attn/cute/interface.py#L747-L751
+                # The tile selection can differ from the block-mask metadata (tile_n=64 for head_dim>64)]:
+                #   File "/usr/local/lib/python3.12/dist-packages/flash_attn/cute/block_sparsity.py", line 321, in normalize_block_sparse_config
+                #     raise ValueError(
+                # ValueError: Block sparsity requires sparse_block_size[1]=64 to match tile_n.
+                with self.assertRaisesRegex(
+                    AssertionError,
+                    r"Block sparsity requires sparse_block_size[1]=64 to match tile_n.",
+                ):
+                    flash_vs_triton(
+                        q,
+                        k,
+                        v,
+                        score_mod=(
+                            case.score_mod_factory(dtype, device)
+                            if case.score_mod_factory
+                            else None
+                        ),
+                        block_mask=_create_block_mask_for_device(
+                            case.mask_mod_factory(dtype, device),
+                            case.batch_size,
+                            case.block_mask_num_heads or case.num_heads,
+                            case.seq_len,
+                            case.seq_len,
+                            device=device,
+                        ),
+                    )
+            elif "qa_block_mask_causal" in case.name:
+                with self.assertRaisesRegex(
+                    AssertionError, r"Block sparsity not supported on SM 12.0"
+                ):
+                    flash_vs_triton(
+                        q,
+                        k,
+                        v,
+                        score_mod=(
+                            case.score_mod_factory(dtype, device)
+                            if case.score_mod_factory
+                            else None
+                        ),
+                        block_mask=_create_block_mask_for_device(
+                            case.mask_mod_factory(dtype, device),
+                            case.batch_size,
+                            case.block_mask_num_heads or case.num_heads,
+                            case.seq_len,
+                            case.seq_len,
+                            device=device,
+                        ),
+                    )
+            else:
+                flash_vs_triton(
+                    q,
+                    k,
+                    v,
+                    score_mod=(
+                        case.score_mod_factory(dtype, device)
+                        if case.score_mod_factory
+                        else None
+                    ),
+                    block_mask=_create_block_mask_for_device(
+                        case.mask_mod_factory(dtype, device),
+                        case.batch_size,
+                        case.block_mask_num_heads or case.num_heads,
+                        case.seq_len,
+                        case.seq_len,
+                        device=device,
+                    ),
+                )
 
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_kernel_called(self, device, dtype):
@@ -1247,7 +1321,15 @@ class TestFlexFlash(InductorTestCase):
             _causal_mask, batch_size, n_heads, seqlen, seqlen, device=device
         )
 
-        flash_vs_triton(q, k, v, block_mask=block_mask)
+        if SM120OrLater:
+            # note: see [SM120 forward tile selection failure]
+            with self.assertRaisesRegex(
+                ValueError,
+                r"Block sparsity requires sparse_block_size[1]=64 to match tile_n",
+            ):
+                flash_vs_triton(q, k, v, block_mask=block_mask)
+        else:
+            flash_vs_triton(q, k, v, block_mask=block_mask)
 
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_backend_raises_on_grad_logsumexp(self, device, dtype):
