@@ -157,6 +157,9 @@ jobs:
             echo $GHCR_PAT | docker login ghcr.io -u pytorch --password-stdin
             docker tag "${ECR_DOCKER_IMAGE}" "${ghcr_image}:${tag}"
             docker push "${ghcr_image}:${tag}"
+            # Also push a tag without the hash for easier reference
+            docker tag "${ECR_DOCKER_IMAGE}" "${ghcr_image}:${{ matrix.docker-image-name }}"
+            docker push "${ghcr_image}:${{ matrix.docker-image-name }}"
 
       - name: Chown workspace
         uses: ./.github/actions/chown-workspace
