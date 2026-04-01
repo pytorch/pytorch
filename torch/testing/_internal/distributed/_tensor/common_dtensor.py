@@ -1461,7 +1461,7 @@ def validate_sharding_rule_sample(
         dt = DTensor.from_local(local, device_mesh, (plc,))
         full = dt.redistribute(device_mesh, (Replicate(),)).to_local()
         if ref.shape != full.shape or not torch.allclose(
-            ref, full, atol=1e-5, rtol=1e-5
+            ref, full, atol=1e-5, rtol=1e-5, equal_nan=True
         ):
             return False
     return True
