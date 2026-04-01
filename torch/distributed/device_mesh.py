@@ -549,10 +549,12 @@ else:
                     getattr(default_group, "bound_device_id", None) is not None
                     or dist_config.use_torchcomms
                 )
-                and torch.cuda.is_available()
+                and torch.accelerator.is_available()
                 and (
                     backend is None
-                    or default_group._get_backend(torch.device("cuda")).name()
+                    or default_group._get_backend(
+                        torch.accelerator.current_accelerator()  # pyrefly: ignore[bad-argument-type]
+                    ).name()
                     == backend
                 )
             ):
@@ -1594,12 +1596,20 @@ else:
         return device_mesh
 
 
+_distributed_opaque_types_registered = False
+
+
 def _register_distributed_opaque_types():
     """
     Register DeviceMesh as an opaque type for torch.compile.
     This must happen before any custom ops that use DeviceMesh in their schema.
     Called lazily to avoid circular import issues.
     """
+    global _distributed_opaque_types_registered
+    if _distributed_opaque_types_registered:
+        return
+    _distributed_opaque_types_registered = True
+
     from torch._library.opaque_object import MemberType, register_opaque_type
 
     register_opaque_type(

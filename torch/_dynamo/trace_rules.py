@@ -34,11 +34,12 @@ import random
 import re
 import sys
 import types
+import typing
 import unittest
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import torch
 import torch._inductor.test_operators
@@ -189,17 +190,14 @@ manual_torch_name_rule_map: dict[
     "torch.to_dlpack": SkipFunctionVariable,
     "torch._check": TorchInGraphFunctionVariable,
     # We graph break on RNG state setters or getters like
-    # `torch.get_rng_state` or `torch.set_rng_state`. These functions
-    # are not aten operations and therefore they are completely ignored
-    # by the AOT dispatcher. As a result, the AOT graph does not have
-    # these setter or getter functions, producing an incorrect graph
-    # when it comes to rng states.
-    "torch.default_generator#get_state": SkipFunctionVariable,
-    "torch._C.Generator#get_state": SkipFunctionVariable,
+    # `torch.get_rng_state`, `torch.set_rng_state`, and
+    # `torch.Generator.manual_seed`. These functions are not aten
+    # operations and therefore they are completely ignored by the AOT
+    # dispatcher. As a result, the AOT graph does not have these setter
+    # or getter functions, producing an incorrect graph when it comes
+    # to rng states.
     "torch.get_rng_state": SkipFunctionVariable,
     "torch.cuda.get_rng_state": SkipFunctionVariable,
-    "torch.default_generator#set_state": SkipFunctionVariable,
-    "torch._C.Generator#set_state": SkipFunctionVariable,
     "torch.set_rng_state": SkipFunctionVariable,
     "torch.cuda.set_rng_state": SkipFunctionVariable,
     # https://github.com/pytorch/pytorch/issues/107187
@@ -392,6 +390,27 @@ manual_torch_name_rule_map: dict[
     "torch._utils_internal.justknobs_check": UserFunctionVariable,
     "inspect.signature": InspectSignatureVariable,
 }
+
+# Keep this in sync with the stateful generator methods exposed from
+# torch/csrc/Generator.cpp.
+_GENERATOR_METHODS_THAT_GRAPH_BREAK = (
+    "clone_state",
+    "get_offset",
+    "get_state",
+    "graphsafe_get_state",
+    "graphsafe_set_state",
+    "initial_seed",
+    "manual_seed",
+    "seed",
+    "set_offset",
+    "set_state",
+)
+
+for generator_prefix in ("torch.default_generator", "torch._C.Generator"):
+    for method_name in _GENERATOR_METHODS_THAT_GRAPH_BREAK:
+        manual_torch_name_rule_map[f"{generator_prefix}#{method_name}"] = (
+            SkipFunctionVariable
+        )
 
 
 # In graph functions (including constant folding) that are C bindings
@@ -3181,11 +3200,6 @@ def _builtin_function_ids() -> dict[int, str]:
             if not k.startswith("_") and callable(v)
         }
     )
-    rv.update(
-        {
-            id(cast): "typing.cast",
-        }
-    )
     return rv
 
 
@@ -3905,6 +3919,12 @@ def check_verbose(
         filename = getfile(obj)
         assert filename is not None
         fi = FunctionInfo(obj, None, filename, None)
+
+    # typing.cast is a polyfilled no-op, but unlike C builtins it has a code
+    # object that PEP 523 can intercept as a standalone frame after a graph
+    # break. Skip it at the top level to avoid installing unnecessary guards.
+    if fi.code is not None and fi.code is typing.cast.__code__:
+        return SkipResult(True, "typing.cast is a no-op, skip at top level")
 
     # Consulte the central trace rules defined in torch._dynamo.trace_rules.
     reasons: set[str] = set()

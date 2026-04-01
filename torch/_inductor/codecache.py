@@ -3053,9 +3053,12 @@ class CppCodeCache:
         # the optimized_code argument is present at all, since that's how the user of
         # this function opts in, but we do compilation and linking in one step if the
         # optimized_code argument is empty (as a micro-optimization).
+        # On GPU the C++ wrapper is just glue — the real kernels are compiled
+        # separately by Triton/CUDA.  Always use -O1 to cut compile time.
+        min_optimize = optimized_code is not None or device_type != "cpu"
         main_build_option = CppTorchDeviceOptions(
             compile_only=bool(optimized_code),
-            min_optimize=optimized_code is not None,
+            min_optimize=min_optimize,
             # pyrefly: ignore [bad-argument-type]
             **compile_command,
         )
@@ -3103,7 +3106,7 @@ class CppCodeCache:
                     main_build_option.precompiled_header = _precompile_header(
                         header,
                         main_cmd_line,
-                        min_optimize=optimized_code is not None,
+                        min_optimize=min_optimize,
                         **compile_command,
                     )
 

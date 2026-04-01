@@ -1175,6 +1175,7 @@ static struct TritonKernelCompileInit {{
         inductor_meta=None,
         graph_name="",
         original_fxnode_name=None,
+        current_stream_idx=None,
     ):
         """
         Override the default value of argument 'gpu' to True here.

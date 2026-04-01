@@ -7968,6 +7968,22 @@ SavedForBackwardsAOTOutput(idx=5)""",
         expected = torch.nn.functional.one_hot(a, 3)
         self.assertEqual(one_hot(a, 3), expected)
 
+    @unittest.expectedFailure
+    def test_method_dunder_dict_setitem(self):
+        # Reproducer for: getattr(obj, method_name).__dict__['key'] = value
+        # method.__dict__ is handled specially by CPython at C level (no
+        # tp_dictoffset, no Python-visible descriptor), which caused
+        # object.__getattribute__(method, "__dict__") to raise AttributeError.
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            getattr(self, self._testMethodName).__dict__["slow_test"] = True
+            return x.sin()
+
+        x = torch.randn(2)
+        _ = fn(x)
+        self.assertTrue(getattr(self, self._testMethodName).__dict__.get("slow_test"))
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     def test_sub_alpha_scalar_repro(self, device):
