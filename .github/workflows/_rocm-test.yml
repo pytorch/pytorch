@@ -224,8 +224,6 @@ jobs:
             ${GPU_FLAG:-} \
             ${DEVICE_FLAG:-} \ #set in actions-runner/.env 
             ${ADDITIONAL_FLAGS:-} \
-            --memory-swap 64g \
-            --memory-reservation 64g \
             -e USE_SCCACHE \
             -e BUILD_ENVIRONMENT \
             -e PR_NUMBER \
@@ -269,6 +267,8 @@ jobs:
             --detach \
             --name="${container_name}" \
             --user jenkins \
+            --memory-swap 64g \
+            --memory-reservation 64g \
             -m 64g \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
