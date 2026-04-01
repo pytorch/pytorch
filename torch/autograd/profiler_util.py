@@ -4,9 +4,9 @@ import itertools
 import json
 import math
 from collections import defaultdict, namedtuple
+from collections.abc import Callable
 from operator import attrgetter
 from typing import Any, NamedTuple
-from collections.abc import Callable
 from typing_extensions import deprecated
 
 import torch
