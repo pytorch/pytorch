@@ -123,8 +123,6 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
       const std::vector<std::string>& skip_actions) override;
   void attachOutOfMemoryObserver(
       c10::cuda::CUDACachingAllocator::OutOfMemoryObserver observer) override;
-  void attachOomRejectionObserver(
-      c10::cuda::CUDACachingAllocator::OomRejectionObserver observer) override;
   void attachAllocatorTraceTracker(
       c10::cuda::CUDACachingAllocator::AllocatorTraceTracker tracker) override;
   std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState>
