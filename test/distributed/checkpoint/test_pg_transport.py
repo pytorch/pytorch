@@ -231,6 +231,7 @@ class PgTransportCPU(MultiProcContinuousTest):
         _test_pg_transport_with_sharded_tensor(self, self.device)
 
 
+@skip_but_pass_in_sandcastle_if(not at_least_x_gpu(2), "test requires 2+ accelerators")
 class PgTransportGPU(MultiProcContinuousTest):
     world_size = 2
     timeout: timedelta = timedelta(seconds=20)
