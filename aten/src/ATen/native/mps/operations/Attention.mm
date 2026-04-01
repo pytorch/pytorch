@@ -493,7 +493,20 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
     auto attn_weights = at::softmax(scores, -1);
     auto out = at::matmul(attn_weights, v_);
     if (unsqueezed) {
-      out = out.view_as(query);
+      if (query.dim() == 3) {
+        out = out.squeeze(0);
+        attn_weights = attn_weights.squeeze(0);
+      } else {
+        std::vector<int64_t> prefix_shape(query.sizes().begin(), query.sizes().end() - 3);
+
+        auto out_shape = prefix_shape;
+        out_shape.insert(out_shape.end(), {out.size(1), out.size(2), out.size(3)});
+        out = out.view(out_shape);
+
+        auto attn_shape = prefix_shape;
+        attn_shape.insert(attn_shape.end(), {attn_weights.size(1), attn_weights.size(2), attn_weights.size(3)});
+        attn_weights = attn_weights.view(attn_shape);
+      }
     }
     return {std::move(out), std::move(attn_weights)};
   }
