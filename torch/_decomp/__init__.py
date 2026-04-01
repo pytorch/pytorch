@@ -371,6 +371,7 @@ def _core_aten_decompositions_post_autograd() -> dict[
             aten.hardswish_backward,
             aten.hardtanh_,
             aten.hardtanh_backward,
+            aten.hann_window,
             aten.heaviside,
             aten.heaviside_,
             aten.huber_loss,
