@@ -822,6 +822,25 @@ def _sfdp_replacement_27(query, key, value, dropout_p):
     )
 
 
+def _sfdp_pattern_28(query, key, value, scale_factor, dropout_p):
+    # Visformer pattern
+    # same as pattern 4 but non-contiguous q/k/v
+    return _sfdp_pattern_4(query, key, value, scale_factor, dropout_p)
+
+
+def _sfdp_replacement_28(query, key, value, scale_factor, dropout_p):
+    counters["inductor"]["fuse_attention"] += 1
+    return _scaled_dot_product_attention(
+        query.contiguous(),
+        key.contiguous(),
+        value.contiguous(),
+        attn_mask=None,
+        dropout_p=dropout_p,
+        is_causal=False,
+        scale=scale_factor,
+    )
+
+
 @functools.lru_cache(None)
 def _warn_tf32_disabled() -> None:
     if (
@@ -946,6 +965,14 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
     g_inp = functools.partial(
         torch.empty, (2, 4, 8, 16), device=device, requires_grad=True
     )
+    # non-contiguous input to cover more patterns.
+    gn_inp = functools.partial(
+        torch.empty_strided,
+        (2, 6, 16, 8),
+        (2304, 128, 1, 16),
+        device=device,
+        requires_grad=True,
+    )
     # attn_mask
     b_inp = functools.partial(torch.empty, (1, 1, 8, 8), device=device)
     m_inp = functools.partial(torch.empty, (2, 1, 1, 4), device=device)
@@ -976,6 +1003,7 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
     # but will not in float, so we generate a pattern for both
     for dtype in [torch.float, torch.half]:
         g = functools.partial(g_inp, dtype=dtype)
+        gn = functools.partial(gn_inp, dtype=dtype)
         b = functools.partial(b_inp, dtype=dtype)
         b_float = functools.partial(b_inp, dtype=torch.float)
         b_bool = functools.partial(b_inp, dtype=torch.bool)
@@ -1240,6 +1268,13 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 [g_bs1(), g_bs1(), g_bs1()],
                 d,
                 _sfdp_extra_check(disable_cuda=True),
+            ),
+            (
+                _sfdp_pattern_28,
+                _sfdp_replacement_28,
+                [gn(), gn(), gn(), c()],
+                d,
+                _sfdp_extra_check(aten.mul.Tensor),
             ),
         ]
         mask_fp32_patterns = ["pattern_16"]
