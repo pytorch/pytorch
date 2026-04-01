@@ -96,9 +96,136 @@ Running with AOT graph logging:
 TORCH_LOGS="aot_graphs" python3 example.py
 ```
 
-The output shows the decomposed graph where `nn.Linear` has been broken down
-into fundamental ATen operations (`aten.mm`, `aten.add`, etc.) that
-TorchInductor can fuse and optimize.
+The output shows separate forward and backward graphs where `nn.Linear` has
+been fully decomposed into ATen operations.
+
+**Forward graph:**
+
+```python
+def forward(self, primals_1, primals_2, primals_3):
+    view = torch.ops.aten.view.default(primals_3, [1, 10])
+    t = torch.ops.aten.t.default(primals_1)
+    addmm = torch.ops.aten.addmm.default(primals_2, view, t)
+    view_1 = torch.ops.aten.view.default(addmm, [10])
+    return (view_1, view)
+```
+
+**Backward graph:**
+
+```python
+def forward(self, view, tangents_1):
+    view_2 = torch.ops.aten.view.default(tangents_1, [1, 10])
+    t_1 = torch.ops.aten.t.default(view_2)
+    mm = torch.ops.aten.mm.default(t_1, view)
+    t_2 = torch.ops.aten.t.default(mm)
+    sum_1 = torch.ops.aten.sum.dim_IntList(view_2, [0], True)
+    view_3 = torch.ops.aten.view.default(sum_1, [10])
+    t_3 = torch.ops.aten.t.default(t_2)
+    return (t_3, view_3, None)
+```
+
+`nn.Linear` decomposes into `aten.view`, `aten.t`, and `aten.addmm` in the
+forward pass, and `aten.mm`, `aten.t`, and `aten.sum` in the backward pass.
+All operations are at the ATen level.
+
+## AOT Autograd vs. Inductor Decomposition
+
+Not all operations are decomposed by AOT Autograd. Some operations are
+decomposed later by TorchInductor itself. To illustrate the difference,
+consider `torch.repeat_interleave`:
+
+```python
+@torch.compile
+def fn(y, repeats, dim, output_size):
+    indices = torch.repeat_interleave(
+        y, repeats, dim=dim, output_size=output_size
+    )
+    return indices
+
+y = torch.tensor([[1, 2], [3, 4]])
+repeats = torch.tensor([1, 2])
+output_size = 3
+dim = 0
+```
+
+**With AOT Eager** (no Inductor), `repeat_interleave` is *not* decomposed —
+it stays in the graph as-is:
+
+```python
+# torch.compile(fn, backend="aot_eager")(y, repeats, dim, output_size)
+def forward(self, arg0_1: "i64[2, 2][2, 1]cpu", arg1_1: "i64[2][1]cpu"):
+    repeat_interleave = torch.ops.aten.repeat_interleave.Tensor(
+        arg1_1, output_size=3
+    )
+    index_select = torch.ops.aten.index_select.default(
+        arg0_1, 0, repeat_interleave
+    )
+    return (index_select,)
+```
+
+**With TorchInductor**, the behavior changes. Inductor applies a conditional
+[decomposition](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/decomposition.py)
+that replaces `repeat_interleave` with cumulative sum, binary search, and
+indexing — operations that are more amenable to fusion:
+
+```python
+# torch.compile(fn, backend="inductor")(y, repeats, dim, output_size)
+def forward(self, arg0_1, arg1_1):
+    cumsum = torch.ops.aten.cumsum.default(arg1_1, 0)
+    iota = torch.ops.prims.iota.default(
+        3, start=0, step=1, dtype=torch.int64,
+        device=device(type='cpu'), requires_grad=False
+    )
+    searchsorted = torch.ops.aten.searchsorted.Tensor(
+        cumsum, iota, right=True
+    )
+    index = torch.ops.aten.index.Tensor(arg0_1, [searchsorted])
+    return (index,)
+```
+
+This demonstrates the two-level decomposition strategy: AOT Autograd handles
+standard decompositions (like `nn.Linear` → `aten.addmm`), while Inductor
+applies additional backend-specific decompositions when they create better
+optimization opportunities.
+
+## Decomposition vs. Lowering
+
+Decomposition and [graph lowering](torch.compiler_inductor_ir.md) are distinct
+transformations:
+
+- **Decomposition** rewrites ATen ops into *other ATen ops* (or Prims ops).
+  The IR stays at the FX graph level. For example, `aten.addmm` decomposes
+  into `aten.mm` + `aten.add`.
+- **Lowering** converts ATen ops into *Inductor IR* nodes (Pointwise, Reduction,
+  etc.) that represent fused computation. For example,
+  [aten.mean is lowered](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/lowering.py)
+  into Inductor IR that computes a sum and division.
+
+Decomposition happens first (during AOT Autograd and in Inductor's
+decomposition pass), and lowering happens afterward during graph lowering.
+
+## Constraints on Decompositions
+
+Decompositions must be **pure functions**: no side effects, no global state
+mutations, and no I/O. They must also be deterministic — the same inputs
+must always produce the same outputs.
+
+## Registering Decompositions
+
+You can register decompositions using the `@register_decomposition` decorator
+at two levels:
+
+- **AOT Autograd level** — register in
+  [torch/_decomp/decompositions.py](https://github.com/pytorch/pytorch/blob/main/torch/_decomp/decompositions.py).
+  These apply to all backends that use AOT Autograd.
+- **Inductor level** — register in
+  [torch/_inductor/decomposition.py](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/decomposition.py).
+  These apply only when TorchInductor is the backend.
+
+For testing and experimentation, you can also pass a custom decomposition
+table to
+[make_fx](https://github.com/pytorch/pytorch/blob/main/torch/fx/experimental/proxy_tensor.py)
+(see the [test examples](https://github.com/pytorch/pytorch/blob/main/test/test_proxy_tensor.py)).
 
 :::{seealso}
 For a reference of the Core ATen and Prims operator sets that decomposition

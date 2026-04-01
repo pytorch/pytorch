@@ -8,7 +8,7 @@ an optimized Triton kernel.
 
 ## Software Architecture
 
-```{image} /_static/img/inductor_user_guide/inductor_arch.png
+```{image} ../../_static/img/inductor_user_guide/inductor_arch.png
 :alt: High-level architecture of the PyTorch compiler showing TorchDynamo, AOT Dispatcher, and TorchInductor
 :width: 600px
 :align: center
@@ -53,7 +53,7 @@ page.
 
 ## TorchInductor Pipeline
 
-```{image} /_static/img/inductor_user_guide/arch_detailed.png
+```{image} ../../_static/img/inductor_user_guide/arch_detailed.png
 :alt: Detailed TorchInductor compilation pipeline from Pre-grad Passes through Code Generation to hardware targets
 :width: 600px
 :align: center
