@@ -2134,6 +2134,27 @@ class TestViewOps(DTensorContinuousTestBase):
         )
         self.assertEqual(out_plc, [Replicate(), Replicate()])
 
+    def test_input_dim_rejects_int_comparison(self):
+        """InputDim.__eq__ should raise TypeError when compared with int.
+
+        Regression guard: shard.dim == in_dim (int == InputDim) silently
+        returned False for over 3 years, making downstream validation dead code.
+        """
+        dim = InputDim(0)
+        # InputDim == InputDim is fine
+        self.assertEqual(dim, InputDim(0))
+        self.assertNotEqual(dim, InputDim(1))
+        # hash contract: equal InputDims must have equal hashes
+        self.assertEqual(hash(dim), hash(InputDim(0)))
+        # hash is salted so it won't collide with raw int in dicts/sets
+        self.assertNotEqual(hash(dim), hash(0))
+        # InputDim == int raises (catches `dim == some_int`)
+        with self.assertRaisesRegex(TypeError, "Did you mean to use .input_dim"):
+            _ = dim == 0
+        # int == InputDim also raises (catches the original bug: `shard.dim == in_dim`)
+        with self.assertRaisesRegex(TypeError, "Did you mean to use .input_dim"):
+            _ = 0 == dim
+
 
 TestViewOpsWithLocalTensor = create_local_tensor_test_class(
     TestViewOps,
