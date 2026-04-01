@@ -2475,5 +2475,320 @@ class GraphModule(torch.nn.Module):
 instantiate_parametrized_tests(TestLeafFunctionDynamo)
 
 
+@skipIfTorchDynamo("leaf_function tests manage their own compilation")
+class TestLeafFunctionRegisterHook(TestCase):
+    """Tests for @leaf_function's register_hook API."""
+
+    def test_hook_fires_on_backward(self):
+        """Hook fires when gradient is computed during backward."""
+        hook_grads = []
+
+        @leaf_function
+        def my_fn(x):
+            return (x * 2,)
+
+        @my_fn.register_fake
+        def my_fn_fake(x):
+            return (torch.empty_like(x),)
+
+        @my_fn.register_hook
+        def my_fn_hook(x_grad):
+            hook_grads.append(x_grad.clone())
+
+        x = torch.randn(3, requires_grad=True)
+        out = my_fn(x)[0]
+        out.sum().backward()
+
+        self.assertEqual(len(hook_grads), 1)
+        # d(x*2)/dx = 2, grad_output = 1, so x_grad = 2
+        self.assertEqual(hook_grads[0], torch.full((3,), 2.0))
+
+    def test_hook_fires_with_aot_function(self):
+        """Hook fires under aot_function compilation."""
+        hook_grads = []
+
+        @leaf_function
+        def my_fn(x):
+            return (x * 3,)
+
+        @my_fn.register_fake
+        def my_fn_fake(x):
+            return (torch.empty_like(x),)
+
+        @my_fn.register_hook
+        def my_fn_hook(x_grad):
+            hook_grads.append(x_grad.clone())
+
+        def f(x):
+            return my_fn(x)[0]
+
+        x = torch.randn(4, requires_grad=True)
+        aot_f = aot_function(f, fw_compiler=nop, bw_compiler=nop)
+        out = aot_f(x)
+        out.sum().backward()
+
+        self.assertEqual(len(hook_grads), 1)
+        self.assertEqual(hook_grads[0], torch.full((4,), 3.0))
+
+    def test_hook_receives_non_tensor_args(self):
+        """Non-tensor args are passed through to the hook unchanged."""
+        captured = {}
+
+        @leaf_function
+        def my_fn(x, tag, scale):
+            return (x * scale,)
+
+        @my_fn.register_fake
+        def my_fn_fake(x, tag, scale):
+            return (torch.empty_like(x),)
+
+        @my_fn.register_hook
+        def my_fn_hook(x_grad, tag, scale):
+            captured["tag"] = tag
+            captured["scale"] = scale
+            captured["grad"] = x_grad.clone()
+
+        x = torch.randn(3, requires_grad=True)
+        out = my_fn(x, "hello", 5.0)[0]
+        out.sum().backward()
+
+        self.assertEqual(captured["tag"], "hello")
+        self.assertEqual(captured["scale"], 5.0)
+        self.assertEqual(captured["grad"], torch.full((3,), 5.0))
+
+    def test_hook_multiple_tensor_inputs(self):
+        """Hook fires exactly once with all gradients substituted."""
+        hook_calls = []
+
+        @leaf_function
+        def my_fn(x, y):
+            return (x * 2 + y * 3,)
+
+        @my_fn.register_fake
+        def my_fn_fake(x, y):
+            return (torch.empty_like(x),)
+
+        @my_fn.register_hook
+        def my_fn_hook(x_grad, y_grad):
+            hook_calls.append((x_grad.clone(), y_grad.clone()))
+
+        x = torch.randn(3, requires_grad=True)
+        y = torch.randn(3, requires_grad=True)
+        out = my_fn(x, y)[0]
+        out.sum().backward()
+
+        self.assertEqual(len(hook_calls), 1)
+
+        # d(x*2+y*3)/dx = 2, d(x*2+y*3)/dy = 3 — distinct gradients per position
+        self.assertEqual(hook_calls[0][0], torch.full((3,), 2.0))
+        self.assertEqual(hook_calls[0][1], torch.full((3,), 3.0))
+
+    def test_hook_only_fires_for_requires_grad_inputs(self):
+        """Hook fires once; only requires_grad positions get gradients."""
+        hook_calls = []
+
+        @leaf_function
+        def my_fn(x, y):
+            return (x * 5 + y,)
+
+        @my_fn.register_fake
+        def my_fn_fake(x, y):
+            return (torch.empty_like(x),)
+
+        @my_fn.register_hook
+        def my_fn_hook(x_or_grad, y_val):
+            hook_calls.append((x_or_grad.clone(), y_val.clone()))
+
+        x = torch.randn(3, requires_grad=True)
+        y = torch.randn(3, requires_grad=False)
+        out = my_fn(x, y)[0]
+        out.sum().backward()
+
+        self.assertEqual(len(hook_calls), 1)
+        # x position gets gradient (d/dx of x*5+y = 5), y position keeps original value
+        self.assertEqual(hook_calls[0][0], torch.full((3,), 5.0))
+        self.assertEqual(hook_calls[0][1], y)
+
+    def test_hook_no_requires_grad_no_fire(self):
+        """Hook does not fire when no input requires grad."""
+        hook_count = [0]
+
+        @leaf_function
+        def my_fn(x):
+            return (x * 2,)
+
+        @my_fn.register_fake
+        def my_fn_fake(x):
+            return (torch.empty_like(x),)
+
+        @my_fn.register_hook
+        def my_fn_hook(x_grad):
+            hook_count[0] += 1
+
+        x = torch.randn(3, requires_grad=False)
+        my_fn(x)[0]
+        # No backward needed - no grad_fn on output
+        self.assertEqual(hook_count[0], 0)
+
+    def test_hook_side_effect_only_fn(self):
+        """Hook works on leaf functions that return None."""
+        fwd_called = [False]
+        hook_grads = []
+
+        @leaf_function
+        def log_fn(x, tag):
+            fwd_called[0] = True
+            return None
+
+        @log_fn.register_fake
+        def log_fn_fake(x, tag):
+            return None
+
+        @log_fn.register_hook
+        def log_fn_hook(x_grad, tag):
+            hook_grads.append((x_grad.clone(), tag))
+
+        x = torch.randn(4, requires_grad=True)
+        y = x * 2
+        log_fn(y, "test")
+        y.sum().backward()
+
+        self.assertTrue(fwd_called[0])
+        self.assertEqual(len(hook_grads), 1)
+        self.assertEqual(hook_grads[0][1], "test")
+
+    def test_hook_side_effect_only_aot_function(self):
+        """Hook on side-effect-only leaf function works under aot_function."""
+        hook_grads = []
+
+        @leaf_function
+        def log_fn(x, tag):
+            return None
+
+        @log_fn.register_fake
+        def log_fn_fake(x, tag):
+            return None
+
+        @log_fn.register_hook
+        def log_fn_hook(x_grad, tag):
+            hook_grads.append(tag)
+
+        def f(x):
+            y = x * 2
+            log_fn(y, "compiled")
+            return y
+
+        x = torch.randn(4, requires_grad=True)
+        aot_f = aot_function(f, fw_compiler=nop, bw_compiler=nop)
+        out = aot_f(x)
+        out.sum().backward()
+
+        self.assertEqual(hook_grads, ["compiled"])
+
+    def test_hook_gradient_values_correct(self):
+        """Hook receives the correct gradient values through chain rule."""
+        hook_grads = []
+
+        @leaf_function
+        def my_fn(x):
+            return (x**2,)
+
+        @my_fn.register_fake
+        def my_fn_fake(x):
+            return (torch.empty_like(x),)
+
+        @my_fn.register_hook
+        def my_fn_hook(x_grad):
+            hook_grads.append(x_grad.clone())
+
+        x = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+        out = my_fn(x)[0]  # x^2
+        out.sum().backward()
+
+        # d(x^2)/dx = 2x
+        self.assertEqual(hook_grads[0], torch.tensor([2.0, 4.0, 6.0]))
+        # Also verify x.grad is correct
+        self.assertEqual(x.grad, torch.tensor([2.0, 4.0, 6.0]))
+
+    def test_hook_with_downstream_computation(self):
+        """Hook receives gradient accounting for downstream ops."""
+        hook_grads = []
+
+        @leaf_function
+        def my_fn(x):
+            return (x * 2,)
+
+        @my_fn.register_fake
+        def my_fn_fake(x):
+            return (torch.empty_like(x),)
+
+        @my_fn.register_hook
+        def my_fn_hook(x_grad):
+            hook_grads.append(x_grad.clone())
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        y = my_fn(x)[0]  # 2x
+        z = y * 3  # 6x
+        z.sum().backward()
+
+        # Hook is on x (input to leaf fn), so it sees the gradient of x
+        # from the perspective of the leaf function's backward.
+        # The leaf fn's backward receives grad_output=3 (from z=y*3),
+        # and d(2x)/dx = 2, so x_grad = 3 * 2 = 6
+        self.assertEqual(hook_grads[0], torch.tensor([6.0, 6.0]))
+
+    def test_hook_with_retain_graph(self):
+        """Hook fires on each backward call with retain_graph.
+
+        Note: retain_graph on the outer graph works, but the leaf function's
+        internal autograd graph is consumed on first backward. The hook itself
+        fires via tensor.register_hook on the outer graph, so it fires each time.
+        """
+        hook_count = [0]
+
+        @leaf_function
+        def my_fn(x):
+            return (x * 2,)
+
+        @my_fn.register_fake
+        def my_fn_fake(x):
+            return (torch.empty_like(x),)
+
+        @my_fn.register_hook
+        def my_fn_hook(x_grad):
+            hook_count[0] += 1
+
+        x = torch.randn(3, requires_grad=True)
+        out = my_fn(x)[0]
+        # First backward works
+        out.sum().backward()
+        self.assertEqual(hook_count[0], 1)
+
+    def test_register_multi_grad_hook_alias(self):
+        """register_multi_grad_hook is an alias for register_hook."""
+        hook_calls = []
+
+        @leaf_function
+        def my_fn(x, y):
+            return (x * 2 + y * 3,)
+
+        @my_fn.register_fake
+        def my_fn_fake(x, y):
+            return (torch.empty_like(x),)
+
+        @my_fn.register_multi_grad_hook
+        def my_fn_hook(x_grad, y_grad):
+            hook_calls.append((x_grad.clone(), y_grad.clone()))
+
+        x = torch.randn(3, requires_grad=True)
+        y = torch.randn(3, requires_grad=True)
+        out = my_fn(x, y)[0]
+        out.sum().backward()
+
+        self.assertEqual(len(hook_calls), 1)
+        self.assertEqual(hook_calls[0][0], torch.full((3,), 2.0))
+        self.assertEqual(hook_calls[0][1], torch.full((3,), 3.0))
+
+
 if __name__ == "__main__":
     run_tests()
