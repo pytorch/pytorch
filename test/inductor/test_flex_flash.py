@@ -1345,6 +1345,8 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
     def _flash_triton_dynamic(self, q, k, v, **kwargs):
         flash_vs_triton(q, k, v, dynamic=True, **kwargs)
 
+    # sm120: AttributeError: 'NoneType' object has no attribute '_trait'
+    @xfailIfSM120OrLater
     def test_dynamic_seq_len_no_score_mod(self):
         """Test dynamic sequence lengths without score_mod."""
         self._run_dynamic_test(seq_lens=[128, 256, 512])
