@@ -354,10 +354,10 @@ template <
     int res_arg_index>
 struct CopyFunctor {
   static_assert(depth == 2 && r_args_depth == 1 && res_arg_index == 1);
-  template <typename Op>
+  template <typename Op, bool IS_VOLTA_OR_HIGHER>
   __device__ __forceinline__ void operator()(
       int64_t chunk_size,
-      TensorListMetadata<depth>& tl,
+      TensorListMetadata<depth, IS_VOLTA_OR_HIGHER>& tl,
       Op op) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];

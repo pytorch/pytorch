@@ -54,9 +54,10 @@ template <
     int r_args_depth = 1,
     int res_arg_index = 0>
 struct LpMaxFunctor {
+  template <bool IS_VOLTA_OR_HIGHER>
   __device__ __forceinline__ void operator()(
       int64_t chunk_size,
-      TensorListMetadata<depth>& tl,
+      TensorListMetadata<depth, IS_VOLTA_OR_HIGHER>& tl,
       T* output_per_tensor_ptr,
       const int max_chunks_per_tensor) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
@@ -251,9 +252,10 @@ template <
     int res_arg_index = 0>
 struct LpNormFunctor {
   using out_opmath_t = typename at::opmath_type<out_t>;
+  template <bool IS_VOLTA_OR_HIGHER>
   __device__ __forceinline__ void operator()(
       int64_t chunk_size,
-      TensorListMetadata<depth>& tl,
+      TensorListMetadata<depth, IS_VOLTA_OR_HIGHER>& tl,
       out_opmath_t* output_per_tensor_ptr,
       const int max_chunks_per_tensor) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
