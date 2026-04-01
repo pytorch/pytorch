@@ -31,12 +31,9 @@ def _call_parse_cmd_line_args():
     # before built-in plugins, so importing there would race with pytest's
     # faulthandler plugin — faulthandler.enable() would overwrite the
     # runtime's handlers.
-    try:
-        from torch.testing._internal.common_utils import parse_cmd_line_args
+    from torch.testing._internal.common_utils import parse_cmd_line_args
 
-        parse_cmd_line_args()
-    except ImportError:
-        pass
+    parse_cmd_line_args()
 
 
 if TYPE_CHECKING:
