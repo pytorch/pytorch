@@ -1025,6 +1025,46 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             tx.output.add_cleanup_hook(lambda: torch.set_autocast_cache_enabled(prev))
             return CONSTANT_VARIABLE_NONE
 
+        @register(torch._C._functorch._grad_increment_nesting)
+        def handle_grad_increment_nesting(
+            self, tx: "InstructionTranslator"
+        ) -> VariableTracker:
+            tx.output.create_node(
+                "call_function", torch._C._functorch._grad_increment_nesting
+            )
+            level = torch._C._functorch._grad_increment_nesting()
+            tx.output.add_cleanup_hook(torch._C._functorch._grad_decrement_nesting)
+            return VariableTracker.build(tx, level)
+
+        @register(torch._C._functorch._grad_decrement_nesting)
+        def handle_grad_decrement_nesting(
+            self, tx: "InstructionTranslator"
+        ) -> VariableTracker:
+            tx.output.create_node(
+                "call_function", torch._C._functorch._grad_decrement_nesting
+            )
+            level = torch._C._functorch._grad_decrement_nesting()
+            tx.output.add_cleanup_hook(torch._C._functorch._grad_increment_nesting)
+            return VariableTracker.build(tx, level)
+
+        @register(torch._C._functorch.set_inplace_requires_grad_allowed)
+        def handle_set_inplace_requires_grad_allowed(
+            self, tx: "InstructionTranslator", allowed: VariableTracker
+        ) -> VariableTracker:
+            tx.output.create_node(
+                "call_function",
+                torch._C._functorch.set_inplace_requires_grad_allowed,
+                (allowed.as_proxy(),),
+            )
+            prev = torch._C._functorch.get_inplace_requires_grad_allowed()
+            torch._C._functorch.set_inplace_requires_grad_allowed(
+                allowed.as_python_constant()
+            )
+            tx.output.add_cleanup_hook(
+                lambda: torch._C._functorch.set_inplace_requires_grad_allowed(prev)
+            )
+            return CONSTANT_VARIABLE_NONE
+
         @register(torch.are_deterministic_algorithms_enabled)
         def handle_are_deterministic_algorithms_enabled(
             self, tx: "InstructionTranslator"
