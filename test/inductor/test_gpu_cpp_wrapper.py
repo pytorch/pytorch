@@ -66,6 +66,7 @@ class TestGpuWrapper(InductorTestCase):
         comp = torch.compile(
             options={
                 "cpp_wrapper": True,
+                "cpp_wrapper_build_separate": True,
                 "aot_inductor.debug_intermediate_value_printer": "2",
             }
         )(test_fn)
