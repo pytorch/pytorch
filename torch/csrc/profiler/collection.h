@@ -370,7 +370,6 @@ struct ExtraFields<EventType::Kineto> {
   Flow flow;
   std::weak_ptr<Result> linked_activity_;
   std::string metadata_json_;
-  // All metadata from Kineto activity, parsed from metadataJson().
   extra_meta_t extra_meta_;
 };
 
