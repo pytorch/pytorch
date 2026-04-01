@@ -16,7 +16,7 @@ from torch.testing._internal.common_dtype import (
     floating_types, floating_and_complex_types_and, get_all_fp_dtypes)
 from torch.testing._internal.common_device_type import (
     _TestParametrizer, _update_param_kwargs, expectedFailureMPS, toleranceOverride, tol,
-    precisionOverride, skipMeta, skipMPS)
+    precisionOverride, skipMeta)
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_nn import (
     cosineembeddingloss_reference, cross_entropy_loss_reference, ctcloss_reference,
@@ -3777,19 +3777,29 @@ _macos15_or_newer = torch.backends.mps.is_available() and torch.backends.mps.is_
 
 
 # Database of ModuleInfo entries in alphabetical order.
+# expectedFailure decorators for modules not supported on MPS backend.
+# These cover all test methods that exercise the module's forward/backward.
+_mps_not_supported_failure_decors = (
+    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_forward', device_type='mps'),
+    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_if_train_and_eval_modes_differ', device_type='mps'),
+    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_memory_format', device_type='mps'),
+    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_non_contiguous_tensors', device_type='mps'),
+    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_save_load', device_type='mps'),
+)
+
 module_db: list[ModuleInfo] = [
     ModuleInfo(torch.nn.AdaptiveAvgPool1d,
                module_inputs_func=module_inputs_torch_nn_AdaptiveAvgPool1d,
                skips=(
                    # Fails on MPS backend if input/output sizes are not divisible
-                   DecorateInfo(skipMPS),)
+                   *_mps_not_supported_failure_decors,)
                ),
     ModuleInfo(torch.nn.AdaptiveAvgPool2d,
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_inputs_func=module_inputs_torch_nn_AdaptiveAvgPool2d,
                skips=(
                    # Fails on MPS backend if input/output sizes are not divisible
-                   DecorateInfo(skipMPS),
+                   *_mps_not_supported_failure_decors,
                    # Fails on backward check if output size is 1x1
                    DecorateInfo(
                        unittest.expectedFailure,
@@ -3804,7 +3814,7 @@ module_db: list[ModuleInfo] = [
                skips=(
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
                    # not supported on MPS backend
-                   DecorateInfo(skipMPS),)
+                   *_mps_not_supported_failure_decors,)
                ),
     ModuleInfo(torch.nn.AdaptiveMaxPool1d,
                module_inputs_func=module_inputs_torch_nn_AdaptiveMaxPool1d,
@@ -3819,7 +3829,7 @@ module_db: list[ModuleInfo] = [
                skips=(
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
                    # not supported on MPS backend
-                   DecorateInfo(skipMPS),)
+                   *_mps_not_supported_failure_decors,)
                ),
     ModuleInfo(torch.nn.AvgPool1d,
                module_inputs_func=module_inputs_torch_nn_AvgPool1d,
@@ -3843,8 +3853,9 @@ module_db: list[ModuleInfo] = [
                skips=(
                    # No channels_last support for AvgPool1d as it does not take 4D inputs
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   # backward not supported on MPS backend
-                   DecorateInfo(skipMPS, 'TestModule', 'test_non_contiguous_tensors'),)
+                   # backward not supported on MPS backend for float16
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_non_contiguous_tensors',
+                                dtypes=[torch.float16], device_type='mps'),)
                ),
     ModuleInfo(torch.nn.BatchNorm1d,
                train_and_eval_differ=True,
@@ -3891,8 +3902,7 @@ module_db: list[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_BatchNorm3d,
                module_error_inputs_func=module_error_inputs_torch_nn_BatchNorm1d_2d_3d,
                skips=(
-                   # not supported on MPS backend
-                   DecorateInfo(skipMPS),
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_memory_format', device_type='mps'),
                    # tracking here rather than in the list in test_aotdispatch.py as eval mode passes
                    # RuntimeError: tried to get Double out of SymInt
                    DecorateInfo(
@@ -3939,8 +3949,6 @@ module_db: list[ModuleInfo] = [
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_memformat_affects_out=True,
                skips=(
-                   # Conv3d is not supported on MPS backend
-                   DecorateInfo(skipMPS, device_type="mps"),
                    # This was wrongly being skipped before and needs investigation.
                    # See https://github.com/pytorch/pytorch/issues/80247
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format"),
@@ -3989,11 +3997,18 @@ module_db: list[ModuleInfo] = [
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_memformat_affects_out=True,
                skips=(
-                   # ConvTranspose3d is not supported on MPS backend
-                   DecorateInfo(skipMPS),
                    # This was wrongly being skipped before and needs investigation.
                    # See https://github.com/pytorch/pytorch/issues/80247
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format"),
+                   # ConvTranspose3d with float16 is not supported on MPS
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_forward',
+                                dtypes=[torch.float16], device_type='mps'),
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_if_train_and_eval_modes_differ',
+                                dtypes=[torch.float16], device_type='mps'),
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_non_contiguous_tensors',
+                                dtypes=[torch.float16], device_type='mps'),
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_save_load',
+                                dtypes=[torch.float16], device_type='mps'),
                    # Not implemented for chalf on CPU
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_cpu_gpu_parity',
                                 dtypes=(torch.chalf,), device_type='cuda'),
@@ -4022,16 +4037,16 @@ module_db: list[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_FractionalMaxPool2d,
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                skips=(
-                   # not supported on MPS backend
-                   DecorateInfo(skipMPS),
+                   # test_random_samples uses float64 which is not supported on MPS
+                   DecorateInfo(unittest.expectedFailure, device_type='mps'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
     ModuleInfo(torch.nn.FractionalMaxPool3d,
                module_inputs_func=module_inputs_torch_nn_FractionalMaxPool3d,
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                skips=(
-                   # not supported on MPS backend
-                   DecorateInfo(skipMPS),
+                   # test_random_samples uses float64 which is not supported on MPS
+                   DecorateInfo(unittest.expectedFailure, device_type='mps'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
     ModuleInfo(torch.nn.L1Loss,
@@ -4086,8 +4101,6 @@ module_db: list[ModuleInfo] = [
                    # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
                    # See https://github.com/pytorch/pytorch/issues/70505 for more info.
                    DecorateInfo(skipMeta),
-                   # LazyConv3d is not supported on MPS backend
-                   DecorateInfo(skipMPS),
                    # This was wrongly being skipped before and needs investigation.
                    # See https://github.com/pytorch/pytorch/issues/80247
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format"),
@@ -4131,11 +4144,18 @@ module_db: list[ModuleInfo] = [
                    # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
                    # See https://github.com/pytorch/pytorch/issues/70505 for more info.
                    DecorateInfo(skipMeta),
-                   # LazyConvTranspose3d is not supported on MPS backend
-                   DecorateInfo(skipMPS),
                    # This was wrongly being skipped before and needs investigation.
                    # See https://github.com/pytorch/pytorch/issues/80247
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format"),
+                   # ConvTranspose3d with float16 is not supported on MPS
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_forward',
+                                dtypes=[torch.float16], device_type='mps'),
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_if_train_and_eval_modes_differ',
+                                dtypes=[torch.float16], device_type='mps'),
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_non_contiguous_tensors',
+                                dtypes=[torch.float16], device_type='mps'),
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_save_load',
+                                dtypes=[torch.float16], device_type='mps'),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -4511,16 +4531,10 @@ module_db: list[ModuleInfo] = [
     ModuleInfo(torch.nn.ReLU6,
                module_inputs_func=module_inputs_torch_nn_ReLU6,
                skips=(
-                   # test fails on MPS backend and is being investigated.
-                   # See https://github.com/pytorch/pytorch/issues/100914
-                   DecorateInfo(skipMPS),)
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_memory_format', device_type='mps'),)
                ),
     ModuleInfo(torch.nn.PReLU,
                module_inputs_func=module_inputs_torch_nn_PReLU,
-               skips=(
-                   # test fails on MPS backend and is being investigated.
-                   # See https://github.com/pytorch/pytorch/issues/100914
-                   DecorateInfo(skipMPS),)
                ),
     ModuleInfo(torch.nn.RNNCell,
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU_Cell, is_rnn=True),
@@ -4584,15 +4598,12 @@ module_db: list[ModuleInfo] = [
     ModuleInfo(torch.nn.Softplus,
                module_inputs_func=module_inputs_torch_nn_Softplus,
                skips=(
-                   # test fails on MPS backend and is being investigated.
+                   # Correctness issue on MPS backend
                    # See https://github.com/pytorch/pytorch/issues/100914
-                   DecorateInfo(skipMPS),)
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_forward', device_type='mps'),)
                ),
     ModuleInfo(torch.nn.Softshrink,
                module_inputs_func=module_inputs_torch_nn_Softshrink,
-               skips=(
-                   # not supported on MPS backend
-                   DecorateInfo(skipMPS),)
                ),
     ModuleInfo(torch.nn.Softsign,
                module_inputs_func=module_inputs_torch_nn_Softsign,
@@ -4625,16 +4636,9 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.Threshold,
                module_inputs_func=module_inputs_torch_nn_Threshold,
-               skips=(
-                   # test fails on MPS backend and is being investigated.
-                   # See https://github.com/pytorch/pytorch/issues/100914
-                   DecorateInfo(skipMPS),)
                ),
     ModuleInfo(torch.nn.Mish,
                module_inputs_func=module_inputs_torch_nn_Mish,
-               skips=(
-                   # not supported on MPS backend
-                   DecorateInfo(skipMPS),)
                ),
     ModuleInfo(torch.nn.RNN,
                train_and_eval_differ=True,
@@ -4652,8 +4656,10 @@ module_db: list[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_LSTM,
                module_error_inputs_func=module_error_inputs_torch_nn_RNN_GRU,
                skips=(
-                   # LSTM with projections is not currently supported with MPS
-                   DecorateInfo(skipMPS),),
+                   # LSTM with projections is not currently supported with MPS.
+                   # Some inputs use proj_size>0 which fails; cannot use expectedFailure
+                   # as pass/fail depends on which inputs are selected.
+                   DecorateInfo(unittest.skip("LSTM projections not supported on MPS"), device_type='mps'),),
                decorators=rnn_gru_lstm_module_info_decorators),
     ModuleInfo(torch.nn.ReflectionPad1d,
                module_inputs_func=module_inputs_torch_nn_ReflectionPad1d,
@@ -4708,9 +4714,8 @@ module_db: list[ModuleInfo] = [
     ModuleInfo(torch.nn.SELU,
                module_inputs_func=module_inputs_torch_nn_SELU,
                skips=(
-                   # test fails on MPS backend and is being investigated.
-                   # See https://github.com/pytorch/pytorch/issues/100914
-                   DecorateInfo(skipMPS),)
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_check_inplace',
+                                dtypes=[torch.float16], device_type='mps'),)
                ),
     ModuleInfo(torch.nn.ZeroPad1d,
                module_inputs_func=module_inputs_torch_nn_ZeroPad1d,
