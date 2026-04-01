@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import dataclasses
+import itertools
 import pickle
 import sys
 import tempfile
@@ -927,6 +928,35 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"x": x, "r": iter(range(2, 15, 4))}, False)
         self._test_check_fn(
             ref, loaded, {"x": torch.randn(4), "r": iter(range(2, 15, 4))}, False
+        )
+
+    def test_count_iterator_match(self):
+        def fn(x, counter):
+            return x + next(counter)
+
+        x = torch.randn(3)
+
+        def _gen_kwargs(x=x):
+            return {"x": x, "counter": itertools.count(2, 3)}
+
+        ref, loaded = self._test_serialization(
+            "COUNT_ITERATOR_MATCH", fn, _gen_fn=_gen_kwargs
+        )
+
+        self._test_check_fn(
+            ref, loaded, {"x": x, "counter": itertools.count(2, 3)}, True
+        )
+        self._test_check_fn(
+            ref,
+            loaded,
+            {"x": torch.randn(4), "counter": itertools.count(2, 3)},
+            True,
+        )
+        self._test_check_fn(
+            ref, loaded, {"x": x, "counter": itertools.count(5, 3)}, False
+        )
+        self._test_check_fn(
+            ref, loaded, {"x": x, "counter": itertools.count(2, 4)}, False
         )
 
     def test_dict_version(self):

@@ -1768,6 +1768,60 @@ class TestFxGraphCache(TestCase):
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
+    def test_cache_guard_sqrt_no_recompilation(self):
+        """
+        Verify that guards containing OpaqueUnaryFn_sqrt (math.sqrt)
+        do not cause spurious recompilations when loaded from cache.
+
+        Previously, the guard printer emitted math.sqrt(...) for
+        OpaqueUnaryFn_sqrt, which when re-evaluated with SymInt inputs during
+        cache hit would force concretization/specialization of the symbol,
+        creating guards like `sym_float(size) == <concrete_value>` that didn't
+        exist in the original program. This caused a cache miss + recompilation
+        for every unique input size.
+
+        The fix emits torch._sym_sqrt(...) which propagates symbolically
+        without forcing specialization.
+
+        See https://github.com/pytorch/pytorch/issues/152435
+        """
+        import math
+
+        def func(x):
+            y = math.ceil((x.numel() // 5) / (math.ceil(math.sqrt(x.numel())))) > 64
+            if y:
+                return x * 5, y
+            else:
+                return x * 10, y
+
+        compiled_fn = torch.compile(func, dynamic=True)
+
+        # Warm up the cache with one size
+        compiled_fn(torch.rand(1000000))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+
+        # Simulate a new process loading from cache
+        self.reset()
+        counters.clear()
+
+        compiled_fn2 = torch.compile(func, dynamic=True)
+        # First call should hit the cache
+        compiled_fn2(torch.rand(2000000))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+
+        # Subsequent calls with different sizes should NOT recompile.
+        # Before the fix, each new size would create a spurious guard
+        # `sym_float(size) == <value>` causing a recompilation.
+        for size in [3000000, 5000000, 6000000, 7000000]:
+            compiled_fn2(torch.rand(size))
+
+        # All subsequent calls should reuse the already-loaded compiled graph
+        # without any additional cache misses or dynamo recompilations.
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
     @config.patch({"freezing": True})
     @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("inlinable", (True, False))

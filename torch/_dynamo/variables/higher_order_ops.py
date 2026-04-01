@@ -28,7 +28,7 @@ import types
 import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, Literal, Optional, TYPE_CHECKING, Union
 
 import torch._C
 import torch.fx
@@ -3268,15 +3268,6 @@ class FunctionalCallVariable(FunctorchHigherOrderVariable):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if not torch._dynamo.config.inline_inbuilt_nn_modules:
-            unimplemented(
-                gb_type="torch.func.functional_call capture is disabled",
-                context="",
-                explanation="torch.func.functional_call capture is disabled",
-                hints=[
-                    "Set `torch._dynamo.config.inline_inbuilt_nn_modules=True` to enable.",
-                ],
-            )
         return super().call_function(tx, args, kwargs)
 
 
@@ -4056,6 +4047,14 @@ class AutoFunctionalizeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 class FlexAttentionBackwardHighOrderVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.ops.higher_order.flex_attention_backward"
 
+    @staticmethod
+    def _uses_pretraced_graphs(
+        fw_graph: VariableTracker, joint_graph: VariableTracker
+    ) -> bool:
+        return not joint_graph.is_constant_none() or isinstance(
+            fw_graph, UnspecializedNNModuleVariable
+        )
+
     def proxy_submod(
         self, tx: "InstructionTranslator", arg: UnspecializedNNModuleVariable
     ) -> Proxy:
@@ -4075,7 +4074,220 @@ class FlexAttentionBackwardHighOrderVariable(TorchHigherOrderOperatorVariable):
         else:
             return arg.as_proxy()
 
+    def create_wrapped_node(
+        self,
+        tx: "InstructionTranslator",
+        query: VariableTracker,
+        fn: VariableTracker,
+        fn_name: str,
+        other_buffers: Sequence[VariableTracker],
+    ) -> tuple[Proxy, tuple[Proxy, ...], torch.fx.GraphModule]:
+        from .._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
+        def create_scalar() -> VariableTracker:
+            return query.call_method(
+                tx,
+                "new_empty",
+                [VariableTracker.build(tx, [])],
+                {"dtype": VariableTracker.build(tx, torch.int32)},
+            )
+
+        with discard_graph_changes(tx):
+            bhmn = [create_scalar() for _ in range(4)]
+            if fn_name == "score_mod":
+                scores_require_grad: bool = query.requires_grad  # type: ignore[attr-defined]
+                score = query.call_method(
+                    tx,
+                    "new_empty",
+                    [VariableTracker.build(tx, [])],
+                    {"requires_grad": VariableTracker.build(tx, scores_require_grad)},
+                )
+                new_args = [score, *bhmn, *other_buffers]
+            else:
+                assert fn_name == "mask_fn", "Illegal function name: " + fn_name
+                new_args = [*bhmn, *other_buffers]
+
+        with TransformGetItemToIndex():
+            (
+                (_body_output, _body_spec),
+                body_graph,
+                body_lifted_freevars,
+            ) = speculate_subgraph(
+                tx,
+                fn,
+                new_args,
+                {},
+                description=f"{self._HOP_NAME}: {fn_name}",
+                source_target=self.value,
+                set_subgraph_inputs="flatten_manual",
+            )
+
+        gm = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
+        body_name = tx.output.install_subgraph(fn_name, gm)
+        return make_attr(tx, body_name), tuple(body_lifted_freevars), gm
+
+    @staticmethod
+    def _buffer_example_value(buffer: VariableTracker) -> Any:
+        proxy = buffer.as_proxy()
+        if isinstance(proxy, Proxy):
+            return proxy.node.meta["example_value"]
+        return proxy
+
+    def _derive_joint_graph(
+        self,
+        tx: "InstructionTranslator",
+        query: VariableTracker,
+        fw_graph_gm: torch.fx.GraphModule,
+        score_mod_other_buffers: TupleVariable,
+        fw_graph_lifted_args: tuple[Proxy, ...],
+    ) -> Proxy:
+        from torch._higher_order_ops.flex_attention import create_fw_bw_graph
+
+        query_example = query.as_proxy().node.meta["example_value"]
+        example_vals = (
+            query_example.new_zeros((), requires_grad=True),
+            query_example.new_zeros((), dtype=torch.int),
+            query_example.new_zeros((), dtype=torch.int),
+            query_example.new_zeros((), dtype=torch.int),
+            query_example.new_zeros((), dtype=torch.int),
+        )
+        all_buffer_examples = tuple(
+            self._buffer_example_value(buf) for buf in score_mod_other_buffers.items
+        ) + tuple(buf.node.meta["example_value"] for buf in fw_graph_lifted_args)
+
+        _, joint_gm = create_fw_bw_graph(fw_graph_gm, example_vals, all_buffer_examples)
+        joint_gm = cast(GraphModule, joint_gm)
+
+        submod_name = tx.output.install_subgraph("joint_graph", joint_gm)
+        p_submod = make_attr(tx, submod_name)
+        set_example_value(p_submod.node, joint_gm)
+        return p_submod
+
     def _call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
+        if len(args) != 14:
+            return self._call_function_fallback(tx, args, kwargs)
+
+        (
+            query,
+            key,
+            value,
+            out,
+            logsumexp,
+            grad_out,
+            grad_logsumexp,
+            fw_graph,
+            joint_graph,
+            block_mask,
+            scale,
+            kernel_options,
+            score_mod_other_buffers,
+            mask_mod_other_buffers,
+        ) = args
+
+        if (
+            not isinstance(block_mask, TupleVariable)
+            or not isinstance(score_mod_other_buffers, TupleVariable)
+            or not isinstance(mask_mod_other_buffers, TupleVariable)
+            or len(block_mask.items) < 1
+        ):
+            return self._call_function_fallback(tx, args, kwargs)
+
+        if self._uses_pretraced_graphs(fw_graph, joint_graph):
+            return self._call_function_fallback(tx, args, kwargs)
+
+        fw_graph_node, fw_graph_lifted_args, fw_graph_gm = self.create_wrapped_node(
+            tx, query, fw_graph, "score_mod", score_mod_other_buffers.items
+        )
+
+        joint_graph_node = self._derive_joint_graph(
+            tx,
+            query,
+            fw_graph_gm,
+            score_mod_other_buffers,
+            fw_graph_lifted_args,
+        )
+
+        mask_fn = block_mask.items[-1]
+        if mask_fn.is_python_constant() and mask_fn.as_python_constant() is None:
+            mask_fn = VariableTracker.build(
+                tx,
+                torch.nn.attention.flex_attention.noop_mask,
+                source=mask_fn.source,
+            )
+        mask_fn_node, mask_fn_lifted_args, _ = self.create_wrapped_node(
+            tx, query, mask_fn, "mask_fn", mask_mod_other_buffers.items
+        )
+
+        proxied_args = [
+            query,
+            key,
+            value,
+            out,
+            logsumexp,
+            grad_out,
+            grad_logsumexp,
+            TupleVariable(block_mask.items[:-1], source=block_mask.source),
+            scale,
+            kernel_options,
+        ]
+        inp_args, _ = proxy_args_kwargs(proxied_args, {})
+        proxied_score_mod_other_buffers = tuple(
+            self.to_proxy(tx, arg) for arg in score_mod_other_buffers.items
+        )
+        proxied_mask_mod_other_buffers = tuple(
+            self.to_proxy(tx, arg) for arg in mask_mod_other_buffers.items
+        )
+
+        (
+            inp_q,
+            inp_k,
+            inp_v,
+            inp_out,
+            inp_lse,
+            inp_grad_out,
+            inp_grad_lse,
+            inp_block_mask,
+            inp_scale,
+            inp_kernel_options,
+        ) = inp_args
+
+        block_mask_proxy = tuple(inp_block_mask + (mask_fn_node,))
+
+        with torch.fx.experimental.proxy_tensor.set_original_aten_op(self.value):
+            return wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    self.value,
+                    args=(
+                        inp_q,
+                        inp_k,
+                        inp_v,
+                        inp_out,
+                        inp_lse,
+                        inp_grad_out,
+                        inp_grad_lse,
+                        fw_graph_node,
+                        joint_graph_node,
+                        block_mask_proxy,
+                        inp_scale,
+                        inp_kernel_options,
+                        proxied_score_mod_other_buffers + fw_graph_lifted_args,
+                        proxied_mask_mod_other_buffers + mask_fn_lifted_args,
+                    ),
+                    kwargs={},
+                ),
+                example_value=None,
+            )
+
+    def _call_function_fallback(
         self,
         tx: "InstructionTranslator",
         args: Sequence[VariableTracker],

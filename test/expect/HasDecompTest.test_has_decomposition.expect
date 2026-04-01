@@ -197,6 +197,8 @@ aten::_foreach_clamp_min.Scalar_out
 aten::_foreach_clamp_min_.List
 aten::_foreach_clamp_min_.Scalar
 aten::_foreach_clamp_min_.ScalarList
+aten::_foreach_clone
+aten::_foreach_clone.out
 aten::_foreach_copy
 aten::_foreach_copy.out
 aten::_foreach_copy_
@@ -649,6 +651,10 @@ aten::_upsample_bilinear2d_aa
 aten::_upsample_bilinear2d_aa.out
 aten::_upsample_bilinear2d_aa_backward
 aten::_upsample_bilinear2d_aa_backward.grad_input
+aten::_upsample_lanczos2d_aa
+aten::_upsample_lanczos2d_aa.out
+aten::_upsample_lanczos2d_aa_backward
+aten::_upsample_lanczos2d_aa_backward.grad_input
 aten::_upsample_nearest_exact1d_backward
 aten::_upsample_nearest_exact1d_backward.grad_input
 aten::_upsample_nearest_exact2d_backward
@@ -857,10 +863,6 @@ aten::hamming_window.periodic_alpha_beta
 aten::hamming_window.periodic_alpha_beta_out
 aten::hamming_window.periodic_alpha_out
 aten::hamming_window.periodic_out
-aten::hann_window
-aten::hann_window.out
-aten::hann_window.periodic
-aten::hann_window.periodic_out
 aten::hardshrink_backward
 aten::hardshrink_backward.grad_input
 aten::hash_tensor

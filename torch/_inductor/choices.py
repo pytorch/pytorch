@@ -347,6 +347,14 @@ class InductorChoices:
         """Hook to change the kwargs passed to TritonKernel, used to apply fixed configurations"""
         return kernel_kwargs
 
+    def override_best_choice(
+        self,
+        best_choice: ChoiceCaller,
+        timings: dict[ChoiceCaller, float],
+    ) -> ChoiceCaller:
+        """Hook to override the autotuning best choice after benchmarking."""
+        return best_choice
+
     def customize_fused_kernel_name(self, fused_name: str, src_code: str) -> str:
         """Hook to transform fused kernel names during codegen"""
         return fused_name

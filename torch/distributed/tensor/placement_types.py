@@ -419,7 +419,7 @@ class Shard(torch._C._distributed.Shard):
         logical_dim_size: IntLikeType,
         num_chunks: int,
     ) -> torch.Tensor:
-        from torch.fx.experimental.symbolic_shapes import guard_or_true
+        from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
 
         # Assume padding (uneven sharding) as general case for unbacked sizes.
         is_padded = guard_or_true(logical_dim_size % num_chunks != 0)
@@ -428,6 +428,22 @@ class Shard(torch._C._distributed.Shard):
             full_chunk_size = (logical_dim_size + num_chunks - 1) // num_chunks
             unpad_size = full_chunk_size * num_chunks - logical_dim_size  # type: ignore[possibly-undefined]
             local_tensor = unpad_tensor(local_tensor, self.dim, unpad_size)
+
+        # Bind derived symbolic sizes (e.g. 2*(s//2)) back to the original
+        # symbol - needed for correct shape propagation and dynamo generation
+        if local_tensor.size(self.dim) is not logical_dim_size:
+            orig_size = local_tensor.size(self.dim)
+            torch._check(orig_size >= logical_dim_size)
+            local_tensor = local_tensor.narrow(self.dim, 0, logical_dim_size)
+
+            # Safety check: the narrow should never change the concrete size.
+            # Use guard_or_false so we don't trigger data-dependent guards
+            # on unbacked symints.
+            if guard_or_false(local_tensor.size(self.dim) != orig_size):
+                raise RuntimeError(
+                    f"narrow unexpectedly changed concrete size on dim {self.dim}: "
+                    f"{orig_size} -> {local_tensor.size(self.dim)}"
+                )
 
         return local_tensor
 

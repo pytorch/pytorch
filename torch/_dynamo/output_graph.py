@@ -2630,8 +2630,7 @@ class OutputGraph(OutputGraphCommon):
                 # If dynamo produces a graph with parameters, skip package stuff
                 # Bypass output graph
                 self.bypass_package(
-                    "Graph contains named parameters: either inline_inbuilt_nn_modules=False or there are static addresses.",
-                    inline_builtin_nn_modules=torch._dynamo.config.inline_inbuilt_nn_modules,
+                    "Graph contains named parameters due to static addresses.",
                     gm=gm.print_readable(
                         print_output=False, include_stride=True, include_device=True
                     ),
@@ -3754,7 +3753,6 @@ class SubgraphTracer(fx.Tracer):
             rv.node.meta["source_fn_stack"] = self.source_fn_stack + [stack]
         elif kind == "call_module":
             if self.parent is not None:
-                # TODO can remove once inline_inbuilt_nn_modules is always True
                 unimplemented(
                     gb_type="Invoking an nn.Module inside a higher order operator",
                     context=f"Higher order op name: {self.source_target}",
@@ -3788,7 +3786,6 @@ class SubgraphTracer(fx.Tracer):
                     ]
                 elif kind == "call_module":
                     if self.parent is not None:
-                        # TODO can remove once inline_inbuilt_nn_modules is always True
                         unimplemented(
                             gb_type="Invoking an nn.Module inside a HigherOrderOperator",
                             context="",

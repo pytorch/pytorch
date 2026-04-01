@@ -32,6 +32,7 @@ import sympy
 import torch._numpy as tnp
 import torch.fx
 import torch.random
+from torch import sym_int
 from torch._dynamo import compiled_autograd
 from torch._library.opaque_object import is_opaque_reference_type
 from torch._opaque_base import OpaqueBase
@@ -386,14 +387,12 @@ class TensorVariable(VariableTracker):
         try:
             real_value = getattr(_input_associated_real_value, name)
         except AttributeError:
-            error_message = VariableTracker.build(
-                tx,
-                f"'{type(_input_associated_real_value).__name__}' object has no attribute '{name}'",
-            )
             raise_observed_exception(
                 AttributeError,
                 tx,
-                args=[error_message],
+                args=[
+                    f"'{type(_input_associated_real_value).__name__}' object has no attribute '{name}'"
+                ],
             )
 
         attr_source = AttrSource(self.source, name)
@@ -885,6 +884,23 @@ class TensorVariable(VariableTracker):
                     hints=[],
                     from_exc=e,
                 )
+
+        # Guard against unknown methods reaching the generic proxy path.
+        # For traceable wrapper subclasses (DTensor, NestedTensor), class_type
+        # is torch.Tensor, so check the example_value's actual type instead.
+        example_value = self.proxy.node.meta.get("example_value")
+        check_type = (
+            type(example_value) if example_value is not None else self.class_type
+        )
+        if not hasattr(check_type, name):
+            unimplemented(
+                gb_type="Unhandled tensor method",
+                context=f"call_method {self} {name} {args} {kwargs}",
+                explanation=f"Tensor method `{name}` is not defined on "
+                f"{check_type.__name__} and does not have an explicit "
+                "handler in TensorVariable.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
 
         from .builder import wrap_fx_proxy
 
@@ -1380,6 +1396,25 @@ class TensorVariable(VariableTracker):
     ) -> "DataPtrVariable":
         return DataPtrVariable(self)
 
+    def method_record_stream(
+        self,
+        tx: "InstructionTranslator",
+        stream: VariableTracker,
+    ) -> VariableTracker:
+        from .streams import StreamVariable
+
+        if not isinstance(stream, StreamVariable):
+            raise RuntimeError(
+                f"record_stream() expects a Stream argument, got {stream.python_type().__name__}"
+            )
+        tx.output.create_proxy(
+            "call_function",
+            torch.ops.streams.record_stream,
+            (self.as_proxy(), stream.user_object_index),
+            {},
+        )
+        return CONSTANT_VARIABLE_NONE
+
     def method_item(
         self,
         tx: "InstructionTranslator",
@@ -1401,6 +1436,36 @@ class TensorVariable(VariableTracker):
                 ],
             )
         return None
+
+    def nb_index_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        # CPython: only integer tensors of a single element can be converted
+        # to an index. Mirrors THPVariable_index_scalar in
+        # https://github.com/pytorch/pytorch/blob/7cfd054075b/tools/autograd/templates/python_variable_methods.cpp#L372-L385
+        if self.dtype is not None and (
+            not self.dtype.is_floating_point and not self.dtype.is_complex
+        ):
+            item = self.call_method(tx, "item", [], {})
+            from .builder import wrap_fx_proxy
+
+            return wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    sym_int,
+                    (item.as_proxy(),),
+                    {},
+                ),
+            )
+        raise_observed_exception(
+            TypeError,
+            tx,
+            args=[
+                "only integer tensors of a single element can be converted to an index"
+            ],
+        )
 
     def method___getitem__(
         self,

@@ -2,6 +2,7 @@
 
 import contextlib
 import json
+import logging
 import sys
 import tempfile
 import unittest
@@ -1196,6 +1197,83 @@ class ComboKernelPDLTests(TestCase):
         out_compiled = torch.compile(fn)(*inps)
 
         self.assertEqual(out_eager, out_compiled)
+
+
+class ComboKernelTestsMaxAutotune(TestCase):
+    def setUp(self):
+        super().setUp()
+        torch._inductor.metrics.reset()
+        self._test_stack = contextlib.ExitStack()
+        self._test_stack.enter_context(
+            torch._inductor.config.patch(
+                {
+                    "combo_kernels": True,
+                    "benchmark_combo_kernel": False,
+                    "combo_kernel_per_subkernel_blocks": True,
+                    "max_autotune": True,
+                    "autotune_local_cache": False,
+                }
+            )
+        )
+
+    def tearDown(self):
+        self._test_stack.close()
+        torch._inductor.metrics.reset()
+        super().tearDown()
+
+    @requires_gpu_and_triton
+    def test_combo_kernel_max_autotune(self):
+        def fn(a, b, c):
+            a1 = torch.nn.functional.relu(a)
+            b1 = torch.nn.functional.sigmoid(b)
+            c1 = torch.nn.functional.tanh(c)
+            return a1, b1, c1
+
+        inps = [
+            torch.rand(32, 1024, device=GPU_TYPE),
+            torch.rand(64, 512, device=GPU_TYPE),
+            torch.rand(16, 2048, device=GPU_TYPE),
+        ]
+
+        out_eager = fn(*inps)
+        fn_c = torch.compile(fn)
+
+        logger = logging.getLogger("torch._inductor.runtime.triton_heuristics")
+        with self.assertLogs(logger, level=logging.DEBUG) as cm:
+            out_compiled, code = run_and_get_code(fn_c, *inps)
+        best_config_logs = [msg for msg in cm.output if "Best config" in msg]
+        self.assertGreater(
+            len(best_config_logs),
+            0,
+            "autotune_to_one_config was not invoked — no 'Best config' log found",
+        )
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_gpu_and_triton
+    def test_combo_kernel_max_autotune_with_reduction(self):
+        def fn(x, y):
+            return x.sum(dim=-1), y.mean(dim=-1)
+
+        inps = [
+            torch.rand(128, 256, device=GPU_TYPE),
+            torch.rand(128, 256, device=GPU_TYPE),
+        ]
+
+        out_eager = fn(*inps)
+        fn_c = torch.compile(fn)
+
+        logger = logging.getLogger("torch._inductor.runtime.triton_heuristics")
+        with self.assertLogs(logger, level=logging.DEBUG) as cm:
+            out_compiled, code = run_and_get_code(fn_c, *inps)
+        best_config_logs = [msg for msg in cm.output if "Best config" in msg]
+        self.assertGreater(
+            len(best_config_logs),
+            0,
+            "autotune_to_one_config was not invoked — no 'Best config' log found",
+        )
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
 
 if __name__ == "__main__":

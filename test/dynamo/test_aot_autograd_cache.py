@@ -68,12 +68,19 @@ class CustomPreGradPassRemoveIdentMuls(CustomGraphPass):
     """
 
     def __call__(self, g: torch.fx.Graph) -> None:
+        changed = False
         for n in g.nodes:
             if n.op == "call_function" and n.target is operator.mul:
                 lhs, rhs = n.args
                 if lhs == 1:
                     n.replace_all_uses_with(rhs)
                     g.erase_node(n)
+                    changed = True
+        if not changed:
+            raise RuntimeError(
+                "Custom pass did not change the graph. "
+                "All test cases expect the pass to modify the graph."
+            )
 
     def uuid(self):
         return "custom_pre_grad_pass_remove_ident_muls_v1"
@@ -2452,6 +2459,41 @@ class AOTAutogradCacheTests(InductorTestCase):
                 self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
                 self.assertGreater(counters["aot_autograd"]["autograd_cache_bypass"], 0)
 
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch("enable_autograd_cache", True)
+    def test_pre_grad_passes_inplace_cpu(self):
+        """
+        `remove_identity` was an out-place operation previously, and it is called
+        for CPU inference inside `pre_grad_passes`. So, it broke the in-place semantics
+        of `pre_grad_passes` for CPU inference. This test ensures `pre_grad_passes` is
+        in-place in this case.
+        """
+
+        from torch._inductor.fx_passes.pre_grad import pre_grad_passes
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+                self.identity = torch.nn.Identity()
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.identity(x)
+                return torch.relu(x)
+
+        x = torch.randn(2, 4)
+        gm = torch.fx.symbolic_trace(Model().eval())
+
+        with inductor_config.patch(
+            pattern_matcher=True,
+            freezing=True,
+        ):
+            with torch.no_grad():
+                gm_after = pre_grad_passes(gm, (x,))
+
+        self.assertTrue(id(gm_after) == id(gm))
+
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -2762,12 +2804,19 @@ class AOTAutogradCacheTests(InductorTestCase):
 
                 class TestPreGradPass(CustomGraphPass):
                     def __call__(self, g):
+                        changed = False
                         for n in g.nodes:
                             if n.op == "call_function" and n.target is operator.mul:
                                 lhs, rhs = n.args
                                 if lhs == 1:
                                     n.replace_all_uses_with(rhs)
                                     g.erase_node(n)
+                                    changed = True
+                        if not changed:
+                            raise RuntimeError(
+                                "Custom pass did not change the graph. "
+                                "All test cases expect the pass to modify the graph."
+                            )
 
                     def uuid(self):
                         return {pass_uuid}
@@ -3142,6 +3191,9 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             fx_g.meta = {"foo": "bar"}
             fx_g.compile_subgraph_reason = "Blah"
             config = self.default_config()
+            # autograd_cache_key now applies sanitize_gm_for_cache
+            # internally, so the result is the same whether we wrap the
+            # call or not.
             with sanitize_gm_for_cache(fx_g):
                 c1 = autograd_cache_key(fx_g, example_inputs, config, {})
             c3 = autograd_cache_key(fx_g, example_inputs, config, {})
@@ -3153,7 +3205,8 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             c4 = autograd_cache_key(fx_g, example_inputs, config, {})
 
             self.assertEqual(c1, c2)
-            self.assertNotEqual(c3, c4)
+            self.assertEqual(c1, c3)
+            self.assertEqual(c1, c4)
 
     def test_dill_serialization_with_inner_functions(self):
         """

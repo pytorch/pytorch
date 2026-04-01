@@ -30,6 +30,11 @@ from torch._inductor.pattern_matcher import (
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
+from torch._library.opaque_object import (
+    get_opaque_type_name,
+    OpaqueBase,
+    register_opaque_type,
+)
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, xfailIfSM89
@@ -45,6 +50,26 @@ from torch.utils import _pytree as pytree
 
 
 aten = torch.ops.aten
+
+
+class OpaqueScaleFactor(OpaqueBase):
+    def __init__(self, val):
+        self.val = val
+
+    def __eq__(self, other):
+        return isinstance(other, OpaqueScaleFactor) and self.val == other.val
+
+    def __hash__(self):
+        return hash(self.val)
+
+    def __fx_repr__(self):
+        return (
+            f"OpaqueScaleFactor({self.val!r})",
+            {"OpaqueScaleFactor": OpaqueScaleFactor},
+        )
+
+
+register_opaque_type(OpaqueScaleFactor, typ="value", hoist=True)
 
 
 @instantiate_parametrized_tests
@@ -1922,6 +1947,60 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(len(sigmoid_nodes), 1)
         self.assertTrue("original_aten" in sigmoid_nodes[0].meta)
 
+    def test_fwd_only_uses_get_decomp_fn(self):
+        """fwd_only traces the pattern graph using the table from get_decomp_fn."""
+
+        def fn(x):
+            return F.gelu(x)
+
+        x = torch.randn(4, 4, device=GPU_TYPE)
+
+        # Default: gelu decomposes into erf/mul/add primitives.
+        gm = fwd_only(fn, args=[x])
+        targets = {n.target for n in gm.graph.nodes if n.op == "call_function"}
+        self.assertNotIn(aten.gelu.default, targets)
+        self.assertIn(aten.erf.default, targets)
+
+        # Empty decomp table: gelu stays intact as aten.gelu.default.
+        gm_nodec = fwd_only(fn, args=[x], get_decomp_fn=dict)
+        targets_nodec = {
+            n.target for n in gm_nodec.graph.nodes if n.op == "call_function"
+        }
+        self.assertIn(aten.gelu.default, targets_nodec)
+        self.assertNotIn(aten.erf.default, targets_nodec)
+
+    def test_register_replacement_get_decomp_fn(self):
+        """A pattern registered with get_decomp_fn matches graphs traced with
+        the same decomposition table, and does not match graphs traced with a
+        different one."""
+
+        def gelu_pattern(x):
+            return F.gelu(x)
+
+        def gelu_double(x):
+            return F.gelu(x) * 2.0
+
+        x = torch.randn(4, 4, device=GPU_TYPE)
+
+        # Pattern traced without decompositions: stored as aten.gelu.default.
+        my_patterns = PatternMatcherPass()
+        register_replacement(
+            gelu_pattern,
+            gelu_double,
+            [x],
+            fwd_only,
+            my_patterns,
+            get_decomp_fn=dict,
+        )
+
+        # Graph where gelu is also not decomposed: pattern should match once.
+        gm_nodec = make_fx(gelu_pattern, {})(x)
+        self.assertEqual(my_patterns.apply(gm_nodec.graph), 1)
+
+        # Graph where gelu is decomposed (default decomps): no match.
+        gm_decomposed = fwd_only(gelu_pattern, args=[x])
+        self.assertEqual(my_patterns.apply(gm_decomposed.graph), 0)
+
     @inductor_config.patch(is_predispatch=True)
     def test_remove_noop_pass_with_remove_passes(self):
         def fn_with_noop(x):
@@ -2095,6 +2174,25 @@ class TestPatternMatcher(TestCase):
         result = compiled_fn(x)
         self.assertEqual(result, x * 3)
         self.assertEqual(count, 1)
+
+    def test_register_replacement_single_tensor_input(self):
+        def pattern(x):
+            return x + 1
+
+        def replacement(x):
+            return x - 1
+
+        my_patterns = PatternMatcherPass()
+
+        # Single tensor should fail fast instead of reaching tracing logic.
+        example_input = torch.randn(4, 4, device=GPU_TYPE, requires_grad=True)
+        with self.assertRaisesRegex(
+            TypeError,
+            f"example_inputs must be a list or tuple, got {type(example_input)}",
+        ):
+            register_replacement(
+                pattern, replacement, example_input, fwd_only, my_patterns
+            )
 
 
 class TestPatternMatcherLogging(LoggingTestCase):
@@ -2366,6 +2464,73 @@ class TestPatternMatcherLogging(LoggingTestCase):
                 count2 = sum(counters.get(counter_key, {}).values())
 
                 self.assertEqual(accumulated_count, count1 + count2)
+
+    def test_opaque_obj_custom_op(self):
+        with torch.library._scoped_library("_test_pm", "FRAGMENT") as lib:
+            lib.define(
+                f"original_op(Tensor x, {get_opaque_type_name(OpaqueScaleFactor)} s) -> Tensor"
+            )
+            lib.impl("original_op", lambda x, s: x * s.val, "CompositeExplicitAutograd")
+
+            @torch.library.register_fake("_test_pm::original_op", lib=lib)
+            def _orig_fake(x, s):
+                return torch.empty_like(x)
+
+            lib.define(
+                f"replacement_op(Tensor x, {get_opaque_type_name(OpaqueScaleFactor)} s) -> Tensor"
+            )
+            lib.impl(
+                "replacement_op", lambda x, s: x + s.val, "CompositeExplicitAutograd"
+            )
+
+            @torch.library.register_fake("_test_pm::replacement_op", lib=lib)
+            def _repl_fake(x, s):
+                return torch.empty_like(x)
+
+            def pattern(x, factor):
+                return torch.ops._test_pm.original_op(x, factor)
+
+            def replacement(x, factor):
+                return torch.ops._test_pm.replacement_op(x, factor)
+
+            patterns = PatternMatcherPass()
+            register_replacement(
+                pattern,
+                replacement,
+                [torch.randn(4, 4), OpaqueScaleFactor(2.0)],
+                fwd_only,
+                patterns,
+            )
+
+            count = 0
+            post_pass_graph = None
+
+            def custom_pass(graph):
+                nonlocal count, post_pass_graph
+                count = patterns.apply(graph)
+                post_pass_graph = graph
+                return graph
+
+            def custom_backend(graph, example_inputs):
+                from torch._inductor.compile_fx import compile_fx
+
+                current_config = inductor_config.get_config_copy()
+                current_config["post_grad_custom_post_pass"] = custom_pass
+                return compile_fx(graph, example_inputs, config_patches=current_config)
+
+            @torch.compile(backend=custom_backend)
+            def f(x, s):
+                return torch.ops._test_pm.original_op(x, s)
+
+            inp = torch.randn(4, 4)
+            result = f(inp, OpaqueScaleFactor(4.0))
+            self.assertEqual(result, inp + 4.0)
+            self.assertEqual(count, 1)
+            op_targets = [
+                n.target for n in post_pass_graph.nodes if n.op == "call_function"
+            ]
+            self.assertNotIn(torch.ops._test_pm.original_op.default, op_targets)
+            self.assertIn(torch.ops._test_pm.replacement_op.default, op_targets)
 
 
 if __name__ == "__main__":

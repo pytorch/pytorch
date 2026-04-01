@@ -1929,7 +1929,9 @@ if HAS_CUDA_AND_TRITON:
             del x
             self.assertEqual(all_live_block_count(), 0)
 
-        @unittest.skipUnless(IS_X86 and IS_LINUX, "cpp contexts are linux only")
+        @unittest.skipUnless(
+            (IS_X86 or IS_ARM64) and IS_LINUX, "cpp contexts are linux x86/aarch64 only"
+        )
         @torch._inductor.config.patch("triton.cudagraph_trees_history_recording", True)
         @blas_library_context("cublas")
         def test_workspace_allocation_error(self):
@@ -2484,9 +2486,12 @@ if HAS_CUDA_AND_TRITON:
             with warnings.catch_warnings(record=True) as w:
                 out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
 
-            FileCheck().check(
-                "Unable to hit fast path of CUDAGraphs because of pending"
-            ).run(str(w[0]))
+            # Match substring only; scan all warnings in case another warning fires first.
+            msgs = [str(x.message) for x in w]
+            self.assertTrue(
+                any("require backward" in m for m in msgs),
+                f"expected CUDAGraph pending-backward warning; got: {msgs}",
+            )
             self.assertTrue(self.get_manager().new_graph_id().id == 0)
 
         def test_mark_step(self):
@@ -2646,6 +2651,25 @@ if HAS_CUDA_AND_TRITON:
 
             with self.assertRaisesRegex(Exception, "custom error msg"):
                 device = x.untyped_storage()
+
+        def test_clear_storage_data_ptr_access_error(self):
+            x = torch.rand([4], device="cuda")
+            storage = x.untyped_storage()
+            storage_ptr = storage.data_ptr()
+            storage_impl_ptr = storage._cdata
+
+            storage.resize_(0)
+
+            torch._C._set_storage_data_ptr_access_error_msg(
+                storage_impl_ptr, "storage is dead"
+            )
+            with self.assertRaisesRegex(Exception, "storage is dead"):
+                storage.data_ptr()
+
+            torch._C._clear_storage_data_ptr_access_error_msg(storage_impl_ptr)
+            storage.resize_(4 * x.element_size())
+            # Should not raise
+            storage.data_ptr()
 
         def test_side_stream_memory_allocation(self):
             device = f"cuda:{self.device_idx}"
