@@ -376,7 +376,6 @@ class FSDPParamGroup:
                 *self.comm_ctx.get_all_gather_streams(async_op, self._training_state),
                 self.device,
                 self._all_gather_comm,
-                self._label_suffix,
             )
 
     def wait_for_unshard(self):
@@ -613,7 +612,6 @@ class FSDPParamGroup:
                 self._partial_reduce_output,
                 self._all_reduce_hook,
                 self.force_sum_reduction_for_comms,
-                self._label_suffix,
             )
             self.comm_ctx.reduce_scatter_states.append(
                 ReduceScatterState(reduce_scatter_input, reduce_scatter_event)
@@ -839,17 +837,11 @@ class FSDPParamGroup:
             )
         return self.mesh_info.replicate_process_group
 
-    @property
-    def _label_suffix(self) -> str:
-        suffix = f"({self._module_fqn})" if self._module_fqn else ""
-        if self._num_param_groups > 1 and isinstance(self.mesh_info, FSDPMeshInfo):
-            suffix = f"{suffix} [pg={self.mesh_info.shard_mesh_size}]".lstrip()
-        return suffix
-
     def _with_fqn(self, label: str) -> str:
-        suffix = self._label_suffix
-        if suffix:
-            return f"{label} {suffix}"
+        if self._module_fqn:
+            label = f"{label} ({self._module_fqn})"
+        if self._num_param_groups > 1 and isinstance(self.mesh_info, FSDPMeshInfo):
+            label = f"{label} [pg={self.mesh_info.shard_mesh_size}]"
         return label
 
     def __repr__(self):
