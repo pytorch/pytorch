@@ -72,12 +72,9 @@ from torch.library import _scoped_library
 from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_cuda import (
-    IS_SM90,
-    PLATFORM_SUPPORTS_FLASH_ATTENTION,
-    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-    SM100OrLater,
     SM80OrLater,
     SM90OrLater,
+    SM100OrLater,
     TEST_CUDNN,
     tf32_on_and_off,
     with_tf32_off,
@@ -91,6 +88,10 @@ from torch.testing._internal.common_dtype import (
     all_types,
     get_all_dtypes,
     highest_precision_float,
+)
+from torch.testing._internal.common_gpu import (
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
 from torch.testing._internal.common_quantization import (
     _dynamically_quantize_per_channel,

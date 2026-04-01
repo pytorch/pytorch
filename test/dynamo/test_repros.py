@@ -62,16 +62,16 @@ from torch.nn.attention.flex_attention import (
     flex_attention,
 )
 from torch.profiler import profile, ProfilerActivity
-from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FLASH_ATTENTION,
-    PLATFORM_SUPPORTS_FP8,
-    SM70OrLater,
-)
+from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
     E4M3_MAX_POS,
     e4m3_type,
     instantiate_device_type_tests,
     onlyAccelerator,
+)
+from torch.testing._internal.common_gpu import (
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    PLATFORM_SUPPORTS_FP8,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,

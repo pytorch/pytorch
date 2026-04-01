@@ -26,7 +26,6 @@ from torch.nested._internal.nested_tensor import (
     ViewNestedFromBuffer,
 )
 from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FUSED_ATTENTION,
     SM70OrLater,
     SM80OrLater,
     tf32_on_and_off,
@@ -45,6 +44,7 @@ from torch.testing._internal.common_device_type import (
     skipMeta,
 )
 from torch.testing._internal.common_dtype import floating_types_and_half
+from torch.testing._internal.common_gpu import PLATFORM_SUPPORTS_FUSED_ATTENTION
 from torch.testing._internal.common_utils import (
     decorateIf,
     freeze_rng_state,

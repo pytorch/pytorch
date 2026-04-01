@@ -38,11 +38,7 @@ from torch.distributed.fsdp.wrap import (
 )
 from torch.nn.attention.flex_attention import flex_attention
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FLASH_ATTENTION,
-    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-    TEST_MULTIGPU,
-)
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     _dynamo_dist_per_rank_init,
@@ -51,6 +47,10 @@ from torch.testing._internal.common_distributed import (
     import_transformers_or_skip,
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
+)
+from torch.testing._internal.common_gpu import (
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
 from torch.testing._internal.common_utils import MI350_ARCH, skipIfRocmArch, skipIfXpu
 from torch.testing._internal.inductor_utils import HAS_GPU
