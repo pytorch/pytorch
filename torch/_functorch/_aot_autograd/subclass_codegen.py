@@ -178,6 +178,32 @@ def _codegen_wrap_subclass(
     return result_var
 
 
+def _emit_output_wrapping(
+    state: _CodegenState,
+    out_metas: list[PlainTensorMeta | SubclassCreationMeta],
+) -> tuple[list[str], int]:
+    """Emit wrapping code for output metas.
+
+    Returns (result_exprs, num_args_tallied) where result_exprs are Python
+    expression strings referencing each wrapped output.
+    """
+    out_idx_ref = [0]
+    result_exprs: list[str] = []
+    num_args_tallied = 0
+
+    for meta in out_metas:
+        if isinstance(meta, PlainTensorMeta):
+            result_exprs.append(f"unwrapped_outs[{meta.unwrapped_idx}]")
+            num_args_tallied += 1
+            out_idx_ref[0] = max(out_idx_ref[0], meta.unwrapped_idx + 1)
+        else:
+            result_var = _codegen_wrap_subclass(state, meta, out_idx_ref)
+            result_exprs.append(result_var)
+            num_args_tallied += meta.arg_count
+
+    return result_exprs, num_args_tallied
+
+
 def _codegen_subclass_wrapper_source(
     inp_metas: list[PlainTensorMeta | SubclassCreationMeta],
     out_metas: list[PlainTensorMeta | SubclassCreationMeta],
@@ -224,30 +250,78 @@ def _codegen_subclass_wrapper_source(
     state.emit("unwrapped_outs = compiled_fn(unwrapped_args)")
 
     # --- Output wrapping ---
-    state.emit("wrapped_outs = []")
-    out_idx_ref = [0]
-    num_args_tallied = 0
-
-    for meta in out_metas:
-        if isinstance(meta, PlainTensorMeta):
-            state.emit(f"wrapped_outs.append(unwrapped_outs[{meta.unwrapped_idx}])")
-            num_args_tallied += 1
-            out_idx_ref[0] = max(out_idx_ref[0], meta.unwrapped_idx + 1)
-        else:
-            result_var = _codegen_wrap_subclass(state, meta, out_idx_ref)
-            state.emit(f"wrapped_outs.append({result_var})")
-            num_args_tallied += meta.arg_count
-
-    # Append activations saved for backward
+    result_exprs, num_args_tallied = _emit_output_wrapping(state, out_metas)
+    result_tuple = f"({', '.join(result_exprs)},)" if result_exprs else "()"
     if num_fw_outs_saved_for_bw is not None:
         state.emit(
-            f"return tuple(wrapped_outs) + tuple(unwrapped_outs[{num_args_tallied}:])"
+            f"return {result_tuple} + tuple(unwrapped_outs[{num_args_tallied}:])"
         )
     else:
-        state.emit("return tuple(wrapped_outs)")
+        state.emit(f"return {result_tuple}")
 
     source = "\n".join(state.lines)
     return source, state.globals
+
+
+def _codegen_subclass_wrap_source(
+    out_metas: list[PlainTensorMeta | SubclassCreationMeta],
+) -> tuple[str, dict[str, object]]:
+    """Generate source for wrapping flat outputs into subclasses.
+
+    Used for the backward epilogue. Shares output-wrapping logic with
+    _codegen_subclass_wrapper_source via _emit_output_wrapping.
+    """
+    state = _CodegenState()
+    state.emit("def wrap_fn(unwrapped_outs):", indent=0)
+    result_exprs, _ = _emit_output_wrapping(state, out_metas)
+    result_tuple = f"({', '.join(result_exprs)},)" if result_exprs else "()"
+    state.emit(f"return {result_tuple}")
+    source = "\n".join(state.lines)
+    return source, state.globals
+
+
+def _compile_and_exec_source(
+    source: str,
+    globals_dict: dict[str, object],
+    fn_name: str,
+    artifact_name: str,
+    wrapped_fn: Callable[..., object] | None = None,
+) -> Callable[..., object]:
+    """Compile generated source, exec it, and return the named function.
+
+    If wrapped_fn is provided, applies functools.update_wrapper so that
+    __wrapped__ and __dict__ (e.g. _fx_graph_cache_key) propagate to the
+    generated function.
+    """
+    if log.isEnabledFor(logging.DEBUG):
+        log.debug("Generated %s:\n%s", artifact_name, source)
+
+    torch._logging.trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": artifact_name,
+            "encoding": "string",
+        },
+        payload_fn=lambda: source,
+    )
+
+    code = compile(source, f"<{artifact_name}>", "exec")
+    local_dict: dict[str, object] = {}
+    exec(code, globals_dict, local_dict)  # noqa: S102
+    fn = local_dict[fn_name]
+    if wrapped_fn is not None:
+        functools.update_wrapper(fn, wrapped_fn)  # type: ignore[arg-type]
+    return fn  # type: ignore[return-value]
+
+
+def codegen_backward_subclass_wrap(
+    out_metas: list[PlainTensorMeta | SubclassCreationMeta],
+) -> Callable[..., object]:
+    """Generate a specialized function for wrapping backward outputs into subclasses."""
+    source, globals_dict = _codegen_subclass_wrap_source(out_metas)
+    return _compile_and_exec_source(
+        source, globals_dict, "wrap_fn", "backward_subclass_wrapper"
+    )
 
 
 def codegen_subclass_wrapper(
@@ -265,25 +339,6 @@ def codegen_subclass_wrapper(
         frozen_inp_indices,
     )
     globals_dict["compiled_fn"] = compiled_fn
-
-    if log.isEnabledFor(logging.DEBUG):
-        log.debug("Generated subclass wrapper:\n%s", source)
-
-    torch._logging.trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "subclass_wrapper",
-            "encoding": "string",
-        },
-        payload_fn=lambda: source,
+    return _compile_and_exec_source(
+        source, globals_dict, "inner_fn", "subclass_wrapper", wrapped_fn=compiled_fn
     )
-
-    code = compile(source, "<subclass_wrapper>", "exec")
-    local_dict: dict[str, object] = {}
-    exec(code, globals_dict, local_dict)  # noqa: S102
-    inner_fn = local_dict["inner_fn"]
-    # Replicate @wraps(compiled_fn): sets __wrapped__ (so autograd_cache can
-    # unwrap to the underlying OutputCode) and copies __dict__ (so attributes
-    # like _fx_graph_cache_key are visible on the wrapper).
-    functools.update_wrapper(inner_fn, compiled_fn)  # type: ignore[arg-type]
-    return inner_fn  # type: ignore[return-value]

@@ -2225,6 +2225,7 @@ def _backward_epilogue_functional(
     *,
     ctx_opaque_objects: Sequence[Any] = (),
     make_subclass_override: Callable[..., Any] | None = None,
+    codegen_wrap_fn: Callable[..., Any] | None = None,
 ) -> tuple[Any, ...]:
     # Toss out the backward output tokens
     num_bw_tokens = metadata.num_backward_tokens
@@ -2258,6 +2259,8 @@ def _backward_epilogue_functional(
     if maybe_subclass_metadata is not None:
         if maybe_subclass_metadata.grad_input_metas is None:
             raise AssertionError("grad_input_metas must not be None")
+        if codegen_wrap_fn is not None and make_subclass_override is None:
+            return codegen_wrap_fn(out)
         outs_wrapped = wrap_tensor_subclasses(
             out,
             subclass_metas=maybe_subclass_metadata.grad_input_metas,
@@ -2776,6 +2779,17 @@ class _AOTDispatchAutogradFunctionFactory:
         aot_config = self.spec.aot_config
         fw_metadata = self.spec.fw_metadata
 
+        _codegen_bw_wrap_fn = None
+        if (
+            maybe_subclass_meta is not None
+            and maybe_subclass_meta.grad_input_metas is not None
+        ):
+            from .subclass_codegen import codegen_backward_subclass_wrap
+
+            _codegen_bw_wrap_fn = codegen_backward_subclass_wrap(
+                maybe_subclass_meta.grad_input_metas,
+            )
+
         class CompiledFunction(torch.autograd.Function):
             compiled_fw = compiled_fw_func
             compiled_bw = compiled_bw_func
@@ -2784,6 +2798,7 @@ class _AOTDispatchAutogradFunctionFactory:
             num_symints_saved_for_bw = num_symints_saved_for_bw_
             _aot_id = aot_config.aot_id
             _lazy_backward_info = lazy_backward_info
+            _bw_epilogue_wrap_fn = _codegen_bw_wrap_fn
 
             @staticmethod
             def _compiled_autograd_key(ctx: Any) -> tuple[Any, ...]:
@@ -2838,6 +2853,7 @@ class _AOTDispatchAutogradFunctionFactory:
                         CompiledFunction.metadata,
                         CompiledFunction.maybe_subclass_metadata,
                         out,
+                        codegen_wrap_fn=CompiledFunction._bw_epilogue_wrap_fn,
                     )
 
                 needs_grad = torch.is_grad_enabled() and any(
