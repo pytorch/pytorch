@@ -3912,6 +3912,13 @@ class TilingSelect:
     In the future, we can implement advanced heuristic in a subclass.
     """
 
+    def __init__(self):
+        self.op_counter: dict[str, int] = {}
+        # ops may cause overhead with vectorization, like non-contiguous
+        # index_expr, load, store
+        self.non_contig_indexing_op_counter: dict[str, int] = {}
+        self.mask_op_count: int = 0
+
     def select_tiling(
         self,
         fn_list,
@@ -3986,10 +3993,9 @@ class TilingSelect:
                     itervars[:reduction_depth],
                     itervars[reduction_depth:],
                 )
-                op_counter: dict[str, int] = {}
-                # ops may cause overhead with vectorization, like non-contiguous
-                # index_expr, load, store
-                non_contig_indexing_op_counter: dict[str, int] = {}
+                self.op_counter.clear()
+                self.non_contig_indexing_op_counter.clear()
+                self.mask_op_count = 0
                 for _body in loop_bodies:
                     sub_blocks = [_body.root_block] + list(_body.subblocks.values())
                     for sub_block in sub_blocks:
@@ -4010,21 +4016,24 @@ class TilingSelect:
                                         else stride not in [0, 1]
                                     ):
                                         _update_negative_op_count(
-                                            _node.target, non_contig_indexing_op_counter
+                                            _node.target, self.non_contig_indexing_op_counter
                                         )
-                            if isinstance(_node.target, str) and not (
-                                _node.target.startswith("masked_subblock")
-                                or _node.target
-                                in ["ops", "output", "constant", "get_index"]
-                            ):
-                                if _node.target not in op_counter:
-                                    op_counter[_node.target] = 1
-                                else:
-                                    op_counter[_node.target] += 1
+                            if isinstance(_node.target, str):
+                                if _node.target.startswith("masked_subblock") or _node.target in ("where", "masked"):
+                                    self.mask_op_count += 1
+                                if not (
+                                    _node.target.startswith("masked_subblock")
+                                    or _node.target
+                                    in ["ops", "output", "constant", "get_index"]
+                                ):
+                                    if _node.target not in self.op_counter:
+                                        self.op_counter[_node.target] = 1
+                                    else:
+                                        self.op_counter[_node.target] += 1
 
-                op_num = sum(op_counter.values())
+                op_num = sum(self.op_counter.values())
                 non_contig_indexing_op_num = sum(
-                    non_contig_indexing_op_counter.values()
+                    self.non_contig_indexing_op_counter.values()
                 )
                 ratio_threshold = 0.12
                 quantity_threshold = 35
@@ -4487,10 +4496,18 @@ class CppKernelProxy(CppKernel):
             def _tail_vec_worthwhile(tail_size, tiling_factor) -> bool:
                 # Tail vectorization has non-trivial mask/cast/blend overhead.
                 # Only vectorize tail when it is large enough to amortize overhead.
-                return V.graph.sizevars.guard_or_false(
-                    sympy.Gt(4 * V.graph.sizevars.optimization_hint(tail_size),
-                    tiling_factor)
-                )
+                op_num = sum(tiling_select.op_counter.values())
+                if op_num > 0 and (
+                    tiling_select.mask_op_count +
+                    sum(
+                        tiling_select.non_contig_indexing_op_counter.values()
+                    )
+                ) / op_num > 0.12:
+                    hint_tail_size = V.graph.sizevars.optimization_hint(tail_size)
+                    return V.graph.sizevars.guard_or_false(
+                        sympy.Gt(10 * hint_tail_size, 8 * tiling_factor)
+                    )
+                return True
 
             assert len(tiling_factors) == len(tiling_indices)
             _inner_loop_reduction_outer_not = False
@@ -4571,7 +4588,6 @@ class CppKernelProxy(CppKernel):
                 if (
                     config.cpp.enable_loop_tail_vec
                     and _tail_vec_worthwhile(inner_tail_size, tiling_factors[0])
-                    and _tail_vec_worthwhile(outer_tail_size, tiling_factors[0])
                 ):
                     for outer_r, inner_r in (
                         ("main", "tail"),
