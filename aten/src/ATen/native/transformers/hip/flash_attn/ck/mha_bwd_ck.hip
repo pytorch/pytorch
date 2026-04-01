@@ -127,7 +127,7 @@ aiter::mha_bwd_args get_ck_fmha_bwd_args(const mask_info &mask,
     return aiter::mha_bwd_args{
         // aiter args
         static_cast<int>(mask.type),
-        true,   // use_asm_v3
+        hdim <= 192,   // use_asm_v3: ASM v3 only supports head dim <= 192
         true,   // v3_atomic_fp32
         1,      // v3_bf16_cvt
         false,  // v3_api_check
