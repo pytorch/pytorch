@@ -225,9 +225,6 @@ jobs:
             ${GPU_FLAG:-} \
             ${DEVICE_FLAG:-} \
             ${ADDITIONAL_FLAGS:-} \
-            -e USE_CACHE \
-            -e SCCACHE_DISABLE \
-            -e SCCACHE_SERVER_PORT \
             -e BUILD_ENVIRONMENT \
             -e PR_NUMBER \
             -e GITHUB_ACTIONS \
