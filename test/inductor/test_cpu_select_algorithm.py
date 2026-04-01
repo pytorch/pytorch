@@ -60,10 +60,13 @@ def patches(fn):
         timings = benchmark(choices)
         for choice, timing in timings.items():
             if isinstance(choice, select_algorithm.ExternKernelCaller):
-                # we intentionally make ATEN kernel slower to cover the cases
+                # We intentionally make ATEN kernel slower to cover the cases
                 # where template kernels are always chosen with fusions applied
-                # and correctness checks at runtime.
-                timings[choice] = timing * 1000
+                # and correctness checks at runtime. On k8s ARC runner pods,
+                # CPU contention from parallel tests can make cpp template
+                # benchmarks 2-3x slower than normal, so the multiplier needs
+                # to be large enough to still exceed those inflated times.
+                timings[choice] = timing * 1000000
         return timings
 
     for patcher in [
