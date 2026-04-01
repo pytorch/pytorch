@@ -182,7 +182,7 @@ from .variables.misc import (
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.streams import SymbolicStreamState
-from .variables.tensor import supported_comparison_ops, SymNodeVariable
+from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
 from .variables.torch_function import (
     SymbolicTorchFunctionState,
     TorchFunctionModeVariable,
@@ -744,7 +744,9 @@ def generic_jump(
             # ConstDictVariable is optimized to be very lazy about insertion of
             # guards, so we have to manually insert a SEQUENCE_LENGTH guard
             # here.
-            if isinstance(value, ConstDictVariable) and value.source:
+            if isinstance(value, BaseListVariable):
+                value._install_list_length_guard()
+            elif isinstance(value, ConstDictVariable) and value.source:
                 install_guard(value.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
             if truth_fn(value.as_python_constant()):
                 if push:
@@ -778,11 +780,13 @@ def generic_jump(
                 if result.is_python_constant():
                     result_value = result.as_python_constant()
                     if method_name == "__bool__" and not isinstance(result_value, bool):
-                        msg = VariableTracker.build(
+                        exc.raise_observed_exception(
+                            TypeError,
                             self,
-                            f"__bool__ should return bool, returned {type(result_value).__name__}",
+                            args=[
+                                f"__bool__ should return bool, returned {type(result_value).__name__}"
+                            ],
                         )
-                        exc.raise_observed_exception(TypeError, self, args=[msg])
                     if isinstance(result_value, (bool, int)) and truth_fn(result_value):
                         if push:
                             self.push(value)
@@ -1084,7 +1088,8 @@ class ExceptionStack:
         if len(self._exc_stack) + prev_idx > 0:
             prev = self._exc_stack[prev_idx]
             self._set_context_recursive(prev, prev_idx - 1)
-            val.set_context(prev)  # type: ignore[union-attr, arg-type]
+            if prev is not val:
+                val.set_context(prev)  # type: ignore[union-attr, arg-type]
         return val
 
     def _break_context_reference_cycle(self, val: ExceptionVals) -> None:
@@ -1833,7 +1838,53 @@ class InstructionTranslatorBase(
             self.is_tracing_resume_prologue = val
 
     def DELETE_FAST(self, inst: Instruction) -> None:
+        var = self.symbolic_locals.get(inst.argval)
+        if isinstance(var, TensorVariable):
+            self._maybe_emit_sync_dealloc(var)
         del self.symbolic_locals[inst.argval]
+
+    def _maybe_emit_sync_dealloc(self, var: TensorVariable) -> None:
+        from .variables.streams import get_current_stream, new_event
+
+        device = var.device
+        if device is None or device.type not in ("cuda", "xpu"):
+            return
+
+        node = var.proxy.node
+        alloc_stream = node.meta.get("custom", {}).get("stream", None)
+
+        users = set(node.users.keys())
+        if not users:
+            return
+        last_user = None
+        for n in self.output.graph.nodes:
+            if n in users:
+                last_user = n
+        if last_user is None or last_user.op == "output":
+            return
+
+        last_use_stream = last_user.meta.get("custom", {}).get("stream", None)
+        if alloc_stream == last_use_stream:
+            return
+
+        if alloc_stream is None:
+            alloc_stream = get_current_stream(device)
+        if last_use_stream is None:
+            last_use_stream = get_current_stream(device)
+
+        event_idx = new_event()
+        self.output.create_proxy(
+            "call_function",
+            torch.ops.streams.record_event,
+            (event_idx, last_use_stream),
+            {},
+        )
+        self.output.create_proxy(
+            "call_function",
+            torch.ops.streams.sync_dealloc,
+            (event_idx, alloc_stream, var.as_proxy()),
+            {},
+        )
 
     def STORE_DEREF(self, inst: Instruction) -> None:  # type: ignore[override]
         assert inst.argval in self.cell_and_freevars()
@@ -2209,18 +2260,16 @@ class InstructionTranslatorBase(
             TypeError,
             self,
             args=[
-                VariableTracker.build(
-                    self,
-                    f"exceptions must derive from BaseException, not {val.python_type_name()}",
-                )
+                f"exceptions must derive from BaseException, not {val.python_type_name()}",
             ],
         )
 
     def RAISE_VARARGS(self, inst: Instruction) -> None:
         if inst.arg == 0:
             if not len(self.exn_vt_stack):
-                msg = VariableTracker.build(self, "No active exception to reraise")
-                exc.raise_observed_exception(RuntimeError, self, args=[msg])
+                exc.raise_observed_exception(
+                    RuntimeError, self, args=["No active exception to reraise"]
+                )
 
             # re-raise the previous exception. Here CPython refers to the exception
             # on top of the exception stack
@@ -2770,6 +2819,12 @@ class InstructionTranslatorBase(
 
     def DELETE_ATTR(self, inst: Instruction) -> None:
         obj = self.pop()
+        try:
+            attr_var = obj.var_getattr(self, inst.argval)  # type: ignore[arg-type]
+            if isinstance(attr_var, TensorVariable):
+                self._maybe_emit_sync_dealloc(attr_var)
+        except Exception:
+            pass
         VariableTracker.build(self, delattr).call_function(
             self,  # type: ignore[arg-type]
             [obj, VariableTracker.build(self, inst.argval)],
@@ -3324,6 +3379,12 @@ class InstructionTranslatorBase(
 
     def DELETE_SUBSCR(self, inst: Instruction) -> None:
         obj, key = self.popn(2)
+        try:
+            item_var = obj.call_method(self, "__getitem__", [key], {})
+            if isinstance(item_var, TensorVariable):
+                self._maybe_emit_sync_dealloc(item_var)
+        except Exception:
+            pass
         obj.call_method(self, "__delitem__", [key], {})
 
     def BUILD_TUPLE(self, inst: Instruction) -> None:

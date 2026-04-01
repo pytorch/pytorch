@@ -11,26 +11,13 @@ install_ubuntu() {
   #   "$UBUNTU_VERSION" == "18.04"
   if [[ "$UBUNTU_VERSION" == "20.04"* ]]; then
     cmake3="cmake=3.16*"
-    maybe_libiomp_dev=""
   elif [[ "$UBUNTU_VERSION" == "22.04"* ]]; then
     cmake3="cmake=3.22*"
-    maybe_libiomp_dev=""
   elif [[ "$UBUNTU_VERSION" == "24.04"* ]]; then
     cmake3="cmake=3.28*"
-    maybe_libiomp_dev=""
   else
-    cmake3="cmake=3.5*"
-    maybe_libiomp_dev="libiomp-dev"
-  fi
-
-  if [[ "$CLANG_VERSION" == 15 ]]; then
-    maybe_libomp_dev="libomp-15-dev"
-  elif [[ "$CLANG_VERSION" == 12 ]]; then
-    maybe_libomp_dev="libomp-12-dev"
-  elif [[ "$CLANG_VERSION" == 10 ]]; then
-    maybe_libomp_dev="libomp-10-dev"
-  else
-    maybe_libomp_dev=""
+    echo "Unknown Ubuntu version $UBUNTU_VERSION"
+    exit 1
   fi
 
   # Install common dependencies
@@ -53,14 +40,13 @@ install_ubuntu() {
     git \
     libatlas-base-dev \
     libc6-dbg \
-    ${maybe_libiomp_dev} \
     libyaml-dev \
     libz-dev \
     libjemalloc2 \
+    libgl1 \
     libjpeg-dev \
     libasound2-dev \
     libsndfile-dev \
-    ${maybe_libomp_dev} \
     software-properties-common \
     wget \
     sudo \
