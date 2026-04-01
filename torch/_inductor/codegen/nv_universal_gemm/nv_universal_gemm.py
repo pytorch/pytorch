@@ -371,13 +371,17 @@ def _add_nv_gemm_choices_impl(
     if variant == GemmVariant.GROUPED_GEMM:
         a_tensor, b_tensor, offs_tensor = dummy_tensors
         assert b_tensor is not None
-        args = cutlass_api.arguments.GroupedGemmArguments(
-            a_tensor,
-            b_tensor,
-            out_tensor,
-            accumulator_type=accumulator_type,
-            offsets=offs_tensor,
-        )
+        try:
+            args = cutlass_api.arguments.GroupedGemmArguments(
+                a_tensor,
+                b_tensor,
+                out_tensor,
+                accumulator_type=accumulator_type,
+                offsets=offs_tensor,
+            )
+        except Exception:
+            log.debug("GroupedGemmArguments creation failed", exc_info=True)
+            return
     elif variant == GemmVariant.SCALED_GEMM:
         from cutlass_api.arguments import ScaledTensor
 
