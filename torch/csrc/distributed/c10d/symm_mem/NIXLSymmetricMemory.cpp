@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <map>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -23,6 +24,9 @@ static std::mutex g_agent_mutex;
 static std::unique_ptr<nixlAgent> g_agent;
 static nixlBackendH* g_ucx_backend = nullptr;
 static std::string g_agent_name;
+// Maps peer PID (from agent name) to NIXL agent name. Used to
+// invalidate stale remote metadata before reloading.
+static std::map<int, std::string> g_peer_agent_names_by_rank;
 
 nixlAgent& ensure_nixl_agent() {
   std::lock_guard<std::mutex> lock(g_agent_mutex);
@@ -139,8 +143,19 @@ class NIXLPeerAllocInfo : public c10::intrusive_ptr_target {
       TORCH_CHECK(agent.registerMem(r) == NIXL_SUCCESS, "NIXL registerMem failed");
       a->registered = true;
     }
+    // Serialize only this buffer's descriptor with connection info.
+    // We always include conn info because we invalidate stale remote
+    // metadata before reloading (see below).
     nixl_blob_t local_md;
-    TORCH_CHECK(agent.getLocalMD(local_md) == NIXL_SUCCESS);
+    nixl_reg_dlist_t buf_desc(VRAM_SEG);
+    buf_desc.addDesc(nixlBlobDesc(
+        reinterpret_cast<uintptr_t>(a->ptr), a->block_size,
+        uint64_t(device_idx_), ""));
+    nixl_opt_args_t opts;
+    opts.includeConnInfo = true;
+    TORCH_CHECK(
+        agent.getLocalPartialMD(buf_desc, local_md, &opts) == NIXL_SUCCESS,
+        "NIXL getLocalPartialMD failed");
     auto mds = all_gather_nixl_metadata(store, rank_, world_size_, gn, local_md);
     NIXLRendezvousInfo li{reinterpret_cast<uintptr_t>(a->ptr),
         reinterpret_cast<uintptr_t>(a->signal_pad_ptr()), a->buffer_size, a->device_idx};
@@ -151,7 +166,31 @@ class NIXLPeerAllocInfo : public c10::intrusive_ptr_target {
         buffers_.push_back(a->ptr); signal_pads_.push_back(a->signal_pad_ptr());
         peer_agent_names_.push_back(nixl_agent_name()); continue;
       }
-      std::string rn; TORCH_CHECK(agent.loadRemoteMD(mds[r], rn) == NIXL_SUCCESS);
+      // Try loading remote metadata. If it fails (stale descriptors
+      // or connection from a prior rendezvous), invalidate that
+      // agent's cached state and retry with fresh metadata.
+      std::string rn;
+      auto md_st = agent.loadRemoteMD(mds[r], rn);
+      if (md_st != NIXL_SUCCESS) {
+        std::lock_guard<std::mutex> lk(g_agent_mutex);
+        auto it = g_peer_agent_names_by_rank.find(r);
+        if (it != g_peer_agent_names_by_rank.end()) {
+          agent.invalidateRemoteMD(it->second);
+          g_peer_agent_names_by_rank.erase(it);
+        }
+        md_st = agent.loadRemoteMD(mds[r], rn);
+      }
+      TORCH_CHECK(md_st == NIXL_SUCCESS,
+          "NIXL loadRemoteMD failed for rank ", r,
+          ", status=", static_cast<int>(md_st));
+      // Proactively establish UCX connection so that later transfers
+      // don't need to do the handshake inline (which requires both
+      // sides to progress UCX simultaneously).
+      agent.makeConnection(rn);
+      {
+        std::lock_guard<std::mutex> lk(g_agent_mutex);
+        g_peer_agent_names_by_rank[r] = rn;
+      }
       peer_agent_names_.push_back(rn);
       buffers_.push_back(nullptr); signal_pads_.push_back(nullptr);
     }
