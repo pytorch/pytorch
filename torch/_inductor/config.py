@@ -2488,6 +2488,8 @@ _cache_config_ignore_prefix: list[str] = [
     "pre_grad_custom_pass",
     "_fuse_ddp_communication_passes",
     "_pre_fusion_custom_pass",
+    # callable hook, not a serializable config value
+    "inductor_choices_class",
     # tests assume that changes here don't invalidate cache
     "always_complex_memory_overlap_TESTING_ONLY",
     # timing affects cache structure, not cache content
