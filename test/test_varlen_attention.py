@@ -627,7 +627,7 @@ class TestVarlenAttention(NNTestCase):
     )
     @parametrize(
         "backend",
-        ["fa2"] + (["fa3"] if IS_SM90 else []) + (["fa4"] if SM100OrLater else []),
+        _varlen_backends(include_fa4_paged_kv=False),
     )
     def test_batch_invariance(
         self, device, dtype, num_splits, window_size, backend, sdpa_backend=None
