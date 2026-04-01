@@ -44,6 +44,27 @@ REGISTER_BINARY_ALPHA_OP(shrink_backward, float, float, float);
 REGISTER_BINARY_ALPHA_OP(shrink_backward, half, half, half);
 REGISTER_BINARY_ALPHA_OP(shrink_backward, bfloat, bfloat, bfloat);
 
+struct relu_functor {
+  template <typename T>
+  inline T operator()(const T x) {
+    return x > T(0) ? x : T(0);
+  }
+};
+
+REGISTER_UNARY_OP(relu, float, float);
+REGISTER_UNARY_OP(relu, half, half);
+REGISTER_UNARY_OP(relu, bfloat, bfloat);
+REGISTER_UNARY_OP(relu, long, long);
+REGISTER_UNARY_OP(relu, int, int);
+REGISTER_UNARY_OP(relu, short, short);
+REGISTER_UNARY_OP(relu, char, char);
+REGISTER_UNARY_OP(relu, uchar, uchar);
+REGISTER_UNARY_OP(relu, bool, bool);
+
+REGISTER_UNARY_VEC4_OP(relu, float, float);
+REGISTER_UNARY_VEC4_OP(relu, half, half);
+REGISTER_UNARY_VEC4_OP(relu, bfloat, bfloat);
+
 struct hardsigmoid_functor {
   template <typename T>
   inline T operator()(const T x) {

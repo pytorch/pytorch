@@ -4,6 +4,12 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Activation.h>
 #include <ATen/native/mps/OperationUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/relu_native.h>
+#endif
 #include <ATen/native/mps/kernels/Activation.h>
 #include <fmt/format.h>
 
@@ -14,6 +20,25 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #else
 #include <ATen/native/mps/ActivationKernel_metallib.h>
 #endif
+
+Tensor relu_mps(const Tensor& self) {
+  TORCH_CHECK(!self.is_complex(), "relu is not supported for complex types");
+  auto output = at::empty_like(self);
+  if (output.numel() == 0)
+    return output;
+  auto iter = at::TensorIteratorConfig().add_output(output).add_input(self).build();
+  lib.exec_unary_kernel(iter, "relu", /*alpha=*/std::nullopt, /*scalar_arg_type=*/std::nullopt, /*supports_vec4=*/true);
+  return output;
+}
+
+Tensor& relu_mps_(Tensor& self) {
+  TORCH_CHECK(!self.is_complex(), "relu is not supported for complex types");
+  if (self.numel() == 0)
+    return self;
+  auto iter = at::TensorIteratorConfig().add_output(self).add_input(self).set_check_mem_overlap(false).build();
+  lib.exec_unary_kernel(iter, "relu", /*alpha=*/std::nullopt, /*scalar_arg_type=*/std::nullopt, /*supports_vec4=*/true);
+  return self;
+}
 
 static void hardshrink_kernel(TensorIteratorBase& iter, const Scalar& lambda = 0.5) {
   lib.exec_unary_kernel(iter, "hardshrink", lambda);
