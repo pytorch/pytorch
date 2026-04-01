@@ -4,6 +4,7 @@
 
 import math
 from collections.abc import MutableMapping
+from itertools import repeat
 
 import torch
 from torch import Tensor
@@ -19,17 +20,34 @@ from .optimizer import (
 
 __all__ = ["Muon"]
 
+EPS = 1e-7
+DEFAULT_NS_STEPS = 5
+
 # Constants from Keller Jordan's Muon post: https://kellerjordan.github.io/posts/muon/
 # github permlink: https://github.com/KellerJordan/Muon/blob/f90a42b28e00b8d9d2d05865fe90d9f39abcbcbd/muon.py#L16
-EPS = 1e-7
-DEFAULT_A = 3.4445
-DEFAULT_B = -4.7750
-DEFAULT_C = 2.0315
-DEFAULT_NS_STEPS = 5
+JORDAN_COEFFICIENTS = (3.4445, -4.7750, 2.0315)
+# constants from https://arxiv.org/abs/2505.16932 and https://arxiv.org/abs/2506.10935 (same coefficients by two independent teams)
+# code to compute coefficients can be found in https://github.com/NoahAmsel/PolarExpress/blob/main/polar_express.py#L74
+PE_COEFFICIENTS = (
+    (8.237312, -23.157747, 16.680568),
+    (4.082442, -2.893048, 0.525285),
+    (3.926348, -2.854747, 0.531802),
+    (3.298219, -2.424542, 0.486320),
+    (2.297037, -1.636626, 0.400263),
+    (1.876381, -1.234790, 0.358919),
+    (1.856442, -1.213245, 0.356800),
+    (1.856435, -1.213237, 0.356799),
+    (1.856431, -1.213229, 0.356795),
+    (1.874995, -1.249991, 0.374995),
+)
+
+
+# A single (a, b, c) tuple or a sequence of per-step (a, b, c) tuples.
+NSCoefficients = tuple[float, float, float] | tuple[tuple[float, float, float], ...]
 
 
 def _zeropower_via_newtonschulz(
-    grad: Tensor, ns_coefficients: tuple[float, float, float], ns_steps: int, eps: float
+    grad: Tensor, ns_coefficients: NSCoefficients, ns_steps: int, eps: float
 ) -> Tensor:
     """
     Newton-Schulz iteration to compute the zeroth power / orthogonalization of G. We opt to use a
@@ -49,16 +67,16 @@ def _zeropower_via_newtonschulz(
         )
     if len(grad.shape) != 2:
         raise ValueError("Input tensor gradient must be a 2D matrix")
-    if len(ns_coefficients) != 3:
-        raise ValueError("Coefficients must be a tuple of exactly 3 values")
-    a, b, c = ns_coefficients
+    # Normalize a single (a, b, c) tuple into a tuple of tuples.
+    if ns_coefficients and not isinstance(ns_coefficients[0], tuple):
+        ns_coefficients = (ns_coefficients,)  # type: ignore[assignment]
     ortho_grad = grad.bfloat16()
     if grad.size(0) > grad.size(1):
         ortho_grad = ortho_grad.T
     # Ensure spectral norm is at most 1
     ortho_grad.div_(ortho_grad.norm().clamp(min=eps))
     # Perform the NS iterations
-    for _ in range(ns_steps):
+    for a, b, c in ns_coefficients[:ns_steps] + list(repeat(ns_coefficients[-1], ns_steps - len(ns_coefficients))):
         gram_matrix = ortho_grad @ ortho_grad.T
         gram_update = torch.addmm(
             gram_matrix, gram_matrix, gram_matrix, beta=b, alpha=c
@@ -94,7 +112,7 @@ class Muon(Optimizer):
         weight_decay: float = 0.1,
         momentum: float = 0.95,
         nesterov: bool = True,
-        ns_coefficients: tuple[float, float, float] = (DEFAULT_A, DEFAULT_B, DEFAULT_C),
+        ns_coefficients: NSCoefficients = PE_COEFFICIENTS,
         eps: float = EPS,
         ns_steps: int = DEFAULT_NS_STEPS,
         adjust_lr_fn: str | None = None,
@@ -324,7 +342,7 @@ def _single_tensor_muon(
     weight_decay: float,
     momentum: float,
     nesterov: bool,
-    ns_coefficients: tuple[float, float, float],
+    ns_coefficients: NSCoefficients,
     ns_steps: int,
     eps: float,
     adjust_lr_fn: str | None,
@@ -362,7 +380,7 @@ def muon(
     weight_decay: float,
     momentum: float,
     nesterov: bool,
-    ns_coefficients: tuple[float, float, float],
+    ns_coefficients: NSCoefficients,
     ns_steps: int,
     eps: float,
     adjust_lr_fn: str | None,
