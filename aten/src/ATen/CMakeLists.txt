@@ -54,6 +54,7 @@ set_bool(CAFFE2_STATIC_LINK_CUDA_INT CAFFE2_STATIC_LINK_CUDA)
 set_bool(AT_CUDNN_ENABLED CAFFE2_USE_CUDNN)
 set_bool(AT_CUSPARSELT_ENABLED CAFFE2_USE_CUSPARSELT)
 set_bool(AT_HIPSPARSELT_ENABLED CAFFE2_USE_HIPSPARSELT)
+set_bool(AT_HIPDNN_ENABLED USE_HIPDNN)
 
 configure_file(Config.h.in "${CMAKE_CURRENT_SOURCE_DIR}/Config.h")
 # TODO: Do not generate CUDAConfig.h for ROCm BUILDS
@@ -102,6 +103,8 @@ file(GLOB hip_nvrtc_stub_h "hip/nvrtc_stub/*.h")
 file(GLOB hip_nvrtc_stub_cpp "hip/nvrtc_stub/*.cpp")
 file(GLOB miopen_h "miopen/*.h")
 file(GLOB miopen_cpp "miopen/*.cpp")
+file(GLOB hipdnn_h "hipdnn/*.h")
+file(GLOB hipdnn_cpp "hipdnn/*.cpp")
 
 file(GLOB mkl_cpp "mkl/*.cpp")
 file(GLOB mkldnn_cpp "mkldnn/*.cpp")
@@ -179,6 +182,7 @@ file(GLOB native_hip_hip "native/hip/*.hip" "native/hip/bgemm_kernels/*.hip")
 file(GLOB native_hip_cpp "native/hip/*.cpp")
 file(GLOB native_hip_linalg_cpp "native/hip/linalg/*.cpp")
 file(GLOB native_miopen_cpp "native/miopen/*.cpp")
+file(GLOB native_hipdnn_cpp "native/hipdnn/*.cpp")
 file(GLOB native_cudnn_hip_cpp "native/cudnn/hip/*.cpp")
 file(GLOB native_nested_hip_hip "native/nested/hip/*.hip")
 file(GLOB native_nested_hip_cpp "native/nested/hip/*.cpp")
@@ -568,6 +572,7 @@ if(USE_CUDA)
     ${native_cuda_cpp}
     ${native_cudnn_cpp}
     ${native_miopen_cpp}
+    ${native_hipdnn_cpp}
     ${native_nested_cuda_cpp}
     ${native_quantized_cuda_cpp}
     ${native_quantized_cudnn_cpp}
@@ -647,10 +652,14 @@ if(USE_ROCM)
     ${cuda_generated_sources}
     ${ATen_HIP_SRCS}
     ${native_miopen_cpp}
+    ${native_hipdnn_cpp}
     ${native_cudnn_hip_cpp}
     ${miopen_cpp}
     ${all_hip_cpp}
   )
+  if(USE_HIPDNN)
+    list(APPEND all_hip_cpp ${hipdnn_cpp})
+  endif()
 endif()
 
 if(USE_XPU)
@@ -926,6 +935,9 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
 set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS} ${native_nested_h} ${ATen_TRANSFORMER_HEADERS})
 if(NOT INTERN_BUILD_MOBILE)
   list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_ao_sparse_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${native_mtia_h} ${cudnn_h} ${hip_h} ${mtia_h} ${xpu_h} ${mps_h} ${native_kleidiai_h} ${native_mps_h} ${native_utils_h} ${miopen_h} ${mkldnn_xpu_h})
+  if(USE_HIPDNN)
+    list(APPEND INSTALL_HEADERS ${hipdnn_h})
+  endif()
   # Metal
   if(USE_PYTORCH_METAL_EXPORT)
     # Add files needed from exporting metal models(optimized_for_mobile)
