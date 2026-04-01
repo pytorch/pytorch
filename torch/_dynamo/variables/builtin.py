@@ -1679,6 +1679,12 @@ class BuiltinVariable(BaseBuiltinVariable):
             try:
                 return VariableTracker.build(tx, repr(arg.as_python_constant()))
             except NotImplementedError:
+                if isinstance(arg, (ListVariable, TupleVariable)):
+                    try:
+                        value = self._materialize_format_value(tx, arg)
+                        return VariableTracker.build(tx, repr(value))
+                    except NotImplementedError:
+                        pass
                 if isinstance(
                     arg,
                     (
@@ -1692,6 +1698,23 @@ class BuiltinVariable(BaseBuiltinVariable):
                     return VariableTracker.build(tx, arg.debug_repr())
                 return None
         return None
+
+    def _materialize_format_value(
+        self, tx: "InstructionTranslator", arg: VariableTracker
+    ) -> Any:
+        arg = arg.realize()
+
+        if arg.is_python_constant():
+            return arg.as_python_constant()
+        if isinstance(arg, SymNodeVariable):
+            return arg.evaluate_expr(tx.output)
+        if isinstance(arg, UnspecializedPythonVariable):
+            return arg.raw_value
+        if isinstance(arg, ListVariable):
+            return [self._materialize_format_value(tx, item) for item in arg.items]
+        if isinstance(arg, TupleVariable):
+            return tuple(self._materialize_format_value(tx, item) for item in arg.items)
+        raise NotImplementedError
 
     def call_str(
         self, tx: "InstructionTranslator", arg: VariableTracker
@@ -1716,6 +1739,12 @@ class BuiltinVariable(BaseBuiltinVariable):
             try:
                 return VariableTracker.build(tx, str(arg.as_python_constant()))
             except NotImplementedError:
+                if isinstance(arg, (ListVariable, TupleVariable)):
+                    try:
+                        value = self._materialize_format_value(tx, arg)
+                        return VariableTracker.build(tx, str(value))
+                    except NotImplementedError:
+                        pass
                 return None
         elif isinstance(arg, (variables.UserDefinedObjectVariable)):
             # Check if object has __str__ method
