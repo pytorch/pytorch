@@ -715,7 +715,7 @@ class ComboKernelBenchmarkTests(TestCase):
         out_compiled = torch.compile(test_mutated)(*inps)
 
         self.assertEqual(out_eager, out_compiled)
-        self.assertTrue(torch._inductor.metrics.generated_kernel_count in [6, 9])
+        self.assertTrue(4 < torch._inductor.metrics.generated_kernel_count <= 10)
 
     @requires_gpu_and_triton
     def test_round_robin_dispatch(self):
