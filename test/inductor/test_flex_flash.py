@@ -25,6 +25,7 @@ from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_cuda import (
     IS_SM90,
     PLATFORM_SUPPORTS_FP8,
+    SM120OrLater,
     xfailIfSM90,
 )
 from torch.testing._internal.common_device_type import (
@@ -802,6 +803,11 @@ GQA_MQA_BLOCK_MASK_CASES = [
     not ensure_flash_available(), "Flash attention (CUTE) library is not available"
 )
 class TestFlexFlash(InductorTestCase):
+    # `FlashAttentionForwardSm120` does not have `apply_score_mod`.
+    @decorateIf(
+        unittest.expectedFailure,
+        lambda params: SM120OrLater,
+    )
     @decorateIf(
         unittest.expectedFailure,
         lambda params: params["case"].requires_grad and IS_SM90,
@@ -841,15 +847,32 @@ class TestFlexFlash(InductorTestCase):
             device=device,
             requires_grad=case.requires_grad,
         )
-        with DeterministicGuard(True):
-            flash_vs_triton(
-                q,
-                k,
-                v,
-                score_mod=case.score_mod_factory(dtype, device)
-                if case.score_mod_factory
-                else None,
+        if SM120OrLater:
+            cls, pattern = (
+                AttributeError,
+                r"'FlashAttentionForwardSm120' object has no attribute 'apply_score_mod'",
             )
+            if "gqa_basic" in case.name or "mqa_basic" in case.name:
+                cls, pattern = ValueError, "Operation creation failed"
+            with self.assertRaisesRegex(cls, pattern), DeterministicGuard(True):
+                flash_vs_triton(
+                    q,
+                    k,
+                    v,
+                    score_mod=case.score_mod_factory(dtype, device)
+                    if case.score_mod_factory
+                    else None,
+                )
+        else:
+            with DeterministicGuard(True):
+                flash_vs_triton(
+                    q,
+                    k,
+                    v,
+                    score_mod=case.score_mod_factory(dtype, device)
+                    if case.score_mod_factory
+                    else None,
+                )
 
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", MASK_MOD_CASES, name_fn=mask_case_name)
@@ -1257,6 +1280,11 @@ class TestFlexFlash(InductorTestCase):
                 kernel_options={"BACKEND": "FLASH"},
             )
 
+    # 'FlashAttentionForwardSm120' object has no attribute 'apply_score_mod'
+    @decorateIf(
+        unittest.expectedFailure,
+        lambda params: SM120OrLater,
+    )
     @decorateIf(
         unittest.expectedFailure,
         lambda params: IS_SM90,
@@ -1367,6 +1395,11 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         """Test backward with dynamic sequence lengths."""
         self._run_dynamic_test(seq_lens=[128, 256, 512], requires_grad=True)
 
+    # 'FlashAttentionForwardSm120' object has no attribute 'apply_score_mod'
+    @decorateIf(
+        unittest.expectedFailure,
+        lambda params: SM120OrLater,
+    )
     @xfailIfSM90
     def test_dynamic_backward_with_score_mod(self):
         """Test backward with score_mod and dynamic sequence lengths."""
@@ -1727,6 +1760,11 @@ class TestHierarchicalIndex(InductorTestCase):
             indexer([b])
         self.assertIn("Rank mismatch", str(ctx.exception))
 
+    # 'FlashAttentionForwardSm120' object has no attribute 'apply_score_mod'
+    @decorateIf(
+        unittest.expectedFailure,
+        lambda params: SM120OrLater,
+    )
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @unittest.skipIf(
         not ensure_flash_available(), "Flash attention (CUTE) library not available"
@@ -1770,6 +1808,11 @@ class TestHierarchicalIndex(InductorTestCase):
             f"Expected '{expected_pattern}' in generated code.\nExcerpt:\n{code_str[:2000]}",
         )
 
+    # 'FlashAttentionForwardSm120' object has no attribute 'apply_score_mod'
+    @decorateIf(
+        unittest.expectedFailure,
+        lambda params: SM120OrLater,
+    )
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @unittest.skipIf(
         not ensure_flash_available(), "Flash attention (CUTE) library not available"
