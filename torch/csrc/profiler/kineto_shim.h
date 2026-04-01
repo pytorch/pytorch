@@ -12,7 +12,14 @@
 #undef USE_KINETO
 #endif
 
+#ifdef USE_KINETO
 #include <ActivityType.h>
+#else
+// Minimal stub so non-Kineto builds can compile types that hold ActivityType.
+namespace libkineto {
+enum class ActivityType : uint8_t { NONE = 0 };
+} // namespace libkineto
+#endif
 
 #include <torch/csrc/Export.h>
 #include <torch/csrc/profiler/api.h>

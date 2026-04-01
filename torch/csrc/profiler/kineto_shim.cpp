@@ -138,6 +138,7 @@ TraceWrapper::TraceWrapper(const int64_t start_time, const std::string& name)
 }
 #endif // USE_KINETO
 
+#ifdef USE_KINETO
 activity_t* TraceWrapper::addCPUActivity(
     const std::string& name,
     const libkineto::ActivityType type,
@@ -145,7 +146,6 @@ activity_t* TraceWrapper::addCPUActivity(
     const uint64_t correlation_id,
     const int64_t start_time,
     const int64_t end_time) {
-#ifdef USE_KINETO
   TORCH_CHECK((bool)(*this), "Cannot add event to non-existent trace.");
   cpu_trace_->emplace_activity(cpu_trace_->span, type, name);
   auto& act = libkineto::CpuTraceBuffer::toRef(cpu_trace_->activities.back());
@@ -157,10 +157,18 @@ activity_t* TraceWrapper::addCPUActivity(
     act.endTime = end_time;
   }
   return cpu_trace_->activities.back().get();
-#else
-  return nullptr;
-#endif // USE_KINETO
 }
+#else
+activity_t* TraceWrapper::addCPUActivity(
+    const std::string& name,
+    const libkineto::ActivityType type,
+    const DeviceAndResource device_and_resource,
+    const uint64_t correlation_id,
+    const int64_t start_time,
+    const int64_t end_time) {
+  return nullptr;
+}
+#endif // USE_KINETO
 
 void TraceWrapper::transferCpuTrace(int64_t end_time) {
 #ifdef USE_KINETO
@@ -473,6 +481,7 @@ void logInvariantViolation(
 
 namespace autograd::profiler {
 c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
+#ifdef USE_KINETO
   // PrivateUse1 kineto backend reuse some ActivityTypes,
   // If PrivateUse1 backend is enabled, this should return
   // c10::DeviceType::PrivateUse1.
@@ -524,6 +533,9 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
       return c10::DeviceType::CPU;
     }
   }
+#else
+  return c10::DeviceType::CPU;
+#endif // USE_KINETO
 }
 
 void addMetadataJson(const std::string& key, const std::string& value) {
