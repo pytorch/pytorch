@@ -1,6 +1,8 @@
 #pragma once
 
 #include <ATen/Tensor.h>
+#include <ATen/core/GraphImplInterface.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <c10/core/Device.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
@@ -19,13 +21,10 @@
 typedef unsigned long long cudaGraphConditionalHandle;
 #endif // defined(USE_ROCM) || !(defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
 
-namespace at {
+namespace at::cuda {
 
-struct Generator;
-struct CUDAGeneratorImpl;
-struct CUDAGeneratorState;
-
-namespace cuda {
+// Forward declaration for CUDAGraph wrapper used by CUDAGraphImpl::owner_
+struct CUDAGraph;
 
 // Standalone way to get a unique mempool id usable as a pool=... argument
 // to CUDAGraph::capture_begin
@@ -41,29 +40,11 @@ TORCH_CUDA_CPP_API MempoolId_t graph_pool_handle();
 TORCH_CUDA_CPP_API bool is_graph_capture_active();
 #endif // defined(USE_ROCM)
 
-struct TORCH_CUDA_CPP_API CUDAGraph {
-  CUDAGraph(bool keep_graph=false);
-  ~CUDAGraph();
+struct TORCH_CUDA_CPP_API CUDAGraphImpl : public at::GraphImplInterface {
+  CUDAGraphImpl(const GraphImplArgs& args = {});
+  ~CUDAGraphImpl() override;
 
-  // Copy and move constructors and assignments are disabled. These
-  // were disabled because pybind11 believed that CUDAGraph was copy
-  // constructable because
-  // pybind11::is_copy_constructible<CUDAGraph>::value originally
-  // evaluated to true. However, it cannot generate a copy constructor
-  // because CUDAGeneratorState, one of CUDAGraph's members, is an
-  // incomplete type unless CUDAGeneratorImpl.h is included. However,
-  // that would create a circular dependency between
-  // CUDAGeneratorImpl.h and CUDAGraph.h. Disabling the copy and move
-  // constructors is the most straightforward way to prevent pybind11
-  // from trying to generate default implementations of them.
-  //
-  // We needed pybind11 to return a reference to a CUDAGraph as part
-  // of wrapping CUDAGraph::get_currently_capturing_graph, which
-  // unearthed the above problem.
-  CUDAGraph(const CUDAGraph&) = delete;
-  CUDAGraph& operator=(const CUDAGraph&) = delete;
-  CUDAGraph(CUDAGraph&& other) = delete;
-  CUDAGraph& operator=(CUDAGraph&& other) = delete;
+  C10_DISABLE_COPY_AND_ASSIGN(CUDAGraphImpl);
 
   // See Note [Explicit Registration of Generators to the CUDA Graph]
   void register_generator_state(c10::intrusive_ptr<at::CUDAGeneratorState> state);
@@ -71,22 +52,28 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   void capture_begin(
       MempoolId_t pool = {0, 0},
       cudaStreamCaptureMode capture_mode = cudaStreamCaptureModeGlobal);
-  void capture_end();
-  void instantiate();
-  void replay();
-  void reset();
-  MempoolId_t pool();
-  void enable_debug_mode();
-  void debug_dump(const std::string& debug_path);
+  void capture_begin(
+      MempoolId_t pool = {0, 0},
+      GraphCaptureMode capture_mode = GraphCaptureMode::Default) override;
+  void capture_end() override;
+  void instantiate() override;
+  void replay() override;
+  void reset() override;
+  MempoolId_t pool() const override;
+  void enable_debug_mode() override;
+  void debug_dump(const std::string& debug_path) override;
   cudaGraph_t raw_cuda_graph();
   cudaGraphExec_t raw_cuda_graph_exec();
 
-  static CUDAGraph* get_currently_capturing_graph();
+  static CUDAGraphImpl* get_currently_capturing_graph();
   void begin_capture_to_if_node(const Tensor& scalar_cuda_pred_tensor);
   void end_capture_to_conditional_node();
   static void set_conditional_handle(
       cudaGraphConditionalHandle handle,
       const Tensor& scalar_cuda_pred_tensor);
+
+  void set_owner(CUDAGraph* owner) { owner_ = owner; }
+  CUDAGraph* owner() const { return owner_; }
 
  private:
   template <typename StreamType>
@@ -145,6 +132,10 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   bool keep_graph_;
   cudaStreamCaptureMode capture_mode_{};
 
+  // Raw pointer to the CUDAGraph wrapper that owns this impl, if any.
+  // Set in CUDAGraph's constructor and used by CUDAGraph::get_currently_capturing_graph.
+  CUDAGraph* owner_{nullptr};
+
 #if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
   std::stack<at::cuda::CUDAStreamGuard> conditional_node_streams_;
   std::stack<CaptureId_t> conditional_graph_capture_ids_;
@@ -155,9 +146,106 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
 };
 
 template <>
-std::function<bool(cudaStream_t)> CUDAGraph::create_allocate_filter<cudaStream_t>() const;
+std::function<bool(cudaStream_t)> CUDAGraphImpl::create_allocate_filter<cudaStream_t>() const;
 template <>
-std::function<bool(c10::Stream)> CUDAGraph::create_allocate_filter<c10::Stream>() const;
+std::function<bool(c10::Stream)> CUDAGraphImpl::create_allocate_filter<c10::Stream>() const;
 
-} // namespace cuda
-} // namespace at
+struct TORCH_CUDA_CPP_API CUDAGraph {
+  CUDAGraph(bool keep_graph = false) {
+    GraphImplArgs args;
+    args.keep_graph = keep_graph;
+    impl_ = std::make_unique<CUDAGraphImpl>(args);
+    impl_->set_owner(this);
+  }
+  ~CUDAGraph() = default;
+
+  // Copy and move constructors and assignments are disabled. These
+  // were disabled because pybind11 believed that CUDAGraph was copy
+  // constructable because
+  // pybind11::is_copy_constructible<CUDAGraph>::value originally
+  // evaluated to true. However, it cannot generate a copy constructor
+  // because CUDAGeneratorState, one of CUDAGraph's members, is an
+  // incomplete type unless CUDAGeneratorImpl.h is included. However,
+  // that would create a circular dependency between
+  // CUDAGeneratorImpl.h and CUDAGraph.h. Disabling the copy and move
+  // constructors is the most straightforward way to prevent pybind11
+  // from trying to generate default implementations of them.
+  //
+  // We needed pybind11 to return a reference to a CUDAGraph as part
+  // of wrapping CUDAGraph::get_currently_capturing_graph, which
+  // unearthed the above problem.
+  C10_DISABLE_COPY_AND_ASSIGN(CUDAGraph);
+  CUDAGraph(CUDAGraph&& other) = delete;
+  CUDAGraph& operator=(CUDAGraph&& other) = delete;
+
+  // See Note [Explicit Registration of Generators to the CUDA Graph]
+  void register_generator_state(c10::intrusive_ptr<at::CUDAGeneratorState> state) {
+    impl_->register_generator_state(state);
+  }
+
+  void register_generator_state(const at::Generator& generator) {
+    impl_->register_generator_state(generator);
+  }
+
+  void capture_begin(
+      MempoolId_t pool = {0, 0},
+      cudaStreamCaptureMode capture_mode = cudaStreamCaptureModeGlobal) {
+    impl_->capture_begin(pool, capture_mode);
+  }
+
+  void capture_end() {
+    impl_->capture_end();
+  }
+
+  void instantiate() {
+    impl_->instantiate();
+  }
+
+  void replay() {
+    impl_->replay();
+  }
+
+  void reset() {
+    impl_->reset();
+  }
+
+  MempoolId_t pool() const {
+    return impl_->pool();
+  }
+
+  void enable_debug_mode() {
+    impl_->enable_debug_mode();
+  }
+
+  void debug_dump(const std::string& debug_path) {
+    impl_->debug_dump(debug_path);
+  }
+
+  cudaGraph_t raw_cuda_graph() {
+    return impl_->raw_cuda_graph();
+  }
+
+  cudaGraphExec_t raw_cuda_graph_exec(){
+    return impl_->raw_cuda_graph_exec();
+  }
+
+  static CUDAGraph* get_currently_capturing_graph() {
+    auto* impl = CUDAGraphImpl::get_currently_capturing_graph();
+    TORCH_CHECK(impl && impl->owner(),
+        "get_currently_capturing_graph() called outside of a CUDAGraph capture.");
+    return impl->owner();
+  }
+
+  void begin_capture_to_if_node(const Tensor& scalar_cuda_pred_tensor) {
+    impl_->begin_capture_to_if_node(scalar_cuda_pred_tensor);
+  }
+
+  void end_capture_to_conditional_node() {
+    impl_->end_capture_to_conditional_node();
+  }
+
+private:
+  std::unique_ptr<CUDAGraphImpl> impl_;
+};
+
+} // namespace at::cuda

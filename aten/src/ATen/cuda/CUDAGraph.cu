@@ -14,7 +14,7 @@ __global__ void set_conditional_handle_kernel(
 #endif
 }
 
-void CUDAGraph::set_conditional_handle(
+void CUDAGraphImpl::set_conditional_handle(
     cudaGraphConditionalHandle handle,
     const Tensor& scalar_cuda_pred_tensor) {
 #if !(defined(USE_ROCM)) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
