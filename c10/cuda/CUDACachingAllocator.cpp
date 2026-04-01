@@ -1012,6 +1012,14 @@ bool BlockComparatorAddress(const Block* a, const Block* b) {
   return (uintptr_t)a->ptr < (uintptr_t)b->ptr;
 }
 
+// Info about OOM rejection, used to defer observer callbacks outside of lock
+struct OomRejectionInfo {
+  bool rejected{false};
+  size_t alloc_size{0};
+  size_t total_allocated{0};
+  size_t device_total{0};
+};
+
 struct AllocParams {
   AllocParams(
       c10::DeviceIndex device,
@@ -1042,6 +1050,7 @@ struct AllocParams {
   Block* block{nullptr};
   StatTypes stat_types = {false};
   cudaError_t err{cudaSuccess};
+  OomRejectionInfo oom_rejection_info;
 };
 
 // Note: cudaEventCreate when concurrently invoked from multiple threads can be
@@ -1405,6 +1414,7 @@ class DeviceCachingAllocator {
 
   // XXX - maybe we should generalize and have multiple events
   std::vector<OutOfMemoryObserver> oom_observers_;
+  std::vector<OomRejectionObserver> oom_rejection_observers_;
 
   std::vector<AllocatorTraceTracker> trace_trackers_;
 
@@ -1513,6 +1523,10 @@ class DeviceCachingAllocator {
     oom_observers_.emplace_back(std::move(observer));
   }
 
+  void attachOomRejectionObserver(OomRejectionObserver observer) {
+    oom_rejection_observers_.emplace_back(std::move(observer));
+  }
+
   void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) {
     std::unique_lock<std::recursive_mutex> lock(mutex);
     trace_trackers_.emplace_back(std::move(tracker));
@@ -1593,25 +1607,71 @@ class DeviceCachingAllocator {
       // cudaMalloc. So far this function has not modified allocator state, but
       // keep in mind that any observed allocator state may change across calls
       // to alloc_block since it may release the lock.
-      block_found = alloc_block(params, false, context, lock)
-          // Try to use memory pools that have opted in as overflow before
-          // expensive memory freeing operations.
-          || try_mempool_fallback(
-                        params, size, stream, device_id, alloc_size, stats)
-          // Free enough available cached blocks to satisfy alloc and retry
-          // alloc.
-          || (release_available_cached_blocks(params, context) &&
-              alloc_block(params, false, context, lock))
-          // Free all non-split cached blocks and retry alloc.
-          || (C10_LIKELY(captures_underway.empty()) &&
-              release_cached_blocks(context, {0, 0}) &&
-              alloc_block(params, true, context, lock));
+      block_found = alloc_block(params, false, context, lock);
+
+      // If allocation was rejected by OOM policy, skip retry chain and fail
+      // immediately
+      if (!block_found && params.oom_rejection_info.rejected) {
+        // Skip retry chain - will be handled below in the !block_found path
+      } else if (!block_found) {
+        // Normal retry chain: try various strategies to free memory and retry
+        block_found =
+            // Try to use memory pools that have opted in as overflow before
+            // expensive memory freeing operations.
+            try_mempool_fallback(
+                params, size, stream, device_id, alloc_size, stats)
+            // Free enough available cached blocks to satisfy alloc and retry
+            // alloc.
+            || (release_available_cached_blocks(params, context) &&
+                alloc_block(params, false, context, lock))
+            // Free all non-split cached blocks and retry alloc.
+            || (C10_LIKELY(captures_underway.empty()) &&
+                release_cached_blocks(context, {0, 0}) &&
+                alloc_block(params, true, context, lock));
+      }
     }
 
     if (!block_found) {
       // For any error code other than cudaErrorMemoryAllocation,
       // alloc_block should have thrown an exception already.
       TORCH_INTERNAL_ASSERT(params.err == cudaErrorMemoryAllocation);
+
+      // Handle OOM rejection separately - return nullptr instead of throwing
+      // This allows callers to handle rejection gracefully without crashing
+      if (params.oom_rejection_info.rejected) {
+        if (!oom_rejection_observers_.empty()) {
+          auto observers_local = oom_rejection_observers_;
+          auto rejection_info = params.oom_rejection_info;
+          auto device = device_id;
+
+          // Release lock before dispatching observers
+          lock.unlock();
+
+          // Dispatch observers asynchronously to minimize latency impact on
+          // rejection path
+          std::thread([observers_local = std::move(observers_local),
+                       rejection_info,
+                       device]() {
+            try {
+              for (const auto& observer : observers_local) {
+                observer(
+                    device,
+                    rejection_info.alloc_size,
+                    rejection_info.total_allocated,
+                    rejection_info.device_total);
+              }
+            } catch (const std::exception& e) {
+              LOG(ERROR) << "Exception in OOM rejection observer: " << e.what();
+            } catch (...) {
+              LOG(ERROR) << "Unknown exception in OOM rejection observer";
+            }
+          }).detach();
+        } else {
+          lock.unlock();
+        }
+
+        return nullptr;
+      }
 
       size_t device_free = 0;
       size_t device_total = 0;
@@ -2312,6 +2372,7 @@ class DeviceCachingAllocator {
     stats.num_sync_all_streams = 0;
     stats.num_device_alloc = 0;
     stats.num_device_free = 0;
+    stats.num_oom_rejections = 0;
     stats.oversize_allocations.reset_accumulated();
     stats.oversize_segments.reset_accumulated();
   }
@@ -3470,8 +3531,37 @@ class DeviceCachingAllocator {
         total_allocated_memory + size > allowed_memory_maximum.value()) {
       p.err = cudaErrorMemoryAllocation;
       return false;
-      // Temporarily disable checkpointing & cudagraphs internally
-    } else if (
+    }
+
+    // When throw_on_cudamalloc_oom is enabled, check
+    // per_process_memory_fraction to reject allocations that would exceed the
+    // configured limit. This prevents fatal HSA/driver aborts by throwing
+    // OutOfMemoryError instead.
+    if (CUDAAllocatorConfig::throw_on_cudamalloc_oom()) {
+      size_t device_total = static_cast<size_t>(device_prop.totalGlobalMem);
+      size_t max_allowed = static_cast<size_t>(
+          CUDAAllocatorConfig::per_process_memory_fraction() *
+          static_cast<double>(device_total));
+      if (total_allocated_memory + size > max_allowed) {
+        stats.num_oom_rejections++;
+        p.oom_rejection_info = {
+            true, size, total_allocated_memory, device_total};
+        C10_LOG_EVERY_MS(WARNING, 60000)
+            << "Preemptively rejecting allocation: requested "
+            << format_size(size) << " but total_allocated_memory ("
+            << format_size(total_allocated_memory)
+            << ") + requested size would exceed memory limit ("
+            << format_size(max_allowed) << " = "
+            << CUDAAllocatorConfig::per_process_memory_fraction() * 100
+            << "% of " << format_size(device_total)
+            << "). Set throw_on_cudamalloc_oom:false to disable.";
+        p.err = cudaErrorMemoryAllocation;
+        return false;
+      }
+    }
+
+    if (
+        // Temporarily disable checkpointing & cudagraphs internally
         p.is_expandable_segments_active &&
         !(in_fbcode && p.pool->owner_PrivatePool)) {
       p.block = try_allocate_expandable_block(
@@ -4143,6 +4233,18 @@ class NativeCachingAllocator : public CUDAAllocator {
         device,
         ": did you call init?");
     Block* block = device_allocator[device]->malloc(size, stream);
+    // block can be nullptr if allocation was rejected by
+    // throw_on_cudamalloc_oom
+    // + per_process_memory_fraction policy. Throw OutOfMemoryError so callers
+    // with OOM error handlers can catch it gracefully.
+    if (C10_UNLIKELY(!block)) {
+      TORCH_CHECK_WITH(
+          OutOfMemoryError,
+          false,
+          "CUDA out of memory. Allocation was preemptively rejected because "
+          "it would exceed per_process_memory_fraction limit. Requested size: ",
+          format_size(size));
+    }
     add_allocated_block(block);
     *devPtr = block->ptr;
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
@@ -4291,6 +4393,12 @@ class NativeCachingAllocator : public CUDAAllocator {
   void attachOutOfMemoryObserver(OutOfMemoryObserver observer) override {
     for (auto& allocator : device_allocator) {
       allocator->attachOutOfMemoryObserver(observer);
+    }
+  }
+
+  void attachOomRejectionObserver(OomRejectionObserver observer) override {
+    for (auto& allocator : device_allocator) {
+      allocator->attachOomRejectionObserver(observer);
     }
   }
 
