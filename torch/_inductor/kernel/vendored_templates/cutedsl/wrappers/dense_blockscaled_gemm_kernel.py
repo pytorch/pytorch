@@ -145,15 +145,17 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslKernel):
         expected_sfa_elements = l * m * expected_sf_k
         expected_sfb_elements = l * n * expected_sf_k
 
-        if args.A.scale.numel() != expected_sfa_elements:
+        # Use >= instead of == because NVFP4 scales from torch._scaled_mm
+        # may have block_size_mn=128 padding (extra unused elements).
+        if args.A.scale.numel() < expected_sfa_elements:
             return Status.fail(
                 f"Scale factor A for tensor A of shape {args.A.shape} must have "
-                f"{expected_sfa_elements} elements, got {args.A.scale.numel()}."
+                f"at least {expected_sfa_elements} elements, got {args.A.scale.numel()}."
             )
-        if args.B.scale.numel() != expected_sfb_elements:
+        if args.B.scale.numel() < expected_sfb_elements:
             return Status.fail(
                 f"Scale factor B for tensor B of shape {args.B.shape} must have "
-                f"{expected_sfb_elements} elements, got {args.B.scale.numel()}."
+                f"at least {expected_sfb_elements} elements, got {args.B.scale.numel()}."
             )
 
         return Status.success()
