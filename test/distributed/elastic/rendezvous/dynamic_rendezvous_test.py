@@ -1761,7 +1761,7 @@ class IntegrationTest(TestCase):
         handler2 = self._create_handler(
             min_nodes=1,
             max_nodes=2,
-            keep_alive_interval=timedelta(seconds=1),
+            keep_alive_interval=1,
         )
         handler3 = self._create_handler(
             min_nodes=1,
