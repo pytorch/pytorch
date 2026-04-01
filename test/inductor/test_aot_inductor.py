@@ -2261,7 +2261,11 @@ class AOTInductorTestsTemplate:
         aot_model = torch._export.aot_load(path, device=self.device)
         torch.testing.assert_close(m(*inputs), aot_model(*inputs))
 
+    @unittest.skipIf(IS_MACOS, "fp8 is not supported on Mac")
     def test_aoti_fp8(self):
+        if self.device != "cpu" and not PLATFORM_SUPPORTS_FP8:
+            raise unittest.SkipTest("FP8 is only supported on H100+, SM 8.9 and MI300+ devices")
+
         class M(torch.nn.Module):
             def forward(self, x1, x2):
                 return x1.to(torch.float32) + x2.to(torch.float32)
