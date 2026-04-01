@@ -62,3 +62,24 @@ def _runtime_compute_coordinate_on_dim_impl(full_mesh: torch.Tensor, index: int)
     if mesh_coords is None:
         raise AssertionError
     return mesh_coords[index]
+
+
+def _get_flattened_submesh_impl(mesh: DeviceMesh, mesh_dims: list[int]) -> DeviceMesh:
+    from torch.distributed.tensor._redistribute import (
+        _get_flattened_mesh_by_layout_impl,
+    )
+
+    result = _get_flattened_mesh_by_layout_impl(mesh, tuple(mesh_dims))
+    if result is None:
+        raise ValueError(f"No flattened mesh found for mesh_dims={mesh_dims} on {mesh}")
+    return result
+
+
+@torch.library.custom_op("device_mesh::_get_flattened_submesh", mutates_args=())
+def _get_flattened_submesh(mesh: DeviceMesh, mesh_dims: list[int]) -> DeviceMesh:
+    return _get_flattened_submesh_impl(mesh, mesh_dims)
+
+
+@_get_flattened_submesh.register_fake
+def _get_flattened_submesh_fake(mesh: DeviceMesh, mesh_dims: list[int]) -> DeviceMesh:
+    return _get_flattened_submesh_impl(mesh, mesh_dims)
