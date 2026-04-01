@@ -61,7 +61,7 @@ PLATFORM_SUPPORTS_FUSED_SDPA: bool = TEST_CUDA and not TEST_WITH_ROCM
 
 
 def evaluate_platform_supports_fp8():
-    if TEST_CUDA:
+    if torch.cuda.is_available():
         if torch.version.hip:
             archs = ["gfx94"]
             if ROCM_VERSION >= (6, 3):
@@ -80,7 +80,7 @@ def evaluate_platform_supports_fp8():
 
 
 def evaluate_platform_supports_bf16():
-    if TEST_CUDA:
+    if torch.version.cuda:
         return SM80OrLater
     elif torch.version.hip:
         return True
@@ -90,7 +90,7 @@ def evaluate_platform_supports_bf16():
 
 
 def evaluate_platform_supports_bf16_atomics():
-    if TEST_CUDA:
+    if torch.version.cuda:
         return SM80OrLater
     elif torch.version.hip:
         return ROCM_VERSION >= (8, 0)
@@ -114,7 +114,7 @@ PLATFORM_SUPPORTS_HALF_ATOMICS: bool = LazyVal(
 
 
 def evaluate_platform_supports_fp8_grouped_gemm():
-    if TEST_CUDA:
+    if torch.cuda.is_available():
         if torch.version.hip:
             if "USE_MSLK" not in torch.__config__.show():
                 return False
@@ -128,7 +128,7 @@ def evaluate_platform_supports_fp8_grouped_gemm():
 
 
 def evaluate_platform_supports_mx_gemm():
-    if TEST_CUDA:
+    if torch.cuda.is_available():
         if torch.version.hip:
             if ROCM_VERSION >= (7, 0):
                 return "gfx950" in torch.cuda.get_device_properties(0).gcnArchName
@@ -138,7 +138,7 @@ def evaluate_platform_supports_mx_gemm():
 
 
 def evaluate_platform_supports_mxfp8_grouped_gemm():
-    if TEST_CUDA and not torch.version.hip:
+    if torch.cuda.is_available() and not torch.version.hip:
         built_with_mslk = "USE_MSLK" in torch.__config__.show()
         return built_with_mslk and IS_SM100
     return False
