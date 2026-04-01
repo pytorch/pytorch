@@ -127,7 +127,7 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
 inline C10_HOST_DEVICE BFloat16::BFloat16(float value)
     :
 #if defined(__CUDACC__) && !defined(USE_ROCM) && defined(__CUDA_ARCH__) && \
-    __CUDA_ARCH__ >= 800 || \
+        __CUDA_ARCH__ >= 800 ||                                            \
     defined(__HIPCC__) && defined(USE_ROCM) && (TORCH_HIP_VERSION >= 702)
       x(__bfloat16_as_ushort(__float2bfloat16(value)))
 #elif defined(__SYCL_DEVICE_ONLY__) && \
