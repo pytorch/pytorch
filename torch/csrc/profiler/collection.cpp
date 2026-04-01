@@ -1118,27 +1118,24 @@ class TransferEvents {
                 i.metadata_json_ = activity->metadataJson();
               },
               [](auto&) { return; }));
-        }
-        // Parse metadataJson() into extra_meta_ so events() carries
-        // all Kineto activity metadata without export_chrome_trace().
-        // Python schemas (profiler_util.py) are the single SOT for
-        // which keys to expose and how to type-convert them.
-        e->visit(c10::overloaded(
-            [&](ExtraFields<EventType::Kineto>& i) {
-              auto json_str = activity->metadataJson();
-              if (!json_str.empty()) {
-                auto j =
-                    nlohmann::json::parse("{" + json_str + "}", nullptr, false);
-                if (!j.is_discarded()) {
-                  for (auto& [key, val] : j.items()) {
-                    i.extra_meta_.emplace(
-                        key,
-                        val.is_string() ? val.get<std::string>() : val.dump());
+          e->visit(c10::overloaded(
+              [&](ExtraFields<EventType::Kineto>& i) {
+                auto json_str = activity->metadataJson();
+                if (!json_str.empty()) {
+                  auto j = nlohmann::json::parse(
+                      "{" + json_str + "}", nullptr, false);
+                  if (!j.is_discarded()) {
+                    for (auto& [key, val] : j.items()) {
+                      i.extra_meta_.emplace(
+                          key,
+                          val.is_string() ? val.get<std::string>()
+                                          : val.dump());
+                    }
                   }
                 }
-              }
-            },
-            [](auto&) {}));
+              },
+              [](auto&) {}));
+        }
         const auto* linked_activity = activity->linkedActivity();
         if (linked_activity) {
           e->visit(c10::overloaded(

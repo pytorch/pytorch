@@ -15,12 +15,10 @@ from torch.autograd import DeviceType
 
 __all__ = [
     "EventList",
+    "EventMetadata",
     "FormattedTimesMixin",
     "Interval",
     "Kernel",
-    "KernelMetadata",
-    "MemoryMetadata",
-    "NcclMetadata",
     "FunctionEvent",
     "FunctionEventAvg",
     "StringTable",
@@ -554,7 +552,8 @@ class Interval:
 Kernel = namedtuple("Kernel", ["name", "device", "duration"])
 
 
-class KernelMetadata(NamedTuple):
+class EventMetadata(NamedTuple):
+    # Kernel fields
     registers_per_thread: int | None
     shared_memory: int | None
     grid: list[int] | None
@@ -562,58 +561,13 @@ class KernelMetadata(NamedTuple):
     blocks_per_sm: float | None
     warps_per_sm: float | None
     occupancy: float | None
-    stream: int | None
-    graph_id: int | None
-    graph_node_id: int | None
     queued: int | None
+    stream: int | None
     context: int | None
-
-
-def _to_int_list(v: str) -> list[int]:
-    return json.loads(v)
-
-
-def _to_str(v: str) -> str:
-    return v.strip('"')
-
-
-def _to_bool(v: str) -> bool:
-    return v in ("1", "true")
-
-
-# Kineto key → (NamedTuple field name, converter from string)
-_KERNEL_METADATA_KEYS: dict[str, tuple[str, Callable[[str], Any]]] = {
-    "registers per thread": ("registers_per_thread", int),
-    "shared memory": ("shared_memory", int),
-    "grid": ("grid", _to_int_list),
-    "block": ("block", _to_int_list),
-    "blocks per SM": ("blocks_per_sm", float),
-    "warps per SM": ("warps_per_sm", float),
-    "est. achieved occupancy %": ("occupancy", float),
-    "stream": ("stream", int),
-    "graph id": ("graph_id", int),
-    "graph node id": ("graph_node_id", int),
-    "queued": ("queued", int),
-    "context": ("context", int),
-}
-
-
-class MemoryMetadata(NamedTuple):
+    # Memory fields
     bytes: int | None
     bandwidth_gb_s: float | None
-    stream: int | None
-    context: int | None
-
-
-_MEMORY_METADATA_KEYS: dict[str, tuple[str, Callable[[str], Any]]] = {
-    "bytes": ("bytes", int),
-    "memory bandwidth (GB/s)": ("bandwidth_gb_s", float),
-    "stream": ("stream", int),
-    "context": ("context", int),
-}
-
-
-class NcclMetadata(NamedTuple):
+    # NCCL fields
     collective_name: str | None
     dtype: str | None
     in_msg_nelems: int | None
@@ -633,7 +587,32 @@ class NcclMetadata(NamedTuple):
     is_async: bool | None
 
 
-_NCCL_METADATA_KEYS: dict[str, tuple[str, Callable[[str], Any]]] = {
+def _to_int_list(v: str) -> list[int]:
+    return json.loads(v)
+
+
+def _to_str(v: str) -> str:
+    return v.strip('"')
+
+
+def _to_bool(v: str) -> bool:
+    return v in ("1", "true")
+
+
+# Kineto key → (EventMetadata field name, converter from string)
+_EVENT_METADATA_KEYS: dict[str, tuple[str, Callable[[str], Any]]] = {
+    "registers per thread": ("registers_per_thread", int),
+    "shared memory": ("shared_memory", int),
+    "grid": ("grid", _to_int_list),
+    "block": ("block", _to_int_list),
+    "blocks per SM": ("blocks_per_sm", float),
+    "warps per SM": ("warps_per_sm", float),
+    "est. achieved occupancy %": ("occupancy", float),
+    "queued": ("queued", int),
+    "stream": ("stream", int),
+    "context": ("context", int),
+    "bytes": ("bytes", int),
+    "memory bandwidth (GB/s)": ("bandwidth_gb_s", float),
     "Collective name": ("collective_name", _to_str),
     "dtype": ("dtype", _to_str),
     "In msg nelems": ("in_msg_nelems", int),
@@ -653,25 +632,18 @@ _NCCL_METADATA_KEYS: dict[str, tuple[str, Callable[[str], Any]]] = {
     "Is asynchronized op": ("is_async", _to_bool),
 }
 
-_METADATA_SCHEMAS: dict[type, dict[str, tuple[str, Callable[[str], Any]]]] = {
-    KernelMetadata: _KERNEL_METADATA_KEYS,
-    MemoryMetadata: _MEMORY_METADATA_KEYS,
-    NcclMetadata: _NCCL_METADATA_KEYS,
-}
 
-
-def _build_metadata(cls, extra_meta):
-    key_map = _METADATA_SCHEMAS[cls]
+def _build_metadata(extra_meta):
     fields: dict[str, Any] = {}
     any_populated = False
-    for kineto_key, (field_name, convert) in key_map.items():
+    for kineto_key, (field_name, convert) in _EVENT_METADATA_KEYS.items():
         v = extra_meta.get(kineto_key)
         if v is not None:
             fields[field_name] = convert(v)
             any_populated = True
         else:
             fields[field_name] = None
-    return cls(**fields) if any_populated else None
+    return EventMetadata(**fields) if any_populated else None
 
 
 class FunctionEvent(FormattedTimesMixin):
@@ -716,6 +688,7 @@ class FunctionEvent(FormattedTimesMixin):
         flops (int): Estimated floating point operations.
         is_user_annotation (bool): Whether this is a user-annotated region.
         metadata_json (str): Additional metadata in JSON format.
+        event_metadata (EventMetadata): Additional metadata in structured format.
 
     Properties:
         cpu_time_total (float): Total CPU time in microseconds.
@@ -820,14 +793,8 @@ class FunctionEvent(FormattedTimesMixin):
         self.flow_start: bool | None = flow_start
         self.external_id: int = external_id
         self.linked_correlation_id: int = linked_correlation_id
-        self.kernel_metadata: KernelMetadata | None = (
-            _build_metadata(KernelMetadata, extra_meta) if extra_meta else None
-        )
-        self.memory_metadata: MemoryMetadata | None = (
-            _build_metadata(MemoryMetadata, extra_meta) if extra_meta else None
-        )
-        self.nccl_metadata: NcclMetadata | None = (
-            _build_metadata(NcclMetadata, extra_meta) if extra_meta else None
+        self.event_metadata: EventMetadata | None = (
+            _build_metadata(extra_meta) if extra_meta else None
         )
 
     def append_kernel(self, name, device, duration):

@@ -3989,12 +3989,15 @@ class TestProfilerEventsParity(TestCase):
                 )
 
     def test_structured_metadata_matches_chrome_trace(self):
-        from torch.autograd.profiler_util import (
-            _KERNEL_METADATA_KEYS,
-            _MEMORY_METADATA_KEYS,
-        )
+        from torch.autograd.profiler_util import _EVENT_METADATA_KEYS
 
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+        experimental_config = torch._C._profiler._ExperimentalConfig(
+            expose_kineto_event_metadata=True
+        )
+        with profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            experimental_config=experimental_config,
+        ) as prof:
             x = torch.randn(10, 10, device="cuda")
             y = torch.mm(x, x)
             z = x + y
@@ -4021,37 +4024,24 @@ class TestProfilerEventsParity(TestCase):
                     continue
                 fe = fe_by_ext_id[ext_id]
 
-                # For each schema key present in JSON args, check the
-                # corresponding NamedTuple field is populated and that
-                # the string representation matches.
-                if cat == "kernel" and fe.kernel_metadata is not None:
-                    km = fe.kernel_metadata
-                    for kineto_key, (field_name, _) in _KERNEL_METADATA_KEYS.items():
+                if cat in ("kernel", "gpu_memcpy") and fe.event_metadata is not None:
+                    em = fe.event_metadata
+                    for kineto_key, (field_name, _) in _EVENT_METADATA_KEYS.items():
                         if kineto_key in args:
-                            val = getattr(km, field_name)
+                            val = getattr(em, field_name)
                             self.assertIsNotNone(
                                 val,
-                                f"kernel '{fe.name}': {field_name} is None "
+                                f"'{fe.name}': {field_name} is None "
                                 f"but JSON has '{kineto_key}': {args[kineto_key]}",
                             )
-                    # Spot-check a value that every kernel has
-                    self.assertIsInstance(km.registers_per_thread, int)
-                    self.assertGreater(km.registers_per_thread, 0)
-                    checked_kernel += 1
-
-                elif cat == "gpu_memcpy" and fe.memory_metadata is not None:
-                    mm = fe.memory_metadata
-                    for kineto_key, (field_name, _) in _MEMORY_METADATA_KEYS.items():
-                        if kineto_key in args:
-                            val = getattr(mm, field_name)
-                            self.assertIsNotNone(
-                                val,
-                                f"memcpy '{fe.name}': {field_name} is None "
-                                f"but JSON has '{kineto_key}': {args[kineto_key]}",
-                            )
-                    if mm.bytes is not None:
-                        self.assertGreater(mm.bytes, 0)
-                    checked_memcpy += 1
+                    if cat == "kernel":
+                        self.assertIsInstance(em.registers_per_thread, int)
+                        self.assertGreater(em.registers_per_thread, 0)
+                        checked_kernel += 1
+                    elif cat == "gpu_memcpy":
+                        if em.bytes is not None:
+                            self.assertGreater(em.bytes, 0)
+                        checked_memcpy += 1
 
             self.assertGreater(checked_kernel, 0, "No kernel events were cross-checked")
 
