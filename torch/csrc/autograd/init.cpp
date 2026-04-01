@@ -309,12 +309,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def("privateuse1_elapsed_us", &KinetoEvent::privateuse1ElapsedUs)
       .def(
           "is_user_annotation",
-          [](const KinetoEvent& e) {
-            return e.activityType() ==
-                (uint8_t)libkineto::ActivityType::USER_ANNOTATION ||
-                e.activityType() ==
-                (uint8_t)libkineto::ActivityType::GPU_USER_ANNOTATION;
-          })
+          [](const KinetoEvent& e) { return e.isUserAnnotation(); })
       .def(
           "is_python_function",
           [](const KinetoEvent& e) { return e.isPythonFunction(); })

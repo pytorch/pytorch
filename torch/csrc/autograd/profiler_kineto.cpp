@@ -1199,6 +1199,13 @@ int64_t KinetoEvent::privateuse1ElapsedUs() const {
       &privateuse1_event_start, &privateuse1_event_end);
 }
 
+bool KinetoEvent::isUserAnnotation() const {
+  constexpr uint8_t kUserAnnotation = 1;
+  constexpr uint8_t kGpuUserAnnotation = 2;
+  const auto type = activityType();
+  return type == kUserAnnotation || type == kGpuUserAnnotation;
+}
+
 void KinetoEvent::getPerfEventCounters(std::vector<uint64_t>& in) const {
   return result_->visit(c10::overloaded(
       [&in](const ExtraFields<EventType::TorchOp>& e) -> void {

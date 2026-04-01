@@ -15,9 +15,16 @@
 #ifdef USE_KINETO
 #include <ActivityType.h>
 #else
-// Minimal stub so non-Kineto builds can compile types that hold ActivityType.
 namespace libkineto {
-enum class ActivityType : uint8_t { NONE = 0 };
+enum class ActivityType : uint8_t {
+  CPU_OP = 0,
+  USER_ANNOTATION,
+  GPU_USER_ANNOTATION,
+  NONE = CPU_OP,
+};
+inline const char* toString(ActivityType) {
+  return "CPU_OP";
+}
 } // namespace libkineto
 #endif
 
