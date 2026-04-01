@@ -29,11 +29,11 @@ install_ubuntu() {
     # When ROCM_VERSION=nightly, install ROCm from TheRock nightly tarballs
     # Mirrors: https://github.com/ROCm/TheRock/blob/main/dockerfiles/install_rocm_tarball.sh
     if [[ "${ROCM_VERSION}" == "nightly" ]]; then
-      # rocm_smi cmake config uses pkg_check_modules(REQUIRED libdrm);
-      # the tarball bundles libdrm under rocm_sysdeps but its .pc file
-      # may not be on the default pkg-config search path, so install the
-      # system package to satisfy the check at cmake configure time.
-      apt-get install -y --no-install-recommends libdrm-dev pkg-config
+      # TheRock tarball consumers need system -dev packages whose .pc files
+      # are not on the default pkg-config search path:
+      #   libdrm  - rocm_smi cmake config (pkg_check_modules)
+      #   liblzma - aotriton cmake config  (pkg_search_module)
+      apt-get install -y --no-install-recommends libdrm-dev liblzma-dev pkg-config
 
       if [[ -d /opt/rocm ]]; then
         rm -rf /opt/rocm
