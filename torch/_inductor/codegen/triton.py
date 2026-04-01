@@ -2706,7 +2706,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
     def should_use_persistent_reduction(self) -> bool:
         return self.inside_reduction and V.choices.should_use_persistent_reduction(
-            self.features, self.cooperative_reduction
+            self.features, self.cooperative_reduction, self.tiling_scores
         )
 
     def want_no_x_dim(self):

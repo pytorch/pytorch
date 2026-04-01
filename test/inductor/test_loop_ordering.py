@@ -528,6 +528,30 @@ class LoopOrderingTest(TestCase):
         self.assertEqual(1, metrics.generated_kernel_count)
         torch._dynamo.reset()
 
+    def test_reshape_reindexing_persistent(self):
+        """
+        After reindexing fuses a non-contiguous pointwise into a
+        reduction, tiling scores should recover INNER hint so the kernel
+        uses persistent reduction.
+        """
+
+        def f(x):
+            head_dim = 128
+            M, N = x.shape
+            x_reshaped = x.reshape(-1, head_dim)
+            x_f32 = x_reshaped.float()
+            variance = x_f32.pow(2).mean(dim=-1, keepdim=True)
+            x_normed = x_f32 * torch.rsqrt(variance + 1e-5)
+            return x_normed.reshape(M, N).to(x.dtype)
+
+        qkv = torch.randn(16, 10240, dtype=torch.bfloat16)
+        x = qkv[:, :8192]
+
+        _, (code,) = run_and_get_code(torch.compile(f), x)
+        # Single kernel and it should be persistent (triton_per)
+        self.assertEqual(code.count("def triton_"), 1)
+        self.assertIn("triton_per_", code)
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 requires H100+ and MI300+")
     def test_fp8_cast_and_t(self):
         """

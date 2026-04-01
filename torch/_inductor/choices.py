@@ -365,7 +365,9 @@ class InductorChoices:
 
     @staticmethod
     def should_use_persistent_reduction(
-        features: SIMDKernelFeatures, cooperative_reduction: bool
+        features: SIMDKernelFeatures,
+        cooperative_reduction: bool,
+        tiling_scores: Optional[dict[str, Any]] = None,
     ) -> bool:
         """
         Heuristic to decide if a persistent reduction should be used.
@@ -374,9 +376,9 @@ class InductorChoices:
             return False
         threshold = {
             ReductionHint.INNER: 1024,
-        }.get(features.get_reduction_hint(), 64)
+        }.get(features.get_reduction_hint(tiling_scores), 64)
 
-        if features.get_reduction_hint() not in (
+        if features.get_reduction_hint(tiling_scores) not in (
             ReductionHint.INNER,
             ReductionHint.OUTER_TINY,
         ):
