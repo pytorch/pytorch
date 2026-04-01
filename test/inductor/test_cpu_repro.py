@@ -40,7 +40,6 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     MI200_ARCH,
     parametrize,
-    skipIfRocm,
     skipIfRocmArch,
     slowTest,
     TEST_MKL,
@@ -5245,7 +5244,6 @@ class CPUReproTests(TestCase):
         get_gcc_major_version() == 13,
         "Fails under GCC 13 due to vector codegen (passes with GCC 11)",
     )
-    @skipIfRocm(msg="Fails with Triton 3.7")
     def test_convert_fp32_to_double_vec(self):
         def fn(x):
             return x.to(torch.double)
@@ -5992,6 +5990,31 @@ class CPUReproTests(TestCase):
             "Expected convert<at::Float8_e4m3fn,1,float,2> in generated code for func1",
         )
 
+    @requires_vectorization
+    def test_bool_to_float8_e4m3fn(self):
+        """
+        Test that bool to float8_e4m3fn cast succeeds.
+        Issue: https://github.com/pytorch/pytorch/issues/178095
+        """
+
+        def fn(x):
+            return x.to(dtype=torch.float8_e4m3fn)
+
+        x = torch.ones(64, dtype=torch.bool)
+        self.common(fn, (x,))
+
+    @requires_vectorization
+    def test_bool_to_float8_e5m2(self):
+        """
+        Test that bool to float8_e5m2 cast succeeds.
+        """
+
+        def fn(x):
+            return x.to(dtype=torch.float8_e5m2)
+
+        x = torch.ones(64, dtype=torch.bool)
+        self.common(fn, (x,))
+
     @config.patch("cpp.simdlen", 256)
     @requires_vectorization
     def test_avx2_bool_constant_pad_nd(self):
@@ -6286,52 +6309,23 @@ class CPUReproTests(TestCase):
             )
         )
 
-    def test_star_dep_preserved_through_outer_loop_fusion(self) -> None:
-        class LayerNorm2d(nn.LayerNorm):
-            def forward(self, x: torch.Tensor) -> torch.Tensor:
-                x = x.permute(0, 2, 3, 1)
-                x = F.layer_norm(
-                    x, self.normalized_shape, self.weight, self.bias, self.eps
-                )
-                return x.permute(0, 3, 1, 2)
+    def test_mutation_transpose_reshape_ordering(self):
+        def fn(x, y):
+            return x.add_(y).reshape(-1, 1, 3)
 
-        class Model(nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.ln = LayerNorm2d(128)
-                self.ds = nn.Conv2d(128, 256, 2, stride=2)
-                self.pool = nn.AdaptiveAvgPool2d(1)
-                self.cls_ln = LayerNorm2d(256)
-                self.fc = nn.Linear(256, 1000)
+        torch.manual_seed(0)
+        x1 = torch.ones([1, 2, 3]).transpose(1, 2)
+        y1 = torch.randn(1, 3, 1)
 
-            def _path(self, x: torch.Tensor) -> torch.Tensor:
-                x = self.ln(x)
-                x = self.ds(x)
-                x = self.pool(x)
-                x = self.cls_ln(x)
-                return self.fc(x.flatten(1))
+        x2 = x1.clone()
+        y2 = y1.clone()
 
-            def forward(self, x1: torch.Tensor, x2: torch.Tensor) -> torch.Tensor:
-                return (
-                    self._path(x1).float().pow(2).mean()
-                    + self._path(x2).float().pow(2).mean()
-                )
+        cfunc = torch.compile(fn, backend="inductor")
 
-        x1 = torch.randn(4, 128, 16, 16)
-        x2 = torch.randn(4, 128, 16, 16)
+        out1 = fn(x1, y1)
+        out2 = cfunc(x2, y2)
 
-        model = Model()
-        eager_model = model
-        compiled_model = torch.compile(copy.deepcopy(model))
-        compiled_loss = compiled_model(x1.clone(), x2.clone())
-        compiled_loss.backward()
-        eager_loss = eager_model(x1.clone(), x2.clone())
-        eager_loss.backward()
-        torch.testing.assert_close(eager_loss, compiled_loss)
-        for p_eager, p_compiled in zip(
-            eager_model.parameters(), compiled_model.parameters()
-        ):
-            torch.testing.assert_close(p_eager.grad, p_compiled.grad)
+        self.assertTrue(torch.allclose(out1, out2, equal_nan=True))
 
 
 if __name__ == "__main__":

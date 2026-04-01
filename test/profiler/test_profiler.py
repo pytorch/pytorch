@@ -3765,10 +3765,10 @@ class TestProfilerEventsParity(TestCase):
 
     def test_python_function_events_in_events(self):
         with profile(
-            activities=[ProfilerActivity.CPU],
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
             with_stack=True,
         ) as prof:
-            x = torch.randn(10, 10)
+            x = torch.randn(10, 10, device="cuda")
             torch.mm(x, x)
 
         events = prof.events()
@@ -3838,6 +3838,50 @@ class TestProfilerEventsParity(TestCase):
                 json_flow_ends,
                 events_flow_ends,
                 "Async CPU->GPU flow end IDs differ between events() and Chrome trace",
+            )
+
+    def test_profiler_fwdbwd_flow_events_parity(self):
+        """Verify that fwd->bwd flow fields on events() match Chrome trace JSON."""
+        with profile(activities=[ProfilerActivity.CPU]) as prof:
+            t1 = torch.ones(1, requires_grad=True)
+            t2 = torch.ones(1, requires_grad=True)
+            z = torch.add(t1, t2)
+            y = torch.ones(1)
+            loss = torch.nn.functional.binary_cross_entropy_with_logits(z, y)
+            loss.backward()
+
+        fwdbwd_events = [
+            e for e in prof.events() if e.flow_type == 1 and e.flow_id != 0
+        ]
+        self.assertGreater(
+            len(fwdbwd_events), 0, "No fwdbwd flow events found via events()"
+        )
+
+        events_flow_starts = {e.flow_id for e in fwdbwd_events if e.flow_start}
+        events_flow_ends = {e.flow_id for e in fwdbwd_events if not e.flow_start}
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                j = json.load(f)
+
+            json_flow_events = [
+                e
+                for e in j["traceEvents"]
+                if e.get("ph") in ("s", "f") and e.get("cat") == "fwdbwd"
+            ]
+            json_flow_starts = {e["id"] for e in json_flow_events if e["ph"] == "s"}
+            json_flow_ends = {e["id"] for e in json_flow_events if e["ph"] == "f"}
+
+            self.assertEqual(
+                json_flow_starts,
+                events_flow_starts,
+                "fwdbwd flow start IDs differ between events() and Chrome trace",
+            )
+            self.assertEqual(
+                json_flow_ends,
+                events_flow_ends,
+                "fwdbwd flow end IDs differ between events() and Chrome trace",
             )
 
     def test_profiler_timestamp_consistency(self):
@@ -3911,6 +3955,38 @@ class TestProfilerEventsParity(TestCase):
                 json_name_ext,
                 "(name, external_id) pairs differ between events() and Chrome trace JSON",
             )
+
+    def test_profiler_activity_type_parity(self):
+        """Verify activity_type on events() matches Chrome trace cat field."""
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            x = torch.randn(32, 32, device="cuda")
+            torch.mm(x, x)
+
+        events = prof.events()
+        for e in events:
+            self.assertIsInstance(e.activity_type, str)
+            self.assertGreater(len(e.activity_type), 0)
+
+        mm_event = next((e for e in events if e.name == "aten::mm"), None)
+        self.assertIsNotNone(mm_event)
+        self.assertEqual(mm_event.activity_type, "cpu_op")
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                j = json.load(f)
+
+            json_name_cats = {
+                (e["name"], e["cat"])
+                for e in j["traceEvents"]
+                if e.get("ph") == "X" and "cat" in e
+            }
+            for e in events:
+                self.assertIn(
+                    (e.name, e.activity_type),
+                    json_name_cats,
+                    f"activity_type mismatch for {e.name}",
+                )
 
 
 if __name__ == "__main__":

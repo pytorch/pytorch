@@ -24,6 +24,7 @@ else:
     TEST_CUDNN = LazyVal(lambda: TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.tensor(1., device=CUDA_DEVICE)))
 
 TEST_CUDNN_VERSION = LazyVal(lambda: torch.backends.cudnn.version() if TEST_CUDNN else 0)
+TEST_HIPDNN = LazyVal(lambda: TEST_CUDA and torch.backends.hipdnn.is_available())
 ROCM_VERSION = LazyVal(lambda : tuple(int(v) for v in torch.version.hip.split('.')[:2]) if torch.version.hip else (0, 0))
 
 SM53OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (5, 3))
@@ -181,7 +182,8 @@ def evaluate_platform_supports_fp8():
             return SM90OrLater or torch.cuda.get_device_capability() == (8, 9)
     if torch.xpu.is_available():
         return True
-    return False
+    # As CPU supports FP8 and is always available, return True.
+    return True
 
 def evaluate_platform_supports_fp8_grouped_gemm():
     if torch.cuda.is_available():

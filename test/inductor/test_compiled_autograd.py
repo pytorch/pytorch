@@ -46,7 +46,6 @@ from torch.testing._internal.common_utils import (
     scoped_load_inline,
     skipIfWindows,
     skipIfXpu,
-    TEST_WITH_ROCM,
 )
 from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.inductor_utils import (
@@ -5416,10 +5415,6 @@ skipped_tests.add("test_checkpoint_error_suggests_mark_dynamic")
 skipped_tests.add("test_checkpoint_automatic_dynamic_graph_shadowing")
 skipped_tests.add("test_checkpoint_automatic_dynamic_mark_dynamic_workaround")
 skipped_tests.add("test_checkpoint_automatic_dynamic_lru_disabled_workaround")
-
-# Fails with triton 3.7
-if TEST_WITH_ROCM:
-    skipped_tests.add("test_concat_unbacked_shape_tensor")
 
 test_autograd = load_test_module("test_autograd")
 test_custom_ops = load_test_module("test_custom_ops")

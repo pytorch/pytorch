@@ -152,7 +152,7 @@ _f8_f8_bf16_rowwise_grouped_mm_cuda(
           const bool use_fast_accum,
           Tensor& out) {
   TORCH_CHECK_VALUE(mat_a.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_a.scalar_type());
-  TORCH_CHECK_VALUE(mat_b.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_b.scalar_type());
+  TORCH_CHECK_VALUE(mat_b.dtype() == at::kFloat8_e4m3fn, "Expected mat_b to be Float8_e4m3 matrix got ", mat_b.scalar_type());
 
   at::cuda::detail::f8f8bf16_grouped_mm(
       mat_a,

@@ -826,7 +826,7 @@ _scaled_block1x128_block1x128(
     scale_a.stride(0) == 1 &&
     (
       scale_a.stride(1) == M ||
-      (scale_a.size(1) == 1 && scale_b.stride(1) == 1)
+      (scale_a.size(1) == 1 && scale_a.stride(1) == 1)
     ),
     "scale_a strides must be (", 1, ", ", M, "); got: ", scale_a.strides()
   );
@@ -848,7 +848,7 @@ _scaled_block1x128_block1x128(
         scale_b.stride(1) == 1
       )
     ),
-    "scale_b strides must be (", 1, ", ", N, "); got: ", scale_a.strides()
+    "scale_b strides must be (", 1, ", ", N, "); got: ", scale_b.strides()
   );
 
   auto scaling_choice_a = ScalingType::BlockWise1x128;
@@ -986,7 +986,7 @@ _scaled_block1x128_block128x128(
         scale_a.stride(1) == 1
       )
     ),
-    "scale_a must have strides (1, ", M, "); got ", scale_b.strides()
+    "scale_a must have strides (1, ", M, "); got ", scale_a.strides()
   );
   // scale_b shape
   TORCH_CHECK_VALUE(
@@ -1228,7 +1228,7 @@ _scaled_nvfp4_nvfp4(
 void check_swizzle_lengths(ScaledGemmImplementation impl,
                            std::vector<SwizzleType>& swizzle_a,
                            std::vector<SwizzleType>& swizzle_b) {
-#ifdef ROCM
+#ifdef USE_ROCM
   // ROCM doesn't swizzle their formats - we don't care what's passed.
   return;
 #else

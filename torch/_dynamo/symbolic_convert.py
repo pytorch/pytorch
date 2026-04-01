@@ -143,7 +143,7 @@ from .utils import (
 )
 from .variables.base import typestr, ValueMutationNew, VariableTracker
 from .variables.builder import FrameStateSizeEntry, VariableBuilder, wrap_fx_proxy
-from .variables.builtin import BuiltinVariable
+from .variables.builtin import BuiltinVariable, DictBuiltinVariable
 from .variables.constant import CONSTANT_VARIABLE_NONE, ConstantVariable
 from .variables.ctx_manager import (
     ContextWrappingVariable,
@@ -744,7 +744,9 @@ def generic_jump(
             # ConstDictVariable is optimized to be very lazy about insertion of
             # guards, so we have to manually insert a SEQUENCE_LENGTH guard
             # here.
-            if isinstance(value, ConstDictVariable) and value.source:
+            if isinstance(value, BaseListVariable):
+                value._install_list_length_guard()
+            elif isinstance(value, ConstDictVariable) and value.source:
                 install_guard(value.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
             if truth_fn(value.as_python_constant()):
                 if push:
@@ -778,11 +780,13 @@ def generic_jump(
                 if result.is_python_constant():
                     result_value = result.as_python_constant()
                     if method_name == "__bool__" and not isinstance(result_value, bool):
-                        msg = VariableTracker.build(
+                        exc.raise_observed_exception(
+                            TypeError,
                             self,
-                            f"__bool__ should return bool, returned {type(result_value).__name__}",
+                            args=[
+                                f"__bool__ should return bool, returned {type(result_value).__name__}"
+                            ],
                         )
-                        exc.raise_observed_exception(TypeError, self, args=[msg])
                     if isinstance(result_value, (bool, int)) and truth_fn(result_value):
                         if push:
                             self.push(value)
@@ -1084,7 +1088,8 @@ class ExceptionStack:
         if len(self._exc_stack) + prev_idx > 0:
             prev = self._exc_stack[prev_idx]
             self._set_context_recursive(prev, prev_idx - 1)
-            val.set_context(prev)  # type: ignore[union-attr, arg-type]
+            if prev is not val:
+                val.set_context(prev)  # type: ignore[union-attr, arg-type]
         return val
 
     def _break_context_reference_cycle(self, val: ExceptionVals) -> None:
@@ -2209,18 +2214,16 @@ class InstructionTranslatorBase(
             TypeError,
             self,
             args=[
-                VariableTracker.build(
-                    self,
-                    f"exceptions must derive from BaseException, not {val.python_type_name()}",
-                )
+                f"exceptions must derive from BaseException, not {val.python_type_name()}",
             ],
         )
 
     def RAISE_VARARGS(self, inst: Instruction) -> None:
         if inst.arg == 0:
             if not len(self.exn_vt_stack):
-                msg = VariableTracker.build(self, "No active exception to reraise")
-                exc.raise_observed_exception(RuntimeError, self, args=[msg])
+                exc.raise_observed_exception(
+                    RuntimeError, self, args=["No active exception to reraise"]
+                )
 
             # re-raise the previous exception. Here CPython refers to the exception
             # on top of the exception stack
@@ -2664,7 +2667,7 @@ class InstructionTranslatorBase(
 
         # Unpack for cases like fn(**obj) where obj is a map
         if isinstance(kwargsvars, UserDefinedObjectVariable):
-            kwargsvars = BuiltinVariable.call_custom_dict(self, dict, kwargsvars)  # type: ignore[arg-type]
+            kwargsvars = DictBuiltinVariable.call_custom_dict(self, dict, kwargsvars)  # type: ignore[arg-type]
 
         # pyrefly: ignore [unbound-name]
         if not isinstance(argsvars, BaseListVariable) or not isinstance(

@@ -1455,7 +1455,6 @@ class CudaReproTests(TestCase):
             torch._dynamo.reset()
             gc.collect()
 
-    @skipIfXpu(msg="AssertionError, torch-xpu-ops: #3007")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "flash attention not supported"
     )
@@ -1488,12 +1487,7 @@ class CudaReproTests(TestCase):
         model = Model().to(device_type).half()
         model = torch.compile(model, backend=cnts, dynamic=True)
 
-        with torch.backends.cuda.sdp_kernel(
-            enable_flash=True,
-            enable_math=False,
-            enable_mem_efficient=False,
-            enable_cudnn=False,
-        ):
+        with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
             input1 = torch.rand(5, 512, 1024, device=device_type, dtype=torch.float16)
             input2 = torch.rand(5, 513, 1024, device=device_type, dtype=torch.float16)
             input3 = torch.rand(5, 514, 1024, device=device_type, dtype=torch.float16)
@@ -2117,7 +2111,6 @@ class CudaReproTests(TestCase):
         self.assertEqual(graph.device_types, {device_type})
         self.assertEqual(compiled_fn(*inp), fn(*inp))
 
-    @skipIfRocm(msg="Fails with Triton 3.7")
     def test_epilogue_fusion_with_view(self):
         class ToyModel(torch.nn.Module):
             def __init__(self) -> None:

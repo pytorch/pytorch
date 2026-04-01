@@ -51,7 +51,6 @@ from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
 from ..source import (
     AttrSource,
-    DictGetItemSource,
     GenericAttrSource,
     GetItemSource,
     TypeMROSource,
@@ -481,9 +480,7 @@ class TracebackVariable(VariableTracker):
 
     @staticmethod
     def is_valid_traceback(obj: VariableTracker) -> bool:
-        return istype(obj, TracebackVariable) or (
-            istype(obj, ConstantVariable) and obj.is_constant_none()
-        )
+        return istype(obj, TracebackVariable) or obj.is_constant_none()
 
     def extract_tb(self) -> list[traceback.FrameSummary | FrameSummaryVariable]:
         if istype(self.tb_next, ConstantVariable):
@@ -556,7 +553,7 @@ class ExceptionVariable(VariableTracker):
     def __init__(
         self,
         exc_type: Any,
-        args: tuple[VariableTracker, ...],
+        args: list[VariableTracker],
         init_kwargs: dict[str, VariableTracker] | None = None,
         source: Source | None = None,
         mutation_type: MutationType | None = None,
@@ -620,14 +617,19 @@ class ExceptionVariable(VariableTracker):
         val: VariableTracker,
     ) -> VariableTracker:
         def raise_error(msg: str) -> NoReturn:
-            raise_observed_exception(
-                TypeError, tx, args=[VariableTracker.build(tx, msg)]
-            )
+            raise_observed_exception(TypeError, tx, args=[msg])
 
         name = name_var.as_python_constant()
         if name == "__context__":
             # Constant can be either an Exceptior or None
-            assert isinstance(val, (ExceptionVariable, ConstantVariable))
+            assert val.is_constant_none() or isinstance(
+                val,
+                (
+                    variables.ExceptionVariable,
+                    variables.UserDefinedExceptionClassVariable,
+                    variables.UserDefinedExceptionObjectVariable,
+                ),
+            ), f"{val} is not a valid exception context"
             self.set_context(val)
         elif name == "__cause__":
             if val.is_constant_none() or isinstance(
@@ -653,11 +655,7 @@ class ExceptionVariable(VariableTracker):
                 raise_observed_exception(
                     TypeError,
                     tx,
-                    args=[
-                        VariableTracker.build(
-                            tx, "__traceback__ must be a traceback object or None"
-                        )
-                    ],
+                    args=["__traceback__ must be a traceback object or None"],
                 )
             self.__traceback__ = val
         else:
@@ -697,7 +695,9 @@ class ExceptionVariable(VariableTracker):
         elif name == "__traceback__":
             return self.__traceback__
         elif name == "args":
-            return variables.ListVariable(list(self.args), source=self.source)
+            return VariableTracker.build(
+                tx, self.args, source=self.source and AttrSource(self.source, "args")
+            )
         return super().var_getattr(tx, name)
 
     def __str__(self) -> str:
@@ -1338,88 +1338,6 @@ class GetAttrVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         return self.obj.call_method(tx, self.name, list(args), kwargs)
-
-    def call_method(
-        self,
-        tx: "InstructionTranslator",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if (
-            name in ("__getitem__", "get")
-            and self.name == "__dict__"
-            and not kwargs
-            and args[0].is_python_constant()
-            and isinstance(
-                self.obj,
-                (
-                    variables.NNModuleVariable,
-                    variables.UserDefinedClassVariable,
-                ),
-            )
-        ):
-            obj = self.obj
-            key = args[0].as_python_constant()
-            if obj.has_key_in_generic_dict(tx, key):
-                if tx.output.side_effects.has_pending_mutation_of_attr(obj, key):
-                    return tx.output.side_effects.load_attr(obj, key)
-
-                # For instance dicts, read directly from __dict__
-                if isinstance(obj.value.__dict__, dict):
-                    raw_value = obj.value.__dict__[key]
-                    raw_source = (
-                        DictGetItemSource(AttrSource(obj.source, "__dict__"), key)
-                        if obj.source
-                        else None
-                    )
-                    return VariableTracker.build(tx, raw_value, raw_source)
-
-                return obj.var_getattr(tx, key)
-
-            # Return the default value for get
-            if name == "get":
-                if len(args) == 2:
-                    return args[1]
-                else:
-                    return variables.CONSTANT_VARIABLE_NONE
-
-        elif (
-            name == "__contains__"
-            and self.name == "__dict__"
-            and len(args) == 1
-            and args[0].is_python_constant()
-            and not kwargs
-            and isinstance(
-                self.obj,
-                (
-                    variables.NNModuleVariable,
-                    variables.UserDefinedClassVariable,
-                ),
-            )
-        ):
-            obj = self.obj
-            key = args[0].as_python_constant()
-            if obj.has_key_in_generic_dict(tx, key):
-                return variables.CONSTANT_VARIABLE_TRUE
-            else:
-                return variables.CONSTANT_VARIABLE_FALSE
-
-        elif name == "__setitem__" and self.name == "__dict__" and not kwargs:
-            if isinstance(self.obj, variables.NNModuleVariable):
-                # This matches how `setattr` is handled for NNModuleVariable
-                self.obj.convert_to_unspecialized(tx)
-
-        return super().call_method(tx, name, args, kwargs)
-
-    def get_forwarded_dict(self, tx: "InstructionTranslator") -> VariableTracker:
-        assert (
-            self.name == "__dict__"
-            and isinstance(self.obj, variables.UserDefinedClassVariable)
-            and not tx.output.side_effects.has_pending_mutation(self.obj)
-        )
-        self.obj.ban_mutation = True
-        return VariableTracker.build(tx, self.obj.value.__dict__, self.source)
 
 
 class MethodWrapperVariable(VariableTracker):
