@@ -46,8 +46,9 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
 fi
 
 # Remove onnxruntime if present to avoid interference with non-ONNX tests
-# (ONNX tests use .ci/onnx/test.sh which has its own setup)
-pip uninstall -y onnxruntime 2>/dev/null || true
+if [[ "$TEST_CONFIG" != "onnx" ]]; then
+  pip uninstall -y onnxruntime 2>/dev/null || true
+fi
 
 echo "Environment variables:"
 env
@@ -153,7 +154,7 @@ export LANG=C.UTF-8
 
 PR_NUMBER=${PR_NUMBER:-${CIRCLE_PR_NUMBER:-}}
 
-if [[ -d "${HF_CACHE}" ]]; then
+if [[ -d "${HF_CACHE}" && "$TEST_CONFIG" != "onnx" ]]; then
   export HF_HOME="${HF_CACHE}"
 fi
 
@@ -2051,7 +2052,10 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-baze
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
-if [[ "${TEST_CONFIG}" == *numpy_2* ]]; then
+if [[ "${TEST_CONFIG}" == "onnx" ]]; then
+  install_torchvision
+  "$(dirname "${BASH_SOURCE[0]}")/../../scripts/onnx/test.sh"
+elif [[ "${TEST_CONFIG}" == *numpy_2* ]]; then
   # Install numpy-2.0.2 and compatible scipy & numba versions
   # Force re-install of pandas to avoid error where pandas checks numpy version from initial install and fails upon import
   TMP_PANDAS_VERSION=$(python -c "import pandas; print(pandas.__version__)" 2>/dev/null)

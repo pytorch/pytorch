@@ -217,39 +217,6 @@ jobs:
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
     secrets: inherit
 
-  linux-jammy-py3_10-clang18-onnx-build:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-clang18-onnx ') }}
-    name: linux-jammy-py3.10-clang18-onnx
-    uses: ./.github/workflows/_linux-build.yml
-    needs:
-      - get-label-type
-      - job-filter
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3.10-clang18-onnx
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang18
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
-          { config: "default", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
-        ]}
-    secrets: inherit
-
-  linux-jammy-py3_10-clang18-onnx-test:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-clang18-onnx ') }}
-    name: linux-jammy-py3.10-clang18-onnx
-    uses: ./.github/workflows/_linux-test.yml
-    needs:
-      - linux-jammy-py3_10-clang18-onnx-build
-      - target-determination
-      - job-filter
-    with:
-      build-environment: ${{ needs.linux-jammy-py3_10-clang18-onnx-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-py3_10-clang18-onnx-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3_10-clang18-onnx-build.outputs.test-matrix }}
-      tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
-    secrets: inherit
-
   linux-jammy-py3_10-clang18-build:
     if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-clang18 ') }}
     name: linux-jammy-py3.10-clang18
@@ -275,6 +242,7 @@ jobs:
           { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
           { config: "einops", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
           { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "onnx", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
         ]}
     secrets: inherit
 
