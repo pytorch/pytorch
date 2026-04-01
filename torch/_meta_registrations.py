@@ -6693,7 +6693,11 @@ def _check_scaled_mm_sizes(
         lambda: f"Expected both inputs to be fp8 or fp4 types but got self.dtype={self.dtype} and mat2.dtype={mat2.dtype}",
     )
 
-    if device_hint(self) == "cuda" or device_hint(self) == "xpu":
+    if (
+        device_hint(self) == "cuda"
+        or device_hint(self) == "xpu"
+        or device_hint(self) == "cpu"
+    ):
 
         def is_row_major(stride):
             return stride[0] > stride[1] and stride[1] == 1
@@ -6704,22 +6708,23 @@ def _check_scaled_mm_sizes(
         def has_zero_dim(tensor_2d):
             return tensor_2d.size(0) == 0 or tensor_2d.size(1) == 0
 
-        torch._check(
-            is_row_major(self.stride()) or has_zero_dim(self),
-            lambda: f"self must be row_major, got stride {self.stride()}",
-        )
-        torch._check(
-            is_col_major(mat2.stride()) or has_zero_dim(mat2),
-            lambda: f"mat2 must be col_major, got stride {mat2.stride()}",
-        )
-        torch._check(
-            self.size(1) % 16 == 0,
-            lambda: f"Expected self.size(1) to be divisible by 16, but got self.size(1)={self.size(1)}",
-        )
-        torch._check(
-            mat2.size(0) % 16 == 0 and mat2.size(1) % 16 == 0,
-            lambda: f"Expected both dimensions of mat2 to be divisible by 16 but got {mat2.shape}",
-        )
+        if device_hint(self) != "cpu":
+            torch._check(
+                is_row_major(self.stride()) or has_zero_dim(self),
+                lambda: f"self must be row_major, got stride {self.stride()}",
+            )
+            torch._check(
+                is_col_major(mat2.stride()) or has_zero_dim(mat2),
+                lambda: f"mat2 must be col_major, got stride {mat2.stride()}",
+            )
+            torch._check(
+                self.size(1) % 16 == 0,
+                lambda: f"Expected self.size(1) to be divisible by 16, but got self.size(1)={self.size(1)}",
+            )
+            torch._check(
+                mat2.size(0) % 16 == 0 and mat2.size(1) % 16 == 0,
+                lambda: f"Expected both dimensions of mat2 to be divisible by 16 but got {mat2.shape}",
+            )
 
         # determine scaling type and check input dimensions (refer to Blas.cpp op)
 
@@ -6934,7 +6939,11 @@ def _check_scaled_mm_sizes_v2(
             SwizzleType.NO_SWIZZLE,
         ]
 
-    if device_hint(self) == "cuda" or device_hint(self) == "xpu":
+    if (
+        device_hint(self) == "cuda"
+        or device_hint(self) == "xpu"
+        or device_hint(self) == "cpu"
+    ):
 
         def is_row_major(stride):
             return stride[0] > stride[1] and stride[1] == 1
@@ -6945,22 +6954,23 @@ def _check_scaled_mm_sizes_v2(
         def has_zero_dim(tensor_2d):
             return tensor_2d.size(0) == 0 or tensor_2d.size(1) == 0
 
-        torch._check(
-            is_row_major(self.stride()) or has_zero_dim(self),
-            lambda: f"self must be row_major, got stride {self.stride()}",
-        )
-        torch._check(
-            is_col_major(mat2.stride()) or has_zero_dim(mat2),
-            lambda: f"mat2 must be col_major, got stride {mat2.stride()}",
-        )
-        torch._check(
-            self.size(1) % 16 == 0,
-            lambda: f"Expected self.size(1) to be divisible by 16, but got self.size(1)={self.size(1)}",
-        )
-        torch._check(
-            mat2.size(0) % 16 == 0 and mat2.size(1) % 16 == 0,
-            lambda: f"Expected both dimensions of mat2 to be divisible by 16 but got {mat2.shape}",
-        )
+        if device_hint(self) != "cpu":
+            torch._check(
+                is_row_major(self.stride()) or has_zero_dim(self),
+                lambda: f"self must be row_major, got stride {self.stride()}",
+            )
+            torch._check(
+                is_col_major(mat2.stride()) or has_zero_dim(mat2),
+                lambda: f"mat2 must be col_major, got stride {mat2.stride()}",
+            )
+            torch._check(
+                self.size(1) % 16 == 0,
+                lambda: f"Expected self.size(1) to be divisible by 16, but got self.size(1)={self.size(1)}",
+            )
+            torch._check(
+                mat2.size(0) % 16 == 0 and mat2.size(1) % 16 == 0,
+                lambda: f"Expected both dimensions of mat2 to be divisible by 16 but got {mat2.shape}",
+            )
 
         def is_tensorwise(recipe_a: list[ScalingType], recipe_b: list[ScalingType]):
             return (
