@@ -1679,7 +1679,18 @@ class BuiltinVariable(BaseBuiltinVariable):
             try:
                 return VariableTracker.build(tx, repr(arg.as_python_constant()))
             except NotImplementedError:
-                return VariableTracker.build(tx, arg.debug_repr())
+                if isinstance(
+                    arg,
+                    (
+                        RangeVariable,
+                        ConstDictVariable,
+                        DefaultDictVariable,
+                        OrderedSetClassVariable,
+                        DictViewVariable,
+                    ),
+                ):
+                    return VariableTracker.build(tx, arg.debug_repr())
+                return None
         return None
 
     def call_str(
@@ -1705,7 +1716,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             try:
                 return VariableTracker.build(tx, str(arg.as_python_constant()))
             except NotImplementedError:
-                return VariableTracker.build(tx, arg.debug_repr())
+                return None
         elif isinstance(arg, (variables.UserDefinedObjectVariable)):
             # Check if object has __str__ method
             if hasattr(arg.value, "__str__"):
@@ -1722,8 +1733,6 @@ class BuiltinVariable(BaseBuiltinVariable):
                 )
 
             if type(arg.value).__str__ is object.__str__:
-                if type(arg.value).__repr__ is not object.__repr__:
-                    return self.call_repr(tx, arg)
                 # Rely on the object str method
                 try:
                     # pyrefly: ignore [unbound-name]
@@ -1760,6 +1769,41 @@ class BuiltinVariable(BaseBuiltinVariable):
                 value = ", ".join(a.as_python_constant() for a in arg.args)
             return VariableTracker.build(tx, value)
         return None
+
+    def call_default_format(
+        self, tx: "InstructionTranslator", arg: VariableTracker
+    ) -> VariableTracker | None:
+        if isinstance(
+            arg,
+            (
+                RangeVariable,
+                ListVariable,
+                TupleVariable,
+                ConstDictVariable,
+                DefaultDictVariable,
+                SetVariable,
+                FrozensetVariable,
+                OrderedSetClassVariable,
+                DictViewVariable,
+            ),
+        ):
+            return self.call_str(tx, arg)
+
+        if not isinstance(arg, variables.UserDefinedObjectVariable):
+            return None
+
+        if type(arg.value).__format__ is not object.__format__:
+            return None
+
+        if type(arg.value).__str__ is not object.__str__:
+            return None
+
+        repr_method = arg.value.__repr__
+        if type(arg.value).__repr__ is object.__repr__:
+            return None
+        if is_wrapper_or_member_descriptor(repr_method):
+            return None
+        return self.call_repr(tx, arg)
 
     def _call_min_max(
         self, tx: "InstructionTranslator", *args: VariableTracker
@@ -2875,7 +2919,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         format_string = _format_string.as_python_constant()
         format_string = str(format_string)
         if format_string in ("{}", "{:}") and len(args) == 1 and not kwargs:
-            eager_value = self.call_str(tx, args[0])
+            eager_value = self.call_default_format(tx, args[0])
             if eager_value is not None:
                 return eager_value
         return variables.StringFormatVariable.create(format_string, args, kwargs)
