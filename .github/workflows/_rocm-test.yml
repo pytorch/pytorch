@@ -216,6 +216,7 @@ jobs:
             TEST_COMMAND=.ci/pytorch/test.sh
           fi
           export USE_CACHE=0
+          export SCCACHE_DISABLE=1
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG since that doesn't play nice
@@ -225,6 +226,8 @@ jobs:
             ${DEVICE_FLAG:-} \
             ${ADDITIONAL_FLAGS:-} \
             -e USE_CACHE \
+            -e SCCACHE_DISABLE \
+            -e SCCACHE_SERVER_PORT \
             -e BUILD_ENVIRONMENT \
             -e PR_NUMBER \
             -e GITHUB_ACTIONS \
