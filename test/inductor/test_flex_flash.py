@@ -1255,6 +1255,7 @@ class TestFlexFlash(InductorTestCase):
         out = compiled_fn(x, weight)
         self.assertEqual(out.shape, (B, H, M, D))
 
+    @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
     def test_gqa_expand_stride_zero_backward(self, device, dtype):
         """Test GQA backward with expand()-created K/V tensors (stride=0).
