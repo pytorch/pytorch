@@ -8,6 +8,12 @@ an optimized Triton kernel.
 
 ## Software Architecture
 
+```{image} /_static/img/inductor_user_guide/inductor_arch.png
+:alt: High-level architecture of the PyTorch compiler showing TorchDynamo, AOT Dispatcher, and TorchInductor
+:width: 600px
+:align: center
+```
+
 The PyTorch compiler receives a PyTorch program and generates optimized
 kernels. The high-level components involved in that translation are:
 
@@ -46,6 +52,12 @@ page.
 :::
 
 ## TorchInductor Pipeline
+
+```{image} /_static/img/inductor_user_guide/arch_detailed.png
+:alt: Detailed TorchInductor compilation pipeline from Pre-grad Passes through Code Generation to hardware targets
+:width: 600px
+:align: center
+```
 
 The entry point into TorchInductor is the `compile_fx` function in
 [compile_fx.py](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/compile_fx.py),
