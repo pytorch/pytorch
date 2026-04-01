@@ -3991,12 +3991,11 @@ class TestProfilerEventsParity(TestCase):
     def test_structured_metadata_matches_chrome_trace(self):
         from torch.autograd.profiler_util import _EVENT_METADATA_KEYS
 
-        experimental_config = torch._C._profiler._ExperimentalConfig(
-            expose_kineto_event_metadata=True
-        )
         with profile(
             activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-            experimental_config=experimental_config,
+            experimental_config=torch._C._profiler._ExperimentalConfig(
+                expose_kineto_event_metadata=True
+            ),
         ) as prof:
             x = torch.randn(10, 10, device="cuda")
             y = torch.mm(x, x)
