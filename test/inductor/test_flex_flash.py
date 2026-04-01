@@ -26,6 +26,7 @@ from torch.testing._internal.common_cuda import (
     IS_SM90,
     PLATFORM_SUPPORTS_FP8,
     SM120OrLater,
+    xfailIfSM120OrLater,
     xfailIfSM90,
 )
 from torch.testing._internal.common_device_type import (
@@ -804,10 +805,7 @@ GQA_MQA_BLOCK_MASK_CASES = [
 )
 class TestFlexFlash(InductorTestCase):
     # `FlashAttentionForwardSm120` does not have `apply_score_mod`.
-    @decorateIf(
-        unittest.expectedFailure,
-        lambda params: SM120OrLater,
-    )
+    @xfailIfSM120OrLater
     @decorateIf(
         unittest.expectedFailure,
         lambda params: params["case"].requires_grad and IS_SM90,
@@ -1285,10 +1283,7 @@ class TestFlexFlash(InductorTestCase):
             )
 
     # 'FlashAttentionForwardSm120' object has no attribute 'apply_score_mod'
-    @decorateIf(
-        unittest.expectedFailure,
-        lambda params: SM120OrLater,
-    )
+    @xfailIfSM120OrLater
     @decorateIf(
         unittest.expectedFailure,
         lambda params: IS_SM90,
@@ -1400,10 +1395,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         self._run_dynamic_test(seq_lens=[128, 256, 512], requires_grad=True)
 
     # 'FlashAttentionForwardSm120' object has no attribute 'apply_score_mod'
-    @decorateIf(
-        unittest.expectedFailure,
-        lambda params: SM120OrLater,
-    )
+    @xfailIfSM120OrLater
     @xfailIfSM90
     def test_dynamic_backward_with_score_mod(self):
         """Test backward with score_mod and dynamic sequence lengths."""
@@ -1765,10 +1757,7 @@ class TestHierarchicalIndex(InductorTestCase):
         self.assertIn("Rank mismatch", str(ctx.exception))
 
     # 'FlashAttentionForwardSm120' object has no attribute 'apply_score_mod'
-    @decorateIf(
-        unittest.expectedFailure,
-        lambda params: SM120OrLater,
-    )
+    @xfailIfSM120OrLater
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @unittest.skipIf(
         not ensure_flash_available(), "Flash attention (CUTE) library not available"
@@ -1813,10 +1802,7 @@ class TestHierarchicalIndex(InductorTestCase):
         )
 
     # 'FlashAttentionForwardSm120' object has no attribute 'apply_score_mod'
-    @decorateIf(
-        unittest.expectedFailure,
-        lambda params: SM120OrLater,
-    )
+    @xfailIfSM120OrLater
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @unittest.skipIf(
         not ensure_flash_available(), "Flash attention (CUTE) library not available"
