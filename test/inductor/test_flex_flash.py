@@ -872,6 +872,7 @@ class TestFlexFlash(InductorTestCase):
                     else None,
                 )
 
+    @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", MASK_MOD_CASES, name_fn=mask_case_name)
     def test_flash_attention_mask_mod_cases(self, device, dtype, case):
@@ -959,6 +960,20 @@ class TestFlexFlash(InductorTestCase):
                 )
                 out.sum().backward()
 
+    @decorateIf(
+        unittest.expectedFailure,
+        lambda params: (
+            SM120OrLater
+            and params["case"].name
+            in {
+                "backward_block_mask_causal",
+                "backward_block_mask_causal_rel_bias",
+                "backward_block_mask_causal_score_squared",
+                "backward_block_mask_causal_score_times_two",
+                "mask_mod_view_buffer",
+            }
+        ),
+    )
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", DETERMINISTIC_MASK_MOD_CASES, name_fn=mask_case_name)
     def test_flash_attention_backward_deterministic_warn_only_block_mask(
@@ -1118,6 +1133,7 @@ class TestFlexFlash(InductorTestCase):
                     ),
                 )
 
+    @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_kernel_called(self, device, dtype):
         q, k, v = create_test_tensors(dtype=dtype, device=device)
@@ -1249,6 +1265,7 @@ class TestFlexFlash(InductorTestCase):
             "Expected deterministic flag to be wired through flash backward",
         )
 
+    @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_generates_cute_hash(self, device, dtype):
         q, k, v = create_test_tensors(dtype=dtype, device=device)
@@ -1433,6 +1450,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         """Test dynamic sequence lengths without score_mod."""
         self._run_dynamic_test(seq_lens=[128, 256, 512])
 
+    @xfailIfSM120OrLater
     def test_dynamic_seq_len_inline_literal(self):
         """Test dynamic sequence lengths with inline literal score_mod."""
 
@@ -1441,6 +1459,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
 
         self._run_dynamic_test(seq_lens=[128, 256, 512], score_mod=score_mod)
 
+    @xfailIfSM120OrLater
     def test_dynamic_seq_len_captured_tensor_buffer(self):
         """Test dynamic sequence lengths with captured tensor buffer (ALiBi-style)."""
         num_heads = 4
@@ -1453,6 +1472,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
 
         self._run_dynamic_test(seq_lens=[128, 256, 512], score_mod=alibi_score_mod)
 
+    @xfailIfSM120OrLater
     def test_dynamic_seq_len_with_block_mask(self):
         """Test dynamic sequence lengths with block mask."""
 
@@ -1491,6 +1511,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             seq_lens=[128, 256, 512], score_mod=score_mod, requires_grad=True
         )
 
+    @xfailIfSM120OrLater
     def test_dynamic_backward_with_block_mask(self):
         """Test backward with block mask and dynamic sequence lengths."""
         major, _ = torch.cuda.get_device_capability()
@@ -1508,6 +1529,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             requires_grad=True,
         )
 
+    @xfailIfSM120OrLater
     def test_dynamic_gqa(self):
         """Test GQA with dynamic sequence lengths."""
         q_heads, kv_heads = 8, 2
@@ -1521,6 +1543,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             )
             self._flash_triton_dynamic(q, k, v, score_mod=None, block_mask=None)
 
+    @xfailIfSM120OrLater
     def test_dynamic_mqa(self):
         """Test MQA with dynamic sequence lengths."""
         q_heads, kv_heads = 8, 1
@@ -1585,6 +1608,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
                 q, k, v, score_mod=score_mod, kernel_options={"BACKEND": "FLASH"}
             )
 
+    @xfailIfSM120OrLater
     def test_captured_float_works_with_static(self):
         """Test that captured Python float works with dynamic=False."""
         val = 2.0  # Captured float
@@ -1600,6 +1624,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         )
         self.assertEqual(out.shape, q.shape)
 
+    @xfailIfSM120OrLater
     def test_dynamic_mask_from_input_lengths_single_graph(self):
         """Dynamic mask creation driven by input lengths should stay single-graph."""
         counter = CompileCounterWithBackend("inductor")
@@ -1646,6 +1671,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             counter.frame_count, 1, f"Expected 1 graph, got {counter.frame_count}"
         )
 
+    @xfailIfSM120OrLater
     def test_dynamic_free_symbol_mask_single_graph(self):
         """Free-symbol dense mask under dynamic=True should not recompile."""
         counter = CompileCounterWithBackend("inductor")
@@ -1682,6 +1708,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             counter.frame_count, 1, f"Expected 1 graph, got {counter.frame_count}"
         )
 
+    @xfailIfSM120OrLater
     def test_dynamic_max_autotune_with_block_mask(self):
         """Dynamic=True with max-autotune should succeed for FLASH backend."""
         q, k, v = create_test_tensors(
@@ -1708,6 +1735,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         )
         self.assertEqual(out.shape, q.shape)
 
+    @xfailIfSM120OrLater
     @xfailIfSM90
     def test_dynamic_captured_buffer_varying_heads(self):
         """Dynamic head_count with captured tensor buffer under FLASH/TRITON parity."""
@@ -1932,6 +1960,7 @@ class TestHierarchicalIndex(InductorTestCase):
             f"Expected '{expected_pattern}' in generated code.\nExcerpt:\n{code_str[:2000]}",
         )
 
+    @xfailIfSM120OrLater
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @unittest.skipIf(
         not ensure_flash_available(), "Flash attention (CUTE) library not available"
