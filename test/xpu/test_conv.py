@@ -1369,6 +1369,52 @@ class TestConvolutionNNDeviceType(NNTestCase):
             self.assertTrue(torch.backends.mkldnn.allow_tf32)
 
 
+    @onlyXPU
+    @dtypes(torch.float)
+    def test_conv_nonzero_storage_offset(self, device, dtype):
+        # Tensors created via slicing have non-zero storage_offset, which
+        # oneDNN does not support. Verify that convolution still produces
+        # correct results for input, weight, and bias with non-zero offsets.
+        conv = nn.Conv2d(3, 8, kernel_size=3, padding=1, dtype=dtype).to(device)
+
+        # Create tensors with non-zero storage_offset via slicing
+        input_base = torch.randn(2, 3, 8, 8, dtype=dtype, device=device)
+        input_sliced = input_base[1:]  # storage_offset != 0
+        input_sliced.requires_grad_(True)
+        self.assertNotEqual(input_sliced.storage_offset(), 0)
+
+        bias_base = torch.randn(16, dtype=dtype, device=device)
+        bias_sliced = bias_base[8:]  # storage_offset != 0
+        self.assertNotEqual(bias_sliced.storage_offset(), 0)
+        conv.bias = nn.Parameter(bias_sliced)
+
+        weight_base = torch.randn(16, 3, 3, 3, dtype=dtype, device=device)
+        weight_sliced = weight_base[8:]  # storage_offset != 0
+        self.assertNotEqual(weight_sliced.storage_offset(), 0)
+        conv.weight = nn.Parameter(weight_sliced)
+
+        # Reference: use contiguous copies with zero storage_offset
+        conv_ref = nn.Conv2d(3, 8, kernel_size=3, padding=1, dtype=dtype).to(device)
+        conv_ref.weight = nn.Parameter(weight_sliced.clone())
+        conv_ref.bias = nn.Parameter(bias_sliced.clone())
+        input_ref = input_sliced.clone().detach().requires_grad_(True)
+
+        out = conv(input_sliced)
+        out_ref = conv_ref(input_ref)
+        self.assertEqual(out, out_ref)
+
+        # Also verify backward pass, with grad_output having non-zero storage_offset
+        grad_output_base = torch.randn(out.size(0) + 1, *out.shape[1:], dtype=dtype, device=device)
+        grad_sliced = grad_output_base[1:]  # storage_offset != 0, same shape as out
+        self.assertNotEqual(grad_sliced.storage_offset(), 0)
+
+        out.backward(grad_sliced)
+        out_ref.backward(grad_sliced.clone())
+        self.assertEqual(input_sliced.grad, input_ref.grad)
+        self.assertEqual(conv.weight.grad, conv_ref.weight.grad)
+        self.assertEqual(conv.bias.grad, conv_ref.bias.grad)
+
+
 instantiate_device_type_tests(
     TestConvolutionNNDeviceType, globals(), only_for="xpu", allow_xpu=True
 )

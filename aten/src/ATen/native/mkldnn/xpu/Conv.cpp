@@ -21,6 +21,21 @@ using namespace at::native::onednn;
 namespace at::native::xpu {
 namespace impl {
 
+// Returns a tensor that always satisfies oneDNN layout requirements:
+// it is contiguous in the given memory format and has zero storage offset.
+// If the input already satisfies these conditions, it is returned as-is;
+// otherwise, a cloned copy with the required properties is created.
+static Tensor prepare_onednn_tensor(
+    const Tensor& tensor,
+    at::MemoryFormat mfmt) {
+  if (tensor.is_contiguous(mfmt) && tensor.storage_offset() == 0) {
+    return tensor;
+  }
+  // Clone produces a fresh, contiguous tensor with storage_offset() == 0
+  // in the requested memory format, avoiding an extra intermediate copy.
+  return tensor.clone(mfmt);
+}
+
 struct ConvParams {
   std::vector<int64_t> stride;
   std::vector<int64_t> padding;
@@ -380,13 +395,14 @@ Tensor _convolution_out(
     params.groups = groups_;
   }
 
-  // ensure the input/weight/bias/output are congituous in desired format
   at::MemoryFormat mfmt = is_channels_last_suggested
       ? get_cl_tag_by_ndim(input.ndimension())
       : at::MemoryFormat::Contiguous;
-  auto bias = bias_r.defined() ? bias_r.contiguous() : bias_r;
-  input = input.contiguous(mfmt);
-  weight = weight.contiguous(mfmt);
+  input = prepare_onednn_tensor(input, mfmt);
+  weight = prepare_onednn_tensor(weight, mfmt);
+  auto bias = bias_r.defined()
+      ? prepare_onednn_tensor(bias_r, at::MemoryFormat::Contiguous)
+      : bias_r;
   check_shape_forward(input, weight, bias, params, true);
 
   Tensor output;
@@ -587,13 +603,12 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
     groups_ = groups;
   }
 
-  // ensure the tensors are contiguous
   auto mfmt = is_channels_last_suggested
       ? get_cl_tag_by_ndim(input_.ndimension())
       : at::MemoryFormat::Contiguous;
-  grad_output_ = grad_output_.contiguous(mfmt);
-  weight_ = weight_.contiguous(mfmt);
-  input_ = input_.contiguous(mfmt);
+  grad_output_ = prepare_onednn_tensor(grad_output_, mfmt);
+  weight_ = prepare_onednn_tensor(weight_, mfmt);
+  input_ = prepare_onednn_tensor(input_, mfmt);
 
   auto opt = grad_output_.options();
   Tensor grad_input;
