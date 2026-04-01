@@ -84,7 +84,7 @@ TransformerDecoderLayer
 
 Single decoder layer with self-attention, cross-attention, and feedforward network.
 
-.. doxygenclass:: torch::nn::TransformerDecoderLayerImpl
+.. doxygenclass:: TransformerDecoderLayerImpl
    :members:
    :undoc-members:
 

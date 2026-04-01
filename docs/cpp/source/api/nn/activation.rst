@@ -210,6 +210,20 @@ Softmax
 
    auto softmax = torch::nn::Softmax(torch::nn::SoftmaxOptions(/*dim=*/1));
 
+Softmax2d
+---------
+
+Applies ``Softmax`` over features to each spatial location in a 4D input
+tensor of shape ``(N, C, H, W)``.
+
+.. doxygenclass:: torch::nn::Softmax2d
+   :members:
+   :undoc-members:
+
+.. doxygenclass:: torch::nn::Softmax2dImpl
+   :members:
+   :undoc-members:
+
 LogSoftmax
 ----------
 

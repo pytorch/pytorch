@@ -15,6 +15,26 @@ Dataset Base Class
    :members:
    :undoc-members:
 
+StatefulDataset
+---------------
+
+A dataset that manages its own state across batches (e.g., position in a stream).
+Unlike ``Dataset``, it produces batches directly without external samplers.
+
+.. doxygenclass:: torch::data::datasets::StatefulDataset
+   :members:
+   :undoc-members:
+
+ChunkDataReader
+---------------
+
+Interface for reading chunks of data from a data source. Used with
+``ChunkDataset`` for large-scale data loading.
+
+.. doxygenclass:: torch::data::datasets::ChunkDataReader
+   :members:
+   :undoc-members:
+
 Custom Dataset Example
 ----------------------
 

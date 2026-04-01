@@ -46,7 +46,14 @@ All ``torch::nn`` modules inherit from ``Cloneable``, enabling deep copies:
 AnyModule
 ---------
 
-``AnyModule`` provides type-erased storage for any module:
+``AnyModule`` provides type-erased storage for any module, allowing you to
+store heterogeneous modules in a single container.
+
+.. doxygenclass:: torch::nn::AnyModule
+   :members:
+   :undoc-members:
+
+**Example:**
 
 .. code-block:: cpp
 
@@ -57,14 +64,11 @@ Functional
 ----------
 
 Wraps a function or callable as a module, useful for inserting arbitrary
-functions into a ``Sequential`` container:
+functions into a ``Sequential`` container.
 
-.. code-block:: cpp
-
-   auto model = torch::nn::Sequential(
-       torch::nn::Linear(10, 5),
-       torch::nn::Functional(torch::relu),
-       torch::nn::Linear(5, 1));
+.. doxygenclass:: torch::nn::FunctionalImpl
+   :members:
+   :undoc-members:
 
 ModuleHolder
 ------------

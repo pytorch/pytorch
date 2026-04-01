@@ -19,6 +19,25 @@ DataLoaderOptions
    :members:
    :undoc-members:
 
+StatefulDataLoader
+------------------
+
+A DataLoader for ``StatefulDataset`` types that manage their own batching logic
+internally.
+
+.. doxygenclass:: torch::data::StatefulDataLoader
+   :members:
+   :undoc-members:
+
+StatelessDataLoader
+-------------------
+
+A DataLoader for ``Dataset`` types that use external samplers for batching.
+
+.. doxygenclass:: torch::data::StatelessDataLoader
+   :members:
+   :undoc-members:
+
 Iterator
 --------
 

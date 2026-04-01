@@ -48,7 +48,7 @@ Setter Operations
    * - ``tensor[1::2] = 1``
      - ``tensor.index_put_({Slice(1, None, 2)}, 1)``
 
-     Slice Syntax
+Slice Syntax
 ------------
 
 .. list-table::

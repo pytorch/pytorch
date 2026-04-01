@@ -53,8 +53,22 @@ Header Files
 Module Base Class
 -----------------
 
-All neural network modules inherit from ``torch::nn::Module``. See
-``torch/nn/module.h`` for the full class definition.
+All neural network modules inherit from ``torch::nn::Module``, which provides
+parameter management, serialization, device/dtype conversion, and hooks.
+
+.. doxygenclass:: torch::nn::Module
+   :members:
+   :undoc-members:
+
+**Key features:**
+
+- ``register_module()``: Register submodules for parameter tracking
+- ``register_parameter()``: Register learnable parameters
+- ``register_buffer()``: Register non-learnable state (e.g., running mean)
+- ``parameters()`` / ``named_parameters()``: Iterate over all parameters
+- ``to()``: Move module to a device or convert dtype
+- ``train()`` / ``eval()``: Toggle training/evaluation mode
+- ``save()`` / ``load()``: Serialize and deserialize module state
 
 Module Categories
 -----------------
