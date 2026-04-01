@@ -141,7 +141,8 @@ class MetalShaderLibrary {
       TensorIteratorBase& iter,
       const std::string& name,
       const std::optional<c10::Scalar> alpha = std::nullopt,
-      const std::optional<c10::ScalarType> scalar_arg_type = std::nullopt);
+      const std::optional<c10::ScalarType> scalar_arg_type = std::nullopt,
+      bool supports_vec4 = false);
   void exec_binary_kernel(
       TensorIteratorBase& iter,
       const std::string& name,
