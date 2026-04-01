@@ -2367,6 +2367,10 @@ def coverage_post_process(app, exception):
     ignore_names = set(app.config.coverage_ignore_functions) | set(
         app.config.coverage_ignore_classes
     )
+    # TorchScript-only pybind11 types that are in __all__ (via dir(torch._C))
+    # but intentionally not documented: their .str member creates ambiguous
+    # cross-references with Python's builtin str across all docstrings.
+    ignore_names |= {"ErrorReport", "FutureType", "StreamObjType"}
     undocumented = []
     for mod_name in modules:
         if not is_not_internal(mod_name):

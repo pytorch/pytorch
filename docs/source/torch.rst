@@ -957,8 +957,6 @@ Utilities
     autocast_increment_nesting
     clear_autocast_cache
     compiled_with_cxx11_abi
-    ErrorReport
-    FutureType
     get_autocast_cpu_dtype
     get_autocast_dtype
     get_autocast_gpu_dtype
@@ -997,8 +995,6 @@ Utilities
     set_autocast_xla_dtype
     set_autocast_xla_enabled
     set_vital
-    StreamObjType
-    TensorType
     unify_type_list
     use_deterministic_algorithms
     are_deterministic_algorithms_enabled
@@ -1013,6 +1009,11 @@ Utilities
     vmap
     _assert
     typename
+
+Type Information
+----------------
+.. autoclass:: TensorType
+    :no-members:
 
 Symbolic Numbers
 ----------------
