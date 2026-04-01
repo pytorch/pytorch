@@ -562,6 +562,8 @@ class EventMetadata(NamedTuple):
     warps_per_sm: float | None
     occupancy: float | None
     queued: int | None
+    graph_id: int | None
+    graph_node_id: int | None
     stream: int | None
     context: int | None
     # Memory fields
@@ -609,6 +611,8 @@ _EVENT_METADATA_KEYS: dict[str, tuple[str, Callable[[str], Any]]] = {
     "warps per SM": ("warps_per_sm", float),
     "est. achieved occupancy %": ("occupancy", float),
     "queued": ("queued", int),
+    "graph id": ("graph_id", int),
+    "graph node id": ("graph_node_id", int),
     "stream": ("stream", int),
     "context": ("context", int),
     "bytes": ("bytes", int),
