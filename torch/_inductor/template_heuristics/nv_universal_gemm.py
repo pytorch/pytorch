@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import torch
+from torch._inductor import config
 from torch._inductor.utils import ensure_nvmatmul_heuristics_available
 from torch._logging import getArtifactLogger
 from torch.utils._ordered_set import OrderedSet
@@ -172,6 +173,56 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         matched.sort(key=lambda x: x[1])
         selected = matched[:count]
         result = [k for k, _ in selected]
+
+        # Supplement with configs the heuristics model doesn't explore.
+        # nvMatmulHeuristics omits large cluster_n (8,16), tile64x32,
+        # and tile256x* that empirically beat cuBLAS on B200 bf16.
+        _SUPPLEMENT_CONFIGS: set[ConfigKey] = {
+            # tile64x128: wins QKV at M=1-32 on Llama-70B/Qwen3-32B
+            (64, 128, 1, 1),
+            (64, 128, 1, 2),
+            (64, 128, 1, 4),
+            (64, 128, 1, 8),
+            (64, 128, 1, 16),
+            # tile64x256: wins gate_up at small M
+            (64, 256, 1, 8),
+            (64, 256, 1, 16),
+            # tile64x32: wins O_proj at decode
+            (64, 32, 1, 2),
+            (64, 32, 1, 4),
+            # tile128x64: wins gate_up on Qwen2.5
+            (128, 64, 1, 1),
+            # tile128x128: wins O_proj/down at M=128
+            (128, 128, 1, 8),
+            (128, 128, 1, 16),
+            (128, 128, 2, 2),
+            (128, 128, 2, 4),
+            (128, 128, 2, 8),
+            # tile128x256: wins gate_up at M=128
+            (128, 256, 1, 4),
+            (128, 256, 1, 8),
+            (128, 256, 1, 16),
+            (128, 256, 2, 1),
+            (128, 256, 2, 8),
+            # tile256x256: wins at M>=1024 prefill
+            (256, 256, 2, 1),
+            (256, 256, 2, 4),
+            (256, 256, 4, 2),
+            (256, 256, 4, 4),
+            (256, 256, 8, 1),
+            (256, 256, 8, 2),
+            # tile256x128: wins at large M
+            (256, 128, 2, 1),
+            (256, 128, 2, 2),
+        }
+        if config.nvgemm_supplement_configs:
+            selected_keys = {
+                _make_config_key_from_kernel_design(k.metadata.design)
+                for k in result
+            }
+            for key, key_kernels in config_to_kernels.items():
+                if key not in selected_keys and key in _SUPPLEMENT_CONFIGS:
+                    result.append(key_kernels[0])
 
         log.debug(
             "Heuristic filtered to %d kernels from %d total", len(result), len(kernels)
