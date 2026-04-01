@@ -26,6 +26,7 @@ from torch.testing._internal.common_quantization import (
     _dynamically_quantize_per_channel,
 )
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     iter_indices,
     parametrize,
     run_tests,
@@ -869,6 +870,14 @@ class TestBasicGEMM(TestCase):
         cpu_result = torch.matmul(a.cpu().float(), b.cpu().float()).half()
         torch.matmul(a, b, out=c)
         self.assertEqual(c, cpu_result)
+
+    @parametrize("shape", [513, 767])
+    def test_matmul_deterministic_mode(self, device, shape):
+        with DeterministicGuard(True):
+            inp = torch.randn(shape, shape, device=device, dtype=torch.float32)
+            first = torch.matmul(inp, inp)
+            for _ in range(10):
+                self.assertEqual(first, torch.matmul(inp, inp), atol=0.0, rtol=0.0)
 
     @dtypes(
         torch.int16,
