@@ -320,7 +320,6 @@ def generate_libtorch_matrix(
             # in 2.10
             windows_cuda_arches = CUDA_ARCHES.copy()
             windows_cuda_arches.remove("12.9")
-            windows_cuda_arches.remove("13.2")
             arches += windows_cuda_arches
     if libtorch_variants is None:
         libtorch_variants = [
@@ -378,7 +377,6 @@ def generate_wheels_matrix(
             # in 2.10
             windows_cuda_arches = CUDA_ARCHES.copy()
             windows_cuda_arches.remove("12.9")
-            windows_cuda_arches.remove("13.2")
             arches += windows_cuda_arches + XPU_ARCHES
         elif os == "linux-aarch64":
             # Separate new if as the CPU type is different and
