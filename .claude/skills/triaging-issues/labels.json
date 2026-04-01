@@ -437,7 +437,7 @@
     },
     {
       "name": "module: helion",
-      "description": ""
+      "description": "Helion (pytorch/helion) is a high-level Python DSL for writing GPU kernels that compiles to Triton. Users write kernels with @helion.kernel decorator and helion.language (hl.tile(), etc.) using familiar PyTorch operations. Helion kernels integrate with torch.compile/inductor via template fusion hooks. Apply when the issue involves helion kernel authoring, helion compilation, helion-to-Triton codegen, or helion+inductor template fusion. Do NOT apply for plain Triton kernel issues (use module: inductor) or general torch.compile issues unless helion is specifically involved."
     },
     {
       "name": "module: higher order operators",
