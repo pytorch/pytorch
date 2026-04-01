@@ -10,6 +10,8 @@ import inspect
 import io
 import itertools
 import pickle
+import subprocess
+import sys
 import unittest
 import weakref
 from unittest.mock import patch
@@ -1257,6 +1259,57 @@ class FakeTensorTest(TestCase):
         self.assertEqual(out[0].dtype, eye.dtype)
         self.assertEqual(out[1].dtype, eye.dtype)
         self.assertEqual(out[2].dtype, eye.dtype)
+
+    @unittest.skipIf(not torch.cuda._is_compiled(), "requires CUDA-compiled PyTorch")
+    def test_fake_device_guard_no_use_after_free(self):
+        # Regression test: when CUDA is compiled but no devices are visible,
+        # FakeTensorMode installs a FakeGuardImpl into the global
+        # device_guard_impl_registry.  The impl must outlive all threads that
+        # use it; previously it was stored as a thread-local unique_ptr, so
+        # the pointer became dangling after the thread exited, causing a
+        # segfault when a later thread called deviceCount() on it.
+        #
+        # CUDA_VISIBLE_DEVICES must be set before torch is imported, so we
+        # run the repro in a subprocess.
+
+        script = """\
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
+import threading
+import torch
+
+def f(x):
+    return x * x
+
+def run_compile():
+    g = torch.compile(f, backend="eager")
+    for i in range(10):
+        g(torch.randn(i))
+
+threads = [threading.Thread(target=run_compile) for _ in range(2)]
+for t in threads:
+    t.start()
+for t in threads:
+    t.join()
+
+torch._dynamo.reset()
+
+threads = [threading.Thread(target=run_compile) for _ in range(2)]
+for t in threads:
+    t.start()
+for t in threads:
+    t.join()
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            timeout=60,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=f"subprocess failed:\n{result.stderr.decode()}",
+        )
 
 
 instantiate_parametrized_tests(FakeTensorTest)
