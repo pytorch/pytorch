@@ -283,12 +283,21 @@ class TestCuda(TestCase):
                 "active_requests.peak": 0,
             }
 
+        # Deltas from baseline captured after cleanup (not absolute totals), so
+        # ordering against other tests cannot leave host stats in a broken state.
+        baseline = {}
+
         def check_stats(expected):
             stats = torch.cuda.host_memory_stats()
             for k, v in expected.items():
-                if v != stats[k]:
-                    print(f"key: {k}, expected: {v}, stats: {stats[k]}")
-                self.assertEqual(v, stats[k])
+                want = baseline[k] + v
+                actual = stats[k]
+                if actual != want:
+                    print(
+                        f"key: {k}, baseline: {baseline[k]}, delta: {v}, "
+                        f"want: {want}, got: {actual}"
+                    )
+                self.assertEqual(actual, want)
 
         # Setup the test cleanly
         alloc1 = 10
@@ -297,11 +306,12 @@ class TestCuda(TestCase):
         alloc2_aligned = 32
         expected = empty_stats()
 
-        # Reset any lingering state
         gc.collect()
         torch._C._host_emptyCache()
+        torch.cuda.reset_peak_host_memory_stats()
+        torch.cuda.reset_accumulated_host_memory_stats()
+        baseline.update(torch.cuda.host_memory_stats())
 
-        # Check that stats are empty
         check_stats(expected)
 
         # Make first allocation and check stats
@@ -4497,14 +4507,36 @@ g = torch.cuda.CUDAGraph()
 with torch.cuda.graph(g):
     output = my_func(a, b, perm)
 """
+        capture_violation_re = (
+            r"(?is)(?:torch\.)?AcceleratorError|CUDA error|HIP error|stream is capturing|"
+            r"hipErrorStreamCaptureUnsupported|hipErrorStreamCaptureInvalidated|"
+            r"previous error during capture"
+        )
         with self.assertRaisesRegex(
             subprocess.CalledProcessError,
             "calls a synchronize which is not allowed in a cudagraph",
         ):
-            r = (
-                subprocess.check_output([sys.executable, "-c", test_script])
-                .decode("ascii")
-                .strip()
+            proc = subprocess.run(
+                [sys.executable, "-c", test_script],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            # First assertRegex above checks the subprocess output for the expected graph-capture
+            # error during execution. We then re-raise as CalledProcessError so assertRaisesRegex
+            # matches repr(cmd). ROCm/HIP may use returncode 0 while still printing that error.
+            combined = proc.stdout + proc.stderr
+            self.assertRegex(
+                combined,
+                capture_violation_re,
+                msg=(
+                    "expected graph-capture violation in subprocess output "
+                    f"(returncode={proc.returncode}):\n{combined}"
+                ),
+            )
+            raise subprocess.CalledProcessError(
+                proc.returncode, [sys.executable, "-c", test_script]
             )
 
     def test_batch_norm_gather_stats(self):
