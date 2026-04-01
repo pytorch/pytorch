@@ -41,13 +41,14 @@ from torch import SymBool, SymInt, Tensor
 from torch._dispatch.python import enable_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import (
+    get_reconstruct_fn,
+    is_opaque_reference_type,
     is_opaque_value,
     is_opaque_value_type,
-    OpaqueType,
+    OpaqueBase,
     should_hoist,
 )
 from torch._logging import trace_structured
-from torch._opaque_base import OpaqueBase
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_impls import fast_detach
 from torch._subclasses.fake_tensor import (
@@ -263,7 +264,7 @@ def set_proxy_slot(obj: Tensor, tracer: _ProxyTracer, proxy: _ProxyTensor) -> No
 
 @overload
 def set_proxy_slot(
-    obj: _AnyScriptObjectType | OpaqueType, tracer: _ProxyTracer, proxy: Proxy
+    obj: _AnyScriptObjectType | OpaqueBase, tracer: _ProxyTracer, proxy: Proxy
 ) -> None: ...
 
 
@@ -274,7 +275,7 @@ def set_proxy_slot(
 
 
 def set_proxy_slot(
-    obj: PySymType | _AnyScriptObjectType | Tensor | OpaqueType,
+    obj: PySymType | _AnyScriptObjectType | Tensor | OpaqueBase,
     tracer: _ProxyTracer,
     proxy: object,
 ) -> None:
@@ -365,7 +366,7 @@ def has_proxy_slot(obj: Tensor, tracer: _ProxyTracer) -> bool:
 
 
 _PySymProxyType: TypeAlias = Thunk[Proxy]
-_OpaqueObjectProxyType: TypeAlias = Thunk[Proxy]
+_OpaqueObjectProxyType: TypeAlias = Proxy
 
 
 @overload
@@ -433,7 +434,7 @@ def get_proxy_slot(
 
 @overload
 def get_proxy_slot(
-    obj: OpaqueType,
+    obj: OpaqueBase,
     tracer: _ProxyTracer,
     default: T,
 ) -> T | _OpaqueObjectProxyType: ...
@@ -452,7 +453,7 @@ def get_proxy_slot(
 # the transform argument is handy if you need to extract a subfield from
 # the successfully looked up result (but NOT the default.)
 def get_proxy_slot(
-    obj: Tensor | _AnyScriptObjectType | PySymType | OpaqueType,
+    obj: Tensor | _AnyScriptObjectType | PySymType | OpaqueBase,
     tracer: _ProxyTracer,
     default: object = no_default,
     transform: Callable = lambda x: x,
@@ -668,7 +669,7 @@ def snapshot_fake(val: Tensor, include_real: bool = False) -> Tensor | None:
 _ExtractValType: TypeAlias = (
     None
     | PySymType
-    | OpaqueType
+    | OpaqueBase
     | _AnyScriptObjectType
     | BackwardState
     | list["_ExtractValType"]
@@ -686,7 +687,7 @@ def extract_val(val: _ExtractValType, include_real: bool = False) -> _ExtractVal
         return snapshot_fake(val, include_real=include_real)
     elif isinstance(val, py_sym_types):
         return val
-    elif isinstance(val, _AnyScriptObject):
+    elif isinstance(val, (_AnyScriptObject, OpaqueBase)):
         return val
     elif isinstance(val, BackwardState):
         return val
@@ -1043,13 +1044,13 @@ def fetch_object_proxy(
 
 @overload
 def fetch_object_proxy(
-    tracer: _ProxyTracer, t: OpaqueType
+    tracer: _ProxyTracer, t: OpaqueBase
 ) -> _OpaqueObjectProxyType | PySymType: ...
 
 
 def fetch_object_proxy(
     tracer: _ProxyTracer,
-    t: Tensor | _AnyScriptObjectType | PySymType | OpaqueType,
+    t: Tensor | _AnyScriptObjectType | PySymType | OpaqueBase,
 ) -> object:
     return get_proxy_slot(t, tracer, t)
 
@@ -1377,7 +1378,7 @@ class PythonKeyTracer(Tracer):
     script_object_tracker: MutableMapping[torch.ScriptObject, Proxy]
     # FakeScriptObject/OpaqueBase uses WeakIdRef because distinct objects that
     # are value-equal (e.g. primal vs tangent opaques) must be tracked separately.
-    opaque_tracker: MutableMapping[FakeScriptObject | OpaqueBase | OpaqueType, Proxy]
+    opaque_tracker: MutableMapping[FakeScriptObject | OpaqueBase, Proxy]
     # Maps id(real_obj) -> proxy for opaque FSOs, so that multiple FSO wrappers
     # of the same real object (e.g. primal vs tangent) resolve to one proxy.
     _opaque_real_obj_proxy: dict[int, Proxy]
@@ -1437,7 +1438,67 @@ class PythonKeyTracer(Tracer):
             if a.node.constant is None:
                 raise AssertionError("a.node.constant should not be None")
             return a.node.constant
+
+        # Try reconstructing untracked opaque reference types from existing
+        # graph inputs (e.g. derive a DeviceMesh submesh from its root mesh).
+        if isinstance(a, (FakeScriptObject, OpaqueBase)):
+            node = self._try_reconstruct_opaque(a)
+            if node is not None:
+                return node
+
         return super().create_arg(a)  # type: ignore[return-value]
+
+    def _try_reconstruct_opaque(
+        self, a: FakeScriptObject | OpaqueBase
+    ) -> fx.node.Node | None:
+        """Try to reconstruct an opaque object from existing graph inputs.
+
+        When make_fx encounters an untracked opaque reference type (e.g. a
+        DeviceMesh submesh captured by a backward closure), this method checks
+        if the type has a registered reconstruct_fn that can derive the object
+        from inputs already in the graph.  Returns an FX Node on success,
+        None on failure (falls back to get_attr constant).
+        """
+        real_obj: OpaqueBase = a.real_obj if isinstance(a, FakeScriptObject) else a
+
+        if not is_opaque_reference_type(type(real_obj)):
+            return None
+
+        reconstruct_fn = get_reconstruct_fn(type(real_obj))
+        if reconstruct_fn is None:
+            return None
+
+        def get_tracked_proxy(obj: OpaqueBase) -> Proxy | None:
+            proxy = self._opaque_real_obj_proxy.get(id(obj))
+            if proxy is not None:
+                return proxy
+            proxy = get_proxy_slot(obj, self, None)
+            if proxy is not None:
+                return proxy
+            # The object may be identity-different but equal to a tracked
+            # FSO's real_obj. This happens because maybe_to_fake_obj creates
+            # a new DeviceMesh wrapper, so the FSO's real_obj is a distinct
+            # object from the one held by submesh._root_mesh. Equality
+            # comparison is needed, not identity.
+            for tracked_obj, p in self.opaque_tracker.items():
+                if not isinstance(tracked_obj, FakeScriptObject):
+                    continue
+                if tracked_obj.real_obj == obj:
+                    return p
+            return None
+
+        result = reconstruct_fn(real_obj, get_tracked_proxy, self)
+        if result is None:
+            return None
+
+        # result is a Proxy from dispatching through a custom op.
+        # The op dispatch already registered the output in opaque_tracker.
+        # Also register for the *input* object so dedup works for re-encounters.
+        set_proxy_slot(a, self, result)
+        if id(real_obj) not in self._opaque_real_obj_proxy:
+            self._opaque_real_obj_proxy[id(real_obj)] = result
+
+        return result.node
 
     @overload
     def unwrap_proxy(self, e: Tensor) -> Proxy | Tensor: ...
@@ -1951,7 +2012,7 @@ def _compute_proxy(
 
 class _GraphAppendingTracerEx(fx.proxy.GraphAppendingTracer):
     script_object_tracker: MutableMapping[torch.ScriptObject, Proxy]
-    opaque_tracker: MutableMapping[FakeScriptObject | OpaqueBase | OpaqueType, Proxy]
+    opaque_tracker: MutableMapping[FakeScriptObject | OpaqueBase, Proxy]
     # Maps id(real_obj) -> proxy for opaque FSOs, so that multiple FSO wrappers
     # of the same real object (e.g. primal vs tangent) resolve to one proxy.
     _opaque_real_obj_proxy: dict[int, Proxy]
