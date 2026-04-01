@@ -1918,6 +1918,77 @@ class outer_fn(torch.nn.Module):
         # Test backward pass
         result.sum().backward()
 
+    @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
+    def test_flattened_submesh_no_getattr_compile_on_one_rank(self):
+        """When compile_on_one_rank=True, the flattened submesh should appear as a
+        custom op call_function node (derived from the mesh graph input) rather than
+        as a get_attr constant holding an unpicklable ProcessGroup."""
+        from torch._library.fake_class_registry import FakeScriptObject
+
+        dist.destroy_process_group()
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
+
+        mesh = init_device_mesh(self.device_type, (2, 2), mesh_dim_names=("dp", "tp"))
+        mesh["dp", "tp"]._flatten("dp_tp")
+
+        import torch._functorch._aot_autograd.graph_compile as gc
+
+        orig = gc._aot_stage2a_partition
+        device_mesh_getattr_count = [0]
+
+        def check_partition(fx_g, joint_inputs, *args, **kwargs):
+            result = orig(fx_g, joint_inputs, *args, **kwargs)
+            fw_module, bw_module = result[0], result[1]
+            count = 0
+            for gm in (fw_module, bw_module):
+                for node in gm.graph.nodes:
+                    if node.op != "get_attr":
+                        continue
+                    val = getattr(gm, node.target, None)
+                    if isinstance(val, FakeScriptObject):
+                        val = getattr(val, "real_obj", val)
+                    if isinstance(val, DeviceMesh):
+                        count += 1
+            device_mesh_getattr_count[0] = count
+            return result
+
+        gc._aot_stage2a_partition = check_partition
+        torch._functorch._aot_autograd.graph_compile._aot_stage2a_partition = (
+            check_partition
+        )
+        try:
+            torch._dynamo.reset()
+            with dist.config.patch(compile_on_one_rank=True):
+
+                def fn(x, mesh):
+                    dt = DTensor.from_local(
+                        x, mesh, [Shard(0), Shard(0)], run_check=False
+                    )
+                    return (
+                        dt.redistribute(mesh, [Replicate(), Replicate()])
+                        .to_local()
+                        .sum()
+                    )
+
+                compiled = torch.compile(fn)
+                x = torch.randn(4, 4, requires_grad=True)
+                loss = compiled(x, mesh)
+                loss.backward()
+
+            self.assertEqual(
+                device_mesh_getattr_count[0],
+                0,
+                "DeviceMesh get_attr nodes survived into partitioned graphs; "
+                "the flattened submesh should use a custom op instead",
+            )
+        finally:
+            gc._aot_stage2a_partition = orig
+            torch._functorch._aot_autograd.graph_compile._aot_stage2a_partition = orig
+            dist.destroy_process_group()
+            dist.init_process_group(
+                "fake", store=FakeStore(), rank=0, world_size=self.world_size
+            )
+
     def test_to_local_symbolic_sizes_non_sharded_dims(self):
         # Checks that symbolic sizes are not polluted by the sharding
         # in to_local - for instance we could incorrectly have (16 * (s27//2))
