@@ -12458,6 +12458,46 @@ def ___make_guard_fn():
         self.assertEqual(eager_result[0], compiled_result[0])
         self.assertEqual(eager_result[1], compiled_result[1])
 
+    def test_fstring_tracks_user_defined_object_mutations(self):
+        class Obj:
+            def __init__(self, val):
+                self.val = val
+
+            def __repr__(self):
+                return f"Obj({self.val})"
+
+        def fn(x, obj):
+            y = x + 1
+            s1 = f"obj = {obj}"
+            obj.val.append(0)
+            s2 = f"obj = {obj}"
+            return y, s1, s2
+
+        x = torch.randn(4)
+        eager_result = fn(x, Obj([1, 2]))
+        compiled_result = torch.compile(fn, backend="eager")(x, Obj([1, 2]))
+        self.assertEqual(eager_result[0], compiled_result[0])
+        self.assertEqual(eager_result[1:], compiled_result[1:])
+
+    def test_fstring_tracks_frozen_dataclass_field_mutations(self):
+        @dataclasses.dataclass(frozen=True)
+        class Obj:
+            val: list[int]
+
+        def fn(x):
+            obj = Obj([1, 2])
+            y = x + 1
+            s1 = f"obj = {obj}"
+            obj.val.append(0)
+            s2 = f"obj = {obj}"
+            return y, s1, s2
+
+        x = torch.randn(4)
+        eager_result = fn(x)
+        compiled_result = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(eager_result[0], compiled_result[0])
+        self.assertEqual(eager_result[1:], compiled_result[1:])
+
     def test_frozen_dataclass_treespec_method_and_fields(self):
         from torch.utils._pytree import tree_flatten
 

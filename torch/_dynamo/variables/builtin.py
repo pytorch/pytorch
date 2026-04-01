@@ -1666,13 +1666,20 @@ class BuiltinVariable(BaseBuiltinVariable):
             arg,
             (
                 RangeVariable,
+                ListVariable,
+                TupleVariable,
                 ConstDictVariable,
                 DefaultDictVariable,
+                SetVariable,
+                FrozensetVariable,
                 OrderedSetClassVariable,
                 DictViewVariable,
             ),
         ):
-            return VariableTracker.build(tx, arg.debug_repr())
+            try:
+                return VariableTracker.build(tx, repr(arg.as_python_constant()))
+            except NotImplementedError:
+                return VariableTracker.build(tx, arg.debug_repr())
         return None
 
     def call_str(
@@ -1681,6 +1688,24 @@ class BuiltinVariable(BaseBuiltinVariable):
         # Handle `str` on a user defined function or object
         if isinstance(arg, (variables.UserFunctionVariable)):
             return VariableTracker.build(tx, str(arg.fn))
+        elif isinstance(
+            arg,
+            (
+                RangeVariable,
+                ListVariable,
+                TupleVariable,
+                ConstDictVariable,
+                DefaultDictVariable,
+                SetVariable,
+                FrozensetVariable,
+                OrderedSetClassVariable,
+                DictViewVariable,
+            ),
+        ):
+            try:
+                return VariableTracker.build(tx, str(arg.as_python_constant()))
+            except NotImplementedError:
+                return VariableTracker.build(tx, arg.debug_repr())
         elif isinstance(arg, (variables.UserDefinedObjectVariable)):
             # Check if object has __str__ method
             if hasattr(arg.value, "__str__"):
@@ -1697,6 +1722,8 @@ class BuiltinVariable(BaseBuiltinVariable):
                 )
 
             if type(arg.value).__str__ is object.__str__:
+                if type(arg.value).__repr__ is not object.__repr__:
+                    return self.call_repr(tx, arg)
                 # Rely on the object str method
                 try:
                     # pyrefly: ignore [unbound-name]
@@ -2847,6 +2874,10 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker:
         format_string = _format_string.as_python_constant()
         format_string = str(format_string)
+        if format_string in ("{}", "{:}") and len(args) == 1 and not kwargs:
+            eager_value = self.call_str(tx, args[0])
+            if eager_value is not None:
+                return eager_value
         return variables.StringFormatVariable.create(format_string, args, kwargs)
 
     def call_id(
