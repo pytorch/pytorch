@@ -23,6 +23,36 @@ def _dummy_wrapper(fn):
     return inner
 
 
+def _merge_connected_partitions(
+    partitions: list[dict[torch.fx.Node, int | None]],
+) -> list[dict[torch.fx.Node, int | None]]:
+    """Merge adjacent partitions with the same annotation connected by data dependencies."""
+    if len(partitions) <= 1:
+        return partitions
+
+    def _depends_on(part, prev_nodes):
+        for node in part:
+            for inp in node.all_input_nodes:
+                if inp in prev_nodes:
+                    return True
+        return False
+
+    def _get_partition_annotation(part):
+        node = next(iter(part))
+        return node.meta["custom"]["compile_with_inductor"]
+
+    merged = [partitions[0]]
+    for part in partitions[1:]:
+        current_annotation = _get_partition_annotation(part)
+        prev_annotation = _get_partition_annotation(merged[-1])
+        prev_nodes = set(merged[-1].keys())
+        if current_annotation == prev_annotation and _depends_on(part, prev_nodes):
+            merged[-1].update(part)
+        else:
+            merged.append(part)
+    return merged
+
+
 def _compile_submod(gm, prefix):
     from torch._inductor.standalone_compile import AOTCompiledArtifact
 
@@ -134,6 +164,8 @@ class _RegionScooper:
         if not partitions:
             logger.info("No inductor marked nodes found")
             return gm
+
+        partitions = _merge_connected_partitions(partitions)
 
         return fuse_by_partitions(
             gm,
