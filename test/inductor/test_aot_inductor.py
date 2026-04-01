@@ -1339,6 +1339,7 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @skipIfMPS
     def test_fp8(self):
         # cuda only
         if self.device not in ("cuda", "xpu"):
@@ -1447,6 +1448,7 @@ class AOTInductorTestsTemplate:
         )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @skipIfMPS
     def test_fp8_view_of_param(self):
         # cuda only
         if self.device != GPU_TYPE:
