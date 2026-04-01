@@ -2367,10 +2367,11 @@ def coverage_post_process(app, exception):
     ignore_names = set(app.config.coverage_ignore_functions) | set(
         app.config.coverage_ignore_classes
     )
-    # TorchScript-only pybind11 types that are in __all__ (via dir(torch._C))
-    # but intentionally not documented: their .str member creates ambiguous
-    # cross-references with Python's builtin str across all docstrings.
-    ignore_names |= {"ErrorReport", "FutureType", "StreamObjType"}
+    # pybind11 objects from torch._C that are in __all__ but cannot be
+    # documented via autosummary: the first three have .str members that
+    # create ambiguous cross-references with Python's builtin str;
+    # unify_type_list has a C++ arglist Sphinx cannot parse.
+    ignore_names |= {"ErrorReport", "FutureType", "StreamObjType", "unify_type_list"}
     undocumented = []
     for mod_name in modules:
         if not is_not_internal(mod_name):

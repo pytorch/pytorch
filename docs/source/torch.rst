@@ -995,7 +995,6 @@ Utilities
     set_autocast_xla_dtype
     set_autocast_xla_enabled
     set_vital
-    unify_type_list
     use_deterministic_algorithms
     are_deterministic_algorithms_enabled
     is_deterministic_algorithms_warn_only_enabled
