@@ -1083,7 +1083,6 @@ elseif(USE_CUDA)
 
   if(NIXL_LIB AND NIXL_INCLUDE_DIR)
     message(STATUS "NIXL found, building with NIXL support")
-    include_directories(${NIXL_INCLUDE_DIR})
 
     add_library(torch_nixl SHARED
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/utils.cpp"

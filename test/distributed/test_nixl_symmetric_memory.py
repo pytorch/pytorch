@@ -26,18 +26,29 @@ def _nixl_compiled() -> bool:
 
 
 def _nixl_vram_functional() -> bool:
+    """Check if NIXL can register VRAM.
+
+    The pip-installed NIXL (nixl_cu12) bundles its own UCX without CUDA
+    memory support, so VRAM registration hangs. A source-built NIXL
+    linked against the system UCX (which has libuct_cuda.so) works.
+    """
     if not _nixl_compiled() or not torch.cuda.is_available():
         return False
     import pathlib
 
-    for d in ["/opt/hpcx/ucx/lib/ucx", "/usr/lib/ucx", "/usr/local/lib/ucx"]:
-        if pathlib.Path(d, "libuct_cuda.so").exists():
-            try:
-                import nixl_cu12  # noqa: F401
-                return False
-            except ImportError:
-                return True
-    return False
+    ucx_has_cuda = any(
+        pathlib.Path(d, "libuct_cuda.so").exists()
+        for d in ["/opt/hpcx/ucx/lib/ucx", "/usr/lib/ucx", "/usr/local/lib/ucx"]
+    )
+    if not ucx_has_cuda:
+        return False
+    try:
+        import nixl_cu12  # noqa: F401
+        # pip-installed — bundled UCX lacks CUDA support
+        return False
+    except ImportError:
+        # Not pip-installed — assume source build with system UCX
+        return True
 
 
 NIXL_COMPILED = _nixl_compiled()
@@ -61,7 +72,7 @@ if "NIXL_PLUGIN_DIR" not in os.environ:
                 if c.is_dir():
                     os.environ["NIXL_PLUGIN_DIR"] = str(c)
                     break
-    except Exception:
+    except (ImportError, AttributeError, TypeError):
         pass
 
 

@@ -1,9 +1,9 @@
 #include <torch/csrc/distributed/c10d/symm_mem/NIXLSymmetricMemory.hpp>
-#include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <nixl.h>
 #include <nixl_descriptors.h>
+#include <chrono>
 #include <thread>
 
 // Device-side ops and CUDA kernels for the NIXL symmetric memory backend.
@@ -92,10 +92,8 @@ static void do_nixl_xfer(nixl_xfer_op_t op,
   nixl_xfer_dlist_t rl(VRAM_SEG); rl.addDesc(nixlBasicDesc(ra, rs, rd));
   nixlXferReqH* req = nullptr;
   auto s = agent.createXferReq(op, ll, rl, rn, req);
-  TORCH_CHECK(s == NIXL_SUCCESS, "NIXL createXferReq failed, status=",
-      static_cast<int>(s), " remote_agent=", rn,
-      " local=(0x", std::hex, la, ",", std::dec, ls, ",dev", ld, ")",
-      " remote=(0x", std::hex, ra, ",", std::dec, rs, ",dev", rd, ")");
+  TORCH_CHECK(s == NIXL_SUCCESS,
+      "NIXL createXferReq failed, status=", static_cast<int>(s));
   s = agent.postXferReq(req);
   TORCH_CHECK(s == NIXL_SUCCESS || s == NIXL_IN_PROG,
       "NIXL postXferReq failed, status=", static_cast<int>(s));
@@ -113,10 +111,12 @@ static void do_nixl_xfer(nixl_xfer_op_t op,
 #define THREADS 512
 
 void nixl_put(at::Tensor& t, int64_t peer) {
-  TORCH_CHECK(t.is_contiguous(), "nixl_put: contiguous tensors only");
+  TORCH_CHECK(t.is_contiguous(), "nixl_put requires contiguous tensor");
   auto sm = c10d::symmetric_memory::rendezvous(t, "0");
   auto* h = dynamic_cast<NIXLSymmetricMemory*>(sm.get());
   TORCH_CHECK(h, "nixl_put requires NIXL backend");
+  TORCH_CHECK(peer >= 0 && peer < h->get_world_size() && peer != h->get_rank(),
+      "nixl_put: invalid peer ", peer);
   c10::cuda::CUDAGuard guard(t.device());
   AT_CUDA_CHECK(cudaStreamSynchronize(at::cuda::getCurrentCUDAStream()));
   size_t nb = t.numel() * c10::elementSize(t.scalar_type());
@@ -127,10 +127,12 @@ void nixl_put(at::Tensor& t, int64_t peer) {
 }
 
 void nixl_get(at::Tensor& t, int64_t peer) {
-  TORCH_CHECK(t.is_contiguous(), "nixl_get: contiguous tensors only");
+  TORCH_CHECK(t.is_contiguous(), "nixl_get requires contiguous tensor");
   auto sm = c10d::symmetric_memory::rendezvous(t, "0");
   auto* h = dynamic_cast<NIXLSymmetricMemory*>(sm.get());
   TORCH_CHECK(h, "nixl_get requires NIXL backend");
+  TORCH_CHECK(peer >= 0 && peer < h->get_world_size() && peer != h->get_rank(),
+      "nixl_get: invalid peer ", peer);
   c10::cuda::CUDAGuard guard(t.device());
   AT_CUDA_CHECK(cudaStreamSynchronize(at::cuda::getCurrentCUDAStream()));
   size_t nb = t.numel() * c10::elementSize(t.scalar_type());
@@ -141,10 +143,12 @@ void nixl_get(at::Tensor& t, int64_t peer) {
 }
 
 void nixl_put_with_signal(at::Tensor& t, int64_t signal, int64_t peer) {
-  TORCH_CHECK(t.is_contiguous(), "nixl_put_with_signal: contiguous tensors only");
+  TORCH_CHECK(t.is_contiguous(), "nixl_put_with_signal requires contiguous tensor");
   auto sm = c10d::symmetric_memory::rendezvous(t, "0");
   auto* h = dynamic_cast<NIXLSymmetricMemory*>(sm.get());
   TORCH_CHECK(h, "nixl_put_with_signal requires NIXL backend");
+  TORCH_CHECK(peer >= 0 && peer < h->get_world_size() && peer != h->get_rank(),
+      "nixl_put_with_signal: invalid peer ", peer);
   c10::cuda::CUDAGuard guard(t.device());
   AT_CUDA_CHECK(cudaStreamSynchronize(at::cuda::getCurrentCUDAStream()));
 

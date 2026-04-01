@@ -5,13 +5,12 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <c10/util/error.h>
 #include <nixl.h>
 #include <nixl_descriptors.h>
 #include <unistd.h>
+#include <chrono>
 #include <map>
 #include <mutex>
-#include <set>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -218,7 +217,12 @@ class NIXLPeerAllocInfo : public c10::intrusive_ptr_target {
         g_agent->deregisterMem(d);
       }
     }
-    if (signal_staging_) { c10::cuda::CUDAGuard g(device_idx_); cudaFree(signal_staging_); }
+    if (signal_staging_) {
+      c10::cuda::CUDAGuard g(device_idx_);
+      AT_CUDA_CHECK(cudaFree(signal_staging_));
+    }
+    if (buffers_dev_) c10::cuda::CUDACachingAllocator::raw_delete(buffers_dev_);
+    if (signal_pads_dev_) c10::cuda::CUDACachingAllocator::raw_delete(signal_pads_dev_);
   }
  private:
   size_t buffer_size_; int rank_, world_size_, device_idx_;
@@ -238,10 +242,15 @@ static void nixl_transfer(nixl_xfer_op_t op,
   nixl_xfer_dlist_t rl(VRAM_SEG); rl.addDesc(nixlBasicDesc(ra, rs, rd));
   nixlXferReqH* req = nullptr;
   auto s = agent.createXferReq(op, ll, rl, rn, req);
-  TORCH_CHECK(s == NIXL_SUCCESS, "createXferReq failed");
+  TORCH_CHECK(s == NIXL_SUCCESS, "NIXL createXferReq failed, status=", static_cast<int>(s));
   s = agent.postXferReq(req);
-  TORCH_CHECK(s == NIXL_SUCCESS || s == NIXL_IN_PROG, "postXferReq failed");
-  while (agent.getXferStatus(req) == NIXL_IN_PROG) std::this_thread::yield();
+  TORCH_CHECK(s == NIXL_SUCCESS || s == NIXL_IN_PROG, "NIXL postXferReq failed, status=", static_cast<int>(s));
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  while (agent.getXferStatus(req) == NIXL_IN_PROG) {
+    TORCH_CHECK(std::chrono::steady_clock::now() < deadline,
+        "NIXL transfer timed out after 30s");
+    std::this_thread::yield();
+  }
   agent.releaseXferReq(req);
 }
 
@@ -259,7 +268,8 @@ bool NIXLSymmetricMemory::has_multicast_support() { return false; }
 void* NIXLSymmetricMemory::get_multicast_ptr() { return nullptr; }
 
 void NIXLSymmetricMemory::put_signal(int dst, int ch, size_t) {
-  TORCH_CHECK(dst != pai_->rank_);
+  TORCH_CHECK(dst >= 0 && dst < pai_->world_size_ && dst != pai_->rank_,
+      "put_signal: invalid dst_rank ", dst);
   c10::cuda::CUDAGuard g(device_idx_);
   AT_CUDA_CHECK(cudaStreamSynchronize(at::cuda::getCurrentCUDAStream()));
   size_t off = (size_t(pai_->world_size_) * ch + pai_->rank_) * 4;
@@ -310,7 +320,9 @@ class NIXLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   }
   size_t get_alloc_size(void* p) override {
     std::lock_guard<std::mutex> lk(mu_);
-    auto i = allocs_.find(p); TORCH_CHECK(i != allocs_.end()); return i->second->buffer_size;
+    auto i = allocs_.find(p);
+    TORCH_CHECK(i != allocs_.end(), p, " is not allocated by NIXLSymmetricMemoryAllocator");
+    return i->second->buffer_size;
   }
   c10::intrusive_ptr<SymmetricMemory> rendezvous(void* p, const std::optional<std::string>& gn) override {
     TORCH_CHECK(gn.has_value());
