@@ -377,6 +377,15 @@ class Vectorizedf8 {
     }
   }
 
+  static Vectorized<T> blendv(
+      const Vectorized<T>& a,
+      const Vectorized<T>& b,
+      const Vectorized<T>& mask) {
+    auto msb_one = _mm512_set1_epi8(0xFF);
+    auto mask_ = _mm512_cmp_epu8_mask((__m512i)mask, msb_one, _MM_CMPINT_EQ);
+    return _mm512_mask_blend_epi8(mask_, (__m512i)a, (__m512i)b);
+  }
+
   Vectorized<T> abs() const {
     return _mm512_andnot_si512(_mm512_set1_epi8(0x80), values);
   }
