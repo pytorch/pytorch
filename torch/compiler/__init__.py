@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import contextlib
 import io
 from collections.abc import Callable
 from typing import Any, TypeVar
@@ -433,6 +434,7 @@ def wrap_numpy(fn):
 
 _is_compiling_flag: bool = False
 _is_exporting_flag: bool = False
+_is_non_strict_tracing_flag: bool = False
 
 
 def is_compiling() -> bool:
@@ -455,6 +457,25 @@ def is_compiling() -> bool:
         return False
     else:
         return _is_compiling_flag
+
+
+def _is_non_strict_tracing() -> bool:
+    """
+    Indicates whether we are inside a non-strict make_fx-based tracing session.
+    """
+    return _is_non_strict_tracing_flag
+
+
+@contextlib.contextmanager
+def _non_strict_tracing_context():
+    """Context manager that sets the non-strict tracing flag."""
+    global _is_non_strict_tracing_flag
+    old = _is_non_strict_tracing_flag
+    try:
+        _is_non_strict_tracing_flag = True
+        yield
+    finally:
+        _is_non_strict_tracing_flag = old
 
 
 def is_dynamo_compiling() -> bool:
