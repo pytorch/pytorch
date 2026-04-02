@@ -37,6 +37,7 @@ from torch.fx.experimental.symbolic_shapes import (
     StatelessSymbolicContext,
     statically_known_false,
     statically_known_true,
+    SYMPY_INTERP,
 )
 from torch.testing._internal.common_dtype import all_types_and
 from torch.testing._internal.common_utils import (
@@ -917,6 +918,46 @@ def forward(self, x_1):
                 )
             )
         )
+
+    def test_sympy_interp_is_non_overlapping_and_dense_flat_args(self):
+        # SYMPY_INTERP is used as the eval() namespace for guard code strings.
+        # Guard code prints IsNonOverlappingAndDenseIndicator(s0, s1, ..., st0, st1, ...)
+        # with flat args, so the SYMPY_INTERP function must accept flat args.
+        interp_fn = SYMPY_INTERP["IsNonOverlappingAndDenseIndicator"]
+
+        # 1D contiguous: sizes=(5,), strides=(1,)
+        self.assertEqual(interp_fn(5, 1), 1)
+        # 1D non-contiguous: sizes=(5,), strides=(2,)
+        self.assertEqual(interp_fn(5, 2), 0)
+        # 1D single element: sizes=(1,), strides=(42,)
+        self.assertEqual(interp_fn(1, 42), 1)
+
+        # 2D contiguous: sizes=(3, 4), strides=(4, 1)
+        self.assertEqual(interp_fn(3, 4, 4, 1), 1)
+        # 2D non-contiguous: sizes=(3, 4), strides=(5, 1) -- gap in memory
+        self.assertEqual(interp_fn(3, 4, 5, 1), 0)
+        # 2D transposed but still dense: sizes=(4, 3), strides=(1, 4)
+        self.assertEqual(interp_fn(4, 3, 1, 4), 1)
+
+        # 4D contiguous (the exact scenario from the MAST job failure):
+        # sizes=(2, 3, 4, 5), strides=(60, 20, 5, 1)
+        self.assertEqual(interp_fn(2, 3, 4, 5, 60, 20, 5, 1), 1)
+        # 4D non-contiguous:
+        self.assertEqual(interp_fn(2, 3, 4, 5, 100, 20, 5, 1), 0)
+
+    def test_sympy_interp_guard_eval_simulation(self):
+        # Simulate the actual guard eval() path: guard code strings use
+        # IsNonOverlappingAndDenseIndicator as a function name, and SYMPY_INTERP
+        # provides the binding in the eval namespace.
+        guard_code = "IsNonOverlappingAndDenseIndicator(2, 3, 4, 5, 60, 20, 5, 1) == 1"
+        result = eval(guard_code, SYMPY_INTERP)  # noqa: P204
+        self.assertTrue(result)
+
+        guard_code_false = (
+            "IsNonOverlappingAndDenseIndicator(2, 3, 4, 5, 100, 20, 5, 1) == 1"
+        )
+        result_false = eval(guard_code_false, SYMPY_INTERP)  # noqa: P204
+        self.assertFalse(result_false)
 
     def test_prims_is_non_overlapping_and_dense_or_false(self):
         shape_env = ShapeEnv()
