@@ -13,8 +13,8 @@ enum class ADAM_MODE : uint8_t { ORIGINAL = 0, ADAMW = 1 };
 // Validates the dtype configuration for mixed-precision fused Adam/AdamW.
 //
 // Currently the only supported configuration is:
-//   params/grads: float32, optimizer states (exp_avg, exp_avg_sq, ...):
-//   bfloat16
+//   params/grads: float32
+//   optimizer states (exp_avg, exp_avg_sq, ...): bfloat16
 //
 // This specific configuration (fp32 params + bf16 optimizer states) has been
 // validated end-to-end in large-scale training runs (e.g. DeepSeek-V3 671B)

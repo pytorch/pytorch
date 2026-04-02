@@ -35,9 +35,10 @@ void _fused_adam_kernel_cuda_(
     TORCH_CHECK(
         at::native::check_fast_path_restrictions(
             {params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs},
+            /*scalarList=*/{},
+            /*does_op_promote_integer_inputs_to_float=*/false,
             /*skip_cross_list_dtype_check=*/is_mixed_precision),
-        "params, grads, exp_avgs, exp_avg_sqs, and max_exp_avg_sqs must be on "
-        "the same device with compatible sizes and strides");
+        "params, grads, exp_avgs, exp_avg_sqs, and max_exp_avg_sqs must have same dtype, device, and layout");
     _fused_adam_amsgrad_cuda_impl_(
         params,
         grads,
@@ -57,9 +58,10 @@ void _fused_adam_kernel_cuda_(
     TORCH_CHECK(
         at::native::check_fast_path_restrictions(
             {params, grads, exp_avgs, exp_avg_sqs},
+            /*scalarList=*/{},
+            /*does_op_promote_integer_inputs_to_float=*/false,
             /*skip_cross_list_dtype_check=*/is_mixed_precision),
-        "params, grads, exp_avgs, and exp_avg_sqs must be on the same device "
-        "with compatible sizes and strides");
+        "params, grads, exp_avgs, and exp_avg_sqs must have same dtype, device, and layout");
     _fused_adam_cuda_impl_(
         params,
         grads,
@@ -137,9 +139,10 @@ void _fused_adam_kernel_cuda_(
     TORCH_CHECK(
         at::native::check_fast_path_restrictions(
             {params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs},
+            /*scalarList=*/{},
+            /*does_op_promote_integer_inputs_to_float=*/false,
             /*skip_cross_list_dtype_check=*/is_mixed_precision),
-        "params, grads, exp_avgs, exp_avg_sqs, and max_exp_avg_sqs must be on "
-        "the same device with compatible sizes and strides");
+        "params, grads, exp_avgs, exp_avg_sqs, and max_exp_avg_sqs must have same dtype, device, and layout");
     _fused_adam_amsgrad_cuda_impl_(
         params,
         grads,
@@ -159,9 +162,10 @@ void _fused_adam_kernel_cuda_(
     TORCH_CHECK(
         at::native::check_fast_path_restrictions(
             {params, grads, exp_avgs, exp_avg_sqs},
+            /*scalarList=*/{},
+            /*does_op_promote_integer_inputs_to_float=*/false,
             /*skip_cross_list_dtype_check=*/is_mixed_precision),
-        "params, grads, exp_avgs, and exp_avg_sqs must be on the same device "
-        "with compatible sizes and strides");
+        "params, grads, exp_avgs, and exp_avg_sqs must have same dtype, device, and layout");
     _fused_adam_cuda_impl_(
         params,
         grads,

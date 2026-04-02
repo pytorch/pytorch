@@ -197,22 +197,15 @@ inline bool _check_tensors_do_type_promotion_with_scalars(
 inline bool check_fast_path_restrictions(
     ArrayRef<TensorList> tensorLists,
     ArrayRef<Scalar> scalarList = {},
-    bool does_op_promote_integer_inputs_to_float = false) {
-  return _check_tensors_share_device_and_dtype(tensorLists) &&
+    bool does_op_promote_integer_inputs_to_float = false,
+    bool skip_cross_list_dtype_check = false) {
+  return _check_tensors_share_device_and_dtype(
+             tensorLists, skip_cross_list_dtype_check) &&
       _check_tensors_share_sizes_and_strides(tensorLists) &&
       _check_tensors_do_type_promotion_with_scalars(
              tensorLists[0],
              scalarList,
              does_op_promote_integer_inputs_to_float);
-}
-
-inline bool check_fast_path_restrictions(
-    ArrayRef<TensorList> tensorLists,
-    bool skip_cross_list_dtype_check) {
-  return _check_tensors_share_device_and_dtype(
-             tensorLists, skip_cross_list_dtype_check) &&
-      _check_tensors_share_sizes_and_strides(tensorLists) &&
-      _check_tensors_do_type_promotion_with_scalars(tensorLists[0]);
 }
 
 inline std::vector<c10::Scalar> convert_tensor_to_scalar_list(
