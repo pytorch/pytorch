@@ -15,8 +15,6 @@ from functools import partial, wraps
 from typing import Any, ClassVar, TypeVar
 from typing_extensions import ParamSpec
 
-import pytest
-
 import torch
 from torch._inductor.utils import GPU_TYPES
 from torch._utils import _is_privateuse1_backend_available
@@ -27,7 +25,7 @@ from torch.testing._internal.common_cuda import (
     TEST_CUSPARSE_GENERIC,
     TEST_HIPSPARSE_GENERIC,
 )
-from torch.testing._internal.common_dtype import all_mps_types, get_all_dtypes
+from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.testing._internal.common_utils import (
     _TestParametrizer,
     clear_tracked_input,
@@ -1716,18 +1714,6 @@ def onlyAccelerator(fn):
         return fn(self, *args, **kwargs)
 
     return only_fn
-
-
-def xfailIfMPSUnsupportedDtype(fn):
-    """Mark test as xfail if MPS is available and dtype is unsupported by MPS."""
-
-    @wraps(fn)
-    def wrapper(self, device, dtype, *args, **kwargs):
-        if torch.backends.mps.is_available() and dtype not in all_mps_types():
-            pytest.xfail(f"MPS doesn't support {dtype}")
-        return fn(self, device, dtype, *args, **kwargs)
-
-    return wrapper
 
 
 def onlyCUDAAndPRIVATEUSE1(fn):

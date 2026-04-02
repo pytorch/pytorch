@@ -4,6 +4,7 @@
 import torch
 import numpy as np
 
+import pytest
 import sys
 import math
 import warnings
@@ -39,7 +40,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast, onlyNativeDeviceTypes,
     onlyCPU, largeTensorTest, precisionOverride, dtypes,
-    onlyCUDA, skipCPUIf, dtypesIfCUDA, dtypesIfCPU, skipMeta, onlyAccelerator, xfailIfMPSUnsupportedDtype)
+    onlyCUDA, skipCPUIf, dtypesIfCUDA, dtypesIfCPU, skipMeta, onlyAccelerator)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex, all_types_and_complex_and, all_types_and, floating_and_complex_types, complex_types,
     floating_types, floating_and_complex_types_and, integral_types, integral_types_and, get_all_dtypes,
@@ -4242,6 +4243,9 @@ class TestAsArray(TestCase):
         # Copy is forced because of different device
         other = get_another_device(device)
         if other is not None:
+            caps = torch.accelerator.get_device_capability(other)
+            if dtype not in caps.get("supported_dtypes", set()):
+                pytest.xfail(f"{other} doesn't support {dtype}")
             check(same_device=False, device=other, dtype=dtype)
             check(same_device=False, device=other, dtype=dtype, copy=True)
 
@@ -4252,25 +4256,21 @@ class TestAsArray(TestCase):
                     check(same_dtype=False, dtype=other)
                     check(same_dtype=False, dtype=other, copy=True)
 
-    @xfailIfMPSUnsupportedDtype
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_copy_tensor(self, device, dtype):
         self._test_copy_with_cvt(identity, device, dtype)
 
-    @xfailIfMPSUnsupportedDtype
     @onlyCPU
     @dtypes(*set(numpy_to_torch_dtype_dict.values()))
     def test_copy_from_numpy(self, device, dtype):
         self._test_copy_with_cvt(to_numpy, device, dtype)
 
-    @xfailIfMPSUnsupportedDtype
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     def test_copy_from_dlpack(self, device, dtype):
         self._test_copy_with_cvt(to_dlpack, device, dtype)
 
-    @xfailIfMPSUnsupportedDtype
     @onlyCPU
     @dtypes(*set(numpy_to_torch_dtype_dict.values()))
     def test_copy_from_buffer(self, device, dtype):
