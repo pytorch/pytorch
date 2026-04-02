@@ -370,6 +370,7 @@ struct ExtraFields<EventType::Kineto> {
   Flow flow;
   std::weak_ptr<Result> linked_activity_;
   std::string metadata_json_;
+  extra_meta_t extra_meta_;
 };
 
 struct TORCH_API Result : public std::enable_shared_from_this<Result> {
