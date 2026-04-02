@@ -387,7 +387,7 @@ void sortKeyValueInplace(
       sortCommon(WarpMergeSort<128, 64>{}, key, value, dim, descending);
     }
 #else
-    sortCommon(WarpMergeSort<128, 32>{}, key, value, dim, descending);
+    sortCommon(WarpMergeSort<128, C10_WARP_SIZE>{}, key, value, dim, descending);
 #endif
 #endif
   } else {
