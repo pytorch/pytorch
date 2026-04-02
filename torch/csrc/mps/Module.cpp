@@ -15,6 +15,12 @@
 #ifdef USE_MPS
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
+#include <unordered_map>
+
+namespace at::native::mps {
+std::unordered_map<std::string, at::Tensor> mps_load_safetensors(
+    const std::string& filename);
+} // namespace at::native::mps
 #endif
 
 namespace torch::mps {
@@ -513,6 +519,9 @@ void initModule(PyObject* module) {
   });
   m.def("_mps_get_core_count", []() {
     return at::mps::MPSDevice::getInstance()->getCoreCount();
+  });
+  m.def("_mps_load_safetensors", [](const std::string& filename) {
+    return at::native::mps::mps_load_safetensors(filename);
   });
 }
 #endif /* USE_MPS */
