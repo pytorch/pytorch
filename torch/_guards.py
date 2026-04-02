@@ -741,10 +741,12 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
 
 class HopSubgraphCache:
     @abstractmethod
-    def add_dynamo_installed_submodule(self, fn_id: int, identifier: str) -> None: ...
+    def add_dynamo_installed_submodule(
+        self, fn_code: CodeType, identifier: str
+    ) -> None: ...
 
     @abstractmethod
-    def get_dynamo_installed_submodules(self, fn_id: int) -> list[str]: ...
+    def get_dynamo_installed_submodules(self, fn_code: CodeType) -> list[str]: ...
 
     @abstractmethod
     def add_autograd_key_entry(self, identifier: str, key: Callable) -> None: ...
@@ -829,24 +831,27 @@ class InvokeSubgraphCache(HopSubgraphCache):
     def __init__(self) -> None:
         self.autograd_cache: dict[str, Callable] = {}
         self.proxy_dispatch_cache: dict[str, Callable] = {}
-        self.dynamo_installed_submodules: dict[int, list[str]] = defaultdict(list)
+        self.dynamo_installed_submodules: dict[CodeType, list[str]] = defaultdict(list)
         self.lazy_bwd_cache: dict[
             str, dict[tuple[object], tuple[torch.fx.GraphModule, int]]
         ] = defaultdict(dict)
         self.effects_cache: dict[
             str, set
         ] = {}  # Maps identifier -> set of effect types
-        # fn_id → list of (condition, cache_entry) pairs. Walked linearly
+        # fn.__code__ → list of (condition, cache_entry) pairs. Walked linearly
         # on lookup; first matching condition wins.
         self.subgraph_reuse_cache: dict[
-            int, list[tuple[InvokeSubgraphReuseCondition, InvokeSubgraphReuseEntry]]
+            CodeType,
+            list[tuple[InvokeSubgraphReuseCondition, InvokeSubgraphReuseEntry]],
         ] = defaultdict(list)
 
-    def add_dynamo_installed_submodule(self, fn_id: int, identifier: str) -> None:
-        self.dynamo_installed_submodules[fn_id].append(identifier)
+    def add_dynamo_installed_submodule(
+        self, fn_code: CodeType, identifier: str
+    ) -> None:
+        self.dynamo_installed_submodules[fn_code].append(identifier)
 
-    def get_dynamo_installed_submodules(self, fn_id: int) -> list[str]:
-        return self.dynamo_installed_submodules.get(fn_id, [])
+    def get_dynamo_installed_submodules(self, fn_code: CodeType) -> list[str]:
+        return self.dynamo_installed_submodules.get(fn_code, [])
 
     def add_autograd_key_entry(self, identifier: str, key: Callable) -> None:
         self.autograd_cache[identifier] = key
@@ -897,16 +902,16 @@ class InvokeSubgraphCache(HopSubgraphCache):
 
     def add_reuse_entry(
         self,
-        fn_id: int,
+        fn_code: CodeType,
         condition: InvokeSubgraphReuseCondition,
         entry: InvokeSubgraphReuseEntry,
         max_reuse_entries: int = 8,
     ) -> None:
-        entries = self.subgraph_reuse_cache[fn_id]
+        entries = self.subgraph_reuse_cache[fn_code]
         if len(entries) >= max_reuse_entries:
             raise RuntimeError(
                 f"invoke_subgraph: exceeded maximum reuse entries "
-                f"({max_reuse_entries}) for function id {fn_id}. "
+                f"({max_reuse_entries}) for function code {fn_code}. "
                 f"This most likely means a guard keeps failing on every "
                 f"invocation, preventing subgraph reuse. "
                 f"Set TORCH_LOGS='+hierarchical_compile' to identify which "
@@ -918,12 +923,12 @@ class InvokeSubgraphCache(HopSubgraphCache):
 
     def find_reuse_entry(
         self,
-        fn_id: int,
+        fn_code: CodeType,
         evaluator: Callable[
             [InvokeSubgraphReuseCondition, InvokeSubgraphReuseEntry], bool
         ],
     ) -> InvokeSubgraphReuseEntry | None:
-        entries = self.subgraph_reuse_cache.get(fn_id, [])
+        entries = self.subgraph_reuse_cache.get(fn_code, [])
         for i, (condition, entry) in enumerate(entries):
             if evaluator(condition, entry):
                 # MRU: move the hit entry to the front for faster future lookups

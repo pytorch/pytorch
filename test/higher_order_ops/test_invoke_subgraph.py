@@ -3755,6 +3755,158 @@ class GraphModule(torch.nn.Module):
         # mod1.c=5 and mod2.c=10 differ → two separate traces
         self.assertEqual(count(), 2)
 
+    def test_subgraph_reuse_monkeypatch_forward(self):
+        """Monkeypatching forward with nested_compile_region should reuse cache.
+
+        When a user wraps a module's forward with nested_compile_region via
+        monkeypatching, each module instance gets a distinct bound method and
+        thus a distinct function object passed to nested_compile_region. The
+        cache key should be based on fn.__code__ rather than id(fn) so that
+        reuse still works across instances whose forward shares the same code.
+        """
+
+        class Mod(torch.nn.Module):
+            def __init__(self, c):
+                super().__init__()
+                self.c = c
+
+            def forward(self, x):
+                return x * self.c
+
+        def apply_nested_compile_region(mod):
+            # Grab the unbound function and create a fresh copy so that each
+            # module instance gets a function with a *different* id() but the
+            # *same* __code__ object, mimicking a monkeypatch/code-gen scenario.
+            import types
+
+            orig = type(mod).forward
+            fresh_fn = types.FunctionType(
+                orig.__code__,
+                orig.__globals__,
+                orig.__name__,
+                orig.__defaults__,
+                orig.__closure__,
+            )
+            mod.forward = nested_compile_region(fresh_fn).__get__(mod, type(mod))
+            return mod
+
+        mod1 = apply_nested_compile_region(Mod(5))
+        mod2 = apply_nested_compile_region(Mod(5))
+
+        # The inner functions passed to invoke_subgraph_placeholder are
+        # different objects but share the same __code__.
+        fn1 = mod1.forward.__func__.__marked_compile_region_fn__
+        fn2 = mod2.forward.__func__.__marked_compile_region_fn__
+        self.assertIsNot(fn1, fn2)
+        self.assertIs(fn1.__code__, fn2.__code__)
+
+        def fn(x):
+            return mod1(x) + mod2(x)
+
+        x = torch.randn(8)
+        ref = fn(x)
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(ref, res)
+        # Both modules have the same code and same c=5, so the second call
+        # should reuse the first trace despite having different function ids.
+        self.assertEqual(count(), 1)
+
+    def test_subgraph_reuse_module_apply(self):
+        """Using module.apply to wrap transformer layers with nested_compile_region."""
+
+        class Layer(torch.nn.Module):
+            def __init__(self, c):
+                super().__init__()
+                self.c = c
+
+            def forward(self, x):
+                return x * self.c
+
+        model = torch.nn.Sequential(Layer(5), Layer(5), Layer(5))
+        ref_model = torch.nn.Sequential(Layer(5), Layer(5), Layer(5))
+
+        def wrap_layer(mod):
+            if isinstance(mod, Layer):
+                fwd = type(mod).forward
+                if not hasattr(fwd, "__marked_compile_region_fn__"):
+                    type(mod).forward = nested_compile_region(fwd)
+
+        model.apply(wrap_layer)
+
+        x = torch.randn(8)
+        ref = ref_model(x)
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(model, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(ref, res)
+        # All three layers share the same class and c=5, only one trace needed.
+        self.assertEqual(count(), 1)
+
+    def test_subgraph_reuse_class_level_wrap(self):
+        """Wrapping cls.forward with nested_compile_region for named_modules pattern."""
+
+        class Layer(torch.nn.Module):
+            def __init__(self, c):
+                super().__init__()
+                self.c = c
+
+            def forward(self, x):
+                return x * self.c
+
+        # Wrap at the class level — the pattern a user would use after
+        # iterating named_modules to wrap all layers of a given type.
+        Layer.forward = nested_compile_region(Layer.forward)
+
+        mod1 = Layer(5)
+        mod2 = Layer(5)
+
+        def fn(x):
+            return mod1(x) + mod2(x)
+
+        x = torch.randn(8)
+        ref = fn(x)
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(ref, res)
+        self.assertEqual(count(), 1)
+
+    def test_subgraph_reuse_module_instance_as_callable(self):
+        """Passing nn.Module instances directly to nested_compile_region."""
+
+        class Layer(torch.nn.Module):
+            def __init__(self, c):
+                super().__init__()
+                self.c = c
+
+            def forward(self, x):
+                return x * self.c
+
+        mod1 = Layer(5)
+        mod2 = Layer(5)
+
+        wrapped1 = nested_compile_region(mod1)
+        wrapped2 = nested_compile_region(mod2)
+
+        def fn(x):
+            return wrapped1(x) + wrapped2(x)
+
+        x = torch.randn(8)
+        ref = fn(x)
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(ref, res)
+        # Both modules have the same forward code and same c=5, so the
+        # second call should reuse the first trace.
+        self.assertEqual(count(), 1)
+
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 @parameterized_class(
