@@ -1,9 +1,13 @@
 # Owner(s): ["module: nn"]
 
 import unittest
+from unittest import mock
 
 import torch
-from torch._native.ops.bmm_outer_product.triton_impl import _is_outer_product
+from torch._native.ops.bmm_outer_product.triton_impl import (
+    _get_bmm_outer_product_backend,
+    _is_outer_product,
+)
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.inductor_utils import HAS_GPU
 
@@ -66,6 +70,18 @@ class TestBmmOuterProduct(TestCase):
         self.assertEqual(a.grad.shape, a.shape)
         self.assertEqual(b.grad.shape, b.shape)
 
+    def test_cutedsl_backend(self):
+        with mock.patch.dict(
+            "os.environ",
+            {"TORCH_BMM_OUTER_PRODUCT_BACKEND": "cutedsl"},
+            clear=False,
+        ):
+            for batch, m_dim, n_dim in ((4, 128, 64), (32, 8, 256), (7, 10, 70)):
+                a = torch.randn(batch, m_dim, 1, device="cuda", dtype=torch.float16)
+                b = torch.randn(batch, 1, n_dim, device="cuda", dtype=torch.float16)
+                with self.subTest(batch=batch, m_dim=m_dim, n_dim=n_dim):
+                    self.assertEqual(torch.bmm(a, b), a @ b)
+
 
 class TestOuterProductDetection(TestCase):
     def test_is_outer_product(self):
@@ -83,6 +99,22 @@ class TestOuterProductDetection(TestCase):
                 torch.empty(4, 1, 16, dtype=torch.complex64),
             )
         )
+
+    def test_backend_selection(self):
+        with mock.patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(_get_bmm_outer_product_backend(), "triton")
+        with mock.patch.dict(
+            "os.environ",
+            {"TORCH_BMM_OUTER_PRODUCT_BACKEND": "cutedsl"},
+            clear=True,
+        ):
+            self.assertEqual(_get_bmm_outer_product_backend(), "cutedsl")
+        with mock.patch.dict(
+            "os.environ",
+            {"TORCH_BMM_OUTER_PRODUCT_BACKEND": "unknown"},
+            clear=True,
+        ):
+            self.assertEqual(_get_bmm_outer_product_backend(), "triton")
 
 
 if __name__ == "__main__":
