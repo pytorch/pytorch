@@ -30,6 +30,7 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/full_like.h>
+#include <ATen/ops/isinf.h>
 #include <ATen/ops/tensor.h>
 #include <ATen/ops/where.h>
 #include <ATen/ops/zeros.h>
