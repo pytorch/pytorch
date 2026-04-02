@@ -2896,6 +2896,13 @@ else:
         if name in _lazy_modules:
             return importlib.import_module(f".{name}", __name__)
 
+        # set_vital
+        if name == "set_vital":
+            import warnings
+
+            warnings.warn(f"'{name}' is deprecated, please do not call", stacklevel=2)
+            return lambda *args: None
+
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 
