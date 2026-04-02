@@ -42,7 +42,7 @@ typename cutlass::epilogue::collective::CollectiveBuilder<
     cute::Shape<${cluster_shape_m}, ${cluster_shape_n}, ${cluster_shape_k}>,
     ${epi_tile_mn},
     ${element_accumulator}, ${element_epilogue},
-    void, ${layout_c}, ${align_c},
+    ${element_c}, ${layout_c}, ${align_c},
     ${element_d}, ${layout_d}, ${align_d},
     ${epilogue_schedule},
     ${epilogue_functor}
