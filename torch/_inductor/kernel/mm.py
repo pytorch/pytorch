@@ -674,6 +674,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         if (
             bias_to_check.get_stride()[0] == 0
             and inductor_config.triton.autotune_cublasLt
+            and not V.graph.cpp_wrapper  # bias_addmm only has a Python implementation
         ):
             aten_templates.append(aten_bias_addmm)
 
