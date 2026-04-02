@@ -267,18 +267,12 @@ case "$tag" in
     GCC_VERSION=13
     ACL=yes
     OPENBLAS=yes
-    # snadampal: skipping llvm src build install because the current version
-    # from pytorch/llvm:9.0.1 is x86 specific
-    SKIP_LLVM_SRC_BUILD_INSTALL=yes
     ;;
   pytorch-linux-jammy-aarch64-py3.10-gcc13-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=13
     ACL=yes
     OPENBLAS=yes
-    # snadampal: skipping llvm src build install because the current version
-    # from pytorch/llvm:9.0.1 is x86 specific
-    SKIP_LLVM_SRC_BUILD_INSTALL=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-noble-riscv64-py3.12-gcc14)
@@ -370,7 +364,6 @@ docker buildx build \
        --build-arg "ACL=${ACL:-}" \
        --build-arg "OPENBLAS=${OPENBLAS:-}" \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
-       --build-arg "SKIP_LLVM_SRC_BUILD_INSTALL=${SKIP_LLVM_SRC_BUILD_INSTALL:-}" \
        --build-arg "INSTALL_MINGW=${INSTALL_MINGW:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        --load \
