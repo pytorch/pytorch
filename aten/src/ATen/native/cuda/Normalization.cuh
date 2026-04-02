@@ -134,7 +134,7 @@ __device__ scalar_t reduce(Op op, PTA tensor, int plane) {
     }
 #endif
   }
-  __shared__ scalar_t shared[C10_WARP_SIZE];
+  __shared__ scalar_t shared[C10_WARP_SIZE_UPPER_BOUND];
   SumReduceOp<scalar_t> reduce_op;
   sum = cuda_utils::BlockReduce<scalar_t, SumReduceOp<scalar_t>, cuda_utils::Block2D>(sum, reduce_op, 0, shared);
   if (threadIdx.x == 0 && threadIdx.y == 0) {
@@ -288,7 +288,7 @@ __global__ void batch_norm_collect_statistics_kernel(
     GenericPackedTensorAccessor<stat_accscalar_t, 1, RestrictPtrTraits, index_t> save_mean,
     GenericPackedTensorAccessor<stat_accscalar_t, 1, RestrictPtrTraits, index_t> save_transformed_var) {
 
-  __shared__ int shared_n[2 * 2 * C10_WARP_SIZE + C10_WARP_SIZE];
+  __shared__ int shared_n[2 * 2 * C10_WARP_SIZE_UPPER_BOUND + C10_WARP_SIZE_UPPER_BOUND];
 
   int plane = blockIdx.x;
   int N = input.size(0) * input.size(2);
