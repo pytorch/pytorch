@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import torch
 from typing import Any, TYPE_CHECKING
 
+import torch
 from torch._inductor import config as inductor_config
 
 from ..kernel.bmm import aten_baddbmm, aten_bmm, aten_bmm_dtype
