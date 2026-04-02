@@ -2637,6 +2637,181 @@ instantiate_device_type_tests(
     ActivationCheckpointingViaTagsTests, globals(), only_for=devices
 )
 
+
+class ActivationCheckpointingNonStrictTracerTests(torch._dynamo.test_case.TestCase):
+    """Tests for non-strict tracing flag interaction with checkpoint."""
+
+    def _trace_train_step(self, mod, x):
+        import torch.utils._pytree as pytree
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.fx.traceback import preserve_node_meta
+        from torch.nn.utils import stateless
+
+        params = dict(mod.named_parameters())
+        flat_params, params_spec = pytree.tree_flatten(params)
+        params_len = len(flat_params)
+
+        def train_step(*all_args):
+            p = pytree.tree_unflatten(list(all_args[:params_len]), params_spec)
+            with stateless._reparametrize_module(mod, p):
+                loss = mod(all_args[params_len]).sum()
+                return torch.autograd.grad(loss, all_args[:params_len])
+
+        full_args = (*flat_params, x)
+
+        with (
+            torch.compiler._non_strict_tracing_context(),
+            preserve_node_meta(),
+        ):
+            return make_fx(train_step)(*full_args)
+
+    def test_checkpoint_traces_through_eager_ac_under_non_strict(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = nn.Parameter(torch.randn(4, 4))
+
+            def forward(self, x):
+                return checkpoint(
+                    lambda x: torch.sin(x @ self.w), x, use_reentrant=False
+                )
+
+        gm = self._trace_train_step(Model(), torch.randn(2, 4))
+
+        # Everything is recomputed in backward: mm_1 is the recomputed mm.
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1):
+    mm = torch.ops.aten.mm.default(arg1_1, arg0_1)
+    sin = torch.ops.aten.sin.default(mm);  mm = None
+    sum_1 = torch.ops.aten.sum.default(sin);  sin = None
+    ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
+    expand = torch.ops.aten.expand.default(ones_like, [2, 4]);  ones_like = None
+    mm_1 = torch.ops.aten.mm.default(arg1_1, arg0_1);  arg0_1 = None
+    detach = torch.ops.aten.detach.default(mm_1);  mm_1 = None
+    detach_1 = torch.ops.aten.detach.default(detach);  detach = None
+    cos = torch.ops.aten.cos.default(detach_1);  detach_1 = None
+    mul = torch.ops.aten.mul.Tensor(expand, cos);  expand = cos = None
+    t = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
+    mm_2 = torch.ops.aten.mm.default(t, mul);  t = mul = None
+    return (mm_2,)""",
+        )
+
+    def test_sac_traces_through_eager_ac_under_non_strict(self):
+        def policy_fn(ctx, func, *args, **kwargs):
+            if func == torch.ops.aten.mm.default:
+                return CheckpointPolicy.PREFER_RECOMPUTE
+            return CheckpointPolicy.MUST_SAVE
+
+        def context_fn():
+            return create_selective_checkpoint_contexts(policy_fn)
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = nn.Parameter(torch.randn(4, 4))
+
+            def forward(self, x):
+                def fn(x):
+                    return torch.sin(x @ self.w)
+
+                return checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
+
+        gm = self._trace_train_step(Model(), torch.randn(2, 4))
+
+        # mm is PREFER_RECOMPUTE so it gets recomputed in backward (mm_1).
+        # sin is MUST_SAVE so its output is saved via detach.
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1):
+    mm = torch.ops.aten.mm.default(arg1_1, arg0_1)
+    sin = torch.ops.aten.sin.default(mm);  mm = None
+    detach = torch.ops.aten.detach.default(sin);  detach = None
+    sum_1 = torch.ops.aten.sum.default(sin);  sin = None
+    ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
+    expand = torch.ops.aten.expand.default(ones_like, [2, 4]);  ones_like = None
+    mm_1 = torch.ops.aten.mm.default(arg1_1, arg0_1);  arg0_1 = None
+    detach_1 = torch.ops.aten.detach.default(mm_1);  mm_1 = None
+    detach_2 = torch.ops.aten.detach.default(detach_1);  detach_1 = None
+    cos = torch.ops.aten.cos.default(detach_2);  detach_2 = None
+    mul = torch.ops.aten.mul.Tensor(expand, cos);  expand = cos = None
+    t = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
+    mm_2 = torch.ops.aten.mm.default(t, mul);  t = mul = None
+    return (mm_2,)""",
+        )
+
+    def test_checkpoint_with_rng_op_under_non_strict(self):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = nn.Parameter(torch.randn(4, 4))
+
+            def forward(self, x):
+                def fn(x):
+                    return torch.nn.functional.dropout(torch.sin(x @ self.w), p=0.5)
+
+                return checkpoint(fn, x, use_reentrant=False, preserve_rng_state=True)
+
+        mod = Model()
+        x = torch.randn(2, 4)
+
+        import torch.utils._pytree as pytree
+        from torch.nn.utils import stateless
+
+        params = dict(mod.named_parameters())
+        flat_params, params_spec = pytree.tree_flatten(params)
+        params_len = len(flat_params)
+
+        def train_step(*all_args):
+            p = pytree.tree_unflatten(list(all_args[:params_len]), params_spec)
+            with stateless._reparametrize_module(mod, p):
+                loss = mod(all_args[params_len]).sum()
+                return torch.autograd.grad(loss, all_args[:params_len])
+
+        full_args = (*flat_params, x)
+
+        torch.manual_seed(42)
+        with torch.compiler._non_strict_tracing_context():
+            gm = make_fx(train_step)(*full_args)
+
+        # The traced graph has two independent bernoulli_ calls (forward and
+        # recomputed). At replay time these produce different dropout masks
+        # because get/set_rng_state are silently dropped by make_fx, so the
+        # traced graph is NOT bitwise equivalent to eager. This is a known
+        # limitation of tracing through eager checkpoint.
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1):
+    mm = torch.ops.aten.mm.default(arg1_1, arg0_1)
+    sin = torch.ops.aten.sin.default(mm);  mm = None
+    empty_like = torch.ops.aten.empty_like.default(sin)
+    bernoulli_ = torch.ops.aten.bernoulli_.float(empty_like);  empty_like = None
+    div_ = torch.ops.aten.div_.Scalar(bernoulli_, 0.5);  bernoulli_ = None
+    mul = torch.ops.aten.mul.Tensor(sin, div_);  sin = div_ = None
+    sum_1 = torch.ops.aten.sum.default(mul);  mul = None
+    ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
+    expand = torch.ops.aten.expand.default(ones_like, [2, 4]);  ones_like = None
+    mm_1 = torch.ops.aten.mm.default(arg1_1, arg0_1);  arg0_1 = None
+    detach = torch.ops.aten.detach.default(mm_1)
+    sin_1 = torch.ops.aten.sin.default(mm_1);  mm_1 = None
+    empty_like_1 = torch.ops.aten.empty_like.default(sin_1);  sin_1 = None
+    bernoulli__1 = torch.ops.aten.bernoulli_.float(empty_like_1);  empty_like_1 = None
+    div__1 = torch.ops.aten.div_.Scalar(bernoulli__1, 0.5);  bernoulli__1 = None
+    mul_1 = torch.ops.aten.mul.Tensor(expand, div__1);  expand = div__1 = None
+    detach_1 = torch.ops.aten.detach.default(detach);  detach = None
+    cos = torch.ops.aten.cos.default(detach_1);  detach_1 = None
+    mul_2 = torch.ops.aten.mul.Tensor(mul_1, cos);  mul_1 = cos = None
+    t = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
+    mm_2 = torch.ops.aten.mm.default(t, mul_2);  t = mul_2 = None
+    return (mm_2,)""",
+        )
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
