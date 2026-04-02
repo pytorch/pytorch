@@ -201,3 +201,37 @@ REGISTER_UNARY_ALPHA_OP(leaky_relu, bfloat, bfloat, bfloat);
 REGISTER_BINARY_ALPHA_OP(leaky_relu_backward, float, float, float);
 REGISTER_BINARY_ALPHA_OP(leaky_relu_backward, half, half, half);
 REGISTER_BINARY_ALPHA_OP(leaky_relu_backward, bfloat, bfloat, bfloat);
+
+struct silu_functor {
+  template <typename T>
+  inline T operator()(const T x) {
+    float xf = float(x);
+    return static_cast<T>(xf / (1.0f + ::metal::precise::exp(-xf)));
+  }
+};
+
+REGISTER_UNARY_OP(silu, float, float);
+REGISTER_UNARY_OP(silu, half, half);
+REGISTER_UNARY_OP(silu, bfloat, bfloat);
+REGISTER_UNARY_OP(silu, int, int);
+REGISTER_UNARY_OP(silu, short, short);
+REGISTER_UNARY_OP(silu, char, char);
+REGISTER_UNARY_OP(silu, uchar, uchar);
+REGISTER_UNARY_OP(silu, bool, bool);
+
+REGISTER_UNARY_VEC4_OP(silu, float, float);
+REGISTER_UNARY_VEC4_OP(silu, half, half);
+REGISTER_UNARY_VEC4_OP(silu, bfloat, bfloat);
+
+struct silu_backward_functor {
+  template <typename T>
+  inline T operator()(const T grad_output, const T self) {
+    float sf = float(self);
+    float sig = 1.0f / (1.0f + ::metal::precise::exp(-sf));
+    return static_cast<T>(float(grad_output) * sig * (1.0f + sf - sf * sig));
+  }
+};
+
+REGISTER_BINARY_OP(silu_backward, float, float);
+REGISTER_BINARY_OP(silu_backward, half, half);
+REGISTER_BINARY_OP(silu_backward, bfloat, bfloat);
