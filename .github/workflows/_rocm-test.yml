@@ -223,7 +223,7 @@ jobs:
           # shellcheck disable=SC2086,SC2090
           container_name=$(docker run \
             ${GPU_FLAG:-} \
-            ${DEVICE_FLAG:-} \ #set in actions-runner/.env 
+            ${DEVICE_FLAG:-} \
             ${ADDITIONAL_FLAGS:-} \
             -e USE_SCCACHE \
             -e BUILD_ENVIRONMENT \
