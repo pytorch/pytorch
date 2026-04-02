@@ -6045,7 +6045,7 @@ def meta__scaled_dot_product_fused_attention_overrideable(
     # Preserve input dimensionality for the output shape
     out_shape = list(query.shape)
     out_shape[-1] = D_V
-    res = torch.empty(out_shape, dtype=query.dtype, device=query.device)
+    res = alloc_with_matching_layout(query, tuple(out_shape))
 
     logsum_exp = torch.empty(
         (B, H_Q, S_Q),
