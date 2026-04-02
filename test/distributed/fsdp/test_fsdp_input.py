@@ -89,7 +89,7 @@ class TestInput(FSDPTestContinuous):
                     input.append(torch.randn(4, 4, device=input[0].device))
                     x = input[0]
                 else:
-                    assert isinstance(input, dict), input
+                    assert isinstance(input, dict), input  # noqa: S101
                     input["added"] = torch.randn(4, 4, device=input["in"].device)
                     x = input["in"]
                 return self.layer(x)
