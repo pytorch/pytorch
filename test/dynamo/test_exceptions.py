@@ -527,6 +527,30 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         metrics = torch._dynamo.utils.get_compilation_metrics()
         self.assertIn("Observed exception", metrics[0].fail_reason)
 
+    def test_observed_exception_formats_fstring_message(self):
+        from torch.utils._pytree import tree_map_with_path
+
+        def check_tensor(path, x):
+            if not isinstance(x, torch.Tensor):
+                raise ValueError(f"Expected Tensor at {path=}")
+            return x * 2
+
+        def fn(tree):
+            return tree_map_with_path(check_tensor, tree)
+
+        tree = {"a": torch.randn(10), "b": 5}
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaises(Unsupported) as compiled_ctx:
+            compiled_fn(tree)
+
+        exc_str = str(compiled_ctx.exception)
+        self.assertIn("Observed exception", exc_str)
+        self.assertIn("Expected Tensor at path=(MappingKey(key='b'),)", exc_str)
+        self.assertNotIn("Failed to trace builtin operator", exc_str)
+        self.assertNotIn("StringFormatVariable", exc_str)
+        self.assertNotIn("ConstantVariable(", exc_str)
+
     def test_key_error(self):
         def fn(x, d):
             try:

@@ -2885,6 +2885,9 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
     def python_stack(self) -> traceback.StackSummary | None:
         return self.exc_vt.python_stack
 
+    def debug_repr(self) -> str:
+        return self.exc_vt.debug_repr()
+
     @python_stack.setter
     def python_stack(self, value: traceback.StackSummary) -> None:
         self.exc_vt.python_stack = value
