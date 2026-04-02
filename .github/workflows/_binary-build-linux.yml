@@ -76,6 +76,16 @@ on:
         type: string
         description: Extra install requirements
         default: ""
+      use-arc:
+        required: false
+        default: false
+        type: boolean
+        description: If true, use ARC (OSDC) runner path instead of EC2.
+      docker-image-name:
+        required: false
+        default: ""
+        type: string
+        description: Full docker image name for OSDC container execution
     secrets:
       github-token:
         required: true
@@ -83,10 +93,14 @@ on:
 
 permissions:
   id-token: write
+  contents: read
+  actions: read
 
 jobs:
   build:
-    runs-on: ${{ inputs.runner_prefix}}${{ inputs.runs_on }}
+    # Don't run on forked repos
+    if: github.repository_owner == 'pytorch' && !inputs.use-arc
+    runs-on: ${{ inputs.runner_prefix }}${{ inputs.runs_on }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     env:
       PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
@@ -153,8 +167,11 @@ jobs:
           no-sudo: ${{ inputs.build_environment == 'linux-aarch64-binary-manywheel' || inputs.build_environment == 'linux-s390x-binary-manywheel' }}
 
       - name: Setup Linux
+        id: setup-linux
         if: inputs.build_environment != 'linux-s390x-binary-manywheel'
-        uses: ./.github/actions/setup-linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        with:
+          github-token: ${{ secrets.github-token }}
 
       - name: Login to ECR
         if: inputs.build_environment != 'linux-s390x-binary-manywheel'
@@ -299,3 +316,105 @@ jobs:
           # ignore expansion of "docker ps -q" since it could be empty
           # shellcheck disable=SC2046
           docker stop $(docker ps -q) || true
+
+  build-osdc:
+    permissions:
+      id-token: write
+      contents: read
+      actions: read
+    # Don't run on forked repos
+    if: github.repository_owner == 'pytorch' && inputs.use-arc
+    runs-on: ${{ inputs.runner_prefix }}${{ inputs.runs_on }}
+    container:
+      image: ${{ inputs.docker-image-name }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    env:
+      PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
+      PACKAGE_TYPE: ${{ inputs.PACKAGE_TYPE }}
+      DESIRED_CUDA: ${{ inputs.DESIRED_CUDA }}
+      GPU_ARCH_VERSION: ${{ inputs.GPU_ARCH_VERSION }}
+      GPU_ARCH_TYPE: ${{ inputs.GPU_ARCH_TYPE }}
+      DOCKER_IMAGE: ${{ inputs.DOCKER_IMAGE }}
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: ${{ inputs.LIBTORCH_CONFIG }}
+      LIBTORCH_VARIANT: ${{ inputs.LIBTORCH_VARIANT }}
+      DESIRED_PYTHON: ${{ inputs.DESIRED_PYTHON }}
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: ${{ inputs.PYTORCH_EXTRA_INSTALL_REQUIREMENTS }}
+      AWS_DEFAULT_REGION: us-east-1
+      BINARY_ENV_FILE: /tmp/env
+      BUILD_ENVIRONMENT: ${{ inputs.build_environment }}
+      GITHUB_TOKEN: ${{ secrets.github-token }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PYTORCH_FINAL_PACKAGE_DIR: /artifacts
+      SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Setup Linux
+        id: setup-linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        with:
+          use-arc: true
+          github-token: ${{ secrets.github-token }}
+
+      - name: Check if the job is disabled
+        id: filter
+        uses: pytorch/pytorch/.github/actions/filter-test-configs@main
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: |
+            { include: [
+              { config: "default" },
+            ]}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/arc
+          aws-region: us-east-1
+          role-duration-seconds: 18000
+
+      - name: Checkout PyTorch to pytorch dir
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 2
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+
+      - name: Build PyTorch binary
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
+        id: build
+        env:
+          SKIP_SCCACHE_INITIALIZATION: 1
+        shell: bash
+        run: |
+          set -x
+          START_TIME=$(date +%s)
+          mkdir -p artifacts/
+          mkdir -p "${RUNNER_TEMP}/artifacts"
+          cd pytorch
+          bash .ci/pytorch/binary_populate_env.sh
+          source "${BINARY_ENV_FILE}" && bash .ci/${{ inputs.PACKAGE_TYPE }}/build.sh
+          END_TIME=$(date +%s)
+          echo "build_time=$((END_TIME - START_TIME))" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
+        with:
+          name: ${{ inputs.build_name }}
+          if-no-files-found: error
+          path:
+            ${{ runner.temp }}/artifacts/*
+
+      - name: Upload sccache stats
+        if: steps.build.outcome != 'skipped'
+        uses: pytorch/pytorch/.github/actions/upload-sccache-stats@main
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          build-time: ${{ steps.build.outputs.build_time }}

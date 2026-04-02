@@ -21,6 +21,8 @@ on:
 
 permissions:
   id-token: write
+  contents: read
+  actions: read
 
 env:
   # Needed for conda builds
@@ -62,7 +64,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu
       DESIRED_PYTHON: "3.10"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cpu"
       build_name: manywheel-py3_10-cpu
       build_environment: linux-binary-manywheel
     secrets:
@@ -86,8 +90,9 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.4xlarge
+      use-arc: true
+      runs_on: mt-l-x86iamx-14-27
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cpu-upload:  # Uploading
@@ -129,7 +134,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.10"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.6"
       build_name: manywheel-py3_10-cuda12_6
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'
@@ -155,8 +162,9 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda12_6
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.6"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda12_6-upload:  # Uploading
@@ -199,7 +207,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.10"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.8"
       build_name: manywheel-py3_10-cuda12_8
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.8.1; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'
@@ -225,8 +235,9 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda12_8
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.8"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda12_8-upload:  # Uploading
@@ -269,7 +280,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.10"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.9"
       build_name: manywheel-py3_10-cuda12_9
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.9.1; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'
@@ -295,8 +308,9 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda12_9
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.9"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda12_9-upload:  # Uploading
@@ -339,7 +353,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.10"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.0"
       build_name: manywheel-py3_10-cuda13_0
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'
@@ -365,8 +381,9 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda13_0
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.0"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda13_0-upload:  # Uploading
@@ -409,7 +426,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.2
       DESIRED_PYTHON: "3.10"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.2"
       build_name: manywheel-py3_10-cuda13_2
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.0; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'
@@ -435,8 +454,9 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda13_2
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.2"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda13_2-upload:  # Uploading
@@ -710,7 +730,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: xpu
       DESIRED_PYTHON: "3.10"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:xpu"
       build_name: manywheel-py3_10-xpu
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.3.2 | intel-cmplr-lib-ur==2025.3.2 | intel-cmplr-lic-rt==2025.3.2 | intel-sycl-rt==2025.3.2 | oneccl-devel==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.1 | onemkl-sycl-blas==2025.3.1 | onemkl-sycl-dft==2025.3.1 | onemkl-sycl-lapack==2025.3.1 | onemkl-sycl-rng==2025.3.1 | onemkl-sycl-sparse==2025.3.1 | dpcpp-cpp-rt==2025.3.2 | intel-opencl-rt==2025.3.2 | mkl==2025.3.1 | intel-openmp==2025.3.2 | tbb==2022.3.1 | tcmlib==1.4.1 | umf==1.0.3 | intel-pti==0.16.0
@@ -814,7 +836,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu
       DESIRED_PYTHON: "3.11"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cpu"
       build_name: manywheel-py3_11-cpu
       build_environment: linux-binary-manywheel
     secrets:
@@ -838,8 +862,9 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.4xlarge
+      use-arc: true
+      runs_on: mt-l-x86iamx-14-27
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cpu-upload:  # Uploading
@@ -881,7 +906,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.11"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.6"
       build_name: manywheel-py3_11-cuda12_6
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'
@@ -907,8 +934,9 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda12_6
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.6"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda12_6-upload:  # Uploading
@@ -951,7 +979,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.11"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.8"
       build_name: manywheel-py3_11-cuda12_8
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.8.1; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'
@@ -977,8 +1007,9 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda12_8
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.8"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda12_8-upload:  # Uploading
@@ -1021,7 +1052,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.11"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.9"
       build_name: manywheel-py3_11-cuda12_9
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.9.1; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'
@@ -1047,8 +1080,9 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda12_9
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.9"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda12_9-upload:  # Uploading
@@ -1091,7 +1125,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.11"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.0"
       build_name: manywheel-py3_11-cuda13_0
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'
@@ -1117,8 +1153,9 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda13_0
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.0"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda13_0-upload:  # Uploading
@@ -1161,7 +1198,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.2
       DESIRED_PYTHON: "3.11"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.2"
       build_name: manywheel-py3_11-cuda13_2
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.0; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'
@@ -1187,8 +1226,9 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda13_2
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.2"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda13_2-upload:  # Uploading
@@ -1462,7 +1502,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: xpu
       DESIRED_PYTHON: "3.11"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:xpu"
       build_name: manywheel-py3_11-xpu
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.3.2 | intel-cmplr-lib-ur==2025.3.2 | intel-cmplr-lic-rt==2025.3.2 | intel-sycl-rt==2025.3.2 | oneccl-devel==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.1 | onemkl-sycl-blas==2025.3.1 | onemkl-sycl-dft==2025.3.1 | onemkl-sycl-lapack==2025.3.1 | onemkl-sycl-rng==2025.3.1 | onemkl-sycl-sparse==2025.3.1 | dpcpp-cpp-rt==2025.3.2 | intel-opencl-rt==2025.3.2 | mkl==2025.3.1 | intel-openmp==2025.3.2 | tbb==2022.3.1 | tcmlib==1.4.1 | umf==1.0.3 | intel-pti==0.16.0
@@ -1566,7 +1608,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu
       DESIRED_PYTHON: "3.12"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cpu"
       build_name: manywheel-py3_12-cpu
       build_environment: linux-binary-manywheel
     secrets:
@@ -1590,8 +1634,9 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cpu
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.4xlarge
+      use-arc: true
+      runs_on: mt-l-x86iamx-14-27
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cpu-upload:  # Uploading
@@ -1633,7 +1678,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.12"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.6"
       build_name: manywheel-py3_12-cuda12_6
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'
@@ -1659,8 +1706,9 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda12_6
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.6"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda12_6-upload:  # Uploading
@@ -1703,7 +1751,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.12"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.8"
       build_name: manywheel-py3_12-cuda12_8
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.8.1; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'
@@ -1729,8 +1779,9 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda12_8
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.8"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda12_8-upload:  # Uploading
@@ -1773,7 +1824,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.12"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.9"
       build_name: manywheel-py3_12-cuda12_9
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.9.1; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'
@@ -1799,8 +1852,9 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda12_9
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.9"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda12_9-upload:  # Uploading
@@ -1843,7 +1897,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.12"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.0"
       build_name: manywheel-py3_12-cuda13_0
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'
@@ -1869,8 +1925,9 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda13_0
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.0"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda13_0-upload:  # Uploading
@@ -1913,7 +1970,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.2
       DESIRED_PYTHON: "3.12"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.2"
       build_name: manywheel-py3_12-cuda13_2
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.0; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'
@@ -1939,8 +1998,9 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda13_2
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.2"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda13_2-upload:  # Uploading
@@ -2214,7 +2274,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: xpu
       DESIRED_PYTHON: "3.12"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:xpu"
       build_name: manywheel-py3_12-xpu
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.3.2 | intel-cmplr-lib-ur==2025.3.2 | intel-cmplr-lic-rt==2025.3.2 | intel-sycl-rt==2025.3.2 | oneccl-devel==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.1 | onemkl-sycl-blas==2025.3.1 | onemkl-sycl-dft==2025.3.1 | onemkl-sycl-lapack==2025.3.1 | onemkl-sycl-rng==2025.3.1 | onemkl-sycl-sparse==2025.3.1 | dpcpp-cpp-rt==2025.3.2 | intel-opencl-rt==2025.3.2 | mkl==2025.3.1 | intel-openmp==2025.3.2 | tbb==2022.3.1 | tcmlib==1.4.1 | umf==1.0.3 | intel-pti==0.16.0
@@ -2318,7 +2380,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu
       DESIRED_PYTHON: "3.13"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cpu"
       build_name: manywheel-py3_13-cpu
       build_environment: linux-binary-manywheel
     secrets:
@@ -2342,8 +2406,9 @@ jobs:
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cpu
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.4xlarge
+      use-arc: true
+      runs_on: mt-l-x86iamx-14-27
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-cpu-upload:  # Uploading
@@ -2385,7 +2450,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.13"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.6"
       build_name: manywheel-py3_13-cuda12_6
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'
@@ -2411,8 +2478,9 @@ jobs:
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda12_6
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.6"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-cuda12_6-upload:  # Uploading
@@ -2455,7 +2523,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.13"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.8"
       build_name: manywheel-py3_13-cuda12_8
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.8.1; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'
@@ -2481,8 +2551,9 @@ jobs:
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda12_8
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.8"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-cuda12_8-upload:  # Uploading
@@ -2525,7 +2596,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.13"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.9"
       build_name: manywheel-py3_13-cuda12_9
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.9.1; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'
@@ -2551,8 +2624,9 @@ jobs:
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda12_9
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.9"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-cuda12_9-upload:  # Uploading
@@ -2595,7 +2669,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.13"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.0"
       build_name: manywheel-py3_13-cuda13_0
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'
@@ -2621,8 +2697,9 @@ jobs:
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda13_0
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.0"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-cuda13_0-upload:  # Uploading
@@ -2665,7 +2742,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.2
       DESIRED_PYTHON: "3.13"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.2"
       build_name: manywheel-py3_13-cuda13_2
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.0; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'
@@ -2691,8 +2770,9 @@ jobs:
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda13_2
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.2"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-cuda13_2-upload:  # Uploading
@@ -2966,7 +3046,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: xpu
       DESIRED_PYTHON: "3.13"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:xpu"
       build_name: manywheel-py3_13-xpu
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.3.2 | intel-cmplr-lib-ur==2025.3.2 | intel-cmplr-lic-rt==2025.3.2 | intel-sycl-rt==2025.3.2 | oneccl-devel==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.1 | onemkl-sycl-blas==2025.3.1 | onemkl-sycl-dft==2025.3.1 | onemkl-sycl-lapack==2025.3.1 | onemkl-sycl-rng==2025.3.1 | onemkl-sycl-sparse==2025.3.1 | dpcpp-cpp-rt==2025.3.2 | intel-opencl-rt==2025.3.2 | mkl==2025.3.1 | intel-openmp==2025.3.2 | tbb==2022.3.1 | tcmlib==1.4.1 | umf==1.0.3 | intel-pti==0.16.0
@@ -3070,7 +3152,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu
       DESIRED_PYTHON: "3.13t"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cpu"
       build_name: manywheel-py3_13t-cpu
       build_environment: linux-binary-manywheel
     secrets:
@@ -3094,8 +3178,9 @@ jobs:
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cpu
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.4xlarge
+      use-arc: true
+      runs_on: mt-l-x86iamx-14-27
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13t-cpu-upload:  # Uploading
@@ -3137,7 +3222,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.13t"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.6"
       build_name: manywheel-py3_13t-cuda12_6
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'
@@ -3163,8 +3250,9 @@ jobs:
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cuda12_6
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.6"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13t-cuda12_6-upload:  # Uploading
@@ -3207,7 +3295,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.13t"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.8"
       build_name: manywheel-py3_13t-cuda12_8
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.8.1; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'
@@ -3233,8 +3323,9 @@ jobs:
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cuda12_8
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.8"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13t-cuda12_8-upload:  # Uploading
@@ -3277,7 +3368,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.13t"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.9"
       build_name: manywheel-py3_13t-cuda12_9
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.9.1; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'
@@ -3303,8 +3396,9 @@ jobs:
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cuda12_9
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.9"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13t-cuda12_9-upload:  # Uploading
@@ -3347,7 +3441,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.13t"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.0"
       build_name: manywheel-py3_13t-cuda13_0
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'
@@ -3373,8 +3469,9 @@ jobs:
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cuda13_0
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.0"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13t-cuda13_0-upload:  # Uploading
@@ -3417,7 +3514,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.2
       DESIRED_PYTHON: "3.13t"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.2"
       build_name: manywheel-py3_13t-cuda13_2
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.0; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'
@@ -3443,8 +3542,9 @@ jobs:
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cuda13_2
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.2"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13t-cuda13_2-upload:  # Uploading
@@ -3718,7 +3818,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: xpu
       DESIRED_PYTHON: "3.13t"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:xpu"
       build_name: manywheel-py3_13t-xpu
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.3.2 | intel-cmplr-lib-ur==2025.3.2 | intel-cmplr-lic-rt==2025.3.2 | intel-sycl-rt==2025.3.2 | oneccl-devel==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.1 | onemkl-sycl-blas==2025.3.1 | onemkl-sycl-dft==2025.3.1 | onemkl-sycl-lapack==2025.3.1 | onemkl-sycl-rng==2025.3.1 | onemkl-sycl-sparse==2025.3.1 | dpcpp-cpp-rt==2025.3.2 | intel-opencl-rt==2025.3.2 | mkl==2025.3.1 | intel-openmp==2025.3.2 | tbb==2022.3.1 | tcmlib==1.4.1 | umf==1.0.3 | intel-pti==0.16.0
@@ -3822,7 +3924,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu
       DESIRED_PYTHON: "3.14"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cpu"
       build_name: manywheel-py3_14-cpu
       build_environment: linux-binary-manywheel
     secrets:
@@ -3846,8 +3950,9 @@ jobs:
       DESIRED_PYTHON: "3.14"
       build_name: manywheel-py3_14-cpu
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.4xlarge
+      use-arc: true
+      runs_on: mt-l-x86iamx-14-27
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_14-cpu-upload:  # Uploading
@@ -3889,7 +3994,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.14"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.6"
       build_name: manywheel-py3_14-cuda12_6
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'
@@ -3915,8 +4022,9 @@ jobs:
       DESIRED_PYTHON: "3.14"
       build_name: manywheel-py3_14-cuda12_6
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.6"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_14-cuda12_6-upload:  # Uploading
@@ -3959,7 +4067,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.14"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.8"
       build_name: manywheel-py3_14-cuda12_8
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.8.1; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'
@@ -3985,8 +4095,9 @@ jobs:
       DESIRED_PYTHON: "3.14"
       build_name: manywheel-py3_14-cuda12_8
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.8"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_14-cuda12_8-upload:  # Uploading
@@ -4029,7 +4140,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.14"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.9"
       build_name: manywheel-py3_14-cuda12_9
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.9.1; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'
@@ -4055,8 +4168,9 @@ jobs:
       DESIRED_PYTHON: "3.14"
       build_name: manywheel-py3_14-cuda12_9
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.9"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_14-cuda12_9-upload:  # Uploading
@@ -4099,7 +4213,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.14"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.0"
       build_name: manywheel-py3_14-cuda13_0
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'
@@ -4125,8 +4241,9 @@ jobs:
       DESIRED_PYTHON: "3.14"
       build_name: manywheel-py3_14-cuda13_0
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.0"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_14-cuda13_0-upload:  # Uploading
@@ -4169,7 +4286,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.2
       DESIRED_PYTHON: "3.14"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.2"
       build_name: manywheel-py3_14-cuda13_2
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.0; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'
@@ -4195,8 +4314,9 @@ jobs:
       DESIRED_PYTHON: "3.14"
       build_name: manywheel-py3_14-cuda13_2
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.2"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_14-cuda13_2-upload:  # Uploading
@@ -4470,7 +4590,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: xpu
       DESIRED_PYTHON: "3.14"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:xpu"
       build_name: manywheel-py3_14-xpu
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.3.2 | intel-cmplr-lib-ur==2025.3.2 | intel-cmplr-lic-rt==2025.3.2 | intel-sycl-rt==2025.3.2 | oneccl-devel==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.1 | onemkl-sycl-blas==2025.3.1 | onemkl-sycl-dft==2025.3.1 | onemkl-sycl-lapack==2025.3.1 | onemkl-sycl-rng==2025.3.1 | onemkl-sycl-sparse==2025.3.1 | dpcpp-cpp-rt==2025.3.2 | intel-opencl-rt==2025.3.2 | mkl==2025.3.1 | intel-openmp==2025.3.2 | tbb==2022.3.1 | tcmlib==1.4.1 | umf==1.0.3 | intel-pti==0.16.0
@@ -4574,7 +4696,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu
       DESIRED_PYTHON: "3.14t"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cpu"
       build_name: manywheel-py3_14t-cpu
       build_environment: linux-binary-manywheel
     secrets:
@@ -4598,8 +4722,9 @@ jobs:
       DESIRED_PYTHON: "3.14t"
       build_name: manywheel-py3_14t-cpu
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.4xlarge
+      use-arc: true
+      runs_on: mt-l-x86iamx-14-27
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_14t-cpu-upload:  # Uploading
@@ -4641,7 +4766,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.14t"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.6"
       build_name: manywheel-py3_14t-cuda12_6
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'
@@ -4667,8 +4794,9 @@ jobs:
       DESIRED_PYTHON: "3.14t"
       build_name: manywheel-py3_14t-cuda12_6
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.6"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_14t-cuda12_6-upload:  # Uploading
@@ -4711,7 +4839,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.14t"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.8"
       build_name: manywheel-py3_14t-cuda12_8
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.8.1; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'
@@ -4737,8 +4867,9 @@ jobs:
       DESIRED_PYTHON: "3.14t"
       build_name: manywheel-py3_14t-cuda12_8
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.8"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_14t-cuda12_8-upload:  # Uploading
@@ -4781,7 +4912,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.14t"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.9"
       build_name: manywheel-py3_14t-cuda12_9
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.9.1; platform_system == 'Linux' | cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | nvidia-cudnn-cu12==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'
@@ -4807,8 +4940,9 @@ jobs:
       DESIRED_PYTHON: "3.14t"
       build_name: manywheel-py3_14t-cuda12_9
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda12.9"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_14t-cuda12_9-upload:  # Uploading
@@ -4851,7 +4985,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.14t"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.0"
       build_name: manywheel-py3_14t-cuda13_0
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'
@@ -4877,8 +5013,9 @@ jobs:
       DESIRED_PYTHON: "3.14t"
       build_name: manywheel-py3_14t-cuda13_0
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.0"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_14t-cuda13_0-upload:  # Uploading
@@ -4921,7 +5058,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.2
       DESIRED_PYTHON: "3.14t"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.2"
       build_name: manywheel-py3_14t-cuda13_2
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.0; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'
@@ -4947,8 +5086,9 @@ jobs:
       DESIRED_PYTHON: "3.14t"
       build_name: manywheel-py3_14t-cuda13_2
       build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
+      use-arc: true
+      runs_on: mt-l-x86iavx512-29-115-t4
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:cuda13.2"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_14t-cuda13_2-upload:  # Uploading
@@ -5222,7 +5362,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: xpu
       DESIRED_PYTHON: "3.14t"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: true
+      runs_on: mt-l-x86iamx-46-84
+      docker-image-name: "docker.io/pytorch/manylinux2_28-builder:xpu"
       build_name: manywheel-py3_14t-xpu
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.3.2 | intel-cmplr-lib-ur==2025.3.2 | intel-cmplr-lic-rt==2025.3.2 | intel-sycl-rt==2025.3.2 | oneccl-devel==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.1 | onemkl-sycl-blas==2025.3.1 | onemkl-sycl-dft==2025.3.1 | onemkl-sycl-lapack==2025.3.1 | onemkl-sycl-rng==2025.3.1 | onemkl-sycl-sparse==2025.3.1 | dpcpp-cpp-rt==2025.3.2 | intel-opencl-rt==2025.3.2 | mkl==2025.3.1 | intel-openmp==2025.3.2 | tbb==2022.3.1 | tcmlib==1.4.1 | umf==1.0.3 | intel-pti==0.16.0

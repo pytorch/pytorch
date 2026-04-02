@@ -1,0 +1,471 @@
+# Modern cibuildwheel-based workflow for building PyTorch manywheel packages.
+# Replaces the generated-linux-binary-manywheel-nightly.yml workflow.
+#
+# Runs on Kubernetes ARC runners with the container: directive.
+# cibuildwheel runs natively inside the pod (no Docker-in-Docker).
+#
+# Runners: https://github.com/pytorch/ci-infra/tree/main/osdc/modules/arc-runners/defs
+
+name: linux-binary-manywheel-cibuildwheel
+
+on:
+  pull_request:
+  push:
+    branches:
+      - nightly
+    tags:
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+      - 'ciflow/binaries/*'
+      - 'ciflow/binaries_wheel/*'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+
+env:
+  PYTORCH_ROOT: /pytorch
+  PYTORCH_FINAL_PACKAGE_DIR: /artifacts
+
+concurrency:
+  group: linux-manywheel-cibw-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  get-docker-image:
+    if: github.repository_owner == 'pytorch'
+    runs-on: l-x86iavx2-8-32
+    strategy:
+      fail-fast: false
+      matrix:
+        gpu_config:
+          - name: cpu
+            docker_tag: cpu
+          - name: cuda12.6
+            docker_tag: cuda12.6
+          - name: cuda12.8
+            docker_tag: cuda12.8
+          - name: cuda12.9
+            docker_tag: cuda12.9
+          - name: cuda13.0
+            docker_tag: cuda13.0
+          - name: cuda13.2
+            docker_tag: cuda13.2
+          - name: rocm7.1
+            docker_tag: rocm7.1
+          - name: rocm7.2
+            docker_tag: rocm7.2
+          - name: xpu
+            docker_tag: xpu
+    outputs:
+      image-cpu: ${{ steps.image.outputs.image-cpu }}
+      image-cuda12_6: ${{ steps.image.outputs.image-cuda12_6 }}
+      image-cuda12_8: ${{ steps.image.outputs.image-cuda12_8 }}
+      image-cuda12_9: ${{ steps.image.outputs.image-cuda12_9 }}
+      image-cuda13_0: ${{ steps.image.outputs.image-cuda13_0 }}
+      image-cuda13_2: ${{ steps.image.outputs.image-cuda13_2 }}
+      image-rocm7_1: ${{ steps.image.outputs.image-rocm7_1 }}
+      image-rocm7_2: ${{ steps.image.outputs.image-rocm7_2 }}
+      image-xpu: ${{ steps.image.outputs.image-xpu }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          show-progress: false
+
+      - name: Calculate docker image
+        id: calc
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+          docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
+          docker-image-name: manylinux2_28-builder
+          custom-tag-prefix: ${{ matrix.gpu_config.docker_tag }}
+          docker-build-dir: .ci/docker
+          docker-build-script: manywheel/build.sh
+
+      - name: Export image output
+        id: image
+        run: |
+          # Normalize name for output key (dots -> underscores)
+          key="image-$(echo '${{ matrix.gpu_config.name }}' | tr '.' '_')"
+          echo "${key}=${{ steps.calc.outputs.docker-image }}" >> "$GITHUB_OUTPUT"
+
+  build:
+    if: github.repository_owner == 'pytorch'
+    needs: get-docker-image
+    timeout-minutes: 720
+    strategy:
+      fail-fast: false
+      matrix:
+        gpu_config:
+          - name: cpu
+            desired_cuda: cpu
+            gpu_arch_type: cpu
+            image_key: image-cpu
+            extra_install_reqs: ""
+            torch_cuda_arch_list: ""
+            torch_nvcc_flags: ""
+            use_cuda: "0"
+          - name: cuda12.6
+            desired_cuda: cu126
+            gpu_arch_type: cuda
+            gpu_arch_version: "12.6"
+            image_key: image-cuda12_6
+            extra_install_reqs: >-
+              cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' |
+              cuda-bindings>=12.9.4,<13; platform_system == 'Linux' |
+              nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' |
+              nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' |
+              nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' |
+              nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'
+            torch_cuda_arch_list: "5.0;6.0;7.0;7.5;8.0;8.6;9.0"
+            torch_nvcc_flags: "-Xfatbin -compress-all --threads 2"
+            use_cuda: "1"
+          - name: cuda12.8
+            desired_cuda: cu128
+            gpu_arch_type: cuda
+            gpu_arch_version: "12.8"
+            image_key: image-cuda12_8
+            extra_install_reqs: >-
+              cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.8.1; platform_system == 'Linux' |
+              cuda-bindings>=12.9.4,<13; platform_system == 'Linux' |
+              nvidia-cudnn-cu12==9.20.0.48; platform_system == 'Linux' |
+              nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' |
+              nvidia-nccl-cu12==2.29.7; platform_system == 'Linux' |
+              nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'
+            torch_cuda_arch_list: "7.5;8.0;8.6;9.0;10.0;12.0"
+            torch_nvcc_flags: "-Xfatbin -compress-all --threads 2"
+            use_cuda: "1"
+          - name: cuda12.9
+            desired_cuda: cu129
+            gpu_arch_type: cuda
+            gpu_arch_version: "12.9"
+            image_key: image-cuda12_9
+            extra_install_reqs: >-
+              cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.9.1; platform_system == 'Linux' |
+              cuda-bindings>=12.9.4,<13; platform_system == 'Linux' |
+              nvidia-cudnn-cu12==9.20.0.48; platform_system == 'Linux' |
+              nvidia-cusparselt-cu12==0.8.1; platform_system == 'Linux' |
+              nvidia-nccl-cu12==2.29.7; platform_system == 'Linux' |
+              nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'
+            torch_cuda_arch_list: "7.5;8.0;8.6;9.0;10.0;12.0+PTX"
+            torch_nvcc_flags: "-Xfatbin -compress-all --threads 2"
+            use_cuda: "1"
+          - name: cuda13.0
+            desired_cuda: cu130
+            gpu_arch_type: cuda
+            gpu_arch_version: "13.0"
+            image_key: image-cuda13_0
+            extra_install_reqs: >-
+              cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' |
+              cuda-bindings>=13.0.3,<14; platform_system == 'Linux' |
+              nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' |
+              nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' |
+              nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' |
+              nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'
+            torch_cuda_arch_list: "7.5;8.0;8.6;9.0;10.0;12.0+PTX"
+            torch_nvcc_flags: "-Xfatbin -compress-all --threads 2 -compress-mode=size"
+            use_cuda: "1"
+          - name: cuda13.2
+            desired_cuda: cu132
+            gpu_arch_type: cuda
+            gpu_arch_version: "13.2"
+            image_key: image-cuda13_2
+            extra_install_reqs: >-
+              cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.0; platform_system == 'Linux' |
+              cuda-bindings>=13.0.3,<14; platform_system == 'Linux' |
+              nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' |
+              nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' |
+              nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' |
+              nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'
+            torch_cuda_arch_list: "7.5;8.0;8.6;9.0;10.0;12.0+PTX"
+            torch_nvcc_flags: "-Xfatbin -compress-all --threads 2 -compress-mode=size"
+            use_cuda: "1"
+          - name: rocm7.1
+            desired_cuda: rocm7.1
+            gpu_arch_type: rocm
+            gpu_arch_version: "7.1"
+            image_key: image-rocm7_1
+            extra_install_reqs: ""
+            torch_cuda_arch_list: ""
+            torch_nvcc_flags: ""
+            use_cuda: "0"
+          - name: rocm7.2
+            desired_cuda: rocm7.2
+            gpu_arch_type: rocm
+            gpu_arch_version: "7.2"
+            image_key: image-rocm7_2
+            extra_install_reqs: ""
+            torch_cuda_arch_list: ""
+            torch_nvcc_flags: ""
+            use_cuda: "0"
+          - name: xpu
+            desired_cuda: xpu
+            gpu_arch_type: xpu
+            image_key: image-xpu
+            extra_install_reqs: ""
+            torch_cuda_arch_list: ""
+            torch_nvcc_flags: ""
+            use_cuda: "0"
+
+    # K8s runner with the manylinux builder as the pod container.
+    # 40 vCPU / 160Gi — enough for parallel compilation.
+    runs-on: l-x86iavx2-40-160
+    container:
+      image: ${{ needs.get-docker-image.outputs[matrix.gpu_config.image_key] }}
+
+    env:
+      DESIRED_CUDA: ${{ matrix.gpu_config.desired_cuda }}
+      GPU_ARCH_TYPE: ${{ matrix.gpu_config.gpu_arch_type }}
+      GPU_ARCH_VERSION: ${{ matrix.gpu_config.gpu_arch_version }}
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: ${{ matrix.gpu_config.extra_install_reqs }}
+
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 2
+          submodules: recursive
+          show-progress: false
+
+      - name: Populate build version
+        id: build-version
+        run: |
+          set -eux
+          export TZ=UTC
+          DATE="$(date -u +%Y%m%d)"
+          BASE_VERSION="$(cat version.txt | cut -da -f1).dev${DATE}"
+
+          # Check for release candidate tag
+          if git describe --tags --match 'v[0-9]*.[0-9]*.[0-9]*' --exact 2>/dev/null; then
+            BASE_VERSION="$(git describe --tags --match 'v[0-9]*.[0-9]*.[0-9]*' --exact | sed -e 's/^v//' -e 's/-.*$//')"
+          fi
+
+          BUILD_VERSION="${BASE_VERSION}+${{ matrix.gpu_config.desired_cuda }}"
+          echo "build_version=${BUILD_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "date=${DATE}" >> "$GITHUB_OUTPUT"
+
+          # Populate triton requirement
+          TRITON_VERSION=$(cat .ci/docker/triton_version.txt)
+          TRITON_REQS=""
+          if [[ -n "${{ matrix.gpu_config.extra_install_reqs }}" && ! "${BUILD_VERSION}" =~ .*xpu.* ]]; then
+            TRITON_SHORTHASH=$(cut -c1-8 .ci/docker/ci_commit_pins/triton.txt)
+            if [[ "${BUILD_VERSION}" =~ .*dev.* ]]; then
+              TRITON_REQS="triton==${TRITON_VERSION}+git${TRITON_SHORTHASH}; platform_system == 'Linux'"
+            else
+              TRITON_REQS="triton==${TRITON_VERSION}; platform_system == 'Linux'"
+            fi
+          fi
+          if [[ "${BUILD_VERSION}" =~ .*rocm.* ]]; then
+            TRITON_SHORTHASH=$(cut -c1-8 .ci/docker/ci_commit_pins/triton.txt)
+            if [[ "${BUILD_VERSION}" =~ .*dev.* ]]; then
+              TRITON_REQS="triton-rocm==${TRITON_VERSION}+git${TRITON_SHORTHASH}; platform_system == 'Linux'"
+            else
+              TRITON_REQS="triton-rocm==${TRITON_VERSION}; platform_system == 'Linux'"
+            fi
+          fi
+          if [[ "${BUILD_VERSION}" =~ .*xpu.* ]]; then
+            TRITON_XPU_VERSION=$(cat .ci/docker/triton_xpu_version.txt)
+            TRITON_SHORTHASH=$(cut -c1-8 .ci/docker/ci_commit_pins/triton-xpu.txt)
+            if [[ "${BUILD_VERSION}" =~ .*dev.* ]]; then
+              TRITON_REQS="triton-xpu==${TRITON_XPU_VERSION}+git${TRITON_SHORTHASH}"
+            else
+              TRITON_REQS="triton-xpu==${TRITON_XPU_VERSION}"
+            fi
+          fi
+          echo "triton_reqs=${TRITON_REQS}" >> "$GITHUB_OUTPUT"
+
+      - name: Install cibuildwheel
+        run: pip3 install cibuildwheel==2.23.0
+
+      - name: Build wheels with cibuildwheel
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          # Build natively — no nested Docker container.
+          # The K8s pod already runs the manylinux builder image.
+          CIBW_CONTAINER_ENGINE: "native"
+
+          # Build for all supported Python versions
+          # TODO: Restore full list: cp310 cp311 cp312 cp313 cp313t cp314 cp314t
+          CIBW_BUILD: "cp311-manylinux_x86_64"
+
+          # Environment variables set inside the build.
+          CIBW_ENVIRONMENT: >-
+            PYTORCH_BUILD_VERSION=${{ steps.build-version.outputs.build_version }}
+            PYTORCH_BUILD_NUMBER=1
+            OVERRIDE_PACKAGE_VERSION=${{ steps.build-version.outputs.build_version }}
+            TH_BINARY_BUILD=1
+            USE_FBGEMM=1
+            INSTALL_TEST=0
+            MAX_JOBS=12
+            TORCH_CUDA_ARCH_LIST="${{ matrix.gpu_config.torch_cuda_arch_list }}"
+            TORCH_NVCC_FLAGS="${{ matrix.gpu_config.torch_nvcc_flags }}"
+            USE_CUDA=${{ matrix.gpu_config.use_cuda }}
+            USE_STATIC_CUDNN=${{ matrix.gpu_config.use_cuda }}
+            USE_STATIC_NCCL=${{ matrix.gpu_config.use_cuda }}
+            ATEN_STATIC_CUDA=${{ matrix.gpu_config.use_cuda }}
+            USE_CUDA_STATIC_LINK=${{ matrix.gpu_config.use_cuda }}
+            USE_CUSPARSELT=${{ matrix.gpu_config.use_cuda }}
+            USE_CUFILE=${{ matrix.gpu_config.use_cuda }}
+            USE_SYSTEM_NCCL=${{ matrix.gpu_config.use_cuda }}
+            USE_CUPTI_SO=0
+            NCCL_ROOT_DIR=/usr/local/cuda
+            NCCL_INCLUDE_DIR=/usr/local/cuda/include/
+            NCCL_LIB_DIR=/usr/local/cuda/lib64/
+            DESIRED_CUDA=${{ matrix.gpu_config.desired_cuda }}
+            GPU_ARCH_TYPE=${{ matrix.gpu_config.gpu_arch_type }}
+            GPU_ARCH_VERSION=${{ matrix.gpu_config.gpu_arch_version }}
+            PYTORCH_EXTRA_INSTALL_REQUIREMENTS=${{ matrix.gpu_config.extra_install_reqs }}
+
+          # Before building: install dependencies, set up GPU-specific env
+          CIBW_BEFORE_BUILD: "bash {project}/.ci/manywheel/cibuildwheel_before_build.sh {project}"
+
+          # Before all builds: run the GPU-specific setup (CUDA symlinks, etc.)
+          CIBW_BEFORE_ALL_LINUX: "bash {project}/.ci/manywheel/cibuildwheel_before_all.sh"
+
+          # Skip repair for now (auditwheel disabled, custom repair TBD)
+          CIBW_REPAIR_WHEEL_COMMAND_LINUX: "cp {wheel} {dest_dir}"
+
+          # Build configuration passed to pip/build
+          CIBW_BUILD_FRONTEND: "build"
+          CIBW_CONFIG_SETTINGS: ""
+
+          # Free-threaded Python support
+          CIBW_FREE_THREADED_SUPPORT: 1
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
+        with:
+          name: wheels-${{ matrix.gpu_config.name }}
+          if-no-files-found: error
+          path: wheelhouse/*.whl
+
+  test:
+    if: github.repository_owner == 'pytorch'
+    needs: [get-docker-image, build]
+    timeout-minutes: 720
+    strategy:
+      fail-fast: false
+      matrix:
+        gpu_config:
+          - name: cpu
+            desired_cuda: cpu
+            gpu_arch_type: cpu
+            image_key: image-cpu
+            # CPU tests: 8 vCPU / 32Gi, no GPU needed
+            runs_on: l-x86iavx2-8-32
+          - name: cuda12.6
+            desired_cuda: cu126
+            gpu_arch_type: cuda
+            image_key: image-cuda12_6
+            # GPU tests: 29 vCPU / 113Gi / 1x A10G
+            runs_on: l-x86aavx2-29-113-a10g
+          - name: cuda12.8
+            desired_cuda: cu128
+            gpu_arch_type: cuda
+            image_key: image-cuda12_8
+            runs_on: l-x86aavx2-29-113-a10g
+          - name: cuda12.9
+            desired_cuda: cu129
+            gpu_arch_type: cuda
+            image_key: image-cuda12_9
+            runs_on: l-x86aavx2-29-113-a10g
+          - name: cuda13.0
+            desired_cuda: cu130
+            gpu_arch_type: cuda
+            image_key: image-cuda13_0
+            runs_on: l-x86aavx2-29-113-a10g
+          - name: cuda13.2
+            desired_cuda: cu132
+            gpu_arch_type: cuda
+            image_key: image-cuda13_2
+            runs_on: l-x86aavx2-29-113-a10g
+          - name: rocm7.1
+            desired_cuda: rocm7.1
+            gpu_arch_type: rocm
+            image_key: image-rocm7_1
+            # ROCm tests need ROCm-specific runners (not available in ARC defs)
+            runs_on: linux.rocm.gpu.gfx942.1
+          - name: rocm7.2
+            desired_cuda: rocm7.2
+            gpu_arch_type: rocm
+            image_key: image-rocm7_2
+            runs_on: linux.rocm.gpu.gfx942.1
+          - name: xpu
+            desired_cuda: xpu
+            gpu_arch_type: xpu
+            image_key: image-xpu
+            runs_on: linux.idc.xpu
+
+    runs-on: ${{ matrix.gpu_config.runs_on }}
+    container:
+      image: ${{ needs.get-docker-image.outputs[matrix.gpu_config.image_key] }}
+
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          show-progress: false
+
+      - name: Download wheels
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: wheels-${{ matrix.gpu_config.name }}
+          path: artifacts/
+
+      - name: Test wheels
+        env:
+          DESIRED_CUDA: ${{ matrix.gpu_config.desired_cuda }}
+        run: |
+          set -eux
+
+          # Test each wheel (one per Python version)
+          for wheel in artifacts/*.whl; do
+            # Extract Python version from wheel filename (e.g., cp310 from torch-...-cp310-...)
+            py_tag=$(echo "$(basename "$wheel")" | sed -E 's/.*-(cp[0-9]+[t]?)-.*$/\1/')
+            py_version=$(echo "$py_tag" | sed -E 's/cp([0-9])([0-9]+)(t?)/\1.\2\3/')
+
+            echo "Testing wheel for Python $py_version: $wheel"
+
+            export PATH=/opt/python/${py_tag}-${py_tag}/bin:$PATH
+            pip install torch --no-index -f artifacts/ --no-dependencies -v
+            export OMP_NUM_THREADS=4
+            LD_LIBRARY_PATH=/usr/local/nvidia/lib64 \
+              .ci/pytorch/run_tests.sh manywheel ${py_version} ${DESIRED_CUDA}
+          done
+
+  upload:
+    if: github.repository_owner == 'pytorch'
+    needs: test
+    permissions:
+      id-token: write
+      contents: read
+    strategy:
+      matrix:
+        gpu_config:
+          - name: cpu
+          - name: cuda12.6
+          - name: cuda12.8
+          - name: cuda12.9
+          - name: cuda13.0
+          - name: cuda13.2
+          - name: rocm7.1
+          - name: rocm7.2
+          - name: xpu
+    uses: ./.github/workflows/_binary-upload.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      DESIRED_CUDA: ${{ matrix.gpu_config.name }}
+      GPU_ARCH_TYPE: ${{ matrix.gpu_config.name }}
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.gpu_config.name }}
+      DESIRED_PYTHON: "3.10"
+      build_name: wheels-${{ matrix.gpu_config.name }}
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
