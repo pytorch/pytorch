@@ -128,9 +128,9 @@ RUN for cpython_version in "cp312-cp312" "cp313-cp313" "cp313-cp313t"; do \
 ADD ./common/patch_libstdc.sh patch_libstdc.sh
 RUN bash ./patch_libstdc.sh && rm patch_libstdc.sh
 
-# cmake-3.18.4 from pip; force in case cmake3 already exists
+# cmake-3.18.4.post1 from pip; force in case cmake3 already exists
 RUN yum install -y python3-pip && \
-    python3 -mpip install cmake==3.18.4 && \
+    python3 -mpip install cmake==3.18.4.post1 && \
     ln -sf /usr/local/bin/cmake /usr/bin/cmake3
 
 FROM cpu_final as cuda_final
