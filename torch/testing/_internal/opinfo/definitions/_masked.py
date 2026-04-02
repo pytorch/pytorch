@@ -641,15 +641,9 @@ op_db: list[OpInfo] = [
             DecorateInfo(
                 unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"
             ),
-            # Exception: cumulative ops are not yet supported for complex
+            # The following dtypes worked in forward but are not listed by the OpInfo: {torch.bool}.
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                device_type="mps",
-                dtypes=(torch.complex64,),
             ),
         ),
         # Can reuse the same inputs; dim is required in both
@@ -688,15 +682,9 @@ op_db: list[OpInfo] = [
                 "test_comprehensive",
                 device_type="cuda",
             ),
-            # Exception: cumulative ops are not yet supported for complex
+            # The following dtypes worked in forward but are not listed by the OpInfo: {torch.bool}.
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                device_type="mps",
-                dtypes=(torch.complex64,),
             ),
         ),
         # Can reuse the same inputs; dim is required in both

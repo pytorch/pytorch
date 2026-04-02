@@ -318,6 +318,15 @@ def _update_param_kwargs(param_kwargs, name, value):
 class DeviceTypeTestBase(TestCase):
     device_type: str = "generic_device_type"
 
+    # When True, @onlyOn-based decorators (@onlyCUDA, @onlyMPS, etc.) will not
+    # skip tests for this device type. This is a pragmatic short-term solution to
+    # allow PrivateUse1 backends to run tests that are currently gated behind
+    # device-specific decorators. It is intended to be used together with the
+    # skip mechanism (see https://github.com/pytorch/pytorch/issues/177253).
+    # In the longer term, we are incrementally migrating accelerator tests to be
+    # device-generic and removing @onlyCUDA on tests that should be device-generic.
+    bypass_device_restrictions: bool = False
+
     # Flag to disable test suite early due to unrecoverable error such as CUDA error.
     _stop_test_suite = False
 
@@ -541,6 +550,7 @@ class CUDATestBase(DeviceTypeTestBase):
     cudnn_version: ClassVar[Any]
     no_magma: ClassVar[bool]
     no_cudnn: ClassVar[bool]
+    no_hipdnn: ClassVar[bool]
 
     def has_cudnn(self):
         return not self.no_cudnn
@@ -572,6 +582,9 @@ class CUDATestBase(DeviceTypeTestBase):
         # Determines if cuDNN is available and its version
         cls.no_cudnn = not torch.backends.cudnn.is_acceptable(t)
         cls.cudnn_version = None if cls.no_cudnn else torch.backends.cudnn.version()
+
+        # Determines if hipDNN is available
+        cls.no_hipdnn = not torch.backends.hipdnn.is_available()
 
         # Acquires the current device as the primary (test) device
         cls.primary_device = f"cuda:{torch.cuda.current_device()}"
@@ -670,6 +683,7 @@ class PrivateUse1TestBase(DeviceTypeTestBase):
     primary_device: ClassVar[str]
     device_mod = None
     device_type = "privateuse1"
+    bypass_device_restrictions = False
 
     @classmethod
     def get_primary_device(cls):
@@ -1444,6 +1458,8 @@ class onlyOn:
         @wraps(fn)
         def only_fn(slf, *args, **kwargs):
             if slf.device_type not in self.device_type:
+                if getattr(slf, "bypass_device_restrictions", False):
+                    return fn(slf, *args, **kwargs)
                 reason = f"Only runs on {self.device_type}"
                 if IS_SANDCASTLE or IS_FBCODE:
                     print(
@@ -2028,6 +2044,16 @@ def skipCUDAIfNoMiopen(fn):
     return skipCUDAIf(torch.version.hip is None, "MIOpen is not available")(
         skipCUDAIfNoCudnn(fn)
     )
+
+
+def skipCUDAIfNoHipdnn(fn):
+    @wraps(fn)
+    def wrap_fn(self, *args, **kwargs):
+        if self.device_type == "cuda" and self.no_hipdnn:
+            raise unittest.SkipTest("hipDNN not available")
+        return fn(self, *args, **kwargs)
+
+    return wrap_fn
 
 
 def skipLazy(fn):

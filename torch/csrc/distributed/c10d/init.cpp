@@ -209,7 +209,7 @@ class PythonStore : public ::c10d::Store {
   using ::c10d::Store::Store;
 
   // Note: this function manually calls the Python-side overload
-  // for this function instead of using the PYBIND11_OVERLOAD_XYZ
+  // for this function instead of using the PYBIND11_OVERRIDE_XYZ
   // macros. This is done so that we can call the Python-side
   // function with a std::string instead of a std::vector<uint8_t>.
   void set(const std::string& key, const std::vector<uint8_t>& value) override {
@@ -222,7 +222,7 @@ class PythonStore : public ::c10d::Store {
   }
 
   // Note: this function manually calls the Python-side overload
-  // for this function instead of using the PYBIND11_OVERLOAD_XYZ
+  // for this function instead of using the PYBIND11_OVERRIDE_XYZ
   // macros. This is done so that the Python-side function can
   // return a py::bytes instead of a std::vector<uint8_t>.
   std::vector<uint8_t> get(const std::string& key) override {
@@ -239,7 +239,7 @@ class PythonStore : public ::c10d::Store {
   }
 
   // Note: this function manually calls the Python-side overload
-  // for this function instead of using the PYBIND11_OVERLOAD_XYZ
+  // for this function instead of using the PYBIND11_OVERRIDE_XYZ
   // macros. This is done so that the Python-side function can
   // return a py::bytes instead of a std::vector<uint8_t>.
   std::vector<uint8_t> compareSet(
@@ -260,37 +260,37 @@ class PythonStore : public ::c10d::Store {
   }
 
   int64_t add(const std::string& key, int64_t value) override {
-    PYBIND11_OVERLOAD_PURE(int64_t, ::c10d::Store, add, key, value);
+    PYBIND11_OVERRIDE_PURE(int64_t, ::c10d::Store, add, key, value);
   }
 
   int64_t getNumKeys() override {
-    PYBIND11_OVERLOAD_PURE(int64_t, ::c10d::Store, getNumKeys);
+    PYBIND11_OVERRIDE_PURE(int64_t, ::c10d::Store, getNumKeys);
   }
 
   bool deleteKey(const std::string& key) override {
-    PYBIND11_OVERLOAD_PURE(bool, ::c10d::Store, deleteKey, key);
+    PYBIND11_OVERRIDE_PURE(bool, ::c10d::Store, deleteKey, key);
   }
 
   bool check(const std::vector<std::string>& keys) override {
-    PYBIND11_OVERLOAD_PURE(bool, ::c10d::Store, check, keys);
+    PYBIND11_OVERRIDE_PURE(bool, ::c10d::Store, check, keys);
   }
 
   void wait(const std::vector<std::string>& keys) override {
-    PYBIND11_OVERLOAD_PURE(void, ::c10d::Store, wait, keys);
+    PYBIND11_OVERRIDE_PURE(void, ::c10d::Store, wait, keys);
   }
 
   void wait(
       const std::vector<std::string>& keys,
       const std::chrono::milliseconds& timeout) override {
-    PYBIND11_OVERLOAD_PURE(void, ::c10d::Store, wait, keys, timeout);
+    PYBIND11_OVERRIDE_PURE(void, ::c10d::Store, wait, keys, timeout);
   }
 
   c10::intrusive_ptr<Store> clone() override {
-    PYBIND11_OVERLOAD_PURE(c10::intrusive_ptr<Store>, ::c10d::Store, clone);
+    PYBIND11_OVERRIDE_PURE(c10::intrusive_ptr<Store>, ::c10d::Store, clone);
   }
 
   // Note: this function manually calls the Python-side overload
-  // for this function instead of using the PYBIND11_OVERLOAD_XYZ
+  // for this function instead of using the PYBIND11_OVERRIDE_XYZ
   // macros. This is done so that we can call the Python-side
   // function with a std::string instead of a std::vector<uint8_t>.
   void append(const std::string& key, const std::vector<uint8_t>& value)
@@ -339,7 +339,7 @@ class PythonStore : public ::c10d::Store {
   }
 
   bool hasExtendedApi() const override {
-    PYBIND11_OVERLOAD_NAME(
+    PYBIND11_OVERRIDE_NAME(
         bool, ::c10d::Store, "has_extended_api", hasExtendedApi);
   }
 };
@@ -815,77 +815,11 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           R"(Sets the debug level of the torch.distributed package from the
           ``TORCH_DISTRIBUTED_DEBUG`` environment variable.)");
 
-  // A callable wrapper for PREMUL_SUM that supports both:
-  // - ReduceOp.PREMUL_SUM as a value (for comparison)
-  // - ReduceOp.PREMUL_SUM(factor) as a callable (to create ReduceOp with
-  // factor)
-  struct PremulSumCallable {
-    ::c10d::ReduceOp operator()(const py::object& factor) const {
-      if (py::isinstance<py::float_>(factor) ||
-          py::isinstance<py::int_>(factor)) {
-        return ::c10d::makePreMulSum(factor.cast<double>());
-      } else {
-        return ::c10d::makePreMulSum(factor.cast<at::Tensor>());
-      }
-    }
-  };
-
-  py::class_<PremulSumCallable>(module, "_PremulSumCallable")
-      .def(
-          "__call__",
-          &PremulSumCallable::operator(),
-          py::arg("factor"),
-          R"(Create a PREMUL_SUM ReduceOp with the given factor.
-
-Args:
-    factor: A scalar (float, int, torch.Tensor) or a single-element Tensor to multiply
-            inputs by before reduction.
-
-Returns:
-    A ReduceOp configured for PREMUL_SUM with the specified factor.
-
-Example:
-    >>> op = ReduceOp.PREMUL_SUM(2.0)
-    >>> dist.all_reduce(tensor, op)
-)")
-      .def(
-          "__eq__",
-          [](const PremulSumCallable&,
-             const ::c10d::ReduceOp::RedOpType& other) {
-            return other == ::c10d::ReduceOp::RedOpType::PREMUL_SUM;
-          })
-      .def(
-          "__eq__",
-          [](const PremulSumCallable&, const ::c10d::ReduceOp& other) {
-            // NOTE: Currently, we only compare the op type and don't handle
-            // the factor value. Two PREMUL_SUM ops with different factors
-            // will be considered equal.
-            return other.op_ == ::c10d::ReduceOp::RedOpType::PREMUL_SUM;
-          })
-      .def(
-          "__eq__",
-          [](const PremulSumCallable&, int64_t other) {
-            // Support comparison with integer value
-            return other ==
-                static_cast<int64_t>(::c10d::ReduceOp::RedOpType::PREMUL_SUM);
-          })
-      .def(
-          "__eq__",
-          // NOLINTNEXTLINE(performance-unnecessary-value-param)
-          [](const PremulSumCallable&, py::object) { return false; })
-      .def(
-          "__hash__",
-          [](const PremulSumCallable&) {
-            return static_cast<uint8_t>(
-                ::c10d::ReduceOp::RedOpType::PREMUL_SUM);
-          })
-      .def("__repr__", [](const PremulSumCallable&) {
-        return c10::str(
-            "<RedOpType.PREMUL_SUM: ",
-            static_cast<int>(::c10d::ReduceOp::RedOpType::PREMUL_SUM),
-            ">");
-      });
-
+  // TODO(crcrpar): Hardening `ReduceOp`.
+  //    While keeping most op types as enum value,
+  //    making `PREMUL_SUM` callable, i.e., allowing for
+  //    `ReduceOp.PREMUL_SUM(scale)` might be better as per @wanchaol.
+  // https://pybind11.readthedocs.io/en/stable/classes.html#enumerations-and-internal-types
   py::class_<::c10d::ReduceOp> reduce_op(
       module,
       "ReduceOp",
@@ -902,9 +836,9 @@ using the ``NCCL`` backend.
 and only for NCCL versions 2.10 or later.
 
 ``PREMUL_SUM`` multiplies inputs by a given scalar locally before reduction.
-``PREMUL_SUM`` is available with the ``NCCL`` backend (NCCL versions 2.11 or later)
-and the ``XCCL`` backend. It can be used by calling ``ReduceOp.PREMUL_SUM(factor)``
-where factor is a float or a single-element Tensor.
+``PREMUL_SUM`` is only available with the ``NCCL`` backend,
+and only available for NCCL versions 2.11 or later. Users are supposed to
+use ``torch.distributed._make_nccl_premul_sum``.
 
 Additionally, ``MAX``, ``MIN`` and ``PRODUCT`` are not supported for complex tensors.
 
@@ -937,13 +871,6 @@ This class does not support ``__members__`` property.)");
             return self == other;
           })
       .def(
-          // Support comparison with PremulSumCallable
-          // e.g., my_reduce_op == ReduceOp.PREMUL_SUM
-          "__eq__",
-          [](const ::c10d::ReduceOp& self, const PremulSumCallable&) {
-            return self.op_ == ::c10d::ReduceOp::RedOpType::PREMUL_SUM;
-          })
-      .def(
           // With the above custom `__eq__`'s, I have to manually support the
           // other types.
           "__eq__",
@@ -970,7 +897,7 @@ This class does not support ``__members__`` property.)");
             }
             TORCH_CHECK(r.supplement_.defined(), "Invalid PREMUL_SUM ReduceOp");
             const auto* preMulSupplement =
-                reinterpret_cast<::c10d::PreMulSumSupplement*>(
+                reinterpret_cast<::c10d::NCCLPreMulSumSupplement*>(
                     r.supplement_.get());
             if (!preMulSupplement->tensor_factor.defined()) {
               return py::make_tuple(r.op_, preMulSupplement->double_factor);
@@ -988,9 +915,9 @@ This class does not support ``__members__`` property.)");
             }
             const auto preMulSupplement_factor = t[1];
             if (py::isinstance<py::float_>(preMulSupplement_factor)) {
-              return ::c10d::makePreMulSum(t[1].cast<double>());
+              return ::c10d::makeNCCLPreMulSum(t[1].cast<double>());
             } else {
-              return ::c10d::makePreMulSum(t[1].cast<at::Tensor>());
+              return ::c10d::makeNCCLPreMulSum(t[1].cast<at::Tensor>());
             }
           }));
 
@@ -1003,10 +930,8 @@ This class does not support ``__members__`` property.)");
       .value("BAND", ::c10d::ReduceOp::RedOpType::BAND)
       .value("BOR", ::c10d::ReduceOp::RedOpType::BOR)
       .value("BXOR", ::c10d::ReduceOp::RedOpType::BXOR)
+      .value("PREMUL_SUM", ::c10d::ReduceOp::RedOpType::PREMUL_SUM)
       .export_values();
-  // Export enum values to ReduceOp class, except PREMUL_SUM which is handled
-  // specially as a callable object below
-  reduce_op.attr("PREMUL_SUM") = PremulSumCallable();
 
   // note(crcrpar): This could be removed because users will not pass
   // `RedOpType` to reduce collective ops Ref: [Implicit
@@ -1015,17 +940,16 @@ This class does not support ``__members__`` property.)");
   // `c10d::ReduceOp::RedOpType` in Python.
   py::implicitly_convertible<::c10d::ReduceOp::RedOpType, ::c10d::ReduceOp>();
 
-  // Keep the private _make_nccl_premul_sum for backward compatibility
   module
       .def(
           "_make_nccl_premul_sum",
-          &::c10d::makePreMulSum<double>,
+          &::c10d::makeNCCLPreMulSum<double>,
           py::arg("factor").noconvert(),
           py::return_value_policy::copy, // seems safest
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_make_nccl_premul_sum",
-          &::c10d::makePreMulSum<at::Tensor>,
+          &::c10d::makeNCCLPreMulSum<at::Tensor>,
           py::arg("factor").noconvert(),
           py::return_value_policy::copy, // seems safest
           py::call_guard<py::gil_scoped_release>());

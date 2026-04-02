@@ -463,16 +463,7 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
     auto records_and_trace =
         recordQueue.getRecords(std::move(converter), startTime, end_time);
 
-    materializeOpEvents(records_and_trace.first);
-
-    // `kinetoEvents` does not include Python events. Instead it exposes them
-    // via the `stacks` property.
-    kinetoEvents.erase(
-        std::remove_if(
-            kinetoEvents.begin(),
-            kinetoEvents.end(),
-            [](const auto& i) { return i.isPythonFunction(); }),
-        kinetoEvents.end());
+    materializeOpEvents(records_and_trace.first, end_time);
 
     return std::move(records_and_trace.second);
   }
@@ -484,25 +475,34 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
     }
   }
 
-  void materializeOpEvents(std::vector<std::shared_ptr<Result>>& events) {
+  void materializeOpEvents(
+      std::vector<std::shared_ptr<Result>>& events,
+      int64_t trace_end_ns) {
     for (auto& e : events) {
       if (e->parent_.expired() && e->deviceType() == c10::DeviceType::CPU) {
         eventTree.push_back(e);
       }
 
-      if (e->finished_) {
+      // Unfinished events automatically have end time set to trace end time
+      if (!e->finished_) {
         e->visit(c10::overloaded(
-            [this](ExtraFields<EventType::TorchOp>& i) { invokeCallback(i); },
-            [this](ExtraFields<EventType::Backend>& i) { invokeCallback(i); },
+            [trace_end_ns](ExtraFields<EventType::TorchOp>& i) {
+              i.end_time_ns_ = trace_end_ns;
+            },
             [](auto&) {}));
-
-        kinetoEvents.emplace_back(e, config_.experimental_config.verbose);
-        AddTensorboardFields add_tb(e, kinetoEvents.back());
-        AddGenericMetadata add_generic(e, &config_);
-
-        // It is not safe to use the activity after post processing.
-        e->kineto_activity_ = nullptr;
       }
+
+      e->visit(c10::overloaded(
+          [this](ExtraFields<EventType::TorchOp>& i) { invokeCallback(i); },
+          [this](ExtraFields<EventType::Backend>& i) { invokeCallback(i); },
+          [](auto&) {}));
+
+      kinetoEvents.emplace_back(e, config_.experimental_config.verbose);
+      AddTensorboardFields add_tb(e, kinetoEvents.back());
+      AddGenericMetadata add_generic(e, &config_);
+
+      // It is not safe to use the activity after post processing.
+      e->kineto_activity_ = nullptr;
     }
   }
 
@@ -1197,11 +1197,32 @@ TYPED_ATTR(Kineto, linkedCorrelationId, [&]() {
   const auto linked = e.linked_activity_.lock();
   return linked ? linked->correlationID() : 0;
 }())
-TYPED_ATTR(Kineto, flowId, e.flow.id)
-TYPED_ATTR(Kineto, flowType, e.flow.type)
-TYPED_ATTR(Kineto, flowStart, static_cast<bool>(e.flow.start))
 #undef TYPED_ATTR
 #undef TYPED_ATTR_WITH_DEFAULT
+
+// Flow fields exist on both TorchOp and Kineto event types.
+uint32_t KinetoEvent::flowId() const {
+  return result_->visit(c10::overloaded(
+      [](const ExtraFields<EventType::TorchOp>& e) { return e.flow.id; },
+      [](const ExtraFields<EventType::Kineto>& e) { return e.flow.id; },
+      [](const auto&) -> uint32_t { return 0; }));
+}
+uint32_t KinetoEvent::flowType() const {
+  return result_->visit(c10::overloaded(
+      [](const ExtraFields<EventType::TorchOp>& e) { return e.flow.type; },
+      [](const ExtraFields<EventType::Kineto>& e) { return e.flow.type; },
+      [](const auto&) -> uint32_t { return 0; }));
+}
+bool KinetoEvent::flowStart() const {
+  return result_->visit(c10::overloaded(
+      [](const ExtraFields<EventType::TorchOp>& e) {
+        return static_cast<bool>(e.flow.start);
+      },
+      [](const ExtraFields<EventType::Kineto>& e) {
+        return static_cast<bool>(e.flow.start);
+      },
+      [](const auto&) { return false; }));
+}
 
 ProfilerResult::ProfilerResult(
     uint64_t start_time,

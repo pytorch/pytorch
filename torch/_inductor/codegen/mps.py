@@ -229,7 +229,8 @@ class MetalOverrides(OpOverrides):
             # generates identical variable names. Without this reset, repeated calls to
             # body() would keep incrementing the counter, resulting in different cache key.
             V.kernel.cse.iter_buffer_ids = itertools.count()
-            V.kernel.cse.name_prefix = "tmp_scoped_"
+            # Append "_scoped" to the current prefix so each nesting level gets unique vars
+            V.kernel.cse.name_prefix += "_scoped"
             rc = body()
 
         # Compute cache key manually as variable name is needed to actually generate the code

@@ -1083,6 +1083,15 @@ std::ostream& operator<<(std::ostream& out, const Constant& constant) {
             out << fmt::format("{}", fmt::streamed(inner_list));
           }
           out << ']';
+        } else if constexpr (is_same_v<T, vector<vector<double>>>) {
+          out << '[';
+          for (const auto& [idx, inner_list] : c10::enumerate(arg)) {
+            if (idx > 0) {
+              out << ", ";
+            }
+            out << fmt::format("{}", fmt::streamed(inner_list));
+          }
+          out << ']';
         } else if constexpr (is_same_v<T, unique_ptr<Graph>>) {
           out << fmt::format("<subgraph>");
           VLOG(0) << "Subgraph pretty print is not implemented";

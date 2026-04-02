@@ -30,6 +30,7 @@ from torch.distributed.tensor._ops.strategy_validation import (
     parse_placement,
     query_single_dim_strategy,
     resolve_op_names,
+    validate_aten_combination,
     validate_combination,
 )
 from torch.distributed.tensor.placement_types import Partial, Shard
@@ -1315,6 +1316,110 @@ class TestCompareOperatorEndToEnd(TestCase):
                     )
 
                 self._with_even_sizes(run)
+
+
+class TestAtenLevelValidation(TestCase):
+    """Tests for aten-level validation (validate_aten_combination + allow_composite mode)."""
+
+    world_size = 2
+
+    def setUp(self):
+        super().setUp()
+        if not dist.is_initialized():
+            dist.init_process_group("fake", rank=0, world_size=self.world_size)
+
+    def tearDown(self):
+        super().tearDown()
+        if dist.is_initialized():
+            dist.destroy_process_group()
+
+    def _with_even_sizes(self, fn):
+        import torch.testing._internal.common_methods_invocations as common_ops
+        from torch.testing._internal.opinfo import core as opinfo_core
+
+        orig_sizes = (opinfo_core.L, opinfo_core.M, opinfo_core.S, opinfo_core.XS)
+        opinfo_core.L = common_ops.L = 24
+        opinfo_core.M = common_ops.M = 12
+        opinfo_core.S = common_ops.S = 4
+        opinfo_core.XS = common_ops.XS = 2
+        try:
+            return fn()
+        finally:
+            (
+                opinfo_core.L,
+                opinfo_core.M,
+                opinfo_core.S,
+                opinfo_core.XS,
+            ) = orig_sizes
+            (
+                common_ops.L,
+                common_ops.M,
+                common_ops.S,
+                common_ops.XS,
+            ) = orig_sizes
+
+    def test_validate_aten_combination_shard_add(self):
+        """S(0), S(0) -> S(0) valid; S(0), S(0) -> R invalid for aten.add."""
+        a = torch.randn(8)
+        b = torch.randn(8)
+        gt = torch.ops.aten.add.Tensor(a, b)
+
+        with LocalTensorMode(frozenset(range(self.world_size))):
+            mesh = init_device_mesh("cpu", (self.world_size,))
+
+            valid, msg = validate_aten_combination(
+                torch.ops.aten.add.Tensor,
+                (a, b),
+                {},
+                gt,
+                ((Shard(0), Shard(0)), (Shard(0),)),
+                self.world_size,
+                mesh,
+            )
+            self.assertTrue(valid, msg)
+
+            valid, _ = validate_aten_combination(
+                torch.ops.aten.add.Tensor,
+                (a, b),
+                {},
+                gt,
+                ((Shard(0), Shard(0)), (Replicate(),)),
+                self.world_size,
+                mesh,
+            )
+            self.assertFalse(valid)
+
+    def test_allow_composite_eliminates_non_1to1_skips(self):
+        """allow_composite mode should validate decomposed ops that default mode skips."""
+        from torch.distributed.tensor._ops.strategy_validation import compare_operator
+
+        def run():
+            default = compare_operator(
+                "inner",
+                device="cpu",
+                dtype=torch.float32,
+                world_size=self.world_size,
+                max_samples=3,
+                incorrect_only=True,
+            )
+            allow_composite = compare_operator(
+                "inner",
+                device="cpu",
+                dtype=torch.float32,
+                world_size=self.world_size,
+                max_samples=3,
+                incorrect_only=True,
+                allow_composite=True,
+            )
+            self.assertGreater(default.skip_reasons.get("non-1:1 aten mapping", 0), 0)
+            self.assertEqual(
+                allow_composite.skip_reasons.get("non-1:1 aten mapping", 0), 0
+            )
+            self.assertGreaterEqual(
+                allow_composite.total_samples, default.total_samples
+            )
+
+        self._with_even_sizes(run)
 
 
 class TestMainModule(TestCase):

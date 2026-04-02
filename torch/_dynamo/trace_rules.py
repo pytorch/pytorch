@@ -34,11 +34,12 @@ import random
 import re
 import sys
 import types
+import typing
 import unittest
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import torch
 import torch._inductor.test_operators
@@ -58,9 +59,11 @@ from .utils import (
 )
 from .variables import (
     BuiltinVariable,
+    DictBuiltinVariable,
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
     InspectSignatureVariable,
+    IterBuiltinVariable,
     LocalGeneratorFunctionVariable,
     LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
@@ -189,17 +192,14 @@ manual_torch_name_rule_map: dict[
     "torch.to_dlpack": SkipFunctionVariable,
     "torch._check": TorchInGraphFunctionVariable,
     # We graph break on RNG state setters or getters like
-    # `torch.get_rng_state` or `torch.set_rng_state`. These functions
-    # are not aten operations and therefore they are completely ignored
-    # by the AOT dispatcher. As a result, the AOT graph does not have
-    # these setter or getter functions, producing an incorrect graph
-    # when it comes to rng states.
-    "torch.default_generator#get_state": SkipFunctionVariable,
-    "torch._C.Generator#get_state": SkipFunctionVariable,
+    # `torch.get_rng_state`, `torch.set_rng_state`, and
+    # `torch.Generator.manual_seed`. These functions are not aten
+    # operations and therefore they are completely ignored by the AOT
+    # dispatcher. As a result, the AOT graph does not have these setter
+    # or getter functions, producing an incorrect graph when it comes
+    # to rng states.
     "torch.get_rng_state": SkipFunctionVariable,
     "torch.cuda.get_rng_state": SkipFunctionVariable,
-    "torch.default_generator#set_state": SkipFunctionVariable,
-    "torch._C.Generator#set_state": SkipFunctionVariable,
     "torch.set_rng_state": SkipFunctionVariable,
     "torch.cuda.set_rng_state": SkipFunctionVariable,
     # https://github.com/pytorch/pytorch/issues/107187
@@ -393,6 +393,27 @@ manual_torch_name_rule_map: dict[
     "inspect.signature": InspectSignatureVariable,
 }
 
+# Keep this in sync with the stateful generator methods exposed from
+# torch/csrc/Generator.cpp.
+_GENERATOR_METHODS_THAT_GRAPH_BREAK = (
+    "clone_state",
+    "get_offset",
+    "get_state",
+    "graphsafe_get_state",
+    "graphsafe_set_state",
+    "initial_seed",
+    "manual_seed",
+    "seed",
+    "set_offset",
+    "set_state",
+)
+
+for generator_prefix in ("torch.default_generator", "torch._C.Generator"):
+    for method_name in _GENERATOR_METHODS_THAT_GRAPH_BREAK:
+        manual_torch_name_rule_map[f"{generator_prefix}#{method_name}"] = (
+            SkipFunctionVariable
+        )
+
 
 # In graph functions (including constant folding) that are C bindings
 torch_c_binding_in_graph_functions = dict.fromkeys(
@@ -546,7 +567,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cuda_isHistoryEnabled",
         "torch._C._cuda_isInBadFork",
         "torch._C._cuda_jiterator_compile_and_launch_kernel",
-        "torch._C._cuda_lock_mutex",
         "torch._C._cuda_maybeExchangeDevice",
         "torch._C._cuda_memorySnapshot",
         "torch._C._cuda_memoryStats",
@@ -565,7 +585,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cuda_setStream",
         "torch._C._cuda_sleep",
         "torch._C._cuda_synchronize",
-        "torch._C._cuda_unlock_mutex",
         "torch._C._cudnn_set_conv_benchmark_empty_cache",
         "torch._C._cudnn.getCompileVersion",
         "torch._C._cudnn.getRuntimeVersion",
@@ -655,6 +674,9 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._from_dlpack",
         "torch._C._functionality_to_backend_keys",
         "torch._C._functionalization_reapply_views_tls",
+        "torch._C._functorch._grad_decrement_nesting",
+        "torch._C._functorch._grad_increment_nesting",
+        "torch._C._functorch.set_inplace_requires_grad_allowed",
         "torch._C._fuse_to_static_module",
         "torch._C._gather_out",
         "torch._C._gather",
@@ -1079,6 +1101,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._nn._test_warn_in_autograd",
         "torch._C._nn._upsample_bicubic2d_aa",
         "torch._C._nn._upsample_bilinear2d_aa",
+        "torch._C._nn._upsample_lanczos2d_aa",
         "torch._C._nn._upsample_nearest_exact1d",
         "torch._C._nn._upsample_nearest_exact2d",
         "torch._C._nn._upsample_nearest_exact3d",
@@ -1508,6 +1531,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._foreach_clamp_max",
         "torch._foreach_clamp_min_",
         "torch._foreach_clamp_min",
+        "torch._foreach_clone",
         "torch._foreach_copy_",
         "torch._foreach_cos_",
         "torch._foreach_cos",
@@ -1590,6 +1614,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functionalize_replace",
         "torch._functionalize_sync",
         "torch._functionalize_was_storage_changed",
+        "torch._fused_adagrad_",
         "torch._fused_adam_",
         "torch._fused_adamw_",
         "torch._fused_dropout",
@@ -2622,6 +2647,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cuda.get_device_properties",
         "torch.cuda.get_gencode_flags",
         "torch.cuda.get_sync_debug_mode",
+        "torch.cuda.synchronize",
         "torch.cuda.graphs.graph_pool_handle",
         "torch.cuda.graphs.is_current_stream_capturing",
         "torch.cuda.graphs.make_graphed_callables",
@@ -2634,7 +2660,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cuda.jiterator._create_multi_output_jit_fn",
         "torch.cuda.memory_usage",
         "torch.cuda.memory._dump_snapshot",
-        "torch.cuda.memory._free_mutex",
         "torch.cuda.memory._get_current_allocator",
         "torch.cuda.memory._host_allocator",
         "torch.cuda.memory._record_memory_history_impl",
@@ -3175,11 +3200,6 @@ def _builtin_function_ids() -> dict[int, str]:
             id(v): f"operator.{k}"
             for k, v in operator.__dict__.items()
             if not k.startswith("_") and callable(v)
-        }
-    )
-    rv.update(
-        {
-            id(cast): "typing.cast",
         }
     )
     return rv
@@ -3902,6 +3922,12 @@ def check_verbose(
         assert filename is not None
         fi = FunctionInfo(obj, None, filename, None)
 
+    # typing.cast is a polyfilled no-op, but unlike C builtins it has a code
+    # object that PEP 523 can intercept as a standalone frame after a graph
+    # break. Skip it at the top level to avoid installing unnecessary guards.
+    if fi.code is not None and fi.code is typing.cast.__code__:
+        return SkipResult(True, "typing.cast is a no-op, skip at top level")
+
     # Consulte the central trace rules defined in torch._dynamo.trace_rules.
     reasons: set[str] = set()
     rule = lookup_inner(fi.py_obj, fi.name, fi.filename, is_inlined_call, reasons)
@@ -3973,6 +3999,8 @@ def is_torch(filename: str) -> bool:
 Main entry point for looking up the trace rule (the Dynamo variable) for a given callable object.
 """
 
+BUILTIN_CALLABLES = {dict: DictBuiltinVariable, iter: IterBuiltinVariable}
+
 
 def lookup_callable(obj: Callable[..., Any]) -> type[VariableTracker] | None:
     if not hashable(obj):
@@ -3984,6 +4012,8 @@ def lookup_callable(obj: Callable[..., Any]) -> type[VariableTracker] | None:
         return TorchInGraphFunctionVariable
     if is_polyfilled_callable(obj):
         return PolyfilledFunctionVariable
+    if obj in BUILTIN_CALLABLES:
+        return BUILTIN_CALLABLES[obj]
     if is_builtin_callable(obj):
         return BuiltinVariable
     return None

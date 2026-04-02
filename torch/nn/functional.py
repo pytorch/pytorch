@@ -4497,7 +4497,7 @@ def upsample(  # noqa: F811
     `mini-batch x channels x [optional depth] x [optional height] x width`.
 
     The modes available for upsampling are: `nearest`, `linear` (3D-only),
-    `bilinear`, `bicubic` (4D-only), `trilinear` (5D-only)
+    `bilinear`, `bicubic` (4D-only), `trilinear` (5D-only), `lanczos` (4D-only)
 
     Args:
         input (Tensor): the input tensor
@@ -4506,7 +4506,7 @@ def upsample(  # noqa: F811
         scale_factor (float or Tuple[float]): multiplier for spatial size. Has to match input size if it is a tuple.
         mode (str): algorithm used for upsampling:
             ``'nearest'`` | ``'linear'`` | ``'bilinear'`` | ``'bicubic'`` |
-            ``'trilinear'``. Default: ``'nearest'``
+            ``'trilinear'`` | ``'lanczos'``. Default: ``'nearest'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
             input and output as squares rather than points.
             If set to ``True``, the input and output tensors are aligned by the
@@ -4519,7 +4519,7 @@ def upsample(  # noqa: F811
             Default: ``False``
 
     .. note::
-        With ``mode='bicubic'``, it's possible to cause overshoot, in other words it can produce
+        With ``mode='bicubic'`` or ``mode='lanczos'``, it's possible to cause overshoot, in other words it can produce
         negative values or values greater than 255 for images.
         Explicitly call ``result.clamp(min=0, max=255)`` if you want to reduce the overshoot
         when displaying the image.
@@ -4637,7 +4637,7 @@ def interpolate(  # noqa: F811
     `mini-batch x channels x [optional depth] x [optional height] x width`.
 
     The modes available for resizing are: `nearest`, `linear` (3D-only),
-    `bilinear`, `bicubic` (4D-only), `trilinear` (5D-only), `area`, `nearest-exact`
+    `bilinear`, `bicubic` (4D-only), `trilinear` (5D-only), `lanczos` (4D-only, CPU only), `area`, `nearest-exact`
 
     Args:
         input (Tensor): the input tensor
@@ -4647,7 +4647,7 @@ def interpolate(  # noqa: F811
             its length has to match the number of spatial dimensions; `input.dim() - 2`.
         mode (str): algorithm used for upsampling:
             ``'nearest'`` | ``'linear'`` | ``'bilinear'`` | ``'bicubic'`` |
-            ``'trilinear'`` | ``'area'`` | ``'nearest-exact'``. Default: ``'nearest'``
+            ``'trilinear'`` | ``'lanczos'`` | ``'area'`` | ``'nearest-exact'``. Default: ``'nearest'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
             input and output as squares rather than points.
             If set to ``True``, the input and output tensors are aligned by the
@@ -4669,13 +4669,18 @@ def interpolate(  # noqa: F811
             be used directly for interpolation. Default: ``None``.
         antialias (bool, optional): flag to apply anti-aliasing. Default: ``False``. Using anti-alias
             option together with ``align_corners=False``, interpolation result would match Pillow
-            result for downsampling operation. Supported modes: ``'bilinear'``, ``'bicubic'``.
+            result for downsampling operation. Supported modes: ``'bilinear'``, ``'bicubic'``, ``'lanczos'``.
 
     .. note::
-        With ``mode='bicubic'``, it's possible to cause overshoot. For some dtypes, it can produce
+        With ``mode='bicubic'`` or ``mode='lanczos'``, it's possible to cause overshoot. For some dtypes, it can produce
         negative values or values greater than 255 for images. Explicitly call ``result.clamp(min=0,max=255)``
         if you want to reduce the overshoot when displaying the image.
         For ``uint8`` inputs, it already performs saturating cast operation. So, no manual `clamp` operation is needed.
+
+    .. note::
+        Mode ``mode='lanczos'`` uses a Lanczos-3 windowed sinc filter (6 taps) and requires
+        ``antialias=True``. It only supports 4-D input (i.e. 2D spatial) and CPU. With ``antialias=True``
+        and ``align_corners=False``, the result matches PIL's ``Image.LANCZOS`` resampling filter.
 
     .. note::
         Mode ``mode='nearest-exact'`` matches Scikit-Image and PIL nearest neighbours interpolation
@@ -4807,9 +4812,11 @@ def interpolate(  # noqa: F811
             ]
         scale_factors = None
 
-    if antialias and not (mode in ("bilinear", "bicubic") and input.ndim == 4):
+    if antialias and not (
+        mode in ("bilinear", "bicubic", "lanczos") and input.ndim == 4
+    ):
         raise ValueError(
-            "Anti-alias option is restricted to bilinear and bicubic modes and requires a 4-D tensor as input"
+            "Anti-alias option is restricted to bilinear, bicubic, and lanczos modes and requires a 4-D tensor as input"
         )
 
     if input.dim() == 3 and mode == "nearest":
@@ -4923,6 +4930,21 @@ def interpolate(  # noqa: F811
             scale_factors,
         )
 
+    if input.dim() == 4 and mode == "lanczos":
+        if align_corners is None:
+            raise AssertionError("align_corners is unexpectedly None")
+        if align_corners:
+            raise ValueError("Lanczos mode does not support align_corners=True")
+        if not antialias:
+            raise ValueError("Lanczos mode requires antialias=True")
+        return torch._C._nn._upsample_lanczos2d_aa(
+            input,
+            # pyrefly: ignore [bad-argument-type]
+            output_size,
+            align_corners,
+            scale_factors,
+        )
+
     if input.dim() == 3 and mode == "bilinear":
         raise NotImplementedError("Got 3D input, but bilinear mode needs 4D input")
     if input.dim() == 3 and mode == "trilinear":
@@ -4938,7 +4960,7 @@ def interpolate(  # noqa: F811
 
     raise NotImplementedError(
         "Input Error: Only 3D, 4D and 5D input Tensors supported"
-        f" (got {input.dim()}D) for the modes: nearest | linear | bilinear | bicubic | trilinear | area | nearest-exact"
+        f" (got {input.dim()}D) for the modes: nearest | linear | bilinear | bicubic | trilinear | lanczos | area | nearest-exact"
         f" (got {mode})"
     )
 
@@ -6650,11 +6672,15 @@ def multi_head_attention_forward(
             )
         else:
             attn_output_weights = torch.bmm(q_scaled, k.transpose(-2, -1))
+        if not torch.jit.is_scripting():
+            del q_scaled, k
         attn_output_weights = softmax(attn_output_weights, dim=-1)
         if dropout_p > 0.0:
             attn_output_weights = dropout(attn_output_weights, p=dropout_p)
 
         attn_output = torch.bmm(attn_output_weights, v)
+        if not torch.jit.is_scripting():
+            del v
 
         attn_output = (
             attn_output.transpose(0, 1).contiguous().view(tgt_len * bsz, embed_dim)
@@ -6691,6 +6717,12 @@ def multi_head_attention_forward(
         attn_output = scaled_dot_product_attention(
             q, k, v, attn_mask, dropout_p, is_causal
         )
+        # Free q, k, v and their backing projection storage before the
+        # .contiguous() call below allocates.  In self-attention the three
+        # tensors are views of a single packed projection, so releasing all
+        # references here lets the allocator reclaim that memory immediately.
+        if not torch.jit.is_scripting():
+            del q, k, v
         attn_output = (
             attn_output.permute(2, 0, 1, 3).contiguous().view(bsz * tgt_len, embed_dim)
         )

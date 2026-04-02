@@ -4586,6 +4586,10 @@ def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None, out_dtype
 
     torch._check(batch1.dim() == 3, lambda: "batch1 must be a 3D tensor")
     torch._check(batch2.dim() == 3, lambda: "batch2 must be a 3D tensor")
+    torch._check(
+        batch1.dtype == batch2.dtype,
+        lambda: f"expected scalar type {batch1.dtype} but found {batch2.dtype}",
+    )
 
     batch1_sizes = batch1.size()
     batch2_sizes = batch2.size()
@@ -5994,14 +5998,23 @@ def meta__scaled_dot_product_fused_attention_overrideable(
     return_debug_mask: bool = False,
     scale: float | None = None,
 ):
-    B = query.size(0)
-    H_Q = query.size(1)
-    S_Q = query.size(2)
-    S_KV = key.size(2)
+    # Explicitly handle 3D (H, S, D) and 4D (B, H, S, D) inputs,
+    # matching the C++ runtime in aten_mtia_ops.cpp.
+    B, H_Q, S_Q = 0, 0, 0
+    if query.dim() == 4:
+        B, H_Q, S_Q, _ = query.size()
+    elif query.dim() == 3:
+        H_Q, S_Q, _ = query.size()
+        B = 1
+    else:
+        raise RuntimeError("query must be 3D or 4D")
+    S_KV = key.size(-2)
     D_V = value.size(-1)
 
-    res_shape = (B, H_Q, S_Q, D_V)
-    res = alloc_with_matching_layout(query, res_shape)
+    # Preserve input dimensionality for the output shape
+    out_shape = list(query.shape)
+    out_shape[-1] = D_V
+    res = torch.empty(out_shape, dtype=query.dtype, device=query.device)
 
     logsum_exp = torch.empty(
         (B, H_Q, S_Q),
@@ -6024,6 +6037,34 @@ def meta__scaled_dot_product_fused_attention_overrideable(
         offset,
         None,
     )
+
+
+@register_meta(aten._scaled_dot_product_fused_attention_overrideable_backward)
+def meta__scaled_dot_product_fused_attention_overrideable_backward(
+    grad_out: Tensor,
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    attn_bias: Tensor,
+    grad_input_mask: list[bool],
+    out: Tensor,
+    logsumexp: Tensor,
+    cum_seq_q: Tensor,
+    cum_seq_k: Tensor,
+    max_q: int,
+    max_k: int,
+    dropout_p: float,
+    is_causal: bool,
+    philox_seed: Tensor,
+    philox_offset: Tensor,
+    *,
+    scale: float | None = None,
+):
+    grad_q = torch.empty_like(query)
+    grad_k = torch.empty_like(key)
+    grad_v = torch.empty_like(value)
+    grad_attn_bias = torch.empty_like(attn_bias) if attn_bias is not None else None
+    return grad_q, grad_k, grad_v, grad_attn_bias
 
 
 @register_meta(
@@ -6652,7 +6693,11 @@ def _check_scaled_mm_sizes(
         lambda: f"Expected both inputs to be fp8 or fp4 types but got self.dtype={self.dtype} and mat2.dtype={mat2.dtype}",
     )
 
-    if device_hint(self) == "cuda" or device_hint(self) == "xpu":
+    if (
+        device_hint(self) == "cuda"
+        or device_hint(self) == "xpu"
+        or device_hint(self) == "cpu"
+    ):
 
         def is_row_major(stride):
             return stride[0] > stride[1] and stride[1] == 1
@@ -6663,22 +6708,23 @@ def _check_scaled_mm_sizes(
         def has_zero_dim(tensor_2d):
             return tensor_2d.size(0) == 0 or tensor_2d.size(1) == 0
 
-        torch._check(
-            is_row_major(self.stride()) or has_zero_dim(self),
-            lambda: f"self must be row_major, got stride {self.stride()}",
-        )
-        torch._check(
-            is_col_major(mat2.stride()) or has_zero_dim(mat2),
-            lambda: f"mat2 must be col_major, got stride {mat2.stride()}",
-        )
-        torch._check(
-            self.size(1) % 16 == 0,
-            lambda: f"Expected self.size(1) to be divisible by 16, but got self.size(1)={self.size(1)}",
-        )
-        torch._check(
-            mat2.size(0) % 16 == 0 and mat2.size(1) % 16 == 0,
-            lambda: f"Expected both dimensions of mat2 to be divisible by 16 but got {mat2.shape}",
-        )
+        if device_hint(self) != "cpu":
+            torch._check(
+                is_row_major(self.stride()) or has_zero_dim(self),
+                lambda: f"self must be row_major, got stride {self.stride()}",
+            )
+            torch._check(
+                is_col_major(mat2.stride()) or has_zero_dim(mat2),
+                lambda: f"mat2 must be col_major, got stride {mat2.stride()}",
+            )
+            torch._check(
+                self.size(1) % 16 == 0,
+                lambda: f"Expected self.size(1) to be divisible by 16, but got self.size(1)={self.size(1)}",
+            )
+            torch._check(
+                mat2.size(0) % 16 == 0 and mat2.size(1) % 16 == 0,
+                lambda: f"Expected both dimensions of mat2 to be divisible by 16 but got {mat2.shape}",
+            )
 
         # determine scaling type and check input dimensions (refer to Blas.cpp op)
 
@@ -6893,7 +6939,11 @@ def _check_scaled_mm_sizes_v2(
             SwizzleType.NO_SWIZZLE,
         ]
 
-    if device_hint(self) == "cuda" or device_hint(self) == "xpu":
+    if (
+        device_hint(self) == "cuda"
+        or device_hint(self) == "xpu"
+        or device_hint(self) == "cpu"
+    ):
 
         def is_row_major(stride):
             return stride[0] > stride[1] and stride[1] == 1
@@ -6904,22 +6954,23 @@ def _check_scaled_mm_sizes_v2(
         def has_zero_dim(tensor_2d):
             return tensor_2d.size(0) == 0 or tensor_2d.size(1) == 0
 
-        torch._check(
-            is_row_major(self.stride()) or has_zero_dim(self),
-            lambda: f"self must be row_major, got stride {self.stride()}",
-        )
-        torch._check(
-            is_col_major(mat2.stride()) or has_zero_dim(mat2),
-            lambda: f"mat2 must be col_major, got stride {mat2.stride()}",
-        )
-        torch._check(
-            self.size(1) % 16 == 0,
-            lambda: f"Expected self.size(1) to be divisible by 16, but got self.size(1)={self.size(1)}",
-        )
-        torch._check(
-            mat2.size(0) % 16 == 0 and mat2.size(1) % 16 == 0,
-            lambda: f"Expected both dimensions of mat2 to be divisible by 16 but got {mat2.shape}",
-        )
+        if device_hint(self) != "cpu":
+            torch._check(
+                is_row_major(self.stride()) or has_zero_dim(self),
+                lambda: f"self must be row_major, got stride {self.stride()}",
+            )
+            torch._check(
+                is_col_major(mat2.stride()) or has_zero_dim(mat2),
+                lambda: f"mat2 must be col_major, got stride {mat2.stride()}",
+            )
+            torch._check(
+                self.size(1) % 16 == 0,
+                lambda: f"Expected self.size(1) to be divisible by 16, but got self.size(1)={self.size(1)}",
+            )
+            torch._check(
+                mat2.size(0) % 16 == 0 and mat2.size(1) % 16 == 0,
+                lambda: f"Expected both dimensions of mat2 to be divisible by 16 but got {mat2.shape}",
+            )
 
         def is_tensorwise(recipe_a: list[ScalingType], recipe_b: list[ScalingType]):
             return (
@@ -7855,7 +7906,11 @@ def meta_histc(input, bins=100, min=0, max=0):
 
 
 @register_meta(
-    [aten._upsample_bilinear2d_aa.default, aten._upsample_bicubic2d_aa.default]
+    [
+        aten._upsample_bilinear2d_aa.default,
+        aten._upsample_bicubic2d_aa.default,
+        aten._upsample_lanczos2d_aa.default,
+    ]
 )
 def meta_upsample_bimode2d_aa(
     input,
@@ -7876,7 +7931,12 @@ def meta_upsample_bimode2d_aa(
     )
 
 
-@register_meta([aten._upsample_bilinear2d_aa_backward.default])
+@register_meta(
+    [
+        aten._upsample_bilinear2d_aa_backward.default,
+        aten._upsample_lanczos2d_aa_backward.default,
+    ]
+)
 def meta_upsample_bimode2d_aa_backward(
     grad_output,
     output_size,

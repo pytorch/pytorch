@@ -525,8 +525,9 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
         )
 
         _, codes = run_fw_bw_and_get_code(lambda: compiled_module(x))
-        # flex in forward and flex_backward in backward
-        self.assertEqual(len(codes), 2)
+        # flex in forward and flex_backward in backward; contiguous partitioning
+        # may split non-contiguous annotated nodes into separate regions
+        self.assertGreaterEqual(len(codes), 2)
 
     def test_refcounts(self):
         """Tests that activations can be cleared before the end of graph"""
@@ -1522,6 +1523,141 @@ class TestRegionalOutputCode(torch._inductor.test_case.TestCase):
         post_compiled = fw_compiled.post_compile(loaded_code, fx_config)
         self.assertIsNotNone(post_compiled)
         self.assertIsNotNone(post_compiled._graph_module)  # Now deserialized
+
+
+class RegionalInductorPartitionTests(torch._inductor.test_case.TestCase):
+    """Tests for _RegionScooper partitioning behavior.
+
+    Ensures that non-contiguous annotated regions are NOT horizontally fused
+    into a single compiled partition.
+    """
+
+    def _make_tag_node(self, g, inp, scalar, tagged):
+        node = g.call_function(torch.ops.aten.mul.Scalar, (inp, scalar))
+        if tagged:
+            node.meta["custom"] = {"compile_with_inductor": True}
+        node.meta["val"] = torch.empty(10)
+        return node
+
+    def _scoop_and_count(self, gm):
+        from torch.fx.passes.regional_inductor import _RegionScooper
+
+        with torch.fx.traceback.preserve_node_meta(enable=False):
+            partitioned = _RegionScooper.scoop_regions(gm)
+        return sum(
+            1
+            for node in partitioned.graph.nodes
+            if node.op == "call_module"
+            and node.target.startswith("__marked_inductor_submod")
+        )
+
+    def _build_chain(self, tags):
+        """Build a linear chain: x -> op0 -> op1 -> ... -> output"""
+        g = torch.fx.Graph()
+        current = g.placeholder("x")
+        for tagged in tags:
+            current = self._make_tag_node(g, current, 1.0, tagged)
+        g.output(current)
+        return torch.fx.GraphModule(torch.nn.Module(), g)
+
+    def test_linear_chain_partitioning(self):
+        """Contiguous runs of tagged nodes form separate partitions."""
+        cases = [
+            # (tags, expected_partitions)
+            ([False, True, True, True, False], 1),
+            ([True, True, False, True, True], 2),
+            ([True, False, True, False, True], 3),
+            ([True, False, True, False, True, False, True], 4),
+            ([False, False, False], 0),
+        ]
+        for tags, expected in cases:
+            with self.subTest(tags=tags):
+                gm = self._build_chain(tags)
+                self.assertEqual(self._scoop_and_count(gm), expected)
+
+    def test_parallel_branches_not_fused(self):
+        """Two adjacent independent tagged branches form 1 partition."""
+        g = torch.fx.Graph()
+        x = g.placeholder("x")
+        mul_a = self._make_tag_node(g, x, 2.0, tagged=True)
+        mul_b = self._make_tag_node(g, x, 3.0, tagged=True)
+        out = g.call_function(torch.ops.aten.add.Tensor, (mul_a, mul_b))
+        out.meta["val"] = torch.empty(10)
+        g.output(out)
+        gm = torch.fx.GraphModule(torch.nn.Module(), g)
+        self.assertEqual(self._scoop_and_count(gm), 1)
+
+    def test_parallel_branches_with_gap_not_fused(self):
+        """Two independent tagged nodes separated by an untagged node in
+        topological order must produce 2 partitions, not be horizontally fused.
+
+        The old CapabilityBasedPartitioner would fuse these into 1 partition.
+        """
+        g = torch.fx.Graph()
+        x = g.placeholder("x")
+        mul_a = self._make_tag_node(g, x, 2.0, tagged=True)
+        sin = g.call_function(torch.ops.aten.sin.default, (x,))
+        sin.meta["val"] = torch.empty(10)
+        mul_b = self._make_tag_node(g, x, 3.0, tagged=True)
+        out = g.call_function(torch.ops.aten.add.Tensor, (mul_a, mul_b))
+        out.meta["val"] = torch.empty(10)
+        g.output(out)
+        gm = torch.fx.GraphModule(torch.nn.Module(), g)
+        self.assertEqual(self._scoop_and_count(gm), 2)
+
+    def test_dependent_partitions_merged_across_gap(self):
+        """Two tagged runs separated by an untagged node but connected by a
+        data dependency should be merged into 1 partition.
+
+        tagged(x) -> untagged -> tagged(tagged_result) => 1 partition
+        """
+        g = torch.fx.Graph()
+        x = g.placeholder("x")
+        mul_a = self._make_tag_node(g, x, 2.0, tagged=True)
+        sin = g.call_function(torch.ops.aten.sin.default, (x,))
+        sin.meta["val"] = torch.empty(10)
+        # mul_b consumes mul_a, creating a data dependency across the gap
+        mul_b = self._make_tag_node(g, mul_a, 3.0, tagged=True)
+        g.output(mul_b)
+        gm = torch.fx.GraphModule(torch.nn.Module(), g)
+        self.assertEqual(self._scoop_and_count(gm), 1)
+
+    def test_different_annotations_not_merged(self):
+        """Two tagged runs with different annotations should NOT be merged,
+        even if connected by a data dependency.
+        """
+        g = torch.fx.Graph()
+        x = g.placeholder("x")
+        mul_a = self._make_tag_node(g, x, 2.0, tagged=True)
+        # Override annotation to use a different ID
+        mul_a.meta["custom"] = {"compile_with_inductor": 0}
+        sin = g.call_function(torch.ops.aten.sin.default, (x,))
+        sin.meta["val"] = torch.empty(10)
+        mul_b = self._make_tag_node(g, mul_a, 3.0, tagged=True)
+        mul_b.meta["custom"] = {"compile_with_inductor": 1}
+        g.output(mul_b)
+        gm = torch.fx.GraphModule(torch.nn.Module(), g)
+        self.assertEqual(self._scoop_and_count(gm), 2)
+
+    def test_chained_merges_across_multiple_gaps(self):
+        """Multiple tagged runs with the same annotation and chained data
+        dependencies should all merge into 1 partition.
+
+        tagged_a(x) -> untagged(x) -> tagged_b(tagged_a) -> untagged(x) -> tagged_c(tagged_b) => 1
+        """
+        g = torch.fx.Graph()
+        x = g.placeholder("x")
+        tagged_a = self._make_tag_node(g, x, 2.0, tagged=True)
+        # Untagged node consuming x (not tagged_a), just occupying a slot
+        filler_1 = g.call_function(torch.ops.aten.sin.default, (x,))
+        filler_1.meta["val"] = torch.empty(10)
+        tagged_b = self._make_tag_node(g, tagged_a, 3.0, tagged=True)
+        filler_2 = g.call_function(torch.ops.aten.sin.default, (x,))
+        filler_2.meta["val"] = torch.empty(10)
+        tagged_c = self._make_tag_node(g, tagged_b, 4.0, tagged=True)
+        g.output(tagged_c)
+        gm = torch.fx.GraphModule(torch.nn.Module(), g)
+        self.assertEqual(self._scoop_and_count(gm), 1)
 
 
 if __name__ == "__main__":

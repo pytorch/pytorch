@@ -523,7 +523,7 @@ class BenchmarkRequest:
             bench_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
             autotuning_log.debug(
                 "InChildProcess %s: load %f, create tensor %f, bench %f",
-                str(self),
+                self,
                 load_elapse,  # type: ignore[possibly-undefined]
                 create_tensor_elapse,  # type: ignore[possibly-undefined]
                 bench_elapse,

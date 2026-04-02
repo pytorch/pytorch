@@ -41,6 +41,7 @@ from torch._dynamo.utils import (
     lazy_format_graph_code,
 )
 from torch._guards import CompileContext, TracingContext
+from torch._library.opaque_object import is_opaque_value
 from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses import FakeTensor
 from torch._subclasses.meta_utils import is_sparse_any
@@ -67,6 +68,7 @@ from .logging_utils import track_graph_compiling
 from .runtime_wrappers import (
     AOTDedupeWrapper,
     AOTDispatchAutograd,
+    AOTDispatchAutogradCompileSpec,
     AOTDispatchSubclassWrapper,
     AOTSyntheticBaseWrapper,
     AutogradLazyBackwardCompileInfo,
@@ -100,6 +102,22 @@ from .utils import (
     strict_zip,
     unlift_tokens,
 )
+
+
+def is_opaque_node(node: Any) -> bool:
+    """Check if a node contains an opaque or non-tensor value (e.g., ProcessGroup)."""
+    from torch._library.fake_class_registry import FakeScriptObject
+
+    if not isinstance(node, torch.fx.Node):
+        return False
+    if "val" not in getattr(node, "meta", {}):
+        return False
+    val = node.meta["val"]
+    if is_opaque_value(val):
+        return True
+    if isinstance(val, (torch.ScriptObject, FakeScriptObject)):
+        return True
+    return False
 
 
 _thread_local = threading.local()
@@ -571,7 +589,7 @@ def collect_fw_donated_buffer_idxs(
         t = saved_tensors[i]
         if (
             t is not None
-            and isinstance(t, torch.Tensor)
+            and isinstance(t, FakeTensor)
             and not is_sparse_any(t)
             and StorageWeakRef(t.untyped_storage()) not in storage_refs
         ):
@@ -1649,9 +1667,9 @@ def _log_fw_bw_graphs(
         )
         aot_graphs_log.info(
             "aot_config id: %s, fw_metadata=%s, inner_meta=%s",
-            str(aot_config.aot_id),
-            str(fw_metadata),
-            str(_get_inner_meta(maybe_subclass_meta, fw_metadata)),
+            aot_config.aot_id,
+            fw_metadata,
+            _get_inner_meta(maybe_subclass_meta, fw_metadata),
         )
 
         aot_graphs_log.info(
@@ -1813,6 +1831,8 @@ def _aot_stage2a_partition(
             for idx, node in enumerate(fw_outs_saved_for_bw):
                 if is_sym_node(node):
                     symint_outs_saved_for_bw.append(node)
+                elif is_opaque_node(node):
+                    opaque_outs_saved_for_bw.append(node)
                 elif isinstance(node, torch.fx.Node) and "val" in getattr(
                     node, "meta", {}
                 ):
@@ -2270,19 +2290,20 @@ def _aot_stage2c_make_autograd_function(
         )
 
     disable_amp = torch._C._is_any_autocast_enabled()
-    compiled_fn = AOTDispatchAutograd.post_compile(
-        compiled_fw_func,
-        compiled_bw_func,
-        maybe_subclass_meta,
-        num_symints_saved_for_bw,
-        backward_state_indices,
-        disable_amp,
-        _indices_of_inps_to_detach,
-        lazy_backward_info,
-        aot_config,
+    compile_spec = AOTDispatchAutogradCompileSpec(
+        compiled_fw_func=compiled_fw_func,
+        compiled_bw_func=compiled_bw_func,
+        maybe_subclass_meta=maybe_subclass_meta,
+        num_symints_saved_for_bw=num_symints_saved_for_bw,
+        backward_state_indices=backward_state_indices,
+        disable_amp=disable_amp,
+        indices_of_inps_to_detach=_indices_of_inps_to_detach,
+        lazy_backward_info=lazy_backward_info,
+        aot_config=aot_config,
         fw_metadata=fw_metadata,
         try_save_cache_entry=try_save_cache_entry,
     )
+    compiled_fn = AOTDispatchAutograd.post_compile(compile_spec)
 
     if entry is not None:
         compiled_fn = SerializableCompiledFunction(compiled_fn, lambda: entry)

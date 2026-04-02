@@ -227,6 +227,14 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
       }
       return false;
     };
+    auto matchList = [&](c10::TypeKind kind) {
+      const auto& t = arg.real_type();
+      if (auto list_t = t->cast<c10::ListType>()) {
+        if (list_t->getElementType()->kind() == kind)
+          return true;
+      }
+      return false;
+    };
     if (argument.isNone()) {
       return py::none();
     } else if (match(c10::ScalarTypeType::Kind)) {
@@ -239,6 +247,31 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
           reinterpret_cast<PyObject*>(obj));
     } else if (match(c10::MemoryFormatType::Kind)) {
       return py::cast(static_cast<c10::MemoryFormat>(argument.toInt()));
+    } else if (matchList(c10::ScalarTypeType::Kind)) {
+      const auto& list = argument.toListRef();
+      py::list result(list.size());
+      for (const auto i : c10::irange(list.size())) {
+        auto* obj = getTHPDtype(static_cast<c10::ScalarType>(list[i].toInt()));
+        result[i] = py::reinterpret_borrow<py::object>(
+            reinterpret_cast<PyObject*>(obj));
+      }
+      return result;
+    } else if (matchList(c10::LayoutType::Kind)) {
+      const auto& list = argument.toListRef();
+      py::list result(list.size());
+      for (const auto i : c10::irange(list.size())) {
+        auto* obj = getTHPLayout(static_cast<c10::Layout>(list[i].toInt()));
+        result[i] = py::reinterpret_borrow<py::object>(
+            reinterpret_cast<PyObject*>(obj));
+      }
+      return result;
+    } else if (matchList(c10::MemoryFormatType::Kind)) {
+      const auto& list = argument.toListRef();
+      py::list result(list.size());
+      for (const auto i : c10::irange(list.size())) {
+        result[i] = py::cast(static_cast<c10::MemoryFormat>(list[i].toInt()));
+      }
+      return result;
     } else {
       return torch::jit::toPyObject(argument);
     }
@@ -2411,7 +2444,13 @@ create_native_op_schema(
                 item_flavor == TensorFlavor::NON_DTENSOR_TENSOR_SUBCLASS) {
               handle_exactly_tensor(item_py_tensor);
             } else { // non-tensor
-              handle_non_tensor_or_undefined(item);
+              // Use handle_non_dtensor_arg to respect static_argnum.
+              // Non-tensor items in lists (e.g., ScalarList args to
+              // foreach ops) should only be included in the cache key
+              // if the list's argument index is >= static_argnum.
+              // Otherwise, step-varying scalars (like AdamW bias
+              // corrections) cause unbounded cache growth.
+              handle_non_dtensor_arg(idx, item);
             }
           }
         } else {
@@ -2445,6 +2484,18 @@ create_native_op_schema(
   }
 
   if (native_info.static_kwargkey && !native_info.static_kwargkey.is_none()) {
+    // Only kwargs named in static_kwargkey affect sharding propagation and
+    // belong in the cache key. The Python comparison key
+    // (DTensor_OpSchema_recompute_comparison_key_impl) already filters this
+    // way; the C++ fast path must match. Without this filter, step-varying
+    // scalar kwargs (e.g. the `value` arg of addcdiv_ used by AdamW bias
+    // corrections) cause unbounded cache growth.
+    c10::SmallVector<std::string, 2> static_kwarg_names;
+    for (const auto& key :
+         py::reinterpret_borrow<py::list>(native_info.static_kwargkey)) {
+      static_kwarg_names.push_back(py::cast<std::string>(key));
+    }
+
     // Separator to disambiguate kwargs from args in comparison and hashing.
     static constexpr int64_t kwargs_separator = 0x0011223344556677LL;
     comparison_key.emplace_back(static_cast<int64_t>(kwargs_separator));
@@ -2453,14 +2504,26 @@ create_native_op_schema(
     for (auto argument_it = args_kwargs.kwargs_begin();
          argument_it != args_kwargs.kwargs_end();
          ++argument_it) {
+      const auto underlying_index = argument_it.underlying_index();
+      const auto [tensor_flavor, py_tensor] =
+          check_for_dtensor_or_tensor(*argument_it);
+      // Skip non-tensor kwargs not listed in static_kwargkey.
+      if (tensor_flavor == TensorFlavor::NON_TENSOR) {
+        const auto& kwarg_name =
+            op.schema().arguments()[underlying_index].name();
+        if (std::find(
+                static_kwarg_names.begin(),
+                static_kwarg_names.end(),
+                kwarg_name) == static_kwarg_names.end()) {
+          continue;
+        }
+      }
+
       // Rather than hash/compare the string key, we can just use the
       // index of the kwarg in the schema!
-      const auto underlying_index = argument_it.underlying_index();
       comparison_key.emplace_back(c10::IValue(underlying_index));
       comparison_key_hash = hash_combine(
           comparison_key_hash, c10::IValue::hash(comparison_key.back().iv));
-      const auto [tensor_flavor, py_tensor] =
-          check_for_dtensor_or_tensor(*argument_it);
       switch (tensor_flavor) {
         case TensorFlavor::EXACTLY_DTENSOR:
         case TensorFlavor::DTENSOR_SUBCLASS: {
