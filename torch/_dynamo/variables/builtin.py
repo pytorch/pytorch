@@ -1727,6 +1727,31 @@ class BuiltinVariable(BaseBuiltinVariable):
             raise NotImplementedError
         raise NotImplementedError
 
+    def _freeze_default_format_value(self, arg: VariableTracker) -> VariableTracker:
+        arg = arg.realize()
+
+        if isinstance(arg, UserDefinedListVariable) and type(arg.value) is list:
+            return self._freeze_default_format_value(arg._list_vt)
+        if isinstance(arg, UserDefinedTupleVariable) and type(arg.value) is tuple:
+            return self._freeze_default_format_value(arg._tuple_vt)
+        if isinstance(arg, SizeVariable):
+            return SizeVariable(
+                [self._freeze_default_format_value(item) for item in arg.items],
+                source=None,
+            )
+        if isinstance(arg, ListVariable):
+            return ListVariable(
+                [self._freeze_default_format_value(item) for item in arg.items],
+                source=None,
+                mutation_type=ValueMutationNew(),
+            )
+        if isinstance(arg, TupleVariable):
+            return TupleVariable(
+                [self._freeze_default_format_value(item) for item in arg.items],
+                source=None,
+            )
+        return arg
+
     def call_str(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker | None:
@@ -1846,7 +1871,18 @@ class BuiltinVariable(BaseBuiltinVariable):
                 DictViewVariable,
             ),
         ):
-            return self.call_str(tx, arg)
+            eager_value = self.call_str(tx, arg)
+            if eager_value is not None:
+                return eager_value
+            if isinstance(arg, (ListVariable, TupleVariable, SizeVariable)):
+                # Freeze the current container VT so deferred formatting
+                # doesn't observe later mutations on the source-backed object.
+                return variables.StringFormatVariable.create(
+                    "{}",
+                    [self._freeze_default_format_value(arg)],
+                    {},
+                )
+            return None
 
         if not isinstance(arg, variables.UserDefinedObjectVariable):
             return None
