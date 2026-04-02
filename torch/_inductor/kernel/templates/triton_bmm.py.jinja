@@ -25,8 +25,8 @@
     tl.assume(pid_m >= 0)
     tl.assume(pid_n >= 0)
 
-    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
-    rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M).to(INDEX_DTYPE)
+    rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N).to(INDEX_DTYPE)
     if (stride_am == 1 and stride_ak == M) or (stride_am == K and stride_ak == 1):
         ram = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
     else:
@@ -36,7 +36,7 @@
     else:
         rbn = rn % N
 
-    rk = tl.arange(0, BLOCK_K)
+    rk = tl.arange(0, BLOCK_K).to(INDEX_DTYPE)
 
     idx_q = tl.program_id(1).to(INDEX_DTYPE)  # batch dimension for BMM
     A = A + (ram[:, None] * stride_am + rk[None, :] * stride_ak + idx_q*stride_aq)
@@ -55,8 +55,8 @@
         B += BLOCK_K * stride_bk
 
     # rematerialize rm and rn to save registers
-    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
-    rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M).to(INDEX_DTYPE)
+    rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N).to(INDEX_DTYPE)
     idx_q = tl.program_id(1).to(INDEX_DTYPE)  # batch dimension for BMM
     idx_m = rm[:, None]
     idx_n = rn[None, :]
