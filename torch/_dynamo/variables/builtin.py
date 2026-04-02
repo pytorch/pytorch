@@ -140,6 +140,58 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+# Container VariableTracker types that support eager str/repr formatting in
+# f-strings. Used by call_str, call_repr, and call_default_format to decide
+# whether to eagerly evaluate container formatting at trace time.
+_CONTAINER_VT_TYPES = (
+    RangeVariable,
+    ListVariable,
+    TupleVariable,
+    ConstDictVariable,
+    DefaultDictVariable,
+    SetVariable,
+    FrozensetVariable,
+    OrderedSetClassVariable,
+    DictViewVariable,
+)
+
+# Subset of container types whose debug_repr() is used as a fallback when
+# as_python_constant() is unavailable and _materialize_format_value cannot
+# handle the content (e.g. containers holding non-constant elements).
+_DEBUG_REPR_VT_TYPES = (
+    RangeVariable,
+    ConstDictVariable,
+    DefaultDictVariable,
+    OrderedSetClassVariable,
+    DictViewVariable,
+)
+
+
+def _unwrap_user_defined_container(
+    arg: "VariableTracker",
+) -> "VariableTracker":
+    """Unwrap UserDefined{List,Tuple,Dict,Set}Variable to its inner VT.
+
+    If `arg` is a UserDefined* wrapper around a plain builtin container,
+    return the inner VariableTracker that Dynamo uses to track the contents.
+    Otherwise return `arg` unchanged.
+    """
+    if isinstance(arg, UserDefinedListVariable) and type(arg.value) is list:
+        return arg._list_vt
+    if isinstance(arg, UserDefinedTupleVariable) and type(arg.value) is tuple:
+        return arg._tuple_vt
+    if isinstance(arg, UserDefinedDictVariable) and type(arg.value) in (
+        dict,
+        OrderedDict,
+    ):
+        return arg._dict_vt
+    if isinstance(arg, UserDefinedSetVariable) and type(arg.value) in (
+        set,
+        frozenset,
+    ):
+        return arg._set_vt
+    return arg
+
 
 IN_PLACE_DESUGARING_MAP = {
     operator.iadd: operator.add,
@@ -1648,58 +1700,41 @@ class BuiltinVariable(BaseBuiltinVariable):
             repr_method = arg.value.__repr__
 
             if type(arg.value).__repr__ is object.__repr__:
-                # Default repr - build and trace it
                 fn_vt = VariableTracker.build(tx, repr_method)
                 return fn_vt.call_function(tx, [], {})
-            elif is_wrapper_or_member_descriptor(repr_method):
+            if is_wrapper_or_member_descriptor(repr_method):
                 unimplemented(
                     gb_type="Attempted to call repr() method implemented in C/C++",
                     context="",
                     explanation=f"{type(arg.value)} has a C/C++ based repr method. This is not supported.",
                     hints=["Write the repr method in Python"],
                 )
-            else:
-                bound_method = repr_method.__func__
-                fn_vt = VariableTracker.build(tx, bound_method)
-                return fn_vt.call_function(tx, [arg], {})
+            bound_method = repr_method.__func__
+            fn_vt = VariableTracker.build(tx, bound_method)
+            return fn_vt.call_function(tx, [arg], {})
+
         if isinstance(arg, variables.UserDefinedClassVariable):
             if type(arg.value).__repr__ is type.__repr__:
                 return VariableTracker.build(tx, repr(arg.value))
-        if isinstance(
-            arg,
-            (
-                RangeVariable,
-                ListVariable,
-                TupleVariable,
-                ConstDictVariable,
-                DefaultDictVariable,
-                SetVariable,
-                FrozensetVariable,
-                OrderedSetClassVariable,
-                DictViewVariable,
-            ),
-        ):
+
+        if not isinstance(arg, _CONTAINER_VT_TYPES):
+            return None
+
+        try:
+            return VariableTracker.build(tx, repr(arg.as_python_constant()))
+        except NotImplementedError:
+            pass
+
+        if isinstance(arg, (ListVariable, TupleVariable, SizeVariable)):
             try:
-                return VariableTracker.build(tx, repr(arg.as_python_constant()))
+                value = self._materialize_format_value(tx, arg)
+                return VariableTracker.build(tx, repr(value))
             except NotImplementedError:
-                if isinstance(arg, (ListVariable, TupleVariable, SizeVariable)):
-                    try:
-                        value = self._materialize_format_value(tx, arg)
-                        return VariableTracker.build(tx, repr(value))
-                    except NotImplementedError:
-                        pass
-                if isinstance(
-                    arg,
-                    (
-                        RangeVariable,
-                        ConstDictVariable,
-                        DefaultDictVariable,
-                        OrderedSetClassVariable,
-                        DictViewVariable,
-                    ),
-                ):
-                    return VariableTracker.build(tx, arg.debug_repr())
-                return None
+                pass
+
+        if isinstance(arg, _DEBUG_REPR_VT_TYPES):
+            return VariableTracker.build(tx, arg.debug_repr())
+
         return None
 
     def _materialize_format_value(
@@ -1728,12 +1763,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         raise NotImplementedError
 
     def _freeze_default_format_value(self, arg: VariableTracker) -> VariableTracker:
-        arg = arg.realize()
-
-        if isinstance(arg, UserDefinedListVariable) and type(arg.value) is list:
-            return self._freeze_default_format_value(arg._list_vt)
-        if isinstance(arg, UserDefinedTupleVariable) and type(arg.value) is tuple:
-            return self._freeze_default_format_value(arg._tuple_vt)
+        arg = _unwrap_user_defined_container(arg.realize())
         if isinstance(arg, SizeVariable):
             return SizeVariable(
                 [self._freeze_default_format_value(item) for item in arg.items],
@@ -1758,20 +1788,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         # Handle `str` on a user defined function or object
         if isinstance(arg, (variables.UserFunctionVariable)):
             return VariableTracker.build(tx, str(arg.fn))
-        elif isinstance(
-            arg,
-            (
-                RangeVariable,
-                ListVariable,
-                TupleVariable,
-                ConstDictVariable,
-                DefaultDictVariable,
-                SetVariable,
-                FrozensetVariable,
-                OrderedSetClassVariable,
-                DictViewVariable,
-            ),
-        ):
+        elif isinstance(arg, _CONTAINER_VT_TYPES):
             try:
                 return VariableTracker.build(tx, str(arg.as_python_constant()))
             except NotImplementedError:
@@ -1838,39 +1855,14 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_default_format(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker | None:
-        # FORMAT_VALUE can still hand us a lazy wrapper for source-backed attrs.
-        # Realize it first so eager f-string formatting sees the tracked VT shape.
-        arg = arg.realize()
+        # Overhead: this is only called for FORMAT_VALUE with default "{}" / "{:}"
+        # format specs, so it runs at most once per f-string interpolation slot.
+        # The eager str/repr calls below are O(container size) but replace work
+        # that StringFormatVariable.realize() would otherwise do at graph output,
+        # so total trace-time cost is unchanged — it just shifts earlier.
+        arg = _unwrap_user_defined_container(arg.realize())
 
-        if isinstance(arg, UserDefinedListVariable) and type(arg.value) is list:
-            arg = arg._list_vt
-        elif isinstance(arg, UserDefinedTupleVariable) and type(arg.value) is tuple:
-            arg = arg._tuple_vt
-        elif isinstance(arg, UserDefinedDictVariable) and type(arg.value) in (
-            dict,
-            OrderedDict,
-        ):
-            arg = arg._dict_vt
-        elif isinstance(arg, UserDefinedSetVariable) and type(arg.value) in (
-            set,
-            frozenset,
-        ):
-            arg = arg._set_vt
-
-        if isinstance(
-            arg,
-            (
-                RangeVariable,
-                ListVariable,
-                TupleVariable,
-                ConstDictVariable,
-                DefaultDictVariable,
-                SetVariable,
-                FrozensetVariable,
-                OrderedSetClassVariable,
-                DictViewVariable,
-            ),
-        ):
+        if isinstance(arg, _CONTAINER_VT_TYPES):
             eager_value = self.call_str(tx, arg)
             if eager_value is not None:
                 return eager_value
