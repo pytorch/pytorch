@@ -2255,7 +2255,7 @@ class InstructionTranslatorBase(
             # Pass the stored python_stack to preserve the original exception location
             python_stack = getattr(val, "python_stack", None)
             raise observed_exception_type(
-                f"raised exception {val}", real_stack=python_stack
+                f"raised exception {val.debug_repr()}", real_stack=python_stack
             )
 
         exc.raise_observed_exception(
@@ -2397,7 +2397,7 @@ class InstructionTranslatorBase(
             assert isinstance(raised_exception, dynamo_exc)  # sanity check
             unimplemented(
                 gb_type="Observed exception",
-                context=f"raised exception {curr_exc.python_type_name()}({curr_exc.args})",  # type: ignore[union-attr]
+                context=f"raised exception {curr_exc.debug_repr()}",
                 explanation=observed_exn_gb_explanation,
                 hints=[
                     *graph_break_hints.USER_ERROR,

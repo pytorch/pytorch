@@ -705,6 +705,17 @@ class ExceptionVariable(VariableTracker):
 
     __repr__ = __str__
 
+    @staticmethod
+    def _debug_format_arg(arg: VariableTracker) -> str:
+        try:
+            return repr(arg.as_python_constant())
+        except Exception:
+            return arg.debug_repr()
+
+    def debug_repr(self) -> str:
+        args = ", ".join(self._debug_format_arg(arg) for arg in self.args)
+        return f"{self.python_type_name()}({args})"
+
 
 class UnknownVariable(VariableTracker):
     """
@@ -1907,6 +1918,26 @@ class StringFormatVariable(VariableTracker):
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.format_string!r}, {self.sym_args!r}, {self.sym_kwargs!r})"
+
+    @staticmethod
+    def _debug_format_arg(arg: VariableTracker) -> object:
+        try:
+            return arg.as_python_constant()
+        except Exception:
+            return arg.debug_repr()
+
+    def debug_repr(self) -> str:
+        try:
+            rendered = self.format_string.format(
+                *[self._debug_format_arg(arg) for arg in self.sym_args],
+                **{
+                    key: self._debug_format_arg(value)
+                    for key, value in self.sym_kwargs.items()
+                },
+            )
+        except Exception:
+            return repr(self)
+        return repr(rendered)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
