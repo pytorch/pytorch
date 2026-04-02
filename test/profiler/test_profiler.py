@@ -3988,6 +3988,62 @@ class TestProfilerEventsParity(TestCase):
                     f"activity_type mismatch for {e.name}",
                 )
 
+    def test_structured_metadata_matches_chrome_trace(self):
+        from torch.autograd.profiler_util import _EVENT_METADATA_KEYS
+
+        with profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            experimental_config=torch._C._profiler._ExperimentalConfig(
+                expose_kineto_event_metadata=True
+            ),
+        ) as prof:
+            x = torch.randn(10, 10, device="cuda")
+            y = torch.mm(x, x)
+            z = x + y
+            z.cpu()
+
+        # Build lookup from External id -> FunctionEvent
+        fe_by_ext_id = {}
+        for fe in prof.events():
+            if fe.external_id != 0:
+                fe_by_ext_id[fe.external_id] = fe
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                trace = json.load(f)
+
+            checked_kernel = 0
+            checked_memcpy = 0
+            for te in trace["traceEvents"]:
+                cat = te.get("cat", "")
+                args = te.get("args", {})
+                ext_id = args.get("External id")
+                if ext_id is None or ext_id not in fe_by_ext_id:
+                    continue
+                fe = fe_by_ext_id[ext_id]
+
+                if cat in ("kernel", "gpu_memcpy") and fe.event_metadata is not None:
+                    em = fe.event_metadata
+                    for kineto_key, (field_name, _) in _EVENT_METADATA_KEYS.items():
+                        if kineto_key in args:
+                            val = getattr(em, field_name)
+                            self.assertIsNotNone(
+                                val,
+                                f"'{fe.name}': {field_name} is None "
+                                f"but JSON has '{kineto_key}': {args[kineto_key]}",
+                            )
+                    if cat == "kernel":
+                        self.assertIsInstance(em.registers_per_thread, int)
+                        self.assertGreater(em.registers_per_thread, 0)
+                        checked_kernel += 1
+                    elif cat == "gpu_memcpy":
+                        if em.bytes is not None:
+                            self.assertGreater(em.bytes, 0)
+                        checked_memcpy += 1
+
+            self.assertGreater(checked_kernel, 0, "No kernel events were cross-checked")
+
 
 if __name__ == "__main__":
     run_tests()

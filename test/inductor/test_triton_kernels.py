@@ -1184,7 +1184,7 @@ def forward(self, x_1, output_1):
         num_bufs_allocated = code.count(code_string)
         if (
             inductor_config.cpp_wrapper
-            and inductor_config.triton.autotune_at_compile_time is False
+            and inductor_config.triton.autotune_at_compile_time is not True
         ):
             # Lazy compile emits aoti_torch_empty_strided for scratch space
             # allocation (global_scratch + profile_scratch) per unique kernel wrapper

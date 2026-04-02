@@ -289,7 +289,11 @@ class SparseSemiStructuredTensor(torch.Tensor):
         return torch.mm(self, torch.eye(col, dtype=self.dtype, device=self.device))
 
     @classmethod
-    def from_dense(cls, original_tensor: torch.Tensor) -> "SparseSemiStructuredTensor":
+    def from_dense(
+        cls,
+        original_tensor: torch.Tensor,
+        alg_id: int = _DEFAULT_ALG_ID,
+    ) -> "SparseSemiStructuredTensor":
         raise NotImplementedError
 
     def _mm(
@@ -305,6 +309,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
 def to_sparse_semi_structured(
     original_tensor: torch.Tensor,
     transposed: bool = False,
+    alg_id: int = SparseSemiStructuredTensor._DEFAULT_ALG_ID,
 ) -> SparseSemiStructuredTensor:
     """
     This function converts a dense tensor into a sparse semi-structured tensor.
@@ -318,6 +323,8 @@ def to_sparse_semi_structured(
     Args:
         original_tensor (Tensor): the dense tensor to convert
         transposed (bool, optional): deprecated arg to be removed in another release. Do not use.
+        alg_id (int, optional): the algorithm id to use for cuSPARSELt matmul. Defaults to 0.
+            Can be obtained via ``torch._cslt_sparse_mm_search``.
     Returns:
         SparseSemiStructuredTensor: A sparse semi-structured tensor created from the given original_tensor
     Raises:
@@ -367,7 +374,7 @@ def to_sparse_semi_structured(
         else torch.sparse.SparseSemiStructuredTensorCUSPARSELT
     )
 
-    return SPARSE_SUBCLASS.from_dense(original_tensor)
+    return SPARSE_SUBCLASS.from_dense(original_tensor, alg_id=alg_id)
 
 
 class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
@@ -392,7 +399,9 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
 
     @classmethod
     def from_dense(
-        cls, original_tensor: torch.Tensor
+        cls,
+        original_tensor: torch.Tensor,
+        alg_id: int = SparseSemiStructuredTensor._DEFAULT_ALG_ID,
     ) -> "SparseSemiStructuredTensorCUTLASS":
         cls._validate_device_dim_dtype_shape(original_tensor)
         (
@@ -556,7 +565,9 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
 
     @classmethod
     def from_dense(
-        cls, original_tensor: torch.Tensor
+        cls,
+        original_tensor: torch.Tensor,
+        alg_id: int = SparseSemiStructuredTensor._DEFAULT_ALG_ID,
     ) -> "SparseSemiStructuredTensorCUSPARSELT":
         cls._validate_device_dim_dtype_shape(original_tensor)
         # pyrefly: ignore [no-matching-overload]
@@ -568,7 +579,7 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
             meta_t=None,
             compressed_swizzled_bitmask=None,
             fuse_transpose_cusparselt=SparseSemiStructuredTensor._FUSE_TRANSPOSE,
-            alg_id_cusparselt=SparseSemiStructuredTensor._DEFAULT_ALG_ID,
+            alg_id_cusparselt=alg_id,
             requires_grad=original_tensor.requires_grad,
         )
 

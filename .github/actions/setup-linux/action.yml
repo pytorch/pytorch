@@ -45,13 +45,26 @@ outputs:
 runs:
   using: composite
   steps:
-    # ── Common steps (shared) ────────────────────────────────────────
+    # ── ARC-only steps ──────────────────────────────────────────────────
+    - name: Fix workspace permissions
+      if: ${{ inputs.use-arc == 'true' }}
+      shell: bash
+      run: |
+        # GH runner image has switched to uid 1001 https://github.com/actions/runner-images/issues/10936
+        # while current PyTorch CI image are still using uid 1000 (ec2-user). We
+        # can update the uid to 1001 eventually when everything migrates to ARC.
+        # In the meantime, this is a quick fix to ensure that CI has the permission
+        # to use the GITHUB_WORKSPACE while still allowing the GH hook (uid 1001,
+        # gid 1001) to clean up the directory after the job
+        sudo chmod -R 777 "$GITHUB_WORKSPACE"
+
     - name: Ack Git cache ownership
       if: ${{ inputs.use-arc == 'true' }}
       shell: bash
       run: |
         git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
+    # ── Common steps (shared) ────────────────────────────────────────
     - name: Checkout PyTorch
       uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
       with:
@@ -174,101 +187,6 @@ runs:
         done
         echo "Reached maximum attempts to connect to Docker. Exiting."
         exit 1
-
-    # ── ARC-only steps ──────────────────────────────────────────────────
-    - name: Install uv (ARC)
-      if: ${{ inputs.use-arc == 'true' }}
-      uses: pytorch/test-infra/.github/actions/setup-uv@main
-      with:
-        python-version: ${{ inputs.python-version || '3.12' }}
-        activate-environment: true
-
-    - name: Install CI requirements
-      if: ${{ inputs.use-arc == 'true' }}
-      shell: bash
-      run: |
-        # Limit uv parallelism to avoid OOM on memory-constrained pods where
-        # uv defaults to the host CPU count (e.g., 192) instead of the pod
-        # limit. Can be removed once uv pip cache is ready
-        export UV_CONCURRENT_BUILDS=1
-        uv pip install -r .ci/docker/requirements-ci.txt
-        echo "CMAKE_PREFIX_PATH=${VIRTUAL_ENV}" >> "${GITHUB_ENV}"
-
-    - name: Activate C++ compiler
-      if: ${{ inputs.use-arc == 'true' && inputs.compiler != '' }}
-      shell: bash
-      run: |
-        set -eux
-
-        COMPILER="${{ inputs.compiler }}"
-        CLANG_VERSION=$(echo "${COMPILER}" | perl -n -e'/^clang(\d+)$/ && print $1')
-        GCC_VERSION=$(echo "${COMPILER}" | perl -n -e'/^gcc(\d+)$/ && print $1')
-
-        # Strip any gcc-toolset paths that might linger from the base image
-        CLEAN_PATH=$(echo "${PATH}" | tr ':' '\n' | grep -v '/opt/rh/gcc-toolset-' | tr '\n' ':' | sed 's/:$//')
-        CLEAN_LD_PATH=$(echo "${LD_LIBRARY_PATH:-}" | tr ':' '\n' | grep -v '/opt/rh/gcc-toolset-' | tr '\n' ':' | sed 's/:$//')
-
-        if [ -z "${CLANG_VERSION}" ] && [ -z "${GCC_VERSION}" ]; then
-          echo "ERROR: unrecognized compiler '${COMPILER}', expected gcc<N> or clang<N>"
-          exit 1
-        elif [ -n "${CLANG_VERSION}" ]; then
-          # Clang versions are pre-installed in the base image under /opt/clang-{VERSION}.
-          INSTALL_DIR="/opt/clang-${CLANG_VERSION}"
-          if [ ! -d "${INSTALL_DIR}" ]; then
-            echo "ERROR: clang ${CLANG_VERSION} not found at ${INSTALL_DIR}"
-            exit 1
-          fi
-          echo "PATH=${INSTALL_DIR}/bin:${CLEAN_PATH}" >> "${GITHUB_ENV}"
-          echo "LD_LIBRARY_PATH=${CLEAN_LD_PATH}" >> "${GITHUB_ENV}"
-          echo "CC=${INSTALL_DIR}/bin/clang" >> "${GITHUB_ENV}"
-          echo "CXX=${INSTALL_DIR}/bin/clang++" >> "${GITHUB_ENV}"
-          echo "CMAKE_PREFIX_PATH=${INSTALL_DIR}:${CMAKE_PREFIX_PATH:-}" >> "${GITHUB_ENV}"
-        else
-          # All GCC versions are pre-installed in the base image via gcc-toolset
-          # under /opt/rh/gcc-toolset-{VERSION}. Remove /usr/local/bin compiler
-          # symlinks from the manylinux base image so they don't shadow the
-          # toolset we're activating.
-          rm -f /usr/local/bin/gcc /usr/local/bin/g++ /usr/local/bin/cc /usr/local/bin/c++
-          TOOLSET_ROOT="/opt/rh/gcc-toolset-${GCC_VERSION}/root/usr"
-          if [ ! -d "${TOOLSET_ROOT}" ]; then
-            echo "ERROR: gcc-toolset-${GCC_VERSION} not found at ${TOOLSET_ROOT}"
-            exit 1
-          fi
-          echo "PATH=${TOOLSET_ROOT}/bin:${CLEAN_PATH}" >> "${GITHUB_ENV}"
-          echo "LD_LIBRARY_PATH=${TOOLSET_ROOT}/lib64:${TOOLSET_ROOT}/lib:${CLEAN_LD_PATH}" >> "${GITHUB_ENV}"
-        fi
-
-    - name: Switch CUDA version
-      if: ${{ inputs.use-arc == 'true' && inputs.cuda-version != '' }}
-      shell: bash
-      run: |
-        set -eux
-
-        CUDA_VERSION="${{ inputs.cuda-version }}"
-
-        # All CUDA versions are pre-installed in the base image under
-        # /usr/local/cuda-{major.minor}. The default (/usr/local/cuda
-        # symlink) points to CUDA 13. Switch to the requested version.
-        CUDA_DIR="/usr/local/cuda-${CUDA_VERSION}"
-        if [ ! -d "${CUDA_DIR}" ]; then
-          echo "ERROR: CUDA ${CUDA_VERSION} not found at ${CUDA_DIR}"
-          ls -d /usr/local/cuda-* /usr/local/cuda 2>/dev/null || true
-          exit 1
-        fi
-
-        rm -f /usr/local/cuda
-        ln -s "${CUDA_DIR}" /usr/local/cuda
-
-        echo "PATH=/usr/local/cuda/bin:${PATH}" >> "${GITHUB_ENV}"
-        echo "LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}" >> "${GITHUB_ENV}"
-        echo "CUDA_HOME=/usr/local/cuda" >> "${GITHUB_ENV}"
-        echo "CUDA_PATH=/usr/local/cuda" >> "${GITHUB_ENV}"
-        echo "DESIRED_CUDA=${CUDA_VERSION}" >> "${GITHUB_ENV}"
-        echo "NCCL_INCLUDE_DIR=/usr/local/cuda/include" >> "${GITHUB_ENV}"
-        echo "NCCL_LIB_DIR=/usr/local/cuda/lib64" >> "${GITHUB_ENV}"
-
-        echo "Switched to CUDA ${CUDA_VERSION}"
-        nvcc --version
 
     # ── Shared steps ────────────────────────────────────────────────────
     - name: Print GPU info (if present)

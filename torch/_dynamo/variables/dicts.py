@@ -1498,7 +1498,15 @@ class SetVariable(ConstDictVariable):
                 "__xor__": "symmetric_difference",
                 "__sub__": "difference",
             }.get(name)
-            if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable)):
+            if not isinstance(
+                args[0],
+                (
+                    SetVariable,
+                    variables.UserDefinedSetVariable,
+                    DictItemsVariable,
+                    DictKeysVariable,
+                ),
+            ):
                 raise_observed_exception(
                     TypeError,
                     tx,
@@ -1508,8 +1516,41 @@ class SetVariable(ConstDictVariable):
                 )
             assert m is not None
             return self.call_method(tx, m, args, kwargs)
+        elif name in ("__rand__", "__ror__", "__rxor__", "__rsub__"):
+            m = {
+                "__rand__": "__and__",
+                "__ror__": "__or__",
+                "__rxor__": "__xor__",
+                "__rsub__": "__sub__",
+            }.get(name)
+            if not isinstance(
+                args[0],
+                (
+                    SetVariable,
+                    variables.UserDefinedSetVariable,
+                    DictItemsVariable,
+                    DictKeysVariable,
+                ),
+            ):
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[
+                        f"unsupported operand type(s) for {name}: '{args[0].python_type_name()}' and '{self.python_type_name()}'"
+                    ],
+                )
+            assert m is not None
+            return args[0].call_method(tx, m, [self], kwargs)
         elif name in ("__iand__", "__ior__", "__ixor__", "__isub__"):
-            if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable)):
+            if not isinstance(
+                args[0],
+                (
+                    SetVariable,
+                    variables.UserDefinedSetVariable,
+                    DictItemsVariable,
+                    DictKeysVariable,
+                ),
+            ):
                 raise_observed_exception(
                     TypeError,
                     tx,
@@ -1527,12 +1568,28 @@ class SetVariable(ConstDictVariable):
             self.call_method(tx, m, args, kwargs)
             return self
         elif name == "__eq__":
-            if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable)):
+            if not isinstance(
+                args[0],
+                (
+                    SetVariable,
+                    variables.UserDefinedSetVariable,
+                    DictItemsVariable,
+                    DictKeysVariable,
+                ),
+            ):
                 return CONSTANT_VARIABLE_FALSE
             r = self.call_method(tx, "symmetric_difference", args, kwargs)
             return VariableTracker.build(tx, len(r.set_items) == 0)  # type: ignore[attr-defined]
         elif name in cmp_name_to_op_mapping:
-            if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable)):
+            if not isinstance(
+                args[0],
+                (
+                    SetVariable,
+                    variables.UserDefinedSetVariable,
+                    DictItemsVariable,
+                    DictKeysVariable,
+                ),
+            ):
                 return VariableTracker.build(tx, NotImplemented)
             return VariableTracker.build(
                 tx,
@@ -1898,8 +1955,16 @@ class DictKeysVariable(DictViewVariable):
             m = getattr(self.set_items, name)
             r = m(args[0].set_items)  # type: ignore[attr-defined]
             return SetVariable(r)
-        if name in cmp_name_to_op_mapping:
-            if not isinstance(args[0], (SetVariable, DictKeysVariable)):
+        elif name in cmp_name_to_op_mapping:
+            if not isinstance(
+                args[0],
+                (
+                    SetVariable,
+                    variables.UserDefinedSetVariable,
+                    DictItemsVariable,
+                    DictKeysVariable,
+                ),
+            ):
                 return VariableTracker.build(tx, NotImplemented)
             return VariableTracker.build(
                 tx,
@@ -1932,6 +1997,13 @@ class DictValuesVariable(DictViewVariable):
 
 class DictItemsVariable(DictViewVariable):
     kv = "items"
+
+    @property
+    def set_items(self) -> set["ConstDictVariable._HashableTracker"]:
+        return {
+            ConstDictVariable._HashableTracker(variables.TupleVariable([k.vt, v]))
+            for k, v in self.view_items
+        }
 
     @property
     def view_items_vt(self) -> list[VariableTracker]:
@@ -1968,12 +2040,54 @@ class DictItemsVariable(DictViewVariable):
                 raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
             if isinstance(args[0], DictItemsVariable):
                 return self.dv_dict.call_method(tx, "__eq__", [args[0].dv_dict], {})
+            elif isinstance(
+                args[0],
+                (
+                    SetVariable,
+                    variables.UserDefinedSetVariable,
+                    DictItemsVariable,
+                    DictKeysVariable,
+                ),
+            ):
+                return VariableTracker.build(
+                    tx,
+                    len(self.set_items ^ args[0].set_items) == 0,
+                )
             return CONSTANT_VARIABLE_FALSE
         elif name == "__iter__":
             from .lists import ListIteratorVariable
 
             return ListIteratorVariable(
                 self.view_items_vt, mutation_type=ValueMutationNew()
+            )
+        elif name in (
+            "__and__",
+            "__iand__",
+            "__or__",
+            "__ior__",
+            "__sub__",
+            "__isub__",
+            "__xor__",
+            "__ixor__",
+        ):
+            # These methods always returns a set
+            fn_hdl = getattr(self.set_items, name)
+            ret_val = fn_hdl(args[0].set_items)  # type: ignore[attr-defined]
+            return SetVariable(ret_val)
+        elif name in cmp_name_to_op_mapping:
+            if not isinstance(
+                args[0],
+                (
+                    SetVariable,
+                    variables.UserDefinedSetVariable,
+                    DictItemsVariable,
+                    DictKeysVariable,
+                ),
+            ):
+                return VariableTracker.build(tx, NotImplemented)
+            return VariableTracker.build(
+                tx,
+                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items),  # type: ignore[attr-defined]
             )
         return super().call_method(tx, name, args, kwargs)
 
