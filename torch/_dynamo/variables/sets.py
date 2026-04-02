@@ -309,11 +309,7 @@ class SetVariable(VariableTracker):
     ) -> ConstantVariable:
         return VariableTracker.build(tx, hasattr(set, name))
 
-    def install_dict_keys_match_guard(self) -> None:
-        # Already EQUALS_MATCH guarded
-        pass
-
-    def install_dict_contains_guard(
+    def install_set_contains_guard(
         self, tx: "InstructionTranslator", args: list[VariableTracker]
     ) -> None:
         if not self.source:
@@ -335,9 +331,6 @@ class SetVariable(VariableTracker):
                     )
                 )
             )
-        elif args[0].source:
-            if not contains:
-                self.install_dict_keys_match_guard()
 
     def _fast_set_method(
         self,
@@ -663,7 +656,7 @@ class SetVariable(VariableTracker):
                 )
             if not (args and is_hashable(args[0])):
                 raise_unhashable(args[0], tx)
-            self.install_dict_contains_guard(tx, args)
+            self.install_set_contains_guard(tx, args)
             contains = args[0] in self
             return VariableTracker.build(tx, contains)
         elif name == "__len__":
@@ -915,11 +908,7 @@ class DictKeySetVariable(SetVariable):
                 items.append(key_str)
             return "dict_keys([" + ",".join(items) + "])"
 
-    def install_dict_keys_match_guard(self) -> None:
-        # Already EQUALS_MATCH guarded
-        pass
-
-    def install_dict_contains_guard(
+    def install_set_contains_guard(
         self, tx: "InstructionTranslator", args: list[VariableTracker]
     ) -> None:
         # Already EQUALS_MATCH guarded
