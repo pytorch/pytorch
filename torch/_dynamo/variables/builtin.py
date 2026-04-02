@@ -1813,6 +1813,10 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_default_format(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker | None:
+        # FORMAT_VALUE can still hand us a lazy wrapper for source-backed attrs.
+        # Realize it first so eager f-string formatting sees the tracked VT shape.
+        arg = arg.realize()
+
         if isinstance(arg, UserDefinedListVariable) and type(arg.value) is list:
             arg = arg._list_vt
         elif isinstance(arg, UserDefinedTupleVariable) and type(arg.value) is tuple:
