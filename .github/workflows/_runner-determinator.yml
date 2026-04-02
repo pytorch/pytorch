@@ -1,0 +1,89 @@
+name: Check whether the workflow owner can use ARC runners
+
+on:
+  workflow_call:
+    inputs:
+      check_experiments:
+        required: false
+        type: string
+        description: |
+          Comma-separated list of non-default experiments to opt into for this workflow.
+          These are added on top of all default experiments. If not defined, only default experiments are included.
+      opt_out_experiments:
+        required: false
+        type: string
+        description: Comma-separated list of experiments this workflow will opt-out of.
+      triggering_actor:
+        required: true
+        type: string
+        description: The triggering_actor for the workflow. Use github.triggering_actor
+      issue_owner:
+        required: true
+        type: string
+        description: The owner of the issue. Use github.event.pull_request.user.login || github.event.issue.user.login
+      curr_branch:
+        required: true
+        type: string
+        description: Current branch or tag.
+      curr_ref_type:
+        required: false
+        type: string
+        default: branch
+        description: The value of "github.ref_type", "branch" or "tag"
+      issue_number:
+        required: false
+        type: string
+        default: "5132"
+        description: |
+          Fetch's GitHub Issue from pytorch/test-infra
+          Example: https://github.com/pytorch/test-infra/issues/5132
+
+    outputs:
+      label-type:
+        description: Type of runners to use
+        value: ${{ jobs.runner-determinator.outputs.label-type }}
+      use-arc:
+        description: Whether to use ARC runners
+        value: ${{ jobs.runner-determinator.outputs.use-arc }}
+
+jobs:
+  runner-determinator:
+    # Don't run on forked repos
+    if: github.repository_owner == 'pytorch'
+    runs-on: ubuntu-latest
+    outputs:
+      label-type: ${{ steps.set-condition.outputs.label-type }}
+      use-arc: ${{ steps.set-condition.outputs.use-arc }}
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ISSUE_NUMBER: ${{ inputs.issue_number }}
+      TRIGGERING_ACTOR: ${{ inputs.triggering_actor }}
+      ISSUE_OWNER: ${{ inputs.issue_owner }}
+      CHECK_EXPERIMENTS: ${{ inputs.check_experiments }}
+      OPT_OUT_EXPERIMENTS: ${{ inputs.opt_out_experiments }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install dependencies
+        run: python3 -m pip install urllib3==1.26.18 PyGithub==2.3.0
+
+      - name: Get the workflow type for the current user
+        id: set-condition
+        run: |
+          curr_branch="${{ inputs.curr_branch }}"
+          curr_ref_type="${{ inputs.curr_ref_type }}"
+          echo "Current branch is '$curr_branch'"
+
+          python3 .github/scripts/runner_determinator.py \
+            --github-token "$GITHUB_TOKEN" \
+            --github-issue "$ISSUE_NUMBER" \
+            --github-branch "$curr_branch" \
+            --github-actor "$TRIGGERING_ACTOR" \
+            --github-issue-owner "$ISSUE_OWNER" \
+            --github-ref-type "$curr_ref_type" \
+            --github-repo "$GITHUB_REPOSITORY" \
+            --eligible-experiments "$CHECK_EXPERIMENTS" \
+            --opt-out-experiments "$OPT_OUT_EXPERIMENTS" \
+            --pr-number "${PR_NUMBER}"

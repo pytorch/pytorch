@@ -1,0 +1,82 @@
+diff --git a/test/dynamo/cpython/3_13/test_funcattrs.py b/test/dynamo/cpython/3_13/test_funcattrs.py
+index 375f456dfde..795e7b586d7 100644
+--- a/test/dynamo/cpython/3_13/test_funcattrs.py
++++ b/test/dynamo/cpython/3_13/test_funcattrs.py
+@@ -1,3 +1,21 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_funcattrs.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++# ======= END DYNAMO PATCH =======
++
+ import textwrap
+ import types
+ import typing
+@@ -8,8 +26,9 @@ from test import support
+ 
+ def global_function():
+     def inner_function():
+-        class LocalClass:
+-            pass
++        with torch._dynamo.error_on_graph_break(False):
++            class LocalClass:
++                pass
+         global inner_global_function
+         def inner_global_function():
+             def inner_function2():
+@@ -19,8 +38,9 @@ def global_function():
+     return lambda: inner_function
+ 
+ 
+-class FuncAttrsTest(unittest.TestCase):
++class FuncAttrsTest(CPythonTestCase):
+     def setUp(self):
++        super().setUp()
+         class F:
+             def a(self):
+                 pass
+@@ -430,7 +450,7 @@ def empty_cell(empty=True):
+     return f.__closure__[0]
+ 
+ 
+-class CellTest(unittest.TestCase):
++class CellTest(CPythonTestCase):
+     def test_comparison(self):
+         # These tests are here simply to exercise the comparison code;
+         # their presence should not be interpreted as providing any
+@@ -443,7 +463,7 @@ class CellTest(unittest.TestCase):
+         self.assertTrue(cell(True) > empty_cell())
+ 
+ 
+-class StaticMethodAttrsTest(unittest.TestCase):
++class StaticMethodAttrsTest(CPythonTestCase):
+     def test_func_attribute(self):
+         def f():
+             pass
+@@ -455,7 +475,7 @@ class StaticMethodAttrsTest(unittest.TestCase):
+         self.assertTrue(s.__func__ is f)
+ 
+ 
+-class BuiltinFunctionPropertiesTest(unittest.TestCase):
++class BuiltinFunctionPropertiesTest(CPythonTestCase):
+     # XXX Not sure where this should really go since I can't find a
+     # test module specifically for builtin_function_or_method.
+ 
+@@ -508,4 +528,4 @@ class BuiltinFunctionPropertiesTest(unittest.TestCase):
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()
