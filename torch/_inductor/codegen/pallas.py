@@ -2110,8 +2110,13 @@ class PallasKernel(SIMDKernel):
 
         buf_size = buf_obj.get_size()
 
-        # 0-dimensional (scalar) buffer - use [...] to access it
         if len(buf_size) == 0:
+            return _BufferIndexing(
+                index_str="...", needs_flatten=indexing.needs_flatten
+            )
+        
+        # if buffer size is 1, and index is an integer, use "..."
+        if len(buf_size) == 1 and not self._has_iteration_vars(index):
             return _BufferIndexing(
                 index_str="...", needs_flatten=indexing.needs_flatten
             )
@@ -3133,6 +3138,9 @@ class PallasKernel(SIMDKernel):
                 else:
                     # Get base index expression
                     indexing = self._get_index_expr(index)
+
+                    # Adjust index for buffer shape (scalar, multi-dim, etc.)
+                    indexing = self._adjust_index_for_buffer_shape(name, index, indexing)
 
                     # Check for im2col-like patterns
                     indexing = self._check_im2col_pattern(index, indexing)
