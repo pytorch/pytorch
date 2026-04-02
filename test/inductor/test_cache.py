@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 from __future__ import annotations
 
+import json
 import pickle
 from concurrent.futures import ThreadPoolExecutor
 from inspect import isclass
@@ -12,6 +13,7 @@ from typing import Any, TYPE_CHECKING
 from typing_extensions import Self
 from unittest.mock import patch
 
+import torch._inductor.config as inductor_config
 from torch._inductor import cache as icache
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
@@ -813,6 +815,21 @@ class OtherTest(TestMixin, TestCase):
         self.assertIsNone(cache.get(key))
         self.assertTrue(cache.insert(key, value))
         self.assertEqual(cache.get(key), value)
+
+
+class ConfigSerializationTest(TestCase):
+    def test_callable_config_not_json_serializable(self):
+        # Repro: setting callable configs to a non-None value
+        # save_config_portable() return a dict that is not JSON-serializable.
+        with inductor_config.patch(
+            bucket_all_gathers_fx_bucket_size_determinator=lambda: None
+        ):
+            portable = inductor_config.save_config_portable(
+                ignore_private_configs=False
+            )
+            self.assertIn("bucket_all_gathers_fx_bucket_size_determinator", portable)
+            with self.assertRaises(TypeError, msg="not JSON serializable"):
+                json.dumps(portable)
 
 
 if __name__ == "__main__":
