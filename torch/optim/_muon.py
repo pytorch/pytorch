@@ -43,11 +43,16 @@ PE_COEFFICIENTS = (
 
 
 # A single (a, b, c) tuple or a sequence of per-step (a, b, c) tuples.
-NSCoefficients = str | tuple[float, float, float] | tuple[tuple[float, float, float], ...]
+NSCoefficients = (
+    str | tuple[float, float, float] | tuple[tuple[float, float, float], ...]
+)
 
 
 def _zeropower_via_newtonschulz(
-    grad: Tensor, ns_coefficients: tuple[tuple[float, float, float], ...], ns_steps: int, eps: float
+    grad: Tensor,
+    ns_coefficients: tuple[tuple[float, float, float], ...],
+    ns_steps: int,
+    eps: float,
 ) -> Tensor:
     """
     Newton-Schulz iteration to compute the zeroth power / orthogonalization of G. We opt to use a
@@ -73,7 +78,9 @@ def _zeropower_via_newtonschulz(
     # Ensure spectral norm is at most 1
     ortho_grad.div_(ortho_grad.norm().clamp(min=eps))
     # Perform the NS iterations
-    for a, b, c in ns_coefficients[:ns_steps] + list(repeat(ns_coefficients[-1], ns_steps - len(ns_coefficients))):
+    for a, b, c in ns_coefficients[:ns_steps] + list(
+        repeat(ns_coefficients[-1], ns_steps - len(ns_coefficients))
+    ):
         gram_matrix = ortho_grad @ ortho_grad.T
         gram_update = torch.addmm(
             gram_matrix, gram_matrix, gram_matrix, beta=b, alpha=c
@@ -138,7 +145,7 @@ class Muon(Optimizer):
             else:
                 raise ValueError(
                     f"Unsupported NS coefficients preset: {ns_coefficients}"
-                )        
+                )
         # Normalize a single (a, b, c) tuple into a tuple of tuples.
         if ns_coefficients and not isinstance(ns_coefficients[0], tuple):
             ns_coefficients = (ns_coefficients,)  # type: ignore[assignment]
@@ -291,7 +298,7 @@ Muon.__doc__ = (
 
     We also provide two options for the Newton–Schulz coefficients: "jordan", which corresponds
     to the coefficients used in Keller's original implementation, and "polar_express", which corresponds
-    to the coefficients derived in `Polar Express coefficients`_ and 
+    to the coefficients derived in `Polar Express coefficients`_ and
     `Accelerating Newton-Schulz Iteration for Orthogonalization via Chebyshev-type Polynomials`_.
 
     For further details regarding the algorithm we refer to `Muon: An optimizer for hidden layers in neural networks`_,
@@ -307,9 +314,9 @@ Muon.__doc__ = (
         nesterov (bool, optional): enables Nesterov momentum. Only applicable
             when momentum is non-zero
         ns_coefficients (string or tuple of three floats or tuple of tuples, optional): coefficients \(a,b,c\) for the
-            Newton–Schulz orthogonalization polynomial. If a string is provided, it must be one of "jordan" or 
-            "polar_express". Tuple of three floats corresponds to a single (a, b, c) tuple for all iterations, 
-            while a tuple of tuples corresponds to per-step (a, b, c). If not specified, we will default 
+            Newton–Schulz orthogonalization polynomial. If a string is provided, it must be one of "jordan" or
+            "polar_express". Tuple of three floats corresponds to a single (a, b, c) tuple for all iterations,
+            while a tuple of tuples corresponds to per-step (a, b, c). If not specified, we will default
             to use the "polar_express" coefficients. (default: "polar_express")
         eps (float, optional): term added to the denominator for numerical stability. (default: {EPS})
         ns_steps (int, optional): number of Newton–Schulz iteration steps. (default: {DEFAULT_NS_STEPS})
