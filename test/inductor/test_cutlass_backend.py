@@ -1174,7 +1174,7 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": False,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "cutlass.cutlass_op_allowlist_regex": "128x256x64.*stream_k_warpspecialized_cooperative_epi_nosmem",
+                "cutlass.cutlass_op_allowlist_regex": "128x256x64.*stream_k",
                 "cutlass.cutlass_max_profiling_configs": 1,
             }
         ):
