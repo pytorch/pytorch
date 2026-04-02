@@ -105,10 +105,10 @@ class InductorChoices(CacheAware):
                 ...
 
             torch._inductor.virtualized.V.set_choices_handler(MyHeuristics())
-    """
 
-    def uuid(self) -> str:
-        return type(self).__qualname__
+    Subclasses that are used with inductor_choices_class must override uuid()
+    to return a unique, JSON-serializable identifier for cache key computation.
+    """
 
     def get_config_heuristics(
         self, device_type: str | None = "cuda"

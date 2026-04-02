@@ -27,14 +27,14 @@ Key = TypeVar("Key", str, int, tuple[Any, ...])
 Value = TypeVar("Value", str, int, tuple[Any, ...], bytes, dict[Any, Any], list[Any])
 
 
-class CacheAware(ABC):
+class CacheAware:
     """Base class for objects that participate in cache key computation.
-    Subclasses must return a JSON/pickle-serializable ID from uuid()."""
+    Subclasses must override uuid() to return a JSON/pickle-serializable ID."""
 
-    @abstractmethod
     def uuid(self) -> Any | None:
         """Return an ID uniquely identifying this configuration.
         Return None to skip caching."""
+        raise NotImplementedError("Subclasses must implement uuid()")
 
 
 class CacheError(ValueError):

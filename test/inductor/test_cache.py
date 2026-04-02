@@ -833,14 +833,16 @@ class ConfigSerializationTest(TestCase):
 
     def test_callable_config_not_json_serializable_2(self):
         # save_config_portable calls the factory and then .uuid(),
-        # producing a JSON-serializable string (qualname).
+        # producing a JSON-serializable value for the cache key.
         from torch._inductor.choices import InductorChoices
 
         class ChoicesA(InductorChoices):
-            pass
+            def uuid(self):
+                return "choices_a"
 
         class ChoicesB(InductorChoices):
-            pass
+            def uuid(self):
+                return "choices_b"
 
         # None is trivially JSON-serializable
         with inductor_config.patch(inductor_choices_class=None):
@@ -855,7 +857,7 @@ class ConfigSerializationTest(TestCase):
             portable = inductor_config.save_config_portable(
                 ignore_private_configs=False
             )
-            self.assertIn("ChoicesA", portable["inductor_choices_class"])
+            self.assertEqual(portable["inductor_choices_class"], "choices_a")
             json_a = json.dumps(portable)
 
         # Factory returning ChoicesB → different uuid string
@@ -863,7 +865,7 @@ class ConfigSerializationTest(TestCase):
             portable = inductor_config.save_config_portable(
                 ignore_private_configs=False
             )
-            self.assertIn("ChoicesB", portable["inductor_choices_class"])
+            self.assertEqual(portable["inductor_choices_class"], "choices_b")
             json_b = json.dumps(portable)
 
         self.assertNotEqual(json_a, json_b)
