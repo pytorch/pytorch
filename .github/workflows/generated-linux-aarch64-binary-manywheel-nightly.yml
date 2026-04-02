@@ -128,7 +128,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: "12.6-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -155,7 +155,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: "12.6-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda-aarch64-12_6
@@ -179,7 +179,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: "12.6-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda-aarch64-12_6
@@ -202,7 +202,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: "12.8-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -229,7 +229,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: "12.8-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda-aarch64-12_8
@@ -253,7 +253,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: "12.8-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda-aarch64-12_8
@@ -276,7 +276,7 @@ jobs:
       DESIRED_CUDA: cu129
       GPU_ARCH_VERSION: "12.9-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -303,7 +303,7 @@ jobs:
       DESIRED_CUDA: cu129
       GPU_ARCH_VERSION: "12.9-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda-aarch64-12_9
@@ -327,7 +327,7 @@ jobs:
       DESIRED_CUDA: cu129
       GPU_ARCH_VERSION: "12.9-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda-aarch64-12_9
@@ -350,7 +350,7 @@ jobs:
       DESIRED_CUDA: cu130
       GPU_ARCH_VERSION: "13.0-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -377,7 +377,7 @@ jobs:
       DESIRED_CUDA: cu130
       GPU_ARCH_VERSION: "13.0-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda-aarch64-13_0
@@ -401,7 +401,7 @@ jobs:
       DESIRED_CUDA: cu130
       GPU_ARCH_VERSION: "13.0-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda-aarch64-13_0
@@ -567,7 +567,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: "12.6-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -594,7 +594,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: "12.6-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda-aarch64-12_6
@@ -618,7 +618,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: "12.6-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda-aarch64-12_6
@@ -641,7 +641,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: "12.8-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -668,7 +668,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: "12.8-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda-aarch64-12_8
@@ -692,7 +692,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: "12.8-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda-aarch64-12_8
@@ -715,7 +715,7 @@ jobs:
       DESIRED_CUDA: cu129
       GPU_ARCH_VERSION: "12.9-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -742,7 +742,7 @@ jobs:
       DESIRED_CUDA: cu129
       GPU_ARCH_VERSION: "12.9-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda-aarch64-12_9
@@ -766,7 +766,7 @@ jobs:
       DESIRED_CUDA: cu129
       GPU_ARCH_VERSION: "12.9-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda-aarch64-12_9
@@ -789,7 +789,7 @@ jobs:
       DESIRED_CUDA: cu130
       GPU_ARCH_VERSION: "13.0-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -816,7 +816,7 @@ jobs:
       DESIRED_CUDA: cu130
       GPU_ARCH_VERSION: "13.0-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda-aarch64-13_0
@@ -840,7 +840,7 @@ jobs:
       DESIRED_CUDA: cu130
       GPU_ARCH_VERSION: "13.0-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda-aarch64-13_0
@@ -1006,7 +1006,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: "12.6-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -1033,7 +1033,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: "12.6-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda-aarch64-12_6
@@ -1057,7 +1057,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: "12.6-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda-aarch64-12_6
@@ -1080,7 +1080,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: "12.8-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -1107,7 +1107,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: "12.8-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda-aarch64-12_8
@@ -1131,7 +1131,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: "12.8-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda-aarch64-12_8
@@ -1154,7 +1154,7 @@ jobs:
       DESIRED_CUDA: cu129
       GPU_ARCH_VERSION: "12.9-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -1181,7 +1181,7 @@ jobs:
       DESIRED_CUDA: cu129
       GPU_ARCH_VERSION: "12.9-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda-aarch64-12_9
@@ -1205,7 +1205,7 @@ jobs:
       DESIRED_CUDA: cu129
       GPU_ARCH_VERSION: "12.9-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda-aarch64-12_9
@@ -1228,7 +1228,7 @@ jobs:
       DESIRED_CUDA: cu130
       GPU_ARCH_VERSION: "13.0-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -1255,7 +1255,7 @@ jobs:
       DESIRED_CUDA: cu130
       GPU_ARCH_VERSION: "13.0-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda-aarch64-13_0
@@ -1279,7 +1279,7 @@ jobs:
       DESIRED_CUDA: cu130
       GPU_ARCH_VERSION: "13.0-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda-aarch64-13_0
@@ -1445,7 +1445,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: "12.6-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.13"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -1472,7 +1472,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: "12.6-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda-aarch64-12_6
@@ -1496,7 +1496,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: "12.6-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda-aarch64-12_6
@@ -1519,7 +1519,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: "12.8-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.13"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -1546,7 +1546,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: "12.8-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda-aarch64-12_8
@@ -1570,7 +1570,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: "12.8-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda-aarch64-12_8
@@ -1593,7 +1593,7 @@ jobs:
       DESIRED_CUDA: cu129
       GPU_ARCH_VERSION: "12.9-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.13"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -1620,7 +1620,7 @@ jobs:
       DESIRED_CUDA: cu129
       GPU_ARCH_VERSION: "12.9-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda-aarch64-12_9
@@ -1644,7 +1644,7 @@ jobs:
       DESIRED_CUDA: cu129
       GPU_ARCH_VERSION: "12.9-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda-aarch64-12_9
@@ -1667,7 +1667,7 @@ jobs:
       DESIRED_CUDA: cu130
       GPU_ARCH_VERSION: "13.0-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.13"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -1694,7 +1694,7 @@ jobs:
       DESIRED_CUDA: cu130
       GPU_ARCH_VERSION: "13.0-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda-aarch64-13_0
@@ -1718,7 +1718,7 @@ jobs:
       DESIRED_CUDA: cu130
       GPU_ARCH_VERSION: "13.0-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda-aarch64-13_0
@@ -1884,7 +1884,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: "12.6-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.13t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -1911,7 +1911,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: "12.6-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cuda-aarch64-12_6
@@ -1935,7 +1935,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: "12.6-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cuda-aarch64-12_6
@@ -1958,7 +1958,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: "12.8-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.13t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -1985,7 +1985,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: "12.8-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cuda-aarch64-12_8
@@ -2009,7 +2009,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: "12.8-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cuda-aarch64-12_8
@@ -2032,7 +2032,7 @@ jobs:
       DESIRED_CUDA: cu129
       GPU_ARCH_VERSION: "12.9-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.13t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -2059,7 +2059,7 @@ jobs:
       DESIRED_CUDA: cu129
       GPU_ARCH_VERSION: "12.9-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cuda-aarch64-12_9
@@ -2083,7 +2083,7 @@ jobs:
       DESIRED_CUDA: cu129
       GPU_ARCH_VERSION: "12.9-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cuda-aarch64-12_9
@@ -2106,7 +2106,7 @@ jobs:
       DESIRED_CUDA: cu130
       GPU_ARCH_VERSION: "13.0-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.13t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -2133,7 +2133,7 @@ jobs:
       DESIRED_CUDA: cu130
       GPU_ARCH_VERSION: "13.0-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cuda-aarch64-13_0
@@ -2157,7 +2157,7 @@ jobs:
       DESIRED_CUDA: cu130
       GPU_ARCH_VERSION: "13.0-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cuda-aarch64-13_0
@@ -2323,7 +2323,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: "12.6-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.14"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -2350,7 +2350,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: "12.6-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.14"
       build_name: manywheel-py3_14-cuda-aarch64-12_6
@@ -2374,7 +2374,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: "12.6-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.14"
       build_name: manywheel-py3_14-cuda-aarch64-12_6
@@ -2397,7 +2397,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: "12.8-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.14"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -2424,7 +2424,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: "12.8-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.14"
       build_name: manywheel-py3_14-cuda-aarch64-12_8
@@ -2448,7 +2448,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: "12.8-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.14"
       build_name: manywheel-py3_14-cuda-aarch64-12_8
@@ -2471,7 +2471,7 @@ jobs:
       DESIRED_CUDA: cu129
       GPU_ARCH_VERSION: "12.9-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.14"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -2498,7 +2498,7 @@ jobs:
       DESIRED_CUDA: cu129
       GPU_ARCH_VERSION: "12.9-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.14"
       build_name: manywheel-py3_14-cuda-aarch64-12_9
@@ -2522,7 +2522,7 @@ jobs:
       DESIRED_CUDA: cu129
       GPU_ARCH_VERSION: "12.9-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.14"
       build_name: manywheel-py3_14-cuda-aarch64-12_9
@@ -2545,7 +2545,7 @@ jobs:
       DESIRED_CUDA: cu130
       GPU_ARCH_VERSION: "13.0-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.14"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -2572,7 +2572,7 @@ jobs:
       DESIRED_CUDA: cu130
       GPU_ARCH_VERSION: "13.0-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.14"
       build_name: manywheel-py3_14-cuda-aarch64-13_0
@@ -2596,7 +2596,7 @@ jobs:
       DESIRED_CUDA: cu130
       GPU_ARCH_VERSION: "13.0-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.14"
       build_name: manywheel-py3_14-cuda-aarch64-13_0
@@ -2762,7 +2762,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: "12.6-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.14t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -2789,7 +2789,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: "12.6-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.14t"
       build_name: manywheel-py3_14t-cuda-aarch64-12_6
@@ -2813,7 +2813,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: "12.6-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.14t"
       build_name: manywheel-py3_14t-cuda-aarch64-12_6
@@ -2836,7 +2836,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: "12.8-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.14t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -2863,7 +2863,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: "12.8-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.14t"
       build_name: manywheel-py3_14t-cuda-aarch64-12_8
@@ -2887,7 +2887,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: "12.8-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.14t"
       build_name: manywheel-py3_14t-cuda-aarch64-12_8
@@ -2910,7 +2910,7 @@ jobs:
       DESIRED_CUDA: cu129
       GPU_ARCH_VERSION: "12.9-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.14t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -2937,7 +2937,7 @@ jobs:
       DESIRED_CUDA: cu129
       GPU_ARCH_VERSION: "12.9-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.14t"
       build_name: manywheel-py3_14t-cuda-aarch64-12_9
@@ -2961,7 +2961,7 @@ jobs:
       DESIRED_CUDA: cu129
       GPU_ARCH_VERSION: "12.9-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
       DESIRED_PYTHON: "3.14t"
       build_name: manywheel-py3_14t-cuda-aarch64-12_9
@@ -2984,7 +2984,7 @@ jobs:
       DESIRED_CUDA: cu130
       GPU_ARCH_VERSION: "13.0-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.14t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -3011,7 +3011,7 @@ jobs:
       DESIRED_CUDA: cu130
       GPU_ARCH_VERSION: "13.0-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.14t"
       build_name: manywheel-py3_14t-cuda-aarch64-13_0
@@ -3035,7 +3035,7 @@ jobs:
       DESIRED_CUDA: cu130
       GPU_ARCH_VERSION: "13.0-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
+      DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.14t"
       build_name: manywheel-py3_14t-cuda-aarch64-13_0

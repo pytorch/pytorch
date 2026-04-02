@@ -275,7 +275,7 @@ DEFAULT_TAG = os.getenv("RELEASE_VERSION_TAG", "main")
 WHEEL_CONTAINER_IMAGES = {
     **{gpu_arch: f"manylinux2_28-builder:cuda{gpu_arch}" for gpu_arch in CUDA_ARCHES},
     **{
-        gpu_arch: f"manylinuxaarch64-builder:cuda{gpu_arch.replace('-aarch64', '')}"
+        gpu_arch: f"manylinux2_28_aarch64-builder:cuda{gpu_arch.replace('-aarch64', '')}"
         for gpu_arch in CUDA_AARCH64_ARCHES
     },
     **{gpu_arch: f"manylinux2_28-builder:rocm{gpu_arch}" for gpu_arch in ROCM_ARCHES},

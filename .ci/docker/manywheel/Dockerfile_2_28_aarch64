@@ -1,8 +1,12 @@
+# syntax = docker/dockerfile:experimental
+
+ARG BASE_CUDA_VERSION=12.8
+
 FROM quay.io/pypa/manylinux_2_28_aarch64 as base
 
-ARG GCCTOOLSET_VERSION=13
+ARG DEVTOOLSET_VERSION=13
+ARG NINJA_VERSION
 
-# Language variables
 ENV LC_ALL=en_US.UTF-8
 ENV LANG=en_US.UTF-8
 ENV LANGUAGE=en_US.UTF-8
@@ -10,6 +14,7 @@ ENV LANGUAGE=en_US.UTF-8
 # Installed needed OS packages. This is to support all
 # the binary builds (torch, vision, audio, text, data)
 RUN yum -y install epel-release
+RUN /usr/bin/crb enable
 RUN yum -y update
 RUN yum install -y \
   autoconf \
@@ -35,24 +40,22 @@ RUN yum install -y \
   yasm \
   zstd \
   sudo \
-  gcc-toolset-${GCCTOOLSET_VERSION}-gcc \
-  gcc-toolset-${GCCTOOLSET_VERSION}-gcc-c++ \
-  gcc-toolset-${GCCTOOLSET_VERSION}-gcc-gfortran \
-  gcc-toolset-${GCCTOOLSET_VERSION}-gdb
+  glibc-langpack-en \
+  gcc-toolset-${DEVTOOLSET_VERSION}-gcc \
+  gcc-toolset-${DEVTOOLSET_VERSION}-gcc-c++ \
+  gcc-toolset-${DEVTOOLSET_VERSION}-gcc-gfortran \
+  gcc-toolset-${DEVTOOLSET_VERSION}-gdb
 
-# (optional) Install non-default Ninja version
-ARG NINJA_VERSION
-COPY ./common/install_ninja.sh install_ninja.sh
-RUN if [ -n "${NINJA_VERSION}" ]; then bash ./install_ninja.sh; fi
-RUN rm install_ninja.sh
+# Ensure the expected toolset is used
+ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
+ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
 
-# Ensure the expected devtoolset is used
-ENV PATH=/opt/rh/gcc-toolset-${GCCTOOLSET_VERSION}/root/usr/bin:$PATH
-ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${GCCTOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${GCCTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
+# Create python3 symlink for tools that expect it in PATH (e.g., NCCL build)
+RUN ln -sf /opt/python/cp310-cp310/bin/python3 /usr/local/bin/python3
 
-# Build a newer version of libgomp than that supported in in Almalinux 8.
+# Build a newer version of libgomp than that supported in Almalinux 8
 COPY ./common/install_libgomp.sh install_libgomp.sh
-RUN bash ./install_libgomp.sh && rm install_libgomp.sh
+RUN bash ./install_libgomp.sh && rm -f install_libgomp.sh
 
 # git236+ would refuse to run git commands in repos owned by other users
 # Which causes version check to fail, as pytorch repo is bind-mounted into the image
@@ -60,24 +63,90 @@ RUN bash ./install_libgomp.sh && rm install_libgomp.sh
 # For more details see https://github.com/pytorch/pytorch/issues/78659#issuecomment-1144107327
 RUN git config --global --add safe.directory "*"
 
+
+FROM base as openssl
+# Install OpenSSL used by manylinux tooling
+ADD ./common/install_openssl.sh install_openssl.sh
+RUN bash ./install_openssl.sh && rm -f install_openssl.sh
+ENV SSL_CERT_FILE=/opt/_internal/certs.pem
+
+
 FROM base as openblas
 # Install openblas
 ARG OPENBLAS_VERSION
 ADD ./common/install_openblas.sh install_openblas.sh
-RUN bash ./install_openblas.sh && rm install_openblas.sh
+RUN bash ./install_openblas.sh && rm -f install_openblas.sh
+
 
 # Install Arm Compute Library
 FROM base as arm_compute
-# use python3.9 to install scons
-RUN python3.9 -m pip install scons==4.7.0
-RUN ln -sf /opt/python/cp39-cp39/bin/scons /usr/local/bin
+# Install scons using the manylinux-provided CPython 3.9
+RUN /opt/python/cp39-cp39/bin/python -m pip install scons==4.7.0 && \
+    ln -sf /opt/python/cp39-cp39/bin/scons /usr/local/bin
 COPY ./common/install_acl.sh install_acl.sh
-RUN bash ./install_acl.sh && rm install_acl.sh
-FROM base as final
+RUN bash ./install_acl.sh && rm -f install_acl.sh
+
+
+FROM base as cuda
+ARG BASE_CUDA_VERSION
+ADD ./common/install_cuda.sh install_cuda.sh
+COPY ./common/install_nccl.sh install_nccl.sh
+COPY ./common/install_cusparselt.sh install_cusparselt.sh
+COPY ./ci_commit_pins/nccl* /ci_commit_pins/
+RUN bash ./install_cuda.sh ${BASE_CUDA_VERSION} && \
+    rm -f install_cuda.sh install_nccl.sh install_cusparselt.sh && \
+    rm -f /ci_commit_pins/nccl*
+
+
+FROM base as magma
+ARG BASE_CUDA_VERSION
+ADD ./common/install_magma.sh install_magma.sh
+RUN bash ./install_magma.sh ${BASE_CUDA_VERSION} && rm -f install_magma.sh
+
+
+FROM base as nvpl
+# Install wget (not included in manylinux base image)
+RUN yum install -y wget && yum clean all
+ADD ./common/install_nvpl.sh install_nvpl.sh
+RUN bash ./install_nvpl.sh && rm -f install_nvpl.sh
+
+
+# Common “final” base: ACL + OpenSSL + py cleanup + libstdc patch
+FROM base as common_final
 
 # remove unnecessary python versions
-COPY --from=openblas     /opt/OpenBLAS/  /opt/OpenBLAS/
-COPY --from=arm_compute /acl /acl
-ENV LD_LIBRARY_PATH=/opt/OpenBLAS/lib:/acl/build/:$LD_LIBRARY_PATH
+RUN rm -rf /opt/python/cp26-cp26m /opt/_internal/cpython-2.6.9-ucs2 && \
+    rm -rf /opt/python/cp26-cp26mu /opt/_internal/cpython-2.6.9-ucs4 && \
+    rm -rf /opt/python/cp33-cp33m /opt/_internal/cpython-3.3.6 && \
+    rm -rf /opt/python/cp34-cp34m /opt/_internal/cpython-3.4.6
+
+COPY --from=openssl     /opt/openssl/  /opt/openssl/
+COPY --from=arm_compute /acl           /acl
+ENV SSL_CERT_FILE=/opt/_internal/certs.pem
+ENV LD_LIBRARY_PATH=/acl/build/:$LD_LIBRARY_PATH
+
 ADD ./common/patch_libstdc.sh patch_libstdc.sh
-RUN bash ./patch_libstdc.sh && rm patch_libstdc.sh
+RUN bash ./patch_libstdc.sh && rm -f patch_libstdc.sh
+
+
+# CPU target (matches current 2_28_aarch64 behavior: OpenBLAS + ACL)
+FROM common_final as cpu_final
+COPY --from=openblas /opt/OpenBLAS/ /opt/OpenBLAS/
+ENV LD_LIBRARY_PATH=/opt/OpenBLAS/lib:$LD_LIBRARY_PATH
+
+
+# CUDA target (matches current cuda_aarch64 behavior: CUDA + MAGMA + NVPL + ACL; no OpenBLAS)
+FROM common_final as cuda_final
+ARG BASE_CUDA_VERSION
+
+RUN rm -rf /usr/local/cuda-${BASE_CUDA_VERSION}
+COPY --from=cuda   /usr/local/cuda-${BASE_CUDA_VERSION} /usr/local/cuda-${BASE_CUDA_VERSION}
+COPY --from=magma  /usr/local/cuda-${BASE_CUDA_VERSION} /usr/local/cuda-${BASE_CUDA_VERSION}
+COPY --from=nvpl   /opt/nvpl/lib/                       /usr/local/lib/
+COPY --from=nvpl   /opt/nvpl/include/                   /usr/local/include/
+
+RUN ln -sf /usr/local/cuda-${BASE_CUDA_VERSION} /usr/local/cuda
+ENV PATH=/usr/local/cuda/bin:$PATH
+
+# Optional: make CPU the default final stage if someone builds without --target
+FROM cpu_final as final

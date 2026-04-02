@@ -12,6 +12,6 @@ cd "${OPENSSL}"
 NPROC=$[$(nproc) - 2]
 make -j${NPROC}; make install_sw
 # Link the ssl libraries to the /usr/lib folder.
-sudo ln -s /opt/openssl/lib/lib* /usr/lib
+ln -sf /opt/openssl/lib/lib* /usr/lib
 cd ..
 rm -rf "${OPENSSL}"
