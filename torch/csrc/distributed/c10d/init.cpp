@@ -1247,8 +1247,8 @@ This class does not support ``__members__`` property.)");
             auto op =
                 c10::Dispatcher::singleton()
                     .findSchemaOrThrow("symm_mem::stream_write_value32_", "")
-                    .typed<at::Tensor(at::Tensor&, int64_t, int64_t)>();
-            return op.call(input, offset, val);
+                    .typed<void(at::Tensor&, int64_t, int64_t)>();
+            op.call(input, offset, val);
           },
           py::arg("input"),
           py::arg("offset"),
@@ -1259,9 +1259,9 @@ This class does not support ``__members__`` property.)");
             // The range of `val` is checked inside the op
             auto op = c10::Dispatcher::singleton()
                           .findSchemaOrThrow("symm_mem::memset32_", "")
-                          .typed<at::Tensor(
+                          .typed<void(
                               at::Tensor&, int64_t, int64_t, int64_t)>();
-            return op.call(input, offset, val, count);
+            op.call(input, offset, val, count);
           },
           py::arg("input"),
           py::arg("offset"),
