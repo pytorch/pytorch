@@ -741,11 +741,7 @@ class SideEffects:
             var.mutation_type.is_modified = True
         if var.source is not None:
             self.mutated_sources.add(var.source)
-        if (
-            var.source
-            and isinstance(var, variables.ConstDictVariable)
-            and not isinstance(var, variables.SetVariable)
-        ):
+        if var.source and isinstance(var, variables.ConstDictVariable):
             self._has_existing_dict_mutation = True
 
     def has_existing_dict_mutation(self) -> bool:
@@ -1095,7 +1091,7 @@ class SideEffects:
                 )
                 _maybe_log_side_effect(var)
 
-            elif isinstance(var, variables.ConstDictVariable):
+            elif isinstance(var, (variables.ConstDictVariable, variables.SetVariable)):
                 # Reconstruct works as follow:
                 # (1) Skip codegen if there are no new items
                 # (2) codegen(...) each pair of key/value

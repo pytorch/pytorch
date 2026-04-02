@@ -95,7 +95,8 @@ from ..utils import (
     unpatched_nn_module_getattr,
 )
 from .base import MutationType, NO_SUCH_SUBOBJ, ValueMutationNew, VariableTracker
-from .dicts import ConstDictVariable, DefaultDictVariable, SetVariable
+from .dicts import ConstDictVariable, DefaultDictVariable
+from .sets import SetVariable
 
 
 try:

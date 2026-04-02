@@ -52,8 +52,9 @@ def vt_identity_compare(
     # Mutable containers created during tracing: VT identity = Python identity.
     from .dicts import ConstDictVariable
     from .lists import ListVariable
+    from .sets import SetVariable
 
-    if isinstance(left, (ConstDictVariable, ListVariable)):
+    if isinstance(left, (ConstDictVariable, ListVariable, SetVariable)):
         return CONSTANT_VARIABLE_FALSE
 
     # Different Python types can never be the same object.

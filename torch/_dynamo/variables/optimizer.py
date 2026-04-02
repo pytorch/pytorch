@@ -46,6 +46,7 @@ from .constant import CONSTANT_VARIABLE_TRUE, ConstantVariable
 from .dicts import ConstDictVariable
 from .lists import ListVariable
 from .misc import GetAttrVariable
+from .sets import HashableTracker
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -207,9 +208,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
             VariableTracker.build(tx, self.value.param_groups, source)
         )
         for param_group_vt in param_groups_vt.items:
-            key = ConstDictVariable._HashableTracker(
-                ConstantVariable.create("capturable")
-            )
+            key = HashableTracker(ConstantVariable.create("capturable"))
             param_group_vt.items[key] = CONSTANT_VARIABLE_TRUE
 
     def get_python_args(
