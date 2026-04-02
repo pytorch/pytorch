@@ -342,7 +342,7 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 //
 // In ROCm 7, warpSize is no longer constexpr, matching CUDA behavior.
 // We can now only use warpSize for C10_WARP_SIZE in device code and this is
-// enfored by using __device__ in its definition.  In host code where
+// enforced by using __device__ in its definition.  In host code where
 // C10_WARP_SIZE was previously used as a compile-time constant, this will now
 // cause a compile-time error.
 //
@@ -368,6 +368,7 @@ static __device__ inline int C10_WARP_SIZE_INTERNAL() {
 #define C10_WARP_SIZE_LOWER_BOUND 32
 #define C10_WARP_SIZE_UPPER_BOUND 32
 #endif
+#endif // __HIPCC__
 #else // !USE_ROCM
 #define C10_WARP_SIZE 32
 #define C10_WARP_SIZE_LOWER_BOUND 32
