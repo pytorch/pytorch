@@ -568,7 +568,7 @@ class ConfigModule(ModuleType):
         config = self._get_dict(ignored_prefixes=prefixes)
         for key in getattr(self, "_cache_config_factory_keys", []):
             if key in config and config[key] is not None:
-                config[key] = hash(config[key]())
+                config[key] = config[key]().uuid()
         return config
 
     def codegen_config(self) -> str:

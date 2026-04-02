@@ -12,6 +12,7 @@ from torch._inductor.scheduler import MixOrderReduction
 from torch.utils._sympy.value_ranges import bound_sympy
 
 from . import config
+from .cache import CacheAware
 from .codecache import write_text
 from .kernel_inputs import KernelInputs  # noqa: TC001
 from .kernel_template_choice import make_ktc_generator
@@ -93,7 +94,7 @@ class FusionScore:
         )
 
 
-class InductorChoices:
+class InductorChoices(CacheAware):
     """
     This class contains a collection of default heuristics that effect performance of our generated
     code.  We try to not put correctness requirements in this file.
@@ -106,8 +107,8 @@ class InductorChoices:
             torch._inductor.virtualized.V.set_choices_handler(MyHeuristics())
     """
 
-    def __hash__(self) -> int:
-        return hash(type(self).__qualname__)
+    def uuid(self) -> str:
+        return type(self).__qualname__
 
     def get_config_heuristics(
         self, device_type: str | None = "cuda"
