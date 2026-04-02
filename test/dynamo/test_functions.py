@@ -3007,7 +3007,6 @@ class GraphModule(torch.nn.Module):
         else:
             return x.cos()
 
-    @unittest.expectedFailure
     def test_getattr_metaclass(self):
         class Meta(type):
             def __getattr__(cls, name):
