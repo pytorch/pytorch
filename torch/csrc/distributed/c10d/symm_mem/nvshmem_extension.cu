@@ -78,7 +78,7 @@ void nvshmemx_cumodule_init(uintptr_t module) {
     "nvshmemx_cumodule_init failed");
 }
 
-at::Tensor nvshmem_broadcast(at::Tensor& input, const int64_t root, const std::string& group_name) {
+void nvshmem_broadcast(at::Tensor& input, const int64_t root, const std::string& group_name) {
   auto input_hdl = c10d::symmetric_memory::rendezvous(input, group_name);
   int rank = input_hdl->get_rank();
   void* buffer_ptr = input.mutable_data_ptr();
@@ -90,7 +90,6 @@ at::Tensor nvshmem_broadcast(at::Tensor& input, const int64_t root, const std::s
 
   auto stream = at::cuda::getCurrentCUDAStream();
   nvshmemx_broadcastmem_on_stream(team, buffer_ptr, buffer_ptr, buffer_size, root, stream);
-  return input;
 }
 
 void nvshmem_put(at::Tensor& tensor, const int64_t peer) {
@@ -147,7 +146,7 @@ void nvshmem_get(at::Tensor& tensor, const int64_t peer) {
   nvshmemx_getmem_on_stream(tensor.mutable_data_ptr(), buffer_ptr, buffer_size, peer, stream);
 }
 
-at::Tensor nvshmem_all_to_all(
+void nvshmem_all_to_all(
     at::Tensor& input,
     at::Tensor& out,
     std::string group_name) {
@@ -169,7 +168,6 @@ at::Tensor nvshmem_all_to_all(
 
   auto stream = at::cuda::getCurrentCUDAStream(input.device().index());
   nvshmemx_alltoallmem_on_stream(team, output_ptr, input_ptr, bytes_per_rank, stream);
-  return out;
 }
 
 // This is an exclusive prefix sum function that calculates read (or write) offsets for each peer.

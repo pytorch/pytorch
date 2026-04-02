@@ -25,7 +25,7 @@ TORCH_API void nvshmem_put(at::Tensor& tensor, const int64_t peer);
 
 TORCH_API void nvshmem_get(at::Tensor& tensor, const int64_t peer);
 
-at::Tensor nvshmem_broadcast(
+void nvshmem_broadcast(
     at::Tensor& input,
     const int64_t root,
     const std::string& group_name);
@@ -41,7 +41,7 @@ TORCH_API void nvshmem_put_with_signal(
     int64_t signal,
     int64_t peer);
 
-at::Tensor nvshmem_all_to_all(
+void nvshmem_all_to_all(
     at::Tensor& input,
     at::Tensor& out,
     std::string group_name);

@@ -160,7 +160,7 @@ static __global__ void multimem_all_reduce_kernel(
   sync_remote_blocks<true, true>(signal_pads, rank, world_size);
 }
 
-at::Tensor multimem_all_reduce_(
+void multimem_all_reduce_(
     const at::Tensor& input,
     std::string reduce_op,
     std::string group_name) {
@@ -225,7 +225,7 @@ at::Tensor multimem_all_reduce_(
           C10_CUDA_KERNEL_LAUNCH_CHECK();
         });
       });
-  return input;
+  return;
 }
 
 template <typename T, int alignment>
@@ -256,7 +256,7 @@ static __global__ void multimem_one_shot_reduce_kernel(
   sync_remote_blocks<true, false>(signal_pads, rank, world_size);
 }
 
-at::Tensor multimem_one_shot_reduce_out(
+void multimem_one_shot_reduce_out(
     const at::Tensor& input,
     std::string reduce_op,
     int64_t root,
@@ -341,17 +341,17 @@ at::Tensor multimem_one_shot_reduce_out(
           C10_CUDA_KERNEL_LAUNCH_CHECK();
         });
       });
-  return out;
+  return;
 }
 
-at::Tensor multimem_one_shot_all_reduce_out(
+void multimem_one_shot_all_reduce_out(
     const at::Tensor& input,
     std::string reduce_op,
     std::string group_name,
     at::Tensor out) {
   auto group = c10d::resolve_process_group(group_name);
   int root = group->getRank();  // each rank reduces to itself
-  return multimem_one_shot_reduce_out(input, reduce_op, root, group_name, out);
+  multimem_one_shot_reduce_out(input, reduce_op, root, group_name, out);
 }
 
 at::Tensor multimem_one_shot_all_reduce(
@@ -359,7 +359,8 @@ at::Tensor multimem_one_shot_all_reduce(
     std::string reduce_op,
     std::string group_name) {
   auto out = at::empty_like(input);
-  return multimem_one_shot_all_reduce_out(input, reduce_op, group_name, out);
+  multimem_one_shot_all_reduce_out(input, reduce_op, group_name, out);
+  return out;
 }
 
 template <int alignment>
@@ -386,7 +387,7 @@ static __global__ void multimem_all_gather_kernel(
   sync_remote_blocks<true, true>(signal_pads, rank, world_size);
 }
 
-at::Tensor multimem_all_gather_out(
+void multimem_all_gather_out(
     const at::Tensor& input,
     std::string group_name,
     at::Tensor out) {
@@ -466,7 +467,7 @@ at::Tensor multimem_all_gather_out(
             symm_mem->get_world_size());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   });
-  return out;
+  return;
 }
 
 #endif //no multi-cast support on ROCm
@@ -512,7 +513,7 @@ static __launch_bounds__(one_shot_all_reduce_max_num_threads) __global__
   sync_remote_blocks<true, false>(signal_pads, rank, world_size);
 }
 
-at::Tensor one_shot_all_reduce_out_impl(
+void one_shot_all_reduce_out_impl(
     const at::Tensor& input,
     const std::optional<at::Tensor>& local_input,
     std::string reduce_op,
@@ -555,7 +556,7 @@ at::Tensor one_shot_all_reduce_out_impl(
   }
   if (input.numel() == 0) {
     TORCH_CHECK(input.scalar_type() == out.scalar_type());
-    return out;
+    return;
   }
   auto symm_mem = c10d::symmetric_memory::rendezvous(input, group_name);
   TORCH_CHECK(
@@ -608,25 +609,25 @@ at::Tensor one_shot_all_reduce_out_impl(
           });
         });
       });
-  return out;
+  return;
 }
 
-at::Tensor one_shot_all_reduce_out(
+void one_shot_all_reduce_out(
     const at::Tensor& input,
     std::string reduce_op,
     std::string group_name,
     at::Tensor out) {
-  return one_shot_all_reduce_out_impl(
+  one_shot_all_reduce_out_impl(
       input, std::nullopt, reduce_op, group_name, out);
 }
 
-at::Tensor one_shot_all_reduce_copy_out(
+void one_shot_all_reduce_copy_out(
     const at::Tensor& input,
     const at::Tensor& local_input,
     std::string reduce_op,
     std::string group_name,
     at::Tensor out) {
-  return one_shot_all_reduce_out_impl(
+  one_shot_all_reduce_out_impl(
       input, local_input, reduce_op, group_name, out);
 }
 
@@ -635,8 +636,9 @@ at::Tensor one_shot_all_reduce(
     std::string reduce_op,
     std::string group_name) {
   auto out = at::empty_like(input);
-  return one_shot_all_reduce_out_impl(
+  one_shot_all_reduce_out_impl(
       input, std::nullopt, reduce_op, group_name, out);
+  return out;
 }
 
 at::Tensor one_shot_all_reduce_copy(
@@ -645,8 +647,9 @@ at::Tensor one_shot_all_reduce_copy(
     std::string reduce_op,
     std::string group_name) {
   auto out = at::empty_like(local_input);
-  return one_shot_all_reduce_out_impl(
+  one_shot_all_reduce_out_impl(
       input, local_input, reduce_op, group_name, out);
+  return out;
 }
 
 #if defined(USE_ROCM)
@@ -784,7 +787,7 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
   sync_remote_blocks<true, true>(signal_pads, rank, world_size);
 }
 
-at::Tensor two_shot_all_reduce_impl(
+void two_shot_all_reduce_impl(
     at::Tensor input,
     std::optional<at::Tensor> output,
     std::string reduce_op,
@@ -834,11 +837,11 @@ at::Tensor two_shot_all_reduce_impl(
         output->sizes());
     if (input.numel() == 0) {
       TORCH_CHECK(output->scalar_type() == input.scalar_type());
-      return *output;
+      return;
     }
   } else {
     if (input.numel() == 0) {
-      return input;
+      return;
     }
   }
 
@@ -879,7 +882,7 @@ at::Tensor two_shot_all_reduce_impl(
             });
           });
         });
-    return input;
+    return;
   } else {
     AT_DISPATCH_FLOAT_AND_BFLOAT16(
         input.scalar_type(), "two_shot_all_reduce", [&]() {
@@ -903,26 +906,26 @@ at::Tensor two_shot_all_reduce_impl(
             });
           });
         });
-    return *output;
+    return;
   }
 }
 
-at::Tensor two_shot_all_reduce_(
+void two_shot_all_reduce_(
     at::Tensor input,
     std::string reduce_op,
     std::string group_name) {
-  return two_shot_all_reduce_impl(input, std::nullopt, reduce_op, group_name);
+  two_shot_all_reduce_impl(input, std::nullopt, reduce_op, group_name);
 }
 
-at::Tensor two_shot_all_reduce_out(
+void two_shot_all_reduce_out(
     at::Tensor input,
     std::string reduce_op,
     std::string group_name,
     at::Tensor output) {
-  return two_shot_all_reduce_impl(input, output, reduce_op, group_name);
+  two_shot_all_reduce_impl(input, output, reduce_op, group_name);
 }
 
-at::Tensor reduce_scatter_out(
+void reduce_scatter_out(
     at::Tensor input,
     std::string group_name,
     bool split_last_dim,
@@ -997,7 +1000,7 @@ at::Tensor reduce_scatter_out(
   }
   if (input.numel() == 0) {
     TORCH_CHECK(input.scalar_type() == output.scalar_type());
-    return output;
+    return;
   }
 
   TORCH_CHECK(
@@ -1074,26 +1077,26 @@ at::Tensor reduce_scatter_out(
           });
         });
   }
-  return output;
+  return;
 }
 } // namespace
 #elif defined(CUDART_VERSION) && CUDART_VERSION < 12030
 namespace {
-at::Tensor multimem_all_reduce_(
+void multimem_all_reduce_(
     const at::Tensor& input,
     std::string reduce_op,
     std::string group_name) {
   TORCH_CHECK(false, "multimem_all_reduce_: requires CUDA 12.3+.");
-  return input;
+  return;
 }
 
-at::Tensor multimem_one_shot_all_reduce_out(
+void multimem_one_shot_all_reduce_out(
     const at::Tensor& input,
     std::string reduce_op,
     std::string group_name,
     at::Tensor out) {
   TORCH_CHECK(false, "multimem_one_shot_all_reduce_out: requires CUDA 12.3+.");
-  return out;
+  return;
 }
 
 at::Tensor multimem_one_shot_all_reduce(
@@ -1104,31 +1107,31 @@ at::Tensor multimem_one_shot_all_reduce(
   return input;
 }
 
-at::Tensor multimem_all_gather_out(
+void multimem_all_gather_out(
     const at::Tensor& input,
     std::string group_name,
     at::Tensor out) {
   TORCH_CHECK(false, "multimem_all_gather_out: requires CUDA 12.3+.");
-  return out;
+  return;
 }
 
-at::Tensor one_shot_all_reduce_out(
+void one_shot_all_reduce_out(
     const at::Tensor& input,
     std::string reduce_op,
     std::string group_name,
     at::Tensor out) {
   TORCH_CHECK(false, "one_shot_all_reduce_out: requires CUDA 12.3+.");
-  return out;
+  return;
 }
 
-at::Tensor one_shot_all_reduce_copy_out(
+void one_shot_all_reduce_copy_out(
     const at::Tensor& input,
     const at::Tensor& local_input,
     std::string reduce_op,
     std::string group_name,
     at::Tensor out) {
   TORCH_CHECK(false, "one_shot_all_reduce_copy_out: requires CUDA 12.3+.");
-  return out;
+  return;
 }
 
 at::Tensor one_shot_all_reduce(
@@ -1148,40 +1151,40 @@ at::Tensor one_shot_all_reduce_copy(
   return input;
 }
 
-at::Tensor two_shot_all_reduce_(
+void two_shot_all_reduce_(
     at::Tensor input,
     std::string reduce_op,
     std::string group_name) {
   TORCH_CHECK(false, "two_shot_all_reduce_: requires CUDA 12.3+.");
-  return input;
+  return;
 }
 
-at::Tensor two_shot_all_reduce_out(
+void two_shot_all_reduce_out(
     at::Tensor input,
     std::string reduce_op,
     std::string group_name,
     at::Tensor output) {
   TORCH_CHECK(false, "two_shot_all_reduce_out: requires CUDA 12.3+.");
-  return output;
+  return;
 }
 
-at::Tensor reduce_scatter_out(
+void reduce_scatter_out(
     at::Tensor input,
     std::string group_name,
     bool split_last_dim,
     at::Tensor output) {
   TORCH_CHECK(false, "reduce_scatter_out: requires CUDA 12.3+.");
-  return output;
+  return;
 }
 
-at::Tensor multimem_one_shot_reduce_out(
+void multimem_one_shot_reduce_out(
     const at::Tensor& input,
     std::string reduce_op,
     int64_t root,
     std::string group_name,
     at::Tensor out) {
   TORCH_CHECK(false, "multimem_one_shot_reduce_out: requires CUDA 12.3+.");
-  return out;
+  return;
 }
 
 } // namespace
@@ -1189,7 +1192,7 @@ at::Tensor multimem_one_shot_reduce_out(
 
 namespace {
 
-at::Tensor memset32_(
+void memset32_(
     at::Tensor& input,
     int64_t offset,
     int64_t val,
@@ -1244,10 +1247,10 @@ at::Tensor memset32_(
   TORCH_CHECK(
       false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
 #endif
-  return input;
+  return;
 }
 
-at::Tensor stream_write_value32_(
+void stream_write_value32_(
     at::Tensor& input,
     int64_t offset,
     int64_t val) {
@@ -1302,7 +1305,7 @@ at::Tensor stream_write_value32_(
   TORCH_CHECK(
       false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
 #endif
-  return input;
+  return;
 }
 
 } // namespace

@@ -495,34 +495,34 @@ at::Tensor one_shot_all_reduce_copy_meta(
 
 TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def(
-      "multimem_all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)");
+      "multimem_all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> ()");
   m.def(
       "multimem_one_shot_all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor");
   m.def(
-      "multimem_one_shot_all_reduce_out(Tensor input, str reduce_op, str group_name, Tensor(a!) out) -> Tensor(a!)");
+      "multimem_one_shot_all_reduce_out(Tensor input, str reduce_op, str group_name, Tensor(a!) out) -> ()");
   m.def(
-      "multimem_one_shot_reduce_out(Tensor input, str reduce_op, int root, str group_name, Tensor(a!) out) -> Tensor(a!)");
+      "multimem_one_shot_reduce_out(Tensor input, str reduce_op, int root, str group_name, Tensor(a!) out) -> ()");
   m.def(
-      "multimem_all_gather_out(Tensor input, str group_name, Tensor(a!) out) -> Tensor(a!)");
+      "multimem_all_gather_out(Tensor input, str group_name, Tensor(a!) out) -> ()");
   m.def(
       "one_shot_all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor");
   m.def(
-      "one_shot_all_reduce_out(Tensor input, str reduce_op, str group_name, Tensor(a!) out) -> Tensor(a!)");
+      "one_shot_all_reduce_out(Tensor input, str reduce_op, str group_name, Tensor(a!) out) -> ()");
   m.def(
       "one_shot_all_reduce_copy(Tensor symm_buffer, Tensor local_input, str reduce_op, str group_name) -> Tensor");
   m.def(
-      "one_shot_all_reduce_copy_out(Tensor symm_buffer, Tensor local_input, str reduce_op, str group_name, Tensor(a!) out) -> Tensor(a!)");
+      "one_shot_all_reduce_copy_out(Tensor symm_buffer, Tensor local_input, str reduce_op, str group_name, Tensor(a!) out) -> ()");
 
   m.def(
-      "two_shot_all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)");
-
-  // note this implementation also modified the input tensor
-  m.def(
-      "two_shot_all_reduce_out(Tensor(a!) input, str reduce_op, str group_name, Tensor(b!) output) -> Tensor(b!)");
+      "two_shot_all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> ()");
 
   // note this implementation also modified the input tensor
   m.def(
-      "reduce_scatter_out(Tensor(a!) input, str group_name, bool split_last_dim, Tensor(b!) output) -> Tensor(b!)");
+      "two_shot_all_reduce_out(Tensor(a!) input, str reduce_op, str group_name, Tensor(b!) output) -> ()");
+
+  // note this implementation also modified the input tensor
+  m.def(
+      "reduce_scatter_out(Tensor(a!) input, str group_name, bool split_last_dim, Tensor(b!) output) -> ()");
 
   // An mm that supports consuming asynchronous input. It guarantees the
   // following rasterization order, and that the corresponding signal arrives
@@ -535,15 +535,12 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   //     # Compute output tiles that consumes the input chunk
   m.def(
       "_async_input_mm(Tensor a, Tensor b, Tensor a_chunk_signals, int a_chunk_pivot) -> Tensor");
-  m.def(
-      "stream_write_value32_(Tensor(a!) input, int offset, int val) -> Tensor(a!)");
-  m.def(
-      "memset32_(Tensor(a!) input, int offset, int val, int count) -> Tensor(a!)");
+  m.def("stream_write_value32_(Tensor(a!) input, int offset, int val) -> ()");
+  m.def("memset32_(Tensor(a!) input, int offset, int val, int count) -> ()");
 
   m.def("nvshmem_put(Tensor(a!) tensor, int peer) -> ()");
   m.def("nvshmem_get(Tensor(a!) tensor, int peer) -> ()");
-  m.def(
-      "nvshmem_broadcast(Tensor(a!) input, int root, str group_name) -> Tensor(a!)");
+  m.def("nvshmem_broadcast(Tensor(a!) input, int root, str group_name) -> ()");
   m.def("nvshmem_wait_for_signal(Tensor sigpad, int signal, int peer) -> ()");
   m.def(
       "nvshmem_put_with_signal(Tensor(a) tensor, Tensor(a) sigpad, int signal, int peer) -> ()");
@@ -554,7 +551,7 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def(
       "nccl_reduce_scatter_offset(Tensor input, Tensor(a!)[] out, str group_name, int dim, int[]? offsets=None, int[]? dst_ranks=None, str red_op='sum') -> ()");
   m.def(
-      "nvshmem_all_to_all(Tensor input, Tensor(a!) out, str group_name) -> Tensor(a!)");
+      "nvshmem_all_to_all(Tensor input, Tensor(a!) out, str group_name) -> ()");
   m.def(
       "all_to_all_vdev(Tensor input, Tensor(a!) out, Tensor in_splits, Tensor(a!) out_splits_offsets, str group_name) -> ()");
   m.def(
