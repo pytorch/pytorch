@@ -873,23 +873,11 @@ class ConfigSerializationTest(TestCase):
     def test_callable_config_without_uuid(self):
         from torch._inductor.choices import InductorChoices
 
-        # A subclass without uuid() warns and is excluded from the config hash.
+        # A subclass without uuid() raises RuntimeError.
         class PlainChoices(InductorChoices):
             pass
 
         with inductor_config.patch(inductor_choices_class=PlainChoices):
-            with self.assertWarnsRegex(UserWarning, "does not implement uuid"):
-                portable = inductor_config.save_config_portable(
-                    ignore_private_configs=False
-                )
-            self.assertNotIn("inductor_choices_class", portable)
-            json.dumps(portable)
-
-        # With strict mode, missing uuid() raises.
-        with inductor_config.patch(
-            inductor_choices_class=PlainChoices,
-            strict_cache_config_hashing=True,
-        ):
             with self.assertRaises(RuntimeError):
                 inductor_config.save_config_portable(ignore_private_configs=False)
 

@@ -824,14 +824,8 @@ assume_unaligned_fallback_output = (
 #
 #     config.inductor_choices_class = _custom_choices_factory
 #
-# The returned instance should implement uuid() for cache key serialization.
+# The returned instance must implement uuid() for cache key serialization.
 inductor_choices_class: Callable[[], "InductorChoices"] | None = None
-
-# When True, raise an error if inductor_choices_class (or any factory config)
-# does not implement uuid(). This prevents silent incorrect cache hits.
-strict_cache_config_hashing: bool = (
-    os.environ.get("TORCHINDUCTOR_STRICT_CACHE_CONFIG_HASHING", "0") == "1"
-)
 
 # fuse even in cases without common reads
 aggressive_fusion = False
@@ -2516,7 +2510,7 @@ _cache_config_ignore_prefix: list[str] = [
 ]
 
 # Config keys whose values are callable factories. save_config_portable will
-# instantiate the factory and use .uuid() for serialization if available.
+# instantiate the factory and use .uuid() for serialization.
 _cache_config_factory_keys: list[str] = [
     "inductor_choices_class",
 ]

@@ -573,22 +573,12 @@ class ConfigModule(ModuleType):
                 instance = config[key]()
                 if hasattr(instance, "uuid"):
                     config[key] = instance.uuid()
-                elif getattr(self, "strict_cache_config_hashing", False):
+                else:
                     raise RuntimeError(
                         f"Config '{key}' is set to {config[key]} which does not "
                         f"implement uuid(). Implement uuid() for cache key "
-                        f"participation, or set strict_cache_config_hashing=False."
+                        f"participation."
                     )
-                else:
-                    import warnings
-
-                    warnings.warn(
-                        f"Config '{key}' is set to {config[key]} which does not "
-                        f"implement uuid(). It will be ignored in cache key "
-                        f"computation, which may lead to incorrect cache hits.",
-                        stacklevel=2,
-                    )
-                    del config[key]
         return config
 
     def codegen_config(self) -> str:

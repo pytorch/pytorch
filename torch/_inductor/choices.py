@@ -105,8 +105,8 @@ class InductorChoices:
 
             torch._inductor.virtualized.V.set_choices_handler(MyHeuristics())
 
-    Subclasses that want to participate in cache key computation should
-    implement uuid().
+    Subclasses used with inductor_choices_class must implement uuid() for
+    cache key computation.
     """
 
     def get_config_heuristics(
