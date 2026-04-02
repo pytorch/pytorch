@@ -2538,7 +2538,6 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> VariableTracker:
         assert self._HOP_NAME is not None
         self.supports_input_mutation = not torch.is_grad_enabled()
-        self.supports_aliasing = not torch.is_grad_enabled()
         return _call_while_loop(
             self, tx, args, kwargs, stack_output=False, hop_name=self._HOP_NAME
         )
