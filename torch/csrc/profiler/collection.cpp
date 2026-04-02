@@ -1096,6 +1096,18 @@ class TransferEvents {
     for (const auto* activity : trace_activities_) {
       auto e = toResult(activity);
       if (e) {
+        // Flow data for Kineto events is already set during
+        // resultFromActivity(). TorchOp events need it copied here because
+        // their Result is created during RecordFunction callbacks, before
+        // flow data exists on the GenericTraceActivity.
+        e->visit(c10::overloaded(
+            [&](ExtraFields<EventType::TorchOp>& i) {
+              i.flow = {
+                  /*id=*/static_cast<uint32_t>(activity->flowId()),
+                  /*type=*/static_cast<uint32_t>(activity->flowType()),
+                  /*start=*/activity->flowStart()};
+            },
+            [](auto&) {}));
         if (config_.experimental_config.expose_kineto_event_metadata) {
           e->visit(c10::overloaded(
               [&](ExtraFields<EventType::TorchOp>& i) {

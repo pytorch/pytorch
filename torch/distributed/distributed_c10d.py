@@ -134,7 +134,6 @@ __all__ = [
     "get_node_local_rank",
     "split_group",
     "shrink_group",
-    "record_comm",
 ]
 
 _MPI_AVAILABLE = True
@@ -5166,6 +5165,7 @@ def barrier(
     group: ProcessGroup | None = GroupMember.WORLD,
     async_op: bool = False,
     device_ids=None,
+    timeout: timedelta | None = None,
 ):
     """
     Synchronize all processes.
@@ -5178,6 +5178,8 @@ def barrier(
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
         device_ids ([int], optional): List of device/GPU ids. Only one id is expected.
+        timeout (datetime.timedelta, optional): Timeout for barrier.
+            If ``None``, the default process group timeout will be used.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -5198,6 +5200,8 @@ def barrier(
 
     opts = BarrierOptions()
     opts.asyncOp = async_op
+    if timeout is not None:
+        opts.timeout = timeout
     # Detect the accelerator on the machine. If no accelerator is available, it
     # returns CPU.
     device = torch._C._get_accelerator()
@@ -6577,28 +6581,3 @@ def _update_process_group_global_state(
         # Standard process group tag
         _world.tags_to_pg.setdefault(pg_tag, []).append(pg)
         _world.pg_to_tag[pg] = pg_tag
-
-
-@contextlib.contextmanager
-def record_comm(name: str):
-    """Context manager to set a custom profiling name for communication collectives.
-
-    When active, all c10d collectives issued within this context will use ``name``
-    as their profiling title in the Work base class, overriding the default
-    backend-specific name (e.g. ``nccl:all_reduce``). This works across all
-    backends without per-backend or per-collective changes.
-
-    Args:
-        name (str): The profiling name to associate with collectives.
-
-    Example::
-        >>> # xdoctest: +SKIP("undefined vars")
-        >>> with dist.record_comm("FSDP::all_gather (layer1)"):
-        ...     dist.all_gather_into_tensor(output, input, group=pg)
-    """
-    prev = torch._C._distributed_c10d._get_comm_profiling_name()
-    torch._C._distributed_c10d._set_comm_profiling_name(name)
-    try:
-        yield
-    finally:
-        torch._C._distributed_c10d._set_comm_profiling_name(prev)

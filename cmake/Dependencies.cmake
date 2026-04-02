@@ -1063,8 +1063,6 @@ if(USE_ROCM)
     list(APPEND HIP_HIPCC_FLAGS -fclang-abi-compat=17)
 
     set(HIP_CLANG_FLAGS ${HIP_CXX_FLAGS})
-    string(JOIN " " HIP_HIPCC_FLAGS_STR ${HIP_HIPCC_FLAGS})
-    set(HIP_HIPCC_FLAGS ${HIP_HIPCC_FLAGS_STR})
     set(CMAKE_HIP_FLAGS ${HIP_HIPCC_FLAGS})
     # Ask hcc to generate device code during compilation so we can use
     # host linker to link.
@@ -1080,6 +1078,10 @@ if(USE_ROCM)
 
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       hip::amdhip64 MIOpen hiprtc::hiprtc) # libroctx will be linked in with MIOpen
+    if(USE_HIPDNN)
+      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS hipdnn_frontend)
+      list(APPEND HIP_CXX_FLAGS -DUSE_HIPDNN)
+    endif()
 
     # Math libraries
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS

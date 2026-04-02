@@ -24,6 +24,7 @@ else:
     TEST_CUDNN = LazyVal(lambda: TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.tensor(1., device=CUDA_DEVICE)))
 
 TEST_CUDNN_VERSION = LazyVal(lambda: torch.backends.cudnn.version() if TEST_CUDNN else 0)
+TEST_HIPDNN = LazyVal(lambda: TEST_CUDA and torch.backends.hipdnn.is_available())
 ROCM_VERSION = LazyVal(lambda : tuple(int(v) for v in torch.version.hip.split('.')[:2]) if torch.version.hip else (0, 0))
 
 SM53OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (5, 3))
@@ -80,6 +81,12 @@ def evaluate_platform_supports_flash_attention():
         return True
     return False
 
+def evaluate_platform_supports_ck_sdpa():
+    if TEST_WITH_ROCM:
+        return torch.backends.cuda.is_ck_sdpa_available()
+    else:
+        return False
+
 def evaluate_platform_supports_efficient_attention():
     if TEST_WITH_ROCM:
         arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950"]
@@ -114,6 +121,8 @@ PLATFORM_SUPPORTS_FUSED_ATTENTION: bool = LazyVal(lambda: PLATFORM_SUPPORTS_FLAS
                                                   PLATFORM_SUPPORTS_MEM_EFF_ATTENTION)
 
 PLATFORM_SUPPORTS_FUSED_SDPA: bool = TEST_CUDA and not TEST_WITH_ROCM
+
+PLATFORM_SUPPORTS_CK_SDPA: bool = LazyVal(lambda: evaluate_platform_supports_ck_sdpa())
 
 
 def evaluate_platform_supports_bf16():
@@ -173,7 +182,8 @@ def evaluate_platform_supports_fp8():
             return SM90OrLater or torch.cuda.get_device_capability() == (8, 9)
     if torch.xpu.is_available():
         return True
-    return False
+    # As CPU supports FP8 and is always available, return True.
+    return True
 
 def evaluate_platform_supports_fp8_grouped_gemm():
     if torch.cuda.is_available():

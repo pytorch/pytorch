@@ -164,7 +164,6 @@ jobs:
       - name: Setup Linux
         id: setup-linux
         uses: pytorch/pytorch/.github/actions/setup-linux@main
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           python-version: ${{ inputs.python-version }}
           compiler: ${{ inputs.compiler }}
@@ -478,7 +477,7 @@ jobs:
     timeout-minutes: 480
     outputs:
       docker-image: ${{ inputs.docker-image-name }}
-      test-matrix: ${{ steps.filter.outputs.test-matrix }}
+      test-matrix: ${{ steps.map-runners.outputs.test-matrix }}
       build-environment: ${{ inputs.build-environment }}
     steps:
       - name: Setup Linux
@@ -511,6 +510,15 @@ jobs:
           test-matrix: ${{ inputs.test-matrix }}
           selected-test-configs: ${{ inputs.selected-test-configs }}
           job-name: ${{ steps.setup-linux.outputs.job-name }}
+
+      - name: Map EC2 runners to ARC runners
+        id: map-runners
+        env:
+          FILTERED_TEST_MATRIX: ${{ steps.filter.outputs.test-matrix }}
+          RUNNER_PREFIX: ${{ inputs.runner_prefix }}
+        shell: bash
+        run: |
+          python3 .github/scripts/map_ec2_to_arc.py --prefix "${RUNNER_PREFIX}" "${FILTERED_TEST_MATRIX}"
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7

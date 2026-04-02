@@ -1455,6 +1455,41 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
             ambiguous_slice = False
 
     if not ambiguous_slice:
+        # Even though the bounds are resolvable now, the FX node may have
+        # allocated unbacked symbols for the slice output size because dynamo
+        # couldn't prove the bounds at trace time (constraints may have been
+        # learned after tracing the slice). We still need to define those
+        # symbols so the assertion new_unbacked_defs >= renamed_unbacked_bindings
+        # passes. Register a DynamicSliceSize operation to define the size symbol.
+        # Note: storage_offset bindings should not appear here because
+        # a resolved start_index means the offset is computable directly
+        # (base_offset + start * stride), so dynamo wouldn't allocate an
+        # unbacked symbol for it.
+        # Note: current_node may be None when slice_ is called from template
+        # rendering (e.g. cpp_template_kernel.slice_nd) rather than FX graph
+        # lowering, so we handle that.
+        current_node = V.graph.current_node
+        node_unbacked_bindings = resolve_unbacked_bindings(
+            V.graph.sizevars.shape_env,
+            current_node.meta.get("unbacked_bindings", {})
+            if current_node is not None
+            else {},
+        )
+        if node_unbacked_bindings:
+            for sym, keypath in node_unbacked_bindings.items():
+                if keypath == (CallMethodKey("size"), pytree.SequenceKey(dim)):
+                    b_size = ir.DynamicSliceSize(sym, start, end, step, size)
+                    b_size.name = V.graph.register_buffer(b_size)
+                    V.graph.register_operation(b_size)
+                elif keypath == (CallMethodKey("storage_offset"),):
+                    # Not handled yet — would require materializing the
+                    # tensor layout. Unlikely to be hit because a resolved
+                    # start_index means the offset is computable directly.
+                    raise AssertionError(
+                        "Unexpected storage_offset unbacked binding when both "
+                        "start and end indices are resolved"
+                    )
+
         return TensorBox(
             ir.SliceView.create(x.data, dim, start, end, step, clamp=clamp)
         )  # go to SliceView/ReinterpretView
@@ -2680,8 +2715,35 @@ def inductor_lookup_seed(seeds, index):
     )
 
 
+def get_threads_per_round(device: torch.device):
+    if not isinstance(device, torch.device):
+        device = torch.device(device)
+
+    if device.type == "cuda":
+        idx = device.index
+        if idx is None:
+            idx = torch.cuda.current_device()
+
+        prop = torch.cuda.get_device_properties(idx)
+        threads_per_round = (
+            prop.multi_processor_count * prop.max_threads_per_multi_processor
+        )
+    else:
+        _CPU_GRAIN_SIZE = 32768
+        threads_per_round = _CPU_GRAIN_SIZE
+
+    return threads_per_round
+
+
 @register_lowering(inductor_prims.random, type_promotion_kind=None)
-def inductor_random(size: list[int], seed: TensorBox, mode: str, *, offset: int = 0):
+def inductor_random(
+    size: list[int],
+    seed: TensorBox,
+    mode: str,
+    *,
+    offset: int = 0,
+    align_dtype: torch.dtype = torch.float32,
+):
     assert not config.fallback_random
     assert mode in ("rand", "randn")
     size = [*size]
@@ -2692,11 +2754,33 @@ def inductor_random(size: list[int], seed: TensorBox, mode: str, *, offset: int 
     ).make_indexer()
     seed_loader = seed.make_loader()
 
-    def inner_fn(index):
-        return getattr(ops, mode)(
-            seed_loader([]),
-            ops.index_expr(random_pos(index), torch.int32),
-        )
+    if config.align_random_eager and device.type == "cuda":
+        threads_per_round = get_threads_per_round(device)
+
+        def _vec_from_dtype(dt: torch.dtype) -> int:
+            if dt in (torch.float16, torch.bfloat16):
+                return 8
+            return 4
+
+        vec = _vec_from_dtype(align_dtype)
+
+        def inner_fn(index):
+            rng_seed = seed_loader([0])
+            base_offset = seed_loader([1])
+            return ops.rand_eager(
+                rng_seed,
+                base_offset,
+                threads_per_round,
+                ops.index_expr(random_pos(index), torch.int32),
+                vec=int(vec),
+            )
+    else:
+
+        def inner_fn(index):
+            return getattr(ops, mode)(
+                seed_loader([]),
+                ops.index_expr(random_pos(index), torch.int32),
+            )
 
     result = Pointwise.create(
         device=device,
@@ -2706,6 +2790,10 @@ def inductor_random(size: list[int], seed: TensorBox, mode: str, *, offset: int 
     )
     result.realize()
     return result
+
+
+make_fallback(inductor_prims.rand_eager_offset)
+make_fallback(inductor_prims.rand_eager_offsets)
 
 
 @register_lowering(inductor_prims.randint, type_promotion_kind=None)
@@ -2917,7 +3005,9 @@ def bucketize(
 
 
 def _is_tensor_irnode(x):
-    return isinstance(x, ir.IRNode) and not isinstance(x, ir.NonTensorObj)
+    return isinstance(x, ir.IRNode) and not isinstance(
+        x, (ir.NonTensorObj, ir.OpaqueMultiOutput)
+    )
 
 
 def require_dense(_, *args, **kwargs):
@@ -7701,7 +7791,11 @@ for method, func in magic_methods.items():
 
 
 @register_lowering(torch.sym_sum)
-def sym_sum(args):
+def sym_sum(*args):
+    # sym_sum can be called as sym_sum([a, b]) or sym_sum(a, b).
+    # Normalize to a flat list before summing.
+    if len(args) == 1 and isinstance(args[0], (list, tuple)):
+        args = args[0]
     return sympy.Add(*args)
 
 

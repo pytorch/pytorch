@@ -156,7 +156,7 @@ If the issue belongs in another repo (vision/text/audio/RL/ExecuTorch/etc.), tra
 
 **PT2 is NOT a redirect.** `oncall: pt2` is not like the other oncall labels in Step 3. PT2 issues continue through Steps 4–7 for full triage — add `oncall: pt2`, then proceed to label with `module:` labels, mark `triaged`, etc.
 
-See [pt2-triage-rubric.md](pt2-triage-rubric.md) for detailed labeling decisions on which `module:` labels to apply.
+**Every `oncall: pt2` issue MUST have at least one `module:` label.** The PT2 oncall queue is too broad without a module label — the team needs to know which component is affected (e.g., `module: dynamo`, `module: inductor`, `module: helion`, `module: dynamic shapes`). If you cannot determine the specific module, use `module: compile ux` as a fallback, but always try to be specific first. See [pt2-triage-rubric.md](pt2-triage-rubric.md) for detailed guidance.
 
 ### 3) Redirect to Secondary Oncall
 
