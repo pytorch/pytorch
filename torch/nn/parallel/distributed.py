@@ -686,8 +686,11 @@ class DistributedDataParallel(Module, Joinable):
                    both the input data for the forward pass and the actual module
                    must be placed on the correct device.
                    (default: ``None``)
-        output_device (int or torch.device): This argument is deprecated and
-                      has no effect on DDP behavior.
+        output_device (int or torch.device): This argument has no effect on
+                      DDP behavior. Unlike ``DataParallel``, DDP does not
+                      perform scatter/gather and each process runs its own
+                      forward pass on its assigned device. Retained for
+                      backward compatibility. (default: ``None``)
         broadcast_buffers (bool): Flag that enables syncing (broadcasting)
                           buffers of the module at beginning of the ``forward``
                           function. (default: ``True``)
@@ -909,15 +912,6 @@ class DistributedDataParallel(Module, Joinable):
             )
 
         self.device_type = next(iter(distinct_device_types))
-
-        if output_device is not None:
-            warnings.warn(
-                "The `output_device` argument in `DistributedDataParallel` "
-                "is deprecated and has no effect. Please remove it from "
-                "your DDP constructor call.",
-                FutureWarning,
-                stacklevel=2,
-            )
 
         if (
             device_ids is None
