@@ -2,8 +2,10 @@ import os
 from functools import cache
 from typing import cast
 
+# Import DSL utility modules to trigger their registration
+# Note: These imports ensure DSL modules are registered at package import time
 # This handles collecting registration of all native ops
-from . import ops, registry
+from . import cutedsl_utils, ops, registry, triton_utils
 
 
 @cache

@@ -1524,12 +1524,78 @@ TEST_OPT_EINSUM = _check_module_exists('opt_einsum')
 
 TEST_Z3 = _check_module_exists('z3')
 
+# DSL availability (lazy evaluation to avoid import overhead)
+class LazyDSLCheck:
+    """Lazy DSL availability checker to avoid import-time overhead"""
+    def __init__(self):
+        self._registry = None
+        self._import_attempted = False
+
+    def _get_registry(self):
+        if not self._import_attempted:
+            self._import_attempted = True
+            try:
+                from torch._native.dsl_registry import dsl_registry
+                self._registry = dsl_registry
+            except ImportError:
+                self._registry = None
+        return self._registry
+
+    def is_available(self, dsl_name: str) -> bool:
+        """Check if specific DSL is available"""
+        registry = self._get_registry()
+        return registry.is_dsl_available(dsl_name) if registry is not None else False
+
+    def list_available(self) -> list[str]:
+        """Get list of available DSLs"""
+        registry = self._get_registry()
+        return list(registry.list_available_dsls()) if registry is not None else []
+
+    def list_all(self) -> list[str]:
+        """Get list of all registered DSLs"""
+        registry = self._get_registry()
+        return list(registry.list_all_dsls()) if registry is not None else []
+
+_dsl_checker = LazyDSLCheck()
+
+# Lazy constants to avoid import-time overhead
+TEST_TRITON_DSL = LazyVal(lambda: _dsl_checker.is_available('triton'))
+TEST_CUTEDSL = LazyVal(lambda: _dsl_checker.is_available('cutedsl'))
+
 def split_if_not_empty(x: str):
     return x.split(",") if len(x) != 0 else []
 
 NOTEST_CPU = "cpu" in split_if_not_empty(os.getenv('PYTORCH_TESTING_DEVICE_EXCEPT_FOR', ''))
 
 skipIfNoDill = unittest.skipIf(not TEST_DILL, "no dill")
+
+# DSL skip decorators (following existing pattern)
+skipIfNoTritonDSL = unittest.skipIf(not TEST_TRITON_DSL, "Triton DSL not available")
+skipIfNoCuteDSL = unittest.skipIf(not TEST_CUTEDSL, "CuTeDSL not available")
+
+def skipIfDSLUnavailable(dsl_name: str, reason: str | None = None):
+    """Skip test if specific DSL is not available"""
+    available = _dsl_checker.is_available(dsl_name)
+    msg = reason or f"{dsl_name} DSL not available"
+    return unittest.skipIf(not available, msg)
+
+def skipUnlessDSLAvailable(dsl_name: str, reason: str | None = None):
+    """Skip test unless specific DSL is available"""
+    available = _dsl_checker.is_available(dsl_name)
+    msg = reason or f"{dsl_name} DSL required"
+    return unittest.skipUnless(available, msg)
+
+def get_available_dsls() -> list[str]:
+    """Get list of available DSL names for test parameterization"""
+    return _dsl_checker.list_available()
+
+def is_dsl_available(dsl_name: str) -> bool:
+    """Check if specific DSL is available for conditional testing"""
+    return _dsl_checker.is_available(dsl_name)
+
+def get_all_dsls() -> list[str]:
+    """Get all registered DSL names (available or not) for comprehensive testing"""
+    return _dsl_checker.list_all()
 
 
 NO_MULTIPROCESSING_SPAWN: bool = False
