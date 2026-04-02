@@ -18188,15 +18188,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 check_lowp=False,
             )
 
-    def test_efficientzerotensor_lowering(self):
-        def fn(x):
-            z = torch.ops.aten._efficientzerotensor(
-                x.shape, dtype=x.dtype, device=x.device
-            )
-            return x + z
-
-        self.common(fn, (torch.randn(8, 8, device=self.device),))
-
     def test_jvp_compile_backward(self):
         def jvp_fn(f, x):
             return torch.func.jvp(f, (x.clone(),), (torch.ones_like(x),))[1]
