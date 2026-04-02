@@ -9,6 +9,10 @@
 #include <dnnl.hpp>
 #endif
 
+#if AT_MKLDNN_ACL_ENABLED()
+#include <arm_compute/core/Version.h>
+#endif
+
 #include <caffe2/core/common.h>
 
 #include <ATen/native/DispatchStub.h>
@@ -45,6 +49,9 @@ std::string get_mkldnn_version() {
       ss << "Intel(R) MKL-DNN v" << ver->major << '.' << ver->minor << '.' << ver->patch
          << " (Git Hash " << ver->hash << ')';
     }
+    #if AT_MKLDNN_ACL_ENABLED()
+      ss << " with ACL v" << ARM_COMPUTE_VERSION_STR;
+    #endif
   #else
     ss << "MKLDNN not found";
   #endif
