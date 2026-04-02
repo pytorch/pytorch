@@ -824,7 +824,8 @@ assume_unaligned_fallback_output = (
 #
 #     config.inductor_choices_class = _custom_choices_factory
 #
-# The returned instance must define __hash__ for cache key serialization.
+# The returned instance must inherit from CacheAware and implement uuid()
+# for cache key serialization. See torch/_inductor/cache.py.
 inductor_choices_class: Callable[[], "InductorChoices"] | None = None
 
 # fuse even in cases without common reads
@@ -2509,8 +2510,8 @@ _cache_config_ignore_prefix: list[str] = [
     "autotune_remote_cache",
 ]
 
-# Config keys whose values are callable factories. save_config_portable
-# will call them and hash the result instead of serializing the callable.
+# Config keys whose values are callable factories returning CacheAware instances.
+# save_config_portable will call the factory and use .uuid() for serialization.
 _cache_config_factory_keys: list[str] = [
     "inductor_choices_class",
 ]
