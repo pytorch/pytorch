@@ -221,7 +221,7 @@ if TEST_NUMBA:
     try:
         import numba.cuda
         TEST_NUMBA_CUDA = numba.cuda.is_available()
-    except (ImportError, RuntimeError):
+    except (ImportError, RuntimeError, OSError):
         TEST_NUMBA_CUDA = False
         TEST_NUMBA = False
 else:
