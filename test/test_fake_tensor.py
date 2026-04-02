@@ -1315,7 +1315,6 @@ for t in threads:
     @unittest.skipIf(
         TEST_ACCELERATOR, "Only execute when an accelerator is not present"
     )
-
     def test_avoid_device_init_without_backends(self):
         fake_mode = FakeTensorMode()
 
