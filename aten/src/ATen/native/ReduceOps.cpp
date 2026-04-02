@@ -2351,10 +2351,14 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
 Tensor value_selecting_reduction_backward_symint(const Tensor& grad, int64_t dim, const Tensor& indices, c10::SymIntArrayRef sizes, bool keepdim) {
   auto inplace_scatter_if_not_tensor_subclass =
       [&](const Tensor& grad_out, const Tensor& indices_) {
-        auto grad_in = at::zeros_symint(sizes, grad_out.options());
         if (areAnyTensorSubclassLike({grad, indices})) {
+          // Use new_zeros_symint so that tensor subclasses (e.g. DTensor)
+          // can intercept the zeros creation through dispatch, ensuring
+          // the result has matching subclass type for subsequent scatter.
+          auto grad_in = grad_out.new_zeros_symint(sizes);
           return grad_in.scatter(dim, indices_, grad_out);
         }
+        auto grad_in = at::zeros_symint(sizes, grad_out.options());
         return grad_in.scatter_(dim, indices_, grad_out);
       };
 
