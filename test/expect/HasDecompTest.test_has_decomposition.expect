@@ -509,6 +509,8 @@ aten::_pdist_backward
 aten::_pdist_backward.out
 aten::_pdist_forward
 aten::_pdist_forward.out
+aten::_philox_key_fold_in
+aten::_philox_key_split
 aten::_pin_memory
 aten::_pin_memory.out
 aten::_reshape_alias_copy
