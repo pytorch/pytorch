@@ -3170,8 +3170,15 @@ def autograd_cache_key(
     )
     compiler_config_extra = create_compiler_config_extra(graph)
 
-    # Match the config patches that compile_fx applies during compilation
-    # so that the autograd_config snapshot is identical.
+    # These context managers replicate the ones that _compile_fx_main sets up
+    # before calling aot_autograd, so that the config snapshot captured by
+    # autograd_cache_key is identical to a real compile_fx run:
+    #   _compile_fx_main outer with-block: _use_lazy_graph_module,
+    #       enable_python_dispatcher, preserve_node_meta,
+    #       reset_provenance_globals
+    #   _compile_fx_main aot_autograd with-block: V.set_fake_mode,
+    #       torch._guards.tracing, compiled_autograd._disable,
+    #       functorch_config.patch
 
     fake_mode = detect_fake_mode(example_inputs) or torch._subclasses.FakeTensorMode(
         allow_non_fake_inputs=True
