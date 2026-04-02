@@ -1202,8 +1202,6 @@ def set_num_interop_threads(
 ) -> None: ...  # THPModule_setNumInteropThreads
 def _get_cudnn_enabled() -> _bool: ...  # THPModule_userEnabledCuDNN
 def _set_cudnn_enabled(arg: _bool) -> None: ...  # THPModule_setUserEnabledCuDNN
-def _get_hipdnn_enabled() -> _bool: ...  # THPModule_userEnabledHipdnn
-def _set_hipdnn_enabled(arg: _bool) -> None: ...  # THPModule_setUserEnabledHipdnn
 def _get_flash_sdp_enabled() -> _bool: ...  # THPModule_userEnabledFusedSDP
 def _set_sdp_use_flash(arg: _bool) -> None: ...  # THPModule_setSDPUseFlash
 def _get_fa3_sdp_enabled() -> _bool: ...  # THPModule_userEnabledFA3SDP
@@ -1465,7 +1463,6 @@ _has_xpu: _bool
 _has_mkldnn: _bool
 _has_mkldnn_acl: _bool
 _has_cudnn: _bool
-_has_hipdnn: _bool
 _has_cusparselt: _bool
 has_spectral: _bool
 _GLIBCXX_USE_CXX11_ABI: _bool
