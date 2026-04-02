@@ -105,6 +105,12 @@ from .utils import (
 )
 
 
+def _unwrap_tensor_subclasses_no_symints(
+    args: list[Any],
+) -> list[Any]:
+    return runtime_unwrap_tensor_subclasses(args, append_symints=False)  # type: ignore[arg-type]
+
+
 zip = strict_zip
 
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
@@ -1948,6 +1954,7 @@ def _backward_prologue_functional(
     metadata: ViewAndMutationMeta,
     maybe_subclass_metadata: SubclassMeta | None,
     *flat_args: Any,
+    codegen_unwrap_fn: Callable[..., Any] | None = None,
 ) -> list[Any]:
     # Calling convention: we expect a grad_out passed to the backward:
     # - for every output of the fw that does *not* alias an input or graph intermediate
@@ -2128,23 +2135,15 @@ def _backward_prologue_functional(
             )
         )
 
-        unwrapped_tangents = runtime_unwrap_tensor_subclasses(
-            all_args[:tangents_start_idx],  # type: ignore[arg-type]
-            # SymInts that are inputs to the backward graph are
-            # already included in the "all_args" list.
-            # Any symints coming from tensor subclasses should always
-            # come from primals, and so they will show up as extra
-            # arguments to the forward graph, and they will be saved
-            # as activation in the backward graph.
-            append_symints=False,
+        if codegen_unwrap_fn is not None:
+            unwrap = codegen_unwrap_fn
+        else:
+            unwrap = _unwrap_tensor_subclasses_no_symints
+        all_args = (
+            unwrap(all_args[:tangents_start_idx])
+            + flat_processed_tangents
+            + unwrap(all_args[tangents_end_idx:])
         )
-
-        unwrapped_primals = runtime_unwrap_tensor_subclasses(
-            all_args[tangents_end_idx:],  # type: ignore[arg-type]
-            append_symints=False,
-        )
-
-        all_args = unwrapped_tangents + flat_processed_tangents + unwrapped_primals
     else:
         stack_traces = metadata.tangent_source_stack_traces or ()
 
@@ -2779,15 +2778,13 @@ class _AOTDispatchAutogradFunctionFactory:
         aot_config = self.spec.aot_config
         fw_metadata = self.spec.fw_metadata
 
+        _codegen_bw_unwrap_fn = None
         _codegen_bw_wrap_fn = None
-        if (
-            maybe_subclass_meta is not None
-            and maybe_subclass_meta.grad_input_metas is not None
-        ):
-            from .subclass_codegen import codegen_backward_subclass_wrap
+        if maybe_subclass_meta is not None:
+            from .subclass_codegen import codegen_backward_subclass_fns
 
-            _codegen_bw_wrap_fn = codegen_backward_subclass_wrap(
-                maybe_subclass_meta.grad_input_metas,
+            _codegen_bw_unwrap_fn, _codegen_bw_wrap_fn = codegen_backward_subclass_fns(
+                grad_input_metas=maybe_subclass_meta.grad_input_metas,
             )
 
         class CompiledFunction(torch.autograd.Function):
@@ -2799,6 +2796,7 @@ class _AOTDispatchAutogradFunctionFactory:
             _aot_id = aot_config.aot_id
             _lazy_backward_info = lazy_backward_info
             _bw_epilogue_wrap_fn = _codegen_bw_wrap_fn
+            _bw_prologue_unwrap_fn = _codegen_bw_unwrap_fn
 
             @staticmethod
             def _compiled_autograd_key(ctx: Any) -> tuple[Any, ...]:
@@ -2844,6 +2842,7 @@ class _AOTDispatchAutogradFunctionFactory:
                     CompiledFunction.metadata,
                     CompiledFunction.maybe_subclass_metadata,
                     *flat_args,
+                    codegen_unwrap_fn=CompiledFunction._bw_prologue_unwrap_fn,
                 )
                 rng_state.add_backward_args(ctx, all_args)
 
