@@ -111,7 +111,8 @@ from .lists import (
     TupleVariable,
 )
 from .misc import NullVariable
-from .sets import FrozensetVariable, is_hashable, OrderedSetClassVariable, SetVariable
+from .hashable import is_hashable
+from .sets import FrozensetVariable, OrderedSetClassVariable, SetVariable
 from .tensor import (
     FakeItemVariable,
     supported_comparison_ops,

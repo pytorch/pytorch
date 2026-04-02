@@ -12,7 +12,7 @@ maintaining proper guards for dictionary mutations and key existence checks. The
 dictionary creation, modification, key/value access, and view operations while ensuring
 correct behavior in the compiled code through appropriate guard installation.
 
-The implementation uses a special HashableTracker wrapper (from sets.py) to handle
+The implementation uses a special HashableTracker wrapper to handle
 dictionary keys while preserving proper aliasing semantics. Set-related classes live
 in sets.py.
 """
@@ -61,7 +61,8 @@ from .constant import (
     CONSTANT_VARIABLE_TRUE,
     ConstantVariable,
 )
-from .sets import HashableTracker, is_hashable, raise_unhashable, SetVariable
+from .hashable import HashableTracker, is_hashable, raise_unhashable
+from .sets import SetVariable
 
 
 if TYPE_CHECKING:

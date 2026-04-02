@@ -46,7 +46,7 @@ from .constant import CONSTANT_VARIABLE_TRUE, ConstantVariable
 from .dicts import ConstDictVariable
 from .lists import ListVariable
 from .misc import GetAttrVariable
-from .sets import HashableTracker
+from .hashable import HashableTracker
 from .user_defined import UserDefinedObjectVariable
 
 
