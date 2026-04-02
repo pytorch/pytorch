@@ -23,7 +23,6 @@
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
-#include <torch/csrc/utils/six.h>
 #ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/rpc/py_rref.h>
 #include <torch/csrc/distributed/rpc/rref_impl.h>
@@ -554,7 +553,7 @@ inline InferredType tryToInferPrimitiveType(py::handle input) {
 inline InferredType tryToInferContainerType(
     py::handle input,
     bool primitiveTypeOnly = false) {
-  if (six::isTuple(input)) {
+  if (PyTuple_Check(input.ptr())) {
     py::tuple tuple = py::cast<py::tuple>(input);
     std::vector<TypePtr> element_types;
     element_types.reserve(tuple.size());

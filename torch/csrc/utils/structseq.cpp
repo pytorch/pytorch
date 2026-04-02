@@ -12,7 +12,7 @@
  * https://github.com/python/cpython#copyright-and-license-information
  */
 
-#include <torch/csrc/utils/six.h>
+#include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/structseq.h>
 #include <sstream>
 
@@ -25,14 +25,10 @@ namespace torch::utils {
 // so this function might not be required in Python 3.8+.
 PyObject* returned_structseq_repr(PyStructSequence* obj) {
   PyTypeObject* typ = Py_TYPE(obj);
-  THPObjectPtr tup = six::maybeAsTuple(obj);
-  if (tup == nullptr) {
-    return nullptr;
-  }
 
   std::stringstream ss;
   ss << typ->tp_name << "(\n";
-  Py_ssize_t num_elements = Py_SIZE(obj);
+  Py_ssize_t num_elements = PyTuple_GET_SIZE(obj);
 
   for (Py_ssize_t i = 0; i < num_elements; i++) {
     const char* cname = typ->tp_members[i].name;
@@ -46,7 +42,7 @@ PyObject* returned_structseq_repr(PyStructSequence* obj) {
       return nullptr;
     }
 
-    PyObject* val = PyTuple_GetItem(tup.get(), i);
+    PyObject* val = PyTuple_GetItem((PyObject*)obj, i);
     if (val == nullptr) {
       return nullptr;
     }
