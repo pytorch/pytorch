@@ -53,6 +53,7 @@ def _zeropower_via_newtonschulz(
     ns_coefficients: tuple[tuple[float, float, float], ...],
     ns_steps: int,
     eps: float,
+    normalization: str = "schatten",
 ) -> Tensor:
     """
     Newton-Schulz iteration to compute the zeroth power / orthogonalization of G. We opt to use a
@@ -72,20 +73,48 @@ def _zeropower_via_newtonschulz(
         )
     if len(grad.shape) != 2:
         raise ValueError("Input tensor gradient must be a 2D matrix")
+    if normalization not in ("fro", "schatten", "aol"):
+        raise ValueError(
+            f"Unsupported normalization {normalization}, expected one of 'fro', 'schatten', or 'aol'"
+        )
     ortho_grad = grad.bfloat16()
     if grad.size(0) > grad.size(1):
         ortho_grad = ortho_grad.T
-    # Ensure spectral norm is at most 1
-    ortho_grad.div_(ortho_grad.norm().clamp(min=eps))
-    # Perform the NS iterations
-    for a, b, c in ns_coefficients[:ns_steps] + list(
+
+    coefficients = ns_coefficients[:ns_steps] + list(
         repeat(ns_coefficients[-1], ns_steps - len(ns_coefficients))
-    ):
+    )
+    # Ensure spectral norm is at most 1
+    if normalization == "fro":
+        ortho_grad.div_(ortho_grad.norm().clamp(min=eps))
         gram_matrix = ortho_grad @ ortho_grad.T
-        gram_update = torch.addmm(
-            gram_matrix, gram_matrix, gram_matrix, beta=b, alpha=c
+    elif normalization == "schatten":
+        gram_matrix = ortho_grad @ ortho_grad.T
+        s = gram_matrix.norm().clamp(min=eps)
+        ortho_grad.mul_(s.rsqrt())  # normalize input
+        gram_matrix.div_(s)  # update gram matrix without recomputing
+    elif normalization == "aol":
+        gram_matrix = ortho_grad @ ortho_grad.T
+        s_vec = torch.rsqrt(
+            torch.clamp_min(gram_matrix.abs().sum(dim=-1, keepdim=False), min=eps)
         )
-        ortho_grad = torch.addmm(ortho_grad, gram_update, ortho_grad, beta=a)
+        ortho_grad.mul_(s_vec.unsqueeze(-1))  # normalize input
+        gram_matrix.mul_(s_vec.unsqueeze(-1) * s_vec.unsqueeze(-2))
+    # setting ns_steps to 0 will only perform the normalization
+    if ns_steps > 0:
+        # perform the first iteration reusing the gram matrix computed for normalization
+        a0, b0, c0 = coefficients[0]
+        gram_update = torch.addmm(
+            gram_matrix, gram_matrix, gram_matrix, beta=b0, alpha=c0
+        )
+        ortho_grad = torch.addmm(ortho_grad, gram_update, ortho_grad, beta=a0)
+        # Perform the NS remaining iterations
+        for a, b, c in coefficients[1:]:
+            gram_matrix = ortho_grad @ ortho_grad.T
+            gram_update = torch.addmm(
+                gram_matrix, gram_matrix, gram_matrix, beta=b, alpha=c
+            )
+            ortho_grad = torch.addmm(ortho_grad, gram_update, ortho_grad, beta=a)
 
     if grad.size(0) > grad.size(1):
         ortho_grad = ortho_grad.T
@@ -117,6 +146,7 @@ class Muon(Optimizer):
         momentum: float = 0.95,
         nesterov: bool = True,
         ns_coefficients: NSCoefficients = "polar_express",
+        normalization: str = "schatten",
         eps: float = EPS,
         ns_steps: int = DEFAULT_NS_STEPS,
         adjust_lr_fn: str | None = None,
@@ -149,6 +179,10 @@ class Muon(Optimizer):
         # Normalize a single (a, b, c) tuple into a tuple of tuples.
         if ns_coefficients and not isinstance(ns_coefficients[0], tuple):
             ns_coefficients = (ns_coefficients,)  # type: ignore[assignment]
+        if normalization not in ("fro", "schatten", "aol"):
+            raise ValueError(
+                f"Unsupported normalization {normalization}, expected one of 'fro', 'schatten', or 'aol'"
+            )
 
         defaults = {
             "lr": lr,
@@ -156,6 +190,7 @@ class Muon(Optimizer):
             "momentum": momentum,
             "nesterov": nesterov,
             "ns_coefficients": ns_coefficients,
+            "normalization": normalization,
             "eps": eps,
             "ns_steps": ns_steps,
             "adjust_lr_fn": adjust_lr_fn,
@@ -231,6 +266,7 @@ class Muon(Optimizer):
                 momentum=momentum,
                 nesterov=group["nesterov"],
                 ns_coefficients=group["ns_coefficients"],
+                normalization=group["normalization"],
                 eps=group["eps"],
                 ns_steps=group["ns_steps"],
                 adjust_lr_fn=group["adjust_lr_fn"],
@@ -318,6 +354,15 @@ Muon.__doc__ = (
             "polar_express". Tuple of three floats corresponds to a single (a, b, c) tuple for all iterations,
             while a tuple of tuples corresponds to per-step (a, b, c). If not specified, we will default
             to use the "polar_express" coefficients. (default: "polar_express")
+        normalization (str, optional): method to normalize the input matrix before applying Newton–Schulz iteration.
+            A spectral norm of the input matrix at most 1 is required to ensure convergence, and tighter estimation
+            yields a faster convergence. Options are "fro", "schatten", or "aol". "fro" corresponds to normalizing
+            the input matrix by its Frobenius norm. "schatten" corresponds
+            to normalizing the input matrix by its Schatten p-norm (see
+            `Accelerating Newton-Schulz Iteration for Orthogonalization via Chebyshev-type Polynomials`_). "aol"
+            corresponds to normalizing the input matrix as done in
+            `Turbo-Muon: Accelerating Orthogonality-Based Optimization with Pre-Conditioning`_ . If not specified,
+            we will default to use "schatten". (default: "schatten")
         eps (float, optional): term added to the denominator for numerical stability. (default: {EPS})
         ns_steps (int, optional): number of Newton–Schulz iteration steps. (default: {DEFAULT_NS_STEPS})
         adjust_lr_fn (str, optional): function to adjust learning rate. One of "original", "match_rms_adamw", and "spectral_unclamped".
@@ -354,8 +399,10 @@ Muon.__doc__ = (
         https://jeremybernste.in/writing/deriving-muon
     .. _Polar Express coefficients:
         https://arxiv.org/pdf/2505.16932
-    .. _Accelerating Newton-Schulz Iteration for Orthogonalization via Chebyshev-type Polynomials
+    .. _Accelerating Newton-Schulz Iteration for Orthogonalization via Chebyshev-type Polynomials:
         https://arxiv.org/pdf/2506.10935
+    .. _Turbo-Muon: Accelerating Orthogonality-Based Optimization with Pre-Conditioning:
+        https://arxiv.org/pdf/2512.04632
 
     """
 )
@@ -371,6 +418,7 @@ def _single_tensor_muon(
     momentum: float,
     nesterov: bool,
     ns_coefficients: NSCoefficients,
+    normalization: str,
     ns_steps: int,
     eps: float,
     adjust_lr_fn: str | None,
@@ -379,6 +427,10 @@ def _single_tensor_muon(
     lr = _to_scalar(lr)
     if has_complex:
         raise ValueError("Complex parameters are not supported")
+    if normalization not in ("fro", "schatten", "aol"):
+        raise ValueError(
+            f"Unsupported normalization {normalization}, expected one of 'fro', 'schatten', or 'aol'"
+        )
 
     for i, param in enumerate(params):
         grad = grads[i]
@@ -389,7 +441,9 @@ def _single_tensor_muon(
         buf.lerp_(grad, 1 - momentum)
         update = grad.lerp(buf, momentum) if nesterov else buf
 
-        update = _zeropower_via_newtonschulz(update, ns_coefficients, ns_steps, eps)
+        update = _zeropower_via_newtonschulz(
+            update, ns_coefficients, ns_steps, eps, normalization
+        )
 
         adjusted_lr = _adjust_lr(lr, adjust_lr_fn, param.shape)
 
@@ -409,6 +463,7 @@ def muon(
     momentum: float,
     nesterov: bool,
     ns_coefficients: NSCoefficients,
+    normalization: str = "schatten",
     ns_steps: int,
     eps: float,
     adjust_lr_fn: str | None,
@@ -432,6 +487,7 @@ def muon(
         momentum=momentum,
         nesterov=nesterov,
         ns_coefficients=ns_coefficients,
+        normalization=normalization,
         ns_steps=ns_steps,
         eps=eps,
         adjust_lr_fn=adjust_lr_fn,
