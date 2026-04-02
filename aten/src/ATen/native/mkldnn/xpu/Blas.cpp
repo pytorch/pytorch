@@ -379,15 +379,17 @@ Tensor& addmv_out(
   bool is_float64 =
       mat.scalar_type() == at::kDouble || vec.scalar_type() == at::kDouble;
   bool is_inplace = self.is_same(out);
+  // Compute into a temporary tensor to avoid modifying out's existing strides.
+  // Passing `out` directly to addmm_out would cause it to be resized from 1D
+  // (N,) to 2D (N,1) and back, which resets strides to contiguous (1,).
+  Tensor tmp = at::empty({mat.size(0), 1}, out.options());
   if (is_float64 && is_inplace) {
     Tensor self_v_copy = self_v.clone();
-    at::native::xpu::addmm_out(self_v_copy, mat, vec_v, beta, alpha, out);
-    out.resize_({mat.size(0)});
-    return out;
+    at::native::xpu::addmm_out(self_v_copy, mat, vec_v, beta, alpha, tmp);
+  } else {
+    at::native::xpu::addmm_out(self_v, mat, vec_v, beta, alpha, tmp);
   }
-
-  at::native::xpu::addmm_out(self_v, mat, vec_v, beta, alpha, out);
-  out.resize_({mat.size(0)});
+  out.copy_(tmp.view({mat.size(0)}));
   return out;
 }
 
