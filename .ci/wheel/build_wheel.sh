@@ -173,7 +173,7 @@ python -mvenv ~/${desired_python}-build
 source ~/${desired_python}-build/bin/activate
 retry pip install "${PINNED_PACKAGES[@]}" -r "${pytorch_rootdir}/requirements.txt"
 
-retry brew install libomp
+source "${SOURCE_DIR}/install_libomp.sh"
 
 # For USE_DISTRIBUTED=1 on macOS, need libuv, which is build as part of tensorpipe submodule
 export USE_DISTRIBUTED=1
