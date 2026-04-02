@@ -125,7 +125,10 @@ from .tensor import (
 from .user_defined import (
     MutableMappingVariable,
     UserDefinedDictVariable,
+    UserDefinedListVariable,
     UserDefinedObjectVariable,
+    UserDefinedSetVariable,
+    UserDefinedTupleVariable,
     UserDefinedVariable,
 )
 
@@ -1810,6 +1813,21 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_default_format(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker | None:
+        if isinstance(arg, UserDefinedListVariable) and type(arg.value) is list:
+            arg = arg._list_vt
+        elif isinstance(arg, UserDefinedTupleVariable) and type(arg.value) is tuple:
+            arg = arg._tuple_vt
+        elif isinstance(arg, UserDefinedDictVariable) and type(arg.value) in (
+            dict,
+            OrderedDict,
+        ):
+            arg = arg._dict_vt
+        elif isinstance(arg, UserDefinedSetVariable) and type(arg.value) in (
+            set,
+            frozenset,
+        ):
+            arg = arg._set_vt
+
         if isinstance(
             arg,
             (
