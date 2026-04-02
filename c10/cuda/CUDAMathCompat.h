@@ -6,6 +6,7 @@
 #if defined(__CUDACC__) || defined(__HIPCC__)
 
 #include <c10/macros/Macros.h>
+#include <c10/util/complex.h>
 #include <c10/util/Exception.h>
 
 #ifdef __HIPCC__
@@ -25,6 +26,12 @@ __MATH_FUNCTIONS_DECL__ float abs(float x) {
 }
 __MATH_FUNCTIONS_DECL__ double abs(double x) {
   return ::fabs(x);
+}
+__MATH_FUNCTIONS_DECL__ float abs(c10::complex<float> x) {
+  return ::hypotf(x.real(), x.imag());
+}
+__MATH_FUNCTIONS_DECL__ double abs(c10::complex<double> x) {
+  return ::hypot(x.real(), x.imag());
 }
 
 __MATH_FUNCTIONS_DECL__ float exp(float x) {

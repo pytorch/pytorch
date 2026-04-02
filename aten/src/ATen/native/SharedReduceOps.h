@@ -8,6 +8,7 @@
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/OpMathType.h>
+
 #if defined(__CUDACC__)
 #include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/native/cuda/DeviceSqrt.cuh>
@@ -15,29 +16,12 @@
 #include <ATen/hip/DeviceUtils.cuh>
 #include <ATen/native/hip/DeviceSqrt.cuh>
 #endif
+
 #if defined(__CUDACC__) || defined(__HIPCC__)
 #include <thrust/pair.h>
 #else
 #include <cmath>
 #define device_sqrt std::sqrt
-#endif
-#if defined(__CUDACC__) || defined(__HIPCC__)
-template <typename scalar_t>
-inline C10_DEVICE scalar_t max_propagate_nan(scalar_t a, scalar_t b) {
-  scalar_t max = at::_isnan(b) ? b : std::max(a, b);
-  return max;
-}
-template <typename scalar_t>
-inline C10_DEVICE scalar_t min_propagate_nan(scalar_t a, scalar_t b) {
-  scalar_t min = at::_isnan(b) ? b : std::min(a, b);
-  return min;
-}
-#define MAX(X, Y) max_propagate_nan(X,Y)
-#define MIN(X, Y) min_propagate_nan(X,Y)
-#else
-#include <ATen/native/cpu/zmath.h>
-#define MAX(X, Y) max_impl(X,Y)
-#define MIN(X, Y) min_impl(X,Y)
 #endif
 
 // ROCm hip compiler doesn't work well with using std:: in kernel functions
@@ -48,8 +32,43 @@ inline C10_DEVICE scalar_t min_propagate_nan(scalar_t a, scalar_t b) {
 #include <c10/hip/HIPMathCompat.h>
 #endif
 #define compat_pow c10::cuda::compat::pow
+#define compat_abs c10::cuda::compat::abs
+#define compat_min c10::cuda::compat::min
+#define compat_max c10::cuda::compat::max
 #else
 #define compat_pow std::pow
+#define compat_abs std::abs
+#define compat_min std::min
+#define compat_max std::max
+#endif
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
+template <typename scalar_t>
+inline C10_DEVICE scalar_t max_propagate_nan(scalar_t a, scalar_t b) {
+  if constexpr (std::is_integral_v<scalar_t>) {
+    return a > b ? a : b;
+  } else {
+    using opmath_t = at::opmath_type<scalar_t>;
+    return at::_isnan(b) ? b : static_cast<scalar_t>(
+        compat_max(static_cast<opmath_t>(a), static_cast<opmath_t>(b)));
+  }
+}
+template <typename scalar_t>
+inline C10_DEVICE scalar_t min_propagate_nan(scalar_t a, scalar_t b) {
+  if constexpr (std::is_integral_v<scalar_t>) {
+    return a < b ? a : b;
+  } else {
+    using opmath_t = at::opmath_type<scalar_t>;
+    return at::_isnan(b) ? b : static_cast<scalar_t>(
+        compat_min(static_cast<opmath_t>(a), static_cast<opmath_t>(b)));
+  }
+}
+#define MAX(X, Y) max_propagate_nan(X,Y)
+#define MIN(X, Y) min_propagate_nan(X,Y)
+#else
+#include <ATen/native/cpu/zmath.h>
+#define MAX(X, Y) max_impl(X,Y)
+#define MIN(X, Y) min_impl(X,Y)
 #endif
 
 namespace at::native {
@@ -186,7 +205,7 @@ template <typename scalar_t, typename acc_t = scalar_t, typename out_t = acc_t>
 struct AbsMinOps {
 
   inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data, int64_t /*idx*/) const {
-    return MIN(acc, static_cast<acc_t>(std::abs(at::opmath_type<scalar_t>(data))));
+    return MIN(acc, static_cast<acc_t>(compat_abs(at::opmath_type<scalar_t>(data))));
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
@@ -215,7 +234,7 @@ struct AbsMinOps {
 template <typename scalar_t, typename acc_t = scalar_t, typename out_t = acc_t>
 struct AbsMaxOps {
   inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data, int64_t /*idx*/) const {
-    return MAX(acc, static_cast<acc_t>(std::abs(at::opmath_type<scalar_t>(data))));
+    return MAX(acc, static_cast<acc_t>(compat_abs(at::opmath_type<scalar_t>(data))));
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
@@ -248,7 +267,7 @@ struct NormOps {
   acc_t norm_;
 
   inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data, int64_t /*idx*/) const {
-    return acc + compat_pow(static_cast<acc_t>(std::abs(at::opmath_type<scalar_t>(data))), norm_);
+    return acc + compat_pow(static_cast<acc_t>(compat_abs(at::opmath_type<scalar_t>(data))), norm_);
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
@@ -314,7 +333,7 @@ struct NormZeroOps {
 template <typename scalar_t, typename acc_t = scalar_t, typename out_t = acc_t>
 struct NormOneOps {
   inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data, int64_t /*idx*/) const {
-    return acc + static_cast<acc_t>(std::abs(at::opmath_type<scalar_t>(data)));
+    return acc + static_cast<acc_t>(compat_abs(at::opmath_type<scalar_t>(data)));
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
@@ -347,12 +366,12 @@ inline C10_DEVICE acc_t abs_if_complex(scalar_t data, AbsSwitch<acc_t> /*unused*
 
 template<typename scalar_t, typename acc_t>
 inline C10_DEVICE acc_t abs_if_complex(std::complex<scalar_t> data, AbsSwitch<acc_t> /*unused*/) {
-  return static_cast<acc_t>(std::abs(data));
+  return static_cast<acc_t>(compat_abs(data));
 }
 
 template<typename scalar_t, typename acc_t>
 inline C10_DEVICE acc_t abs_if_complex(c10::complex<scalar_t> data, AbsSwitch<acc_t> /*unused*/) {
-  return static_cast<acc_t>(std::abs(at::opmath_type<c10::complex<scalar_t>>(data)));
+  return static_cast<acc_t>(compat_abs(at::opmath_type<c10::complex<scalar_t>>(data)));
 }
 
 // This accumulator template is used to calculate the order two norm of the
