@@ -2397,48 +2397,48 @@ class TestOptimRenewed(TestCase):
         self, device, dtype, optim_info, amsgrad
     ):
         optim_cls = optim_info.optim_cls
-        params = [torch.rand(10, 5, device=device, dtype=dtype) for _ in range(3)]
-        for p in params:
+
+        # Two param groups: group 1 gets f32 state pre-populated (hook should
+        # skip it), group 2 has no state (hook should initialize it in bf16).
+        # This exercises the fused kernel handling two groups whose states have
+        # different dtypes within the same optimizer.step() call.
+        g1_params = [torch.rand(10, 5, device=device, dtype=dtype) for _ in range(2)]
+        g2_params = [torch.rand(10, 5, device=device, dtype=dtype) for _ in range(2)]
+        for p in g1_params + g2_params:
             p.grad = torch.rand_like(p)
 
-        optim = optim_cls(params, lr=1e-3, fused=True, amsgrad=amsgrad)
+        optim = optim_cls(
+            [{"params": g1_params}, {"params": g2_params}],
+            lr=1e-3,
+            fused=True,
+            amsgrad=amsgrad,
+        )
 
-        # Pre-populate state for the first param in bf16 with specific
-        # non-zero values so we can verify the hook doesn't overwrite them.
-        p0 = params[0]
-        optim.state[p0]["step"] = torch.zeros((), dtype=torch.float32, device=p0.device)
-        optim.state[p0]["exp_avg"] = torch.ones_like(p0, dtype=torch.bfloat16)
-        optim.state[p0]["exp_avg_sq"] = torch.ones_like(p0, dtype=torch.bfloat16)
-        if amsgrad:
-            optim.state[p0]["max_exp_avg_sq"] = torch.ones_like(
-                p0, dtype=torch.bfloat16
+        for p in g1_params:
+            optim.state[p]["step"] = torch.zeros(
+                (), dtype=torch.float32, device=p.device
             )
+            optim.state[p]["exp_avg"] = torch.zeros_like(p)
+            optim.state[p]["exp_avg_sq"] = torch.zeros_like(p)
+            if amsgrad:
+                optim.state[p]["max_exp_avg_sq"] = torch.zeros_like(p)
 
         optim.register_step_pre_hook(_bf16_state_init_hook)
-
-        # Snapshot pre-populated values before step
-        exp_avg_before = optim.state[p0]["exp_avg"].clone()
-        exp_avg_sq_before = optim.state[p0]["exp_avg_sq"].clone()
-        if amsgrad:
-            max_exp_avg_sq_before = optim.state[p0]["max_exp_avg_sq"].clone()
-
         optim.step()
 
-        # First param: hook should have skipped it (state was non-empty).
-        # Values should have been updated by the optimizer (not reset to zero).
-        self.assertEqual(optim.state[p0]["exp_avg"].dtype, torch.bfloat16)
-        self.assertEqual(optim.state[p0]["exp_avg_sq"].dtype, torch.bfloat16)
-        self.assertNotEqual(optim.state[p0]["exp_avg"], exp_avg_before)
-        self.assertNotEqual(optim.state[p0]["exp_avg_sq"], exp_avg_sq_before)
-        if amsgrad:
-            self.assertEqual(optim.state[p0]["max_exp_avg_sq"].dtype, torch.bfloat16)
-            self.assertNotEqual(
-                optim.state[p0]["max_exp_avg_sq"], max_exp_avg_sq_before
-            )
-
-        # Other params: hook should have initialized them in bf16
-        for p in params[1:]:
+        # Group 1: hook skipped (state was non-empty), dtypes stay f32.
+        for p in g1_params:
             state = optim.state[p]
+            self.assertEqual(state["step"].dtype, torch.float32)
+            self.assertEqual(state["exp_avg"].dtype, torch.float32)
+            self.assertEqual(state["exp_avg_sq"].dtype, torch.float32)
+            if amsgrad:
+                self.assertEqual(state["max_exp_avg_sq"].dtype, torch.float32)
+
+        # Group 2: hook initialized state in bf16.
+        for p in g2_params:
+            state = optim.state[p]
+            self.assertEqual(state["step"].dtype, torch.float32)
             self.assertEqual(state["exp_avg"].dtype, torch.bfloat16)
             self.assertEqual(state["exp_avg_sq"].dtype, torch.bfloat16)
             if amsgrad:
