@@ -814,8 +814,8 @@ assume_unaligned_fallback_output = (
     os.environ.get("TORCHINDUCTOR_ASSUME_UNALIGNED_FALLBACK_OUTPUT") == "1"
 )
 
-# Custom InductorChoices callable to use (can be a class or functools.partial with kwargs)
-inductor_choices_class: Callable[[], "InductorChoices"] | None = None
+# Custom InductorChoices subclass to use
+inductor_choices_class: type["InductorChoices"] | None = None
 
 # fuse even in cases without common reads
 aggressive_fusion = False
@@ -2488,8 +2488,6 @@ _cache_config_ignore_prefix: list[str] = [
     "pre_grad_custom_pass",
     "_fuse_ddp_communication_passes",
     "_pre_fusion_custom_pass",
-    # callable hook, not a serializable config value
-    # "inductor_choices_class",
     # tests assume that changes here don't invalidate cache
     "always_complex_memory_overlap_TESTING_ONLY",
     # timing affects cache structure, not cache content

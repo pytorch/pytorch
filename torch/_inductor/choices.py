@@ -93,7 +93,12 @@ class FusionScore:
         )
 
 
-class InductorChoices:
+class _InductorChoicesMeta(type):
+    def __str__(cls) -> str:
+        return f"{cls.__module__}.{cls.__qualname__}"
+
+
+class InductorChoices(metaclass=_InductorChoicesMeta):
     """
     This class contains a collection of default heuristics that effect performance of our generated
     code.  We try to not put correctness requirements in this file.

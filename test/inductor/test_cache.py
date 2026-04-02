@@ -818,7 +818,7 @@ class OtherTest(TestMixin, TestCase):
 
 
 class ConfigSerializationTest(TestCase):
-    def test_callable_config_not_json_serializable(self):
+    def test_callable_config_not_json_serializable_1(self):
         # Repro: setting callable configs to a non-None value
         # save_config_portable() return a dict that is not JSON-serializable.
         with inductor_config.patch(
@@ -830,6 +830,43 @@ class ConfigSerializationTest(TestCase):
             self.assertIn("bucket_all_gathers_fx_bucket_size_determinator", portable)
             with self.assertRaises(TypeError, msg="not JSON serializable"):
                 json.dumps(portable)
+
+    def test_callable_config_not_json_serializable_2(self):
+        # InductorChoices metaclass provides __str__ returning qualname,
+        # making subclasses JSON-serializable via default=str.
+        from torch._inductor.choices import InductorChoices
+
+        class ChoicesA(InductorChoices):
+            pass
+
+        class ChoicesB(InductorChoices):
+            pass
+
+        # None is trivially JSON-serializable
+        with inductor_config.patch(inductor_choices_class=None):
+            portable = inductor_config.save_config_portable(
+                ignore_private_configs=False
+            )
+            self.assertIsNone(portable["inductor_choices_class"])
+            json.dumps(portable)
+
+        # Derived class is serializable via default=str
+        with inductor_config.patch(inductor_choices_class=ChoicesA):
+            portable = inductor_config.save_config_portable(
+                ignore_private_configs=False
+            )
+            json_a = json.dumps(portable, default=str)
+            self.assertIn("ChoicesA", json_a)
+
+        # Different derived class produces different JSON
+        with inductor_config.patch(inductor_choices_class=ChoicesB):
+            portable = inductor_config.save_config_portable(
+                ignore_private_configs=False
+            )
+            json_b = json.dumps(portable, default=str)
+            self.assertIn("ChoicesB", json_b)
+
+        self.assertNotEqual(json_a, json_b)
 
 
 if __name__ == "__main__":
