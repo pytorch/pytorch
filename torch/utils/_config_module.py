@@ -566,15 +566,17 @@ class ConfigModule(ModuleType):
             prefixes.append("_")
         prefixes.extend(getattr(self, "_cache_config_ignore_prefix", []))
         config = self._get_dict(ignored_prefixes=prefixes)
-        for key in getattr(self, "_cache_config_factory_keys", []):
-            if key in config and config[key] is not None:
-                from torch._inductor.cache import CacheAware
+        factory_keys = getattr(self, "_cache_config_factory_keys", [])
+        if any(key in config and config[key] is not None for key in factory_keys):
+            from torch._inductor.cache import CacheAware
 
-                instance = config[key]()
-                if isinstance(instance, CacheAware):
-                    config[key] = instance.uuid()
-                else:
-                    config[key] = None
+            for key in factory_keys:
+                if key in config and config[key] is not None:
+                    instance = config[key]()
+                    if isinstance(instance, CacheAware):
+                        config[key] = instance.uuid()
+                    else:
+                        config[key] = None
         return config
 
     def codegen_config(self) -> str:
