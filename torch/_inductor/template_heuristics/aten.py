@@ -88,7 +88,6 @@ class ATenBiasAddMMConfigHeuristics(
         # for addmm, bias is the first input
         bias = nodes[0]
         # Conditions should be checked in tuned_addmm before adding this template.
-        #
         # On ROCm, tuned_addmm passes the original 1D bias input so hipBLASLt
         # fused-bias kernels can see the native bias form. In that case the bias
         # no longer has the expanded stride-0 layout used on the non-ROCm path.
