@@ -193,6 +193,22 @@ def _unwrap_user_defined_container(
     return arg
 
 
+def _has_default_format_user_repr(arg: "UserDefinedObjectVariable") -> bool:
+    """Check whether a UserDefinedObjectVariable uses default __format__ and
+    __str__ but provides a Python-level custom __repr__.  When all three
+    conditions hold, call_default_format can eagerly inline repr() to capture
+    the value at the correct point in the trace.
+    """
+    cls = type(arg.value)
+    if cls.__format__ is not object.__format__:
+        return False
+    if cls.__str__ is not object.__str__:
+        return False
+    if cls.__repr__ is object.__repr__:
+        return False
+    return not is_wrapper_or_member_descriptor(arg.value.__repr__)
+
+
 IN_PLACE_DESUGARING_MAP = {
     operator.iadd: operator.add,
     operator.isub: operator.sub,
@@ -1879,16 +1895,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         if not isinstance(arg, variables.UserDefinedObjectVariable):
             return None
 
-        if type(arg.value).__format__ is not object.__format__:
-            return None
-
-        if type(arg.value).__str__ is not object.__str__:
-            return None
-
-        repr_method = arg.value.__repr__
-        if type(arg.value).__repr__ is object.__repr__:
-            return None
-        if is_wrapper_or_member_descriptor(repr_method):
+        if not _has_default_format_user_repr(arg):
             return None
         return self.call_repr(tx, arg)
 
