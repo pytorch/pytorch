@@ -46,12 +46,10 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3
       test-matrix: |
         { include: [
-          { config: "inductor", shard: 1, num_shards: 6, runner: "linux.rocm.gpu.mi300-test" },
-          { config: "inductor", shard: 2, num_shards: 6, runner: "linux.rocm.gpu.mi300-test" },
-          { config: "inductor", shard: 3, num_shards: 6, runner: "linux.rocm.gpu.mi300-test" },
-          { config: "inductor", shard: 4, num_shards: 6, runner: "linux.rocm.gpu.mi300-test" },
-          { config: "inductor", shard: 5, num_shards: 6, runner: "linux.rocm.gpu.mi300-test" },
-          { config: "inductor", shard: 6, num_shards: 6, runner: "linux.rocm.gpu.mi300-test" },
+          { config: "inductor", shard: 1, num_shards: 4, runner: "linux.rocm.gpu.mi300-test" },
+          { config: "inductor", shard: 2, num_shards: 4, runner: "linux.rocm.gpu.mi300-test" },
+          { config: "inductor", shard: 3, num_shards: 4, runner: "linux.rocm.gpu.mi300-test" },
+          { config: "inductor", shard: 4, num_shards: 4, runner: "linux.rocm.gpu.mi300-test" },
         ]}
     secrets: inherit
 
