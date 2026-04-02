@@ -95,7 +95,7 @@ class FusionScore:
 
 class InductorChoices:
     """
-    This class contains a collection of default heuristics that effect performance of our generated
+    This class contains a collection of default heuristics that affect performance of our generated
     code.  We try to not put correctness requirements in this file.
 
     You can override the choices made here by doing:
@@ -105,8 +105,8 @@ class InductorChoices:
 
             torch._inductor.virtualized.V.set_choices_handler(MyHeuristics())
 
-    Subclasses that want to participate in cache key computation should also
-    inherit from CacheAware and implement uuid().
+    Subclasses that want to participate in cache key computation should
+    implement uuid().
     """
 
     def get_config_heuristics(
