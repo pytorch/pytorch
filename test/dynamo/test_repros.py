@@ -8040,7 +8040,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
     @skipIfHpu
     @unittest.skipIf(
-        TEST_WITH_ROCM or not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "flash attention not supported",
     )
     def test_flash_attn_backward_mixed_strides(self, device):

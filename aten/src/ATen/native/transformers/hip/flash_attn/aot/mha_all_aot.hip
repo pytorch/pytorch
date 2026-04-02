@@ -635,7 +635,7 @@ mha_bwd_aot(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x hea
     TORCH_CHECK(dv.stride(-1) == 1, "dv must have contiguous last dimension");
     CHECK_SHAPE(dv, batch_size, seqlen_k, num_heads_k, head_size);
   } else {
-    dv = at::empty_like(k);
+    dv = at::empty_like(v);
   }
 
   auto [needs_swa, window_left, window_right] = calculate_swa(window_size_left,
