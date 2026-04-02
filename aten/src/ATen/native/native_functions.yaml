@@ -6830,6 +6830,16 @@
   tags: nondeterministic_seeded
   autogen: _standard_gamma.out
 
+- func: _philox_key_split(Tensor key, int num_splits) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: _philox_key_split_cuda
+
+- func: _philox_key_fold_in(Tensor key, int data) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: _philox_key_fold_in_cuda
+
 - func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total) -> Tensor
   dispatch:
     CPU: _dirichlet_grad_cpu
