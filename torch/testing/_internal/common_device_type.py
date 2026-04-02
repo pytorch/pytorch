@@ -550,7 +550,6 @@ class CUDATestBase(DeviceTypeTestBase):
     cudnn_version: ClassVar[Any]
     no_magma: ClassVar[bool]
     no_cudnn: ClassVar[bool]
-    no_hipdnn: ClassVar[bool]
 
     def has_cudnn(self):
         return not self.no_cudnn
@@ -582,9 +581,6 @@ class CUDATestBase(DeviceTypeTestBase):
         # Determines if cuDNN is available and its version
         cls.no_cudnn = not torch.backends.cudnn.is_acceptable(t)
         cls.cudnn_version = None if cls.no_cudnn else torch.backends.cudnn.version()
-
-        # Determines if hipDNN is available
-        cls.no_hipdnn = not torch.backends.hipdnn.is_available()
 
         # Acquires the current device as the primary (test) device
         cls.primary_device = f"cuda:{torch.cuda.current_device()}"
@@ -2044,16 +2040,6 @@ def skipCUDAIfNoMiopen(fn):
     return skipCUDAIf(torch.version.hip is None, "MIOpen is not available")(
         skipCUDAIfNoCudnn(fn)
     )
-
-
-def skipCUDAIfNoHipdnn(fn):
-    @wraps(fn)
-    def wrap_fn(self, *args, **kwargs):
-        if self.device_type == "cuda" and self.no_hipdnn:
-            raise unittest.SkipTest("hipDNN not available")
-        return fn(self, *args, **kwargs)
-
-    return wrap_fn
 
 
 def skipLazy(fn):

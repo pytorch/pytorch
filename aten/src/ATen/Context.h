@@ -244,8 +244,6 @@ class TORCH_API Context {
   void setBenchmarkLimitCuDNN(int /*b*/);
   bool immediateMiopen() const;
   void setImmediateMiopen(bool /*b*/);
-  bool userEnabledHipdnn() const;
-  void setUserEnabledHipdnn(bool e);
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool /*b*/);
   bool deterministicMkldnn() const;
@@ -480,7 +478,6 @@ class TORCH_API Context {
   bool allow_fp16_bf16_reduction_mathSDP = false;
   bool benchmark_cudnn = false;
   bool immediate_miopen = false;
-  bool enabled_hipdnn = false;
   Float32MatmulPrecision float32_matmul_precision =
       c10::utils::check_env("TORCH_ALLOW_TF32_CUBLAS_OVERRIDE") == true
       ? at::Float32MatmulPrecision::HIGH
