@@ -484,14 +484,30 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   bool supports_fast_sdpa = !is_causal && supports_sdpa_vector;
 
   // Fast path for long sequences without mask/causal: use native MPS ops directly.
-  // This avoids MPSGraph compilation/dispatch overhead, float32 upcast, and
-  // unnecessary attention weight allocation — ~2x faster than sdpa_general_mps.
-  if (!supports_fast_sdpa && !is_causal && !mask_.has_value() && query_seq_len > 8) {
+  // This avoids MPSGraph dispatch overhead — ~1.3-1.6x faster than sdpa_general_mps
+  // at seq_len >= 1024. Respects fp32 upcast setting for numerical precision.
+  if (!supports_fast_sdpa && !is_causal && !mask_.has_value() && query_seq_len >= 1024) {
     auto scale_factor = sdp::calculate_scale(q_, scale).expect_float();
-    auto scores = at::matmul(q_, k_.transpose(-2, -1));
+
+    // Upcast to fp32 for precision when required (matches math backend behavior)
+    auto& ctx = at::globalContext();
+    bool need_upcast = !ctx.allowFP16BF16ReductionMathSDP() &&
+        (q_.scalar_type() == at::kHalf || q_.scalar_type() == at::kBFloat16);
+    auto q_acc = need_upcast ? q_.to(at::kFloat) : q_;
+    auto k_acc = need_upcast ? k_.to(at::kFloat) : k_;
+    auto v_acc = need_upcast ? v_.to(at::kFloat) : v_;
+
+    auto scores = at::matmul(q_acc, k_acc.transpose(-2, -1));
     scores.mul_(scale_factor);
     auto attn_weights = at::softmax(scores, -1);
-    auto out = at::matmul(attn_weights, v_);
+    auto out = at::matmul(attn_weights, v_acc);
+
+    // Downcast back to input dtype if we upcasted
+    if (need_upcast) {
+      out = out.to(q_.scalar_type());
+      attn_weights = attn_weights.to(q_.scalar_type());
+    }
+
     if (unsqueezed) {
       if (query.dim() == 3) {
         out = out.squeeze(0);
