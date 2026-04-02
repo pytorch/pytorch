@@ -57,8 +57,6 @@ All neural network modules inherit from ``torch::nn::Module``, which provides
 parameter management, serialization, device/dtype conversion, and hooks.
 
 .. doxygenclass:: torch::nn::Module
-   :members:
-   :undoc-members:
 
 **Key features:**
 

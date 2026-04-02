@@ -33,8 +33,6 @@ Cloneable
 ---------
 
 .. doxygenclass:: torch::nn::Cloneable
-   :members:
-   :undoc-members:
 
 All ``torch::nn`` modules inherit from ``Cloneable``, enabling deep copies:
 

@@ -211,6 +211,23 @@ html_context = {
 # so a file named "default.css" will overwrite the builtin "default.css".
 # NOTE: sharing python docs resources
 
+# Remove "Subclassed by" paragraphs that Breathe renders as plain text
+# (not links) because per-class pages don't exist without exhale.
+def remove_subclassed_by(app, doctree, docname):
+    from docutils import nodes
+
+    for node in doctree.traverse(nodes.paragraph):
+        text = node.astext()
+        if text.startswith("Subclassed by "):
+            # Keep if it contains actual reference links
+            if not node.traverse(nodes.reference):
+                node.parent.remove(node)
+
+
+def setup(app):
+    app.connect("doctree-resolved", remove_subclassed_by)
+
+
 # Called automatically by Sphinx, making this `conf.py` an "extension".
 
 # -- Options for HTMLHelp output ------------------------------------------
