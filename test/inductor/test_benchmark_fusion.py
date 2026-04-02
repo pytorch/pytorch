@@ -346,7 +346,7 @@ if HAS_GPU_AND_TRITON:
             torch._dynamo.reset()
 
         @fresh_cache()
-        @config.patch(autotune_gemm_at_fusion_time=True)
+        @config.patch(autotune_at_fusion_time=True)
         def test_autotune_fused_epilogue(self):
             from unittest.mock import patch as mock_patch
 

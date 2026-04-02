@@ -513,8 +513,11 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 
 # Autotune gemm configs at fusion time, skipping unfused autotuning
-autotune_gemm_at_fusion_time = (
-    os.environ.get("TORCHINDUCTOR_AUTOTUNE_GEMM_AT_FUSION_TIME") == "1"
+autotune_at_fusion_time = os.environ.get("TORCHINDUCTOR_AUTOTUNE_AT_FUSION_TIME") == "1"
+
+# Also benchmark the winning fused config unfused to verify fusion is beneficial
+autotune_at_fusion_time_compare_unfused = (
+    os.environ.get("TORCHINDUCTOR_AUTOTUNE_AT_FUSION_TIME_COMPARE_UNFUSED") == "1"
 )
 
 

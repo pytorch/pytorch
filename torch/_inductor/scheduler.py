@@ -4269,9 +4269,18 @@ class Scheduler:
                 epilogue_fusion=True,
             )
 
-            log_fusion(min_ms_fused, extern_time, ms2)
+            baseline_time = extern_time
+            if (
+                config.autotune_at_fusion_time_compare_unfused
+                and ms_fused_choice is not None
+            ):
+                assert hasattr(ms_fused_choice, "bmreq")
+                unfused_triton_time = ms_fused_choice.bmreq.benchmark()
+                baseline_time = min(extern_time, unfused_triton_time)
 
-            if min_ms_fused < (extern_time + ms2) and ms_fused_choice is not None:
+            log_fusion(min_ms_fused, baseline_time, ms2)
+
+            if min_ms_fused < (baseline_time + ms2) and ms_fused_choice is not None:
                 # pyrefly: ignore [missing-attribute]
                 multi_node.finalize_as_triton_caller(ms_fused_choice)
                 multi_node._choice_timings[None] = new_timings
@@ -4559,7 +4568,7 @@ class Scheduler:
             if self._has_layout_conflict_for_template(multi_node):
                 return FusionResult.fuse(False)
 
-            if config.autotune_gemm_at_fusion_time and epilogue_fusion:
+            if config.autotune_at_fusion_time and epilogue_fusion:
                 return self._autotune_fused_epilogue(
                     multi_node,
                     node_list_fused,
