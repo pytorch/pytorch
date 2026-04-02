@@ -3756,14 +3756,16 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
                 ignore_shape_env=True,
             )
 
-    def _standalone_compile_cache_key(self, fx_graph, example_inputs):
+    def _standalone_compile_cache_key(
+        self, fx_graph, example_inputs, dynamic_shapes="from_example_inputs"
+    ):
         """Call standalone_compile.autograd_cache_key, the top-level API
         that mirrors standalone_compile's dynamic_shapes interface."""
         with self._tracing_context():
             return standalone_compile_autograd_cache_key(
                 fx_graph,
                 example_inputs,
-                dynamic_shapes="from_example_inputs",
+                dynamic_shapes=dynamic_shapes,
             )
 
     @requires_triton()
@@ -3904,6 +3906,42 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
         self.assertEqual(gt_key, api_key)
         self.assertEqual(gt_key, cfx_key)
         self.assertEqual(gt_key, sc_key)
+
+    @requires_triton()
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+    )
+    def test_standalone_compile_cache_key_varies_with_dynamic_shapes(self):
+        """dynamic_shapes controls ignore_shape_env, which affects the key.
+
+        "from_example_inputs" ignores the shape env (ignore_shape_env=True),
+        while "from_graph" and "from_tracing_context" include it
+        (ignore_shape_env=False). This must produce different cache keys.
+        """
+
+        def fn(x):
+            return x.sin() + x.cos()
+
+        x = torch.randn(4, 4)
+        _, fx_graph, example_inputs = self._compile_and_capture(fn, x)
+
+        ei_key, _ = self._standalone_compile_cache_key(
+            fx_graph, example_inputs, dynamic_shapes="from_example_inputs"
+        )
+        fg_key, _ = self._standalone_compile_cache_key(
+            fx_graph, example_inputs, dynamic_shapes="from_graph"
+        )
+        tc_key, _ = self._standalone_compile_cache_key(
+            fx_graph, example_inputs, dynamic_shapes="from_tracing_context"
+        )
+        # "from_graph" and "from_tracing_context" both resolve to
+        # ignore_shape_env=False, so they produce identical keys.
+        self.assertEqual(fg_key, tc_key)
+        # "from_example_inputs" sets ignore_shape_env=True, producing a
+        # different key than the other two options.
+        self.assertNotEqual(ei_key, fg_key)
 
 
 if __name__ == "__main__":
