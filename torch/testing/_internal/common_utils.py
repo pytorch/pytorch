@@ -94,6 +94,7 @@ from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.utils._import_utils import _check_module_exists
 import torch.utils._pytree as pytree
 from torch.utils import cpp_extension
+from torch._utils import _is_privateuse1_backend_available
 try:
     import pytest  # type: ignore[import-not-found]
     has_pytest = True
@@ -1453,12 +1454,6 @@ else:
             yield d
 
 
-def is_privateuse1_backend_available():
-    privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
-    privateuse1_backend_module = getattr(torch, privateuse1_backend_name, None)
-    return (is_available := getattr(privateuse1_backend_module, "is_available", None)) and is_available()
-
-
 def make_lazy_class(cls):
 
     def lazy_init(self, cb):
@@ -1512,7 +1507,7 @@ TEST_CUDA = torch.cuda.is_available()
 TEST_ACCELERATOR = LazyVal(lambda: torch.accelerator.is_available())  # type: ignore[call-arg]
 TEST_MULTIACCELERATOR = LazyVal(lambda: torch.accelerator.device_count() > 1)  # type: ignore[call-arg]
 custom_device_mod = getattr(torch, torch._C._get_privateuse1_backend_name(), None)
-TEST_PRIVATEUSE1 = is_privateuse1_backend_available()
+TEST_PRIVATEUSE1 = _is_privateuse1_backend_available()
 TEST_PRIVATEUSE1_DEVICE_TYPE = torch._C._get_privateuse1_backend_name()
 TEST_NUMBA = _check_module_exists('numba')
 TEST_TRANSFORMERS = _check_module_exists('transformers')
