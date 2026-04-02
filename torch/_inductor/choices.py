@@ -93,12 +93,7 @@ class FusionScore:
         )
 
 
-class _InductorChoicesMeta(type):
-    def __str__(cls) -> str:
-        return f"{cls.__module__}.{cls.__qualname__}"
-
-
-class InductorChoices(metaclass=_InductorChoicesMeta):
+class InductorChoices:
     """
     This class contains a collection of default heuristics that effect performance of our generated
     code.  We try to not put correctness requirements in this file.
@@ -110,6 +105,9 @@ class InductorChoices(metaclass=_InductorChoicesMeta):
 
             torch._inductor.virtualized.V.set_choices_handler(MyHeuristics())
     """
+
+    def __hash__(self) -> int:
+        return hash(type(self).__qualname__)
 
     def get_config_heuristics(
         self, device_type: str | None = "cuda"

@@ -814,8 +814,18 @@ assume_unaligned_fallback_output = (
     os.environ.get("TORCHINDUCTOR_ASSUME_UNALIGNED_FALLBACK_OUTPUT") == "1"
 )
 
-# Custom InductorChoices subclass to use
-inductor_choices_class: type["InductorChoices"] | None = None
+# Factory callable that returns a custom InductorChoices instance.
+# A callable (rather than a class) is used to defer imports and avoid circular
+# dependencies between config and the choices module. Example:
+#
+#     def _custom_choices_factory():
+#         from my_package.choices import MyInductorChoices
+#         return MyInductorChoices()
+#
+#     config.inductor_choices_class = _custom_choices_factory
+#
+# The returned instance must define __hash__ for cache key serialization.
+inductor_choices_class: Callable[[], "InductorChoices"] | None = None
 
 # fuse even in cases without common reads
 aggressive_fusion = False
@@ -2497,6 +2507,12 @@ _cache_config_ignore_prefix: list[str] = [
     "fx_graph_remote_cache",
     "autotune_local_cache",
     "autotune_remote_cache",
+]
+
+# Config keys whose values are callable factories. save_config_portable
+# will call them and hash the result instead of serializing the callable.
+_cache_config_factory_keys: list[str] = [
+    "inductor_choices_class",
 ]
 
 # External callable for matmul tuning candidates

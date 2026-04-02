@@ -565,7 +565,11 @@ class ConfigModule(ModuleType):
         if ignore_private_configs:
             prefixes.append("_")
         prefixes.extend(getattr(self, "_cache_config_ignore_prefix", []))
-        return self._get_dict(ignored_prefixes=prefixes)
+        config = self._get_dict(ignored_prefixes=prefixes)
+        for key in getattr(self, "_cache_config_factory_keys", []):
+            if key in config and config[key] is not None:
+                config[key] = hash(config[key]())
+        return config
 
     def codegen_config(self) -> str:
         """Convert config to Python statements that replicate current config.

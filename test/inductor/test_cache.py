@@ -832,8 +832,8 @@ class ConfigSerializationTest(TestCase):
                 json.dumps(portable)
 
     def test_callable_config_not_json_serializable_2(self):
-        # InductorChoices metaclass provides __str__ returning qualname,
-        # making subclasses JSON-serializable via default=str.
+        # save_config_portable calls the factory and hashes the result
+        # via InductorChoices.__hash__, producing a JSON-serializable int.
         from torch._inductor.choices import InductorChoices
 
         class ChoicesA(InductorChoices):
@@ -850,21 +850,21 @@ class ConfigSerializationTest(TestCase):
             self.assertIsNone(portable["inductor_choices_class"])
             json.dumps(portable)
 
-        # Derived class is serializable via default=str
+        # Factory returning ChoicesA → hash int
         with inductor_config.patch(inductor_choices_class=ChoicesA):
             portable = inductor_config.save_config_portable(
                 ignore_private_configs=False
             )
-            json_a = json.dumps(portable, default=str)
-            self.assertIn("ChoicesA", json_a)
+            self.assertIsInstance(portable["inductor_choices_class"], int)
+            json_a = json.dumps(portable)
 
-        # Different derived class produces different JSON
+        # Factory returning ChoicesB → different hash int
         with inductor_config.patch(inductor_choices_class=ChoicesB):
             portable = inductor_config.save_config_portable(
                 ignore_private_configs=False
             )
-            json_b = json.dumps(portable, default=str)
-            self.assertIn("ChoicesB", json_b)
+            self.assertIsInstance(portable["inductor_choices_class"], int)
+            json_b = json.dumps(portable)
 
         self.assertNotEqual(json_a, json_b)
 
