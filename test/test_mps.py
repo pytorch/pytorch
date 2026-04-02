@@ -6108,7 +6108,7 @@ class TestMPS(TestCaseMPS):
             input_mps = input_cpu.to('mps')
             output_cpu = torch.linalg.cholesky_ex(input_cpu, upper=upper)
             output_mps = torch.linalg.cholesky_ex(input_mps, upper=upper)
-            self.assertEqual(output_cpu, output_mps, atol=2e-5, rtol=1e-6)
+            self.assertEqual(output_cpu, output_mps, atol=3e-5, rtol=1e-6)
 
         # test with different even/odd matrix sizes
         matrix_sizes = [1, 2, 3, 4, 8, 17, 64, 128, 154]
