@@ -2264,7 +2264,9 @@ class AOTInductorTestsTemplate:
     @unittest.skipIf(IS_MACOS, "fp8 is not supported on Mac")
     def test_aoti_fp8(self):
         if self.device != "cpu" and not PLATFORM_SUPPORTS_FP8:
-            raise unittest.SkipTest("FP8 is only supported on H100+, SM 8.9 and MI300+ devices")
+            raise unittest.SkipTest(
+                "FP8 is only supported on H100+, SM 8.9 and MI300+ devices"
+            )
 
         class M(torch.nn.Module):
             def forward(self, x1, x2):
