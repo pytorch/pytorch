@@ -12,7 +12,6 @@ from torch._inductor.scheduler import MixOrderReduction
 from torch.utils._sympy.value_ranges import bound_sympy
 
 from . import config
-from .cache import CacheAware
 from .codecache import write_text
 from .kernel_inputs import KernelInputs  # noqa: TC001
 from .kernel_template_choice import make_ktc_generator
@@ -94,7 +93,7 @@ class FusionScore:
         )
 
 
-class InductorChoices(CacheAware):
+class InductorChoices:
     """
     This class contains a collection of default heuristics that effect performance of our generated
     code.  We try to not put correctness requirements in this file.
@@ -106,8 +105,8 @@ class InductorChoices(CacheAware):
 
             torch._inductor.virtualized.V.set_choices_handler(MyHeuristics())
 
-    Subclasses that are used with inductor_choices_class must override uuid()
-    to return a unique, JSON-serializable identifier for cache key computation.
+    Subclasses that want to participate in cache key computation should also
+    inherit from CacheAware and implement uuid().
     """
 
     def get_config_heuristics(

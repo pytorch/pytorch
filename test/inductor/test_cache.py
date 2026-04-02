@@ -834,13 +834,14 @@ class ConfigSerializationTest(TestCase):
     def test_callable_config_not_json_serializable_2(self):
         # save_config_portable calls the factory and then .uuid(),
         # producing a JSON-serializable value for the cache key.
+        from torch._inductor.cache import CacheAware
         from torch._inductor.choices import InductorChoices
 
-        class ChoicesA(InductorChoices):
+        class ChoicesA(InductorChoices, CacheAware):
             def uuid(self):
                 return "choices_a"
 
-        class ChoicesB(InductorChoices):
+        class ChoicesB(InductorChoices, CacheAware):
             def uuid(self):
                 return "choices_b"
 
@@ -869,6 +870,29 @@ class ConfigSerializationTest(TestCase):
             json_b = json.dumps(portable)
 
         self.assertNotEqual(json_a, json_b)
+
+    def test_callable_config_without_cache_aware(self):
+        from torch._inductor.cache import CacheAware
+        from torch._inductor.choices import InductorChoices
+
+        # A subclass without CacheAware is excluded from the cache key.
+        class PlainChoices(InductorChoices):
+            pass
+
+        with inductor_config.patch(inductor_choices_class=PlainChoices):
+            portable = inductor_config.save_config_portable(
+                ignore_private_configs=False
+            )
+            self.assertIsNone(portable["inductor_choices_class"])
+            json.dumps(portable)
+
+        # A subclass with CacheAware but no uuid() raises.
+        class BadChoices(InductorChoices, CacheAware):
+            pass
+
+        with inductor_config.patch(inductor_choices_class=BadChoices):
+            with self.assertRaises(NotImplementedError):
+                inductor_config.save_config_portable(ignore_private_configs=False)
 
 
 if __name__ == "__main__":

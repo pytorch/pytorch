@@ -568,7 +568,13 @@ class ConfigModule(ModuleType):
         config = self._get_dict(ignored_prefixes=prefixes)
         for key in getattr(self, "_cache_config_factory_keys", []):
             if key in config and config[key] is not None:
-                config[key] = config[key]().uuid()
+                from torch._inductor.cache import CacheAware
+
+                instance = config[key]()
+                if isinstance(instance, CacheAware):
+                    config[key] = instance.uuid()
+                else:
+                    config[key] = None
         return config
 
     def codegen_config(self) -> str:
