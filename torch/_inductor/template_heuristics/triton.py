@@ -2704,14 +2704,18 @@ class CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic(
         """
         Generate main loop scaling kernel inputs.
         """
-        mat_a, mat_b, scale_a, scale_b = kernel_inputs._input_nodes
-        scale_a_size, scale_b_size = scale_a.get_size(), scale_b.get_size()
+        if "TILE_SIZE_A" in kwargs and "TILE_SIZE_B" in kwargs:
+            tile_size_a = kwargs["TILE_SIZE_A"]
+            tile_size_b = kwargs["TILE_SIZE_B"]
+        else:
+            mat_a, mat_b, scale_a, scale_b = kernel_inputs._input_nodes
+            scale_a_size, scale_b_size = scale_a.get_size(), scale_b.get_size()
 
-        scale_option_a, scale_option_b = get_scaling_options(
-            mat_a, mat_b, scale_a_size, scale_b_size
-        )
-        tile_size_a = get_tile_size(scale_option_a)
-        tile_size_b = get_tile_size(scale_option_b)
+            scale_option_a, scale_option_b = get_scaling_options(
+                mat_a, mat_b, scale_a_size, scale_b_size
+            )
+            tile_size_a = get_tile_size(scale_option_a)
+            tile_size_b = get_tile_size(scale_option_b)
 
         # Get base scaled MM template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(

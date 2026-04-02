@@ -50,6 +50,7 @@ class ATenConfigHeuristics(TemplateConfigHeuristics):
         self,
         kernel_inputs: KernelInputs,
         op_name: str,
+        **kwargs,
     ) -> Generator[dict[str, Any], None, None]:
         yield dict()
 
@@ -82,6 +83,7 @@ class ATenBiasAddMMConfigHeuristics(
         self,
         kernel_inputs: KernelInputs,
         op_name: str,
+        **kwargs,
     ) -> Generator[dict[str, Any], None, None]:
         nodes = kernel_inputs.nodes()
         # for addmm, bias is the first input

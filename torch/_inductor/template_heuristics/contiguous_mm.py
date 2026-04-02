@@ -45,6 +45,7 @@ class ContiguousMMHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         self,
         kernel_inputs: KernelInputs,
         op_name: str,
+        **kwargs,
     ) -> Generator[dict[str, Any], None, None]:
         """
         Get all the valid k_splits for the given m, n, k.

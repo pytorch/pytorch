@@ -7095,64 +7095,68 @@ def _check_scaled_mm_sizes_v2(
             )
         elif is_128x128_1x128(scale_recipe_a, scale_recipe_b):
             # A, B are fp8, scales are fp32
-            # L4 = round_up(K // 128, 4)
-            # As: [L4 x M // 128], stride: [1, L4]
-            # Bs: [N x K // 128], stride: [1, N]
+            # L4 = round_up(ceil_div(K, 128), 4)
+            # As: [L4 x ceil_div(M, 128)], stride: [1, L4]
+            # Bs: [N x ceil_div(K, 128)], stride: [1, N]
             types_ok = (
                 scale_a[0].dtype == torch.float32 and scale_b[0].dtype == torch.float32
             )
-            L4 = round_up(K / 128, 4)
+            K_128 = ceil_div(K, 128)
+            M_128 = ceil_div(M, 128)
+            L4 = round_up(K_128, 4)
             sa = scale_a[0]
             scale_a_ok = (
                 sa.shape[0] == L4
-                and sa.shape[1] == M // 128
+                and sa.shape[1] == M_128
                 and sa.stride(0) == 1
                 and (sa.stride(1) == L4 or (sa.shape[1] == 1 and sa.stride(1) == 1))
             )
             sb = scale_b[0]
             scale_b_ok = (
                 sb.shape[0] == N
-                and sb.shape[1] == K // 128
+                and sb.shape[1] == K_128
                 and sb.stride(0) == 1
                 and (sb.stride(1) == N or (sb.shape[1] == 1 and sb.stride(1) == 1))
             )
             torch._check(
                 types_ok and scale_a_ok and scale_b_ok,
                 lambda: (
-                    "For 128x128 x 1x128 blockwise scaling, L4 = {round_up(K / 128, 4)}, "
-                    f"scale a must have shape [{L4}, {M // 128}] (got: {sa.shape}) and stride [1, {L4}] (got: {sa.stride})"
-                    f"scale b must have shape [{N}, {K // 128}] (got: {sb.shape}) and stride [1, {N}] (got: {sb.stride})"
+                    f"For 128x128 x 1x128 blockwise scaling, L4 = {L4}, "
+                    f"scale a must have shape [{L4}, {M_128}] (got: {sa.shape}) and stride [1, {L4}] (got: {sa.stride})"
+                    f"scale b must have shape [{N}, {K_128}] (got: {sb.shape}) and stride [1, {N}] (got: {sb.stride})"
                 ),
             )
         elif is_1x128_128x128(scale_recipe_a, scale_recipe_b):
             # A, B are fp8, scales are fp32
-            # L4 = round_up(K // 128, 4)
-            # As: [M x K // 128], stride: [1, M]
-            # Bs: [L4 x N // 128], stride: [1, L4]
+            # L4 = round_up(ceil_div(K, 128), 4)
+            # As: [M x ceil_div(K, 128)], stride: [1, M]
+            # Bs: [L4 x ceil_div(N, 128)], stride: [1, L4]
             types_ok = (
                 scale_a[0].dtype == torch.float32 and scale_b[0].dtype == torch.float32
             )
-            L4 = round_up(K / 128, 4)
+            K_128 = ceil_div(K, 128)
+            N_128 = ceil_div(N, 128)
+            L4 = round_up(K_128, 4)
             sa = scale_a[0]
             scale_a_ok = (
                 sa.shape[0] == M
-                and sa.shape[1] == K // 128
+                and sa.shape[1] == K_128
                 and sa.stride(0) == 1
                 and (sa.stride(1) == M or (sa.shape[1] == 1 and sa.stride(1) == 1))
             )
             sb = scale_b[0]
             scale_b_ok = (
                 sb.shape[0] == L4
-                and sb.shape[1] == N // 128
+                and sb.shape[1] == N_128
                 and sb.stride(0) == 1
                 and (sb.stride(1) == L4 or (sb.shape[1] == 1 and sb.stride(1) == 1))
             )
             torch._check(
                 types_ok and scale_a_ok and scale_b_ok,
                 lambda: (
-                    "For 1x128 x 128x128 blockwise scaling, L4 = {round_up(K / 128, 4)}, "
-                    f"scale a must have shape [{M}, {K // 128}] (got: {sa.shape}) and stride [1, {M}] (got: {sa.stride})"
-                    f"scale b must have shape [{L4}, {N // 128}] (got: {sb.shape}) and stride [1, {L4}] (got: {sb.stride})"
+                    f"For 1x128 x 128x128 blockwise scaling, L4 = {L4}, "
+                    f"scale a must have shape [{M}, {K_128}] (got: {sa.shape}) and stride [1, {M}] (got: {sa.stride})"
+                    f"scale b must have shape [{L4}, {N_128}] (got: {sb.shape}) and stride [1, {L4}] (got: {sb.stride})"
                 ),
             )
         elif is_mx(scale_recipe_a, scale_recipe_b):

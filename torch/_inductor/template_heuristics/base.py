@@ -29,6 +29,7 @@ class TemplateConfigHeuristics:
         self,
         kernel_inputs: KernelInputs,
         op_name: str,
+        **kwargs,
     ) -> Generator[KernelTemplateParams, None, None]:
         """
         Get template configs for the given inputs.
@@ -40,7 +41,9 @@ class TemplateConfigHeuristics:
             return
 
         # Generate configs and fuse with extra_kwargs
-        for config_dict in self._get_template_configs_impl(kernel_inputs, op_name):
+        for config_dict in self._get_template_configs_impl(
+            kernel_inputs, op_name, **kwargs
+        ):
             # Fuse extra_kwargs into config
             yield DictKernelTemplateParams(config_dict)
 
@@ -48,6 +51,7 @@ class TemplateConfigHeuristics:
         self,
         kernel_inputs: KernelInputs,
         op_name: str,
+        **kwargs,
     ) -> Generator[dict[str, Any], None, None]:
         """
         Get template configs for the given inputs.

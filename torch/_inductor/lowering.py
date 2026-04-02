@@ -2399,6 +2399,7 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
                 aten.cat.default,
                 aten.clone.default,
                 aten._scaled_mm.default,
+                aten._scaled_mm_v2.default,
             )
             or (isinstance(node.target, torch._ops.OpOverload) and is_view(node.target))
         )

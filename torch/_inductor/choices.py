@@ -210,6 +210,7 @@ class InductorChoices:
         cs = heuristic.get_template_configs(
             kernel_inputs,
             op_name,
+            **(kwarg_overrides or {}),
         )
         # adjust the kernel inputs to the template-specific heuristic, if needed
         # default here is to just return the kernel_inputs as is
