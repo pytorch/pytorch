@@ -844,12 +844,12 @@ class ConfigSerializationTest(TestCase):
             def uuid(self):
                 return "choices_b"
 
-        # None default is excluded from the config hash entirely.
+        # None default stays as None in the config hash.
         with inductor_config.patch(inductor_choices_class=None):
             portable = inductor_config.save_config_portable(
                 ignore_private_configs=False
             )
-            self.assertNotIn("inductor_choices_class", portable)
+            self.assertIsNone(portable["inductor_choices_class"])
             json.dumps(portable)
 
         # Factory returning ChoicesA → uuid string

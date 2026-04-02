@@ -567,9 +567,7 @@ class ConfigModule(ModuleType):
         prefixes.extend(getattr(self, "_cache_config_ignore_prefix", []))
         config = self._get_dict(ignored_prefixes=prefixes)
         for key in getattr(self, "_cache_config_factory_keys", []):
-            if key in config and config[key] is None:
-                del config[key]
-            elif key in config:
+            if key in config and config[key] is not None:
                 instance = config[key]()
                 if hasattr(instance, "uuid"):
                     config[key] = instance.uuid()
