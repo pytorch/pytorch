@@ -898,66 +898,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 ],
             )
 
-        @register(torch._dynamo.allow_in_graph, torch.compiler.allow_in_graph)
-        def handle_allow_in_graph(
-            self,
-            tx: "InstructionTranslator",
-            *args: VariableTracker,
-            **kwargs: VariableTracker,
-        ) -> VariableTracker:
-            from .. import graph_break_hints
-
-            if kwargs or len(args) != 1:
-                unimplemented(
-                    gb_type="allow_in_graph with incorrect arguments",
-                    context=f"args={args}, kwargs={kwargs}",
-                    explanation="allow_in_graph expects exactly one callable argument with no keyword arguments",
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
-            fn_var = args[0]
-            if isinstance(fn_var, TorchInGraphFunctionVariable):
-                return fn_var
-            if not isinstance(fn_var, variables.functions.UserFunctionVariable):
-                unimplemented(
-                    gb_type="allow_in_graph on non-user-function",
-                    context=f"fn={fn_var}",
-                    explanation=(
-                        "allow_in_graph inside a compiled function only supports user-defined "
-                        "Python functions (UserFunctionVariable). For cases requiring nn.Module "
-                        "arguments or user-defined class inputs, use @torch._dynamo.nonstrict_trace instead."
-                    ),
-                    hints=[
-                        "Use @torch.compiler.allow_in_graph as a module-level decorator on your function.",
-                        "For functions with nn.Module or user-defined class arguments, use @torch._dynamo.nonstrict_trace.",
-                    ],
-                )
-            try:
-                python_fn = fn_var.as_python_constant()
-            except NotImplementedError:
-                unimplemented(
-                    gb_type="allow_in_graph on non-constant function",
-                    context=f"fn={fn_var}",
-                    explanation=(
-                        "allow_in_graph called inside a compiled function requires a function "
-                        "whose Python value can be determined at trace time. Functions defined "
-                        "inside the compiled function body with non-constant closures are not supported."
-                    ),
-                    hints=[
-                        "Move the allow_in_graph call to module level, outside the compiled function.",
-                        "Use @torch.compiler.allow_in_graph as a decorator on the function definition.",
-                        "For complex cases (non-constant closures), use @torch._dynamo.nonstrict_trace.",
-                    ],
-                )
-            # Registering python_fn in _allowed_callable_ids makes lookup_callable
-            # return TorchInGraphFunctionVariable for it, so VariableTracker.build
-            # will always produce a TorchInGraphFunctionVariable here.
-            # Note: this mutation is global; any other variable tracker that already
-            # holds python_fn (pre-registration) will remain its original type, but
-            # calling python_fn again from a fresh LOAD would still get the updated
-            # classification via lookup_callable.
-            torch._dynamo.allow_in_graph(python_fn)
-            return VariableTracker.build(tx, python_fn)
-
         @register(torch.library.wrap_triton)
         def handle_wrap_triton(
             self,

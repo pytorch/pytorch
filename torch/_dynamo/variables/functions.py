@@ -2288,6 +2288,16 @@ class SkipFunctionVariable(VariableTracker):
                     ]
                     # also warn on it because most users won't see the graph break message
                     torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
+            if qualname == "allow_in_graph":
+                explanation = (
+                    "torch.compiler.allow_in_graph (or torch._dynamo.allow_in_graph) "
+                    "was called inside a compiled region. Dynamically annotating functions "
+                    "inside a compiled region is not supported."
+                )
+                hints = [
+                    "Apply @torch.compiler.allow_in_graph as a decorator before compilation, "
+                    "not inside the compiled function.",
+                ]
             if self.reason:
                 reason = self.reason
             else:

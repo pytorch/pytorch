@@ -12,7 +12,6 @@ from torch._dynamo.exc import Unsupported
 from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    parametrize,
     skipIfWindows,
 )
 from torch.testing._internal.dynamo_pytree_test_utils import PytreeRegisteringTestCase
@@ -2438,80 +2437,20 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         with self.assertRaises(RuntimeError):
             exported_model = torch.export.export(model, (inp,))
 
-    @parametrize(
-        "allow_fn", [torch.compiler.allow_in_graph, torch._dynamo.allow_in_graph]
-    )
-    def test_allow_in_graph_inside_compile_api_paths(self, allow_fn):
+    def test_allow_in_graph_inside_compile_gives_clear_error(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/178511
-        # Both torch.compiler.allow_in_graph and torch._dynamo.allow_in_graph are registered
-        # separately in manual_torch_name_rule_map, so both need coverage.
-        def forward(x):
-            wrapped_fn = allow_fn(torch.relu)
-            return wrapped_fn(x)
-
-        compiled = torch.compile(forward, fullgraph=True)
-        x = torch.randn(4)
-        self.assertEqual(compiled(x), torch.relu(x))
-
-    def test_allow_in_graph_inside_compile_module_level_fn(self):
-        # Regression test for https://github.com/pytorch/pytorch/issues/178511
-        # Verify that my_custom_function appears as a call_function node in the FX graph.
-        backend = torch._dynamo.testing.EagerAndRecordGraphs()
-
+        # Calling allow_in_graph inside a compiled region is not supported.
+        # Verify the error message guides users to annotate before compilation.
         def forward(x):
             wrapped_fn = torch.compiler.allow_in_graph(my_custom_function)
             return wrapped_fn(x)
 
-        compiled = torch.compile(forward, fullgraph=True, backend=backend)
-        x = torch.randn(4)
-        result = compiled(x)
-        self.assertEqual(result, my_custom_function(x))
-        self.assertEqual(len(backend.graphs), 1)
-        call_nodes = [
-            n
-            for n in backend.graphs[0].graph.nodes
-            if n.op == "call_function" and n.target is my_custom_function
-        ]
-        self.assertEqual(len(call_nodes), 1)
-
-    def test_allow_in_graph_inside_compile_inner_fn_rejected(self):
-        # Regression test for https://github.com/pytorch/pytorch/issues/178511
-        # allow_in_graph inside compile only supports UserFunctionVariable (module-level
-        # functions). Inner functions defined inside the compiled region are
-        # NestedUserFunctionVariable and are intentionally rejected - use
-        # @torch._dynamo.nonstrict_trace for those cases.
-        def forward(x):
-            def inner(t):
-                return t * 2
-
-            wrapped = torch.compiler.allow_in_graph(inner)
-            return wrapped(x)
-
-        # fullgraph=True ensures the graph break surfaces as Unsupported rather than
-        # silently resuming in eager mode.
         compiled = torch.compile(forward, fullgraph=True)
-        with self.assertRaises(torch._dynamo.exc.Unsupported):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "allow_in_graph",
+        ):
             compiled(torch.randn(4))
-
-    def test_disallow_in_graph_after_allow_in_graph_causes_graph_break(self):
-        # Regression test for https://github.com/pytorch/pytorch/issues/178511
-        # disallow_in_graph is in the torch._dynamo blanket-skip module and
-        # causes a graph break when called inside compiled code.
-        cnts = torch._dynamo.testing.CompileCounter()
-
-        def forward(x):
-            wrapped_fn = torch.compiler.allow_in_graph(my_custom_function)
-            result = wrapped_fn(x)
-            torch._dynamo.disallow_in_graph(my_custom_function)  # graph break here
-            return result
-
-        compiled = torch.compile(forward, backend=cnts, fullgraph=False)
-        x = torch.randn(4)
-        result = compiled(x)
-        self.assertEqual(result, my_custom_function(x))
-        # One graph compiled (allow_in_graph + wrapped_fn(x)); the remainder
-        # (disallow_in_graph + return) runs eagerly after the break with no new graph.
-        self.assertEqual(cnts.frame_count, 1)
 
 
 instantiate_parametrized_tests(DecoratorTests)
