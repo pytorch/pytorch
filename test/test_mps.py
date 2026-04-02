@@ -10260,9 +10260,6 @@ def create_sdpa_meta_test():
 
     return new_test_cls
 
-TestSDPAMeta = create_sdpa_meta_test()
-instantiate_parametrized_tests(TestSDPAMeta)
-
 class TestGatherScatter(TestCaseMPS):
     def test_slicing_with_step(self):
         # Slicing with step
@@ -13570,6 +13567,10 @@ instantiate_parametrized_tests(TestMPS)
 instantiate_parametrized_tests(TestSDPA)
 instantiate_parametrized_tests(TestSmoothL1Loss)
 instantiate_parametrized_tests(TestMetalLibrary)
+
+# TestSDPAMeta must be instantiated after TestSDPA
+TestSDPAMeta = create_sdpa_meta_test()
+instantiate_parametrized_tests(TestSDPAMeta)
 
 if __name__ == "__main__":
     run_tests()
