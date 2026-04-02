@@ -872,9 +872,10 @@ class TestBasicGEMM(TestCase):
         self.assertEqual(c, cpu_result)
 
     @parametrize("shape", [513, 767])
-    def test_matmul_deterministic_mode(self, device, shape):
+    @dtypes(torch.bfloat16, torch.half, torch.float, torch.double)
+    def test_matmul_deterministic_mode(self, device, shape, dtype):
         with DeterministicGuard(True):
-            inp = torch.randn(shape, shape, device=device, dtype=torch.float32)
+            inp = torch.randn(shape, shape, device=device, dtype=dtype)
             first = torch.matmul(inp, inp)
             for _ in range(10):
                 self.assertEqual(first, torch.matmul(inp, inp), atol=0.0, rtol=0.0)
