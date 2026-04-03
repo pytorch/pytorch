@@ -591,6 +591,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     container:
       image: ${{ inputs.docker-image }}
+      options: "--gpus all"
     timeout-minutes: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
     permissions:
       id-token: write
