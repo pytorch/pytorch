@@ -91,7 +91,7 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
 
     def __init__(self, value: Any, **kwargs: Any) -> None:
         assert not (isinstance(value, type) and issubclass(value, enum.Enum)), (
-            f"Enum class {value} should use UserDefinedEnumClassVariable, "
+            f"Enum class {value} should use UserDefinedClassVariable, "
             "not OpaqueObjectClassVariable"
         )
         super().__init__(**kwargs)
@@ -237,7 +237,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         **options: Any,
     ) -> "TorchScriptObjectVariable":
         assert not isinstance(value, enum.Enum), (
-            f"Enum {type(value)} should use EnumVariable, not TorchScriptObjectVariable"
+            f"Enum {type(value)} should use UserDefinedObjectVariable, not TorchScriptObjectVariable"
         )
         out = TorchScriptObjectVariable(
             proxy, value, ctor_args_kwargs, ctor_arg_sources=ctor_arg_sources, **options
