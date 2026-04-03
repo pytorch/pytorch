@@ -38,12 +38,8 @@ from torch.testing._internal.common_utils import (
     xfailIfTorchDynamo,
 )
 from torch.testing._internal.hop_db import hop_db
-from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
-from torch.testing._internal.triton_utils import (
-    requires_cuda_and_triton,
-    requires_gpu_and_triton,
-)
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 def count_ops(gm, args, freq, op):
@@ -137,6 +133,12 @@ def default_args_generator(seed_value):
 
 
 class HigherOrderOpTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+    def _get_accelerator_device(self):
+        """Get current accelerator device, skip test if not available."""
+        if not torch.accelerator.is_available():
+            self.skipTest("Accelerator is not available")
+        return torch.accelerator.current_accelerator()
+
     def _assert_wrap_fallback(self, func, args, setup=lambda: None):
         counters.clear()
         backend = EagerAndRecordGraphs()
@@ -3385,12 +3387,12 @@ class GraphModule(torch.nn.Module):
         with self.assertRaisesRegex(RuntimeError, msg):
             fn_with_hints(x, y)
 
-    @requires_gpu_and_triton
     def test_wrap_inductor_compiled_regions_option(self):
         """
         Test that wrap_inductor_compiled_regions option wraps compiled regions
         in inductor_compiled_code HOP, making them visible to DebugMode.
         """
+        device = self._get_accelerator_device()
         from torch.utils._debug_mode import DebugMode
 
         # Test with wrapping enabled
@@ -3407,8 +3409,8 @@ class GraphModule(torch.nn.Module):
         def fn_not_wrapped(x, y):
             return torch.matmul(x, y)
 
-        x = torch.randn(4, 4, device=GPU_TYPE)
-        y = torch.randn(4, 4, device=GPU_TYPE)
+        x = torch.randn(4, 4, device=device)
+        y = torch.randn(4, 4, device=device)
 
         # Test wrapped version - HOP should be visible in DebugMode
         with DebugMode() as debug_mode_wrapped:
@@ -3429,11 +3431,11 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(result_wrapped, expected)
         self.assertEqual(result_not_wrapped, expected)
 
-    @requires_gpu_and_triton
     def test_wrap_inductor_compiled_regions_with_backward(self):
         """
         Test that wrap_inductor_compiled_regions works correctly with autograd.
         """
+        device = self._get_accelerator_device()
         from torch.utils._debug_mode import DebugMode
 
         @torch.compile(
@@ -3444,8 +3446,8 @@ class GraphModule(torch.nn.Module):
         def fn(x, y):
             return torch.matmul(x, y)
 
-        x = torch.randn(4, 4, device=GPU_TYPE, requires_grad=True)
-        y = torch.randn(4, 4, device=GPU_TYPE, requires_grad=True)
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
 
         # Clone for eager comparison
         x_eager = x.detach().clone().requires_grad_(True)
@@ -6841,6 +6843,12 @@ class GraphModule(torch.nn.Module):
 class ActivationCheckpointingTests(
     torch._dynamo.test_case.TestCaseWithNestedGraphBreaks
 ):
+    def _get_accelerator_device(self):
+        """Get current accelerator device, skip test if not available."""
+        if not torch.accelerator.is_available():
+            self.skipTest("Accelerator is not available")
+        return torch.accelerator.current_accelerator()
+
     def _validate(self, fn, backend, *args, skip_check=False, fullgraph=True):
         cloned_args = []
         for arg in args:
@@ -6860,9 +6868,10 @@ class ActivationCheckpointingTests(
             for arg, cloned_arg in zip(args, cloned_args):
                 self.assertEqual(arg.grad, cloned_arg.grad)
 
-    @requires_cuda_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_function(self):
+        device = self._get_accelerator_device()
+
         def gn(x, y):
             return torch.sigmoid(torch.matmul(x, y))
 
@@ -6871,17 +6880,18 @@ class ActivationCheckpointingTests(
                 gn, torch.sin(x), y, use_reentrant=True
             )
 
-        x = torch.randn(4, 4, requires_grad=True)
-        y = torch.randn(4, 4, requires_grad=True)
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
 
         fw_compiler = functools.partial(count_ops, freq=1, op=torch.ops.aten.mm.default)
         bw_compiler = functools.partial(count_ops, freq=2, op=torch.ops.aten.mm.default)
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
 
-    @requires_cuda_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_function_with_kwargs(self):
+        device = self._get_accelerator_device()
+
         def gn(x, y):
             return torch.sigmoid(torch.matmul(x, y))
 
@@ -6894,17 +6904,18 @@ class ActivationCheckpointingTests(
                 preserve_rng_state=False,
             )
 
-        x = torch.randn(4, 4, requires_grad=True)
-        y = torch.randn(4, 4, requires_grad=True)
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
 
         fw_compiler = functools.partial(count_ops, freq=1, op=torch.ops.aten.mm.default)
         bw_compiler = functools.partial(count_ops, freq=2, op=torch.ops.aten.mm.default)
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
 
-    @requires_cuda_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_dropout(self):
+        device = self._get_accelerator_device()
+
         def gn(x, y):
             return torch.nn.functional.dropout(torch.matmul(x, y), p=0.2)
 
@@ -6913,8 +6924,8 @@ class ActivationCheckpointingTests(
                 gn, torch.sin(x), y, use_reentrant=True
             )
 
-        x = torch.randn(4, 4, device="cuda", requires_grad=True)
-        y = torch.randn(4, 4, device="cuda", requires_grad=True)
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
 
         fw_compiler = functools.partial(
             count_ops, freq=1, op=torch.ops.rngprims.philox_rand.default
@@ -6928,9 +6939,10 @@ class ActivationCheckpointingTests(
             fn, backend, x, y, skip_check=True
         )  # dropout decomp is known to diverge with eager
 
-    @requires_cuda_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_dropout_inductor(self):
+        device = self._get_accelerator_device()
+
         def gn(x, y):
             return torch.nn.functional.dropout(torch.matmul(x, y), p=0.2)
 
@@ -6939,17 +6951,18 @@ class ActivationCheckpointingTests(
                 gn, torch.sin(x), y, use_reentrant=True
             )
 
-        x = torch.randn(4, 4, device="cuda", requires_grad=True)
-        y = torch.randn(4, 4, device="cuda", requires_grad=True)
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
 
         backend = "inductor"
         self._validate(
             fn, backend, x, y, skip_check=True
         )  # dropout decomp is known to diverge with eager
 
-    @requires_gpu_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_fallback(self):
+        device = self._get_accelerator_device()
+
         def gn(x, y):
             torch._dynamo.graph_break()
             return torch.sigmoid(torch.matmul(x, y))
@@ -6961,8 +6974,8 @@ class ActivationCheckpointingTests(
                 ),
             )
 
-        x = torch.randn(4, 4, requires_grad=True)
-        y = torch.randn(4, 4, requires_grad=True)
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
         args = (x, y)
 
         backend = EagerAndRecordGraphs()
@@ -6978,9 +6991,10 @@ class ActivationCheckpointingTests(
         self.assertEqual(cnt.op_count, 2)
         self.assertEqual(len(backend.graphs), 2)
 
-    @requires_cuda_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_module(self):
+        device = self._get_accelerator_device()
+
         class MockModule(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -6989,14 +7003,14 @@ class ActivationCheckpointingTests(
             def forward(self, x):
                 return torch.sigmoid(self.linear(x))
 
-        mod = MockModule()
+        mod = MockModule().to(device)
 
         def fn(x):
             return torch.utils.checkpoint.checkpoint(
                 mod, torch.sin(x), use_reentrant=True
             )
 
-        x = torch.randn(10, 10, requires_grad=True)
+        x = torch.randn(10, 10, device=device, requires_grad=True)
 
         fw_compiler = functools.partial(
             count_ops, freq=1, op=torch.ops.aten.sigmoid.default
