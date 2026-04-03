@@ -970,10 +970,27 @@ def create_functionalized_fn(
                                 raise AssertionError(
                                     f"expected both before and after to be Tensors, got {type(before)} and {type(after)}"
                                 )
-                            # no_grad prevents the FakeTensor's requires_grad from
-                            # triggering check_inplace during tracing.  The
-                            # requires_grad case is checked at runtime instead
-                            with torch.no_grad():
+                            # Mirror the handling in apply_in_graph_mutations:
+                            # mutations hidden from autograd or under no_grad
+                            # must replay under no_grad to avoid "leaf Variable
+                            # that requires grad" errors on nn.Parameters.
+                            if are_all_mutations_hidden_from_autograd(f_inpt):
+                                if before.is_inference():
+                                    maybe_preserve_vc = nullcontext()
+                                else:
+                                    maybe_preserve_vc = (
+                                        torch.autograd._unsafe_preserve_version_counter(
+                                            before
+                                        )
+                                    )
+                                with torch.no_grad(), maybe_preserve_vc:
+                                    before.copy_(after)
+                            elif are_all_mutations_under_no_grad_or_inference_mode(
+                                f_inpt
+                            ):
+                                with torch.no_grad():
+                                    before.copy_(after)
+                            else:
                                 before.copy_(after)
                         meta.indices_of_inputs_that_requires_grad_with_mutations_in_bw.append(
                             idx
