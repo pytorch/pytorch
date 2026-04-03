@@ -2833,7 +2833,8 @@ class TritonTemplate(KernelTemplate):
         workspace_zero_fill = False
         workspace_args = []
         if workspace_arg is not None:
-            workspace_size_bytes = workspace_arg.count
+            ws_count = V.graph.sizevars.optimization_hint(workspace_arg.count)
+            workspace_size_bytes = ws_count * get_dtype_size(workspace_arg.dtype)
             workspace_zero_fill = (
                 workspace_arg.zero_mode != WorkspaceZeroMode.UNINITIALIZED
             )
