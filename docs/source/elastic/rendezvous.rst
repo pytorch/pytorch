@@ -19,6 +19,8 @@ Registry
 
 .. automodule:: torch.distributed.elastic.rendezvous.registry
 
+.. autofunction:: torch.distributed.elastic.rendezvous.registry.get_rendezvous_handler
+
 Handler
 -------
 
