@@ -949,7 +949,6 @@ KinetoEvent::KinetoEvent(
     if (get_record_concrete_inputs_enabled()) {
       shapes_ = std::move(arg_data.shapes);
     } else {
-      shapes_.reserve(arg_data.shapesForKinetoEvent.size());
       for (auto& s : arg_data.shapesForKinetoEvent) {
         shapes_.push_back(std::move(s));
       }
