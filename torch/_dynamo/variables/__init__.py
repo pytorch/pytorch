@@ -17,7 +17,12 @@ allows Dynamo to accurately trace and optimize Python code while preserving its 
 """
 
 from .base import VariableTracker
-from .builtin import BuiltinVariable
+from .builtin import (
+    BaseBuiltinVariable,
+    BuiltinVariable,
+    DictBuiltinVariable,
+    IterBuiltinVariable,
+)
 from .constant import (
     CONSTANT_VARIABLE_FALSE,
     CONSTANT_VARIABLE_NONE,
@@ -64,6 +69,7 @@ from .dicts import (
 )
 from .distributed import BackwardHookVariable, DistributedVariable
 from .functions import (
+    BaseUserFunctionVariable,
     BuiltinMethodVariable,
     CollectionsNamedTupleFunction,
     CreateTMADescriptorExperimentalVariable,
@@ -174,6 +180,7 @@ from .user_defined import (
     UserDefinedObjectVariable,
     UserDefinedSetVariable,
     UserDefinedTupleVariable,
+    UserDefinedVariable,
 )
 
 
@@ -181,6 +188,7 @@ __all__ = [
     "AutogradFunctionContextVariable",
     "AutogradFunctionVariable",
     "BackwardHookVariable",
+    "BaseBuiltinVariable",
     "BaseListVariable",
     "BuiltinVariable",
     "CatchWarningsCtxManagerVariable",
@@ -189,6 +197,7 @@ __all__ = [
     "CONSTANT_VARIABLE_TRUE",
     "ConstantVariable",
     "ConstDictVariable",
+    "DictBuiltinVariable",
     "ContextWrappingVariable",
     "CountIteratorVariable",
     "CreateTMADescriptorExperimentalVariable",
@@ -206,6 +215,7 @@ __all__ = [
     "GradModeVariable",
     "InspectSignatureVariable",
     "InspectVariable",
+    "IterBuiltinVariable",
     "IteratorVariable",
     "ItertoolsVariable",
     "LambdaVariable",

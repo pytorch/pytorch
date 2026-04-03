@@ -70,13 +70,6 @@ ENV NCCL_LIB_DIR="/usr/local/cuda/lib64/"
 
 ARG CUDA_VERSION
 
-# (optional) Install vision packages like OpenCV
-ARG VISION
-COPY ./common/install_vision.sh ./common/cache_vision_models.sh ./common/common_utils.sh ./
-RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
-RUN rm install_vision.sh cache_vision_models.sh common_utils.sh
-ENV INSTALLED_VISION ${VISION}
-
 # (optional) Install non-default Ninja version
 ARG NINJA_VERSION
 COPY ./common/install_ninja.sh install_ninja.sh
