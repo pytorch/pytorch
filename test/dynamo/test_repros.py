@@ -8018,6 +8018,57 @@ SavedForBackwardsAOTOutput(idx=5)""",
         _ = fn(x)
         self.assertTrue(getattr(self, self._testMethodName).__dict__.get("slow_test"))
 
+    def test_elementwise_dtypes_constant_fold(self):
+        from torch._prims_common import (
+            elementwise_dtypes,
+            ELEMENTWISE_TYPE_PROMOTION_KIND,
+        )
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(x):
+            dt, _ = elementwise_dtypes(
+                x, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+            )
+            return x.to(dt)
+
+        result = fn(torch.randn(3))
+        self.assertEqual(result.dtype, torch.float32)
+
+    def test_elementwise_dtypes_int_to_float(self):
+        from torch._prims_common import (
+            elementwise_dtypes,
+            ELEMENTWISE_TYPE_PROMOTION_KIND,
+        )
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(x):
+            dt, _ = elementwise_dtypes(
+                x, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+            )
+            return x.to(dt)
+
+        result = fn(torch.randint(0, 10, (3,)))
+        self.assertEqual(result.dtype, torch.float32)
+
+    def test_elementwise_dtypes_multi_args(self):
+        from torch._prims_common import (
+            elementwise_dtypes,
+            ELEMENTWISE_TYPE_PROMOTION_KIND,
+        )
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(x, y):
+            dt, _ = elementwise_dtypes(
+                x, y, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+            )
+            return x.to(dt)
+
+        result = fn(
+            torch.randn(3, dtype=torch.float16),
+            torch.randn(3, dtype=torch.float32),
+        )
+        self.assertEqual(result.dtype, torch.float32)
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     def test_sub_alpha_scalar_repro(self, device):

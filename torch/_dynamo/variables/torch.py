@@ -1991,6 +1991,39 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             return CONSTANT_VARIABLE_NONE
 
+        from torch._prims_common import elementwise_dtypes
+
+        @register(elementwise_dtypes)
+        def handle_elementwise_dtypes(
+            self,
+            tx: "InstructionTranslator",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker:
+            from .builder import SourcelessBuilder
+
+            type_promotion_kind = kwargs["type_promotion_kind"].as_python_constant()
+            real_args = []
+            for arg in args:
+                if isinstance(arg, TensorVariable):
+                    real_args.append(arg.as_proxy().node.meta["example_value"])
+                elif arg.is_python_constant():
+                    real_args.append(arg.as_python_constant())
+                else:
+                    unimplemented(
+                        gb_type="elementwise_dtypes unsupported arg type",
+                        context=str(arg),
+                        explanation=(
+                            "elementwise_dtypes requires tensor or constant arguments, "
+                            f"got {type(arg).__name__}"
+                        ),
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+            result = elementwise_dtypes(
+                *real_args, type_promotion_kind=type_promotion_kind
+            )
+            return SourcelessBuilder.create(tx, result)
+
         @register(torch._check)
         def handle_check(
             self,

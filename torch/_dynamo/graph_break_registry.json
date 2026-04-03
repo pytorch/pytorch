@@ -650,6 +650,16 @@
       "Hints": []
     }
   ],
+  "GB5195": [
+    {
+      "Gb_type": "elementwise_dtypes unsupported arg type",
+      "Context": "str(arg)",
+      "Explanation": "elementwise_dtypes requires tensor or constant arguments, got {type(arg).__name__}",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0054": [
     {
       "Gb_type": "Failed to construct Enum variable",
