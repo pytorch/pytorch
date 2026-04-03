@@ -74,7 +74,7 @@ kernel void ctc_loss_log_alpha_mps_kernel(
   constant int64_t& tg_target_stride      [[buffer(15)]],
   constant int64_t& batch_size            [[buffer(16)]],
   constant int64_t& BLANK                 [[buffer(17)]],
-  // Emular os nomes CUDA
+  // Emulate CUDA variable names  
   uint2 threadIdx [[thread_position_in_threadgroup]],         // == threadIdx in CUDA
   uint2 blockIdx  [[threadgroup_position_in_grid]],           // == blockIdx in CUDA
   uint2 blockDim  [[threads_per_threadgroup]],                // == blockDim in CUDA
@@ -226,7 +226,7 @@ kernel void ctc_loss_backward_log_beta_mps_kernel(
     constant int64_t& tg_target_stride     [[ buffer(14) ]],
     constant int64_t& batch_size           [[ buffer(15) ]],
     constant int64_t& BLANK                [[ buffer(16) ]],
-    // Emular os nomes CUDA
+    // Emulate CUDA variable names  
     uint2 threadIdx [[thread_position_in_threadgroup]],         // == threadIdx in CUDA
     uint2 blockIdx  [[threadgroup_position_in_grid]],           // == blockIdx in CUDA
     uint2 blockDim  [[threads_per_threadgroup]],                // == blockDim in CUDA
@@ -248,7 +248,7 @@ kernel void ctc_loss_backward_log_beta_mps_kernel(
   if (input_length == 0)
     return;
 
-  // "first" row, the beta initialization before eq (10) (t=target_length - differes per batch)
+  // "first" row, the beta initialization before eq (10) (t=target_length - differs per batch)
   for (int64_t block_s = 2*max_target_length - (2*max_target_length % blockDim.x); block_s >= 0; block_s -= blockDim.x) {
     int64_t s = threadIdx.x + block_s;
     scalar_t lb;
@@ -379,7 +379,7 @@ kernel void ctc_loss_backward_collect_nonblank_mps_kernel(
   constant int64_t& tg_target_stride             [[ buffer(23) ]],
   constant int64_t& batch_size                   [[ buffer(24) ]],
   constant int64_t& zero_infinity                [[ buffer(25) ]],
-  // Emular os nomes CUDA
+  // Emulate CUDA variable names  
   uint2 threadIdx [[thread_position_in_threadgroup]],         // == threadIdx in CUDA
   uint2 blockIdx  [[threadgroup_position_in_grid]],           // == blockIdx in CUDA
   uint2 blockDim  [[threads_per_threadgroup]],                // == blockDim in CUDA
@@ -453,7 +453,7 @@ kernel void ctc_loss_backward_collect_mps_kernel(
   constant int64_t& num_labels                   [[ buffer(27) ]],
   constant int64_t& BLANK                        [[ buffer(28) ]],
   constant int64_t& zero_infinity                [[ buffer(29) ]],
-  // Emular os nomes CUDA
+  // Emulate CUDA variable names  
   uint2 threadIdx [[thread_position_in_threadgroup]],         // == threadIdx in CUDA
   uint2 blockIdx  [[threadgroup_position_in_grid]],           // == blockIdx in CUDA
   uint2 blockDim  [[threads_per_threadgroup]],                // == blockDim in CUDA
@@ -524,7 +524,7 @@ kernel void ctc_loss_zero_padded_gradients(
   constant int64_t& max_input_length   [[buffer(5)]],   // T
   constant int64_t& batch_size         [[buffer(6)]],   // B
   constant int64_t& num_labels         [[buffer(7)]],   // D
-  // Emular os nomes CUDA
+  // Emulate CUDA variable names  
   uint2 threadIdx [[thread_position_in_threadgroup]],         // == threadIdx in CUDA
   uint2 blockIdx  [[threadgroup_position_in_grid]],           // == blockIdx in CUDA
   uint2 blockDim  [[threads_per_threadgroup]],                // == blockDim in CUDA
