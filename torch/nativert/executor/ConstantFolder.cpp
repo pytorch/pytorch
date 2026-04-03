@@ -102,7 +102,7 @@ void ConstantFolder::unlinkConstants(
         if (user == output) {
           continue;
         }
-        if (foldable.find(user) == foldable.end()) {
+        if (!foldable.contains(user)) {
           constFoldableCandidates.push(user);
         }
       }
@@ -115,7 +115,7 @@ void ConstantFolder::unlinkConstants(
         // we only store folded values if there is a non-foldable user
         if (const auto& users = value->users();
             std::any_of(users.begin(), users.end(), [&](const auto* u) {
-              return foldable.find(u) == foldable.end();
+              return !foldable.contains(u);
             })) {
           foldedOutputValueIds_.insert(value->id());
         }
@@ -132,12 +132,7 @@ void ConstantFolder::unlinkConstants(
 
   // remove moved (i.e., associated w/ const-folded nodes) kernels
   // from the input kernel vector
-  kernels.erase(
-      std::remove_if(
-          kernels.begin(),
-          kernels.end(),
-          [](const auto& k) { return k == nullptr; }),
-      kernels.end());
+  std::erase(kernels, nullptr);
 
   graph_.renumberValues();
   graph_.finalize();
