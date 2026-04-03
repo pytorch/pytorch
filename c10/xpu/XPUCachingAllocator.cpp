@@ -2016,7 +2016,7 @@ class NativeCachingAllocator : public XPUAllocator {
     }
   }
 
-  void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) override {
+  void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) {
     for (auto& allocator : device_allocators) {
       allocator->attachAllocatorTraceTracker(tracker);
     }
