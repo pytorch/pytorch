@@ -1657,6 +1657,14 @@ class triton:
     # not incurring large memory overhead
     reorder_for_reducing_graph_partitions: bool = True
 
+    # Defer checking static input (parameter) data pointers to after
+    # graph.replay(). This moves the O(n_params) check off the critical
+    # path so it doesn't delay GPU launch. If a parameter change is
+    # detected post-replay, one invocation may return stale results, but
+    # the node permanently falls back to full pre-replay checking so
+    # subsequent invocations are correct.
+    cudagraph_defer_static_input_checks = True
+
     # assertions on the fast path
     fast_path_cudagraph_asserts = False
 

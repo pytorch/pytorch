@@ -834,6 +834,13 @@ class AliasesNewOutput(OutputAliasInfo):
         self.index = index
 
 
+def _check_invariants_success_str() -> str:
+    return str(CheckInvariantStatus.SUCCESS)
+
+
+_check_invariants_success_logger = _check_invariants_success_str
+
+
 class CUDAGraphNode:
     """
     A single recording of a function into a CUDA Graph. Recordings of CUDA Graphs share a single memory pool
@@ -950,6 +957,17 @@ class CUDAGraphNode:
             for i in wrapped_function.static_input_idxs
             if i not in self.cudagraph_managed_idxs
         ]
+
+        # For deferred static input checks: check one sentinel param before
+        # replay to catch the common all-params-changed case, then verify
+        # the rest after replay.
+        if self.non_managed_static_input_idxs:
+            self._sentinel_static_input_idxs = [
+                self.non_managed_static_input_idxs[0]
+            ]
+        else:
+            self._sentinel_static_input_idxs = []
+        self._force_full_static_input_check = False
 
         def maybe_get_static_data_ptr(
             idx: int,
@@ -1132,6 +1150,31 @@ class CUDAGraphNode:
             )
             torch._check(False, lambda: error_msg)
 
+    def _check_deferred_static_inputs(
+        self, new_inputs: list[InputType]
+    ) -> None:
+        if (
+            not config.triton.cudagraph_defer_static_input_checks
+            or self._force_full_static_input_check
+            or not self.non_managed_static_input_idxs
+        ):
+            return
+        if not torch._C._tensors_data_ptrs_at_indices_equal(
+            new_inputs,  # type: ignore[arg-type]
+            self.static_input_data_ptrs,
+            self.non_managed_static_input_idxs,
+        ):
+            # Sentinel passed but another param changed. We already replayed
+            # with stale data. Fall back to full pre-replay checking so
+            # future invocations catch this before replay.
+            self._force_full_static_input_check = True
+            raise RuntimeError(
+                "CUDA graph deferred static input check detected a parameter "
+                "change after replay. This invocation returned stale results. "
+                "Set torch._inductor.config.triton.cudagraph_defer_static_input_checks = False "
+                "to check all parameters before replay."
+            )
+
     def run_first_inputs(self, new_inputs: list[InputType]) -> OutputType:
         if config.triton.fast_path_cudagraph_asserts:
             self.debug_check_invariants_before_invocation()
@@ -1151,6 +1194,8 @@ class CUDAGraphNode:
 
         self.run_graph()
 
+        self._check_deferred_static_inputs(new_inputs)
+
         outputs = self.reconstruct_outputs()
         new_inputs.clear()
 
@@ -1159,9 +1204,6 @@ class CUDAGraphNode:
 
         if config.triton.force_cudagraph_sync:
             torch.cuda.synchronize()
-
-        # Reset this to run the check in the future
-        self.static_inputs_stable = False
 
         return outputs
 
@@ -1750,13 +1792,6 @@ class CUDAGraphNode:
         and tensors managed in the cudagraph private pool must remain stable.
         """
 
-        _logger = functools.partial(
-            log_data_ptr_mismatch,
-            self.wrapped_function.placeholders,
-            inputs,
-            self.static_input_data_ptrs,
-        )
-
         # previously managed data pointers remain stable
         # this is on the hot path so moved to C++. equivalent to:
         # return all(t.data_ptr() == data_ptr for (t, data_ptr) in zip(tensors, data_ptrs))
@@ -1767,7 +1802,10 @@ class CUDAGraphNode:
         ):
             status = CheckInvariantStatus.CudagraphManagedIdxMismatch
             _logger = functools.partial(
-                _logger,
+                log_data_ptr_mismatch,
+                self.wrapped_function.placeholders,
+                inputs,
+                self.static_input_data_ptrs,
                 self.cudagraph_managed_idxs,
                 status,
             )
@@ -1783,21 +1821,32 @@ class CUDAGraphNode:
         # if we are inlining builtin nn modules we re-record in this case
         # if we are not inlining builtin nn modules, we check this in check_static_inputs_are_stable
         # and error if they are not stable
-        if (
-            self.rerecord_if_static_inputs_change
-            and not torch._C._tensors_data_ptrs_at_indices_equal(
+        if self.rerecord_if_static_inputs_change:
+            # When deferred checks are enabled, only check a single sentinel
+            # param before replay to catch the common all-params-changed case.
+            # The full check happens after graph.replay() in run().
+            if (
+                config.triton.cudagraph_defer_static_input_checks
+                and not self._force_full_static_input_check
+            ):
+                check_idxs = self._sentinel_static_input_idxs
+            else:
+                check_idxs = self.non_managed_static_input_idxs
+            if check_idxs and not torch._C._tensors_data_ptrs_at_indices_equal(
                 inputs,  # type: ignore[arg-type]
                 self.static_input_data_ptrs,
-                self.static_input_idxs,
-            )
-        ):
-            status = CheckInvariantStatus.StaticInputIdxMismatch
-            _logger = functools.partial(
-                _logger,
-                self.static_input_idxs,
-                status,
-            )
-            return status, _logger
+                check_idxs,
+            ):
+                status = CheckInvariantStatus.StaticInputIdxMismatch
+                _logger = functools.partial(
+                    log_data_ptr_mismatch,
+                    self.wrapped_function.placeholders,
+                    inputs,
+                    self.static_input_data_ptrs,
+                    self.static_input_idxs,
+                    status,
+                )
+                return status, _logger
 
         # the cudagraph managed tensors which died upon recording must also die upon
         # this invocation. it is too late to check after we've replayed the graph,
@@ -1813,7 +1862,7 @@ class CUDAGraphNode:
             lambda: "TODO: graph recording observed an input tensor deallocate during graph "
             " recording that did not occur during replay. Please file an issue.",
         )
-        return CheckInvariantStatus.SUCCESS, lambda: f"{CheckInvariantStatus.SUCCESS}"
+        return CheckInvariantStatus.SUCCESS, _check_invariants_success_logger
 
     def num_descendants(self) -> int:
         "Total number of descendents of this node"

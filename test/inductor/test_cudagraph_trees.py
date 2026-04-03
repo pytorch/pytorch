@@ -2779,6 +2779,9 @@ if HAS_CUDA_AND_TRITON:
                 # Fwd + bwd graphs for each version of the function => 4 graphs
                 self.assertEqual(self.get_manager().new_graph_id().id, 4)
 
+        @torch._inductor.config.patch(
+            "triton.cudagraph_defer_static_input_checks", False
+        )
         @torch._dynamo.config.patch("error_on_recompile", True)
         def test_multi_dispatch_single_compile_param_inputs(self):
             # Verify that we can record multiple cudagraphs for a single
@@ -2789,6 +2792,9 @@ if HAS_CUDA_AND_TRITON:
             # Fwd + bwd graphs for each version of the function => 4 graphs
             self.run_static_input_param_test(fn, 4)
 
+        @torch._inductor.config.patch(
+            "triton.cudagraph_defer_static_input_checks", False
+        )
         @torch._dynamo.config.patch("error_on_recompile", True)
         def test_multi_dispatch_single_compile_builtin_module(self):
             # Verify that we don't recompile when changing the param of a builtin module
@@ -2796,6 +2802,9 @@ if HAS_CUDA_AND_TRITON:
             # Note: Linear is a builtin module so we enable that config setting above
             self._module_test(torch.nn.Linear(2, 3, device="cuda"))
 
+        @torch._inductor.config.patch(
+            "triton.cudagraph_defer_static_input_checks", False
+        )
         @torch._dynamo.config.patch("error_on_recompile", True)
         def test_multi_dispatch_single_compile_builtin_module_buffers(self):
             # Verify that we don't recompile when changing the buffer of a builtin module
@@ -2806,6 +2815,9 @@ if HAS_CUDA_AND_TRITON:
                 param_wrapping=False,
             )
 
+        @torch._inductor.config.patch(
+            "triton.cudagraph_defer_static_input_checks", False
+        )
         @torch._inductor.config.patch("triton.cudagraphs", True)
         @torch._dynamo.config.patch("error_on_recompile", True)
         def test_multi_dispatch_custom_module(self):
@@ -2823,6 +2835,9 @@ if HAS_CUDA_AND_TRITON:
                 TestModule(torch.nn.Parameter(torch.rand([2, 2], device="cuda")))
             )
 
+        @torch._inductor.config.patch(
+            "triton.cudagraph_defer_static_input_checks", False
+        )
         @torch._dynamo.config.patch("error_on_recompile", True)
         def test_multi_dispatch_custom_module_buffer(self):
             # Test that we can correctly dispatch multiple graphs
@@ -2845,6 +2860,9 @@ if HAS_CUDA_AND_TRITON:
                 param_wrapping=False,
             )
 
+        @torch._inductor.config.patch(
+            "triton.cudagraph_defer_static_input_checks", False
+        )
         @torch._inductor.config.patch("triton.cudagraphs", True)
         @torch._dynamo.config.patch("error_on_recompile", True)
         def test_multi_dispatch_child_node(self):
@@ -2864,6 +2882,9 @@ if HAS_CUDA_AND_TRITON:
             # and then two backward graphs
             self.run_static_input_param_test(fn, 5)
 
+        @torch._inductor.config.patch(
+            "triton.cudagraph_defer_static_input_checks", False
+        )
         @torch._dynamo.config.patch("error_on_recompile", True)
         def test_multi_dispatch_parent_node(self):
             def fn(x, p):
@@ -2883,6 +2904,9 @@ if HAS_CUDA_AND_TRITON:
             # and then two backward graphs
             self.run_static_input_param_test(fn, 6)
 
+        @torch._inductor.config.patch(
+            "triton.cudagraph_defer_static_input_checks", False
+        )
         @torch._dynamo.config.patch("error_on_recompile", True)
         @torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 1)
         def test_not_fallback_to_eager_if_have_not_recompiling_too_many_times(self):
@@ -3292,6 +3316,9 @@ if HAS_CUDA_AND_TRITON:
             for _ in range(3):
                 foo(inp)
 
+        @torch._inductor.config.patch(
+            "triton.cudagraph_defer_static_input_checks", False
+        )
         @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
         def test_rerecord_if_static_input_address_changed(self):
             # By setting triton.cudagraph_support_input_mutation=True, we force re-record
