@@ -716,7 +716,7 @@ class TestFP8Matmul(TestCase):
         if not _device_supports_scaled_mm_fp8(device):
             raise unittest.SkipTest(f8_msg)
         with self.assertRaises(
-            AssertionError if (torch.version.hip or "xpu" in device)
+            AssertionError if (torch.version.hip or "xpu" in device or "cpu" in device)
             else RuntimeError
         ):
             self._test_tautological_mm(device, out_dtype=e5m2_type)
