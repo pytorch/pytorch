@@ -403,11 +403,6 @@ def getattr_and_trace(*args: Any, **kwargs: Any) -> Any:
     return fn(*args[2:], **kwargs)
 
 
-def getattr_and_trace_no_nested_graph_breaks(*args: Any, **kwargs: Any) -> Any:
-    with torch._dynamo.disable_nested_graph_breaks():
-        return getattr_and_trace(*args, **kwargs)
-
-
 def mapping_get(obj: Mapping[T, U], key: T, value: U | None = None, /) -> U | None:
     try:
         return obj.__getitem__(key)
@@ -569,20 +564,47 @@ def cmp_eq(a: object, b: object) -> bool:
     # slow in some corner cases.
     # if a is b:
     #     return True
-    result = a.__eq__(b)
+    if isinstance(a, type):
+        # Default metaclass equality is identity-based. Preserve the reflected
+        # operand fallback without tracing through type.__eq__.
+        if type(a).__eq__ is type.__eq__:
+            result = True if a is b else NotImplemented
+        else:
+            result = type(a).__eq__(a, b)
+    else:
+        result = a.__eq__(b)
     if result is NotImplemented:
-        result = b.__eq__(a)
+        if isinstance(b, type):
+            if type(b).__eq__ is type.__eq__:
+                result = True if a is b else NotImplemented
+            else:
+                result = type(b).__eq__(b, a)
+        else:
+            result = b.__eq__(a)
     return result is not NotImplemented and result
 
 
 def cmp_ne(a: object, b: object) -> bool:
-    # Check if __ne__ is overridden
-    if isinstance(type(a).__ne__, types.FunctionType):
+    if isinstance(a, type):
+        if type(a).__ne__ is type.__ne__:
+            result = False if a is b else NotImplemented
+        else:
+            result = type(a).__ne__(a, b)
+        if result is not NotImplemented:
+            return result
+    elif isinstance(type(a).__ne__, types.FunctionType):
         result = a.__ne__(b)
         if result is not NotImplemented:
             return result
         # Fall through to try b.__ne__(a) or cmp_eq
-    if isinstance(type(b).__ne__, types.FunctionType):
+    if isinstance(b, type):
+        if type(b).__ne__ is type.__ne__:
+            result = False if a is b else NotImplemented
+        else:
+            result = type(b).__ne__(b, a)
+        if result is not NotImplemented:
+            return result
+    elif isinstance(type(b).__ne__, types.FunctionType):
         result = b.__ne__(a)
         if result is not NotImplemented:
             return result
