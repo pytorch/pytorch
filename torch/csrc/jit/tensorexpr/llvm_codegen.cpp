@@ -76,6 +76,7 @@ C10_DIAGNOSTIC_POP()
 
 #include <torch/csrc/jit/jit_log.h>
 
+#include <concepts>
 #include <memory>
 
 using namespace torch::jit::tensorexpr;
@@ -1083,17 +1084,13 @@ void LLVMCodeGenImpl::visit(const CompareSelectPtr& v) {
   value_ = v->bias() == kUnbiased ? genUnbiased() : genBiased();
 }
 
-template <typename T>
-std::enable_if_t<std::is_integral_v<T>, llvm::Value*> getFromType(
-    llvm::Type* type,
-    T value) {
+template <std::integral T>
+llvm::Value* getFromType(llvm::Type* type, T value) {
   return llvm::ConstantInt::get(type, value, std::is_signed_v<T>);
 }
 
-template <typename T>
-std::enable_if_t<std::is_floating_point_v<T>, llvm::Value*> getFromType(
-    llvm::Type* type,
-    T value) {
+template <std::floating_point T>
+llvm::Value* getFromType(llvm::Type* type, T value) {
   return llvm::ConstantFP::get(type, value);
 }
 
@@ -1973,7 +1970,7 @@ static bool wantSleef(const std::string& name) {
       "fabsf",
       "floorf",
   };
-  return noSleef.find(name) == noSleef.end();
+  return !noSleef.contains(name);
 }
 
 LLVMCodeGenImpl::SimdCallee LLVMCodeGenImpl::getSimdFunction(
