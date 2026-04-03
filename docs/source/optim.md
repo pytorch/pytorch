@@ -685,9 +685,6 @@ We train the model for a total of 300 epochs and start to collect EMA averages i
 
     swa_utils.AveragedModel
     swa_utils.SWALR
-    swa_utils.get_ema_avg_fn
-    swa_utils.get_swa_avg_fn
-    swa_utils.get_swa_multi_avg_fn
 
 
 .. autofunction:: torch.optim.swa_utils.get_ema_multi_avg_fn

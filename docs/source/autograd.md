@@ -220,12 +220,6 @@ like the following:
 When creating a new {class}`Function`, the following methods are available to `ctx`.
 
 ```{eval-rst}
-.. autoclass:: torch.autograd.function.FunctionCtx
-    :no-members:
-
-.. autoclass:: torch.autograd.function.FunctionMeta
-    :no-members:
-
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -281,9 +275,6 @@ Base custom {class}`Function` used to build PyTorch utilities
     gradcheck
     gradgradcheck
     GradcheckError
-    get_analytical_jacobian
-    get_numerical_jacobian
-    get_numerical_jacobian_wrt_specific_input
 ```
 
 % Just to reset the base path for the rest of this file
@@ -319,10 +310,6 @@ and vtune profiler based using
     profiler.EnforceUnique
     profiler.KinetoStepTracker
     profiler.record_function
-    profiler_util.EventList
-    profiler_util.FormattedTimesMixin
-    profiler_util.FunctionEvent
-    profiler_util.FunctionEventAvg
     profiler_util.Interval
     profiler_util.Kernel
     profiler_util.MemRecordsAcc
@@ -483,19 +470,5 @@ Also see {ref}`saved-tensors-hooks-doc`.
 ```
 
 ```{eval-rst}
-.. automodule:: torch.autograd.variable
-
-.. currentmodule:: torch.autograd.variable
-
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    Variable
-    VariableMeta
-```
-
-```{eval-rst}
 .. py:module:: torch.autograd.variable
-   :noindex:
 ```
