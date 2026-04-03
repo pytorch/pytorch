@@ -396,6 +396,16 @@
       ]
     }
   ],
+  "GB6999": [
+    {
+      "Gb_type": "unsupported variable type for __dict__ access",
+      "Context": "VariableTracker type: {type(vt)}",
+      "Explanation": "Dynamo does not know how to get __dict__ from {type(vt)}",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
   "GB0037": [
     {
       "Gb_type": "Dynamic shape operator (no meta kernel)",
@@ -886,6 +896,22 @@
       ]
     }
   ],
+  "GB7230": [
+    {
+      "Gb_type": "iter() with no arguments",
+      "Context": "iter()",
+      "Explanation": "iter() requires at least one argument",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    },
+    {
+      "Gb_type": "iter() with no arguments",
+      "Context": "iter()",
+      "Explanation": "iter() requires at least one argument",
+      "Hints": []
+    }
+  ],
   "GB0073": [
     {
       "Gb_type": "Invoking an nn.Module inside a HigherOrderOperator",
@@ -1050,6 +1076,14 @@
     }
   ],
   "GB0088": [
+    {
+      "Gb_type": "Observed exception",
+      "Context": "raised exception {curr_exc.debug_repr()}",
+      "Explanation": "observed_exn_gb_explanation",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    },
     {
       "Gb_type": "Observed exception",
       "Context": "raised exception {curr_exc.python_type_name()}({curr_exc.args})",
@@ -1395,6 +1429,16 @@
       "Context": "call_method {self} {name} {args} {kwargs}",
       "Explanation": "Dynamo encountered an error while calling the method `{name}`.",
       "Hints": []
+    }
+  ],
+  "GB7650": [
+    {
+      "Gb_type": "torch.Generator method",
+      "Context": "torch.Generator.{name}",
+      "Explanation": "torch.Generator.{name}() is a stateful RNG operation that cannot be soundly traced in the FX graph.",
+      "Hints": [
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
     }
   ],
   "GB0118": [
@@ -3191,6 +3235,16 @@
   "GB4927": [
     {
       "Gb_type": "autograd.grad consumed returned tensor's grad_fn",
+      "Context": "Leaked output tensors: {leaked_str}",
+      "Explanation": "torch.autograd.grad() consumes grad_fns that are needed by tensors returned from this compiled function. This would cause 'backward through graph a second time' errors.\n  The following returned tensors have consumed grad_fns: {leaked_str}",
+      "Hints": [
+        "Detach the problematic tensor(s) before returning: e.g. `{leaked[0]}.detach()`",
+        "Call .detach() on the tensor before returning.",
+        "If you need to backward through the returned tensor, use retain_graph=True in autograd.grad()."
+      ]
+    },
+    {
+      "Gb_type": "autograd.grad consumed returned tensor's grad_fn",
       "Context": "",
       "Explanation": "torch.autograd.grad() consumes grad_fns that are needed by tensors returned from this compiled function. This would cause 'backward through graph a second time' errors.",
       "Hints": [
@@ -3867,6 +3921,14 @@
       "Hints": [
         "Register '{name}' with a MemberType in register_opaque_type(members=...)."
       ]
+    }
+  ],
+  "GB5458": [
+    {
+      "Gb_type": "Custom metaclass with __getattribute__",
+      "Context": "type({self.value}) = {metacls}",
+      "Explanation": "Dynamo does not trace attribute access on classes whose metaclass overrides __getattribute__",
+      "Hints": []
     }
   ],
   "GB0310": [

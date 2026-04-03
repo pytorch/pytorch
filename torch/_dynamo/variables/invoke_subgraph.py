@@ -7,6 +7,7 @@ higher-order operator.
 import enum
 import logging
 import traceback
+import types
 from dataclasses import dataclass
 from typing import Any, cast, NamedTuple, TYPE_CHECKING
 
@@ -328,11 +329,13 @@ LiftedArgOrigin = (
 )
 
 
-def get_fn_id(fn_var: Any) -> int | None:
+def get_fn_code(fn_var: Any) -> types.CodeType | None:
     if isinstance(fn_var, UserFunctionVariable):
-        return id(fn_var.get_function())
+        return fn_var.get_function().__code__
     elif isinstance(fn_var, UnspecializedNNModuleVariable):
-        return id(fn_var.value.forward.__func__)  # pyrefly: ignore[missing-attribute]
+        return (
+            fn_var.value.forward.__func__.__code__  # pyrefly: ignore[missing-attribute]
+        )
     return None
 
 
@@ -362,6 +365,7 @@ def is_reuse_eligible(
     fingerprint: InputFingerprint,
     tracing_info: "SubgraphTracingInfo",
     traced_sources: OrderedSet[Source] | None = None,
+    has_reuse_hash_fn: bool = False,
 ) -> bool:
     """Best-effort check for whether a traced subgraph result can be reused.
 
@@ -377,19 +381,24 @@ def is_reuse_eligible(
         unspecialized NN module — for sourceless or other input types we
         rely on the treespec and tags for structural matching, so only
         types with well-defined comparison semantics are supported.
-    """
-    if tracing_info.side_effect_stack is not None:
-        stack_msg = "\n" + "".join(
-            traceback.format_list(tracing_info.side_effect_stack)
-        )
-        hc_log.debug(
-            "subgraph_reuse: not eligible -- subgraph has side effects%s",
-            stack_msg,
-        )
-        return False
 
-    if traced_sources and has_mutated_vars(tx, traced_sources):
-        return False
+    When ``has_reuse_hash_fn`` is True, side-effect and mutation checks are
+    skipped because the hash key replaces guards — there are no guards to
+    go stale from mutations.
+    """
+    if not has_reuse_hash_fn:
+        if tracing_info.side_effect_stack is not None:
+            stack_msg = "\n" + "".join(
+                traceback.format_list(tracing_info.side_effect_stack)
+            )
+            hc_log.debug(
+                "subgraph_reuse: not eligible -- subgraph has side effects%s",
+                stack_msg,
+            )
+            return False
+
+        if traced_sources and has_mutated_vars(tx, traced_sources):
+            return False
 
     if isinstance(body_r, TensorVariable):
         pass
@@ -670,10 +679,14 @@ def is_reusable(
             value = new_source.get_value(resolve_globals, resolve_locals, resolve_cache)
         except Exception:
             hc_log.debug(
-                "subgraph_reuse: reuse failed -- cannot resolve source '%s' "
-                "(guard type: %s, user stack:\n%s)",
-                new_source.name,
+                "subgraph_reuse: reuse failed -- cannot resolve source\n"
+                "  guard type: %s\n"
+                "  guard source: %s\n"
+                "  guard source name: %s\n"
+                "  user stack:\n%s",
                 guard.create_fn_name(),
+                new_source,
+                new_source.name,
                 "".join(guard.user_stack.format())
                 if guard.user_stack
                 else "<no stack>",
@@ -682,11 +695,18 @@ def is_reusable(
 
         if not handler.eval_fn(value, expected):
             hc_log.debug(
-                "subgraph_reuse: reuse failed -- guard on '%s': expected %s, got mismatch "
-                "(guard type: %s, user stack:\n%s)",
+                "subgraph_reuse: reuse failed --\n"
+                "  guard type: %s\n"
+                "  guard source: %s\n"
+                "  guard source name: %s\n"
+                "  expected: %s\n"
+                "  got: %s\n"
+                "  user stack:\n%s",
+                guard.create_fn_name(),
+                new_source,
                 new_source.name,
                 expected,
-                guard.create_fn_name(),
+                value,
                 "".join(guard.user_stack.format())
                 if guard.user_stack
                 else "<no stack>",
@@ -708,8 +728,8 @@ def has_reuse_entries(
     )
     if not isinstance(invoke_subgraph_cache, InvokeSubgraphCache):
         return False
-    fn_id = get_fn_id(fn_var)
-    return fn_id is not None and fn_id in invoke_subgraph_cache.subgraph_reuse_cache
+    fn_code = get_fn_code(fn_var)
+    return fn_code is not None and fn_code in invoke_subgraph_cache.subgraph_reuse_cache
 
 
 def find_reuse_match(
@@ -724,8 +744,8 @@ def find_reuse_match(
     )
     if not isinstance(invoke_subgraph_cache, InvokeSubgraphCache):
         return None
-    fn_id = get_fn_id(fn_var)
-    if fn_id is None:
+    fn_code = get_fn_code(fn_var)
+    if fn_code is None:
         return None
 
     # this evaluator function is called one by one for all the invoke subgraph
@@ -736,7 +756,7 @@ def find_reuse_match(
     ) -> bool:
         return is_reusable(tx, cond, fingerprint, entry)
 
-    return invoke_subgraph_cache.find_reuse_entry(fn_id, evaluator)
+    return invoke_subgraph_cache.find_reuse_entry(fn_code, evaluator)
 
 
 def save_reuse_entry(
@@ -749,8 +769,9 @@ def save_reuse_entry(
     p_args: tuple[Any, ...],
     body_r: VariableTracker,
     example_value: Any,
-    condition: "InvokeSubgraphReuseCondition",
     max_reuse_entries: int = 8,
+    condition: "InvokeSubgraphReuseCondition | None" = None,
+    hash_key: int | None = None,
 ) -> None:
     """Save a traced subgraph into the reuse cache for future cache hits.
 
@@ -758,8 +779,16 @@ def save_reuse_entry(
     lifted arg maps back to user inputs or captured variables), output
     metadata, and arg sources. On a future cache hit, stamp_out_subgraph
     uses this entry to emit a new invoke_subgraph call without re-tracing.
+
+    Exactly one of ``condition`` or ``hash_key`` must be provided.
+    ``condition`` stores the entry in the guard-based cache (linear scan);
+    ``hash_key`` stores it in the hash-key cache (O(1) lookup).
     """
     from torch._guards import InvokeSubgraphCache
+
+    assert (condition is None) != (hash_key is None), (
+        "Exactly one of condition or hash_key must be provided"
+    )
 
     invoke_subgraph_cache = tx.output.tracing_context.hop_dispatch_set_cache.get_cache(
         torch._higher_order_ops.invoke_subgraph
@@ -767,8 +796,8 @@ def save_reuse_entry(
     if not isinstance(invoke_subgraph_cache, InvokeSubgraphCache):
         return
 
-    fn_id = get_fn_id(fn_var)
-    if fn_id is None:
+    fn_code = get_fn_code(fn_var)
+    if fn_code is None:
         return
 
     subgraph_input_mapping = build_subgraph_input_mapping(
@@ -813,7 +842,63 @@ def save_reuse_entry(
         arg_sources=fingerprint.arg_sources,
         num_user_outputs=num_user_outputs,
     )
-    invoke_subgraph_cache.add_reuse_entry(fn_id, condition, entry, max_reuse_entries)
+    if condition is not None:
+        invoke_subgraph_cache.add_reuse_entry(
+            fn_code, condition, entry, max_reuse_entries
+        )
+    else:
+        assert hash_key is not None
+        invoke_subgraph_cache.add_reuse_entry_by_key(
+            fn_code, hash_key, entry, max_reuse_entries
+        )
+
+
+def trace_reuse_hash_fn(
+    tx: "InstructionTranslator",
+    reuse_hash_fn: Any,
+    fn_args_vt: "Sequence[VariableTracker]",
+    kwargs: dict[str, VariableTracker],
+) -> int:
+    """Trace the user's reuse_hash_fn to get a constant integer hash key.
+
+    Guards installed during the hash function tracing are skipped — the hash
+    key itself is the reuse condition, not the guards.
+    """
+    from torch._dynamo.exc import Unsupported
+    from torch._dynamo.utils import _make_inlined
+
+    with tx.output.tracing_context.guards_context.skip_guard_install():
+        try:
+            result = _make_inlined(tx, reuse_hash_fn)(*fn_args_vt, **kwargs)
+        except Unsupported as e:
+            raise RuntimeError(
+                f"reuse_hash_fn must be fully traceable without graph breaks. Got: {e}"
+            ) from e
+
+    if not isinstance(result, ConstantVariable) or not isinstance(result.value, int):
+        raise RuntimeError(
+            f"reuse_hash_fn must return a constant integer, got {result}"
+        )
+
+    return result.value
+
+
+def find_reuse_entry_by_key(
+    tx: "InstructionTranslator",
+    fn_var: Any,
+    hash_key: int,
+) -> InvokeSubgraphReuseEntry | None:
+    from torch._guards import InvokeSubgraphCache
+
+    invoke_subgraph_cache = tx.output.tracing_context.hop_dispatch_set_cache.get_cache(
+        torch._higher_order_ops.invoke_subgraph
+    )
+    if not isinstance(invoke_subgraph_cache, InvokeSubgraphCache):
+        return None
+    fn_code = get_fn_code(fn_var)
+    if fn_code is None:
+        return None
+    return invoke_subgraph_cache.find_reuse_entry_by_key(fn_code, hash_key)
 
 
 def stamp_out_subgraph(
@@ -1040,17 +1125,17 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         )
 
         if isinstance(fn_vt, UserFunctionVariable):
-            fn_id = id(fn_vt.get_function())
+            fn_code = fn_vt.get_function().__code__
             fn_name = fn_vt.get_function().__name__
         else:
             assert isinstance(fn_vt, UnspecializedNNModuleVariable)
-            fn_id = id(fn_vt.value.forward.__func__)  # type: ignore[attr-defined]
+            fn_code = fn_vt.value.forward.__func__.__code__  # type: ignore[attr-defined]
             fn_name = fn_vt.value.forward.__name__  # type: ignore[attr-defined]
         # pyrefly: ignore [implicit-any]
         previously_installed_submodules = []
         if invoke_subgraph_cache:
             previously_installed_submodules = (
-                invoke_subgraph_cache.get_dynamo_installed_submodules(fn_id)
+                invoke_subgraph_cache.get_dynamo_installed_submodules(fn_code)
             )
             current_mod = body_gmod
             # NB - reverse is more likely to cause a hit sooner because first
@@ -1079,7 +1164,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             len(previously_installed_submodules) + 1,
         )
         if invoke_subgraph_cache:
-            invoke_subgraph_cache.add_dynamo_installed_submodule(fn_id, body_name)
+            invoke_subgraph_cache.add_dynamo_installed_submodule(fn_code, body_name)
 
         return body_name
 
@@ -1099,12 +1184,16 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 
         config = None
         max_reuse_entries = 8
+        reuse_hash_fn = None
         if hasattr(fn_var, "get_function"):
             try:
                 fn = fn_var.get_function()
                 config = getattr(fn, "__marked_compile_region_config__", None)
                 max_reuse_entries = getattr(
                     fn, "__marked_compile_region_max_reuse_entries__", 8
+                )
+                reuse_hash_fn = getattr(
+                    fn, "__marked_compile_region_reuse_hash_fn__", None
                 )
             except Exception:
                 log.warning(
@@ -1117,10 +1206,27 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         # and enable if request arises.
         reuse = not tx.output.export
 
-        # Reuse lookup: check fn_id first (cheap) to avoid the
-        # expensive pytree flatten in build_input_fingerprint on the
-        # first call when there's nothing in the cache yet.
-        if reuse and has_reuse_entries(tx, fn_var):
+        # User-provided reuse_hash_fn path: hash key determines cache lookup.
+        if reuse and reuse_hash_fn is not None:
+            with dynamo_timed("invoke_subgraph_reuse_hash_fn"):
+                hash_key = trace_reuse_hash_fn(tx, reuse_hash_fn, fn_args_vt, kwargs)
+
+            cached = find_reuse_entry_by_key(tx, fn_var, hash_key)
+            if cached is not None:
+                hc_log.debug(
+                    "subgraph_reuse: hash key %d hit for '%s', reusing subgraph '%s'",
+                    hash_key,
+                    fn_var,
+                    cached.body_name,
+                )
+                fingerprint = build_input_fingerprint(tx, fn_args_vt, kwargs)
+                with dynamo_timed("invoke_subgraph_reuse_stamp_out"):
+                    return stamp_out_subgraph(tx, fingerprint, cached)
+
+        # Automatic reuse lookup (guard-based): check fn_code first (cheap) to
+        # avoid the expensive pytree flatten in build_input_fingerprint on
+        # the first call when there's nothing in the cache yet.
+        elif reuse and has_reuse_entries(tx, fn_var):
             with dynamo_timed("invoke_subgraph_reuse_lookup"):
                 fingerprint = build_input_fingerprint(tx, fn_args_vt, kwargs)
                 match = find_reuse_match(
@@ -1173,27 +1279,58 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         # Subgraph reuse: save entry for future cache hits
         if reuse:
             fingerprint = build_input_fingerprint(tx, fn_args_vt, kwargs)
-            traced_sources = tracing_info.traced_sources
-            if is_reuse_eligible(tx, body_r, fingerprint, tracing_info, traced_sources):
-                condition = build_reuse_condition(
+            if reuse_hash_fn is not None:
+                traced_sources = tracing_info.traced_sources
+                if not is_reuse_eligible(
                     tx,
+                    body_r,
                     fingerprint,
+                    tracing_info,
                     traced_sources,
-                )
-                if condition is not None:
-                    save_reuse_entry(
-                        tx,
-                        fn_var,
-                        fingerprint,
-                        body_name,
-                        body_gmod,
-                        config,
-                        p_args,
-                        body_r,
-                        example_value,
-                        condition,
-                        max_reuse_entries,
+                    has_reuse_hash_fn=True,
+                ):
+                    raise RuntimeError(
+                        "reuse_hash_fn was provided but the subgraph is not "
+                        "eligible for reuse. Check the logs with "
+                        "TORCH_LOGS='+hierarchical_compile' for details."
                     )
+                save_reuse_entry(
+                    tx,
+                    fn_var,
+                    fingerprint,
+                    body_name,
+                    body_gmod,
+                    config,
+                    p_args,
+                    body_r,
+                    example_value,
+                    max_reuse_entries,
+                    hash_key=hash_key,  # type: ignore[possibly-undefined]
+                )
+            else:
+                traced_sources = tracing_info.traced_sources
+                if is_reuse_eligible(
+                    tx, body_r, fingerprint, tracing_info, traced_sources
+                ):
+                    condition = build_reuse_condition(
+                        tx,
+                        fingerprint,
+                        traced_sources,
+                    )
+                    if condition is not None:
+                        save_reuse_entry(
+                            tx,
+                            fn_var,
+                            fingerprint,
+                            body_name,
+                            body_gmod,
+                            config,
+                            p_args,
+                            body_r,
+                            example_value,
+                            max_reuse_entries,
+                            condition=condition,
+                        )
 
         return _call_function_with_auto_output_flattening(  # type: ignore[return-value]
             tx,

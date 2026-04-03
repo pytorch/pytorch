@@ -1282,6 +1282,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         self.h100_default_flex_config = {
             (torch.float32, 64): FlexConfig(128, 32, 3, 4),
             (torch.float32, 128): FlexConfig(32, 64, 3, 4),
+            (torch.float32, 192): FlexConfig(32, 64, 1, 8),
             (torch.float32, 256): FlexConfig(32, 32, 3, 4),
             (torch.bfloat16, 64): FlexConfig(128, 128, 3, 4),
             (torch.bfloat16, 128): FlexConfig(128, 64, 3, 8),
@@ -2856,11 +2857,10 @@ class ROCmScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, ROCmConfigHeurist
         super().__init__()
         # Override mm_configs to use scaled_mm_configs
         self.mm_configs = self.scaled_mm_configs
-        # NOTE: overriding exhaustive configs here to be the same as mm_configs
-        # as we haven't validated exhaustive support here yet
-        # TODO(coconutruben): remove this once we have validated exhaustive support
-        # for scaled_mm
-        self.exhaustive_configs = self.scaled_mm_configs
+
+    def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
+        configs = [c for c in configs if c.block_k >= 32]
+        return super()._filter_configs(configs)
 
 
 @register_template_heuristic(
