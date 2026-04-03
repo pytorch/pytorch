@@ -216,6 +216,141 @@ static std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tens
   return std::make_tuple(output, mask);
 }
 
+// Stateless Philox RNG batching rules.
+// The CUDA kernels already handle batched keys natively (key shape (*batch, 2)
+// with output shape (*batch, *event)), so the batch rules just reshape tensors
+// to leverage this.
+
+static std::tuple<Tensor, std::optional<int64_t>> philox_key_split_batch_rule(
+    const Tensor& key, std::optional<int64_t> key_bdim,
+    int64_t num_splits) {
+  auto key_ = moveBatchDimToFront(key, key_bdim);
+  // key_ shape: (B, *orig_batch, 2)
+  // split output: (num_splits, B, *orig_batch, 2), vmap batch at position 1
+  auto result = at::_philox_key_split(key_, num_splits);
+  return {result, 1};
+}
+
+static std::tuple<Tensor, std::optional<int64_t>> philox_key_fold_in_batch_rule(
+    const Tensor& key, std::optional<int64_t> key_bdim,
+    int64_t data) {
+  auto key_ = moveBatchDimToFront(key, key_bdim);
+  auto result = at::_philox_key_fold_in(key_, data);
+  return {result, 0};
+}
+
+// Unsqueeze key so key.dim() == output.dim() + 1, satisfying the
+// trailing-suffix broadcasting rule that the kernel enforces.
+static Tensor unsqueeze_key_for_broadcast(const Tensor& key, const Tensor& output) {
+  auto key_ = key;
+  while (key_.dim() < output.dim() + 1) {
+    key_ = key_.unsqueeze(-2);
+  }
+  return key_;
+}
+
+static std::tuple<Tensor, std::optional<int64_t>> philox_normal_batch_rule(
+    const Tensor& self, std::optional<int64_t> self_bdim,
+    const Tensor& key, std::optional<int64_t> key_bdim,
+    double mean, double std, bool portable) {
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto key_ = moveBatchDimToFront(key, key_bdim);
+  auto batch_size = get_bdim_size2(self, self_bdim, key, key_bdim);
+  self_ = ensure_has_bdim(self_, self_bdim.has_value(), batch_size);
+  key_ = ensure_has_bdim(key_, key_bdim.has_value(), batch_size);
+  auto output = at::empty_like(self_);
+  key_ = unsqueeze_key_for_broadcast(key_, output);
+  at::_philox_normal_(output, key_, mean, std, portable);
+  return {output, 0};
+}
+
+static std::tuple<Tensor, std::optional<int64_t>> philox_uniform_batch_rule(
+    const Tensor& self, std::optional<int64_t> self_bdim,
+    const Tensor& key, std::optional<int64_t> key_bdim,
+    double low, double high, bool portable) {
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto key_ = moveBatchDimToFront(key, key_bdim);
+  auto batch_size = get_bdim_size2(self, self_bdim, key, key_bdim);
+  self_ = ensure_has_bdim(self_, self_bdim.has_value(), batch_size);
+  key_ = ensure_has_bdim(key_, key_bdim.has_value(), batch_size);
+  auto output = at::empty_like(self_);
+  key_ = unsqueeze_key_for_broadcast(key_, output);
+  at::_philox_uniform_(output, key_, low, high, portable);
+  return {output, 0};
+}
+
+// In-place variants: custom handler (not generated plumbing) so that when
+// self is unbatched but key is batched, we can create a batched output and
+// reassign self to a BatchedTensor.
+static Tensor& philox_normal_inplace_batched(
+    Tensor& self, const Tensor& key, double mean, double std, bool portable) {
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  vmap_check_escaped(maybe_layer, "philox_normal_inplace_batched");
+  int64_t cur_level = maybe_layer->layerId();
+  if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(key, cur_level)) {
+    return at::_ops::_philox_normal_::call(self, key, mean, std, portable);
+  }
+  auto [self_value, self_bdim] = unwrapTensorAtLevel(self, cur_level);
+  auto [key_value, key_bdim] = unwrapTensorAtLevel(key, cur_level);
+  if (!self_bdim && key_bdim) {
+    // Self unbatched, key batched: create batched output directly.
+    auto key_ = moveBatchDimToFront(key_value, key_bdim);
+    auto batch_size = key_.size(0);
+    auto event_sizes = self.sizes().vec();
+    std::vector<int64_t> out_sizes;
+    out_sizes.reserve(1 + event_sizes.size());
+    out_sizes.push_back(batch_size);
+    out_sizes.insert(out_sizes.end(), event_sizes.begin(), event_sizes.end());
+    auto output = at::empty(out_sizes, self.options());
+    key_ = unsqueeze_key_for_broadcast(key_, output);
+    at::_philox_normal_(output, key_, mean, std, portable);
+    self = makeBatched(output, 0, cur_level);
+    return self;
+  }
+  auto self_ = moveBatchDimToFront(self_value, self_bdim);
+  auto key_ = moveBatchDimToFront(key_value, key_bdim);
+  auto batch_size = self_.size(0);
+  key_ = ensure_has_bdim(key_, key_bdim.has_value(), batch_size);
+  key_ = unsqueeze_key_for_broadcast(key_, self_);
+  at::_philox_normal_(self_, key_, mean, std, portable);
+  return self;
+}
+
+static Tensor& philox_uniform_inplace_batched(
+    Tensor& self, const Tensor& key, double low, double high, bool portable) {
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  vmap_check_escaped(maybe_layer, "philox_uniform_inplace_batched");
+  int64_t cur_level = maybe_layer->layerId();
+  if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(key, cur_level)) {
+    return at::_ops::_philox_uniform_::call(self, key, low, high, portable);
+  }
+  auto [self_value, self_bdim] = unwrapTensorAtLevel(self, cur_level);
+  auto [key_value, key_bdim] = unwrapTensorAtLevel(key, cur_level);
+  if (!self_bdim && key_bdim) {
+    auto key_ = moveBatchDimToFront(key_value, key_bdim);
+    auto batch_size = key_.size(0);
+    auto event_sizes = self.sizes().vec();
+    std::vector<int64_t> out_sizes;
+    out_sizes.reserve(1 + event_sizes.size());
+    out_sizes.push_back(batch_size);
+    out_sizes.insert(out_sizes.end(), event_sizes.begin(), event_sizes.end());
+    auto output = at::empty(out_sizes, self.options());
+    key_ = unsqueeze_key_for_broadcast(key_, output);
+    at::_philox_uniform_(output, key_, low, high, portable);
+    self = makeBatched(output, 0, cur_level);
+    return self;
+  }
+  auto self_ = moveBatchDimToFront(self_value, self_bdim);
+  auto key_ = moveBatchDimToFront(key_value, key_bdim);
+  auto batch_size = self_.size(0);
+  key_ = ensure_has_bdim(key_, key_bdim.has_value(), batch_size);
+  key_ = unsqueeze_key_for_broadcast(key_, self_);
+  at::_philox_uniform_(self_, key_, low, high, portable);
+  return self;
+}
+
 static Tensor native_dropout_backward_batch_rule(const Tensor& grad_out, const Tensor& mask, double scale){
   Tensor result = grad_out * mask * scale;
   return result;
@@ -368,6 +503,13 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
                             c10::guts::function_traits<decltype(ATEN_FN2(op, overload))>::parameter_types>::apply))
 
   RANDOM_INPLACE_BATCH_RULE2(bernoulli_, float);
+
+  VMAP_SUPPORT(_philox_key_split, philox_key_split_batch_rule);
+  VMAP_SUPPORT(_philox_key_fold_in, philox_key_fold_in_batch_rule);
+  VMAP_SUPPORT(_philox_normal, philox_normal_batch_rule);
+  VMAP_SUPPORT(_philox_uniform, philox_uniform_batch_rule);
+  m.impl("_philox_normal_", philox_normal_inplace_batched);
+  m.impl("_philox_uniform_", philox_uniform_inplace_batched);
 
   #undef RANDOM_INPLACE_BATCH_RULE2
 }
