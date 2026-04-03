@@ -92,7 +92,6 @@ from .constant import (
     CONSTANT_VARIABLE_FALSE,
     CONSTANT_VARIABLE_NONE,
     ConstantVariable,
-    EnumVariable,
     FakeIdVariable,
 )
 from .dicts import (
@@ -804,7 +803,6 @@ class BuiltinVariable(BaseBuiltinVariable):
                 # time benchmark - add_loop_eager.
                 result = [
                     ((ConstantVariable, ConstantVariable), compare_by_value),
-                    ((EnumVariable, EnumVariable), compare_by_value),
                 ]
 
                 op_var = BuiltinVariable(op)
@@ -3399,6 +3397,7 @@ class IterBuiltinVariable(BaseBuiltinVariable):
                     variables.NNModuleVariable,
                     variables.TensorVariable,
                     variables.TupleVariable,
+                    variables.UserDefinedClassVariable,
                     DictViewVariable,
                 ),
             )
