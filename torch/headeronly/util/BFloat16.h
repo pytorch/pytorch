@@ -124,9 +124,11 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
 /// Constructors
 inline C10_HOST_DEVICE BFloat16::BFloat16(float value)
     :
-#if defined(__CUDACC__) &&                                                   \
-    (!defined(USE_ROCM) && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800 || \
-     defined(USE_ROCM) && (TORCH_HIP_VERSION >= 702))
+#if defined(__HIPCC__) && defined(USE_ROCM) && (TORCH_HIP_VERSION >= 702)
+      // Ensure NAN have same canonical form as in RNE path
+      x(value != value ? UINT16_C(0x7FC0) : __bfloat16_as_ushort(__float2bfloat16(value)))
+#elif defined(__CUDACC__) &&                                                 \
+    !defined(USE_ROCM) && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
       x(__bfloat16_as_ushort(__float2bfloat16(value)))
 #elif defined(__SYCL_DEVICE_ONLY__) && \
     defined(SYCL_EXT_ONEAPI_BFLOAT16_MATH_FUNCTIONS)
