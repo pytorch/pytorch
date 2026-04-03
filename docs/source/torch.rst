@@ -550,6 +550,7 @@ Other Operations
     bucketize
     cartesian_prod
     cdist
+    pdist
     clone
     combinations
     corrcoef
