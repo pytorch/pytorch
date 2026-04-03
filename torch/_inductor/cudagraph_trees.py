@@ -409,6 +409,9 @@ def cudagraphify_impl(
 
     has_warn = False
 
+    # Cache capture_sizes to avoid config lookup per call
+    cudagraph_capture_sizes = config.triton.cudagraph_capture_sizes
+
     del inputs
 
     def deferred_cudagraphify(inputs: list[InputType]) -> OutputType:
@@ -416,7 +419,7 @@ def cudagraphify_impl(
 
         int_key = get_ints(inputs)
 
-        if not is_cudagraph_capture_sizes(int_key):
+        if cudagraph_capture_sizes is not None and int_key not in cudagraph_capture_sizes:
             return model(inputs)
 
         fn = fn_cache.get(int_key)
@@ -887,6 +890,13 @@ class CUDAGraphNode:
         # if not we should error when it changed.
         self.rerecord_if_static_inputs_change = True
 
+        # Cache config values to avoid repeated __getattr__ on the hot path
+        self._fast_path_cudagraph_asserts = config.triton.fast_path_cudagraph_asserts
+        self._force_cudagraph_sync = config.triton.force_cudagraph_sync
+        self._defer_static_input_checks = (
+            config.triton.cudagraph_defer_static_input_checks
+        )
+
         # if this is a root parent will be None. use weakref to prevent reference cycle
         self._parent = weakref.ref(parent) if parent is not None else None
         # reference to the shared memory pool for the entire cuda graphs tree
@@ -1154,7 +1164,7 @@ class CUDAGraphNode:
         self, new_inputs: list[InputType]
     ) -> None:
         if (
-            not config.triton.cudagraph_defer_static_input_checks
+            not self._defer_static_input_checks
             or self._force_full_static_input_check
             or not self.non_managed_static_input_idxs
         ):
@@ -1176,7 +1186,7 @@ class CUDAGraphNode:
             )
 
     def run_first_inputs(self, new_inputs: list[InputType]) -> OutputType:
-        if config.triton.fast_path_cudagraph_asserts:
+        if self._fast_path_cudagraph_asserts:
             self.debug_check_invariants_before_invocation()
 
         # graph is already invoked in the __init__
@@ -1199,10 +1209,10 @@ class CUDAGraphNode:
         outputs = self.reconstruct_outputs()
         new_inputs.clear()
 
-        if config.triton.fast_path_cudagraph_asserts:
+        if self._fast_path_cudagraph_asserts:
             self.debug_check_invariants_after_invocation()
 
-        if config.triton.force_cudagraph_sync:
+        if self._force_cudagraph_sync:
             torch.cuda.synchronize()
 
         return outputs
@@ -1826,7 +1836,7 @@ class CUDAGraphNode:
             # param before replay to catch the common all-params-changed case.
             # The full check happens after graph.replay() in run().
             if (
-                config.triton.cudagraph_defer_static_input_checks
+                self._defer_static_input_checks
                 and not self._force_full_static_input_check
             ):
                 check_idxs = self._sentinel_static_input_idxs
@@ -2150,6 +2160,10 @@ class CUDAGraphTreeManager:
         self.running_forwards_with_pending_backwards = False
         self.mode: CompilationMode | None = None
 
+        # Cache config values to avoid repeated __getattr__ on the hot path
+        self._skip_cudagraph_warmup = config.triton.skip_cudagraph_warmup
+        self._force_cudagraphs_warmup = config.triton.force_cudagraphs_warmup
+
         self.disable_invalidate_aliases = (
             False
             if not torch._environment.is_fbcode()
@@ -2222,13 +2236,17 @@ class CUDAGraphTreeManager:
         # we dont want to do unnecessary checking of the existing outputs
         # on the hot path, but both recording and warmup only happen once
         # so we check up front
-        if self.in_recording:
+        path_state = self.path_state
+        if path_state == ExecutionState.RECORDING:
             self.try_end_curr_recording(function_id)
+            path_state = self.path_state
 
-        if self.in_warmup:
+        elif path_state == ExecutionState.WARMUP:
             self.try_end_curr_warmup(function_id)
+            path_state = self.path_state
 
-        node_id = self._get_node_id()
+        current_node = self.current_node
+        node_id = None if current_node is None else current_node.id
         if function_id not in self.non_cudagraph_managed_mutation_hint[node_id]:
             self._update_non_cudagraph_managed_mutation(function_id, new_inputs)
 
@@ -2249,25 +2267,25 @@ class CUDAGraphTreeManager:
             (
                 not (
                     function_id in self.warmed_up_functions
-                    or config.triton.skip_cudagraph_warmup
+                    or self._skip_cudagraph_warmup
                 )
             )
-            or self.in_warmup
-            or config.triton.force_cudagraphs_warmup
+            or path_state == ExecutionState.WARMUP
+            or self._force_cudagraphs_warmup
         ):
             # If we are in the middle of executing cuda graphs, then we need to checkpoint memory state.
             # Both Recording and Warmup will be reflected in the allocator and dont need changes
-            if self.path_state == ExecutionState.EXECUTION:
+            if path_state == ExecutionState.EXECUTION:
                 self.apply_checkpoint_execution_state_in_allocator()
 
             return self.run_eager(new_inputs, function_id)
 
-        assert not isinstance(self.current_node, CUDAWarmupNode)
+        assert not isinstance(current_node, CUDAWarmupNode)
         child_nodes = (
-            self.roots if self.current_node is None else self.current_node.children
+            self.roots if current_node is None else current_node.children
         )
 
-        if not self.in_recording:
+        if path_state != ExecutionState.RECORDING:
             unexpected_rerecord = False
             unexpected_rerecord_reason = None
             for child in child_nodes[function_id]:
