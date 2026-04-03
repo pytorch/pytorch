@@ -347,7 +347,7 @@ def tensorify_python_scalars(
                     ):
                         failed_tensorify_ops.update(str(node.target))
 
-                        log.info("Failed to tensorify %s", str(node.target))
+                        log.info("Failed to tensorify %s", node.target)
 
     # Now do one more pass that specializes all symfloats we didn't manage
     # to tensorify away.
