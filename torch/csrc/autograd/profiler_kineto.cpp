@@ -103,7 +103,6 @@ struct OpArgData {
   std::vector<std::string> dtypes;
   std::vector<c10::IValue> concreteInputs;
   std::vector<std::vector<int64_t>> shapesForKinetoEvent;
-  std::vector<std::vector<int64_t>> stridesForKinetoEvent;
   std::vector<shape> strides;
 };
 
@@ -111,13 +110,12 @@ auto parseArgData(
     const std::vector<op_input_t>& input_shapes,
     const std::vector<op_input_t>& concreteInputs) {
   if (input_shapes.empty()) {
-    return OpArgData{false, {}, {}, {}, {}, {}, {}};
+    return OpArgData{false, {}, {}, {}, {}, {}};
   }
 
   std::vector<shape> shapes(input_shapes.size());
   std::vector<shape> strides(input_shapes.size());
   std::vector<std::vector<int64_t>> shapesForKinetoEvent(input_shapes.size());
-  std::vector<std::vector<int64_t>> stridesForKinetoEvent(input_shapes.size());
 
   std::vector<std::string> dtypes(input_shapes.size());
   std::vector<c10::IValue> concrete_inputs_list;
@@ -130,7 +128,6 @@ auto parseArgData(
               shapesForKinetoEvent[i] = t.sizes_;
               dtypes[i] = std::string(scalarTypeToTypeMeta(t.dtype_).name());
               strides[i] = t.strides_;
-              stridesForKinetoEvent[i] = t.strides_;
             },
             [&](const std::vector<TensorMetadata>& l) {
               std::vector<std::vector<int64_t>> shape;
@@ -177,7 +174,6 @@ auto parseArgData(
       dtypes,
       concrete_inputs_list,
       shapesForKinetoEvent,
-      stridesForKinetoEvent,
       strides};
 }
 
@@ -950,8 +946,15 @@ KinetoEvent::KinetoEvent(
 
   result->visit_if_base<ExtraFields<EventType::TorchOp>>([&](const auto& op) {
     auto arg_data = parseArgData(op.inputs_, op.concrete_inputs_);
-    shapes_ = std::move(arg_data.shapesForKinetoEvent);
-    strides_ = std::move(arg_data.stridesForKinetoEvent);
+    if (get_record_concrete_inputs_enabled()) {
+      shapes_ = std::move(arg_data.shapes);
+    } else {
+      shapes_.reserve(arg_data.shapesForKinetoEvent.size());
+      for (auto& s : arg_data.shapesForKinetoEvent) {
+        shapes_.push_back(std::move(s));
+      }
+    }
+    strides_ = std::move(arg_data.strides);
     dtypes_ = std::move(arg_data.dtypes);
     concrete_inputs_ = std::move(arg_data.concreteInputs);
     kwinputs_ = std::move(op.kwinputs_);
@@ -1007,11 +1010,11 @@ bool KinetoEvent::hasShapes() const {
   return !shapes_.empty();
 }
 
-const c10::ArrayRef<std::vector<int64_t>> KinetoEvent::shapes() const {
+const c10::ArrayRef<torch::profiler::impl::shape> KinetoEvent::shapes() const {
   return shapes_;
 }
 
-const c10::ArrayRef<std::vector<int64_t>> KinetoEvent::strides() const {
+const c10::ArrayRef<torch::profiler::impl::shape> KinetoEvent::strides() const {
   return strides_;
 }
 

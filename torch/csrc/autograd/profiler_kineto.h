@@ -22,17 +22,15 @@ using experimental_event_t = std::shared_ptr<torch::profiler::impl::Result>;
 using extra_meta_t = std::unordered_map<std::string, std::string>;
 
 struct TORCH_API KinetoEvent {
-  KinetoEvent(
-      const std::shared_ptr<const torch::profiler::impl::Result>& /*result*/,
-      const bool verbose);
+  KinetoEvent(const std::shared_ptr<const torch::profiler::impl::Result>& /*result*/, const bool verbose);
 
   uint64_t startThreadId() const;
   uint64_t endThreadId() const;
   uint8_t activityType() const;
   uint64_t fwdThreadId() const;
   bool hasShapes() const;
-  const c10::ArrayRef<std::vector<int64_t>> shapes() const;
-  const c10::ArrayRef<std::vector<int64_t>> strides() const;
+  const c10::ArrayRef<torch::profiler::impl::shape> shapes() const;
+  const c10::ArrayRef<torch::profiler::impl::shape> strides() const;
   bool hasTypes() const;
   const c10::ArrayRef<std::string> dtypes() const;
   bool hasConcreteInputs() const;
@@ -83,8 +81,8 @@ struct TORCH_API KinetoEvent {
   std::vector<std::string> python_stack_;
 
   // Copy fields from result so we can return ArrayRefs.
-  std::vector<std::vector<int64_t>> shapes_;
-  std::vector<std::vector<int64_t>> strides_;
+  std::vector<torch::profiler::impl::shape> shapes_;
+  std::vector<torch::profiler::impl::shape> strides_;
   std::vector<std::string> dtypes_;
   std::vector<c10::IValue> concrete_inputs_;
   std::unordered_map<std::string, c10::IValue> kwinputs_;
@@ -95,12 +93,10 @@ struct TORCH_API KinetoEvent {
 // memory allocation events)
 struct TORCH_API ProfilerResult {
   ProfilerResult();
-  ProfilerResult(
-      uint64_t start_time,
-      std::vector<KinetoEvent> events,
-      std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>&&
-          trace,
-      std::vector<experimental_event_t>&& event_tree);
+  ProfilerResult(uint64_t start_time,
+                 std::vector<KinetoEvent> events,
+                 std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>&& trace,
+                 std::vector<experimental_event_t>&& event_tree);
   ~ProfilerResult();
 
   uint64_t trace_start_ns() const {
@@ -145,18 +141,16 @@ struct TORCH_API ProfilerResult {
  * @param event_name: name of the event, e.g. op name
  * @param backend_name: name of the backend where the event took place.
  */
-TORCH_API void reportBackendEventToActiveKinetoProfiler(
-    const int64_t start_time_us,
-    const int64_t end_time_us,
-    const int64_t debug_handle,
-    const at::RecordScope scope,
-    const std::string& event_name,
-    const std::string& backend_name);
+TORCH_API void reportBackendEventToActiveKinetoProfiler(const int64_t start_time_us,
+                                                        const int64_t end_time_us,
+                                                        const int64_t debug_handle,
+                                                        const at::RecordScope scope,
+                                                        const std::string& event_name,
+                                                        const std::string& backend_name);
 
-TORCH_API void enableProfiler(
-    const torch::profiler::impl::ProfilerConfig& config,
-    const std::set<torch::profiler::impl::ActivityType>& activities,
-    const std::unordered_set<at::RecordScope>& scopes = {});
+TORCH_API void enableProfiler(const torch::profiler::impl::ProfilerConfig& config,
+                              const std::set<torch::profiler::impl::ActivityType>& activities,
+                              const std::unordered_set<at::RecordScope>& scopes = {});
 
 /*
  * Same as enableProfiler but with callback to do post-processing of
@@ -180,25 +174,20 @@ using post_process_t = std::function<void(
     /*debug_handle */ int64_t,
     /*jit_stack    */ std::vector<std::string>&,
     /*jit_modules  */ std::vector<std::string>&)>;
-TORCH_API void enableProfilerWithEventPostProcess(
-    const torch::profiler::impl::ProfilerConfig& config,
-    const std::set<torch::profiler::impl::ActivityType>& activities,
-    post_process_t&& cb,
-    const std::unordered_set<at::RecordScope>& scopes = {});
+TORCH_API void enableProfilerWithEventPostProcess(const torch::profiler::impl::ProfilerConfig& config,
+                                                  const std::set<torch::profiler::impl::ActivityType>& activities,
+                                                  post_process_t&& cb,
+                                                  const std::unordered_set<at::RecordScope>& scopes = {});
 
 TORCH_API std::unique_ptr<ProfilerResult> disableProfiler();
 
-using ActivityFilter = std::unordered_map<
-    torch::profiler::impl::ActivityType,
-    std::unordered_set<std::string>>;
-TORCH_API void prepareProfiler(
-    const torch::profiler::impl::ProfilerConfig& config,
-    const std::set<torch::profiler::impl::ActivityType>& activities,
-    const ActivityFilter& activity_filter = {});
+using ActivityFilter = std::unordered_map<torch::profiler::impl::ActivityType, std::unordered_set<std::string>>;
+TORCH_API void prepareProfiler(const torch::profiler::impl::ProfilerConfig& config,
+                               const std::set<torch::profiler::impl::ActivityType>& activities,
+                               const ActivityFilter& activity_filter = {});
 
-TORCH_API void toggleCollectionDynamic(
-    const bool enable,
-    const std::set<torch::profiler::impl::ActivityType>& activities);
+TORCH_API void toggleCollectionDynamic(const bool enable,
+                                       const std::set<torch::profiler::impl::ActivityType>& activities);
 
 TORCH_API void startMemoryProfile();
 TORCH_API void stopMemoryProfile();

@@ -252,8 +252,34 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
           "correlation_id",
           [](const KinetoEvent& e) { return e.correlationId(); })
       // shapes of input tensors
-      .def("shapes", [](const KinetoEvent& e) { return e.shapes().vec(); })
-      .def("strides", [](const KinetoEvent& e) { return e.strides().vec(); })
+      .def(
+          "shapes",
+          [](const KinetoEvent& e) {
+            py::list result;
+            for (const auto& s : e.shapes()) {
+              if (std::holds_alternative<std::vector<int64_t>>(s)) {
+                result.append(std::get<std::vector<int64_t>>(s));
+              } else {
+                result.append(
+                    std::get<std::vector<std::vector<int64_t>>>(s));
+              }
+            }
+            return result;
+          })
+      .def(
+          "strides",
+          [](const KinetoEvent& e) {
+            py::list result;
+            for (const auto& s : e.strides()) {
+              if (std::holds_alternative<std::vector<int64_t>>(s)) {
+                result.append(std::get<std::vector<int64_t>>(s));
+              } else {
+                result.append(
+                    std::get<std::vector<std::vector<int64_t>>>(s));
+              }
+            }
+            return result;
+          })
       .def("dtypes", [](const KinetoEvent& e) { return e.dtypes().vec(); })
       .def("python_id", [](const KinetoEvent& e) { return e.pythonId(); })
       .def(
