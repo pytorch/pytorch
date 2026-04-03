@@ -328,6 +328,26 @@ class TestMaxAutotune(TestCase):
             mm_tma_heuristic.mm_configs = original_tma_configs
             mm_heuristic.mm_configs = original_mm_configs
 
+    def test_workspace_size_bytes_accounts_for_dtype(self):
+        """Workspace size for autotuning must be in bytes, not element count."""
+        import sympy
+
+        from torch._inductor.codegen.common import WorkspaceZeroMode
+        from torch._inductor.utils import get_dtype_size
+
+        count = 1024
+        for dtype in [torch.uint8, torch.float16, torch.float32, torch.float64]:
+            ws = WorkspaceArg(
+                count=sympy.Integer(count),
+                zero_mode=WorkspaceZeroMode.UNINITIALIZED,
+                device=torch.device("cpu"),
+                outer_name="test_ws",
+                dtype=dtype,
+            )
+            expected_bytes = count * get_dtype_size(dtype)
+            actual_bytes = int(ws.count) * get_dtype_size(ws.dtype)
+            self.assertEqual(actual_bytes, expected_bytes)
+
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
