@@ -6,7 +6,7 @@ using namespace metal;
 #include <c10/metal/special_math.h>
 #include <c10/metal/utils.h>
 
-using c10::metal::accum_t;
+using namespace c10::metal;
 
 struct LogAddExp {
   template <typename T>
@@ -103,6 +103,29 @@ struct LogCumSumExpOp {
     for (int i = 1; i <= 16; i *= 2) {
       acc_t other = simd_shuffle_and_fill_up(x, init, i);
       x = LogAddExp{}(x, other);
+    }
+    return x;
+  }
+
+  acc_t simd_exclusive_scan(acc_t x) {
+    x = simd_scan(x);
+    return simd_shuffle_and_fill_up(x, init, 1);
+  }
+};
+
+template <typename T, typename acc_t = accum_t<T>>
+struct CumProdOp {
+  static constexpr constant acc_t init =
+      is_complex_v<acc_t> ? acc_t(1, 0) : static_cast<acc_t>(1);
+
+  acc_t operator()(acc_t a, acc_t b) {
+    return c10::metal::mul(a, b);
+  }
+
+  acc_t simd_scan(acc_t x) {
+    for (int i = 1; i <= 16; i *= 2) {
+      acc_t other = simd_shuffle_and_fill_up(x, init, i);
+      x = this->operator()(x, other);
     }
     return x;
   }
@@ -757,6 +780,9 @@ REGISTER_SCAN_OP(logcumsumexp, LogCumSumExpOp, half, 4);
 REGISTER_SCAN_OP(logcumsumexp, LogCumSumExpOp, bfloat, 4);
 REGISTER_SCAN_OP(logcumsumexp, LogCumSumExpOp, float2, 2);
 REGISTER_SCAN_OP(logcumsumexp, LogCumSumExpOp, half2, 4);
+
+REGISTER_SCAN_OP(cumprod, CumProdOp, float2, 2);
+REGISTER_SCAN_OP(cumprod, CumProdOp, half2, 4);
 
 // Scan with indices operations for cummin/cummax
 REGISTER_SCAN_WITH_INDICES_OP(cummin, CumMinOp, float, 4);

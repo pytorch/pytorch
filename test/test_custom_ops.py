@@ -2381,6 +2381,56 @@ TORCH_LIBRARY(test_autograd_function_backed_op, m) {
         ):
             torch.ops.load_library("libnoexist.so")
 
+    def test_list_scalar_type(self):
+        lib = self.lib()
+        lib.define("scalar_list(Tensor x, ScalarType[] dts) -> Tensor")
+
+        received = None
+
+        @torch.library.impl(lib, "scalar_list", "CPU")
+        def _(x, dts):
+            nonlocal received
+            received = dts
+            return x.clone()
+
+        x = torch.randn(3)
+        torch.ops._test_custom_op.scalar_list(x, [torch.float32, torch.bfloat16])
+        self.assertEqual(received, [torch.float32, torch.bfloat16])
+
+    def test_list_layout(self):
+        lib = self.lib()
+        lib.define("layout_list(Tensor x, Layout[] layouts) -> Tensor")
+
+        received = None
+
+        @torch.library.impl(lib, "layout_list", "CPU")
+        def _(x, layouts):
+            nonlocal received
+            received = layouts
+            return x.clone()
+
+        x = torch.randn(3)
+        torch.ops._test_custom_op.layout_list(x, [torch.strided, torch.sparse_coo])
+        self.assertEqual(received, [torch.strided, torch.sparse_coo])
+
+    def test_list_memory_format(self):
+        lib = self.lib()
+        lib.define("memfmt_list(Tensor x, MemoryFormat[] fmts) -> Tensor")
+
+        received = None
+
+        @torch.library.impl(lib, "memfmt_list", "CPU")
+        def _(x, fmts):
+            nonlocal received
+            received = fmts
+            return x.clone()
+
+        x = torch.randn(3)
+        torch.ops._test_custom_op.memfmt_list(
+            x, [torch.contiguous_format, torch.channels_last]
+        )
+        self.assertEqual(received, [torch.contiguous_format, torch.channels_last])
+
 
 def op_with_incorrect_schema(testcase, name):
     lib = testcase.lib()
