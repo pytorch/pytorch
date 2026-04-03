@@ -44,6 +44,7 @@ import torch.utils.cpp_extension
 from torch import Tensor
 from torch._C import FileCheck
 from torch._dynamo import allow_in_graph
+from torch._dynamo.comptime import comptime
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.source import ConstantSource, GetItemSource, LocalSource
@@ -5645,6 +5646,54 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         # Graph breaks at manual_seed.
         self.assertEqual(len(counters["graph_break"]), 1)
 
+    def test_torch_generator_manual_seed(self):
+        from torch._dynamo.utils import counters
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        counters.clear()
+
+        def fn(x, gen):
+            gen.manual_seed(3)
+            return x + 1
+
+        x = torch.randn(10)
+        ref = fn(x, torch.Generator())
+
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=False)
+        res = opt_fn(x, torch.Generator())
+
+        self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.op_count, 1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(len(counters["graph_break"]), 1)
+
+    def test_torch_generator_initial_seed(self):
+        from torch._dynamo.utils import counters
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        counters.clear()
+
+        def fn(x):
+            return x + 1, torch.default_generator.initial_seed()
+
+        x = torch.randn(10)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=False)
+        res = opt_fn(x)
+
+        self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.op_count, 1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(len(counters["graph_break"]), 1)
+
+    def test_torch_generator_get_state_fullgraph(self):
+        def fn():
+            return torch.default_generator.get_state()
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)()
+
     def test_is_tensor_like(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -6250,6 +6299,42 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         opt_f2 = torch.compile(f2, backend=cnts)
         res2 = opt_f2()
         self.assertTrue(same(res1, res2))
+
+    def test_list_append_does_not_recompile_on_existing_contents(self):
+        items = []
+        cnts = CompileCounter()
+
+        def fn():
+            items.append(torch.ones(8))
+
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+
+        opt_fn()
+        opt_fn()
+        opt_fn()
+
+        self.assertEqual(len(items), 3)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_list_clear_does_not_recompile_on_existing_contents(self):
+        items = [torch.randn(8)]
+        cnts = CompileCounter()
+
+        def fn():
+            items.clear()
+            return torch.ones(8)
+
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+
+        out1 = opt_fn()
+        self.assertEqual(len(items), 0)
+
+        items.extend([torch.randn(8), torch.randn(8)])
+        out2 = opt_fn()
+
+        self.assertEqual(len(items), 0)
+        self.assertTrue(same(out1, out2))
+        self.assertEqual(cnts.frame_count, 1)
 
     def test_inline_dict_mutation(self):
         def f1(d):
@@ -7120,6 +7205,49 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         torch._dynamo.reset()
         test_recompile(foo_graph_break, exp_frame_count=2)
 
+    def test_multithread_compile_dynamic(self):
+        def f(x):
+            comptime.assert_static(x.shape[0])
+            return x * x
+
+        def _do_test(func):
+            success = True
+
+            def run(offset):
+                for i in range(20):
+                    print(func(torch.randn(i * 2 + offset)))
+
+            t1 = threading.Thread(target=run, args=[0])
+            t2 = threading.Thread(target=run, args=[1])
+
+            def exc_hook(x):
+                nonlocal success
+                success = False
+
+            try:
+                threading.excepthook = exc_hook
+                t1.start()
+                t2.start()
+
+                t1.join()
+                t2.join()
+            finally:
+                threading.excepthook = threading.__excepthook__
+            self.assertTrue(success)
+
+        _do_test(torch.compile(f, backend="eager", dynamic=False))
+        torch._dynamo.reset()
+
+        f_opt = torch.compile(f, backend="eager")
+
+        def g(x):
+            with torch._dynamo.config.patch(
+                automatic_dynamic_shapes=False, assume_static_by_default=True
+            ):
+                f_opt(x)
+
+        _do_test(g)
+
     def test_backend_match_guard_multi_threads(self):
         x = torch.randn([3, 4])
 
@@ -7426,10 +7554,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         @torch.compile(backend="eager")
         def f1(a, b):
-            try:
-                f2(a, b)
-            finally:
-                pass
+            f2(a, b)
 
         def f2(a, b):
             c = a + b
@@ -7438,10 +7563,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         @torch.compile(backend="eager")
         def g1(a, b):
-            try:
-                g2(a, b)
-            finally:
-                pass
+            g2(a, b)
 
         def g2(a, b):
             c = a + b
@@ -8758,6 +8880,98 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         res = opt_fn(torch.ones(2, 2))
 
         self.assertTrue(same(ref, res))
+
+    def test_cast_with_different_module_types(self):
+        # typing.cast works correctly when used in a mixin pattern with
+        # different module types, producing correct results without
+        # graph breaks.
+        from typing import cast
+
+        class Mixin:
+            def get_self_as_module(self):
+                return cast(torch.nn.Module, self)
+
+        class ModuleA(Mixin, torch.nn.Module):
+            def forward(self, x):
+                self.get_self_as_module()
+                return x + 1
+
+        class ModuleB(Mixin, torch.nn.Module):
+            def forward(self, x):
+                self.get_self_as_module()
+                return x + 2
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(mod, x):
+            mod.get_self_as_module()
+            return x + 1
+
+        x = torch.randn(4)
+        ref_a = fn.__wrapped__(ModuleA(), x)
+        ref_b = fn.__wrapped__(ModuleB(), x)
+        res_a = fn(ModuleA(), x)
+        res_b = fn(ModuleB(), x)
+
+        self.assertEqual(ref_a, res_a)
+        self.assertEqual(ref_b, res_b)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_cast_fullgraph_with_non_tensor(self):
+        # Verify typing.cast works with non-tensor values under fullgraph=True
+        from typing import cast
+
+        def fn(x):
+            val = cast(int, x.shape[0])
+            return x + val
+
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        ref = fn(torch.ones(3, 4))
+        res = opt_fn(torch.ones(3, 4))
+
+        self.assertTrue(same(ref, res))
+
+    def test_cast_no_recompile_after_graph_break(self):
+        # In FSDP, cast(nn.Module, self) can be called after a
+        # graph break. Without the polyfill + skip_code fix, PEP 523 compiles
+        # typing.cast as a standalone frame with TYPE_MATCH guards on val,
+        # causing recompilation when different module types pass through.
+        # https://github.com/pytorch/pytorch/blob/0feb90404fbeb9b1594ae194f8fd47bbe7f5f245/torch/distributed/fsdp/_fully_shard/_fully_shard.py#L376
+        from typing import cast
+
+        from torch._dynamo.utils import counters
+
+        counters.clear()
+
+        class Base(torch.nn.Module):
+            def get_state(self):
+                torch._dynamo.decorators.graph_break()
+                return cast(torch.nn.Module, self)
+
+        class ModuleA(Base):
+            pass
+
+        class ModuleB(Base):
+            pass
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        a, b = ModuleA(), ModuleB()
+
+        @torch.compile(backend=cnt)
+        def fn(mod, x):
+            mod.get_state()
+            return x + 1
+
+        x = torch.randn(4)
+        fn(a, x)
+        fn(b, x)
+        self.assertEqual(cnt.frame_count, 1)
+        # 5 frames: fn (x2), get_state before graph_break (x2),
+        # get_state resume after graph_break (x1, no recompile).
+        # Without skip_code, typing.cast would add 2 more frames (7 total).
+        self.assertEqual(counters["frames"]["total"], 5)
 
     def test_T_tensor_attribute(self):
         def fn(x, y):
@@ -14584,6 +14798,36 @@ fn
         self.assertRaises(Unsupported, f, fake_arg=1)
         self.assertRaises(Unsupported, f, [])
         self.assertRaises(Unsupported, f, "1 + j")
+
+    def test_builtin_class_method_constant_fold(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return (
+                bool.__new__(bool),
+                bool.__new__(bool, 1),
+                bool.__new__(bool, 0),
+                bool.from_bytes(b"\x00" * 8, "big"),
+                bool.from_bytes(b"abcd", "little"),
+                int.__new__(int),
+                int.__new__(int, 42),
+                int.from_bytes(b"\x00\x03", "big"),
+                int.from_bytes(b"\xff", byteorder="big", signed=True),
+                float.fromhex("0x1.ffffp10"),
+                float.hex(1.5),
+            )
+
+        res = fn()
+        self.assertIs(res[0], False)
+        self.assertIs(res[1], True)
+        self.assertIs(res[2], False)
+        self.assertIs(res[3], False)
+        self.assertIs(res[4], True)
+        self.assertEqual(res[5], 0)
+        self.assertEqual(res[6], 42)
+        self.assertEqual(res[7], 3)
+        self.assertEqual(res[8], -1)
+        self.assertEqual(res[9], float.fromhex("0x1.ffffp10"))
+        self.assertEqual(res[10], "0x1.8000000000000p+0")
 
     def test_guard_string_escaped(self):
         d = {frozenset({0}): {frozenset({0}): 1}}

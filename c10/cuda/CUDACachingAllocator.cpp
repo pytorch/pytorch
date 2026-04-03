@@ -762,20 +762,32 @@ struct ExpandableSegment {
 
  private:
   void setAccess(c10::DeviceIndex device, size_t begin, size_t end) {
-    CUmemAccessDesc desc;
-    desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+#if defined(USE_ROCM) && (ROCM_VERSION >= 70200)
+    constexpr int num_desc = 2;
+    CUmemAccessDesc desc[num_desc];
+    desc[1].location.type = CU_MEM_LOCATION_TYPE_HOST;
+    desc[1].location.id = 0; // ignored
+    desc[1].flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+#else
+    constexpr int num_desc = 1;
+    CUmemAccessDesc desc[num_desc];
+#endif
+    desc[0].location.type = CU_MEM_LOCATION_TYPE_DEVICE;
     // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-    desc.location.id = static_cast<int>(device);
-    desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+    desc[0].location.id = static_cast<int>(device);
+    desc[0].flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
 #ifdef USE_ROCM
     C10_CUDA_CHECK(hipMemSetAccess(
         ptr() + begin * segment_size_,
         (end - begin) * segment_size_,
-        &desc,
-        1));
+        &desc[0],
+        num_desc));
 #else
     C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemSetAccess_(
-        ptr_ + begin * segment_size_, (end - begin) * segment_size_, &desc, 1));
+        ptr_ + begin * segment_size_,
+        (end - begin) * segment_size_,
+        &desc[0],
+        num_desc));
 #endif
   }
 
