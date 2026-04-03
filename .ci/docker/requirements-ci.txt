@@ -223,7 +223,7 @@ xdoctest==1.3.0
 #Pinned versions: 1.1.0
 #test that import:
 
-pygments==2.15.0
+pygments==2.20.0
 #Description: support doctest highlighting
 #Pinned versions: 2.12.0
 #test that import: the doctests
