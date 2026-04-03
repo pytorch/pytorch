@@ -1,18 +1,19 @@
-import torch
-from torch.testing._internal.common_utils import run_tests, TestCase
+# Owner(s): ["module: optimizer"]
 
+import torch
 from torch.optim._muon import (
     _zeropower_via_newtonschulz,
     EPS,
     JORDAN_COEFFICIENTS,
     PE_COEFFICIENTS,
 )
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 def _orthogonality_error(M):
     """||M @ M^T - I||_F measuring distance from orthogonality, computed in float32."""
     M = M.float()
-    rows = M.size(0) if M.size(0) <= M.size(1) else M.size(1)
+    rows = min(M.size(0), M.size(1))
     eye = torch.eye(rows, device=M.device)
     if M.size(0) <= M.size(1):
         return (M @ M.T - eye).norm()
@@ -195,9 +196,7 @@ class TestNewtonSchulz(TestCase):
         errors = []
         # note that we stop at 5 step because Jordan coefficients do not have convergence guarantees
         for steps in (1, 2, 3):
-            result = _zeropower_via_newtonschulz(
-                M, ns_coeffs, ns_steps=steps, eps=EPS
-            )
+            result = _zeropower_via_newtonschulz(M, ns_coeffs, ns_steps=steps, eps=EPS)
             errors.append(_orthogonality_error(result).item())
         for i in range(len(errors) - 1):
             self.assertGreaterEqual(errors[i], errors[i + 1])
@@ -237,9 +236,7 @@ class TestNewtonSchulz(TestCase):
     def test_non_2d_input_raises(self):
         M = torch.randn(4, 4, 4)
         with self.assertRaisesRegex(ValueError, "2D matrix"):
-            _zeropower_via_newtonschulz(
-                M, (JORDAN_COEFFICIENTS,), ns_steps=5, eps=EPS
-            )
+            _zeropower_via_newtonschulz(M, (JORDAN_COEFFICIENTS,), ns_steps=5, eps=EPS)
 
     def test_invalid_normalization_raises(self):
         M = self._make_matrix(16, 16)
@@ -251,9 +248,7 @@ class TestNewtonSchulz(TestCase):
     def test_1d_input_raises(self):
         M = torch.randn(16)
         with self.assertRaisesRegex(ValueError, "2D matrix"):
-            _zeropower_via_newtonschulz(
-                M, (JORDAN_COEFFICIENTS,), ns_steps=5, eps=EPS
-            )
+            _zeropower_via_newtonschulz(M, (JORDAN_COEFFICIENTS,), ns_steps=5, eps=EPS)
 
     # ── Output property tests ─────────────────────────────────────────
 
