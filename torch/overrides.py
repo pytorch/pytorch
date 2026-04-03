@@ -382,6 +382,8 @@ def get_ignored_functions() -> set[Callable]:
         Tensor._addmm_activation,
         Tensor.to_padded_tensor,
         Tensor._use_count,
+        Tensor._philox_normal_,
+        Tensor._philox_uniform_,
     }
 
     if sys.version_info >= (3, 14):
