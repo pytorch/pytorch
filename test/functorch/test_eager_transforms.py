@@ -1399,6 +1399,7 @@ class TestGradTransform(TestCase):
         )
         self.assertFalse(torch.is_inference_mode_enabled())
 
+    @skipIfTorchDynamo("tests C++ TLS state preservation")
     def test_inference_mode_preserves_grad_mode(self, device):
         # The fix uses AutogradState::set_inference_mode directly (not the
         # InferenceMode RAII guard) to avoid clobbering grad_mode. Verify
