@@ -1491,6 +1491,26 @@ if(USE_ROCM)
 
       set_target_properties(torch_rocshmem PROPERTIES LINKER_LANGUAGE HIP)
 
+
+      # torch_rocshmem is built with -fgpu-rdc, so its HIP link step performs
+      # device linking and must carry the full arch list explicitly.
+      # rocSHMEM device archives are commonly built for gfx90a xnack variants,
+      # so map plain gfx90a to gfx90a:xnack-/gfx90a:xnack+ to match device
+      # symbols during HIP RDC link.
+      set(_torch_rocshmem_arches)
+      foreach(_arch ${PYTORCH_ROCM_ARCH})
+        if(_arch STREQUAL "gfx90a")
+          list(APPEND _torch_rocshmem_arches "gfx90a:xnack-" "gfx90a:xnack+")
+        else()
+          list(APPEND _torch_rocshmem_arches "${_arch}")
+        endif()
+      endforeach()
+      list(REMOVE_DUPLICATES _torch_rocshmem_arches)
+      list(JOIN _torch_rocshmem_arches ";" _torch_rocshmem_arch_list)
+      set_target_properties(
+          torch_rocshmem PROPERTIES HIP_ARCHITECTURES "${_torch_rocshmem_arch_list}")
+
+
       target_compile_definitions(torch_hip PUBLIC USE_NVSHMEM)
       target_compile_definitions(torch_rocshmem PUBLIC USE_NVSHMEM USE_ROCM)
 
