@@ -3979,6 +3979,7 @@ class TestProfilerEventsParity(TestCase):
             self.assertEqual(fe_add.input_strides, args["Input Strides"])
             self.assertEqual(fe_add.input_dtypes, args["Input type"])
 
+            # Test a case with TensorList inputs -- input_shapes should handle this
             json_cat = next(
                 (
                     e
