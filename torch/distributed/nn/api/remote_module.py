@@ -1,3 +1,4 @@
+# See: https://github.com/pytorch/pytorch/issues/171905
 #!/usr/bin/python3
 # mypy: allow-untyped-defs
 import collections

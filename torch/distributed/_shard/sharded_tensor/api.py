@@ -1,3 +1,4 @@
+# See: https://github.com/pytorch/pytorch/issues/171905
 # mypy: allow-untyped-defs
 from __future__ import annotations  # type: ignore[attr-defined]
 

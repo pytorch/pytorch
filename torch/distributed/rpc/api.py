@@ -1,3 +1,4 @@
+# See: https://github.com/pytorch/pytorch/issues/171905
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 

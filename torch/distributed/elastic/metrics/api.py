@@ -1,3 +1,5 @@
+# See: https://github.com/pytorch/pytorch/issues/171905
+
 #!/usr/bin/env python3
 # mypy: allow-untyped-defs
 
