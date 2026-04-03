@@ -27,6 +27,9 @@ if(CXX_AVX2_FOUND)
   add_library(Caffe2_perfkernels_avx2 STATIC ${avx2_srcs})
   target_link_libraries(Caffe2_perfkernels_avx2 PRIVATE c10)
 
+  # Add CAFFE2_PERF_WITH_AVX2 preprocessor definition
+  target_compile_definitions(Caffe2_perfkernels_avx2 PRIVATE CAFFE2_PERF_WITH_AVX2)
+
   if(MSVC AND NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
     target_compile_options(Caffe2_perfkernels_avx2
         PRIVATE "/arch:AVX2"
