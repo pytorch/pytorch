@@ -1740,6 +1740,7 @@ def _get_dynamo_config_for_logging() -> str | None:
             "_autograd_backward_strict_mode_banned_ops",
             "reorderable_logging_functions",
             "ignore_logger_methods",
+            "ignore_logging_functions",
             "traceable_tensor_subclasses",
             "nontraceable_tensor_subclasses",
             "_custom_ops_profile",
@@ -3057,7 +3058,6 @@ def raise_args_mismatch(
     actual: str = "",
 ) -> None:
     from torch._dynamo.exc import raise_observed_exception
-    from torch._dynamo.variables import ConstantVariable
 
     msg_str = (
         f"wrong number of arguments or keyword arguments for {name}() call.\n"
@@ -3068,7 +3068,7 @@ def raise_args_mismatch(
     raise_observed_exception(
         TypeError,
         tx,
-        args=[ConstantVariable(msg_str)],
+        args=[msg_str],
     )
 
 

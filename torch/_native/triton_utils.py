@@ -1,5 +1,7 @@
 import functools
 import logging
+import sys
+from typing import cast
 
 from packaging.version import Version
 
@@ -9,12 +11,18 @@ from .common_utils import (
     check_native_jit_disabled,
     check_native_version_skip,
 )
-from .registry import _OpFn, _register_op_override
+from .dsl_registry import dsl_registry, DSLModuleProtocol
+from .registry import (
+    _OpFn,
+    deregister_op_overrides as _deregister_op_overrides_impl,
+    register_op_override as _register_op_override_impl,
+)
 
 
 log = logging.getLogger(__name__)
 
 
+_TRITON_DSL_NAME = "triton"
 _TRITON_REQUIRED_VERSION_MAJOR = 3
 _TRITON_MINIMUM_VERSION_MINOR = 6
 
@@ -35,7 +43,7 @@ def _check_runtime_available() -> tuple[bool, Version | None]:
         available = True
         version = _available_version("triton")
     else:
-        log.info("triton native DSL ops require: `triton` %s", reason)
+        log.warning("triton native DSL ops require: `triton` %s", reason)
         available = False
         version = None
     return available, version
@@ -65,7 +73,7 @@ def _version_is_sufficient() -> bool:
     if (major_ok and minor_ok) or check_native_version_skip():
         return True
 
-    log.info(
+    log.warning(
         "triton version %s is not sufficient (>= (%s.%s.*)); "
         "set TORCH_NATIVE_SKIP_VERSION_CHECK=1 to override",
         version,
@@ -73,6 +81,13 @@ def _version_is_sufficient() -> bool:
         _TRITON_MINIMUM_VERSION_MINOR,
     )
     return False
+
+
+def deregister_op_overrides() -> None:
+    """
+    Deregister all ops through triton
+    """
+    _deregister_op_overrides_impl(disable_dsl_names=_TRITON_DSL_NAME)
 
 
 def register_op_override(
@@ -87,7 +102,7 @@ def register_op_override(
     """
     See torch/_native/registry.py for the underlying implementation
     and arguments. This is a thin, DSL-checking wrapper over
-    _register_op_override
+    _register_op_override_impl
     """
     available, version = _check_runtime_available()
     if (not available) or check_native_jit_disabled():
@@ -96,7 +111,8 @@ def register_op_override(
     if not _version_is_sufficient():
         return
 
-    _register_op_override(
+    _register_op_override_impl(
+        _TRITON_DSL_NAME,
         lib_symbol,
         op_symbol,
         dispatch_key,
@@ -104,3 +120,8 @@ def register_op_override(
         allow_multiple_override=allow_multiple_override,
         unconditional_override=unconditional_override,
     )
+
+
+# Register this DSL module with the registry
+# Note: Import-time registration ensures DSL is available when module is loaded
+dsl_registry.register_dsl("triton", cast(DSLModuleProtocol, sys.modules[__name__]))
