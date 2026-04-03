@@ -1949,6 +1949,11 @@ class aot_inductor:
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
     debug_symbols = os.environ.get("AOT_INDUCTOR_DEBUG_SYMBOLS", "0") == "1"
 
+    # Enable frame pointers for profiling tools (e.g. strobelight)
+    enable_frame_pointer = (
+        os.environ.get("AOT_INDUCTOR_ENABLE_FRAME_POINTER", "0") == "1"
+    )
+
     # Annotate generated main wrapper function, i.e. AOTInductorModel::run_impl,
     # to use which cpp compiler optimization level, default to O1
     compile_wrapper_opt_level = os.environ.get(
