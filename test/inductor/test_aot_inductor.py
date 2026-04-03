@@ -1618,6 +1618,47 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
+    def test_bmm_large_batch_dynamic(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("using triton backend only is not supported on CPU")
+
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                return torch.bmm(a, b)
+
+        M, K, N = 64, 64, 64
+        dtype = torch.float16
+        model = Model()
+
+        # Compile with small batch, then run with batch > 65535 (CUDA grid.y limit)
+        compile_batch = 100
+        a = torch.randn(compile_batch, M, K, device=self.device, dtype=dtype)
+        b = torch.randn(compile_batch, K, N, device=self.device, dtype=dtype)
+        dim0_a = Dim("dim0_a", min=1, max=2**17)
+        dynamic_shapes = {"a": {0: dim0_a}, "b": {0: dim0_a}}
+        list_example_inputs = [(a, b)]
+
+        # Large batch exceeding CUDA grid.y limit of 65535
+        large_batch = 70000
+        list_example_inputs.append(
+            (
+                torch.randn(large_batch, M, K, device=self.device, dtype=dtype),
+                torch.randn(large_batch, K, N, device=self.device, dtype=dtype),
+            ),
+        )
+        self.check_model_with_multiple_inputs(
+            model,
+            list_example_inputs,
+            options={
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+            },
+            dynamic_shapes=dynamic_shapes,
+        )
+
     @skipIfWindows(msg="TODO: (xuhancn) confirm, Crash: access violation")
     def test_foreach_multiple_dynamic(self):
         class Model(torch.nn.Module):
