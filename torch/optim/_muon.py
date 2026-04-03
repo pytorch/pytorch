@@ -81,7 +81,7 @@ def _zeropower_via_newtonschulz(
     if grad.size(0) > grad.size(1):
         ortho_grad = ortho_grad.T
 
-    coefficients = ns_coefficients[:ns_steps] + list(
+    coefficients = ns_coefficients[:ns_steps] + tuple(
         repeat(ns_coefficients[-1], ns_steps - len(ns_coefficients))
     )
     # Ensure spectral norm is at most 1
