@@ -342,7 +342,7 @@ def _categorize(name: str) -> str:
         return "torch::fft"
     if name.startswith("torch::special::"):
         return "torch::special"
-    if name.startswith("torch::cuda::") or name.startswith("torch::mps::") or name.startswith("torch::xpu::"):
+    if name.startswith(("torch::cuda::", "torch::mps::", "torch::xpu::")):
         return "torch (device)"
     if name.startswith("torch::"):
         return "torch (core)"
@@ -366,7 +366,10 @@ def discover_apis_from_xml(xml_dir: Path) -> dict[str, list[tuple[str, str]]]:
     """
     index_path = xml_dir / "index.xml"
     if not index_path.exists():
-        print(f"ERROR: {index_path} not found. Run 'make doxygen' first.", file=sys.stderr)
+        print(
+            f"ERROR: {index_path} not found. Run 'make doxygen' first.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     tree = ET.parse(index_path)
@@ -459,8 +462,10 @@ def scan_sources(source_dir: Path) -> set[str]:
     for src_file in list(source_dir.rglob("*.rst")) + list(source_dir.rglob("*.md")):
         content = src_file.read_text(errors="replace")
         patterns = (
-            RST_DIRECTIVE_RE, RST_CPP_DIRECTIVE_RE,
-            MYST_DIRECTIVE_RE, MYST_CPP_DIRECTIVE_RE,
+            RST_DIRECTIVE_RE,
+            RST_CPP_DIRECTIVE_RE,
+            MYST_DIRECTIVE_RE,
+            MYST_CPP_DIRECTIVE_RE,
         )
         for pattern in patterns:
             for match in pattern.finditer(content):
@@ -534,9 +539,7 @@ def generate_coverage_report(
     lines.append("-" * 70)
     for category, covered, section_total in section_stats:
         spct = (covered / section_total * 100) if section_total else 0
-        lines.append(
-            f"{category:<45} {covered:>8} {section_total:>6} {spct:>6.1f}%"
-        )
+        lines.append(f"{category:<45} {covered:>8} {section_total:>6} {spct:>6.1f}%")
     lines.append("")
 
     return "\n".join(lines)

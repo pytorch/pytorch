@@ -215,6 +215,7 @@ html_context = {
 # so a file named "default.css" will overwrite the builtin "default.css".
 # NOTE: sharing python docs resources
 
+
 # Remove "Subclassed by" paragraphs that Breathe renders as plain text
 # (not links) because per-class pages don't exist without exhale.
 def remove_subclassed_by(app, doctree, docname):

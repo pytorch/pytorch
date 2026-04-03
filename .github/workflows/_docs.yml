@@ -224,18 +224,16 @@ jobs:
             exit 0
           fi
 
-          preview_base="https://docs-preview.pytorch.org/pytorch/pytorch/${PR_NUM}/cppdocs"
-
           body="${MARKER}
           ## C++ Docs
 
-          - [Doc Preview](${preview_base}/index.html)
-          - [API Coverage Report](${preview_base}/_coverage/cpp_coverage.txt)
-          - [HTML Issues Report](${preview_base}/_coverage/cpp_html_issues.txt)"
+          - [Doc Preview](https://docs-preview.pytorch.org/pytorch/pytorch/${PR_NUM}/cppdocs/index.html)
+          - [API Coverage Report](https://docs-preview.pytorch.org/pytorch/pytorch/${PR_NUM}/cppdocs/_coverage/cpp_coverage.txt)
+          - [HTML Issues Report](https://docs-preview.pytorch.org/pytorch/pytorch/${PR_NUM}/cppdocs/_coverage/cpp_html_issues.txt)"
 
           if [ -f cppdocs/_coverage/index.html ]; then
             body="${body}
-          - [Coverxygen Report (interactive)](${preview_base}/_coverage/index.html)"
+          - [Coverxygen Report (interactive)](https://docs-preview.pytorch.org/pytorch/pytorch/${PR_NUM}/cppdocs/_coverage/index.html)"
           fi
 
           gh pr comment "$PR_NUM" --body "$body"
