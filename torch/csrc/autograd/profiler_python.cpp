@@ -17,6 +17,7 @@
 #include <ATen/core/TensorBase.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ApproximateClock.h>
+#include <c10/util/ScopeExit.h>
 #include <c10/util/Semaphore.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
