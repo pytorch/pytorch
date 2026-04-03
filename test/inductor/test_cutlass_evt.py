@@ -665,7 +665,7 @@ using DagCompute4 = cutlass::epilogue::fusion::Sm90TopologicalVisitor<
 using ElementD = float;
 using StrideD = cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>;
 
-""",
+""",  # noqa: B950
             )
 
 
