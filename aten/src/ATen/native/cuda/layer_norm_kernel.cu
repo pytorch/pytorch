@@ -26,6 +26,10 @@
 #include <c10/cuda/CUDAMathCompat.h>
 #include <c10/util/env.h>
 
+#ifdef USE_ROCM
+#include <ATen/cuda/detail/ROCmMacros.cuh>
+#endif
+
 
 namespace at::native {
 

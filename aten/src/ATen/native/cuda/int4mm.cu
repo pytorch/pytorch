@@ -12,6 +12,10 @@
 #include <ATen/DeviceGuard.h>
 #include <c10/cuda/CUDAGuard.h>
 
+#if defined(USE_ROCM)
+#include <ATen/cuda/detail/ROCmMacros.cuh>
+#endif
+
 
 namespace at::native {
 

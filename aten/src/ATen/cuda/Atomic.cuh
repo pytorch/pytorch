@@ -10,6 +10,10 @@
 #include <cuda_bf16.h>
 #endif
 
+#if defined(USE_ROCM)
+#include <ATen/cuda/detail/ROCmMacros.cuh>
+#endif
+
 template <typename T>
 struct AtomicFPOp;
 

@@ -13,6 +13,10 @@
 
 #include <thrust/tuple.h>
 
+#ifdef USE_ROCM
+#include <ATen/cuda/detail/ROCmMacros.cuh>
+#endif
+
 // References:
 // https://devblogs.nvidia.com/cuda-pro-tip-increase-performance-with-vectorized-memory-access/
 
