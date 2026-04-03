@@ -26,5 +26,3 @@ Event Objects
 .. autoclass:: torch.distributed.elastic.events.api.EventSource
 
 .. autoclass:: torch.distributed.elastic.events.api.EventMetadataValue
-
-.. autoclass:: torch.distributed.elastic.events.api.NodeState
