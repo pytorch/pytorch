@@ -96,20 +96,13 @@ frontend includes the following:
 
 See [this document](https://pytorch.org/cppdocs/frontend.html) for a more
 detailed description of the C++ frontend. Relevant sections of the `torch::`
-namespace related to the C++ Frontend include `torch::nn
-<https://pytorch.org/cppdocs/api/namespace_torch__nn.html#namespace-torch-nn>`_,
-`torch::optim
-<https://pytorch.org/cppdocs/api/namespace_torch__optim.html#namespace-torch-optim>`_,
-`torch::data
-<https://pytorch.org/cppdocs/api/namespace_torch__data.html#namespace-torch-data>`_,
-`torch::serialize
-<https://pytorch.org/cppdocs/api/namespace_torch__serialize.html#namespace-torch-serialize>`_,
-`torch::jit
-<https://pytorch.org/cppdocs/api/namespace_torch__jit.html#namespace-torch-jit>`_
-and `torch::python
-<https://pytorch.org/cppdocs/api/namespace_torch__python.html#namespace-torch-python>`_.
-Examples of the C++ frontend can be found in `this repository
-<https://github.com/pytorch/examples/tree/master/cpp>`_ which is being
+namespace related to the C++ Frontend include [torch::nn](https://pytorch.org/cppdocs/api/namespace_torch__nn.html#namespace-torch-nn),
+[torch::optim](https://pytorch.org/cppdocs/api/namespace_torch__optim.html#namespace-torch-optim),
+[torch::data](https://pytorch.org/cppdocs/api/namespace_torch__data.html#namespace-torch-data),
+[torch::serialize](https://pytorch.org/cppdocs/api/namespace_torch__serialize.html#namespace-torch-serialize),
+[torch::jit](https://pytorch.org/cppdocs/api/namespace_torch__jit.html#namespace-torch-jit)
+and [torch::python](https://pytorch.org/cppdocs/api/namespace_torch__python.html#namespace-torch-python).
+Examples of the C++ frontend can be found in [this repository](https://github.com/pytorch/examples/tree/master/cpp) which is being
 expanded on a continuous and active basis.
 
 ```{note}
@@ -136,12 +129,10 @@ functionality:
 The first mechanism may be of great interest to you if you would like to define
 your models in Python as much as possible, but subsequently export them to C++
 for production environments and no-Python inference. You can find out more
-about this by following `this
-<https://pytorch.org/tutorials/advanced/cpp_export.html>`_ link. The second
+about this by following [this](https://pytorch.org/tutorials/advanced/cpp_export.html) link. The second
 API concerns itself with scenarios in which you would like to extend
 TorchScript with custom operators, which can similarly be serialized and
-invoked from C++ during inference. Lastly, the `torch::jit::compile
-<https://pytorch.org/cppdocs/api/function_namespacetorch_1_1jit_1a8660dc13a6b82336aadac667e6dccba1.html>`_
+invoked from C++ during inference. Lastly, the [torch::jit::compile](https://pytorch.org/cppdocs/api/function_namespacetorch_1_1jit_1a8660dc13a6b82336aadac667e6dccba1.html)
 function may be used to access the TorchScript compiler directly from C++.
 
 ## C++ Extensions

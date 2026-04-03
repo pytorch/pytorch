@@ -39,8 +39,7 @@ auto result = torch::dispatcher::call("myops::add", tensor_a, tensor_b);
 ```
 
 For a tutorial-style introduction to the library API, check out the
-`Extending TorchScript with Custom C++ Operators
-<https://pytorch.org/tutorials/advanced/torch_script_custom_ops.html>`_
+[Extending TorchScript with Custom C++ Operators](https://pytorch.org/tutorials/advanced/torch_script_custom_ops.html)
 tutorial.
 
 ## Header Files

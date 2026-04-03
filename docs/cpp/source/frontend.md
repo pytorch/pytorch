@@ -98,8 +98,7 @@ int main() {
 }
 ```
 
-To see more complete examples of using the PyTorch C++ frontend, see `the example repository
-<https://github.com/pytorch/examples/tree/master/cpp>`_.
+To see more complete examples of using the PyTorch C++ frontend, see [the example repository](https://github.com/pytorch/examples/tree/master/cpp).
 
 ## Philosophy
 
