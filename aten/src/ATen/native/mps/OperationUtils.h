@@ -44,6 +44,7 @@ struct MPSScalar {
     float f; // MPS doesn't support 'double'
     at::Half h;
     int64_t i;
+    uint64_t u;
     bool b;
     c10::complex<float> cf;
     c10::complex<at::Half> ch;
