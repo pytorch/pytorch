@@ -518,3 +518,82 @@ def uniform(
     # pyrefly: ignore [no-matching-overload]
     result = torch.empty(shape, dtype=dtype, device=key.device)
     return uniform_(key, result, low=low, high=high, portable=portable)
+
+
+class StatefulPRNG:
+    """Mutable wrapper around stateless PRNG keys.
+
+    Holds a :class:`PRNGKey` internally and advances it after each generation,
+    providing a traditional generator interface backed by the stateless APIs.
+
+    Example::
+
+        g = StatefulPRNG(42)
+        a = g.normal(100)  # first 100 values
+        b = g.normal(100)  # next 100 values (different from a)
+        g.manual_seed(42)  # reset
+        c = g.normal(100)  # same as a
+    """
+
+    _key: PRNGKey
+
+    def __init__(self, seed: int = 0, *, impl: str = "philox4x32-10", device=None):
+        self._impl = impl
+        self._key = key(seed, impl=impl, device=device)
+
+    def manual_seed(self, seed: int) -> "StatefulPRNG":
+        self._key = key(seed, impl=self._impl, device=self._key.device)
+        return self
+
+    @property
+    def key(self) -> PRNGKey:
+        return self._key
+
+    def uniform(
+        self,
+        *shape,
+        low: float = 0.0,
+        high: float = 1.0,
+        dtype: torch.dtype | None = None,
+        portable: bool = True,
+    ) -> torch.Tensor:
+        result = uniform(
+            self._key,
+            *shape,
+            low=low,
+            high=high,
+            dtype=dtype,
+            portable=portable,
+        )
+        # float64: 2 uint32 per element (curand_uniform2_double).
+        # All other dtypes: 1 uint32 per element.
+        offset = result.numel() * (2 if result.dtype == torch.float64 else 1)
+        self._advance(offset)
+        return result
+
+    def normal(
+        self,
+        *shape,
+        mean: float = 0.0,
+        std: float = 1.0,
+        dtype: torch.dtype | None = None,
+        portable: bool = True,
+    ) -> torch.Tensor:
+        result = normal(
+            self._key,
+            *shape,
+            mean=mean,
+            std=std,
+            dtype=dtype,
+            portable=portable,
+        )
+        # Box-Muller for float64 uses 4 uint32 → 2 doubles (2 uint32 per element).
+        # All other dtypes use 2 uint32 → 2 floats (1 uint32 per element).
+        offset = result.numel() * (2 if result.dtype == torch.float64 else 1)
+        self._advance(offset)
+        return result
+
+    def _advance(self, n: int):
+        data = self._key._data.view(torch.int64).clone()
+        data[..., 1] += n
+        self._key = type(self._key)(data.view(torch.uint64))
