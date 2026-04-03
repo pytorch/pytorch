@@ -9,6 +9,104 @@ from collections.abc import Sequence
 import torch
 
 
+class PRNGKey(torch.Tensor):
+    """Base tensor subclass for typed PRNG keys.
+
+    Uses _make_wrapper_subclass with __tensor_flatten__/__tensor_unflatten__
+    so torch.compile can decompose the key into a plain tensor for tracing.
+    __torch_dispatch__ unwraps the key for all ops, so the dispatcher always
+    sees plain tensors.
+    """
+
+    _data: torch.Tensor
+
+    __torch_function__ = torch._C._disabled_torch_function_impl
+
+    @staticmethod
+    def __new__(cls, data: torch.Tensor):
+        return torch.Tensor._make_wrapper_subclass(
+            cls,
+            data.shape,
+            dtype=data.dtype,
+            device=data.device,
+            strides=data.stride(),
+        )
+
+    def __init__(self, data: torch.Tensor):
+        self._data = data
+
+    def __tensor_flatten__(self):
+        return ["_data"], {}
+
+    @classmethod
+    def __tensor_unflatten__(cls, inner_tensors, metadata, outer_size, outer_stride):
+        return cls(inner_tensors["_data"])
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
+        def unwrap(x):
+            return x._data if isinstance(x, PRNGKey) else x
+
+        args = torch.utils._pytree.tree_map(unwrap, args)
+        kwargs = torch.utils._pytree.tree_map(unwrap, kwargs)
+        return func(*args, **kwargs)
+
+    def __repr__(self):
+        return f"{type(self).__name__}({self._data})"
+
+    def _unbind(
+        self, shape: tuple, splits: tuple, outputs_per_elem: int
+    ) -> "PRNGKey":
+        raise NotImplementedError
+
+    def _split(self, num: int) -> "PRNGKey":
+        raise NotImplementedError
+
+    def _fold_in(self, data: int) -> "PRNGKey":
+        raise NotImplementedError
+
+    def _uniform(
+        self, out: torch.Tensor, low: float, high: float, portable: bool
+    ) -> torch.Tensor:
+        raise NotImplementedError
+
+    def _normal(
+        self, out: torch.Tensor, mean: float, std: float, portable: bool
+    ) -> torch.Tensor:
+        raise NotImplementedError
+
+
+class Philox4x32_10Key(PRNGKey):
+    """Philox 4x32-10 PRNG key. Data layout: (*batch, 2) uint64 [seed, offset]."""
+
+    @classmethod
+    def __tensor_unflatten__(cls, inner_tensors, metadata, outer_size, outer_stride):
+        return cls(inner_tensors["_data"])
+
+    def _unbind(self, shape, splits, outputs_per_elem):
+        return Philox4x32_10Key(
+            _philox_unbind(self._data, shape, splits, outputs_per_elem)
+        )
+
+    def _split(self, num):
+        return Philox4x32_10Key(torch.ops.aten._philox_key_split(self, num))
+
+    def _fold_in(self, data):
+        return Philox4x32_10Key(torch.ops.aten._philox_key_fold_in(self, data))
+
+    def _uniform(self, out, low, high, portable):
+        return torch.ops.aten._philox_uniform_(out, self, low, high, portable)
+
+    def _normal(self, out, mean, std, portable):
+        return torch.ops.aten._philox_normal_(out, self, mean, std, portable)
+
+
+_IMPLS: dict[str, type[PRNGKey]] = {"philox4x32-10": Philox4x32_10Key}
+
+
 def key(
     seed: int, impl: str = "philox4x32-10", device: torch.device | None = None
 ) -> torch.Tensor:
@@ -39,11 +137,11 @@ def key(
 
         >>> key = torch.func._random.key(42, device="cuda")  # doctest: +SKIP
     """
-    if impl != "philox4x32-10":
+    cls = _IMPLS.get(impl)
+    if cls is None:
         raise NotImplementedError(f"key() does not support PRNG impl '{impl}'")
-
-    # (seed, offset)
-    return torch.tensor([seed, 0], dtype=torch.uint64, device=device)
+    data = torch.tensor([seed, 0], dtype=torch.uint64, device=device)
+    return cls(data)
 
 
 def split(key: torch.Tensor, num: int = 2) -> torch.Tensor:
@@ -69,6 +167,8 @@ def split(key: torch.Tensor, num: int = 2) -> torch.Tensor:
         >>> key = torch.func._random.key(42, device="cuda")  # doctest: +SKIP
         >>> k1, k2 = torch.func._random.split(key)  # doctest: +SKIP
     """
+    if isinstance(key, PRNGKey):
+        return key._split(num)
     return torch.ops.aten._philox_key_split(key, num)
 
 
@@ -125,6 +225,8 @@ def unbind(
         if s % sp != 0:
             raise ValueError(f"splits[{i}]={sp} does not evenly divide shape[{i}]={s}")
     outputs_per_elem = 2 if dtype is not None and dtype == torch.float64 else 1
+    if isinstance(key, PRNGKey):
+        return key._unbind(shape, splits, outputs_per_elem)
     return _philox_unbind(key, shape, splits, outputs_per_elem)
 
 
@@ -226,6 +328,8 @@ def fold_in(key: torch.Tensor, data: int) -> torch.Tensor:
         >>> assert torch.equal(k0, keys[0])  # doctest: +SKIP
         >>> assert torch.equal(k1, keys[1])  # doctest: +SKIP
     """
+    if isinstance(key, PRNGKey):
+        return key._fold_in(data)
     return torch.ops.aten._philox_key_fold_in(key, data)
 
 
@@ -267,11 +371,13 @@ def normal_(
         >>> result = torch.empty(1000, device="cuda")  # doctest: +SKIP
         >>> torch.func._random.normal_(key, result)  # doctest: +SKIP
     """
+    if isinstance(key, PRNGKey):
+        return key._normal(result, mean, std, portable)
     return torch.ops.aten._philox_normal_(result, key, mean, std, portable)
 
 
 def normal(
-    key: torch.Tensor,
+    key,
     *shape: tuple[int, ...],
     mean: float = 0.0,
     std: float = 1.0,
@@ -360,11 +466,13 @@ def uniform_(
         >>> result = torch.empty(1000, device="cuda")  # doctest: +SKIP
         >>> torch.func._random.uniform_(key, result)  # doctest: +SKIP
     """
+    if isinstance(key, PRNGKey):
+        return key._uniform(result, low, high, portable)
     return torch.ops.aten._philox_uniform_(result, key, low, high, portable)
 
 
 def uniform(
-    key: torch.Tensor,
+    key,
     *shape: tuple[int, ...],
     low: float = 0.0,
     high: float = 1.0,

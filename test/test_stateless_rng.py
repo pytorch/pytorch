@@ -619,8 +619,8 @@ class TestUnbind(TestCase):
     def test_1d_shape(self, device):
         k = random.key(42, device=device)
         keys = random.unbind(k, (100,), (10,))
+        self.assertIsInstance(keys, random.Philox4x32_10Key)
         self.assertEqual(keys.shape, (10, 2))
-        self.assertEqual(keys.dtype, torch.uint64)
 
     def test_1d_uniform_reconstruction(self, device):
         k = random.key(42, device=device)
