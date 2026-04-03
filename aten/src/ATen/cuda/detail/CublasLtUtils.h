@@ -89,9 +89,9 @@ class CuBlasLtGroupedMatrixLayout : public CuBlasLtDescriptor<
   CuBlasLtGroupedMatrixLayout(
       cudaDataType_t type,
       int group_count,
-      const void* rows_array,
-      const void* cols_array,
-      const void* ld_array,
+      const int32_t* rows_array,
+      const int32_t* cols_array,
+      const int32_t* ld_array,
       bool t = false) {
     cublasLtMatrixLayout_t raw_descriptor = nullptr;
     TORCH_CUDABLAS_CHECK(cublasLtGroupedMatrixLayoutCreate(

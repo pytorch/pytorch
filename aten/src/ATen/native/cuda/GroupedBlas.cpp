@@ -453,12 +453,12 @@ std::optional<c10::ScalarType> out_dtype) {
                                args.mArray, args.avgM,
                                args.nArray, args.avgN,
                                args.kArray, args.avgK,
-                               reinterpret_cast<const float* const*>(args.alphaPtrArray), args.A_dtype,
-                               reinterpret_cast<const void* const*>(args.APtrArray), args.ldaArray,
-                               reinterpret_cast<const void* const*>(args.BPtrArray), args.ldbArray,
-                               reinterpret_cast<const float* const*>(args.betaPtrArray), args.result_dtype,
-                               reinterpret_cast<const void* const*>(args.DPtrArray), args.lddArray,
-                               reinterpret_cast<void**>(args.DPtrArray), args.lddArray, args.batchCount);
+                               args.alphaPtrArray, args.A_dtype,
+                               args.APtrArray, args.ldaArray,
+                               args.BPtrArray, args.ldbArray,
+                               args.betaPtrArray, args.result_dtype,
+                               args.DPtrArray, args.lddArray,
+                               args.DPtrArray, args.lddArray, args.batchCount);
   return out;
 #else
   TORCH_CHECK(false, "cublasLt grouped GEMM requires CUDA >= 13.2 and is not supported on ROCm. Current build does not meet these requirements.");

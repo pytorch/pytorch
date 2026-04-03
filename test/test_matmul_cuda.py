@@ -552,13 +552,7 @@ class TestMatmulCuda(InductorTestCase):
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig_bf16
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_fp16
 
-    @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
-    @parametrize("strided", [False, True])
-    @parametrize("a_row_major", [False, True])
-    @parametrize("b_row_major", [False, True])
-    @parametrize("backend", ["cublaslt", "cutlass"])
-    @dtypes(torch.bfloat16, torch.float32, torch.float16)
-    def test_grouped_gemm_2d_2d(self, strided, a_row_major, b_row_major, backend, dtype):
+    def _setup_grouped_gemm_backend(self, backend, dtype):
         if backend == "cublaslt":
             if not SM100OrLater or SM120OrLater:
                 self.skipTest("cublaslt grouped gemm requires SM 10.x or 11.0")
@@ -568,6 +562,15 @@ class TestMatmulCuda(InductorTestCase):
         else:
             os.environ["TORCH_GROUPED_MM_PREFER_CUBLASLT"] = "0"
         self.addCleanup(os.environ.pop, "TORCH_GROUPED_MM_PREFER_CUBLASLT", None)
+
+    @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @parametrize("strided", [False, True])
+    @parametrize("a_row_major", [False, True])
+    @parametrize("b_row_major", [False, True])
+    @parametrize("backend", ["cublaslt", "cutlass"])
+    @dtypes(torch.bfloat16, torch.float32, torch.float16)
+    def test_grouped_gemm_2d_2d(self, strided, a_row_major, b_row_major, backend, dtype):
+        self._setup_grouped_gemm_backend(backend, dtype)
 
         device = "cuda"
         m, n, k, n_groups = 16, 32, 64, 4
@@ -607,15 +610,7 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("backend", ["cublaslt", "cutlass"])
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
     def test_grouped_gemm_2d_3d(self, strided, a_row_major, b_row_major, backend, dtype):
-        if backend == "cublaslt":
-            if not SM100OrLater or SM120OrLater:
-                self.skipTest("cublaslt grouped gemm requires SM 10.x or 11.0")
-            if dtype == torch.float32:
-                self.skipTest("cublaslt grouped gemm does not support float32")
-            os.environ["TORCH_GROUPED_MM_PREFER_CUBLASLT"] = "1"
-        else:
-            os.environ["TORCH_GROUPED_MM_PREFER_CUBLASLT"] = "0"
-        self.addCleanup(os.environ.pop, "TORCH_GROUPED_MM_PREFER_CUBLASLT", None)
+        self._setup_grouped_gemm_backend(backend, dtype)
 
         device = "cuda"
         s_int = int(strided)
@@ -673,15 +668,7 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("backend", ["cublaslt", "cutlass"])
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
     def test_grouped_gemm_3d_3d(self, strided, a_row_major, b_row_major, backend, dtype):
-        if backend == "cublaslt":
-            if not SM100OrLater or SM120OrLater:
-                self.skipTest("cublaslt grouped gemm requires SM 10.x or 11.0")
-            if dtype == torch.float32:
-                self.skipTest("cublaslt grouped gemm does not support float32")
-            os.environ["TORCH_GROUPED_MM_PREFER_CUBLASLT"] = "1"
-        else:
-            os.environ["TORCH_GROUPED_MM_PREFER_CUBLASLT"] = "0"
-        self.addCleanup(os.environ.pop, "TORCH_GROUPED_MM_PREFER_CUBLASLT", None)
+        self._setup_grouped_gemm_backend(backend, dtype)
 
         device = "cuda"
         s_int = int(strided)
@@ -717,15 +704,7 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("backend", ["cublaslt", "cutlass"])
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
     def test_grouped_gemm_3d_2d(self, strided, a_row_major, b_row_major, backend, dtype):
-        if backend == "cublaslt":
-            if not SM100OrLater or SM120OrLater:
-                self.skipTest("cublaslt grouped gemm requires SM 10.x or 11.0")
-            if dtype == torch.float32:
-                self.skipTest("cublaslt grouped gemm does not support float32")
-            os.environ["TORCH_GROUPED_MM_PREFER_CUBLASLT"] = "1"
-        else:
-            os.environ["TORCH_GROUPED_MM_PREFER_CUBLASLT"] = "0"
-        self.addCleanup(os.environ.pop, "TORCH_GROUPED_MM_PREFER_CUBLASLT", None)
+        self._setup_grouped_gemm_backend(backend, dtype)
 
         device = "cuda"
         s_int = int(strided)
