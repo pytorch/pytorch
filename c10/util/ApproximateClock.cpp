@@ -50,7 +50,7 @@ std::function<time_t(approx_time_t)> ApproximateClockToUnixTimeConverter::
         static_cast<double>(delta_ns) / static_cast<double>(delta_approx);
   }
   std::sort(scale_factors.begin(), scale_factors.end());
-  long double scale_factor = scale_factors[replicates / 2 + 1];
+  long double scale_factor = scale_factors[replicates / 2];
 
   // We shift all times by `t0` for better numerics. Double precision only has
   // 16 decimal digits of accuracy, so if we blindly multiply times by
@@ -69,7 +69,7 @@ std::function<time_t(approx_time_t)> ApproximateClockToUnixTimeConverter::
         scale_factor;
     t0_correction[i] = dt - (time_t)dt_approx; // NOLINT
   }
-  t0 += t0_correction[t0_correction.size() / 2 + 1]; // NOLINT
+  t0 += t0_correction[t0_correction.size() / 2]; // NOLINT
 
   return [=](approx_time_t t_approx) {
     // See above for why this is more stable than `A * t_approx + B`.
