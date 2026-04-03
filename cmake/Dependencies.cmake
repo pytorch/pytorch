@@ -1023,7 +1023,7 @@ if(USE_ROCM)
       list(APPEND HIP_CXX_FLAGS -DUSE_ROCM_CK_GEMM)
     endif()
     list(APPEND HIP_HIPCC_FLAGS --offload-compress)
-    list(APPEND HIP_HIPCC_FLAGS -std=c++17)
+    list(APPEND HIP_HIPCC_FLAGS -std=c++20)
     # Pass device library path for theRock nightly builds
     if(DEFINED ENV{HIP_DEVICE_LIB_PATH})
       file(TO_CMAKE_PATH "$ENV{HIP_DEVICE_LIB_PATH}" _hip_device_lib_path)
@@ -1078,10 +1078,6 @@ if(USE_ROCM)
 
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       hip::amdhip64 MIOpen hiprtc::hiprtc) # libroctx will be linked in with MIOpen
-    if(USE_HIPDNN)
-      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS hipdnn_frontend)
-      list(APPEND HIP_CXX_FLAGS -DUSE_HIPDNN)
-    endif()
 
     # Math libraries
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS

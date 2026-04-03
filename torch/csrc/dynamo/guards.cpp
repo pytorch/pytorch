@@ -1690,7 +1690,6 @@ class LeafGuard {
   // is not exposed to Python and can only be called from C++.
   virtual bool check_nopybind(PyObject* value) = 0;
   virtual bool check_nopybind(FrameLocalsMapping* map) {
-    // throw std::runtime_error("fallback to python");
     // Could fallback to running check on the Python dict (lazily constructed)
     return check_nopybind((PyObject*)map->to_dict());
   }
@@ -1733,7 +1732,8 @@ class LAMBDA_GUARD : public LeafGuard {
     if (py::isinstance<py::function>(guard_check_fn)) {
       _guard_check_fn = py::cast<py::function>(std::move(guard_check_fn));
     } else {
-      throw py::type_error("LAMBDA_GUARD expects (callable, str)");
+      throw py::type_error(
+          "LAMBDA_GUARD expects (callable, str)"); // @allow-raw-throw
     }
   }
 
@@ -2161,7 +2161,8 @@ class GLOBAL_STATE : public LeafGuard {
         owner_(std::move(initial_state)),
         _guard((GlobalStateGuard*)owner_.ptr()) {
     if (!PyObject_TypeCheck(owner_.ptr(), &GlobalStateGuardType)) {
-      throw py::type_error("GLOBAL_STATE expects a GlobalStateGuard");
+      throw py::type_error(
+          "GLOBAL_STATE expects a GlobalStateGuard"); // @allow-raw-throw
     }
   }
 
@@ -2543,11 +2544,13 @@ class SYMBOLIC_SHAPE_GUARD : public RelationalGuard {
     _nargs_float = PyLong_AsSize_t(nargs_float.ptr());
     _nargs = _nargs_int + _nargs_float;
     if (PyErr_Occurred()) {
+      // @allow-raw-throw
       throw py::value_error(
           "SYMBOLIC_SHAPE_GUARD expected a non-negative number of arguments.");
     }
     uintptr_t addr = PyLong_AsUnsignedLongLong(py_addr.ptr());
     if (PyErr_Occurred()) {
+      // @allow-raw-throw
       throw py::value_error(
           "SYMBOLIC_SHAPE_GUARD expected an address to a C function.");
     }
@@ -2694,7 +2697,7 @@ class DICT_VERSION : public LeafGuard {
             std::move(verbose_code_parts),
             std::move(user_stack)) {
     if (!PyDict_Check(value.ptr())) {
-      throw py::type_error("DICT_VERSION expects a dict");
+      throw py::type_error("DICT_VERSION expects a dict"); // @allow-raw-throw
     }
     _tag = get_dict_version_unchecked(value.ptr());
   }
@@ -2831,7 +2834,6 @@ class GuardAccessor {
   // subtree on immutable dict getitems.
   virtual bool check_nopybind(PyObject* obj, bool matches_dict_tag = false) = 0;
   virtual bool check_nopybind(FrameLocalsMapping* map, bool matches_dict_tag) {
-    // throw std::runtime_error("fallback to python");
     // Could fallback to running check on the Python dict (lazily constructed)
     return check_nopybind((PyObject*)map->to_dict(), matches_dict_tag);
   }
@@ -3659,7 +3661,7 @@ class GuardManager {
 
   void add_permitted_leaf_guard(std::shared_ptr<LeafGuard> leaf_guard) {
     // Selectively called for permitted guards. This is used by DictGuardManager
-    // which overrides the add_leaf_guard manager to throw runtime error.
+    // which overrides the add_leaf_guard manager to raise a runtime error.
     GuardManager::add_leaf_guard(std::move(leaf_guard));
   }
 
@@ -4496,7 +4498,7 @@ std::unique_ptr<GuardManager> make_guard_manager(
       return std::make_unique<DictGuardManager>(
           root, std::move(source), example_value);
     } else {
-      throw py::type_error("Invalid guard manager enum");
+      throw py::type_error("Invalid guard manager enum"); // @allow-raw-throw
     }
   }
   return std::make_unique<GuardManager>(root, std::move(source), example_value);
@@ -6027,22 +6029,47 @@ class TypeDictGuardAccessor : public GuardAccessor {
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
+  //
+  // In CPython 3.12+, types with Py_TPFLAGS_MANAGED_DICT (e.g. enum.Enum)
+  // can have tp_dict=NULL because the dict is lazily materialized. Use
+  // PyType_GetDict() which handles this transparently. It returns a new
+  // reference, so we must decref after use.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
+#if PY_VERSION_HEX >= 0x030C0000
+    PyObject* x = PyType_GetDict((PyTypeObject*)obj); // new ref
+    if (x == nullptr) {
+      return false;
+    }
+    bool result = _guard_manager->check_nopybind(x);
+    Py_DECREF(x);
+    return result;
+#else
     PyObject* x = ((PyTypeObject*)obj)->tp_dict; // borrowed ref
     if (x == nullptr) {
       return false;
     }
     return _guard_manager->check_nopybind(x);
+#endif
   }
 
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
+#if PY_VERSION_HEX >= 0x030C0000
+    PyObject* x = PyType_GetDict((PyTypeObject*)obj); // new ref
+    if (x == nullptr) {
+      return GuardDebugInfo(false, "null type dict on " + repr(), 0);
+    }
+    auto result = _guard_manager->check_verbose_nopybind(x);
+    Py_DECREF(x);
+    return result;
+#else
     PyObject* x = ((PyTypeObject*)obj)->tp_dict; // borrowed ref
     if (x == nullptr) {
       return GuardDebugInfo(false, "null type dict on " + repr(), 0);
     }
     return _guard_manager->check_verbose_nopybind(x);
+#endif
   }
 
   std::string repr() const override {

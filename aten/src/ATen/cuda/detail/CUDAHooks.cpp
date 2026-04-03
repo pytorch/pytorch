@@ -4,7 +4,6 @@
 #include <ATen/Context.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/DynamicLibrary.h>
-#include <ATen/core/Vitals.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/CUDADevice.h>
 #include <ATen/cuda/Exceptions.h>
@@ -86,9 +85,6 @@ struct _Initializer {
 // let's not if we don't need to!)
 void CUDAHooks::init() const {
   C10_LOG_API_USAGE_ONCE("aten.init.cuda");
-  // Force the update to enable unit testing. This code get executed before unit tests
-  // have a chance to enable vitals.
-  at::vitals::VitalsAPI.setVital("CUDA", "used", "true", /* force = */ true);
 
   const auto num_devices = c10::cuda::device_count_ensure_non_zero();
   c10::cuda::CUDACachingAllocator::init(num_devices);
@@ -278,10 +274,6 @@ bool CUDAHooks::compiledWithCuDNN() const {
 
 bool CUDAHooks::compiledWithMIOpen() const {
   return AT_ROCM_ENABLED();
-}
-
-bool CUDAHooks::compiledWithHipDNN() const {
-  return AT_HIPDNN_ENABLED();
 }
 
 bool CUDAHooks::supportsDilatedConvolutionWithCuDNN() const {

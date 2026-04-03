@@ -42,7 +42,6 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   Allocator* getPinnedMemoryAllocator() const override;
   bool compiledWithCuDNN() const override;
   bool compiledWithMIOpen() const override;
-  bool compiledWithHipDNN() const override;
   bool supportsDilatedConvolutionWithCuDNN() const override;
   bool supportsDepthwiseConvolutionWithCuDNN() const override;
   bool supportsBFloat16ConvolutionWithCuDNNv8() const override;

@@ -423,8 +423,6 @@ class DataLoader(Generic[_T_co]):
 
         self.check_worker_number_rationality()
 
-        torch.set_vital("Dataloader", "enabled", "True")  # type: ignore[attr-defined]
-
     def _get_iterator(self) -> _BaseDataLoaderIter:
         if self.num_workers == 0:
             return _SingleProcessDataLoaderIter(self)

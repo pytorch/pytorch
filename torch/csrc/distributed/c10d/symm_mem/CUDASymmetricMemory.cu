@@ -934,6 +934,10 @@ c10::intrusive_ptr<Block> CUDASymmetricMemoryAllocator::find_block_covering(void
   return alloc_it->second;
 }
 
+bool CUDASymmetricMemoryAllocator::has_allocation(void* ptr) {
+  return find_block(ptr) != nullptr;
+}
+
 struct RegisterCUDASymmetricMemoryAllocator {
   RegisterCUDASymmetricMemoryAllocator() {
     auto allocator = c10::make_intrusive<CUDASymmetricMemoryAllocator>();

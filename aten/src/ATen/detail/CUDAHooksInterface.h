@@ -154,10 +154,6 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
     return false;
   }
 
-  virtual bool compiledWithHipDNN() const {
-    return false;
-  }
-
   virtual bool supportsDilatedConvolutionWithCuDNN() const {
     return false;
   }

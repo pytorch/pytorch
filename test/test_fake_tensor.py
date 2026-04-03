@@ -68,6 +68,7 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     skipIfXpu,
     TemporaryFileName,
+    TEST_ACCELERATOR,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xfailIfTorchDynamo,
@@ -1310,6 +1311,42 @@ for t in threads:
             0,
             msg=f"subprocess failed:\n{result.stderr.decode()}",
         )
+
+    @unittest.skipIf(
+        TEST_ACCELERATOR, "Only execute when an accelerator is not present"
+    )
+    def test_avoid_device_init_without_backends(self):
+        fake_mode = FakeTensorMode()
+
+        self.assertTrue(
+            fake_mode.avoid_device_init,
+            "Expected avoid_device_init to return True when no backends are registered",
+        )
+
+    @parametrize("is_available", [False, True])
+    @skipIfTorchDynamo(
+        "TorchDynamo exposes https://github.com/pytorch/pytorch/issues/166696"
+    )
+    @unittest.skipIf(
+        TEST_ACCELERATOR, "Only execute when an accelerator is not present"
+    )
+    def test_avoid_device_init_with_privateuse1_backend(self, is_available):
+        class _DummyPrivateUse1Module:
+            @staticmethod
+            def is_available() -> bool:
+                return is_available
+
+        backend_name = "privateuseone"
+
+        try:
+            torch._register_device_module(backend_name, _DummyPrivateUse1Module)
+
+            fake_mode = FakeTensorMode()
+
+            self.assertEqual(fake_mode.avoid_device_init, not is_available)
+        finally:
+            delattr(torch, backend_name)
+            del sys.modules[f"torch.{backend_name}"]
 
 
 instantiate_parametrized_tests(FakeTensorTest)

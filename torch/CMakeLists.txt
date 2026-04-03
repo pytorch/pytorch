@@ -164,9 +164,6 @@ if(USE_ROCM)
       USE_ROCM
       __HIP_PLATFORM_AMD__
       )
-    if(USE_HIPDNN)
-      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_HIPDNN)
-    endif()
     if(NOT WIN32)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${ROCM_ROCTX_LIB})
     endif()

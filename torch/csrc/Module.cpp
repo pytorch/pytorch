@@ -20,7 +20,6 @@
 
 #include <ATen/Parallel.h>
 #include <ATen/Utils.h>
-#include <ATen/core/Vitals.h>
 #include <ATen/dlpack.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/ForeachUtils.h>
@@ -1334,29 +1333,6 @@ static PyObject* THPModule_immediateMiopen(
   Py_RETURN_FALSE;
 }
 
-static PyObject* THPModule_setUserEnabledHipdnn(
-    PyObject* _unused,
-    PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      PyBool_Check(arg),
-      "set_hipdnn_enabled expects a bool, "
-      "but got ",
-      THPUtils_typename(arg));
-  at::globalContext().setUserEnabledHipdnn(arg == Py_True);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* THPModule_userEnabledHipdnn(
-    PyObject* _unused,
-    PyObject* noargs) {
-  if (at::globalContext().userEnabledHipdnn()) {
-    Py_RETURN_TRUE;
-  }
-  Py_RETURN_FALSE;
-}
-
 static PyObject* THPModule_setAllowTF32CuBLAS(
     PyObject* _unused,
     PyObject* arg) {
@@ -1962,8 +1938,6 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_set_cudnn_benchmark", THPModule_setBenchmarkCuDNN, METH_O, nullptr},
     {"_get_miopen_immediate", THPModule_immediateMiopen, METH_NOARGS, nullptr},
     {"_set_miopen_immediate", THPModule_setImmediateMiopen, METH_O, nullptr},
-    {"_get_hipdnn_enabled", THPModule_userEnabledHipdnn, METH_NOARGS, nullptr},
-    {"_set_hipdnn_enabled", THPModule_setUserEnabledHipdnn, METH_O, nullptr},
     {"_get_cudnn_deterministic",
      THPModule_deterministicCuDNN,
      METH_NOARGS,
@@ -2445,13 +2419,6 @@ PyObject* initModule() {
 #endif
   ASSERT_TRUE(set_module_attr("_has_cudnn", has_cudnn));
 
-#if defined(USE_HIPDNN)
-  PyObject* has_hipdnn = Py_True;
-#else
-  PyObject* has_hipdnn = Py_False;
-#endif
-  ASSERT_TRUE(set_module_attr("_has_hipdnn", has_hipdnn));
-
 #if defined(USE_CUSPARSELT) || defined(USE_ROCM)
   PyObject* has_cusparselt = Py_True;
 #else
@@ -2485,17 +2452,6 @@ PyObject* initModule() {
   py_module.def("_initCrashHandler", &_initCrashHandler);
   py_module.def("_demangle", &c10::demangle);
   py_module.def("_log_api_usage_metadata", &LogAPIUsageMetadataFromPython);
-
-  py_module.def("vitals_enabled", &at::vitals::torchVitalEnabled);
-  py_module.def(
-      "set_vital",
-      [](const std::string& vital,
-         const std::string& attr,
-         const std::string& value) {
-        return at::vitals::VitalsAPI.setVital(vital, attr, value);
-      });
-  py_module.def(
-      "read_vitals", []() { return at::vitals::VitalsAPI.readVitals(); });
 
   py_module.def(
       "init_num_threads",
@@ -2598,9 +2554,7 @@ Call this whenever a new thread is created in order to propagate values from
           "Winograd3x3Depthwise", at::native::ConvBackend::Winograd3x3Depthwise)
       .value("Xnnpack2d", at::native::ConvBackend::Xnnpack2d)
       .value("Mps", at::native::ConvBackend::Mps)
-      .value("MpsTranspose,", at::native::ConvBackend::MpsTranspose)
-      .value("Hipdnn", at::native::ConvBackend::Hipdnn)
-      .value("HipdnnTranspose", at::native::ConvBackend::HipdnnTranspose);
+      .value("MpsTranspose,", at::native::ConvBackend::MpsTranspose);
 
   py_module.def(
       "_select_conv_backend",

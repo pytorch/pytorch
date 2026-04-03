@@ -126,7 +126,6 @@ from torch.backends import (
     cuda as cuda,
     cudnn as cudnn,
     cusparselt as cusparselt,
-    hipdnn as hipdnn,
     kleidiai as kleidiai,
     mha as mha,
     miopen as miopen,
