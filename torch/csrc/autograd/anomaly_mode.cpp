@@ -74,4 +74,8 @@ void AnomalyMetadata::assign_parent(const std::shared_ptr<Node>& parent_node) {
   parent_ = parent_node;
 }
 
+std::vector<std::string> AnomalyMetadata::get_forward_traceback() {
+  return {};
+}
+
 } // namespace torch::autograd

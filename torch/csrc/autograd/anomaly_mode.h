@@ -3,6 +3,7 @@
 #include <torch/csrc/Export.h>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace torch::autograd {
 
@@ -62,6 +63,7 @@ struct TORCH_API AnomalyMetadata {
   virtual void store_stack();
   virtual void print_stack(const std::string& current_node_name);
   virtual void assign_parent(const std::shared_ptr<Node>& parent_node);
+  virtual std::vector<std::string> get_forward_traceback();
 
  private:
   std::string traceback_;

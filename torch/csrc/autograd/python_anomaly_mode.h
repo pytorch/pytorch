@@ -27,6 +27,7 @@ struct PyAnomalyMetadata : public AnomalyMetadata {
   void store_stack() override;
   void print_stack(const std::string& current_node_name) override;
   void assign_parent(const std::shared_ptr<Node>& parent_node) override;
+  std::vector<std::string> get_forward_traceback() override;
 
   PyObject* dict() {
     return dict_;
