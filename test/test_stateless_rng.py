@@ -5,6 +5,7 @@ import torch.func._random as random
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    onlyCUDA,
 )
 from torch.testing._internal.common_dtype import floating_types_and
 from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
@@ -123,14 +124,6 @@ class TestStatelessRNGKeySplit(TestCase):
         with self.assertRaisesRegex(RuntimeError, "key must have dtype uint64"):
             random.split(key, 4)
 
-    def test_error_wrong_device(self, device):
-        key = random.key(42)  # CPU key
-        with self.assertRaisesRegex(
-            NotImplementedError,
-            "Could not run .* with arguments from the 'CPU' backend",
-        ):
-            random.split(key, 4)
-
     def test_error_invalid_num_splits(self, device):
         key = random.key(42, device=device)
         with self.assertRaisesRegex(RuntimeError, "num_splits must be positive"):
@@ -154,6 +147,14 @@ class TestStatelessRNGKeySplit(TestCase):
         self.assertEqual(splits[1], random.fold_in(key0, 0))
         self.assertEqual(splits[2], random.fold_in(key0, 1))
 
+    @onlyCUDA
+    def test_cross_device_consistency(self, device):
+        key_cpu = random.key(42)
+        key_cuda = random.key(42, device=device)
+        self.assertEqual(
+            random.split(key_cpu, 100),
+            random.split(key_cuda, 100).cpu(),
+        )
 
 class TestStatelessRNGKeyFoldIn(TestCase):
     def test_basic_shape_and_dtype(self, device):
@@ -220,14 +221,6 @@ class TestStatelessRNGKeyFoldIn(TestCase):
         with self.assertRaisesRegex(RuntimeError, "key must have dtype uint64"):
             random.fold_in(key, 0)
 
-    def test_error_wrong_device(self, device):
-        key = random.key(42)  # CPU key
-        with self.assertRaisesRegex(
-            NotImplementedError,
-            "Could not run .* with arguments from the 'CPU' backend",
-        ):
-            random.fold_in(key, 0)
-
     def test_error_batched_last_dim_not_2(self, device):
         key = torch.tensor([[42, 0, 1], [43, 0, 1]], dtype=torch.uint64, device=device)
         with self.assertRaisesRegex(
@@ -244,6 +237,14 @@ class TestStatelessRNGKeyFoldIn(TestCase):
         key0 = torch.tensor([42, 0], dtype=torch.uint64, device=device)
         self.assertEqual(result, random.fold_in(key0, 0))
 
+    @onlyCUDA
+    def test_cross_device_consistency(self, device):
+        key_cpu = random.key(42)
+        key_cuda = random.key(42, device=device)
+        self.assertEqual(
+            random.fold_in(key_cpu, 7),
+            random.fold_in(key_cuda, 7).cpu(),
+        )
 
 class TestStatelessRNGDistribution(TestCase):
     def _gen(self, gen_fn_name, *args, **kwargs):
@@ -484,6 +485,34 @@ class TestStatelessRNGDistribution(TestCase):
         self.assertTrue(result.max().item() <= 5.0)
 
 
+    @dtypes(*all_floating_dtypes)
+    @onlyCUDA
+    def test_cross_device_uniform_consistency(self, device, dtype):
+        key_cpu = random.fold_in(random.key(42), 7)
+        key_cuda = random.fold_in(random.key(42, device=device), 7)
+        # Uniform generation uses no transcendentals, so results must be bitwise identical.
+        self.assertEqual(
+            self._gen("uniform", key_cpu, (1000,), dtype=dtype),
+            self._gen("uniform", key_cuda, (1000,), dtype=dtype).cpu(),
+            atol=0,
+            rtol=0,
+        )
+
+    @dtypes(*all_floating_dtypes)
+    @onlyCUDA
+    def test_cross_device_normal_consistency(self, device, dtype):
+        key_cpu = random.fold_in(random.key(42), 7)
+        key_cuda = random.fold_in(random.key(42, device=device), 7)
+        # Normal generation uses Box-Muller (log, sin, cos), and CUDA uses fast-math
+        # intrinsics (__logf, __sincosf) that differ slightly from CPU std::log / std::sin /
+        # std::cos. Results are approximately but not bitwise equal. assertEqual() by default
+        # allows for some tolerance in the comparisons.
+        self.assertEqual(
+            self._gen("normal", key_cpu, (1000,), dtype=dtype),
+            self._gen("normal", key_cuda, (1000,), dtype=dtype).cpu(),
+        )
+
+
 class TestStatelessRNGCompile(TestCase):
     def test_split_fullgraph(self, device):
         key = random.key(42, device=device)
@@ -554,13 +583,21 @@ class TestStatelessRNGCompile(TestCase):
         self.assertEqual(f(key), random.uniform(random.fold_in(key, 3), (100,)))
 
 
-instantiate_device_type_tests(TestStatelessRNGKey, globals(), only_for=("cuda",))
-instantiate_device_type_tests(TestStatelessRNGKeySplit, globals(), only_for=("cuda",))
-instantiate_device_type_tests(TestStatelessRNGKeyFoldIn, globals(), only_for=("cuda",))
 instantiate_device_type_tests(
-    TestStatelessRNGDistribution, globals(), only_for=("cuda",)
+    TestStatelessRNGKey, globals(), only_for=("cpu", "cuda")
 )
-instantiate_device_type_tests(TestStatelessRNGCompile, globals(), only_for=("cuda",))
+instantiate_device_type_tests(
+    TestStatelessRNGKeySplit, globals(), only_for=("cpu", "cuda")
+)
+instantiate_device_type_tests(
+    TestStatelessRNGKeyFoldIn, globals(), only_for=("cpu", "cuda")
+)
+instantiate_device_type_tests(
+    TestStatelessRNGDistribution, globals(), only_for=("cpu", "cuda")
+)
+instantiate_device_type_tests(
+    TestStatelessRNGCompile, globals(), only_for=("cpu", "cuda")
+)
 
 
 if __name__ == "__main__":
