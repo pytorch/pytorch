@@ -993,14 +993,13 @@ int64_t KinetoEvent::pythonModuleId() const {
   int64_t out{-1};
   // Returns the module id for PyCall events (python function calls to
   // nn.Module)
-  result_->visit(
-      c10::overloaded(
-          [&](const ExtraFields<EventType::PyCall>& py_call) {
-            if (py_call.module_.has_value()) {
-              out = static_cast<int64_t>(py_call.module_->id_);
-            }
-          },
-          [](const auto&) {}));
+  result_->visit(c10::overloaded(
+      [&](const ExtraFields<EventType::PyCall>& py_call) {
+        if (py_call.module_.has_value()) {
+          out = static_cast<int64_t>(py_call.module_->id_);
+        }
+      },
+      [](const auto&) {}));
   return out;
 }
 
@@ -1234,13 +1233,10 @@ TYPED_ATTR(TorchOp, isAsync, e.is_async_)
 
 extra_meta_t KinetoEvent::extraMeta() const {
   extra_meta_t out;
-  result_->visit(
-      c10::overloaded(
-          [&](const ExtraFields<EventType::TorchOp>& e) {
-            out = e.extra_meta_;
-          },
-          [&](const ExtraFields<EventType::Kineto>& e) { out = e.extra_meta_; },
-          [](const auto&) {}));
+  result_->visit(c10::overloaded(
+      [&](const ExtraFields<EventType::TorchOp>& e) { out = e.extra_meta_; },
+      [&](const ExtraFields<EventType::Kineto>& e) { out = e.extra_meta_; },
+      [](const auto&) {}));
   return out;
 }
 
