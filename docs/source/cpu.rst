@@ -9,7 +9,6 @@ torch.cpu
 
     current_device
     current_stream
-    get_capabilities
     is_available
     is_initialized
     synchronize
