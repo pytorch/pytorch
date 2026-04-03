@@ -51,10 +51,10 @@ convolution_notes = {
         :math:`(C_\text{in}=C_\text{in}, C_\text{out}=C_\text{in} \times \text{K}, ..., \text{groups}=C_\text{in})`.""",
 }  # noqa: B950
 
-Ts = TypeVarTuple("Ts")
+_Ts = TypeVarTuple("Ts")
 
 
-class _ConvNd(Module, Generic[Unpack[Ts]]):
+class _ConvNd(Module, Generic[Unpack[_Ts]]):
     __constants__ = [
         "stride",
         "padding",
@@ -75,12 +75,12 @@ class _ConvNd(Module, Generic[Unpack[Ts]]):
     in_channels: int
     _reversed_padding_repeated_twice: list[int]
     out_channels: int
-    kernel_size: tuple[Unpack[Ts]]
-    stride: tuple[Unpack[Ts]]
-    padding: str | tuple[Unpack[Ts]]
-    dilation: tuple[Unpack[Ts]]
+    kernel_size: tuple[Unpack[_Ts]]
+    stride: tuple[Unpack[_Ts]]
+    padding: str | tuple[Unpack[_Ts]]
+    dilation: tuple[Unpack[_Ts]]
     transposed: bool
-    output_padding: tuple[Unpack[Ts]]
+    output_padding: tuple[Unpack[_Ts]]
     groups: int
     padding_mode: Literal["zeros", "reflect", "replicate", "circular"]
     weight: Tensor
@@ -90,12 +90,12 @@ class _ConvNd(Module, Generic[Unpack[Ts]]):
         self,
         in_channels: int,
         out_channels: int,
-        kernel_size: tuple[Unpack[Ts]],
-        stride: tuple[Unpack[Ts]],
-        padding: str | tuple[Unpack[Ts]],
-        dilation: tuple[Unpack[Ts]],
+        kernel_size: tuple[Unpack[_Ts]],
+        stride: tuple[Unpack[_Ts]],
+        padding: str | tuple[Unpack[_Ts]],
+        dilation: tuple[Unpack[_Ts]],
         transposed: bool,
-        output_padding: tuple[Unpack[Ts]],
+        output_padding: tuple[Unpack[_Ts]],
         groups: int,
         bias: bool,
         padding_mode: Literal["zeros", "reflect", "replicate", "circular"],
