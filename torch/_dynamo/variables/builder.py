@@ -857,7 +857,7 @@ class VariableBuilder:
                 self.tx.output.guard_on_key_order.add(self.source)
 
             # We need all the keys to be hashable. We do this within the
-            # HashableTracker class in sets.py
+            # HashableTracker class in hashable.py
             def build_key_value(
                 i: Any, k: Any, v: Any
             ) -> tuple[VariableTracker, VariableTracker]:
@@ -1663,7 +1663,7 @@ class VariableBuilder:
             self.tx.output.guard_on_key_order.add(self.source)
 
             # We need all the keys to be hashable. We do this within the
-            # HashableTracker class in sets.py
+            # HashableTracker class in hashable.py
             def build_key_value(
                 i: Any, k: Any, v: Any
             ) -> tuple[VariableTracker, VariableTracker]:
