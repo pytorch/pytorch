@@ -79,7 +79,8 @@ using TypeMap = std::unordered_map<std::string, at::DeprecatedTypeProperties*>;
 
 static TypeMap build_type_map(
     const std::vector<at::DeprecatedTypeProperties*>& types) {
-  TypeMap m(types.size());
+  TypeMap m;
+  m.reserve(types.size());
   for (auto type : types)
     m.emplace(type_to_string(*type), type);
   return m;
