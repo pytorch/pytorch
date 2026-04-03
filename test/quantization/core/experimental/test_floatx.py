@@ -274,7 +274,11 @@ class TestFloat8Dtype(TestCase):
         x = torch.cat((x, -x))
         x8 = x.to(dtype)
         # CUDA uses __NV_SATFINITE intrinsics which clamp overflow to max
-        saturate = x.is_cuda and torch.version.cuda >= "13.2" and torch.cuda.get_device_capability() >= (8, 9)
+        saturate = (
+            x.is_cuda
+            and torch.version.cuda >= "13.2"
+            and torch.cuda.get_device_capability() >= (8, 9)
+        )
         x8_simulated = simulate_fp8_precision(x, dtype, saturate=saturate)
         self.assertEqual(x8_simulated, x8.float())
 
