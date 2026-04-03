@@ -201,7 +201,6 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     KATEX=yes
-    TRITON=yes
     DOCS=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
@@ -215,7 +214,6 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     KATEX=yes
-    TRITON=yes
     DOCS=yes
     UNINSTALL_DILL=yes
     ;;
