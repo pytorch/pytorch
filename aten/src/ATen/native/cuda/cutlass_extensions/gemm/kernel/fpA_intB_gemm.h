@@ -74,7 +74,7 @@ struct GemmFpAIntB {
     using ElementScale = ElementC;
 
     static ComplexTransform const kTransformA = Mma::kTransformA;
-    static ComplexTransform const kTransformB = Mma::kTransformA;
+    static ComplexTransform const kTransformB = Mma::kTransformB;
 
     // Type definitions about the mainloop.
     using Operator         = typename Mma::Operator;
