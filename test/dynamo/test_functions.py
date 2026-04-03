@@ -152,7 +152,7 @@ def inline_script_if_tracing_fn_with_default_args(x, y, c=1.2):
     return torch.cos(x * y) + c
 
 
-class FunctionTests(torch._dynamo.test_case.TestCase):
+class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
     @make_test
     def test_inline_jit_annotations(x):
         x = inline_script_if_tracing(x)
@@ -3007,7 +3007,6 @@ class GraphModule(torch.nn.Module):
         else:
             return x.cos()
 
-    @unittest.expectedFailure
     def test_getattr_metaclass(self):
         class Meta(type):
             def __getattr__(cls, name):
@@ -4627,7 +4626,7 @@ class WrapperModule(torch.nn.Module):
         return self.m()
 
 
-class DefaultsTests(torch._dynamo.test_case.TestCase):
+class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
     def test_func_default_tensor_args(self):
         """
         Tests that we indeed reference (and mutate) "the one" default tensor arg

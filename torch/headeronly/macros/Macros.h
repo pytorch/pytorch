@@ -325,41 +325,55 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define C10_HIP_HOST_DEVICE
 #endif
 
-#if defined(USE_ROCM)
 // C10_WARP_SIZE is only allowed for device code.
-// Host code _must_ use at::cuda::warp_size()
+// Host code dynamically-sized launch configs _must_ use at::cuda::warp_size().
+// Host or device statically-sized arrays _must_ use either
+// C10_WARP_SIZE_UPPER_BOUND or C10_WARP_SIZE_LOWER_BOUND, as needed.
+//
 // HIP header used to define warpSize as a constexpr that was either 32 or 64
 // depending on the target device, and then always set it to 64 for host code.
-// Host pass of HIP compiler needs C10_WARP_SIZE defined to _something_ so we
-// set it to something unreasonable to trigger obvious host code errors.
-
-namespace at::cuda {
-TORCH_CUDA_CPP_API int warp_size();
+// For a time, that allowed C10_WARP_SIZE to be defined like so:
+//
+// #ifdef USE_ROCM
+// #define C10_WARP_SIZE warpSize
+// #else
+// #define C10_WARP_SIZE 32
+// #endif
+//
+// In ROCm 7, warpSize is no longer constexpr, matching CUDA behavior.
+// We can now only use warpSize for C10_WARP_SIZE in device code and this is
+// enforced by using __device__ in its definition.  In host code where
+// C10_WARP_SIZE was previously used as a compile-time constant, this will now
+// cause a compile-time error.
+//
+// If an array was previously expected to be sized at compile-time using
+// C10_WARP_SIZE, users must now use either C10_WARP_SIZE_UPPER_BOUND or
+// C10_WARP_SIZE_LOWER_BOUND depending on the situation.
+//
+// If C10_WARP_SIZE was previously used to determine kernel launch sizes, users
+// must now use at::cuda::warp_size() for the dynamic runtime query.
+#ifdef USE_ROCM
+#if defined(__HIPCC__)
+static __device__ inline int C10_WARP_SIZE_INTERNAL() {
+  return warpSize;
 }
-#ifdef __HIPCC__
-static inline int __host__ C10_WARP_SIZE_INTERNAL() {
-  return at::cuda::warp_size();
-}
-
-static inline constexpr int __device__ C10_WARP_SIZE_INTERNAL() {
-#if defined(__GFX9__)
-  return 64;
-#else // __GFX9__
-  return 32;
-#endif // __GFX9__
-}
-#else // __HIPCC__
-static inline int C10_WARP_SIZE_INTERNAL() {
-  return at::cuda::warp_size();
-}
-#endif // __HIPCC__
-
 #define C10_WARP_SIZE (C10_WARP_SIZE_INTERNAL())
-#define C10_WARP_SIZE_STATIC 64
-
-#else // defined(USE_ROCM)
-#define C10_WARP_SIZE 32
+#if defined(__SPIRV__)
+#define C10_WARP_SIZE_LOWER_BOUND 32
+#define C10_WARP_SIZE_UPPER_BOUND 64
+#elif defined(__GFX9__)
+#define C10_WARP_SIZE_LOWER_BOUND 64
+#define C10_WARP_SIZE_UPPER_BOUND 64
+#else
+#define C10_WARP_SIZE_LOWER_BOUND 32
+#define C10_WARP_SIZE_UPPER_BOUND 32
 #endif
+#endif // __HIPCC__
+#else // !USE_ROCM
+#define C10_WARP_SIZE 32
+#define C10_WARP_SIZE_LOWER_BOUND 32
+#define C10_WARP_SIZE_UPPER_BOUND 32
+#endif // USE_ROCM
 
 #if defined(_MSC_VER) && _MSC_VER <= 1900
 #define __func__ __FUNCTION__
