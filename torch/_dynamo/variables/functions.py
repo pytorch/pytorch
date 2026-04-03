@@ -2290,12 +2290,14 @@ class SkipFunctionVariable(VariableTracker):
                     torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
             if qualname == "allow_in_graph":
                 explanation = (
-                    "Found an allow_in_graph decorator to a function which "
-                    "is created inside the parent function that is getting "
-                    "compiled. This is not supported for now."
+                    "torch.compiler.allow_in_graph (or torch._dynamo.allow_in_graph) "
+                    "was called inside a compiled region. Dynamically annotating functions "
+                    "inside a compiled region is not supported."
                 )
-                # pyrefly: ignore [implicit-any]
-                hints = []
+                hints = [
+                    "Apply @torch.compiler.allow_in_graph as a decorator before compilation, "
+                    "not inside the compiled function.",
+                ]
             if self.reason:
                 reason = self.reason
             else:
