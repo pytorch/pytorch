@@ -611,6 +611,29 @@ class TestDecomp(TestCase):
     def test_comprehensive(self, device, dtype, op):
         self.do_cross_ref(device, dtype, op, run_all=True)
 
+    def test_hann_window_decomp(self, device):
+        # Verify the hann_window decomp matches the native kernel for all four
+        # overloads: .default, .periodic, .out, .periodic_out.
+        from torch._decomp.decompositions import hann_window, hann_window_periodic
+
+        for n in (0, 1, 8, 9):
+            # .default (periodic=True)
+            ref = torch.hann_window(n, device=device)
+            res = hann_window(n, device=device)
+            self.assertEqual(ref, res)
+
+            # .periodic overload, explicit periodic flag
+            for periodic in (True, False):
+                ref = torch.hann_window(n, periodic, device=device)
+                res = hann_window_periodic(n, periodic, device=device)
+                self.assertEqual(ref, res)
+
+        # dtype forwarding
+        ref = torch.hann_window(8, dtype=torch.float64, device=device)
+        res = hann_window_periodic(8, dtype=torch.float64, device=device)
+        self.assertEqual(ref, res)
+        self.assertEqual(res.dtype, torch.float64)
+
     def test_uniform(self, device):
         size = (2, 3, 4, 5)
         dtype = torch.float32

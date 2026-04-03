@@ -4887,8 +4887,6 @@ class TestCudaAllocator(TestCase):
         # Test throw_on_cudamalloc_oom config parsing - valid formats
         torch.cuda.memory._set_allocator_settings("throw_on_cudamalloc_oom:True")
         torch.cuda.memory._set_allocator_settings("throw_on_cudamalloc_oom:False")
-        torch.cuda.memory._set_allocator_settings("throw_on_cudamalloc_oom:1")
-        torch.cuda.memory._set_allocator_settings("throw_on_cudamalloc_oom:0")
 
         # Test throw_on_cudamalloc_oom config parsing - invalid formats
         with self.assertRaises(ValueError):

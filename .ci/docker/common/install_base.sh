@@ -22,6 +22,11 @@ install_ubuntu() {
 
   # Install common dependencies
   apt-get update
+  # Install prerequisites for add-apt-repository (needs gpg-agent for PPA key import)
+  apt-get install -y --no-install-recommends software-properties-common gpg-agent
+  # Add git-core PPA for a newer version of git
+  add-apt-repository ppa:git-core/ppa -y
+  apt-get update
   # TODO: Some of these may not be necessary
   ccache_deps="asciidoc docbook-xml docbook-xsl xsltproc"
   deploy_deps="libffi-dev libbz2-dev libreadline-dev libncurses5-dev libncursesw5-dev libgdbm-dev libsqlite3-dev uuid-dev tk-dev"
@@ -57,7 +62,8 @@ install_ubuntu() {
     unzip \
     gpg-agent \
     gdb \
-    bc
+    bc \
+    zip
 
   # Should resolve issues related to various apt package repository cert issues
   # see: https://github.com/pytorch/pytorch/issues/65931

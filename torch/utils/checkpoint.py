@@ -1199,8 +1199,10 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
 
 
 def _is_compiling(func, args, kwargs):
-    # Check if we are under AOTAutograd tracing
-    # Checking that a functional mode is active should always do what we want
+    # Check if we are under AOTAutograd tracing or export tracing
+    # Checking that a proxy mode is active should always do what we want
+    if torch.compiler._is_non_strict_tracing():
+        return False
     return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY) is not None
 
 
@@ -1334,6 +1336,8 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         if isinstance(policy, bool):
             policy = _policy_from_bool(policy)
 
+        # TODO: eventually we will only rely on tagging for the compile path
+        # and remove the eager checkpoint machinery entirely in compile path.
         is_compiling = _is_compiling(func, args, kwargs)
 
         if is_compiling:

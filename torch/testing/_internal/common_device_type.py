@@ -17,6 +17,7 @@ from typing_extensions import ParamSpec
 
 import torch
 from torch._inductor.utils import GPU_TYPES
+from torch._utils import _is_privateuse1_backend_available
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     _get_torch_hipblaslt_version,
@@ -33,7 +34,6 @@ from torch.testing._internal.common_utils import (
     get_tracked_input,
     IS_FBCODE,
     IS_MACOS,
-    is_privateuse1_backend_available,
     IS_REMOTE_GPU,
     IS_S390X,
     IS_SANDCASTLE,
@@ -733,7 +733,7 @@ def get_device_type_test_bases():
         if torch.cuda.is_available():
             test_bases.append(CUDATestBase)
 
-        if is_privateuse1_backend_available():
+        if _is_privateuse1_backend_available():
             test_bases.append(PrivateUse1TestBase)
         # Disable MPS testing in generic device testing temporarily while we're
         # ramping up support.
@@ -760,7 +760,7 @@ def filter_desired_device_types(device_type_test_bases, except_for=None, only_fo
     # This handles the case where PrivateUse1TestBase.device_type has been
     # changed from "privateuse1" to the actual backend name (e.g., "openreg")
     # by setUpClass being called during previous instantiate_device_type_tests calls
-    if is_privateuse1_backend_available():
+    if _is_privateuse1_backend_available():
         privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
 
         def func_replace(x: str) -> str:

@@ -33,7 +33,7 @@ from ..bytecode_transformation import (
     create_instruction,
     create_rot_n,
 )
-from ..exc import raise_observed_exception, unimplemented
+from ..exc import raise_observed_exception, raise_type_error, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, NamedTupleFieldsSource
 from ..utils import (
@@ -283,30 +283,26 @@ class BaseListVariable(VariableTracker):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
 
-            if args[0].is_tensor():
-                value = get_fake_value(args[0].as_proxy().node, tx)
-                if value.constant is not None and value.constant.numel() == 1:
-                    value = VariableTracker.build(tx, value.constant.item())
-                else:
-                    unimplemented(
-                        gb_type="Indexing list with non-scalar tensor",
-                        context=f"call_method {self} {name} {args} {kwargs}",
-                        explanation=(
-                            "Attempted to index list-like object with tensor with > 1 element."
-                        ),
-                        hints=[*graph_break_hints.USER_ERROR],
-                    )
-            else:
-                value = args[0]
+            value = args[0]
 
-            if value.python_type() not in (int, slice):
-                raise_observed_exception(
-                    TypeError,
-                    tx,
-                    args=[
-                        f"indices must be integers or slices, not {value.python_type()}"
-                    ],
-                )
+            try:
+                value_type = value.python_type()
+            except NotImplementedError:
+                value_type = None
+            if value_type not in (int, bool, slice):
+                # CPython: list_subscript checks _PyIndex_Check first, and
+                # raises its own error if the type doesn't have nb_index.
+                # Only if the type has __index__ does it call PyNumber_AsSsize_t.
+                if value_type is not None and not hasattr(value_type, "__index__"):
+                    container_name = self.python_type_name()
+                    raise_observed_exception(
+                        TypeError,
+                        tx,
+                        args=[
+                            f"{container_name} indices must be integers or slices, not {value.python_type_name()}"
+                        ],
+                    )
+                value = value.nb_index_impl(tx)
 
             return self.getitem_const(tx, value)
         elif name == "__contains__":
@@ -973,7 +969,7 @@ class CommonListMethodsVariable(BaseListVariable):
                     )
             else:
                 msg = f"list indices must be integers or slices, not {args[0].python_type_name()}"
-                raise_observed_exception(TypeError, tx, args=[msg])
+                raise_type_error(tx, msg)
             return CONSTANT_VARIABLE_NONE
         elif name == "copy":
             # List copy() doesn't have args and kwargs
