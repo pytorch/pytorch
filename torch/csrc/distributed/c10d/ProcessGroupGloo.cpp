@@ -664,7 +664,15 @@ ProcessGroupGloo::ProcessGroupGloo(
 }
 
 ProcessGroupGloo::~ProcessGroupGloo() {
+  shutdown();
+}
+
+void ProcessGroupGloo::shutdown() {
   std::unique_lock<std::mutex> lock(workMutex_);
+  if (stop_) {
+    // Already shut down.
+    return;
+  }
   workConsumeCV_.wait(lock, [&] { return workQueue_.empty(); });
 
   // Queue is empty, signal stop

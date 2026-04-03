@@ -300,6 +300,8 @@ class TORCH_API ProcessGroupGloo : public Backend {
 
   ~ProcessGroupGloo() override;
 
+  void shutdown() override;
+
   c10::intrusive_ptr<Options> getOptions() {
     return options_;
   }

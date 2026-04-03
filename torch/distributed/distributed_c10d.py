@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 """Distributed Collective Communication (c10d)."""
 
+import atexit
 import collections.abc
 import contextlib
 import copy
@@ -1912,6 +1913,26 @@ def init_process_group(
             # Use store based barrier here since barrier() used a bunch of
             # default devices and messes up NCCL internal state.
             _store_based_barrier(rank, store, group_name, world_size, timeout)
+
+    # Ensure Gloo process groups are shut down before the Python interpreter
+    # starts finalizing. Without this, Gloo's C++ worker threads may try to
+    # acquire the GIL to decref tensors after the interpreter is torn down,
+    # causing SIGABRT. We only target Gloo here because calling shutdown() on
+    # other backends (e.g. NCCL) during atexit could hang if peers are gone.
+    atexit.register(_shutdown_gloo_backends)
+
+
+def _shutdown_gloo_backends():
+    if not is_gloo_available():
+        return
+    for pg in list(_world.pg_map.keys()):
+        for device_type in pg._device_types:
+            try:
+                backend = pg._get_backend(device_type)
+            except RuntimeError:
+                continue
+            if isinstance(backend, ProcessGroupGloo):
+                backend.shutdown()
 
 
 def _get_split_source(pg: ProcessGroup):

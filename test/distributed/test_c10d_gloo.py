@@ -3516,6 +3516,41 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
         self._test_new_group_ordered(backend="gloo")
 
 
+class GlooAtexitTest(TestCase):
+    """Test that the atexit handler destroys process groups cleanly."""
+
+    @requires_gloo()
+    def test_exit_without_destroy_pg(self):
+        # Verify that a process using gloo exits cleanly even without an
+        # explicit destroy_process_group() call.  Before the atexit handler was
+        # added, Gloo worker threads could try to acquire the GIL during
+        # interpreter finalization, causing SIGABRT.
+        script = """\
+import os, tempfile, torch, torch.distributed as dist
+f = tempfile.NamedTemporaryFile(delete=False)
+store = dist.FileStore(f.name, 1)
+dist.init_process_group(backend="gloo", store=store, rank=0, world_size=1)
+t = torch.ones(4)
+dist.all_reduce(t)
+os.unlink(f.name)
+# Exit without calling destroy_process_group()
+"""
+        import signal
+        import subprocess
+
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            timeout=60,
+            capture_output=True,
+        )
+        self.assertNotEqual(
+            result.returncode,
+            -signal.SIGABRT,
+            f"Process died with SIGABRT:\n{result.stderr.decode(errors='replace')}",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+
+
 if __name__ == "__main__":
     if torch.cuda._initialized:
         raise AssertionError(
