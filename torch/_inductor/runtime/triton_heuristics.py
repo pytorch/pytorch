@@ -1233,9 +1233,7 @@ class CachingAutotuner(KernelInterface):
         def kernel_call():
             # Resolve the raw stream at call time rather than at closure-creation
             # time so that CUDA graph capture on a different stream works correctly.
-            stream = device_interface.get_raw_stream(
-                device_interface.current_device()
-            )
+            stream = device_interface.get_raw_stream(device_interface.current_device())
             cloned_args, cloned_kwargs = self.maybe_clone_args(
                 cpu_copies, *args, **kwargs
             )
