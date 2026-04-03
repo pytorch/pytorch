@@ -32,6 +32,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     LocalDTensorContinuousTestBase,
     LocalDTensorTestBase,
+    op_strategy_context,
     with_comms,
 )
 
@@ -1297,6 +1298,18 @@ DistTensorOpsTestWithLocalTensor = create_local_tensor_test_class(
 )
 
 
+@torch.library.custom_op("testlib::optional_clamp_op", mutates_args=())
+def optional_clamp_op(
+    x: torch.Tensor, lo: torch.Tensor | None, hi: torch.Tensor | None
+) -> torch.Tensor:
+    return torch.clamp(x, lo, hi)
+
+
+@optional_clamp_op.register_fake
+def _optional_clamp_op_fake(x, lo, hi):
+    return torch.empty_like(x)
+
+
 @torch.library.custom_op("testlib::modified_cat_op", mutates_args=())
 def modified_cat_op(a: list[torch.Tensor], b: list[torch.Tensor]) -> torch.Tensor:
     return torch.cat(a, dim=0)
@@ -1372,8 +1385,6 @@ class DistTensorCppPyTree(DTensorContinuousTestBase):
             self.assertEqual(hits, 1)
 
     def test_two_list_op_cache_collision(self):
-        from test_op_strategy import op_strategy_context
-
         from torch.distributed.tensor._op_schema import RuntimeSchemaInfo
         from torch.distributed.tensor._ops.utils import replicate_op_strategy
         from torch.distributed.tensor.debug import (
@@ -1399,6 +1410,63 @@ class DistTensorCppPyTree(DTensorContinuousTestBase):
             self.assertEqual(hits, 0)
             self.assertEqual(misses, 2)
             self.assertEqual(result.shape, torch.Size([8, 8]))
+
+    def test_optional_tensor_cache_key(self):
+        """Cache must distinguish op(t1, None, t2) from op(t1, t2, None).
+
+        Uses a custom op with high static_argnum so that None args for
+        optional Tensor? parameters would be dropped from the cache key
+        without the is_none_or_undefined fix in handle_non_dtensor_arg.
+        With same-spec DTensors the collision is deterministic.
+        """
+        from torch.distributed.tensor._op_schema import RuntimeSchemaInfo
+        from torch.distributed.tensor._ops.utils import replicate_op_strategy
+        from torch.distributed.tensor.debug import (
+            _clear_fast_path_sharding_prop_cache,
+            _get_fast_path_sharding_prop_cache_stats,
+        )
+
+        mesh = self.build_device_mesh()
+        op = torch.ops.testlib.optional_clamp_op
+
+        with op_strategy_context(
+            op.default,
+            replicate_op_strategy,
+            schema_info=RuntimeSchemaInfo(static_argnum=3),
+        ):
+            _clear_fast_path_sharding_prop_cache()
+            a = distribute_tensor(torch.randn(4, 8), mesh, [Shard(0)])
+
+            op(a, a, None)  # miss 1: key should include None at position 2
+            op(a, None, a)  # miss 2: key should include None at position 1
+
+            hits, misses = _get_fast_path_sharding_prop_cache_stats()
+            self.assertEqual(hits, 0)
+            self.assertEqual(misses, 2)
+
+    def test_optional_tensor_cache_key_python_slow_path(self):
+        """Same as above but exercises the Python slow path via OpSchema directly.
+
+        DTensor_OpSchema_recompute_comparison_key_impl must include None
+        args for optional Tensor? parameters in the comparison key.
+        """
+        from torch.distributed.tensor._dtensor_spec import DTensorSpec
+        from torch.distributed.tensor._op_schema import OpSchema, RuntimeSchemaInfo
+
+        mesh = self.build_device_mesh()
+        spec = DTensorSpec(mesh, (Shard(0),))
+        op = torch.ops.testlib.optional_clamp_op.default
+
+        schema1 = OpSchema(op, (spec, None, spec), {})
+        schema1.schema_info = RuntimeSchemaInfo(static_argnum=3)
+        schema1._recompute_comparison_key()
+
+        schema2 = OpSchema(op, (spec, spec, None), {})
+        schema2.schema_info = RuntimeSchemaInfo(static_argnum=3)
+        schema2._recompute_comparison_key()
+
+        self.assertNotEqual(hash(schema1), hash(schema2))
+        self.assertNotEqual(schema1, schema2)
 
 
 class TestNewEmptyStridedUneven(DTensorTestBase):
