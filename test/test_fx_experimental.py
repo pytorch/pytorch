@@ -907,7 +907,7 @@ terrible spacing
         else:
             raise RuntimeError("Expected the subgraph to have an output node.")
 
-    def test_split_module_boxed_return(self):
+    def test_split_module_tuple_return(self):
         from torch._inductor.compile_fx import graph_returns_tuple
 
         class M(torch.nn.Module):
@@ -921,7 +921,7 @@ terrible spacing
         def partition_fn(node):
             return 0 if node.target == operator.add else 1
 
-        # Without boxed_return: single-output submodules return a bare value.
+        # Without tuple_return: single-output submodules return a bare value.
         sp = split_module(gm, None, partition_fn)
         self.assertTrue(
             any(
@@ -933,11 +933,11 @@ terrible spacing
         x, y = torch.randn(4), torch.randn(4)
         self.assertEqual(sp(x, y), gm(x, y))
 
-        # With boxed_return: all submodules return a tuple.
-        sp_boxed = split_module(gm, None, partition_fn, boxed_return=True)
+        # With tuple_return: all submodules return a tuple.
+        sp_boxed = split_module(gm, None, partition_fn, tuple_return=True)
         self.assertTrue(
             all(graph_returns_tuple(submod) for submod in sp_boxed.children()),
-            "all submodules should return a tuple with boxed_return=True",
+            "all submodules should return a tuple with tuple_return=True",
         )
         self.assertEqual(sp_boxed(x, y), gm(x, y))
 
