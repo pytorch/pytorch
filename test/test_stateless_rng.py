@@ -512,6 +512,21 @@ class TestStatelessRNGDistribution(TestCase):
             self._gen("normal", key_cuda, (1000,), dtype=dtype).cpu(),
         )
 
+    @parametrize("gen_fn_name", ["normal", "uniform"])
+    def test_portable_default(self, device, gen_fn_name):
+        key = random.key(42, device=device)
+        a = self._gen(gen_fn_name, key, (1000,))
+        b = self._gen(gen_fn_name, key, (1000,), portable=True)
+        self.assertEqual(a, b)
+
+    @parametrize("gen_fn_name", ["normal", "uniform"])
+    def test_portable_false_deterministic(self, device, gen_fn_name):
+        key = random.key(42, device=device)
+        a = self._gen(gen_fn_name, key, (1000,), portable=False)
+        b = self._gen(gen_fn_name, key, (1000,), portable=False)
+        self.assertEqual(a, b)
+        self.assertEqual(a.shape, (1000,))
+
 
 class TestStatelessRNGCompile(TestCase):
     def test_split_fullgraph(self, device):

@@ -6844,14 +6844,14 @@
     CPU: _philox_key_fold_in_cpu
     CUDA: _philox_key_fold_in_cuda
 
-- func: _philox_normal_(Tensor(a!) self, Tensor key, float mean=0, float std=1) -> Tensor(a!)
+- func: _philox_normal_(Tensor(a!) self, Tensor key, float mean=0, float std=1, bool portable=True) -> Tensor(a!)
   variants: function, method
   dispatch:
     CPU: _philox_normal_cpu_
     CUDA: _philox_normal_cuda_
   autogen: _philox_normal, _philox_normal.out
 
-- func: _philox_uniform_(Tensor(a!) self, Tensor key, float low=0, float high=1) -> Tensor(a!)
+- func: _philox_uniform_(Tensor(a!) self, Tensor key, float low=0, float high=1, bool portable=True) -> Tensor(a!)
   variants: function, method
   dispatch:
     CPU: _philox_uniform_cpu_
