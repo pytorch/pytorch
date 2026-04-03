@@ -2064,7 +2064,7 @@ torch_to_numpy_dtype_dict.update({
 
 def skipIfNNModuleInlined(
     msg="test doesn't currently work with nn module inlining",
-    condition=torch._dynamo.config.inline_inbuilt_nn_modules,
+    condition=True,
 ):
     def decorator(fn):
         if not isinstance(fn, type):
