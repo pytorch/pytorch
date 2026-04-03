@@ -3,7 +3,7 @@ if(PYTORCH_NNAPI_STANDALONE)
   cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
   project(pytorch_nnapi)
 
-  set(CMAKE_CXX_STANDARD 14 CACHE STRING "The C++ standard whose features are requested to build this target.")
+  set(CMAKE_CXX_STANDARD 20 CACHE STRING "The C++ standard whose features are requested to build this target.")
   find_package(Torch REQUIRED)
 
   set(NNAPI_SRCS

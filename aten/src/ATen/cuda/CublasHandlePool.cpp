@@ -29,6 +29,10 @@
  * For CUDA builds, getCurrentCUDABlasLtHandle will alias for getCurrentCUDABlasHandle,
  * whereas for ROCm builds, it is a distinct function.
  *
+ * Additionally, hipblaslt cannot share a single handle across multiple streams.
+ * On ROCm, getCurrentCUDABlasLtHandle returns a handle unique to each (device, stream)
+ * pair, rather than just per-device like the cublas handle pool.
+ *
  * The workspace pools are separate for ROCm. On CUDA, the env var
  * TORCH_CUBLASLT_UNIFIED_WORKSPACE can be used to opt-in to unifying the workspace pools.
  */
@@ -437,7 +441,11 @@ cublasLtHandle_t getCurrentCUDABlasLtHandle() {
   thread_local std::unique_ptr<CuBlasLtPoolType::PoolWindow> myPoolWindow(
       pool->newPoolWindow());
 
-  auto handle = myPoolWindow->reserve(device);
+  // hipblaslt cannot share a single handle across multiple streams,
+  // so reserve a handle unique to each (device, stream) pair.
+  auto stream = c10::cuda::getCurrentCUDAStream();
+  cudaStream_t _stream = stream;
+  auto handle = myPoolWindow->reserve(device, static_cast<void*>(_stream));
   return handle;
 #else
   return reinterpret_cast<cublasLtHandle_t>(getCurrentCUDABlasHandle());

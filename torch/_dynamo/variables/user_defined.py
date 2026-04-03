@@ -56,6 +56,7 @@ from ..exc import (
     ObservedTypeError,
     ObservedUserStopIteration,
     raise_observed_exception,
+    raise_type_error,
     unimplemented,
 )
 from ..graph_bytecode_inputs import get_external_object_by_index
@@ -76,7 +77,6 @@ from ..utils import (
     check_constant_args,
     cmp_name_to_op_mapping,
     dict_methods,
-    enum_type_methods,
     frozenset_methods,
     get_custom_getattr,
     has_torch_function,
@@ -96,13 +96,7 @@ from ..utils import (
     tuple_methods,
     unpatched_nn_module_getattr,
 )
-from .base import (
-    MutationType,
-    NO_SUCH_SUBOBJ,
-    raise_type_error_exc,
-    ValueMutationNew,
-    VariableTracker,
-)
+from .base import MutationType, NO_SUCH_SUBOBJ, ValueMutationNew, VariableTracker
 from .dicts import ConstDictVariable, DefaultDictVariable, SetVariable
 
 
@@ -294,7 +288,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return value in UserDefinedClassVariable.supported_c_new_functions()
 
     def can_constant_fold_through(self) -> bool:
-        return self.value in self._constant_fold_classes()
+        if self.value in self._constant_fold_classes():
+            return True
+        # Enum class calls (e.g., Color(1)) are value lookups that return
+        # existing singleton members, so they can always be constant-folded.
+        return isinstance(self.value, type) and issubclass(self.value, enum.Enum)
 
     def lookup_cls_mro_attr(self, name: str) -> object:
         """Walk cls.__mro__ only (not the metaclass chain) to find *name*."""
@@ -684,7 +682,30 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 explanation="Dyanmo does not support tracing mutations on a class when its __dict__ is materialized",
                 hints=graph_break_hints.SUPPORTABLE,
             )
+
+        # Dispatch dunder methods defined on the metaclass (e.g., EnumType.__contains__).
+        # In Python, `x in Color` calls `type(Color).__contains__(Color, x)`.
+        metaclass = type(self.value)
+        if metaclass is not type:
+            # Look up the method on the metaclass MRO, not the class MRO
+            for klass in metaclass.__mro__:
+                if name in klass.__dict__:
+                    method = klass.__dict__[name]
+                    if isinstance(method, types.FunctionType):
+                        source = self.source and AttrSource(self.source, name)
+                        return variables.UserMethodVariable(
+                            method, self, source=source
+                        ).call_function(tx, args, kwargs)
+                    break
+
         return super().call_method(tx, name, args, kwargs)
+
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslator"
+    ) -> list["VariableTracker"]:
+        if isinstance(self.value, type) and issubclass(self.value, enum.Enum):
+            return [VariableTracker.build(tx, item) for item in self.value]
+        raise NotImplementedError
 
     def call_function(
         self,
@@ -862,9 +883,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.CatchWarningsCtxManagerVariable.create(tx, kwargs)
         elif self.value is torch.cuda.device and not kwargs and len(args) == 1:
             if not args[0].is_python_constant():
-                raise_type_error_exc(
-                    tx, "torch.cuda.device() requires a constant argument"
-                )
+                raise_type_error(tx, "torch.cuda.device() requires a constant argument")
             return variables.CUDADeviceVariable.create(tx, args[0].as_python_constant())
         elif (
             issubclass(type(self.value), type)
@@ -1249,62 +1268,6 @@ class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
         return super().call_function(tx, args, kwargs)
 
 
-class UserDefinedEnumClassVariable(UserDefinedClassVariable):
-    """
-    Represents Enum class objects (the class itself, not instances).
-
-    Handles Enum metaclass methods like __contains__ by checking if the method
-    is from the standard EnumType metaclass and executing it directly.
-
-    Not yet supported:
-    - Flag enum membership checks (e.g., `Flag.A in combined_flags`)
-    """
-
-    # pyrefly: ignore[bad-override]
-    value: type[enum.Enum]
-
-    def call_method(
-        self,
-        tx: "InstructionTranslator",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        method = self._maybe_get_baseclass_method(name)
-        if method in enum_type_methods:
-            if name == "__contains__" and len(args) == 1 and not kwargs:
-                arg = args[0]
-                if isinstance(arg, variables.EnumVariable):
-                    # Check if the enum value is a member of this enum class
-                    return VariableTracker.build(tx, arg.value in self.value)
-                elif arg.is_python_constant():
-                    return VariableTracker.build(
-                        tx, arg.as_python_constant() in self.value
-                    )
-        elif isinstance(method, types.FunctionType):
-            if name == "__contains__" and len(args) == 1 and not kwargs:
-                source = self.source and AttrSource(self.source, name)
-                return variables.UserMethodVariable(
-                    method, self, source=source
-                ).call_function(tx, args, kwargs)
-
-        return super().call_method(tx, name, args, kwargs)
-
-    def unpack_var_sequence(
-        self, tx: "InstructionTranslator"
-    ) -> list["VariableTracker"]:
-        return [VariableTracker.build(tx, item) for item in self.value]
-
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
-        method = self._maybe_get_baseclass_method(name)
-        if method in enum_type_methods:
-            # __iter__ is a bound method which is not correctly handled by the parent var_getattr, so need to handle it here
-            if name == "__iter__":
-                source = self.source and AttrSource(self.source, name)
-                return variables.UserMethodVariable(method, self, source=source)
-        return super().var_getattr(tx, name)
-
-
 class RemovableHandleClass:
     # Dummy class to pass to python_type of
     # RemovableHandleVariable
@@ -1420,6 +1383,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return self.value
 
     def as_python_constant(self) -> object:
+        if isinstance(
+            self.value,
+            (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType),
+        ):
+            return self.value
+
         if self.is_pytree_constant_class and self.source:
             # NOTE pytree constants created in the torch.compile region will
             # NOT be guarded (even though they have a source set)
@@ -1445,6 +1414,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     return _MaskModWrapper(fn)
 
         return super().as_python_constant()
+
+    def as_proxy(self) -> object:
+        if isinstance(self.value, enum.Enum):
+            if isinstance(self.value, int):
+                return int(self.value)
+            return self.value
+        return super().as_proxy()
 
     def guard_as_python_constant(self) -> object:
         if self.source:
@@ -2367,6 +2343,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return hash(self.value)
 
     def is_python_equal(self, other: object) -> bool:
+        if (
+            isinstance(other, VariableTracker)
+            and self.is_python_constant()
+            and other.is_python_constant()
+        ):
+            return self.as_python_constant() == other.as_python_constant()
         # id check
         if not isinstance(other, UserDefinedVariable):
             return False
