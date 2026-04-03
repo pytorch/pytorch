@@ -10,8 +10,10 @@
 #include <Foundation/Foundation.h>
 #include <Metal/Metal.h>
 typedef id<MTLDevice> MTLDevice_t;
+typedef NSInteger MTLGPUFamily_t;
 #else
 typedef void* MTLDevice_t;
+typedef void* MTLGPUFamily_t;
 #endif
 
 namespace at::mps {
@@ -57,6 +59,13 @@ class TORCH_API MPSDevice {
   bool isMacOS13Plus(MacOSVersion version) const;
 
   /**
+   * Returns whether device supports the GPU family
+   * Possible family values:
+   * https://developer.apple.com/documentation/metal/mtlgpufamily?language=objc
+   */
+  bool isGPUFamily(MTLGPUFamily_t family) const;
+
+  /**
    * Returns device name
    */
   std::string getName() const;
@@ -78,6 +87,7 @@ class TORCH_API MPSDevice {
 TORCH_API bool is_available();
 TORCH_API bool is_macos_13_or_newer(MacOSVersion version);
 TORCH_API at::Allocator* GetMPSAllocator();
+TORCH_API bool is_gpu_family(MTLGPUFamily_t family);
 
 inline Device getDeviceFromPtr(void* ptr) {
   return {c10::DeviceType::MPS, 0};
