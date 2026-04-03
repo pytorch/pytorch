@@ -714,6 +714,9 @@ class FxConverter:
         )
         self._record_allocation(ir_node, fx_node)
 
+    def _generate_assert_size_stride(self, line: WrapperLine) -> None:
+        pass
+
     def _generate_comment(self, line: WrapperLine) -> None:
         assert isinstance(line, CommentLine)
         # We ignore comments in FX IR.
