@@ -539,10 +539,8 @@ class IListRef {
     payload_.unboxed = at::ArrayRef<T>(list);
   }
 
-  template <
-      typename... UnboxedConstructorArgs,
-      typename = std::enable_if_t<
-          std::is_constructible_v<unboxed_type, UnboxedConstructorArgs...>>>
+  template <typename... UnboxedConstructorArgs>
+  requires std::is_constructible_v<unboxed_type, UnboxedConstructorArgs...>
   IListRef(UnboxedConstructorArgs&&... args) : tag_(IListRefTag::Unboxed) {
     payload_.unboxed = unboxed_type(std::forward<UnboxedConstructorArgs>(args)...);
   }
