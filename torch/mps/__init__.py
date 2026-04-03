@@ -231,6 +231,131 @@ def _host_alias_storage(storage: "torch.UntypedStorage") -> "torch.UntypedStorag
     return torch._C._mps_host_alias_storage(storage)
 
 
+from contextlib import contextmanager
+
+
+class MPSGraph:
+    r"""Wraps a captured MPS graph for repeated replay.
+
+    Mirrors the interface of :class:`torch.cuda.CUDAGraph`.
+
+    Usage::
+
+        g = torch.mps.MPSGraph()
+
+        with torch.mps.graph(g):
+            out = model(x)          # capture pass — ops recorded, outputs valid
+
+        for batch_data in loader:
+            x.copy_(batch_data)     # update input in-place
+            g.replay()              # re-run captured ops in a single dispatch
+            results.append(out.cpu())
+
+    Constraints (identical to :class:`torch.cuda.CUDAGraph`):
+
+    * Tensor shapes must not change between capture and replays.
+    * Input data must be updated **in-place** via ``.copy_()`` before each replay.
+    * MPS profiling must be disabled during capture.
+    * Only ops routed through ``MPSStream::executeMPSGraph`` are captured.
+      Elementwise ops that use raw Metal encoders (``sigmoid``, ``exp``,
+      ``tanh``, ``layernorm``) are not captured and will execute eagerly
+      during replay.
+    """
+
+    def capture_begin(self) -> None:
+        """Begin recording MPS ops into this graph."""
+        torch._C._mps_graphCaptureBegin()
+
+    def capture_end(self) -> None:
+        """Stop recording and finalise the captured graph."""
+        torch._C._mps_graphCaptureEnd()
+
+    def replay(self) -> None:
+        """Re-encode all captured ops in a single ``dispatch_sync``.
+
+        Input tensors must have been updated in-place before calling this.
+        If no ops were captured (e.g. the model uses only non-capturable paths)
+        a warning is issued and the call is a no-op.
+        """
+        torch._C._mps_graphReplay()
+
+    def reset(self) -> None:
+        """Discard the captured graph so a new capture can be recorded."""
+        torch._C._mps_graphCaptureReset()
+
+
+@contextmanager
+def graph(mpsgraph: MPSGraph):
+    r"""Context manager that captures MPS ops into *mpsgraph* for later replay.
+
+    Usage::
+
+        g = torch.mps.MPSGraph()
+        with torch.mps.graph(g):
+            out = model(x)
+        g.replay()
+
+    See :class:`MPSGraph` for constraints.
+    """
+    mpsgraph.capture_begin()
+    try:
+        yield
+    finally:
+        mpsgraph.capture_end()
+
+
+@contextmanager
+def graph_capture():
+    r"""Context manager that records a sequence of MPS (MPSGraph) operations
+    for later replay via :func:`graph_replay`.
+
+    On entry the stream begins recording; every MPSGraph op executed inside
+    the block is encoded normally (outputs are valid) and its executable +
+    buffer bindings are saved.  On exit recording stops.
+
+    Subsequent calls to :func:`graph_replay` re-encode all saved ops in a
+    single ``dispatch_sync`` block, collapsing N per-op dispatches to one and
+    eliminating their CPU overhead.
+
+    Constraints (identical to ``torch.cuda.graph``):
+
+    * Tensor shapes must not change between the capture pass and replays.
+    * Input data must be updated **in-place** via ``.copy_()`` before each
+      replay — do **not** create new tensors or reassign variables.
+    * MPS profiling must be disabled during capture.
+    * Ops that go through raw Metal encoders (``torch.mps.synchronize``,
+      explicit copies, etc.) are executed eagerly and not captured.
+
+    Example::
+
+        model.eval()
+        x = torch.randn(batch, seq, d_model, device="mps")
+
+        with torch.mps.graph_capture():
+            out = model(x)          # runs once; ops recorded
+
+        for batch_data in loader:
+            x.copy_(batch_data)     # update input in-place
+            torch.mps.graph_replay()
+            results.append(out.cpu())
+    """
+    torch._C._mps_graphCaptureBegin()
+    try:
+        yield
+    finally:
+        torch._C._mps_graphCaptureEnd()
+
+
+def graph_replay() -> None:
+    r"""Replays the ops recorded by the most recent :func:`graph_capture` block.
+
+    All captured MPSGraph ops are encoded to the command buffer inside a single
+    ``dispatch_sync``, eliminating per-op dispatch overhead.  Input tensors must
+    have been updated in-place before calling this function.
+    """
+    torch._C._mps_graphReplay()
+
+
 from . import profiler
 from .event import Event
 
@@ -240,7 +365,11 @@ __all__ = [
     "load_metallib",
     "device_count",
     "get_rng_state",
+    "graph",
+    "graph_capture",
+    "graph_replay",
     "manual_seed",
+    "MPSGraph",
     "seed",
     "set_rng_state",
     "synchronize",

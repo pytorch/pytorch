@@ -2,9 +2,11 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include <ATen/mps/MPSDevice.h>
 #include <c10/core/DeviceGuard.h>
@@ -99,6 +101,27 @@ class TORCH_API MPSStream {
                        SyncType syncType = SyncType::NONE);
   void addCompletedHandler(MTLCommandBufferHandler block);
 
+  // Graph capture: record a sequence of MPSGraph ops on the first pass and
+  // replay them all in a single dispatch_sync on subsequent passes.
+  // Constraints (same as torch.cuda.graph):
+  //   - inputs must be updated in-place via .copy_() between replay calls
+  //   - tensor shapes and allocations must not change between replays
+  //   - profiling must be disabled during capture
+  void captureBegin();
+  void captureEnd();
+  void captureReset();
+  void replay();
+
+  // Returns true if a capture is currently in progress.
+  // _captureMode is std::atomic<bool> so this is safe to call from any thread.
+  bool captureMode() const {
+    return _captureMode.load(std::memory_order_acquire);
+  }
+
+  size_t capturedStepCount() const {
+    return _capturedSteps.size();
+  }
+
   /// Get the MPS device index that this stream is associated with.
   c10::DeviceIndex device_index() const {
     return _stream.device_index();
@@ -135,6 +158,25 @@ class TORCH_API MPSStream {
   // Populated lazily on first executeMPSGraph call per graph; never invalidated
   // because each MPSGraph* in MPSGraphCache is shape-specific.
   std::unordered_map<uintptr_t, void*> _graphExecutableCache;
+
+  // Graph capture state.
+  // _capturedSteps stores one entry per executeMPSGraph call recorded during
+  // a capture pass. inputsArray/resultsArray are retained ObjC arrays of
+  // MPSGraphTensorData* wrapping the MTLBuffers of the captured tensors.
+  // On replay those same buffers are re-bound — callers must update input
+  // data in-place (via .copy_()) between replay calls to supply new batches.
+  struct CapturedStep {
+    void* exe = nullptr; // MPSGraphExecutable*, borrowed from _graphExecutableCache
+#ifdef __OBJC__
+    NSArray<MPSGraphTensorData*>* inputsArray = nil;
+    NSArray<MPSGraphTensorData*>* resultsArray = nil;
+#else
+    void* inputsArray = nullptr;
+    void* resultsArray = nullptr;
+#endif
+  };
+  std::atomic<bool> _captureMode{false};
+  std::vector<CapturedStep> _capturedSteps;
 
   // use synchronize() to access any of these commit functions outside MPSStream
   void commit();

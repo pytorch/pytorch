@@ -40,6 +40,10 @@ MPSStream::~MPSStream() {
   for (auto& [key, val] : _graphExecutableCache) {
     [(__bridge MPSGraphExecutable*)val release];
   }
+  for (auto& step : _capturedSteps) {
+    [(__bridge NSArray*)step.inputsArray release];
+    [(__bridge NSArray*)step.resultsArray release];
+  }
   [_commandQueue release];
   _commandQueue = nil;
   [_executionDescriptor release];
@@ -271,6 +275,17 @@ void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDicti
                     resultsArray:resultsArray
              executionDescriptor:nil];
 
+      // If capture mode is active, record this step so replay() can re-encode
+      // everything in one dispatch_sync.  We retain the arrays here; capture
+      // owns one reference that is released in captureBegin() / ~MPSStream().
+      if (_captureMode) {
+        CapturedStep step;
+        step.exe = (__bridge void*)exe;
+        step.inputsArray = [inputsArray retain];
+        step.resultsArray = [resultsArray retain];
+        _capturedSteps.push_back(step);
+      }
+
       [inputsArray release];
       [resultsArray release];
     } else {
@@ -301,6 +316,60 @@ void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDicti
 
 id<MTLBuffer> MPSStream::getErrorBuffer() {
   return _errorBuffer;
+}
+
+void MPSStream::captureBegin() {
+  TORCH_CHECK(!_captureMode, "MPS graph capture already in progress");
+  // Release any steps from a previous capture.
+  dispatch_sync_with_rethrow(_serialQueue, ^() {
+    for (auto& step : _capturedSteps) {
+      [(__bridge NSArray*)step.inputsArray release];
+      [(__bridge NSArray*)step.resultsArray release];
+    }
+    _capturedSteps.clear();
+    _captureMode.store(true, std::memory_order_release);
+  });
+}
+
+void MPSStream::captureEnd() {
+  TORCH_CHECK(_captureMode, "captureEnd() called without a matching captureBegin()");
+  dispatch_sync_with_rethrow(_serialQueue, ^() {
+    _captureMode.store(false, std::memory_order_release);
+  });
+}
+
+void MPSStream::captureReset() {
+  dispatch_sync_with_rethrow(_serialQueue, ^() {
+    _captureMode.store(false, std::memory_order_release);
+    for (auto& step : _capturedSteps) {
+      [(__bridge NSArray*)step.inputsArray release];
+      [(__bridge NSArray*)step.resultsArray release];
+    }
+    _capturedSteps.clear();
+  });
+}
+
+void MPSStream::replay() {
+  if (_capturedSteps.empty()) {
+    TORCH_WARN("torch.mps.graph_replay() called with no captured steps. "
+               "Did the capture block contain any MPSGraph-routed ops? "
+               "Ops using raw Metal encoders (sigmoid, exp, tanh, layernorm) "
+               "are not captured.");
+    return;
+  }
+  dispatch_sync_with_rethrow(_serialQueue, ^() {
+    endKernelCoalescing();
+    for (auto& step : _capturedSteps) {
+      MPSGraphExecutable* exe = (__bridge MPSGraphExecutable*)step.exe;
+      NSArray<MPSGraphTensorData*>* ins = (__bridge NSArray*)step.inputsArray;
+      NSArray<MPSGraphTensorData*>* outs = (__bridge NSArray*)step.resultsArray;
+      [exe encodeToCommandBuffer:commandBuffer()
+                     inputsArray:ins
+                    resultsArray:outs
+             executionDescriptor:nil];
+    }
+    synchronize(SyncType::COMMIT_ADAPTIVE);
+  });
 }
 
 void MPSStream::checkLastError() {

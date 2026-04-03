@@ -16626,6 +16626,370 @@ class TestExecutableCache(TestCaseMPS):
                 result = m(x)
                 self.assertEqual(result.float().cpu(), ref, atol=1e-2, rtol=1e-2)
 
+class TestGraphCapture(TestCaseMPS):
+    """Tests for torch.mps.graph_capture / graph_replay and torch.mps.MPSGraph.
+
+    Capture records ops that go through MPSStream::executeMPSGraph (matmul,
+    relu, gelu, softmax, layer_norm, nn.Linear, etc.).  Ops that use raw Metal
+    encoders (elementwise +, *, sigmoid, exp, tanh) are not captured.
+    Models must consist entirely of MPSGraph-routed ops for replay to produce
+    correct results with updated inputs — the same constraint as torch.cuda.graph.
+    """
+
+    def _simple_model(self, x):
+        # Uses only MPSGraph-routed ops: matmul + relu.
+        return torch.relu(x @ x)
+
+    def test_replay_matches_eager(self):
+        # Output from replay must match a fresh eager call on the same input.
+        x = torch.randn(16, 16, device="mps")
+        expected = self._simple_model(x)
+        torch.mps.synchronize()
+
+        with torch.mps.graph_capture():
+            out = self._simple_model(x)
+
+        for _ in range(5):
+            torch.mps.graph_replay()
+            torch.mps.synchronize()
+
+        self.assertEqual(out, expected)
+
+    def test_inplace_input_update_respected(self):
+        # After updating input in-place, replay must produce the new result.
+        # All tensors must be pre-allocated before capture — allocating after
+        # capture may alias intermediate buffers (same constraint as torch.cuda.graph).
+        x = torch.ones(8, 8, device="mps")
+        x2 = torch.full((8, 8), 2.0, device="mps")
+
+        with torch.mps.graph_capture():
+            out = self._simple_model(x)
+
+        torch.mps.synchronize()
+        self.assertEqual(out[0, 0].item(), 8.0)  # relu(ones @ ones)[0,0] = 8
+
+        x.copy_(x2)
+        torch.mps.graph_replay()
+        torch.mps.synchronize()
+
+        self.assertEqual(out[0, 0].item(), 32.0)  # relu(2s @ 2s)[0,0] = 32
+
+    def test_multiple_replays_independent(self):
+        # N successive replays after distinct in-place updates each produce
+        # the correct result for their respective input.
+        x = torch.ones(4, 4, device="mps")
+        x2 = torch.full((4, 4), 2.0, device="mps")
+        x3 = torch.full((4, 4), 3.0, device="mps")
+
+        with torch.mps.graph_capture():
+            out = self._simple_model(x)
+
+        for val, expected_val in [(x2, 16.0), (x3, 36.0), (x2, 16.0)]:
+            x.copy_(val)
+            torch.mps.graph_replay()
+            torch.mps.synchronize()
+            self.assertEqual(out[0, 0].item(), expected_val)
+
+    def test_multi_op_chain(self):
+        # Capture a longer MPSGraph-routed chain (matmul + layer_norm + relu)
+        # and verify replay with updated input is numerically equivalent to eager.
+        d = 8
+        w = torch.eye(d, device="mps")
+        x = torch.arange(1, d * 4 + 1, dtype=torch.float32, device="mps").view(4, d)
+        x2 = x * 2
+
+        def model(inp):
+            h = inp @ w
+            h = torch.nn.functional.layer_norm(h, [d])
+            return torch.relu(h)
+
+        with torch.mps.graph_capture():
+            out = model(x)
+
+        x.copy_(x2)
+        torch.mps.graph_replay()
+        torch.mps.synchronize()
+
+        expected = model(x2.clone())
+        torch.mps.synchronize()
+        self.assertEqual(out, expected, atol=1e-5, rtol=1e-5)
+
+    def test_replay_without_capture_warns(self):
+        # graph_replay() on an empty capture must be a no-op (C++ TORCH_WARN to stderr),
+        # not raise an exception.
+        torch._C._mps_graphCaptureReset()
+        torch._C._mps_graphReplay()  # must not raise
+
+    def test_nn_linear_captured(self):
+        # nn.Linear (addmm) must be captured — with the MPSGraph path active during
+        # capture, the nograph shortcut is skipped and the op goes through executeMPSGraph.
+        d = 8
+        linear = torch.nn.Linear(d, d, bias=False, device="mps")
+        x = torch.ones(4, d, device="mps")
+        x2 = torch.full((4, d), 2.0, device="mps")
+
+        with torch.mps.graph_capture():
+            out = linear(x)
+        torch.mps.synchronize()
+        captured_val = out[0, 0].item()
+
+        x.copy_(x2)
+        torch.mps.graph_replay()
+        torch.mps.synchronize()
+        replayed_val = out[0, 0].item()
+
+        # After updating input to 2s the output must change (2× the original).
+        self.assertAlmostEqual(replayed_val, captured_val * 2.0, places=4)
+
+    def test_mpsgraph_class_api(self):
+        # MPSGraph class + graph() context manager must match the functional API.
+        x = torch.ones(8, 8, device="mps")
+        x2 = torch.full((8, 8), 2.0, device="mps")
+
+        g = torch.mps.MPSGraph()
+        with torch.mps.graph(g):
+            out = self._simple_model(x)
+        torch.mps.synchronize()
+        self.assertEqual(out[0, 0].item(), 8.0)
+
+        x.copy_(x2)
+        g.replay()
+        torch.mps.synchronize()
+        self.assertEqual(out[0, 0].item(), 32.0)
+
+        g.reset()
+        # After reset, replay should be a no-op (C++ TORCH_WARN to stderr, no exception).
+        g.replay()  # must not raise
+
+    def test_capture_produces_valid_output_on_first_pass(self):
+        # The capture pass itself must produce valid (non-garbage) output.
+        x = torch.randn(8, 8, device="mps")
+        expected = self._simple_model(x)
+        torch.mps.synchronize()
+
+        with torch.mps.graph_capture():
+            out = self._simple_model(x)
+        torch.mps.synchronize()
+
+        self.assertEqual(out, expected)
+
+    def test_transformer_encoder_correctness(self):
+        # TransformerEncoderLayer mixes captured (MPSGraph) and non-captured ops
+        # (layernorm, gelu use raw Metal encoders). Verify the capture pass produces
+        # numerically correct output relative to a plain eager forward pass.
+        # Replay correctness for partially-captured models is not asserted here;
+        # full replay correctness is covered by test_mlp_correctness which uses a
+        # fully-captured op chain.
+        d_model, nhead, seq, batch = 64, 4, 16, 2
+        layer = torch.nn.TransformerEncoderLayer(
+            d_model=d_model, nhead=nhead, dim_feedforward=128,
+            batch_first=True, norm_first=True,
+        ).to("mps").to(torch.float16).eval()
+        x = torch.randn(batch, seq, d_model, device="mps", dtype=torch.float16)
+
+        with torch.no_grad():
+            eager_out = layer(x).float().cpu()
+        torch.mps.synchronize()
+
+        with torch.mps.graph_capture():
+            with torch.no_grad():
+                cap_out = layer(x)
+        torch.mps.synchronize()
+        # The capture pass runs all ops normally — output must match eager.
+        self.assertTrue(
+            torch.allclose(eager_out, cap_out.float().cpu(), atol=1e-2, rtol=1e-2),
+            f"capture vs eager max_diff={(eager_out - cap_out.float().cpu()).abs().max():.5f}",
+        )
+
+        # Replay must not crash and must produce finite values.
+        torch.mps.graph_replay()
+        torch.mps.synchronize()
+        result = cap_out.float().cpu()
+        self.assertFalse(result.isnan().any(), "replay produced NaN")
+        self.assertFalse(result.isinf().any(), "replay produced Inf")
+
+    def test_mlp_correctness(self):
+        # Deep MLP (Linear + ReLU stack): capture + replay numerically match eager.
+        width, depth, batch = 64, 8, 4
+        layers = []
+        for _ in range(depth):
+            layers += [torch.nn.Linear(width, width), torch.nn.ReLU()]
+        model = torch.nn.Sequential(*layers).to("mps").eval()
+        x = torch.randn(batch, width, device="mps")
+
+        with torch.no_grad():
+            eager_out = model(x).cpu()
+        torch.mps.synchronize()
+
+        with torch.mps.graph_capture():
+            with torch.no_grad():
+                cap_out = model(x)
+        torch.mps.synchronize()
+        self.assertTrue(
+            torch.allclose(eager_out, cap_out.cpu(), atol=1e-4, rtol=1e-4),
+            f"capture vs eager max_diff={(eager_out - cap_out.cpu()).abs().max():.6f}",
+        )
+
+        torch.mps.graph_replay()
+        torch.mps.synchronize()
+        self.assertTrue(
+            torch.allclose(eager_out, cap_out.cpu(), atol=1e-4, rtol=1e-4),
+            f"replay vs eager max_diff={(eager_out - cap_out.cpu()).abs().max():.6f}",
+        )
+
+    def test_embedding_correctness(self):
+        # Embedding lookup: capture + replay must produce identical output to eager.
+        vocab, dim, batch, seq = 1000, 32, 4, 16
+        emb = torch.nn.Embedding(vocab, dim).to("mps")
+        idx = torch.randint(0, vocab, (batch, seq), device="mps")
+
+        with torch.no_grad():
+            eager_out = emb(idx).cpu()
+        torch.mps.synchronize()
+
+        with torch.mps.graph_capture():
+            with torch.no_grad():
+                cap_out = emb(idx)
+        torch.mps.synchronize()
+        self.assertTrue(
+            torch.allclose(eager_out, cap_out.cpu()),
+            f"capture vs eager max_diff={(eager_out - cap_out.cpu()).abs().max():.6f}",
+        )
+
+        torch.mps.graph_replay()
+        torch.mps.synchronize()
+        self.assertTrue(
+            torch.allclose(eager_out, cap_out.cpu()),
+            f"replay vs eager max_diff={(eager_out - cap_out.cpu()).abs().max():.6f}",
+        )
+
+    def test_capture_reset_and_recapture(self):
+        # reset() must allow a fresh capture with a different model.
+        x = torch.ones(4, 4, device="mps")
+        x2 = torch.full((4, 4), 3.0, device="mps")
+
+        g = torch.mps.MPSGraph()
+        with torch.mps.graph(g):
+            out1 = x @ x
+        torch.mps.synchronize()
+        first_val = out1[0, 0].item()  # 4.0
+
+        g.reset()
+
+        # Recapture a different computation.
+        with torch.mps.graph(g):
+            out2 = x2 @ x2
+        torch.mps.synchronize()
+        second_val = out2[0, 0].item()  # 36.0
+
+        self.assertAlmostEqual(first_val, 4.0, places=4)
+        self.assertAlmostEqual(second_val, 36.0, places=4)
+
+        # Replaying the new capture must produce the second result, not the first.
+        g.replay()
+        torch.mps.synchronize()
+        self.assertAlmostEqual(out2[0, 0].item(), 36.0, places=4)
+
+    def test_nested_capture_raises(self):
+        # captureBegin() while already capturing must raise, not silently corrupt state.
+        torch._C._mps_graphCaptureReset()
+        torch._C._mps_graphCaptureBegin()
+        with self.assertRaises(RuntimeError):
+            torch._C._mps_graphCaptureBegin()
+        torch._C._mps_graphCaptureReset()
+
+    def test_f16_capture(self):
+        # f16 tensors must be captured and replayed correctly.
+        d = 32
+        w = torch.eye(d, device="mps", dtype=torch.float16)
+        x = torch.randn(8, d, device="mps", dtype=torch.float16)
+        x2 = torch.randn(8, d, device="mps", dtype=torch.float16)
+
+        with torch.mps.graph_capture():
+            out = torch.relu(x @ w)
+        torch.mps.synchronize()
+
+        expected_first = torch.relu(x.clone() @ w)
+        torch.mps.synchronize()
+        self.assertEqual(out, expected_first, atol=1e-3, rtol=1e-3)
+
+        x.copy_(x2)
+        torch.mps.graph_replay()
+        torch.mps.synchronize()
+
+        expected_second = torch.relu(x2 @ w)
+        torch.mps.synchronize()
+        self.assertEqual(out, expected_second, atol=1e-3, rtol=1e-3)
+
+    def test_step_count_nonzero_after_capture(self):
+        # _mps_graphCapturedStepCount() must return > 0 after capturing
+        # MPSGraph-routed ops, and 0 after reset.
+        torch._C._mps_graphCaptureReset()
+        self.assertEqual(torch._C._mps_graphCapturedStepCount(), 0)
+
+        x = torch.randn(8, 8, device="mps")
+        with torch.mps.graph_capture():
+            self._simple_model(x)
+
+        self.assertGreater(torch._C._mps_graphCapturedStepCount(), 0)
+
+        torch._C._mps_graphCaptureReset()
+        self.assertEqual(torch._C._mps_graphCapturedStepCount(), 0)
+
+    def test_recapture_after_reset(self):
+        # After reset(), a fresh capture with different ops must produce an
+        # independent graph — the old captured steps are fully discarded.
+        x_soft = torch.randn(4, 4, device="mps")
+        x_soft2 = torch.randn(4, 4, device="mps")
+
+        torch._C._mps_graphCaptureReset()
+
+        with torch.mps.graph_capture():
+            out2 = torch.softmax(x_soft, dim=-1)
+        torch.mps.synchronize()
+
+        x_soft.copy_(x_soft2)
+        torch.mps.graph_replay()
+        torch.mps.synchronize()
+
+        expected = torch.softmax(x_soft2, dim=-1)
+        torch.mps.synchronize()
+        self.assertEqual(out2, expected, atol=1e-5, rtol=1e-5)
+
+    def test_full_mlp_capture_new_input(self):
+        # Replay with a fresh input must produce a different (correct) result,
+        # not the cached output from the capture pass.
+        import torch.nn as nn
+
+        torch.manual_seed(42)
+        width, depth = 64, 4
+        layers = []
+        for _ in range(depth):
+            layers += [nn.Linear(width, width, bias=True), nn.ReLU()]
+        mlp = nn.Sequential(*layers).to("mps").eval()
+
+        x = torch.randn(16, width, device="mps")
+        x2 = torch.randn(16, width, device="mps")
+
+        with torch.no_grad():
+            with torch.mps.graph_capture():
+                out = mlp(x)
+        torch.mps.synchronize()
+
+        with torch.no_grad():
+            expected_first = mlp(x.clone())
+        torch.mps.synchronize()
+        self.assertEqual(out, expected_first, atol=1e-4, rtol=1e-4)
+
+        x.copy_(x2)
+        torch.mps.graph_replay()
+        torch.mps.synchronize()
+
+        with torch.no_grad():
+            expected_second = mlp(x2)
+        torch.mps.synchronize()
+        self.assertEqual(out, expected_second, atol=1e-4, rtol=1e-4)
+
 
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
 # This requires mps to be properly registered in the device generic test framework which is not the

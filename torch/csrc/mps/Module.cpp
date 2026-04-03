@@ -546,6 +546,21 @@ void initModule(PyObject* module) {
     at::mps::getMPSProfiler().startCapture(fileName);
   });
   m.def("_mps_stopCapture", []() { at::mps::getMPSProfiler().stopCapture(); });
+  m.def("_mps_graphCaptureBegin", []() {
+    at::mps::getDefaultMPSStream()->captureBegin();
+  });
+  m.def("_mps_graphCaptureEnd", []() {
+    at::mps::getDefaultMPSStream()->captureEnd();
+  });
+  m.def("_mps_graphCaptureReset", []() {
+    at::mps::getDefaultMPSStream()->captureReset();
+  });
+  m.def("_mps_graphCapturedStepCount", []() {
+    return at::mps::getDefaultMPSStream()->capturedStepCount();
+  });
+  m.def("_mps_graphReplay", []() {
+    at::mps::getDefaultMPSStream()->replay();
+  });
   m.def("_mps_get_name", []() {
     return at::mps::MPSDevice::getInstance()->getName();
   });
