@@ -1051,6 +1051,48 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertIn("in g", str(ctx.exception))
         self.assertIn('raise Exception("Invalid")', str(ctx.exception))
 
+    def test_str_repr_exception_no_args(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            try:
+                raise ValueError
+            except ValueError as e:
+                return t.sin(), str(e), repr(e)
+
+        t = torch.randn(2)
+        y, s, r = fn(t)
+        self.assertEqual(y, t.sin())
+        self.assertEqual(s, "")
+        self.assertEqual(r, "ValueError()")
+
+    def test_str_repr_exception_single_arg(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            try:
+                raise ValueError("test error")
+            except ValueError as e:
+                return t.sin(), str(e), repr(e)
+
+        t = torch.randn(2)
+        y, s, r = fn(t)
+        self.assertEqual(y, t.sin())
+        self.assertEqual(s, "test error")
+        self.assertEqual(r, "ValueError('test error')")
+
+    def test_str_repr_exception_multi_args(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            try:
+                raise ValueError("hello", 42)
+            except ValueError as e:
+                return t.sin(), str(e), repr(e)
+
+        t = torch.randn(2)
+        y, s, r = fn(t)
+        self.assertEqual(y, t.sin())
+        self.assertEqual(s, str(("hello", 42)))
+        self.assertEqual(r, "ValueError('hello', 42)")
+
     def test_frozen_dataclass_setattr_raises(self):
         @dataclasses.dataclass(frozen=True)
         class TestDataClass:

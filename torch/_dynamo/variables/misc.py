@@ -686,7 +686,9 @@ class ExceptionVariable(VariableTracker):
             return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
-        if name == "__context__":
+        if name == "__class__":
+            return VariableTracker.build(tx, self.exc_type)
+        elif name == "__context__":
             return self.__context__
         elif name == "__cause__":
             return self.__cause__
@@ -696,7 +698,9 @@ class ExceptionVariable(VariableTracker):
             return self.__traceback__
         elif name == "args":
             return VariableTracker.build(
-                tx, self.args, source=self.source and AttrSource(self.source, "args")
+                tx,
+                tuple(self.args),
+                source=self.source and AttrSource(self.source, "args"),
             )
         return super().var_getattr(tx, name)
 
