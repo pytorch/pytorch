@@ -401,8 +401,8 @@ def cudagraph_mark_step_begin():
 
 
 def wrap_numpy(fn):
-    r"""Decorator that turns a function from ``np.ndarray``s to ``np.ndarray``s into a function
-    from ``torch.Tensor``s to ``torch.Tensor``s.
+    r"""Decorator that turns a function from ``np.ndarray``\ s to ``np.ndarray``\ s into a function
+    from ``torch.Tensor``\ s to ``torch.Tensor``\ s.
 
     It is designed to be used with :func:`torch.compile` with ``fullgraph=True``. It allows to
     compile a NumPy function as if it were a PyTorch function. This allows you to run NumPy code
