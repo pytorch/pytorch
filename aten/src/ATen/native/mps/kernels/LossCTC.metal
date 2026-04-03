@@ -1,7 +1,7 @@
 // Referenced in https://github.com/pytorch/pytorch/issues/153976
 // Metal version:
 // Copyright (c) 2025 André de Souza Pinto
-// baed on CUDA version
+// based on CUDA version
 // Copyright (c) 2018 MathInf GmbH, Thomas Viehmann
 // Licensed under the BSD-3-Clause license
 // This is the GPU implementation of the Connectionist Temporal Loss.
