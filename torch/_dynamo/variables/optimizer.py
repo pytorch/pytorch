@@ -44,9 +44,9 @@ from ..utils import GLOBAL_KEY_PREFIX
 from .base import VariableTracker
 from .constant import CONSTANT_VARIABLE_TRUE, ConstantVariable
 from .dicts import ConstDictVariable
+from .hashable import HashableTracker
 from .lists import ListVariable
 from .misc import GetAttrVariable
-from .hashable import HashableTracker
 from .user_defined import UserDefinedObjectVariable
 
 

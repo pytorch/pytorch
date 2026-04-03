@@ -101,6 +101,7 @@ from .dicts import (
     DictKeysVariable,
     DictViewVariable,
 )
+from .hashable import is_hashable
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -111,7 +112,6 @@ from .lists import (
     TupleVariable,
 )
 from .misc import NullVariable
-from .hashable import is_hashable
 from .sets import FrozensetVariable, OrderedSetClassVariable, SetVariable
 from .tensor import (
     FakeItemVariable,

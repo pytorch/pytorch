@@ -20,7 +20,6 @@ import operator
 from collections.abc import Iterable, Sequence
 from typing import Any, Literal, TYPE_CHECKING
 
-import torch
 from torch.utils._ordered_set import OrderedSet
 
 from .. import polyfills, variables
@@ -28,11 +27,7 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, is_constant_source, is_from_local_source
-from ..utils import (
-    cmp_name_to_op_mapping,
-    istype,
-    raise_args_mismatch,
-)
+from ..utils import cmp_name_to_op_mapping, istype, raise_args_mismatch
 from .base import ValueMutationNew, VariableTracker
 from .constant import CONSTANT_VARIABLE_FALSE, CONSTANT_VARIABLE_NONE, ConstantVariable
 from .hashable import HashableTracker, is_hashable, raise_unhashable
@@ -42,9 +37,6 @@ if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
     from torch._dynamo.variables.builtin import BuiltinVariable
-
-
-
 
 
 # [Adding a new supported class within the keys of SetVariable]
