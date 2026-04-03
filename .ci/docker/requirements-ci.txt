@@ -344,7 +344,7 @@ sympy==1.13.3
 #Pinned versions:
 #test that import:
 
-onnx==1.20.0
+onnx==1.21.0
 #Description: Required by the torch.onnx exporter
 #Pinned versions:
 #test that import:
