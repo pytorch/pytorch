@@ -1,3 +1,6 @@
+# See also: https://github.com/pytorch/pytorch/issues/171905
+# for discussion on migrating to TypeAliasType (PEP 613)
+
 from collections.abc import Callable
 from typing import TypeVar
 
