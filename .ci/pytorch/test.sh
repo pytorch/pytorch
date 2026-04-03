@@ -45,6 +45,11 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   fi
 fi
 
+# Remove onnxruntime if present to avoid interference with non-ONNX tests
+if [[ "$TEST_CONFIG" != "onnx" ]]; then
+  pip uninstall -y onnxruntime 2>/dev/null || true
+fi
+
 echo "Environment variables:"
 env
 
@@ -149,7 +154,7 @@ export LANG=C.UTF-8
 
 PR_NUMBER=${PR_NUMBER:-${CIRCLE_PR_NUMBER:-}}
 
-if [[ -d "${HF_CACHE}" ]]; then
+if [[ -d "${HF_CACHE}" && "$TEST_CONFIG" != "onnx" ]]; then
   export HF_HOME="${HF_CACHE}"
 fi
 
@@ -619,7 +624,9 @@ test_inductor_cpp_wrapper_shard() {
     -k 'take' \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
-  TORCHINDUCTOR_AUTOTUNE_AT_COMPILE_TIME=0 python test/run_test.py \
+  # Keep testing TORCHINDUCTOR_AUTOTUNE_AT_COMPILE_TIME=1 for the near future.
+  # Will drop this after AOTInductor also switches to lazy Triton compilation.
+  TORCHINDUCTOR_AUTOTUNE_AT_COMPILE_TIME=1 python test/run_test.py \
     --include inductor/test_torchinductor inductor/test_triton_kernels inductor/test_max_autotune \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
@@ -1009,6 +1016,147 @@ test_inductor_torchbench_smoketest_perf() {
       --actual "$TEST_REPORTS_DIR/inductor_warm_start_smoketest_$test.csv" \
       --expected "benchmarks/dynamo/ci_expected_accuracy/${MAYBE_ROCM}inductor_huggingface_training.csv"
   done
+}
+
+test_unbacked_parity_smoketest() {
+  # Check that unbacked batch-only has performance parity with backed batch-only
+  # Fails if any model regresses >THRESHOLD% consistently across 3 retries
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+
+  local THRESHOLD=1.0
+  local MAX_RETRIES=3
+  local MODELS="MobileBertForMaskedLM|DistilBertForMaskedLM|DistillGPT2|T5Small"
+
+  # Issue 6: Write per-run output files for post-failure debugging
+  run_comparison() {
+    local run_num=$1
+    local output_file="$TEST_REPORTS_DIR/unbacked_parity_results_run${run_num}.txt"
+    python benchmarks/dynamo/huggingface.py \
+      --compare-backed-unbacked \
+      --performance --inference --inductor --device cuda \
+      --filter "$MODELS" 2>&1 | tee "$output_file"
+  }
+
+  check_regressions() {
+    local run_num=$1
+    local output_file="$TEST_REPORTS_DIR/unbacked_parity_results_run${run_num}.txt"
+    # Parse the comparison table and check for regressions > threshold
+    # Returns 0 if regressions found, 1 if no regressions
+    local regressions=()
+    while IFS= read -r line; do
+      # Issue 3: Broadened regex to match model names with hyphens, slashes, dots
+      # Match lines like: "  ModelName                      10.000      10.500    +5.0%"
+      if [[ "$line" =~ ^[[:space:]]+([A-Za-z0-9_./-]+)[[:space:]]+([0-9.]+)[[:space:]]+([0-9.]+)[[:space:]]+\+([0-9.]+)% ]]; then
+        local model="${BASH_REMATCH[1]}"
+        local diff="${BASH_REMATCH[4]}"
+        # Nit: Use awk instead of bc -l to avoid dependency on bc
+        if awk "BEGIN{exit !($diff > $THRESHOLD)}"; then
+          regressions+=("$model:+${diff}%")
+        fi
+      fi
+    done < "$output_file"
+
+    if [[ ${#regressions[@]} -gt 0 ]]; then
+      echo "Regressions found: ${regressions[*]}"
+      return 0
+    fi
+    return 1
+  }
+
+  check_failures() {
+    local run_num=$1
+    local output_file="$TEST_REPORTS_DIR/unbacked_parity_results_run${run_num}.txt"
+    # Issue 2: Check for any model failure — not just paired failures.
+    # Specifically flags when unbacked fails but backed succeeds (regression signal).
+    # Returns 0 if failures found, 1 if no failures
+    local current_model=""
+    local backed_failed=false
+    local unbacked_failed=false
+    local both_failures=()
+    local unbacked_only_failures=()
+
+    # Append a sentinel header so the loop naturally evaluates the last real model
+    while IFS= read -r line; do
+      if [[ "$line" =~ ^---[[:space:]]+([A-Za-z0-9_./-]+)[[:space:]]+--- ]]; then
+        if [[ -n "$current_model" ]]; then
+          if $backed_failed && $unbacked_failed; then
+            both_failures+=("$current_model")
+          elif $unbacked_failed && ! $backed_failed; then
+            unbacked_only_failures+=("$current_model")
+          fi
+        fi
+        current_model="${BASH_REMATCH[1]}"
+        backed_failed=false
+        unbacked_failed=false
+      elif [[ "$line" =~ backed.*FAILED|backed.*TIMEOUT|backed.*ERROR ]]; then
+        backed_failed=true
+      elif [[ "$line" =~ unbacked.*FAILED|unbacked.*TIMEOUT|unbacked.*ERROR ]]; then
+        unbacked_failed=true
+      fi
+    done < <(cat "$output_file"; echo "--- END ---")
+
+    local has_failures=false
+    if [[ ${#both_failures[@]} -gt 0 ]]; then
+      echo "❌ FAILURES DETECTED: Both backed and unbacked failed for: ${both_failures[*]}"
+      has_failures=true
+    fi
+    if [[ ${#unbacked_only_failures[@]} -gt 0 ]]; then
+      echo "❌ FAILURES DETECTED: Unbacked failed (but backed succeeded) for: ${unbacked_only_failures[*]}"
+      has_failures=true
+    fi
+
+    if $has_failures; then
+      return 0
+    fi
+    return 1
+  }
+
+  # Run initial comparison
+  echo "=== Run 1/$MAX_RETRIES ==="
+  run_comparison 1
+
+  # Check for failures first
+  if check_failures 1; then
+    echo "❌ Test failed: Models failed to run (see above for details)"
+    exit 1
+  fi
+
+  # Check for regressions
+  if ! check_regressions 1; then
+    echo "✅ PASSED: No regressions above ${THRESHOLD}% threshold"
+    exit 0
+  fi
+
+  # Regression detected - retry to confirm
+  local regression_count=1
+  for ((retry=2; retry<=MAX_RETRIES; retry++)); do
+    echo ""
+    echo "=== Retry $retry/$MAX_RETRIES (potential regression detected) ==="
+    run_comparison "$retry"
+
+    # Issue 4: Also check for failures on retries (e.g., intermittent OOM)
+    if check_failures "$retry"; then
+      echo "❌ Test failed: Models failed on retry $retry (see above for details)"
+      exit 1
+    fi
+
+    if check_regressions "$retry"; then
+      ((regression_count++))
+    fi
+  done
+
+  # Check if regression was consistent (majority of runs)
+  local required=$((MAX_RETRIES / 2 + 1))
+  if [[ $regression_count -ge $required ]]; then
+    echo ""
+    echo "❌ REGRESSION CONFIRMED: Detected in $regression_count/$MAX_RETRIES runs (threshold: ${THRESHOLD}%)"
+    exit 1
+  else
+    echo ""
+    echo "✅ PASSED: Regressions were not consistent ($regression_count/$MAX_RETRIES runs, needed $required)"
+    exit 0
+  fi
 }
 
 test_inductor_set_cpu_affinity(){
@@ -1906,7 +2054,10 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-baze
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
-if [[ "${TEST_CONFIG}" == *numpy_2* ]]; then
+if [[ "${TEST_CONFIG}" == "onnx" ]]; then
+  install_torchvision
+  "$(dirname "${BASH_SOURCE[0]}")/../../scripts/onnx/test.sh"
+elif [[ "${TEST_CONFIG}" == *numpy_2* ]]; then
   # Install numpy-2.0.2 and compatible scipy & numba versions
   # Force re-install of pandas to avoid error where pandas checks numpy version from initial install and fails upon import
   TMP_PANDAS_VERSION=$(python -c "import pandas; print(pandas.__version__)" 2>/dev/null)
@@ -1982,7 +2133,11 @@ elif [[ "${TEST_CONFIG}" == *aoti_cross_compile_for_windows* ]]; then
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   install_torchvision
   id=$((SHARD_NUMBER-1))
-  test_dynamo_benchmark huggingface "$id"
+  if [[ "${TEST_CONFIG}" == *unbacked_parity* ]]; then
+    test_unbacked_parity_smoketest
+  else
+    test_dynamo_benchmark huggingface "$id"
+  fi
 elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   install_torchvision
   id=$((SHARD_NUMBER-1))
