@@ -2625,7 +2625,8 @@ class TestMaxAutotune(TestCase):
         """
         ROCm regression test for addmm autotune input wiring.
         A 1D bias is required for hipBLASLt bias-fused addmm kernels; expanded 2D
-        bias disables that fused path.
+        bias disables that fused path. Exercise the real bias_addmm heuristic
+        so regressions in the runtime path are caught as part of this test.
         """
         bias_input_ranks: dict[str, set[int]] = {"addmm": set(), "bias_addmm": set()}
 
@@ -2645,26 +2646,11 @@ class TestMaxAutotune(TestCase):
             mat1 = torch.randn(32, 128, device=GPU_TYPE)
             mat2 = torch.randn(128, 64, device=GPU_TYPE)
 
-            from torch._inductor.template_heuristics.aten import (
-                ATenAddMMConfigHeuristics,
+            compiled_fn = torch.compile(
+                lambda b, x, w: torch.addmm(b, x, w),
+                dynamic=False,
             )
-
-            def allow_bias_addmm_configs(self, kernel_inputs, op_name):
-                yield from ATenAddMMConfigHeuristics._get_template_configs_impl(
-                    self, kernel_inputs, op_name
-                )
-
-            # Relax bias_addmm heuristics here so this test can assert 1D vs 2D bias wiring.
-            with mock.patch(
-                "torch._inductor.template_heuristics.aten.ATenBiasAddMMConfigHeuristics._get_template_configs_impl",
-                autospec=True,
-                side_effect=allow_bias_addmm_configs,
-            ):
-                compiled_fn = torch.compile(
-                    lambda b, x, w: torch.addmm(b, x, w),
-                    dynamic=False,
-                )
-                _ = compiled_fn(bias, mat1, mat2)
+            _ = compiled_fn(bias, mat1, mat2)
 
             self.assertTrue(
                 bias_input_ranks["addmm"], "Expected ATen addmm choice to be generated"
