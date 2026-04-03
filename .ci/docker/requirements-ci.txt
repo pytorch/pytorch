@@ -416,5 +416,5 @@ tqdm>=4.66.0
 #Description: progress bar library required for dynamo benchmarks
 #test that import: benchmarks/dynamo/*
 
-aiohttp==3.13.3
+aiohttp==3.13.4
 #Description: required for torch.distributed.debug

@@ -394,17 +394,7 @@ class BaseUserFunctionVariable(VariableTracker):
 
     def get_dict_vt(self, tx: "InstructionTranslator") -> "DunderDictVariable":
         if self.dict_vt is None:
-            dict_proxy: dict[str, VariableTracker] = {}
-
-            if not istype(self, NestedUserFunctionVariable):
-                fn = self.get_function()
-                dict_proxy = {
-                    name: VariableTracker.build(
-                        tx, value, source=self.source and AttrSource(self.source, name)
-                    )
-                    for name, value in fn.__dict__.items()
-                }
-            self.dict_vt = variables.DunderDictVariable.create(tx, self, dict_proxy)
+            self.dict_vt = variables.DunderDictVariable.create(tx, self)
         return self.dict_vt
 
     def call_method(
@@ -1291,7 +1281,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # is propagated to the parent frame.
             try:
                 self._setup_exception(
-                    tx, variables.ExceptionVariable(GeneratorExit, ())
+                    tx, variables.ExceptionVariable(GeneratorExit, [])
                 )
                 # There's an extra block on Python 3.12+ to handle StopIteration
                 # see: https://github.com/python/cpython/blob/8f93dd8a8f237b277abad20d566df90c5cbd7f1e/Objects/genobject.c#L394-L397
@@ -1418,7 +1408,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             exc_type = type("__InternalThrowException", (Exception,), {})
 
             try:
-                self._setup_exception(tx, variables.ExceptionVariable(exc_type, ()))
+                self._setup_exception(tx, variables.ExceptionVariable(exc_type, []))
                 self.next_variable(tx)
             except get_dynamo_observed_exception(exc_type):
                 # We should get back the exception raised before.
@@ -1521,6 +1511,9 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
             inline_tracer,  # type: ignore[arg-type]
             source=self.source,
         )
+
+    def get_real_python_backed_value(self) -> object:
+        return self.vt.get_real_python_backed_value()
 
 
 class FunctionDecoratedByContextlibContextManagerVariable(
@@ -1672,6 +1665,9 @@ class UserMethodVariable(UserFunctionVariable):
             # variable tracker.
             return VariableTracker.build(tx, self.fn, self.source_fn)  # type: ignore[arg-type]
         return super().var_getattr(tx, name)
+
+    def get_real_python_backed_value(self) -> Any:
+        return self.fn
 
 
 class WrappedUserMethodVariable(UserMethodVariable):
@@ -2445,24 +2441,17 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
                     dynamo_logger.debug(user_stack_trace)
 
         all_args = self.self_args() + list(args)
-        # Inner torch.compile wrapper: disable nested graph breaks to
-        # preserve the inner compile's semantics (e.g. fullgraph=True).
-        # Graph breaks inside the inner function should raise Unsupported
-        # so they're handled by the outer frame, not as nested breaks.
-        polyfill = (
-            polyfills.getattr_and_trace_no_nested_graph_breaks
-            if self.attr_to_trace == "_torchdynamo_inline"
-            and getattr(self.wrapper_obj, "_is_torch_compile", False)
-            else polyfills.getattr_and_trace
-        )
         return VariableTracker.build(
             tx,
-            polyfill,  # type: ignore[arg-type]
+            polyfills.getattr_and_trace,  # type: ignore[arg-type]
         ).call_function(
             tx,
             [self, VariableTracker.build(tx, self.attr_to_trace), *all_args],
             kwargs,
         )
+
+    def get_real_python_backed_value(self) -> object:
+        return getattr(self.wrapper_obj, self.attr_to_trace)
 
 
 class WrapperUserMethodVariable(WrapperUserFunctionVariable):
@@ -2700,7 +2689,7 @@ class CollectionsNamedTupleFunction(UserFunctionVariable):
                 raise_observed_exception(
                     type(exc),
                     tx,
-                    args=[VariableTracker.build(tx, a) for a in exc.args],
+                    args=list(exc.args),
                 )
             return variables.UserDefinedClassVariable(
                 value,
@@ -3127,7 +3116,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
             kernel=variable.kernel,
             kernel_idx=variable.kernel_idx,
             grid=args[0],
-            kernel_source=variable.source,
+            kernel_source=variable.kernel_source,
         )
 
     def call_HOP(
@@ -3212,12 +3201,12 @@ class TritonKernelVariable(VariableTracker):
     grid: "TritonGridType"
     kernel: "TritonKernelType"
     kernel_idx: int | None
-    kernel_source: "AttrSource"
+    kernel_source: Source | None
 
     def __init__(
         self, kernel: Any, kernel_idx: int | None, grid: Any, **kwargs: Any
     ) -> None:
-        self.kernel_source = kwargs.pop("kernel_source", None)
+        self.kernel_source = kwargs.pop("kernel_source", kwargs.get("source"))
         super().__init__(**kwargs)
         dynamo_triton_hopifier_singleton.init_variable(self, kernel, kernel_idx, grid)
 

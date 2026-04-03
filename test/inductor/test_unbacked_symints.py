@@ -825,6 +825,36 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_slice_unbacked_bindings_with_later_constraint(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/166460
+        # When slicing with an unbacked symint end index (e.g. x[:total] where
+        # total = sum of data-dependent values), dynamo may allocate a fresh
+        # unbacked symbol for the output size because it can't prove bounds at
+        # trace time. Later operations (e.g. new_zeros with padding) may
+        # establish constraints that make the bounds provable at inductor time.
+        # Inductor must still define the unbacked symbol even when taking the
+        # efficient SliceView path.
+        def fn(x, sizes):
+            sizes_list = sizes.tolist()
+            total = sum(sizes_list)
+            num_padding = x.shape[0] - total
+            sliced = x[:total]
+            splits = torch.split(sliced, sizes_list, dim=0)
+            out = torch.cat([s * 2 for s in splits], dim=0)
+            out = torch.vstack((out, out.new_zeros((num_padding, out.shape[-1]))))
+            return out
+
+        example_inputs = (
+            torch.randn(64, 16, device=device, dtype=torch.bfloat16),
+            torch.tensor([8, 8], device=device, dtype=torch.int64),
+        )
+
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
 
 instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)
 

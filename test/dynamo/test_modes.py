@@ -160,12 +160,10 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         super().tearDownClass()
 
     def setUp(self):
-        super().setUp()
         torch.set_default_device(None)
         torch._dynamo.reset()
 
     def tearDown(self):
-        super().tearDown()
         torch.set_default_device(None)
         torch._dynamo.reset()
 
@@ -801,7 +799,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
             with self.assertRaisesRegex(
                 torch._dynamo.exc.Unsupported,
-                "raised exception HopDetectionError([ConstantVariable(str: 'test')])",
+                "raised exception HopDetectionError\\('test'\\)",
             ):
                 # This runs in fullgraph already
                 with TestModeRaises():
@@ -823,7 +821,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         with torch.device(GPU_TYPE):
             with self.assertRaisesRegex(
                 torch._dynamo.exc.Unsupported,
-                "raised exception HopDetectionError([ConstantVariable(str: 'test')])",
+                "raised exception HopDetectionError\\('test'\\)",
             ):
                 with TestModeRaises():
                     flex_attention_eager(

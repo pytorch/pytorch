@@ -989,8 +989,8 @@ with torch.cuda._DeviceGuard(0):
     with torch.cuda.stream(stream1):
         buf0 = empty_strided_cuda((1024, ), (1, ), torch.float32)
         buf1 = buf0; del buf0
-        stream0 = get_raw_stream(0)
-        triton_kernel.run(buf1, arg0_1, 1024, stream=stream0)
+        raw_stream = get_raw_stream(0)
+        triton_kernel.run(buf1, arg0_1, 1024, stream=raw_stream)
     return (buf1, )""",
         )
 
@@ -1167,7 +1167,7 @@ with torch.cuda._DeviceGuard(0):
         torch.ops.streams.record_event.default(4, 1)
     with torch.cuda.stream(stream3):
         torch.ops.streams.wait_event.default(4, 2)
-        buf6 = buf0; del buf0
+        buf6 = empty_strided_cuda((32, 32), (32, 1), torch.float32)
         extern_kernels.mm(buf3, arg3_1, out=buf6)
     return (buf6, )""",
         )
@@ -1264,9 +1264,9 @@ with torch.cuda._DeviceGuard(0):
     with torch.cuda.stream(default_stream):
         torch.ops.streams.wait_event.default(2, 4)
         torch.ops.streams.wait_event.default(3, 4)
-        buf6 = buf0; del buf0
+        buf6 = empty_strided_cuda((32, 32), (32, 1), torch.float32)
         stream0 = get_raw_stream(0)
-        triton_kernel.run(buf6, buf2, 1024, stream=stream0)
+        triton_kernel.run(buf0, buf2, buf6, 1024, stream=stream0)
     return (buf6, )""",  # noqa: B950
         )
 
@@ -1278,7 +1278,7 @@ class TestStreamOrderingStress(InductorTestCase):
     matmuls so there is real GPU work, and repeats many iterations so
     that race conditions (if ordering is wrong) surface reliably."""
 
-    N = 512  # matrix size — big enough for real GPU work
+    N = 4096  # matrix size — big enough for real GPU work
     ITERS = 20  # repetitions per test
 
     def _check_compiled_matches_eager(self, fn, *args):
@@ -1287,6 +1287,9 @@ class TestStreamOrderingStress(InductorTestCase):
         for _ in range(self.ITERS):
             expected = fn(*args)
             actual = compiled_fn(*args)
+            # Compiled code may not codegen stream.synchronize() yet, so
+            # synchronize the device to ensure all stream work is visible.
+            torch.cuda.synchronize()
             if not isinstance(expected, (tuple, list)):
                 expected, actual = [expected], [actual]
             for e, a in zip(expected, actual):
@@ -1307,9 +1310,6 @@ class TestStreamOrderingStress(InductorTestCase):
     #    Without the event.wait() the consumer would launch immediately
     #    and read stale memory because the producer chain hasn't finished.
     # ------------------------------------------------------------------
-    @unittest.skip(
-        "Pre-existing cross-stream buffer reuse bug — needs record_stream support"
-    )
     def test_race_producer_consumer(self):
         N = self.N
 
@@ -1370,9 +1370,6 @@ class TestStreamOrderingStress(InductorTestCase):
     # 3. Race: fan-out where the producer is slow.
     #    All three consumers depend on the producer finishing.
     # ------------------------------------------------------------------
-    @unittest.skip(
-        "Pre-existing cross-stream buffer reuse bug — needs record_stream support"
-    )
     def test_race_fan_out(self):
         N = self.N
 
@@ -1501,9 +1498,6 @@ class TestStreamOrderingStress(InductorTestCase):
     # ------------------------------------------------------------------
     # 6. Race: back-to-back sync, both directions carry heavy work
     # ------------------------------------------------------------------
-    @unittest.skip(
-        "Pre-existing cross-stream buffer reuse bug — needs record_stream support"
-    )
     def test_race_back_to_back(self):
         N = self.N
 
@@ -1525,6 +1519,34 @@ class TestStreamOrderingStress(InductorTestCase):
 
             s.synchronize()
             return c
+
+        x = torch.randn(N, N, device="cuda")
+        w = torch.eye(N, device="cuda") * 0.9
+        self._check_compiled_matches_eager(fn, x, w)
+
+    # ------------------------------------------------------------------
+    # 7. Race: triton kernel on user stream.
+    #    Without the triton stream fix the kernel launches on the default
+    #    stream and reads stale/in-progress data from the user stream.
+    # ------------------------------------------------------------------
+    def test_race_triton_on_user_stream(self):
+        N = self.N
+
+        def fn(x, w):
+            s = torch.cuda.Stream()
+            e = torch.cuda.Event()
+
+            with torch.cuda.stream(s):
+                # Heavy matmul chain produces data on user stream
+                a = TestStreamOrderingStress._heavy_matmul_chain(x, w)
+                # Triton pointwise on the same user stream — without fix
+                # this launches on the default stream
+                b = torch.relu(a)
+                e.record(s)
+
+            e.wait()
+            s.synchronize()
+            return b
 
         x = torch.randn(N, N, device="cuda")
         w = torch.eye(N, device="cuda") * 0.9

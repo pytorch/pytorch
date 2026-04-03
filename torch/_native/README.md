@@ -173,9 +173,64 @@ register_op_override(
     implementation_fn: _OpOverrideFn,
     *,
     allow_multiple_override: bool = False,
-    unconditional_override: bool = False,
-) -> None
+    unconditional_override: bool = False,) -> None
 ```
-Register a given implementation to a library - `lib_symbol = "aten"` for most cases, `op_symbol` refers to the library method you wish to override (ex. `"_scaled_grouped_mm_v2"` from above), and dispatch key will generally be one of `("CPU", "CUDA")` depending on what backend you're overriding. For all arguments, please see the comments for `_register_op_override` in [registry.py](registry.py).
+Register a given implementation to a library - `lib_symbol = "aten"` for most cases, `op_symbol` refers to the library method you wish to override (ex. `"_scaled_grouped_mm_v2"` from above), and dispatch key will generally be one of `("CPU", "CUDA")` depending on what backend you're overriding. For all arguments, please see the comments for `register_op_override` in [registry.py](registry.py).
+
+`deregister_op_overrides() -> None` : De-register all operators that are currently registered by this DSL. Note that `torch._native.registry` has a `deregister_op_overrides` method to enable this in a centralized fashion.
 
 An example of an implementation of this spec can be found in [cutedsl_utils.py](cutedsl_utils.py), but please talk to us if you're planning on adding a new DSL.
+
+## Registration Orders and You
+
+Currently the registration order (both in general and per-op) is set by the order of imports in `torch/_native/ops/__init__.py`, noting that registration acts as a stack, in that **the last registered override for an op is the first that will be called**. If you wish to exercise control of the override ordering, please utilize one of the methods below.
+
+### User-Ordering Functions
+
+We allow for user-defined ordering functions of the form:
+
+```
+from torch._native.registry import _OverrideNode
+
+def ordering_fn(
+    op_symbol: str,
+    dispatch_key: str,
+    graph: list[_OverrideNode],
+) -> list[_OverrideNode]
+```
+
+In other words, a function that takes some context and a graph describing the override order, and returning a modified graph.
+
+**NOTE**: Graphs are described as lists of the private class `_OverrideNode` -- while this graph re-ordering functionality is public, it is both experimental and intended for advanced users only. The `_OverrideNode` class is to be used very carefully, and may change in the future.
+
+This functionality can used by either setting the environment variable `TORCH_PYTHON_NATIVE_USER_GRAPH_ORDER_FN` to an importable python function with the above signature, or by adding the following to your top-level script, post `import torch`:
+
+```
+torch._native.reorder_graphs_from_user_function(
+    my_ordering_fn,
+    reregister_overrides=True,
+)
+```
+
+Both methods are equivalent in functionality, but the environment-variable version is a little more efficient in that torch doesn't have to register **all** ops, before disabling/re-registering again based on the user-passed function.
+
+**NOTE**: The passed ordering function can be destructive in nature - one can disable an op completely by returning `[]` for a given graph, indicating that no overrides exist / are allowed. **There is currently no supported way to retrieve the original graphs - they are considered gone for the lifetime of the process**.
+
+An example user-ordering function is demonstrated below:
+
+```
+def example_ordering_fn(op_symbol, dispatch_key, nodes):
+    out_nodes = []
+
+    # disable overrides for these symbols completely
+    if op_symbol in ["_scaled_mm_v2", "add"]:
+         return []
+
+    # Only keep triton overrides otherwise
+    for node in nodes:
+        if node.dsl_name != 'triton':
+            continue
+        out_nodes.append(node)
+
+    return out_nodes
+```

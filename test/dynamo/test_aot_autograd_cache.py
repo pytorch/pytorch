@@ -2459,6 +2459,41 @@ class AOTAutogradCacheTests(InductorTestCase):
                 self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
                 self.assertGreater(counters["aot_autograd"]["autograd_cache_bypass"], 0)
 
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch("enable_autograd_cache", True)
+    def test_pre_grad_passes_inplace_cpu(self):
+        """
+        `remove_identity` was an out-place operation previously, and it is called
+        for CPU inference inside `pre_grad_passes`. So, it broke the in-place semantics
+        of `pre_grad_passes` for CPU inference. This test ensures `pre_grad_passes` is
+        in-place in this case.
+        """
+
+        from torch._inductor.fx_passes.pre_grad import pre_grad_passes
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+                self.identity = torch.nn.Identity()
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.identity(x)
+                return torch.relu(x)
+
+        x = torch.randn(2, 4)
+        gm = torch.fx.symbolic_trace(Model().eval())
+
+        with inductor_config.patch(
+            pattern_matcher=True,
+            freezing=True,
+        ):
+            with torch.no_grad():
+                gm_after = pre_grad_passes(gm, (x,))
+
+        self.assertTrue(id(gm_after) == id(gm))
+
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
