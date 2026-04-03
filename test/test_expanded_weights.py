@@ -636,6 +636,10 @@ class TestExpandedWeightModule(TestCase):
 
         batch_dim = 0 if batch_first else 1
         batch_size = input.shape[batch_dim]
+
+        # FIX: Force a fresh leaf tensor by detaching from previous graphs and cloning
+        input = input.detach().clone()
+
         diff_input = input.dtype == torch.float or input.dtype == torch.double
         if diff_input:
             input.requires_grad_()
