@@ -2116,7 +2116,7 @@ class PallasKernel(SIMDKernel):
             )
         
         # if buffer size is 1, and index is an integer, use "..."
-        if len(buf_size) == 1 and not self._has_iteration_vars(index):
+        if len(buf_size) == 1 and buf_size[0] == 1 and not self._has_iteration_vars(index):
             return _BufferIndexing(
                 index_str="...", needs_flatten=indexing.needs_flatten
             )
