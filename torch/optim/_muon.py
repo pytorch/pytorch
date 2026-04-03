@@ -401,7 +401,7 @@ Muon.__doc__ = (
         https://arxiv.org/pdf/2505.16932
     .. _Accelerating Newton-Schulz Iteration for Orthogonalization via Chebyshev-type Polynomials:
         https://arxiv.org/pdf/2506.10935
-    .. _Turbo-Muon: Accelerating Orthogonality-Based Optimization with Pre-Conditioning:
+    .. _Turbo-Muon\: Accelerating Orthogonality-Based Optimization with Pre-Conditioning:
         https://arxiv.org/pdf/2512.04632
 
     """
