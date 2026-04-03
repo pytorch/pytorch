@@ -17,10 +17,10 @@
 #include <ATen/core/TensorBase.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ApproximateClock.h>
-#include <c10/util/ScopeExit.h>
-#include <c10/util/Semaphore.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
+#include <c10/util/ScopeExit.h>
+#include <c10/util/Semaphore.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/python_variable.h>
@@ -1175,12 +1175,13 @@ void PythonTracer::stop() {
     // pyProfileFn hold their thread's profile_sem. They may have temporarily
     // released the GIL or parked mid-callback due to a stop-the-world event.
     // Acquiring each semaphore here blocks until those callbacks complete.
-    Py_BEGIN_ALLOW_THREADS
-    for (auto& tls : thread_local_results_) {
-      tls.profile_sem.acquire();
-      tls.profile_sem.release();
+    {
+      pybind11::gil_scoped_release release;
+      for (auto& tls : thread_local_results_) {
+        tls.profile_sem.acquire();
+        tls.profile_sem.release();
+      }
     }
-    Py_END_ALLOW_THREADS
 
 #if IS_PYTHON_3_12
     unregisterMonitoringCallback();
@@ -1587,8 +1588,8 @@ int PythonTracer::pyProfileFn(
   TORCH_INTERNAL_ASSERT(acquired, "pyProfileFn: profile_sem unexpectedly held");
   // RAII release: ensures the semaphore is released on both normal
   // return and C++ exception paths (e.g. from pybind11 in ValueCache::store).
-  auto release_sem = c10::make_scope_exit(
-      [&]() { local_results->profile_sem.release(); });
+  auto release_sem =
+      c10::make_scope_exit([&]() { local_results->profile_sem.release(); });
   switch (what) {
     case PyTrace_CALL:
       local_results->active_tracer_->recordPyCall(*local_results, frame, false);
