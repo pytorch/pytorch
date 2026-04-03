@@ -207,7 +207,16 @@ std::tuple<Tensor, Tensor> miopen_ctc_loss(
   Tensor costs = at::empty({batch_size}, log_probs->options());
   Tensor grad = at::empty_like(log_probs_t, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
-  // MIOpen requires labels and lengths on GPU
+#ifdef _WIN32
+  // On Windows there is no unified memory (HSA), so MIOpen cannot read
+  // GPU pointers from the host side. Pass CPU pointers for labels and
+  // lengths which MIOpen reads during workspace size calculation.
+  Tensor labels_cpu = targets_t.to(at::kInt).contiguous();
+  int* labels_ptr = labels_cpu.data_ptr<int>();
+  int* label_lengths_ptr = target_lengths.data();
+  int* input_lengths_ptr = input_lengths.data();
+#else
+  // On Linux with HSA, GPU memory is host-accessible.
   Tensor labels_gpu = targets_t.to(Device(at::kCUDA), at::kInt);
   Tensor label_lengths_gpu = at::empty(
       {static_cast<int64_t>(target_lengths.size())},
@@ -227,15 +236,20 @@ std::tuple<Tensor, Tensor> miopen_ctc_loss(
       input_lengths.size() * sizeof(int),
       hipMemcpyHostToDevice));
 
+  int* labels_ptr = labels_gpu.data_ptr<int>();
+  int* label_lengths_ptr = label_lengths_gpu.data_ptr<int>();
+  int* input_lengths_ptr = input_lengths_gpu.data_ptr<int>();
+#endif
+
   size_t workspace_size;
   (void)deterministic; // MIOpen only supports deterministic algorithm
   MIOPEN_CHECK(miopenGetCTCLossWorkspaceSize(
       handle,
       probs_desc,
       grads_desc,
-      labels_gpu.data_ptr<int>(),
-      label_lengths_gpu.data_ptr<int>(),
-      input_lengths_gpu.data_ptr<int>(),
+      labels_ptr,
+      label_lengths_ptr,
+      input_lengths_ptr,
       MIOPEN_CTC_LOSS_ALGO_DETERMINISTIC,
       ctc_desc,
       &workspace_size));
@@ -246,9 +260,9 @@ std::tuple<Tensor, Tensor> miopen_ctc_loss(
       handle,
       probs_desc,
       log_probs_t.data_ptr(),
-      labels_gpu.data_ptr<int>(),
-      label_lengths_gpu.data_ptr<int>(),
-      input_lengths_gpu.data_ptr<int>(),
+      labels_ptr,
+      label_lengths_ptr,
+      input_lengths_ptr,
       costs.data_ptr(),
       grads_desc,
       grad.data_ptr(),
