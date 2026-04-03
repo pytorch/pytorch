@@ -579,34 +579,7 @@ class FunctionalTensorMode(TorchDispatchMode):
                             torch.Tensor, wrap, outs_unwrapped
                         )
                     else:
-                        # Note: [Functionalization View Replay Annotation]
-                        # When functionalization encounters a mutation, it handles aliases by lazily regenerating the aliases
-                        # at the first time they are next used.
-                        # This is a problem when plumbing user annotations during tracing. We want the view ops from view replay
-                        # to have the same annotation that the user specified on the original views. But view replay in
-                        # functionalization happens the next time the alias is used (e.g. second_op(alias_with_pending_mutation)),
-                        # so when we regenerate views before calling into second_op, those views will end up getting the metadata
-                        # for second_op!
-                        #
-                        # Instead, we need to remember the node metadata from the original views, and ensure that this node metadata
-                        # is globally set when we lazily perform view replay.
-                        # The globally set metadata will be used to populate the fx node created for the replayed operation.
-                        if m := torch._C._get_dispatch_mode(
-                            torch._C._TorchDispatchModeKey.PROXY
-                        ):
-                            for a in pytree.tree_leaves([args, kwargs]):
-                                if not isinstance(a, FunctionalTensor):
-                                    continue
-                                unwrapped = torch._from_functional_tensor(a.elem)
-                                try:
-                                    tracker_entry = m.tracer.tensor_tracker[unwrapped]
-                                except KeyError:
-                                    raise RuntimeError(
-                                        f"cannot find {unwrapped} in tensor_tracker"
-                                    ) from None
-                                curr_node = tracker_entry.proxy.node
-                                with fx_traceback.set_current_replay_node(curr_node):
-                                    torch._sync(a)
+                        self._sync_view_replay_annotations(args, kwargs)
 
                         # When we dispatch to the C++ functionalization kernel, we might need to jump back to the
                         # PreDispatch mode stack afterwards, to handle any other PreDispatch modes underneath
@@ -658,6 +631,41 @@ class FunctionalTensorMode(TorchDispatchMode):
         # Use this util to figure out the right thing to return.
         # If none of our inputs were wrapped, then we have no FunctionalTensor outputs that we need to fix up storages for.
         return return_and_correct_aliasing(func, args, kwargs, outs_wrapped)
+
+    def _sync_view_replay_annotations(
+        self,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+    ) -> None:
+        """Sync FunctionalTensor args so view replay uses correct fx node metadata.
+
+        When functionalization encounters a mutation, it handles aliases by lazily
+        regenerating them at the first time they are next used. This is a problem when
+        plumbing user annotations during tracing: we want view ops from view replay to
+        have the same annotation the user specified on the original views. But view
+        replay happens the next time the alias is used (e.g.
+        second_op(alias_with_pending_mutation)), so the regenerated views would get the
+        metadata for second_op instead.
+
+        To fix this, we remember the node metadata from the original views and globally
+        set it when we lazily perform view replay. The globally set metadata will be
+        used to populate the fx node created for the replayed operation.
+        """
+        m = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
+        if m is not None:
+            for a in pytree.tree_leaves([args, kwargs]):
+                if not isinstance(a, FunctionalTensor):
+                    continue
+                unwrapped = torch._from_functional_tensor(a.elem)
+                try:
+                    tracker_entry = m.tracer.tensor_tracker[unwrapped]
+                except KeyError:
+                    raise RuntimeError(
+                        f"cannot find {unwrapped} in tensor_tracker"
+                    ) from None
+                curr_node = tracker_entry.proxy.node
+                with fx_traceback.set_current_replay_node(curr_node):
+                    torch._sync(a)
 
     def _can_decompose(
         self,
@@ -748,21 +756,17 @@ class BaseFunctionalizeAPI(ABC):
     def redispatch_to_next(self) -> AbstractContextManager[None]:
         pass
 
-    @abstractmethod
     def replace(self, input_tensor: torch.Tensor, output_tensor: torch.Tensor) -> None:
-        pass
+        torch._functionalize_replace(input_tensor, output_tensor)
 
-    @abstractmethod
     def commit_update(self, tensor: torch.Tensor) -> None:
-        pass
+        torch._functionalize_commit_update(tensor)
 
-    @abstractmethod
     def sync(self, tensor: torch.Tensor) -> None:
-        pass
+        torch._functionalize_sync(tensor)
 
-    @abstractmethod
     def mark_mutation_hidden_from_autograd(self, tensor: torch.Tensor) -> None:
-        pass
+        torch._functionalize_mark_mutation_hidden_from_autograd(tensor)
 
 
 class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
@@ -798,35 +802,30 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
         # directly instead of globally setting it.
         return contextlib.nullcontext()
 
-    def replace(self, input_tensor: torch.Tensor, output_tensor: torch.Tensor) -> None:
-        if not isinstance(input_tensor, FunctionalTensor):
+    @staticmethod
+    def _check_cast_functional(tensor: torch.Tensor, name: str) -> FunctionalTensor:
+        if not isinstance(tensor, FunctionalTensor):
             raise AssertionError(
-                f"input_tensor must be a FunctionalTensor, got {type(input_tensor)}"
+                f"{name} must be a FunctionalTensor, got {type(tensor)}"
             )
+        return tensor
+
+    def replace(self, input_tensor: torch.Tensor, output_tensor: torch.Tensor) -> None:
+        ft = self._check_cast_functional(input_tensor, "input_tensor")
         if isinstance(output_tensor, FunctionalTensor):
             raise AssertionError("output_tensor must not be a FunctionalTensor")
-        input_tensor.replace_(output_tensor)
+        ft.replace_(output_tensor)
 
     def commit_update(self, tensor: torch.Tensor) -> None:
-        if not isinstance(tensor, FunctionalTensor):
-            raise AssertionError(
-                f"tensor must be a FunctionalTensor, got {type(tensor)}"
-            )
-        tensor.commit_update()
+        self._check_cast_functional(tensor, "tensor").commit_update()
 
     def sync(self, tensor: torch.Tensor) -> None:
-        if not isinstance(tensor, FunctionalTensor):
-            raise AssertionError(
-                f"tensor must be a FunctionalTensor, got {type(tensor)}"
-            )
-        tensor.sync()
+        self._check_cast_functional(tensor, "tensor").sync()
 
     def mark_mutation_hidden_from_autograd(self, tensor: torch.Tensor) -> None:
-        if not isinstance(tensor, FunctionalTensor):
-            raise AssertionError(
-                f"tensor must be a FunctionalTensor, got {type(tensor)}"
-            )
-        tensor.mark_mutation_hidden_from_autograd()
+        self._check_cast_functional(
+            tensor, "tensor"
+        ).mark_mutation_hidden_from_autograd()
 
 
 class CppFunctionalizeAPI(BaseFunctionalizeAPI):
@@ -852,18 +851,6 @@ class CppFunctionalizeAPI(BaseFunctionalizeAPI):
         return torch._C._ExcludeDispatchKeyGuard(
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
         )
-
-    def replace(self, input_tensor: torch.Tensor, output_tensor: torch.Tensor) -> None:
-        torch._functionalize_replace(input_tensor, output_tensor)
-
-    def commit_update(self, tensor: torch.Tensor) -> None:
-        torch._functionalize_commit_update(tensor)
-
-    def sync(self, tensor: torch.Tensor) -> None:
-        torch._functionalize_sync(tensor)
-
-    def mark_mutation_hidden_from_autograd(self, tensor: torch.Tensor) -> None:
-        torch._functionalize_mark_mutation_hidden_from_autograd(tensor)
 
 
 class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
@@ -899,18 +886,6 @@ class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
 
     def redispatch_to_next(self) -> AbstractContextManager[None]:
         return self.interpreter.lower()
-
-    def replace(self, input_tensor: torch.Tensor, output_tensor: torch.Tensor) -> None:
-        torch._functionalize_replace(input_tensor, output_tensor)
-
-    def commit_update(self, tensor: torch.Tensor) -> None:
-        torch._functionalize_commit_update(tensor)
-
-    def sync(self, tensor: torch.Tensor) -> None:
-        torch._functionalize_sync(tensor)
-
-    def mark_mutation_hidden_from_autograd(self, tensor: torch.Tensor) -> None:
-        torch._functionalize_mark_mutation_hidden_from_autograd(tensor)
 
 
 def mb_unwrap_functional_tensor(tensor: torch.Tensor) -> torch.Tensor:
