@@ -311,15 +311,25 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
                 e.activityType() ==
                 (uint8_t)libkineto::ActivityType::GPU_USER_ANNOTATION;
           })
+      .def(
+          "is_python_function",
+          [](const KinetoEvent& e) { return e.isPythonFunction(); })
       .def("nbytes", [](const KinetoEvent& e) { return e.nBytes(); })
       // whether the event is hidden
       .def(
           "is_hidden_event",
           [](const KinetoEvent& e) { return e.isHiddenEvent(); })
       // KinetoEvent metadata
-      .def("metadata_json", [](const KinetoEvent& e) {
-        return e.metadataJson();
-      });
+      .def(
+          "metadata_json",
+          [](const KinetoEvent& e) { return e.metadataJson(); })
+      .def(
+          "activity_type",
+          [](const KinetoEvent& e) {
+            return libkineto::toString(
+                static_cast<libkineto::ActivityType>(e.activityType()));
+          })
+      .def("extra_meta", [](const KinetoEvent& e) { return e.extraMeta(); });
 
   m.def("_soft_assert_raises", &setSoftAssertRaises);
   m.def("_get_sequence_nr", &at::sequence_number::peek);
