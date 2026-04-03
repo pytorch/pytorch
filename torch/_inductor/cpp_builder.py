@@ -1841,6 +1841,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
         min_optimize: bool = False,
         precompiling: bool = False,
         preprocessing: bool = False,
+        compiler: str = "",
     ) -> None:
         super().__init__(
             vec_isa=vec_isa,
@@ -1854,6 +1855,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
             min_optimize=min_optimize,
             precompiling=precompiling,
             preprocessing=preprocessing,
+            compiler=compiler,
         )
 
         device_definitions: list[str] = []
