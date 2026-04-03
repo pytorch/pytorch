@@ -251,7 +251,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def(
           "correlation_id",
           [](const KinetoEvent& e) { return e.correlationId(); })
-      // shapes of input tensors
+      // Shapes/strides are stored as vector<shape> where shape is
+      // variant<vector<int64_t>, vector<vector<int64_t>>>. Plain tensor
+      // inputs are vector<int64_t>, TensorList inputs are nested.
       .def(
           "shapes",
           [](const KinetoEvent& e) {
@@ -260,8 +262,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
               if (std::holds_alternative<std::vector<int64_t>>(s)) {
                 result.append(std::get<std::vector<int64_t>>(s));
               } else {
-                result.append(
-                    std::get<std::vector<std::vector<int64_t>>>(s));
+                result.append(std::get<std::vector<std::vector<int64_t>>>(s));
               }
             }
             return result;
@@ -274,8 +275,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
               if (std::holds_alternative<std::vector<int64_t>>(s)) {
                 result.append(std::get<std::vector<int64_t>>(s));
               } else {
-                result.append(
-                    std::get<std::vector<std::vector<int64_t>>>(s));
+                result.append(std::get<std::vector<std::vector<int64_t>>>(s));
               }
             }
             return result;
