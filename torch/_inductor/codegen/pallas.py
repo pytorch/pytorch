@@ -25,7 +25,7 @@ from .common import (
     OpOverrides,
     PythonPrinter,
 )
-from .simd import SIMDKernel, SIMDScheduling
+from .simd import IterationRangesEntry, SIMDKernel, SIMDScheduling
 
 
 class PallasPrinter(PythonPrinter):
@@ -815,6 +815,25 @@ class _IndirectAccessInfo:
 
 
 @dataclasses.dataclass
+class _BufferIndexing:
+    """Encapsulates index string and flattening requirements for buffer access."""
+
+    index_str: str
+    needs_flatten: bool
+
+
+@dataclasses.dataclass
+class _BroadcastedIterVar:
+    """Encapsulates information needed to codegen a broadcasted iteration var"""
+
+    # index of this var in `self.range_tree_nodes.items()``
+    idx: int
+    var_sym: sympy.Symbol
+    entry: IterationRangesEntry
+    length_val: int | None
+
+
+@dataclasses.dataclass
 class _CodegenContext:
     """Bundles local state shared across codegen_kernel helper methods."""
 
@@ -1577,15 +1596,17 @@ class PallasKernel(SIMDKernel):
         groups.reverse()
         return groups
 
-    def _get_index_expr(self, index: sympy.Expr) -> tuple[str, bool]:
+    def _get_index_expr(self, index: sympy.Expr) -> _BufferIndexing:
         """Get the index expression string and whether it needs flattening."""
         has_indirect = self._has_indirect_vars(index)
         has_iter_vars = self._has_iteration_vars(index)
 
         if has_indirect and has_iter_vars:
-            return self._handle_mixed_indexing(index), True
+            return _BufferIndexing(
+                index_str=self._handle_mixed_indexing(index), needs_flatten=True
+            )
         elif has_indirect:
-            return self.kexpr(index), False
+            return _BufferIndexing(index_str=self.kexpr(index), needs_flatten=False)
         else:
             index_str = self._get_index_str(index)
             # Check if index contains ModularIndexing - this requires flattened access
@@ -1597,7 +1618,7 @@ class PallasKernel(SIMDKernel):
                 # Check if it's a simple slice pattern (::N or M::N)
                 if not ("::" in index_str or index_str.lstrip("-").isdigit()):
                     needs_flatten = True
-            return index_str, needs_flatten
+            return _BufferIndexing(index_str=index_str, needs_flatten=needs_flatten)
 
     @staticmethod
     def _safe_int(val: Any) -> int | None:
@@ -1966,17 +1987,16 @@ class PallasKernel(SIMDKernel):
         self,
         name: str,
         index: sympy.Expr,
-        index_str: str,
-        needs_flatten: bool,
-    ) -> tuple[str, bool]:
+        indexing: _BufferIndexing,
+    ) -> _BufferIndexing:
         """Check if buffer access needs strided indexing due to size mismatch or gather patterns."""
         # Only applies when full array access is indicated
-        if index_str != "..." or needs_flatten:
-            return index_str, needs_flatten
+        if indexing.index_str != "..." or indexing.needs_flatten:
+            return indexing
 
         info = self._get_buffer_info(name)
         if info is None:
-            return index_str, needs_flatten
+            return indexing
 
         buf_obj, buf_size, buf_numel, actual_strides, is_contiguous = info
         output_numel, used_vars = self._compute_output_numel_from_index(index)
@@ -2015,77 +2035,85 @@ class PallasKernel(SIMDKernel):
             and not skip_for_non_contiguous
             and not has_symbolic_coef
         ):
-            return self._generate_strided_index(index), True
+            return _BufferIndexing(
+                index_str=self._generate_strided_index(index), needs_flatten=True
+            )
 
-        return index_str, needs_flatten
+        return indexing
 
     def _adjust_index_for_buffer_shape(
         self,
         name: str,
         index: sympy.Expr,
-        index_str: str,
-        needs_flatten: bool,
-    ) -> tuple[str, bool]:
+        indexing: _BufferIndexing,
+    ) -> _BufferIndexing:
         """
         Adjust index expression based on buffer shape (0-dim scalar, multi-dim, etc.).
         """
-        if needs_flatten or index_str == "...":
-            return index_str, needs_flatten
+        if indexing.needs_flatten or indexing.index_str == "...":
+            return indexing
 
         buf_obj = V.graph.get_buffer(name)
         if buf_obj is None:
-            return index_str, needs_flatten
+            return indexing
 
         buf_size = buf_obj.get_size()
 
         # 0-dimensional (scalar) buffer - use [...] to access it
         if len(buf_size) == 0:
-            return "...", needs_flatten
+            return _BufferIndexing(
+                index_str="...", needs_flatten=indexing.needs_flatten
+            )
 
         # Multi-dimensional buffer with constant/scalar index
         if len(buf_size) > 1:
             has_iter_vars = self._has_iteration_vars(index)
             if not has_iter_vars:
-                return index_str, True  # Use flattened access
-            elif "::" in index_str:
+                return _BufferIndexing(
+                    index_str=indexing.index_str, needs_flatten=True
+                )  # Use flattened access
+            elif "::" in indexing.index_str:
                 # Strided slice patterns need flattened indexing for multi-dim
-                return self._generate_strided_index(index), True
+                return _BufferIndexing(
+                    index_str=self._generate_strided_index(index), needs_flatten=True
+                )
 
         # GPU doesn't support gather from slice patterns on 1D buffers
-        if self.is_gpu and "::" in index_str:
-            return self._generate_strided_index(index), True
+        if self.is_gpu and "::" in indexing.index_str:
+            return _BufferIndexing(
+                index_str=self._generate_strided_index(index), needs_flatten=True
+            )
 
-        return index_str, needs_flatten
+        return indexing
 
     def _try_multidim_slice(
         self,
         name: str,
         index: sympy.Expr,
-        index_str: str,
-        needs_flatten: bool,
-    ) -> tuple[str, bool]:
+        indexing: _BufferIndexing,
+    ) -> _BufferIndexing:
         """
         Try to emit multi-dim slice notation instead of flatten + gather.
 
         For a buffer with shape (d0, ..., dk) and index `stride * var + offset`,
         emit `buf[:, ..., :, offset::stride]` when stride divides dk.
         """
-        if not needs_flatten:
-            return index_str, needs_flatten
+        if not indexing.needs_flatten:
+            return indexing
 
         buf_obj = V.graph.get_buffer(name)
         if buf_obj is None:
-            return index_str, needs_flatten
+            return indexing
 
         buf_size = buf_obj.get_size()
         ndim = len(buf_size)
         if ndim < 2:
-            return index_str, needs_flatten
+            return indexing
 
         # Need a single iteration variable with an affine index
         used_vars = self._get_used_iter_vars(index)
         if len(used_vars) != 1:
-            return index_str, needs_flatten
+            return indexing
 
         var = next(iter(used_vars))
         var_expr = BlockPatternMatcher.get_subexpr_involving_symbol(index, var)
@@ -2093,20 +2121,20 @@ class PallasKernel(SIMDKernel):
             BlockPatternMatcher.match_affine_block_expr(var_expr, var)
         )
         if stride is None or stride <= 1:
-            return index_str, needs_flatten
+            return indexing
 
         offset = V.graph.sizevars.simplify(index - var_expr)
         try:
             offset_val = int(offset)
         except (TypeError, ValueError):
-            return index_str, needs_flatten
+            return indexing
 
         if offset_val < 0 or offset_val >= stride:
-            return index_str, needs_flatten
+            return indexing
 
         last_dim = self._safe_int(buf_size[-1])
         if last_dim is None or last_dim % stride != 0:
-            return index_str, needs_flatten
+            return indexing
 
         # Verify the iteration variable covers all buffer elements at the
         # given stride: var_length * stride == buf_numel. This ensures
@@ -2114,23 +2142,23 @@ class PallasKernel(SIMDKernel):
         # to buf[:, ..., :, offset::stride].
         entry = self.range_tree_nodes.get(var)
         if entry is None:
-            return index_str, needs_flatten
+            return indexing
         var_length = self._safe_int(entry.length)
         buf_numel = 1
         for s in buf_size:
             d = self._safe_int(s)
             if d is None:
-                return index_str, needs_flatten
+                return indexing
             buf_numel *= d
         if var_length is None or var_length * stride != buf_numel:
-            return index_str, needs_flatten
+            return indexing
 
         prefix = ":, " * (ndim - 1)
         if offset_val == 0:
             slice_str = f"{prefix}::{stride}"
         else:
             slice_str = f"{prefix}{offset_val}::{stride}"
-        return slice_str, False
+        return _BufferIndexing(index_str=slice_str, needs_flatten=False)
 
     @staticmethod
     def _gather_permute_expr(load_expr: str, perm: tuple[int, ...]) -> str:
@@ -2282,13 +2310,12 @@ class PallasKernel(SIMDKernel):
         buf: str,
         name: str,
         index: sympy.Expr,
-        index_str: str,
-        needs_flatten: bool,
+        indexing: _BufferIndexing,
     ) -> str:
         """
         Build the load expression based on indexing mode.
         """
-        if needs_flatten:
+        if indexing.needs_flatten:
             # Detect indirect (data-dependent) access for scalar prefetch
             indirect = self._detect_indirect_access(buf, name, index)
             if indirect is not None:
@@ -2307,13 +2334,17 @@ class PallasKernel(SIMDKernel):
             # Flatten then index for non-contiguous access (gather operation)
             has_minmax = index.has(sympy.Min) or index.has(sympy.Max)
             idx_dtype = "jnp.int32" if self.is_tpu else "jnp.int64"
-            idx = f"({index_str}).astype({idx_dtype})" if has_minmax else index_str
+            idx = (
+                f"({indexing.index_str}).astype({idx_dtype})"
+                if has_minmax
+                else indexing.index_str
+            )
             return f"{buf}[...].flatten()[{idx}]"
         else:
             # Direct indexing for contiguous access
-            load_expr = f"{buf}[{index_str}]"
+            load_expr = f"{buf}[{indexing.index_str}]"
 
-            if index_str == "..." and not self.is_gpu:
+            if indexing.index_str == "..." and not self.is_gpu:
                 perm = self._get_full_load_permutation(name, index)
                 if perm is not None:
                     load_expr = self._gather_permute_expr(load_expr, perm)
@@ -2450,16 +2481,16 @@ class PallasKernel(SIMDKernel):
         return f"{load_expr}.reshape({', '.join(map(str, reshape_dims))})"
 
     def _check_im2col_pattern(
-        self, index: sympy.Expr, index_str: str, needs_flatten: bool
-    ) -> tuple[str, bool]:
+        self, index: sympy.Expr, indexing: _BufferIndexing
+    ) -> _BufferIndexing:
         """
         Check for im2col-like patterns where store uses block variables but load doesn't.
 
         For cat/expand patterns, both load and store prepared indices share block vars.
         For im2col patterns, store compresses to block vars but load doesn't.
         """
-        if index_str != "..." or needs_flatten:
-            return index_str, needs_flatten
+        if indexing.index_str != "..." or indexing.needs_flatten:
+            return indexing
 
         prepared_index = self.prepare_indexing(index)
         iter_vars = self._get_iter_vars()
@@ -2473,7 +2504,7 @@ class PallasKernel(SIMDKernel):
 
         # Only trigger if store introduces new block vars
         if not new_vars or len(store_orig_vars) <= 1:
-            return index_str, needs_flatten
+            return indexing
 
         # Check if loads are compatible with broadcast or cat pattern
         has_im2col_pattern = False
@@ -2506,9 +2537,12 @@ class PallasKernel(SIMDKernel):
                 break
 
         if has_im2col_pattern:
-            return self._generate_strided_index(prepared_index), True
+            return _BufferIndexing(
+                index_str=self._generate_strided_index(prepared_index),
+                needs_flatten=True,
+            )
 
-        return index_str, needs_flatten
+        return indexing
 
     def _check_load_is_strided_input(
         self, buf_name: str, load_index: sympy.Expr, load_orig_vars: OrderedSet
@@ -2633,8 +2667,7 @@ class PallasKernel(SIMDKernel):
         name: str,
         index: sympy.Expr,
         value: CSEVariable,
-        index_str: str,
-        needs_flatten: bool,
+        indexing: _BufferIndexing,
         mode: Any = None,
     ) -> list[str]:
         """
@@ -2642,17 +2675,17 @@ class PallasKernel(SIMDKernel):
         mode can be None (set) or "atomic_add" (accumulate).
         Returns a list of lines to emit.
         """
-        if index_str == "...":
+        if indexing.index_str == "...":
             # Full array store with shape matching
             needs_transpose = self._check_store_needs_transpose(name)
             return self._build_full_array_store_expr(out, value, needs_transpose)
 
-        if needs_flatten:
+        if indexing.needs_flatten:
             self.has_flatten_indexing = True
             # Block variable indexing (e.g., im2col) - use flattened scatter
             scatter_op = "add" if mode == "atomic_add" else "set"
             return [
-                f"{out}[...] = {out}[...].flatten().at[({index_str}).flatten()].{scatter_op}("
+                f"{out}[...] = {out}[...].flatten().at[({indexing.index_str}).flatten()].{scatter_op}("
                 f"jnp.asarray({value}).flatten()).reshape({out}.shape)"
             ]
 
@@ -2670,22 +2703,20 @@ class PallasKernel(SIMDKernel):
             # Indirect indexed store (scatter): use .add() for atomic_add, .set() otherwise
             scatter_op = "add" if mode == "atomic_add" else "set"
             lines = [f"_val = jnp.asarray({value})"]
-            value_expr = (
-                f"(jnp.full({index_str}.shape, _val) if _val.ndim == 0 else {value})"
-            )
+            value_expr = f"(jnp.full({indexing.index_str}.shape, _val) if _val.ndim == 0 else {value})"
             if mode == "atomic_add":
                 # For atomic_add, mark output as needing to be readable (for aliasing)
                 self.outputs_need_read.add(out)
                 alias_param = f"{out}_alias"
                 lines.append(
-                    f"{out}[...] = {alias_param}[...].flatten().at[({index_str}).flatten()].{scatter_op}("
+                    f"{out}[...] = {alias_param}[...].flatten().at[({indexing.index_str}).flatten()].{scatter_op}("
                     f"{value_expr}.flatten()).reshape({out}.shape)"
                 )
             else:
-                lines.append(f"{out}[{index_str}] = {value_expr}")
+                lines.append(f"{out}[{indexing.index_str}] = {value_expr}")
             return lines
 
-        return [f"{out}[{index_str}] = {value}"]
+        return [f"{out}[{indexing.index_str}] = {value}"]
 
     def _build_scatter_store_expr(
         self,
@@ -2776,12 +2807,10 @@ class PallasKernel(SIMDKernel):
         self.load_index_exprs[name] = index
 
         # Get base index expression
-        index_str, needs_flatten = self._get_index_expr(index)
+        indexing = self._get_index_expr(index)
 
         # Check for buffer size mismatch requiring strided indexing
-        index_str, needs_flatten = self._needs_strided_indexing(
-            name, index, index_str, needs_flatten
-        )
+        indexing = self._needs_strided_indexing(name, index, indexing)
 
         # Try strided decomposition before multidim slice or flatten.
         # This generates reshape + static indexing which works on both
@@ -2792,22 +2821,16 @@ class PallasKernel(SIMDKernel):
             load_expr = self._strided_load_expr(buf, decomp)
         else:
             # Adjust index for buffer shape (scalar, multi-dim, etc.)
-            index_str, needs_flatten = self._adjust_index_for_buffer_shape(
-                name, index, index_str, needs_flatten
-            )
+            indexing = self._adjust_index_for_buffer_shape(name, index, indexing)
 
             # Try to emit multi-dim slice instead of flatten + gather
-            index_str, needs_flatten = self._try_multidim_slice(
-                name, index, index_str, needs_flatten
-            )
+            indexing = self._try_multidim_slice(name, index, indexing)
 
             # Build the load expression
-            load_expr = self._build_load_expr(
-                buf, name, index, index_str, needs_flatten
-            )
+            load_expr = self._build_load_expr(buf, name, index, indexing)
 
         # Handle intermediate buffer squeezing for correct broadcasting
-        if not needs_flatten and index_str == "...":
+        if not indexing.needs_flatten and indexing.index_str == "...":
             load_expr = self._maybe_squeeze_intermediate_buffer(name, load_expr)
             # Handle 1D buffer broadcasting for higher-dimensional kernels
             load_expr = self._maybe_broadcast_1d_buffer(name, index, load_expr)
@@ -3058,16 +3081,14 @@ class PallasKernel(SIMDKernel):
                     ]
                 else:
                     # Get base index expression
-                    index_str, needs_flatten = self._get_index_expr(index)
+                    indexing = self._get_index_expr(index)
 
                     # Check for im2col-like patterns
-                    index_str, needs_flatten = self._check_im2col_pattern(
-                        index, index_str, needs_flatten
-                    )
+                    indexing = self._check_im2col_pattern(index, indexing)
 
                     # Build the store expression
                     store_lines = self._build_store_expr(
-                        out, name, index, value, index_str, needs_flatten, mode
+                        out, name, index, value, indexing, mode
                     )
 
         for line in store_lines:
@@ -4033,16 +4054,9 @@ from torch._inductor.runtime.runtime_utils import (
                 pw_idx += 1
         return None
 
-    def _codegen_iteration_vars(
-        self, kernel_body: IndentedBuffer, ctx: _CodegenContext
-    ) -> None:
-        # Generate iteration variables as jnp.arange arrays
-        # Skip on GPU - jnp.arange is not supported by Pallas Mosaic backend
-        if not (self.range_tree_nodes and not self.is_gpu and self.used_iter_vars):
-            return
-
-        kernel_body.writeline("# Define iteration variables as JAX arrays")
-
+    def _get_reshape_target_shape_and_numel(
+        self,
+    ) -> tuple[tuple[int, ...] | None, int | None]:
         # Find reshape target: N-D shape whose numel matches an iteration
         # var. Try output first (repeat/upsample), then inputs (reductions).
         iter_lengths = OrderedSet(
@@ -4064,11 +4078,7 @@ from torch._inductor.runtime.runtime_utils import (
             numel = math.prod(shape)
             return (shape, numel) if numel in iter_lengths else (None, None)
 
-        candidate_buf_names = []
-        if ctx.output_params:
-            buf_name = ctx.output_buffer_lookup.get(ctx.output_params[0])
-            if buf_name:
-                candidate_buf_names.append(buf_name)
+        candidate_buf_names = self._output_buffer_names.copy()
         candidate_buf_names.extend(self.args.input_buffers)
 
         reshape_target_shape, reshape_target_numel = None, None
@@ -4077,6 +4087,41 @@ from torch._inductor.runtime.runtime_utils import (
             if result[0]:
                 reshape_target_shape, reshape_target_numel = result
                 break
+
+        return reshape_target_shape, reshape_target_numel
+
+    def _make_broadcasted_iteration_var_expr(
+        self, broadcast_vars: list[_BroadcastedIterVar], broadcast_idx: int
+    ) -> str:
+        bv = broadcast_vars[broadcast_idx]
+        length = bv.entry.length
+        renamed_length = self.rename_indexing(length)
+        length_str = self.kexpr(renamed_length)
+
+        num_broadcast_dims = len(broadcast_vars)
+        axis_idx = self._broadcast_axis_idx(
+            broadcast_vars, broadcast_idx, num_broadcast_dims
+        )
+        shape_parts = ["1"] * num_broadcast_dims
+        shape_parts[axis_idx] = length_str
+        shape_str = ", ".join(shape_parts)
+        arange = f"jnp.arange({length_str})"
+        reshaped = f"{arange}.reshape({shape_str})"
+        return reshaped
+
+    def _codegen_iteration_vars(
+        self, kernel_body: IndentedBuffer, ctx: _CodegenContext
+    ) -> None:
+        # Generate iteration variables as jnp.arange arrays
+        # Skip on GPU - jnp.arange is not supported by Pallas Mosaic backend
+        if not (self.range_tree_nodes and not self.is_gpu and self.used_iter_vars):
+            return
+
+        kernel_body.writeline("# Define iteration variables as JAX arrays")
+
+        reshape_target_shape, reshape_target_numel = (
+            self._get_reshape_target_shape_and_numel()
+        )
 
         var_items = list(self.range_tree_nodes.items())
 
@@ -4087,7 +4132,9 @@ from torch._inductor.runtime.runtime_utils import (
             if length_val is not None and length_val == reshape_target_numel:
                 total_var_idx = idx
             else:
-                broadcast_vars.append((idx, var_sym, entry, length_val))
+                broadcast_vars.append(
+                    _BroadcastedIterVar(idx, var_sym, entry, length_val)
+                )
 
         num_broadcast_dims = len(broadcast_vars)
 
@@ -4107,24 +4154,14 @@ from torch._inductor.runtime.runtime_utils import (
                     and idx != total_var_idx
                 ):
                     broadcast_idx = next(
-                        (
-                            i
-                            for i, (vidx, _, _, _) in enumerate(broadcast_vars)
-                            if vidx == idx
-                        ),
+                        (i for i, v in enumerate(broadcast_vars) if v.idx == idx),
                         None,
                     )
                     if broadcast_idx is not None:
-                        axis_idx = self._broadcast_axis_idx(
-                            broadcast_vars, broadcast_idx, num_broadcast_dims
+                        expr = self._make_broadcasted_iteration_var_expr(
+                            broadcast_vars, broadcast_idx
                         )
-                        shape_parts = ["1"] * num_broadcast_dims
-                        shape_parts[axis_idx] = length_str
-                        shape_str = ", ".join(shape_parts)
-                        arange = f"jnp.arange({length_str})"
-                        kernel_body.writeline(
-                            f"{var_name} = {arange}.reshape({shape_str})"
-                        )
+                        kernel_body.writeline(f"{var_name} = {expr}")
                         continue
                 kernel_body.writeline(f"{var_name} = jnp.arange({length_str})")
                 continue
@@ -4139,16 +4176,12 @@ from torch._inductor.runtime.runtime_utils import (
                 kernel_body.writeline(f"{var_name} = {arange}.reshape({shape_str})")
             elif num_broadcast_dims > 1 and idx != total_var_idx:
                 broadcast_idx = next(
-                    i for i, (vidx, _, _, _) in enumerate(broadcast_vars) if vidx == idx
+                    i for i, v in enumerate(broadcast_vars) if v.idx == idx
                 )
-                axis_idx = self._broadcast_axis_idx(
-                    broadcast_vars, broadcast_idx, num_broadcast_dims
+                expr = self._make_broadcasted_iteration_var_expr(
+                    broadcast_vars, broadcast_idx
                 )
-                shape_parts = ["1"] * num_broadcast_dims
-                shape_parts[axis_idx] = length_str
-                shape_str = ", ".join(shape_parts)
-                arange = f"jnp.arange({length_str})"
-                kernel_body.writeline(f"{var_name} = {arange}.reshape({shape_str})")
+                kernel_body.writeline(f"{var_name} = {expr}")
             else:
                 # Simple 1D arange — emit tile-relative form so tiling is safe.
                 # When grid=(1,), _pallas_tile[ax] == full length and
@@ -4181,7 +4214,7 @@ from torch._inductor.runtime.runtime_utils import (
 
     @staticmethod
     def _broadcast_axis_idx(
-        broadcast_vars: list[tuple[int, Any, Any, Any]],
+        broadcast_vars: list[_BroadcastedIterVar],
         broadcast_idx: int,
         num_broadcast_dims: int,
     ) -> int:
@@ -4189,10 +4222,10 @@ from torch._inductor.runtime.runtime_utils import (
         # - Mixed: pointwise first, reduction last for output reshape
         # - Same-type: reverse order, first var innermost
         has_reduction_vars = any(
-            str(v).startswith("r") for _, v, _, _ in broadcast_vars
+            str(bv.var_sym).startswith("r") for bv in broadcast_vars
         )
         has_pointwise_vars = any(
-            not str(v).startswith("r") for _, v, _, _ in broadcast_vars
+            not str(bv.var_sym).startswith("r") for bv in broadcast_vars
         )
         is_mixed = has_reduction_vars and has_pointwise_vars
         if is_mixed:
