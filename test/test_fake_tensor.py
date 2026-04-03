@@ -1327,6 +1327,9 @@ for t in threads:
     @skipIfTorchDynamo(
         "TorchDynamo exposes https://github.com/pytorch/pytorch/issues/166696"
     )
+    @unittest.skipIf(
+        TEST_ACCELERATOR, "Only execute when an accelerator is not present"
+    )
     def test_avoid_device_init_with_privateuse1_backend(self, is_available):
         class _DummyPrivateUse1Module:
             @staticmethod
