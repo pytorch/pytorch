@@ -3796,19 +3796,13 @@ class TestProfilerEventsParity(TestCase):
             self.assertEqual(len(python_events), len(json_py))
 
             # Verify python_id/parent_id/module_id parity with JSON args
-            fe_mod = next(
-                (e for e in events if "DummyModule" in e.name), None
-            )
+            fe_mod = next((e for e in events if "DummyModule" in e.name), None)
             self.assertIsNotNone(fe_mod)
             self.assertGreater(fe_mod.python_id, 0)
             self.assertGreaterEqual(fe_mod.python_module_id, 0)
 
             json_mod = next(
-                (
-                    e
-                    for e in json_py
-                    if "DummyModule" in e.get("name", "")
-                ),
+                (e for e in json_py if "DummyModule" in e.get("name", "")),
                 None,
             )
             self.assertIsNotNone(json_mod)
@@ -3956,9 +3950,7 @@ class TestProfilerEventsParity(TestCase):
         base_tensor = torch.randn(1024, dtype=torch.float32)
         a = base_tensor.as_strided((16, 16), (17, 1), 0)
         b = base_tensor.as_strided((16, 16), (25, 2), 272)
-        with profile(
-            activities=[ProfilerActivity.CPU], record_shapes=True
-        ) as prof:
+        with profile(activities=[ProfilerActivity.CPU], record_shapes=True) as prof:
             torch.add(a, b)
 
         fe_add = next((e for e in prof.events() if e.name == "aten::add"), None)
