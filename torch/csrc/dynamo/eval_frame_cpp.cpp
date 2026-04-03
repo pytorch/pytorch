@@ -96,9 +96,7 @@ py::object get_null_stack_value() {
 py::list _get_frame_value_stack_with_depth(
     const py::handle& frame_obj,
     int depth) {
-  if (!PyFrame_Check(frame_obj.ptr())) {
-    throw py::type_error("expected a frame object!");
-  }
+  TORCH_CHECK_TYPE(PyFrame_Check(frame_obj.ptr()), "expected a frame object!");
 
   py::list result;
   if (depth <= 0) {
@@ -294,9 +292,9 @@ static py::handle _callback_from_action(
 static int32_t c_recursion_limit = -1;
 
 void dynamo_set_c_recursion_limit(int32_t limit) {
-  if (limit < 1 && limit != -1) {
-    throw std::range_error("recursion limit must be >= 1, or -1 to reset");
-  }
+  TORCH_CHECK_VALUE(
+      limit >= 1 || limit == -1,
+      "recursion limit must be >= 1, or -1 to reset");
   c_recursion_limit = limit;
 }
 
@@ -396,7 +394,7 @@ PyObject* dynamo__custom_eval_frame(
     // immediately skip the frame, and (2) even if it did, this would only
     // be profitable if there was tensor code in the unwinding code.  Seems
     // unlikely.
-    DEBUG_TRACE("throw %s", get_frame_name(frame));
+    DEBUG_TRACE("throw %s", get_frame_name(frame)); // @allow-raw-throw
     return dynamo_eval_frame_default(tstate, frame, throw_flag);
   }
 
