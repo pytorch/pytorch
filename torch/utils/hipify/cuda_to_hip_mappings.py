@@ -4193,6 +4193,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("cudaDeviceGetDefaultMemPool", ("hipDeviceGetDefaultMemPool", CONV_MEM, API_RUNTIME)),
         ("cudaMemAccessDesc", ("hipMemAccessDesc", CONV_MEM, API_RUNTIME)),
         ("cudaMemAccessFlagsProtReadWrite", ("hipMemAccessFlagsProtReadWrite", CONV_MEM, API_RUNTIME)),
+        ("cudaMemLocation", ("hipMemLocation", CONV_MEM, API_RUNTIME)),
         ("cudaMemLocationTypeDevice", ("hipMemLocationTypeDevice", CONV_MEM, API_RUNTIME)),
         ("cudaMemPoolAttrReleaseThreshold", ("hipMemPoolAttrReleaseThreshold", CONV_MEM, API_RUNTIME)),
         ("cudaMemPoolAttrReservedMemCurrent", ("hipMemPoolAttrReservedMemCurrent", CONV_MEM, API_RUNTIME)),

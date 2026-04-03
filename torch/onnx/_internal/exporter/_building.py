@@ -98,9 +98,8 @@ def _construct_named_inputs_and_attrs(
         else:
             # Handle attributes
             attribute: ValidAttributeType | ir.Attr
-            assert isinstance(param, _schemas.AttributeParameter), (
-                f"Expected AttributeParameter, got {type(param)}"
-            )
+            if not isinstance(param, _schemas.AttributeParameter):
+                raise AssertionError(f"Expected AttributeParameter, got {type(param)}")
             if reversed_args_stack:
                 # First exhaust the positional arguments
                 attribute = reversed_args_stack.pop()  # type: ignore[assignment]
@@ -166,9 +165,8 @@ def _resolve_parameter_dtypes(
     type_binding = {}
     for name, arg in named_inputs.items():
         param = signature.params_map[name]
-        assert isinstance(param, _schemas.Parameter), (
-            f"Expected Parameter, got {type(param)}"
-        )
+        if not isinstance(param, _schemas.Parameter):
+            raise AssertionError(f"Expected Parameter, got {type(param)}")
         if isinstance(arg, (int, float, bool, str, Sequence, torch.Tensor)):
             # Skip the Python constants because we do not know what dtype they should take yet
             continue
@@ -177,7 +175,8 @@ def _resolve_parameter_dtypes(
                 # Skip the ir.Value if the type is not set
                 continue
             # NOTE: We assume arg.type is compatible with the type_constraint
-            assert arg.type is not None, f"Expected type to be set for {arg}"
+            if arg.type is None:
+                raise AssertionError(f"Expected type to be set for {arg}")
             # TODO(justinchuby): Implement type promotion logic here.
             type_binding[param.type_constraint] = arg.type
     return type_binding
@@ -325,9 +324,8 @@ def _process_python_constants(
     #       - Otherwise, set named_inputs[param.name] = Constant(value)
     for name, arg in named_inputs.items():
         param = signature.params_map[name]
-        assert isinstance(param, _schemas.Parameter), (
-            f"Expected Parameter, got {type(param)}"
-        )
+        if not isinstance(param, _schemas.Parameter):
+            raise AssertionError(f"Expected Parameter, got {type(param)}")
 
         if isinstance(arg, ir.Value):
             # TODO(justinchuby): Cast the ir.Value here if needed
@@ -398,9 +396,8 @@ def _process_python_sequences(
     """
     for name, arg in named_inputs.items():
         param = signature.params_map[name]
-        assert isinstance(param, _schemas.Parameter), (
-            f"Expected Parameter, got {type(param)}"
-        )
+        if not isinstance(param, _schemas.Parameter):
+            raise AssertionError(f"Expected Parameter, got {type(param)}")
 
         if not isinstance(arg, (tuple, list)):
             continue
@@ -462,9 +459,8 @@ def _process_python_sequences(
                     )
                 else:
                     # Turn the Python constant into 1D tensor for the constant
-                    assert isinstance(val, (bool, int, float)), (
-                        f"Expected int or float, got {type(val)}"
-                    )
+                    if not isinstance(val, (bool, int, float)):
+                        raise AssertionError(f"Expected int or float, got {type(val)}")
                     new_args.append(
                         _get_or_create_constant(constant_farm, [val], dtype, opset)  # type: ignore[arg-type]
                     )
@@ -622,7 +618,8 @@ class OpRecorder(evaluator.Evaluator):
             )
             # TODO(justinchuby): Handle cast
             if schema.name == "CastLike":
-                assert len(named_inputs) == 2
+                if len(named_inputs) != 2:
+                    raise AssertionError(f"Expected 2 inputs, got {len(named_inputs)}")
                 # Skip CastLike if the input and output types are the same
                 src_input = named_inputs["input"]
                 target_type = named_inputs["target_type"]

@@ -7,6 +7,7 @@ high-performance GEMM kernels for NVIDIA GPUs.
 """
 
 import itertools
+from enum import auto, Enum
 from typing import Any, Optional, Union
 
 import torch
@@ -17,6 +18,9 @@ from torch._inductor.autotune_process import (
     TensorMeta,
 )
 from torch._inductor.codegen.cuda.cuda_env import get_cuda_arch
+from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils import (
+    to_cutlass_scale_mode,
+)
 from torch._inductor.ir import Buffer, ChoiceCaller, Layout, TensorBox
 from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.template_heuristics.nv_universal_gemm import get_nvgemm_heuristics
@@ -25,6 +29,34 @@ from torch._logging import getArtifactLogger
 
 
 log = getArtifactLogger(__name__, "output_code")
+
+
+class GemmVariant(Enum):
+    """
+    Enum for different GEMM operation types supported by NVIDIA Universal GEMM.
+    """
+
+    GEMM = auto()
+
+    GROUPED_GEMM = auto()
+
+    SCALED_GEMM = auto()
+
+    @property
+    def op_name(self) -> str:
+        """Return the operation name for logging and naming."""
+        if self == GemmVariant.GROUPED_GEMM:
+            return "nv_universal_grouped_gemm"
+        if self == GemmVariant.SCALED_GEMM:
+            return "nv_universal_scaled_gemm"
+        return "nv_universal_gemm"
+
+    @property
+    def arguments_class_name(self) -> str:
+        """Return the cutlass_api arguments class name."""
+        if self == GemmVariant.GROUPED_GEMM:
+            return "GroupedGemmArguments"
+        return "GemmArguments"
 
 
 class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
@@ -37,7 +69,12 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         output_tensor_meta: Union[TensorMeta, list[TensorMeta]],
         kernel,  # cutlass_api.Kernel object
         accumulator_type: torch.dtype,
+        variant: GemmVariant,
         workspace_size: int = 0,
+        scale_type_a: Optional[Any] = None,
+        scale_type_b: Optional[Any] = None,
+        swizzle_type_a: Optional[Any] = None,
+        swizzle_type_b: Optional[Any] = None,
     ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, ())
         self.kernel = kernel
@@ -45,6 +82,11 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         self._compiled_artifact = None
         self._workspace: Optional[torch.Tensor] = None
         self.workspace_size = workspace_size
+        self.variant = variant
+        self.scale_type_a = scale_type_a
+        self.scale_type_b = scale_type_b
+        self.swizzle_type_a = swizzle_type_a
+        self.swizzle_type_b = swizzle_type_b
 
     def benchmark(
         self,
@@ -73,13 +115,8 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         """Create a function to run the NVIDIA Universal GEMM kernel."""
         import cutlass_api
 
-        a, b = input_tensors
-        args = cutlass_api.arguments.GemmArguments(
-            a,
-            b,
-            out,
-            accumulator_type=self.accumulator_type,
-        )
+        args = self._create_gemm_arguments(cutlass_api, input_tensors, out)
+
         if self._compiled_artifact is None:
             self._compiled_artifact = self.kernel.compile(args)
         artifact = self._compiled_artifact
@@ -107,6 +144,45 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
 
         return run_kernel
 
+    def _create_gemm_arguments(self, cutlass_api, input_tensors, out):
+        """Create the appropriate GemmArguments based on variant."""
+        if self.variant == GemmVariant.GROUPED_GEMM:
+            a, b, offsets = input_tensors
+            return cutlass_api.arguments.GroupedGemmArguments(
+                a,
+                b,
+                out,
+                accumulator_type=self.accumulator_type,
+                offsets=offsets,
+            )
+        elif self.variant == GemmVariant.SCALED_GEMM:
+            from cutlass_api.arguments import ScaledTensor
+
+            scale_mode_a, swizzle_mode_a = to_cutlass_scale_mode(
+                self.scale_type_a, self.swizzle_type_a
+            )
+            scale_mode_b, swizzle_mode_b = to_cutlass_scale_mode(
+                self.scale_type_b, self.swizzle_type_b
+            )
+
+            a, b, scale_a, scale_b = input_tensors
+            scaled_a = ScaledTensor(a, scale_a, scale_mode_a, swizzle_mode_a)
+            scaled_b = ScaledTensor(b, scale_b, scale_mode_b, swizzle_mode_b)
+            return cutlass_api.arguments.GemmArguments(
+                scaled_a,
+                scaled_b,
+                out,
+                accumulator_type=self.accumulator_type,
+            )
+        else:
+            a, b = input_tensors
+            return cutlass_api.arguments.GemmArguments(
+                a,
+                b,
+                out,
+                accumulator_type=self.accumulator_type,
+            )
+
     def cleanup_run_fn(self) -> None:
         self._workspace = None
 
@@ -127,19 +203,29 @@ class NVUniversalGemmCaller(ChoiceCaller):
         layout: Layout,
         kernel,  # cutlass_api.Kernel object
         accumulator_type: torch.dtype,
+        variant: GemmVariant,
         workspace_size: int = 0,
+        scale_type_a: Optional[Any] = None,
+        scale_type_b: Optional[Any] = None,
+        swizzle_type_a: Optional[Any] = None,
+        swizzle_type_b: Optional[Any] = None,
     ) -> None:
         super().__init__(
             name=name,
             input_nodes=input_nodes,
             layout=layout,
-            description=f"nv_universal_gemm {kernel.metadata.kernel_name}",
+            description=f"{variant.op_name} {kernel.metadata.kernel_name}",
         )
         self.kernel = kernel
         self.accumulator_type = accumulator_type
         self.workspace_size = workspace_size
+        self.variant = variant
+        self.scale_type_a = scale_type_a
+        self.scale_type_b = scale_type_b
+        self.swizzle_type_a = swizzle_type_a
+        self.swizzle_type_b = swizzle_type_b
 
-        output_buffer = Buffer(name="nv_universal_gemm_out", layout=layout)
+        output_buffer = Buffer(name=f"{variant.op_name}_out", layout=layout)
 
         self.bmreq = NVUniversalGemmBenchmarkRequest(
             kernel_name=name,
@@ -148,6 +234,11 @@ class NVUniversalGemmCaller(ChoiceCaller):
             kernel=kernel,
             accumulator_type=accumulator_type,
             workspace_size=workspace_size,
+            variant=variant,
+            scale_type_a=scale_type_a,
+            scale_type_b=scale_type_b,
+            swizzle_type_a=swizzle_type_a,
+            swizzle_type_b=swizzle_type_b,
         )
 
     def __str__(self) -> str:
@@ -165,6 +256,11 @@ class NVUniversalGemmCaller(ChoiceCaller):
             kernel=self.kernel,
             accumulator_type=self.accumulator_type,
             workspace_size=self.workspace_size,
+            variant=self.variant,
+            scale_type_a=self.scale_type_a,
+            scale_type_b=self.scale_type_b,
+            swizzle_type_a=self.swizzle_type_a,
+            swizzle_type_b=self.swizzle_type_b,
         )
         # Pass KTC annotation to the buffer for encoding
         if "ktc" in self.annotations:
@@ -178,12 +274,12 @@ class NVUniversalGemmCaller(ChoiceCaller):
         return self.bmreq.make_run_fn
 
     def hash_key(self) -> str:
-        return f"nv_universal_gemm_{self.kernel.metadata.kernel_name}"
+        return f"{self.variant.op_name}_{self.kernel.metadata.kernel_name}"
 
     def info_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
-            "backend": "nv_universal_gemm",
+            "backend": self.variant.op_name,
             "kernel_name": self.kernel.metadata.kernel_name,
         }
 
@@ -202,48 +298,110 @@ def _create_dummy_tensor_from_layout(layout: Layout) -> Optional[torch.Tensor]:
         return None
 
 
-def add_nv_universal_gemm_choices(
+def _exclude_efc_kernels(metadata) -> bool:
+    """
+    Filter out EFC kernels.
+
+    EFC kernels support custom epilogue operations but have additional overhead.
+    Since NVGEMM doesn't support epilogue fusion yet (see nv_universal_gemm_scheduling.py),
+    we use non-EFC kernels which are equivalent for identity epilogue (out = acc).
+    TODO(nikhilap): Remove this filter once NVGEMM supports epilogue fusion.
+    """
+    return "EFC" not in metadata.kernel_class.__name__
+
+
+def _add_nv_gemm_choices_impl(
     choices: list[ChoiceCaller],
     layout: Layout,
-    inputs: MMKernelInputs,
-    accumulator_type: Optional[torch.dtype] = None,
+    input_nodes: list[Buffer],
+    variant: GemmVariant,
+    accumulator_type: torch.dtype,
+    mm_inputs: Optional[MMKernelInputs] = None,
+    scale_type_a: Optional[Any] = None,
+    scale_type_b: Optional[Any] = None,
+    swizzle_type_a: Optional[Any] = None,
+    swizzle_type_b: Optional[Any] = None,
 ) -> None:
     """
-    Add NVIDIA Universal GEMM kernels to the autotune choices.
+    Unified implementation for adding NVIDIA Universal GEMM choices.
 
-    Queries cutlass_api for compatible kernels and adds them as autotune choices.
+    Args:
+        choices: List to append ChoiceCaller objects to
+        layout: Output layout
+        input_nodes: Input tensor nodes
+        variant: The GEMM variant (determines behavior)
+        accumulator_type: Accumulator dtype
+        mm_inputs: Optional MMKernelInputs for heuristics
+        scale_type_a: ScalingType for A (required for SCALED_GEMM)
+        scale_type_b: ScalingType for B (required for SCALED_GEMM)
+        swizzle_type_a: SwizzleType for A (required for SCALED_GEMM)
+        swizzle_type_b: SwizzleType for B (required for SCALED_GEMM)
     """
-    if ensure_nv_universal_gemm_available():
-        import cutlass_api
-    else:
-        log.debug("cutlass_api not available, skipping NVIDIA Universal GEMM choices")
-        return
+    import cutlass_api
 
-    if accumulator_type is None:
-        accumulator_type = torch.float32
-
-    input_nodes = inputs.nodes()
-    a_node, b_node = input_nodes
+    from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
+        get_compatible_kernels,
+    )
 
     # Create dummy tensors for cutlass_api's supports() checks
-    a_tensor = _create_dummy_tensor_from_layout(a_node.get_layout())
-    b_tensor = _create_dummy_tensor_from_layout(b_node.get_layout())
+    dummy_tensors = [
+        _create_dummy_tensor_from_layout(node.get_layout()) for node in input_nodes
+    ]
     out_tensor = _create_dummy_tensor_from_layout(layout)
 
-    if a_tensor is None or b_tensor is None or out_tensor is None:
-        log.debug("Failed to create dummy tensors")
+    if any(t is None for t in dummy_tensors) or out_tensor is None:
+        log.debug("Failed to create dummy tensors for %s", variant.op_name)
         return
 
-    try:
+    if variant == GemmVariant.GROUPED_GEMM:
+        a_tensor, b_tensor, offs_tensor = dummy_tensors
+        assert b_tensor is not None
+        args = cutlass_api.arguments.GroupedGemmArguments(
+            a_tensor,
+            b_tensor,
+            out_tensor,
+            accumulator_type=accumulator_type,
+            offsets=offs_tensor,
+        )
+    elif variant == GemmVariant.SCALED_GEMM:
+        from cutlass_api.arguments import ScaledTensor
+
+        scale_mode_a, swizzle_mode_a = to_cutlass_scale_mode(
+            scale_type_a, swizzle_type_a
+        )
+        scale_mode_b, swizzle_mode_b = to_cutlass_scale_mode(
+            scale_type_b, swizzle_type_b
+        )
+        if scale_mode_a is None or scale_mode_b is None:
+            return
+
+        a_tensor, b_tensor, scale_a_tensor, scale_b_tensor = dummy_tensors
+        scaled_a = ScaledTensor(
+            a_tensor,
+            scale_a_tensor,
+            scale_mode_a,
+            swizzle_mode_a,
+        )
+        scaled_b = ScaledTensor(
+            b_tensor,
+            scale_b_tensor,
+            scale_mode_b,
+            swizzle_mode_b,
+        )
+        args = cutlass_api.arguments.GemmArguments(
+            scaled_a,
+            scaled_b,
+            out_tensor,
+            accumulator_type=accumulator_type,
+        )
+    else:
+        a_tensor, b_tensor = dummy_tensors
         args = cutlass_api.arguments.GemmArguments(
             a_tensor,
             b_tensor,
             out_tensor,
             accumulator_type=accumulator_type,
         )
-    except Exception:
-        log.debug("Failed to create GemmArguments", exc_info=True)
-        return
 
     cc = get_cuda_arch()
     if cc is None:
@@ -251,27 +409,26 @@ def add_nv_universal_gemm_choices(
         return
     cc_int = int(cc)
 
-    # EFC kernels support custom epilogue operations but have additional overhead.
-    # Since NVGEMM doesn't support epilogue fusion yet (see nv_universal_gemm_scheduling.py),
-    # we use non-EFC kernels which are equivalent for identity epilogue (out = acc).
-    # TODO(nikhilap): Remove this filter once NVGEMM supports epilogue fusion.
-    def _exclude_efc_kernels(metadata) -> bool:
-        return "EFC" not in metadata.kernel_class.__name__
-
-    kernels = cutlass_api.get_kernels(
-        args=args, cc=cc_int, metadata_filter=_exclude_efc_kernels
-    )
+    kernels = get_compatible_kernels(args, cc_int, metadata_filter=_exclude_efc_kernels)
     if not kernels:
-        log.debug("No compatible NVIDIA Universal GEMM kernels found")
+        log.debug("No compatible %s kernels found", variant.op_name)
         return
 
-    max_configs = config.cuda.nvgemm_max_profiling_configs or len(kernels)
+    max_configs = config.nvgemm_max_profiling_configs or len(kernels)
+    if variant == GemmVariant.GEMM and mm_inputs is not None:
+        heuristics = get_nvgemm_heuristics()
+        kernels = heuristics.filter_kernels(
+            kernels, mm_inputs, max_configs, accumulator_type
+        )
+    else:
+        # TODO(nikhilap): Enable heuristics for grouped and scaled GEMMs
+        # when nvMatmulHeuristics adds support
+        kernels = kernels[:max_configs]
 
-    heuristics = get_nvgemm_heuristics()
-    kernels = heuristics.filter_kernels(kernels, inputs, max_configs, accumulator_type)
+    # Add callers for each kernel
     num_added = 0
     for kernel in kernels:
-        name = f"nv_universal_gemm_{next(NVUniversalGemmCaller.index_counter)}"
+        name = f"{variant.op_name}_{next(NVUniversalGemmCaller.index_counter)}"
         workspace_size = kernel.get_workspace_size(args)
         try:
             caller = NVUniversalGemmCaller(
@@ -281,9 +438,116 @@ def add_nv_universal_gemm_choices(
                 kernel=kernel,
                 accumulator_type=accumulator_type,
                 workspace_size=workspace_size,
+                variant=variant,
+                scale_type_a=scale_type_a,
+                scale_type_b=scale_type_b,
+                swizzle_type_a=swizzle_type_a,
+                swizzle_type_b=swizzle_type_b,
             )
             choices.append(caller)
             num_added += 1
         except Exception:
-            log.debug("Failed to create NVIDIA Universal GEMM choice", exc_info=True)
-    log.debug("Added %d NVIDIA Universal GEMM choices", num_added)
+            log.debug("Failed to create %s choice", variant.op_name, exc_info=True)
+
+    log.debug("Added %d %s choices", num_added, variant.op_name)
+
+
+def add_nv_universal_gemm_choices(
+    choices: list[ChoiceCaller],
+    layout: Layout,
+    inputs: MMKernelInputs,
+    accumulator_type: Optional[torch.dtype] = None,
+) -> None:
+    """
+    Add NVIDIA Universal GEMM kernels to the autotune choices.
+
+    Thin wrapper around _add_nv_gemm_choices_impl for regular GEMM.
+    """
+    if not ensure_nv_universal_gemm_available():
+        log.debug("cutlass_api not available, skipping NVIDIA Universal GEMM choices")
+        return
+
+    _add_nv_gemm_choices_impl(
+        choices=choices,
+        layout=layout,
+        input_nodes=inputs.nodes(),
+        variant=GemmVariant.GEMM,
+        accumulator_type=accumulator_type or torch.float32,
+        mm_inputs=inputs,
+    )
+
+
+def add_nv_universal_grouped_gemm_choices(
+    choices: list[ChoiceCaller],
+    layout: Layout,
+    input_nodes: list[Buffer],
+    accumulator_type: Optional[torch.dtype] = None,
+) -> None:
+    """
+    Add NVIDIA Universal Grouped GEMM kernels to the autotune choices.
+
+    Thin wrapper around _add_nv_gemm_choices_impl for grouped GEMM.
+
+    For grouped GEMM (contiguous offset variant):
+    - A is (TotalM, K) with problems stacked along M
+    - B is (G, K, N) where B[i] is the weight for problem i
+    - offsets is (G,) marking where each problem ends in A
+    - Output is (TotalM, N)
+    """
+    if not ensure_nv_universal_gemm_available():
+        log.debug(
+            "cutlass_api not available, skipping NVIDIA Universal Grouped GEMM choices"
+        )
+        return
+
+    _add_nv_gemm_choices_impl(
+        choices=choices,
+        layout=layout,
+        input_nodes=input_nodes,
+        variant=GemmVariant.GROUPED_GEMM,
+        accumulator_type=accumulator_type or torch.float32,
+    )
+
+
+def add_nv_universal_scaled_gemm_choices(
+    choices: list[ChoiceCaller],
+    layout: Layout,
+    input_nodes: list[Buffer],
+    accumulator_type: Optional[torch.dtype] = None,
+) -> None:
+    """
+    Add NVIDIA Universal Scaled GEMM (FP8) kernels to the autotune choices.
+
+    The scaling type is inferred from the input shapes/dtypes.
+    If the scaling mode is unsupported by NVGEMM, this function returns without
+    adding any choices.
+    """
+    if not ensure_nv_universal_gemm_available():
+        return
+
+    from torch._inductor.utils import infer_scale_swizzle_ir
+
+    if len(input_nodes) < 4:
+        return
+
+    mat_a, mat_b, scale_a, scale_b = input_nodes[:4]
+
+    scale_type_a, swizzle_type_a = infer_scale_swizzle_ir(mat_a, scale_a)
+    scale_type_b, swizzle_type_b = infer_scale_swizzle_ir(
+        mat_b, scale_b, transpose=True
+    )
+
+    if scale_type_a is None or scale_type_b is None:
+        return
+
+    _add_nv_gemm_choices_impl(
+        choices=choices,
+        layout=layout,
+        input_nodes=input_nodes,
+        variant=GemmVariant.SCALED_GEMM,
+        accumulator_type=accumulator_type or torch.float32,
+        scale_type_a=scale_type_a,
+        scale_type_b=scale_type_b,
+        swizzle_type_a=swizzle_type_a,
+        swizzle_type_b=swizzle_type_b,
+    )

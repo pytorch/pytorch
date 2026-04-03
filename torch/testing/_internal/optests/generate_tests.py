@@ -269,7 +269,8 @@ def generate_opcheck_tests(
                 for mark in pytestmark:
                     if isinstance(mark, pytest.Mark) and mark.name == "parametrize":
                         argnames, argvalues = mark.args
-                        assert not mark.kwargs, "NYI"
+                        if mark.kwargs:
+                            raise AssertionError("NYI: mark.kwargs is not empty")
                         # Special case for device, we want to run on all
                         # devices
                         if argnames != "device":
@@ -808,8 +809,12 @@ class FailuresDict:
                 }
             else:
                 dct = json.loads(contents)
-                assert "data" in dct
-                assert "_version" in dct and dct["_version"] == VERSION
+                if "data" not in dct:
+                    raise AssertionError("Expected 'data' in dct")
+                if "_version" not in dct or dct["_version"] != VERSION:
+                    raise AssertionError(
+                        f"Expected '_version' in dct with value {VERSION}"
+                    )
         return FailuresDict(path, dct["data"])
 
     def _save(self, to_str=False) -> Optional[str]:

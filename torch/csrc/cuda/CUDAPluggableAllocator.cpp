@@ -227,7 +227,8 @@ void CUDAPluggableAllocator::resetPeakStats(c10::DeviceIndex device) {
 }
 
 c10::cuda::CUDACachingAllocator::SnapshotInfo CUDAPluggableAllocator::snapshot(
-    c10::cuda::MempoolId_t mempool_id) {
+    c10::cuda::MempoolId_t mempool_id,
+    bool include_traces) {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support snapshot. "

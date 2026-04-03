@@ -799,7 +799,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
 
     @unittest.skipIf(
-        not torch._C._cpu._is_amx_tile_supported(), "AMX ISA support is required"
+        not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
     )
     @inductor_config.patch({"freezing": True})
     @patches
@@ -1500,7 +1500,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self._check_amx_counter(vec_amx)
 
     @unittest.skipIf(
-        not torch._C._cpu._is_amx_tile_supported(), "AMX ISA support is required"
+        not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
     )
     @inductor_config.patch({"freezing": True})
     @patches
@@ -1584,7 +1584,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
         vec_amx = VecAMX()
         self._check_amx_counter(vec_amx)
-        if torch._C._cpu._is_amx_tile_supported():
+        if torch.cpu._is_amx_tile_supported():
             # Only AMX ISA based micro-kernel is currently supported for da8w8
             self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
 
@@ -1629,7 +1629,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         )
 
     @unittest.skipIf(
-        not torch._C._cpu._is_amx_tile_supported(), "AMX ISA support is required"
+        not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
     )
     @inductor_config.patch({"freezing": True})
     @patches
@@ -1700,7 +1700,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @unittest.skipIf(
-        not torch._C._cpu._is_amx_tile_supported(), "AMX ISA support is required"
+        not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
     )
     @inductor_config.patch({"freezing": True})
     @inductor_config.patch({"cpp.use_small_dequant_buffer": True})
@@ -1744,7 +1744,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             torch._C.FileCheck().check(_target_code_check).run(code)
 
     @unittest.skipIf(
-        not torch._C._cpu._is_amx_tile_supported(), "AMX ISA support is required"
+        not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
     )
     @inductor_config.patch({"freezing": True})
     @patches
@@ -1814,7 +1814,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @unittest.skipIf(
-        not torch._C._cpu._is_amx_tile_supported(), "AMX ISA support is required"
+        not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
     )
     @inductor_config.patch({"freezing": True})
     @inductor_config.patch({"cpp.enable_concat_linear": True})
@@ -2799,7 +2799,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.common(mod, (u, v))
 
     @unittest.skipIf(
-        not torch._C._cpu._is_amx_tile_supported(), "AMX ISA support is required"
+        not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
     )
     @inductor_config.patch({"freezing": True})
     @patches

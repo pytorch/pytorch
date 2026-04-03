@@ -279,7 +279,8 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
 
     with torch.random.fork_rng(devices, _caller="torch.jit.verify"):
         uncompiled_outs, uncompiled_grads = run_fwd_bwd(args, force_trace=True)
-        assert model.has_trace_for(*args)
+        if not model.has_trace_for(*args):
+            raise AssertionError("Model should have trace for the given args")
 
     if is_module:
         model.load_state_dict(saved_state)  # type: ignore[possibly-undefined]
@@ -545,9 +546,14 @@ def _check_trace(
                         elif getattr(orig, "is_nested", None) or getattr(
                             ref, "is_nested", None
                         ):
-                            assert getattr(orig, "is_nested", None) == getattr(
+                            if getattr(orig, "is_nested", None) != getattr(
                                 ref, "is_nested", None
-                            )
+                            ):
+                                raise AssertionError(
+                                    f"Nested tensor mismatch: orig.is_nested="
+                                    f"{getattr(orig, 'is_nested', None)}, "
+                                    f"ref.is_nested={getattr(ref, 'is_nested', None)}"
+                                )
                             for t_orig, t_ref in zip(orig.unbind(), ref.unbind()):
                                 torch.testing.assert_close(
                                     t_orig.double(),
@@ -1269,7 +1275,8 @@ class TracedModule(ScriptModule):
     def __init__(self, orig, id_set=None, _compilation_unit=None):
         # XXX: orig can be a nn.Module or a function!
         super().__init__()
-        assert isinstance(orig, torch.nn.Module)
+        if not isinstance(orig, torch.nn.Module):
+            raise AssertionError(f"Expected nn.Module, got {type(orig)}")
 
         # Copy a subset of `orig` to a temporary nn.Module.
         # This is a way to customize what will actually get compiled by create_script_module

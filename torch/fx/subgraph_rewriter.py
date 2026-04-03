@@ -319,9 +319,10 @@ def _replace_pattern(
     elif callable(replacement):
         common_replacement_graph = symbolic_trace(replacement).graph
     else:
-        assert replacement_callback is not None, (
-            "Must provide either a replacement GraphModule or a replacement callback"
-        )
+        if replacement_callback is None:
+            raise AssertionError(
+                "Must provide either a replacement GraphModule or a replacement callback"
+            )
         common_replacement_graph = None  # type: ignore[assignment]
 
     # As we progressively replace nodes, we'll need to keep track of how the match results should change
@@ -334,9 +335,10 @@ def _replace_pattern(
                 match, original_graph, pattern_graph
             )
         else:
-            assert common_replacement_graph is not None, (
-                "Must provide either a replacement GraphModule or a replacement callback"
-            )
+            if common_replacement_graph is None:
+                raise AssertionError(
+                    "Must provide either a replacement GraphModule or a replacement callback"
+                )
             replacement_graph = common_replacement_graph
         replacement_placeholders = [
             n for n in replacement_graph.nodes if n.op == "placeholder"
@@ -346,7 +348,11 @@ def _replace_pattern(
 
         # Initialize `val_map` with mappings from placeholder nodes in
         # `replacement` to their corresponding node in `original_graph`
-        assert len(match.placeholder_nodes) == len(replacement_placeholders)
+        if len(match.placeholder_nodes) != len(replacement_placeholders):
+            raise AssertionError(
+                f"Placeholder count mismatch: {len(match.placeholder_nodes)} vs "
+                f"{len(replacement_placeholders)}"
+            )
         val_map: dict[Node, Node] = {}
         for rn, gn in zip(replacement_placeholders, match.placeholder_nodes):
             if isinstance(gn, Node):
@@ -394,7 +400,8 @@ def _replace_pattern(
         insert_point = (
             first_user_node if first_user_node is not None else first_next_node
         )
-        assert insert_point is not None, "The insert point can't be None"
+        if insert_point is None:
+            raise AssertionError("The insert point can't be None")
         with original_graph.inserting_before(insert_point):
             copied_returning_nodes = original_graph.graph_copy(
                 replacement_graph, val_map
@@ -410,7 +417,11 @@ def _replace_pattern(
 
         # Hook the output Node of the replacement subgraph in to the
         # original Graph at the correct location
-        assert len(match.returning_nodes) == len(copied_returning_nodes)  # type: ignore[arg-type]
+        if len(match.returning_nodes) != len(copied_returning_nodes):  # type: ignore[arg-type]
+            raise AssertionError(
+                f"Returning nodes count mismatch: {len(match.returning_nodes)} vs "
+                f"{len(copied_returning_nodes)}"  # pyrefly: ignore [bad-argument-type]
+            )
         for gn, copied_node in zip(match.returning_nodes, copied_returning_nodes):  # type: ignore[arg-type]
             gn.replace_all_uses_with(copied_node)
             match_changed_node[gn] = copied_node

@@ -62,6 +62,7 @@ from torch.testing._internal.common_quantized import (
     generate_jagged_offs,
     pack_uint4,
 )
+from torch._inductor.utils import infer_scale_swizzle
 
 
 _IS_SM8X = False
@@ -199,70 +200,6 @@ def _pad_128x128_scales(scale: torch.Tensor) -> (torch.Tensor, int):
 
 def round_up(x: int, y: int) -> int:
     return ((x + y - 1) // y) * y
-
-
-def infer_scale_swizzle(mat, scale):
-    # Tensor-wise
-    if scale.numel() == 1:
-        return ScalingType.TensorWise, SwizzleType.NO_SWIZZLE
-
-    # Row-wise
-    if (scale.shape[0] == mat.shape[0] and scale.shape[1] == 1) or (
-        scale.shape[0] == 1 and scale.shape[1] == mat.shape[1]
-    ):
-        return ScalingType.RowWise, SwizzleType.NO_SWIZZLE
-
-    # deepgemm 1x128 / 128x1
-    if len(scale.shape) > 1:
-        if (
-            (scale.shape[0] == mat.shape[0]
-                and scale.shape[1] == math.ceil(mat.shape[1] // 128))
-            or (scale.shape[1] == mat.shape[1]
-                and scale.shape[0] == math.ceil(mat.shape[0] // 128))
-        ):
-            return ScalingType.BlockWise1x128, SwizzleType.NO_SWIZZLE
-
-        # deepgemm 128x128
-        if scale.shape[0] == math.ceil(mat.shape[0] // 128) and scale.shape[
-            1
-        ] == math.ceil(mat.shape[1] // 128):
-            return ScalingType.BlockWise128x128, SwizzleType.NO_SWIZZLE
-
-    # if we're checking for nvfp4, need to adjust for packed-K
-    K_multiplier = 2 if mat.dtype == torch.float4_e2m1fn_x2 else 1
-    # NVFP4
-    if (
-        (scale.numel()
-            == round_up(mat.shape[0], 128) * round_up(math.ceil(K_multiplier * mat.shape[1] // 16), 4)
-            or scale.numel()
-            == round_up(mat.shape[1], 128) * round_up(math.ceil(K_multiplier * mat.shape[0] // 16), 4))
-        and mat.dtype == torch.float4_e2m1fn_x2
-        and scale.dtype == torch.float8_e4m3fn
-    ):
-        return ScalingType.BlockWise1x16, SwizzleType.SWIZZLE_32_4_4
-
-    # MX formats
-    if not torch.version.hip:
-        # MX w/swizzle (NVIDIA)
-        if (
-            (scale.numel()
-                == round_up(mat.shape[0], 128) * round_up(math.ceil(K_multiplier * mat.shape[1] // 32), 4)
-                or scale.numel()
-                == round_up(mat.shape[1], 128) * round_up(math.ceil(K_multiplier * mat.shape[0] // 32), 4))
-            and scale.dtype == torch.float8_e8m0fnu
-        ):
-            return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_4_4
-
-    else:
-        # MX w/o swizzle (AMD)
-        if (
-            (scale.numel() == math.ceil(mat.shape[0] // 32) * K_multiplier * mat.shape[1]
-                or scale.numel() == math.ceil(K_multiplier * mat.shape[1] // 32) * mat.shape[0])
-            and scale.dtype == torch.float8_e8m0fnu
-        ):
-            return ScalingType.BlockWise1x32, SwizzleType.NO_SWIZZLE
-
-    return None, None
 
 
 wrap: bool = True

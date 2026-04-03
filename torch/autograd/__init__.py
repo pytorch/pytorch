@@ -15,7 +15,7 @@ from typing import cast, Optional, Union
 import torch
 from torch import _vmap_internals
 from torch.overrides import handle_torch_function, has_torch_function, is_tensor_like
-from torch.types import _size, _TensorOrTensors, _TensorOrTensorsOrGradEdge
+from torch.types import _size, _TensorOrOptionalTensors, _TensorOrTensorsOrGradEdge
 
 from . import forward_ad, functional, graph
 from .anomaly_mode import detect_anomaly, set_detect_anomaly
@@ -241,7 +241,7 @@ def _make_grads(
 
 
 def _tensor_or_tensors_to_tuple(
-    tensors: Optional[_TensorOrTensors], length: int
+    tensors: Optional[_TensorOrOptionalTensors], length: int
 ) -> tuple[_OptionalTensor, ...]:
     if tensors is None:
         return (None,) * length
@@ -252,10 +252,10 @@ def _tensor_or_tensors_to_tuple(
 
 def backward(
     tensors: _TensorOrTensorsOrGradEdge,
-    grad_tensors: Optional[_TensorOrTensors] = None,
+    grad_tensors: Optional[_TensorOrOptionalTensors] = None,
     retain_graph: Optional[bool] = None,
     create_graph: bool = False,
-    grad_variables: Optional[_TensorOrTensors] = None,
+    grad_variables: Optional[_TensorOrOptionalTensors] = None,
     inputs: Optional[_TensorOrTensorsOrGradEdge] = None,
 ) -> None:
     r"""Compute the sum of gradients of given tensors with respect to graph leaves.
@@ -392,7 +392,7 @@ def backward(
 def grad(
     outputs: _TensorOrTensorsOrGradEdge,
     inputs: _TensorOrTensorsOrGradEdge,
-    grad_outputs: Optional[_TensorOrTensors] = None,
+    grad_outputs: Optional[_TensorOrOptionalTensors] = None,
     retain_graph: Optional[bool] = None,
     create_graph: bool = False,
     only_inputs: bool = True,
@@ -423,10 +423,10 @@ def grad(
         outputs (sequence of Tensor or GradientEdge): outputs of the differentiated function.
         inputs (sequence of Tensor or GradientEdge): Inputs w.r.t. which the gradient will be
             returned (and not accumulated into ``.grad``).
-        grad_outputs (sequence of Tensor): The "vector" in the vector-Jacobian product.
-            Usually gradients w.r.t. each output. None values can be specified for scalar
-            Tensors or ones that don't require grad. If a None value would be acceptable
-            for all grad_tensors, then this argument is optional. Default: None.
+        grad_outputs (sequence of [Tensor or None] or Tensor, optional): The "vector" in the
+            vector-Jacobian product. Usually gradients w.r.t. each output. None values can be
+            specified for scalar Tensors or ones that don't require grad. If a None value would be
+            acceptable for all grad_tensors, then this argument is optional. Default: None.
         retain_graph (bool, optional): If ``False``, the graph used to compute the grad
             will be freed. Note that in nearly all cases setting this option to ``True``
             is not needed and often can be worked around in a much more efficient

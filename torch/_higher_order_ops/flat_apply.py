@@ -123,8 +123,12 @@ class FlatApply(HigherOrderOperator):
         registered with pytree.register_constant. The constant type goes directly
         into the spec.
         """
-        assert isinstance(func, _op_types) or pytree._is_constant_holder(func)
-        assert len(_unused) == 0
+        if not (isinstance(func, _op_types) or pytree._is_constant_holder(func)):
+            raise AssertionError(
+                f"func must be an op type or constant holder, got {type(func)}"
+            )
+        if len(_unused) != 0:
+            raise AssertionError(f"unexpected keyword arguments: {_unused}")
         # pyrefly: ignore[bad-argument-type]  # pyrefly bug?
         return impl(func, in_spec, flat_args, checked_output)
 
@@ -152,7 +156,10 @@ def impl(
     if isinstance(func, pytree.TreeSpec):
         # assume _ConstantFunction
         func = pytree._retrieve_constant(func)
-        assert isinstance(func, _ConstantFunction)
+        if not isinstance(func, _ConstantFunction):
+            raise AssertionError(
+                f"expected retrieved constant to be _ConstantFunction, got {type(func)}"
+            )
 
     # pyrefly: ignore[bad-argument-type]  # pyrefly bug?
     args, kwargs = from_graphable(flat_args, in_spec)
@@ -161,7 +168,10 @@ def impl(
     if checked_output:
         # For "normal" usage all outputs must either be graphable or
         # lists/tuples of graphables.
-        assert is_valid_output(out)
+        if not is_valid_output(out):
+            raise AssertionError(
+                f"output must be graphable or nested list/tuple of graphables, got {type(out)}"
+            )
     return out
 
 

@@ -22,7 +22,7 @@ from sympy.utilities.iterables import sift
 
 from torch.torch_version import TorchVersion
 
-from .numbers import int_oo
+from .numbers import int_oo, is_infinite
 
 
 if TYPE_CHECKING:
@@ -226,12 +226,7 @@ class FloorDiv(sympy.Function):
         # makes it difficult to check the types.
         if divisor.is_zero:
             raise ZeroDivisionError("division by zero")
-        if base in (int_oo, -int_oo, sympy.oo, -sympy.oo) and divisor in (
-            int_oo,
-            -int_oo,
-            sympy.oo,
-            -sympy.oo,
-        ):
+        if is_infinite(base) and is_infinite(divisor):
             return sympy.nan
         if base is sympy.nan or divisor is sympy.nan:
             return sympy.nan
@@ -248,10 +243,7 @@ class FloorDiv(sympy.Function):
         if (
             isinstance(base, sympy.Number)
             and isinstance(divisor, sympy.Number)
-            and (
-                base in (int_oo, -int_oo, sympy.oo, -sympy.oo)
-                or divisor in (int_oo, -int_oo, sympy.oo, -sympy.oo)
-            )
+            and (is_infinite(base) or is_infinite(divisor))
         ):
             r = float(base) / float(divisor)
             if r == math.inf:
@@ -1152,10 +1144,7 @@ class IntTrueDiv(sympy.Function):
         if (
             isinstance(base, sympy.Number)
             and isinstance(divisor, sympy.Number)
-            and (
-                base in (int_oo, -int_oo, sympy.oo, -sympy.oo)
-                or divisor in (int_oo, -int_oo, sympy.oo, -sympy.oo)
-            )
+            and (is_infinite(base) or is_infinite(divisor))
         ):
             # Don't have to worry about precision here, you're getting zero or
             # inf from the division
@@ -1347,6 +1336,19 @@ class Identity(sympy.Function):
 
     def _eval_is_integer(self):
         return self.args[0].is_integer  # type: ignore[attr-defined]
+
+    @property
+    def is_number(self):
+        # Treat Identity as numeric only when the argument is comparable.
+        # This avoids creating numeric non-comparable Identity(I) terms.
+        # pyrefly: ignore [missing-attribute]
+        return bool(self.args[0].is_number and self.args[0].is_comparable)
+
+    @property
+    def is_comparable(self):
+        # Delegate comparability to the wrapped argument.
+        # pyrefly: ignore [missing-attribute]
+        return bool(self.args[0].is_comparable)
 
     def _eval_expand_identity(self, **hints):
         # Removes the identity op.

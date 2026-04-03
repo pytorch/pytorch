@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 This module is responsible for transforming functions to be traced into a form
 that is easier for the downstream infra (e.g. Autograd, FX, AOTAutograd analysis)
@@ -12,7 +11,7 @@ It does so by:
 """
 
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
 from typing import Any, Optional, TypeVar, Union
@@ -74,6 +73,7 @@ from .logging_utils import setup_stacktrace_preservation_hooks
 from .schemas import (
     AOTConfig,
     FxValue,
+    InputAliasInfo,
     JointTraceFn,
     MutationType,
     OutputType,
@@ -108,7 +108,7 @@ def fn_input_mutations_to_outputs(
     keep_data_input_mutations: bool,
 ) -> Any:
     @simple_wraps(fn)
-    def inner_fn(*args):
+    def inner_fn(*args: FxValue) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
         outs, outs_descs = call_and_expect_output_descs(fn, args)
         assert len(meta.output_info) == len(outs)
         # The compiled fw will return mutated input tensors, *including* metadata-only mutation.
@@ -134,7 +134,7 @@ def fn_input_mutations_to_outputs(
 
 
 @contextmanager
-def disable_autocast():
+def disable_autocast() -> Generator[None, None, None]:
     with ExitStack() as stack:
         autocast_enabled_devices = torch._C._autocast_supported_devices()
         for device_type in autocast_enabled_devices:
@@ -164,12 +164,14 @@ def fn_prepped_for_autograd(
     aot_config: AOTConfig,
 ) -> PreppedForAutogradTraceFn:
     @simple_wraps(fn)
-    def inner_fn(*args):
+    def inner_fn(
+        *args: FxValue,
+    ) -> tuple[tuple[list[FxValue], list[bool]], list[AOTOutput]]:
         args_maybe_cloned = [
             maybe_to_fresh_input(i, t, meta) for i, t in enumerate(args)
         ]
 
-        outs, outs_descs = call_and_expect_output_descs(fn, args_maybe_cloned)
+        outs, outs_descs = call_and_expect_output_descs(fn, args_maybe_cloned)  # type: ignore[arg-type]
         assert isinstance(outs, (tuple, list))
         outs = list(outs)
         assert len(meta.output_info) == len(outs)
@@ -248,6 +250,7 @@ def fn_prepped_for_autograd(
                     continue
                 sync_functional_tensor(arg)
 
+        # pyrefly: ignore[bad-return]
         return (fw_outs_to_return, out_grad_mask), (
             fw_outs_to_return_descs,
             out_grad_mask,
@@ -258,7 +261,7 @@ def fn_prepped_for_autograd(
 
 @dataclass
 class JointFnHandle:
-    post_forward: Optional[Callable] = None
+    post_forward: Callable[..., Any] | None = None
 
 
 # Given a fn, computes the joint.
@@ -272,11 +275,11 @@ class JointFnHandle:
 #     otherwise, when we compute autograd.grad(), we will not take those input mutations into account
 #     (the way this is handled is that we ensure any inputs that normally get mutated are cloned first)
 def create_joint(
-    fn: Any,  # PreppedForAutogradTraceFn
+    fn: Callable[..., Any],
     primals_descs: Optional[list[AOTInput]] = None,
     *,
     aot_config: AOTConfig,
-) -> Any:  # JointTraceFn
+) -> Callable[..., Any]:
     joint_fn_handle = JointFnHandle()
 
     # post_forward
@@ -294,7 +297,8 @@ def create_joint(
             assert not pytree.tree_any(lambda x: isinstance(x, AOTOutput), tangent_mask)
         else:
             (outs, tangent_mask), (outs_descs, _) = call_and_expect_output_descs(
-                fn, primals
+                fn,
+                primals,  # type: ignore[arg-type]
             )
         mode = get_proxy_mode()
         assert mode is not None, "Expected non-None proxy mode"
@@ -415,6 +419,7 @@ def create_joint(
         if primals_descs is None:
             return final_outs  # type: ignore[return-value]
         assert outs_descs is not None
+        # pyrefly: ignore[bad-return]
         return final_outs, (
             outs_descs,
             [
@@ -437,16 +442,25 @@ def create_joint(
             with torch.autograd.detect_anomaly(check_nan=False):
                 return inner_fn(primals, tangents)
 
-    def joint_helper(primals, tangents):
+    def joint_helper(
+        primals: list[FxValue], tangents: list[FxValue]
+    ) -> tuple[
+        tuple[list[FxValue], list[Optional[Tensor]]],
+        tuple[list[AOTOutput], list[Optional[AOTOutput]]],
+    ]:
         return inner_fn_with_anomaly(primals, tangents)
 
     joint_helper.handle = joint_fn_handle  # type: ignore[attr-defined]
 
+    # pyrefly: ignore[bad-return]
     return joint_helper
 
 
 def create_functionalized_rng_ops_wrapper(
-    func, args, args_descs, trace_joint=True
+    func: Callable[..., Any],
+    args: Any,
+    args_descs: list[AOTInput],
+    trace_joint: bool = True,
 ) -> Any:
     # Functionalization of rng ops changes the calling convention of the joint graph.
     # It goes from (primals, tangents) to (seed, offset, primals, tangents)
@@ -457,14 +471,18 @@ def create_functionalized_rng_ops_wrapper(
     if fake_mode_det is not None:
         fake_mode = fake_mode_det
 
-    def override_get_rng_state(device: Union[int, str, torch.device] = "cuda"):
+    def override_get_rng_state(
+        device: Union[int, str, torch.device] = "cuda",
+    ) -> Tensor:
         out = PhiloxStateTracker.get_state_as_tensor()
         return out
 
-    def override_set_rng_state(x, device: Union[int, str, torch.device] = "cuda"):
+    def override_set_rng_state(
+        x: Tensor, device: Union[int, str, torch.device] = "cuda"
+    ) -> None:
         PhiloxStateTracker.set_state_from_tensor(x)
 
-    def append_rng_offsets(outs, outs_descs):
+    def append_rng_offsets(outs: Any, outs_descs: Any) -> Any:
         if trace_joint:
             # outs signature before: Tuple(fwd_outputs), Tuple(bwd_outputs)
             # outs signature after: Tuple(fwd_outputs, new_fwd_rng_offset), Tuple(bwd_offset, new_bwd_rng_offset)
@@ -487,15 +505,23 @@ def create_functionalized_rng_ops_wrapper(
             )
 
     def traced_joint(
-        primals, tangents, fwd_seed, fwd_base_offset, bwd_seed, bwd_base_offset
-    ):
+        primals: list[FxValue],
+        tangents: list[FxValue],
+        fwd_seed: Tensor,
+        fwd_base_offset: Tensor,
+        bwd_seed: Tensor,
+        bwd_base_offset: Tensor,
+    ) -> tuple[
+        tuple[tuple[FxValue, ...], tuple[FxValue, ...]],
+        tuple[tuple[AOTOutput, ...], tuple[AOTOutput, ...]],
+    ]:
         with (
             patch("torch.cuda.get_rng_state", override_get_rng_state),
             patch("torch.cuda.set_rng_state", override_set_rng_state),
         ):
             return append_rng_offsets(*func(primals, tangents))
 
-    def traced_forward(*primals_fwd_seed_fwd_base_offset):
+    def traced_forward(*primals_fwd_seed_fwd_base_offset: Any) -> Any:
         # The signature is (*primals, seed, offset)
         with (
             patch("torch.cuda.get_rng_state", override_get_rng_state),
@@ -548,7 +574,7 @@ def create_functionalized_rng_ops_wrapper(
 
 
 @contextmanager
-def set_partitioner_tag(tag: str):
+def set_partitioner_tag(tag: str) -> Generator[None, None, None]:
     meta_key = "partitioner_tag"
     assert fx_traceback.has_preserved_node_meta()
 
@@ -560,15 +586,15 @@ def set_partitioner_tag(tag: str):
         fx_traceback.current_meta[meta_key] = original_val
 
 
-def set_partitioner_tag_is_backward():
+def set_partitioner_tag_is_backward() -> AbstractContextManager[None]:
     return set_partitioner_tag("is_backward")
 
 
-def set_partitioner_tag_must_be_in_backward():
+def set_partitioner_tag_must_be_in_backward() -> AbstractContextManager[None]:
     return set_partitioner_tag("must_be_in_backward")
 
 
-def set_partitioner_tag_must_be_in_forward():
+def set_partitioner_tag_must_be_in_forward() -> AbstractContextManager[None]:
     return set_partitioner_tag("must_be_in_forward")
 
 
@@ -583,14 +609,17 @@ T = TypeVar("T")
 
 
 def sc_visit(
-    t, fn: Callable[[Tensor], T], reduce_fn: Callable[[T, T], T], accum_init: T
+    t: torch.Tensor,
+    fn: Callable[[Tensor], T],
+    reduce_fn: Callable[[T, T], T],
+    accum_init: T,
 ) -> T:
     if not is_traceable_wrapper_subclass(t):
         return fn(t)
 
     accum = accum_init
 
-    def visit(e):
+    def visit(e: Any) -> None:
         if not is_traceable_wrapper_subclass(e):
             nonlocal accum
             accum = reduce_fn(accum, fn(e))
@@ -603,7 +632,7 @@ def sc_visit(
     return accum
 
 
-def _get_mutation_counter(t) -> int:
+def _get_mutation_counter(t: torch.Tensor) -> int:
     return sc_visit(
         t,
         lambda t: torch._functionalize_mutation_counter(t.elem),  # type: ignore[attr-defined]
@@ -612,7 +641,7 @@ def _get_mutation_counter(t) -> int:
     )
 
 
-def _get_storage_changed_counter(t) -> int:
+def _get_storage_changed_counter(t: torch.Tensor) -> int:
     return sc_visit(
         t,
         lambda t: torch._functionalize_storage_changed_counter(t.elem),  # type: ignore[attr-defined]
@@ -621,7 +650,7 @@ def _get_storage_changed_counter(t) -> int:
     )
 
 
-def _get_inductor_storage_resized_counter(t) -> int:
+def _get_inductor_storage_resized_counter(t: torch.Tensor) -> int:
     return sc_visit(
         t,
         lambda t: torch._functionalize_inductor_storage_resized_counter(t.elem),  # type: ignore[attr-defined]
@@ -630,7 +659,7 @@ def _get_inductor_storage_resized_counter(t) -> int:
     )
 
 
-def _get_mutation_counters(t) -> MutationCounters:
+def _get_mutation_counters(t: torch.Tensor) -> MutationCounters:
     return MutationCounters(
         _get_mutation_counter(t),
         _get_storage_changed_counter(t),
@@ -639,14 +668,14 @@ def _get_mutation_counters(t) -> MutationCounters:
 
 
 def apply_in_graph_mutations(
-    input_info,
-    inpt_old,
-    inpt_new,
-    f_inpt,
-    input_idx,
+    input_info: InputAliasInfo,
+    inpt_old: Tensor,
+    inpt_new: Tensor,
+    f_inpt: Tensor,
+    input_idx: int,
     mcs: Optional[MutationCounters] = None,
     applied_mcs: Optional[MutationCounters] = None,
-):
+) -> None:
     assert input_info.mutation_type == MutationType.MUTATED_IN_GRAPH
     # See Note [set_() Input Mutations in AOTAutograd]
     # all mutations on the input must be under no_grad, so it is safe to put in the graph
@@ -665,6 +694,7 @@ def apply_in_graph_mutations(
     if input_info.mutates_storage_metadata:
         if mcs is None or mcs.mc_storage > applied_mcs.mc_storage:  # type: ignore[union-attr]
             with torch.no_grad():
+                # pyrefly: ignore[no-matching-overload]
                 inpt_old.set_(inpt_new)
 
     # Note [Ordering of resize_() and set_()]
@@ -756,9 +786,9 @@ def apply_in_graph_mutations(
 # (2) "traced_fn(primals: List[Any], tangents: List[Any])" if trace_joint is True
 # Returns a new (functionalized) function, and updated arguments to call it with.
 def create_functionalized_fn(
-    fn,
-    args,
-    args_descs,
+    fn: Callable[..., Any],
+    args: Any,
+    args_descs: Any,
     *,
     meta: ViewAndMutationMeta,
     aot_config: AOTConfig,
@@ -793,7 +823,7 @@ def create_functionalized_fn(
 
                 if trace_joint and has_input_mutated_in_graph and joint_fn_handle:
                     # TODO(ivankobzarev): Support fw and bw mutations for subclasses
-                    def _post_forward(primals):
+                    def _post_forward(primals: Any) -> None:
                         nonlocal primals_after_forward
                         primals_after_forward = pytree.tree_map(from_fun, primals)
                         nonlocal f_args_after_forward
@@ -1016,7 +1046,9 @@ def create_functionalized_fn(
                     ):
                         apply_in_graph_mutations(
                             meta.input_info[idx],
+                            # pyrefly: ignore[bad-argument-type]
                             inpt_old,
+                            # pyrefly: ignore[bad-argument-type]
                             inpt_new,
                             f_inpt,
                             idx,
@@ -1051,7 +1083,7 @@ def create_functionalized_fn(
     # Kinda annoying, but needed to make sure that the fx graph we trace out has "primals"
     # and "tangents" as its input names (which are special-cased by the partitioner)
     # TODO (tmanlaibaatar) revisit this if we ever need to turn on non-strict joint graph export
-    def joint_helper(primals, tangents):
+    def joint_helper(primals: list[FxValue], tangents: list[FxValue]) -> Any:
         return _functionalized_f_helper(primals, tangents)
 
     helper = joint_helper if trace_joint else _functionalized_f_helper
@@ -1065,8 +1097,8 @@ def create_functionalized_fn(
 
 
 def handle_effect_tokens_fn(
-    fn,
-    args,
+    fn: Callable[..., Any],
+    args: Any,
     args_descs: list[AOTInput],
     *,
     meta: ViewAndMutationMeta,
@@ -1075,7 +1107,7 @@ def handle_effect_tokens_fn(
     num_tokens = len(meta.tokens)
 
     @simple_wraps(fn)
-    def inner_fn(*args):
+    def inner_fn(*args: Any) -> Any:
         # See Note [Disabling Functionalize TLS Above Python Functionalization]
         disable_above = torch._C._ExcludeDispatchKeyGuard(
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
@@ -1180,7 +1212,7 @@ def aot_dispatch_subclass(
     fw_only: Callable,
 ) -> SubclassTracingInfo:
     # Skip logic if we don't need to trace through any subclasses
-    req_subclass_dispatch = requires_subclass_dispatch(args, meta)
+    req_subclass_dispatch = requires_subclass_dispatch(args, meta)  # type: ignore[arg-type]
     if not req_subclass_dispatch:
         return SubclassTracingInfo(
             plain_tensor_trace_fn=flat_fn_maybe_joint,
@@ -1200,14 +1232,14 @@ def aot_dispatch_subclass(
 
     # NB: doesn't take descs, this is going from the NEW flat_args to the
     # subclasses, we don't need to do bookkeeping here
-    def inner_fn(fn, args, *, use_trace_joint: bool):
+    def inner_fn(fn: Callable[..., Any], args: Any, *, use_trace_joint: bool) -> Any:
         # Step 1: wrap tensor inputs into subclasses if necessary
         all_args = wrap_tensor_subclasses_maybe_joint(
             args, is_joint_structure=use_trace_joint, meta=meta
         )
 
         # Step 2: call the inner function, with our (maybe subclass) inputs
-        wrapped_outs, wrapped_outs_descs = call_and_expect_output_descs(fn, all_args)
+        wrapped_outs, wrapped_outs_descs = call_and_expect_output_descs(fn, all_args)  # type: ignore[arg-type]
 
         if use_trace_joint:
             # See Note: [Computing Subclass Metadata about grad_inputs]
@@ -1256,7 +1288,7 @@ def aot_dispatch_subclass(
 
     def metadata_fn(*primals: FxValue) -> tuple[list[FxValue], list[AOTOutput]]:
         @simple_wraps(fw_only)
-        def inner_fw_only(*args):
+        def inner_fw_only(*args: Any) -> Any:
             return call_and_expect_output_descs(fw_only, args)
 
         return inner_fn(inner_fw_only, primals, use_trace_joint=False)
@@ -1279,7 +1311,8 @@ def aot_dispatch_subclass(
         args_unwrapped = (primals_unwrapped_pair[0], tangents_unwrapped_pair[0])
         args_descs_unwrapped = (primals_unwrapped_pair[1], tangents_unwrapped_pair[1])
         remapped_static_indices = remap_unwrapped_subclass_arg_indices(
-            args[0], meta.static_input_indices
+            args[0],  # type: ignore[arg-type]
+            meta.static_input_indices,  # type: ignore[arg-type]
         )
     else:
         args_unwrapped, args_descs_unwrapped = unwrap_tensor_subclasses(  # type: ignore[assignment]
@@ -1288,7 +1321,8 @@ def aot_dispatch_subclass(
             append_symints=True,
         )
         remapped_static_indices = remap_unwrapped_subclass_arg_indices(
-            args, meta.static_input_indices
+            args,  # type: ignore[arg-type]
+            meta.static_input_indices,  # type: ignore[arg-type]
         )
 
     if is_joint_structure:
@@ -1338,13 +1372,17 @@ def aot_dispatch_subclass(
 
 
 def create_functional_call(
-    mod, params_spec, params_len, store_orig_mod=False, strict_out_tuple=True
-):
+    mod: Any,
+    params_spec: Any,
+    params_len: int,
+    store_orig_mod: bool = False,
+    strict_out_tuple: bool = True,
+) -> Callable[..., Any]:
     # Redundant with dynamo, but worth having in case this gets invoked elsewhere.
     # https://github.com/pytorch/pytorch/issues/103569
 
     @simple_wraps(mod)
-    def functional_call(*args, **kwargs):
+    def functional_call(*args: Any, **kwargs: Any) -> Any:
         flat_params = args[:params_len]
         if isinstance(params_spec, TreeSpec):
             params = pytree.tree_unflatten(flat_params, params_spec)

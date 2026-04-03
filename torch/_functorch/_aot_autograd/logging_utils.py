@@ -1,14 +1,18 @@
-# mypy: allow-untyped-defs
 """
 Contains utils for logging in AOTAutograd, including managing the names of the graphs under
 compilation, capturing user-friendly tracebacks, and debug messages.
 """
 
 import collections
+from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
+from typing import Any
 
 import torch
 import torch.fx.traceback as fx_traceback
+from torch._C import _FunctionBase
+
+from .schemas import AOTConfig
 
 
 # This is a list since looking forward, we can have this arbitrarily nested.
@@ -22,7 +26,7 @@ nth_graph: int = 0
 model_name: str = "model"
 
 
-def set_model_name(name):
+def set_model_name(name: str) -> None:
     global model_name
     model_name = name
 
@@ -43,7 +47,9 @@ get_graph_being_compiled = get_aot_graph_name
 
 
 @contextmanager
-def track_graph_compiling(aot_config, graph_name):
+def track_graph_compiling(
+    aot_config: AOTConfig, graph_name: str
+) -> Generator[None, None, None]:
     global graph_being_compiled
     # TODO: Don't shove the aot_id in here; set it in the context
     graph_being_compiled = [f"{aot_config.aot_id}_{graph_name}"]
@@ -69,12 +75,12 @@ def track_graph_compiling(aot_config, graph_name):
 callback_set = False
 
 
-def setup_stacktrace_preservation_hooks(roots: list):
-    def iter_graph(roots):
+def setup_stacktrace_preservation_hooks(roots: list[_FunctionBase]) -> None:
+    def iter_graph(roots: list[_FunctionBase]) -> Iterator[_FunctionBase]:
         if not roots:
             return
         seen = set()
-        q = collections.deque()  # type: ignore[var-annotated]
+        q = collections.deque()
         for node in roots:
             if node is not None and node not in seen:
                 seen.add(node)
@@ -90,16 +96,16 @@ def setup_stacktrace_preservation_hooks(roots: list):
 
             yield node
 
-    def get_callback(saved_stack_):
-        def callback():
+    def get_callback(saved_stack_: list[str]) -> Callable[[], None]:
+        def callback() -> None:
             global callback_set
             fx_traceback.set_stack_trace(saved_stack_)
             callback_set = False
 
         return callback
 
-    def get_prehook(stack_, seq_nr):
-        def prehook(grad_output):
+    def get_prehook(stack_: list[str], seq_nr: int) -> Callable[[Any], None]:
+        def prehook(grad_output: Any) -> None:
             global callback_set
 
             if not callback_set:
@@ -113,8 +119,10 @@ def setup_stacktrace_preservation_hooks(roots: list):
 
         return prehook
 
-    def get_posthook(special_stack_, seq_nr):
-        def posthook(grad_input, grad_output):
+    def get_posthook(
+        special_stack_: list[str], seq_nr: int
+    ) -> Callable[[Any, Any], None]:
+        def posthook(grad_input: Any, grad_output: Any) -> None:
             fx_traceback.set_stack_trace(special_stack_)
             fx_traceback.reset_grad_fn_seq_nr()
 
@@ -129,14 +137,14 @@ def setup_stacktrace_preservation_hooks(roots: list):
         node.register_hook(get_posthook(special_stack, node._sequence_nr()))
 
 
-def describe_input(i, aot_config):
+def describe_input(i: int, aot_config: AOTConfig) -> str:
     if i < aot_config.num_params_buffers:
         return f"parameter/buffer {i}"
     else:
         return f"input {i - aot_config.num_params_buffers}"
 
 
-def format_guard_bug_msg(aot_config, expected):
+def format_guard_bug_msg(aot_config: AOTConfig, expected: str) -> str:
     return (
         f"At compilation time, graph {aot_config.aot_id} was compiled under the "
         f"assumption that {expected}, but at runtime this was not the case.  "

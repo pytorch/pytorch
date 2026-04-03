@@ -2888,6 +2888,7 @@ from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_d
                 if out_ptr in full_kernel_params:
                     code.writeline(store_line)
 
+        code.writeline("")
         jit_wrapper_name = f"{kernel_name}_jit_wrapper"
         donate_indices = []
         # Offset by 2 for (out_shapes, out_dtypes), plus size_var_params count
@@ -3330,6 +3331,7 @@ from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_d
                     code.writeline(f"    {', '.join(kernel_input_params)},")
                 code.writeline(")")
 
+        code.writeline("")
         main_name = f"{kernel_name}_main"
         code.writeline(
             f"def {main_name}({', '.join(full_kernel_params)}, stream=None):"

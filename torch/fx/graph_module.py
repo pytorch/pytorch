@@ -298,7 +298,8 @@ def _get_attr_via_attr_list(model: torch.nn.Module, attr_list: list[str]):
     t = model
     for item in prefix:
         t = getattr(t, item, None)  # type: ignore[assignment]
-        assert t is not None
+        if t is None:
+            raise AssertionError(f"Attribute '{item}' not found in model")
 
     return getattr(t, field)
 
@@ -324,9 +325,8 @@ def _print_readable(
     expanded_def=False,
 ):
     graph = module.graph
-    assert graph is not None and isinstance(graph, torch.fx.Graph), (
-        "print_readable must be used on a module with a graph"
-    )
+    if graph is None or not isinstance(graph, torch.fx.Graph):
+        raise AssertionError("print_readable must be used on a module with a graph")
 
     verbose_python_code = graph.python_code(
         root_module="self",
@@ -411,9 +411,11 @@ class _WrappedCall:
     def _generate_error_message(frame_summary: traceback.FrameSummary) -> str:
         # auxiliary variables (for readability)
         err_lineno = frame_summary.lineno
-        assert err_lineno is not None
+        if err_lineno is None:
+            raise AssertionError("frame_summary.lineno is None")
         line = frame_summary.line
-        assert line is not None
+        if line is None:
+            raise AssertionError("frame_summary.line is None")
         err_line_len = len(line)
         all_src_lines = linecache.getlines(frame_summary.filename)
 
@@ -441,7 +443,8 @@ class _WrappedCall:
             else:
                 return super(self.cls, obj).__call__(*args, **kwargs)  # type: ignore[misc]
         except Exception as e:
-            assert e.__traceback__
+            if not e.__traceback__:
+                raise AssertionError("Exception has no traceback") from e
             topmost_framesummary: traceback.FrameSummary = (
                 traceback.StackSummary.extract(traceback.walk_tb(e.__traceback__))[-1]
             )
@@ -535,13 +538,19 @@ class GraphModule(torch.nn.Module):
 
             for node in graph.nodes:
                 if node.op in ["get_attr", "call_module"]:
-                    assert isinstance(node.target, str)
+                    if not isinstance(node.target, str):
+                        raise AssertionError(
+                            f"Expected node.target to be str, got {type(node.target)}"
+                        )
                     _copy_attr(root, self, node.target)
         elif isinstance(root, dict):
             targets_to_copy = []
             for node in graph.nodes:
                 if node.op in ["get_attr", "call_module"]:
-                    assert isinstance(node.target, str)
+                    if not isinstance(node.target, str):
+                        raise AssertionError(
+                            f"Expected node.target to be str, got {type(node.target)}"
+                        )
                     if node.target not in root:
                         raise RuntimeError(
                             "Node "
@@ -615,7 +624,8 @@ class GraphModule(torch.nn.Module):
         recompile the ``GraphModule`` so that the generated ``forward()`` function
         corresponds to ``g``
         """
-        assert isinstance(g, Graph), f"Expected a Graph instance, but got {type(g)}"
+        if not isinstance(g, Graph):
+            raise AssertionError(f"Expected a Graph instance, but got {type(g)}")
         self._graph = g
         g.owning_module = self
         self.recompile()
@@ -1093,7 +1103,8 @@ class {module_name}(torch.nn.Module):
         the old node we're changing, and NAME of the new node, followed by the
         user node which consumes the old node to be replaced.
         """
-        assert callable(f), "Replace hook must be a callable."
+        if not callable(f):
+            raise AssertionError("Replace hook must be a callable.")
         self._register_replace_node_hook(f)
         try:
             yield
@@ -1107,7 +1118,8 @@ class {module_name}(torch.nn.Module):
         the old node we're changing, and NAME of the new node, followed by the
         user node which consumes the old node to be replaced.
         """
-        assert callable(f), "create_node hook must be a callable."
+        if not callable(f):
+            raise AssertionError("create_node hook must be a callable.")
         self._replace_hooks.append(f)
 
     def _unregister_replace_node_hook(self, f):
@@ -1115,7 +1127,8 @@ class {module_name}(torch.nn.Module):
         Takes a callable which was previously registered to be called every time when we replace a node.
         This function will unregister that callable so it is no longer invoked on node replacement.
         """
-        assert callable(f), "create_node hook must be a callable."
+        if not callable(f):
+            raise AssertionError("create_node hook must be a callable.")
         self._replace_hooks.remove(f)
 
     def _register_create_node_hook(self, f):
@@ -1123,7 +1136,8 @@ class {module_name}(torch.nn.Module):
         Takes a callable which will be called after we create a new node. The
         callable takes the newly created node as input and returns None.
         """
-        assert callable(f), "create_node hook must be a callable."
+        if not callable(f):
+            raise AssertionError("create_node hook must be a callable.")
         self._create_node_hooks.append(f)
 
     def _unregister_create_node_hook(self, f):
@@ -1131,7 +1145,8 @@ class {module_name}(torch.nn.Module):
         Takes a callable which was previously registered to be called after we create a node.
         This function will unregister that callable so it is no longer invoked on node creation.
         """
-        assert callable(f), "create_node hook must be a callable."
+        if not callable(f):
+            raise AssertionError("create_node hook must be a callable.")
         self._create_node_hooks.remove(f)
 
     def _register_erase_node_hook(self, f):
@@ -1139,7 +1154,8 @@ class {module_name}(torch.nn.Module):
         Takes a callable which will be called after we erase a node. The
         callable takes the node that is being erased as input and returns None.
         """
-        assert callable(f), "erase_node hook must be a callable."
+        if not callable(f):
+            raise AssertionError("erase_node hook must be a callable.")
         self._erase_node_hooks.append(f)
 
     def _unregister_erase_node_hook(self, f):
@@ -1147,7 +1163,8 @@ class {module_name}(torch.nn.Module):
         Takes a callable which was previously registered to be called after we erase a node.
         This function will unregister that callable so it is no longer invoked on node erasure.
         """
-        assert callable(f), "erase_node hook must be a callable."
+        if not callable(f):
+            raise AssertionError("erase_node hook must be a callable.")
         self._erase_node_hooks.remove(f)
 
     def _register_deepcopy_hook(self, f):
@@ -1155,7 +1172,8 @@ class {module_name}(torch.nn.Module):
         Takes a callable which will be called when we deepcopy this graph module. The
         callable takes the resulting deepcopied graph module.
         """
-        assert callable(f), "deepcopy hook must be a callable."
+        if not callable(f):
+            raise AssertionError("deepcopy hook must be a callable.")
         self._deepcopy_hooks.append(f)
 
     def _unregister_deepcopy_hook(self, f):
@@ -1163,7 +1181,8 @@ class {module_name}(torch.nn.Module):
         Takes a callable which was previously registered to be called after deepcopy.
         This function will unregister that callable so it is no longer invoked on deepcopy.
         """
-        assert callable(f), "deepcopy hook must be a callable."
+        if not callable(f):
+            raise AssertionError("deepcopy hook must be a callable.")
         self._deepcopy_hooks.remove(f)
 
 

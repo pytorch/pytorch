@@ -5227,6 +5227,8 @@ known_graph_breaks_tests = {
     "test_nested_checkpoint_two_children_early_stop_False",  # dynamo disable
     "test_nested_checkpoint_two_children_early_stop_True",  # dynamo disable
     "test_custom_autograd_ac_early_stop",  # marked as skipped
+    "test_checkpoint_compile_no_recompile",  # torch._dynamo.exc.Unsupported: Attempted to call function marked as skipped
+    "test_checkpoint_device_context_fn",  # torch._dynamo.exc.Unsupported: Attempted to call function marked as skipped
     "test_dropout",  # dynamo disable
     "test_dropout_inductor",  # dynamo disable
     "test_function_with_kwargs",  # dynamo disable

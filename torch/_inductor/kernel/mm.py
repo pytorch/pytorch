@@ -20,7 +20,7 @@ from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
 from torch.torch_version import TorchVersion
 
 from .. import config as inductor_config, distributed_autotune
-from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
+from ..codegen.cutlass.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
@@ -1000,6 +1000,16 @@ def tuned_scaled_mm(
             kwarg_overrides=kwarg_overrides,
         )
     )
+
+    # NVGEMM get_kernels() will return empty if the scaling mode/dtype is unsupported
+    if is_nonzero and use_nv_universal_gemm_template(layout, m, n, k, mat_a, mat_b):
+        from ..codegen.nv_universal_gemm import add_nv_universal_scaled_gemm_choices
+
+        add_nv_universal_scaled_gemm_choices(
+            choices,
+            layout,
+            input_nodes,
+        )
 
     # Early return for MX variants
     if scale_a.dtype != torch.float32:

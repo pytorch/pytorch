@@ -2616,25 +2616,21 @@ def specialize_symnode(arg: Any) -> Any:
     from .variables import ConstantVariable, LazyVariableTracker, SymNodeVariable
 
     # Guard and specialize
-    if isinstance(arg, LazyVariableTracker):
-        if not arg.is_realized():
-            # Find if the arg would be realized as SymNodeVariable later on. If yes,
-            # realize it and specialize. Else return the arg.
+    if isinstance(arg, LazyVariableTracker) and not arg.is_realized():
+        # Find if the arg would be realized as SymNodeVariable later on. If yes,
+        # realize it and specialize. Else return the arg.
 
-            source = arg.original_source()
-            value = arg.original_value()
+        source = arg.original_source()
+        value = arg.original_value()
 
-            is_symnode_vt = is_torch_sym(value) or (
-                not config.specialize_int
-                and type(value) is int
-                and not is_int_specialization_case(value, source)
-            )
+        is_symnode_vt = is_torch_sym(value) or (
+            not config.specialize_int
+            and type(value) is int
+            and not is_int_specialization_case(value, source)
+        )
 
-            if not is_symnode_vt:
-                return arg
-
-        # Realize to get the underlying variable (handles both realized and unrealized)
-        arg = arg.realize()
+        if not is_symnode_vt:
+            return arg
 
     if isinstance(arg, SymNodeVariable):
         return ConstantVariable.create(arg.evaluate_expr())
@@ -2718,6 +2714,11 @@ list_methods = {method for method in list.__dict__.values() if callable(method)}
 list_getitem = list.__getitem__
 
 str_methods = {method for method in str.__dict__.values() if callable(method)}
+
+# EnumType is the metaclass for Enum classes
+enum_type_methods = {
+    method for method in type(enum.Enum).__dict__.values() if callable(method)
+}
 
 K = TypeVar("K")
 V = TypeVar("V")
@@ -3852,7 +3853,7 @@ def get_real_value(node: torch.fx.Node, tracer: Any) -> Any:
     return real_value
 
 
-def assert_no_fake_params_or_buffers(gm: torch.fx.GraphModule) -> None:
+def assert_no_fake_params_or_buffers(gm: torch.nn.Module) -> None:
     from torch._subclasses.fake_tensor import FakeTensorConfig, is_fake
 
     def stack_or_hint(t: Any) -> str:

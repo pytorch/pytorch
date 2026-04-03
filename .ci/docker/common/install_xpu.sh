@@ -16,46 +16,47 @@ function install_ubuntu() {
 
     apt-get update -y
     apt-get install -y gpg-agent wget
-    # To add the online network package repository for the GPU Driver
-    wget -qO - https://repositories.intel.com/gpu/intel-graphics.key \
-        | gpg --yes --dearmor --output /usr/share/keyrings/intel-graphics.gpg
-    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics.gpg] \
-        https://repositories.intel.com/gpu/ubuntu ${VERSION_CODENAME}${XPU_DRIVER_VERSION} unified" \
-        | tee /etc/apt/sources.list.d/intel-gpu-${VERSION_CODENAME}.list
-    # To add the online network network package repository for the Intel Support Packages
-    wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
-        | gpg --dearmor > /usr/share/keyrings/oneapi-archive-keyring.gpg.gpg
-    echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg.gpg] \
-        https://apt.repos.intel.com/oneapi all main" \
-        | tee /etc/apt/sources.list.d/oneAPI.list
 
-    # Update the packages list and repository index
-    apt-get update
-
-    # The xpu-smi packages
-    apt-get install -y flex bison xpu-smi
-
-    # Compute and Media Runtimes
-    if [[ " ${VERSION_CODENAME} " =~ " noble " ]]; then
+    if [[ "${XPU_DRIVER_TYPE,,}" == "client" ]]; then
+        apt-get install -y software-properties-common
+        add-apt-repository -y ppa:kobuk-team/intel-graphics
         apt-get install -y \
-            intel-opencl-icd libze-intel-gpu1 libze1 \
-            intel-media-va-driver-non-free libmfx-gen1 libvpl2 \
-            libegl-mesa0 libegl1-mesa-dev libgbm1 libgl1-mesa-dev libgl1-mesa-dri \
-            libglapi-mesa libgles2-mesa-dev libglx-mesa0 libigdgmm12 libxatracker2 mesa-va-drivers \
-            mesa-vdpau-drivers mesa-vulkan-drivers va-driver-all vainfo hwinfo clinfo intel-ocloc
-    else # jammy
-        apt-get install -y \
-            intel-opencl-icd libze-intel-gpu1 libze1 \
-            intel-media-va-driver-non-free libmfx-gen1 libvpl2 \
-            libegl-mesa0 libegl1-mesa libegl1-mesa-dev libgbm1 libgl1-mesa-dev libgl1-mesa-dri \
-            libglapi-mesa libglx-mesa0 libigdgmm12 libxatracker2 mesa-va-drivers \
-            mesa-vdpau-drivers mesa-vulkan-drivers va-driver-all vainfo hwinfo clinfo intel-ocloc
+            libze-intel-gpu1 libze1 intel-metrics-discovery intel-opencl-icd clinfo intel-gsc \
+            intel-media-va-driver-non-free libmfx-gen1 libvpl2 libvpl-tools libva-glx2 va-driver-all vainfo \
+            libze-dev intel-ocloc xpu-smi
+    else
+        # To add the online network package repository for the GPU Driver
+        wget -qO - https://repositories.intel.com/gpu/intel-graphics.key \
+            | gpg --yes --dearmor --output /usr/share/keyrings/intel-graphics.gpg
+        echo "deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics.gpg] \
+            https://repositories.intel.com/gpu/ubuntu ${VERSION_CODENAME}${XPU_DRIVER_VERSION} unified" \
+            | tee /etc/apt/sources.list.d/intel-gpu-${VERSION_CODENAME}.list
+
+        # Update the packages list and repository index
+        apt-get update
+
+        # The xpu-smi packages
+        apt-get install -y flex bison xpu-smi
+
+        # Compute and Media Runtimes
+        if [[ " ${VERSION_CODENAME} " =~ " noble " ]]; then
+            apt-get install -y \
+                intel-opencl-icd libze-intel-gpu1 libze1 \
+                intel-media-va-driver-non-free libmfx-gen1 libvpl2 \
+                libegl-mesa0 libegl1-mesa-dev libgbm1 libgl1-mesa-dev libgl1-mesa-dri \
+                libglapi-mesa libgles2-mesa-dev libglx-mesa0 libigdgmm12 libxatracker2 mesa-va-drivers \
+                mesa-vdpau-drivers mesa-vulkan-drivers va-driver-all vainfo hwinfo clinfo intel-ocloc
+        else # jammy
+            apt-get install -y \
+                intel-opencl-icd libze-intel-gpu1 libze1 \
+                intel-media-va-driver-non-free libmfx-gen1 libvpl2 \
+                libegl-mesa0 libegl1-mesa libegl1-mesa-dev libgbm1 libgl1-mesa-dev libgl1-mesa-dri \
+                libglapi-mesa libglx-mesa0 libigdgmm12 libxatracker2 mesa-va-drivers \
+                mesa-vdpau-drivers mesa-vulkan-drivers va-driver-all vainfo hwinfo clinfo intel-ocloc
+        fi
+        # Development Packages
+        apt-get install -y libigc-dev intel-igc-cm libigdfcl-dev libigfxcmrt-dev libze-dev
     fi
-    # Development Packages
-    apt-get install -y libigc-dev intel-igc-cm libigdfcl-dev libigfxcmrt-dev libze-dev
-
-    # Install Intel Support Packages
-    apt-get install -y ${XPU_PACKAGES}
 
     # Cleanup
     apt-get autoclean && apt-get clean
@@ -77,19 +78,7 @@ function install_rhel() {
     # To add the online network package repository for the GPU Driver
     dnf config-manager --add-repo \
         https://repositories.intel.com/gpu/rhel/${VERSION_ID}${XPU_DRIVER_VERSION}/unified/intel-gpu-${VERSION_ID}.repo
-    # To add the online network network package repository for the Intel Support Packages
-    tee > /etc/yum.repos.d/oneAPI.repo << EOF
-[oneAPI]
-name=Intel for Pytorch GPU dev repository
-baseurl=https://yum.repos.intel.com/oneapi
-enabled=1
-gpgcheck=1
-repo_gpgcheck=1
-gpgkey=https://yum.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB
-EOF
 
-    # Install Intel Support Packages
-    yum install -y ${XPU_PACKAGES}
     # The xpu-smi packages
     dnf install -y xpu-smi
     # Compute and Media Runtimes
@@ -124,9 +113,6 @@ function install_sles() {
     zypper addrepo -f -r \
         https://repositories.intel.com/gpu/sles/${VERSION_SP}${XPU_DRIVER_VERSION}/unified/intel-gpu-${VERSION_SP}.repo
     rpm --import https://repositories.intel.com/gpu/intel-graphics.key
-    # To add the online network network package repository for the Intel Support Packages
-    zypper addrepo https://yum.repos.intel.com/oneapi oneAPI
-    rpm --import https://yum.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB
 
     # The xpu-smi packages
     zypper install -y lsb-release flex bison xpu-smi
@@ -135,10 +121,16 @@ function install_sles() {
         intel-media-driver libigfxcmrt7 libvpl2 libvpl-tools libmfxgen1 libmfx1
     # Development packages
     zypper install -y libigdfcl-devel intel-igc-cm libigfxcmrt-devel level-zero-devel
+}
 
-    # Install Intel Support Packages
-    zypper install -y ${XPU_PACKAGES}
-
+function install_xpu_packages() {
+    # Download the Intel® software for general purpose GPU capabilities
+    wget -qO /tmp/intel-deep-learning-essentials.sh ${XPU_PACKAGES_URL}
+    chmod +x /tmp/intel-deep-learning-essentials.sh
+    # Install the Intel® software for general purpose GPU capabilities
+    /tmp/intel-deep-learning-essentials.sh -a --silent --eula accept
+    # Cleanup
+    rm -f /tmp/intel-deep-learning-essentials.sh
 }
 
 # Default use GPU driver rolling releases
@@ -150,12 +142,12 @@ fi
 
 # Default use Intel® oneAPI Deep Learning Essentials 2025.2
 if [[ "$XPU_VERSION" == "2025.3" ]]; then
-    XPU_PACKAGES="intel-deep-learning-essentials-2025.3"
+    XPU_PACKAGES_URL="https://registrationcenter-download.intel.com/akdlm/IRC_NAS/9065c156-58ab-41b0-bbee-9b0e229ffca5/intel-deep-learning-essentials-2025.3.1.15_offline.sh"
 else
-    XPU_PACKAGES="intel-deep-learning-essentials-2025.2"
+    XPU_PACKAGES_URL="https://registrationcenter-download.intel.com/akdlm/IRC_NAS/de3686c4-d3e1-41da-bf3b-bf5908da075c/intel-deep-learning-essentials-2025.2.1.24_offline.sh"
 fi
 
-# The installation depends on the base OS
+# The Driver installation depends on the base OS
 ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
 case "$ID" in
     ubuntu)
@@ -172,3 +164,6 @@ case "$ID" in
         exit 1
     ;;
 esac
+
+# XPU support packages installation
+install_xpu_packages

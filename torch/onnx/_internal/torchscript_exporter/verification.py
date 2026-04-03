@@ -210,9 +210,10 @@ def _compare_onnx_pytorch_outputs_in_np(
     pt_outs: _OutputsType,
     options: VerificationOptions,
 ) -> None:
-    assert len(onnx_outs) == len(pt_outs), (
-        f"Number of outputs differ ONNX runtime: ({len(onnx_outs)}) PyTorch: ({len(pt_outs)})"
-    )
+    if len(onnx_outs) != len(pt_outs):
+        raise AssertionError(
+            f"Number of outputs differ ONNX runtime: ({len(onnx_outs)}) PyTorch: ({len(pt_outs)})"
+        )
     acceptable_error_percentage = options.acceptable_error_percentage
     if acceptable_error_percentage and (
         acceptable_error_percentage > 1.0 or acceptable_error_percentage < 0.0

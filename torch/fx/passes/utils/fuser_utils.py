@@ -35,9 +35,10 @@ def topo_sort(nodes: NodeList) -> NodeList:
                 if indegree_map[n] == 0:
                     candidates.put(n)
 
-    assert len(nodes) == len(sorted_nodes), (
-        "topological sorted nodes doesn't have same length as input nodes"
-    )
+    if len(nodes) != len(sorted_nodes):
+        raise AssertionError(
+            "topological sorted nodes doesn't have same length as input nodes"
+        )
 
     return sorted_nodes
 
@@ -126,16 +127,20 @@ def fuse_as_graphmodule(
     # assumption: nodes are already sorted in topo order
 
     for node in nodes:
-        assert node.graph.owning_module is gm, (
-            f"{node} doesn't belong to passed in graph module {gm._get_name()}"
-        )
-        assert not node._erased, f"{node} has been removed from owning graph"
-        assert node in gm.graph._find_nodes_lookup_table, (
-            f"{node} is not found in graph module {gm._get_name()}"
-        )
+        if node.graph.owning_module is not gm:
+            raise AssertionError(
+                f"{node} doesn't belong to passed in graph module {gm._get_name()}"
+            )
+        if node._erased:
+            raise AssertionError(f"{node} has been removed from owning graph")
+        if node not in gm.graph._find_nodes_lookup_table:
+            raise AssertionError(
+                f"{node} is not found in graph module {gm._get_name()}"
+            )
 
     # validates partition doesn't introduce dependency circles in the graph
-    assert validate_partition(nodes), "Invalid partition, found dependency cycles"
+    if not validate_partition(nodes):
+        raise AssertionError("Invalid partition, found dependency cycles")
 
     # if no dict of partition nodes is provided, reconstruct it by nodes list to reduce lookup time
     if partition_lookup_table is None:
@@ -227,7 +232,8 @@ def insert_subgm(
         return None
 
     last_output_node: Node | None = last_node(orig_outputs)
-    assert last_output_node is not None
+    if last_output_node is None:
+        raise AssertionError("last_output_node is None")
 
     # Create a call_module node in main graph.
     with gm.graph.inserting_after(last_output_node):

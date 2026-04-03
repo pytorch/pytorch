@@ -381,7 +381,7 @@ class InductorChoices:
             if not all(
                 (
                     (isinstance(bound, int) or bound.is_constant())
-                    and bound != torch.utils._sympy.numbers.IntInfinity()
+                    and not torch.utils._sympy.numbers.is_infinite(bound)
                 )
                 for bound in (lower, upper)
             ):
@@ -400,12 +400,11 @@ class InductorChoices:
 
         if cooperative_reduction:
             # The RSPLIT of cooperative reductions means each thread block is operating on fewer elements
-            try:
-                threshold *= 32 // min(
-                    V.graph.sizevars.size_hint_or_throw(features.numel), 32
-                )
-            except ValueError:
-                pass  # unbacked symint
+            # The default fallback will be used if optimizations hint is not provided. The default fallback
+            # is >> 32.
+            threshold *= 32 // min(
+                V.graph.sizevars.optimization_hint(features.numel), 32
+            )
 
         # If multi_kernel is enabled, we do more aggressive persistent reduction.
         # This may result in some persistent reductions slower than the

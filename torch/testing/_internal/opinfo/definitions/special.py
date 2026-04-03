@@ -420,6 +420,12 @@ op_db: list[OpInfo] = [
                 "test_output_match",
                 device_type="mps",
             ),
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=0.0004, rtol=0.009)}),
+                "TestConsistency",
+                "test_output_grad_match",
+                device_type="mps",
+            ),
         ),
         dtypes=all_types_and(torch.bool),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),

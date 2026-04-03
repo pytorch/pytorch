@@ -421,10 +421,11 @@ class _TestErrorHandling:
             self.assertRaises(ZeroDivisionError, f, 2, seq)
 
     def test_arg_parsing(self):
-        for f in (self.module.heapify, self.module.heappop,
-                  self.module.heappush, self.module.heapreplace,
-                  self.module.nlargest, self.module.nsmallest):
-            self.assertRaises((TypeError, AttributeError), f, 10)
+        with torch._dynamo.error_on_graph_break(False):
+            for f in (self.module.heapify, self.module.heappop,
+                    self.module.heappush, self.module.heapreplace,
+                    self.module.nlargest, self.module.nsmallest):
+                self.assertRaises((TypeError, AttributeError), f, 10)
 
     def test_iterable_args(self):
         for f in (self.module.nlargest, self.module.nsmallest):

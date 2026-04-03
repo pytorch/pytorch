@@ -2846,6 +2846,163 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
             *inputs, group_size, group_name
         )
 
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_overlap_scheduling_device_put_sync(self):
+        """
+        Test that overlap scheduling handles async device_put correctly.
+
+        This test exercises the pattern from torchtitan's expert_parallel.py:
+        - Compute splits on GPU
+        - Transfer to CPU with .to(cpu, non_blocking=True/False)
+        - Use the CPU tensors in subsequent operations
+
+        The make_all_device_put_sync function in OverlapScheduler.__init__
+        protects against race conditions by converting all non_blocking=True
+        device_puts to non_blocking=False. This ensures the transfer completes
+        before the data is used.
+
+        Without this protection, the overlap scheduler could reorder operations
+        in a way that reads from an async-transferred tensor before the data
+        is ready, causing dirty reads. While this race is timing-dependent and
+        may not manifest in every run, this test verifies the pattern works
+        correctly with overlap scheduling.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        torch.cuda.set_device(self.rank)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        group = c10d.distributed_c10d._get_default_group()
+        group_name = "default"
+        torch._C._distributed_c10d._register_process_group(group_name, group)
+        group_size = group.size()
+
+        def overlap_pass(graph: torch.fx.Graph) -> torch.fx.GraphModule:
+            """Custom pass that runs overlap scheduling and verifies device_put sync."""
+            from torch._inductor.fx_passes.overlap_scheduling import (
+                schedule_overlap_bucketing,
+            )
+
+            result = schedule_overlap_bucketing(
+                graph.owning_module,
+                collective_bucketing=False,
+                insert_overlap_deps=True,
+                max_memory_increase_ratio=0.05,
+                collective_estimator="analytical",
+            )
+
+            # Verify all device_put nodes have non_blocking=False
+            for n in result.graph.nodes:
+                if (
+                    n.op == "call_function"
+                    and n.target == torch.ops.prims.device_put.default
+                ):
+                    # non_blocking can be in args (position 2) or kwargs
+                    # If not specified, it defaults to False
+                    non_blocking = False
+                    if len(n.args) >= 3:
+                        non_blocking = n.args[2]
+                    elif "non_blocking" in n.kwargs:
+                        non_blocking = n.kwargs["non_blocking"]
+                    assert non_blocking is False, (
+                        f"device_put has non_blocking=True after overlap scheduling: {n}"
+                    )
+
+            return result
+
+        def func(num_tokens_per_expert, routed_input, group_size, group_name):
+            """
+            Pattern from expert_parallel.py:
+            1. Exchange token counts via all_to_all
+            2. Compute splits from CUDA tensors and transfer to CPU (one async, one sync)
+            3. Convert to list with .tolist() and use in all_to_all for data routing
+
+            The race condition occurs because:
+            - input_splits is computed and transferred with non_blocking=True
+            - output_splits is transferred with non_blocking=False
+            - .tolist() reads from the CPU tensors
+            - Without make_all_device_put_sync, overlap scheduler may reorder
+              the use of input_splits before the sync transfer completes
+            """
+            # Exchange token counts
+            num_tokens_per_expert_group = torch.ops._c10d_functional.all_to_all_single(
+                num_tokens_per_expert,
+                [num_tokens_per_expert.size(0) // group_size] * group_size,
+                [num_tokens_per_expert.size(0) // group_size] * group_size,
+                group_name,
+            )
+            num_tokens_per_expert_group = torch.ops._c10d_functional.wait_tensor(
+                num_tokens_per_expert_group
+            )
+
+            # Compute input/output splits - one async, one sync
+            # This is the critical pattern from expert_parallel.py
+            input_splits = num_tokens_per_expert.view(group_size, -1).sum(dim=1)
+            output_splits = num_tokens_per_expert_group.view(group_size, -1).sum(dim=1)
+
+            # Transfer to CPU - async for input_splits, sync for output_splits
+            # User relies on the sync transfer to implicitly complete the async one
+            cpu_input_splits = input_splits.to(torch.device("cpu"), non_blocking=True)
+            cpu_output_splits = output_splits.to(
+                torch.device("cpu"), non_blocking=False
+            )
+
+            # Convert to lists - this is where the race manifests
+            # If async transfer isn't complete, .tolist() reads garbage
+            input_splits_list = cpu_input_splits.tolist()
+            output_splits_list = cpu_output_splits.tolist()
+
+            routed_output = torch.ops._c10d_functional.all_to_all_single(
+                routed_input,
+                output_splits_list,
+                input_splits_list,
+                group_name,
+            )
+            routed_output = torch.ops._c10d_functional.wait_tensor(routed_output)
+
+            return routed_output
+
+        # Setup inputs matching expert parallel pattern
+        num_local_experts = 4
+        num_experts = num_local_experts * self.world_size
+        num_tokens = 512
+        hidden_dim = 128
+        top_k = 2
+
+        # Random router scores for each token per expert
+        tokens_expert_scores = torch.randn(
+            num_tokens, num_experts, device=self.device, dtype=torch.float32
+        )
+
+        # Precompute num_tokens_per_expert from topk selection (outside compiled fn)
+        with torch.no_grad():
+            _, selected_experts = torch.topk(tokens_expert_scores, k=top_k, dim=1)
+            flat_experts = selected_experts.reshape(-1)
+            num_tokens_per_expert = torch.bincount(
+                flat_experts, minlength=num_experts
+            ).to(torch.int64)
+
+        # Total routed tokens = sum of tokens per expert
+        total_routed_tokens = int(num_tokens_per_expert.sum().item())
+        routed_input = torch.randn(
+            total_routed_tokens, hidden_dim, device=self.device, dtype=torch.float32
+        )
+
+        torch._inductor.config.post_grad_custom_post_pass = overlap_pass
+
+        compiled_fn = torch.compile(func, backend="inductor", fullgraph=True)
+
+        eager_out = func(num_tokens_per_expert, routed_input, group_size, group_name)
+        compiled_out = compiled_fn(
+            num_tokens_per_expert, routed_input, group_size, group_name
+        )
+
+        self.assertTrue(
+            torch.allclose(eager_out, compiled_out, rtol=1e-3, atol=1e-3),
+            "Mismatch between eager and compiled output.",
+        )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

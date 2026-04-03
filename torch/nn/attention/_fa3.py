@@ -249,6 +249,8 @@ def _fa3_run_forward(
     value: torch.Tensor,
     cu_seq_q: torch.Tensor | None,
     cu_seq_k: torch.Tensor | None,
+    max_q: int,
+    max_k: int,
     scale: float | None,
     is_causal: bool,
     window_size_left: int | None,
@@ -292,8 +294,8 @@ def _fa3_run_forward(
         None,  # cu_seqlens_k_new
         None,  # seqused_q
         seqused_k,  # seqused_k
-        None,  # max_seqlen_q
-        None,  # max_seqlen_k
+        max_q,  # max_seqlen_q
+        max_k,  # max_seqlen_k
         None,  # page_table,
         None,  # kv_batch_idx,
         None,  # leftpad_k,
@@ -420,6 +422,8 @@ def _fa3_flash_attention_forward_impl(
         value,
         cum_seq_q,
         cum_seq_k,
+        max_q,
+        max_k,
         scale,
         is_causal,
         window_size_left,

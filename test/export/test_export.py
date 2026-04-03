@@ -6889,6 +6889,24 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         inps = (torch.ones(6, 4), torch.tensor(5), torch.tensor(4))
         self._test_export_same_as_eager(list_tensor_map, inps)
 
+    def test_map_dynamic_batch(self):
+        # Test that map works with dynamic batch dimension
+        class Module(torch.nn.Module):
+            def forward(self, xs):
+                def body(x):
+                    return x + 1
+
+                return torch._higher_order_ops.map(body, xs)
+
+        mod = Module()
+        inps = (torch.ones(3, 4),)
+        dim_batch = torch.export.Dim("batch", min=1)
+        ep = export(mod, inps, dynamic_shapes={"xs": {0: dim_batch}})
+        self.assertEqual(ep.module()(*inps), mod(*inps))
+
+        diff_batch_size_inp = (torch.randn(4, 4),)
+        self.assertEqual(ep.module()(*diff_batch_size_inp), mod(*diff_batch_size_inp))
+
     @unittest.expectedFailure
     def test_crop_like(self):
         # https://fb.workplace.com/groups/1405155842844877/posts/8195050017188725/

@@ -11,7 +11,6 @@
 #   "mccabe==0.7.0",
 #   "pycodestyle==2.14.0",
 #   "pyflakes==3.4.0",
-#   "torchfix==0.4.0 ; python_version >= '3.10' and python_version < '3.13'",
 #   "setuptools",
 # ]
 # ///
@@ -370,7 +369,8 @@ def main() -> None:
     if args.severity:
         for severity in args.severity:
             parts = severity.split(":", 1)
-            assert len(parts) == 2, f"invalid severity `{severity}`"
+            if len(parts) != 2:
+                raise AssertionError(f"invalid severity `{severity}`")
             severities[parts[0]] = LintSeverity(parts[1])
 
     lint_messages = check_files(

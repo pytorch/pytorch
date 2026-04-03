@@ -125,7 +125,6 @@ from .source import (
     ChainedSource,
     ClosureSource,
     CodeSource,
-    CollectionsSource,
     ConstantSource,
     ConstDictKeySource,
     CurrentStreamSource,
@@ -143,6 +142,7 @@ from .source import (
     GlobalStateSource,
     GlobalWeakRefSource,
     GradSource,
+    ImportSource,
     ListGetItemSource,
     LocalSource,
     NamedTupleFieldsSource,
@@ -154,7 +154,6 @@ from .source import (
     ShapeEnvSource,
     SubclassAttrListSource,
     TorchFunctionModeStackSource,
-    TorchSource,
     TupleIteratorGetItemSource,
     TypeDictSource,
     TypeMROSource,
@@ -1469,16 +1468,10 @@ class GuardBuilder(GuardBuilderBase):
         ):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager
-        elif istype(source, TorchSource):
+        elif istype(source, ImportSource):
+            module = importlib.import_module(source.module_name)
             out = root_guard_manager.lambda_manager(
-                python_lambda=lambda _: torch,
-                source=source_name,
-                example_value=example_value,
-                guard_manager_enum=guard_manager_enum,
-            )
-        elif istype(source, CollectionsSource):
-            out = root_guard_manager.lambda_manager(
-                python_lambda=lambda _: collections,
+                python_lambda=lambda _, m=module: m,
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,

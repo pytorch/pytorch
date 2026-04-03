@@ -782,7 +782,13 @@ class CustomOpDef:
                 def wrapped_func(keyset, *args, **kwargs):
                     interpreter = retrieve_current_functorch_interpreter()
                     return custom_function_call_vmap_helper(
-                        interpreter, self._vmap_fn, self._opoverload, *args, **kwargs
+                        # pyrefly: ignore[bad-argument-type]
+                        interpreter,
+                        # pyrefly: ignore[bad-argument-type]
+                        self._vmap_fn,
+                        self._opoverload,
+                        *args,
+                        **kwargs,
                     )
 
                 self._lib.impl(

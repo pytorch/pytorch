@@ -222,6 +222,41 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
 
         self._test_export_blockmask_with_mask_fn(make_mask_fn)
 
+    def test_export_with_default_kwargs(self):
+        class FunctionalWrapper(torch.nn.Module):
+            """Wrapper with keyword-only argument in __call__."""
+
+            def __init__(self, module):
+                super().__init__()
+                self._module = module
+
+            def __call__(self, *args, _ctx=None, **kwargs):
+                # _ctx is keyword-only with default None
+                out = self._module(*args, **kwargs)
+                return out, _ctx
+
+        inner = torch.nn.Linear(4, 4)
+        wrapper = FunctionalWrapper(inner)
+        x = torch.randn(2, 4, requires_grad=True)
+
+        gm = dynamo_graph_capture_for_export(wrapper)(x)
+        compile_out, compile_ctx = gm(x)
+        eager_out, eager_ctx = wrapper(x)
+        self.assertEqual(compile_ctx, eager_ctx)
+        self.assertEqual(compile_out, eager_out)
+        self.assertExpectedInline(
+            str(gm.code).strip(),
+            """\
+def forward(self, args_0):
+    _fn_args = (args_0, )
+    L_self_modules_module_parameters_weight_ , L_self_modules_module_parameters_bias_ , L_args_0_ , = self._dynamo_bytecode_flatten(*_fn_args)
+    l_self_modules_module_parameters_weight_ = L_self_modules_module_parameters_weight_
+    l_self_modules_module_parameters_bias_ = L_self_modules_module_parameters_bias_
+    l_args_0_ = L_args_0_
+    out = torch._C._nn.linear(l_args_0_, l_self_modules_module_parameters_weight_, l_self_modules_module_parameters_bias_);  l_args_0_ = l_self_modules_module_parameters_weight_ = l_self_modules_module_parameters_bias_ = None
+    return self._dynamo_bytecode_unflatten((out,), _fn_args)""",
+        )
+
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_export_blockmask_mutated_closure(self):
         def make_mask_fn():

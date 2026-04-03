@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 This module is one of the analysis modules - it takes as input a function or graph
 and some preexisting properties, and returns some data that is useful for deciding
@@ -12,7 +11,7 @@ In particular, the following analyses are provided:
 
 import contextlib
 import itertools
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -26,6 +25,7 @@ from torch.fx.experimental.symbolic_shapes import is_concrete_int
 from .collect_metadata_analysis import coerce_tangent_and_suggest_memory_format
 from .descriptors import AOTInput, InputMutationAOTOutput, TangentAOTInput
 from .schemas import (
+    AOTConfig,
     BackwardSignature,
     GraphSignature,
     InputAliasInfo,
@@ -119,7 +119,7 @@ def create_synthetic_base_metadata(
     m: ViewAndMutationMeta,
     # Maps each outer argument idx to its inner idx (or, if this outer arg is generated from a
     # synthetic base, you get a tuple of (i, TensorMeta), telling you the base tensor idx, and view metadata)
-    synthetic_base_info: list[Union[int, tuple[int, torch.Tensor]]],
+    synthetic_base_info: list[int | tuple[int, torch.Tensor]],
     outer_args: list[Any],
     inner_args: list[Any],
     inner_args_desc: list[AOTInput],
@@ -276,6 +276,7 @@ def create_synthetic_base_metadata(
     )
     assert m.subclass_tangent_meta is not None
     subclass_tangent_meta = [
+        # pyrefly: ignore[bad-argument-type]
         PlainTensorMeta(0, memory_format=x)
         for x in inner_mutated_tangents_memory_formats
     ] + m.subclass_tangent_meta[len(inner_mutated_tangents) :]
@@ -298,7 +299,9 @@ def create_synthetic_base_metadata(
     )
 
 
-def compute_overlapping_inputs(aot_config, fwd_inputs, aliased_input_indices):
+def compute_overlapping_inputs(
+    aot_config: AOTConfig, fwd_inputs: list[Any], aliased_input_indices: list[int]
+) -> set[int]:
     num_aliases = len(aliased_input_indices)
 
     shape_env = None
@@ -376,11 +379,11 @@ def compute_overlapping_inputs(aot_config, fwd_inputs, aliased_input_indices):
     return actual_aliased_indices
 
 
-def _graph_input_names(gm):
+def _graph_input_names(gm: torch.fx.GraphModule) -> list[str]:
     return [node.name for node in gm.graph.find_nodes(op="placeholder")]
 
 
-def _graph_output_names(gm):
+def _graph_output_names(gm: torch.fx.GraphModule) -> list[Any]:
     output_node = next(iter(reversed(gm.graph.nodes)))
     assert output_node.op == "output" and len(output_node.args) == 1
     return_args = output_node.args[0]
@@ -398,8 +401,8 @@ def create_graph_signature(
     param_names: list[str],
     buffer_names: list[str],
     trace_joint: bool,
-    num_user_fw_outs: Optional[int],
-    loss_index: Optional[int],
+    num_user_fw_outs: int | None,
+    loss_index: int | None,
 ) -> GraphSignature:
     # Retrieve graph input names
     graph_input_names = _graph_input_names(fx_g)
@@ -437,6 +440,7 @@ def create_graph_signature(
         )
 
         # Check that we have fully accounted for all graph outputs
+        assert loss_index is not None
         backward_signature = BackwardSignature(
             gradients_to_parameters,
             gradients_to_user_inputs,

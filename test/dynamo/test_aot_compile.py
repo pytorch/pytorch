@@ -1617,6 +1617,74 @@ from user code:
             c10d.destroy_process_group()
 
 
+class TestTritonKernelSerialization(torch._inductor.test_case.TestCase):
+    """Tests for triton kernel side table serialization."""
+
+    def test_kernel_side_table_serialization_roundtrip(self):
+        """
+        Test that the kernel_side_table is properly serialized and restored.
+
+        This test verifies that when we serialize the triton kernel side table
+        and then clear it (simulating a new process), deserialization properly
+        restores the kernels so they can be looked up by index.
+
+        Without this fix, deserialization in a new process would fail with:
+            AssertionError: Kernel index X not found in id_to_kernel
+        """
+        from torch._dynamo.aot_compile_types import (
+            _deserialize_triton_kernel,
+            _serialize_triton_kernel,
+        )
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+
+        # Create a mock kernel-like object that mimics triton JITFunction structure.
+        # Triton JITFunction has a `fn` attribute pointing to the wrapped function.
+        class MockTritonKernel:
+            def __init__(self, fn):
+                self.fn = fn
+
+        # Use a real importable function (torch.sin) as the wrapped function
+        mock_kernel = MockTritonKernel(torch.sin)
+
+        # Add the kernel to the side table (this is what dynamo does during tracing)
+        kernel_idx = kernel_side_table.add_kernel(mock_kernel)
+
+        # Add some constant args too
+        const_args = {"BLOCK_SIZE": 128, "num_warps": 4}
+        const_args_idx = kernel_side_table.add_constant_args(const_args)
+
+        # Simulate serialization: capture the kernel side table state
+        triton_kernels = {
+            idx: _serialize_triton_kernel(kernel)
+            for idx, kernel in kernel_side_table.id_to_kernel.items()
+        }
+        triton_constant_args = dict(kernel_side_table.constant_args)
+
+        # Simulate a new process by clearing the side table
+        kernel_side_table.reset_table()
+
+        # Verify the table is empty - looking up the kernel should fail
+        with self.assertRaisesRegex(AssertionError, "not found in id_to_kernel"):
+            kernel_side_table.get_kernel(kernel_idx)
+
+        # Simulate deserialization: restore the kernel side table
+        for idx, kernel_info in triton_kernels.items():
+            restored_kernel = _deserialize_triton_kernel(kernel_info)
+            kernel_side_table.id_to_kernel[idx] = restored_kernel
+            kernel_side_table.kernel_to_id[restored_kernel] = idx
+
+        for idx, args in triton_constant_args.items():
+            kernel_side_table.constant_args[idx] = args
+
+        # Now the kernel lookup should succeed
+        restored = kernel_side_table.get_kernel(kernel_idx)
+        # The restored kernel is torch.sin (the underlying function), not the mock wrapper
+        self.assertIs(restored, torch.sin)
+
+        # Constant args should also be restored
+        self.assertEqual(kernel_side_table.constant_args[const_args_idx], const_args)
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 

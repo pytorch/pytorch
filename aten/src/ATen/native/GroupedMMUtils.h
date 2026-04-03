@@ -21,7 +21,8 @@ inline bool check_valid_strides_and_return_transposed(const Tensor& mat) {
   IntArrayRef tensor_sizes = mat.sizes();
   int end_dim = mat.dim() - 1;
   int alignment = 16 / mat.element_size();
-  TORCH_CHECK(uint64_t(mat.data_ptr()) % 16 ==0, "expected data_ptr to be aligned to 16 bytes\n");
+  bool is_cpu = mat.device().is_cpu();
+  TORCH_CHECK(is_cpu || uint64_t(mat.data_ptr()) % 16 == 0, "expected data_ptr to be aligned to 16 bytes");
   if ((tensor_strides[end_dim - 1] == 1) && (tensor_strides[end_dim] >= std::max<int64_t>(1, tensor_sizes[end_dim - 1]))) {
     TORCH_CHECK(tensor_strides[end_dim] % alignment == 0, "strides should be multiple of 16 bytes");
     return true;

@@ -161,29 +161,31 @@ case "$tag" in
     UCC_COMMIT=${_UCC_COMMIT}
     TRITON=yes
     ;;
-  pytorch-linux-jammy-py3-clang12-onnx)
+  pytorch-linux-jammy-py3-clang15-onnx)
     ANACONDA_PYTHON_VERSION=3.10
-    CLANG_VERSION=12
+    CLANG_VERSION=15
     VISION=yes
     ONNX=yes
     ;;
-  pytorch-linux-jammy-py3.10-clang12)
+  pytorch-linux-jammy-py3.10-clang15)
     ANACONDA_PYTHON_VERSION=3.10
-    CLANG_VERSION=12
-    VISION=yes
-    TRITON=yes
+    CLANG_VERSION=15
     ;;
-  pytorch-linux-jammy-py3.11-clang12)
+  pytorch-linux-jammy-py3.11-clang15)
     ANACONDA_PYTHON_VERSION=3.11
-    CLANG_VERSION=12
-    VISION=no
-    TRITON=no
+    CLANG_VERSION=15
     ;;
-  pytorch-linux-jammy-py3.12-clang12)
+  pytorch-linux-jammy-py3.12-clang15)
     ANACONDA_PYTHON_VERSION=3.12
-    CLANG_VERSION=12
-    VISION=no
-    TRITON=no
+    CLANG_VERSION=15
+    ;;
+  pytorch-linux-jammy-py3.13-clang15)
+    ANACONDA_PYTHON_VERSION=3.13
+    CLANG_VERSION=15
+    ;;
+  pytorch-linux-jammy-py3.14-clang15)
+    ANACONDA_PYTHON_VERSION=3.14
+    CLANG_VERSION=15
     ;;
   pytorch-linux-jammy-rocm-n-py3 | pytorch-linux-jammy-rocm-n-py3-benchmarks | pytorch-linux-noble-rocm-n-py3)
     if [[ $tag =~ "jammy" ]]; then
@@ -221,6 +223,7 @@ case "$tag" in
     GCC_VERSION=11
     VISION=yes
     XPU_VERSION=2025.2
+    XPU_DRIVER_TYPE=LTS
     NINJA_VERSION=1.9.0
     TRITON=yes
     ;;
@@ -229,6 +232,7 @@ case "$tag" in
     GCC_VERSION=13
     VISION=yes
     XPU_VERSION=2025.3
+    XPU_DRIVER_TYPE=LTS
     NINJA_VERSION=1.9.0
     TRITON=yes
     if [[ $tag =~ "benchmarks" ]]; then
@@ -244,10 +248,10 @@ case "$tag" in
     DOCS=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-clang12)
+  pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-clang15)
     ANACONDA_PYTHON_VERSION=3.10
     CUDA_VERSION=12.8.1
-    CLANG_VERSION=12
+    CLANG_VERSION=15
     VISION=yes
     TRITON=yes
     ;;
@@ -265,9 +269,9 @@ case "$tag" in
     DOCS=yes
     UNINSTALL_DILL=yes
     ;;
-  pytorch-linux-jammy-py3-clang12-executorch)
+  pytorch-linux-jammy-py3-clang15-executorch)
     ANACONDA_PYTHON_VERSION=3.10
-    CLANG_VERSION=12
+    CLANG_VERSION=15
     EXECUTORCH=yes
     ;;
   pytorch-linux-jammy-py3.12-halide)
@@ -427,6 +431,7 @@ docker buildx build \
        --build-arg "PALLAS=${PALLAS}" \
        --build-arg "TPU=${TPU}" \
        --build-arg "XPU_VERSION=${XPU_VERSION}" \
+       --build-arg "XPU_DRIVER_TYPE=${XPU_DRIVER_TYPE}" \
        --build-arg "UNINSTALL_DILL=${UNINSTALL_DILL}" \
        --build-arg "ACL=${ACL:-}" \
        --build-arg "OPENBLAS=${OPENBLAS:-}" \

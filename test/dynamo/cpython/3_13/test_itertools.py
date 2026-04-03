@@ -1052,9 +1052,10 @@ class TestBasicOps(__TestCase):
         self.assertEqual(list(filterfalse(None, [0,1,0,2,0])), [0,0,0])
         self.assertEqual(list(filterfalse(bool, [0,1,0,2,0])), [0,0,0])
         self.assertEqual(take(4, filterfalse(isEven, count())), [1,3,5,7])
-        self.assertRaises(TypeError, filterfalse)
-        self.assertRaises(TypeError, filterfalse, lambda x:x)
-        self.assertRaises(TypeError, filterfalse, lambda x:x, range(6), 7)
+        with torch._dynamo.error_on_graph_break(False):
+            self.assertRaises(TypeError, filterfalse)
+            self.assertRaises(TypeError, filterfalse, lambda x:x)
+            self.assertRaises(TypeError, filterfalse, lambda x:x, range(6), 7)
         self.assertRaises(TypeError, filterfalse, isEven, 3)
         with torch._dynamo.error_on_graph_break(False):
             self.assertRaises(TypeError, next, filterfalse(range(6), range(6)))

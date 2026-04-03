@@ -1,10 +1,10 @@
 'use strict';
 
-import * as d3 from "https://cdn.jsdelivr.net/npm/d3@5/+esm";
-import {axisLeft} from "https://cdn.jsdelivr.net/npm/d3-axis@1/+esm";
-import {scaleLinear} from "https://cdn.jsdelivr.net/npm/d3-scale@1/+esm";
-import {zoom, zoomIdentity} from "https://cdn.jsdelivr.net/npm/d3-zoom@1/+esm";
-import {brushX} from "https://cdn.jsdelivr.net/npm/d3-brush@1/+esm";
+import * as d3 from "https://cdn.jsdelivr.net/npm/d3@7/+esm";
+import {axisLeft} from "https://cdn.jsdelivr.net/npm/d3-axis@3/+esm";
+import {scaleLinear} from "https://cdn.jsdelivr.net/npm/d3-scale@4/+esm";
+import {zoom, zoomIdentity} from "https://cdn.jsdelivr.net/npm/d3-zoom@3/+esm";
+import {brushX} from "https://cdn.jsdelivr.net/npm/d3-brush@3/+esm";
 
 const schemeTableau10 = [
   '#4e79a7',
@@ -80,13 +80,13 @@ function EventSelector(outer, events, stack_info, memory_view) {
       selected_event_idx = idx;
     },
   };
-  d3.select('body').on('keydown', _e => {
-    const key = d3.event.key;
+  d3.select('body').on('keydown', event => {
+    const key = event.key;
     const actions = {ArrowDown: 1, ArrowUp: -1};
     if (selected_event_idx !== null && key in actions) {
       const new_idx = selected_event_idx + actions[key];
       es.select(Math.max(0, Math.min(new_idx, events.length - 1)));
-      d3.event.preventDefault();
+      event.preventDefault();
     }
   });
 
@@ -208,8 +208,8 @@ function MemoryView(outer, stack_info, snapshot, device) {
     .attr('preserveAspectRatio', 'xMinYMin meet');
   const g = svg.append('g');
   const seg_zoom = zoom();
-  seg_zoom.on('zoom', () => {
-    g.attr('transform', d3.event.transform);
+  seg_zoom.on('zoom', (event) => {
+    g.attr('transform', event.transform);
   });
   svg.call(seg_zoom);
 
@@ -608,20 +608,20 @@ function StackInfo(outer) {
   return {
     register(dom, enter, leave = _e => {}, select = _e => {}) {
       dom
-        .on('mouseover', _e => {
+        .on('mouseover', function (event) {
           selected.leave();
-          stack_trace.text(enter(d3.select(d3.event.target)));
+          stack_trace.text(enter(d3.select(event.target)));
         })
-        .on('mousedown', _e => {
-          const obj = d3.select(d3.event.target);
+        .on('mousedown', function (event) {
+          const obj = d3.select(event.target);
           selected = {
             enter: () => stack_trace.text(enter(obj)),
             leave: () => leave(obj),
           };
           select(obj);
         })
-        .on('mouseleave', _e => {
-          leave(d3.select(d3.event.target));
+        .on('mouseleave', function (event) {
+          leave(d3.select(event.target));
           selected.enter();
         });
     },
@@ -1162,10 +1162,10 @@ function MemoryPlot(
 
   const axis = plot_coordinate_space.append('g').call(yaxis);
 
-  function handleZoom() {
-    const t = d3.event.transform;
+  function handleZoom(event) {
+    const t = event.transform;
     zoom_group.attr('transform', t);
-    axis.call(yaxis.scale(d3.event.transform.rescaleY(yscale)));
+    axis.call(yaxis.scale(event.transform.rescaleY(yscale)));
   }
 
   const thezoom = zoom().on('zoom', handleZoom);
@@ -1273,8 +1273,8 @@ function MiniMap(mini_svg, plot, data, left_pad, width, height = 70) {
     [left_pad, 0],
     [width, height],
   ]);
-  brush.on('brush', function () {
-    const [begin, end] = d3.event.selection.map(x => x - left_pad);
+  brush.on('brush', function (event) {
+    const [begin, end] = event.selection.map(x => x - left_pad);
 
     const stepbegin = Math.floor(xscale.invert(begin));
     const stepend = Math.floor(xscale.invert(end));
