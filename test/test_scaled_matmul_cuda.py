@@ -7,7 +7,6 @@ import re
 import itertools
 import tempfile
 import unittest
-from typing import Optional
 
 import torch
 
@@ -56,7 +55,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TEST_CUDA,
     TestCase,
-    skipIfXpu,
 )
 from torch.testing._internal.common_quantized import (
     _bfloat16_to_float4_e2m1fn_x2,
@@ -302,7 +300,7 @@ def scaled_grouped_mm_wrap(
 
 
 
-def mm_float8_emulated(x, x_scale, y, y_scale, out_dtype, bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+def mm_float8_emulated(x, x_scale, y, y_scale, out_dtype, bias: torch.Tensor | None = None) -> torch.Tensor:
     # naive implementation: dq -> op -> q
     x_fp32 = x.to(torch.float) / x_scale
     y_fp32 = y.to(torch.float) / y_scale
@@ -329,8 +327,8 @@ def addmm_float8_unwrapped(
     b_data: torch.Tensor,
     b_scale: torch.tensor,
     output_dtype: torch.dtype,
-    output_scale: Optional[torch.Tensor],
-    bias: Optional[torch.Tensor] = None,
+    output_scale: torch.Tensor | None,
+    bias: torch.Tensor | None = None,
 ) -> torch.Tensor:
     a_inverse_scale = a_scale.reciprocal()
     b_inverse_scale = b_scale.reciprocal()
@@ -639,7 +637,7 @@ class TestFP8Matmul(TestCase):
     def _test_tautological_mm(self, device: str = "cuda",
                               x_dtype: torch.dtype = e4m3_type,
                               y_dtype: torch.dtype = e4m3_type,
-                              out_dtype: Optional[torch.dtype] = None,
+                              out_dtype: torch.dtype | None = None,
                               x_cm: bool = True,
                               y_cm: bool = False,
                               size: int = 16) -> None:
@@ -659,7 +657,21 @@ class TestFP8Matmul(TestCase):
             self.assertEqual(out_dtype, out_fp8.dtype)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
 
-    def test_float8_basics(self, device) -> None:
+    @parametrize(
+        "test_case",
+        [
+            ("e4m3_e4m3_default", e4m3_type, e4m3_type, None, 16),
+            ("e5m2_e5m2_default", e5m2_type, e5m2_type, None, 16),
+            ("e5m2_e5m2_f32", e5m2_type, e5m2_type, torch.float32, 16),
+            ("e4m3_e5m2_default", e4m3_type, e5m2_type, None, 32),
+            ("e5m2_e4m3_default", e5m2_type, e4m3_type, None, 48),
+            ("e4m3_e4m3_f16", e4m3_type, e4m3_type, torch.float16, 64),
+            ("e4m3_e4m3_f32", e4m3_type, e4m3_type, torch.float32, 96),
+            ("e4m3_e4m3_bf16", e4m3_type, e4m3_type, torch.bfloat16, 80),
+        ],
+        name_fn=lambda test_case: f"cuda_{test_case[0]}",
+    )
+    def test_float8_basics(self, device, test_case) -> None:
         if not _device_supports_scaled_mm_fp8(device):
             raise unittest.SkipTest(f8_msg)
         _, x_dtype, y_dtype, out_dtype, size = test_case
@@ -1395,18 +1407,19 @@ class TestFP8Matmul(TestCase):
         # Inputs (as generated are):
         #   A: [M, K]
         #   B: [N, K]
-        # then scales are, for the 3 combinations:
-        #   1x128 x 1x128:
-        #     As: [M, K // 128], stride: [1, M] -> scale.t().contiguous().t()
-        #     Bs: [N, K // 128], stride: [1, N] -> scale.t().contiguous().t()
-        #   1x128 x 128x128
-        #     L4 = round_up(K // 128, 4)
-        #     As: [M, K // 128], stride: [1, M]   -> scale.t().contiguous().t()
-        #     Bs: [L4, N // 128], stride: [1, L4] -> scale.t()
-        #   128x128 x 1x128
-        #     L4 = round_up(K // 128, 4)
-        #     As: [L4, M // 128], stride: [1, L4]
-        #     Bs: [N, K // 128], stride: [1, N]
+        # Scale shapes are the same for CUDA and XPU (only strides differ).
+        # For CUDA, scales use column-major strides;
+        # XPU accepts any stride, but prefers row-major.
+        #
+        # 1x128 x 1x128:
+        #   As: [M, K // 128]
+        #   Bs: [N, K // 128]
+        # 1x128 x 128x128:
+        #   As: [M, K // 128]
+        #   Bs: [K // 128, N // 128]  (CUDA uses L4=round_up(K//128, 4) padding)
+        # 128x128 x 1x128:
+        #   As: [K // 128, M // 128]  (CUDA uses L4 padding)
+        #   Bs: [N, K // 128]
         """
         if not _device_supports_scaled_mm_fp8(device):
             raise unittest.SkipTest(f8_msg)
@@ -1417,29 +1430,24 @@ class TestFP8Matmul(TestCase):
         def _adjust_lhs_scale(x_fp8, x_scales, lhs_block):
             M, K = x_fp8.shape
             x_scales_original = x_scales.clone()
-            # Unlike cuBLAS, XPU does not use L4 padding nor column-major swizzling.
-            # XPU scale_a uses natural shapes matching A:[M, K]. See ScaledBlas.cpp.
             if lhs_block == 1:
                 lhs_recipe = ScalingType.BlockWise1x128
                 x_hp = hp_from_1x128(x_fp8, x_scales_original)
-                if is_xpu:
-                    # XPU scale_a shape: [M, K//128], row-major contiguous (stride(1)==1)
-                    x_scales = x_scales.contiguous()
-                else:
-                    # cuBLAS requires column-major: shape [M, K//128], stride [1, M]
-                    x_scales = x_scales.t().contiguous().t()
-                    if not (x_scales.shape[0] == M and x_scales.shape[1] == K // 128):
-                        raise AssertionError(f"{x_scales.shape=}")
-                    if not (x_scales.stride(0) == 1 and x_scales.stride(1) in [1, M]):
-                        raise AssertionError(f"{x_scales.stride=}")
+                # Shape [M, K//128] for both CUDA and XPU.
+                # cuBLAS requires column-major stride (1, M); XPU also accepts this.
+                x_scales = x_scales.t().contiguous().t()
+                if not (x_scales.shape[0] == M and x_scales.shape[1] == K // 128):
+                    raise AssertionError(f"{x_scales.shape=}")
+                if not (x_scales.stride(0) == 1 and x_scales.stride(1) in [1, M]):
+                    raise AssertionError(f"{x_scales.stride=}")
             else:
                 lhs_recipe = ScalingType.BlockWise128x128
                 x_hp = hp_from_128x128(x_fp8, x_scales_original)
                 if is_xpu:
-                    # XPU scale_a shape: [M//128, K//128], row-major contiguous (stride(1)==1)
-                    x_scales = x_scales.contiguous()
+                    # XPU: same shape as CUDA v2 without L4: [K//128, M//128]
+                    x_scales = x_scales_original.t()
                 else:
-                    # cuBLAS requires L4-padded column-major: shape [L4, M//128] where L4=round_up(K//128, 4)
+                    # cuBLAS: shape [L4, M//128] where L4=round_up(K//128, 4)
                     x_scales, pad_amount = _pad_128x128_scales(x_scales)
                     # scales in [M // 128, L4] -> [L4, M // 128]
                     x_scales = x_scales.t()
@@ -1453,26 +1461,22 @@ class TestFP8Matmul(TestCase):
             if rhs_block == 1:
                 rhs_recipe = ScalingType.BlockWise1x128
                 y_hp = hp_from_1x128(y_fp8, y_scales_original)
-                if is_xpu:
-                    # XPU scale_b shape: [K//128, N], row-major contiguous (stride(1)==1)
-                    # Input comes in as [N, K//128], transpose to [K//128, N] to match B:[K, N]
-                    y_scales = y_scales.t().contiguous()
-                else:
-                    # cuBLAS requires column-major: shape [N, K//128], stride [1, N]
-                    y_scales = y_scales.t().contiguous().t()
-                    if not (y_scales.shape[0] == N and y_scales.shape[1] == K // 128):
-                        raise AssertionError(f"{y_scales.shape=}")
-                    if not (y_scales.stride(0) == 1 and y_scales.stride(1) in [1, N]):
-                        raise AssertionError(f"{y_scales.stride=}")
+                # Shape [N, K//128] for both CUDA and XPU.
+                # cuBLAS requires column-major stride (1, N); XPU C++ internally
+                # transposes to [K//128, N] row-major for oneDNN.
+                y_scales = y_scales.t().contiguous().t()
+                if not (y_scales.shape[0] == N and y_scales.shape[1] == K // 128):
+                    raise AssertionError(f"{y_scales.shape=}")
+                if not (y_scales.stride(0) == 1 and y_scales.stride(1) in [1, N]):
+                    raise AssertionError(f"{y_scales.stride=}")
             else:
                 rhs_recipe = ScalingType.BlockWise128x128
                 y_hp = hp_from_128x128(y_fp8, y_scales_original)
                 if is_xpu:
-                    # XPU scale_b shape: [K//128, N], row-major contiguous (stride(1)==1)
-                    # Input comes in as [N//128, K//128], transpose to [K//128, N//128] to match B:[K, N]
-                    y_scales = y_scales.t().contiguous()
+                    # XPU: same shape as CUDA v2 without L4: [K//128, N//128]
+                    y_scales = y_scales_original.t()
                 else:
-                    # cuBLAS requires L4-padded: shape [L4, N//128] where L4=round_up(K//128, 4)
+                    # cuBLAS: shape [L4, N//128] where L4=round_up(K//128, 4)
                     y_scales, pad_amount = _pad_128x128_scales(y_scales)
                     # Scale in [N // 128, L4] -> [L4, N // 128]
                     y_scales = y_scales.t()
@@ -1650,76 +1654,40 @@ class TestFP8Matmul(TestCase):
 
         is_xpu = "xpu" in str(device)
 
-        # Unlike cuBLAS, XPU does not use L4 padding nor column-major swizzling.
-        # XPU uses natural (row-major) scale shapes matching the matrix layout:
-        #   A: [M, K]    -> scale_a: [M//128, K//128]  (for 128x128)
-        #                -> scale_a: [M,      K//128]  (for 1x128)
-        #   B: [K, N]    -> scale_b: [K//128, N]       (for both 128x128 and 1x128)
-        # See: ScaledBlas.cpp _scaled_block128x128_block1x128 for details.
         if lhs_block == 1:
             lhs_recipe = ScalingType.BlockWise1x128
-            if is_xpu:
-                # XPU scale_a shape: [M, K//128], row-major contiguous (stride(1)==1)
-                x_scales = x_scales.contiguous()
-                if not (x_scales.shape[0] == M and x_scales.shape[1] == K // 128):
-                    raise AssertionError(f"{x_scales.shape=}")
-                if not x_scales.stride(1) == 1:
-                    raise AssertionError(f"{x_scales.stride()=}")
-            else:
-                # cuBLAS requires column-major: shape [M, K//128], stride [1, M]
-                x_scales = x_scales.t().contiguous().t()
-                if not (x_scales.shape[0] == M and x_scales.shape[1] == K // 128):
-                    raise AssertionError(f"{x_scales.shape=}")
-                if not (x_scales.stride(0) == 1 and x_scales.stride(1) in [1, M]):
-                    raise AssertionError(f"{x_scales.stride=}")
+            # shape [M, K//128].
+            x_scales = x_scales.t().contiguous().t()
+            if not (x_scales.shape[0] == M and x_scales.shape[1] == K // 128):
+                raise AssertionError(f"{x_scales.shape=}")
+            if not (x_scales.stride(0) == 1 and x_scales.stride(1) in [1, M]):
+                raise AssertionError(f"{x_scales.stride=}")
         else:
             lhs_recipe = ScalingType.BlockWise128x128
             if is_xpu:
-                # XPU scale_a shape: [M//128, K//128], row-major contiguous (stride(1)==1)
-                x_scales = x_scales.contiguous()
-                if not (x_scales.shape[0] == M // 128 and x_scales.shape[1] == K // 128):
-                    raise AssertionError(f"{x_scales.shape=}")
-                if not x_scales.stride(1) == 1:
-                    raise AssertionError(f"{x_scales.stride()=}")
+                # XPU: same shape as CUDA v2 without L4: [K//128, M//128]
+                x_scales = x_scales_original.t()
             else:
-                # cuBLAS requires L4-padded column-major: shape [L4, M//128] where L4=round_up(K//128, 4)
+                # cuBLAS: shape [L4, M//128] where L4=round_up(K//128, 4)
                 x_scales, pad_amount = _pad_128x128_scales(x_scales)
                 # scales in [M // 128, L4] -> [L4, M // 128]
                 x_scales = x_scales.t()
 
         if rhs_block == 1:
             rhs_recipe = ScalingType.BlockWise1x128
-            if is_xpu:
-                # XPU scale_b shape: [K//128, N], row-major contiguous (stride(1)==1)
-                # Input comes in as [N, K//128], transpose to [K//128, N] to match B:[K, N]
-                # Use clone(contiguous_format) instead of contiguous() to guarantee stride(1)==1
-                # even when the last dim is size-1 (e.g. N=128 -> N//128=1).
-                y_scales = y_scales.t().clone(memory_format=torch.contiguous_format)
-                if not (y_scales.shape[0] == K // 128 and y_scales.shape[1] == N):
-                    raise AssertionError(f"{y_scales.shape=}")
-                if not y_scales.stride(1) == 1:
-                    raise AssertionError(f"{y_scales.stride()=}")
-            else:
-                # cuBLAS requires column-major: shape [N, K//128], stride [1, N]
-                y_scales = y_scales.t().contiguous().t()
-                if not (y_scales.shape[0] == N and y_scales.shape[1] == K // 128):
-                    raise AssertionError(f"{y_scales.shape=}")
-                if not (y_scales.stride(0) == 1 and y_scales.stride(1) in [1, N]):
-                    raise AssertionError(f"{y_scales.stride=}")
+            # shape [N, K//128].
+            y_scales = y_scales.t().contiguous().t()
+            if not (y_scales.shape[0] == N and y_scales.shape[1] == K // 128):
+                raise AssertionError(f"{y_scales.shape=}")
+            if not (y_scales.stride(0) == 1 and y_scales.stride(1) in [1, N]):
+                raise AssertionError(f"{y_scales.stride=}")
         else:
             rhs_recipe = ScalingType.BlockWise128x128
             if is_xpu:
-                # XPU scale_b shape: [K//128, N//128], row-major contiguous (stride(1)==1)
-                # Input comes in as [N//128, K//128], transpose to [K//128, N//128] to match B:[K, N]
-                # Use clone(contiguous_format) instead of contiguous() to guarantee stride(1)==1
-                # even when the last dim is size-1 (e.g. N=128 -> N//128=1).
-                y_scales = y_scales.t().clone(memory_format=torch.contiguous_format)
-                if not (y_scales.shape[0] == K // 128 and y_scales.shape[1] == N // 128):
-                    raise AssertionError(f"{y_scales.shape=}")
-                if not y_scales.stride(1) == 1:
-                    raise AssertionError(f"{y_scales.stride()=}")
+                # XPU: same shape as CUDA v2 without L4: [K//128, N//128]
+                y_scales = y_scales_original.t()
             else:
-                # cuBLAS requires L4-padded: shape [L4, N//128] where L4=round_up(K//128, 4)
+                # cuBLAS: shape [L4, N//128] where L4=round_up(K//128, 4)
                 y_scales, pad_amount = _pad_128x128_scales(y_scales)
                 # Scale in [N // 128, L4] -> [L4, N // 128]
                 y_scales = y_scales.t()
