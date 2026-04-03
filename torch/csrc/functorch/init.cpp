@@ -6,6 +6,7 @@
 
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/WrapDimUtils.h>
+#include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/functorch/init.h>
 #include <torch/csrc/utils/python_raii.h>
 #include <torch/python.h>
@@ -557,6 +558,40 @@ void initFuncTorchBindings(PyObject* module) {
       "get_single_level_autograd_function_allowed",
       &at::functorch::getSingleLevelAutogradFunctionAllowed);
   m.def("unwrap_if_dead", &unwrapIfDead);
+  m.def(
+      "_unwrap_dead_wrappers",
+      [](const py::args& args) -> py::tuple {
+        auto size = args.size();
+        // Fast path: scan for any TensorWrapper using the THPVariable
+        // C API to avoid pybind11 cast overhead per element.
+        bool any_wrapper = false;
+        for (size_t i = 0; i < size; i++) {
+          py::handle arg = args[i];
+          if (THPVariable_Check(arg.ptr())) {
+            const auto& t = THPVariable_Unpack(arg.ptr());
+            if (at::functorch::maybeGetTensorWrapper(t) != nullptr) {
+              any_wrapper = true;
+              break;
+            }
+          }
+        }
+        if (!any_wrapper) {
+          // Return the args tuple directly without copying.
+          return args;
+        }
+        // Slow path: unwrap dead wrappers
+        py::tuple result(size);
+        for (size_t i = 0; i < size; i++) {
+          py::handle arg = args[i];
+          if (THPVariable_Check(arg.ptr())) {
+            result[i] = py::cast(
+                unwrapIfDead(THPVariable_Unpack(arg.ptr())));
+          } else {
+            result[i] = arg;
+          }
+        }
+        return result;
+      });
   m.def("is_dead_tensor_wrapper", &isDeadTensorWrapper);
   m.def("dlevel", &dlevel, "dlevel");
   m.def("dump_tensor", &dump_tensor, "dump_tensor");

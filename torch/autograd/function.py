@@ -592,7 +592,7 @@ class Function(_SingleLevelFunction):
 
         if not torch._C._are_functorch_transforms_active():
             # See NOTE: [functorch vjp and autograd interaction]
-            args = _functorch.utils.unwrap_dead_wrappers(args)
+            args = torch._C._functorch._unwrap_dead_wrappers(*args)
             return super().apply(*args, **kwargs)  # type: ignore[misc]
 
         if not is_setup_ctx_defined:
