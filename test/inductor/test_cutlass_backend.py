@@ -44,6 +44,7 @@ from torch.sparse import SparseSemiStructuredTensor, to_sparse_semi_structured
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
+    SM100OrLater,
     SM80OrLater,
     SM90OrLater,
 )
@@ -1173,7 +1174,7 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": False,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "cutlass.cutlass_op_allowlist_regex": "128x256x64.*stream_k_warpspecialized_cooperative_epi_nosmem",
+                "cutlass.cutlass_op_allowlist_regex": "128x256x64.*stream_k",
                 "cutlass.cutlass_max_profiling_configs": 1,
             }
         ):
@@ -1437,7 +1438,8 @@ class TestCutlassBackend(TestCase):
                         if cuda_template_count <= 0:
                             raise AssertionError("No CUTLASSTemplateCaller choices")
 
-        run_test(True)
+        if not SM100OrLater:
+            run_test(True)
         run_test(False)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")

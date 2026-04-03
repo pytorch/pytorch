@@ -3,6 +3,7 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/operations/ScanKernel.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -45,7 +46,7 @@ static std::pair<uint32_t, uint32_t> get_2d_grid_dims(const IntArrayRef& shape, 
   return {static_cast<uint32_t>(grid_x), static_cast<uint32_t>(grid_y)};
 }
 
-static void scan_simple_mps_impl(const Tensor& self, const Tensor& output, int64_t dim, const std::string& op_name) {
+void scan_simple_mps_impl(const Tensor& self, const Tensor& output, int64_t dim, const std::string& op_name) {
   if (output.numel() == 0) {
     return;
   }

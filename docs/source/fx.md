@@ -1155,6 +1155,9 @@ The set of leaf modules can be customized by overriding
 
     check_for_mutable_operation
     create_type_hint
+    get_signature_for_torch_op
+    normalize_function
+    normalize_module
     type_matches
 ```
 
@@ -1174,6 +1177,9 @@ The set of leaf modules can be customized by overriding
     :nosignatures:
 
     annotate_fn
+    get_graph_provenance_json
+    NodeSource
+    NodeSourceAction
 ```
 
 <!-- The experimental and passes submodules are missing docs. -->
@@ -1193,6 +1199,15 @@ The set of leaf modules can be customized by overriding
 .. py:module:: torch.fx.passes.dialect.common
 .. py:module:: torch.fx.config
 .. py:module:: torch.fx.experimental.const_fold
+
+.. currentmodule:: torch.fx.experimental.const_fold
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    get_unique_attr_name_in_module
+    split_const_subgraphs
 .. py:module:: torch.fx.experimental.migrate_gradual_types.operation
 .. py:module:: torch.fx.experimental.migrate_gradual_types.util
 .. py:module:: torch.fx.experimental.migrate_gradual_types.z3_types
@@ -1203,7 +1218,25 @@ The set of leaf modules can be customized by overriding
 .. py:module:: torch.fx.experimental.schema_type_annotation
 .. py:module:: torch.fx.experimental.unification.dispatch
 .. py:module:: torch.fx.graph
+
+.. currentmodule:: torch.fx.graph
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    CodeGen
+
 .. py:module:: torch.fx.graph_module
+
+.. currentmodule:: torch.fx.graph_module
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    reduce_graph_module
+    reduce_package_graph_module
 .. py:module:: torch.fx.immutable_collections
 .. py:module:: torch.fx.interpreter
 .. py:module:: torch.fx.passes.annotate_getitem_nodes
@@ -1213,6 +1246,14 @@ The set of leaf modules can be customized by overriding
 .. py:module:: torch.fx.passes.graph_drawer
 .. py:module:: torch.fx.passes.graph_manipulation
 .. py:module:: torch.fx.passes.graph_transform_observer
+
+.. currentmodule:: torch.fx.passes.graph_transform_observer
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    GraphTransformObserver
 .. py:module:: torch.fx.passes.infra.partitioner
 .. py:module:: torch.fx.passes.infra.pass_base
 .. py:module:: torch.fx.passes.infra.pass_manager
@@ -1223,19 +1264,60 @@ The set of leaf modules can be customized by overriding
 .. py:module:: torch.fx.passes.regional_inductor
 .. py:module:: torch.fx.passes.reinplace
 .. py:module:: torch.fx.passes.runtime_assert
+
+.. currentmodule:: torch.fx.passes.runtime_assert
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    insert_deferred_runtime_asserts
 .. py:module:: torch.fx.passes.shape_prop
+
+.. currentmodule:: torch.fx.passes.shape_prop
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    TensorMetadata
 .. py:module:: torch.fx.passes.split_module
 .. py:module:: torch.fx.passes.split_utils
 .. autofunction:: torch.fx.passes.split_utils.move_non_tensor_nodes_on_boundary
 .. py:module:: torch.fx.passes.splitter_base
+
+.. currentmodule:: torch.fx.passes.splitter_base
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    NodeEvent
+    NodeEventTracker
 .. py:module:: torch.fx.passes.tests.test_pass_manager
 .. py:module:: torch.fx.passes.tools_common
 .. py:module:: torch.fx.passes.utils.common
 .. py:module:: torch.fx.passes.utils.fuser_utils
 .. py:module:: torch.fx.passes.utils.matcher_utils
 .. py:module:: torch.fx.passes.utils.matcher_with_name_node_map_utils
+
+.. currentmodule:: torch.fx.passes.utils.matcher_with_name_node_map_utils
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    SubgraphMatcherWithNameNodeMap
 .. py:module:: torch.fx.passes.utils.source_matcher_utils
 .. py:module:: torch.fx.proxy
+
+.. currentmodule:: torch.fx.proxy
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    GraphAppendingTracer
 .. py:module:: torch.fx.subgraph_rewriter
 .. py:module:: torch.fx.tensor_type
 ```
