@@ -1059,6 +1059,48 @@ static PyObject* assert_alignment(PyObject* dummy, PyObject* args) {
   Py_RETURN_TRUE;
 }
 
+static PyObject* copy_misaligned(PyObject* dummy, PyObject* item) {
+  /*
+   * If the tensor's data pointer is not 16-byte aligned, return a
+   * clone that preserves strides. Otherwise return the original
+   * tensor (new reference).  Implemented in C++ so the aligned
+   * fast-path is just a pointer check with minimal Python overhead.
+   *
+   * NOTE: kAlignment is hardcoded to match torch._inductor.utils.ALIGNMENT.
+   * If alignment requirements ever change or become per-platform, this
+   * constant must be updated (or turned into a parameter).
+   */
+  constexpr size_t kAlignment = 16;
+
+  if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
+    PyErr_SetString(PyExc_TypeError, "expected Tensor()");
+    return nullptr;
+  }
+
+  at::Tensor tensor = THPVariable_Unpack(item);
+
+  if (reinterpret_cast<uintptr_t>(tensor.data_ptr()) % kAlignment == 0) {
+    // Already aligned – return the original tensor.
+    Py_INCREF(item);
+    return item;
+  }
+
+  // Misaligned – clone while preserving strides.
+  // Same logic as torch._inductor.utils.clone_preserve_strides.
+  int64_t needed_size = 0;
+  if (tensor.numel() > 0) {
+    auto sizes = tensor.sizes();
+    auto strides = tensor.strides();
+    for (int64_t i = 0; i < tensor.dim(); ++i) {
+      needed_size += (sizes[i] - 1) * strides[i];
+    }
+    needed_size += 1;
+  }
+  at::Tensor flat = at::as_strided(tensor, {needed_size}, {1}).clone();
+  at::Tensor result = at::as_strided(flat, tensor.sizes(), tensor.strides());
+  return THPVariable_Wrap(std::move(result));
+}
+
 template <typename T>
 static void unwrap_size_tuple(PyObject* obj, T& output) {
   TORCH_CHECK(PyTuple_CheckExact(obj));
@@ -1181,6 +1223,7 @@ static PyMethodDef _methods[] = {
     {"check_obj_id", check_obj_id, METH_VARARGS, nullptr},
     {"assert_size_stride", assert_size_stride, METH_VARARGS, nullptr},
     {"assert_alignment", assert_alignment, METH_VARARGS, nullptr},
+    {"copy_misaligned", copy_misaligned, METH_O, nullptr},
     {"dict_version", dict_version, METH_O, nullptr},
     {"_empty_strided_cpu", _empty_strided_cpu, METH_VARARGS, nullptr},
     {"_empty_strided_cpu_pinned",
