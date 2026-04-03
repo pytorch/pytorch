@@ -23,7 +23,7 @@ from torch.profiler import record_function
 
 from ._utils import generate_rank_to_stage_mapping, generate_stage_to_rank_mapping
 from .microbatch import merge_chunks, split_args_kwargs_into_chunks, TensorChunkSpec
-from .stage import _PipelineStageBase
+from .stage import _PipelineStageBase, _RecvInfo
 
 
 __all__ = [
@@ -1554,12 +1554,66 @@ class PipelineScheduleMulti(_PipelineSchedule):
                     next_stage_args = stage._prepare_forward_infra(
                         self._n_microbatches, next_stage_args, kwargs
                     )
+
+            # PipelineScheduleMulti's runtime communication logic assumes only
+            # adjacent stage communication (stage i <-> i +/- 1). Validate
+            # this explicitly to avoid silent incorrectness for unsupported
+            # skip-connection topologies.
+            self._validate_adjacent_stage_communication()
             self._stages_forward_initialized = True
 
         if self._has_backward and not self._stages_backward_initialized:
             for stage in self._stages:
                 stage._prepare_backward_infra(self._n_microbatches)
             self._stages_backward_initialized = True
+
+    def _validate_adjacent_stage_communication(self) -> None:
+        """Validate that stage communication follows adjacent-stage topology only."""
+
+        def _check_stage_indices(
+            stage_idx: int,
+            direction: str,
+            actual_stage_indices: set[int],
+            expected_stage_indices: set[int],
+        ) -> None:
+            if actual_stage_indices != expected_stage_indices:
+                raise RuntimeError(
+                    "PipelineScheduleMulti only supports adjacent-stage "
+                    f"communication, but stage {stage_idx} has {direction} "
+                    f"stages {sorted(actual_stage_indices)} (expected "
+                    f"{sorted(expected_stage_indices)}). This commonly "
+                    "indicates skip connections, which are unsupported in "
+                    "this schedule runtime."
+                )
+
+        for stage in self._stages:
+            stage_idx = stage.stage_index
+            actual_fwd_recv_sources = {
+                info.source
+                for info in stage.args_recv_info[0]
+                if isinstance(info, _RecvInfo)
+            }
+            expected_fwd_recv_sources = set() if stage.is_first else {stage_idx - 1}
+            _check_stage_indices(
+                stage_idx,
+                "forward recv",
+                actual_fwd_recv_sources,
+                expected_fwd_recv_sources,
+            )
+
+            actual_fwd_send_dests = {
+                dst
+                for dsts in stage.act_send_info.values()
+                for dst in dsts
+                if dst is not None
+            }
+            expected_fwd_send_dests = set() if stage.is_last else {stage_idx + 1}
+            _check_stage_indices(
+                stage_idx,
+                "forward send",
+                actual_fwd_send_dests,
+                expected_fwd_send_dests,
+            )
 
     def _validate_and_set_stage_mapping(
         self, actions: dict[int, list[_Action | None]]

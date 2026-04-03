@@ -35,6 +35,7 @@ from torch.distributed.pipelining.schedules import (
     B,
     F,
     get_schedule_class,
+    PipelineScheduleMulti,
     I,
     PipelineScheduleSingle,
     RECV_F,
@@ -116,6 +117,93 @@ class ScheduleTest(TestCase):
             # Test that the original name is included in the error message
             with self.assertRaisesRegex(ValueError, f"{name}"):
                 get_schedule_class(name)
+
+    def test_pipeline_schedule_multi_rejects_skip_connection_topology(self):
+        class _PeerOnlyOp:
+            def __init__(self, peer: int):
+                self.peer = peer
+
+        class _SkipConnectionStage(MockPipelineStage):
+            def __init__(self):
+                super().__init__(num_stages=3, group_size=3, group_rank=0)
+                self.stage_index = 0
+
+            def _get_init_p2p_neighbors_ops(self):
+                return []
+
+            def _prepare_forward_infra(self, *args, **kwargs):
+                self.args_recv_info = {0: tuple()}
+                self.act_send_info = {0: [2]}
+                return tuple()
+
+            def _prepare_backward_infra(self, *args, **kwargs):
+                return None
+
+            def clear_runtime_states(self):
+                return None
+
+            def get_fwd_recv_ops(self, mb_index):
+                return []
+
+            def get_fwd_send_ops(self, mb_index):
+                # Stage 0 should only send to stage 1 (rank 1), but this
+                # intentionally models a skip connection to stage 2 (rank 2).
+                return [_PeerOnlyOp(peer=2)]
+
+            def get_bwd_recv_ops(self, mb_index):
+                return []
+
+            def get_bwd_send_ops(self, mb_index):
+                return []
+
+        schedule = PipelineScheduleMulti([_SkipConnectionStage()], n_microbatches=1)
+        schedule.pipeline_order = {0: [None], 1: [None], 2: [None]}
+
+        with self.assertRaisesRegex(RuntimeError, "adjacent-stage communication"):
+            schedule.step()
+
+    def test_pipeline_schedule_multi_allows_adjacent_topology(self):
+        class _PeerOnlyOp:
+            def __init__(self, peer: int):
+                self.peer = peer
+
+        class _AdjacentStage(MockPipelineStage):
+            def __init__(self):
+                super().__init__(num_stages=3, group_size=3, group_rank=0)
+                self.stage_index = 0
+
+            def _get_init_p2p_neighbors_ops(self):
+                return []
+
+            def _prepare_forward_infra(self, *args, **kwargs):
+                self.args_recv_info = {0: tuple()}
+                self.act_send_info = {0: [1]}
+                return tuple()
+
+            def _prepare_backward_infra(self, *args, **kwargs):
+                return None
+
+            def clear_runtime_states(self):
+                return None
+
+            def get_fwd_recv_ops(self, mb_index):
+                return []
+
+            def get_fwd_send_ops(self, mb_index):
+                # Stage 0 -> stage 1 (adjacent) is valid.
+                return [_PeerOnlyOp(peer=1)]
+
+            def get_bwd_recv_ops(self, mb_index):
+                return []
+
+            def get_bwd_send_ops(self, mb_index):
+                return []
+
+        schedule = PipelineScheduleMulti([_AdjacentStage()], n_microbatches=1)
+        schedule.pipeline_order = {0: [None], 1: [None], 2: [None]}
+
+        # Should run without topology validation errors.
+        schedule.step()
 
     @parametrize(
         "ScheduleClass",
