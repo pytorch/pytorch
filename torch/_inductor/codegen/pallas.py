@@ -2745,7 +2745,7 @@ class PallasKernel(SIMDKernel):
             # Block variable indexing (e.g., im2col) - use flattened scatter
             scatter_op = "add" if mode == "atomic_add" else "set"
             return [
-                f"{out}[...] = {out}[...].flatten().at[({indexing.index_str}).flatten()].{scatter_op}("
+                f"{out}[...] = {out}[...].flatten().at[jnp.asarray({indexing.index_str}).flatten()].{scatter_op}("
                 f"jnp.asarray({value}).flatten()).reshape({out}.shape)"
             ]
 
@@ -2769,8 +2769,8 @@ class PallasKernel(SIMDKernel):
                 self.outputs_need_read.add(out)
                 alias_param = f"{out}_alias"
                 lines.append(
-                    f"{out}[...] = {alias_param}[...].flatten().at[({indexing.index_str}).flatten()].{scatter_op}("
-                    f"{value_expr}.flatten()).reshape({out}.shape)"
+                    f"{out}[...] = {alias_param}[...].flatten().at[jnp.asarray({indexing.index_str}).flatten()].{scatter_op}("
+                    f"jnp.asarray({value_expr}).flatten()).reshape({out}.shape)"
                 )
             else:
                 lines.append(f"{out}[{indexing.index_str}] = {value_expr}")
