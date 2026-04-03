@@ -787,6 +787,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             traced.graph,
             collective_info,
             scheduled,
+            bucket_mode="custom_ops_multidtype",
         )
         bucketer.bucket_collectives()
 
@@ -1427,6 +1428,83 @@ class TestOverlapSchedulingFixes(InductorTestCase):
         # This should complete without errors
         result = scheduler.run()
         result.graph.lint()
+
+    def test_no_cycle_from_dtype_convert_timeline_deps(self):
+        """
+        Test that transfer_erased_node_deps doesn't create cycles when
+        convert_element_type nodes with timeline deps get fused into a
+        _pre_bucket node that is a data dependency of the bucketed start.
+
+        Uses make_fx to trace a realistic graph with dtype conversions and
+        collectives, then simulates the bucketing transfer that would create
+        a cycle: _pre_bucket extra-depends-on new_start, while new_start
+        already data-depends on _pre_bucket.
+        """
+        from torch._inductor.augmented_graph_helper import AugmentedGraphHelper
+
+        def func(a, b):
+            group_name = dist.distributed_c10d._get_default_group().group_name
+            group_size = 16
+
+            conv_a = torch.ops.prims.convert_element_type.default(a, torch.bfloat16)
+            ag1 = torch.ops._c10d_functional.all_gather_into_tensor(
+                conv_a, group_size, group_name
+            )
+            conv_b = torch.ops.prims.convert_element_type.default(b, torch.bfloat16)
+            ag2 = torch.ops._c10d_functional.all_gather_into_tensor(
+                conv_b, group_size, group_name
+            )
+            w1 = torch.ops._c10d_functional.wait_tensor(ag1)
+            w2 = torch.ops._c10d_functional.wait_tensor(ag2)
+            return w1.sum() + w2.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            b = torch.ones(4, 4, device=self.device)
+            traced = make_fx(func)(a, b)
+
+        graph = traced.graph
+        nodes = {n.name: n for n in graph.nodes}
+        conv_a = nodes["convert_element_type"]
+        conv_b = nodes["convert_element_type_1"]
+        ag_start_1 = nodes["all_gather_into_tensor"]
+        ag_start_2 = nodes["all_gather_into_tensor_1"]
+        ag_wait_1 = nodes["wait_tensor"]
+        ag_wait_2 = nodes["wait_tensor_1"]
+
+        helper = AugmentedGraphHelper(graph)
+
+        # Simulate PG timeline dep: conv_b scheduled after ag_start_1
+        helper.add_extra_dep(n=conv_b, dep=ag_start_1)
+
+        # Simulate bucketed replacement nodes as custom_ops_multidtype would:
+        # _pre_bucket is a data dep of new_start (new_start.kwargs["out"])
+        x = nodes["a_1"]
+        pre_bucket = graph.call_function(torch.sigmoid, args=(x,), name="pre_bucket")
+        new_start = graph.call_function(
+            torch.tanh, kwargs={"out": pre_bucket}, name="new_start"
+        )
+        new_wait = graph.call_function(torch.exp, args=(new_start,), name="new_wait")
+
+        # This is what _apply_bucket does: converts → pre_bucket,
+        # starts → new_start, waits → new_wait
+        helper.transfer_erased_node_deps(
+            {
+                conv_a: pre_bucket,
+                conv_b: pre_bucket,
+                ag_start_1: new_start,
+                ag_start_2: new_start,
+                ag_wait_1: new_wait,
+                ag_wait_2: new_wait,
+            }
+        )
+
+        # Without the fix, pre_bucket gets extra dep on new_start,
+        # but new_start already data-depends on pre_bucket → cycle
+        self.assertFalse(
+            helper.has_cycle(),
+            "Cycle: pre_bucket <-> new_start via data + extra deps",
+        )
 
 
 class TestForeachGroupsUnit(InductorTestCase):
