@@ -75,7 +75,8 @@ librosa==0.10.2 ; python_version == "3.12" and platform_machine != "s390x"
 #test that import: test_spectral_ops.py
 #librosa depends on numba; disable it for s390x while numba is disabled too
 
-mkl==2024.2.0 ; platform_machine != "aarch64" and sys_platform != "darwin"
+# Only mkl-static and mkl-include are needed; the mkl package contains
+# dynamic libraries that are not discoverable by our build scripts.
 mkl-static==2024.2.0 ; platform_machine != "aarch64" and sys_platform != "darwin"
 mkl-include==2024.2.0 ; platform_machine != "aarch64" and sys_platform != "darwin"
 #Description: Intel oneAPI Math Kernel Library
