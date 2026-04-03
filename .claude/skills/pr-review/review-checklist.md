@@ -26,6 +26,11 @@ When a PR introduces new API patterns, carefully evaluate the broader implicatio
 - [ ] **Testing implications** - Does this pattern require awkward test patterns? Internal-only flags often lead to tests that use "forbidden" parameters
 - [ ] **UX implications** - Is this pattern discoverable and understandable to users? Will it appear in autocomplete, type hints, or docs in confusing ways?
 
+### Public API Documentation
+
+- [ ] **`__all__` requires docs** - Any callable added to a module's `__all__` must have a corresponding entry in the module's `.rst`/`.md` doc file (typically in an `autosummary` block). CI enforces this via `docs/source/conf.py`'s `coverage_post_process`
+- [ ] **Never add to coverage ignore lists** - `coverage_ignore_functions` and `coverage_ignore_classes` in `docs/source/conf.py` are legacy allowlists. Never add new entries. Instead, either properly document the API or remove it from `__all__`
+
 ### Code Clarity
 
 - [ ] **Self-explanatory code** - Variable and function names convey intent; minimal comments needed
@@ -50,7 +55,7 @@ When a PR touches code in the scope of any item below, **stop and investigate** 
 - [ ] **Structured Kernels** — PR adds a new ATen operator with separate hand-written functional, inplace, and out= variants instead of using `structured: True` + `structured_delegate` in `native_functions.yaml` to generate boilerplate
 - [ ] **TORCH_CHECK variants** — PR uses generic `TORCH_CHECK` for conditions that have a more specific variant: `ValueError` → `TORCH_CHECK_VALUE`, `IndexError` → `TORCH_CHECK_INDEX`, `TypeError` → `TORCH_CHECK_TYPE`, `NotImplementedError` → `TORCH_CHECK_NOT_IMPLEMENTED`
 - [ ] **AT_DISPATCH macros** — PR manually switches on `dtype` with `if (dtype == kFloat) ... else if (dtype == kDouble)` instead of using `AT_DISPATCH_FLOATING_TYPES`, `AT_DISPATCH_ALL_TYPES_AND`, or the `AT_DISPATCH_SWITCH` / `AT_DISPATCH_CASE` pattern from `aten/src/ATen/Dispatch.h`
-- [ ] **Device guards (RAII)** — PR manually saves/restores device context (`cudaSetDevice` + try/catch) instead of using `DeviceGuard` or `OptionalDeviceGuard` from `c10/core/DeviceGuard.h`
+- [ ] **Device guards (RAII)** — PR manually saves/restores device context (`cudaSetDevice` + try/catch) instead of using `DeviceGuard` or `OptionalDeviceGuard` from `c10/core/DeviceGuard.h`. **Note:** Operators registered in `native_functions.yaml` get automatic `DeviceGuard` insertion from codegen (controlled by `device_guard: True`, the default) — do NOT flag missing device guards for these ops unless they explicitly set `device_guard: False`
 - [ ] **Memory format propagation** — PR allocates output tensors with `at::empty(shape, options)` (defaulting to contiguous) without calling `input.suggest_memory_format()` to preserve ChannelsLast or other input formats
 - [ ] **Subclass-safe tensor allocation** — PR uses `at::empty(shape, input.options())` instead of `input.new_empty(shape)` or `at::empty_like(input)`, which don't propagate tensor subclass metadata
 - [ ] **TORCH_LIBRARY operator registration** — PR registers operators using manual dispatcher calls instead of `TORCH_LIBRARY` / `TORCH_LIBRARY_IMPL` macros from `torch/library.h`
@@ -185,7 +190,7 @@ When a PR touches code in the scope of any item below, **stop and investigate** 
 ### Test Quality
 
 - [ ] **Edge cases covered** - Tests include boundary conditions, empty inputs, error cases
-- [ ] **Error conditions tested** - Expected exceptions are tested with `assertRaises` or `assertRaisesRegex`
+- [ ] **Error conditions tested** - Expected exceptions are tested with `assertRaisesRegex`, not bare `assertRaises`. `assertRaisesRegex` verifies both the exception type and message, catching cases where the right exception is raised for the wrong reason. Bare `assertRaises` should be flagged — always require a message pattern match
 - [ ] **No duplicated test logic** - Similar tests share a private helper method called from individual tests with different configs
 - [ ] **Use weakref for lifetime testing** - PR uses `sys.getrefcount()` to test whether objects are kept alive. Use `weakref.ref()` instead — create a weak reference, delete the strong references, then check if the weakref is dead (`wr() is None`). `sys.getrefcount` is a CPython implementation detail that varies across versions and is fragile
 
