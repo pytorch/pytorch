@@ -3737,7 +3737,6 @@ class AlgorithmSelectorCache(PersistentCache):
         benchmark_with_cudagraphs: bool = False,  # Use CUDA graphs for ExternKernelCaller benchmarking
     ):
         from .codegen.cutlass.kernel import CUTLASSTemplateCaller
-        from .codegen.subgraph import SubgraphChoiceCaller
 
         # Run preprocessing functions on choices
         for preprocessing_fn in self.preprocessing_fns:
@@ -3791,9 +3790,6 @@ class AlgorithmSelectorCache(PersistentCache):
             if use_pipelined_autotuning():
                 assert not config.benchmark_epilogue_fusion, (
                     "Benchmarking epilogues will cause gpu contention with pipelined autotuning"
-                )
-                assert all(not isinstance(c, SubgraphChoiceCaller) for c in choices), (
-                    "Pipelined autotuning not compatible yet with subgraph choices"
                 )
                 extern_kernels = [
                     c for c in choices if AlgorithmSelectorCache._is_extern(c)
