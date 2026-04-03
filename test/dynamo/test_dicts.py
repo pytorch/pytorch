@@ -2419,10 +2419,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 class DictSubclassMethodsTests(DictMethodsTests):
     thetype = SimpleDict
 
-    @unittest.expectedFailure
-    def test_binop_or(self):
-        super().test_binop_or()
-
 
 class OrderedDictMethodsTests(DictMethodsTests):
     thetype = OrderedDict

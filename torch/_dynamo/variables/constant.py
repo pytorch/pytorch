@@ -177,21 +177,6 @@ its type to `common_constant_types`.
         except TypeError as e:
             raise NotImplementedError from e
 
-    def len_impl(self, tx: "InstructionTranslator") -> "VariableTracker":
-        """Generic len for any constant value (sequence or mapping)."""
-        try:
-            return ConstantVariable.create(len(self.value))
-        except TypeError as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
-
-    def sq_length(self, tx: "InstructionTranslator") -> "VariableTracker":
-        """Sequence length - delegates to len_impl for constants."""
-        return self.len_impl(tx)
-
-    def mp_length(self, tx: "InstructionTranslator") -> "VariableTracker":
-        """Mapping length - delegates to len_impl for constants."""
-        return self.len_impl(tx)
-
     def const_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if not hasattr(self.value, name):
             raise_observed_exception(AttributeError, tx, args=[name])
@@ -294,7 +279,12 @@ its type to `common_constant_types`.
             except Exception as e:
                 raise_observed_exception(type(e), tx)
 
-        if name == "__round__" and len(args) == 1 and args[0].is_python_constant():
+        if name == "__len__" and not (args or kwargs):
+            try:
+                return ConstantVariable.create(len(self.value))
+            except TypeError as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
+        elif name == "__round__" and len(args) == 1 and args[0].is_python_constant():
             try:
                 return ConstantVariable.create(
                     round(self.value, args[0].as_python_constant())
