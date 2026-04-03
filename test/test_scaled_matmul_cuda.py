@@ -692,8 +692,6 @@ class TestFP8Matmul(TestCase):
                 size=size,
             )
 
-    # Skip on XPU due to known oneDNN accuracy issue (#169772)
-    @skipXPU
     def test_float8_basics_layout_permutations(self, device) -> None:
         if not _device_supports_scaled_mm_fp8(device):
             raise unittest.SkipTest(f8_msg)
@@ -710,8 +708,7 @@ class TestFP8Matmul(TestCase):
                 with contextlib.nullcontext() if layouts_supported else self.assertRaises(RuntimeError):
                     self._test_tautological_mm(device, size=64, out_dtype=torch.bfloat16, x_cm=x_cm, y_cm=y_cm)
 
-    # Skip on XPU due to known oneDNN accuracy issue (#169772)
-    @skipXPU
+
     def test_float8_basics_invalid_out_dtype(self, device) -> None:
         if not _device_supports_scaled_mm_fp8(device):
             raise unittest.SkipTest(f8_msg)
