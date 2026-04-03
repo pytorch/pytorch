@@ -253,7 +253,15 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
           [](const KinetoEvent& e) { return e.correlationId(); })
       // shapes of input tensors
       .def("shapes", [](const KinetoEvent& e) { return e.shapes().vec(); })
+      .def("strides", [](const KinetoEvent& e) { return e.strides().vec(); })
       .def("dtypes", [](const KinetoEvent& e) { return e.dtypes().vec(); })
+      .def("python_id", [](const KinetoEvent& e) { return e.pythonId(); })
+      .def(
+          "python_parent_id",
+          [](const KinetoEvent& e) { return e.pythonParentId(); })
+      .def(
+          "python_module_id",
+          [](const KinetoEvent& e) { return e.pythonModuleId(); })
       .def(
           "concrete_inputs",
           [](const KinetoEvent& e) {

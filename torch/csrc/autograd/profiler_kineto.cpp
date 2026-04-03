@@ -103,6 +103,7 @@ struct OpArgData {
   std::vector<std::string> dtypes;
   std::vector<c10::IValue> concreteInputs;
   std::vector<std::vector<int64_t>> shapesForKinetoEvent;
+  std::vector<std::vector<int64_t>> stridesForKinetoEvent;
   std::vector<shape> strides;
 };
 
@@ -110,12 +111,13 @@ auto parseArgData(
     const std::vector<op_input_t>& input_shapes,
     const std::vector<op_input_t>& concreteInputs) {
   if (input_shapes.empty()) {
-    return OpArgData{false, {}, {}, {}, {}, {}};
+    return OpArgData{false, {}, {}, {}, {}, {}, {}};
   }
 
   std::vector<shape> shapes(input_shapes.size());
   std::vector<shape> strides(input_shapes.size());
   std::vector<std::vector<int64_t>> shapesForKinetoEvent(input_shapes.size());
+  std::vector<std::vector<int64_t>> stridesForKinetoEvent(input_shapes.size());
 
   std::vector<std::string> dtypes(input_shapes.size());
   std::vector<c10::IValue> concrete_inputs_list;
@@ -128,6 +130,7 @@ auto parseArgData(
               shapesForKinetoEvent[i] = t.sizes_;
               dtypes[i] = std::string(scalarTypeToTypeMeta(t.dtype_).name());
               strides[i] = t.strides_;
+              stridesForKinetoEvent[i] = t.strides_;
             },
             [&](const std::vector<TensorMetadata>& l) {
               std::vector<std::vector<int64_t>> shape;
@@ -174,6 +177,7 @@ auto parseArgData(
       dtypes,
       concrete_inputs_list,
       shapesForKinetoEvent,
+      stridesForKinetoEvent,
       strides};
 }
 
@@ -947,6 +951,7 @@ KinetoEvent::KinetoEvent(
   result->visit_if_base<ExtraFields<EventType::TorchOp>>([&](const auto& op) {
     auto arg_data = parseArgData(op.inputs_, op.concrete_inputs_);
     shapes_ = std::move(arg_data.shapesForKinetoEvent);
+    strides_ = std::move(arg_data.stridesForKinetoEvent);
     dtypes_ = std::move(arg_data.dtypes);
     concrete_inputs_ = std::move(arg_data.concreteInputs);
     kwinputs_ = std::move(op.kwinputs_);
@@ -959,12 +964,56 @@ bool KinetoEvent::isPythonFunction() const {
   return out;
 }
 
+int64_t KinetoEvent::pythonId() const {
+  int64_t out{-1};
+  result_->visit_if_base<PyExtraFieldsBase>(
+      [&](const auto& i) { out = static_cast<int64_t>(i.id_); });
+  return out;
+}
+
+int64_t KinetoEvent::pythonParentId() const {
+  int64_t out{-1};
+  // Walk the python parent pointers up to find the next event of type
+  // PyExtraFieldsBase
+  result_->visit_if_base<PyExtraFieldsBase>([&](const auto&) {
+    auto parent = result_->parent_.lock();
+    while (parent) {
+      parent->visit_if_base<PyExtraFieldsBase>(
+          [&](const auto& j) { out = static_cast<int64_t>(j.id_); });
+      if (out >= 0) {
+        break;
+      }
+      parent = parent->parent_.lock();
+    }
+  });
+  return out;
+}
+
+int64_t KinetoEvent::pythonModuleId() const {
+  int64_t out{-1};
+  // Returns the module id for PyCall events (python function calls to
+  // nn.Module)
+  result_->visit(
+      c10::overloaded(
+          [&](const ExtraFields<EventType::PyCall>& py_call) {
+            if (py_call.module_.has_value()) {
+              out = static_cast<int64_t>(py_call.module_->id_);
+            }
+          },
+          [](const auto&) {}));
+  return out;
+}
+
 bool KinetoEvent::hasShapes() const {
   return !shapes_.empty();
 }
 
 const c10::ArrayRef<std::vector<int64_t>> KinetoEvent::shapes() const {
   return shapes_;
+}
+
+const c10::ArrayRef<std::vector<int64_t>> KinetoEvent::strides() const {
+  return strides_;
 }
 
 bool KinetoEvent::hasTypes() const {
@@ -1185,10 +1234,13 @@ TYPED_ATTR(TorchOp, isAsync, e.is_async_)
 
 extra_meta_t KinetoEvent::extraMeta() const {
   extra_meta_t out;
-  result_->visit(c10::overloaded(
-      [&](const ExtraFields<EventType::TorchOp>& e) { out = e.extra_meta_; },
-      [&](const ExtraFields<EventType::Kineto>& e) { out = e.extra_meta_; },
-      [](const auto&) {}));
+  result_->visit(
+      c10::overloaded(
+          [&](const ExtraFields<EventType::TorchOp>& e) {
+            out = e.extra_meta_;
+          },
+          [&](const ExtraFields<EventType::Kineto>& e) { out = e.extra_meta_; },
+          [](const auto&) {}));
   return out;
 }
 

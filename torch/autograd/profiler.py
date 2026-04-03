@@ -676,6 +676,11 @@ class profile:
                 end_us=rel_end_ns / 1000,
                 fwd_thread=kineto_event.fwd_thread_id(),
                 input_shapes=kineto_event.shapes(),
+                input_strides=kineto_event.strides(),
+                input_dtypes=kineto_event.dtypes(),
+                python_id=kineto_event.python_id(),
+                python_parent_id=kineto_event.python_parent_id(),
+                python_module_id=kineto_event.python_module_id(),
                 concrete_inputs=kineto_event.concrete_inputs(),
                 kwinputs=kineto_event.kwinputs(),
                 stack=[

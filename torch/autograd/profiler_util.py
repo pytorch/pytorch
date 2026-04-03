@@ -721,6 +721,8 @@ class FunctionEvent(FormattedTimesMixin):
         overload_name=None,
         fwd_thread=None,
         input_shapes=None,
+        input_strides=None,
+        input_dtypes=None,
         stack=None,
         scope=0,
         use_device=None,
@@ -740,6 +742,9 @@ class FunctionEvent(FormattedTimesMixin):
         kwinputs=None,
         is_user_annotation=False,
         is_python_function=False,
+        python_id=-1,
+        python_parent_id=-1,
+        python_module_id=-1,
         activity_type=None,
         metadata_json=None,
         flow_id=None,
@@ -766,6 +771,10 @@ class FunctionEvent(FormattedTimesMixin):
         # pyrefly: ignore [bad-assignment]
         self.input_shapes: tuple[int, ...] = input_shapes
         # pyrefly: ignore [bad-assignment]
+        self.input_strides: tuple[int, ...] = input_strides
+        # pyrefly: ignore [bad-assignment]
+        self.input_dtypes: list[str] = input_dtypes
+        # pyrefly: ignore [bad-assignment]
         self.concrete_inputs: list[Any] = concrete_inputs
         # pyrefly: ignore [bad-assignment]
         self.kwinputs: dict[str, Any] = kwinputs
@@ -787,6 +796,9 @@ class FunctionEvent(FormattedTimesMixin):
         self.flops: int | None = flops
         self.is_user_annotation: bool | None = is_user_annotation
         self.is_python_function: bool = is_python_function
+        self.python_id: int = python_id
+        self.python_parent_id: int = python_parent_id
+        self.python_module_id: int = python_module_id
         self.activity_type: str | None = activity_type
         self.self_cpu_percent = -1
         self.total_cpu_percent = -1
