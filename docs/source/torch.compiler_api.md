@@ -33,8 +33,4 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
      skip_guard_on_globals_unsafe
      skip_all_guards_unsafe
      nested_compile_region
-     load_cache_artifacts
-     load_compiled_function
-     save_cache_artifacts
-     wrap_numpy
 ```

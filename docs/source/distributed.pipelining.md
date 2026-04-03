@@ -517,7 +517,3 @@ The following set of APIs transform your model into a pipeline representation.
 .. autoclass:: PipelineScheduleMulti
   :members:
 ```
-
-```{eval-rst}
-.. autofunction:: get_schedule_class
-```
