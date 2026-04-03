@@ -12,6 +12,7 @@ __all__ = [
     "reorder_graphs_from_user_function",
     "reenable_op_overrides",
     "deregister_op_overrides",
+    "get_dsl_operations",
 ]
 
 log = logging.getLogger(__name__)
@@ -355,6 +356,24 @@ def deregister_op_overrides(
                 _graphs[key],
                 filter_state=_filter_state,
             )
+
+
+def get_dsl_operations(dsl_name: str) -> list[str]:
+    """Get list of operations registered by a specific DSL.
+
+    Args:
+        dsl_name: Name of the DSL to query.
+
+    Returns:
+        Sorted list of operation names registered by the DSL.
+    """
+    operations = set()
+    for (op_symbol, _), nodes in _graphs.items():
+        for node in nodes:
+            if node.dsl_name == dsl_name:
+                operations.add(op_symbol)
+                break
+    return sorted(operations)
 
 
 def _update_registration_maps(
