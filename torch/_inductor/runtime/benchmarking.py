@@ -365,7 +365,7 @@ class Benchmarker:
         which eliminates kernel launch overhead for fair comparison between different
         implementations.
         """
-        # Warmup: triggers cuBLAS/cuDNN/Triton lazy init
+        # Warmup
         torch.cuda.synchronize()
         _callable()
         torch.cuda.synchronize()
