@@ -993,8 +993,7 @@ def _get_debug_context_and_cb() -> Tuple[Callable[[], Any], Callable[[Checkpoint
     # checkpointing mechanism. error_cb is invoked when an error is detected
     # during unpack.
 
-    # record_context_cpp is not support on non-linux non-x86_64 platforms
-    cpp_tb = platform.machine() == 'x86_64' and platform.system() == 'Linux'
+    cpp_tb = platform.machine() in ('x86_64', 'aarch64', 'arm64') and platform.system() == 'Linux'
 
     class CaptureLogs:
         def __init__(self) -> None:
@@ -1200,8 +1199,10 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
 
 
 def _is_compiling(func, args, kwargs):
-    # Check if we are under AOTAutograd tracing
-    # Checking that a functional mode is active should always do what we want
+    # Check if we are under AOTAutograd tracing or export tracing
+    # Checking that a proxy mode is active should always do what we want
+    if torch.compiler._is_non_strict_tracing():
+        return False
     return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY) is not None
 
 
@@ -1335,6 +1336,8 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         if isinstance(policy, bool):
             policy = _policy_from_bool(policy)
 
+        # TODO: eventually we will only rely on tagging for the compile path
+        # and remove the eager checkpoint machinery entirely in compile path.
         is_compiling = _is_compiling(func, args, kwargs)
 
         if is_compiling:

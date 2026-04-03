@@ -267,6 +267,10 @@ these features.
 
 ```
 
+```{eval-rst}
+.. autofunction:: implicit_replication
+```
+
 % modules that are missing docs, add the doc later when necessary
 
 ```{eval-rst}
