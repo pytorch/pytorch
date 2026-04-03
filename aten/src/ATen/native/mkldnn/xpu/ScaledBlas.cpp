@@ -46,20 +46,22 @@ namespace {
 /*
  * Scaling Type Determination (XPU):
  * -------------------------------------------
- * All scale tensors must be float32 and contiguous in the inner dim
- * (stride(1) == 1) for blockwise modes.
+ * All scale tensors must be float32.
+ * API shapes match CUDA for portability (Same shape [n, k], but strides may
+ * differ). CUDA uses col-major because of swizzling purpose, but XPU expects
+ * row-major order for oneDNN.
  *
  * For matrix A [M, K] and scale_a:
- *   - TensorWise:    scale_a is a singleton (numel==1)
- *   - RowWise:       scale_a has shape [M, 1]
- *   - BlockWise1x128: scale_a has shape [M, K//128], stride(1)==1
- *   - BlockWise128x128: scale_a has shape [M//128, K//128], stride(1)==1
+ *   - TensorWise:      scale_a is a singleton (numel==1)
+ *   - RowWise:         scale_a has shape [M, 1]
+ *   - BlockWise1x128:  scale_a has shape [M, K//128]
+ *   - BlockWise128x128: scale_a has shape [M//128, K//128]
  *
  * For matrix B [K, N] and scale_b:
- *   - TensorWise:    scale_b is a singleton (numel==1)
- *   - RowWise:       scale_b has shape [1, N]
- *   - BlockWise1x128: scale_b has shape [K//128, N], stride(1)==1
- *   - BlockWise128x128: scale_b has shape [K//128, N//128], stride(1)==1
+ *   - TensorWise:      scale_b is a singleton (numel==1)
+ *   - RowWise:         scale_b has shape [1, N]
+ *   - BlockWise1x128:  scale_b has shape [K//128, N]
+ *   - BlockWise128x128: scale_b has shape [K//128, N//128]
  *
  * Supported (A, B) scaling combinations:
  *   - (TensorWise, TensorWise)
@@ -81,16 +83,22 @@ bool is_rowwise_scaling(const at::Tensor& t, const at::Tensor& scale) {
       scale.is_contiguous());
 }
 
-// XPU uses row-major (inner-dim-contiguous) scale tensors for both A and B.
+// Scale shape checks for blockwise scaling.
 // For a matrix t [rows, cols]:
-//   BlockWise1x128:   scale has shape [rows, cols//128], stride(1)==1
-//   BlockWise128x128: scale has shape [rows//128, cols//128], stride(1)==1
+//   BlockWise1x128:   scale has shape [rows, ceil_div(cols, 128)]
+//   BlockWise128x128: scale has shape [ceil_div(rows, 128), ceil_div(cols,
+//   128)]
+// These shapes match CUDA's convention.
+// XPU accepts both row-major (contiguous) and column-major strides,
+// since it internally calls .contiguous() for oneDNN. CUDA requires
+// specific strides for cuBLAS swizzling; XPU is more permissive but
+// still validates that strides form a valid contiguous layout.
 bool is_blockwise_1x128_scaling(const at::Tensor& t, const at::Tensor& scale) {
   return (
       at::isFloat8Type(t.scalar_type()) && scale.scalar_type() == at::kFloat &&
       scale.dim() == 2 && scale.size(0) == t.size(0) &&
       scale.size(1) == ceil_div<int64_t>(t.size(1), 128) &&
-      scale.stride(1) == 1);
+      (scale.is_contiguous() || scale.t().is_contiguous()));
 }
 
 bool is_blockwise_128x128_scaling(
@@ -100,7 +108,7 @@ bool is_blockwise_128x128_scaling(
       at::isFloat8Type(t.scalar_type()) && scale.scalar_type() == at::kFloat &&
       scale.dim() == 2 && scale.size(0) == ceil_div<int64_t>(t.size(0), 128) &&
       scale.size(1) == ceil_div<int64_t>(t.size(1), 128) &&
-      scale.stride(1) == 1);
+      (scale.is_contiguous() || scale.t().is_contiguous()));
 }
 
 bool is_desired_scaling(
@@ -128,16 +136,13 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
     const at::Tensor& scale_a,
     const at::Tensor& scale_b) {
   for (auto [lhs, rhs] : options) {
-    // For blockwise, XPU scale shapes are row-major for both A and B, so B is
-    // checked directly (not transposed). For TensorWise/RowWise we use the .t()
-    // convention (matching B's transposed view) as before.
-    bool use_blockwise_b =
-        (rhs == ScalingType::BlockWise1x128 ||
-         rhs == ScalingType::BlockWise128x128);
-    const at::Tensor& b_check = use_blockwise_b ? b : b.t();
-    const at::Tensor& scale_b_check = use_blockwise_b ? scale_b : scale_b.t();
+    // Use the same b.t()/scale_b.t() convention as CUDA v1.
+    // For b=[K,N]: b.t()=[N,K], scale_b.t() is checked against [N,K].
+    // This gives API shapes matching CUDA:
+    //   1x128:   scale_b = [K//128, N]
+    //   128x128: scale_b = [K//128, N//128]
     if (is_desired_scaling(a, scale_a, lhs) &&
-        is_desired_scaling(b_check, scale_b_check, rhs)) {
+        is_desired_scaling(b.t(), scale_b.t(), rhs)) {
       return {lhs, rhs};
     }
   }
@@ -158,7 +163,7 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
       ceil_div<int64_t>(b.size(0), 128),
       ", ",
       b.size(1),
-      "), both with stride(1)==1.\n"
+      ").\n"
       "- For BlockWise 128x128 scaling, a and b should be float8, scales should be float, scale_a should be (",
       ceil_div<int64_t>(a.size(0), 128),
       ", ",
@@ -167,7 +172,7 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
       ceil_div<int64_t>(b.size(0), 128),
       ", ",
       ceil_div<int64_t>(b.size(1), 128),
-      "), both with stride(1)==1.\n"
+      ").\n"
       "Got a.dtype()=",
       a.scalar_type(),
       ", scale_a.dtype()=",
@@ -388,11 +393,29 @@ Tensor& _scaled_mm_out_xpu(
   }
 
   // TODO: Scale_result is not supported by now!!
+  // API shapes match CUDA v1. oneDNN needs row-major contiguous.
+  // scale_a: [M, K//128] or [M//128, K//128]
+  // scale_b: [K//128, N] or [K//128, N//128]
+  // Because the user might passed in the CUDA's stride (col-major because of
+  // swizzling)
+  // call a contiguous() to ensure row-major for oneDNN
+  Tensor scale_a_internal = scale_a;
+  Tensor scale_b_internal = scale_b;
+  if (scaling_choice_a == ScalingType::BlockWise128x128 ||
+      scaling_choice_a == ScalingType::BlockWise1x128) {
+    scale_a_internal = scale_a.is_contiguous() ? scale_a : scale_a.contiguous();
+  }
+  if (scaling_choice_b == ScalingType::BlockWise1x128 ||
+      scaling_choice_b == ScalingType::BlockWise128x128) {
+    // CUDA v1 shapes [K//128, N] and [K//128, N//128] already match oneDNN's
+    // expected row-major layout. Just ensure contiguous.
+    scale_b_internal = scale_b.is_contiguous() ? scale_b : scale_b.contiguous();
+  }
   return _scaled_gemm(
       mat1,
       mat2,
-      scale_a,
-      scale_b,
+      scale_a_internal,
+      scale_b_internal,
       scaling_choice_a,
       scaling_choice_b,
       bias,
@@ -594,22 +617,9 @@ Tensor& _scaled_block1x128_block1x128(
     const c10::ScalarType out_dtype,
     const bool use_fast_accum,
     Tensor& out) {
-  // A: [M, K], B: [K, N] are FP8, scales are fp32
-  //
-  //          |  shape    | stride
-  //  --------|-----------|--------
-  //  A       | [M, K]    | row-major
-  //  B       | [K, N]    | col-major
-  //
-  // Scale layout vs CUDA:
-  //   CUDA (col-major, mirrors cuBLAS col-major A/B convention):
-  //     scale_a: [M, K//128]   stride (1, M)   <- scale_a[:,kb] contiguous
-  //     scale_b: [N, K//128]   stride (1, N)   <- scale_b[:,kb] contiguous
-  //   XPU (row-major, PyTorch-native convention):
-  //     scale_a: [M, K//128]   stride (K//128, 1)
-  //     scale_b: [K//128, N]   stride (N, 1)
+  //   scale_a: [M, K//128]
+  //   scale_b: [N, K//128]
 
-  // check types
   TORCH_CHECK_VALUE(
       isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()),
       "mat_a and mat_b must be fp8 types, got: ",
@@ -620,7 +630,6 @@ Tensor& _scaled_block1x128_block1x128(
   const int64_t K = mat_a.sizes()[1];
   const int64_t N = mat_b.sizes()[1];
 
-  // scale_a: [M, K//128], row-major stride (K//128, 1)
   TORCH_CHECK_VALUE(
       scale_a.size(0) == M && scale_a.size(1) == ceil_div<int64_t>(K, 128) &&
           scale_a.scalar_type() == kFloat,
@@ -630,26 +639,23 @@ Tensor& _scaled_block1x128_block1x128(
       ceil_div<int64_t>(K, 128),
       " Float elements, got ",
       scale_a.sizes());
-  TORCH_CHECK_VALUE(
-      scale_a.stride(1) == 1,
-      "scale_a must be row-major (stride(1) == 1); got: ",
-      scale_a.strides());
 
-  // scale_b: [K//128, N], row-major stride (N, 1) — same K//128 x N grid as
-  // CUDA's [N, K//128], axes swapped to match row-major layout
   TORCH_CHECK_VALUE(
-      scale_b.size(0) == ceil_div<int64_t>(K, 128) && scale_b.size(1) == N &&
+      scale_b.size(0) == N && scale_b.size(1) == ceil_div<int64_t>(K, 128) &&
           scale_b.scalar_type() == kFloat,
       "scale_b must have shape ",
-      ceil_div<int64_t>(K, 128),
-      " x ",
       N,
+      " x ",
+      ceil_div<int64_t>(K, 128),
       " Float elements, got ",
       scale_b.sizes());
-  TORCH_CHECK_VALUE(
-      scale_b.stride(1) == 1,
-      "scale_b must be row-major (stride(1) == 1); got: ",
-      scale_b.strides());
+
+  // Convert to oneDNN row-major layout:
+  //   scale_a [M, K//128] → no transpose, just contiguous
+  //   scale_b [N, K//128] → transpose to [K//128, N], then contiguous
+  auto sa = scale_a.is_contiguous() ? scale_a : scale_a.contiguous();
+  auto sb_t = scale_b.t();
+  auto sb = sb_t.is_contiguous() ? sb_t : sb_t.contiguous();
 
   auto scaling_choice_a = ScalingType::BlockWise1x128;
   auto scaling_choice_b = ScalingType::BlockWise1x128;
@@ -657,8 +663,8 @@ Tensor& _scaled_block1x128_block1x128(
   _scaled_gemm(
       mat_a,
       mat_b,
-      scale_a,
-      scale_b,
+      sa,
+      sb,
       scaling_choice_a,
       scaling_choice_b,
       bias,
@@ -677,20 +683,8 @@ Tensor& _scaled_block128x128_block1x128(
     const c10::ScalarType out_dtype,
     const bool use_fast_accum,
     Tensor& out) {
-  // A: [M, K], B: [K, N] are FP8, scales are fp32
-  //
-  //          |  shape    | stride
-  //  --------|-----------|--------
-  //  A       | [M, K]    | row-major
-  //  B       | [K, N]    | col-major
-  //
-  // Scale layout vs CUDA:
-  //   CUDA (col-major, mirrors cuBLAS col-major A/B convention):
-  //     scale_a: [round_up(K//128,4), M//128]  stride (1, round_up(K//128,4))
-  //     scale_b: [N, K//128]                   stride (1, N)
-  //   XPU (row-major, PyTorch-native convention, no L4 padding):
-  //     scale_a: [M//128, K//128]  stride (K//128, 1)
-  //     scale_b: [K//128, N]       stride (N, 1)
+  //   scale_a: [K//128, M//128]
+  //   scale_b: [N, K//128]
   TORCH_CHECK_VALUE(
       isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()),
       "mat_a and mat_b must be fp8 types, got: ",
@@ -701,37 +695,34 @@ Tensor& _scaled_block128x128_block1x128(
   const int64_t K = mat_a.sizes()[1];
   const int64_t N = mat_b.sizes()[1];
 
-  // scale_a: [M//128, K//128], row-major stride (K//128, 1)
   TORCH_CHECK_VALUE(
-      scale_a.size(0) == ceil_div<int64_t>(M, 128) &&
-          scale_a.size(1) == ceil_div<int64_t>(K, 128) &&
+      scale_a.size(0) == ceil_div<int64_t>(K, 128) &&
+          scale_a.size(1) == ceil_div<int64_t>(M, 128) &&
           scale_a.scalar_type() == kFloat,
       "scale_a must have shape ",
-      ceil_div<int64_t>(M, 128),
-      " x ",
       ceil_div<int64_t>(K, 128),
+      " x ",
+      ceil_div<int64_t>(M, 128),
       " Float elements, got ",
       scale_a.sizes());
-  TORCH_CHECK_VALUE(
-      scale_a.stride(1) == 1,
-      "scale_a must be row-major (stride(1) == 1); got: ",
-      scale_a.strides());
 
-  // scale_b: [K//128, N], row-major stride (N, 1) — same K//128 x N grid as
-  // CUDA's [N, K//128], axes swapped to match row-major layout
   TORCH_CHECK_VALUE(
-      scale_b.size(0) == ceil_div<int64_t>(K, 128) && scale_b.size(1) == N &&
+      scale_b.size(0) == N && scale_b.size(1) == ceil_div<int64_t>(K, 128) &&
           scale_b.scalar_type() == kFloat,
       "scale_b must have shape ",
-      ceil_div<int64_t>(K, 128),
-      " x ",
       N,
+      " x ",
+      ceil_div<int64_t>(K, 128),
       " Float elements, got ",
       scale_b.sizes());
-  TORCH_CHECK_VALUE(
-      scale_b.stride(1) == 1,
-      "scale_b must be row-major (stride(1) == 1); got: ",
-      scale_b.strides());
+
+  // Convert to oneDNN row-major layout:
+  //   scale_a [K//128, M//128] → transpose to [M//128, K//128], then contiguous
+  //   scale_b [N, K//128] → transpose to [K//128, N], then contiguous
+  auto sa_t = scale_a.t();
+  auto sa = sa_t.is_contiguous() ? sa_t : sa_t.contiguous();
+  auto sb_t = scale_b.t();
+  auto sb = sb_t.is_contiguous() ? sb_t : sb_t.contiguous();
 
   auto scaling_choice_a = ScalingType::BlockWise128x128;
   auto scaling_choice_b = ScalingType::BlockWise1x128;
@@ -739,8 +730,8 @@ Tensor& _scaled_block128x128_block1x128(
   _scaled_gemm(
       mat_a,
       mat_b,
-      scale_a,
-      scale_b,
+      sa,
+      sb,
       scaling_choice_a,
       scaling_choice_b,
       bias,
@@ -759,20 +750,8 @@ Tensor& _scaled_block1x128_block128x128(
     const c10::ScalarType out_dtype,
     const bool use_fast_accum,
     Tensor& out) {
-  // A: [M, K], B: [K, N] are FP8, scales are fp32
-  //
-  //          |  shape    | stride
-  //  --------|-----------|--------
-  //  A       | [M, K]    | row-major
-  //  B       | [K, N]    | col-major
-  //
-  // Scale layout vs CUDA:
-  //   CUDA (col-major, mirrors cuBLAS col-major A/B convention):
-  //     scale_a: [M, K//128]                   stride (1, M)
-  //     scale_b: [round_up(K//128,4), N//128]  stride (1, round_up(K//128,4))
-  //   XPU (row-major, PyTorch-native convention, no L4 padding):
-  //     scale_a: [M, K//128]       stride (K//128, 1)
-  //     scale_b: [K//128, N//128]  stride (N//128, 1)
+  //   scale_a: [M, K//128]
+  //   scale_b: [K//128, N//128]
   TORCH_CHECK_VALUE(
       isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()),
       "mat_a and mat_b must be fp8 types, got: ",
@@ -783,7 +762,6 @@ Tensor& _scaled_block1x128_block128x128(
   int64_t K = mat_a.size(1);
   int64_t N = mat_b.size(1);
 
-  // scale_a: [M, K//128], row-major stride (K//128, 1)
   TORCH_CHECK_VALUE(
       scale_a.size(0) == M && scale_a.size(1) == ceil_div<int64_t>(K, 128) &&
           scale_a.scalar_type() == kFloat,
@@ -793,12 +771,7 @@ Tensor& _scaled_block1x128_block128x128(
       ceil_div<int64_t>(K, 128),
       " Float elements, got ",
       scale_a.sizes());
-  TORCH_CHECK_VALUE(
-      scale_a.stride(1) == 1,
-      "scale_a must be row-major (stride(1) == 1); got: ",
-      scale_a.strides());
-  // scale_b: [K//128, N//128], row-major stride (N//128, 1) — no L4 padding vs
-  // CUDA's [round_up(K//128, 4), N//128]
+
   TORCH_CHECK_VALUE(
       scale_b.size(0) == ceil_div<int64_t>(K, 128) &&
           scale_b.size(1) == ceil_div<int64_t>(N, 128) &&
@@ -809,10 +782,12 @@ Tensor& _scaled_block1x128_block128x128(
       ceil_div<int64_t>(N, 128),
       " Float elements, got ",
       scale_b.sizes());
-  TORCH_CHECK_VALUE(
-      scale_b.stride(1) == 1,
-      "scale_b must be row-major (stride(1) == 1); got: ",
-      scale_b.strides());
+
+  // Convert to oneDNN row-major layout:
+  //   scale_a [M, K//128] → no transpose, just contiguous
+  //   scale_b [K//128, N//128] → no transpose, just contiguous
+  auto sa = scale_a.is_contiguous() ? scale_a : scale_a.contiguous();
+  auto sb = scale_b.is_contiguous() ? scale_b : scale_b.contiguous();
 
   auto scaling_choice_a = ScalingType::BlockWise1x128;
   auto scaling_choice_b = ScalingType::BlockWise128x128;
@@ -820,8 +795,8 @@ Tensor& _scaled_block1x128_block128x128(
   _scaled_gemm(
       mat_a,
       mat_b,
-      scale_a,
-      scale_b,
+      sa,
+      sb,
       scaling_choice_a,
       scaling_choice_b,
       bias,
@@ -1023,19 +998,19 @@ Tensor& _scaled_mm_xpu_v2_out(
       ", ",
       ceil_div<int64_t>(mat_a.size(1), 128),
       ") and scale_b should be (",
-      ceil_div<int64_t>(mat_b.size(0), 128),
-      ", ",
       mat_b.size(1),
-      "), and both should be outer-dim-major.\n"
-      "- For BlockWise 128x128 scaling, a and b should be float8, scales should be float, scale_a should be (",
-      ceil_div<int64_t>(mat_a.size(0), 128),
       ", ",
+      ceil_div<int64_t>(mat_b.size(0), 128),
+      ").\n"
+      "- For BlockWise 128x128 scaling, a and b should be float8, scales should be float, scale_a should be (",
       ceil_div<int64_t>(mat_a.size(1), 128),
+      ", ",
+      ceil_div<int64_t>(mat_a.size(0), 128),
       ") and scale_b should be (",
       ceil_div<int64_t>(mat_b.size(0), 128),
       ", ",
       ceil_div<int64_t>(mat_b.size(1), 128),
-      "), and both should be near-inner-dim-major (with 16-byte aligned strides).\n"
+      ").\n"
       "Got mat_a.dtype()=",
       mat_a.scalar_type(),
       ", scale_a[0].dtype()=",
@@ -1058,7 +1033,6 @@ Tensor& _scaled_mm_xpu_v2_out(
 
   auto bias_ = bias.value_or(Tensor());
 
-  // dispatch to appropriate lower-level calls for error checking & execution
   if (gemm_impl == ScaledGemmImplementation::TENSORWISE_TENSORWISE) {
     return _scaled_tensorwise_tensorwise(
         mat_a,
