@@ -1571,6 +1571,15 @@ def redistribute_local_tensor(
                 mesh_to_use = device_mesh
             i = transform_info.mesh_dim
             current, target = transform_info.src_dst_placements
+
+            # _StridedShard methods use device_mesh directly, not mesh_to_use.
+            # This is safe because _StridedShard.is_shard() returns False, so
+            # _comm_type_key() returns None and flattening is never attempted.
+            if isinstance(current, _StridedShard) or isinstance(target, _StridedShard):
+                assert mesh_to_use is device_mesh, (  # noqa: S101
+                    "_StridedShard redistribute assumes no flattened transforms"
+                )
+
             num_chunks = mesh_to_use.size(mesh_dim=i)
 
             if current == target:
@@ -1641,8 +1650,15 @@ def redistribute_local_tensor(
                             target_placement.dim,
                         )
                 elif isinstance(current, _StridedShard):
-                    raise NotImplementedError(
-                        "Redistribute from _StridedShard to Shard is not implemented yet"
+                    # _StridedShard -> Shard: go via Replicate as intermediate
+                    replicated = current._to_replicate_tensor(
+                        local_tensor, device_mesh, i, transform_info.logical_shape
+                    )
+                    new_local_tensor = target_placement._replicate_to_shard(
+                        replicated,
+                        mesh_to_use,
+                        i,
+                        mesh_to_use._sym_get_coordinate(i),
                     )
                 else:
                     raise ValueError(
@@ -1668,8 +1684,13 @@ def redistribute_local_tensor(
             elif isinstance(target, _StridedShard):
                 # Case 4: target is _StridedShard
                 if current.is_partial():
-                    raise NotImplementedError(
-                        "Redistribute from Partial to _StridedShard is not implemented yet"
+                    # Partial -> _StridedShard: reduce to Replicate, then strided shard
+                    partial_spec = cast(Partial, current)
+                    replicated = partial_spec._reduce_value(
+                        local_tensor, mesh_to_use, i
+                    )
+                    new_local_tensor = target._replicate_to_strided_shard(
+                        replicated, device_mesh, i, device_mesh._sym_get_coordinate(i)
                     )
                 elif current.is_replicate():
                     # split the tensor and return the corresponding local strided shard
@@ -1677,9 +1698,13 @@ def redistribute_local_tensor(
                         local_tensor, device_mesh, i, device_mesh._sym_get_coordinate(i)
                     )
                 elif current.is_shard():
-                    # Shard -> _StridedShard on potentially different dimensions
-                    raise NotImplementedError(
-                        "Redistribute from Shard to _StridedShard is not implemented yet"
+                    # Shard -> _StridedShard: all-gather to Replicate, then strided shard
+                    current_placement = cast(Shard, current)
+                    replicated = current_placement._to_replicate_tensor(
+                        local_tensor, mesh_to_use, i, transform_info.logical_shape
+                    )
+                    new_local_tensor = target._replicate_to_strided_shard(
+                        replicated, device_mesh, i, device_mesh._sym_get_coordinate(i)
                     )
                 elif isinstance(current, _StridedShard):
                     # _StridedShard -> _StridedShard: go through Replicate
