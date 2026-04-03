@@ -56,6 +56,7 @@ from ..exc import (
     ObservedTypeError,
     ObservedUserStopIteration,
     raise_observed_exception,
+    raise_type_error,
     unimplemented,
 )
 from ..graph_bytecode_inputs import get_external_object_by_index
@@ -95,13 +96,7 @@ from ..utils import (
     tuple_methods,
     unpatched_nn_module_getattr,
 )
-from .base import (
-    MutationType,
-    NO_SUCH_SUBOBJ,
-    raise_type_error_exc,
-    ValueMutationNew,
-    VariableTracker,
-)
+from .base import MutationType, NO_SUCH_SUBOBJ, ValueMutationNew, VariableTracker
 from .dicts import ConstDictVariable, DefaultDictVariable, SetVariable
 
 
@@ -888,9 +883,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.CatchWarningsCtxManagerVariable.create(tx, kwargs)
         elif self.value is torch.cuda.device and not kwargs and len(args) == 1:
             if not args[0].is_python_constant():
-                raise_type_error_exc(
-                    tx, "torch.cuda.device() requires a constant argument"
-                )
+                raise_type_error(tx, "torch.cuda.device() requires a constant argument")
             return variables.CUDADeviceVariable.create(tx, args[0].as_python_constant())
         elif (
             issubclass(type(self.value), type)
