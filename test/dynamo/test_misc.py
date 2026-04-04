@@ -10139,6 +10139,35 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         finally:
             torch.use_deterministic_algorithms(prior, warn_only=prior_warn_only)
 
+    def test_use_deterministic_algorithms_warn_only_no_graph_break(self):
+        prior = torch.are_deterministic_algorithms_enabled()
+        prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+        cnt = CompileCounter()
+
+        def eager_fn(x):
+            torch.use_deterministic_algorithms(True, warn_only=True)
+            res = x.scatter_add(
+                0,
+                torch.tensor([0, 1, 0]),
+                torch.tensor([1.0, 2.0, 3.0]),
+            )
+            torch.use_deterministic_algorithms(False, warn_only=True)
+            return res
+
+        fn = torch.compile(backend=cnt, fullgraph=True)(eager_fn)
+
+        try:
+            x = torch.zeros(2)
+            expected = eager_fn(x)
+            actual = fn(x)
+            self.assertEqual(actual, expected)
+
+            actual = fn(x)
+            self.assertEqual(actual, expected)
+            self.assertEqual(cnt.frame_count, 1)
+        finally:
+            torch.use_deterministic_algorithms(prior, warn_only=prior_warn_only)
+
     def test_torch_compile_ctx_on_forward_and_training_step(self):
         class MyModel(torch.nn.Module):
             def forward(self): ...
