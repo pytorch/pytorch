@@ -914,9 +914,7 @@ class OutputGraph(OutputGraphCommon):
                     ):
                         potential_side_effects.append(var)
 
-        return [
-            _get_source_debug_name(var.source) for var in potential_side_effects
-        ]
+        return [_get_source_debug_name(var.source) for var in potential_side_effects]
 
     def get_chained_attr_source(self, base: Source, path: str) -> AttrSource:
         parts = path.split(".")

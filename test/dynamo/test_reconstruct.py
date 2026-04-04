@@ -65,15 +65,11 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
                 return out_code.replace(co_name=f"{out_code.co_name}_hooked")
 
             def inspect_hook(code, out_code):
-                captured["refs"] = (
-                    torch._dynamo.convert_frame.get_compiled_code_side_effects(
-                        out_code
-                    )
+                captured["refs"] = torch._dynamo.convert_frame.get_compiled_code_side_effects(
+                    out_code
                 )
                 captured["has_side_effects"] = (
-                    torch._dynamo.convert_frame.compiled_code_has_side_effects(
-                        out_code
-                    )
+                    torch._dynamo.convert_frame.compiled_code_has_side_effects(out_code)
                 )
 
             torch._dynamo.reset()

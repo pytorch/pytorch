@@ -818,8 +818,13 @@ def compiled_code_has_side_effects(code: types.CodeType) -> bool:
 
 
 def _copy_code_context(src_code: types.CodeType, dst_code: types.CodeType) -> None:
-    if code_context.has_context(src_code):
-        code_context.get_context(dst_code).update(code_context.get_context(src_code))
+    if not code_context.has_context(src_code):
+        return
+    src_context = code_context.get_context(src_code)
+    if _BYTECODE_HOOK_SIDE_EFFECTS_CONTEXT_KEY in src_context:
+        code_context.get_context(dst_code)[_BYTECODE_HOOK_SIDE_EFFECTS_CONTEXT_KEY] = (
+            src_context[_BYTECODE_HOOK_SIDE_EFFECTS_CONTEXT_KEY]
+        )
 
 
 def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
@@ -1788,7 +1793,7 @@ def _compile(
         return wrap_guarded_code(guarded_code), tracer_output
 
     metrics_context = get_metrics_context()
-    code_context = (
+    package_code_context = (
         package.code_context(code) if package is not None else contextlib.nullcontext()
     )
     with (
@@ -1804,7 +1809,7 @@ def _compile(
             phase_name="entire_frame_compile",
             dynamo_compile_column_us="dynamo_cumulative_compile_time_us",
         ),
-        code_context,
+        package_code_context,
     ):
         restart_reasons: set[str] = set()
         if compile_pg := get_compile_pg():
