@@ -2275,7 +2275,6 @@ class TestReductions(TestCase):
     @onlyCPU
     @dtypes(*integral_types_and(torch.bool))
     def test_nanmean_integral_types(self, device, dtype):
-
         # List of tensor shapes to test
         shapes = [
             (),
@@ -2293,12 +2292,11 @@ class TestReductions(TestCase):
         for shape in shapes:
             # Tensor of the specified shape and dtype
             t = make_tensor(shape, dtype=dtype, device=device)
-            # Attempt to call torch.nanmean and expect a RuntimeError
-            with self.assertRaisesRegex(
-                RuntimeError,
-                r"nanmean\(\): expected input to have floating point or complex dtype but got \w+"
-            ):
-                torch.nanmean(t)
+            # Verify against NumPy
+            # NumPy's nanmean for integers returns float64 by default.
+            # PyTorch's nanmean returns default float (usually float32).
+            # We use exact_dtype=False because of this.
+            self.compare_with_numpy(torch.nanmean, np.nanmean, t, exact_dtype=False)
 
     @precisionOverride({torch.float16: 1e-2, torch.bfloat16: 1e-2})
     @dtypes(*set(all_types_and(torch.half, torch.bfloat16)) - {torch.uint8})

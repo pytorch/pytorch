@@ -1482,14 +1482,6 @@ Tensor& nanmean_out(
     bool keepdim,
     std::optional<ScalarType> opt_dtype,
     Tensor& result) {
-  // Check if dtype is an integral type or Bool and raise an error
-  TORCH_CHECK(
-    !at::isIntegralType(self.scalar_type(), /*includeBool=*/true),
-    "nanmean(): integral types and 'Bool' are not supported for nanmean, even for empty tensors.");
-  TORCH_CHECK(
-      self.is_floating_point() || self.is_complex(),
-      "nanmean(): expected input to have floating point or complex dtype but got ",
-      self.scalar_type());
   const auto factor = at::native::isnan(self).logical_not_().sum(dim, keepdim);
   at::nansum_out(result, self, dim, keepdim, opt_dtype).div_(factor);
   return result;
@@ -1500,13 +1492,13 @@ Tensor nanmean(
     at::OptionalIntArrayRef dim,
     bool keepdim,
     std::optional<ScalarType> opt_dtype) {
-  TORCH_CHECK(
-      self.is_floating_point() || self.is_complex(),
-      "nanmean(): expected input to have floating point or complex dtype but got ",
-      self.scalar_type());
+  ScalarType dtype = get_dtype_from_self(self, opt_dtype, true);
+  if (!at::isFloatingType(dtype) && !at::isComplexType(dtype)) {
+    dtype = at::typeMetaToScalarType(c10::get_default_dtype());
+  }
   const auto factor =
       at::native::isnan(self.detach()).logical_not_().sum(dim, keepdim);
-  return at::nansum(self, dim, keepdim, opt_dtype).div(factor);
+  return at::nansum(self, dim, keepdim, dtype).div(factor);
 }
 
 static Tensor& logsumexp_out_impl(Tensor& result, const Tensor& self, IntArrayRef dims, bool keepdim) {
