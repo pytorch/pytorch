@@ -1280,7 +1280,6 @@ def _build_table(
     if append_node_id:
         headers.append("Node ID")
 
-    # Have to use a list because nonlocal is Py3 only...
     SPACING_SIZE = 2
     row_format_lst = [""]
     header_sep_lst = [""]
@@ -1341,7 +1340,6 @@ def _build_table(
     line_length = line_length_lst[0]
     add_column = None  # type: ignore[assignment]
 
-    # Have to use a list because nonlocal is Py3 only...
     result = []
 
     def append(s):
