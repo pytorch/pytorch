@@ -968,7 +968,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # Record the call in the FX graph so it happens at runtime
             tx.output.create_node(
                 "call_function",
-                torch.use_deterministic_algorithms,
+                torch._C._set_deterministic_algorithms,
                 (mode_val,),
                 {"warn_only": warn_only_val},
             )
