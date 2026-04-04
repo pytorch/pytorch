@@ -873,11 +873,19 @@ class OutputGraph(OutputGraphCommon):
         self.used_inlined_inbuilt_modules_names: OrderedSet[str] = OrderedSet()
 
         self.attr_source_cache: dict[tuple[Source, str], AttrSource] = {}
+        self._cached_replayed_side_effect_source_refs: tuple[str, ...] | None = None
 
     def get_replayed_side_effect_source_refs(
         self, *, populate_export_metadata: bool = False
     ) -> list[str]:
         """Return Python-side effect sources that Dynamo replays outside the FX graph."""
+        if (
+            not populate_export_metadata
+            and not self.side_effects.id_to_variable
+            and self._cached_replayed_side_effect_source_refs is not None
+        ):
+            return list(self._cached_replayed_side_effect_source_refs)
+
         from torch.export._trace import _ExportModuleSpecTrackerDict
 
         potential_side_effects = []
@@ -3273,6 +3281,9 @@ class OutputGraph(OutputGraphCommon):
                 del node.meta["grapharg"]
         self.real_value_cache.clear()
         self.input_name_to_proxy.clear()
+        self._cached_replayed_side_effect_source_refs = tuple(
+            self.get_replayed_side_effect_source_refs()
+        )
         self.side_effects.clear()
         self.variable_tracker_cache.clear()
         self.mro_source_cache.clear()
