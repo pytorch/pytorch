@@ -1545,6 +1545,11 @@ AOTITorchError aoti_torch_new_stable_ivalue(StableIValue** ret_value) {
 }
 
 AOTITorchError aoti_torch_delete_stable_ivalue(StableIValue* value) {
-  delete value;
-  return AOTI_TORCH_SUCCESS;
+  if (value == nullptr) {
+    // Input was invalid or not allocated in the first place.
+    return AOTI_TORCH_FAILURE;
+  } else {
+    delete value;
+    return AOTI_TORCH_SUCCESS;
+  }
 }
