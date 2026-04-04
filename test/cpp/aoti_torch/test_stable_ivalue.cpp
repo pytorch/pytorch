@@ -23,6 +23,11 @@ TEST(AotiTorchStableIValue, TestStableIValueUse) {
   // Freeing a nullptr should result in a failure.
   StableIValue* b = nullptr;
   ASSERT_EQ(aoti_torch_delete_stable_ivalue(b), AOTI_TORCH_FAILURE);
+
+  // Trying to allocate with a pointer into which can't be assigned is a
+  // failure.
+  StableIValue** ret_value = nullptr;
+  ASSERT_EQ(aoti_torch_new_stable_ivalue(ret_value), AOTI_TORCH_FAILURE);
 }
 
 TEST(AotiTorch, TestStableIValueLargeAmount) {
