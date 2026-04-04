@@ -247,8 +247,10 @@ class GraphRegionTrackerTests(TestCase):
                 lambda: torch.use_deterministic_algorithms(True),
                 lambda: torch.use_deterministic_algorithms(False),
             ),
-            # (lambda: torch.use_deterministic_algorithms(True, warn_only=True),
-            # lambda: torch.use_deterministic_algorithms(False)), : Unsupported
+            (
+                lambda: torch.use_deterministic_algorithms(True, warn_only=True),
+                lambda: torch.use_deterministic_algorithms(False, warn_only=True),
+            ),
             create_toggle_fns("allow_bf16_reduced_precision_reduction"),
             create_toggle_fns("allow_fp16_reduced_precision_reduction"),
             create_toggle_fns("allow_tf32"),

@@ -685,7 +685,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
     def _get_handlers() -> dict[Callable[..., Any], Callable[..., Any]]:
         """Build a dict from function -> method to handle it so that we are O(1)
         in terms of the number of function with special handling."""
-        handlers = {}
+        handlers: dict[Callable[..., Any], Callable[..., Any]] = {}
 
         def register(
             *fns: Callable[..., Any],
@@ -956,25 +956,27 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.use_deterministic_algorithms)
         def handle_use_deterministic_algorithms(
-            self, tx: "InstructionTranslator", mode: Any, warn_only: bool = False
+            self, tx: "InstructionTranslator", mode: Any, warn_only: Any = False
         ) -> VariableTracker:
-            # pyrefly: ignore [missing-attribute]
-            if warn_only and warn_only.as_python_constant():
-                unimplemented(
-                    gb_type="Attempted to use torch.use_deterministic_algorithms(warn_only=True)",
-                    context=f"mode={mode}, warn_only={warn_only}",
-                    explanation="Dynamo does not support this.",
-                    hints=[
-                        "Remove param warn_only in function call torch.use_deterministic_algorithms.",
-                        *graph_break_hints.SUPPORTABLE,
-                    ],
-                )
+            mode_val = mode.as_python_constant()
 
-            value = mode.as_python_constant()
+            # If warn_only isn't provided, default to False
+            warn_only_val = False
+            if isinstance(warn_only, VariableTracker):
+                warn_only_val = warn_only.as_python_constant()
+
+            # Record the call in the FX graph so it happens at runtime
             tx.output.create_node(
-                "call_function", torch._C._set_deterministic_algorithms, (value,), {}
+                "call_function",
+                torch.use_deterministic_algorithms,
+                (mode_val,),
+                {"warn_only": warn_only_val},
             )
-            torch._C._set_deterministic_algorithms(value)
+
+            # Actually trigger the effect NOW so subsequent tracing
+            # (like scatter_add) knows determinism is on.
+            torch.use_deterministic_algorithms(mode_val, warn_only=warn_only_val)
+
             return CONSTANT_VARIABLE_NONE
 
         @register(torch.autocast_increment_nesting)
