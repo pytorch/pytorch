@@ -387,7 +387,7 @@ void adaptive_avg_pool2d_kernel_impl(
   }
 }
 
-void adapative_avg_pool2d_backward_kernel_impl(
+void adaptive_avg_pool2d_backward_kernel_impl(
     Tensor& grad_input,
     const Tensor& grad_output) {
   switch (grad_output.suggest_memory_format()) {
@@ -831,7 +831,7 @@ void adaptive_avg_pool3d_kernel_impl(
   }
 }
 
-void adapative_avg_pool3d_backward_kernel_impl(
+void adaptive_avg_pool3d_backward_kernel_impl(
     Tensor& grad_input,
     const Tensor& grad_output) {
   switch (grad_output.suggest_memory_format()) {
@@ -855,8 +855,8 @@ void adapative_avg_pool3d_backward_kernel_impl(
 } // anonymous namespace
 
 REGISTER_DISPATCH(adaptive_avg_pool2d_kernel, &adaptive_avg_pool2d_kernel_impl)
-REGISTER_DISPATCH(adaptive_avg_pool2d_backward_kernel, &adapative_avg_pool2d_backward_kernel_impl)
+REGISTER_DISPATCH(adaptive_avg_pool2d_backward_kernel, &adaptive_avg_pool2d_backward_kernel_impl)
 REGISTER_DISPATCH(adaptive_avg_pool3d_kernel, &adaptive_avg_pool3d_kernel_impl)
-REGISTER_DISPATCH(adaptive_avg_pool3d_backward_kernel, &adapative_avg_pool3d_backward_kernel_impl)
+REGISTER_DISPATCH(adaptive_avg_pool3d_backward_kernel, &adaptive_avg_pool3d_backward_kernel_impl)
 
 } // at::native
