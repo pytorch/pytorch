@@ -491,35 +491,15 @@ class OpDispatcher:
                 if not isinstance(args[0], dtensor.DTensor):
                     raise AssertionError
 
-                # Check if arg 0's input placement actually needs to change.
-                # needs_redistribute can be True for reasons other than
-                # arg 0 placement changes (e.g. squeeze dim rewriting),
-                # so we check the redistribute schema directly.
-                if (
-                    output_sharding.needs_redistribute
-                    and output_sharding.redistribute_schema is not None
-                ):
-                    desired_arg0 = output_sharding.redistribute_schema.args_schema[0]
-                    if not isinstance(desired_arg0, DTensorSpec):
-                        raise AssertionError(
-                            f"Expected DTensorSpec for inplace arg 0, "
-                            f"got {type(desired_arg0)}"
-                        )
-                    if args[0]._spec.placements != desired_arg0.placements:
-                        raise RuntimeError(
-                            f"{op_call}: in-place operations that require "
-                            f"redistribution of the first argument are not "
-                            f"supported because redistribution replaces the "
-                            f"local tensor, breaking aliasing semantics. "
-                            f"Please redistribute explicitly first."
-                        )
-
                 # Fast path: placements unchanged (common case: add_, mul_, etc.)
                 if args[0]._spec.placements == output_spec.placements:
                     return args[0]
 
-                # Placement changed without redistribution (e.g. dim reindexing
-                # in squeeze_: Shard(1) → Shard(0) after removing dim 0).
+                # Placement reindexed (e.g. squeeze_ removing a non-sharded
+                # dim: Shard(1) → Shard(0)). No redistribution — the local
+                # tensor data is unchanged, only dim indices shift.
+                # strict_view=True in sharding prop prevents the illegal
+                # case (squeezing a sharded dim) from reaching here.
                 args[0]._spec = output_spec
                 return return_and_correct_aliasing(op_call, args, kwargs, args[0])
             else:

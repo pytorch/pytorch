@@ -2620,39 +2620,28 @@ class TestViewOps(DTensorContinuousTestBase):
             self.assertEqual(result.placements, (Shard(0),))
             self.assertEqual(result.full_tensor(), x.squeeze((0, 2)))
 
-        # S(0) on globally-singleton dim now errors (strict view, #174136)
-        with self.subTest("singleton_shard_errors"):
+        # Squeezing a sharded singleton dim requires redistribution and
+        # must error rather than silently allgathering (#174136).
+        with self.subTest("squeeze_sharded_dim_errors"):
             x = torch.randn(1, 4, device=self.device_type)
             dt = distribute_tensor(x, mesh, [Shard(0)])
-            with self.assertRaisesRegex(RuntimeError, "requires redistribution"):
-                dt.squeeze()
+            # All 6 squeeze ATen ops must error:
+            for op, args in [
+                (dt.squeeze, ()),  # squeeze.default
+                (dt.squeeze, (0,)),  # squeeze.dim
+                (dt.squeeze, ((0,),)),  # squeeze.dims
+                (dt.squeeze_, ()),  # squeeze_.default
+                (dt.squeeze_, (0,)),  # squeeze_.dim
+                (dt.squeeze_, ((0,),)),  # squeeze_.dims
+            ]:
+                with self.assertRaisesRegex(RuntimeError, "requires redistribution"):
+                    op(*args)
 
-    def test_squeeze_errors_when_sharded_dim_removed(self):
-        """Squeeze on a sharded singleton dim must error, not silently allgather."""
+    def test_squeeze_comm_free_cases(self):
+        """Squeeze is comm-free when no sharded dim is removed."""
         mesh = init_device_mesh(self.device_type, (self.world_size,))
-        x = torch.randn(1, 4, device=self.device_type)
-        dt = distribute_tensor(x, mesh, [Shard(0)])
-        with self.assertRaisesRegex(RuntimeError, "requires redistribution"):
-            dt.squeeze(0)
 
-    def test_squeeze_inplace_errors_when_sharded_dim_removed(self):
-        """squeeze_ on a sharded singleton dim must error (#174136)."""
-        mesh = init_device_mesh(self.device_type, (self.world_size,))
-        x = torch.randn(1, 4, device=self.device_type)
-
-        # squeeze_.dim
-        dt = distribute_tensor(x, mesh, [Shard(0)])
-        with self.assertRaisesRegex(RuntimeError, "requires redistribution"):
-            dt.squeeze_(0)
-
-        # squeeze_.dims
-        dt2 = distribute_tensor(x, mesh, [Shard(0)])
-        with self.assertRaisesRegex(RuntimeError, "requires redistribution"):
-            dt2.squeeze_((0,))
-
-    def test_squeeze_no_comm_when_non_sharded_dim_removed(self):
-        """Squeeze on a non-sharded singleton dim is communication-free."""
-        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        # Non-sharded singleton removed (out-of-place), shard dim reindexes
         x = torch.randn(1, self.world_size, device=self.device_type)
         dt = distribute_tensor(x, mesh, [Shard(1)])
         with CommDebugMode() as comm_mode:
@@ -2662,33 +2651,39 @@ class TestViewOps(DTensorContinuousTestBase):
         self.assertEqual(result.placements, (Shard(0),))
         self.assertEqual(result.full_tensor(), x.squeeze(0))
 
-    def test_squeeze_after_explicit_redistribute(self):
-        """User redistributes to Replicate first, then squeeze is comm-free."""
-        mesh = init_device_mesh(self.device_type, (self.world_size,))
-        x = torch.randn(1, 4, device=self.device_type)
-        dt = distribute_tensor(x, mesh, [Shard(0)])
-        dt_replicate = dt.redistribute(mesh, [Replicate()])
+        # Same but inplace — exercises the dispatch reindex path
+        x_inp = torch.randn(1, self.world_size, device=self.device_type)
+        dt_inp = distribute_tensor(x_inp, mesh, [Shard(1)])
         with CommDebugMode() as comm_mode:
-            result = dt_replicate.squeeze(0)
+            dt_inp.squeeze_(0)
         self.assertEqual(comm_mode.get_total_counts(), 0)
-        self.assertEqual(result.shape, torch.Size([4]))
-        self.assertEqual(result.placements, (Replicate(),))
-        self.assertEqual(result.full_tensor(), x.squeeze(0))
+        self.assertEqual(dt_inp.shape, torch.Size([self.world_size]))
+        self.assertEqual(dt_inp.placements, (Shard(0),))
+        self.assertEqual(dt_inp.full_tensor(), x_inp.squeeze(0))
 
-    def test_squeeze_2d_mesh(self):
-        """2D mesh: squeeze removes non-sharded singleton, shard dims reindex."""
-        mesh = init_device_mesh(
+        # Explicit redistribute first, then squeeze
+        x2 = torch.randn(1, 4, device=self.device_type)
+        dt2 = distribute_tensor(x2, mesh, [Shard(0)])
+        dt2_rep = dt2.redistribute(mesh, [Replicate()])
+        with CommDebugMode() as comm_mode:
+            result2 = dt2_rep.squeeze(0)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(result2.shape, torch.Size([4]))
+        self.assertEqual(result2.placements, (Replicate(),))
+        self.assertEqual(result2.full_tensor(), x2.squeeze(0))
+
+        # 2D mesh: both shard dims reindex
+        mesh_2d = init_device_mesh(
             self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
         )
-        # shape (1, 2, world_size//2) sharded on dim 1 and dim 2
-        x = torch.randn(1, 2, self.world_size // 2, device=self.device_type)
-        dt = distribute_tensor(x, mesh, [Shard(1), Shard(2)])
+        x3 = torch.randn(1, 2, self.world_size // 2, device=self.device_type)
+        dt3 = distribute_tensor(x3, mesh_2d, [Shard(1), Shard(2)])
         with CommDebugMode() as comm_mode:
-            result = dt.squeeze(0)
+            result3 = dt3.squeeze(0)
         self.assertEqual(comm_mode.get_total_counts(), 0)
-        self.assertEqual(result.shape, torch.Size([2, self.world_size // 2]))
-        self.assertEqual(result.placements, (Shard(0), Shard(1)))
-        self.assertEqual(result.full_tensor(), x.squeeze(0))
+        self.assertEqual(result3.shape, torch.Size([2, self.world_size // 2]))
+        self.assertEqual(result3.placements, (Shard(0), Shard(1)))
+        self.assertEqual(result3.full_tensor(), x3.squeeze(0))
 
     def test_storage_offset_slice(self):
         """

@@ -722,9 +722,9 @@ class _ViewShardingPropagator:
             ):
                 if self.strict_view:
                     raise RuntimeError(
-                        f"Sharded dimension {p.dim} ({p}) would need to become "
-                        f"Replicate. This requires redistribution. "
-                        f"Please redistribute the input before this operation."
+                        f"This operation would remove or reshape sharded "
+                        f"dimension {p.dim}, which requires redistribution. "
+                        f"Please redistribute the input first."
                     )
                 input_tgt_placements.append(Replicate())
             else:
