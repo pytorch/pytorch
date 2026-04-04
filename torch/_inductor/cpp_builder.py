@@ -963,6 +963,12 @@ def _get_optimization_cflags(
         cflags += debug_cflags
         ldflags += debug_ldflags
 
+    if config.aot_inductor.enable_frame_pointer:
+        if _IS_WINDOWS:
+            cflags.append("Oy-")
+        else:
+            cflags.append("fno-omit-frame-pointer")
+
     cflags += _get_ffast_math_flags()
 
     if _IS_WINDOWS:
