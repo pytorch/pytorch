@@ -50,6 +50,26 @@ kernel void geometric(
   output[tid] = static_cast<T>(result);
 }
 
+template <typename T>
+kernel void exponential(
+    device T* output [[buffer(0)]],
+    constant float2& params [[buffer(1)]],
+    constant long2& seed_base_offset [[buffer(2)]],
+    constant uint& numel [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  uint base = tid * 4;
+  uint4 raw =
+      c10::metal::philox4::rand(seed_base_offset.x, seed_base_offset.y + tid);
+  float lambda = params.x;
+  uint count = min(4u, numel - base);
+  for (uint i = 0; i < count; ++i) {
+    float u = clamp(
+        c10::metal::detail::uint32_to_uniform_float(raw[i]), eps, 1.0f - eps);
+    output[base + i] =
+        static_cast<T>(-::metal::precise::log(1.0f - u) / lambda);
+  }
+}
+
 #define REGISTER_OP(NAME, DTYPE)                                    \
   template [[host_name(#NAME "_" #DTYPE)]] kernel void NAME<DTYPE>( \
       device DTYPE*, constant float2&, constant long2&, uint)
@@ -70,6 +90,15 @@ REGISTER_OP(geometric, long);
 REGISTER_OP(geometric, short);
 REGISTER_OP(geometric, char);
 REGISTER_OP(geometric, uchar);
+
+#define REGISTER_EXPONENTIAL(DTYPE)                         \
+  template [[host_name("exponential_" #DTYPE)]] kernel void \
+  exponential<DTYPE>(                                       \
+      device DTYPE*, constant float2&, constant long2&, constant uint&, uint)
+
+REGISTER_EXPONENTIAL(float);
+REGISTER_EXPONENTIAL(half);
+REGISTER_EXPONENTIAL(bfloat);
 
 // Marsaglia & Tsang (2000) acceptance-rejection method for Gamma distribution.
 // Adapted from aten/src/ATen/native/Distributions.h sample_gamma(),
