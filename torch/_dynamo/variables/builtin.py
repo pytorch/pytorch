@@ -1588,13 +1588,6 @@ class BuiltinVariable(BaseBuiltinVariable):
                     tx, getattr(float, name)(args[0].as_python_constant())
                 )
 
-        if name == "__len__" and len(args) == 1 and not kwargs:
-            # type.__len__(instance) → len(instance)
-            # e.g. list.__len__(my_list) → len(my_list)
-            from .object_protocol import generic_len
-
-            return generic_len(tx, args[0])
-
         return super().call_method(tx, name, args, kwargs)
 
     def _call_int_float(
@@ -2241,9 +2234,10 @@ class BuiltinVariable(BaseBuiltinVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        from .object_protocol import generic_len
-
-        return generic_len(tx, args[0])
+        try:
+            return args[0].call_method(tx, "__len__", list(args[1:]), kwargs)
+        except AttributeError as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
 
     def call_getitem(
         self,
