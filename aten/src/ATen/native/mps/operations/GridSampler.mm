@@ -226,6 +226,7 @@ Tensor grid_sampler_3d_mps(const Tensor& input,
 } // namespace at::native
 
 namespace at::native {
+
 std::tuple<Tensor, Tensor> grid_sampler_2d_backward_mps(
     const Tensor& grad_output,
     const Tensor& input,
@@ -234,10 +235,11 @@ std::tuple<Tensor, Tensor> grid_sampler_2d_backward_mps(
     int64_t padding_mode,
     bool align_corners,
     std::array<bool, 2> output_mask) {
+  
   at::globalContext().alertNotDeterministic("grid_sampler_2d_backward_mps");
-  // The actual implementation would go here, but for now, 
-  // we are just plugging the deterministic "leak".
-  TORCH_CHECK(false, "grid_sampler_2d_backward is not yet implemented for MPS");
-  return std::make_tuple(Tensor(), Tensor());
+  
+  return at::native::grid_sampler_2d_backward_cpu(
+      grad_output, input, grid, interpolation_mode, padding_mode, align_corners, output_mask);
 }
+
 } // namespace at::native
