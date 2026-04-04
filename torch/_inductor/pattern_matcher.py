@@ -1342,8 +1342,11 @@ class ReplacementPatternEntry(PatternEntry):
                     # incorrectly tag some nodes as recomputables.
                     for tag_name in ["recompute", "ac_graph_id"]:
                         if tag_name in old.meta:
+                            # Flatten nested args (e.g., [(node1, node2)]) to handle
+                            # pytree-structured arguments correctly
+                            flat_args = pytree.tree_leaves(args)
                             percolate_tags(
-                                new, tag_name, old.meta[tag_name], OrderedSet(args)
+                                new, tag_name, old.meta[tag_name], OrderedSet(flat_args)
                             )
 
                     old.replace_all_uses_with(
