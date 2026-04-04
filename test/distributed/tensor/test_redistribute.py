@@ -1976,6 +1976,23 @@ class TransformInfoTest(TestCase):
             info = _TransformInfo(0, placements, [8, 8])
             self.assertIsNone(info._comm_type_key())
 
+    def test_comm_type_key_strided_shard(self):
+        """_StridedShard must produce the same comm type keys as Shard."""
+        ss = _StridedShard(0, split_factor=2)
+        test_cases = [
+            ((Partial("sum"), ss), "reduce_scatter"),
+            ((ss, Replicate()), "all_gather"),
+            ((ss, Shard(1)), "all_to_all"),
+            ((ss, _StridedShard(1, split_factor=2)), "all_to_all"),
+        ]
+        for placements, expected_key in test_cases:
+            info = _TransformInfo(0, placements, [8, 8])
+            self.assertEqual(
+                info._comm_type_key(),
+                expected_key,
+                f"_StridedShard transform {placements} should map to '{expected_key}'",
+            )
+
 
 class OptimizeFlattenedReductionsTest(TestCase):
     """Tests for _optimize_transform_infos helper.

@@ -894,6 +894,10 @@ def _dijkstra_expand_single_dim_strategy_to_mesh(
         total_bytes = spec.tensor_meta.dtype.itemsize * math.prod(
             spec.tensor_meta.shape
         )
+        # TODO: is_shard() misses _StridedShard, use spec.num_shards instead.
+        # Not fixing yet: the overestimate biases Dijkstra toward redistributing
+        # away from _StridedShard, which is the safer default until _StridedShard
+        # is fully validated.
         num_shards = 1
         for i, p in enumerate(spec.placements):
             if p.is_shard():
