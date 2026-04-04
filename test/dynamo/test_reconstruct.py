@@ -57,6 +57,57 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
 
+    def test_bytecode_hook_exposes_side_effect_refs(self):
+        def compile_and_capture(fn, *args):
+            captured = {}
+
+            def rewrite_hook(code, out_code):
+                return out_code.replace(co_name=f"{out_code.co_name}_hooked")
+
+            def inspect_hook(code, out_code):
+                captured["refs"] = (
+                    torch._dynamo.convert_frame.get_compiled_code_side_effects(
+                        out_code
+                    )
+                )
+                captured["has_side_effects"] = (
+                    torch._dynamo.convert_frame.compiled_code_has_side_effects(
+                        out_code
+                    )
+                )
+
+            torch._dynamo.reset()
+            rewrite_handle = torch._dynamo.convert_frame.register_bytecode_hook(
+                rewrite_hook
+            )
+            inspect_handle = torch._dynamo.convert_frame.register_bytecode_hook(
+                inspect_hook
+            )
+            try:
+                torch.compile(fn, backend="eager", fullgraph=True)(*args)
+            finally:
+                inspect_handle.remove()
+                rewrite_handle.remove()
+
+            return captured
+
+        def mutating_fn(x, lst):
+            lst.append(x + 1)
+            return x * 2
+
+        def pure_fn(x):
+            return x * 2
+
+        x = torch.randn(3)
+
+        mutated = compile_and_capture(mutating_fn, x, [])
+        self.assertEqual(mutated["refs"], ("L['lst']",))
+        self.assertTrue(mutated["has_side_effects"])
+
+        pure = compile_and_capture(pure_fn, x)
+        self.assertEqual(pure["refs"], ())
+        self.assertFalse(pure["has_side_effects"])
+
     def test_ConstDict_pop_reconstruct(self):
         """
         If something is pop'ed from the dict, we reconstruct everything
