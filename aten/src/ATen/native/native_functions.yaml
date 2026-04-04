@@ -3888,7 +3888,7 @@
   device_check: NoCheck   # TensorIterator
   structured: True
   dispatch:
-    CPU, CUDA, MTIA: aminmax_out
+    CPU, CUDA: aminmax_out
     MPS: aminmax_out_mps
   tags: reduction
 
@@ -3943,7 +3943,7 @@
 - func: amax.out(Tensor self, int[1] dim=[], bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
-    CPU, CUDA, MTIA: amax_out
+    CPU, CUDA: amax_out
     MPS: amax_out_mps
   tags: reduction
 
@@ -4132,7 +4132,7 @@
 - func: amin.out(Tensor self, int[1] dim=[], bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
-    CPU, CUDA, MTIA: amin_out
+    CPU, CUDA: amin_out
     MPS: amin_out_mps
   tags: reduction
 
@@ -6658,7 +6658,6 @@
   dispatch:
     CPU, CUDA: var
     MPS: var_mps
-    MTIA: var_mtia
   tags: [core, reduction]
 
 - func: var.out(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
