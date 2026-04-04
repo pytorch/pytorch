@@ -302,6 +302,39 @@ def silu_backward(grad_output: Tensor, self: Tensor) -> Tensor:
     return grad_output * sigmoid * (1 + self * (1 - sigmoid))
 
 
+@register_decomposition(aten.celu)
+@out_wrapper()
+@pw_cast_for_opmath
+def celu(self: Tensor, alpha: float = 1.0) -> Tensor:
+    torch._check(
+        alpha != 0,
+        lambda: "ZeroDivisionError: alpha cannot be 0 for CELU",
+    )
+    inv_alpha = 1.0 / alpha
+    return torch.where(
+        self > 0,
+        self,
+        alpha * (torch.exp(self / alpha) - 1),
+    )
+
+
+@register_decomposition(aten.celu_)
+@out_wrapper()
+@pw_cast_for_opmath
+def celu_(self: Tensor, alpha: float = 1.0) -> Tensor:
+    torch._check(
+        alpha != 0,
+        lambda: "ZeroDivisionError: alpha cannot be 0 for CELU",
+    )
+    inv_alpha = 1.0 / alpha
+    result = torch.where(
+        self > 0,
+        self,
+        alpha * (torch.exp(self / alpha) - 1),
+    )
+    return self.copy_(result)
+
+
 @register_decomposition(aten._prelu_kernel)
 def _prelu_kernel(self: Tensor, weight: Tensor) -> Tensor:
     return torch.where(self > 0, self, weight * self)
