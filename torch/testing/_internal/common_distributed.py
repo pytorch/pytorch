@@ -153,19 +153,6 @@ ACCELERATOR_DIST_BACKENDS = ["nccl", "xccl", "hccl"]
 DDP_RANK_DEVICES = ["cuda", "xpu"]
 HAS_ACCELERATOR = TEST_CUDA or TEST_HPU or TEST_XPU or TEST_PRIVATEUSE1
 
-# Hooks called in the parent process before workers are spawned.
-_test_env_setup_hooks: list[Callable[..., None]] = []
-# Hooks called in each child worker process with (rank,) before the test runs.
-_worker_env_setup_hooks: list[Callable[[int], None]] = []
-
-
-def register_test_env_setup_hook(fn: Callable[..., None]) -> None:
-    """Register a hook called in the parent process before workers spawn."""
-    _test_env_setup_hooks.append(fn)
-
-def register_worker_env_setup_hook(fn: Callable[[int], None]) -> None:
-    """Register a hook called with (rank) in each spawned worker process."""
-    _worker_env_setup_hooks.append(fn)
 
 class TestSkip(NamedTuple):
     exit_code: int
@@ -985,8 +972,6 @@ class MultiProcessTestCase(TestCase):
 
     def setUp(self) -> None:
         super().setUp()
-        for hook in _test_env_setup_hooks:
-            hook(world_size=self.world_size)
 
         # Used for tests that are expected to return a non-0 exit code, such as
         # SIGABRT thrown by watchdog.
@@ -1086,8 +1071,6 @@ class MultiProcessTestCase(TestCase):
     def _run(
         cls, rank: int, test_name: str, file_name: str, parent_pipe, **kwargs
     ) -> None:
-        for hook in _worker_env_setup_hooks:
-            hook(rank)
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
@@ -1858,8 +1841,6 @@ class DynamoDistributedMultiProcTestCase(DistributedTestBase):
         cls, rank: int, test_name: str, file_name: str, parent_pipe, **kwargs
     ) -> None:
         trace_log.addHandler(logging.NullHandler())
-        for hook in _worker_env_setup_hooks:
-            hook(rank)
 
         # The rest is copypasta from MultiProcessTestCase._run
         self = cls(test_name)
@@ -1972,9 +1953,6 @@ class MultiProcContinuousTest(TestCase):
                 init_skip_reason = skip_entry.message
             else:
                 raise
-
-        for hook in _worker_env_setup_hooks:
-            hook(rank)
 
         # End of bootstrap
         logger.debug("Setup complete")
@@ -2179,8 +2157,6 @@ class MultiProcContinuousTest(TestCase):
         Test fixture. Run before each test.
         """
         super().setUp()
-        for hook in _test_env_setup_hooks:
-            hook(world_size=self.world_size)
 
         # Ensure processes are spawned (lazy initialization for instantiate_device_type_tests)
         self.__class__._ensure_processes_spawned()
