@@ -5272,6 +5272,35 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=1)
 
     @requires_cuda_and_triton
+    def test_binary_epilogue_is_not_fused(self):
+        @triton.jit
+        def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offs < n_elements
+            x = tl.load(in_ptr0 + offs, mask=mask)
+            y = tl.load(in_ptr1 + offs, mask=mask)
+            tl.store(out_ptr + offs, x + y, mask=mask)
+
+        def fn(a, b, c):
+            out = torch.empty_like(a)
+            grid = (triton.cdiv(a.numel(), 1024),)
+            add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
+            return out + c
+
+        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device="cuda")
+        b = torch.tensor(
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+        )
+        c = torch.tensor(
+            [0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0.0], dtype=torch.float32, device="cuda"
+        )
+
+        out, code = run_and_get_code(torch.compile(fn), a, b, c)
+        self.assertEqual(out, fn(a, b, c), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=2, num_allocs=None, num_deallocs=None)
+
+    @requires_cuda_and_triton
     def test_fusion_custom_kernel_with_linebreaks(self):
         # we do AST manipulation / string manipulation of the kernel source code
         # so we wanna make sure to correctly handle edge cases with tricky line breaks

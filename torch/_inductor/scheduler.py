@@ -5853,14 +5853,21 @@ class Scheduler:
                 if any(usage != "load" for usage in usages):
                     return False
 
+            assert len(node1.node.mutation_outputs) == 1
+            written_buffer_name = node1.node.mutation_outputs[0].name
+
+            # The epilogue can only read the output buffer produced by the user
+            # kernel. Any additional tensor read would require plumbing a new
+            # argument into the user-defined Triton kernel, which this fusion path
+            # does not support.
+            if any(dep.name != written_buffer_name for dep in node2.read_writes.reads):
+                return False
+
             # should be true now because we checked `can_fuse_epilogue`
             assert len(node1.node.mutable_args) == 1
             if node1.node.mutable_args[0].layout != node2.node.layout:
                 why("node1 and node2 uses different buf layouts")
                 return False
-
-            assert len(node1.node.mutation_outputs) == 1
-            written_buffer_name = node1.node.mutation_outputs[0].name
 
             def _is_other_node_that_references_mutation_buffer(
                 other_node: BaseSchedulerNode,
