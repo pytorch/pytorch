@@ -258,7 +258,7 @@ using namespace c10::xpu;
 #include <hip/hip_runtime.h>
 #endif
 
-#if defined(__HIPCC__) || defined(__HIPCC__)
+#if defined(__CUDACC__) || defined(__HIPCC__)
 // Designates functions callable from the host (CPU) and the device (GPU)
 #define C10_HOST_DEVICE __host__ __device__
 #define C10_DEVICE __device__
