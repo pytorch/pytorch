@@ -1201,6 +1201,10 @@ class ComboKernel(Kernel):
                         meta[f"tile_hint_{num}"] = "TileHint.SQUARE"
                     else:
                         meta[f"tile_hint_{num}"] = "TileHint.DEFAULT"
+                else:
+                    meta[f"reduction_hint_{num}"] = (
+                        sub_kernel.features.get_reduction_hint().name
+                    )
 
             for tree in sub_kernel.range_trees:
                 if not tree.is_reduction:

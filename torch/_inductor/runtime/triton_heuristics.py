@@ -2957,7 +2957,7 @@ def _handle_combo_kernel_per_subkernel_blocks(
         elif subkernel_heuristic == "reduction":
             cfgs = reduction(
                 size_hints_i,
-                reduction_hint=reduction_hint,
+                reduction_hint=ReductionHint[combo_meta[f"reduction_hint_{i}"]],
                 triton_meta=triton_meta,
                 filename=filename,
                 inductor_meta=inductor_meta_clean,
@@ -2967,7 +2967,7 @@ def _handle_combo_kernel_per_subkernel_blocks(
         elif subkernel_heuristic == "persistent_reduction":
             cfgs = persistent_reduction(
                 size_hints_i,
-                reduction_hint=reduction_hint,
+                reduction_hint=ReductionHint[combo_meta[f"reduction_hint_{i}"]],
                 triton_meta=triton_meta,
                 filename=filename,
                 inductor_meta=inductor_meta_clean,
