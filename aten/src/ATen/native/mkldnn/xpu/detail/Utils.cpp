@@ -289,9 +289,8 @@ void undo_broadcast(at::Tensor& tensor) {
 
 bool is_64_bytes_aligned(const at::Tensor& tensor) {
   constexpr uintptr_t alignment_byte = 64;
-  return reinterpret_cast<uintptr_t>(tensor.const_data_ptr()) %
-      alignment_byte ==
-      0;
+  auto data_ptr = reinterpret_cast<uintptr_t>(tensor.const_data_ptr());
+  return (data_ptr % alignment_byte) == 0;
 }
 
 at::Tensor make_contiguous_and_aligned(
@@ -300,7 +299,7 @@ at::Tensor make_contiguous_and_aligned(
   at::Tensor out = memory_format.has_value() ? tensor.contiguous(*memory_format)
                                              : tensor.contiguous();
 
-  if (out.storage_offset() > 0 && !is_64_bytes_aligned(out)) {
+  if (!is_64_bytes_aligned(out)) {
     TORCH_WARN(
         "Tensor is not 64-byte aligned. Cloning to ensure alignment for oneDNN "
         "operations, which incurs a device-to-device copy.");
