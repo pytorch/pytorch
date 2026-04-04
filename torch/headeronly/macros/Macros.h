@@ -258,7 +258,7 @@ using namespace c10::xpu;
 #include <hip/hip_runtime.h>
 #endif
 
-#if defined(__CUDACC__) || defined(__HIPCC__)
+#if defined(__HIPCC__) || defined(__HIPCC__)
 // Designates functions callable from the host (CPU) and the device (GPU)
 #define C10_HOST_DEVICE __host__ __device__
 #define C10_DEVICE __device__
@@ -357,6 +357,9 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 // device since approximately 2019, so forcing it to be device-only would break
 // existing code in the wild.
 #if defined(USE_ROCM)
+namespace at::cuda {
+TORCH_CUDA_CPP_API int warp_size();
+}
 #if defined(__HIPCC__)
 static __host__ inline int C10_WARP_SIZE_INTERNAL() {
   return at::cuda::warp_size();
