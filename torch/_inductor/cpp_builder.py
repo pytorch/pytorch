@@ -1219,6 +1219,8 @@ def _get_torch_related_args(
         libraries_dirs = [TORCH_LIB_PATH]
         if sys.platform != "darwin" and not config.is_fbcode():
             libraries.extend(["torch", "torch_cpu"])
+            if _IS_WINDOWS:
+                libraries.append("c10")
             if not aot_mode:
                 libraries.append("torch_python")
     else:
