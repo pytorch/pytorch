@@ -400,9 +400,11 @@ class Conv2d(_ConvNd):
 
 
     where :math:`\star` is the valid 2D `cross-correlation`_ operator,
-    :math:`N` is a batch size, :math:`C` denotes a number of channels,
-    :math:`H` is a height of input planes in pixels, and :math:`W` is
-    width in pixels.
+    :math:`N` is a batch size, :math:`C_{\text{in}}` and :math:`C_{\text{out}}` correspond to
+    :attr:`in_channels` and :attr:`out_channels` respectively,
+    :math:`H` and :math:`W` are the input height and width in pixels.
+    See the Shape section below for how :math:`H_{\text{out}}` and :math:`W_{\text{out}}`
+    are derived from :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, and :attr:`dilation`.
     """
         + r"""
 
