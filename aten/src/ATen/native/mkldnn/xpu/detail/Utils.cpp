@@ -298,7 +298,6 @@ at::Tensor make_contiguous_and_aligned(
     std::optional<at::MemoryFormat> memory_format) {
   at::Tensor out = memory_format.has_value() ? tensor.contiguous(*memory_format)
                                              : tensor.contiguous();
-
   if (!is_64_bytes_aligned(out)) {
     TORCH_WARN(
         "Tensor is not 64-byte aligned. Cloning to ensure alignment for oneDNN "
