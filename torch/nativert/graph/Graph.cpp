@@ -1188,8 +1188,7 @@ c10::Device convertDevice(std::string_view symbol) {
   TORCH_CHECK(indexValue.has_value(), "Invalid device index format");
   int64_t deviceIndex = indexValue.value();
   TORCH_CHECK(
-      deviceIndex >= std::numeric_limits<c10::DeviceIndex>::min() &&
-          deviceIndex <= std::numeric_limits<c10::DeviceIndex>::max(),
+      std::in_range<c10::DeviceIndex>(deviceIndex),
       "Device index out of range for int8_t");
   device.set_index(static_cast<c10::DeviceIndex>(deviceIndex));
   return device;
