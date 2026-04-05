@@ -2709,7 +2709,7 @@ def _should_use_xmask_unswitch(kernel: TritonKernel) -> bool:
     Config flag must be enabled and x-dimension numel must be dynamic.
     Per-op eligibility (xmask is sole mask) is checked at load/store sites.
     """
-    if config.triton.xmask_unswitch == 0:
+    if not config.triton.xmask_unswitch:
         return False
     xtree = kernel.range_trees[0]
     return not isinstance(xtree.numel, (sympy.Integer, int))
@@ -3842,6 +3842,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     unmasked_line += ".to(tl.float32)"
                 dtype = torch.float32
             if dtype == torch.bool and torch.version.hip is None:
+                # Workaround for https://github.com/triton-lang/triton/issues/2151
+                # tl.load returns int8 when loading from pointer to int1
+                # NOTE: Currently causes hangs on bool UTs for ROCm
                 line += ".to(tl.int1)"
                 if _register_xmask_load:
                     unmasked_line += ".to(tl.int1)"
@@ -6164,22 +6167,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def _codegen_body(self) -> None:
         """Splice indexing/loads/compute/stores into self.body.
 
-        - Mode 0: plain masked code (no unswitch)
-        - Mode 1: per-load/store if/else + shared compute
-        - Mode 2: one if/else wrapping all loads+compute+stores
+        When xmask_unswitch is enabled and there are unswitchable ops,
+        each load/store gets its own if/else with shared compute.
+        Otherwise, plain masked code is emitted.
         """
-        mode = config.triton.xmask_unswitch
-        if mode == 0 or not self._xmask_unswitch_map:
+        if not self._xmask_unswitch_map:
             self._codegen_body_plain()
-        elif mode == 1:
-            self._codegen_body_unswitch_ldst_only()
-        elif mode == 2:
-            self._codegen_body_unswitch_whole()
         else:
-            raise ValueError(f"unexpected xmask_unswitch={mode}, expected 0, 1, or 2")
+            self._codegen_body_unswitch_ldst_only()
 
     def _codegen_body_plain(self) -> None:
-        """Mode 0: plain masked code — no unswitch."""
+        """Plain masked code — no unswitch."""
         for buf in [self.indexing_code, self.loads, self.compute, self.stores]:
             self.body.splice(buf)
 
@@ -6201,7 +6199,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.body.writeline(line_str)
 
     def _codegen_body_unswitch_ldst_only(self) -> None:
-        """Mode 1: load/store-only unswitch — compute shared outside branches."""
+        """Load/store-only unswitch — compute shared outside branches."""
         unswitch_map = self._xmask_unswitch_map
 
         # Emit indexing code directly (shared)
@@ -6215,31 +6213,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         # Wrap each unswitchable store in its own if/else
         self._emit_unswitched_lines(self.stores, unswitch_map)
-
-    def _codegen_body_unswitch_whole(self) -> None:
-        """Mode 2: whole-body unswitch — all code in both branches."""
-        all_bufs = [self.indexing_code, self.loads, self.compute, self.stores]
-
-        # Render all staging buffers to lines
-        masked_lines = []
-        for buf in all_bufs:
-            masked_lines.extend(buf.getvalue().splitlines())
-
-        unswitch_map = self._xmask_unswitch_map
-
-        self.body.writeline("if xoffset + XBLOCK <= xnumel:")
-        with self.body.indent():
-            for line_str in masked_lines:
-                stripped = line_str.lstrip()
-                if stripped in unswitch_map:
-                    self.body.writeline(unswitch_map[stripped])
-                else:
-                    self.body.writeline(stripped)
-        self.body.writeline("else:")
-        with self.body.indent():
-            for line_str in masked_lines:
-                stripped = line_str.lstrip()
-                self.body.writeline(stripped)
 
     def filter_masks(self, mask_vars: OrderedSet[str]) -> None:
         for tree in self.range_trees:
