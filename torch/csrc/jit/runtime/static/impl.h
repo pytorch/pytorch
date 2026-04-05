@@ -79,11 +79,11 @@ class ValueGroup {
   void init(const Block& block, const AliasDb& db);
 
   bool isExternalAlias(const Value* value) const {
-    return external_aliases_.find(value) != external_aliases_.end();
+    return external_aliases_.contains(value);
   }
 
   bool isOutputAlias(const Value* value) const {
-    return output_aliases_.find(value) != output_aliases_.end();
+    return output_aliases_.contains(value);
   }
 
   bool isAlwaysAlive(const Value* value) const {
@@ -375,16 +375,15 @@ class BlockInfo {
   }
 
   bool node_is_optimizable_container_type(const Node* node) const {
-    return node_is_optimizable_container_type_.find(node) !=
-        node_is_optimizable_container_type_.end();
+    return node_is_optimizable_container_type_.contains(node);
   }
 
   bool value_is_managed_tensor(const Value* value) const {
-    return managed_tensor_values_.find(value) != managed_tensor_values_.end();
+    return managed_tensor_values_.contains(value);
   }
 
   bool value_is_leaked_container(const Value* value) const {
-    return leaked_values_.find(value) != leaked_values_.end();
+    return leaked_values_.contains(value);
   }
 
   const ValueGroup& value_group() const {

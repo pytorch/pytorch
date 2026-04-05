@@ -56,10 +56,10 @@ class TORCH_API HashProvider : public IRVisitor {
   }
 
   bool cachedHash(const ExprPtr& e) {
-    return exprToHash_.find(e) != exprToHash_.end();
+    return exprToHash_.contains(e);
   }
   bool cachedHash(const StmtPtr& s) {
-    return stmtToHash_.find(s) != stmtToHash_.end();
+    return stmtToHash_.contains(s);
   }
 
   void clearCache() {

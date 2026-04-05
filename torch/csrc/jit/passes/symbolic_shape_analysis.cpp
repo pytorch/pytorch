@@ -251,7 +251,7 @@ c10::SymbolicShape extractListShape(
   Node* list_construct = list->node();
   std::vector<std::optional<int64_t>> output_shape;
   for (Value* input : list_construct->inputs()) {
-    if (symbolic_shape_values.count(input)) {
+    if (symbolic_shape_values.contains(input)) {
       output_shape.emplace_back(symbolic_shape_values[input]);
     } else {
       output_shape.push_back(constant_as<int64_t>(input));
@@ -836,7 +836,7 @@ struct SymbolicShapeGraphAnalyzer {
         continue;
       }
 
-      if (!partial_evaluated_graphs.count(curr)) {
+      if (!partial_evaluated_graphs.contains(curr)) {
         GRAPH_DEBUG("No graph ", getHeader(curr));
         return std::nullopt;
       }
@@ -879,7 +879,7 @@ struct SymbolicShapeGraphAnalyzer {
       Value* output = stitched_shape_compute_graph->outputs().at(i);
       // this Value is already contained, so the symbolic shape for i must be
       // equal to the symbolic shape at the existing index
-      if (graph_output_to_symbolic_shape_dim.count(output)) {
+      if (graph_output_to_symbolic_shape_dim.contains(output)) {
         auto curr_sym_shape = output_index_to_symbolic_shape_[i];
         auto existing_sym_shape = graph_output_to_symbolic_shape_dim[output];
         discovered_sym_shape_equalities[curr_sym_shape] = existing_sym_shape;
@@ -924,7 +924,7 @@ struct SymbolicShapeGraphAnalyzer {
         auto new_sizes =
             c10::fmap(shape_vec, [&](const at::ShapeSymbol& shape) {
               auto value = shape.value();
-              if (sym_shape_equalities.count(value)) {
+              if (sym_shape_equalities.contains(value)) {
                 changed = true;
                 return sym_shape_equalities[value];
               }
@@ -1014,7 +1014,7 @@ struct SymbolicShapeGraphAnalyzer {
         for (size_t j = 0; j < rank; ++j) {
           auto shape = tt->symbolic_sizes()[j];
           if (shape.is_static() ||
-              symbolic_shape_value_to_graph_output_.count(shape.value())) {
+              symbolic_shape_value_to_graph_output_.contains(shape.value())) {
             continue;
           }
           auto input = enclosing_graph_value_to_shape_graph_input_[node_input];
@@ -1056,7 +1056,7 @@ struct SymbolicShapeGraphAnalyzer {
           continue;
         }
         int64_t symbolic_shape = symbolic_sizes[i].value();
-        if (symbolic_shape_value_to_graph_output_.count(symbolic_shape)) {
+        if (symbolic_shape_value_to_graph_output_.contains(symbolic_shape)) {
           continue;
         }
         registerStitchedComputeOutput(

@@ -20,7 +20,7 @@ namespace torch::jit::tensorexpr {
 class BlockAnalysis : public IRVisitor {
  public:
   bool is_buf_store_target(const BufPtr& buf) const {
-    return store_targets_.count(buf) > 0;
+    return store_targets_.contains(buf);
   }
 
   const std::unordered_set<BufPtr>& loads() const {

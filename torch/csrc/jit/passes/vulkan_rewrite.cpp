@@ -514,7 +514,7 @@ script::Module vulkanOptimizeForMobile(
   removeDropout(cloned_module);
   vulkanRemoveMutation(cloned_module);
 
-  if (!optimization_blocklist.count(
+  if (!optimization_blocklist.contains(
           MobileOptimizerType::VULKAN_AUTOMATIC_GPU_TRANSFER)) {
     transferInputOutputBackends(cloned_module);
     cloned_module.register_attribute(

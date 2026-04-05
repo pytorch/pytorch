@@ -711,7 +711,7 @@ RecordQueue::RecordQueue(
 }
 
 bool RecordQueue::tracePython() const {
-  return config_.with_stack && activities_.count(ActivityType::CPU);
+  return config_.with_stack && activities_.contains(ActivityType::CPU);
 }
 
 bool RecordQueue::getPythonGcEvents() const {

@@ -83,7 +83,7 @@ struct ConstantTableValue : public SugaredValue {
     // see [Constant Object Weak CompilationUnit Reference]
     if (ivalue.isObject() && !ivalue.toObject()->is_weak_compilation_ref()) {
       auto obj = ivalue.toObject();
-      if (!non_holding_object_cache.count(obj)) {
+      if (!non_holding_object_cache.contains(obj)) {
         non_holding_object_cache[obj] = obj->copy_to_weak_compilation_ref();
       }
       value = m.graph()->insertConstant(non_holding_object_cache[obj], loc);
@@ -154,7 +154,7 @@ Function* SourceImporterImpl::findFunction(const QualifiedName& name) {
 
 void SourceImporterImpl::parseSourceIfNeeded(const std::string& qualifier) {
   // qualifier may be blank, for instance checking if __torch__ is a class.
-  if (qualifier.empty() || loaded_sources_.count(qualifier)) {
+  if (qualifier.empty() || loaded_sources_.contains(qualifier)) {
     return;
   }
   loaded_sources_.insert(qualifier);
@@ -370,7 +370,7 @@ std::optional<Assign> SourceImporterImpl::
   static std::regex mangle_re("\\.___torch_mangle_\\d+");
   auto demangled_classname =
       std::regex_replace(qualified_classname.qualifiedName(), mangle_re, "");
-  if (replacements.count(demangled_classname)) {
+  if (replacements.contains(demangled_classname)) {
     auto lhs = Var(assign.lhs());
     if (!assign.type().present() || assign.type().get().kind() != TK_VAR) {
       return std::nullopt;
@@ -533,10 +533,10 @@ void SourceImporterImpl::importClass(
       case TK_DEF: {
         Def def = Def(statement);
         const auto def_name = def.name().name();
-        if (pre_hook_names.find(def_name) != pre_hook_names.end()) {
+        if (pre_hook_names.contains(def_name)) {
           pre_hook_def_map.emplace(def_name, def);
           pre_hook_resolver_map.emplace(def_name, shared_from_this());
-        } else if (hook_names.find(def_name) != hook_names.end()) {
+        } else if (hook_names.contains(def_name)) {
           hook_def_map.emplace(def_name, def);
           hook_resolver_map.emplace(def_name, shared_from_this());
         } else {
@@ -564,8 +564,8 @@ void SourceImporterImpl::importClass(
         const auto type = assign.type().present()
             ? type_parser.parseTypeFromExpr(assign.type().get())
             : type_parser.parseTypeFromExpr(assign.rhs().get());
-        const bool is_parameter = parameter_names.count(name);
-        const bool is_buffer = buffer_names.count(name);
+        const bool is_parameter = parameter_names.contains(name);
+        const bool is_buffer = buffer_names.contains(name);
         class_type->addAttribute(name, type, is_parameter, is_buffer);
       } break;
       case TK_SUBSCRIPT: {
@@ -574,8 +574,8 @@ void SourceImporterImpl::importClass(
         const auto type = assign.type().present()
             ? type_parser.parseTypeFromExpr(assign.type().get())
             : type_parser.parseTypeFromExpr(assign.rhs().get());
-        const bool is_parameter = parameter_names.count(name);
-        const bool is_buffer = buffer_names.count(name);
+        const bool is_parameter = parameter_names.contains(name);
+        const bool is_buffer = buffer_names.contains(name);
         class_type->addAttribute(name, type, is_parameter, is_buffer);
       }
     }

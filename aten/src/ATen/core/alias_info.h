@@ -65,11 +65,11 @@ class AliasInfo {
   }
 
   bool isWildcardBefore() const {
-    return beforeSets_.count(wildcardSet()) != 0;
+    return beforeSets_.contains(wildcardSet());
   }
 
   bool isWildcardAfter() const {
-    return afterSets_.count(wildcardSet()) != 0;
+    return afterSets_.contains(wildcardSet());
   }
 
   // the alias info for the contained types of the type

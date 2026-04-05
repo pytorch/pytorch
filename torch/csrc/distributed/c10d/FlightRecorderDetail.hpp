@@ -92,7 +92,7 @@ typename FlightRecorder<EventType>::TraceIdentifier FlightRecorder<EventType>::
   auto traceback =
       torch::CapturedTraceback::gather(true, true, capture_cpp_stack_);
   std::lock_guard<std::mutex> guard(mutex_);
-  if (all_pg_status_.find(pg_id) == all_pg_status_.end()) {
+  if (!all_pg_status_.contains(pg_id)) {
     // Current pg_status is not in FR.
     all_pg_status_[pg_id] = std::move(pg_status);
   }

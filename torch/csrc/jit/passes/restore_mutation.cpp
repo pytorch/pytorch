@@ -8,8 +8,7 @@ FunctionalToInplaceRewriter::FunctionalToInplaceRewriter(
     : aliasDb_(nullptr), graph_(std::move(graph)) {}
 
 bool FunctionalToInplaceRewriter::CanBeInplace(Node* node) {
-  if (activation_type_promotion_mapping.find(node->kind()) ==
-      activation_type_promotion_mapping.end()) {
+  if (!activation_type_promotion_mapping.contains(node->kind())) {
     return false;
   }
 

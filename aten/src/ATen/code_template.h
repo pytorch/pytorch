@@ -42,7 +42,7 @@ struct TemplateEnv {
   // Retrieve the string representation of the value stored at 'k' from the map.
   // Raises an exception if the key is not found.
   const std::string& s(const std::string& k) const {
-    if (strings_.count(k) == 0) {
+    if (!strings_.contains(k)) {
       if (parent) {
         return parent->s(k);
       }
@@ -60,7 +60,7 @@ struct TemplateEnv {
   // Retrieve a list of strings stored at 'k' from the map.
   // Raises an exception if the key is not found.
   const string_list& v(const std::string& k) const {
-    if (lists_.count(k) == 0) {
+    if (!lists_.contains(k)) {
       if (parent) {
         return parent->v(k);
       }
@@ -71,9 +71,9 @@ struct TemplateEnv {
 
   // Test if a string 'k' is a string (as opposed to a list.)
   bool keyIsString(const std::string& k) const {
-    if (strings_.count(k) > 0)
+    if (strings_.contains(k))
       return true;
-    if (lists_.count(k) > 0)
+    if (lists_.contains(k))
       return false;
     if (parent)
       return parent->keyIsString(k);

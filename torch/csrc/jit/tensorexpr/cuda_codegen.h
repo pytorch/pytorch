@@ -27,7 +27,7 @@ class CudaAnalysis : public IRVisitor {
         alloc<IntImm>(1), alloc<IntImm>(1), alloc<IntImm>(1)};
   }
   bool is_buf_store_target(const BufPtr& buf) const {
-    return store_targets_.count(buf) > 0;
+    return store_targets_.contains(buf);
   }
 
   const std::unordered_set<VarPtr>& thread_local_bufs() const {

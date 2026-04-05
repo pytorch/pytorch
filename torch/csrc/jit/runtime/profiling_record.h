@@ -106,7 +106,7 @@ struct SetPartitioningHelper {
       c10::ShapeSymbol symbol) {
     auto& dims2symbols = getSetForSymbol(symbol);
 
-    if (dims2symbols.count(new_size) == 0) {
+    if (!dims2symbols.contains(new_size)) {
       auto new_sym = c10::ShapeSymbol::newSymbol();
       dims2symbols[new_size] = new_sym;
       return new_sym;
@@ -140,7 +140,7 @@ struct ShapeSymbolTable {
     if (s.is_static()) {
       return true;
     }
-    return data_.count(s) != 0;
+    return data_.contains(s);
   }
 
   // N.B. we treat static symbols as always assigned

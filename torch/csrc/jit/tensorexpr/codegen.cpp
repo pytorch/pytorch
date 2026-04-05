@@ -187,7 +187,7 @@ static std::vector<std::pair<BufPtr, BufPtr>> AllocBufsWithMemReuse(
     }
 
     bool allocated = false;
-    if (bufs_external_allocs.find(buf) == bufs_external_allocs.end()) {
+    if (!bufs_external_allocs.contains(buf)) {
       // Check whether there are free memories that this buf can reuse.
       for (auto it = mem_up_for_grabs.begin(); it != mem_up_for_grabs.end();
            it++) {
@@ -227,7 +227,7 @@ static StmtPtr insertAllocFree(
   for (auto rit = buf_allocs.rbegin(); rit != buf_allocs.rend(); ++rit) {
     if (rit->first == rit->second) {
       BufPtr buf = rit->first;
-      if (bufs_external_allocs.find(buf) == bufs_external_allocs.end()) {
+      if (!bufs_external_allocs.contains(buf)) {
         b->prepend_stmt(alloc<Allocate>(buf));
         b->append_stmt(alloc<Free>(buf));
       } else {
@@ -274,8 +274,8 @@ ExtCallMemoryReuse::ExtCallMemoryReuse(
 }
 
 StmtPtr ExtCallMemoryReuse::mutate(const ExternalCallPtr& v) {
-  if (extCallFuncNameMap_.count(v->func_name()) &&
-      bufferArgs_.count(v->buf()) == 0) {
+  if (extCallFuncNameMap_.contains(v->func_name()) &&
+      !bufferArgs_.contains(v->buf())) {
     std::vector<BufPtr> buf_out_args = {v->buf()};
     return alloc<ExternalCallWithAlloc>(
         extCallFuncNameMap_.at(v->func_name()),
@@ -306,7 +306,7 @@ void CodeGen::allocIntermediateBufs() {
   std::unordered_set<BufPtr> interm_bufs;
   std::unordered_map<BufPtr, std::tuple<int32_t, int32_t>> interm_buf_ranges;
   for (const auto& buf : bufs) {
-    if (!bufs_allocated.count(buf) && !interm_bufs.count(buf)) {
+    if (!bufs_allocated.contains(buf) && !interm_bufs.contains(buf)) {
       interm_bufs.insert(buf);
 
       // Identify the access stmts to each unallocated intermediate buffer.

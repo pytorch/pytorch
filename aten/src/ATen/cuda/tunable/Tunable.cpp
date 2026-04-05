@@ -109,7 +109,7 @@ void TuningResultsManager::Add(const std::string& op_signature, const std::strin
   {
     std::scoped_lock l{lock_};
     auto& km = results_[op_signature];  // creates if missing
-    is_new = (km.find(params_signature) == km.end());
+    is_new = (!km.contains(params_signature));
     AddImpl(op_signature, params_signature, std::move(best), km);
     if (is_new) {
       inserted = km.at(params_signature);  // snapshot for I/O after unlocking
@@ -374,12 +374,12 @@ static bool CheckMandatoryKeys(
     const std::unordered_map<std::string, std::string>& to_check) {
   bool passed = true;
   for (const auto& k : TuningResultsValidator::mandatory_keys) {
-    if (gv_funcs.find(k) == gv_funcs.end()) {
+    if (!gv_funcs.contains(k)) {
       passed = false;
       TUNABLE_LOG1("key=\"", k, "\" is not registered for Get and Validate. ");
     }
 
-    if (to_check.find(k) == to_check.end()) {
+    if (!to_check.contains(k)) {
       passed = false;
       TUNABLE_LOG1("key=\"", k, "\" is not provided for validation. ");
     }
@@ -406,7 +406,7 @@ static bool CheckKeysMatching(
   if (intersection.size() != required_keys.size()) {
     matched = false;
     for (const auto& k : required_keys) {
-      if (intersection.find(k) == intersection.end()) {
+      if (!intersection.contains(k)) {
         TORCH_WARN("Unmatched validator: \"", k, "\" is required, but the tuning results does not provide it. ");
       }
     }
@@ -414,7 +414,7 @@ static bool CheckKeysMatching(
   if (intersection.size() != provided_keys.size()) {
     matched = false;
     for (const auto& k : provided_keys) {
-      if (intersection.find(k) == intersection.end()) {
+      if (!intersection.contains(k)) {
         TORCH_WARN("Unmatched validator: \"", k, "\" is provided, but pytorch is unable to consume it. ");
       }
     }
@@ -451,7 +451,7 @@ TuningStatus TuningResultsValidator::ValidateAll(
 }
 
 void TuningResultsValidator::RegisterValidator(const std::string& key, const GetFunc& gf, const ValidateFunc& vf) {
-  if (validators_.find(key) != validators_.end()) {
+  if (validators_.contains(key)) {
     TORCH_WARN("Attempting to re-register validator with key ", key);
   }
   else {

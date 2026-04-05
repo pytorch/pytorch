@@ -192,7 +192,7 @@ struct TORCH_API ForwardGrad : std::enable_shared_from_this<ForwardGrad> {
 
   bool contains(uint64_t level) {
     std::lock_guard<std::mutex> lock(mutex_);
-    return content_.count(level) > 0;
+    return content_.contains(level);
   }
 
   bool empty() const {
