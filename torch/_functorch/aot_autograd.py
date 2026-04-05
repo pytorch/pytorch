@@ -1098,6 +1098,7 @@ def aot_module_simplified(
         [torch.fx.GraphModule, Sequence[InputType]], torch.fx.GraphModule
     ]
     | None = None,
+    compile_region_name: str | None = None,
 ) -> Callable[..., Any]:
     """
     This is the simplified or low overhead version of aot_module. For frontends
@@ -1161,6 +1162,7 @@ def aot_module_simplified(
                     compiler_config_extra,
                     local,
                     remote,
+                    compile_region_name=compile_region_name,
                 )
 
         if compiled_fn is None:

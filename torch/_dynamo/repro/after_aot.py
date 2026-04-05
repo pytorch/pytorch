@@ -289,11 +289,16 @@ def wrap_compiler_debug(
     def debug_wrapper(
         gm: torch.fx.GraphModule,
         example_inputs: Sequence[InputType],
+        compile_region_name: str | None = None,
         **kwargs: Unpack[_CompileFxKwargs],
     ) -> OutputCode:
         from torch._subclasses import FakeTensorMode
 
-        compiler_fn = functools.partial(unconfigured_compiler_fn, **kwargs)
+        compiler_fn = functools.partial(
+            unconfigured_compiler_fn,
+            compile_region_name=compile_region_name,
+            **kwargs,
+        )
 
         from torch._functorch.aot_autograd import get_aot_graph_name
 
