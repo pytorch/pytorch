@@ -122,7 +122,6 @@ class TestReductions(TestCase):
     # TODO(@heitorschueroff) combine cases with and without keepdim once
     # there's support for a @parametrize decorator.
 
-    @skipIfMPS
     @ops(reduction_ops, dtypes=OpDTypes.none)
     def test_dim_default(self, device, op: ReductionOpInfo):
         """Tests that the default dim reduces all dimensions."""
