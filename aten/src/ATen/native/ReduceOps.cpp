@@ -1482,7 +1482,9 @@ Tensor& nanmean_out(
     bool keepdim,
     std::optional<ScalarType> opt_dtype,
     Tensor& result) {
-  const auto factor = at::native::isnan(self).logical_not_().sum(dim, keepdim);
+  const auto factor = (self.is_floating_point() || self.is_complex())
+      ? at::native::isnan(self).logical_not_().sum(dim, keepdim)
+      : at::ones_like(self, result.options()).sum(dim, keepdim);
   at::nansum_out(result, self, dim, keepdim, opt_dtype).div_(factor);
   return result;
 }
@@ -1496,8 +1498,9 @@ Tensor nanmean(
   if (!at::isFloatingType(dtype) && !at::isComplexType(dtype)) {
     dtype = at::typeMetaToScalarType(c10::get_default_dtype());
   }
-  const auto factor =
-      at::native::isnan(self.detach()).logical_not_().sum(dim, keepdim);
+  const auto factor = (self.is_floating_point() || self.is_complex())
+      ? at::native::isnan(self.detach()).logical_not_().sum(dim, keepdim)
+      : at::ones_like(self.detach(), dtype).sum(dim, keepdim);
   return at::nansum(self, dim, keepdim, dtype).div(factor);
 }
 
