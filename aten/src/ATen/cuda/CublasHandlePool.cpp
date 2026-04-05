@@ -247,10 +247,10 @@ size_t parseCUDABlasLtWorkspaceSize() {
 }
 
 size_t getCUDABlasLtWorkspaceSize() {
-  size_t pool_size = parseCUDABlasLtWorkspaceSize();
+  static size_t pool_size = parseCUDABlasLtWorkspaceSize();
 #ifndef USE_ROCM
   if (unified_cublas_and_lt_workspaces()) {
-    auto cublasWorkspaceSize = parseChosenWorkspaceSize();
+    static size_t cublasWorkspaceSize = parseChosenWorkspaceSize();
     if (cublasWorkspaceSize < pool_size) {
       TORCH_WARN_ONCE("Requested unified CUBLASLT workspace size of ", pool_size,
                       " bytes exceeds CUBLAS workspace size of ", cublasWorkspaceSize,
