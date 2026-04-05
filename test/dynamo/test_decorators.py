@@ -2437,6 +2437,21 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         with self.assertRaises(RuntimeError):
             exported_model = torch.export.export(model, (inp,))
 
+    def test_allow_in_graph_inside_compile_gives_clear_error(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/178511
+        # Calling allow_in_graph inside a compiled region is not supported.
+        # Verify the error message guides users to annotate before compilation.
+        def forward(x):
+            wrapped_fn = torch.compiler.allow_in_graph(my_custom_function)
+            return wrapped_fn(x)
+
+        compiled = torch.compile(forward, fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "allow_in_graph",
+        ):
+            compiled(torch.randn(4))
+
 
 instantiate_parametrized_tests(DecoratorTests)
 
