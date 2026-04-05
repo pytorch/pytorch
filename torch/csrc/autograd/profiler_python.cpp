@@ -636,8 +636,8 @@ class StopTheWorldGuard {
 // == Thread local cache ======================================================
 // ============================================================================
 struct ThreadLocalResults {
-  ThreadLocalResults(PyThreadState* thread_state, PythonTracer* active_tracer)
-      : thread_state_{thread_state}, active_tracer_{active_tracer} {}
+  ThreadLocalResults(PythonTracer* active_tracer)
+      : active_tracer_{active_tracer} {}
 
   ThreadLocalResults() = delete;
   ThreadLocalResults(const ThreadLocalResults&) = delete;
@@ -656,7 +656,6 @@ struct ThreadLocalResults {
 
   static constexpr size_t BLOCK_SIZE = 1024;
 
-  PyThreadState* thread_state_;
   ValueCache value_cache_;
   PythonTracer* active_tracer_;
   CallTypeHelper<TraceKeyCacheState>::tuple_type trace_keys_;
@@ -1052,7 +1051,7 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
   {
     StopTheWorldGuard stw(interpreter_);
     for (const auto thread_state : interpreterThreads()) {
-      thread_local_results_.emplace_back(thread_state, this);
+      thread_local_results_.emplace_back(this);
       auto& tls = thread_local_results_.back();
       thread_local_results_map_[thread_state] = &tls;
 
@@ -1113,6 +1112,7 @@ void unregister_gc_callback() {
     PySequence_DelItem(callbacks, idx);
   } else {
     // Not found, maybe already removed
+    PyErr_Clear();
   }
   Py_DECREF(callbacks);
   Py_DECREF(gc_module);
@@ -1220,13 +1220,13 @@ void PythonTracer::recordPyCall(
       auto locals = THPObjectPtr(PyFrame_GetLocals(frame));
 
 #if PY_MAJOR_VERSION < 3 || (PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION < 13)
-      auto self = THPObjectPtr(PyDict_GetItemString(locals, "self"));
+      auto self =
+          THPObjectPtr(Py_XNewRef(PyDict_GetItemString(locals, "self")));
 #else
       // In Python-3.13+ `PyFrame_GetLocals()` returns instance of
       // PyFrameLocalsProxy_Type See PEP 667 for more info
       auto self = THPObjectPtr(PyMapping_GetItemString(locals, "self"));
 #endif
-      Py_INCREF(self.get());
       auto back = THPFrameObjectPtr(PyFrame_GetBack(frame));
       TORCH_INTERNAL_ASSERT(back != nullptr);
       return tls.intern<CallType::PyModuleCall, E>(
@@ -1234,11 +1234,11 @@ void PythonTracer::recordPyCall(
     } else if (code.get() == optimizer_hook_) {
       auto locals = THPObjectPtr(PyFrame_GetLocals(frame));
 #if PY_MAJOR_VERSION < 3 || (PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION < 13)
-      auto self = THPObjectPtr(PyDict_GetItemString(locals, "self"));
+      auto self =
+          THPObjectPtr(Py_XNewRef(PyDict_GetItemString(locals, "self")));
 #else
       auto self = THPObjectPtr(PyMapping_GetItemString(locals, "self"));
 #endif
-      Py_INCREF(self.get());
       auto back = THPFrameObjectPtr(PyFrame_GetBack(frame));
       TORCH_INTERNAL_ASSERT(back != nullptr);
       return tls.intern<CallType::PyOptimizerCall, E>(
@@ -1507,17 +1507,15 @@ static void toggle_memory_tracing(bool enable) {
   }
   // Call the function with arguments
   PyObject* args = PyTuple_New(6);
-  PyTuple_SetItem(args, 0, enable ? PyUnicode_FromString("all") : Py_None);
+  PyTuple_SetItem(
+      args, 0, enable ? PyUnicode_FromString("all") : Py_NewRef(Py_None));
   PyTuple_SetItem(args, 1, PyUnicode_FromString("all")); // context
   PyTuple_SetItem(args, 2, PyUnicode_FromString("all")); // stacks
   PyTuple_SetItem(args, 3, THPUtils_packInt64(100000)); // max_entries
-  PyTuple_SetItem(args, 4, Py_None); // device (None)
+  PyTuple_SetItem(args, 4, Py_NewRef(Py_None)); // device (None)
   PyTuple_SetItem(args, 5, PyBool_FromLong(0)); // clear_history (False)
-  PyObject* result = PyObject_Call(snapshot_func.get(), args, nullptr);
+  THPObjectPtr result(PyObject_Call(snapshot_func.get(), args, nullptr));
   Py_DECREF(args);
-  if (result == nullptr) {
-    return;
-  }
 }
 
 void PythonMemoryTracer::start() {
@@ -1536,14 +1534,9 @@ void PythonMemoryTracer::export_memory_history(const std::string& path) {
   if (!snapshot_func) {
     return;
   }
-  PyObject* py_filename = PyUnicode_FromString(path.c_str());
-  // Call the function with arguments (e.g., a file path)
-  PyObject* args = PyTuple_Pack(1, py_filename);
-  PyObject* result = PyObject_Call(snapshot_func.get(), args, nullptr);
-  Py_DECREF(args);
-  if (result == nullptr) {
-    return;
-  }
+  THPObjectPtr py_filename(PyUnicode_FromString(path.c_str()));
+  THPObjectPtr result(
+      PyObject_CallOneArg(snapshot_func.get(), py_filename.get()));
 }
 
 void PythonMemoryTracer::stop() {
