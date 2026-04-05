@@ -7857,7 +7857,7 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
       auto contrib = at::stack({std::move(d_grid_x), std::move(d_grid_y)}, -1);
       d_grid = d_grid.defined() ? d_grid + contrib : std::move(contrib);
     }
-  } else { // bicubic
+  } else if (interpolation == GridSamplerInterpolation::Bicubic) {
     // Native bicubic backward uses raw unnormalized coordinates with a constant
     // gx_mult/gy_mult (the unnormalize scale only), applying padding
     // exclusively when sampling each tap value.  Using gs_compute_coords here
@@ -8002,6 +8002,11 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
       d_grid =
           d_grid.defined() ? d_grid + ggrid_d_grid : std::move(ggrid_d_grid);
     }
+  } else {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "grid_sampler_2d_double_backward does not support interpolation mode ",
+        interpolation_mode);
   }
   return {std::move(d_grad_output), std::move(d_input), std::move(d_grid)};
 }
