@@ -7538,12 +7538,11 @@ static Tensor gs_bound_coord(
   // Native formula: in = idx - min_v (= idx + 0.5 for no-align_corners).
   // For integer idx this is always a half-integer, so fold result + min_v is
   // an exact integer — no rounding artifacts.
-  auto in = x - min_v;
-  auto in_abs = in.abs();
-  auto even = at::fmod(at::floor(in_abs / span), 2.0) < 0.5;
-  auto rem = at::fmod(in_abs, span);
+  auto in = (x - min_v).abs_();
+  auto even = at::fmod(at::floor(in / span), 2.0) < 0.5;
+  auto rem = at::fmod(in, span);
   auto r = at::where(even, rem, span - rem);
-  return (r + min_v).round().clamp(0, size - 1).to(at::kLong);
+  return r.add_(min_v).round_().clamp_(0, size - 1).to(at::kLong);
 }
 
 // Compute unnormalized source coordinate and per-position chain-rule multiplier
@@ -7563,7 +7562,7 @@ static std::pair<Tensor, Tensor> gs_compute_coords(
     // clip_coordinates_set_grad: grad = 1 iff strictly inside (0, size-1)
     padding_grad =
         ((ix > 0) & (ix < static_cast<double>(size - 1))).to(ix.dtype());
-    ix = ix.clamp(0, size - 1);
+    ix.clamp_(0, size - 1);
   } else {
     TORCH_CHECK_NOT_IMPLEMENTED(
         padding_mode == GridSamplerPadding::Reflection,
