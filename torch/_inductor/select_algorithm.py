@@ -1712,6 +1712,13 @@ class TritonTemplateKernel(TritonKernel):
         Scheduler falls back to aten if layout constraint violated. If no aten,
         freeze right away.
         """
+        # For ReinterpretView, the view's strides are already determined by its layout.
+        # We skip constraint tracking because node.get_name() returns the underlying
+        # buffer name, not the view's identity, so constraints would be incorrectly
+        # associated with the underlying buffer rather than the view.
+        if isinstance(node, ir.ReinterpretView):
+            return list(node.get_stride())
+
         # realizing for safety
         ir.ExternKernel.realize_input(node)
         layout = node.data.layout

@@ -3099,6 +3099,58 @@ class TestMaxAutotune(TestCase):
 
         torch.testing.assert_close(result, torch.mm(a, b), rtol=1e-2, atol=1e-2)
 
+    @fresh_cache()
+    @config.patch(
+        {
+            "max_autotune": True,
+            "test_configs.max_mm_configs": 1,
+        }
+    )
+    def test_deferred_layout_constraint_reinterpret_3d(self):
+        batch, m, k, n = 32, 40, 1053, 40
+        batch_stride = 42176
+
+        a = torch.randn(batch, m, k, dtype=torch.bfloat16, device=GPU_TYPE)
+        b = torch.empty_strided(
+            size=(batch, k * n),
+            stride=(batch_stride, 1),
+            dtype=torch.bfloat16,
+            device=GPU_TYPE,
+        )
+        b.copy_(torch.randn_like(b))
+        c = torch.randn(batch, n, m, dtype=torch.bfloat16, device=GPU_TYPE)
+        idx0 = torch.tensor([0], device=GPU_TYPE)
+        idx1 = torch.tensor([0], device=GPU_TYPE)
+        value = torch.zeros(1, dtype=torch.bfloat16, device=GPU_TYPE)
+
+        def fn(a, b, c, idx0, idx1, value):
+            # Mirror the 2D regression first: a simple pointwise op gives us a
+            # rank-2 FlexibleLayout. Then force that 2D value to realize before
+            # reinterpreting it as the rank-3 view from the original repro.
+            b_flex_2d = b + 0
+            b_flex_2d = aten.index_put.default(b_flex_2d, (idx0, idx1), value, False)
+            b_view_3d = b_flex_2d.view(batch, k, n)
+            return (
+                torch.bmm(a, b_view_3d).to(torch.float32),
+                b_flex_2d + 1.0,
+                torch.bmm(b_view_3d, c).to(torch.float32),
+            )
+
+        with (
+            mock.patch(
+                "torch._inductor.autotune_process.run_autotune_in_subprocess",
+                mock_benchmark_choice_wrapper(aten_time=1.0, triton_time=0.1),
+            ),
+            mock.patch.object(
+                AlgorithmSelectorCache,
+                "benchmark_choice",
+                mock_benchmark_choice_wrapper(aten_time=1.0, triton_time=0.1),
+            ),
+        ):
+            compiled_fn = torch.compile(fn)
+            _, code = run_and_get_code(compiled_fn, a, b, c, idx0, idx1, value)
+            FileCheck().check("triton_tem_fused").run(code[0])
+
 
 @instantiate_parametrized_tests
 class TestTemplateConfigPruning(TestCase):
