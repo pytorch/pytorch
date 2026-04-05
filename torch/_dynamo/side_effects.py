@@ -88,14 +88,6 @@ def _manual_list_update(list_from: list[Any], list_to: list[Any]) -> None:
     list.extend(list_to, list_from)
 
 
-def _manual_list_replay(
-    list_to: list[Any], appended_items: list[Any], clear_first: bool
-) -> None:
-    if clear_first:
-        list.clear(list_to)
-    list.extend(list_to, appended_items)
-
-
 class SideEffects:
     """
     Maintain records of mutations and provide methods to apply them during code generation.
@@ -1026,31 +1018,6 @@ class SideEffects:
                 # Log individual side effects for granular debugging
                 side_effects_log.debug(msg)
 
-        def _codegen_direct_list_replay(
-            list_vt: "ListVariable", source: Source | None
-        ) -> bool:
-            if source is None or not list_vt.has_direct_list_replay():
-                return False
-            appended_items = list_vt.direct_list_replay_appends()
-
-            cg.add_push_null(
-                lambda: cg.load_import_from(__name__, "_manual_list_replay")
-            )
-            cg(source)
-            cg.foreach(appended_items)
-            cg.append_output(create_instruction("BUILD_LIST", arg=len(appended_items)))
-            cg.append_output(
-                cg.create_load_const(list_vt.direct_list_replay_should_clear())
-            )
-            suffixes.append(
-                [
-                    *create_call_function(3, False),
-                    create_instruction("POP_TOP"),
-                ]
-            )
-            _maybe_log_side_effect(list_vt)
-            return True
-
         suffixes = []
         for var in self._get_modified_vars():
             # When replay_side_effects=False, only update variables with TempLocalSource
@@ -1059,8 +1026,6 @@ class SideEffects:
             ):
                 continue
             if isinstance(var, variables.ListVariable):
-                if _codegen_direct_list_replay(var, var.source):
-                    continue
                 # old[:] = new
                 cg(var, allow_cache=False)  # Don't codegen via source
                 cg(var.source)  # type: ignore[attr-defined]
@@ -1246,42 +1211,41 @@ class SideEffects:
                     var,
                     variables.UserDefinedListVariable,
                 ) and self.is_modified(var._list_vt):
-                    if not _codegen_direct_list_replay(var._list_vt, var.source):
-                        # Update the list to the updated items. Be careful in
-                        # calling the list methods and not the overridden methods.
-                        varname_map = {}
-                        for name in _manual_list_update.__code__.co_varnames:
-                            varname_map[name] = cg.tx.output.new_var()
+                    # Update the list to the updated items. Be careful in
+                    # calling the list methods and not the overridden methods.
+                    varname_map = {}
+                    for name in _manual_list_update.__code__.co_varnames:
+                        varname_map[name] = cg.tx.output.new_var()
 
-                        cg(var.source)  # type: ignore[attr-defined]
-                        cg.extend_output(
-                            [
-                                create_instruction(
-                                    "STORE_FAST", argval=varname_map["list_to"]
-                                )
-                            ]
-                        )
+                    cg(var.source)  # type: ignore[attr-defined]
+                    cg.extend_output(
+                        [
+                            create_instruction(
+                                "STORE_FAST", argval=varname_map["list_to"]
+                            )
+                        ]
+                    )
 
-                        cg(var._list_vt, allow_cache=False)  # Don't codegen via source
-                        cg.extend_output(
-                            [
-                                create_instruction(
-                                    "STORE_FAST", argval=varname_map["list_from"]
-                                )
-                            ]
-                        )
+                    cg(var._list_vt, allow_cache=False)  # Don't codegen via source
+                    cg.extend_output(
+                        [
+                            create_instruction(
+                                "STORE_FAST", argval=varname_map["list_from"]
+                            )
+                        ]
+                    )
 
-                        list_update_insts = bytecode_from_template(
-                            _manual_list_update, varname_map=varname_map
-                        )
+                    list_update_insts = bytecode_from_template(
+                        _manual_list_update, varname_map=varname_map
+                    )
 
-                        suffixes.append(
-                            [
-                                *list_update_insts,
-                                create_instruction("POP_TOP"),
-                            ]
-                        )
-                        _maybe_log_side_effect(var._list_vt)
+                    suffixes.append(
+                        [
+                            *list_update_insts,
+                            create_instruction("POP_TOP"),
+                        ]
+                    )
+                    _maybe_log_side_effect(var._list_vt)
 
                 # Applying mutations involves two steps: 1) Push all
                 # reconstructed objects onto the stack.  2) Call STORE_ATTR to
