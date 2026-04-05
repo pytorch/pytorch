@@ -18,6 +18,8 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._functorch._aot_autograd
+import torch._functorch._aot_autograd.autograd_cache as autograd_cache
+import torch._functorch.aot_autograd as aot_autograd
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
@@ -3684,6 +3686,201 @@ class HOPCacheTests(torch._dynamo.test_case.TestCase):
 
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+
+class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
+    """
+    Verify that the exposed autograd_cache_key API function produces the same
+    cache key that the internal compilation pipeline would.
+    """
+
+    def setUp(self):
+        super().setUp()
+        counters.clear()
+        torch._dynamo.reset()
+
+    def tearDown(self):
+        super().tearDown()
+        counters.clear()
+        torch._dynamo.reset()
+
+    def _compile_and_capture(self, fn, *args):
+        """Run torch.compile with the inductor backend and capture the
+        ground-truth cache key, graph module, and example inputs produced
+        during compilation."""
+        torch._dynamo.reset()
+        real_compile_fx = torch._inductor.compile_fx.compile_fx
+        captured_key = None
+        captured_gm = None
+        captured_example_inputs = None
+
+        def capturing_compile_fx(model_, example_inputs_, **kwargs):
+            nonlocal captured_gm, captured_example_inputs
+            captured_gm = model_
+            captured_example_inputs = list(example_inputs_)
+            return real_compile_fx(model_, example_inputs_, **kwargs)
+
+        real_cache_key = autograd_cache.autograd_cache_key
+
+        def capturing_cache_key(mod, ei, config, compiler_config_extra=None):
+            nonlocal captured_key
+            result = real_cache_key(mod, ei, config, compiler_config_extra)
+            captured_key = result[0]
+            return result
+
+        with fresh_cache():
+            with (
+                patch(
+                    "torch._inductor.compile_fx.compile_fx",
+                    side_effect=capturing_compile_fx,
+                ),
+                patch(
+                    "torch._functorch._aot_autograd.autograd_cache.autograd_cache_key",
+                    side_effect=capturing_cache_key,
+                ),
+            ):
+                torch.compile(fn, fullgraph=True)(*args)
+
+        self.assertIsNotNone(captured_key)
+        return captured_key, captured_gm, captured_example_inputs
+
+    def _aot_autograd_cache_key(self, fx_graph, example_inputs):
+        """Call aot_autograd.autograd_cache_key with the same config and
+        tracing context that compile_fx would use."""
+        from torch._inductor.compile_fx import create_compiler_config_extra
+        from torch._inductor.decomposition import select_decomp_table
+
+        compiler_config_extra = create_compiler_config_extra(fx_graph)
+        decompositions = select_decomp_table()
+
+        # _check_can_cache requires a TracingContext with a ShapeEnv.
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        ctx = TracingContext(fake_mode)
+
+        # Match the config patches that compile_fx applies during compilation
+        # so that the autograd_config snapshot is identical.
+        with (
+            torch._guards.tracing(ctx),
+            functorch_config.patch(
+                unlift_effect_tokens=True,
+                selective_decompose=inductor_config.selective_decompose,
+            ),
+        ):
+            return aot_autograd.autograd_cache_key(
+                fx_graph,
+                example_inputs,
+                ignore_shape_env=True,
+                decompositions=decompositions,
+                compiler_config_extra=compiler_config_extra,
+                keep_inference_input_mutations=True,
+            )
+
+    @requires_triton()
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+    )
+    def test_cache_key_matches_torch_compile(self):
+        """autograd_cache_key matches the real compile_fx pipeline."""
+
+        def fn(x):
+            return x.sin() + x.cos()
+
+        x = torch.randn(4, 4)
+        gt_key, fx_graph, example_inputs = self._compile_and_capture(fn, x)
+        api_key, _ = self._aot_autograd_cache_key(fx_graph, example_inputs)
+        self.assertEqual(gt_key, api_key)
+
+    @requires_triton()
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+    )
+    def test_cache_key_stable_across_calls(self):
+        """Cache keys should be deterministic."""
+
+        def fn(x):
+            return x.sin() + x.cos()
+
+        x = torch.randn(4, 4)
+        gt_key, fx_graph, example_inputs = self._compile_and_capture(fn, x)
+        key1, _ = self._aot_autograd_cache_key(fx_graph, example_inputs)
+        key2, _ = self._aot_autograd_cache_key(fx_graph, example_inputs)
+        self.assertEqual(gt_key, key1)
+        self.assertEqual(key1, key2)
+
+    @requires_triton()
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+    )
+    def test_cache_key_varies_with_different_inputs(self):
+        """Different input dtypes should produce different cache keys."""
+
+        def fn(x):
+            return x.sin() + x.cos()
+
+        x_float = torch.randn(4, 4)
+        x_double = torch.randn(4, 4, dtype=torch.float64)
+
+        gt_key1, graph1, inputs1 = self._compile_and_capture(fn, x_float)
+        gt_key2, graph2, inputs2 = self._compile_and_capture(fn, x_double)
+        api_key1, _ = self._aot_autograd_cache_key(graph1, inputs1)
+        api_key2, _ = self._aot_autograd_cache_key(graph2, inputs2)
+        self.assertEqual(gt_key1, api_key1)
+        self.assertEqual(gt_key2, api_key2)
+        self.assertNotEqual(gt_key1, gt_key2)
+
+    @requires_triton()
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+    )
+    def test_cache_key_varies_with_different_graphs(self):
+        """Different model functions should produce different cache keys."""
+
+        def fn1(x):
+            return x.sin() + x.cos()
+
+        def fn2(x):
+            return x.exp() * x.log()
+
+        x = torch.randn(4, 4)
+
+        gt_key1, graph1, inputs1 = self._compile_and_capture(fn1, x)
+        gt_key2, graph2, inputs2 = self._compile_and_capture(fn2, x)
+        api_key1, _ = self._aot_autograd_cache_key(graph1, inputs1)
+        api_key2, _ = self._aot_autograd_cache_key(graph2, inputs2)
+        self.assertEqual(gt_key1, api_key1)
+        self.assertEqual(gt_key2, api_key2)
+        self.assertNotEqual(gt_key1, gt_key2)
+
+    @requires_triton()
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+    )
+    def test_cache_key_for_module(self):
+        """autograd_cache_key matches compilation for nn.Modules."""
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x).relu()
+
+        mod = MyModule()
+        x = torch.randn(4, 4)
+        gt_key, fx_graph, example_inputs = self._compile_and_capture(mod, x)
+        api_key, _ = self._aot_autograd_cache_key(fx_graph, example_inputs)
+        self.assertEqual(gt_key, api_key)
 
 
 if __name__ == "__main__":

@@ -33,9 +33,9 @@ from torch.export._tree_utils import reorder_kwargs
 from torch.fx.experimental.proxy_tensor import make_fx
 
 from . import config
+from ._aot_autograd import autograd_cache
 from ._aot_autograd.autograd_cache import (  # noqa: F401
     AOTAutogradCache,
-    autograd_cache_key,
     should_use_local_autograd_cache,
     should_use_remote_autograd_cache,
 )
@@ -181,6 +181,7 @@ zip = strict_zip
 # one counter is allocated per entire compiled block (but this block
 # may involve compiling multiple subgraphs; e.g., for forwards/backwards)
 AOT_COUNTER = itertools.count()
+
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -888,6 +889,44 @@ def aot_module(mod: nn.Module, *args: Any, **kwargs: Any) -> nn.Module:
     return AOTModule()
 
 
+def autograd_cache_key(
+    graph,
+    example_inputs,
+    ignore_shape_env: bool,
+    decompositions,
+    compiler_config_extra: CompilerConfigExtra,
+    keep_inference_input_mutations: bool = False,
+    disable_functionalization: bool = False,
+):
+    (
+        functional_call,
+        params_buffers_flat,
+        _params_spec,
+        _buffers_spec,
+        fake_flat_args,
+        full_args_descs,
+        aot_config,
+        fake_mode,
+        shape_env,
+        _in_spec,
+        _out_spec,
+    ) = prepare_aot_module_simplified(
+        graph,
+        example_inputs,
+        None,
+        decompositions,
+        keep_inference_input_mutations,
+        ignore_shape_env,
+        flatten=False,
+        force_non_lazy_backward_lowering=config.force_non_lazy_backward_lowering,
+        disable_functionalization=disable_functionalization,
+    )
+
+    return autograd_cache.autograd_cache_key(
+        graph, fake_flat_args, aot_config, compiler_config_extra
+    )
+
+
 def prepare_aot_module_simplified(
     mod: nn.Module,
     args: Iterable[Any],
@@ -1016,6 +1055,9 @@ def prepare_aot_module_simplified(
         disable_functionalization=disable_functionalization,
         _disable_torch_fn_metadata_mode=_disable_torch_fn_metadata_mode,
     )
+
+    # TODO: Split the remainder of this function into a separate preparation function for input processing.
+    # Only the aot_config above is needed for the cache key computation.
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
     # NB: full_args_descs not needed here, fake_flat_args is 1:1 with full_args
     fake_flat_args = process_inputs(
@@ -1818,9 +1860,6 @@ def _aot_export_function(
         decompositions=decompositions,
         num_params_buffers=num_params_buffers,
         aot_id=next(AOT_COUNTER),
-        # For now there's no use case involving keeping input mutations in the graph
-        # (which we can only do in the inference case anyway).
-        # We can add this later if we need to.
         keep_inference_input_mutations=keep_input_mutations,
         dynamic_shapes=dynamic_shapes,
         aot_autograd_arg_pos_to_source=None,
