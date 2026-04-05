@@ -6,7 +6,7 @@ for making VariableTracker instances usable as dictionary keys and set elements
 during symbolic execution. Used by both ConstDictVariable and SetVariable.
 """
 
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 
 def raise_unhashable(
-    arg: VariableTracker, tx: Optional["InstructionTranslator"] = None
+    arg: VariableTracker, tx: "InstructionTranslator | None" = None
 ) -> None:
     if tx is None:
         from torch._dynamo.symbolic_convert import InstructionTranslator
