@@ -135,8 +135,9 @@ static StableIValue from_ivalue(
         return torch::stable::detail::_from(
             std::nullopt, extension_build_version);
       }
-      StableIValue* sivp = new StableIValue(
-          from_ivalue(inner_type, ivalue, extension_build_version));
+      StableIValue* sivp = nullptr;
+      TORCH_ERROR_CODE_CHECK(aoti_torch_new_stable_ivalue(&sivp));
+      *sivp = from_ivalue(inner_type, ivalue, extension_build_version);
       return torch::stable::detail::_from(sivp, extension_build_version);
     }
     case c10::TypeKind::ListType: {
@@ -245,10 +246,10 @@ static c10::IValue to_ivalue(
           torch::stable::detail::_from(std::nullopt, extension_build_version)) {
         return c10::IValue();
       }
-      auto sivp = torch::stable::detail::_to<StableIValue*>(
+      StableIValue* sivp = torch::stable::detail::_to<StableIValue*>(
           stable_ivalue, extension_build_version);
       auto ival = to_ivalue(inner_type, *sivp, extension_build_version);
-      delete sivp;
+      TORCH_ERROR_CODE_CHECK(aoti_torch_delete_stable_ivalue(sivp));
       return ival;
     }
     case c10::TypeKind::ListType: {

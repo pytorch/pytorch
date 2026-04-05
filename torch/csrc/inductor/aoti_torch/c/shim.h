@@ -489,6 +489,7 @@ AOTI_TORCH_EXPORT void aoti_torch_save_tensor_handle(
 // helpers for converting between StableIValue and actual IValues
 using StableIValue = uint64_t;
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
 // Allocates an StableIValue on the heap, returns an owning pointer.
 // This allocation must be deleted with aoti_torch_delete_stable_ivalue or
 // by passing it to a dispatch call which frees it internally.
@@ -496,10 +497,12 @@ AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_new_stable_ivalue(StableIValue** ret_value);
 
 // Frees an StableIValue that was created by aoti_torch_new_stable_ivalue.
-// Deleting a nullpointer is invalid and returns failure, allocations must
+// Deleting a nullptr is invalid and returns failure, allocations must
 // only be deleted once.
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_stable_ivalue(StableIValue* value);
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
 
 class TorchLibraryOpaque;
 using TorchLibraryHandle = TorchLibraryOpaque*;

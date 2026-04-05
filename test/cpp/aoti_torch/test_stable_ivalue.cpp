@@ -3,10 +3,9 @@
 //  aoti_torch_delete_stable_ivalue
 
 #include <gtest/gtest.h>
-#include "torch/csrc/inductor/aoti_torch/c/macros.h"
-
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <limits>
+#include "torch/csrc/inductor/aoti_torch/c/macros.h"
 
 TEST(AotiTorchStableIValue, TestStableIValueUse) {
   StableIValue* a = nullptr;
