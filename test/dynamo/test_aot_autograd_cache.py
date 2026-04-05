@@ -2983,7 +2983,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         # Not needed for actual key calculation.
         with torch._guards.tracing(ctx):
             with sanitize_gm_for_cache(fx_g):
-                return autograd_cache_key(fx_g, example_inputs, config, {})
+                return autograd_cache_key(fx_g, example_inputs, config, None)
 
     def test_basic_hash_key(self):
         def fn(x):
@@ -3195,14 +3195,14 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             # internally, so the result is the same whether we wrap the
             # call or not.
             with sanitize_gm_for_cache(fx_g):
-                c1 = autograd_cache_key(fx_g, example_inputs, config, {})
-            c3 = autograd_cache_key(fx_g, example_inputs, config, {})
+                c1 = autograd_cache_key(fx_g, example_inputs, config, None)
+            c3 = autograd_cache_key(fx_g, example_inputs, config, None)
 
             fx_g.meta = {"foo": "baz"}
             fx_g.compile_subgraph_reason = None
             with sanitize_gm_for_cache(fx_g):
-                c2 = autograd_cache_key(fx_g, example_inputs, config, {})
-            c4 = autograd_cache_key(fx_g, example_inputs, config, {})
+                c2 = autograd_cache_key(fx_g, example_inputs, config, None)
+            c4 = autograd_cache_key(fx_g, example_inputs, config, None)
 
             self.assertEqual(c1, c2)
             self.assertEqual(c1, c3)

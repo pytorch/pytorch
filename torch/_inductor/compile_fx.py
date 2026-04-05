@@ -2072,6 +2072,7 @@ def fw_compiler_freezing(
     dynamo_model: GraphModule,
     num_example_inputs: int,
     inner_compile: Callable[..., Any],
+    # TODO: Take compiler_config_extra instead
     cudagraphs: BoxedBool,
     graph_id: int,
     forward_device: BoxedDeviceIndex,
@@ -2961,8 +2962,7 @@ def _compile_fx_main(
                     decompositions=decompositions,
                     partition_fn=partition_fn,
                     keep_inference_input_mutations=True,
-                    cudagraphs=compiler_config_extra.cudagraphs,
-                    boxed_forward_device_index=compiler_config_extra.forward_device,
+                    compiler_config_extra=compiler_config_extra,
                     ignore_shape_env=ignore_shape_env,
                     pre_grad_passes=run_pre_grad_passes,
                 )(model_, example_inputs_)
