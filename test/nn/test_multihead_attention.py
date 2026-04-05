@@ -745,6 +745,64 @@ class TestMultiheadAttentionNN(NNTestCase):
         mha.out_proj.bias.requires_grad = False
         mha(nt, nt, nt)
 
+    def test_multihead_attention_rotary_callable_shapes(self):
+        embed_dim = 8
+        num_heads = 2
+        tgt_len = 4
+        src_len = 3
+        batch_size = 5
+
+        class RecordingRotary:
+            def __init__(self) -> None:
+                self.shapes = []
+
+            def __call__(self, x):
+                self.shapes.append(tuple(x.shape))
+                return x
+
+        rotary = RecordingRotary()
+        mha = torch.nn.MultiheadAttention(embed_dim, num_heads, use_rotary=False)
+        mha.use_rotary = True
+        mha.rotary_pos_emb = rotary
+
+        query = torch.randn(tgt_len, batch_size, embed_dim)
+        key = torch.randn(src_len, batch_size, embed_dim)
+        value = torch.randn(src_len, batch_size, embed_dim)
+
+        mha(query, key, value, need_weights=False)
+
+        self.assertEqual(
+            rotary.shapes,
+            [
+                (batch_size, tgt_len, num_heads, embed_dim // num_heads),
+                (batch_size, src_len, num_heads, embed_dim // num_heads),
+            ],
+        )
+
+    def test_multihead_attention_use_rotary_changes_output(self):
+        torch.manual_seed(0)
+        embed_dim = 16
+        num_heads = 4
+        seq_len = 6
+        batch_size = 2
+
+        mha_no_rope = torch.nn.MultiheadAttention(
+            embed_dim, num_heads, dropout=0.0, use_rotary=False
+        )
+        mha_rope = torch.nn.MultiheadAttention(
+            embed_dim, num_heads, dropout=0.0, use_rotary=True
+        )
+        mha_rope.load_state_dict(mha_no_rope.state_dict(), strict=False)
+
+        query = torch.randn(seq_len, batch_size, embed_dim)
+        key = torch.randn(seq_len, batch_size, embed_dim)
+        value = torch.randn(seq_len, batch_size, embed_dim)
+
+        out_no_rope, _ = mha_no_rope(query, key, value, need_weights=False)
+        out_rope, _ = mha_rope(query, key, value, need_weights=False)
+
+        self.assertFalse(torch.allclose(out_no_rope, out_rope))
+
 
 class TestMultiheadAttentionNNDeviceType(NNTestCase):
     def test_multihead_self_attn_two_masks_fast_path(self, device):

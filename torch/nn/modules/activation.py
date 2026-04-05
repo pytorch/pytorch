@@ -1303,21 +1303,16 @@ class MultiheadAttention(Module):
         dtype=None,
         use_rotary: bool = False,
     ) -> None:
+        factory_kwargs = {"device": device, "dtype": dtype}
+        super().__init__()
         self.rotary_pos_emb = None
         self.use_rotary = use_rotary
-        if use_rotary:
-            self.rotary_pos_emb = cast(
-                Callable[[Tensor], Tensor],
-                RotaryPositionalEmbeddings(embed_dim // num_heads),
-            )
 
         if embed_dim <= 0 or num_heads <= 0:
             raise ValueError(
                 f"embed_dim and num_heads must be greater than 0,"
                 f" got embed_dim={embed_dim} and num_heads={num_heads} instead"
             )
-        factory_kwargs = {"device": device, "dtype": dtype}
-        super().__init__()
         self.embed_dim = embed_dim
         self.kdim = kdim if kdim is not None else embed_dim
         self.vdim = vdim if vdim is not None else embed_dim
@@ -1329,6 +1324,12 @@ class MultiheadAttention(Module):
         self.head_dim = embed_dim // num_heads
         if self.head_dim * num_heads != self.embed_dim:
             raise AssertionError("embed_dim must be divisible by num_heads")
+
+        if use_rotary:
+            self.rotary_pos_emb = cast(
+                Callable[[Tensor], Tensor],
+                RotaryPositionalEmbeddings(self.head_dim),
+            )
 
         if not self._qkv_same_embed_dim:
             self.q_proj_weight = Parameter(
