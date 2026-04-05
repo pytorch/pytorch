@@ -45,6 +45,7 @@ using at::Scalar;
 using at::Tensor;
 using at::TensorList;
 using at::native::detail::GridSamplerInterpolation;
+using at::native::detail::GridSamplerPadding;
 
 const char* kCudnnDoubleBackwardMsg =
     "Double backwards is not supported for CuDNN RNNs due to limitations in the CuDNN API. To run double backwards, please disable the CuDNN backend temporarily while running the forward pass of your RNN. For example: \nwith torch.backends.cudnn.flags(enabled=False):\n    output = model(inputs)";
@@ -7516,9 +7517,9 @@ namespace {
 static Tensor gs_bound_coord(
     const Tensor& idx,
     int64_t size,
-    int64_t padding_mode,
+    GridSamplerPadding padding_mode,
     bool align_corners) {
-  if (padding_mode <= 1 /* zeros or border */) {
+  if (padding_mode != GridSamplerPadding::Reflection) {
     return idx.clamp(0, size - 1);
   }
   // Reflection: mirrors the PyTorch reflect_coordinates convention.
@@ -7550,20 +7551,24 @@ static Tensor gs_bound_coord(
 static std::pair<Tensor, Tensor> gs_compute_coords(
     const Tensor& coord,
     int64_t size,
-    int64_t padding_mode,
+    GridSamplerPadding padding_mode,
     bool align_corners) {
   double unnorm_scale = align_corners ? (size - 1) / 2.0 : size / 2.0;
   Tensor ix = align_corners ? (coord + 1) * unnorm_scale
                             : (coord + 1) * unnorm_scale - 0.5;
   Tensor padding_grad;
-  if (padding_mode == 0 /* zeros */) {
+  if (padding_mode == GridSamplerPadding::Zeros) {
     padding_grad = at::ones_like(ix);
-  } else if (padding_mode == 1 /* border */) {
+  } else if (padding_mode == GridSamplerPadding::Border) {
     // clip_coordinates_set_grad: grad = 1 iff strictly inside (0, size-1)
     padding_grad =
         ((ix > 0) & (ix < static_cast<double>(size - 1))).to(ix.dtype());
     ix = ix.clamp(0, size - 1);
-  } else { /* reflection */
+  } else {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        padding_mode == GridSamplerPadding::Reflection,
+        "Unknown padding mode: ",
+        static_cast<int64_t>(padding_mode));
     double twice_low = align_corners ? 0.0 : -1.0;
     double twice_high = align_corners ? 2.0 * (size - 1) : 2.0 * size - 1.0;
     if (twice_high <= twice_low) {
@@ -7650,7 +7655,7 @@ static Tensor gs_gather2d_bc_multi(
     const Tensor& input,
     const Tensor& h_idx,
     const Tensor& w_idx,
-    int64_t padding_mode,
+    GridSamplerPadding padding_mode,
     bool align_corners) {
   auto N = input.size(0), C = input.size(1);
   auto H = input.size(2), W = input.size(3);
@@ -7662,7 +7667,7 @@ static Tensor gs_gather2d_bc_multi(
   auto result = input.reshape({N, C, H * W})
                     .gather(2, flat)
                     .reshape({N, C, out_H, out_W, K});
-  if (padding_mode == 0 /* zeros */) {
+  if (padding_mode == GridSamplerPadding::Zeros) {
     auto mask = (h_idx >= 0) & (h_idx < H) & (w_idx >= 0) & (w_idx < W);
     result = result * mask.unsqueeze(1).to(result.dtype());
   }
@@ -7678,7 +7683,7 @@ static Tensor gs_scatter2d_bc_multi(
     const Tensor& w_idx,
     int64_t H,
     int64_t W,
-    int64_t padding_mode,
+    GridSamplerPadding padding_mode,
     bool align_corners) {
   auto N = values.size(0), C = values.size(1);
   auto out_H = values.size(2), out_W = values.size(3);
@@ -7688,7 +7693,7 @@ static Tensor gs_scatter2d_bc_multi(
                   .reshape({N, 1, out_H * out_W * K})
                   .expand({N, C, out_H * out_W * K});
   auto weighted = values.unsqueeze(-1) * weights.unsqueeze(1);
-  if (padding_mode == 0 /* zeros */) {
+  if (padding_mode == GridSamplerPadding::Zeros) {
     auto mask = (h_idx >= 0) & (h_idx < H) & (w_idx >= 0) & (w_idx < W);
     weighted = weighted * mask.unsqueeze(1).to(weighted.dtype());
   }
@@ -7769,6 +7774,7 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
   Tensor d_grad_output, d_input, d_grid;
   const auto interpolation =
       static_cast<GridSamplerInterpolation>(interpolation_mode);
+  const auto padding_mode_enum = static_cast<GridSamplerPadding>(padding_mode);
 
   // ggI -> d_grad_output: gather ggI at grid positions = grid_sampler_2d(ggI,
   // grid)
@@ -7794,17 +7800,17 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
   }
   auto H = input.size(2), W = input.size(3);
 
-  auto [ix, gix_mult] =
-      gs_compute_coords(grid.select(-1, 0), W, padding_mode, align_corners);
-  auto [iy, giy_mult] =
-      gs_compute_coords(grid.select(-1, 1), H, padding_mode, align_corners);
+  auto [ix, gix_mult] = gs_compute_coords(
+      grid.select(-1, 0), W, padding_mode_enum, align_corners);
+  auto [iy, giy_mult] = gs_compute_coords(
+      grid.select(-1, 1), H, padding_mode_enum, align_corners);
 
   auto x0 = at::floor(ix).to(at::kLong);
   auto y0 = at::floor(iy).to(at::kLong);
   auto fx = ix - x0.to(ix.dtype());
   auto fy = iy - y0.to(iy.dtype());
 
-  bool zeros_oob = (padding_mode == 0);
+  bool zeros_oob = (padding_mode_enum == GridSamplerPadding::Zeros);
   auto ggG_x = ggGrid.select(-1, 0) * gix_mult; // (N, out_H, out_W)
   auto ggG_y = ggGrid.select(-1, 1) * giy_mult;
 
@@ -7925,7 +7931,7 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
 
     // Gather all 16 taps at once: [N, C, Ho, Wo, 16]
     auto I_all = gs_gather2d_bc_multi(
-        input, h_idx_bc, w_idx_bc, padding_mode, align_corners);
+        input, h_idx_bc, w_idx_bc, padding_mode_enum, align_corners);
 
     Tensor B_dx, B_dy;
     if (output_mask[0] || output_mask[1]) {
@@ -7954,7 +7960,7 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
           w_idx_bc,
           H,
           W,
-          padding_mode,
+          padding_mode_enum,
           align_corners);
     }
 
@@ -8024,6 +8030,7 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
   Tensor d_grad_output, d_input, d_grid;
   const auto interpolation =
       static_cast<GridSamplerInterpolation>(interpolation_mode);
+  const auto padding_mode_enum = static_cast<GridSamplerPadding>(padding_mode);
 
   if (output_mask[0] && ggI.defined()) {
     d_grad_output = at::grid_sampler_3d(
@@ -8050,12 +8057,12 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
   // Bilinear 3D: ggGrid contributions.
   auto D = input.size(2), H = input.size(3), W = input.size(4);
 
-  auto [ix, gix_mult] =
-      gs_compute_coords(grid.select(-1, 0), W, padding_mode, align_corners);
-  auto [iy, giy_mult] =
-      gs_compute_coords(grid.select(-1, 1), H, padding_mode, align_corners);
-  auto [iz, giz_mult] =
-      gs_compute_coords(grid.select(-1, 2), D, padding_mode, align_corners);
+  auto [ix, gix_mult] = gs_compute_coords(
+      grid.select(-1, 0), W, padding_mode_enum, align_corners);
+  auto [iy, giy_mult] = gs_compute_coords(
+      grid.select(-1, 1), H, padding_mode_enum, align_corners);
+  auto [iz, giz_mult] = gs_compute_coords(
+      grid.select(-1, 2), D, padding_mode_enum, align_corners);
 
   auto x0 = at::floor(ix).to(at::kLong);
   auto y0 = at::floor(iy).to(at::kLong);
@@ -8065,7 +8072,7 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
   auto fy = iy - y0.to(iy.dtype());
   auto fz = iz - z0.to(iz.dtype());
 
-  bool zeros_oob = (padding_mode == 0);
+  bool zeros_oob = (padding_mode_enum == GridSamplerPadding::Zeros);
   auto ggG_x = ggGrid.select(-1, 0) * gix_mult;
   auto ggG_y = ggGrid.select(-1, 1) * giy_mult;
   auto ggG_z = ggGrid.select(-1, 2) * giz_mult;
