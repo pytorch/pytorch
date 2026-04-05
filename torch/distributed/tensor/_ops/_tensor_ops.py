@@ -34,6 +34,7 @@ from torch.distributed.tensor._ops.utils import (
     shift_shard_dims_after_remove,
 )
 from torch.distributed.tensor.placement_types import (
+    _is_shard_like,
     _MaskPartial,
     Partial,
     Placement,
@@ -498,7 +499,7 @@ def slice_backward_rules(op_schema: OpSchema) -> OpStrategy:
         new_placements: list[Placement] = []
         for placement in output_spec.placements:
             # Redistribute to replicate only if the dim is sharded and matches the slice dim
-            if isinstance(placement, Shard) and placement.dim == dim:
+            if _is_shard_like(placement) and placement.dim == dim:
                 new_placements.append(Replicate())
             else:
                 new_placements.append(placement)
@@ -516,7 +517,7 @@ def unshard_tensor_dim(
 ) -> tuple[Placement, ...]:
     """Disallow the given tensor dimension to be sharded."""
     return tuple(
-        p if (not isinstance(p, Shard) or p.dim != dim) else Replicate()
+        p if (not _is_shard_like(p) or p.dim != dim) else Replicate()
         for p in placements
     )
 
@@ -525,10 +526,8 @@ def replicate_tensor_dim(
     placements: Sequence[Placement], dim: int
 ) -> tuple[Placement, ...]:
     """Force the given tensor dimension to be replicated."""
-    # Not using p.is_shard() to avoid mypy complain about Placement not having
-    # attribute dim.
     return tuple(
-        Replicate() if p.is_partial() or isinstance(p, Shard) and p.dim == dim else p
+        Replicate() if p.is_partial() or (_is_shard_like(p) and p.dim == dim) else p
         for p in placements
     )
 
@@ -740,11 +739,13 @@ def _derive_follow_placements_from_tuple_strategy(
         # check each placement for the current arg placement
         # to see if we want to merge/adjust the placement to follow
         # the priority: Partial -> Shard -> Replicate
+        # _StridedShard.__eq__ compares both dim and split_factor,
+        # so two _StridedShard with different split_factor won't match here.
         if cur_placement == new_placement:
             return cur_placement
 
         if cur_placement.is_partial():
-            if new_placement.is_shard():
+            if _is_shard_like(new_placement):
                 # follow new placement
                 return new_placement
             elif new_placement.is_partial():
@@ -753,8 +754,8 @@ def _derive_follow_placements_from_tuple_strategy(
             else:
                 # follow partial
                 return cur_placement
-        elif cur_placement.is_shard():
-            if new_placement.is_shard():
+        elif _is_shard_like(cur_placement):
+            if _is_shard_like(new_placement):
                 # cur/new placement are different sharding (i.e. different shard dim)
                 # currently fallback to replicate all args
                 return Replicate()
