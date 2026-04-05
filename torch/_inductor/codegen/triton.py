@@ -3821,6 +3821,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     self._use_xmask_unswitch
                     and indexing.mask_vars == OrderedSet(["xmask"])
                 )
+                if _register_xmask_load:
+                    unmasked_line = f"tl.load({var} + ({indexing.index_str}), None{ep}{other}{cachemod})"
 
                 # The block shape of tl.load depends on the indexing expression.
                 # Inferring shape solely from the mask may miss cases where the mask is constant.
@@ -3836,17 +3838,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 and config.triton.codegen_upcast_to_fp32
             ):
                 line += ".to(tl.float32)"
+                if _register_xmask_load:
+                    unmasked_line += ".to(tl.float32)"
                 dtype = torch.float32
             if dtype == torch.bool and torch.version.hip is None:
                 line += ".to(tl.int1)"
+                if _register_xmask_load:
+                    unmasked_line += ".to(tl.int1)"
                 dtype = torch.bool
-
-            # Build unmasked_line from final line by replacing mask with None.
-            # Done after all suffixes (.to(...)) to avoid duplicating each suffix.
-            if _register_xmask_load:
-                unmasked_line = line.replace(
-                    f", {indexing.mask_str}", ", None", 1
-                )
 
         load_buffer = self.get_load_buffer(indexing)
         self._handle_pdl_before_access(load_buffer, name)
