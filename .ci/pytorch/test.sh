@@ -50,6 +50,11 @@ if [[ "$TEST_CONFIG" != "onnx" ]]; then
   pip uninstall -y onnxruntime 2>/dev/null || true
 fi
 
+# Remove dill to test that serialization works without it
+if [[ "$BUILD_ENVIRONMENT" == *py3.10-gcc11 ]]; then
+  pip uninstall -y dill 2>/dev/null || true
+fi
+
 echo "Environment variables:"
 env
 
