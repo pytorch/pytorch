@@ -68,7 +68,7 @@ struct GemmFpAIntB {
     using ElementA     = typename Mma::IteratorA::Element;
     using LayoutA      = typename Mma::IteratorA::Layout;
     using ElementB     = typename Mma::IteratorB::Element;
-    using LayoutB      = typename Mma::IteratorB::Element;
+    using LayoutB      = typename Mma::IteratorB::Layout;
     using ElementC     = typename Epilogue::OutputTileIterator::Element;
     using LayoutC      = typename Mma::LayoutC;
     using ElementScale = ElementC;
