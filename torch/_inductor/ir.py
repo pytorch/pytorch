@@ -117,6 +117,14 @@ from .utils import (
 )
 from .virtualized import ops, OpsValue, V
 
+# Op namespaces that handle ReinterpretView inputs natively.
+# Custom ops outside these namespaces get contiguous copies to ensure
+# .data_ptr() is callable (see FallbackKernel.process_kernel).
+_INTERNAL_OP_NAMESPACES = frozenset({
+    "aten", "prims", "inductor", "_c10d_functional",
+    "quantized", "quantized_decomposed",
+})
+
 
 if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import SympyBoolean
@@ -6440,7 +6448,25 @@ class ExternKernel(InputsKernel):
             r = pytree.tree_unflatten(result, args_spec)
             return r.get("args", []), r.get("kwargs", {})
 
-        tensor_args = [cls.realize_input(x) for x in tensor_args]
+        # For custom (non-internal) ops, force contiguous copies instead of
+        # ReinterpretView to ensure C++ ops can safely call .data_ptr().
+        # realize_input() may return ReinterpretView which can lack accessible
+        # storage in Inductor's runtime, causing "Cannot access data pointer
+        # of Tensor that doesn't have storage" errors.
+        is_custom_op = (
+            isinstance(kernel, torch._ops.OpOverload)
+            and kernel.namespace not in _INTERNAL_OP_NAMESPACES
+        )
+        if is_custom_op:
+            realized = []
+            for x in tensor_args:
+                r = cls.realize_input(x)
+                if isinstance(r, ReinterpretView):
+                    r = cls.copy_input(x)
+                realized.append(r)
+            tensor_args = realized
+        else:
+            tensor_args = [cls.realize_input(x) for x in tensor_args]
 
         # freeze layout otherwise our output stride calculation might
         # become incorrect
