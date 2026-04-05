@@ -280,10 +280,11 @@ void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDicti
       // owns one reference that is released in captureBegin() / ~MPSStream().
       if (_captureMode) {
         CapturedStep step;
+        step.kind = CapturedStep::Kind::MPSGraph;
         step.exe = (__bridge void*)exe;
         step.inputsArray = [inputsArray retain];
         step.resultsArray = [resultsArray retain];
-        _capturedSteps.push_back(step);
+        _capturedSteps.push_back(std::move(step));
       }
 
       [inputsArray release];
@@ -323,10 +324,15 @@ void MPSStream::captureBegin() {
   // Release any steps from a previous capture.
   dispatch_sync_with_rethrow(_serialQueue, ^() {
     for (auto& step : _capturedSteps) {
-      [(__bridge NSArray*)step.inputsArray release];
-      [(__bridge NSArray*)step.resultsArray release];
+      if (step.kind == CapturedStep::Kind::MPSGraph) {
+        [(__bridge NSArray*)step.inputsArray release];
+        [(__bridge NSArray*)step.resultsArray release];
+      } else if (step.metalKernel) {
+        [(__bridge id<MTLComputePipelineState>)step.metalKernel->pso release];
+      }
     }
     _capturedSteps.clear();
+    _pendingMetalKernel.reset();
     _captureMode.store(true, std::memory_order_release);
   });
 }
@@ -342,31 +348,92 @@ void MPSStream::captureReset() {
   dispatch_sync_with_rethrow(_serialQueue, ^() {
     _captureMode.store(false, std::memory_order_release);
     for (auto& step : _capturedSteps) {
-      [(__bridge NSArray*)step.inputsArray release];
-      [(__bridge NSArray*)step.resultsArray release];
+      if (step.kind == CapturedStep::Kind::MPSGraph) {
+        [(__bridge NSArray*)step.inputsArray release];
+        [(__bridge NSArray*)step.resultsArray release];
+      } else if (step.metalKernel) {
+        [(__bridge id<MTLComputePipelineState>)step.metalKernel->pso release];
+      }
     }
     _capturedSteps.clear();
+    _pendingMetalKernel.reset();
   });
+}
+
+// Metal kernel capture recording API.
+// These are called from inside dispatch_sync on _serialQueue (from exec_unary/binary_kernel).
+
+void MPSStream::beginRecordMetalKernel(void* pso) {
+  _pendingMetalKernel = std::make_unique<CapturedMetalKernel>();
+  _pendingMetalKernel->pso = pso;
+  [(__bridge id<MTLComputePipelineState>)pso retain];
+}
+
+void MPSStream::recordMetalBuffer(void* buffer, size_t offset, unsigned index) {
+  if (_pendingMetalKernel) {
+    _pendingMetalKernel->buffers.push_back({buffer, offset, index});
+  }
+}
+
+void MPSStream::recordMetalBytes(const void* data, size_t size, unsigned index) {
+  if (_pendingMetalKernel) {
+    CapturedMetalKernel::BytesBinding binding;
+    binding.data.assign(static_cast<const uint8_t*>(data),
+                        static_cast<const uint8_t*>(data) + size);
+    binding.index = index;
+    _pendingMetalKernel->bytes.push_back(std::move(binding));
+  }
+}
+
+void MPSStream::endRecordMetalKernel(uint64_t gridX, uint64_t gridY, uint64_t gridZ,
+                                      uint64_t tgX, uint64_t tgY, uint64_t tgZ) {
+  if (_pendingMetalKernel) {
+    _pendingMetalKernel->gridX = gridX;
+    _pendingMetalKernel->gridY = gridY;
+    _pendingMetalKernel->gridZ = gridZ;
+    _pendingMetalKernel->tgX = tgX;
+    _pendingMetalKernel->tgY = tgY;
+    _pendingMetalKernel->tgZ = tgZ;
+    CapturedStep step;
+    step.kind = CapturedStep::Kind::MetalKernel;
+    step.metalKernel = std::move(_pendingMetalKernel);
+    _capturedSteps.push_back(std::move(step));
+  }
 }
 
 void MPSStream::replay() {
   if (_capturedSteps.empty()) {
     TORCH_WARN("torch.mps.graph_replay() called with no captured steps. "
-               "Did the capture block contain any MPSGraph-routed ops? "
-               "Ops using raw Metal encoders (sigmoid, exp, tanh, layernorm) "
-               "are not captured.");
+               "Did the capture block contain any MPS ops?");
     return;
   }
   dispatch_sync_with_rethrow(_serialQueue, ^() {
     endKernelCoalescing();
     for (auto& step : _capturedSteps) {
-      MPSGraphExecutable* exe = (__bridge MPSGraphExecutable*)step.exe;
-      NSArray<MPSGraphTensorData*>* ins = (__bridge NSArray*)step.inputsArray;
-      NSArray<MPSGraphTensorData*>* outs = (__bridge NSArray*)step.resultsArray;
-      [exe encodeToCommandBuffer:commandBuffer()
-                     inputsArray:ins
-                    resultsArray:outs
-             executionDescriptor:nil];
+      if (step.kind == CapturedStep::Kind::MPSGraph) {
+        endKernelCoalescing(); // End compute encoder before MPSGraph encoding
+        MPSGraphExecutable* exe = (__bridge MPSGraphExecutable*)step.exe;
+        NSArray<MPSGraphTensorData*>* ins = (__bridge NSArray*)step.inputsArray;
+        NSArray<MPSGraphTensorData*>* outs = (__bridge NSArray*)step.resultsArray;
+        [exe encodeToCommandBuffer:commandBuffer()
+                       inputsArray:ins
+                      resultsArray:outs
+               executionDescriptor:nil];
+      } else {
+        auto& mk = *step.metalKernel;
+        auto enc = commandEncoder();
+        id<MTLComputePipelineState> pso = (__bridge id<MTLComputePipelineState>)mk.pso;
+        [enc setComputePipelineState:pso];
+        for (auto& b : mk.buffers) {
+          [enc setBuffer:(__bridge id<MTLBuffer>)b.buffer offset:b.offset atIndex:b.index];
+        }
+        for (auto& b : mk.bytes) {
+          [enc setBytes:b.data.data() length:b.data.size() atIndex:b.index];
+        }
+        auto gridSize = MTLSizeMake(mk.gridX, mk.gridY, mk.gridZ);
+        auto tgSize = MTLSizeMake(mk.tgX, mk.tgY, mk.tgZ);
+        [enc dispatchThreads:gridSize threadsPerThreadgroup:tgSize];
+      }
     }
     synchronize(SyncType::COMMIT_ADAPTIVE);
   });

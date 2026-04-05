@@ -122,6 +122,14 @@ class TORCH_API MPSStream {
     return _capturedSteps.size();
   }
 
+  // Metal kernel capture recording API.
+  // Call sequence: beginRecordMetalKernel -> recordMetalBuffer/recordMetalBytes (N times) -> endRecordMetalKernel
+  void beginRecordMetalKernel(void* pso); // id<MTLComputePipelineState>
+  void recordMetalBuffer(void* buffer, size_t offset, unsigned index); // id<MTLBuffer>
+  void recordMetalBytes(const void* data, size_t size, unsigned index);
+  void endRecordMetalKernel(uint64_t gridX, uint64_t gridY, uint64_t gridZ,
+                            uint64_t tgX, uint64_t tgY, uint64_t tgZ);
+
   /// Get the MPS device index that this stream is associated with.
   c10::DeviceIndex device_index() const {
     return _stream.device_index();
@@ -160,12 +168,32 @@ class TORCH_API MPSStream {
   std::unordered_map<uintptr_t, void*> _graphExecutableCache;
 
   // Graph capture state.
-  // _capturedSteps stores one entry per executeMPSGraph call recorded during
-  // a capture pass. inputsArray/resultsArray are retained ObjC arrays of
-  // MPSGraphTensorData* wrapping the MTLBuffers of the captured tensors.
-  // On replay those same buffers are re-bound — callers must update input
+  // _capturedSteps stores one entry per executeMPSGraph call OR raw Metal
+  // kernel dispatch recorded during a capture pass.
+  // On replay the same buffers are re-bound — callers must update input
   // data in-place (via .copy_()) between replay calls to supply new batches.
+
+  struct CapturedMetalKernel {
+    void* pso = nullptr; // id<MTLComputePipelineState>, retained
+    struct BufferBinding {
+      void* buffer; // id<MTLBuffer>
+      size_t offset;
+      unsigned index;
+    };
+    struct BytesBinding {
+      std::vector<uint8_t> data;
+      unsigned index;
+    };
+    std::vector<BufferBinding> buffers;
+    std::vector<BytesBinding> bytes;
+    uint64_t gridX = 0, gridY = 0, gridZ = 0;
+    uint64_t tgX = 0, tgY = 0, tgZ = 0;
+  };
+
   struct CapturedStep {
+    enum class Kind { MPSGraph, MetalKernel };
+    Kind kind = Kind::MPSGraph;
+    // MPSGraph fields
     void* exe = nullptr; // MPSGraphExecutable*, borrowed from _graphExecutableCache
 #ifdef __OBJC__
     NSArray<MPSGraphTensorData*>* inputsArray = nil;
@@ -174,9 +202,12 @@ class TORCH_API MPSStream {
     void* inputsArray = nullptr;
     void* resultsArray = nullptr;
 #endif
+    // Metal kernel fields
+    std::unique_ptr<CapturedMetalKernel> metalKernel;
   };
   std::atomic<bool> _captureMode{false};
   std::vector<CapturedStep> _capturedSteps;
+  std::unique_ptr<CapturedMetalKernel> _pendingMetalKernel;
 
   // use synchronize() to access any of these commit functions outside MPSStream
   void commit();
