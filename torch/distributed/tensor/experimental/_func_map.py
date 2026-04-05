@@ -2,7 +2,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import functools
 from collections.abc import Callable, Sequence
-
 from typing_extensions import TypeAliasType
 
 import torch
