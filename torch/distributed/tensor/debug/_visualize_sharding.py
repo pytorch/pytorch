@@ -5,6 +5,7 @@ import numpy as np
 
 from torch._prims_common import ShapeType
 from torch.distributed.tensor._utils import _compute_local_shape_and_global_offset
+from torch.utils._exposed_in import exposed_in
 
 
 __all__ = ["visualize_sharding"]
@@ -152,6 +153,7 @@ def _create_rich_table(
     console.print(table, end="\n\n")
 
 
+@exposed_in("torch.distributed.tensor.debug")
 def visualize_sharding(dtensor, header="", use_rich: bool = False):
     """
     Visualizes sharding in the terminal for :class:`DTensor` that are 1D or 2D.

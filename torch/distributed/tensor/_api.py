@@ -38,6 +38,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.utils._exposed_in import exposed_in
 
 
 __all__ = [
@@ -287,6 +288,7 @@ class _FromTorchTensor(torch.autograd.Function):
         return grad_output.to_local(), None, None, None, None, None, None
 
 
+@exposed_in("torch.distributed.tensor")
 class DTensor(torch.Tensor):
     """
     ``DTensor`` (Distributed Tensor) is a subclass of ``torch.Tensor`` that provides single-device like
@@ -807,6 +809,7 @@ class DTensor(torch.Tensor):
             raise RuntimeError("Unsupported tensor type!")
 
 
+@exposed_in("torch.distributed.tensor")
 def distribute_tensor(
     tensor: torch.Tensor,
     device_mesh: DeviceMesh | None = None,
@@ -1019,6 +1022,7 @@ def _shard_tensor(
     return distribute_tensor(full_tensor, device_mesh, placements, src_data_rank=None)
 
 
+@exposed_in("torch.distributed.tensor")
 def distribute_module(
     module: nn.Module,
     device_mesh: DeviceMesh | None = None,
@@ -1245,6 +1249,7 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
     )
 
 
+@exposed_in("torch.distributed.tensor")
 def ones(  # type: ignore[no-untyped-def]
     *size,
     dtype: torch.dtype | None = None,
@@ -1288,6 +1293,7 @@ def ones(  # type: ignore[no-untyped-def]
     )
 
 
+@exposed_in("torch.distributed.tensor")
 def empty(  # type: ignore[no-untyped-def]
     *size,
     dtype: torch.dtype | None = None,
@@ -1331,6 +1337,7 @@ def empty(  # type: ignore[no-untyped-def]
     )
 
 
+@exposed_in("torch.distributed.tensor")
 def full(  # type: ignore[no-untyped-def]
     size,
     fill_value,
@@ -1378,6 +1385,7 @@ def full(  # type: ignore[no-untyped-def]
     )
 
 
+@exposed_in("torch.distributed.tensor")
 def rand(  # type: ignore[no-untyped-def]
     *size,
     requires_grad: bool = False,
@@ -1422,6 +1430,7 @@ def rand(  # type: ignore[no-untyped-def]
     )
 
 
+@exposed_in("torch.distributed.tensor")
 def randn(  # type: ignore[no-untyped-def]
     *size,
     requires_grad: bool = False,
@@ -1466,6 +1475,7 @@ def randn(  # type: ignore[no-untyped-def]
     )
 
 
+@exposed_in("torch.distributed.tensor")
 def zeros(  # type: ignore[no-untyped-def]
     *size,
     requires_grad: bool = False,

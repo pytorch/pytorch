@@ -63,8 +63,3 @@ def _reinit_dispatch_logger():
     changing the log level on the ``torch.distributed.tensor._dispatch`` logger.
     """
     torch._C._reinit_DTensor_dispatch_logger()
-
-
-# Set namespace for exposed private names
-CommDebugMode.__module__ = "torch.distributed.tensor.debug"
-visualize_sharding.__module__ = "torch.distributed.tensor.debug"

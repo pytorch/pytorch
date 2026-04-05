@@ -78,17 +78,6 @@ if DTensor not in _util_foreach_supported_types:
     _util_foreach_supported_types.append(DTensor)  # type: ignore[arg-type]
 
 
-# Set namespace for exposed private names
-DTensor.__module__ = "torch.distributed.tensor"
-distribute_tensor.__module__ = "torch.distributed.tensor"
-distribute_module.__module__ = "torch.distributed.tensor"
-ones.__module__ = "torch.distributed.tensor"
-empty.__module__ = "torch.distributed.tensor"
-full.__module__ = "torch.distributed.tensor"
-rand.__module__ = "torch.distributed.tensor"
-randn.__module__ = "torch.distributed.tensor"
-zeros.__module__ = "torch.distributed.tensor"
-
 # Register DTensor dispatch for higher order operators
 from torch._higher_order_ops.print import _register_dtensor_impl
 
