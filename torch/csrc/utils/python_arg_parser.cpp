@@ -769,9 +769,12 @@ auto handle_torch_function_indexing(
   }
   py::object func =
       PyObject_FastGetAttrString(THPVariableClass, (char*)func_name);
-  py::object args = (val == nullptr)
-      ? py::make_tuple(py::handle(self), py::handle(index))
-      : py::make_tuple(py::handle(self), py::handle(index), py::handle(val));
+  py::tuple args;
+  if (val == nullptr) {
+    args = py::make_tuple(py::handle(self), py::handle(index));
+  } else {
+    args = py::make_tuple(py::handle(self), py::handle(index), py::handle(val));
+  }
   return handle_torch_function_no_python_arg_parser(
       overridable_args,
       args.ptr(),
