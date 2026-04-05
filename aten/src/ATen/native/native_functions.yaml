@@ -2736,8 +2736,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
-    CPU, CUDA: fill_
-    MPS: fill_scalar_mps
+    CPU, CUDA, MPS: fill_
     QuantizedCPU, QuantizedCUDA: fill_quantized_
     Meta: fill_meta_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: fill_sparse_csr_
@@ -2748,8 +2747,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
-    CPU, CUDA: fill_
-    MPS: fill_tensor_mps_
+    CPU, CUDA, MPS: fill_
     QuantizedCPU, QuantizedCUDA: fill_quantized_
     Meta: fill_meta_
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: fill_nested_
@@ -7141,8 +7139,7 @@
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
-    CPU, CUDA: zero_
-    MPS: zero_mps_
+    CPU, CUDA, MPS: zero_
     Meta: zero_meta_
     SparseCPU, SparseCUDA, SparseMPS, SparseMeta: zero_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: zero_sparse_csr_
