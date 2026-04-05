@@ -6267,6 +6267,7 @@ def multi_head_attention_forward(
     static_v: Optional[Tensor] = None,
     average_attn_weights: bool = True,
     is_causal: bool = False,
+    rotary_pos_emb: Optional[Callable[[Tensor], Tensor]] = None,
 ) -> tuple[Tensor, Optional[Tensor]]:
     r"""Forward method for MultiHeadAttention.
 
@@ -6311,6 +6312,22 @@ def multi_head_attention_forward(
         average_attn_weights: If true, indicates that the returned ``attn_weights`` should be averaged across heads.
             Otherwise, ``attn_weights`` are provided separately per head. Note that this flag only has an effect
             when ``need_weights=True.``. Default: True
+        rotary_pos_emb:
+            Optional callable that applies rotary positional embeddings (RoPE) to the
+            projected query and key tensors.
+
+            When provided, the callable is invoked on the reshaped query and key tensors
+            with shape ``(batch_size, seq_len, num_heads, head_dim)`` and is expected to
+            return tensors of the same shape and dtype, with rotary positional information
+            applied along the sequence dimension.
+
+            If ``None`` (default), no rotary positional embeddings are applied and the
+            attention computation is identical to the standard multi-head attention
+            implementation.
+
+            Note:
+                The callable must be side-effect free and preserve tensor contiguity
+                semantics expected by the subsequent attention computation.
 
 
     Shape:
@@ -6385,6 +6402,7 @@ def multi_head_attention_forward(
             static_k=static_k,
             static_v=static_v,
             average_attn_weights=average_attn_weights,
+            rotary_pos_emb=rotary_pos_emb,
         )
 
     is_batched = _mha_shape_check(
@@ -6603,6 +6621,19 @@ def multi_head_attention_forward(
 
     # update source sequence length after adjustments
     src_len = k.size(1)
+    # --- START RoPE ---
+    if rotary_pos_emb is not None:
+        q = q.contiguous().view(tgt_len, bsz, num_heads, -1).permute(1, 0, 2, 3)
+        k = k.contiguous().view(src_len, bsz, num_heads, -1).permute(1, 0, 2, 3)
+
+        # apply rotary positional embeddings
+        q = rotary_pos_emb(q)
+        k = rotary_pos_emb(k)
+
+        # revert permutate and restore shape to 3D [tgt_len, bsz*num_heads, head_dim]
+        q = q.transpose(1, 2).contiguous().view(bsz * num_heads, tgt_len, -1)
+        k = k.transpose(1, 2).contiguous().view(bsz * num_heads, src_len, -1)
+    # --- END RoPE ---
 
     # merge key padding and attention masks
     if key_padding_mask is not None:
@@ -6672,12 +6703,12 @@ def multi_head_attention_forward(
                 attn_mask = attn_mask.unsqueeze(0)
             else:
                 attn_mask = attn_mask.view(bsz, num_heads, -1, src_len)
-
-        q = q.view(bsz, num_heads, tgt_len, head_dim)
         # pyrefly: ignore [no-matching-overload]
-        k = k.view(bsz, num_heads, src_len, head_dim)
+        q = q.view(bsz, num_heads, tgt_len, -1)
         # pyrefly: ignore [no-matching-overload]
-        v = v.view(bsz, num_heads, src_len, head_dim)
+        k = k.view(bsz, num_heads, src_len, -1)
+        # pyrefly: ignore [no-matching-overload]
+        v = v.view(bsz, num_heads, src_len, -1)
 
         attn_output = scaled_dot_product_attention(
             q, k, v, attn_mask, dropout_p, is_causal
