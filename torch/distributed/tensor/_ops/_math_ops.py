@@ -33,7 +33,6 @@ from torch.distributed.tensor._ops.utils import (
 )
 from torch.distributed.tensor._utils import normalize_to_torch_size
 from torch.distributed.tensor.placement_types import (
-    _is_shard_like,
     _StridedShard,
     Partial,
     Placement,
@@ -160,7 +159,7 @@ def _replicate_dims_start_at(
 ) -> tuple[Placement, ...]:
     new_placements: list[Placement] = []
     for p in placements:
-        if p.is_partial() or (_is_shard_like(p) and p.dim >= start_dim):
+        if p.is_partial() or (isinstance(p, Shard) and p.dim >= start_dim):
             new_placements.append(Replicate())  # make it replicate
         else:
             new_placements.append(p)  # keep the placement
@@ -168,16 +167,12 @@ def _replicate_dims_start_at(
 
 
 # return new_placements which align with placements but skip the skipped_dim
-# Precondition: no shard-like placement on skipped_dim (callers must
-# replicate it first via replicate_reduction_dims).
 def _skip_dim(
     placements: tuple[Placement, ...], skipped_dim: int
 ) -> tuple[Placement, ...]:
     new_placements: list[Placement] = []
     for p in placements:
-        if isinstance(p, _StridedShard) and p.dim >= skipped_dim:
-            new_placements.append(_StridedShard(p.dim - 1, split_factor=p.split_factor))
-        elif isinstance(p, Shard) and p.dim >= skipped_dim:
+        if isinstance(p, Shard) and p.dim >= skipped_dim:
             new_placements.append(Shard(p.dim - 1))
         else:
             new_placements.append(p)
@@ -193,7 +188,7 @@ def replicate_reduction_dims(
     for p in placements:
         if p.is_partial():
             new_placements.append(Replicate())
-        elif _is_shard_like(p) and p.dim in reduction_dims:
+        elif isinstance(p, Shard) and p.dim in reduction_dims:
             new_placements.append(Replicate())
         else:
             new_placements.append(p)
@@ -215,7 +210,7 @@ def map_placements_after_reduction(
         if isinstance(placement, (Replicate, Partial)):
             new_placements.append(placement)
         else:
-            if not _is_shard_like(placement):
+            if not isinstance(placement, Shard | _StridedShard):
                 raise AssertionError(
                     f"Expected Shard/_StridedShard, got {type(placement)}"
                 )
@@ -226,14 +221,14 @@ def map_placements_after_reduction(
                 # (i.e. for the case where keepdims=True), we generate partial
                 new_placements.append(get_placement_from_reduction_op(reduction_op))
             else:
-                if isinstance(placement, _StridedShard):
+                if isinstance(placement, Shard):
+                    new_placements.append(Shard(new_shard_dim))
+                else:
                     new_placements.append(
                         _StridedShard(
                             new_shard_dim, split_factor=placement.split_factor
                         )
                     )
-                elif isinstance(placement, Shard):
-                    new_placements.append(Shard(new_shard_dim))
     return tuple(new_placements)
 
 

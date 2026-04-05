@@ -26,7 +26,6 @@ from torch.distributed.tensor._dtensor_spec import (
 from torch.distributed.tensor._utils import assert_no_mixed_partial_types
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
-    _is_shard_like,
     _StridedShard,
     Partial,
     Placement,
@@ -167,11 +166,11 @@ class _TransformInfo:
         src, dst = self.src_dst_placements
         if src.is_partial() and dst.is_replicate():
             return "all_reduce"
-        elif src.is_partial() and _is_shard_like(dst):
+        elif src.is_partial() and dst.is_shard():
             return "reduce_scatter"
-        elif _is_shard_like(src) and dst.is_replicate():
+        elif src.is_shard() and dst.is_replicate():
             return "all_gather"
-        elif _is_shard_like(src) and _is_shard_like(dst):
+        elif src.is_shard() and dst.is_shard():
             return "all_to_all"
         else:
             # Local ops (Replicate->Shard, Replicate->Partial, noop, etc.)
@@ -1373,11 +1372,6 @@ class DTensorRedistributePlanner:
                 target = target_placements[mesh_dim]
                 # If target is not Shard, we can directly redistribute since we
                 # are traversing from inner to outer placements here
-                # TODO: extend nested sharding detection to _StridedShard
-                # (isinstance check and is_shard() below miss it).
-                # Safe today: strategies convert _StridedShard to Replicate
-                # on ALL mesh dims for a given reduction dim, so misaligned
-                # nested _StridedShard targets can't arise.
                 if isinstance(target, Shard):
                     # If target is Shard, check for nested sharding on the
                     # tensor dim BEFORE the current mesh_dim
@@ -1676,7 +1670,7 @@ def redistribute_local_tensor(
                     new_local_tensor = partial_spec._partition_value(
                         local_tensor, mesh_to_use, i
                     )
-                elif _is_shard_like(current):
+                elif current.is_shard() or isinstance(current, _StridedShard):
                     raise RuntimeError(
                         f"redistribute from {current} to {target} not supported yet"
                     )
@@ -1786,11 +1780,9 @@ def _redistribute_backward(
 
     # for backward shard -> partial, we just do shard -> replicate
     # for backward replicate -> partial, we skip the transformation
-    # NOTE: _is_shard_like covers _StridedShard defensively; currently
-    # unreachable because Partial -> _StridedShard is not implemented.
     normalized_placements: list[Placement] = []
     for current, target in zip(current_spec.placements, previous_spec.placements):
-        if (_is_shard_like(current) or current.is_replicate()) and target.is_partial():
+        if (current.is_shard() or current.is_replicate()) and target.is_partial():
             normalized_placements.append(Replicate())
         else:
             normalized_placements.append(target)

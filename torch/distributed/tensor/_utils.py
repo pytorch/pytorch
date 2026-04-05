@@ -1,7 +1,7 @@
 import logging
 import threading
 from collections.abc import Callable, Sequence
-from typing import Any
+from typing import Any, cast
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -15,7 +15,6 @@ from torch.distributed.tensor._collective_utils import redistribute_cost
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import OpSchema
 from torch.distributed.tensor.placement_types import (
-    _is_shard_like,
     _StridedShard,
     Partial,
     Placement,
@@ -315,13 +314,14 @@ def compute_local_tensor_info(
 
     for idx, placement in enumerate(placements):
         mesh_dim_size = mesh.size(idx)
-        if _is_shard_like(placement):
-            if placement.dim < 0:
+        if placement.is_shard():
+            shard_placement = cast(Shard, placement)
+            if shard_placement.dim < 0:
                 raise AssertionError(
                     "Shard placements should have negative dims normalized in "
-                    f"the user-facing APIs: {placement}"
+                    f"the user-facing APIs: {shard_placement}"
                 )
-            shard_dim = placement.dim
+            shard_dim = shard_placement.dim
             if shard_dim >= len(local_shape):
                 raise AssertionError(
                     f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)} "
@@ -385,7 +385,6 @@ def compute_global_tensor_shape(
 
     if isinstance(placements[0], Replicate):
         return shape
-    # NOTE: isinstance(_, Shard) does not match _StridedShard; see _is_shard_like().
     elif isinstance(placements[0], Shard):
 
         @maybe_run_for_local_tensor

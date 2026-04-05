@@ -4,7 +4,6 @@ from typing import Any
 
 import torch
 from torch.distributed.tensor import DeviceMesh, DTensor, Replicate, Shard
-from torch.distributed.tensor.placement_types import _is_shard_like
 
 
 __all__ = [
@@ -88,7 +87,7 @@ def _unpack_hook_tp(mesh: DeviceMesh, input_reshard_dim: int, x: Any) -> torch.T
     if (
         isinstance(x, DTensor)
         and len(x._spec.placements) == 1
-        and _is_shard_like(x._spec.placements[0])
+        and x._spec.placements[0].is_shard()
     ):
         return x.redistribute(device_mesh=mesh, placements=[Replicate()])
     elif (

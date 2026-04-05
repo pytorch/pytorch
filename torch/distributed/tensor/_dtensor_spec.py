@@ -8,7 +8,6 @@ from typing import Any, cast, NamedTuple
 import torch
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
-    _is_shard_like,
     _MaskPartial,
     _StridedShard,
     Partial,
@@ -170,7 +169,7 @@ class DTensorSpec:
         tensor_dim_to_mesh_dims: defaultdict[int, list[int]] = defaultdict(list)
         mesh_ndim = len(placements)
         for mesh_dim in range(mesh_ndim):
-            if _is_shard_like(placements[mesh_dim]):
+            if isinstance(placements[mesh_dim], Shard | _StridedShard):
                 placement = placements[mesh_dim]
                 shard_dim = placement.dim  # pyrefly: ignore [missing-attribute]
                 if shard_dim < 0:
@@ -321,7 +320,9 @@ class DTensorSpec:
         """
         if not any(isinstance(p, _StridedShard) for p in placements):
             return DTensorSpec.compute_default_shard_order(placements)
-        max_tensor_dim = max([i.dim for i in placements if _is_shard_like(i)]) + 1
+        max_tensor_dim = (
+            max([i.dim for i in placements if isinstance(i, Shard | _StridedShard)]) + 1
+        )
         shard_order = []
 
         tensor_dim_to_mesh_dims_order: list[list[int]] = [
@@ -329,7 +330,8 @@ class DTensorSpec:
         ]
         for mesh_dim in reversed(range(len(placements))):
             cur_placement = placements[mesh_dim]
-            if _is_shard_like(cur_placement):
+            # _StridedShard may not be a subclass of Shard in the future, so write in this way:
+            if isinstance(cur_placement, Shard | _StridedShard):
                 tensor_dim = cur_placement.dim
                 mesh_dims_order = tensor_dim_to_mesh_dims_order[tensor_dim]
                 cur_sf = 1
@@ -367,8 +369,6 @@ class DTensorSpec:
         """Verify that the shard_order is valid and matches the placements."""
         total_shard = 0
         if any(isinstance(p, _StridedShard) for p in self.placements):
-            # _StridedShard shard_order validation not yet supported;
-            # the Shard-only checks below (line 390, 394) would fail.
             return
         prev_tensor_dim = -1
         for entry in shard_order:
@@ -564,7 +564,7 @@ class DTensorSpec:
         # native dtensor-style sharding representation: map from mesh
         # dim to tensor dim
         for mesh_dim, placement in enumerate(placements):
-            if _is_shard_like(placement):
+            if isinstance(placement, (Shard, _StridedShard)):
                 if shard_order is not None:
                     for entry in shard_order:
                         tensor_dim = entry.tensor_dim
@@ -608,7 +608,7 @@ class DTensorSpec:
     def num_shards(self) -> int:
         num_shards = 1
         for i, placement in enumerate(self.placements):
-            if _is_shard_like(placement):
+            if placement.is_shard():
                 num_shards *= self.mesh.size(i)
         return num_shards
 
@@ -644,8 +644,8 @@ class DTensorSpec:
         # and int >=0 represent shard on that device mesh dim
         r = [-1] * self.ndim
         for i, placement in enumerate(self.placements):
-            if _is_shard_like(placement):
-                shard_dim = placement.dim
+            if placement.is_shard():
+                shard_dim = cast(Shard, placement).dim
                 if r[shard_dim] > -1:
                     raise ValueError(
                         f"Tensor dim {shard_dim} is already sharded on mesh dim {r[shard_dim]},"
@@ -672,8 +672,9 @@ class DTensorSpec:
         """
         r = [1] * self.ndim
         for i, placement in enumerate(self.placements):
-            if _is_shard_like(placement):
-                r[placement.dim] *= self.mesh.size(i)
+            if placement.is_shard():
+                shard_dim = cast(Shard, placement).dim
+                r[shard_dim] *= self.mesh.size(i)
 
         return r
 
@@ -722,7 +723,7 @@ class DTensorSpec:
         for i, m in enumerate(dim_map):
             if m >= 0:
                 placement = placements[m]
-                if placement.is_shard():  # dim_map only produces Shard placements
+                if placement.is_shard():
                     placement = cast(Shard, placement)
                     raise RuntimeError(
                         f"DeviceMesh dimension can't be mapped to two dimension of the same tensor: {i} and {placement.dim}"
@@ -743,9 +744,9 @@ class DTensorSpec:
 
     def is_sharded(self) -> bool:
         """
-        return True if the current DTensorSpec uses Shard() or _StridedShard() placement on any mesh dims (devices)
+        return True if the current DTensorSpec uses Shard() placement on any mesh dims (devices)
         """
-        return any(_is_shard_like(placement) for placement in self.placements)
+        return any(placement.is_shard() for placement in self.placements)
 
     def shallow_copy_with_tensor_meta(
         self, tensor_meta: TensorMeta | None
