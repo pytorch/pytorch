@@ -471,12 +471,12 @@ jobs:
       actions: read
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch' && inputs.use-arc
-    runs-on: ${{ inputs.runner_prefix }}${{ inputs.runner }}
+    runs-on: ${{ inputs.runner_prefix }}${{ startsWith(inputs.runner, 'l-') && inputs.runner || 'l-x86iavx512-8-64' }}
     container:
-      image: ${{ inputs.docker-image-name }}
+      image: ghcr.io/pytorch/${{ inputs.docker-image-name }}
     timeout-minutes: 480
     outputs:
-      docker-image: ${{ inputs.docker-image-name }}
+      docker-image: ghcr.io/pytorch/${{ inputs.docker-image-name }}
       test-matrix: ${{ steps.map-runners.outputs.test-matrix }}
       build-environment: ${{ inputs.build-environment }}
     steps:
@@ -560,7 +560,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/build-external-packages@main
         with:
           build-targets: ${{ inputs.build-external-packages }}
-          docker-image: ${{ inputs.docker-image-name }}
+          docker-image: ghcr.io/pytorch/${{ inputs.docker-image-name }}
           cuda-arch-list: ${{ inputs.cuda-arch-list }}
           output-dir: external
 
