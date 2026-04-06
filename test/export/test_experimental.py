@@ -1440,8 +1440,14 @@ def forward(self, arg0_1):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_aot_export_blockmask_closure_spec_mismatch(self):
-        """BlockMasks with same closure code but different captured values must
-        produce different TreeSpecs, so pytree won't confuse them."""
+        """BlockMasks with same closure structure produce equal TreeSpecs.
+
+        Closure values are extracted into pytree leaves, so two BlockMasks
+        whose mask_mod closures have the same code + structure but different
+        captured values have the same spec (values differ in the leaves, not
+        the context).  BlockMasks with different closure *structure* (e.g.
+        different code) must still produce different specs.
+        """
         from torch.nn.attention.flex_attention import create_block_mask
 
         _register_blockmask_pytree()
@@ -1468,8 +1474,19 @@ def forward(self, arg0_1):
 
         # Same closure code + same captured value -> same spec
         self.assertEqual(spec_a, spec_a_same)
-        # Same closure code + different captured value -> different spec
-        self.assertNotEqual(spec_a, spec_b)
+        # Same closure code + different captured value -> same spec
+        # (values are in the leaves, not the context)
+        self.assertEqual(spec_a, spec_b)
+
+        # Different closure *code* -> different spec
+        def different_mask(b, h, q, k):
+            return q > k
+
+        mask_c = create_block_mask(
+            different_mask, B=1, H=1, Q_LEN=64, KV_LEN=64, device="cuda"
+        )
+        _, spec_c = pytree.tree_flatten(mask_c)
+        self.assertNotEqual(spec_a, spec_c)
 
     def test_aot_export_closure_buffer_mutation(self):
         class Mod(torch.nn.Module):

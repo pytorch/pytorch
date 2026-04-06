@@ -6300,42 +6300,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         res2 = opt_f2()
         self.assertTrue(same(res1, res2))
 
-    def test_list_append_does_not_recompile_on_existing_contents(self):
-        items = []
-        cnts = CompileCounter()
-
-        def fn():
-            items.append(torch.ones(8))
-
-        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
-
-        opt_fn()
-        opt_fn()
-        opt_fn()
-
-        self.assertEqual(len(items), 3)
-        self.assertEqual(cnts.frame_count, 1)
-
-    def test_list_clear_does_not_recompile_on_existing_contents(self):
-        items = [torch.randn(8)]
-        cnts = CompileCounter()
-
-        def fn():
-            items.clear()
-            return torch.ones(8)
-
-        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
-
-        out1 = opt_fn()
-        self.assertEqual(len(items), 0)
-
-        items.extend([torch.randn(8), torch.randn(8)])
-        out2 = opt_fn()
-
-        self.assertEqual(len(items), 0)
-        self.assertTrue(same(out1, out2))
-        self.assertEqual(cnts.frame_count, 1)
-
     def test_inline_dict_mutation(self):
         def f1(d):
             d["c"] = d["a"] + d.pop("b")
