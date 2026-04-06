@@ -27,6 +27,17 @@ endif()
 # ---[ Project and semantic versioning.
 project(Torch CXX C)
 
+# When built via scikit-build-core, Python_EXECUTABLE is already set.
+# For standalone cmake invocations, find it via find_package.
+find_package(Python COMPONENTS Interpreter REQUIRED)
+
+# Forward environment variables to CMake variables, replicating the behavior
+# previously handled by setup.py / tools/setup_helpers/cmake.py.
+# When built via setup.py, these are already set as -D flags; the module
+# skips variables that are already defined, so it is safe to include
+# unconditionally.
+include(cmake/EnvVarForwarding.cmake)
+
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   set(LINUX TRUE)
 else()
