@@ -35,6 +35,7 @@ from torch._dynamo import (
     logging as dynamo_logging,
     utils as dynamo_utils,
 )
+from torch._dynamo.backends import common as dynamo_common
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.repro.after_aot import wrap_compiler_debug
 from torch._dynamo.utils import (
@@ -50,7 +51,7 @@ from torch._dynamo.utils import (
     lazy_format_graph_code,
     set_feature_use,
 )
-from torch._functorch import config as functorch_config
+from torch._functorch import aot_autograd, config as functorch_config
 from torch._functorch._aot_autograd.subclass_parametrization import (
     unwrap_tensor_subclass_parameters,
 )
@@ -104,7 +105,6 @@ from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.monitor import _WaitCounter
 from torch.utils._ordered_set import OrderedSet
 
-from .._dynamo.backends.common import aot_autograd
 from .._dynamo.exc import ShortenTraceback, SkipFrame
 from ..fx._lazy_graph_module import _use_lazy_graph_module
 from ..fx.graph import _PyTreeCodeGen
@@ -3000,7 +3000,7 @@ def _compile_fx_main(
             ),
         ):
             try:
-                return aot_autograd(
+                return dynamo_common.aot_autograd(
                     fw_compiler=fw_compiler,
                     bw_compiler=bw_compiler,
                     inference_compiler=inference_compiler,
@@ -3199,3 +3199,30 @@ def _aoti_flatten_inputs(
         }
     )
     return flat_example_inputs, options
+
+
+def autograd_cache_key(
+    graph,
+    example_inputs,
+    ignore_shape_env: bool,
+    decompositions=None,
+):
+    decompositions = (
+        decompositions if decompositions is not None else select_decomp_table()
+    )
+    compiler_config_extra = create_compiler_config_extra(graph)
+
+    # Match the config patches that compile_fx applies during compilation
+    # so that the autograd_config snapshot is identical.
+    with functorch_config.patch(
+        unlift_effect_tokens=True,
+        selective_decompose=config.selective_decompose,
+    ):
+        return aot_autograd.autograd_cache_key(
+            graph,
+            example_inputs,
+            ignore_shape_env=ignore_shape_env,
+            decompositions=decompositions,
+            compiler_config_extra=compiler_config_extra,
+            keep_inference_input_mutations=True,
+        )
