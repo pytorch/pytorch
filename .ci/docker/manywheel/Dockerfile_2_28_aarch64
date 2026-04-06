@@ -39,12 +39,7 @@ RUN yum install -y \
   gcc-toolset-${GCCTOOLSET_VERSION}-gcc-c++ \
   gcc-toolset-${GCCTOOLSET_VERSION}-gcc-gfortran \
   gcc-toolset-${GCCTOOLSET_VERSION}-gdb
-
-# (optional) Install non-default Ninja version
-ARG NINJA_VERSION
-COPY ./common/install_ninja.sh install_ninja.sh
-RUN if [ -n "${NINJA_VERSION}" ]; then bash ./install_ninja.sh; fi
-RUN rm install_ninja.sh
+RUN yum install -y --enablerepo=powertools ninja-build
 
 # Ensure the expected devtoolset is used
 ENV PATH=/opt/rh/gcc-toolset-${GCCTOOLSET_VERSION}/root/usr/bin:$PATH
