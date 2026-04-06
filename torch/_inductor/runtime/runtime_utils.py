@@ -385,6 +385,7 @@ def pallas_permute(x, perm):
     # Unrolled loop: extract slices with static indices, apply sub-perm,
     # then stack along the loop output dimension.
     slices = []
+    # pyrefly: ignore [bad-argument-type]
     for i in range(loop_size):
         idx: list[Any] = [slice(None)] * ndim
         idx[loop_in_dim] = i

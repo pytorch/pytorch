@@ -1947,6 +1947,17 @@ class TestMetaKernelConv(TestCase):
         self.assertTrue(gw2.is_contiguous(memory_format=torch.channels_last))
 
 
+
+
+class TestMetaKernelRegistrations(TestCase):
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_make_dep_token(self):
+        cpu_result = torch.ops.aten._make_dep_token(device=torch.device("cpu"))
+        meta_result = torch.ops.aten._make_dep_token(device=torch.device("meta"))
+        self.assertEqual(cpu_result.shape, meta_result.shape)
+        self.assertEqual(cpu_result.dtype, meta_result.dtype)
+
+
 instantiate_device_type_tests(TestMeta, globals())
 
 

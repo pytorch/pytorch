@@ -2765,6 +2765,13 @@ Arguments:
   module.def("_set_process_group", &::c10d::setProcessGroup);
   module.def("_current_process_group", &::c10d::currentProcessGroup);
 
+  // Thread local comm profiling name
+  module.def(
+      "_set_comm_profiling_name",
+      &::c10d::set_comm_profiling_name,
+      py::arg("name"));
+  module.def("_get_comm_profiling_name", &::c10d::get_comm_profiling_name);
+
   py::enum_<::c10d::ProcessGroup::BackendType>(
       processGroup,
       "BackendType",

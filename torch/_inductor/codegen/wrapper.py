@@ -3290,7 +3290,7 @@ class PythonWrapperCodegen(CodeGen):
         current_stream_idx=None,
     ):
         device = device or V.graph.get_current_device_or_throw()
-        if not triton and device.type != "cuda":
+        if not triton and device.type not in ("cuda", "xpu"):
             if device.type == "cpu":
                 self.writeline(self.wrap_kernel_call(kernel_name, call_args))
             elif device.type == "mps":
@@ -3399,7 +3399,7 @@ class PythonWrapperCodegen(CodeGen):
 
             reused_args = {}
             for i, (arg, arg_type, raw_key, raw_arg) in enumerate(
-                # pyrefly: ignore [no-matching-overload]
+                # pyrefly: ignore [bad-argument-type, no-matching-overload]
                 zip(call_args, arg_types, raw_keys, raw_args)
             ):
                 key = None

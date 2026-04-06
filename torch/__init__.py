@@ -2226,7 +2226,10 @@ import torch
 
 
 __all__.extend(
-    name for name in dir(torch) if isinstance(getattr(torch, name), torch.dtype)
+    # pyrefly: ignore [unresolvable-dunder-all]
+    name
+    for name in dir(torch)
+    if isinstance(getattr(torch, name), torch.dtype)
 )
 
 ################################################################################
