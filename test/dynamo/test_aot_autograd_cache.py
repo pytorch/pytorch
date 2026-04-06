@@ -3978,6 +3978,21 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
         # different key than the other two options.
         self.assertNotEqual(ei_key, fg_key)
 
+    def test_cache_key_for_multiple_outputs(self):
+        """autograd_cache_key matches compilation for multiple outputs."""
+
+        def fn(x):
+            return x.sin(), x.cos()
+
+        x = torch.randn(4, 4)
+        gt_key, fx_graph, example_inputs = self._compile_and_capture(fn, x)
+        api_key, _ = self._aot_autograd_cache_key(fx_graph, example_inputs)
+        cfx_key, _ = self._compile_fx_cache_key(fx_graph, example_inputs)
+        sc_key, _ = self._standalone_compile_cache_key(fx_graph, example_inputs)
+        self.assertEqual(gt_key, api_key)
+        self.assertEqual(gt_key, cfx_key)
+        self.assertEqual(gt_key, sc_key)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
