@@ -989,6 +989,7 @@ Tensor unbind_backward_nested(
     int64_t dim,
     const at::TensorOptions& options) {
   std::vector<Tensor> grads_tensors;
+  grads_tensors.reserve(grads.size());
   for (int64_t i : c10::irange(static_cast<int64_t>(grads.size()))) {
     if (grads[i].defined()) {
       grads_tensors.push_back(static_cast<Tensor>(grads[i]));
@@ -2185,6 +2186,7 @@ Tensor _nested_split_with_sizes_backward(
   // it's possible some of the grads are not defined (represents tensors of all
   // 0s). Since at::cat can't handle those, let's define them
   std::vector<Tensor> grads_all_defined;
+  grads_all_defined.reserve(grads.size());
   for (int64_t i : c10::irange(static_cast<int64_t>(grads.size()))) {
     if (grads[i].defined()) {
       grads_all_defined.push_back(static_cast<Tensor>(grads[i]));
@@ -4312,9 +4314,19 @@ Tensor linalg_det_backward(
     const Tensor& LU,
     const Tensor& pivots) {
   at::NoTF32Guard disable_tf32;
-  // A.numel() == 0 necessary for the singular case
-  if (!grad.defined() || A.sym_numel() == 0) {
+  if (!grad.defined()) {
     return {};
+  }
+  if (A.sym_numel() == 0) {
+    return at::zeros_like(A);
+  }
+
+  // Special case handling for 1 x 1 matrix, to ensure mathematically correct.
+  // d(det)/dA = 1, so gradient = grad * ones_like(A)
+  // See #80761
+  if (A.sym_size(-2) == 1 && A.sym_size(-1) == 1) {
+    // For batched 1x1 matrices, broadcast grad to match A's shape
+    return grad.unsqueeze(-1).unsqueeze(-1).expand_as(A);
   }
 
   // The gradient G is the matrix solving
@@ -7200,7 +7212,7 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     grad_self = grad_self.scatter(dim, index, 0);
   }
 
-  return std::make_tuple(grad_self, grad_src);
+  return std::make_tuple(std::move(grad_self), std::move(grad_src));
 }
 
 Tensor _to_copy_backward(
@@ -7296,7 +7308,7 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
     grad_self = grad_self.index_fill(dim, index, 0);
   }
 
-  return std::make_tuple(grad_self, grad_src);
+  return std::make_tuple(std::move(grad_self), std::move(grad_src));
 }
 
 Tensor take_backward(

@@ -555,6 +555,7 @@ def _compile_frame_context(
     # under the same cache entry, so we don't have recompile ids
     # i.e. If cold start had 0/0, 0/1, 1/0, 1/1, these would be
     # collapsed into 0/0, 1/0 on warm.
+    # pyrefly: ignore [deprecated]
     @contextlib.contextmanager
     def _ctx() -> Iterator[None]:
         increment_frame()
@@ -757,12 +758,12 @@ class CompilePackage:
         self,
         python_code: types.CodeType,
         python_module: str,
-        function_name: str | None,
+        function_name: str,
     ) -> None:
         self._add_function(
             python_code,
             python_module,
-            function_name=_FunctionId(function_name) if function_name else None,
+            function_name=_FunctionId(function_name),
             install_to_global=True,
         )
         self._resume_codes.add(python_code)
@@ -828,8 +829,29 @@ class CompilePackage:
                 target_code = code
                 if entry.install_to_global:
                     for function_name in entry.function_names:
-                        fn = types.FunctionType(code, module.__dict__, function_name)
-                        self._install_global(module, function_name, fn)
+                        if code.co_freevars:
+                            # Resume functions with freevars need a factory
+                            # that takes a closure tuple, matching
+                            # install_resume_function_global in output_graph.py.
+                            f_globals = module.__dict__
+                            fn_name = function_name
+
+                            def _make_fn(
+                                closure: tuple[types.CellType, ...],
+                                _code: types.CodeType = code,
+                                _globals: dict[str, Any] = f_globals,
+                                _name: str = fn_name,
+                            ) -> types.FunctionType:
+                                return types.FunctionType(
+                                    _code, _globals, _name, None, closure
+                                )
+
+                            self._install_global(module, function_name, _make_fn)
+                        else:
+                            fn = types.FunctionType(
+                                code, module.__dict__, function_name
+                            )
+                            self._install_global(module, function_name, fn)
                 if entry.code_source:
                     target_code = _lookup_code(entry)
 

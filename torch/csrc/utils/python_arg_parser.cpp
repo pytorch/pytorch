@@ -302,8 +302,22 @@ static py::object maybe_get_registered_torch_dispatch_rule(
 static bool is_dtensor(PyObject* obj) {
 #ifdef USE_DISTRIBUTED
   const py::handle dtensor = get_dtensor_class();
-  return (PyObject*)Py_TYPE(obj) == dtensor.ptr() ||
-      py::isinstance(py::handle(obj), dtensor);
+  if ((PyObject*)Py_TYPE(obj) == dtensor.ptr()) {
+    return true;
+  }
+  if (!py::isinstance(py::handle(obj), dtensor)) {
+    return false;
+  }
+  // DTensor subclass: only use the C++ fast path if it does not override
+  // __torch_dispatch__. Subclasses with a custom override should fall
+  // through to the normal Python dispatch path.
+  // Compare via __func__ because @classmethod descriptors create new bound
+  // method objects on each attr access, making direct identity checks fail.
+  static py::object base_td =
+      dtensor.attr("__torch_dispatch__").attr("__func__");
+  py::object sub_td =
+      py::type::handle_of(obj).attr("__torch_dispatch__").attr("__func__");
+  return sub_td.is(base_td);
 #else
   return false;
 #endif
@@ -755,9 +769,12 @@ auto handle_torch_function_indexing(
   }
   py::object func =
       PyObject_FastGetAttrString(THPVariableClass, (char*)func_name);
-  py::object args = (val == nullptr)
-      ? py::make_tuple(py::handle(self), py::handle(index))
-      : py::make_tuple(py::handle(self), py::handle(index), py::handle(val));
+  py::tuple args;
+  if (val == nullptr) {
+    args = py::make_tuple(py::handle(self), py::handle(index));
+  } else {
+    args = py::make_tuple(py::handle(self), py::handle(index), py::handle(val));
+  }
   return handle_torch_function_no_python_arg_parser(
       overridable_args,
       args.ptr(),

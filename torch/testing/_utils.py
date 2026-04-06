@@ -33,8 +33,12 @@ def freeze_rng_state():
     # which we need to disable to get and set rng state
     with torch.utils._mode_utils.no_dispatch(), torch._C._DisableFuncTorch():
         rng_state = torch.get_rng_state()
-        if torch.cuda.is_available():
-            cuda_rng_state = torch.cuda.get_rng_state()
+        if torch.accelerator.is_available():
+            accelerator = torch.accelerator.current_accelerator(check_available=True)
+            if accelerator is not None:
+                accelerator_rng_state = torch.get_device_module(
+                    accelerator.type
+                ).get_rng_state()
     try:
         yield
     finally:
@@ -47,6 +51,12 @@ def freeze_rng_state():
         #
         # NB: Mode disable is to avoid running cross-ref tests on this seeding
         with torch.utils._mode_utils.no_dispatch(), torch._C._DisableFuncTorch():
-            if torch.cuda.is_available():
-                torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
+            if torch.accelerator.is_available():
+                accelerator = torch.accelerator.current_accelerator(
+                    check_available=True
+                )
+                if accelerator is not None:
+                    torch.get_device_module(accelerator.type).set_rng_state(
+                        accelerator_rng_state  # type: ignore[possibly-undefined]
+                    )
             torch.set_rng_state(rng_state)

@@ -1,18 +1,29 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import unittest
 
 import sympy
 
 import torch
 import torch._inductor.config as inductor_config
 from torch._inductor.codegen import triton_utils
-from torch._inductor.codegen.common import CSEVariable, SizeArg
-from torch._inductor.codegen.triton import TritonKernelOverrides
+from torch._inductor.codegen.common import CSEVariable, SizeArg, TensorArg
+from torch._inductor.codegen.triton import (
+    _materialize_trunc_to_float_expr,
+    TritonKernelOverrides,
+)
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler, promote_types
 from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_GPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CPU,
+    HAS_GPU,
+    HAS_GPU_AND_TRITON,
+)
+from torch.utils._sympy.functions import FloorDiv, TruncToFloat, TruncToInt
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
@@ -150,6 +161,101 @@ class TestCodegenTriton(InductorTestCase):
             TestTritonKernelOverrides.pow(3, exponent),
             "triton_helpers.pow_integer(custom_constant(3, torch.uint32), ks0)",
         )
+
+    def test_materialize_trunc_to_float_expr_preserves_integer_subexpressions(self):
+        s0 = sympy.Symbol("s0")
+
+        trunc_expr = TruncToInt(s0)
+        self.assertEqual(
+            _materialize_trunc_to_float_expr(trunc_expr, torch.float64),
+            TruncToFloat(s0),
+        )
+
+        integer_expr = FloorDiv(trunc_expr, sympy.Integer(5))
+        self.assertEqual(
+            _materialize_trunc_to_float_expr(integer_expr, torch.float64),
+            integer_expr,
+        )
+
+        predicate_expr = sympy.Eq(trunc_expr, sympy.Integer(9007199254740993))
+        self.assertEqual(
+            _materialize_trunc_to_float_expr(predicate_expr, torch.float64),
+            predicate_expr,
+        )
+
+        float_expr = sympy.Float(0.5) + trunc_expr
+        self.assertEqual(
+            _materialize_trunc_to_float_expr(float_expr, torch.float64),
+            sympy.Float(0.5) + TruncToFloat(s0),
+        )
+
+    @unittest.skipUnless(torch.version.hip is not None, "pointer_range_32 is HIP-only")
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_pointer_range_in_generated_code(self):
+        """Verify tt.pointer_range=32 appears in generated Triton code on HIP."""
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(64, 64, device=GPU_TYPE, dtype=torch.bfloat16)
+        _, code = run_and_get_code(torch.compile(fn), x)
+        code_str = " ".join(code)
+        self.assertIn("tt.pointer_range", code_str)
+
+    def test_is_multiple_of_rules(self):
+        """Test structural divisibility rules in _is_multiple_of."""
+        from torch.utils._sympy.functions import FloorDiv, Mod
+
+        sv = V.graph.sizevars
+        shape_env = sv.shape_env
+
+        s1 = sympy.Symbol("s1", positive=True, integer=True)
+        s2 = sympy.Symbol("s2", positive=True, integer=True)
+        s3 = sympy.Symbol("s3", positive=True, integer=True)
+
+        # Product: any factor divisible → product divisible
+        self.assertTrue(sv.statically_known_multiple_of(16 * s1, 16))
+        self.assertTrue(sv.statically_known_multiple_of(4 * 4 * s1, 16))
+        shape_env.axioms[sympy.Eq(Mod(s1, 16), 0)] = sympy.true
+        self.assertTrue(sv.statically_known_multiple_of(s1 * s2, 16))
+        self.assertFalse(sv.statically_known_multiple_of(s2 * s3, 16))
+
+        # Sum: all terms divisible → sum divisible
+        self.assertFalse(sv.statically_known_multiple_of(s1 + s2, 16))
+        shape_env.axioms[sympy.Eq(Mod(s2, 16), 0)] = sympy.true
+        self.assertTrue(sv.statically_known_multiple_of(s1 + s2, 16))
+        self.assertTrue(sv.statically_known_multiple_of(s1 + 32, 16))
+        self.assertFalse(sv.statically_known_multiple_of(s1 + 3, 16))
+
+        # FloorDiv(a, b): a must be multiple of b*n
+        self.assertFalse(sv.statically_known_multiple_of(FloorDiv(s1, 3), 16))
+        shape_env.axioms[sympy.Eq(Mod(s3, 48), 0)] = sympy.true
+        self.assertTrue(sv.statically_known_multiple_of(FloorDiv(s3, 3), 16))
+
+        # Mod(a, b): both a and b must be multiples of n
+        self.assertTrue(sv.statically_known_multiple_of(Mod(s1, 48), 16))
+        s_nodiv = sympy.Symbol("s_nodiv", positive=True, integer=True)
+        self.assertFalse(sv.statically_known_multiple_of(Mod(s_nodiv, 32), 16))
+        self.assertFalse(sv.statically_known_multiple_of(Mod(s1, 7), 16))
+
+        # Axiom fallback: bare symbol resolved via statically_known_true
+        s4 = sympy.Symbol("s4", positive=True, integer=True)
+        self.assertFalse(sv.statically_known_multiple_of(s4, 8))
+        shape_env.axioms[sympy.Eq(Mod(s4, 8), 0)] = sympy.true
+        self.assertTrue(sv.statically_known_multiple_of(s4, 8))
+
+    def test_signature_of_fp8_dtypes(self):
+        """fp8 dtypes should produce correct Triton pointer signatures via _type_of."""
+        expected = {
+            torch.float8_e4m3fn: "*fp8e4nv",
+            torch.float8_e5m2: "*fp8e5",
+            torch.float8_e4m3fnuz: "*fp8e4b8",
+            torch.float8_e5m2fnuz: "*fp8e5b16",
+        }
+        for dtype, expected_sig in expected.items():
+            arg = TensorArg(name="x", buffer="buf0", dtype=dtype)
+            sig = triton_utils.signature_of(arg, size_dtype=None)
+            self.assertEqual(sig, expected_sig, f"wrong signature for {dtype}")
 
 
 if __name__ == "__main__":

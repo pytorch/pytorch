@@ -12,6 +12,7 @@ from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
     DTensor,
+    init_device_mesh,
     Partial,
     Placement,
     Replicate,
@@ -19,6 +20,7 @@ from torch.distributed.tensor import (
 )
 from torch.distributed.tensor._ops._math_ops import _NormPartial
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -546,7 +548,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertTrue(res._spec.placements[0].is_partial())
         res = res.redistribute(dt.device_mesh, placements=[Replicate()])
         expected = sum(i for i in range(self.world_size)) * 2
-        self.assertEqual(res, expected)
+        self.assertEqual(res.full_tensor(), expected)
 
         res = aten.div.Scalar(dt, 2)
         self.assertEqual(
@@ -557,7 +559,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertTrue(res._spec.placements[0].is_partial())
         res = res.redistribute(dt.device_mesh, placements=[Replicate()])
         expected = sum(i for i in range(self.world_size)) / 2
-        self.assertEqual(res, expected)
+        self.assertEqual(res.full_tensor(), expected)
 
     @with_comms
     def test_mul_div_scalar_norm_partial(self):
@@ -589,7 +591,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
         res = dt + 1
         expected = sum(i for i in range(self.world_size)) + 1
-        self.assertEqual(res, expected)
+        self.assertEqual(res.full_tensor(), expected)
         self.assertTrue(res._spec.placements[0].is_replicate())
 
         # regular partial - scalar -> replicate
@@ -601,12 +603,12 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
         res = dt - 1
         expected = sum(i for i in range(self.world_size)) - 1
-        self.assertEqual(res, expected)
+        self.assertEqual(res.full_tensor(), expected)
         self.assertTrue(res._spec.placements[0].is_replicate())
 
         res = 7 - dt
         expected = 7 - sum(i for i in range(self.world_size))
-        self.assertEqual(res, expected)
+        self.assertEqual(res.full_tensor(), expected)
         self.assertTrue(res._spec.placements[0].is_replicate())
 
         # regular partial + regular partial -> partial
@@ -615,14 +617,14 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertTrue(res._spec.placements[0].is_partial())
         res = res.redistribute(dt.device_mesh, placements=[Replicate()])
         expected = sum(i for i in range(self.world_size)) * 2
-        self.assertEqual(res, expected)
+        self.assertEqual(res.full_tensor(), expected)
 
         # regular partial - regular partial -> partial
         res = dt - dt
         self.assertEqual(res.to_local(), rank - rank)
         self.assertTrue(res._spec.placements[0].is_partial())
         res = res.redistribute(dt.device_mesh, placements=[Replicate()])
-        self.assertEqual(res, 0)
+        self.assertEqual(res.full_tensor(), 0)
 
     @with_comms
     def test_add_sub_scalar_norm_partial(self):
@@ -636,7 +638,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertTrue(isinstance(norm._spec.placements[0], _NormPartial))
         norm = norm + 1
 
-        self.assertEqual(norm, 11)
+        self.assertEqual(norm.full_tensor(), 11)
         self.assertTrue(norm._spec.placements[0].is_replicate())
 
         dt = distribute_tensor(local_tensor, mesh, [Shard(0)])
@@ -645,7 +647,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertTrue(isinstance(norm._spec.placements[0], _NormPartial))
         norm = norm - 1
 
-        self.assertEqual(norm, 9)
+        self.assertEqual(norm.full_tensor(), 9)
         self.assertTrue(norm._spec.placements[0].is_replicate())
 
     @with_comms
@@ -917,6 +919,392 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             device=self.device_type,
         )
         self.assertEqual(d_self.full_tensor(), expected)
+
+    @with_comms
+    @parametrize(
+        "op_fn,second_arg,placement,expected",
+        [
+            # Binary list ops preserve Partial("sum")
+            (torch._foreach_add, "list", Partial("sum"), Partial("sum")),
+            # Scalar mul preserves Partial("sum") (linearity)
+            (torch._foreach_mul, 2.0, Partial("sum"), Partial("sum")),
+            # Neg preserves Partial("sum") (linearity)
+            (torch._foreach_neg, None, Partial("sum"), Partial("sum")),
+            # Binary list ops preserve Shard(0)
+            (torch._foreach_add, "list", Shard(0), Shard(0)),
+        ],
+    )
+    def test_foreach_placement_propagation(
+        self, op_fn, second_arg, placement, expected
+    ):
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        shapes = [(8, 8), (4, 4), (2, 6)]
+        if placement.is_shard():
+            dts = [
+                distribute_tensor(
+                    torch.rand(s, device=self.device_type), device_mesh, [placement]
+                )
+                for s in shapes
+            ]
+        else:
+            dts = [
+                DTensor.from_local(
+                    torch.rand(s, device=self.device_type), device_mesh, [placement]
+                )
+                for s in shapes
+            ]
+
+        if second_arg == "list":
+            if placement.is_shard():
+                args = [
+                    distribute_tensor(
+                        torch.rand(s, device=self.device_type),
+                        device_mesh,
+                        [placement],
+                    )
+                    for s in shapes
+                ]
+            else:
+                args = [
+                    DTensor.from_local(
+                        torch.rand(s, device=self.device_type),
+                        device_mesh,
+                        [placement],
+                    )
+                    for s in shapes
+                ]
+            call_args = (dts, args)
+        elif second_arg is None:
+            call_args = (dts,)
+        else:
+            call_args = (dts, second_arg)
+
+        with comm_mode:
+            result = op_fn(*call_args)
+
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(len(result), len(shapes))
+        for r in result:
+            self.assertIsInstance(r, DTensor)
+            self.assertEqual(r.placements, (expected,))
+
+    @with_comms
+    def test_foreach_mixed_placements(self):
+        """Each element in a foreach list independently preserves its placement."""
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        dt1 = DTensor.from_local(
+            torch.rand(8, 8, device=self.device_type),
+            device_mesh,
+            [Partial("sum")],
+        )
+        ds1 = DTensor.from_local(
+            torch.rand(8, 8, device=self.device_type),
+            device_mesh,
+            [Partial("sum")],
+        )
+        dt2 = distribute_tensor(
+            torch.rand(8, 4, device=self.device_type), device_mesh, [Shard(0)]
+        )
+        ds2 = distribute_tensor(
+            torch.rand(8, 4, device=self.device_type), device_mesh, [Shard(0)]
+        )
+
+        with comm_mode:
+            result = torch._foreach_add([dt1, dt2], [ds1, ds2])
+
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(result[0].placements, (Partial("sum"),))
+        self.assertEqual(result[1].placements, (Shard(0),))
+
+    @with_comms
+    @skip_unless_torch_gpu
+    @parametrize(
+        "mesh_type,amsgrad",
+        [
+            # All tensors on the same 1D mesh
+            ("same", False),
+            # state_steps on a different sub-mesh, with max_exp_avg_sqs present
+            ("cross", True),
+            # state_steps on a different sub-mesh, empty max_exp_avg_sqs
+            # (triggers the different_mesh_args index remapping)
+            ("cross", False),
+        ],
+    )
+    def test_fused_adam(self, mesh_type, amsgrad):
+        if mesh_type == "same":
+            param_mesh = self.build_device_mesh()
+            step_mesh = param_mesh
+        else:
+            mesh_2d = init_device_mesh(
+                self.device_type,
+                (2, self.world_size // 2),
+                mesh_dim_names=("dp", "tp"),
+            )
+            param_mesh = mesh_2d["tp"]
+            step_mesh = mesh_2d["dp"]
+
+        d_params = [
+            distribute_tensor(
+                torch.rand(8, 8, device=self.device_type), param_mesh, [Shard(0)]
+            )
+        ]
+        d_grads = [
+            distribute_tensor(
+                torch.rand(8, 8, device=self.device_type), param_mesh, [Shard(0)]
+            )
+        ]
+        d_exp_avgs = [
+            distribute_tensor(
+                torch.zeros(8, 8, device=self.device_type), param_mesh, [Shard(0)]
+            )
+        ]
+        d_exp_avg_sqs = [
+            distribute_tensor(
+                torch.zeros(8, 8, device=self.device_type), param_mesh, [Shard(0)]
+            )
+        ]
+        d_max_exp_avg_sqs = (
+            [
+                distribute_tensor(
+                    torch.zeros(8, 8, device=self.device_type),
+                    param_mesh,
+                    [Shard(0)],
+                )
+            ]
+            if amsgrad
+            else []
+        )
+        d_state_steps = [
+            distribute_tensor(
+                torch.tensor(1.0, device=self.device_type), step_mesh, [Replicate()]
+            )
+        ]
+
+        torch._fused_adam_(
+            d_params,
+            d_grads,
+            d_exp_avgs,
+            d_exp_avg_sqs,
+            d_max_exp_avg_sqs,
+            d_state_steps,
+            lr=0.001,
+            beta1=0.9,
+            beta2=0.999,
+            weight_decay=0.0,
+            eps=1e-8,
+            amsgrad=amsgrad,
+            maximize=False,
+        )
+
+        self.assertIsInstance(d_params[0], DTensor)
+        self.assertEqual(d_params[0].placements, (Shard(0),))
+        self.assertEqual(d_params[0].device_mesh, param_mesh)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_fused_adamw_strided_shard_cross_mesh(self):
+        """Reproduce the torchtitan pattern: params with _StridedShard on a 2D
+        mesh, state_steps with Replicate on a 1D DP sub-mesh."""
+        mesh_2d = init_device_mesh(
+            self.device_type,
+            (2, self.world_size // 2),
+            mesh_dim_names=("dp", "tp"),
+        )
+        dp_mesh = mesh_2d["dp"]
+        placements = [_StridedShard(0, split_factor=2), Shard(0)]
+
+        d_params = [
+            DTensor.from_local(
+                torch.randn(4, 8, device=self.device_type),
+                mesh_2d,
+                placements,
+                run_check=False,
+            )
+        ]
+        d_grads = [
+            DTensor.from_local(
+                torch.randn(4, 8, device=self.device_type),
+                mesh_2d,
+                placements,
+                run_check=False,
+            )
+        ]
+        d_exp_avgs = [
+            DTensor.from_local(
+                torch.zeros(4, 8, device=self.device_type),
+                mesh_2d,
+                placements,
+                run_check=False,
+            )
+        ]
+        d_exp_avg_sqs = [
+            DTensor.from_local(
+                torch.zeros(4, 8, device=self.device_type),
+                mesh_2d,
+                placements,
+                run_check=False,
+            )
+        ]
+        d_state_steps = [
+            DTensor.from_local(
+                torch.tensor(1.0, device=self.device_type),
+                dp_mesh,
+                [Replicate()],
+                run_check=False,
+            )
+        ]
+
+        torch.ops.aten._fused_adamw_.default(
+            d_params,
+            d_grads,
+            d_exp_avgs,
+            d_exp_avg_sqs,
+            [],
+            d_state_steps,
+            lr=0.1,
+            beta1=0.9,
+            beta2=0.999,
+            weight_decay=0.01,
+            eps=1e-8,
+            amsgrad=False,
+            maximize=False,
+        )
+
+        self.assertIsInstance(d_params[0], DTensor)
+        self.assertEqual(d_params[0].placements, tuple(placements))
+        self.assertEqual(d_params[0].device_mesh, mesh_2d)
+
+    @with_comms
+    def test_fused_adamw_tensor_lr(self):
+        """Test _fused_adamw_ with tensor lr kwarg."""
+        device_mesh = self.build_device_mesh()
+
+        d_params = [
+            distribute_tensor(
+                torch.rand(8, 8, device=self.device_type), device_mesh, [Shard(0)]
+            )
+        ]
+        d_grads = [
+            distribute_tensor(
+                torch.rand(8, 8, device=self.device_type), device_mesh, [Shard(0)]
+            )
+        ]
+        d_exp_avgs = [
+            distribute_tensor(
+                torch.zeros(8, 8, device=self.device_type), device_mesh, [Shard(0)]
+            )
+        ]
+        d_exp_avg_sqs = [
+            distribute_tensor(
+                torch.zeros(8, 8, device=self.device_type), device_mesh, [Shard(0)]
+            )
+        ]
+        d_state_steps = [
+            distribute_tensor(
+                torch.tensor(1.0, device=self.device_type),
+                device_mesh,
+                [Replicate()],
+            )
+        ]
+        d_lr = distribute_tensor(
+            torch.tensor(0.001, device=self.device_type),
+            device_mesh,
+            [Replicate()],
+        )
+
+        # tensor_lr variant passes lr as a tensor kwarg
+        torch.ops.aten._fused_adamw_.tensor_lr(
+            d_params,
+            d_grads,
+            d_exp_avgs,
+            d_exp_avg_sqs,
+            [],
+            d_state_steps,
+            lr=d_lr,
+            beta1=0.9,
+            beta2=0.999,
+            weight_decay=0.01,
+            eps=1e-8,
+            amsgrad=False,
+            maximize=False,
+        )
+
+        self.assertIsInstance(d_params[0], DTensor)
+        self.assertEqual(d_params[0].placements, (Shard(0),))
+
+    @with_comms
+    def test_new_pointwise_ops(self):
+        device_mesh = self.build_device_mesh()
+        torch.manual_seed(self.rank)
+        shard_spec = [Shard(0)]
+
+        # hardshrink: non-decreasing unary, decomp-blocked
+        inp = torch.randn(8, 5, device=self.device_type)
+        dt = DTensor.from_local(inp, device_mesh, shard_spec)
+        self.assertEqual(
+            torch.nn.functional.hardshrink(dt).to_local(),
+            torch.nn.functional.hardshrink(inp),
+        )
+
+        # lcm: binary integer pointwise
+        a = torch.randint(1, 100, (8, 5), device=self.device_type)
+        b = torch.randint(1, 100, (8, 5), device=self.device_type)
+        da = DTensor.from_local(a, device_mesh, shard_spec)
+        db = DTensor.from_local(b, device_mesh, shard_spec)
+        self.assertEqual(torch.lcm(da, db).to_local(), torch.lcm(a, b))
+
+        # special_xlog1py and special_entr
+        pos = torch.rand(8, 5, device=self.device_type) + 0.1
+        dp = DTensor.from_local(pos, device_mesh, shard_spec)
+        self.assertEqual(
+            torch.special.xlog1py(dp, dp).to_local(),
+            torch.special.xlog1py(pos, pos),
+        )
+        self.assertEqual(
+            torch.special.entr(dp).to_local(),
+            torch.special.entr(pos),
+        )
+
+    @with_comms
+    def test_new_special_pointwise_ops(self):
+        device_mesh = self.build_device_mesh()
+        torch.manual_seed(self.rank)
+        shard_spec = [Shard(0)]
+
+        # Unary special functions
+        inp = torch.rand(8, 5, device=self.device_type) + 0.1
+        dt = DTensor.from_local(inp, device_mesh, shard_spec)
+        for op in [
+            torch.special.airy_ai,
+            torch.special.bessel_y0,
+            torch.special.bessel_y1,
+            torch.special.modified_bessel_i0,
+            torch.special.modified_bessel_i1,
+            torch.special.modified_bessel_k0,
+            torch.special.modified_bessel_k1,
+            torch.special.scaled_modified_bessel_k0,
+            torch.special.scaled_modified_bessel_k1,
+        ]:
+            self.assertEqual(op(dt).to_local(), op(inp))
+
+        # Binary special polynomial ops
+        x = torch.rand(8, 5, device=self.device_type)
+        n = torch.randint(0, 5, (8, 5), device=self.device_type, dtype=x.dtype)
+        dx = DTensor.from_local(x, device_mesh, shard_spec)
+        dn = DTensor.from_local(n, device_mesh, shard_spec)
+        for op in [
+            torch.special.chebyshev_polynomial_t,
+            torch.special.chebyshev_polynomial_u,
+            torch.special.hermite_polynomial_h,
+            torch.special.hermite_polynomial_he,
+            torch.special.laguerre_polynomial_l,
+            torch.special.legendre_polynomial_p,
+        ]:
+            self.assertEqual(op(dx, dn).to_local(), op(x, n))
 
 
 instantiate_parametrized_tests(DistElementwiseOpsTest)

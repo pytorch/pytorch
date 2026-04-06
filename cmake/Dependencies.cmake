@@ -1023,7 +1023,7 @@ if(USE_ROCM)
       list(APPEND HIP_CXX_FLAGS -DUSE_ROCM_CK_GEMM)
     endif()
     list(APPEND HIP_HIPCC_FLAGS --offload-compress)
-    list(APPEND HIP_HIPCC_FLAGS -std=c++17)
+    list(APPEND HIP_HIPCC_FLAGS -std=c++20)
     # Pass device library path for theRock nightly builds
     if(DEFINED ENV{HIP_DEVICE_LIB_PATH})
       file(TO_CMAKE_PATH "$ENV{HIP_DEVICE_LIB_PATH}" _hip_device_lib_path)
@@ -1086,6 +1086,16 @@ if(USE_ROCM)
     if(hipsparselt_FOUND)
       list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
         roc::hipsparselt
+      )
+      if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "7.12.0")
+          set(CAFFE2_USE_HIPSPARSELT ON)
+      endif()
+    endif()
+
+    # ROCM-SMI needed to support symmetric memory
+    if(USE_DISTRIBUTED AND UNIX)
+      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
+        rocm_smi64
       )
     endif()
 

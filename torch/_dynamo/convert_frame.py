@@ -585,6 +585,7 @@ class ConvertFrameAssert:
         export: bool = False,
         export_constraints: Any | None = None,
         package: CompilePackage | None = None,
+        recompile_limit: int | None = None,
     ) -> None:
         # assert export_constraints is None
         reset_graph_break_dup_checker()
@@ -593,6 +594,7 @@ class ConvertFrameAssert:
         self._export = export
         self._export_constraints = export_constraints
         self._package = package
+        self._recompile_limit = recompile_limit
         self._box = ConvertFrameBox()
 
     @property
@@ -602,6 +604,7 @@ class ConvertFrameAssert:
             self._one_graph,
             self._export,
             self._export_constraints,
+            recompile_limit=self._recompile_limit,
         )
 
     def __call__(
@@ -720,7 +723,15 @@ class ConvertFrameAssert:
             dynamo_tls.traced_frame_infos.append(info)
 
         try:
-            with compile_context(CompileContext(compile_id)):
+            compile_ctx = compile_context(CompileContext(compile_id))
+            # When recompile_limit is set, temporarily override the global
+            # config so the existing exceeds_recompile_limit check uses it.
+            recompile_ctx = (
+                config.patch(recompile_limit=self._recompile_limit)
+                if self._recompile_limit is not None
+                else contextlib.nullcontext()
+            )
+            with compile_ctx, recompile_ctx:
                 result = _compile(
                     frame.f_code,
                     frame.f_globals,
@@ -759,10 +770,16 @@ def convert_frame_assert(
     export: bool = False,
     export_constraints: Any | None = None,
     package: CompilePackage | None = None,
+    recompile_limit: int | None = None,
 ) -> ConvertFrameAssert:
     """Fully convert a frame into an FX graph, raising an exception if we fail."""
     return ConvertFrameAssert(
-        compiler_fn, one_graph, export, export_constraints, package
+        compiler_fn,
+        one_graph,
+        export,
+        export_constraints,
+        package,
+        recompile_limit,
     )
 
 
@@ -1004,6 +1021,20 @@ class GraphRuntimeEnv:
             )
 
 
+def _safe_builtins_dict(builtins_dict: dict[str, Any]) -> dict[str, Any]:
+    """Filter a builtins dict to only picklable entries for serialization."""
+    import pickle
+
+    result = {}
+    for k, v in builtins_dict.items():
+        try:
+            pickle.dumps(v)
+            result[k] = v
+        except Exception:
+            pass
+    return result
+
+
 @dataclass
 class GraphCaptureOutput:
     """
@@ -1052,6 +1083,17 @@ class GraphCaptureOutput:
 
         # Scan bytecode for all external references
         external_refs = self._get_external_refs(self.bytecode)
+
+        # Best-effort serialization of builtins referenced by the bytecode.
+        # Similar to how guards prune __builtins_dict__ to only used entries.
+        import builtins as _builtins
+
+        for ref in external_refs:
+            if ref not in used_globals:
+                if ref.startswith("__builtins_dict__") and ref in self.f_globals:
+                    used_globals[ref] = _safe_builtins_dict(self.f_globals[ref])
+                elif hasattr(_builtins, ref):
+                    used_globals[ref] = getattr(_builtins, ref)
 
         return GraphRuntimeEnv(
             bytecode=self.bytecode,
@@ -1742,29 +1784,10 @@ def _compile(
             recompile_reason = (
                 "Unable to find recompilation reasons" if not reasons else reasons[0]
             )
-        # Recheck for recompilation, for when inline_inbuilt_nn_modules is set to False
-        inline_inbuilt_nn_modules_candidate = False
-        if not config.inline_inbuilt_nn_modules and frame:
-            inbuilt_nn_reasons = get_and_maybe_log_recompilation_reasons(
-                cache_entry, frame, innermost_fn(compiler_fn), skip_logging=True
-            )
-            inbuilt_nn_recompile_reason = (
-                None if not inbuilt_nn_reasons else inbuilt_nn_reasons[0]
-            )
-
-            if (
-                inbuilt_nn_recompile_reason is not None
-                and "[inline-inbuilt-nn-modules-candidate]"
-                in inbuilt_nn_recompile_reason
-            ):
-                inline_inbuilt_nn_modules_candidate = True
-
-        # Set if the recompile is a candidate for inline_inbuilt_nn_modules
-        # regardless of whether inline_inbuilt_nn_modules is set or not
         metrics_context.update_outer(
             {
                 "recompile_reason": recompile_reason,
-                "inline_inbuilt_nn_modules_candidate": inline_inbuilt_nn_modules_candidate,
+                "inline_inbuilt_nn_modules_candidate": False,
             }
         )
 
@@ -2093,18 +2116,24 @@ class ConvertFrame:
         compiler_fn: CompilerFn,
         hooks: Hooks,
         package: CompilePackage | None = None,
+        recompile_limit: int | None = None,
     ) -> None:
         self._torchdynamo_orig_backend = compiler_fn
         self._inner_convert = convert_frame_assert(
-            compiler_fn, one_graph=False, package=package
+            compiler_fn,
+            one_graph=False,
+            package=package,
+            recompile_limit=recompile_limit,
         )
         self._hooks = hooks
+        self._recompile_limit = recompile_limit
 
     @property
     def _clone_with_backend(self) -> Callable[[WrapBackendDebug], ConvertFrame]:
         return lambda backend: convert_frame(
             backend,
             self._hooks,
+            recompile_limit=self._recompile_limit,
         )
 
     def __call__(
@@ -2229,9 +2258,12 @@ def convert_frame(
     compiler_fn: CompilerFn,
     hooks: Hooks,
     package: CompilePackage | None = None,
+    recompile_limit: int | None = None,
 ) -> ConvertFrame:
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
-    return ConvertFrame(compiler_fn, hooks, package=package)
+    return ConvertFrame(
+        compiler_fn, hooks, package=package, recompile_limit=recompile_limit
+    )
 
 
 # TODO mlazos: add support for same args, or record them

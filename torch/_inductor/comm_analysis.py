@@ -9,7 +9,7 @@ import sympy
 
 import torch
 import torch.utils._pytree as pytree
-from torch.fx.experimental.symbolic_shapes import size_hint
+from torch.fx.experimental.symbolic_shapes import optimization_hint
 from torch.fx.operator_schemas import normalize_function
 
 from . import ir
@@ -86,7 +86,7 @@ def get_ir_node_size_numel(size: torch.Size, fallback: int = 4096 * 4096) -> int
 
 def get_fx_node_size_numel(size: torch.Size, fallback: int = 4096 * 4096) -> int:
     numel = functools.reduce(operator.mul, size, 1)
-    result = size_hint(numel, fallback=fallback)
+    result = optimization_hint(numel, fallback=fallback)
     return result
 
 
@@ -467,19 +467,18 @@ def estimate_nccl_collective_runtime_from_fx_node(
 
     def _nccl_estimate() -> float | None:
         # TODO: Refactor with estimate_nccl_collective_runtime_nccl_estimator
-        from torch.distributed.distributed_c10d import (
-            _get_pg_default_device,
-            _resolve_process_group,
-            Backend,
-        )
+        from torch.distributed.distributed_c10d import _resolve_process_group, Backend
 
         pg = _resolve_process_group(group_name)
         if torch.distributed.distributed_c10d.get_backend(pg) == Backend.FAKE:
             # nccl estimator requires real process group
             return None
 
-        device = _get_pg_default_device(pg)
-        backend = pg._get_backend(device)
+        device = torch.device("cuda")
+        try:
+            backend = pg._get_backend(device)
+        except RuntimeError:
+            return None
         if not backend.supports_time_estimate:
             return None
 
@@ -491,9 +490,6 @@ def estimate_nccl_collective_runtime_from_fx_node(
                 dtype=dtype,
                 device=device,
             )
-
-        def try_size_hint(s: sympy.Expr) -> int:
-            return V.graph.sizevars.optimization_hint(s, fallback=0)
 
         def to_real_tensor(e: Any) -> Any:
             if isinstance(e, torch.fx.Node):
@@ -507,7 +503,9 @@ def estimate_nccl_collective_runtime_from_fx_node(
 
         fn = fx_node.target
         assert isinstance(fn, torch._ops.OpOverload)
-        with torch.distributed._time_estimator(group=pg) as time_estimator:
+        with torch.distributed._time_estimator(
+            group=pg, device=device
+        ) as time_estimator:
             w = fn(*real_args, **real_kwargs)
             torch.ops._c10d_functional.wait_tensor.default(w)
         est_time_us = time_estimator.estimated_time

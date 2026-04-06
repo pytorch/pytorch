@@ -180,6 +180,26 @@ automatic_dynamic_shapes = (
 # Valid options: "dynamic", "unbacked"
 automatic_dynamic_shapes_mark_as: Literal["dynamic", "unbacked"] = "dynamic"
 
+# When True, adds exclusion guards for tensor dims and scalars that transition
+# from static to dynamic via automatic_dynamic_shapes.
+#
+# Invariant: when enabled, automatic_dynamic recompilation preserves graph
+# selection — inputs that matched a previous static cache entry will continue
+# to use that entry, not be intercepted by a newer dynamic entry. This holds
+# as long as recompilations are caused solely by the same variable being
+# observed with different static values (progressive dynamism). A recompilation
+# triggered by a different reason (e.g., a guard failure unrelated to shape
+# transitions) will clear the exclusion state for that entry.
+#
+# Mechanism: the exclusion guard rejects inputs matching the prior static
+# graph's sizes, so those inputs fall through to the more specialized static
+# graph instead of being captured by the newer dynamic graph.
+#
+# Scope: applies only to graph-input-level dimension and scalar transitions.
+# Does NOT handle data-dependent branching (if x.size(0) > k), graph breaks,
+# or other recompilation triggers where no dimension actually transitions.
+automatic_dynamic_exclusion_guard = False
+
 # log graph in/out metadata
 # This is only turned on for export today since we
 # know we are tracing a flat callable. later, this
@@ -442,7 +462,7 @@ skip_no_tensor_aliasing_guards_on_parameters = True
 skip_tensor_guards_with_matching_dict_tags = True
 
 # Skips guards on func.__defaults__ if the element to be guarded is a constant
-skip_guards_on_constant_func_defaults = True
+skip_guards_on_constant_func_defaults = False
 
 
 # The recursive-dict-tag guard relies on the class/function identity staying
@@ -544,6 +564,8 @@ enable_faithful_generator_behavior = True
 inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
     default=True,
     justknob="pytorch/compiler:inline_inbuilt_nn_modules",
+    deprecated=True,
+    deprecation_message="does not do anything, inline_inbuilt_nn_modules is always True",
 )
 
 # Resume tracing in nested frames if a nested graph break occurs

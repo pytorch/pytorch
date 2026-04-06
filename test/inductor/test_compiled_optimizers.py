@@ -58,18 +58,19 @@ from torch.testing._internal.common_optimizers import (
     optim_db,
     optims,
 )
-from torch.testing._internal.common_utils import parametrize, skipIfRocm, skipIfWindows
+from torch.testing._internal.common_utils import (
+    parametrize,
+    skipIfRocm,
+    skipIfWindows,
+    skipIfXpu,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
     HAS_GPU,
     has_triton,
 )
-from torch.testing._internal.triton_utils import (
-    requires_cuda_and_triton,
-    requires_gpu,
-    requires_gpu_and_triton,
-)
+from torch.testing._internal.triton_utils import requires_gpu, requires_gpu_and_triton
 
 
 def get_inputs(optim):
@@ -591,7 +592,7 @@ class CompiledOptimizerParityTests(TestCase):
     @optims(optim_db, dtypes=[torch.float32])
     @parametrize("use_closure", [True, False])
     def test_correctness(self, device, dtype, optim_info, use_closure):
-        torch.cuda.manual_seed_all(0)
+        torch.get_device_module(device).manual_seed_all(0)
         torch.manual_seed(0)
         random.seed(0)
         optim_cls = optim_info.optim_cls
@@ -931,7 +932,7 @@ class CompiledOptimizerTests(TestCase):
 
         self.assertLess(end - start, 90)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_S429861(self):
         # Just verify we can compile this function without error
         try:
@@ -947,7 +948,7 @@ class CompiledOptimizerTests(TestCase):
         from torch._inductor.utils import fresh_cache
 
         with fresh_cache():
-            kwargs = aot_graph_input_parser(forward)
+            kwargs = aot_graph_input_parser(forward, device=GPU_TYPE)
             torch.compile(forward)(**kwargs)
 
     @requires_gpu_and_triton
@@ -992,7 +993,7 @@ class CompiledOptimizerTests(TestCase):
 
 
 @skipIfRocm(msg="ROCm may have different numerical behavior")
-@requires_cuda_and_triton
+@requires_gpu_and_triton
 class CompiledOptimizerBitwiseTests(TestCase):
     """
     Tests that compiled optimizers produce bitwise identical results to eager
@@ -1085,7 +1086,8 @@ for optim_cls, name, kwargs, scheduler_cls in COMPILED_OPT_KWARG_DB:
 
 def _make_bitwise_test(optim_cls, kernel_count=None, **optim_kwargs):
     @skipIfRocm(msg="ROCm may have different numerical behavior")
-    @requires_cuda_and_triton
+    @skipIfXpu(msg="AttributeError, torch-xpu-ops: #2999")
+    @requires_gpu_and_triton
     @config.patch(
         {
             "score_fusion_memory_threshold": 1,

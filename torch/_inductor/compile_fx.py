@@ -46,6 +46,7 @@ from torch._dynamo.utils import (
     flatten_graph_inputs,
     get_inputs_devices,
     get_metrics_context,
+    GmWrapper,
     lazy_format_graph_code,
     set_feature_use,
 )
@@ -86,6 +87,7 @@ from torch._inductor.utils import (
     count_tangents,
     fresh_cache,
     get_all_devices,
+    get_static_bw_input_idxs,
     InputType,
     is_gpu,
     should_assume_input_aligned,
@@ -158,8 +160,6 @@ else:
     from torch._inductor.fb.utils import log_optimus_to_scuba, time_and_log
 
 if TYPE_CHECKING:
-    import types
-
     from torch._functorch._aot_autograd.schemas import (
         FQN,
         GraphInputName,
@@ -771,6 +771,7 @@ class _CompileFxKwargs(TypedDict, total=False):
     extern_node_serializer: Callable[[list[ExternKernelNode]], Any] | None
     boxed_forward_device_index: BoxedDeviceIndex | None
     fx_wrapper: bool
+    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]]
 
 
 class _CompileFxCallable(Protocol):
@@ -778,6 +779,7 @@ class _CompileFxCallable(Protocol):
         self,
         gm: GraphModule,
         example_inputs: Sequence[InputType],
+        compile_region_name: str | None = None,
         **kwargs: Unpack[_CompileFxKwargs],
     ) -> OutputCode: ...
 
@@ -785,6 +787,7 @@ class _CompileFxCallable(Protocol):
 def compile_fx_inner(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
+    compile_region_name: str | None = None,
     **kwargs: Unpack[_CompileFxKwargs],
 ) -> OutputCode:
     kwargs.setdefault("cudagraphs", None)
@@ -824,6 +827,7 @@ def compile_fx_inner(
         return wrap_compiler_debug(_compile_fx_inner, compiler_name="inductor")(
             gm,
             example_inputs,
+            compile_region_name=compile_region_name,
             **kwargs,
         )
 
@@ -832,6 +836,7 @@ def compile_fx_inner(
 def _compile_fx_inner(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
+    compile_region_name: str | None = None,
     **graph_kwargs: Unpack[_CompileFxKwargs],
 ) -> OutputCode:
     """
@@ -890,6 +895,7 @@ def _compile_fx_inner(
         save_args_for_compile_fx_inner(
             gm,
             example_inputs,
+            compile_region_name=compile_region_name,
             **graph_kwargs,
         )
 
@@ -986,7 +992,11 @@ def _compile_fx_inner(
             TritonBundler.begin_compile()
             try:
                 mb_compiled_graph = fx_codegen_and_compile(
-                    gm, example_inputs, inputs_to_check, **graph_kwargs
+                    gm,
+                    example_inputs,
+                    inputs_to_check,
+                    compile_region_name=compile_region_name,
+                    **graph_kwargs,
                 )
                 assert mb_compiled_graph is not None
                 (
@@ -1018,7 +1028,11 @@ def _compile_fx_inner(
             )
             try:
                 mb_compiled_graph = fx_codegen_and_compile(
-                    gm, example_inputs, inputs_to_check, **graph_kwargs
+                    gm,
+                    example_inputs,
+                    inputs_to_check,
+                    compile_region_name=compile_region_name,
+                    **graph_kwargs,
                 )
             except Exception as e:
                 raise InductorError(e, currentframe()).with_traceback(
@@ -1033,7 +1047,11 @@ def _compile_fx_inner(
             TritonBundler.begin_compile()
             try:
                 mb_compiled_graph = fx_codegen_and_compile(
-                    gm, example_inputs, inputs_to_check, **graph_kwargs
+                    gm,
+                    example_inputs,
+                    inputs_to_check,
+                    compile_region_name=compile_region_name,
+                    **graph_kwargs,
                 )
                 assert mb_compiled_graph is not None
                 mb_compiled_graph._time_taken_ns = time.time_ns() - start_time
@@ -1078,6 +1096,8 @@ def _compile_fx_inner(
 
         assert mb_compiled_graph is not None
         compiled_graph = mb_compiled_graph
+        if isinstance(compiled_graph, CompiledFxGraph):
+            compiled_graph.compile_region_name = compile_region_name
 
         # Logging and observability: we log a single chromium event
         # and a tlparse log for every cache action.
@@ -1192,6 +1212,7 @@ class FxCompile(ABC):
 
     # Some stats for logging/debugging
     _compile_stats: dict[type[FxCompile], _FxCompileStat] = defaultdict(_FxCompileStat)
+    compile_region_name: str | None = None
 
     # TODO: We should probably eventually add some kind of async version of this
     # so we can kick off a compile and then go do other things - but we'll need
@@ -1239,7 +1260,9 @@ class _InProcessFxCompile(FxCompile):
         extern_node_serializer: Callable[[list[ExternKernelNode]], Any] | None = (
             graph_kwargs.get("extern_node_serializer", None)
         )
-
+        get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = graph_kwargs.get(
+            "get_decomp_fn", select_decomp_table
+        )
         with (
             _WaitCounter("pytorch.wait_counter.actual_codegen_and_compile").guard(),
             dynamo_utils.preserve_rng_state(),
@@ -1435,6 +1458,7 @@ class _InProcessFxCompile(FxCompile):
                         is_backward=is_backward,
                         is_const_graph=True,
                         fx_wrapper=fx_wrapper,
+                        get_decomp_fn=get_decomp_fn,
                     )
                     with (
                         V.set_graph_handler(const_graph),
@@ -1469,6 +1493,7 @@ class _InProcessFxCompile(FxCompile):
                     const_module=const_graph,
                     inputs_to_check=inputs_to_check,
                     fx_wrapper=fx_wrapper,
+                    get_decomp_fn=get_decomp_fn,
                 )
                 metrics_helper = metrics.CachedMetricsHelper()
 
@@ -1733,6 +1758,7 @@ class _InProcessFxCompile(FxCompile):
                         cudagraphs,
                         example_inputs,
                         static_input_idxs,
+                        self.compile_region_name,
                         graph_kwargs,
                         inputs_to_check,
                         runnable_graph_str,
@@ -1749,6 +1775,7 @@ def fx_codegen_and_compile(
     # This is derivable from the other inputs to this function, but we pass it
     # in explicitly because it's nontrivial to compute
     inputs_to_check: Sequence[int],
+    compile_region_name: str | None = None,
     **graph_kwargs: Unpack[_CompileFxKwargs],
 ) -> OutputCode:
     scheme: FxCompile
@@ -1774,6 +1801,9 @@ def fx_codegen_and_compile(
         )
         # pyrefly: ignore [unbound-name]
         scheme = _AsyncFxCompile(scheme)
+        scheme._compile.compile_region_name = (
+            compile_region_name  # pyrefly: ignore[attr-defined]
+        )
 
     if fx_compile_progressive:
         from .compile_fx_async import _ProgressiveFxCompile
@@ -1788,9 +1818,15 @@ def fx_codegen_and_compile(
 
         # Use in-process compile for the fast version
         fast_scheme = _InProcessFxCompile()
+        fast_scheme.compile_region_name = compile_region_name
 
         # pyrefly: ignore [unbound-name]
         scheme = _ProgressiveFxCompile(fast_scheme, scheme, progression_configs)
+        scheme._optimized_compile.compile_region_name = (
+            compile_region_name  # pyrefly: ignore[attr-defined]
+        )
+
+    scheme.compile_region_name = compile_region_name  # pyrefly: ignore[unbound-name]
 
     # pyrefly: ignore [unbound-name]
     return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
@@ -2067,6 +2103,7 @@ def fw_compiler_freezing(
     dynamo_model: GraphModule,
     num_example_inputs: int,
     inner_compile: Callable[..., Any],
+    # TODO: Take compiler_config_extra instead
     cudagraphs: BoxedBool,
     graph_id: int,
     forward_device: BoxedDeviceIndex,
@@ -2076,7 +2113,8 @@ def fw_compiler_freezing(
     # partition_fn won't be called
     inputs_devices = get_inputs_devices(aot_example_inputs, aot_autograd_model)
     aot_autograd_model = _recursive_joint_graph_passes(
-        aot_autograd_model, input_device=next(iter(inputs_devices))
+        aot_autograd_model,
+        input_device=next(iter(inputs_devices)),
     )
 
     layout_opt = GraphLowering.decide_layout_opt(aot_autograd_model, is_inference=True)
@@ -2172,14 +2210,15 @@ def get_cpp_wrapper_config() -> dict[str, object]:
             format_default_skip_message("cpp wrapper enabled")
         )
 
+    autotune_at_compile_time = (
+        config.triton.autotune_at_compile_time
+        if config.triton.autotune_at_compile_time is not None
+        # Default to True for AOTI. Subject to change in future.
+        else has_triton() and V.aot_compilation
+    )
     return {
-        # Set autotune_at_compile_time to True as default if the option is not explicitly set
-        "triton.autotune_at_compile_time": (
-            config.triton.autotune_at_compile_time
-            if config.triton.autotune_at_compile_time is not None
-            else has_triton()
-        ),
-        "triton.autotune_cublasLt": False,
+        "triton.autotune_at_compile_time": autotune_at_compile_time,
+        "triton.autotune_cublasLt": not autotune_at_compile_time,
         "triton.cudagraphs": False,  # TODO: to be removed
         "triton.store_cubin": True,
     }
@@ -2215,7 +2254,9 @@ def partition_fn(
         # in partitioning.
         inputs_devices = get_inputs_devices(joint_inputs, gm)
         gm = _recursive_joint_graph_passes(
-            gm, skip_invoke_subgraph=True, input_device=next(iter(inputs_devices))
+            gm,
+            skip_invoke_subgraph=True,
+            input_device=next(iter(inputs_devices)),
         )
 
     static_lifetime_input_indices: list[int] | None = kwargs.pop(  # type: ignore[assignment]
@@ -2271,12 +2312,15 @@ class CompilerConfigExtra:
     cudagraphs: BoxedBool
     graph_id: int
     forward_device: BoxedDeviceIndex
+    forward_is_partitioned: BoxedBool
     cudagraphs_bwd_override: bool | None = None
 
 
 def create_compiler_config_extra(
-    config: types.ModuleType, gm_meta: dict[str, Any] | None = None
+    gm: GraphModule | GmWrapper,
 ) -> CompilerConfigExtra:
+    gm_meta = gm.meta if isinstance(gm, GraphModule) else None
+
     # Although cudagraphs may have been enabled via config, various
     # conditions (which are tested within the bowels of Inductor) may
     # force cudagraphs to be disabled.  This mutable box lets us retrieve
@@ -2320,11 +2364,17 @@ def create_compiler_config_extra(
     # See [Backward Generation Handling]
     forward_device = BoxedDeviceIndex(None)
 
+    # Set by the forward compilation when it is partitioned for CUDA graphs.
+    # The backward reads this to decide whether saved tensors can be assumed
+    # to have fixed addresses.
+    forward_is_partitioned = BoxedBool(False)
+
     return CompilerConfigExtra(
         cudagraphs=cudagraphs,
         graph_id=graph_id,
         forward_device=forward_device,
         cudagraphs_bwd_override=cudagraphs_bwd_override,
+        forward_is_partitioned=forward_is_partitioned,
     )
 
 
@@ -2362,6 +2412,18 @@ def compile_fx_forward(
                 print_output=False, include_stride=True, include_device=True
             ),
         )
+
+        # Snapshot stack traces on the output node before passes run,
+        # as later passes may strip stack_trace from individual nodes.
+        output = output_node(gm)
+        output.meta["output_stack_traces"] = [
+            (
+                arg.meta.get("stack_trace")
+                if isinstance(arg, torch.fx.node.Node)
+                else None
+            )
+            for arg in output.args[0]  # type: ignore[union-attr]
+        ]
 
         inputs_devices = get_inputs_devices(example_inputs, gm)
         gm = _recursive_joint_graph_passes(gm, input_device=next(iter(inputs_devices)))
@@ -2429,7 +2491,7 @@ def compile_fx_forward(
     _recursive_record_user_visible_output_idxs(gm)
 
     with cudagraph_annotation_context(compiler_config_extra.cudagraphs):
-        return inner_compile(
+        result = inner_compile(
             gm,
             example_inputs,
             static_input_idxs=get_static_input_idxs(fixed),
@@ -2438,6 +2500,16 @@ def compile_fx_forward(
             is_inference=is_inference,
             boxed_forward_device_index=compiler_config_extra.forward_device,
         )
+
+        if (
+            not is_inference
+            and isinstance(result, CompiledFxGraph)
+            and result.partition_maps
+            and len(result.partition_maps) > 1
+        ):
+            compiler_config_extra.forward_is_partitioned.value = True
+
+        return result
 
 
 def compile_fx_backward(
@@ -2476,6 +2548,13 @@ def compile_fx_backward(
         if compiler_config_extra.cudagraphs_bwd_override is not None:
             cudagraphs = BoxedBool(compiler_config_extra.cudagraphs_bwd_override)
 
+        # When the forward was partitioned, saved activations from inline
+        # code between partitions are NOT at fixed addresses. Only mark
+        # primals (params/buffers) as static.
+        if compiler_config_extra.forward_is_partitioned.value:
+            static_input_idxs: Sequence[int] = get_static_bw_input_idxs(gm)
+        else:
+            static_input_idxs = list(range(fixed))
         with (
             (
                 config.patch(get_cpp_wrapper_config())
@@ -2487,7 +2566,7 @@ def compile_fx_backward(
             return inner_compile(
                 gm,
                 example_inputs,
-                static_input_idxs=list(range(fixed)),
+                static_input_idxs=static_input_idxs,
                 cudagraphs=cudagraphs,
                 is_backward=True,
                 graph_id=compiler_config_extra.graph_id,
@@ -2552,6 +2631,7 @@ def compile_fx(
     config_patches: dict[str, Any] | None = None,
     decompositions: dict[OpOverload, Callable[..., Any]] | None = None,
     ignore_shape_env: bool = False,
+    compile_region_name: str | None = None,
 ) -> CompileFxOutput:
     """
     Main entry point for compiling given FX graph.  Despite the fact that this
@@ -2564,6 +2644,13 @@ def compile_fx(
     NB: This function TAKES OWNERSHIP of the input ``model_`` and can potentially
     mutate it!  Make a copy if you need to preserve the original GraphModule.
     """
+    if decompositions is not None:
+
+        def get_decomp_fn() -> dict[Any, Callable[..., Any]]:
+            return decompositions  # pyrefly: ignore[bad-return]
+    else:
+        get_decomp_fn = select_decomp_table
+
     # Some arguments trigger a recursive call to compile_fx.  Handle these
     # short circuits first, before anything else
 
@@ -2582,7 +2669,14 @@ def compile_fx(
                 inner_compile=config.patch(config_patches)(inner_compile),
                 decompositions=decompositions,
                 ignore_shape_env=ignore_shape_env,
+                compile_region_name=compile_region_name,
             )
+
+    # Keep region names out of graph_kwargs so they don't perturb FX cache keys.
+    inner_compile = functools.partial(
+        inner_compile,
+        compile_region_name=compile_region_name,
+    )
 
     # Wake up the AsyncCompile subproc pool as early as possible (if there's cuda).
     if any(
@@ -2622,16 +2716,18 @@ def compile_fx(
                         cpp_wrapper=cpp_wrapper_config,
                         fx_wrapper=fx_wrapper_config,
                     ),
-                    decompositions=decompositions,
                     ignore_shape_env=ignore_shape_env,
+                    get_decomp_fn=get_decomp_fn,
+                    compile_region_name=compile_region_name,
                 )
 
     return _maybe_wrap_and_compile_fx_main(
         model_,
         example_inputs_,
         inner_compile,
-        decompositions,
         ignore_shape_env,
+        get_decomp_fn=get_decomp_fn,
+        compile_region_name=compile_region_name,
     )
 
 
@@ -2670,8 +2766,10 @@ def _maybe_wrap_and_compile_fx_main(
     model_: GraphModule,
     example_inputs_: Sequence[InputType],
     inner_compile: Callable[..., OutputCode],
-    decompositions: dict[OpOverload, Callable[..., Any]] | None,
     ignore_shape_env: bool,
+    *,
+    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
+    compile_region_name: str | None = None,
 ) -> CompileFxOutput:
     """
     Part of compile_fx, called after patching configs.
@@ -2685,8 +2783,9 @@ def _maybe_wrap_and_compile_fx_main(
     compile_gm = functools.partial(
         _maybe_wrap_and_compile_fx_main,
         inner_compile=inner_compile,
-        decompositions=decompositions,
         ignore_shape_env=ignore_shape_env,
+        get_decomp_fn=get_decomp_fn,
+        compile_region_name=compile_region_name,
     )
     if not graph_returns_tuple(model_):
         return make_graph_return_tuple(model_, example_inputs_, compile_gm)
@@ -2707,8 +2806,9 @@ def _maybe_wrap_and_compile_fx_main(
         model_,
         example_inputs_,
         inner_compile,
-        decompositions,
         ignore_shape_env,
+        get_decomp_fn=get_decomp_fn,
+        compile_region_name=compile_region_name,
     )
 
 
@@ -2716,8 +2816,10 @@ def _compile_fx_main(
     model_: GraphModule,
     example_inputs_: Sequence[InputType],
     inner_compile: Callable[..., OutputCode],
-    decompositions: dict[OpOverload, Callable[..., Any]] | None,
     ignore_shape_env: bool,
+    *,
+    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
+    compile_region_name: str | None = None,
 ) -> CompileFxOutput:
     """
     Main part of compile_fx, called after wrapping is done.
@@ -2746,12 +2848,10 @@ def _compile_fx_main(
 
         num_example_inputs = len(example_inputs_)
 
-        gm_meta = model_.meta if isinstance(model_, GraphModule) else None
-        compiler_config_extra = create_compiler_config_extra(config, gm_meta)
+        compiler_config_extra = create_compiler_config_extra(model_)
 
-        decompositions = (
-            decompositions if decompositions is not None else select_decomp_table()
-        )
+        decompositions = get_decomp_fn()
+        inner_compile = functools.partial(inner_compile, get_decomp_fn=get_decomp_fn)
 
         def fw_compiler_base(
             gm: GraphModule,
@@ -2907,10 +3007,10 @@ def _compile_fx_main(
                     decompositions=decompositions,
                     partition_fn=partition_fn,
                     keep_inference_input_mutations=True,
-                    cudagraphs=compiler_config_extra.cudagraphs,
-                    boxed_forward_device_index=compiler_config_extra.forward_device,
+                    compiler_config_extra=compiler_config_extra,
                     ignore_shape_env=ignore_shape_env,
                     pre_grad_passes=run_pre_grad_passes,
+                    compile_region_name=compile_region_name,
                 )(model_, example_inputs_)
             except ShortenTraceback as e:
                 # We will also shorten the traceback inside dynamo.

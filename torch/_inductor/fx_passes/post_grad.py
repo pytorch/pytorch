@@ -245,6 +245,15 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 pass_name = "custom_backend_passes_" + device
                 GraphTransformObserver(gm, pass_name).apply_gm_pass(custom_backend_pass)
 
+    # SPMD verification — before collective reordering passes.
+    if (
+        config.aten_distributed_optimizations.spmd_check
+        and _needs_spmd_graph_preservation()
+    ):
+        from torch._inductor.fx_passes.spmd_check import spmd_check
+
+        spmd_check(gm)
+
     collectives_bucketing: bool = False
 
     if config.bucket_reduce_scatters_fx != "none":
@@ -777,6 +786,13 @@ def reorder_for_locality(graph: torch.fx.Graph):
         def check():
             return True
 
+    def consumes_rng_state(node: torch.fx.Node) -> bool:
+        return (
+            node.op == "call_function"
+            and isinstance(node.target, torch._ops.OpOverload)
+            and torch.Tag.nondeterministic_seeded in node.target.tags
+        )
+
     def visit(other_node):
         if (
             other_node.op == "call_function"
@@ -786,6 +802,11 @@ def reorder_for_locality(graph: torch.fx.Graph):
             == get_mutation_region_id(graph, other_node)
             and check()
         ):
+            # Ops that consume RNG state are order-sensitive and must not be
+            # reordered during locality optimization.
+            if consumes_rng_state(other_node):
+                return
+
             # move node's producers right before it
             node.prepend(other_node)
 
@@ -1037,8 +1058,20 @@ def register_noop_decomp(targets, nop_arg=0):
     return register_fun
 
 
+def _needs_spmd_graph_preservation() -> bool:
+    """Check if SPMD graph preservation is needed for distributed overlap."""
+    return (
+        config.aten_distributed_optimizations.enable_overlap_scheduling
+        or config.reorder_for_compute_comm_overlap
+    )
+
+
 @register_noop_decomp(aten.slice)
 def slice_noop(self, dim=0, start=None, end=None, step=1):
+    if _needs_spmd_graph_preservation():
+        # Keep no-op slices so all ranks produce identical FX graphs (SPMD)
+        # with matching op counts and runtime estimations.
+        return False
     if start is None or end is None:
         return False
 
@@ -1082,6 +1115,10 @@ def repeat_noop(self, repeats):
 
 @register_noop_decomp(aten.constant_pad_nd)
 def constant_pad_nd(x, padding, fill_value=0):
+    if _needs_spmd_graph_preservation():
+        # Keep no-op pads so all ranks produce identical FX graphs (SPMD)
+        # with matching op counts and runtime estimations.
+        return False
     return all(p == 0 for p in padding)
 
 
@@ -1530,9 +1567,10 @@ def should_prefer_unfused_addmm(match):
     extra_check=should_prefer_unfused_addmm,
 )
 def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
-    # Unfusing addmm introduces an extra bf16/fp16 truncation at the mm output
-    # that compounds through deep models and causes accuracy failures.
-    if inp.meta["val"].dtype in (torch.bfloat16, torch.float16):
+    if config.keep_addmm_fused_for_half_dtypes and inp.meta["val"].dtype in (
+        torch.bfloat16,
+        torch.float16,
+    ):
         return
 
     def repl(inp, x1, x2, alpha, beta):
@@ -1876,7 +1914,8 @@ class ConstructorMoverPass:
                         lambda x: x
                         not in [cpu_concat, gpu_concat, gpu_split, gpu_node]
                         + unsqueezed_nodes
-                        and x.target != torch.ops.aten.copy_.default,
+                        and x.target != torch.ops.aten.copy_.default
+                        and x.target != "output",
                     )
                     last_node = gpu_node
 

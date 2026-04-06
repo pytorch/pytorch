@@ -858,6 +858,48 @@ class PyWorkTest(TestCase):
         self.assertEqual(pg.dels, 4)
 
 
+class ProcessGroupArgTest(TestCase):
+    """
+    Test that _c10d_functional ops accept ProcessGroup objects directly
+    (not just string group names) via the Any-typed group argument.
+    """
+
+    def setUp(self):
+        super().setUp()
+        dummy_init_pg()
+        self.pg = ProcessGroupDummy().register()
+
+    def test_all_reduce(self) -> None:
+        x = torch.rand(2, 2)
+        out = torch.ops._c10d_functional.all_reduce(x, "sum", self.pg)
+        torch.ops._c10d_functional.wait_tensor(out)
+
+    def test_all_reduce_(self) -> None:
+        x = torch.rand(2, 2)
+        out = torch.ops._c10d_functional.all_reduce_(x, "sum", self.pg)
+        torch.ops._c10d_functional.wait_tensor(out)
+
+    def test_all_gather_into_tensor(self) -> None:
+        x = torch.rand(2, 2)
+        out = torch.ops._c10d_functional.all_gather_into_tensor(x, 1, self.pg)
+        torch.ops._c10d_functional.wait_tensor(out)
+
+    def test_reduce_scatter_tensor(self) -> None:
+        x = torch.rand(2, 2)
+        out = torch.ops._c10d_functional.reduce_scatter_tensor(x, "sum", 1, self.pg)
+        torch.ops._c10d_functional.wait_tensor(out)
+
+    def test_broadcast(self) -> None:
+        x = torch.rand(2, 2)
+        out = torch.ops._c10d_functional.broadcast(x, 0, self.pg)
+        torch.ops._c10d_functional.wait_tensor(out)
+
+    def test_broadcast_(self) -> None:
+        x = torch.rand(2, 2)
+        out = torch.ops._c10d_functional.broadcast_(x, 0, self.pg)
+        torch.ops._c10d_functional.wait_tensor(out)
+
+
 def find_buffer_assignments(code):
     pattern = r"buf(\d+) = empty_strided_"
     matches = re.finditer(pattern, code)

@@ -91,9 +91,6 @@ jobs:
       - name: Setup XPU
         uses: ./.github/actions/setup-xpu
 
-      - name: Login to ECR
-        uses: ./.github/actions/ecr-login
-
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
@@ -251,7 +248,7 @@ jobs:
             -e ZE_AFFINITY_MASK \
             -e HUGGING_FACE_HUB_TOKEN \
             -e DASHBOARD_TAG \
-            --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
+            --env-file="${RUNNER_TEMP}/github_env_${GITHUB_RUN_ID}" \
             --ulimit stack=10485760:83886080 \
             --ulimit core=0 \
             --security-opt seccomp=unconfined \

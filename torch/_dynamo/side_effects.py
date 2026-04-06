@@ -24,6 +24,7 @@ while enabling optimizations where safe.
 import collections
 import contextlib
 import inspect
+import logging
 import textwrap
 import traceback
 import warnings
@@ -549,6 +550,8 @@ class SideEffects:
         else:
             if isinstance(base_cls_vt, variables.BuiltinVariable):
                 base_cls = base_cls_vt.fn
+            elif isinstance(base_cls_vt, variables.DictBuiltinVariable):
+                base_cls = dict
             elif isinstance(base_cls_vt, variables.UserDefinedClassVariable):
                 base_cls = base_cls_vt.value
             else:
@@ -834,6 +837,17 @@ class SideEffects:
 
                 cg.add_cache(var)
                 var.source = TempLocalSource(cg.tempvars[var])
+
+                if isinstance(var, variables.FrozenDataClassVariable):
+                    for name, value in self.store_attr_mutations.get(var, {}).items():
+                        cg.load_import_from("builtins", "object")
+                        cg.load_method("__setattr__")
+                        cg(var.source)  # type: ignore[attr-defined]
+                        cg(variables.ConstantVariable(name))
+                        cg(value)
+                        cg.extend_output(
+                            [*create_call_method(3), create_instruction("POP_TOP")]
+                        )
 
         for ctx, args in self.save_for_backward:
             cg(ctx.source)
@@ -1132,7 +1146,13 @@ class SideEffects:
                     _maybe_log_side_effect(var)
 
             elif self.is_attribute_mutation(var):
-                if isinstance(
+                if isinstance(var.mutation_type, AttributeMutationNew) and isinstance(
+                    var, variables.FrozenDataClassVariable
+                ):
+                    # These frozen attribute initializations are handled in codegen_save_tempvars
+                    # and don't need to be reset in the suffix.
+                    continue
+                elif isinstance(
                     var,
                     variables.UserDefinedDictVariable,
                 ) and self.is_modified(var._dict_vt):
@@ -1315,6 +1335,15 @@ class SideEffects:
                     cg.call_function(1, False)
                     cg.pop_top()
                 _maybe_log_side_effect(var)
+            elif isinstance(var, variables.CountIteratorVariable):
+                for _ in range(var.advance_count):
+                    cg.add_push_null(
+                        lambda: cg.load_import_from(utils.__name__, "iter_next")
+                    )
+                    cg(var.source)  # type: ignore[attr-defined]
+                    cg.call_function(1, False)
+                    cg.pop_top()
+                _maybe_log_side_effect(var)
             elif isinstance(var, variables.RandomVariable):
                 # set correct random seed state
                 def gen_fn() -> None:
@@ -1351,6 +1380,15 @@ class SideEffects:
                 },
                 payload_fn=lambda: combined_msg,
             )
+
+    def log_side_effects_summary(self) -> None:
+        if config.side_effect_replay_policy == "silent":
+            return
+        if not side_effects_log.isEnabledFor(logging.DEBUG):
+            return
+        for var in self._get_modified_vars():
+            msg = self._format_side_effect_message(var)
+            side_effects_log.debug(msg)
 
     def is_empty(self) -> bool:
         return not (

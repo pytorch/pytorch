@@ -10,9 +10,6 @@
 #include <pybind11/gil_simple.h>
 #else
 // pybind11 < 3.0: gil_simple.h does not exist yet.
-// Use simple GIL management to avoid pulling in
-// pybind11::detail::get_internals() which requires linking against pybind11
-// symbols unavailable in JIT builds.
 #define PYBIND11_SIMPLE_GIL_MANAGEMENT
 #include <pybind11/gil.h>
 // Provide the _simple aliases so generated code works with either version.

@@ -25,34 +25,6 @@
 #include <mach-o/dyld.h>
 #include <mach-o/getsect.h>
 
-@implementation MPSGraph (PyTorchFixups)
-- (MPSGraphTensor*)minimumWithNaNPropagationAndIntFallbackWithPrimaryTensor:(MPSGraphTensor*)primaryTensor
-                                                            secondaryTensor:(MPSGraphTensor*)secondaryTensor
-                                                                       name:(NSString*)name {
-  // As of MacOS-15.1 m..imumWithNanPropagation is only defined for floating types and calling it with integral
-  // arguments results in
-  //  /AppleInternal/Library/BuildRoots/c7c74b64-74b4-11ef-aeda-9635a580fe0d/Library/Caches/com.apple.xbs/Sources/MetalPerformanceShaders/MPSCore/Utility/MPSKernelDAG.mm:805:
-  //  failed assertion `Error getting visible function: (null) Function isNaN_u8_i8 was not found in the library'
-  if (([primaryTensor dataType] & MPSDataTypeFloatBit) == 0) {
-    return [self minimumWithPrimaryTensor:primaryTensor secondaryTensor:secondaryTensor name:name];
-  }
-  return [self minimumWithNaNPropagationWithPrimaryTensor:primaryTensor secondaryTensor:secondaryTensor name:name];
-}
-
-- (MPSGraphTensor*)maximumWithNaNPropagationAndIntFallbackWithPrimaryTensor:(MPSGraphTensor*)primaryTensor
-                                                            secondaryTensor:(MPSGraphTensor*)secondaryTensor
-                                                                       name:(NSString*)name {
-  // As of MacOS-15.1 m..imumWithNanPropagation is only defined for floating types and calling it with integral
-  // arguments results in
-  //  /AppleInternal/Library/BuildRoots/c7c74b64-74b4-11ef-aeda-9635a580fe0d/Library/Caches/com.apple.xbs/Sources/MetalPerformanceShaders/MPSCore/Utility/MPSKernelDAG.mm:805:
-  //  failed assertion `Error getting visible function: (null) Function isNaN_u8_i8 was not found in the library'
-  if (([primaryTensor dataType] & MPSDataTypeFloatBit) == 0) {
-    return [self maximumWithPrimaryTensor:primaryTensor secondaryTensor:secondaryTensor name:name];
-  }
-  return [self maximumWithNaNPropagationWithPrimaryTensor:primaryTensor secondaryTensor:secondaryTensor name:name];
-}
-@end
-
 namespace at::native::mps {
 /**
  * Computes distance from lowest to highest element offset in given tensor.
@@ -673,6 +645,8 @@ MPSScalar getMPSScalar(const Scalar& scalar, ScalarType type) {
     case ScalarType::ComplexDouble:
       return {.size = sizeof(int64_t), .type = type, .value.cf = scalar.to<c10::complex<float>>()};
     // Unsigned types
+    case ScalarType::UInt64:
+      return {.size = sizeof(uint64_t), .type = type, .value.u = scalar.to<uint64_t>()};
     case ScalarType::UInt32:
       return {.size = sizeof(uint32_t), .type = type, .value.i = scalar.to<uint32_t>()};
     case ScalarType::UInt16:
@@ -1004,11 +978,12 @@ class BundledShaderLibary : public MetalShaderLibrary {
 void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
                                            const std::string& name,
                                            std::optional<c10::Scalar> alpha,
-                                           std::optional<c10::ScalarType> scalar_arg_type) {
+                                           std::optional<c10::ScalarType> scalar_arg_type,
+                                           bool supports_vec4) {
   // Decompose 64-bit tensor into 32-bit ones
   if (!iter.can_use_32bit_indexing()) {
     for (auto&& sub_iter : iter.with_32bit_indexing()) {
-      exec_unary_kernel(sub_iter, name, alpha, scalar_arg_type);
+      exec_unary_kernel(sub_iter, name, alpha, scalar_arg_type, supports_vec4);
     }
     return;
   }
@@ -1020,10 +995,12 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
     return;
   }
   using namespace mps;
+  bool use_vec4 =
+      supports_vec4 && iter.is_contiguous() && !alpha.has_value() && at::isFloatingType(iter.common_dtype());
   const auto alpha_type = scalar_arg_type.has_value() ? scalar_arg_type.value() : iter.common_dtype();
   auto kernel_name = fmt::format("{}_{}_{}_{}{}",
                                  name,
-                                 iter.is_contiguous() ? "dense" : "strided",
+                                 use_vec4 ? "dense_vec4" : (iter.is_contiguous() ? "dense" : "strided"),
                                  scalarToMetalTypeString(outputTensor),
                                  scalarToMetalTypeString(inputTensor),
                                  alpha.has_value() ? fmt::format("_{}", scalarToMetalTypeString(alpha_type)) : "");
@@ -1038,17 +1015,22 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
 
       [computeEncoder setComputePipelineState:cplState];
       bind_iter_tensors(computeEncoder, iter);
-      if (!iter.is_contiguous()) {
-        mtl_setArgs<2>(computeEncoder,
-                       outputTensor.sizes(),
-                       inputTensor.strides(),
-                       outputTensor.strides(),
-                       inputTensor.ndimension());
+      if (use_vec4) {
+        mtl_setBytes(computeEncoder, length, 2);
+        mtl_dispatch1DJob(computeEncoder, cplState, (length + 3) / 4);
+      } else {
+        if (!iter.is_contiguous()) {
+          mtl_setArgs<2>(computeEncoder,
+                         outputTensor.sizes(),
+                         inputTensor.strides(),
+                         outputTensor.strides(),
+                         inputTensor.ndimension());
+        }
+        if (alpha) {
+          mtl_setBytes(computeEncoder, getMPSScalar(*alpha, alpha_type), iter.is_contiguous() ? 2 : 6);
+        }
+        mtl_dispatch1DJob(computeEncoder, cplState, length);
       }
-      if (alpha) {
-        mtl_setBytes(computeEncoder, getMPSScalar(*alpha, alpha_type), iter.is_contiguous() ? 2 : 6);
-      }
-      mtl_dispatch1DJob(computeEncoder, cplState, length);
 
       getMPSProfiler().endProfileKernel(cplState);
     });
@@ -1129,7 +1111,8 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
     }
   }
 
-  const auto alpha_type = scalar_arg_type.has_value() ? scalar_arg_type.value() : iter.common_dtype();
+  const auto alpha_type =
+      scalar_arg_type.has_value() ? scalar_arg_type.value() : (cast_needed ? out.scalar_type() : iter.common_dtype());
   const auto alpha_suffix = alpha.has_value() ? fmt::format("_{}", scalarToMetalTypeString(alpha_type)) : "";
 
   std::string kernel_name;

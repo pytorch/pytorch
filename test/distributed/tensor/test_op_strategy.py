@@ -2,7 +2,6 @@
 
 import itertools
 import random
-from contextlib import contextmanager
 from itertools import chain
 from unittest.mock import patch
 
@@ -31,16 +30,15 @@ from torch.distributed.tensor._ops._einsum_strategy import (
     EinsumDims,
     gen_einsum_strategies,
 )
-from torch.distributed.tensor._ops.utils import (
-    register_op_strategy,
-    replicate_op_strategy,
-)
-from torch.distributed.tensor.debug import _clear_sharding_prop_cache, CommDebugMode
+from torch.distributed.tensor._ops.utils import replicate_op_strategy
+from torch.distributed.tensor.debug import CommDebugMode
+from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorOpTestBase,
     DTensorTestBase,
+    op_strategy_context,
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -208,6 +206,25 @@ class TestCostModel(DTensorOpTestBase):
         # shard to partial
         cost = redistribute_cost(shard_spec, partial_spec)
         self.assertEqual(cost, float("inf"))
+
+    def test_redistribute_cost_strided_shard(self):
+        """_StridedShard specs get inf cost (shard_order is None bail-out)."""
+        mesh_1d = self.build_device_mesh()
+
+        global_tensor_meta = extract_tensor_meta(torch.randn(10, 10))
+
+        strided_shard_spec = DTensorSpec(
+            mesh_1d, (_StridedShard(0, split_factor=2),), global_tensor_meta
+        )
+        replica_spec = DTensorSpec(mesh_1d, (Replicate(),), global_tensor_meta)
+
+        # _StridedShard as source: shard_order is None → inf
+        self.assertEqual(
+            redistribute_cost(strided_shard_spec, replica_spec), float("inf")
+        )
+        # Replicate as source: is_replicated() short-circuits to 0 before
+        # reaching the shard_order check
+        self.assertEqual(redistribute_cost(replica_spec, strided_shard_spec), 0.0)
 
     def test_redistribute_cost_latency(self):
         # test cost model on addmm op
@@ -491,45 +508,6 @@ def _fw_tuple(x, y, z):
 torch.library.register_autograd(
     "mylib::numpy_tuple_sin", tuple_backward, setup_context=setup_tuple_context
 )
-
-
-@contextmanager
-def op_strategy_context(op_overload, strategy_func, schema_info=None):
-    """
-    Context manager for setting and clearing op strategies.
-    Args:
-        op_overload: The operator overload to set or clear the strategy for.
-        strategy_func: The strategy function to set for the operator overload.
-        schema_info: Optional schema information for the operator overload.
-    Yields:
-        None
-    """
-    propagator = DTensor._op_dispatcher.sharding_propagator
-    _origin_op_strategy_funcs = None
-    _origin_op_strategy_schema = None
-    try:
-        # register the op strategy
-        if op_overload in propagator.op_strategy_funcs:
-            _origin_op_strategy_funcs = propagator.op_strategy_funcs[op_overload]
-            del propagator.op_strategy_funcs[op_overload]
-        if op_overload in propagator.op_to_schema_info:
-            _origin_op_strategy_schema = propagator.op_to_schema_info[op_overload]
-            del propagator.op_to_schema_info[op_overload]
-        register_op_strategy(op_overload, schema_info=schema_info)(strategy_func)
-        yield
-    finally:
-        # clear this op strategy cache
-        if _origin_op_strategy_funcs is None:
-            if op_overload in propagator.op_strategy_funcs:
-                del propagator.op_strategy_funcs[op_overload]
-        else:
-            propagator.op_strategy_funcs[op_overload] = _origin_op_strategy_funcs
-        if _origin_op_strategy_schema is None:
-            if op_overload in propagator.op_to_schema_info:
-                del propagator.op_to_schema_info[op_overload]
-        else:
-            propagator.op_to_schema_info[op_overload] = _origin_op_strategy_schema
-        _clear_sharding_prop_cache()
 
 
 def detect_exists_identical_opspec(*args, op, mesh, strategy_function) -> bool:

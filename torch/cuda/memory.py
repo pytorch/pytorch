@@ -98,15 +98,6 @@ def _host_allocator():
     return torch._C._cuda_cudaHostAllocator()
 
 
-@contextlib.contextmanager
-def _free_mutex():
-    torch._C._cuda_lock_mutex()
-    try:
-        yield
-    finally:
-        torch._C._cuda_unlock_mutex()
-
-
 def caching_allocator_alloc(size, device: "Device" = None, stream=None):
     r"""Perform a memory allocation using the CUDA memory allocator.
 
@@ -1027,6 +1018,9 @@ def _snapshot(device: "Device" = None, augment_with_fx_traces=False):
             total_size: int  #  cudaMalloc'd size of segment
             stream: int
             segment_type: Literal["small", "large"]  # 'large' (>1MB)
+            segment_pool_id: Tuple[
+                int, int
+            ]  # id of the memory pool owning this segment
             allocated_size: int  # size of memory in use
             active_size: int  # size of memory in use or in active_awaiting_free state
             blocks: List[Block]
@@ -1085,6 +1079,7 @@ def _snapshot(device: "Device" = None, augment_with_fx_traces=False):
             stream: int
             device_free: int  # only present for OOM, the amount of
             # memory cuda still reports to be free
+            pool_id: Tuple[int, int]  # id of the memory pool for this entry
 
     Args:
         device: Device to capture snapshot for. If None, captures for current device.

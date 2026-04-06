@@ -1740,6 +1740,7 @@ def _get_dynamo_config_for_logging() -> str | None:
             "_autograd_backward_strict_mode_banned_ops",
             "reorderable_logging_functions",
             "ignore_logger_methods",
+            "ignore_logging_functions",
             "traceable_tensor_subclasses",
             "nontraceable_tensor_subclasses",
             "_custom_ops_profile",
@@ -1864,7 +1865,7 @@ def record_compilation_metrics(
         ),
         "dynamo_config": _get_dynamo_config_for_logging(),
         "config_suppress_errors": config.suppress_errors,
-        "config_inline_inbuilt_nn_modules": config.inline_inbuilt_nn_modules,
+        "config_inline_inbuilt_nn_modules": True,
         "inductor_config": _scrubbed_inductor_config_for_logging(),
         "compiler_config": _compiler_config_for_logging(),
         "cuda_version": torch.version.cuda,
@@ -2941,6 +2942,29 @@ def dataclass_fields(cls: Any) -> Any:
 iter_next = next
 
 
+def normalize_count_iter(count_iter: Iterator[Any]) -> tuple[Any, Any]:
+    try:
+        _, args = count_iter.__reduce__()
+    except TypeError:
+        # Python 3.14 no longer pickles itertools.count, so fall back to the
+        # repr and only recover literal arguments. Non-literal arguments still
+        # fall back to user-defined handling via the NotImplemented sentinel.
+        import ast
+
+        count_repr = repr(count_iter)
+        if not count_repr.startswith("count(") or not count_repr.endswith(")"):
+            return (NotImplemented, NotImplemented)
+        try:
+            args = ast.literal_eval(f"({count_repr[6:-1]},)")
+        except (SyntaxError, ValueError):
+            return (NotImplemented, NotImplemented)
+        if not isinstance(args, tuple) or not 1 <= len(args) <= 2:
+            return (NotImplemented, NotImplemented)
+    if len(args) == 1:
+        return (args[0], 1)
+    return (args[0], args[1])
+
+
 def normalize_range_iter(range_iter: Any) -> tuple[int, int, int]:
     _, (range_obj,), maybe_idx = range_iter.__reduce__()
     # In 3.12+, `maybe_idx` could be None, and `range_obj.start` would've been
@@ -3034,7 +3058,6 @@ def raise_args_mismatch(
     actual: str = "",
 ) -> None:
     from torch._dynamo.exc import raise_observed_exception
-    from torch._dynamo.variables import ConstantVariable
 
     msg_str = (
         f"wrong number of arguments or keyword arguments for {name}() call.\n"
@@ -3045,7 +3068,7 @@ def raise_args_mismatch(
     raise_observed_exception(
         TypeError,
         tx,
-        args=[ConstantVariable(msg_str)],
+        args=[msg_str],
     )
 
 
@@ -4407,18 +4430,16 @@ def defake(x: Any) -> Any:
     size: torch._prims_common.ShapeType
     stride: torch._prims_common.StrideType
     if x._has_symbolic_sizes_strides:
-        size = []
-        for s in x.size():
-            if isinstance(s, torch.SymInt):
-                size.append(s.node.shape_env.size_hint(s.node.expr))
-            else:
-                size.append(s)
-        stride = []
-        for s in x.stride():
-            if isinstance(s, torch.SymInt):
-                stride.append(s.node.shape_env.size_hint(s.node.expr))
-            else:
-                stride.append(s)
+        # optimization_hint is appropriate here because defake only needs a
+        # plausible concrete shape to allocate a real tensor; it does not need
+        # to install guards. For unbacked symbols the heuristic fallback is fine.
+        size = [
+            torch.fx.experimental.symbolic_shapes.optimization_hint(s) for s in x.size()
+        ]
+        stride = [
+            torch.fx.experimental.symbolic_shapes.optimization_hint(s)
+            for s in x.stride()
+        ]
     else:
         size = x.size()
         stride = x.stride()
@@ -4808,6 +4829,7 @@ def is_tensor_base_attr_getter(value: Any) -> bool:
     return (
         isinstance(value, types.MethodWrapperType)
         and value.__name__ == "__get__"
+        and hasattr(value.__self__, "__objclass__")
         and value.__self__.__objclass__ is torch._C._TensorBase  # type: ignore[attr-defined]
     )
 

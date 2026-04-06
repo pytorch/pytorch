@@ -20,6 +20,7 @@ from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_utils import (
     TestCase,
     skipIfCrossRef,
+    skipIfTorchDynamo,
     suppress_warnings,
     TEST_WITH_TORCHDYNAMO,
     run_tests,
@@ -1698,6 +1699,32 @@ class TestMeta(TestCase):
         )
         self.assertEqual(grad_weight.to('meta'), meta_grad_weight)
 
+    def _assert_fft_meta_stride_matches_eager(self, op, *args):
+        to_meta = MetaConverter()
+        meta_args = tree_map_only(torch.Tensor, to_meta, args)
+        ref_out = op(*args)
+        meta_out = op(*meta_args)
+        self.assertEqual(ref_out.size(), meta_out.size())
+        self.assertEqual(ref_out.stride(), meta_out.stride())
+
+    @onlyCUDA
+    @unittest.skipIf(torch.version.hip, "cuFFT-specific stride behavior")
+    def test_fft_multi_dim_cufft_stride_matches_meta(self, device):
+        self._assert_fft_meta_stride_matches_eager(
+            aten._fft_c2c.default,
+            torch.randn((5, 5, 5, 5, 5), device=device, dtype=torch.complex64),
+            [1, 2, 3, 4],
+            0,
+            True,
+        )
+        self._assert_fft_meta_stride_matches_eager(
+            aten._fft_c2r.default,
+            torch.randn((5, 5, 5, 5, 3), device=device, dtype=torch.complex64),
+            [0, 1, 2, 3, 4],
+            0,
+            5,
+        )
+
     # opinfo test is using aten.fill_, it's not testing aten.fill
     @onlyCUDA
     def test_fill_stride(self):
@@ -1869,7 +1896,59 @@ class TestMeta(TestCase):
         else:
             self.assertEqual(out_dtype, [in_dtype,])
 
+class TestMetaKernelConv(TestCase):
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_convolution_backward_meta_kernel_channels_last(self):
+        """Test the meta kernel directly (device='meta', no FakeTensorMode).
+        This exercises the @register_meta path used by torch.export, which
+        does NOT go through the FakeTensor intercept in fake_impls.py.
+        """
+        # channels_last grad_output + contiguous input/weight -> contiguous
+        grad_out = torch.empty(2, 3, 4, 4, device="meta").to(
+            memory_format=torch.channels_last
+        )
+        inp = torch.empty(2, 3, 4, 4, device="meta")
+        w = torch.empty(3, 3, 3, 3, device="meta")
+        gi, gw, _ = torch.ops.aten.convolution_backward(
+            grad_out,
+            inp,
+            w,
+            [3],
+            [1, 1],
+            [1, 1],
+            [1, 1],
+            False,
+            [0, 0],
+            1,
+            [True, True, True],
+        )
+        self.assertTrue(gi.is_contiguous())
+        self.assertTrue(gw.is_contiguous())
+
+        # contiguous grad_output + channels_last input -> channels_last
+        grad_out2 = torch.empty(2, 3, 4, 4, device="meta")
+        inp2 = torch.empty(2, 3, 4, 4, device="meta").to(
+            memory_format=torch.channels_last
+        )
+        gi2, gw2, _ = torch.ops.aten.convolution_backward(
+            grad_out2,
+            inp2,
+            w,
+            [3],
+            [1, 1],
+            [1, 1],
+            [1, 1],
+            False,
+            [0, 0],
+            1,
+            [True, True, True],
+        )
+        self.assertTrue(gi2.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(gw2.is_contiguous(memory_format=torch.channels_last))
+
+
 instantiate_device_type_tests(TestMeta, globals())
+
 
 def print_op_str_if_not_supported(op_str):
     op = OperatorName.parse(op_str)
