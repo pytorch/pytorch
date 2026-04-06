@@ -225,7 +225,7 @@ class CacheKeyEquivalenceMixin:
                 standalone_key, standalone_debug_lines = compile_fx.autograd_cache_key(
                     mod, example_inputs_, ignore_shape_env=False
                 )
-            except BypassAOTAutogradCache:
+            except (BypassAOTAutogradCache, NotImplementedError):
                 standalone_bypassed = True
             mod.recompile()
             self.assertEqual(
@@ -3011,6 +3011,52 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_non_tuple_return_cache_key(self):
+        """autograd_cache_key does not support graphs that don't return a tuple,
+        since compile_fx mutates them via make_graph_return_tuple."""
+        from torch._subclasses import FakeTensorMode
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        def fn(x):
+            return x.sin()
+
+        inp = torch.randn(10)
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        fake_inp = fake_mode.from_tensor(inp)
+        gm = make_fx(fn, tracing_mode="fake")(fake_inp)
+        self.assertFalse(compile_fx.graph_returns_tuple(gm))
+        with self.assertRaisesRegex(NotImplementedError, "don't return a tuple"):
+            compile_fx.autograd_cache_key(gm, [fake_inp], ignore_shape_env=False)
+        compile_fx.compile_fx(gm, [fake_inp])
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_flatten_graph_inputs_cache_key(self):
+        """autograd_cache_key does not support nested container inputs, since
+        compile_fx wraps them via flatten_graph_inputs."""
+        from torch._subclasses import FakeTensorMode
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        def fn(xs):
+            return (xs[0] + xs[1],)
+
+        inp = torch.randn(10)
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        fake_x = fake_mode.from_tensor(inp)
+        fake_y = fake_mode.from_tensor(inp)
+        gm = make_fx(fn, tracing_mode="fake")([fake_x, fake_y])
+        with self.assertRaisesRegex(NotImplementedError, "nested container inputs"):
+            compile_fx.autograd_cache_key(
+                gm, [[fake_x, fake_y]], ignore_shape_env=False
+            )
+        compile_fx.compile_fx(gm, [[fake_x, fake_y]])
 
 
 @functorch_config.patch({"bundled_autograd_cache": True})

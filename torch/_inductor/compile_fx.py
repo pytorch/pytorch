@@ -3215,6 +3215,18 @@ def autograd_cache_key(
     decompositions = (
         decompositions if decompositions is not None else select_decomp_table()
     )
+    # compile_fx applies these graph transforms before reaching _compile_fx_main.
+    # Neither occurs on the torch.compile/Dynamo path (which always produces
+    # tuple-returning, pre-flattened graphs). Not supported by this API.
+    if isinstance(graph, GraphModule) and not graph_returns_tuple(graph):
+        raise NotImplementedError(
+            "autograd_cache_key does not support graphs that don't return a tuple"
+        )
+    if any(isinstance(x, (list, tuple, dict)) for x in example_inputs):
+        raise NotImplementedError(
+            "autograd_cache_key does not support nested container inputs"
+        )
+
     compiler_config_extra = create_compiler_config_extra(graph)
 
     # These context managers replicate the ones that _compile_fx_main sets up
