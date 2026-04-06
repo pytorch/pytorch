@@ -78,7 +78,7 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.10-gcc11
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang18
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-gcc11
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
@@ -201,7 +201,7 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.10-gcc11-no-ops
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang18
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-gcc11
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
@@ -434,7 +434,7 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.10-gcc11-mobile-lightweight-dispatch-build
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang18
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-gcc11
       build-generates-artifacts: false
       test-matrix: |
         { include: [
