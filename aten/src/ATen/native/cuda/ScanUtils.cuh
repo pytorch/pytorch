@@ -7,6 +7,7 @@
 #include <c10/util/Load.h>
 #include <limits>
 #include <cmath>
+#include <utility>
 
 namespace at::native {
 
@@ -208,7 +209,7 @@ __host__ void scan_outer_dim_with_indices(
   dim3 threads(std::min(512, int(num_irows)));
   int64_t maxGridDim = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
   dim3 grid(std::min(maxGridDim, num_orows), std::min(maxGridDim, ceil_div(num_irows, int64_t{threads.x})));
-  if (static_cast<size_t>(num_irows) * num_orows * row_size <= UINT_MAX) {
+  if (std::in_range<uint32_t>(static_cast<size_t>(num_irows) * num_orows * row_size)) {
     tensor_kernel_scan_outer_dim_with_indices<scalar_t, uint32_t><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
       self.const_data_ptr<scalar_t>(), values.mutable_data_ptr<scalar_t>(), indices.mutable_data_ptr<int64_t>(),
       num_orows, num_irows, row_size, init, binary_op);
@@ -242,7 +243,7 @@ __host__ void scan_innermost_dim_with_indices(
   check_fits_in_unsigned(row_size, "row_size");
 
   const uint32_t mem_size = 2 * num_threads * (sizeof(scalar_t) + sizeof(int64_t));
-  if (num_rows * static_cast<size_t>(row_size) <= UINT_MAX) {
+  if (std::in_range<uint32_t>(num_rows * static_cast<size_t>(row_size))) {
     tensor_kernel_scan_innermost_dim_with_indices<scalar_t, uint32_t><<<grid, threads, mem_size,
                                                               at::cuda::getCurrentCUDAStream()>>>(
       self.const_data_ptr<scalar_t>(), values.mutable_data_ptr<scalar_t>(), indices.mutable_data_ptr<int64_t>(),
@@ -428,7 +429,7 @@ __host__ void scan_outer_dim(const TensorBase& self, const TensorBase& result,
   check_fits_in_unsigned(num_irows, "num_irows");
   check_fits_in_unsigned(num_orows, "num_orows");
   check_fits_in_unsigned(row_size, "row_size");
-  if (static_cast<size_t>(num_irows) * num_orows * row_size <= UINT_MAX) {
+  if (std::in_range<uint32_t>(static_cast<size_t>(num_irows) * num_orows * row_size)) {
   tensor_kernel_scan_outer_dim<scalar_t, uint32_t><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
     result.mutable_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(),
     num_orows, num_irows, row_size, init, binary_op);
