@@ -530,6 +530,51 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                     _optim.step()
                 self.assertEqual(losses[0], losses[1])
 
+    @skip_if_lt_x_gpu(4)
+    def test_multi_group_comm_dedup(self):
+        """
+        Tests that ``fully_shard`` with ``reshard_after_forward`` as int
+        deduplicates the post-forward DeviceMesh and its NCCL communicators
+        across multiple calls, rather than creating duplicate process groups.
+        """
+        torch.manual_seed(42)
+        n_layers = 3
+        model_args = ModelArgs(
+            n_layers=n_layers,
+            n_heads=4,
+            vocab_size=1024,
+            max_seq_len=64,
+            dropout_p=0,
+        )
+        model = Transformer(model_args)
+        mesh = init_device_mesh("cuda", (self.world_size,))
+        reshard_after_forward = 2
+        group_count_before = dist.distributed_c10d._group_count
+        fully_shard_fn = functools.partial(
+            fully_shard,
+            mesh=mesh,
+            reshard_after_forward=reshard_after_forward,
+        )
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard_fn(module)
+        fully_shard_fn(model)
+        new_groups = dist.distributed_c10d._group_count - group_count_before
+        # reshard_after_forward=2 on a 1D mesh creates a 2D post-forward mesh
+        # with 2 dims. The cache should ensure only one set of sub-groups is
+        # created across all fully_shard calls, not one per call.
+        # Without caching: (n_layers + 1) * groups_per_mesh = 4 * 4 = 16
+        # With caching: groups_per_mesh = 4 (2 per dim on a 2x2 mesh)
+        max_expected_groups = 2 * (self.world_size // reshard_after_forward)
+        self.assertLessEqual(
+            new_groups,
+            max_expected_groups,
+            f"Expected at most {max_expected_groups} new process groups from "
+            f"the post-forward mesh, but got {new_groups}. "
+            f"The post-forward DeviceMesh may not be deduplicated across "
+            f"fully_shard calls.",
+        )
+
     @skip_if_lt_x_gpu(2, allow_cpu=True)
     @unittest.skipIf(TEST_XPU, "Sleep is not supported on XPU")
     def test_non_root_forward_backward(self):

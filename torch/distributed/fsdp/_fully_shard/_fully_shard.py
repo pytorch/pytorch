@@ -235,6 +235,7 @@ def fully_shard(
         post_forward_mesh_info = _get_post_forward_mesh_info(
             reshard_after_forward if not auto_reshard_after_forward else True,  # type: ignore[arg-type]
             mesh_info,
+            module,
         )
     else:
         # DDPMeshInfo: no sharding, so no post-forward resharding needed
@@ -258,6 +259,7 @@ def fully_shard(
         reshard_after_forward=reshard_after_forward
         if not auto_reshard_after_forward
         else True,
+        module=module,
     )
 
     # For Dynamo
@@ -432,6 +434,7 @@ class FSDPModule:
                         _get_post_forward_mesh_info(
                             reshard_after_forward,
                             fsdp_param_group.mesh_info,
+                            module,
                         )
                     )
 
