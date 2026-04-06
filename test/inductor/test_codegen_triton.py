@@ -15,7 +15,7 @@ from torch._inductor.codegen.triton import (
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler, promote_types
 from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import _type_of, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -243,6 +243,14 @@ class TestCodegenTriton(InductorTestCase):
         self.assertFalse(sv.statically_known_multiple_of(s4, 8))
         shape_env.axioms[sympy.Eq(Mod(s4, 8), 0)] = sympy.true
         self.assertTrue(sv.statically_known_multiple_of(s4, 8))
+
+
+class TestTypeOf(InductorTestCase):
+    def test_fp8_dtypes(self):
+        self.assertEqual(_type_of(torch.float8_e4m3fn), "*fp8e4nv")
+        self.assertEqual(_type_of(torch.float8_e5m2), "*fp8e5")
+        self.assertEqual(_type_of(torch.float8_e4m3fnuz), "*fp8e4b8")
+        self.assertEqual(_type_of(torch.float8_e5m2fnuz), "*fp8e5b16")
 
 
 if __name__ == "__main__":
