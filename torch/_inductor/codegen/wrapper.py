@@ -3173,7 +3173,14 @@ class PythonWrapperCodegen(CodeGen):
             device = buf.get_device()
             dtype = buf.get_dtype()
             offset = V.graph.sizevars.optimization_hint(buf.get_layout().offset)
-            value = f"generate_example_value({size}, {stride}, '{device}', {dtype}, {offset}, {allocation_size})"
+            # Pad the underlying storage to prevent OOB during compile-time
+            # autotuning. Symbolic offsets (e.g., from index_select/slice
+            # fusions) are concretized independently from buffer sizes via
+            # optimization_hints, so the concretized offset can exceed the
+            # buffer allocation. Adding padding ensures these accesses land
+            # within allocated memory. See https://github.com/pytorch/pytorch/issues/XXXXX
+            extra_size = offset + config.unbacked_symint_fallback
+            value = f"generate_example_value({size}, {stride}, '{device}', {dtype}, {extra_size}, {allocation_size})"
             self.kernel_autotune_calls.writeline(f"{buf_name} = {value}")
 
             if isinstance(raw_arg, ir.TMADescriptor):
