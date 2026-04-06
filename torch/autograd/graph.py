@@ -875,15 +875,8 @@ def _engine_run_backward(
     if attach_logging_hooks:
         unregister_hooks = _register_logging_hooks_on_whole_graph(t_outputs)
 
-    # Need to save the context so compiler config will be visible in device threads.
-    # Only stash when the context has actual overrides; on C++ worker threads
-    # (e.g., unified-parallelism GPU thread groups) the context is empty and
-    # stashing it creates unnecessary SafePyObject lifecycle management on
-    # autograd device threads that can cause GIL-related hangs.
-    ctx = contextvars.copy_context()
-    _stash_context = len(ctx) > 0
-    if _stash_context:
-        torch._C._stash_obj_in_tls("context", ctx)
+    # Need to save the context so compiler config will be visible in device threads
+    torch._C._stash_obj_in_tls("context", contextvars.copy_context())
 
     try:
         return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
@@ -892,5 +885,4 @@ def _engine_run_backward(
     finally:
         if attach_logging_hooks:
             unregister_hooks()  # type: ignore[possibly-undefined]
-        if _stash_context:
-            torch._C._stash_obj_in_tls("context", None)
+        torch._C._stash_obj_in_tls("context", None)
