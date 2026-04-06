@@ -899,18 +899,16 @@ def autograd_cache_key(
     disable_functionalization: bool = False,
 ):
     (
-        functional_call,
-        params_buffers_flat,
+        _functional_call,
+        _params_buffers_flat,
         _params_spec,
         _buffers_spec,
-        fake_flat_args,
-        full_args_descs,
+        full_args,
+        _full_args_descs,
         aot_config,
-        fake_mode,
-        shape_env,
         _in_spec,
         _out_spec,
-    ) = prepare_aot_module_simplified(
+    ) = prepare_aot_config(
         graph,
         example_inputs,
         None,
@@ -922,12 +920,17 @@ def autograd_cache_key(
         disable_functionalization=disable_functionalization,
     )
 
+    fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
+    fake_flat_args = process_inputs(
+        full_args, aot_config, fake_mode, shape_env, ignore_shape_env
+    )
+
     return autograd_cache.autograd_cache_key(
         graph, fake_flat_args, aot_config, compiler_config_extra
     )
 
 
-def prepare_aot_module_simplified(
+def prepare_aot_config(
     mod: nn.Module,
     args: Iterable[Any],
     kwargs: dict[str, Any] | None,
@@ -945,11 +948,9 @@ def prepare_aot_module_simplified(
     list[torch.nn.Parameter | Tensor],
     list[str],
     list[str],
-    FakifiedFlatArgs,
+    list[Any],
     list[Any],
     AOTConfig,
-    FakeTensorMode,
-    ShapeEnv | None,
     pytree.TreeSpec | None,
     PytreeThunk | None,
 ]:
@@ -1056,8 +1057,69 @@ def prepare_aot_module_simplified(
         _disable_torch_fn_metadata_mode=_disable_torch_fn_metadata_mode,
     )
 
-    # TODO: Split the remainder of this function into a separate preparation function for input processing.
-    # Only the aot_config above is needed for the cache key computation.
+    return (
+        functional_call,
+        params_buffers_flat,
+        params_spec,
+        buffers_spec,
+        full_args,
+        full_args_descs,
+        aot_config,
+        in_spec,
+        out_spec,
+    )
+
+
+def prepare_aot_module_simplified(
+    mod: nn.Module,
+    args: Iterable[Any],
+    kwargs: dict[str, Any] | None,
+    decompositions: dict[OpOverload, Callable[..., Any]] | None,
+    keep_inference_input_mutations: bool,
+    ignore_shape_env: bool,
+    flatten: bool,
+    *,
+    force_non_lazy_backward_lowering: bool = False,
+    disable_functionalization: bool = False,
+    _record_nn_module_stack: bool = False,
+    _disable_torch_fn_metadata_mode: bool = False,
+) -> tuple[
+    Any,
+    list[torch.nn.Parameter | Tensor],
+    list[str],
+    list[str],
+    FakifiedFlatArgs,
+    list[Any],
+    AOTConfig,
+    FakeTensorMode,
+    ShapeEnv | None,
+    pytree.TreeSpec | None,
+    PytreeThunk | None,
+]:
+    (
+        functional_call,
+        params_buffers_flat,
+        params_spec,
+        buffers_spec,
+        full_args,
+        full_args_descs,
+        aot_config,
+        in_spec,
+        out_spec,
+    ) = prepare_aot_config(
+        mod,
+        args,
+        kwargs,
+        decompositions,
+        keep_inference_input_mutations,
+        ignore_shape_env,
+        flatten,
+        force_non_lazy_backward_lowering=force_non_lazy_backward_lowering,
+        disable_functionalization=disable_functionalization,
+        _record_nn_module_stack=_record_nn_module_stack,
+        _disable_torch_fn_metadata_mode=_disable_torch_fn_metadata_mode,
+    )
+
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
     # NB: full_args_descs not needed here, fake_flat_args is 1:1 with full_args
     fake_flat_args = process_inputs(
