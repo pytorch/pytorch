@@ -145,7 +145,8 @@ ARG ROCM_VERSION=6.0
 ARG PYTORCH_ROCM_ARCH
 ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
 ARG DEVTOOLSET_VERSION=13
-ENV LDFLAGS="-Wl,-rpath=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64 -Wl,-rpath=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib"
+# All rocm clang cfg files load the same rocm.cfg, make sure it points to the right toolchain.
+RUN echo "--gcc-toolchain=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr" >> /opt/rocm/llvm/bin/rocm.cfg
 # Somewhere in ROCm stack, we still use non-existing /opt/rocm/hip path,
 # below workaround helps avoid error
 ENV ROCM_PATH /opt/rocm
