@@ -2115,10 +2115,10 @@ test_operator_microbenchmark() {
   # OP_BENCHMARK_TESTS env var can override the default operator list (set via _linux-test.yml matrix)
   local op_list="${OP_BENCHMARK_TESTS:-matmul mm addmm bmm conv optimizer activation norm scaled_mm scaled_grouped_mm}"
   for op in $op_list; do
-    $TASKSET python -m pt.${op}_test --tag-filter long \
+    $TASKSET python -m "pt.${op}_test" --tag-filter long \
       --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${op}_compile.json" \
       --benchmark-name "PyTorch operator microbenchmark" --use-compile
-    $TASKSET python -m pt.${op}_test --tag-filter long \
+    $TASKSET python -m "pt.${op}_test" --tag-filter long \
       --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${op}.json" \
       --benchmark-name "PyTorch operator microbenchmark"
   done

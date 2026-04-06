@@ -95,9 +95,7 @@ def format_comparison(branch_map, baseline_map):
             return
         lines.append(f"### {mode_label}")
         lines.append("")
-        lines.append(
-            "| Case Name | Branch (us) | Baseline (us) | Delta | |"
-        )
+        lines.append("| Case Name | Branch (us) | Baseline (us) | Delta | |")
         lines.append("|-----------|------------|--------------|-------|---|")
         speedups = []
         for name, bval, mval, delta, status in rows:
