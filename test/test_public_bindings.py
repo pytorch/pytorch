@@ -412,10 +412,9 @@ class TestPublicBindings(TestCase):
 
         errors = []
         for mod, exc in failures:
-            if mod in private_allowlist or (
-                mod.startswith("torch._native.ops.") and "triton" in mod
-            ):
-                if self._is_mod_public(mod):
+            if mod in private_allowlist:
+                # make sure mod is actually private
+                if not any(t.startswith("_") for t in mod.split(".")):
                     raise AssertionError(
                         f"Expected private module name to include '_' segments: {mod}"
                     )
