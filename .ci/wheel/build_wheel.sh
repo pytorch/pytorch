@@ -97,7 +97,7 @@ fi
 whl_tmp_dir="${MAC_PACKAGE_WORK_DIR}/dist"
 mkdir -p "$whl_tmp_dir"
 
-mac_version='macosx-11.0-arm64'
+mac_version='macosx-14.0-arm64'
 libtorch_arch='arm64'
 
 # Create a consistent wheel package name to rename the wheel to
@@ -125,7 +125,7 @@ popd
 
 export TH_BINARY_BUILD=1
 export INSTALL_TEST=0 # dont install test binaries into site-packages
-export MACOSX_DEPLOYMENT_TARGET=11.0
+export MACOSX_DEPLOYMENT_TARGET=14.0
 
 EXTRA_CONDA_INSTALL_FLAGS=""
 CONDA_ENV_CREATE_FLAGS=""
@@ -179,6 +179,7 @@ retry pip install "${PINNED_PACKAGES[@]}" -r "${pytorch_rootdir}/requirements.tx
 if [[ -d "/opt/llvm-openmp" ]]; then
   export OMP_PREFIX=/opt/llvm-openmp
 else
+  echo "libomp not found, installing via brew"
   retry brew install libomp
 fi
 
