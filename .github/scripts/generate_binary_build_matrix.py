@@ -16,7 +16,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import warnings
 from pathlib import Path
 
 
@@ -55,9 +54,6 @@ CUDA_AARCH64_ARCHES = [
 ]
 
 
-# WARNING: For CUDA 12.8 and 13.0, cublas is pinned to a version range rather
-# than an exact version. A broken cublas release within that range will be
-# silently pulled in.
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "12.6": (
         "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | "  # noqa: B950
@@ -68,8 +64,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
     ),
     "12.8": (
-        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cufile,nvjitlink,nvtx]==12.8.1; platform_system == 'Linux' | "  # noqa: B950
-        "nvidia-cublas-cu12>=12.8.4.1,<=12.8.5.5; platform_system == 'Linux' | "
+        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.8.1; platform_system == 'Linux' | "  # noqa: B950
         "cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | "
         "nvidia-cudnn-cu12==9.20.0.48; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
@@ -77,8 +72,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
     ),
     "13.0": (
-        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | "  # noqa: B950
-        "nvidia-cublas>=13.1.0.3,<=13.1.1.3; platform_system == 'Linux' | "
+        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | "  # noqa: B950
         "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | "
         "nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
@@ -246,25 +240,6 @@ def validate_cudnn_version_consistency(arch_version: str) -> None:
             f"Linux has {linux_ver} (.ci/docker/common/install_cuda.sh) "
             f"but Windows has {windows_ver} (.ci/pytorch/windows/internal/cuda_install.bat)"
         )
-
-
-def warn_cublas_not_pinned(arch_version: str) -> None:
-    """Emit a runtime warning that cublas uses a version range."""
-    if arch_version not in ("12.8", "13.0"):
-        return
-    reqs = PYTORCH_EXTRA_INSTALL_REQUIREMENTS.get(arch_version, "")
-    for segment in reqs.split("|"):
-        if "nvidia-cublas" not in segment:
-            continue
-        pkg_spec = segment.split(";")[0]
-        if "==" not in pkg_spec:
-            warnings.warn(
-                f"CUDA {arch_version}: nvidia-cublas is pinned to a version "
-                f"range, not an exact version. A broken cublas release within "
-                f"that range could be silently installed.",
-                stacklevel=2,
-            )
-        break
 
 
 def arch_type(arch_version: str) -> str:
@@ -533,7 +508,6 @@ arch_version = ""
 for arch_version in CUDA_ARCHES:
     validate_nccl_dep_consistency(arch_version)
     validate_cudnn_version_consistency(arch_version)
-    warn_cublas_not_pinned(arch_version)
 del arch_version
 
 
