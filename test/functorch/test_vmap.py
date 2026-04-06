@@ -4848,6 +4848,30 @@ class TestVmapOperatorsOpInfo(TestCase):
                 torch.randn(2, device=device),
             )
 
+    def test_scatter_reduce__self_not_batched(self, device):
+        x = torch.zeros(5, device=device)
+        msg = "out-of-place operators instead of scatter_reduce_"
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(Tensor.scatter_reduce_, in_dims=(None, None, None, 0, None, None))(
+                x,
+                0,
+                torch.tensor([0, 1], device=device),
+                torch.randn(2, 2, device=device),
+                "sum",
+                True,
+            )
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(Tensor.scatter_reduce_, in_dims=(None, None, 0, None, None, None))(
+                x,
+                0,
+                torch.tensor([[0, 1], [2, 3]], device=device),
+                torch.randn(2, device=device),
+                "sum",
+                True,
+            )
+
     @tf32_on_and_off(0.005)
     def test_conv_double_backward(self, device):
         images = torch.randn(2, 1, 5, 5, device=device)

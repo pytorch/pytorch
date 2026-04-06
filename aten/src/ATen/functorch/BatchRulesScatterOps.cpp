@@ -480,16 +480,6 @@ namespace {
 
 }  // namespace
 
-static void check_scatter_inplace_bdim(
-    std::optional<int64_t> self_bdim,
-    std::optional<int64_t> index_bdim,
-    std::optional<int64_t> src_bdim,
-    const char* schema_name) {
-  if (!self_bdim.has_value() && (index_bdim.has_value() || src_bdim.has_value())) {
-    vmapIncompatibleInplaceError(schema_name);
-  }
-}
-
 void index_put__batch_rule(
     const Tensor& self,
     std::optional<int64_t> self_bdim,
@@ -782,6 +772,16 @@ std::tuple<Tensor, std::optional<int64_t>> scatter_add_batch_rule(
     const Tensor& src, std::optional<int64_t> src_bdim) {
   return scatter_batch_rule(ATEN_FN(scatter_add),
                             self, self_bdim, dim, index, index_bdim, src, src_bdim);
+}
+
+static void check_scatter_inplace_bdim(
+    std::optional<int64_t> self_bdim,
+    std::optional<int64_t> index_bdim,
+    std::optional<int64_t> src_bdim,
+    const char* schema_name) {
+  if (!self_bdim.has_value() && (index_bdim.has_value() || src_bdim.has_value())) {
+    vmapIncompatibleInplaceError(schema_name);
+  }
 }
 
 std::tuple<Tensor, std::optional<int64_t>> scatter_add__batch_rule(
