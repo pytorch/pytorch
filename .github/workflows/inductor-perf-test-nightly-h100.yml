@@ -51,6 +51,11 @@ on:
         required: false
         type: boolean
         default: false
+      deterministic_perf:
+        description: Run benchmarks with deterministic mode enabled?
+        required: false
+        type: boolean
+        default: false
       benchmark_configs:
         description: The list of configs used the benchmark
         required: false
@@ -69,6 +74,7 @@ concurrency:
 permissions:
   id-token: write
   contents: read
+  actions: read
 
 jobs:
   get-label-type:
@@ -93,8 +99,8 @@ jobs:
       # from trunk. Also use a memory-intensive runner here because memory is
       # usually the bottleneck
       runner: linux.12xlarge.memory
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm90
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11-inductor-benchmarks
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm90
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
       cuda-arch-list: '9.0'
       test-matrix: |
         { include: [
@@ -131,7 +137,7 @@ jobs:
     if: github.event.schedule == '15 0 * * 1-6'
     with:
       build-environment: ${{ needs.build.outputs.build-environment }}
-      dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true
+      dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true-deterministic_perf-true
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
       timeout-minutes: 720
@@ -148,7 +154,7 @@ jobs:
     if: github.event.schedule == '0 7 * * 0'
     with:
       build-environment: ${{ needs.build.outputs.build-environment }}
-      dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true-maxautotune-true-freeze_autotune_cudagraphs-true
+      dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true-maxautotune-true-freeze_autotune_cudagraphs-true-deterministic_perf-true
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
       timeout-minutes: 1440
@@ -167,7 +173,7 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' }}
     with:
       build-environment: ${{ needs.build.outputs.build-environment }}
-      dashboard-tag: training-${{ inputs.training || 'true' }}-inference-${{ inputs.inference || 'true' }}-default-${{ inputs.default || 'true' }}-dynamic-${{ inputs.dynamic || 'true' }}-cudagraphs-${{ inputs.cudagraphs || 'true' }}-cppwrapper-${{ inputs.cppwrapper || 'false' }}-aotinductor-${{ inputs.aotinductor || 'false' }}-maxautotune-${{ inputs.maxautotune || 'false' }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs || 'false' }}
+      dashboard-tag: training-${{ inputs.training || 'true' }}-inference-${{ inputs.inference || 'true' }}-default-${{ inputs.default || 'true' }}-dynamic-${{ inputs.dynamic || 'true' }}-cudagraphs-${{ inputs.cudagraphs || 'true' }}-cppwrapper-${{ inputs.cppwrapper || 'false' }}-aotinductor-${{ inputs.aotinductor || 'false' }}-maxautotune-${{ inputs.maxautotune || 'false' }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs || 'false' }}-deterministic_perf-${{ inputs.deterministic_perf || 'false' }}
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
       timeout-minutes: 720

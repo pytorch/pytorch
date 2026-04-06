@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 import torch
 from torch import SymInt
@@ -26,8 +26,8 @@ class _DeconstructedSymNode:
     # n.b. keep the same protocol as SymNode
     _expr: sympy.Expr
     pytype: type
-    _hint: Optional[Union[int, float, bool]]
-    constant: Optional[Union[int, float, bool]]
+    _hint: int | float | bool | None
+    constant: int | float | bool | None
     fx_node: torch.fx.Node
 
     @staticmethod
@@ -125,10 +125,10 @@ class _PySymInputStub:
     #                          the cache to avoid cyclic ShapeEnv references.
     #   _InputBackref: This is a back-reference to a previous _PySymInputStub in
     #                  the key.
-    value: Union[PySymType, _DeconstructedSymType, _InputBackref]
+    value: PySymType | _DeconstructedSymType | _InputBackref
 
     def __init__(
-        self, value: Union[PySymType, _DeconstructedSymType, _InputBackref]
+        self, value: PySymType | _DeconstructedSymType | _InputBackref
     ) -> None:
         # For inputs (values in the `key`) we need to keep the PySymType intact
         # - this way if we need to reuse it as an output we can properly copy
@@ -183,9 +183,9 @@ class _SymIntOutputStub:
 
     # This is either an `int` which represents the index in the key to copy the
     # SymNode from or it's the deconstructed SymNode itself.
-    value: Union[int, _DeconstructedSymNode]
+    value: int | _DeconstructedSymNode
 
-    def __init__(self, value: SymInt, key_path: Optional[int]) -> None:
+    def __init__(self, value: SymInt, key_path: int | None) -> None:
         if key_path is None:
             self.value = _DeconstructedSymNode.from_node(value.node)
         else:
@@ -234,9 +234,9 @@ class _CacheKeyState:
     # ShapeEnv on the FakeTensorMode - but for SymNodes we MUST have a
     # ShapeEnv. So as we scan if we see a SymNode (with a ShapeEnv) we record it
     # here.
-    shape_env: Optional[ShapeEnv]
+    shape_env: ShapeEnv | None
 
-    def __init__(self, shape_env: Optional[ShapeEnv] = None) -> None:
+    def __init__(self, shape_env: ShapeEnv | None = None) -> None:
         self.sym_node_lookup = {}
         self.known_symbols = set()
         self.shape_env = shape_env

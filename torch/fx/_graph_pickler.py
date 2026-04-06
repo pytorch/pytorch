@@ -1,16 +1,27 @@
+import contextlib
 import dataclasses
 import importlib
 import io
+import itertools
 import pickle
+import weakref
 from abc import abstractmethod
 from collections.abc import Callable
-from typing import Any, NewType, Optional, TypeVar, Union
+from typing import Any, NewType, TypeVar
 from typing_extensions import override, Self
+
+from torch.utils._import_utils import import_dill
+
+
+dill = import_dill()
+if dill is not None:
+    pickle = dill  # noqa: F811
 
 import torch
 import torch.utils._pytree as pytree
 from torch._guards import TracingContext
 from torch._inductor.standalone_compile import AOTCompiledArtifact
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, Tensor
 from torch._subclasses.meta_utils import (
     MetaConverter,
@@ -51,20 +62,55 @@ def _node_metadata_key_filter_safe(key: str) -> bool:
 class Options:
     # A filter for which ops will cause the pickler to raise a
     # BypassFxGraphCache exception. If None then all ops are allowed.
-    ops_filter: Optional[Callable[[str], bool]] = _ops_filter_safe
-    node_metadata_key_filter: Optional[Callable[[str], bool]] = (
+    ops_filter: Callable[[str], bool] | None = _ops_filter_safe
+    node_metadata_key_filter: Callable[[str], bool] | None = (
         _node_metadata_key_filter_safe
     )
+    # If True, raw torch.fx.Node objects encountered during pickling will be
+    # silently replaced with None instead of raising an AssertionError.
+    ignore_raw_node: bool = False
 
 
+def _unpickle_as_none() -> None:
+    return None
+
+
+def _unpickle_as_weakref(referent: object) -> weakref.ref:
+    return weakref.ref(referent)
+
+
+def _unpickle_as_dead_weakref() -> Callable[[], None]:
+    return lambda: None
+
+
+@contextlib.contextmanager
+def patch_pytree_map_over_slice():
+    if slice in pytree.SUPPORTED_NODES:
+        yield
+        return
+
+    pytree._private_register_pytree_node(
+        slice, lambda x: ([x.start, x.stop, x.step], None), lambda x, c: slice(*x)
+    )
+
+    try:
+        yield
+    finally:
+        pytree._deregister_pytree_node(slice)
+
+
+# pyrefly: ignore [invalid-inheritance]
 class GraphPickler(pickle.Pickler):
     """
     GraphPickler is a Pickler which helps pickling fx graph - in particular
     GraphModule.
     """
 
-    def __init__(self, file: io.BytesIO, options: Optional[Options] = None) -> None:
-        super().__init__(file)
+    def __init__(self, file: io.BytesIO, options: Options | None = None) -> None:
+        if dill is not None:
+            super().__init__(file, byref=True)
+        else:
+            super().__init__(file)
         self.options = options or Options()
 
         # This abomination is so we can pass external decoding state to the
@@ -111,9 +157,26 @@ class GraphPickler(pickle.Pickler):
             return _SymNodePickleData.reduce_helper(self, obj)
         elif isinstance(obj, torch._guards.TracingContext):
             return _TracingContextPickleData.reduce_helper(self, obj)
+        elif isinstance(obj, FakeScriptObject):
+            # FakeScriptObjects wrap opaque traced objects (e.g. DeviceMesh,
+            # ProcessGroup) that can't be default-pickled. Reduce to None
+            # since they aren't meaningful after deserialization.
+            return (_unpickle_as_none, ())
+        elif isinstance(obj, weakref.ref):
+            # Serialize weakrefs properly: if the referent is alive,
+            # serialize it and reconstruct the weakref on unpickle.
+            # If the referent is dead, unpickle as a dead-weakref-like callable.
+            referent = obj()
+            if referent is not None:
+                return (_unpickle_as_weakref, (referent,))
+            else:
+                return (_unpickle_as_dead_weakref, ())
         else:
             # We should never get a raw Node!
-            assert not isinstance(obj, torch.fx.Node)
+            if isinstance(obj, torch.fx.Node):
+                if self.options.ignore_raw_node:
+                    return (_unpickle_as_none, ())
+                raise AssertionError("Unexpected raw Node during pickling")
             if reduce := _TorchNumpyPickleData.reduce_helper(self, obj):
                 return reduce
 
@@ -122,18 +185,19 @@ class GraphPickler(pickle.Pickler):
             return NotImplemented
 
     @override
-    def persistent_id(self, obj: object) -> Optional[str]:
+    # pyrefly: ignore [bad-override]
+    def persistent_id(self, obj: object) -> str | None:
         if obj is self._unpickle_state:
             return "unpickle_state"
         else:
             return None
 
     @classmethod
-    def dumps(cls, obj: object, options: Optional[Options] = None) -> bytes:
+    def dumps(cls, obj: object, options: Options | None = None) -> bytes:
         """
         Pickle an object.
         """
-        with io.BytesIO() as stream:
+        with patch_pytree_map_over_slice(), io.BytesIO() as stream:
             pickler = cls(stream, options)
             pickler.dump(obj)
             return stream.getvalue()
@@ -143,10 +207,201 @@ class GraphPickler(pickle.Pickler):
         """
         Unpickle an object.
         """
-        state = _UnpickleState(fake_mode)
-        with io.BytesIO(data) as stream:
-            unpickler = _GraphUnpickler(stream, state)
-            return unpickler.load()
+        from torch._dynamo.utils import dynamo_timed
+
+        with patch_pytree_map_over_slice(), dynamo_timed("GraphPickler.loads"):
+            state = _UnpickleState(fake_mode)
+            with io.BytesIO(data) as stream:
+                unpickler = _GraphUnpickler(stream, state)
+                return unpickler.load()
+
+    @classmethod
+    def debug_dumps(
+        cls,
+        obj: object,
+        options: "Options | None" = None,
+        *,
+        max_depth: int = 80,
+        max_iter_items: int = 50,
+        verbose: bool = True,
+    ) -> str | None:
+        """
+        Find the first leaf that GraphPickler.dumps cannot serialize and return its path.
+
+        This is GraphPickler-aware and avoids infinite loops by:
+          - Traversing builtin containers directly (dict/list/tuple/set) instead of
+            exploring their __reduce_ex__ tuples.
+          - Only using __reduce_ex__ / __reduce__ for "opaque" objects.
+          - Bounding recursion depth and iterator expansion.
+
+        Args:
+            obj: The object to attempt to pickle and debug.
+            options: Optional Options instance for the GraphPickler.
+            max_depth: Maximum recursion depth before stopping traversal.
+            max_iter_items: Maximum number of items to materialize from iterators.
+            verbose: If True, prints detailed traversal information.
+
+        Returns:
+            A string representing the path to the first unpicklable leaf,
+            or None if the object is fully picklable.
+        """
+        options = options or Options()
+        pickler = cls(io.BytesIO(), options)
+
+        visited: set[int] = set()
+
+        def log(msg: str) -> None:
+            if verbose:
+                print(msg)
+
+        def fail_exc(o: Any) -> BaseException | None:
+            try:
+                cls.dumps(o, options)
+                return None
+            except Exception as e:
+                return e
+
+        def walk(o: Any, path: str, depth: int) -> str | None:
+            if depth > max_depth:
+                log(f"{'  ' * depth}Depth limit at {path} ({type(o)})")
+                return path + " (depth_limit)"
+
+            key = id(o)
+            if key in visited:
+                return None
+            visited.add(key)
+
+            indent = "  " * depth
+            log(f"{indent}Walking: {path} ({type(o)})")
+
+            e = fail_exc(o)
+            if e is None:
+                log(f"{indent}✓ Pickles fine alone")
+                return None
+            log(f"{indent}[FAIL pickle] {type(o)} -> {e}")
+
+            # 1) Builtin containers: walk contents directly (do NOT call __reduce_ex__)
+            if isinstance(o, dict):
+                for k, v in o.items():
+                    bad = walk(v, f"{path}[{k!r}]", depth + 1)
+                    if bad:
+                        return bad
+                return path
+
+            if isinstance(o, (list, tuple)):
+                for i, v in enumerate(o):
+                    bad = walk(v, f"{path}[{i}]", depth + 1)
+                    if bad:
+                        return bad
+                return path
+
+            if isinstance(o, (set, frozenset)):
+                for i, v in enumerate(o):
+                    bad = walk(v, f"{path}[{i}]", depth + 1)
+                    if bad:
+                        return bad
+                return path
+
+            # 2) Iterator types: materialize a bounded prefix
+            if hasattr(o, "__iter__") and type(o).__name__.endswith("iterator"):
+                try:
+                    prefix = list(itertools.islice(iter(o), max_iter_items + 1))
+                except Exception:
+                    prefix = None
+                if prefix is not None:
+                    if len(prefix) > max_iter_items:
+                        log(
+                            f"{indent}⚠ Iterator has more than {max_iter_items} items, "
+                            f"only checking first {max_iter_items}"
+                        )
+                        prefix = prefix[:max_iter_items]
+                    for i, v in enumerate(prefix):
+                        bad = walk(v, f"{path}[{i}]", depth + 1)
+                        if bad:
+                            return bad
+                    return path
+
+            # 3) GraphPickler reducer_override
+            try:
+                red = pickler.reducer_override(o)
+                log(f"{indent}reducer_override -> {type(red)}")
+            except Exception as e2:
+                log(f"{indent}💥 reducer_override crashed: {e2}")
+                return path
+
+            if red is not NotImplemented:
+                _, args = red
+                log(f"{indent}Using custom reduce, args={len(args)}")
+                for i, a in enumerate(args):
+                    bad = walk(a, f"{path}.reduce_args[{i}]", depth + 1)
+                    if bad:
+                        return bad
+
+            # 4) Dataclasses
+            if dataclasses.is_dataclass(o):
+                for f in dataclasses.fields(o):
+                    try:
+                        v = getattr(o, f.name)
+                    except Exception:
+                        return f"{path}.{f.name}"
+                    bad = walk(v, f"{path}.{f.name}", depth + 1)
+                    if bad:
+                        return bad
+                return path
+
+            # 5) __getstate__ and __dict__/__slots__
+            getstate = getattr(o, "__getstate__", None)
+            if callable(getstate):
+                try:
+                    state = getstate()
+                    log(f"{indent}__getstate__ -> {type(state)}")
+                except Exception as e3:
+                    log(f"{indent}💥 __getstate__ failed: {e3}")
+                    return path + ".__getstate__()"
+                bad = walk(state, path + ".__getstate__()", depth + 1)
+                if bad:
+                    return bad
+
+            if hasattr(o, "__dict__"):
+                for name, v in vars(o).items():
+                    bad = walk(v, f"{path}.{name}", depth + 1)
+                    if bad:
+                        return bad
+                return path
+
+            if hasattr(o, "__slots__"):
+                for slot in o.__slots__:
+                    if hasattr(o, slot):
+                        bad = walk(getattr(o, slot), f"{path}.{slot}", depth + 1)
+                        if bad:
+                            return bad
+                return path
+
+            # 6) Last resort: reduce protocol for non-container / opaque objects
+            reduce_tuple = None
+            try:
+                if hasattr(o, "__reduce_ex__"):
+                    reduce_tuple = o.__reduce_ex__(pickle.HIGHEST_PROTOCOL)
+                    log(f"{indent}__reduce_ex__ -> {type(reduce_tuple)}")
+                elif hasattr(o, "__reduce__"):
+                    reduce_tuple = o.__reduce__()
+                    log(f"{indent}__reduce__ -> {type(reduce_tuple)}")
+            except Exception as e4:
+                log(f"{indent}💥 reduce protocol failed: {e4}")
+                return path
+
+            if isinstance(reduce_tuple, tuple):
+                for i, part in enumerate(reduce_tuple):
+                    if part is None:
+                        continue
+                    bad = walk(part, f"{path}.__reduce__[{i}]", depth + 1)
+                    if bad:
+                        return bad
+
+            return path
+
+        bad = walk(obj, "root", 0)
+        return bad
 
 
 class _UnpickleState:
@@ -160,12 +415,14 @@ class _UnpickleState:
 _UnpickleStateToken = NewType("_UnpickleStateToken", object)
 
 
+# pyrefly: ignore [invalid-inheritance]
 class _GraphUnpickler(pickle.Unpickler):
     def __init__(self, stream: io.BytesIO, unpickle_state: _UnpickleState) -> None:
         super().__init__(stream)
         self._unpickle_state = unpickle_state
 
     @override
+    # pyrefly: ignore [bad-override]
     def persistent_load(self, pid: object) -> object:
         if pid == "unpickle_state":
             return self._unpickle_state
@@ -188,15 +445,18 @@ class _ShapeEnvPickleData:
         # In theory pickle should recognize that a given ShapeEnv was already
         # pickled and reuse the resulting _ShapeEnvPickleData (so two objects
         # pointing at the same ShapeEnv get the same ShapeEnv out).
-        assert not env._translation_validation_enabled
+        if env._translation_validation_enabled:
+            raise AssertionError("Translation validation must be disabled for pickling")
         self.data = env.__dict__.copy()
         del self.data["tracked_fakes"]
         del self.data["fake_tensor_cache"]
 
     def unpickle(self, unpickle_state: _UnpickleState) -> ShapeEnv:
         # Fill in the existing ShapeEnv rather than creating a new one
-        assert unpickle_state.fake_mode
-        assert unpickle_state.fake_mode.shape_env
+        if not unpickle_state.fake_mode:
+            raise AssertionError("unpickle_state.fake_mode is not set")
+        if not unpickle_state.fake_mode.shape_env:
+            raise AssertionError("unpickle_state.fake_mode.shape_env is not set")
 
         for k, v in self.data.items():
             setattr(unpickle_state.fake_mode.shape_env, k, v)
@@ -227,7 +487,8 @@ class _SymNodePickleData:
         self.hint = node._hint
 
     def _to_sym_node(self) -> SymNode:
-        assert self.shape_env is not None
+        if self.shape_env is None:
+            raise AssertionError("shape_env is None")
         return SymNode(self.expr, self.shape_env, self.pytype, self.hint)
 
     def unpickle_sym_int(self, unpickle_state: _UnpickleState) -> torch.SymInt:
@@ -257,18 +518,21 @@ class _TensorPickleData:
 
         # view_func is fine if it's either None or a _FakeTensorViewFunc. A
         # custom one (which is basically a lambda) can't be serialized.
-        assert not metadata.view_func or isinstance(
+        if metadata.view_func and not isinstance(
             metadata.view_func, torch._subclasses.meta_utils._FakeTensorViewFunc
-        )
+        ):
+            raise AssertionError(
+                f"view_func must be None or _FakeTensorViewFunc, got "
+                f"{type(metadata.view_func)}"
+            )
         self.metadata = dataclasses.replace(metadata, fake_mode=None)
 
         # Some debugging/verification
         for k in MetaTensorDesc._UNSERIALIZABLE:
             if k in ("fake_mode", "view_func"):
                 continue
-            assert getattr(self.metadata, k) is None, (
-                f"not None: {k}: {getattr(self.metadata, k)}"
-            )
+            if getattr(self.metadata, k) is not None:
+                raise AssertionError(f"not None: {k}: {getattr(self.metadata, k)}")
 
     def unpickle(self, unpickle_state: _UnpickleState) -> FakeTensor:
         # TODO: make common w/ _output_from_cache_entry() in fake_tensor.py?
@@ -286,7 +550,7 @@ class _TensorPickleData:
             metadata = dataclasses.replace(metadata, base=new_base)
 
         def with_fake(
-            make_meta_t: Callable[[], torch.Tensor], device: Union[torch.device, str]
+            make_meta_t: Callable[[], torch.Tensor], device: torch.device | str
         ) -> FakeTensor:
             with no_dispatch():
                 return FakeTensor(
@@ -309,11 +573,12 @@ class _TorchNumpyPickleData:
     @classmethod
     def reduce_helper(
         cls, pickler: GraphPickler, obj: object
-    ) -> Optional[
+    ) -> (
         tuple[
             Callable[[Self, _UnpickleState], object], tuple[Self, _UnpickleStateToken]
         ]
-    ]:
+        | None
+    ):
         if data := cls.from_object(obj):
             return (cls.unpickle, (data, pickler._unpickle_state))
         else:
@@ -328,7 +593,7 @@ class _TorchNumpyPickleData:
         return torch._dynamo.variables.misc.get_np_to_tnp_map()[np]
 
     @classmethod
-    def from_object(cls, tnp: object) -> Optional[Self]:
+    def from_object(cls, tnp: object) -> Self | None:
         if not callable(tnp):
             return None
 
@@ -346,7 +611,10 @@ class _TorchNumpyPickleData:
             return None
 
         # pyrefly: ignore [unbound-name]
-        assert np == getattr(importlib.import_module(mod), name)
+        if np != getattr(importlib.import_module(mod), name):
+            raise AssertionError(
+                f"Numpy object mismatch for {mod}.{name}"  # pyrefly: ignore [unbound-name]
+            )
         # pyrefly: ignore [unbound-name]
         return cls(mod, name)
 
@@ -370,7 +638,10 @@ class _GraphModulePickleData:
             _python_code = gm._real_recompile()
         else:
             _python_code = gm.recompile()
-        self.gm_dict = gm.__dict__.copy()
+        if hasattr(gm, "__getstate__"):
+            self.gm_dict = gm.__getstate__()
+        else:
+            self.gm_dict = gm.__dict__.copy()
         del self.gm_dict["_graph"]
         self.graph = _GraphPickleData(gm._graph, options)
 
@@ -422,7 +693,8 @@ class _NodePickleData:
             _NodePickleData, lambda n: mapping[n], self.kwargs
         )
         target = self.target.unpickle(unpickle_state)
-        assert callable(target) or isinstance(target, str)
+        if not (callable(target) or isinstance(target, str)):
+            raise AssertionError(f"target must be callable or str, got {type(target)}")
         node = graph.create_node(self.op, target, args, kwargs, self.name, self.type)
         node.meta = self.meta
         return node
@@ -442,9 +714,13 @@ class _OpPickleData:
             return _OpStrPickleData(op)
 
         if isinstance(getattr(op, "__wrapped__", None), AOTCompiledArtifact):
-            assert hasattr(op, "__wrapped__")
+            if not hasattr(op, "__wrapped__"):
+                raise AssertionError("op missing __wrapped__ attribute")
             artifact = op.__wrapped__
-            assert isinstance(artifact, AOTCompiledArtifact)
+            if not isinstance(artifact, AOTCompiledArtifact):
+                raise AssertionError(
+                    f"Expected AOTCompiledArtifact, got {type(artifact)}"
+                )
             return _OpPrecompiledPickleData(artifact)
 
         name = torch.fx.Node._pretty_print_target(op)
@@ -463,9 +739,7 @@ class _OpPickleData:
     @staticmethod
     def _pickle_op(
         name: str,
-        datacls: Union[
-            type["_OpOverloadPickleData"], type["_OpOverloadPacketPickleData"]
-        ],
+        datacls: type["_OpOverloadPickleData"] | type["_OpOverloadPacketPickleData"],
         options: Options,
     ) -> "_OpPickleData":
         if (ops_filter := options.ops_filter) and not ops_filter(name):
@@ -515,7 +789,8 @@ class _OpOverloadPickleData(_OpPickleData):
 
     def unpickle(self, unpickle_state: _UnpickleState) -> torch._ops.OpOverload:
         obj = self._lookup_global_by_name(self.name)
-        assert isinstance(obj, torch._ops.OpOverload)
+        if not isinstance(obj, torch._ops.OpOverload):
+            raise AssertionError(f"Expected OpOverload, got {type(obj)}")
         return obj
 
 
@@ -525,7 +800,8 @@ class _OpOverloadPacketPickleData(_OpPickleData):
 
     def unpickle(self, unpickle_state: _UnpickleState) -> torch._ops.OpOverloadPacket:
         obj = self._lookup_global_by_name(self.name)
-        assert isinstance(obj, torch._ops.OpOverloadPacket)
+        if not isinstance(obj, torch._ops.OpOverloadPacket):
+            raise AssertionError(f"Expected OpOverloadPacket, got {type(obj)}")
         return obj
 
 

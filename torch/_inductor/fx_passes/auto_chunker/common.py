@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
@@ -18,7 +18,7 @@ class ChunkingMeta:
     # tensor in the `scale_by` field. Need this since we pretend tangent to be 1 first and
     # scale the affected tensor later. Need propagate such information
     # to downstream.
-    scale_by: Optional[Node] = None
+    scale_by: Node | None = None
 
     # The dimension of the current tensor that get chunked.
     # Can be None if the current tensor is not chunked. E.g., when
@@ -26,7 +26,7 @@ class ChunkingMeta:
     #
     # To recover a tensor with non-None chunk_dim, we need concat each
     # chunk at the 'chunk_dim' dimension.
-    chunk_dim: Optional[int] = None
+    chunk_dim: int | None = None
 
     # The original tensor is the sum of each tensor in the chunking subgraph.
     # `chunk_dim` and `need_sum` are exclusive! A node can not have both a non

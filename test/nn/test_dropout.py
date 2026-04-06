@@ -11,7 +11,6 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfMPS,
-    expectedFailureMPS,
     expectedFailureXLA,
     instantiate_device_type_tests,
 )
@@ -77,8 +76,12 @@ class TestDropoutNN(NNTestCase):
                     o_ref = torch.dropout(x_ref, p, train)
                     o.sum().backward()
                     o_ref.sum().backward()
-                    assert o.equal(o_ref)
-                    assert x.grad.equal(x_ref.grad)
+                    if not o.equal(o_ref):
+                        raise AssertionError("Expected o.equal(o_ref) to be True")
+                    if not x.grad.equal(x_ref.grad):
+                        raise AssertionError(
+                            "Expected x.grad.equal(x_ref.grad) to be True"
+                        )
 
     def test_invalid_dropout_p(self):
         v = torch.ones(1)
@@ -212,7 +215,6 @@ class TestDropoutNNDeviceType(NNTestCase):
     @expectedFailureXLA  # seems like freeze_rng_state is not honoured by XLA
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
-    @expectedFailureMPS
     def test_Dropout1d(self, device, dtype):
         with set_default_dtype(dtype):
             N, C, L = (
@@ -285,7 +287,6 @@ class TestDropoutNNDeviceType(NNTestCase):
         self._test_dropoutNd_channel_zero(nn.Dropout2d(p=0.5, inplace=True), input)
 
     @expectedFailureXLA  # seems like freeze_rng_state is not honoured by XLA
-    @expectedFailureMPS  # Failing on current pytorch MPS
     def test_Dropout3d(self, device):
         b = random.randint(1, 5)
         w = random.randint(1, 5)

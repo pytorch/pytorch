@@ -12,12 +12,15 @@ from torch.sparse._semi_structured_conversions import (
 from torch.sparse._semi_structured_ops import (
     fallback_dispatcher,
     semi_sparse_addmm,
+    semi_sparse_clone,
     semi_sparse_detach,
     semi_sparse_indices,
     semi_sparse_linear,
     semi_sparse_mm,
     semi_sparse_scaled_mm,
     semi_sparse_t,
+    semi_sparse_to,
+    semi_sparse_to_copy,
     semi_sparse_values,
     semi_sparse_view,
 )
@@ -230,8 +233,10 @@ class SparseSemiStructuredTensor(torch.Tensor):
                 torch.ops.aten.matmul: semi_sparse_mm,
                 torch.ops.aten.addmm: semi_sparse_addmm,
                 torch.ops.aten.linear: semi_sparse_linear,
-                torch.ops.aten._to_copy: fallback_dispatcher,
+                torch.ops.aten._to_copy: semi_sparse_to_copy,
                 torch.ops.aten._scaled_mm: semi_sparse_scaled_mm,
+                torch.ops.aten.clone: semi_sparse_clone,
+                torch.ops.aten.to: semi_sparse_to,
             }
             if custom_dispatch_table is not None:
                 cls.SPARSE_DISPATCH.update(custom_dispatch_table)
@@ -278,29 +283,6 @@ class SparseSemiStructuredTensor(torch.Tensor):
                 f"Error original_tensor.shape {original_tensor.shape} is not supported! "
                 f"Both dimensions must be larger or equal than and a multiple of ({min_rows}, {min_cols})"
             )
-
-    @classmethod
-    def _pad_dense_input(cls, dense_input: torch.Tensor) -> torch.Tensor:
-        """
-        Calculates padding for dense tensor and pads tensor if necessary.
-        If padding is not required, this function returns the original tensor.
-        """
-        # only 2d matmul
-        if dense_input.dim() != 2:
-            raise AssertionError(f"dense_input must be 2D, got {dense_input.dim()}D")
-
-        # check shape
-        m, n = dense_input.shape
-        min_rows = cls._DTYPE_SHAPE_CONSTRAINTS[dense_input.dtype].dense_min_rows
-        min_cols = cls._DTYPE_SHAPE_CONSTRAINTS[dense_input.dtype].dense_min_cols
-
-        # calculate padding
-        to_pad_m = -m % min_rows if m < min_rows or m % min_rows else 0
-        to_pad_n = -n % min_cols if n < min_cols or n % min_rows else 0
-        if to_pad_m or to_pad_n:
-            return torch.nn.functional.pad(dense_input, (0, to_pad_n, 0, to_pad_m))
-        else:
-            return dense_input
 
     def to_dense(self):  # type:ignore[override]
         col = self.shape[-1]
@@ -517,7 +499,12 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
         )
 
     def _mm(
-        self, B: torch.Tensor, *, bias: torch.Tensor | None = None, **kwargs
+        self,
+        B: torch.Tensor,
+        *,
+        bias: torch.Tensor | None = None,
+        should_transpose_dense: bool = False,
+        **kwargs,
     ) -> torch.Tensor:
         if isinstance(B, SparseSemiStructuredTensor):
             raise ValueError(
@@ -533,13 +520,18 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
                 f"`{cls_name}` matmul: operation is not supported"
             )
         else:
-            if bias is None:
-                res = torch._sparse_semi_structured_mm(self.packed, self.meta, B)
-            else:
-                res = torch._sparse_semi_structured_addmm(
-                    bias, self.packed, self.meta, B
-                )
-            return res[: self.shape[0]]
+            _ensure_cutlass_mm_registered()
+            constraints = self._DTYPE_SHAPE_CONSTRAINTS[B.dtype]
+            return torch.ops.semi_structured.cutlass_mm(
+                B,
+                self.packed,
+                self.meta,
+                bias,
+                self.shape[0],
+                constraints.dense_min_rows,
+                constraints.dense_min_cols,
+                should_transpose_dense,
+            )
 
 
 class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
@@ -646,7 +638,12 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
         )
 
     def _mm(
-        self, B: torch.Tensor, *, bias: torch.Tensor | None = None, **kwargs
+        self,
+        B: torch.Tensor,
+        *,
+        bias: torch.Tensor | None = None,
+        should_transpose_dense: bool = False,
+        **kwargs,
     ) -> torch.Tensor:
         if isinstance(B, SparseSemiStructuredTensor):
             raise ValueError(
@@ -680,11 +677,141 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
                 f"`{self.__class__.__name__}` matmul: operation is not supported"
             )
         else:
-            res = torch._cslt_sparse_mm(
-                self.packed,
+            _ensure_cusparselt_mm_registered()
+            constraints = self._DTYPE_SHAPE_CONSTRAINTS[B.dtype]
+            return torch.ops.semi_structured.cusparselt_mm(
                 B,
-                bias=bias,
-                transpose_result=self.fuse_transpose_cusparselt,
-                alg_id=self.alg_id_cusparselt,
+                self.packed,
+                bias,
+                self.shape[0],
+                constraints.dense_min_rows,
+                constraints.dense_min_cols,
+                self.fuse_transpose_cusparselt,
+                self.alg_id_cusparselt,
+                should_transpose_dense,
             )
-            return res.t() if self.fuse_transpose_cusparselt else res
+
+
+_cutlass_mm_registered = False
+
+
+def _ensure_cutlass_mm_registered():
+    """Lazily register the cutlass_mm custom op.
+
+    Registration is deferred to avoid importing torch.library at module load
+    time, since torch.sparse is imported early during ``import torch``.
+    """
+    global _cutlass_mm_registered
+    if _cutlass_mm_registered:
+        return
+    _cutlass_mm_registered = True
+
+    from torch.library import custom_op
+
+    @custom_op("semi_structured::cutlass_mm", mutates_args=())
+    def cutlass_mm(
+        dense: torch.Tensor,
+        packed: torch.Tensor,
+        meta: torch.Tensor,
+        bias: torch.Tensor | None,
+        out_features: int,
+        min_rows: int,
+        min_cols: int,
+        transpose_dense: bool,
+    ) -> torch.Tensor:
+        m, n = dense.shape
+        to_pad_m = (-m) % min_rows
+        to_pad_n = (-n) % min_cols
+        dense_padded = torch.nn.functional.pad(dense, (0, to_pad_n, 0, to_pad_m))
+        mm_input = dense_padded.t() if transpose_dense else dense_padded
+        if bias is None:
+            res = torch._sparse_semi_structured_mm(packed, meta, mm_input)
+        else:
+            res = torch._sparse_semi_structured_addmm(bias, packed, meta, mm_input)
+        out_cols = m if transpose_dense else n
+        return (
+            res[:out_features]
+            .narrow(1, 0, out_cols)
+            .clone(memory_format=torch.contiguous_format)
+        )
+
+    @cutlass_mm.register_fake
+    def _cutlass_mm_fake(
+        dense: torch.Tensor,
+        packed: torch.Tensor,
+        meta: torch.Tensor,
+        bias: torch.Tensor | None,
+        out_features: int,
+        min_rows: int,
+        min_cols: int,
+        transpose_dense: bool,
+    ) -> torch.Tensor:
+        out_cols = dense.shape[0] if transpose_dense else dense.shape[1]
+        return torch.empty(
+            out_features,
+            out_cols,
+            dtype=dense.dtype,
+            device=dense.device,
+        )
+
+
+_cusparselt_mm_registered = False
+
+
+def _ensure_cusparselt_mm_registered():
+    """Lazily register the cusparselt_mm custom op."""
+    global _cusparselt_mm_registered
+    if _cusparselt_mm_registered:
+        return
+    _cusparselt_mm_registered = True
+
+    from torch.library import custom_op
+
+    @custom_op("semi_structured::cusparselt_mm", mutates_args=())
+    def cusparselt_mm(
+        dense: torch.Tensor,
+        packed: torch.Tensor,
+        bias: torch.Tensor | None,
+        out_features: int,
+        min_rows: int,
+        min_cols: int,
+        fuse_transpose: bool,
+        alg_id: int,
+        should_transpose_dense: bool = False,
+    ) -> torch.Tensor:
+        m, n = dense.shape
+        to_pad_m = (-m) % min_rows
+        to_pad_n = (-n) % min_cols
+        dense_padded = torch.nn.functional.pad(dense, (0, to_pad_n, 0, to_pad_m))
+        mm_input = dense_padded.t() if should_transpose_dense else dense_padded
+        res = torch._cslt_sparse_mm(
+            packed,
+            mm_input,
+            bias=bias,
+            transpose_result=fuse_transpose,
+            alg_id=alg_id,
+        )
+        if fuse_transpose:
+            res = res.t()
+        out_cols = m if should_transpose_dense else n
+        return res.narrow(1, 0, out_cols).clone(memory_format=torch.contiguous_format)
+
+    @cusparselt_mm.register_fake
+    def _cusparselt_mm_fake(
+        dense: torch.Tensor,
+        packed: torch.Tensor,
+        bias: torch.Tensor | None,
+        out_features: int,
+        min_rows: int,
+        min_cols: int,
+        fuse_transpose: bool,
+        alg_id: int,
+        should_transpose_dense: bool,
+    ) -> torch.Tensor:
+        out_cols = dense.shape[0] if should_transpose_dense else dense.shape[1]
+        return torch.empty(
+            out_features,
+            out_cols,
+            dtype=dense.dtype,
+            device=dense.device,
+        )

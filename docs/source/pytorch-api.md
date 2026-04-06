@@ -52,7 +52,6 @@ futures
 fx
 fx.experimental
 torch.hub <hub>
-torch.jit <jit>
 torch.linalg <linalg>
 torch.monitor <monitor>
 torch.signal <signal>

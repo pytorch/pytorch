@@ -225,7 +225,6 @@ class PGTransport:
         self._work: list[Work] = []
         self._pg = pg
         self._timeout = timeout
-        # pyrefly: ignore [read-only]
         self._device = device
         self._state_dict = state_dict
 

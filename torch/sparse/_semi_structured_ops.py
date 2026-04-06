@@ -15,6 +15,9 @@ __all__ = [
     "semi_sparse_addmm",
     "semi_sparse_linear",
     "semi_sparse_scaled_mm",
+    "semi_sparse_clone",
+    "semi_sparse_to",
+    "semi_sparse_to_copy",
 ]
 
 
@@ -136,20 +139,14 @@ def semi_sparse_mm(func, types, args=(), kwargs=None) -> torch.Tensor:
             "`SparseSemiStructuredTensor` matmul: Broadcasting is not implemented"
         )
     if isinstance(A, torch.sparse.SparseSemiStructuredTensor):
-        row, col = B.shape
-        B_padded = A._pad_dense_input(B)
-        res = A._mm(B_padded)
-        return res[:, :col]
+        return A._mm(B)
     else:
         B_t = B.t()
         if not isinstance(B_t, torch.sparse.SparseSemiStructuredTensor):
             raise AssertionError(
                 f"expected SparseSemiStructuredTensor, got {type(B_t).__name__}"
             )
-        row, col = A.shape
-        A_padded = B._pad_dense_input(A)
-        res = B_t._mm(A_padded.t()).t()
-        return res[:row, :]
+        return B_t._mm(A, should_transpose_dense=True).t()
 
 
 def semi_sparse_addmm(func, types, args=(), kwargs=None) -> torch.Tensor:
@@ -174,9 +171,7 @@ def semi_sparse_addmm(func, types, args=(), kwargs=None) -> torch.Tensor:
             f"expected SparseSemiStructuredTensor, got {type(B_t).__name__}"
         )
     row, _col = A.shape
-    A_padded = B_t._pad_dense_input(A)
-    result = B_t._mm(A_padded.t(), bias=bias).t()
-    return result[:row, :]
+    return B_t._mm(A, bias=bias, should_transpose_dense=True).t()
 
 
 def semi_sparse_linear(func, types, args=(), kwargs=None) -> torch.Tensor:
@@ -187,7 +182,6 @@ def semi_sparse_linear(func, types, args=(), kwargs=None) -> torch.Tensor:
 
     shape = A.shape
     A_2d = A.view(-1, shape[-1])
-
     if bias is None:
         res = A_2d @ B.t()
     else:
@@ -196,7 +190,6 @@ def semi_sparse_linear(func, types, args=(), kwargs=None) -> torch.Tensor:
             types=None,
             args=[bias, A_2d, B.t()],
         )
-
     return res.view(*shape[:-1], -1)
 
 
@@ -234,3 +227,74 @@ def semi_sparse_scaled_mm(func, types, args=(), kwargs=None) -> torch.Tensor:
         out_dtype=out_dtype,
     )
     return sparse_result
+
+
+def semi_sparse_clone(func, types, args=(), kwargs=None) -> torch.Tensor:
+    if len(args) != 1:
+        raise AssertionError(f"expected 1 arg, got {len(args)}")
+
+    self = args[0]
+    if not isinstance(self, torch.sparse.SparseSemiStructuredTensor):
+        raise AssertionError(
+            f"expected SparseSemiStructuredTensor, got {type(self).__name__}"
+        )
+
+    # pyrefly: ignore [no-matching-overload]
+    return self.__class__(
+        shape=self.shape,
+        packed=None if self.packed is None else self.packed.clone(),
+        meta=None if self.meta is None else self.meta.clone(),
+        packed_t=None if self.packed_t is None else self.packed_t.clone(),
+        meta_t=None if self.meta_t is None else self.meta_t.clone(),
+        compressed_swizzled_bitmask=(
+            None
+            if self.compressed_swizzled_bitmask is None
+            else self.compressed_swizzled_bitmask.clone()
+        ),
+        fuse_transpose_cusparselt=self.fuse_transpose_cusparselt,
+        alg_id_cusparselt=self.alg_id_cusparselt,
+        requires_grad=self.requires_grad,
+    )
+
+
+def semi_sparse_to_copy(func, types, args, kwargs=None) -> torch.Tensor:
+    self = args[0]
+    kwargs = kwargs or {}
+
+    device = kwargs.get("device", None)
+
+    if device is not None and torch.device(device).type == "cpu":
+        dense = self.to_dense()
+        return func(dense, **kwargs)
+
+    raise NotImplementedError(
+        f"`_to_copy()` with kwargs={kwargs} is not implemented "
+        "for SparseSemiStructuredTensor. Only converting to CPU is supported currently."
+    )
+
+
+def semi_sparse_to(func, types, args, kwargs=None) -> torch.Tensor:
+    self = args[0]
+    remaining_args = args[1:]
+    kwargs = kwargs or {}
+
+    # Determine the target device from args/kwargs
+    device = None
+    if remaining_args:
+        first_arg = remaining_args[0]
+        if isinstance(first_arg, (torch.device, str)):
+            try:
+                device = torch.device(first_arg)
+            except RuntimeError:
+                pass
+    if "device" in kwargs:
+        device = torch.device(kwargs["device"])
+
+    if device is not None and device.type == "cpu":
+        dense = self.to_dense()
+        return func(dense, *remaining_args, **kwargs)
+
+    raise NotImplementedError(
+        f"`to()` with args={remaining_args}, kwargs={kwargs} is not implemented "
+        "for SparseSemiStructuredTensor. Only `to('cpu')` is supported currently."
+    )

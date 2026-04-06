@@ -534,7 +534,7 @@ def copy_template_registration_files(name, apple_sdks = None):
     #
     for (path_prefix, file_paths) in template_source_dict.items():
         cmd.append("mkdir -p $OUT/{}".format(path_prefix))
-        cmd_exe.append("md $OUT/{}".format(path_prefix))
+        cmd_exe.append("if not exist $OUT\\{0} md $OUT\\{0}".format(path_prefix.replace("/", "\\")))
 
         # Adding *.cpp is a workaround to prevent cp from thrown an error when it
         # encounters a directory (since -r was not specified). If files with an
@@ -542,32 +542,37 @@ def copy_template_registration_files(name, apple_sdks = None):
         # will not work and will need to be updated.
         #
         cmd.append("cp -f $(location {0}:templated_selective_build_srcs)/{1}/*.cpp $OUT/{1}/".format(ROOT, path_prefix))
-        cmd_exe.append("robocopy /E $(location {0}:templated_selective_build_srcs)/{1} $OUT/{1}".format(ROOT, path_prefix))
+        cmd_exe.append("robocopy /E $(location {0}:templated_selective_build_srcs)/{1} $OUT\\{2}".format(ROOT, path_prefix, path_prefix.replace("/", "\\")))
 
     if NOT_OSS:
         for file_path in TEMPLATE_MASKRCNN_SOURCE_LIST:
             maskrcnn_file = "$(location //xplat/caffe2/fb/custom_ops/maskrcnn:templated_selective_build_srcs)/" + file_path
             cmd.append("cp -f " + maskrcnn_file + " $OUT")
-            cmd_exe.append("copy " + maskrcnn_file + " $OUT")
+            maskrcnn_file_win = "$(location //xplat/caffe2/fb/custom_ops/maskrcnn:templated_selective_build_srcs)\\" + file_path.replace("/", "\\")
+            cmd_exe.append("copy " + maskrcnn_file_win + " $OUT")
 
     cmd.append("mkdir -p $OUT/aten/src/ATen")
-    cmd_exe.append("md $OUT/aten/src/ATen")
+    cmd_exe.append("if not exist $OUT\\aten\\src\\ATen md $OUT\\aten\\src\\ATen")
 
     # NB: CUDA is skipped here because this is selective build and CUDA is not
     # supported for selective build
     for ufunc_file in aten_ufunc_generated_all_cpu_sources("$(location " + ROOT + ":gen_aten[{}])"):
         cmd.append("cp -f " + ufunc_file + " $OUT/aten/src/ATen")
-        cmd_exe.append("copy " + ufunc_file + " $OUT/aten/src/ATen")
+        cmd_exe.append("copy " + ufunc_file + " $OUT\\aten\\src\\ATen")
 
     if NOT_OSS:
         pvd_batch_box_cox_file = "$(location //xplat/caffe2/fb/custom_ops/batch_box_cox:templated_selective_build_srcs)/register_batch_box_cox_ops.cpp"
         cmd.append("cp -f " + pvd_batch_box_cox_file + " $OUT")
-        cmd_exe.append("copy " + pvd_batch_box_cox_file + " $OUT")
+        pvd_batch_box_cox_file_win = "$(location //xplat/caffe2/fb/custom_ops/batch_box_cox:templated_selective_build_srcs)\\register_batch_box_cox_ops.cpp"
+        cmd_exe.append("copy " + pvd_batch_box_cox_file_win + " $OUT")
 
+    # For Windows, use newlines to separate commands into different lines in the batch file.
+    # This avoids Windows command line length limits. Each line in a .bat file is treated as a separate
+    # command with its own length limit.
     fb_xplat_genrule(
         name = name,
         cmd = " && ".join(cmd),
-        cmd_exe = "@powershell -Command " + ("; ".join(cmd_exe)),
+        cmd_exe = "\n".join(cmd_exe),
         outs = get_template_registration_files_outs(IS_OSS),
         default_outs = ["."],
         apple_sdks = apple_sdks,
@@ -900,6 +905,7 @@ def define_buck_targets(
             ("aten/src", "ATen/ops/*.h"),
             # ATen Base
             ("aten/src", "ATen/*.h"),
+            ("aten/src", "ATen/accelerator/*.h"),
             ("aten/src", "ATen/cpu/**/*.h"),
             ("aten/src", "ATen/detail/*.h"),
             ("aten/src", "ATen/functorch/**/*.h"),
@@ -1514,7 +1520,12 @@ def define_buck_targets(
         srcs = [
             "torch/csrc/api/src/data/samplers/random.cpp",
             "torch/csrc/api/src/data/samplers/sequential.cpp",
+            "torch/csrc/api/src/optim/adagrad.cpp",
+            "torch/csrc/api/src/optim/adam.cpp",
+            "torch/csrc/api/src/optim/adamw.cpp",
+            "torch/csrc/api/src/optim/lbfgs.cpp",
             "torch/csrc/api/src/optim/optimizer.cpp",
+            "torch/csrc/api/src/optim/rmsprop.cpp",
             "torch/csrc/api/src/optim/serialize.cpp",
             "torch/csrc/api/src/optim/sgd.cpp",
             "torch/csrc/api/src/serialize/input-archive.cpp",

@@ -71,7 +71,8 @@ def _rebuild_tensor_from_dtensor_meta(arg) -> object:
     """
     This is used to propagate tensor metadata, must be under fake mode
     """
-    assert arg.tensor_meta is not None, "DTensorSpec does not contain tensor_meta."
+    if arg.tensor_meta is None:
+        raise AssertionError("DTensorSpec does not contain tensor_meta.")
     return torch.empty_strided(
         arg.tensor_meta.shape,
         arg.tensor_meta.stride,
@@ -109,7 +110,8 @@ class OpSpec:
 
     # output_specs and input_specs are related: for this op, given these input_specs,
     # this is the way the output would look
-    output_specs: DTensorSpec | tuple[DTensorSpec | None, ...]
+    # Note: output_specs can be None for ops that don't return tensors (e.g., _linalg_check_errors)
+    output_specs: DTensorSpec | tuple[DTensorSpec | None, ...] | None
     input_specs: Sequence[DTensorSpec] | None = None
 
     """
@@ -159,19 +161,29 @@ class OpSpec:
             return self.output_specs.mesh
         elif isinstance(self.output_specs, tuple):
             out_spec = self.output_specs[0]
-            assert isinstance(out_spec, DTensorSpec)
+            if not isinstance(out_spec, DTensorSpec):
+                raise AssertionError
             return out_spec.mesh
+        elif self.output_specs is None:
+            # For no-output ops, get mesh from input_specs
+            if self.input_specs is None or len(self.input_specs) <= 0:
+                raise AssertionError(
+                    "Cannot determine mesh: output_specs is None and input_specs is empty"
+                )
+            return self.input_specs[0].mesh
         else:
             raise ValueError(
                 f"function output_spec expects a single DTensorSpec or a tuple of DTensorSpec but got: {self.output_specs}"
             )
 
     def input_spec(self, index: int = 0) -> DTensorSpec:
-        assert self.input_specs is not None, "input_specs of OpSpec is None!"
-        assert len(self.input_specs) > index, (
-            f"Invalid index {index} for input_specs of length "
-            f"{len(self.input_specs)}: {self.input_specs}"
-        )
+        if self.input_specs is None:
+            raise AssertionError("input_specs of OpSpec is None!")
+        if len(self.input_specs) <= index:
+            raise AssertionError(
+                f"Invalid index {index} for input_specs of length "
+                f"{len(self.input_specs)}: {self.input_specs}"
+            )
         return self.input_specs[index]
 
     def __str__(self) -> str:
@@ -183,11 +195,12 @@ class OpSpec:
         return f"{input_specs_str}{output_spec_str}"
 
     def __hash__(self) -> int:
-        output_hash = hash(
-            self.output_specs
-            if isinstance(self.output_specs, DTensorSpec)
-            else tuple(self.output_specs)
-        )
+        if self.output_specs is None:
+            output_hash = hash(None)
+        elif isinstance(self.output_specs, DTensorSpec):
+            output_hash = hash(self.output_specs)
+        else:
+            output_hash = hash(tuple(self.output_specs))
         input_hash = hash(tuple(self.input_specs)) if self.input_specs else 0
         return hash((output_hash, input_hash))
 
@@ -249,7 +262,8 @@ class OpStrategy(StrategyType):
     @property
     def tensor_meta(self) -> TensorMeta:
         # TODO upstream this assert to DTensorSpec itself and fill any missing TensorMetas
-        assert self.strategies[0].output_spec.tensor_meta is not None
+        if self.strategies[0].output_spec.tensor_meta is None:
+            raise AssertionError
         return self.strategies[0].output_spec.tensor_meta
 
     def __hash__(self) -> int:
@@ -295,7 +309,8 @@ class TupleStrategy(StrategyType):
 
     def child_mesh(self, index: int) -> DeviceMesh:
         op_strategy = self.children[index]
-        assert isinstance(op_strategy, OpStrategy)
+        if not isinstance(op_strategy, OpStrategy):
+            raise AssertionError
         return op_strategy.mesh
 
     def __str__(self) -> str:
@@ -421,6 +436,9 @@ class OpSchema:
                 return item.tensor_meta
             elif isinstance(item, TupleStrategy):
                 return tuple(convert_to_meta(child) for child in item.children)
+            elif isinstance(item, (list, tuple)):
+                converted = [convert_to_meta(child) for child in item]
+                return type(item)(converted)
             else:
                 return item
 
@@ -435,6 +453,9 @@ class OpSchema:
                 return item.tensor_meta
             elif isinstance(item, TupleStrategy):
                 return tuple(convert_to_meta(child) for child in item.children)
+            elif isinstance(item, (list, tuple)):
+                converted = [convert_to_meta(child) for child in item]
+                return type(item)(converted)
             else:
                 return item
 
@@ -459,12 +480,14 @@ class OpSchema:
                 args_schema.append(str(arg))
                 device_mesh = arg.mesh
             elif isinstance(arg, OpStrategy):
-                assert len(arg.strategies) == 1
+                if len(arg.strategies) != 1:
+                    raise AssertionError
                 args_schema.append(_pretty_print_spec(arg.strategies[0].output_specs))
                 device_mesh = arg.mesh
             elif isinstance(arg, TupleStrategy):
                 first_op_strategy = arg.children[0]
-                assert isinstance(first_op_strategy, OpStrategy)
+                if not isinstance(first_op_strategy, OpStrategy):
+                    raise AssertionError
                 device_mesh = first_op_strategy.mesh
                 args_schema.append(str(arg))
             else:
@@ -504,7 +527,9 @@ class OpSchema:
         return_types = self.op._schema.returns
         # all dispatch ops only return Tensor or Tuple[Tensor] for tensor like
         # return types, so this check is enough for tensor like types
-        return isinstance(return_types[0].type, torch.TensorType)
+        return len(return_types) > 0 and isinstance(
+            return_types[0].type, torch.TensorType
+        )
 
     def get_mesh_from_args(self, validate: bool = True) -> DeviceMesh:
         """
@@ -519,18 +544,23 @@ class OpSchema:
             - for foreach like ops we need to check "zipped" inputs are on the same mesh
               for each index.
         """
-        first_arg = self.args_schema[0]
-        if isinstance(first_arg, (DTensorSpec, OpStrategy)):
-            mesh = first_arg.mesh
-        elif isinstance(first_arg, (list, tuple, TupleStrategy)):
-            first_elem = (
-                first_arg.children[0]
-                if isinstance(first_arg, TupleStrategy)
-                else first_arg[0]
-            )
-            assert isinstance(first_elem, (DTensorSpec, OpStrategy))
-            mesh = first_elem.mesh
-        else:
+        mesh = None
+        # Scan all args to find the first DTensorSpec/OpStrategy (not just the first arg)
+        for arg in self.args_schema:
+            if isinstance(arg, (DTensorSpec, OpStrategy)):
+                mesh = arg.mesh
+                break
+            elif isinstance(arg, (list, tuple, TupleStrategy)):
+                # Scan all elements in the list/tuple, not just the first one,
+                # to handle cases like List[Optional[Tensor]] where first elem may be None
+                elems = arg.children if isinstance(arg, TupleStrategy) else arg
+                for elem in elems:
+                    if isinstance(elem, (DTensorSpec, OpStrategy)):
+                        mesh = elem.mesh
+                        break
+                if mesh is not None:
+                    break
+        if mesh is None:
             raise ValueError(f"Cannot find device mesh from args for op : {self.op}.")
 
         if validate:

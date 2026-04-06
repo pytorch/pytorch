@@ -54,6 +54,25 @@ kernel void unary_dense(
 }
 
 template <typename T, typename F>
+kernel void unary_dense_vec4(
+    device result_of<F, T>* output [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant uint& numel [[buffer(2)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  uint base = index * 4;
+  if (base + 4 <= numel) {
+    using ::metal::vec;
+    vec<T, 4> val = *(constant vec<T, 4>*)(input + base);
+    *(device vec<result_of<F, T>, 4>*)(output + base) = {
+        f(val.x), f(val.y), f(val.z), f(val.w)};
+  } else {
+    for (uint i = base; i < numel; i++)
+      output[i] = f(input[i]);
+  }
+}
+
+template <typename T, typename F>
 kernel void unary_strided(
     device result_of<F, T>* output [[buffer(0)]],
     constant T* input [[buffer(1)]],
@@ -89,6 +108,18 @@ kernel void unary_strided(
           constant long* output_strides,                                       \
           constant uint& ndim,                                                 \
           uint index)
+
+#define REGISTER_UNARY_VEC4_OP(NAME, DTYPE0, DTYPE1)                          \
+  static_assert(                                                              \
+      ::metal::                                                               \
+          is_same_v<DTYPE1, ::c10::metal::result_of<NAME##_functor, DTYPE0>>, \
+      "Output dtype mismatch for unary op " #NAME " and input " #DTYPE0);     \
+  template [[host_name(#NAME "_dense_vec4_" #DTYPE1 "_" #DTYPE0)]]            \
+  kernel void ::c10::metal::unary_dense_vec4<DTYPE0, NAME##_functor>(         \
+      device ::c10::metal::result_of<NAME##_functor, DTYPE0> * output,        \
+      constant DTYPE0 * input,                                                \
+      constant uint & numel,                                                  \
+      uint index)
 
 #define DEFINE_UNARY_FLOATING_FUNCTOR(NAME)                                     \
   struct NAME##_functor {                                                       \
@@ -182,10 +213,16 @@ inline T val_at_offs(P ptr, long offs, ScalarType type) {
       return cast_to<T>(val_at_offs<char>(ptr, offs));
     case ScalarType::Short:
       return cast_to<T>(val_at_offs<short>(ptr, offs));
+    case ScalarType::UInt16:
+      return cast_to<T>(val_at_offs<uint16_t>(ptr, offs));
     case ScalarType::Int:
       return cast_to<T>(val_at_offs<int>(ptr, offs));
+    case ScalarType::UInt32:
+      return cast_to<T>(val_at_offs<uint32_t>(ptr, offs));
     case ScalarType::Long:
       return cast_to<T>(val_at_offs<long>(ptr, offs));
+    case ScalarType::UInt64:
+      return cast_to<T>(val_at_offs<uint64_t>(ptr, offs));
     // Floats
     case ScalarType::Float:
       return cast_to<T>(val_at_offs<float>(ptr, offs));
@@ -897,7 +934,6 @@ kernel void ternary_strided(
     constant long* other1_strides [[buffer(7)]],
     constant long* other2_strides [[buffer(8)]],
     constant uint& ndim [[buffer(9)]],
-    constant uint4& types [[buffer(10)]],
     uint index [[thread_position_in_grid]]) {
   F f;
   using res_t = result_of<F, T, T, T>;
@@ -996,7 +1032,6 @@ kernel void ternary_dense_cast(
           constant long* other1_strides,                                       \
           constant long* other2_strides,                                       \
           constant uint& ndim,                                                 \
-          constant uint4& types,                                               \
           uint tid);                                                           \
   template [[host_name(#NAME "_strided_cast_" #DTYPEI)]] kernel void ::c10::   \
       metal::ternary_strided_cast<DTYPEI, NAME##_functor, OMT>(                \

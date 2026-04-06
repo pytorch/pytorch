@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
-from typing import Any, Union
+from typing import Any
 from typing_extensions import deprecated
 
 import torch
@@ -15,6 +15,7 @@ __all__ = [
     "preferred_linalg_library",
     "preferred_blas_library",
     "preferred_rocm_fa_library",
+    "is_ck_sdpa_available",
     "cufft_plan_cache",
     "matmul",
     "SDPAParams",
@@ -215,7 +216,7 @@ _LinalgBackends_str = ", ".join(_LinalgBackends.keys())
 
 
 def preferred_linalg_library(
-    backend: Union[None, str, torch._C._LinalgBackend] = None,
+    backend: None | str | torch._C._LinalgBackend = None,
 ) -> torch._C._LinalgBackend:
     r"""
     Override the heuristic PyTorch uses to choose between cuSOLVER and MAGMA for CUDA linear algebra operations.
@@ -286,7 +287,7 @@ _BlasBackends_str = ", ".join(_BlasBackends.keys())
 
 
 def preferred_blas_library(
-    backend: Union[None, str, torch._C._BlasBackend] = None,
+    backend: None | str | torch._C._BlasBackend = None,
 ) -> torch._C._BlasBackend:
     r"""
     Override the library PyTorch uses for BLAS operations. Choose between cuBLAS, cuBLASLt, and CK [ROCm-only].
@@ -341,7 +342,7 @@ from torch._C import _SDPAParams as SDPAParams, _SDPBackend as SDPBackend
 
 
 def preferred_rocm_fa_library(
-    backend: Union[None, str, torch._C._ROCmFABackend] = None,
+    backend: None | str | torch._C._ROCmFABackend = None,
 ) -> torch._C._ROCmFABackend:
     r"""
     [ROCm-only]
@@ -383,6 +384,16 @@ def preferred_rocm_fa_library(
 # Set the __module__ attribute
 SDPAParams.__module__ = "torch.backends.cuda"
 SDPAParams.__name__ = "SDPAParams"
+
+
+def is_ck_sdpa_available() -> bool:
+    r"""
+    .. warning:: This flag is beta and subject to change.
+
+    Returns whether composable_kernel may be used as the backend for
+    scaled-dot-product-attention.
+    """
+    return torch._C._is_ck_sdpa_available()
 
 
 def flash_sdp_enabled():

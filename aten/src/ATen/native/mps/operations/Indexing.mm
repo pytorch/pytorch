@@ -3,6 +3,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch_v2.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/kernels/Indexing.h>
 
 #include <ATen/AccumulateType.h>
 #include <ATen/ExpandUtils.h>
@@ -25,25 +26,23 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/count_nonzero.h>
-#include <ATen/ops/count_nonzero_native.h>
+#include <ATen/native/IndexKernel.h>
 #include <ATen/ops/embedding_dense_backward_native.h>
 #include <ATen/ops/flip_native.h>
 #include <ATen/ops/index.h>
 #include <ATen/ops/index_add_native.h>
 #include <ATen/ops/index_copy_native.h>
-#include <ATen/ops/index_fill_native.h>
 #include <ATen/ops/index_put.h>
+#include <ATen/ops/index_reduce_native.h>
 #include <ATen/ops/index_select_native.h>
 #include <ATen/ops/masked_fill_native.h>
 #include <ATen/ops/masked_scatter_native.h>
 #include <ATen/ops/masked_select_native.h>
 #include <ATen/ops/nonzero.h>
 #include <ATen/ops/nonzero_native.h>
+#include <ATen/ops/ones_like.h>
 #include <ATen/ops/view_as_real.h>
 #endif
-
-constexpr auto nonZeroMaxSize = 1UL << 24;
 
 namespace at::native {
 namespace mps {
@@ -289,66 +288,12 @@ TORCH_IMPL_FUNC(index_copy_out_mps)(const Tensor& self,
   });
 }
 
-static Tensor nonzero_fallback(const Tensor& self) {
-  return at::nonzero(self.to("cpu")).to("mps");
-}
-
-static Tensor& nonzero_out_native_mps(const Tensor& self, Tensor& out_) {
-  using namespace mps;
-
-  int64_t nDim = self.dim();
-  MPSStream* stream = getCurrentMPSStream();
-  using CachedGraph = MPSUnaryCachedGraph;
-
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    stream->synchronize(SyncType::COMMIT_AND_WAIT);
-  });
-  int64_t total_nonzero = at::count_nonzero(self).item<int64_t>();
-  at::native::resize_output(out_, {total_nonzero, nDim});
-  if (out_.numel() == 0) {
-    return out_;
-  }
-
-  bool contiguous_output = !needsGather(out_);
-  Tensor out = out_;
-  if (!contiguous_output) {
-    out = at::empty_like(out_, MemoryFormat::Contiguous);
-  }
-
-  @autoreleasepool {
-    std::string key = "nonzero_out_native_mps" + getTensorsStringKey(self);
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
-
-      MPSGraphTensor* outputTensor = [mpsGraph nonZeroIndicesOfTensor:inputTensor name:nil];
-
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-    });
-
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out);
-    auto feeds = dictionaryFromPlaceholders(selfPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
-  }
-
-  if (!contiguous_output) {
-    out_.copy_(out);
-  }
-
-  return out_;
-}
-
+// Metal kernel-based nonzero using prefix-sum + scatter.
+// Step 1: Per-element exclusive prefix sum of nonzero flags + block totals.
+// Step 2: GPU prefix sum of block totals → block offsets + total count.
+// Host:   Read back total count, allocate output.
+// Step 3: Scatter multi-dimensional indices into the output.
 Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
-  if (self.is_complex()) {
-    TORCH_WARN_ONCE("MPS: nonzero op is not supported for complex datatypes. ",
-                    "Falling back on CPU. This may have performance implications.");
-    Tensor out_fallback = nonzero_fallback(self);
-    at::native::resize_output(out_, out_fallback.sizes());
-    out_.copy_(out_fallback);
-    return out_;
-  }
-
   int64_t nDim = self.dim();
   if (self.numel() == 0) {
     at::native::resize_output(out_, {0, nDim});
@@ -356,66 +301,80 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
   }
 
   using namespace mps;
-  const uint32_t maxDimensions = 16;
 
   TORCH_CHECK(self.numel() < std::numeric_limits<int>::max(),
-              "nonzero is not supported for tensors with more than INT_MAX elements, \
-  See https://github.com/pytorch/pytorch/issues/51871");
-  TORCH_CHECK(
-      out_.dtype() == at::kLong, "Expected object of scalar type ", at::kLong, " as out, but got ", out_.dtype());
+              "nonzero is not supported for tensors with more than INT_MAX elements, "
+              "See https://github.com/pytorch/pytorch/issues/51871");
+  TORCH_CHECK(out_.dtype() == at::kLong, "Expected output type to be Long, but got ", out_.dtype());
   TORCH_CHECK(self.device() == out_.device(),
               "expected self and out to be on the same device, but got out on ",
               out_.device(),
               " and self on ",
               self.device());
-  TORCH_CHECK(self.dim() <= maxDimensions, "nonzero is not supported for tensor with more than ", 16, " dimensions");
   TORCH_CHECK(out_.is_mps());
 
-  if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS) &&
-      (self.numel() >= nonZeroMaxSize || self.is_complex())) {
-    TORCH_WARN_ONCE("MPS: nonzero op is not natively supported for the provided input on MacOS14",
-                    "Falling back on CPU. This may have performance implications.",
-                    "See github.com/pytorch/pytorch/issues/122916 for further info");
-    Tensor out_fallback = nonzero_fallback(self);
-    at::native::resize_output(out_, out_fallback.sizes());
-    out_.copy_(out_fallback);
-    return out_;
-  }
-
+  Tensor input = self.contiguous();
+  const auto numel = static_cast<uint32_t>(input.numel());
+  const auto type_str = scalarToMetalTypeString(input);
   MPSStream* stream = getCurrentMPSStream();
-  using CachedGraph = MPSUnaryCachedGraph;
 
+  // All three kernels declare [[max_total_threads_per_threadgroup(1024)]]
+  // so mtl_dispatch1DJob picks the same threadgroup size for steps 1 and 3,
+  // ensuring tgid in scatter matches block_offsets from the prefix sum.
+  auto pso_step1 = lib.getPipelineStateForFunc(fmt::format("count_nonzero_prefix_sum_{}", type_str));
+  auto pso_step2 = lib.getPipelineStateForFunc("prefix_sum_blocks");
+  auto pso_step3 = lib.getPipelineStateForFunc(fmt::format("scatter_nonzero_indices_{}", type_str));
+  TORCH_INTERNAL_ASSERT([pso_step1 maxTotalThreadsPerThreadgroup] == [pso_step3 maxTotalThreadsPerThreadgroup],
+                        "nonzero: step 1 and step 3 threadgroup sizes must match");
+
+  uint32_t threads_per_group = static_cast<uint32_t>([pso_step1 maxTotalThreadsPerThreadgroup]);
+  uint32_t num_blocks = (numel + threads_per_group - 1) / threads_per_group;
+
+  // Single allocation: [prefix | block_sums | block_offsets | total]
+  auto tmp = at::empty({input.numel() + 2 * num_blocks + 1}, input.options().dtype(kInt));
+  Tensor prefix_buf = tmp.slice(0, 0, numel);
+  Tensor block_sums_buf = tmp.slice(0, numel, numel + num_blocks);
+  Tensor block_offsets_buf = tmp.slice(0, numel + num_blocks, numel + 2 * num_blocks);
+  Tensor total_nonzero_buf = tmp.slice(0, numel + 2 * num_blocks, numel + 2 * num_blocks + 1);
+
+  // Steps 1+2: compute prefix sums and block offsets entirely on GPU
   dispatch_sync_with_rethrow(stream->queue(), ^() {
-    stream->synchronize(SyncType::COMMIT_AND_WAIT);
+    @autoreleasepool {
+      auto computeEncoder = stream->commandEncoder();
+
+      [computeEncoder setComputePipelineState:pso_step1];
+      mtl_setArgs(computeEncoder, input, prefix_buf, block_sums_buf);
+      mtl_dispatch1DJob(computeEncoder, pso_step1, numel);
+
+      [computeEncoder setComputePipelineState:pso_step2];
+      mtl_setArgs(computeEncoder, block_sums_buf, block_offsets_buf, total_nonzero_buf, num_blocks);
+      uint32_t tg_size_blocks = std::min(1024u, ((num_blocks + 31) / 32) * 32);
+      [computeEncoder dispatchThreads:MTLSizeMake(tg_size_blocks, 1, 1)
+                threadsPerThreadgroup:MTLSizeMake(tg_size_blocks, 1, 1)];
+    }
   });
-  int64_t total_nonzero = at::count_nonzero(self).item<int64_t>();
+
+  const int64_t total_nonzero = total_nonzero_buf.item<int>();
+
   at::native::resize_output(out_, {total_nonzero, nDim});
   if (out_.numel() == 0) {
     return out_;
   }
 
-  bool contiguous_output = !needsGather(out_);
-  Tensor out = out_;
-  if (!contiguous_output) {
-    out = at::empty_like(out_, MemoryFormat::Contiguous);
-  }
+  bool contiguous_output = out_.is_contiguous();
+  Tensor out = contiguous_output ? out_ : at::empty_like(out_, MemoryFormat::Contiguous);
 
-  @autoreleasepool {
-    std::string key = "nonzero_out_native_mps" + getTensorsStringKey(self);
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
+  int ndim_int = static_cast<int>(nDim);
 
-      MPSGraphTensor* outputTensor = [mpsGraph nonZeroIndicesOfTensor:inputTensor name:nil];
-
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-    });
-
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out);
-    auto feeds = dictionaryFromPlaceholders(selfPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
-  }
+  // Step 3: scatter indices (block_offsets already on GPU)
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = stream->commandEncoder();
+      [computeEncoder setComputePipelineState:pso_step3];
+      mtl_setArgs(computeEncoder, input, prefix_buf, out, ndim_int, input.sizes(), block_offsets_buf);
+      mtl_dispatch1DJob(computeEncoder, pso_step3, numel);
+    }
+  });
 
   if (!contiguous_output) {
     out_.copy_(out);
@@ -425,12 +384,6 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
 }
 
 Tensor nonzero_mps(const Tensor& self) {
-  if (self.is_complex()) {
-    TORCH_WARN_ONCE("MPS: nonzero op is not supported for complex datatypes ",
-                    "Falling back on CPU. This may have performance implications.");
-    return nonzero_fallback(self);
-  }
-
   Tensor out = at::empty({0}, self.options().dtype(kLong));
   return nonzero_out_mps(self, out);
 }
@@ -537,6 +490,13 @@ TORCH_IMPL_FUNC(index_add_mps_out)
 
   auto casted_type = isFloatingType(source.scalar_type()) ? ScalarType::Float : ScalarType::Int;
 
+  bool needs_gather = needsGather(result);
+  Tensor output;
+  if (needs_gather) {
+    output = at::empty_like(result, MemoryFormat::Contiguous);
+    output.copy_(result);
+  }
+
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor* inputTensor_ = nil;
@@ -582,7 +542,7 @@ TORCH_IMPL_FUNC(index_add_mps_out)
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
     Placeholder indexPlaceholder = Placeholder(cachedGraph->indexTensor_, index);
     Placeholder sourcePlaceholder = Placeholder(cachedGraph->sourceTensor_, source);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, needs_gather ? output : result);
     MPSScalar alpha_scalar = getMPSScalar(alpha, casted_type);
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
@@ -592,6 +552,10 @@ TORCH_IMPL_FUNC(index_add_mps_out)
       cachedGraph->alphaTensor_ : getMPSGraphTensorFromScalar(stream, alpha_scalar),
     };
     runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
+  }
+
+  if (needs_gather) {
+    result.copy_(output);
   }
 }
 
@@ -700,6 +664,123 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
   }
 
   return output;
+}
+
+static inline ReductionType index_reduce_type(const std::string_view& reduce) {
+  if (reduce == "prod") {
+    return ReductionType::PROD;
+  } else if (reduce == "mean") {
+    return ReductionType::MEAN;
+  } else if (reduce == "amax") {
+    return ReductionType::MAX;
+  } else if (reduce == "amin") {
+    return ReductionType::MIN;
+  } else {
+    TORCH_CHECK(false, "reduce argument must be either prod, mean, amax or amin, got ", reduce, ".");
+  }
+}
+
+template <typename scalar_t>
+static inline scalar_t highest_value() {
+  if constexpr (std::numeric_limits<scalar_t>::has_infinity) {
+    return std::numeric_limits<scalar_t>::infinity();
+  } else {
+    return std::numeric_limits<scalar_t>::max();
+  }
+}
+
+template <typename scalar_t>
+static inline scalar_t lowest_value() {
+  if constexpr (std::numeric_limits<scalar_t>::has_infinity) {
+    return -std::numeric_limits<scalar_t>::infinity();
+  } else {
+    return std::numeric_limits<scalar_t>::lowest();
+  }
+}
+
+template <typename scalar_t>
+static inline scalar_t index_reduce_init_value(ReductionType reduction_type) {
+  if (reduction_type == ReductionType::PROD) {
+    return 1;
+  } else if (reduction_type == ReductionType::MEAN) {
+    return 0;
+  } else if (reduction_type == ReductionType::MAX) {
+    return lowest_value<scalar_t>();
+  } else if (reduction_type == ReductionType::MIN) {
+    return highest_value<scalar_t>();
+  } else {
+    TORCH_INTERNAL_ASSERT(false, "reduction type not supported");
+  }
+}
+
+TORCH_IMPL_FUNC(index_reduce_mps_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& source,
+ const std::string_view reduce,
+ bool include_self,
+ const Tensor& result) {
+  TORCH_WARN_ONCE("index_reduce() is in beta and the API may change at any time.");
+  TORCH_CHECK(self.scalar_type() != c10::kLong, "index_reduce for MPS does not support torch.long dtype");
+  TORCH_CHECK(self.scalar_type() != c10::kComplexFloat, "index_reduce for MPS does not support torch.cfloat dtype");
+
+  auto reduction_type = index_reduce_type(reduce);
+
+  if (!result.is_same(self)) {
+    result.copy_(self);
+  }
+
+  if (!include_self) {
+    AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half,
+                               at::ScalarType::BFloat16,
+                               result.scalar_type(),
+                               "index_reduce_func_mps_exclude_input_init",
+                               [&] {
+                                 scalar_t init_val = index_reduce_init_value<scalar_t>(reduction_type);
+                                 result.index_fill_(dim, index.to(at::ScalarType::Long), init_val);
+                               });
+  }
+
+  IndexReduceParams params;
+  params.index_stride = index.stride(0);
+  params.reduce_dim = dim;
+  params.ndim = result.dim();
+
+  for (const auto dim : c10::irange(result.dim())) {
+    params.self_strides[dim] = result.stride(dim);
+    params.self_sizes[dim] = result.size(dim);
+    params.source_strides[dim] = source.stride(dim);
+    params.source_sizes[dim] = source.size(dim);
+  }
+
+  MPSStream* stream = getCurrentMPSStream();
+
+  auto num_threads = source.numel();
+
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
+      auto pipeline_state = mps::lib.getPipelineStateForFunc(fmt::format(
+          "index_reduce_{}_{}_{}", reduce, mps::scalarToMetalTypeString(result), mps::scalarToMetalTypeString(index)));
+      getMPSProfiler().beginProfileKernel(pipeline_state, "index_reduce", {result, index, source});
+      [compute_encoder setComputePipelineState:pipeline_state];
+      mps::mtl_setArgs(compute_encoder, result, index, source, params);
+      mps::mtl_dispatch1DJob(compute_encoder, pipeline_state, num_threads);
+      getMPSProfiler().endProfileKernel(pipeline_state);
+    }
+  });
+
+  if (reduction_type == ReductionType::MEAN) {
+    auto counts = include_self ? at::ones_like(result) : at::zeros_like(result);
+    counts.index_add_(dim, index, at::ones_like(source));
+    counts.masked_fill_(counts.eq(0), 1);
+    if (result.is_floating_point() || result.is_complex()) {
+      result.div_(counts);
+    } else {
+      result.div_(counts, "floor");
+    }
+  }
 }
 
 Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) {
@@ -850,6 +931,8 @@ Tensor& masked_scatter__mps(Tensor& self, const Tensor& mask, const Tensor& sour
   TORCH_CHECK(mask.scalar_type() == ScalarType::Byte || mask.scalar_type() == ScalarType::Bool,
               "masked_scatter: expected BoolTensor or ByteTensor for mask");
 
+  bool was_scalar = self.dim() == 0;
+
   auto mask_temp =
       (mask.dim() == 0) ? c10::MaybeOwned<Tensor>::owned(mask.unsqueeze(0)) : c10::MaybeOwned<Tensor>::borrowed(mask);
   auto self_temp =
@@ -862,6 +945,9 @@ Tensor& masked_scatter__mps(Tensor& self, const Tensor& mask, const Tensor& sour
   auto indices =
       at::native::expandTensors(*std::get<1>(mask_self_expanded),
                                 c10::List<std::optional<at::Tensor>>({*std::move(std::get<0>(mask_self_expanded))}));
+
+  TORCH_CHECK(indices[0].numel() <= source.numel(), "Number of elements of source < number of ones in mask");
+
   // next broadcast all index tensors together
   try {
     indices = at::expand_outplace(indices);
@@ -879,104 +965,165 @@ Tensor& masked_scatter__mps(Tensor& self, const Tensor& mask, const Tensor& sour
   for (const auto index : indices) {
     final_indices.push_back(index);
   }
-  return at::index_put_out(self, *std::get<1>(mask_self_expanded), final_indices, source.resize_(indices[0].numel()));
-}
 
-Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Tensor& source) {
-  using namespace mps;
-  MPSStream* stream = getCurrentMPSStream();
-  auto num_indices = index.numel();
-  dim = maybe_wrap_dim(dim, self.dim());
-
-  // Checks
-  TORCH_CHECK_INDEX(index.dim() <= 1, "index_fill_(): Index is supposed to be a vector");
-  TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
-              "index_fill_(): Expected dtype int32 or int64 for index");
-  TORCH_CHECK(dim == 0 || dim < self.dim(), "index_fill_(): Indexing dim ", dim, " is out of bounds of tensor");
-  TORCH_CHECK(self.is_complex() || !source.is_complex(),
-              "index_fill_(): Converting complex Scalar to non-complex type is not supported");
-  // MPS.scatter crashes if used with complex dtypes
-  TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "index_fill_(): Complex types are yet not supported");
-
-  // Empty index
-  if (num_indices == 0) {
-    return self;
-  }
-
-  // Scalar input
-  if (self.dim() == 0 && self.numel() == 1) {
-    return self.copy_(source);
-  }
-
-  // Derive from MPSCachedGraph
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* indexTensor_ = nil;
-    MPSGraphTensor* updateTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-  };
-
-  auto inputType = getMPSDataType(self);
-  auto sourceType = getMPSDataType(source);
-  if (inputType == MPSDataTypeUInt8 || inputType == MPSDataTypeBool) {
-    inputType = MPSDataTypeInt8;
-  }
-
-  std::vector<int64_t> source_shape(self.sizes().begin(), self.sizes().end());
-  source_shape[dim] = index.numel();
-  auto expanded_source = source.expand(source_shape);
-
-  @autoreleasepool {
-    std::string key =
-        "index_fill_mps_" + getTensorsStringKey({self, index, expanded_source}) + ":" + std::to_string(dim);
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, inputType, getMPSShape(self));
-      MPSGraphTensor* indexTensor = mpsGraphRankedPlaceHolder(mpsGraph, index);
-      MPSGraphTensor* updateTensor = mpsGraphRankedPlaceHolder(mpsGraph, expanded_source);
-      MPSGraphTensor* castedUpdateTensor = updateTensor;
-      if (inputType != sourceType) {
-        castedUpdateTensor = castMPSTensor(mpsGraph, updateTensor, inputType);
-      }
-      MPSGraphTensor* outputTensor = [mpsGraph scatterWithDataTensor:inputTensor
-                                                       updatesTensor:castedUpdateTensor
-                                                       indicesTensor:indexTensor
-                                                                axis:(NSInteger)dim
-                                                                mode:MPSGraphScatterModeSet
-                                                                name:nil];
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->indexTensor_ = indexTensor;
-      newCachedGraph->updateTensor_ = updateTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-    });
-
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_,
-                                              self,
-                                              /*mpsShape=*/nullptr,
-                                              /*gatherTensorData=*/true,
-                                              /*dataType=*/inputType);
-    Placeholder indexPlaceholder = Placeholder(cachedGraph->indexTensor_, index);
-    Placeholder updatePlaceholder = Placeholder(cachedGraph->updateTensor_,
-                                                expanded_source,
-                                                /*mpsShape=*/nullptr,
-                                                /*gatherTensorData=*/true,
-                                                /*dataType=*/sourceType);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_,
-                                                self,
-                                                /*mpsShape=*/nullptr,
-                                                /*gatherTensorData=*/false,
-                                                /*dataType=*/inputType);
-
-    auto feeds = dictionaryFromPlaceholders(selfPlaceholder, indexPlaceholder, updatePlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
+  at::index_put_out(
+      self, *std::get<1>(mask_self_expanded), final_indices, source.flatten().narrow(0, 0, indices[0].numel()));
+  if (was_scalar) {
+    self.squeeze_();
   }
   return self;
 }
 
-Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Scalar& source) {
-  return self.index_fill_(dim, index, mps::wrapped_scalar_tensor_mps(source, self.device()));
+static void index_fill_mps_kernel(TensorIterator& iter,
+                                  int64_t dim,
+                                  int64_t self_dim_size,
+                                  int64_t self_dim_stride,
+                                  const Scalar& source) {
+  if (iter.numel() == 0) {
+    return;
+  }
+  using namespace mps;
+
+  // Reconstruct original self from the restrided iterator output.
+  // iter.tensor(0) has stride[dim]=0 and size[dim]=index_numel; restore originals.
+  const Tensor& self_rs = iter.tensor(0);
+  auto self_sizes = self_rs.sizes().vec();
+  auto self_strides = self_rs.strides().vec();
+  self_sizes[dim] = self_dim_size;
+  self_strides[dim] = self_dim_stride;
+  Tensor self = self_rs.as_strided(self_sizes, self_strides, self_rs.storage_offset());
+
+  // Reconstruct original 1D index from the restrided iterator input.
+  // iter.tensor(1) has shape [..., index_numel, ...] with stride[dim]=original stride.
+  const Tensor& idx_rs = iter.tensor(1);
+  Tensor index = idx_rs.as_strided({idx_rs.size(dim)}, {idx_rs.stride(dim)}, idx_rs.storage_offset());
+
+  const bool is_dense = self.is_contiguous() && index.is_contiguous();
+  const auto type_str = scalarToMetalTypeString(self);
+  const int64_t dim_size = self_dim_size;
+  const int64_t indices_numel = index.numel();
+
+  // For large index counts, use a two-pass mask approach: mark which dim-positions
+  // to fill, then iterate over all elements checking the mask. This avoids write
+  // conflicts from duplicate indices and produces cache-friendly sequential writes.
+  // Threshold: ≥6% fill rate (indices_numel × 16 ≥ dim_size).  Empirically this
+  // is where the mask's O(numel) sequential scan beats scatter's growing write-
+  // conflict overhead.
+  const bool use_mask = (indices_numel * 16 >= dim_size);
+
+  auto stream = getCurrentMPSStream();
+  if (use_mask) {
+    // Use at::empty (not at::zeros) to avoid a blit encoder fill that would
+    // force a blit→compute encoder switch, adding latency per call.
+    // The mask is zeroed via a compute kernel inside the dispatch block instead.
+    // TODO: Remove me after https://github.com/pytorch/pytorch/issues/175859 is fixed
+    auto mask = at::empty({dim_size}, at::TensorOptions().dtype(at::kBool).device(self.device()));
+    auto zeroMaskPSO = lib.getPipelineStateForFunc("index_fill_zero_mask");
+    auto setMaskPSO = lib.getPipelineStateForFunc("index_fill_set_mask");
+    auto fillMaskPSO = lib.getPipelineStateForFunc(
+        fmt::format("index_fill_{}_from_mask_{}", is_dense ? "dense" : "strided", type_str));
+
+    c10::SmallVector<int64_t> all_sizes, all_strides;
+    if (!is_dense) {
+      for (int64_t d = 0; d < self.dim(); d++) {
+        all_sizes.push_back(self.size(d));
+        all_strides.push_back(self.stride(d));
+      }
+    }
+
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        auto computeEncoder = stream->commandEncoder();
+        auto mpsScalar = getMPSScalar(source, self.scalar_type());
+        long indices_stride = index.stride(0);
+
+        // Pass 0: zero the mask entirely within the compute encoder.
+        [computeEncoder setComputePipelineState:zeroMaskPSO];
+        mtl_setArgs(computeEncoder, mask);
+        mtl_dispatch1DJob(computeEncoder, zeroMaskPSO, dim_size);
+
+        [computeEncoder setComputePipelineState:setMaskPSO];
+        mtl_setArgs(computeEncoder, mask, index);
+        mtl_setArgs<2>(computeEncoder, dim_size, indices_stride);
+        mtl_dispatch1DJob(computeEncoder, setMaskPSO, indices_numel);
+
+        [computeEncoder setComputePipelineState:fillMaskPSO];
+        mtl_setArgs(computeEncoder, self, mask);
+        mtl_setBytes(computeEncoder, mpsScalar, 2);
+        if (is_dense) {
+          // 3D dispatch: (inner, dim, outer) avoids integer division in the kernel.
+          // Compute inner_size from size products, not stride(dim): for size-1 dims,
+          // is_contiguous() returns true regardless of stride, so stride(dim) can
+          // exceed the actual inner element count, causing outer_size=0 (no threads).
+          uint32_t dim_size_u = static_cast<uint32_t>(dim_size);
+          uint32_t inner_size = 1;
+          for (int64_t d = dim + 1; d < self.dim(); d++) {
+            inner_size *= static_cast<uint32_t>(self.size(d));
+          }
+          uint32_t outer_size = static_cast<uint32_t>(self.numel() / ((int64_t)dim_size * inner_size));
+          mtl_setArgs<3>(computeEncoder, dim_size_u, inner_size);
+          NSUInteger maxTG = [fillMaskPSO maxTotalThreadsPerThreadgroup];
+          // Fill threadgroup across dimensions to ensure adequate occupancy.
+          // When inner_size is small (e.g. 1 for dim=last), use y-dim threads.
+          NSUInteger tgX = std::min((NSUInteger)inner_size, maxTG);
+          NSUInteger tgY = std::min((NSUInteger)dim_size_u, maxTG / tgX);
+          NSUInteger tgZ = std::min((NSUInteger)outer_size, maxTG / (tgX * tgY));
+          [computeEncoder dispatchThreads:MTLSizeMake(inner_size, dim_size_u, outer_size)
+                    threadsPerThreadgroup:MTLSizeMake(tgX, tgY, tgZ)];
+        } else {
+          uint32_t dim_u = static_cast<uint32_t>(dim);
+          uint32_t ndim_u = static_cast<uint32_t>(self.dim());
+          mtl_setArgs<3>(computeEncoder, all_sizes, all_strides, dim_u, ndim_u);
+          mtl_dispatch1DJob(computeEncoder, fillMaskPSO, self.numel());
+        }
+      }
+    });
+  } else {
+    // Scatter: one thread per (index, slice-element) pair.
+    const int64_t slice_numel = self.numel() / dim_size;
+    auto indexFillPSO =
+        lib.getPipelineStateForFunc(fmt::format("index_fill_{}_{}", is_dense ? "dense" : "strided", type_str));
+
+    c10::SmallVector<int64_t> slice_sizes, slice_out_strides;
+    if (!is_dense) {
+      for (int64_t d = 0; d < self.dim(); d++) {
+        if (d != dim) {
+          slice_sizes.push_back(self.size(d));
+          slice_out_strides.push_back(self.stride(d));
+        }
+      }
+    }
+
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        auto computeEncoder = stream->commandEncoder();
+        auto mpsScalar = getMPSScalar(source, self.scalar_type());
+        [computeEncoder setComputePipelineState:indexFillPSO];
+        mtl_setArgs(computeEncoder, self, index);
+        mtl_setBytes(computeEncoder, mpsScalar, 2);
+        if (is_dense) {
+          long dim_stride = self.stride(dim);
+          mtl_setArgs<3>(computeEncoder, dim_size, dim_stride, slice_numel);
+        } else {
+          long dim_out_stride = self.stride(dim);
+          long indices_stride = index.stride(0);
+          uint32_t slice_ndim = static_cast<uint32_t>(self.dim() - 1);
+          mtl_setArgs<3>(computeEncoder,
+                         dim_size,
+                         dim_out_stride,
+                         slice_sizes,
+                         slice_out_strides,
+                         slice_ndim,
+                         slice_numel,
+                         indices_stride);
+        }
+        mtl_dispatch1DJob(computeEncoder, indexFillPSO, indices_numel * slice_numel);
+      }
+    });
+  }
 }
 
 REGISTER_DISPATCH(index_stub, &mps::index_kernel_mps)
+REGISTER_DISPATCH(index_fill_stub, &index_fill_mps_kernel)
 REGISTER_DISPATCH(index_put_stub, &mps::index_put_kernel_mps)
 } // namespace at::native

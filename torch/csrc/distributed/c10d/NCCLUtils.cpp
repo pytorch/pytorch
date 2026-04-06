@@ -595,6 +595,54 @@ std::string NCCLComm::repr() const {
   return c10::str((void*)ncclComm_);
 }
 
+void NCCLComm::suspend() {
+#ifdef NCCL_HAS_COMM_OFFLOAD
+  LockType lock(mutex_);
+  at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex_);
+  auto comm = getNcclComm();
+  C10D_NCCL_CHECK(ncclCommSuspend(comm, NCCL_SUSPEND_MEM), std::nullopt);
+#else
+  TORCH_CHECK(false, "suspend() requires NCCL 2.29.7 or later");
+#endif
+}
+
+void NCCLComm::resume() {
+#ifdef NCCL_HAS_COMM_OFFLOAD
+  LockType lock(mutex_);
+  at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex_);
+  auto comm = getNcclComm();
+  C10D_NCCL_CHECK(ncclCommResume(comm), std::nullopt);
+#else
+  TORCH_CHECK(false, "resume() requires NCCL 2.29.7 or later");
+#endif
+}
+
+std::unordered_map<std::string, uint64_t> NCCLComm::getMemoryStats() {
+#ifdef NCCL_HAS_COMM_OFFLOAD
+  LockType lock(mutex_);
+  at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex_);
+  auto comm = getNcclComm();
+  uint64_t suspend, suspended, persist, total;
+  C10D_NCCL_CHECK(
+      ncclCommMemStats(comm, ncclStatGpuMemSuspend, &suspend), std::nullopt);
+  C10D_NCCL_CHECK(
+      ncclCommMemStats(comm, ncclStatGpuMemSuspended, &suspended),
+      std::nullopt);
+  C10D_NCCL_CHECK(
+      ncclCommMemStats(comm, ncclStatGpuMemPersist, &persist), std::nullopt);
+  C10D_NCCL_CHECK(
+      ncclCommMemStats(comm, ncclStatGpuMemTotal, &total), std::nullopt);
+  return {
+      {"suspend", suspend},
+      {"suspended", suspended},
+      {"persist", persist},
+      {"total", total},
+  };
+#else
+  TORCH_CHECK(false, "getMemoryStats() requires NCCL 2.29.7 or later");
+#endif
+}
+
 #if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
 std::unordered_map<std::string, std::string> NCCLComm::ncclCommDump() {
   std::unordered_map<std::string, std::string> dump;
@@ -680,27 +728,6 @@ size_t hashTensors(const std::vector<at::Tensor>& tensors) {
     }
   }
   return hash;
-}
-
-// NCCL uses Non-negative int to represent in-group according to API
-// requirement. We take a list of ranks and generate a hash value based on the
-// list and ensure its range of 32-bit int.
-int genNcclSplitColor(const std::vector<int>& ranks) {
-  // Combine the hash values using a simple reducer (std::hash + fold)
-  std::size_t combined_hash = std::accumulate(
-      ranks.begin(),
-      ranks.end(),
-      std::size_t(0),
-      [](std::size_t acc, int rank) {
-        return acc ^
-            (std::hash<int>{}(rank) + 0x9e3779b9 + (acc << 6) + (acc >> 2));
-      });
-
-  // max positive value of int32_t
-  constexpr int32_t max_c_int = std::numeric_limits<int32_t>::max();
-  int color = static_cast<int>(
-      std::abs(static_cast<int64_t>(combined_hash)) % max_c_int);
-  return color;
 }
 
 // Default value: 30 minutes

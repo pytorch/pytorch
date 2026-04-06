@@ -1,4 +1,5 @@
 #include <ATen/DLConvertor.h>
+#include <memory>
 
 using namespace std;
 namespace at {
@@ -401,9 +402,9 @@ void fillVersion<DLManagedTensorVersioned>(
 // constructed out of ATen tensor
 template <class T>
 T* toDLPackImpl(const Tensor& src) {
-  ATenDLMTensor<T>* atDLMTensor(new ATenDLMTensor<T>);
+  auto atDLMTensor = std::make_unique<ATenDLMTensor<T>>();
   atDLMTensor->handle = src;
-  atDLMTensor->tensor.manager_ctx = atDLMTensor;
+  atDLMTensor->tensor.manager_ctx = atDLMTensor.get();
   atDLMTensor->tensor.deleter = &deleter<T>;
   if (src.device().type()  == kMPS) {
       atDLMTensor->tensor.dl_tensor.data = src.storage().mutable_data();
@@ -419,7 +420,7 @@ T* toDLPackImpl(const Tensor& src) {
   atDLMTensor->tensor.dl_tensor.strides = const_cast<int64_t*>(src.strides().data());
   fillVersion(&atDLMTensor->tensor);
 
-  return &(atDLMTensor->tensor);
+  return &(atDLMTensor.release()->tensor);
 }
 
 // Explicitly instantiate the template above for both classes.

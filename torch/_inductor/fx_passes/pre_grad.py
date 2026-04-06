@@ -170,7 +170,7 @@ def use_matmul_fuse_lce_replace_first_LCE(graph):
 
 
 @init_once_fakemode
-def lazy_init():
+def lazy_init(input_device: torch.device | None = None):
     from . import (  # noqa: F401  # noqa: F401
         apply_gumbel_max_trick,
         efficient_conv_bn_eval,
@@ -319,7 +319,9 @@ def pre_grad_passes(
             if "normalization_pass" in config.pre_grad_fusion_options:
                 pattern_matcher_pass = PRE_GRAD_PATTERNS["normalization_pass"]
                 pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
-            group_batch_fusion_passes(gm.graph, pre_grad=True)
+            GraphTransformObserver(gm, "group_batch_fusion_passes").apply_graph_pass(
+                lambda graph: group_batch_fusion_passes(graph, pre_grad=True)
+            )
             for pass_name in config.pre_grad_fusion_options:
                 # skip all patterns for group batch fusions
                 if pass_name in PRE_GRAD_FUSIONS or pass_name == "normalization_pass":
@@ -344,8 +346,12 @@ def pre_grad_passes(
                         ),
                     )
             # TODO: move efficient_conv_bn_eval_pass to the fusions dict too.
-            efficient_conv_bn_eval_pass.apply(gm.graph)  # type: ignore[arg-type]
-            apply_gumbel_max_trick_pass.apply(gm.graph)
+            GraphTransformObserver(gm, "efficient_conv_bn_eval_pass").apply_graph_pass(
+                efficient_conv_bn_eval_pass.apply
+            )
+            GraphTransformObserver(gm, "apply_gumbel_max_trick_pass").apply_graph_pass(
+                apply_gumbel_max_trick_pass.apply
+            )
 
     if config.pre_grad_custom_pass is not None:
         GraphTransformObserver(gm, "pre_grad_custom_pass").apply_graph_pass(
@@ -425,16 +431,20 @@ def remove_identity(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     """
     Removes all identity layers from the module.
     """
-
-    class IdentityRemover(torch.fx.Transformer):
-        def call_module(self, target, args, kwargs):
-            if isinstance(self.submodules[target], nn.Identity):
-                assert len(args) == 1
-                return args[0]
-            else:
-                return super().call_module(target, args, kwargs)
-
-    return IdentityRemover(gm).transform()
+    graph = gm.graph
+    work_done = False
+    for module_name, module in gm.named_modules():
+        if type(module) is nn.Identity:
+            for node in list(graph.find_nodes(op="call_module", target=module_name)):
+                assert len(node.args) == 1
+                input_node = node.args[0]
+                node.replace_all_uses_with(input_node)
+                graph.erase_node(node)
+                work_done = True
+    if work_done:
+        graph.lint()
+        gm.recompile()
+    return gm
 
 
 def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModule:

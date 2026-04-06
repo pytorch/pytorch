@@ -4,7 +4,6 @@ import functools
 import warnings
 from collections.abc import Callable, Iterable
 from itertools import product
-from typing import Optional, Union
 from typing_extensions import deprecated
 
 import torch
@@ -13,7 +12,7 @@ import torch.testing
 # pyrefly: ignore [deprecated]
 from torch._vmap_internals import _vmap, vmap
 from torch.overrides import is_tensor_like
-from torch.types import _TensorOrTensors
+from torch.types import _TensorOrOptionalTensors, _TensorOrTensors
 
 
 # Note: `get_*_jacobian` functions are added here even though we didn't intend to make them public
@@ -83,7 +82,7 @@ def _allocate_jacobians_with_outputs(
 
 
 def _iter_tensors(
-    x: Union[torch.Tensor, Iterable[torch.Tensor]], only_requiring_grad: bool = False
+    x: torch.Tensor | Iterable[torch.Tensor], only_requiring_grad: bool = False
 ) -> Iterable[torch.Tensor]:
     if is_tensor_like(x):
         # mypy doesn't narrow type of `x` to torch.Tensor
@@ -438,7 +437,7 @@ def _combine_jacobian_cols(
 
 
 def _prepare_input(
-    input: torch.Tensor, maybe_perturbed_input: Optional[torch.Tensor], fast_mode=False
+    input: torch.Tensor, maybe_perturbed_input: torch.Tensor | None, fast_mode=False
 ) -> torch.Tensor:
     # Prepares the inputs to be passed into the function while including the new
     # modified input.
@@ -899,7 +898,7 @@ def _get_analytical_jacobian(inputs, outputs, input_idx, output_idx):
 
 def _compute_analytical_jacobian_rows(
     vjp_fn, sample_output
-) -> list[list[Optional[torch.Tensor]]]:
+) -> list[list[torch.Tensor | None]]:
     # Computes Jacobian row-by-row by projecting `vjp_fn` = v^T J on standard basis
     # vectors: vjp_fn(e) = e^T J is a corresponding row of the Jacobian.
     # NB: this function does not assume vjp_fn(v) to return tensors with the same
@@ -910,7 +909,7 @@ def _compute_analytical_jacobian_rows(
     )
     flat_grad_out = grad_out_base.view(-1)
     # jacobians_rows[i][j] is the Jacobian jth row for the ith input
-    jacobians_rows: list[list[Optional[torch.Tensor]]] = []
+    jacobians_rows: list[list[torch.Tensor | None]] = []
     for j in range(flat_grad_out.numel()):
         flat_grad_out.zero_()
         flat_grad_out[j] = 1.0  # projection for jth row of Jacobian
@@ -926,9 +925,9 @@ def _compute_analytical_jacobian_rows(
 
 def _get_analytical_vjps_wrt_specific_output(
     vjp_fn, sample_output, v
-) -> list[list[Optional[torch.Tensor]]]:
+) -> list[list[torch.Tensor | None]]:
     grad_inputs = vjp_fn(v.reshape(sample_output.shape))
-    vjps: list[list[Optional[torch.Tensor]]] = [
+    vjps: list[list[torch.Tensor | None]] = [
         [vjp.clone() if isinstance(vjp, torch.Tensor) else None] for vjp in grad_inputs
     ]
     return vjps
@@ -1749,12 +1748,31 @@ def _adjusted_atol(atol, u, v):
     # the correctly sized matrix in which each entry is atol.
     #
     # We see that atol needs to be scaled by v^T M u (where M is an all-ones M x N
-    # matrix): v^T M u = \sum_{i} \sum_{j} u_i * v_j = (\sum_{i} u_i)(\sum_{i} v_i)
-    # TODO: properly handle case when u is tuple instead of only taking first element
-    u = u[0] if isinstance(u, tuple) else u
-    sum_u = u.sum()
+    # matrix): v^T M u = \sum_{i} \sum_{j} u[i] * v[j] = sum(u) * sum(v).
+
+    # For the case of complex inputs, u has re and im. components: u = (ur, ui).
+    # Let q = a - b = (qr, qi) in the above notation, eg. q is the difference between analytic and numerical
+    # Jacobians. Then the transformed tolerance checks being done in the torch.allclose ops
+    # are of form abs(Re{q_r u_r - q_i u_i}) < atol * (abs(u_r) + abs(u_i)), and equivalently
+    # for imaginary components abs(Im{q_r u_r - q_i ui}) < atol * (abs(u_r) + abs(u_i)).
+    # Since u is drawn randomly non-negative, the end effect is a factor
+    # (sum(u_r) + sum(u_i)) * sum(v) increase in atol for complex inputs, eg.
+    # a statistical factor of 2 as compared to the real case.
+
     sum_v = 1.0 if v is None else v.sum()
-    return atol * float(sum_u) * float(sum_v)
+
+    if isinstance(u, tuple):
+        # case of complex input
+        ur, ui = u[0], u[1]
+        sum_ur = ur.sum()
+        sum_ui = ui.sum()
+        complex_modified_atol = atol * (float(sum_ur) + float(sum_ui)) * float(sum_v)
+        return complex_modified_atol
+
+    # case of real input
+    sum_u = u.sum()
+    modified_atol = atol * float(sum_u) * float(sum_v)
+    return modified_atol
 
 
 FAST_FAIL_SLOW_OK_MSG = """
@@ -1979,7 +1997,7 @@ def _fast_gradcheck(
 # the '...' first argument of Callable can be replaced with VarArg(Tensor).
 # For now, we permit any input.
 def gradcheck(
-    func: Callable[..., Union[_TensorOrTensors]],  # See Note [VarArg of Tensors]
+    func: Callable[..., _TensorOrTensors],  # See Note [VarArg of Tensors]
     inputs: _TensorOrTensors,
     *,
     eps: float = 1e-6,
@@ -1994,7 +2012,7 @@ def gradcheck(
     check_forward_ad: bool = False,
     check_backward_ad: bool = True,
     fast_mode: bool = False,
-    masked: Optional[bool] = None,
+    masked: bool | None = None,
 ) -> bool:  # noqa: D400,D205
     r"""Check gradients computed via small finite differences against analytical
     gradients wrt tensors in :attr:`inputs` that are of floating point or complex type
@@ -2149,7 +2167,7 @@ def _gradcheck_helper(
 def gradgradcheck(
     func: Callable[..., _TensorOrTensors],  # See Note [VarArg of Tensors]
     inputs: _TensorOrTensors,
-    grad_outputs: Optional[_TensorOrTensors] = None,
+    grad_outputs: _TensorOrOptionalTensors | None = None,
     *,
     eps: float = 1e-6,
     atol: float = 1e-5,
@@ -2192,7 +2210,7 @@ def gradgradcheck(
         func (function): a Python function that takes Tensor inputs and returns
             a Tensor or a tuple of Tensors
         inputs (tuple of Tensor or Tensor): inputs to the function
-        grad_outputs (tuple of Tensor or Tensor, optional): The gradients with
+        grad_outputs (tuple of [Tensor or None] or Tensor, optional): The gradients with
             respect to the function's outputs.
         eps (float, optional): perturbation for finite differences
         atol (float, optional): absolute tolerance

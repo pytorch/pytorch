@@ -1675,7 +1675,10 @@ class TestFxDetectOutliers(QuantizationTestCase):
                 # everything should be an outlier because we said that the max should be equal to the min for all of them
                 # however we will just test and say most should be in case we have several 0 channel values
                 outlier_info = module_dict[OutlierDetector.OUTLIER_KEY]
-                assert sum(outlier_info) >= len(outlier_info) / 2
+                if not sum(outlier_info) >= len(outlier_info) / 2:
+                    raise AssertionError(
+                        f"Expected at least half of channels to be outliers, got {sum(outlier_info)} out of {len(outlier_info)}"
+                    )
 
                 # ensure that the number of ratios and batches counted is the same as the number of params
                 self.assertEqual(len(module_dict[OutlierDetector.COMP_METRIC_KEY]), param_size)
@@ -1735,7 +1738,11 @@ class TestFxDetectOutliers(QuantizationTestCase):
                 # because we ran 30 times, we should have at least a couple be significant
                 # could be less because some channels could possibly be all 0
                 sufficient_batches_info = module_dict[OutlierDetector.IS_SUFFICIENT_BATCHES_KEY]
-                assert sum(sufficient_batches_info) >= len(sufficient_batches_info) / 2
+                if not sum(sufficient_batches_info) >= len(sufficient_batches_info) / 2:
+                    raise AssertionError(
+                        f"Expected at least half of channels to have sufficient batches, "
+                        f"got {sum(sufficient_batches_info)} out of {len(sufficient_batches_info)}"
+                    )
 
                 # half of them should be outliers, because we set a really high value every 2 channels
                 outlier_info = module_dict[OutlierDetector.OUTLIER_KEY]
@@ -1751,7 +1758,10 @@ class TestFxDetectOutliers(QuantizationTestCase):
                     # check that the non-zero channel count, at least 2 should be there
                     # for the first module
                     counts_info = module_dict[OutlierDetector.CONSTANT_COUNTS_KEY]
-                    assert sum(counts_info) >= 2
+                    if not sum(counts_info) >= 2:
+                        raise AssertionError(
+                            f"Expected at least 2 non-zero channel counts, got {sum(counts_info)}"
+                        )
 
                     # half of the recorded max values should be what we set
                     matched_max = sum(val == 3.28e8 for val in module_dict[OutlierDetector.MAX_VALS_KEY])

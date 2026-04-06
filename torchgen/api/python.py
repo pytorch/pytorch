@@ -470,7 +470,8 @@ class PythonSignature:
 
         # Below are the major changes in vararg vs. regular pyi signatures
         # vararg signatures also omit the asterix
-        assert isinstance(vararg_type, ListType)
+        if not isinstance(vararg_type, ListType):
+            raise AssertionError(f"Expected ListType, got {type(vararg_type)}")
         schema_formals[0] = (
             "*" + args[0].name + ": " + argument_type_str_pyi(vararg_type.elem)
         )
@@ -709,7 +710,8 @@ def argument_type_str(
     elif isinstance(t, ListType):
         size = t.size if not simple_type else None
         if str(t.elem) == "bool":
-            assert t.size is not None
+            if t.size is None:
+                raise AssertionError("bool ListType must have a size")
             return f"::std::array<bool,{t.size}>"
         elif str(t.elem) == "int":
             return f"IntArrayRef[{size}]" if size is not None else "IntArrayRef"

@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import re
 from collections.abc import Callable
-from typing import Optional, Union
 
 import torch.fx
 from torch.fx.node import map_arg
@@ -29,8 +28,8 @@ class FoldedGraphModule(torch.fx.GraphModule):
         self,
         root: torch.nn.Module,
         graph: torch.fx.Graph,
-        const_subgraph: Optional[torch.fx.Graph] = None,
-        fx_const_folded_attrs_name: Optional[str] = None,
+        const_subgraph: torch.fx.Graph | None = None,
+        fx_const_folded_attrs_name: str | None = None,
         device_for_folded_attrs: str = "cuda",
     ):
         super().__init__(root, graph)
@@ -57,7 +56,8 @@ class FoldedGraphModule(torch.fx.GraphModule):
         ):
             return
 
-        assert not self.has_folding_been_run
+        if self.has_folding_been_run:
+            raise AssertionError("Folding has already been run")
         self.has_folding_been_run = True
 
         # Actually run const folding subgraph. Note that single attr const fold
@@ -92,13 +92,15 @@ def _inline_module(
     """
     # Fetch the inner graph module that we want to inline inside `gm`.
     inline_mod = dict(gm.named_modules())[inline_mod_name]
-    assert isinstance(inline_mod, torch.fx.GraphModule)
+    if not isinstance(inline_mod, torch.fx.GraphModule):
+        raise AssertionError(f"Expected GraphModule, got {type(inline_mod)}")
     call_mod_node_to_replace = None
     for node in gm.graph.nodes:
         if node.op == "call_module" and node.target == inline_mod_name:
             call_mod_node_to_replace = node
             break
-    assert call_mod_node_to_replace is not None
+    if call_mod_node_to_replace is None:
+        raise AssertionError(f"Could not find call_module node for {inline_mod_name}")
 
     # Now actually do the swap. Note that we have to keep track of new nodes that are
     # copied into `gm` -- we do this via replacement_mapping.
@@ -147,7 +149,8 @@ def _inline_module(
             # Inline getitem nodes that now index into the tuple literal
             for user in getitem_users:
                 idx = user.args[1]
-                assert isinstance(idx, int)
+                if not isinstance(idx, int):
+                    raise AssertionError(f"Expected int index, got {type(idx)}")
                 user.replace_all_uses_with(output_replacements[idx])
                 gm.graph.erase_node(user)
                 replacement_mapping[user] = output_replacements[idx]
@@ -189,8 +192,8 @@ def get_unique_attr_name_in_module(mod_traced: torch.fx.GraphModule, name: str) 
 
 
 def split_const_subgraphs(
-    module: Union[torch.nn.Module, torch.fx.GraphModule],
-    skip_folding_node_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
+    module: torch.nn.Module | torch.fx.GraphModule,
+    skip_folding_node_fn: Callable[[torch.fx.Node], bool] | None = None,
     device_for_folded_attrs: str = "cpu",
 ) -> FoldedGraphModule:
     """
@@ -212,9 +215,10 @@ def split_const_subgraphs(
         """
         Return True if a GraphModule type subgraph contains any impure op, else False.
         """
-        assert isinstance(module, torch.fx.GraphModule), (
-            "caller should only pass GraphModule to subgraph_has_impure_ops check"
-        )
+        if not isinstance(module, torch.fx.GraphModule):
+            raise AssertionError(
+                "caller should only pass GraphModule to subgraph_has_impure_ops check"
+            )
         for node in module.graph.nodes:
             if node.op == "call_function" and node.is_impure():
                 return True
@@ -308,7 +312,8 @@ def split_const_subgraphs(
             if node.target == const_mod_name:
                 call_const_gm_args = node.args
                 break
-    assert call_const_gm_args is not None
+    if call_const_gm_args is None:
+        raise AssertionError("Could not find call_module node for const_gm")
 
     # Here we do the actual replacement of placeholders to get_attrs. Note that here we
     # set the const_gm.graph into a new root_const_gm with split as the root module,
@@ -335,16 +340,22 @@ def split_const_subgraphs(
             continue
         if node.op != "placeholder":
             continue
-        assert ph_idx < len(call_const_gm_args)
+        if ph_idx >= len(call_const_gm_args):
+            raise AssertionError(
+                f"Placeholder index {ph_idx} out of range for args "
+                f"(len={len(call_const_gm_args)})"
+            )
         in_node = call_const_gm_args[ph_idx]
         ph_idx += 1
-        assert in_node.op == "get_attr"
+        if in_node.op != "get_attr":
+            raise AssertionError(f"Expected get_attr, got {in_node.op}")
         with root_const_gm.graph.inserting_before(node):
             new_node = root_const_gm.graph.get_attr(in_node.target)
         new_node.meta = node.meta.copy()
         node.replace_all_uses_with(new_node)
         root_const_gm.graph.erase_node(node)
-    assert "multiple_outputs" in locals()
+    if "multiple_outputs" not in locals():
+        raise AssertionError("multiple_outputs not set in loop")
 
     # Now find the call to const_gm inside split, and replace it with a getattr to the
     # folded tensor(s) that result from constant folding. Note that we don't need to

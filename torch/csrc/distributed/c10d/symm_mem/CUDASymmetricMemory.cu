@@ -1,6 +1,7 @@
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
+#include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
-#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
+#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 
@@ -62,8 +63,8 @@ AllocationRef::~AllocationRef() {
 #endif
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemRelease_(handle));
 #elif defined(USE_ROCM)
-  C10_HIP_CHECK(hipMemUnmap(reinterpret_cast<hipDeviceptr_t>(ptr), block_size));
-  C10_HIP_CHECK(hipMemRelease(handle));
+  C10_CUDA_CHECK(hipMemUnmap(reinterpret_cast<hipDeviceptr_t>(ptr), block_size));
+  C10_CUDA_CHECK(hipMemRelease(handle));
 #else
   TORCH_CHECK(
       false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
@@ -79,7 +80,8 @@ CUDAPeerAllocInfo::CUDAPeerAllocInfo(
     size_t buffer_size,
     int local_device_idx,
     int rank,
-    int world_size)
+    int world_size,
+    std::string group_name)
     : alloc_refs_(std::move(alloc_refs)),
       buffers_(std::move(buffers)),
       signal_pads_(std::move(signal_pads)),
@@ -88,7 +90,8 @@ CUDAPeerAllocInfo::CUDAPeerAllocInfo(
       buffer_size_(buffer_size),
       local_device_idx_(local_device_idx),
       rank_(rank),
-      world_size_(world_size) {
+      world_size_(world_size),
+      group_name_(std::move(group_name)) {
   const size_t arr_size = sizeof(void*) * world_size_;
   buffers_dev_ = reinterpret_cast<void**>(
       c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
@@ -210,7 +213,21 @@ static __global__ void barrier_kernel(
 
 void CUDASymmetricMemory::barrier(int channel, size_t timeout_ms) {
   check_channel(channel, world_size_);
-  c10::cuda::CUDAGuard guard(local_device_idx_);
+  auto pg = c10d::resolve_process_group(pai_->group_name_);
+  RECORD_PARAM_COMMS(
+      static_cast<int64_t>(0),
+      std::make_tuple(pg->getGroupName(), pg->getGroupDesc()),
+      rank_,
+      "symm_mem::barrier",
+      0,
+      0,
+      at::kByte,
+      std::vector<int64_t>(),
+      std::vector<int64_t>(),
+      -1,
+      -1,
+      world_size_);
+  c10::cuda::CUDAGuard device_guard(local_device_idx_);
   barrier_kernel<<<
       1,
       max(at::cuda::warp_size(), world_size_),
@@ -252,7 +269,21 @@ void CUDASymmetricMemory::put_signal(
     int channel,
     size_t timeout_ms) {
   check_channel(channel, world_size_);
-  c10::cuda::CUDAGuard guard(local_device_idx_);
+  auto pg = c10d::resolve_process_group(pai_->group_name_);
+  RECORD_PARAM_COMMS(
+      static_cast<int64_t>(0),
+      std::make_tuple(pg->getGroupName(), pg->getGroupDesc()),
+      rank_,
+      "symm_mem::put_signal",
+      0,
+      0,
+      at::kByte,
+      std::vector<int64_t>(),
+      std::vector<int64_t>(),
+      -1,
+      -1,
+      world_size_);
+  c10::cuda::CUDAGuard device_guard(local_device_idx_);
   put_signal_kernel<<<
       1,
       at::cuda::warp_size(),
@@ -300,7 +331,21 @@ void CUDASymmetricMemory::wait_signal(
     int channel,
     size_t timeout_ms) {
   check_channel(channel, world_size_);
-  c10::cuda::CUDAGuard guard(local_device_idx_);
+  auto pg = c10d::resolve_process_group(pai_->group_name_);
+  RECORD_PARAM_COMMS(
+      static_cast<int64_t>(0),
+      std::make_tuple(pg->getGroupName(), pg->getGroupDesc()),
+      rank_,
+      "symm_mem::wait_signal",
+      0,
+      0,
+      at::kByte,
+      std::vector<int64_t>(),
+      std::vector<int64_t>(),
+      -1,
+      -1,
+      world_size_);
+  c10::cuda::CUDAGuard device_guard(local_device_idx_);
   wait_signal_kernel<<<
       1,
       at::cuda::warp_size(),
@@ -396,12 +441,12 @@ void* CUDASymmetricMemoryAllocator::alloc(
   prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
 
   size_t granularity;
-  C10_HIP_CHECK(hipMemGetAllocationGranularity(
+  C10_CUDA_CHECK(hipMemGetAllocationGranularity(
       &granularity, &prop, hipMemAllocationGranularityRecommended));
   block_size = at::round_up(block_size, granularity);
 
   HandleType handle;
-  C10_HIP_CHECK(hipMemCreate(
+  C10_CUDA_CHECK(hipMemCreate(
       reinterpret_cast<hipMemGenericAllocationHandle_t*>(&handle),
       block_size,
       &prop,
@@ -662,7 +707,7 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
                         : CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR,
       0));
 #elif defined(USE_ROCM)
-  C10_HIP_CHECK(hipMemExportToShareableHandle(
+  C10_CUDA_CHECK(hipMemExportToShareableHandle(
       &block_handle,
       block->alloc_ref->handle,
       hipMemHandleTypePosixFileDescriptor,
@@ -726,7 +771,7 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
           CU_MEM_HANDLE_TYPE_FABRIC));
     }
 #elif defined(USE_ROCM)
-    C10_HIP_CHECK(hipMemImportFromShareableHandle(
+    C10_CUDA_CHECK(hipMemImportFromShareableHandle(
         &handles[r],
 #if ROCM_VERSION >= 70100
         reinterpret_cast<void*>(static_cast<uintptr_t>(imported_handles[r])),
@@ -785,7 +830,8 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
       block->buffer_size,
       block->device_idx,
       rank,
-      world_size);
+      world_size,
+      group_name);
 
   return pai;
 }

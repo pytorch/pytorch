@@ -1205,7 +1205,7 @@ backward() with non-leaf tensor
         ref = fn(a, b)
 
         # Second call - compiled (should accumulate into SAME tensor)
-        opt_fn = torch.compile(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         act = opt_fn(a, b)
 
         self.assertTrue(ref is act)

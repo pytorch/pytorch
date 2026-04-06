@@ -164,6 +164,9 @@ if(USE_ROCM)
       USE_ROCM
       __HIP_PLATFORM_AMD__
       )
+    if(USE_HIPDNN)
+      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_HIPDNN)
+    endif()
     if(NOT WIN32)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${ROCM_ROCTX_LIB})
     endif()
@@ -172,7 +175,6 @@ endif()
 if(USE_XPU)
     include(${TORCH_ROOT}/cmake/public/xpu.cmake)
     append_filelist("libtorch_python_xpu_sources" TORCH_PYTHON_SRCS)
-
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_XPU)
 endif()
 

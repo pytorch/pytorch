@@ -104,8 +104,9 @@ bool use_mkldnn(const Tensor& input, TensorList params, TensorList hx) {
        (input.scalar_type() == kHalf && !at::GradMode::is_enabled() &&
         mkldnn_fp16_device_check())) &&
       input.numel() != 0;
-#endif
+#else
   return false;
+#endif
 }
 
 bool use_cudnn(const Tensor& t) {
@@ -852,7 +853,7 @@ struct FullLayer : Layer<Tensor, hidden_type, cell_params> {
       hidden = cell_(input, hidden, params, pre_compute_input);
       step_outputs.emplace_back(hidden_as_output(hidden));
     }
-    return {step_outputs, hidden};
+    return {std::move(step_outputs), std::move(hidden)};
   }
 
   output_type operator()(
@@ -947,7 +948,7 @@ struct PackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
     std::vector<hidden_type> hiddens;
     int64_t input_offset = 0;
     int64_t num_steps = input.batch_sizes.size(0);
-    int64_t* batch_sizes = input.batch_sizes.data_ptr<int64_t>();
+    const int64_t* batch_sizes = input.batch_sizes.const_data_ptr<int64_t>();
     int64_t last_batch_size = batch_sizes[0];
 
     const Tensor* input_ptr = &input.data;
@@ -1006,7 +1007,7 @@ struct ReversedPackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
     std::vector<at::Tensor> step_outputs;
     int64_t input_offset = input.data.size(0);
     int64_t num_steps = input.batch_sizes.size(0);
-    int64_t* batch_sizes = input.batch_sizes.data_ptr<int64_t>();
+    const int64_t* batch_sizes = input.batch_sizes.const_data_ptr<int64_t>();
     int64_t last_batch_size = batch_sizes[num_steps - 1];
 
     const Tensor* input_ptr = &input.data;
@@ -1111,7 +1112,7 @@ apply_layer_stack(const Layer<io_type, hidden_type, weight_type>& layer, const i
     }
   }
 
-  return {layer_input, final_hiddens};
+  return {std::move(layer_input), std::move(final_hiddens)};
 }
 
 ////////////////////////////////////////////////////////////////////////////////

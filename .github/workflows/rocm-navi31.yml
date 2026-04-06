@@ -38,12 +38,12 @@ jobs:
 
   linux-jammy-rocm-py3_10-build:
     if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
-    name: linux-jammy-rocm-py3.10
+    name: linux-jammy-rocm-py3.10-navi31
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-rocm-py3.10
+      build-environment: linux-jammy-rocm-py3.10-navi31
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
       sync-tag: rocm-build
       test-matrix: |
@@ -57,7 +57,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    name: linux-jammy-rocm-py3_10
+    name: linux-jammy-rocm-py3.10-navi31
     uses: ./.github/workflows/_rocm-test.yml
     needs:
       - linux-jammy-rocm-py3_10-build
@@ -67,9 +67,8 @@ jobs:
       docker-image: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.test-matrix }}
       tests-to-include: >-
-         ${{ github.event_name == 'schedule' && 'test_nn test_torch test_cuda test_ops test_unary_ufuncs test_binary_ufuncs
          test_autograd inductor/test_torchinductor inductor/test_kernel_benchmark
          inductor/test_pad_mm inductor/test_benchmark_fusion inductor/test_aot_inductor
          inductor/test_torchinductor inductor/test_decompose_mem_bound_mm
-         inductor/test_flex_attention inductor/test_max_autotune' || '' }}
+         inductor/test_flex_attention inductor/test_max_autotune
     secrets: inherit

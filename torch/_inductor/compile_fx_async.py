@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 from typing_extensions import final, override
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
@@ -37,7 +37,7 @@ class _PostCompileData:
 class ProgressiveCompilationState:
     progression_futures: deque[Future[_WireProtocolPickledOutput]]
     callback: Callable[[_WireProtocolPickledOutput], OutputCode]
-    post_compile_data: Optional[_PostCompileData]
+    post_compile_data: _PostCompileData | None
 
     def check_and_get_ready_stage(self) -> int:
         """Check if any progression stage is ready and return its index, or -1 if none are ready."""
@@ -79,11 +79,11 @@ class ProgressiveCompilationState:
 # out-of-process compile to finish and then switching over to it.
 @final
 class _AsyncOutputCode(OutputCode):
-    _eager_fn: Optional[Callable[..., Any]]
-    _output_code: Optional[OutputCode]
-    _future: Optional[Future[_WireProtocolPickledOutput]]
+    _eager_fn: Callable[..., Any] | None
+    _output_code: OutputCode | None
+    _future: Future[_WireProtocolPickledOutput] | None
     _callback: Callable[[_WireProtocolPickledOutput], OutputCode]
-    _post_compile_data: Optional[_PostCompileData] = None
+    _post_compile_data: _PostCompileData | None = None
     _boxed_call: bool  # Copied from the forward/output_code
 
     def __init__(
@@ -232,9 +232,9 @@ class _AsyncFxCompile(FxCompile):
 # to a more optimized version when the expensive compile finishes.
 @final
 class _ProgressiveOutputCode(OutputCode):
-    _fast_output_code: Optional[OutputCode]
-    _optimized_output_code: Optional[OutputCode]
-    _compilation_state: Optional[ProgressiveCompilationState]
+    _fast_output_code: OutputCode | None
+    _optimized_output_code: OutputCode | None
+    _compilation_state: ProgressiveCompilationState | None
     # _boxed_call state is effectively cached (we sometimes wrap unboxed w/
     # lambdas to box them) so we can't change it mid-way. Since _boxed_call=True
     # is more common let's default to that and we'll convert if necessary.

@@ -10,9 +10,22 @@
 #include <ATen/ops/gather_native.h>
 #include <ATen/ops/scatter_add_native.h>
 #include <ATen/ops/scatter_native.h>
+#include <ATen/ops/view_as_real.h>
 #endif
 
 namespace at::native {
+
+static Tensor maybe_expand_0_dim(const Tensor& t) {
+  return t.dim() == 0 ? t.view({1}) : t;
+}
+
+static Tensor expand_index_as_real(const Tensor& index) {
+  auto index_view = maybe_expand_0_dim(index);
+  std::vector<int64_t> index_expanded_sizes = index_view.sizes().vec();
+  index_expanded_sizes.push_back(2);
+  auto index_expanded = index_view.unsqueeze(-1).expand(index_expanded_sizes);
+  return index_expanded;
+}
 
 TORCH_IMPL_FUNC(gather_out_mps)
 (const Tensor& self_arg, int64_t dim, const Tensor& index, bool sparse_grad, const Tensor& output) {
@@ -27,7 +40,14 @@ TORCH_IMPL_FUNC(gather_out_mps)
   TORCH_CHECK(!sparse_grad, "sparse_grad not supported in MPS yet")
   TORCH_CHECK(self.scalar_type() == output.scalar_type(), "gather(): self and output must have the same scalar type");
   TORCH_CHECK(dim >= 0 && dim < self.dim(), "gather(): Indexing dim ", dim, " is out of bounds of tensor");
-  TORCH_CHECK(!self.is_complex(), "gather(): Yet not supported for complex");
+
+  if (self.is_complex()) {
+    auto self_real = at::view_as_real(self);
+    auto index_expanded = expand_index_as_real(index);
+    auto output_real = at::view_as_real(maybe_expand_0_dim(output));
+    structured_gather_out_mps::impl(self_real, dim, index_expanded, sparse_grad, output_real);
+    return;
+  }
 
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
@@ -145,7 +165,15 @@ static void scatter_mps_general(const Tensor& self_arg,
   TORCH_CHECK(self.scalar_type() == output.scalar_type() && output.scalar_type() == src.scalar_type(),
               "scatter(): self, src and output must have the same scalar type");
   TORCH_CHECK(dim >= 0 && dim < self.dim(), "scatter(): Indexing dim ", dim, " is out of bounds of tensor");
-  TORCH_CHECK(!self.is_complex(), "scatter(): Yet not supported for complex");
+
+  if (self.is_complex()) {
+    auto self_real = at::view_as_real(self);
+    auto index_expanded = expand_index_as_real(index);
+    auto src_real = at::view_as_real(maybe_expand_0_dim(src));
+    auto output_real = at::view_as_real(maybe_expand_0_dim(output));
+    scatter_mps_general(self_real, dim, index_expanded, src_real, output_real, func_name, reduce);
+    return;
+  }
 
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}

@@ -7,8 +7,13 @@
 #include <map>
 #include <memory>
 #include <regex>
+#include <shared_mutex>
 #include <string>
 #include <tuple>
+
+#if defined(USE_ROCM)
+#include <rocblas/rocblas.h>
+#endif
 
 /**
  * Note [hipblaslt handles]
@@ -53,8 +58,6 @@ void destroyCublasLtHandle(cublasLtHandle_t handle) {
 using CuBlasLtPoolType = DeviceThreadHandlePool<cublasLtHandle_t, createCublasLtHandle, destroyCublasLtHandle>;
 
 // ugly hack until hipblasSetWorkspace exists
-#include <rocblas/rocblas.h>
-
 static hipblasStatus_t rocBLASStatusToHIPStatus(rocblas_status error) {
     switch(error) {
     case rocblas_status_size_unchanged:
@@ -130,6 +133,32 @@ void clearCublasWorkspaces() {
   }
 }
 
+void clearCublasWorkspacesForStream(cudaStream_t stream) {
+  void* stream_ptr = static_cast<void*>(stream);
+  {
+    auto& workspace = cublas_handle_stream_to_workspace();
+    std::unique_lock<std::shared_mutex> lock(workspace.mutex);
+    for (auto it = workspace.map.begin(); it != workspace.map.end(); ) {
+      if (std::get<1>(it->first) == stream_ptr) {
+        it = workspace.map.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+  {
+    auto& workspace = cublaslt_handle_stream_to_workspace();
+    std::unique_lock<std::shared_mutex> lock(workspace.mutex);
+    for (auto it = workspace.map.begin(); it != workspace.map.end(); ) {
+      if (std::get<1>(it->first) == stream_ptr) {
+        it = workspace.map.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+}
+
 size_t parseChosenWorkspaceSize() {
   auto val = c10::utils::get_env("CUBLAS_WORKSPACE_CONFIG");
 #ifdef USE_ROCM
@@ -144,10 +173,10 @@ size_t parseChosenWorkspaceSize() {
   const bool gfx94_95 = at::detail::getCUDAHooks().isGPUArch({"gfx94", "gfx95"});
   const size_t default_size = gfx94_95 ? 1024 * 128 * 1024 : 1024 * 32 * 1024;
 #else
-  /* :4096:2:16:8 default, 32MiB for Hopper */
+  /* :4096:2:16:8 default, 32MiB for Hopper and Blackwell */
   cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
-  const bool sm90 = properties != nullptr && properties->major == 9 && properties->minor == 0;
-  const size_t default_size = sm90 ? 4096 * 8 * 1024 : 4096 * 1024 * 2 + 16 * 1024 * 8;
+  const bool use32mb = properties != nullptr && (properties->major == 9 || properties->major == 10 || properties->major == 12);
+  const size_t default_size = use32mb ? 4096 * 8 * 1024 : 4096 * 1024 * 2 + 16 * 1024 * 8;
 #endif
 
   if (val) {
@@ -174,6 +203,19 @@ size_t parseChosenWorkspaceSize() {
   }
 }
 
+#define TORCH_CUBLASLT_UNIFIED_WORKSPACE "TORCH_CUBLASLT_UNIFIED_WORKSPACE"
+#ifndef USE_ROCM
+inline bool unified_cublas_and_lt_workspaces() {
+  static auto unified_env_var = c10::utils::check_env(TORCH_CUBLASLT_UNIFIED_WORKSPACE);
+#if !defined(FBCODE)
+  static bool unified = (unified_env_var == std::nullopt) || (unified_env_var == true);
+#else
+  static bool unified = unified_env_var == true;
+#endif
+  return unified;
+}
+#endif
+
 size_t parseCUDABlasLtWorkspaceSize() {
   auto val = c10::utils::get_env("CUBLASLT_WORKSPACE_SIZE");
 #ifdef USE_ROCM
@@ -183,7 +225,9 @@ size_t parseCUDABlasLtWorkspaceSize() {
   }
   size_t workspace_size = 76*1024; /* Use 76 MB for hipBLASLt */
 #else
-  size_t workspace_size = 1024; /* default size in KiB according to #73328 */
+  /* use CUDABlas default workspace size if unified */
+  /* otherwise, use default size in KiB according to #73328 */
+  size_t workspace_size = unified_cublas_and_lt_workspaces() ? parseChosenWorkspaceSize() / 1024 : 1024;
 #endif
 
   if (val.has_value()) {
@@ -206,24 +250,11 @@ size_t parseCUDABlasLtWorkspaceSize() {
   return workspace_size * 1024;
 }
 
-size_t getChosenWorkspaceSize() {
-  size_t pool_size = parseChosenWorkspaceSize();
-  return pool_size;
-}
-
-#define TORCH_CUBLASLT_UNIFIED_WORKSPACE "TORCH_CUBLASLT_UNIFIED_WORKSPACE"
-
 size_t getCUDABlasLtWorkspaceSize() {
   size_t pool_size = parseCUDABlasLtWorkspaceSize();
 #ifndef USE_ROCM
-  static auto unified_env_var = c10::utils::check_env(TORCH_CUBLASLT_UNIFIED_WORKSPACE);
-#if !defined(FBCODE)
-  static bool unified = (unified_env_var == std::nullopt) || (unified_env_var == true);
-#else
-  static bool unified = unified_env_var == true;
-#endif
-  if (unified) {
-    auto cublasWorkspaceSize = getChosenWorkspaceSize();
+  if (unified_cublas_and_lt_workspaces()) {
+    auto cublasWorkspaceSize = parseChosenWorkspaceSize();
     if (cublasWorkspaceSize < pool_size) {
       TORCH_WARN_ONCE("Requested unified CUBLASLT workspace size of ", pool_size,
                       " bytes exceeds CUBLAS workspace size of ", cublasWorkspaceSize,
@@ -239,7 +270,7 @@ size_t getCUDABlasLtWorkspaceSize() {
 }
 
 at::DataPtr getNewWorkspace() {
-  return c10::cuda::CUDACachingAllocator::get()->allocate(getChosenWorkspaceSize());
+  return c10::cuda::CUDACachingAllocator::get()->allocate(parseChosenWorkspaceSize());
 }
 
 at::DataPtr getNewCUDABlasLtWorkspace() {
@@ -252,7 +283,7 @@ void setWorkspaceForHandle(cublasHandle_t handle, c10::cuda::CUDAStream stream) 
 
   auto& workspace = cublas_handle_stream_to_workspace();
 
-  size_t workspace_size = getChosenWorkspaceSize();
+  size_t workspace_size = parseChosenWorkspaceSize();
 
   // Fast path: check if workspace already exists
   {
@@ -280,8 +311,7 @@ void setWorkspaceForHandle(cublasHandle_t handle, c10::cuda::CUDAStream stream) 
 
 void* getCUDABlasLtWorkspace() {
 #ifndef USE_ROCM
-  static bool unified = c10::utils::check_env(TORCH_CUBLASLT_UNIFIED_WORKSPACE) == true;
-  if (unified) {
+  if (unified_cublas_and_lt_workspaces()) {
     cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
     auto stream = c10::cuda::getCurrentCUDAStream();
     cudaStream_t _stream = stream;

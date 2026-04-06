@@ -1,5 +1,5 @@
 diff --git a/test/dynamo/cpython/3_13/test_collections.py b/test/dynamo/cpython/3_13/test_collections.py
-index cafc44007d1..4571e5a14fd 100644
+index cafc44007d1..ec10d45bd77 100644
 --- a/test/dynamo/cpython/3_13/test_collections.py
 +++ b/test/dynamo/cpython/3_13/test_collections.py
 @@ -1,3 +1,23 @@
@@ -24,12 +24,12 @@ index cafc44007d1..4571e5a14fd 100644
 +# ======= END DYNAMO PATCH =======
 +
  """Unit tests for collections.py."""
-
+ 
  import array
 @@ -29,7 +49,7 @@ from collections.abc import Sequence, MutableSequence
  from collections.abc import ByteString, Buffer
-
-
+ 
+ 
 -class TestUserObjects(unittest.TestCase):
 +class TestUserObjects(__TestCase):
      def _superset_test(self, a, b):
@@ -37,7 +37,7 @@ index cafc44007d1..4571e5a14fd 100644
              set(dir(a)),
 @@ -73,9 +93,10 @@ class TestUserObjects(unittest.TestCase):
          self._copy_test(obj)
-
+ 
      def test_dict_missing(self):
 -        class A(UserDict):
 -            def __missing__(self, key):
@@ -52,15 +52,15 @@ index cafc44007d1..4571e5a14fd 100644
 @@ -85,7 +106,7 @@ class TestUserObjects(unittest.TestCase):
  ### ChainMap (helper class for configparser and the string module)
  ################################################################################
-
+ 
 -class TestChainMap(unittest.TestCase):
 +class TestChainMap(__TestCase):
-
+ 
      def test_basics(self):
          c = ChainMap()
 @@ -172,9 +193,10 @@ class TestChainMap(unittest.TestCase):
          self.assertTrue(ChainMap({}, {1:2}))
-
+ 
      def test_missing(self):
 -        class DefaultChainMap(ChainMap):
 -            def __missing__(self, key):
@@ -74,7 +74,7 @@ index cafc44007d1..4571e5a14fd 100644
              self.assertEqual(d[k], v)                                  # check __getitem__ w/missing
 @@ -206,13 +228,14 @@ class TestChainMap(unittest.TestCase):
               ('i', 9999), ('j', 0)])
-
+ 
      def test_iter_not_calling_getitem_on_maps(self):
 -        class DictWithGetItem(UserDict):
 -            def __init__(self, *args, **kwds):
@@ -91,12 +91,12 @@ index cafc44007d1..4571e5a14fd 100644
 +                def __getitem__(self, item):
 +                    self.called = True
 +                    UserDict.__getitem__(self, item)
-
+ 
          d = DictWithGetItem(a=1)
          c = ChainMap(d)
 @@ -237,15 +260,16 @@ class TestChainMap(unittest.TestCase):
          self.assertIs(m, d.maps[0])
-
+ 
          # Use a different map than a dict
 -        class lowerdict(dict):
 -            def __getitem__(self, key):
@@ -117,50 +117,51 @@ index cafc44007d1..4571e5a14fd 100644
 +                    if isinstance(key, str):
 +                        key = key.lower()
 +                    return dict.__contains__(self, key)
-
+ 
          c = ChainMap()
          c['a'] = 1
 @@ -315,7 +339,7 @@ class TestChainMap(unittest.TestCase):
-
+ 
  TestNT = namedtuple('TestNT', 'x y z')    # type used for pickle tests
-
+ 
 -class TestNamedTuple(unittest.TestCase):
 +class TestNamedTuple(__TestCase):
-
+ 
      def test_factory(self):
          Point = namedtuple('Point', 'x y')
 @@ -666,8 +690,9 @@ class TestNamedTuple(unittest.TestCase):
              NT = namedtuple('NT', ['abc', 'def'], False, True)
-
+ 
      def test_namedtuple_subclass_issue_24931(self):
 -        class Point(namedtuple('_Point', ['x', 'y'])):
 -            pass
 +        with torch._dynamo.error_on_graph_break(False):
 +            class Point(namedtuple('_Point', ['x', 'y'])):
 +                pass
-
+ 
          a = Point(3, 4)
          self.assertEqual(a._asdict(), OrderedDict([('x', 3), ('y', 4)]))
 @@ -722,21 +747,26 @@ class TestNamedTuple(unittest.TestCase):
  ### Abstract Base Classes
  ################################################################################
-
+ 
 -class ABCTestCase(unittest.TestCase):
 +class ABCTestCase(__TestCase):
-
+ 
      def validate_abstract_methods(self, abc, *names):
          methodstubs = dict.fromkeys(names, lambda s, *args: 0)
-
+ 
          # everything should work will all required methods are present
 -        C = type('C', (abc,), methodstubs)
+-        C()
 +        with torch._dynamo.error_on_graph_break(False):
 +            C = type('C', (abc,), methodstubs)
-         C()
-
++            C()
++
 +        # Dynamo raises a hard error here that we can't easily capture
 +        # Commenting this part as this would also fail in eager if a user
 +        # attempt to run the same code
-+
+ 
          # instantiation should fail if a required method is missing
 -        for name in names:
 -            stubs = methodstubs.copy()
@@ -172,7 +173,7 @@ index cafc44007d1..4571e5a14fd 100644
 +        #     del stubs[name]
 +        #     C = type('C', (abc,), stubs)
 +        #     self.assertRaises(TypeError, C, name)
-
+ 
      def validate_isinstance(self, abc, name):
          stub = lambda s, *args: 0
 @@ -981,19 +1011,21 @@ class TestOneTrickPonyABCs(ABCTestCase):
@@ -363,11 +364,11 @@ index cafc44007d1..4571e5a14fd 100644
 +                __contains__ = None
          self.assertFalse(issubclass(NonCol, Collection))
          self.assertFalse(isinstance(NonCol(), Collection))
-
+ 
 @@ -1162,30 +1202,32 @@ class TestOneTrickPonyABCs(ABCTestCase):
              self.assertTrue(issubclass(type(x), Iterator), repr(type(x)))
          self.validate_abstract_methods(Iterator, '__next__', '__iter__')
-
+ 
 -        # Issue 10565
 -        class NextOnly:
 -            def __next__(self):
@@ -380,7 +381,7 @@ index cafc44007d1..4571e5a14fd 100644
 +                    yield 1
 +                    return
          self.assertNotIsInstance(NextOnly(), Iterator)
-
+ 
      def test_Generator(self):
 -        class NonGen1:
 -            def __iter__(self): return self
@@ -415,13 +416,13 @@ index cafc44007d1..4571e5a14fd 100644
 +                def close(self): pass
 +                def send(self, value): return value
 +                def throw(self, typ, val=None, tb=None): pass
-
+ 
          non_samples = [
              None, 42, 3.14, 1j, b"", "", (), [], {}, set(),
 @@ -1194,18 +1236,19 @@ class TestOneTrickPonyABCs(ABCTestCase):
              self.assertNotIsInstance(x, Generator)
              self.assertFalse(issubclass(type(x), Generator), repr(type(x)))
-
+ 
 -        class Gen:
 -            def __iter__(self): return self
 -            def __next__(self): return None
@@ -435,7 +436,7 @@ index cafc44007d1..4571e5a14fd 100644
 +                def close(self): pass
 +                def send(self, value): return value
 +                def throw(self, typ, val=None, tb=None): pass
-
+ 
 -        class MinimalGen(Generator):
 -            def send(self, value):
 -                return value
@@ -446,13 +447,13 @@ index cafc44007d1..4571e5a14fd 100644
 +                    return value
 +                def throw(self, typ, val=None, tb=None):
 +                    super().throw(typ, val, tb)
-
+ 
          def gen():
              yield 1
 @@ -1228,15 +1271,17 @@ class TestOneTrickPonyABCs(ABCTestCase):
                                 mgen.throw, ValueError, ValueError("huhu"))
          self.assertRaises(StopIteration, mgen.throw, StopIteration())
-
+ 
 -        class FailOnClose(Generator):
 -            def send(self, value): return value
 -            def throw(self, *args): raise ValueError
@@ -460,9 +461,9 @@ index cafc44007d1..4571e5a14fd 100644
 +            class FailOnClose(Generator):
 +                def send(self, value): return value
 +                def throw(self, *args): raise ValueError
-
+ 
          self.assertRaises(ValueError, FailOnClose().close)
-
+ 
 -        class IgnoreGeneratorExit(Generator):
 -            def send(self, value): return value
 -            def throw(self, *args): pass
@@ -470,11 +471,11 @@ index cafc44007d1..4571e5a14fd 100644
 +            class IgnoreGeneratorExit(Generator):
 +                def send(self, value): return value
 +                def throw(self, *args): pass
-
+ 
          self.assertRaises(RuntimeError, IgnoreGeneratorExit().close)
-
+ 
 @@ -1379,15 +1424,17 @@ class TestOneTrickPonyABCs(ABCTestCase):
-
+ 
      def test_direct_subclassing(self):
          for B in Hashable, Iterable, Iterator, Reversible, Sized, Container, Callable:
 -            class C(B):
@@ -484,7 +485,7 @@ index cafc44007d1..4571e5a14fd 100644
 +                    pass
              self.assertTrue(issubclass(C, B))
              self.assertFalse(issubclass(int, C))
-
+ 
      def test_registration(self):
          for B in Hashable, Iterable, Iterator, Reversible, Sized, Container, Callable:
 -            class C:
@@ -515,11 +516,11 @@ index cafc44007d1..4571e5a14fd 100644
 +                def __iter__(self):
 +                    return iter([])
          self.validate_comparison(MySet())
-
+ 
      def test_hash_Set(self):
 @@ -1448,15 +1496,16 @@ class TestCollectionABCs(ABCTestCase):
          self.assertTrue(hash(a) == hash(b))
-
+ 
      def test_isdisjoint_Set(self):
 -        class MySet(Set):
 -            def __init__(self, itr):
@@ -545,7 +546,7 @@ index cafc44007d1..4571e5a14fd 100644
          s3 = MySet((1, 5, 6))
 @@ -1464,15 +1513,16 @@ class TestCollectionABCs(ABCTestCase):
          self.assertFalse(s1.isdisjoint(s3))
-
+ 
      def test_equality_Set(self):
 -        class MySet(Set):
 -            def __init__(self, itr):
@@ -571,7 +572,7 @@ index cafc44007d1..4571e5a14fd 100644
          s3 = MySet((3, 4))
 @@ -1486,15 +1536,16 @@ class TestCollectionABCs(ABCTestCase):
          self.assertNotEqual(s2, s3)
-
+ 
      def test_arithmetic_Set(self):
 -        class MySet(Set):
 -            def __init__(self, itr):
@@ -596,7 +597,7 @@ index cafc44007d1..4571e5a14fd 100644
          s2 = MySet((3, 4, 5))
          s3 = s1 & s2
 @@ -1516,28 +1567,29 @@ class TestCollectionABCs(ABCTestCase):
-
+ 
      def test_issue_4920(self):
          # MutableSet.pop() method did not work
 -        class MySet(MutableSet):
@@ -688,11 +689,11 @@ index cafc44007d1..4571e5a14fd 100644
 +                    return NotImplemented
 +                def __lt__(self, x):
 +                    return NotImplemented
-
+ 
          cs = MyComparableSet()
          ncs = MyNonComparableSet()
 @@ -1591,13 +1644,14 @@ class TestCollectionABCs(ABCTestCase):
-
+ 
      def test_issue26915(self):
          # Container membership test should check identity first
 -        class CustomSequence(Sequence):
@@ -710,11 +711,11 @@ index cafc44007d1..4571e5a14fd 100644
 +                    return self._seq[index]
 +                def __len__(self):
 +                    return len(self._seq)
-
+ 
          nan = float('nan')
          obj = support.NEVER_EQ
 @@ -1622,30 +1676,31 @@ class TestCollectionABCs(ABCTestCase):
-
+ 
      def test_Set_from_iterable(self):
          """Verify _from_iterable overridden to an instance method works."""
 -        class SetUsingInstanceFromIterable(MutableSet):
@@ -730,41 +731,41 @@ index cafc44007d1..4571e5a14fd 100644
 +                        raise ValueError('created_by must be specified')
 +                    self.created_by = created_by
 +                    self._values = set(values)
-
+ 
 -            def _from_iterable(self, values):
 -                return type(self)(values, 'from_iterable')
 +                def _from_iterable(self, values):
 +                    return type(self)(values, 'from_iterable')
-
+ 
 -            def __contains__(self, value):
 -                return value in self._values
 +                def __contains__(self, value):
 +                    return value in self._values
-
+ 
 -            def __iter__(self):
 -                yield from self._values
 +                def __iter__(self):
 +                    yield from self._values
-
+ 
 -            def __len__(self):
 -                return len(self._values)
 +                def __len__(self):
 +                    return len(self._values)
-
+ 
 -            def add(self, value):
 -                self._values.add(value)
 +                def add(self, value):
 +                    self._values.add(value)
-
+ 
 -            def discard(self, value):
 -                self._values.discard(value)
 +                def discard(self, value):
 +                    self._values.discard(value)
-
+ 
          impl = SetUsingInstanceFromIterable([1, 2, 3], 'test')
-
+ 
 @@ -1678,20 +1733,21 @@ class TestCollectionABCs(ABCTestCase):
-
+ 
      def test_Set_interoperability_with_real_sets(self):
          # Issue: 8743
 -        class ListSet(Set):
@@ -796,7 +797,7 @@ index cafc44007d1..4571e5a14fd 100644
 +                    return len(self.data)
 +                def __repr__(self):
 +                    return 'Set({!r})'.format(self.data)
-
+ 
          r1 = set('abc')
          r2 = set('bcd')
 @@ -1846,13 +1902,14 @@ class TestCollectionABCs(ABCTestCase):
@@ -820,7 +821,7 @@ index cafc44007d1..4571e5a14fd 100644
 +                    return iter(())
          self.validate_comparison(MyMapping())
          self.assertRaises(TypeError, reversed, MyMapping())
-
+ 
 @@ -1860,7 +1917,7 @@ class TestCollectionABCs(ABCTestCase):
          for sample in [dict]:
              self.assertIsInstance(sample(), MutableMapping)
@@ -828,11 +829,11 @@ index cafc44007d1..4571e5a14fd 100644
 -        self.validate_abstract_methods(MutableMapping, '__contains__', '__iter__', '__len__',
 +        self.validate_abstract_methods(MutableMapping, '__iter__', '__len__',
              '__getitem__', '__setitem__', '__delitem__')
-
+ 
      def test_MutableMapping_subclass(self):
 @@ -1903,15 +1960,16 @@ class TestCollectionABCs(ABCTestCase):
              '__getitem__')
-
+ 
      def test_Sequence_mixins(self):
 -        class SequenceSubclass(Sequence):
 -            def __init__(self, seq=()):
@@ -841,17 +842,17 @@ index cafc44007d1..4571e5a14fd 100644
 +            class SequenceSubclass(Sequence):
 +                def __init__(self, seq=()):
 +                    self.seq = seq
-
+ 
 -            def __getitem__(self, index):
 -                return self.seq[index]
 +                def __getitem__(self, index):
 +                    return self.seq[index]
-
+ 
 -            def __len__(self):
 -                return len(self.seq)
 +                def __len__(self):
 +                    return len(self.seq)
-
+ 
          # Compare Sequence.index() behavior to (list|str).index() behavior
          def assert_index_same(seq1, seq2, index_args):
 @@ -1983,24 +2041,25 @@ class TestCollectionABCs(ABCTestCase):
@@ -865,46 +866,46 @@ index cafc44007d1..4571e5a14fd 100644
 +            class MutableSequenceSubclass(MutableSequence):
 +                def __init__(self):
 +                    self.lst = []
-
+ 
 -            def __setitem__(self, index, value):
 -                self.lst[index] = value
 +                def __setitem__(self, index, value):
 +                    self.lst[index] = value
-
+ 
 -            def __getitem__(self, index):
 -                return self.lst[index]
 +                def __getitem__(self, index):
 +                    return self.lst[index]
-
+ 
 -            def __len__(self):
 -                return len(self.lst)
 +                def __len__(self):
 +                    return len(self.lst)
-
+ 
 -            def __delitem__(self, index):
 -                del self.lst[index]
 +                def __delitem__(self, index):
 +                    del self.lst[index]
-
+ 
 -            def insert(self, index, value):
 -                self.lst.insert(index, value)
 +                def insert(self, index, value):
 +                    self.lst.insert(index, value)
-
+ 
          mss = MutableSequenceSubclass()
          mss.append(0)
 @@ -2059,7 +2118,7 @@ class CounterSubclassWithGet(Counter):
          self.called = True
          return Counter.get(self, key, default)
-
+ 
 -class TestCounter(unittest.TestCase):
 +class TestCounter(__TestCase):
-
+ 
      def test_basics(self):
          c = Counter('abcaba')
 @@ -2225,8 +2284,9 @@ class TestCounter(unittest.TestCase):
          check(Counter(words))
-
+ 
      def test_copy_subclass(self):
 -        class MyCounter(Counter):
 -            pass
@@ -916,8 +917,8 @@ index cafc44007d1..4571e5a14fd 100644
          self.assertEqual(d, c)
 @@ -2402,10 +2462,5 @@ class TestCounter(unittest.TestCase):
          self.assertFalse(Counter(a=2, b=1, c=0) > Counter('aab'))
-
-
+ 
+ 
 -def load_tests(loader, tests, pattern):
 -    tests.addTest(doctest.DocTestSuite(collections))
 -    return tests

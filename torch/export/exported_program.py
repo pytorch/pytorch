@@ -599,12 +599,14 @@ def _decompose_and_get_gm_with_new_signature_constants(
         gm, graph_signature = aot_export_module(
             ep.graph_module,
             fake_args,
+            # pyrefly: ignore[bad-argument-type]
             decompositions=python_decomp_table,
             trace_joint=joint_loss_index is not None,
             output_loss_index=(
                 joint_loss_index if joint_loss_index is not None else None
             ),
         )
+        assert isinstance(gm, torch.fx.GraphModule)  # noqa: S101
         gm.graph.eliminate_dead_code()
 
     # Update the signatures with the new placeholder names in case they

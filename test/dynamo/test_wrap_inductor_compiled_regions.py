@@ -38,7 +38,8 @@ def count_ops(
         return False
 
     if op is not None:
-        assert not isinstance(op, list)
+        if isinstance(op, list):
+            raise AssertionError("Expected op to not be a list")
         ops = [op]
     if freq is not None:
         freqs = [freq]
@@ -51,17 +52,20 @@ def count_ops(
                 if match_rng_op(node, op) or node.target == op:
                     actual_count += 1
             err_msg = f"In graph {gm}, expected {op} to have occurred {freq} times in the graph, but got {actual_count}."
-            assert actual_count == freq, err_msg
+            if actual_count != freq:
+                raise AssertionError(err_msg)
     else:
-        assert freqs_ge is not None
+        if freqs_ge is None:
+            raise AssertionError("Expected freqs_ge to not be None")
         for op, freq_ge in zip(ops, freqs_ge):
             actual_count = 0
             for node in gm.graph.nodes:
                 if match_rng_op(node, op) or node.target == op:
                     actual_count += 1
-            assert actual_count >= freq_ge, (
-                f"In graph {gm}, expected {op} to have occurred at least {freq_ge} times in the graph, but got {actual_count}."
-            )
+            if actual_count < freq_ge:
+                raise AssertionError(
+                    f"In graph {gm}, expected {op} to have occurred at least {freq_ge} times in the graph, but got {actual_count}."
+                )
     return gm
 
 
@@ -1064,20 +1068,75 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         torch.testing.assert_close(k.grad, k2.grad, rtol=1e-3, atol=1e-3)
         torch.testing.assert_close(v.grad, v2.grad, rtol=1e-3, atol=1e-3)
 
-    def test_fake_tensor_mode_raises_error(self):
-        """Test that running compiled code inside FakeTensorMode raises a clear error"""
+    def test_fake_tensor_mode_works(self):
+        """Test that running compiled code inside FakeTensorMode works with FX graph fallback"""
         from torch._subclasses.fake_tensor import FakeTensorMode
 
         with FakeTensorMode():
             model = torch.nn.Linear(4, 4)
             inp = torch.rand(4, 4)
 
+            # The FX graph is now serialized using SerializedGraphModule, so it
+            # survives cache serialization/deserialization and works with caching
             with inductor_config.patch({"wrap_inductor_compiled_regions": True}):
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    "Inductor compiled code cannot be run with FakeTensor inputs",
-                ):
-                    torch.compile(model)(inp)
+                # This should now work - the inductor_compiled_code HOP will
+                # use the stored FX graph to propagate fake tensors
+                result = torch.compile(model)(inp)
+                # Verify the result has the expected shape
+                self.assertEqual(result.shape, (4, 4))
+
+    def test_proxy_tensor_mode_works(self):
+        """Test that running compiled code inside ProxyTensorMode works with FX graph fallback"""
+        from torch._higher_order_ops.wrap import (
+            inductor_code_side_table,
+            inductor_compiled_code,
+            InductorCompiledCallable,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        # Reset the side table for a clean test
+        inductor_code_side_table.reset_table()
+
+        # Create a simple FX graph
+        class SimpleModel(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        model = SimpleModel()
+        gm = torch.fx.symbolic_trace(model)
+
+        # Create an InductorCompiledCallable
+        # The compiled callable should match FX graph's output convention
+        def simple_compiled(inputs):
+            return inputs[0] + 1
+
+        callable_obj = InductorCompiledCallable(simple_compiled, gm)
+
+        # Wrapper that uses the HOP
+        def wrapper(x):
+            return inductor_compiled_code(callable_obj, [x])
+
+        inp = torch.randn(4, 4)
+        traced = make_fx(wrapper)(inp)
+
+        # Verify the traced graph contains the inductor_compiled_code HOP
+        hop_found = False
+        for node in traced.graph.nodes:
+            if node.op == "call_function" and "inductor_compiled_code" in str(
+                node.target
+            ):
+                hop_found = True
+                # Verify the callable index is an int
+                self.assertIsInstance(node.args[0], int)
+                break
+        self.assertTrue(
+            hop_found, "inductor_compiled_code HOP not found in traced graph"
+        )
+
+        # Verify the traced graph can be executed and produces correct results
+        result = traced(inp)
+        expected = inp + 1
+        torch.testing.assert_close(result, expected)
 
 
 if __name__ == "__main__":

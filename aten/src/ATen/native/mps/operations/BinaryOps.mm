@@ -11,7 +11,6 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/add_native.h>
-#include <ATen/ops/atan2_native.h>
 #include <ATen/ops/div_native.h>
 #include <ATen/ops/eq_native.h>
 #include <ATen/ops/ge_native.h>
@@ -21,15 +20,12 @@
 #include <ATen/ops/logical_or_native.h>
 #include <ATen/ops/logical_xor_native.h>
 #include <ATen/ops/lt_native.h>
-#include <ATen/ops/maximum_native.h>
-#include <ATen/ops/minimum_native.h>
 #include <ATen/ops/ne_native.h>
 #include <ATen/ops/pow.h>
 #include <ATen/ops/pow_native.h>
 #include <ATen/ops/result_type.h>
 #include <ATen/ops/sub_native.h>
 #include <ATen/ops/view_as_real.h>
-#include <ATen/ops/xlogy_native.h>
 #endif
 
 namespace at::native {
@@ -244,19 +240,10 @@ CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(gt_scalar_out_mps, greaterThan, Scalar);
 CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(gt_tensor_out_mps, greaterThan, Tensor);
 
 // Arithmetic Binary Ops
-CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(minimum_out_mps, minimumWithNaNPropagationAndIntFallback, Tensor);
-CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(maximum_out_mps, maximumWithNaNPropagationAndIntFallback, Tensor);
 CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(pow_tensor_tensor_out_mps, power, Tensor);
 CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_and_out_mps, logicalAND, Tensor);
 CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_or_out_mps, logicalOR, Tensor);
 CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_xor_out_mps, logicalXOR, Tensor);
-
-TORCH_IMPL_FUNC(atan2_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
-  mps::binaryOpTensor(self, other, output, "atan2", ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
-    MPSGraph* mpsGraph = cachedGraph->graph();
-    return [mpsGraph atan2WithPrimaryTensor:primaryCastTensor secondaryTensor:secondaryCastTensor name:nil];
-  });
-}
 
 TORCH_IMPL_FUNC(add_out_mps)(const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& output) {
   mps::add_sub_lerp_template(self, other, alpha, output, "add");
@@ -272,31 +259,6 @@ TORCH_IMPL_FUNC(pow_Scalar_out_mps)(const Scalar& base, const Tensor& exp, const
   } else {
     at::pow_out(const_cast<Tensor&>(out), mps::wrapped_scalar_tensor_mps(base, exp.device()), exp); // redispatch!
   }
-}
-
-TORCH_IMPL_FUNC(xlogy_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
-  mps::BinaryOpBlock xlogy_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
-    MPSGraph* mpsGraph = cachedGraph->graph();
-    MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0 shape:@[ @1 ] dataType:primaryCastTensor.dataType];
-    MPSGraphTensor* yIsNaNPredicateTensor = [mpsGraph isNaNWithTensor:secondaryCastTensor name:nil];
-    MPSGraphTensor* logyTensor = [mpsGraph logarithmWithTensor:secondaryCastTensor name:nil];
-    MPSGraphTensor* xlogyTensor = [mpsGraph multiplicationWithPrimaryTensor:primaryCastTensor
-                                                            secondaryTensor:logyTensor
-                                                                       name:nil];
-    MPSGraphTensor* xEqualZeroPredicateTensor = [mpsGraph equalWithPrimaryTensor:primaryCastTensor
-                                                                 secondaryTensor:zeroTensor
-                                                                            name:nil];
-    MPSGraphTensor* outputTensor = [mpsGraph selectWithPredicateTensor:xEqualZeroPredicateTensor
-                                                   truePredicateTensor:zeroTensor
-                                                  falsePredicateTensor:xlogyTensor
-                                                                  name:nil];
-    outputTensor = [mpsGraph selectWithPredicateTensor:yIsNaNPredicateTensor
-                                   truePredicateTensor:secondaryCastTensor
-                                  falsePredicateTensor:outputTensor
-                                                  name:nil];
-    return outputTensor;
-  };
-  mps::binaryOpTensor(self, other, output, "xlogy_out_mps", xlogy_op_block);
 }
 
 } // namespace at::native

@@ -370,6 +370,13 @@ using InferredType = c10::InferredType;
 
 InferredType tryToInferContainerType(py::handle input, bool primitiveTypeOnly);
 
+namespace detail {
+
+// Additional implementations for tryToInferType().
+std::optional<InferredType> _tryToInferTypeImpl(py::handle input);
+
+} // namespace detail
+
 // Try to infer the type of a Python object
 // The type cannot be inferred if:
 //   input is an empty container (list, dict)
@@ -509,6 +516,11 @@ inline InferredType tryToInferType(py::handle input) {
   py::bool_ is_module = py::isinstance(input, module_type);
   if (py::cast<bool>(is_module)) {
     return InferredType("Cannot infer concrete type of torch.nn.Module");
+  }
+
+  auto ty = detail::_tryToInferTypeImpl(input);
+  if (ty.has_value()) {
+    return ty.value();
   }
 
   // Try container types

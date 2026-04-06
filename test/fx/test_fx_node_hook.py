@@ -64,20 +64,22 @@ class TestFXNodeHook(TestCase):
         for node in graph.find_nodes(op="placeholder"):
             node_a = node
             break
-        assert node_a is not None
+        if node_a is None:
+            raise AssertionError("Expected to find a placeholder node")
         # This will create a new node
         node_a_copy = graph.node_copy(node_a)
         node_a.replace_all_uses_with(node_a_copy)
         graph.erase_node(node_a)
 
-        assert (
+        if not (
             create_node_hook1_called
             and create_node_hook2_called
             and erase_node_hook1_called
             and erase_node_hook2_called
             and replace_node_hook1_called
             and replace_node_hook2_called
-        )
+        ):
+            raise AssertionError("Expected all node hooks to be called")
 
         gm._unregister_create_node_hook(create_node_hook1)
         gm._unregister_create_node_hook(create_node_hook2)
@@ -86,9 +88,12 @@ class TestFXNodeHook(TestCase):
         gm._unregister_replace_node_hook(replace_node_hook1)
         gm._unregister_replace_node_hook(replace_node_hook2)
 
-        assert gm._create_node_hooks == []
-        assert gm._erase_node_hooks == []
-        assert gm._replace_hooks == []
+        if gm._create_node_hooks != []:
+            raise AssertionError("Expected gm._create_node_hooks to be empty")
+        if gm._erase_node_hooks != []:
+            raise AssertionError("Expected gm._erase_node_hooks to be empty")
+        if gm._replace_hooks != []:
+            raise AssertionError("Expected gm._replace_hooks to be empty")
 
 
 if __name__ == "__main__":

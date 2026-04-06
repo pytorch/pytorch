@@ -151,7 +151,8 @@ def tensor_split(
         if split_val.dim() > 0:
             start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
             res = []
-            assert _outputs is not None
+            if _outputs is None:
+                raise AssertionError("_outputs must be non-None")
             for i in range(_outputs - 1):
                 end = g.op(
                     "Gather",

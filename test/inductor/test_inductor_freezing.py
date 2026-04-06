@@ -17,11 +17,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import override_lowering, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, tf32_on_and_off
-from torch.testing._internal.common_utils import (
-    IS_FBCODE,
-    skipIfXpu,
-    TEST_WITH_SLOW_GRADCHECK,
-)
+from torch.testing._internal.common_utils import IS_FBCODE, TEST_WITH_SLOW_GRADCHECK
 
 
 # Make the helper files in test/ importable
@@ -349,36 +345,14 @@ class OptimizeForInferenceTemplate(TestCase):
                 mod2.b1 = torch.nn.Parameter(torch.rand([15], device=self.device))
                 mod2.b2 = torch.nn.Parameter(torch.rand([20], device=self.device))
 
-            # not fused
-            count = 3 if hasattr(mod2, "t3") else 2
-
+            # fused: weights share same dim 0 (in_features), different dim 1 is OK
             with torch.no_grad():
                 out_eager = mod2(inp)
                 out, code = run_and_get_code(foo, mod2, inp)
                 FileCheck().check_not(kernel_invoke).check_count(
-                    mm_invoke, count=count, exactly=True
+                    mm_invoke, count=1, exactly=True
                 ).run(code[0])
                 self.assertEqual(out_eager, out)
-
-    # With inlining of inbuilt nn modules, Dynamo traces the innards of inbuilt
-    # module and does not modify the eager module.
-    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
-    def test_error_on_eager(self):
-        mod = ConvBN(3, 32, kernel_size=3, stride=2).eval().to(self.device)
-
-        x = torch.rand(3, 3, 32, 32).to(self.device)
-
-        @torch.compile()
-        def foo(mod, x):
-            return mod(x)
-
-        with torch.no_grad():
-            foo(mod, x)
-
-        with self.assertRaisesRegex(
-            RuntimeError, "Trying to run Pytorch Eager Module after Dynamo Freezing"
-        ):
-            mod(x)
 
     def test_static_indices_cudagraph(self):
         if self.device != "cuda":
@@ -746,6 +720,7 @@ class OptimizeForInferenceTemplate(TestCase):
         self.assertEqual(eager, compiled)
         self.assertTrue(weight_ref() is None)
 
+    @torch._inductor.config.patch(layout_optimization=True)
     def test_conv_with_as_strided(self):
         class Model(nn.Module):
             def __init__(self, groups):
@@ -787,7 +762,6 @@ class OptimizeForInferenceTemplate(TestCase):
                 mod_eager = mod(x)
                 self.assertEqual(foo(mod, x), mod_eager)
 
-    @skipIfXpu
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @unittest.skipIf(
         TEST_WITH_SLOW_GRADCHECK,

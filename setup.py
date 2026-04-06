@@ -271,7 +271,6 @@ if sys.version_info < python_min_version:
     sys.exit(-1)
 
 import filecmp
-import glob
 import importlib
 import itertools
 import json
@@ -315,6 +314,7 @@ os.environ["PYTHONPATH"] = os.pathsep.join(
 ).rstrip(os.pathsep)
 
 from tools.build_pytorch_libs import build_pytorch
+from tools.clean import clean as _clean
 from tools.generate_torch_version import get_torch_version
 from tools.setup_helpers.cmake import CMake, CMakeValue
 from tools.setup_helpers.env import (
@@ -399,56 +399,45 @@ RUN_BUILD_DEPS = True
 # see if the user passed a quiet flag to setup.py arguments and respect
 # that in our parts of the build
 EMIT_BUILD_WARNING = False
-RERUN_CMAKE = str2bool(os.environ.pop("CMAKE_FRESH", None))
-CMAKE_ONLY = str2bool(os.environ.pop("CMAKE_ONLY", None))
+RERUN_CMAKE = str2bool(os.environ.pop("CMAKE_FRESH", None)) or "--cmake" in sys.argv
+CMAKE_ONLY = str2bool(os.environ.pop("CMAKE_ONLY", None)) or "--cmake-only" in sys.argv
 filtered_args = []
 for i, arg in enumerate(sys.argv):
-    if arg == "--cmake":
-        RERUN_CMAKE = True
-        continue
-    if arg == "--cmake-only":
-        # Stop once cmake terminates. Leave users a chance to adjust build
-        # options.
-        CMAKE_ONLY = True
+    if arg in ("--cmake", "--cmake-only"):
         continue
     if arg == "rebuild" or arg == "build":
         arg = "build"  # rebuild is gone, make it build
         EMIT_BUILD_WARNING = True
-    if arg == "develop":
-        print(
-            (
-                "WARNING: Redirecting 'python setup.py develop' to 'pip install -e . -v --no-build-isolation',"
-                " for more info see https://github.com/pytorch/pytorch/issues/152276"
-            ),
-            file=sys.stderr,
-        )
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pip",
-                "install",
-                "-e",
-                ".",
-                "-v",
-                "--no-build-isolation",
-            ],
-            env={**os.environ},
-        )
-        sys.exit(result.returncode)
-    if arg == "install":
-        print(
-            (
-                "WARNING: Redirecting 'python setup.py install' to 'pip install . -v --no-build-isolation',"
-                " for more info see https://github.com/pytorch/pytorch/issues/152276"
-            ),
-            file=sys.stderr,
-        )
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", ".", "-v", "--no-build-isolation"],
-            env={**os.environ},
-        )
-        sys.exit(result.returncode)
+    if arg in ("develop", "install"):
+        # CMAKE_ONLY only runs cmake and exits (via sys.exit in build_deps)
+        # before setup() is called, so there's no need to go through pip.
+        # Replace the command with "build" so setuptools doesn't complain
+        # about an unrecognized command if we somehow reach setup().
+        if CMAKE_ONLY:
+            arg = "build"
+        else:
+            editable = arg == "develop"
+            print(
+                (
+                    f"WARNING: Redirecting 'python setup.py {arg}' to "
+                    f"'pip install {'-e ' if editable else ''}. -v --no-build-isolation',"
+                    " for more info see https://github.com/pytorch/pytorch/issues/152276"
+                ),
+                file=sys.stderr,
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    *(("-e", ".") if editable else (".",)),
+                    "-v",
+                    "--no-build-isolation",
+                ],
+                env={**os.environ},
+            )
+            sys.exit(result.returncode)
     if arg == "--":
         filtered_args += sys.argv[i:]
         break
@@ -637,7 +626,8 @@ def mirror_inductor_external_kernels() -> None:
     cuda_is_disabled = not str2bool(os.getenv("USE_CUDA"))
     paths = [
         (
-            CWD / "torch/_inductor/kernel/vendored_templates/cutedsl_grouped_gemm.py",
+            CWD
+            / "torch/_inductor/kernel/vendored_templates/cutedsl/kernels/cutedsl_grouped_gemm.py",
             CWD
             / "third_party/cutlass/examples/python/CuTeDSL/blackwell/grouped_gemm.py",
             True,
@@ -1471,21 +1461,7 @@ class clean(Command):
         pass
 
     def run(self) -> None:
-        ignores = (CWD / ".gitignore").read_text(encoding="utf-8")
-        for wildcard in filter(None, ignores.splitlines()):
-            if wildcard.strip().startswith("#"):
-                if "BEGIN NOT-CLEAN-FILES" in wildcard:
-                    # Marker is found and stop reading .gitignore.
-                    break
-                # Ignore lines which begin with '#'.
-            else:
-                # Don't remove absolute paths from the system
-                wildcard = wildcard.lstrip("./")
-                for filename in glob.iglob(wildcard):
-                    try:
-                        os.remove(filename)
-                    except OSError:
-                        shutil.rmtree(filename, ignore_errors=True)
+        _clean()
 
 
 # Need to dump submodule hashes and create the proper LICENSE.txt for the sdist
@@ -1703,7 +1679,7 @@ def main() -> None:
     install_requires = [
         "filelock",
         "typing-extensions>=4.10.0",
-        'setuptools ; python_version >= "3.12"',
+        "setuptools<82",
         "sympy>=1.13.3",
         "networkx>=2.5.1",
         "jinja2",

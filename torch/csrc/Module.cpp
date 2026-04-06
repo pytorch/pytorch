@@ -2,6 +2,7 @@
 #include <fmt/core.h>
 #include <sys/types.h>
 #include <torch/csrc/python_headers.h>
+#include <torch/csrc/utils/pythoncapi_compat.h>
 #include <csignal>
 #include <optional>
 
@@ -117,7 +118,7 @@
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
-#include <torch/csrc/inductor/static_cuda_launcher.h>
+#include <torch/csrc/inductor/static_launcher/cuda.h>
 #ifdef __HIP_PLATFORM_AMD__
 #include <ATen/native/cudnn/hip/BatchNorm.h>
 #else
@@ -127,6 +128,9 @@
 
 #ifdef USE_XPU
 #include <ATen/native/transformers/xpu/sdp_utils.h>
+#ifndef _WIN32
+#include <torch/csrc/inductor/static_launcher/xpu.h>
+#endif
 #endif
 
 #ifdef USE_DISTRIBUTED
@@ -934,6 +938,25 @@ static PyObject* THPModule_userEnabledFlashSDP(
   else
     Py_RETURN_FALSE;
 }
+static PyObject* THPModule_setSDPUseFA3(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_sdp_use_fa3 expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setSDPUseFA3(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+static PyObject* THPModule_userEnabledFA3SDP(
+    PyObject* _unused,
+    PyObject* noargs) {
+  if (at::globalContext().userEnabledFA3SDP())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
 static PyObject* THPModule_setSDPUseMemEfficient(
     PyObject* _unused,
     PyObject* arg) {
@@ -1311,6 +1334,29 @@ static PyObject* THPModule_immediateMiopen(
   Py_RETURN_FALSE;
 }
 
+static PyObject* THPModule_setUserEnabledHipdnn(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_hipdnn_enabled expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setUserEnabledHipdnn(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_userEnabledHipdnn(
+    PyObject* _unused,
+    PyObject* noargs) {
+  if (at::globalContext().userEnabledHipdnn()) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+}
+
 static PyObject* THPModule_setAllowTF32CuBLAS(
     PyObject* _unused,
     PyObject* arg) {
@@ -1548,12 +1594,16 @@ static PyObject* THPModule_setCheckSparseTensorInvariants(
     PyObject* _unused,
     PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      PyBool_Check(arg),
-      "set_check_sparse_tensor_invariants expects a bool, "
-      "but got ",
-      THPUtils_typename(arg));
-  at::globalContext().setCheckSparseTensorInvariants(arg == Py_True);
+  if (arg == Py_None) {
+    at::globalContext().setCheckSparseTensorInvariants(std::nullopt);
+  } else {
+    TORCH_CHECK(
+        PyBool_Check(arg),
+        "set_check_sparse_tensor_invariants expects a bool or None, "
+        "but got ",
+        THPUtils_typename(arg));
+    at::globalContext().setCheckSparseTensorInvariants(arg == Py_True);
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1561,7 +1611,7 @@ static PyObject* THPModule_setCheckSparseTensorInvariants(
 static PyObject* THPModule_checkSparseTensorInvariants(
     PyObject* _unused,
     PyObject* noargs) {
-  if (at::globalContext().checkSparseTensorInvariants())
+  if (at::globalContext().checkSparseTensorInvariants().value_or(false))
     Py_RETURN_TRUE;
   else
     Py_RETURN_FALSE;
@@ -1753,7 +1803,56 @@ static PyObject* THCPModule_ensureCUDADeviceGuardSet(
   END_HANDLE_TH_ERRORS
 }
 
+struct TorchModuleState {
+  PyObject* log_api_usage_seen; // dict used by _log_api_usage_once
+};
+
+static int torchmodule_traverse(PyObject* mod, visitproc visit, void* arg) {
+  auto* state = static_cast<TorchModuleState*>(PyModule_GetState(mod));
+  Py_VISIT(state->log_api_usage_seen);
+  return 0;
+}
+
+static int torchmodule_clear(PyObject* mod) {
+  auto* state = static_cast<TorchModuleState*>(PyModule_GetState(mod));
+  Py_CLEAR(state->log_api_usage_seen);
+  return 0;
+}
+
+static void torchmodule_free(void* mod) {
+  torchmodule_clear((PyObject*)mod);
+}
+
+// Thread-safe in free-threaded Python.
+static PyObject* LogAPIUsageOnceFromPython(PyObject* self, PyObject* event) {
+  auto* state = static_cast<TorchModuleState*>(PyModule_GetState(self));
+  PyObject* api_usage_seen = state->log_api_usage_seen;
+
+  int found = PyDict_Contains(api_usage_seen, event);
+  if (found < 0) {
+    return nullptr;
+  } else if (found != 0) {
+    Py_RETURN_NONE;
+  }
+
+  const char* event_str = PyUnicode_AsUTF8(event);
+  if (!event_str) {
+    return nullptr;
+  }
+
+  // Returns 0 if we inserted, 1 if already present, -1 on error.
+  int rc = PyDict_SetDefaultRef(api_usage_seen, event, Py_None, nullptr);
+  if (rc < 0) {
+    return nullptr;
+  }
+  if (rc == 0) {
+    c10::LogAPIUsage(event_str);
+  }
+  Py_RETURN_NONE;
+}
+
 static std::initializer_list<PyMethodDef> TorchMethods = {
+    {"_log_api_usage_once", LogAPIUsageOnceFromPython, METH_O, nullptr},
     {"_initExtension", THPModule_initExtension, METH_O, nullptr},
     {"_autograd_init", THPAutograd_initExtension, METH_NOARGS, nullptr},
     {"_add_docstr", THPModule_addDocStr, METH_VARARGS, nullptr},
@@ -1815,6 +1914,8 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      METH_NOARGS,
      nullptr},
     {"_set_sdp_use_flash", THPModule_setSDPUseFlash, METH_O, nullptr},
+    {"_get_fa3_sdp_enabled", THPModule_userEnabledFA3SDP, METH_NOARGS, nullptr},
+    {"_set_sdp_use_fa3", THPModule_setSDPUseFA3, METH_O, nullptr},
     {"_get_mem_efficient_sdp_enabled",
      userEnabledMemEfficientSDP,
      METH_NOARGS,
@@ -1861,6 +1962,8 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_set_cudnn_benchmark", THPModule_setBenchmarkCuDNN, METH_O, nullptr},
     {"_get_miopen_immediate", THPModule_immediateMiopen, METH_NOARGS, nullptr},
     {"_set_miopen_immediate", THPModule_setImmediateMiopen, METH_O, nullptr},
+    {"_get_hipdnn_enabled", THPModule_userEnabledHipdnn, METH_NOARGS, nullptr},
+    {"_set_hipdnn_enabled", THPModule_setUserEnabledHipdnn, METH_O, nullptr},
     {"_get_cudnn_deterministic",
      THPModule_deterministicCuDNN,
      METH_NOARGS,
@@ -2084,22 +2187,14 @@ void initModule(PyObject* module);
 PyMethodDef* THXPModule_methods();
 void THXPStream_init(PyObject* module);
 void THXPEvent_init(PyObject* module);
+void THXPMemPool_init(PyObject* module);
+void THXPGraph_init(PyObject* module);
 namespace torch::xpu {
 void initModule(PyObject* module);
 } // namespace torch::xpu
 #endif
 
 static std::vector<PyMethodDef> methods;
-
-// In Python we can't use the trick of C10_LOG_API_USAGE_ONCE
-// Guaranteed to be invoked from Python under GIL, no locking on map needed
-static void LogAPIUsageOnceFromPython(const std::string& event) {
-  static std::unordered_set<std::string> seen;
-  if (!seen.count(event)) {
-    seen.insert(event);
-    c10::LogAPIUsage(event);
-  }
-}
 
 static void LogAPIUsageMetadataFromPython(
     const std::string& event,
@@ -2219,9 +2314,22 @@ PyObject* initModule() {
 #endif
 
   static struct PyModuleDef torchmodule = {
-      PyModuleDef_HEAD_INIT, "torch._C", nullptr, -1, methods.data()};
+      PyModuleDef_HEAD_INIT,
+      "torch._C",
+      nullptr,
+      sizeof(TorchModuleState),
+      methods.data(),
+      nullptr, // m_slots
+      torchmodule_traverse,
+      torchmodule_clear,
+      torchmodule_free};
   module = PyModule_Create(&torchmodule);
   ASSERT_TRUE(module);
+
+  auto* mod_state = static_cast<TorchModuleState*>(PyModule_GetState(module));
+  mod_state->log_api_usage_seen = PyDict_New();
+  ASSERT_TRUE(mod_state->log_api_usage_seen);
+
 #ifdef Py_GIL_DISABLED
   PyUnstable_Module_SetGIL(module, Py_MOD_GIL_NOT_USED);
 #endif
@@ -2273,8 +2381,11 @@ PyObject* initModule() {
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
 #endif
-#if defined(USE_CUDA) && !defined(USE_ROCM)
+#if defined(USE_CUDA)
   ASSERT_TRUE(StaticCudaLauncher_init(module));
+#endif
+#if defined(USE_XPU) && !defined(_WIN32)
+  ASSERT_TRUE(StaticXpuLauncher_init(module));
 #endif
 #ifdef USE_MPS
   torch::mps::initModule(module);
@@ -2306,6 +2417,8 @@ PyObject* initModule() {
 #ifdef USE_XPU
   THXPStream_init(module);
   THXPEvent_init(module);
+  THXPMemPool_init(module);
+  THXPGraph_init(module);
 #endif
 
   torch::distributed::initPlacementBindings(module);
@@ -2332,7 +2445,14 @@ PyObject* initModule() {
 #endif
   ASSERT_TRUE(set_module_attr("_has_cudnn", has_cudnn));
 
-#if defined(USE_CUSPARSELT)
+#if defined(USE_HIPDNN)
+  PyObject* has_hipdnn = Py_True;
+#else
+  PyObject* has_hipdnn = Py_False;
+#endif
+  ASSERT_TRUE(set_module_attr("_has_hipdnn", has_hipdnn));
+
+#if defined(USE_CUSPARSELT) || defined(USE_ROCM)
   PyObject* has_cusparselt = Py_True;
 #else
   PyObject* has_cusparselt = Py_False;
@@ -2364,7 +2484,6 @@ PyObject* initModule() {
   auto py_module = py::reinterpret_borrow<py::module>(module);
   py_module.def("_initCrashHandler", &_initCrashHandler);
   py_module.def("_demangle", &c10::demangle);
-  py_module.def("_log_api_usage_once", &LogAPIUsageOnceFromPython);
   py_module.def("_log_api_usage_metadata", &LogAPIUsageMetadataFromPython);
 
   py_module.def("vitals_enabled", &at::vitals::torchVitalEnabled);
@@ -2479,7 +2598,9 @@ Call this whenever a new thread is created in order to propagate values from
           "Winograd3x3Depthwise", at::native::ConvBackend::Winograd3x3Depthwise)
       .value("Xnnpack2d", at::native::ConvBackend::Xnnpack2d)
       .value("Mps", at::native::ConvBackend::Mps)
-      .value("MpsTranspose,", at::native::ConvBackend::MpsTranspose);
+      .value("MpsTranspose,", at::native::ConvBackend::MpsTranspose)
+      .value("Hipdnn", at::native::ConvBackend::Hipdnn)
+      .value("HipdnnTranspose", at::native::ConvBackend::HipdnnTranspose);
 
   py_module.def(
       "_select_conv_backend",
@@ -2702,6 +2823,14 @@ Call this whenever a new thread is created in order to propagate values from
   });
   py_module.def("_get_rocm_fa_preferred_backend", []() {
     return at::globalContext().getROCmFAPreferredBackend();
+  });
+
+  py_module.def("_is_ck_sdpa_available", []() {
+#ifdef USE_ROCM
+    return at::globalContext().ckSupported() && at::globalContext().hasCKSDPA();
+#else
+    return false;
+#endif
   });
 
   py_module.def(

@@ -19,6 +19,12 @@ from torch._functorch.pyfunctorch import dispatch_functorch, TransformType
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
+try:
+    from types import NotImplementedType  # Python 3.10+
+except ImportError:  # pragma: no cover
+    NotImplementedType = type(NotImplemented)  # type: ignore[misc]
+
+
 if TYPE_CHECKING:
     from torch._subclasses.functional_tensor import BaseFunctionalizeAPI
 
@@ -174,7 +180,16 @@ class OperatorBase:
 
         def functionalize_dispatch_mode_fn(
             mode: FunctionalTensorMode | None, *args: _P.args, **kwargs: _P.kwargs
-        ) -> _T:
+        ) -> _T | NotImplementedType:
+            from torch._higher_order_ops.utils import has_user_subclass
+            from torch._subclasses import FakeTensor
+            from torch._subclasses.functional_tensor import FunctionalTensor
+
+            if has_user_subclass(
+                (args, kwargs),
+                allowed_subclasses=(FakeTensor, FunctionalTensor),
+            ):
+                return NotImplemented
             return fn(PythonFunctionalizeAPI(mode), *args, **kwargs)
 
         def functionalize_functorch_fn(
@@ -265,7 +280,9 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
     # If you're creating a new HigherOrderOperator, please do not change the
     # default. Adding operators to the global torch.ops namespace is a bad
     # practice due to name collisions.
-    def __init__(self, name, *, cacheable=False):
+    def __init__(
+        self, name, *, cacheable=False, supports_training_input_mutation=False
+    ):
         super().__init__()
         if type(self) is HigherOrderOperator:
             raise RuntimeError(
@@ -279,6 +296,10 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
         self._ns = "higher_order"
         self.__module__ = "torch.ops.higher_order"
         self._cacheable = cacheable
+        # When True, allows mutating inputs that don't require grad during
+        # training. Mutations must be handled by auto_functionalize before
+        # reaching autograd.
+        self._supports_training_input_mutation = supports_training_input_mutation
 
         self.non_fallthrough_keys = torch._C._dispatch_keyset_full()
 
@@ -316,7 +337,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
 
             from torch._higher_order_ops.utils import _has_gen_schema
 
-            if _has_gen_schema(self):
+            if not self._supports_training_input_mutation and _has_gen_schema(self):
                 schema = self.gen_schema(*args, **kwargs)
                 if any(arg.is_write for arg in schema.arguments):
                     raise RuntimeError(
@@ -1112,12 +1133,23 @@ class TorchBindOpOverload(OpOverload[_P, _T]):
         return handler(*args, **kwargs)
 
 
-def _must_dispatch_in_python(args, kwargs):
-    return pytree.tree_any(
-        lambda obj: isinstance(
-            obj, torch._library.fake_class_registry.FakeScriptObject
-        ),
-        (args, kwargs),
+def _contains_fake_script_object(obj) -> bool:
+    """Check if obj is or contains a FakeScriptObject.
+    This is load-bearing for TorchBindOpOverloads so we avoid pytree
+    since it's much slower.
+    """
+    if isinstance(obj, torch._library.fake_class_registry.FakeScriptObject):
+        return True
+    elif isinstance(obj, (list, tuple)):
+        return any(_contains_fake_script_object(item) for item in obj)
+    elif isinstance(obj, dict):
+        return any(_contains_fake_script_object(v) for v in obj.values())
+    return False
+
+
+def _must_dispatch_in_python(args, kwargs) -> bool:
+    return any(_contains_fake_script_object(arg) for arg in args) or (
+        bool(kwargs) and any(_contains_fake_script_object(v) for v in kwargs.values())
     )
 
 

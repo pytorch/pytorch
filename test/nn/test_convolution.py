@@ -39,11 +39,13 @@ from torch.testing._internal.common_device_type import (
     skipCPUIfNoMkldnn,
     skipCUDAIfMiopen,
     skipCUDAIfNoCudnn,
+    skipCUDAIfNoHipdnn,
     skipCUDAIfNoMiopen,
     skipCUDAIfRocm,
     skipCUDAIfRocmHipBlasltVersionLessThan,
     skipMeta,
     skipMPS,
+    skipXPU,
 )
 from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and,
@@ -51,12 +53,15 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_nn import _test_module_empty_input, NNTestCase
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     download_file,
     dtype2prec_DONTUSE,
     gradcheck,
     GRADCHECK_NONDET_TOL,
     gradgradcheck,
     instantiate_parametrized_tests,
+    IS_ARM64,
+    IS_LINUX,
     MACOS_VERSION,
     MI300_ARCH,
     parametrize as parametrize_test,
@@ -1660,7 +1665,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
         output = module(input)
 
         grad = torch.randn(2, 2, 5, 10, 10, dtype=dtype, device=device)[:, 1]
-        assert not grad.is_contiguous()
+        if grad.is_contiguous():
+            raise AssertionError("Expected grad to be non-contiguous")
         output.backward(grad, retain_graph=True)
         self.assertIsNotNone(input.grad)
         result = input.grad.data.clone()
@@ -1716,6 +1722,62 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     + "\ndilation: "
                     + str(dilation),
                 )
+
+    def test_conv_aten_invalid_output_mask(self, device):
+        # test low-level aten.convolution_backward ops with output_mask parameter
+        def test_conv_backward_output_mask(output_mask):
+            input = torch.randn(1, 1, 4, 4, device=device)
+            weight = torch.randn(1, 1, 3, 3, device=device)
+            grad_output = torch.randn(1, 1, 2, 2, device=device)
+            grad_input, grad_weight, grad_bias = torch.ops.aten.convolution_backward(
+                grad_output,
+                input,
+                weight,
+                [1],
+                (1, 1),
+                (0, 0),
+                (1, 1),
+                False,
+                (0, 0),
+                1,
+                output_mask,  # output_mask: (grad_input, grad_weight, grad_bias)
+            )
+            if output_mask[0]:
+                self.assertIsNotNone(grad_input)
+            else:
+                self.assertIsNone(grad_input)
+            if output_mask[1]:
+                self.assertIsNotNone(grad_weight)
+            else:
+                self.assertIsNone(grad_weight)
+            if output_mask[2]:
+                self.assertIsNotNone(grad_bias)
+            else:
+                self.assertIsNone(grad_bias)
+
+        # Convolution Backward(ConvB) propagation must return valid  input, weight, bias gradient
+        test_conv_backward_output_mask([True, True, True])
+
+        # ConvB propagation must return input and weight gradient
+        test_conv_backward_output_mask([True, True, False])
+
+        # ConvB propagation must return input and bias gradient
+        test_conv_backward_output_mask([True, False, True])
+
+        # ConvB propagation must return just input gradient
+        test_conv_backward_output_mask([True, False, False])
+
+        # ConvB propagation must return weight and bias gradient
+        test_conv_backward_output_mask([False, True, True])
+
+        # ConvB propagation must return just weight gradient
+        test_conv_backward_output_mask([False, True, False])
+
+        # ConvB propagation must return just bias gradient
+        test_conv_backward_output_mask([False, False, True])
+
+        # ConvB propagation shouldn't return any of gradient
+        test_conv_backward_output_mask([False, False, False])
 
     def test_conv_double_backward_no_bias(self):
         kern = 3
@@ -1897,6 +1959,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(expect, actual)
 
     @dtypes(torch.float, torch.cfloat)
+    @tf32_on_and_off(0.005)
     def test_conv3d_same_padding(self, device, dtype):
         if dtype is torch.cfloat:
             rtol, atol = 2e-6, 2e-6
@@ -2308,6 +2371,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(output.shape, output_size)
 
     @skipMeta
+    @skipXPU  # Refer https://github.com/intel/torch-xpu-ops/issues/2594
     @parametrize_test(
         "input_shape,transposed,dilated,groups,layout,backend_expected",
         [
@@ -3137,6 +3201,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
             gradgradcheck(convolution, inputs, nondet_tol=gradcheck_nondet_tol)
         )
 
+    @xfailIf(IS_LINUX and IS_ARM64)
+    # see https://github.com/pytorch/pytorch/issues/177245
     @onlyCPU
     def test_conv_contiguous_for_oneDNN(self):
         # See https://github.com/pytorch/pytorch/issues/80837.
@@ -3163,6 +3229,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     y_ = conv(x2)
                     self.assertEqual(y, y_)
 
+    @xfailIf(IS_LINUX and IS_ARM64)
+    # see https://github.com/pytorch/pytorch/issues/177245
     @onlyCPU
     def test_conv_ic1_channels_last_for_oneDNN(self):
         # See https://github.com/pytorch/pytorch/issues/82060, N > 1 will call in OneDNN path.
@@ -3515,7 +3583,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @dtypes(torch.float)
     @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
     @torch.backends.miopen.flags(immediate=True)
-    @tf32_on_and_off(0.001)
+    @tf32_on_and_off(0.005)
     def test_Conv2d_naive_groups(self, device, dtype):
         # Check that grouped convolutions matches two half convolutions
         m = nn.Conv2d(4, 4, kernel_size=3, groups=2).to(device, dtype)
@@ -4282,8 +4350,214 @@ class TestConvolutionNNDeviceType(NNTestCase):
         y = c.to(device=device)(x.to(device=device))
         self.assertEqual(yref, y, atol=5e-3, rtol=1e-4)
 
+    # === hipDNN convolution tests ===
 
-instantiate_device_type_tests(TestConvolutionNNDeviceType, globals(), allow_mps=True)
+    def _hipdnn_compare_conv(
+        self,
+        device,
+        x_shape,
+        w_shape,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups,
+        dtype,
+        transposed=False,
+        output_padding=0,
+        memory_format=torch.contiguous_format,
+        atol=1e-4,
+        rtol=1e-4,
+    ):
+        """Compares float32 cpu reference output to hipdnn (gpu) output."""
+
+        x_gpu = torch.randn(*x_shape, dtype=dtype, device=device)
+        if memory_format != torch.contiguous_format:
+            x_gpu = x_gpu.contiguous(memory_format=memory_format)
+        w_gpu = torch.randn(*w_shape, dtype=dtype, device=device)
+        b_gpu = (
+            torch.randn(
+                w_shape[1] if transposed else w_shape[0], dtype=dtype, device=device
+            )
+            if bias
+            else None
+        )
+
+        x_cpu = x_gpu.float().cpu().requires_grad_(True)
+        w_cpu = w_gpu.float().cpu().requires_grad_(True)
+        b_cpu = b_gpu.float().cpu().requires_grad_(True) if bias else None
+
+        conv_fn = F.conv_transpose2d if transposed else F.conv2d
+        kwargs = dict(stride=stride, padding=padding, dilation=dilation, groups=groups)
+        if transposed:
+            kwargs["output_padding"] = output_padding
+
+        out_cpu = conv_fn(x_cpu, w_cpu, b_cpu, **kwargs)
+        out_cpu.sum().backward()
+
+        x_gpu = x_gpu.detach().requires_grad_(True)
+        w_gpu = w_gpu.detach().requires_grad_(True)
+        b_gpu = b_gpu.detach().requires_grad_(True) if bias else None
+
+        out_gpu = conv_fn(x_gpu, w_gpu, b_gpu, **kwargs)
+        out_gpu.sum().backward()
+
+        self.assertEqual(out_cpu.float(), out_gpu.float().cpu(), atol=atol, rtol=rtol)
+        self.assertEqual(
+            x_cpu.grad.float(), x_gpu.grad.float().cpu(), atol=atol, rtol=rtol
+        )
+        self.assertEqual(
+            w_cpu.grad.float(), w_gpu.grad.float().cpu(), atol=atol, rtol=rtol
+        )
+        if bias:
+            self.assertEqual(
+                b_cpu.grad.float(), b_gpu.grad.float().cpu(), atol=atol, rtol=rtol
+            )
+
+    @onlyCUDA
+    @skipCUDAIfNoHipdnn
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize_test("has_bias", [False, True])
+    @parametrize_test("transposed", [False, True])
+    @torch.backends.hipdnn.flags(enabled=True)
+    def test_conv2d_hipdnn(self, device, dtype, has_bias, transposed):
+        # Condition on rocm sdk version when hipdnn ships with conv+bias fusion support by default.
+        if has_bias:
+            self.skipTest(
+                "No default plugin for hipdnn supports conv + bias fusion yet."
+            )
+
+        if dtype == torch.float32:
+            C_in, C_out, rtol, atol = 16, 32, 1e-4, 1e-4
+        elif dtype == torch.float16:
+            C_in, C_out, rtol, atol = 8, 16, 5e-2, 5e-2
+        else:
+            C_in, C_out, rtol, atol = 4, 8, 1e-1, 1e-1
+
+        if transposed:
+            self._hipdnn_compare_conv(
+                device,
+                (2, C_out, 16, 16),
+                (C_out, C_in, 3, 3),
+                bias=has_bias,
+                stride=2,
+                padding=1,
+                dilation=1,
+                groups=1,
+                dtype=dtype,
+                transposed=True,
+                output_padding=1,
+                atol=atol,
+                rtol=rtol,
+            )
+        else:
+            self._hipdnn_compare_conv(
+                device,
+                (2, C_in, 32, 32),
+                (C_out, C_in, 3, 3),
+                bias=has_bias,
+                stride=1,
+                padding=1,
+                dilation=1,
+                groups=1,
+                dtype=dtype,
+                atol=atol,
+                rtol=rtol,
+            )
+
+    @onlyCUDA
+    @skipCUDAIfNoHipdnn
+    @torch.backends.hipdnn.flags(enabled=True)
+    @parametrize_test(
+        "config",
+        [
+            subtest(
+                ((2, 64, 32, 32), (128, 64, 3, 3), 2, 1, 1, 1),
+                name="stride2",
+            ),
+            subtest(
+                ((2, 64, 32, 32), (128, 64, 3, 3), 1, 2, 2, 1),
+                name="dilation2",
+            ),
+            subtest(
+                ((2, 128, 32, 32), (128, 32, 3, 3), 1, 1, 1, 4),
+                name="grouped",
+            ),
+            subtest(
+                ((2, 128, 32, 32), (128, 1, 3, 3), 1, 1, 1, 128),
+                name="depthwise",
+            ),
+            subtest(
+                ((1, 3, 224, 224), (64, 3, 7, 7), 2, 3, 1, 1),
+                name="resnet_first",
+            ),
+        ],
+    )
+    def test_conv2d_hipdnn_configs(self, device, config):
+        x_shape, w_shape, stride, padding, dilation, groups = config
+        self._hipdnn_compare_conv(
+            device,
+            x_shape,
+            w_shape,
+            bias=False,
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+            groups=groups,
+            dtype=torch.float32,
+        )
+
+    @onlyCUDA
+    @skipCUDAIfNoHipdnn
+    @torch.backends.hipdnn.flags(enabled=True)
+    def test_conv2d_hipdnn_channels_last(self, device):
+        self._hipdnn_compare_conv(
+            device,
+            (2, 64, 32, 32),
+            (128, 64, 3, 3),
+            bias=False,
+            stride=1,
+            padding=1,
+            dilation=1,
+            groups=1,
+            dtype=torch.float32,
+            memory_format=torch.channels_last,
+        )
+
+    @onlyCUDA
+    @skipCUDAIfNoHipdnn
+    @torch.backends.hipdnn.flags(enabled=True)
+    def test_conv2d_hipdnn_deterministic_error(self, device):
+        x = torch.randn(2, 64, 32, 32, device=device)
+        w = torch.randn(128, 64, 3, 3, device=device)
+        with DeterministicGuard(True):
+            with self.assertRaisesRegex(
+                RuntimeError, "hipdnn_convolution does not support deterministic"
+            ):
+                F.conv2d(x, w, padding=1)
+
+    @onlyCUDA
+    @skipCUDAIfNoHipdnn
+    def test_conv2d_hipdnn_backend_selection(self, device):
+        x = torch.randn(2, 64, 32, 32, device=device)
+        w = torch.randn(128, 64, 3, 3, device=device)
+        inputs = [x, w, None, (1,) * 2, (1,) * 2, (1,) * 2, False, (0,) * 2, 1]
+
+        with torch.backends.hipdnn.flags(enabled=True):
+            backend = torch._C._select_conv_backend(*inputs)
+        self.assertEqual(backend, torch._C._ConvBackend.Hipdnn)
+
+        # Transposed
+        w_t = torch.randn(64, 128, 3, 3, device=device)
+        inputs_t = [x, w_t, None, (1,) * 2, (0,) * 2, (1,) * 2, True, (0,) * 2, 1]
+        with torch.backends.hipdnn.flags(enabled=True):
+            backend_t = torch._C._select_conv_backend(*inputs_t)
+        self.assertEqual(backend_t, torch._C._ConvBackend.HipdnnTranspose)
+
+
+instantiate_device_type_tests(
+    TestConvolutionNNDeviceType, globals(), allow_mps=True, allow_xpu=True
+)
 instantiate_parametrized_tests(TestConvolutionNN)
 
 if __name__ == "__main__":

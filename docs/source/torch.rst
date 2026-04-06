@@ -320,8 +320,10 @@ Constants
 ~~~~~~~~~~~~~~~~~~~~~~
 
 ======================================= ===========================================
+``e``                                       Euler's number, the base of natural logarithms (~2.7183). Alias for :attr:`math.e`.
 ``inf``                                     A floating-point positive infinity. Alias for :attr:`math.inf`.
 ``nan``                                     A floating-point "not a number" value. This value is not a legal number. Alias for :attr:`math.nan`.
+``pi``                                      The ratio of a circle's circumference to its diameter (~3.1416). Alias for :attr:`math.pi`.
 ======================================= ===========================================
 
 Pointwise Ops
@@ -663,6 +665,7 @@ Foreach Operations
     _foreach_atan_
     _foreach_ceil
     _foreach_ceil_
+    _foreach_clone
     _foreach_cos
     _foreach_cos_
     _foreach_cosh
@@ -731,6 +734,7 @@ Utilities
     is_warn_always_enabled
     vmap
     _assert
+    typename
 
 Symbolic Numbers
 ----------------
@@ -754,6 +758,7 @@ Symbolic Numbers
     sym_min
     sym_not
     sym_ite
+    sym_sqrt
     sym_sum
 
 Export Path

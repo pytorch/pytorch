@@ -280,6 +280,10 @@ bool CUDAHooks::compiledWithMIOpen() const {
   return AT_ROCM_ENABLED();
 }
 
+bool CUDAHooks::compiledWithHipDNN() const {
+  return AT_HIPDNN_ENABLED();
+}
+
 bool CUDAHooks::supportsDilatedConvolutionWithCuDNN() const {
 #if AT_CUDNN_ENABLED()
   if (!hasCUDA()) {
@@ -549,6 +553,35 @@ bool CUDAHooks::isGPUArch(const std::vector<std::string>& archs, DeviceIndex dev
       }
   }
   return false;
+}
+
+const std::vector<std::string>& CUDAHooks::getHipblasltPreferredArchs() const {
+  static const std::vector<std::string> archs = {
+    "gfx90a", "gfx942",
+#if ROCM_VERSION >= 60400
+    "gfx1200", "gfx1201",
+#endif
+#if ROCM_VERSION >= 70000
+    "gfx950"
+#endif
+  };
+  return archs;
+}
+
+const std::vector<std::string>& CUDAHooks::getHipblasltSupportedArchs() const {
+  static const std::vector<std::string> archs = {
+    "gfx90a", "gfx942",
+#if ROCM_VERSION >= 60300
+    "gfx1100", "gfx1101", "gfx1103", "gfx1200", "gfx1201", "gfx908",
+#endif
+#if ROCM_VERSION >= 70000
+    "gfx950", "gfx1150", "gfx1151",
+#endif
+#if ROCM_VERSION >= 70200
+    "gfx1250"
+#endif
+  };
+  return archs;
 }
 #endif
 

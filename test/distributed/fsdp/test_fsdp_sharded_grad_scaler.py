@@ -5,7 +5,6 @@ import functools
 import itertools
 import sys
 import unittest
-from typing import Optional
 
 import torch
 from torch import distributed as dist
@@ -24,7 +23,7 @@ from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     DummyProcessGroup,
     FSDPInitMode,
-    FSDPTest,
+    FSDPTestContinuous,
     NestedWrappedModule,
     NonUniformReqGradNWM,
     subtest_name,
@@ -163,7 +162,7 @@ class TestShardGradScaler(TestCase):
         self.assertTrue(ret_val is None)
 
 
-class TestShardedGradScalerParityWithDDP(FSDPTest):
+class TestShardedGradScalerParityWithDDP(FSDPTestContinuous):
     def _get_init_modes_for_test(self, cpu_offload):
         modes = [DEVICEInitMode.DEVICE_AFTER, DEVICEInitMode.DEVICE_BEFORE]
         # Note that DEVICEInitMode.DEVICE_NEVER works currently only with CPU
@@ -180,9 +179,9 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
     def test_fsdp_ddp_parity_with_grad_scaler(
         self,
         cpu_offload: CPUOffload,
-        sharding_strategy: Optional[ShardingStrategy],
-        mixed_precision: Optional[str],
-        use_orig_params: Optional[str],
+        sharding_strategy: ShardingStrategy | None,
+        mixed_precision: str | None,
+        use_orig_params: str | None,
     ):
         init_modes = self._get_init_modes_for_test(cpu_offload)
         mp = (

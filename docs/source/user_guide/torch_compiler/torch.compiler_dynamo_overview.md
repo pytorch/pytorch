@@ -188,7 +188,7 @@ def toy_example(a, b):
     if __temp_1[1]:
         return __resume_at_30_1(b, x)
     return __resume_at_38_2(b, x)
-If you find the decompiled code is wrong,please submit an issue at https://github.com/youkaichao/depyf/issues.
+If you find the decompiled code is wrong, please submit an issue at https://github.com/youkaichao/depyf/issues.
 ```
 
 At the top you can see the FX graph.

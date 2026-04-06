@@ -3,6 +3,7 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/operations/ScanKernel.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -45,7 +46,7 @@ static std::pair<uint32_t, uint32_t> get_2d_grid_dims(const IntArrayRef& shape, 
   return {static_cast<uint32_t>(grid_x), static_cast<uint32_t>(grid_y)};
 }
 
-static void scan_simple_mps_impl(const Tensor& self, const Tensor& output, int64_t dim, const std::string& op_name) {
+void scan_simple_mps_impl(const Tensor& self, const Tensor& output, int64_t dim, const std::string& op_name) {
   if (output.numel() == 0) {
     return;
   }
@@ -60,12 +61,10 @@ static void scan_simple_mps_impl(const Tensor& self, const Tensor& output, int64
   // Preprocess output tensor - ensure it's contiguous for Metal shaders
   Tensor output_tensor = output;
   bool output_needs_copy = !output.is_contiguous();
-  Tensor temp_output;
 
   if (output_needs_copy) {
     // Create a temporary contiguous tensor with the same shape and type
-    temp_output = at::empty_like(output, output.options()).contiguous();
-    output_tensor = temp_output;
+    output_tensor = at::empty_like(output, output.options().memory_format(c10::MemoryFormat::Contiguous));
   }
 
   // Determine which kernel to use based on scan dimension position

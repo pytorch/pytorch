@@ -4,7 +4,7 @@ MPS backend
 ===========
 
 :mod:`mps` device enables high-performance
-training on GPU for MacOS devices with Metal programming framework.  It
+training on GPU for macOS devices with Metal programming framework.  It
 introduces a new device to map Machine Learning computational graphs and
 primitives on highly efficient Metal Performance Shaders Graph framework and
 tuned kernels provided by Metal Performance Shaders framework respectively.
@@ -22,7 +22,7 @@ To get started, simply move your Tensor and Module to the ``mps`` device:
             print("MPS not available because the current PyTorch install was not "
                   "built with MPS enabled.")
         else:
-            print("MPS not available because the current MacOS version is not 12.3+ "
+            print("MPS not available because the current macOS version is not 14.0+ "
                   "and/or you do not have an MPS-enabled device on this machine.")
 
     else:

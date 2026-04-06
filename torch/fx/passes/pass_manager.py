@@ -3,7 +3,6 @@ import logging
 from collections.abc import Callable
 from functools import wraps
 from inspect import unwrap
-from typing import Optional
 
 
 logger = logging.getLogger(__name__)
@@ -80,8 +79,8 @@ def log_hook(fn: Callable, level=logging.INFO) -> Callable:
 
 def loop_pass(
     base_pass: Callable,
-    n_iter: Optional[int] = None,
-    predicate: Optional[Callable] = None,
+    n_iter: int | None = None,
+    predicate: Callable | None = None,
 ):
     """
     Convenience wrapper for passes which need to be applied multiple times.
@@ -94,9 +93,8 @@ def loop_pass(
         predicate (Callable[Object, bool], optional):
 
     """
-    assert (n_iter is not None) ^ (predicate is not None), (
-        "Exactly one of `n_iter`or `predicate` must be specified."
-    )
+    if not ((n_iter is not None) ^ (predicate is not None)):
+        raise AssertionError("Exactly one of `n_iter`or `predicate` must be specified.")
 
     @wraps(base_pass)
     def new_pass(source):
