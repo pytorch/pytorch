@@ -3466,7 +3466,9 @@ class DeviceCachingAllocator {
     bool in_fbcode = false;
 #endif
 
-    if (allowed_memory_maximum.has_value() &&
+    bool has_custom_allocator = p.pool && p.pool->owner_PrivatePool &&
+        p.pool->owner_PrivatePool->allocator();
+    if (!has_custom_allocator && allowed_memory_maximum.has_value() &&
         total_allocated_memory + size > allowed_memory_maximum.value()) {
       p.err = cudaErrorMemoryAllocation;
       return false;
