@@ -1527,6 +1527,7 @@ class TritonTemplateKernel(TritonKernel):
             subgraph_name, self._make_codegen_hook(subgraph_name, indent_width)
         )
 
+
     def _register_hook(
         self,
         hook_name: str,
