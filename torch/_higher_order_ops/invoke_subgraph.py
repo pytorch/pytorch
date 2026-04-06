@@ -268,6 +268,7 @@ def mark_compile_region(
     fn=None,
     options: NestedCompileRegionOptions | None = None,
     max_reuse_entries: int = 8,
+    reuse_hash_fn=None,
 ):
     """
     This wrapper instructs torch.compile to compile the wrapped region once and
@@ -298,6 +299,7 @@ def mark_compile_region(
         inner.__marked_compile_region_fn__ = func  # type: ignore[attr-defined]
         func.__marked_compile_region_config__ = options  # type: ignore[attr-defined]
         func.__marked_compile_region_max_reuse_entries__ = max_reuse_entries  # type: ignore[attr-defined]
+        func.__marked_compile_region_reuse_hash_fn__ = reuse_hash_fn  # type: ignore[attr-defined]
 
         return inner
 

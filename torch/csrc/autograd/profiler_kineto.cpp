@@ -1182,7 +1182,16 @@ TYPED_ATTR(TorchOp, fwdThreadId, e.sequence_number_ >= 0 ? e.forward_tid_ : 0)
 TYPED_ATTR(TorchOp, scope, static_cast<uint8_t>(e.scope_))
 TYPED_ATTR(TorchOp, hasModuleHierarchy, !e.jit_modules_.empty())
 TYPED_ATTR(TorchOp, isAsync, e.is_async_)
-TYPED_ATTR(TorchOp, extraMeta, e.extra_meta_)
+
+extra_meta_t KinetoEvent::extraMeta() const {
+  extra_meta_t out;
+  result_->visit(c10::overloaded(
+      [&](const ExtraFields<EventType::TorchOp>& e) { out = e.extra_meta_; },
+      [&](const ExtraFields<EventType::Kineto>& e) { out = e.extra_meta_; },
+      [](const auto&) {}));
+  return out;
+}
+
 TYPED_ATTR(TorchOp, fallbackStart, e.device_fallback_.device_event_start_)
 TYPED_ATTR(TorchOp, fallbackEnd, e.device_fallback_.device_event_end_)
 TYPED_ATTR(

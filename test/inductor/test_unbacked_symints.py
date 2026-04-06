@@ -826,37 +826,33 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
-    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
-    def test_slice_on_unbacked_plus_constant(self, device):
-        """
-        Test slicing on a tensor whose size is (unbacked + constant).
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_slice_unbacked_bindings_with_later_constraint(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/166460
+        # When slicing with an unbacked symint end index (e.g. x[:total] where
+        # total = sum of data-dependent values), dynamo may allocate a fresh
+        # unbacked symbol for the output size because it can't prove bounds at
+        # trace time. Later operations (e.g. new_zeros with padding) may
+        # establish constraints that make the bounds provable at inductor time.
+        # Inductor must still define the unbacked symbol even when taking the
+        # efficient SliceView path.
+        def fn(x, sizes):
+            sizes_list = sizes.tolist()
+            total = sum(sizes_list)
+            num_padding = x.shape[0] - total
+            sliced = x[:total]
+            splits = torch.split(sliced, sizes_list, dim=0)
+            out = torch.cat([s * 2 for s in splits], dim=0)
+            out = torch.vstack((out, out.new_zeros((num_padding, out.shape[-1]))))
+            return out
 
-        When we have:
-        - repeat_interleave creates unbacked symbol u0
-        - cat creates size u0 + 1
-        - slice [1:] produces size u0 (existing symbol, not fresh)
+        example_inputs = (
+            torch.randn(64, 16, device=device, dtype=torch.bfloat16),
+            torch.tensor([8, 8], device=device, dtype=torch.int64),
+        )
 
-        The lowering should handle this case where the output uses an existing
-        unbacked symbol rather than creating a new one.
-        """
-
-        def fn(x: torch.Tensor, repeats: list[int]):
-            repeats_t = torch.tensor(repeats, device=x.device, dtype=torch.long)
-
-            # repeat_interleave with tensor repeats -> unbacked size u0
-            vals = torch.repeat_interleave(x, repeats_t)
-
-            # cat with fixed-size tensor -> size becomes u0 + 1
-            vals = torch.cat([torch.zeros(1, device=x.device, dtype=x.dtype), vals])
-
-            # slice on u0 + 1 sized tensor -> should produce size u0
-            return vals[1:]
-
-        x = torch.tensor([10, 20, 30], device=device, dtype=torch.int32)
-        repeats = [2, 3, 1]
-
-        actual = torch.compile(fn, fullgraph=True)(x, repeats)
-        expected = fn(x, repeats)
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
 

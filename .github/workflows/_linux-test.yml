@@ -132,13 +132,6 @@ jobs:
             All testing is done inside the container, to start an interactive session run:
               docker exec -it $(docker container ps --format '{{.ID}}') bash
 
-      - name: Setup Python
-        if: contains(matrix.runner, 'b200')
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: '3.12'
-          cache: pip
-
       - name: Setup Linux
         id: setup-linux
         uses: pytorch/pytorch/.github/actions/setup-linux@main
@@ -374,8 +367,6 @@ jobs:
 
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.ci/pytorch/multigpu-test.sh
-          elif [[ $BUILD_ENVIRONMENT == *onnx* ]]; then
-            TEST_COMMAND=.ci/onnx/test.sh
           else
             TEST_COMMAND=.ci/pytorch/test.sh
           fi
@@ -600,6 +591,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     container:
       image: ${{ inputs.docker-image }}
+      options: "--gpus all"
     timeout-minutes: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
     permissions:
       id-token: write
@@ -740,14 +732,13 @@ jobs:
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           ARTIFACTS_FILE_SUFFIX: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.setup-linux.outputs.job-id }}
           TORCH_TPU_TEXT_FILE: /var/lib/jenkins/workspace/.github/ci_commit_pins/torch_tpu.txt
+          USE_ARC: "1"
         shell: bash
         run: |
           set -x
 
           if [[ "${TEST_CONFIG}" == 'multigpu' ]]; then
             TEST_COMMAND=.ci/pytorch/multigpu-test.sh
-          elif [[ "${BUILD_ENVIRONMENT}" == *onnx* ]]; then
-            TEST_COMMAND=.ci/onnx/test.sh
           else
             TEST_COMMAND=.ci/pytorch/test.sh
           fi
