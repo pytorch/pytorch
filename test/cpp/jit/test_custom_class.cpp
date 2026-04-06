@@ -146,5 +146,105 @@ TEST(CustomClassTest, Serialization) {
   auto loaded_frozen_module = torch::jit::load(iss_frozen, torch::kCPU);
 }
 
+// --- Torchbind inheritance tests ---
+
+TEST(CustomClassTest, DefBaseRegistersBaseType) {
+  // Verify that def_base<> correctly sets the base type on the ClassType.
+  auto dogType = c10::getCustomClassType<c10::intrusive_ptr<Dog>>();
+  auto animalType = c10::getCustomClassType<c10::intrusive_ptr<Animal>>();
+  ASSERT_TRUE(dogType != nullptr);
+  ASSERT_TRUE(animalType != nullptr);
+
+  auto dogClass = std::dynamic_pointer_cast<c10::ClassType>(dogType);
+  auto animalClass = std::dynamic_pointer_cast<c10::ClassType>(animalType);
+  ASSERT_TRUE(dogClass != nullptr);
+  ASSERT_TRUE(animalClass != nullptr);
+  ASSERT_TRUE(dogClass->baseType() != nullptr);
+  EXPECT_EQ(dogClass->baseType().get(), animalClass.get());
+}
+
+TEST(CustomClassTest, IsSubtypeOfWithInheritance) {
+  auto dogType = c10::getCustomClassType<c10::intrusive_ptr<Dog>>();
+  auto catType = c10::getCustomClassType<c10::intrusive_ptr<Cat>>();
+  auto animalType = c10::getCustomClassType<c10::intrusive_ptr<Animal>>();
+
+  // Dog is a subtype of Animal.
+  EXPECT_TRUE(dogType->isSubtypeOf(*animalType));
+  // Cat is a subtype of Animal.
+  EXPECT_TRUE(catType->isSubtypeOf(*animalType));
+  // Animal is NOT a subtype of Dog.
+  EXPECT_FALSE(animalType->isSubtypeOf(*dogType));
+  // Dog is NOT a subtype of Cat.
+  EXPECT_FALSE(dogType->isSubtypeOf(*catType));
+  // Reflexive: Dog is a subtype of itself.
+  EXPECT_TRUE(dogType->isSubtypeOf(*dogType));
+}
+
+TEST(CustomClassTest, IsSubtypeOfMultiLevel) {
+  // Puppy -> Dog -> Animal: Puppy should be a subtype of both Dog and Animal.
+  auto puppyType = c10::getCustomClassType<c10::intrusive_ptr<Puppy>>();
+  auto dogType = c10::getCustomClassType<c10::intrusive_ptr<Dog>>();
+  auto animalType = c10::getCustomClassType<c10::intrusive_ptr<Animal>>();
+
+  EXPECT_TRUE(puppyType->isSubtypeOf(*dogType));
+  EXPECT_TRUE(puppyType->isSubtypeOf(*animalType));
+  EXPECT_FALSE(animalType->isSubtypeOf(*puppyType));
+}
+
+TEST(CustomClassTest, DerivedToBaseIValueConversion) {
+  // Wrap a derived class in IValue, then extract as base type.
+  auto dog = c10::make_intrusive<Dog>();
+  c10::IValue iv(dog);
+
+  // Should succeed: extract Dog IValue as Animal.
+  auto asAnimal = iv.toCustomClass<Animal>();
+  ASSERT_TRUE(asAnimal != nullptr);
+  EXPECT_EQ(asAnimal->speak(), "woof");
+}
+
+TEST(CustomClassTest, MultiLevelIValueConversion) {
+  // Puppy -> Dog -> Animal: extract Puppy as Animal via IValue.
+  auto puppy = c10::make_intrusive<Puppy>();
+  c10::IValue iv(puppy);
+
+  auto asAnimal = iv.toCustomClass<Animal>();
+  ASSERT_TRUE(asAnimal != nullptr);
+  EXPECT_EQ(asAnimal->speak(), "yip");
+
+  auto asDog = iv.toCustomClass<Dog>();
+  ASSERT_TRUE(asDog != nullptr);
+  EXPECT_EQ(asDog->speak(), "yip");
+}
+
+TEST(CustomClassTest, DerivedPassedAsBaseToConstructor) {
+  // Simulate the torchbind path: pass a Dog to AnimalShelter(Animal).
+  auto dog = c10::make_intrusive<Dog>();
+  auto shelter = c10::make_intrusive<AnimalShelter>(dog);
+  EXPECT_EQ(shelter->resident_speak(), "woof");
+
+  auto cat = c10::make_intrusive<Cat>();
+  auto shelter2 = c10::make_intrusive<AnimalShelter>(cat);
+  EXPECT_EQ(shelter2->resident_speak(), "meow");
+}
+
+TEST(CustomClassTest, DerivedPassedAsBaseViaIValue) {
+  // Simulate the Python/TorchScript path: wrap derived in IValue, then pass to
+  // a function expecting the base type via toCustomClass<Base>().
+  auto cat = c10::make_intrusive<Cat>();
+  c10::IValue iv(cat);
+
+  auto asAnimal = iv.toCustomClass<Animal>();
+  ASSERT_TRUE(asAnimal != nullptr);
+  EXPECT_EQ(asAnimal->speak(), "meow");
+}
+
+TEST(CustomClassTest, InvalidCrossHierarchyConversionThrows) {
+  // Cat should NOT be convertible to Dog.
+  auto cat = c10::make_intrusive<Cat>();
+  c10::IValue iv(cat);
+
+  EXPECT_THROW(iv.toCustomClass<Dog>(), c10::Error);
+}
+
 } // namespace jit
 } // namespace torch
