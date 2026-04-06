@@ -1,7 +1,6 @@
 #include <ATen/native/cuda/fused_adamw_impl.cuh>
 
 #include <ATen/Dispatch.h>
-#include <ATen/Dispatch_v2.h>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/cuda/MultiTensorApply.cuh>
 #include <ATen/native/cuda/fused_adam_utils.cuh>
@@ -32,59 +31,26 @@ void _fused_adamw_cuda_impl_(
       found_inf.has_value() ? found_inf->data_ptr<float>() : nullptr;
   const float* lr_ptr = nullptr;
 
-  if (params[0].scalar_type() != exp_avgs[0].scalar_type()) {
-    validate_mixed_precision_dtypes(
-        params, grads, exp_avgs, exp_avg_sqs, "Mixed-precision fused AdamW");
-    AT_DISPATCH_V2(
-        exp_avgs[0].scalar_type(),
-        "fused_adamw_mp_kernel_cuda",
-        AT_WRAP([&]() {
-          multi_tensor_apply_for_fused_optimizer<4>(
-              tensor_lists,
-              state_steps,
-              FusedAdamMathFunctorMP<
-                  float,
-                  float,
-                  float,
-                  scalar_t,
-                  scalar_t,
-                  float,
-                  4,
-                  ADAM_MODE::ADAMW,
-                  false>(),
-              lr_ptr, // unused
-              lr,
-              beta1,
-              beta2,
-              weight_decay,
-              eps,
-              maximize,
-              grad_scale_ptr,
-              found_inf_ptr);
-        }),
-        kBFloat16);
-  } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-        kHalf,
-        kBFloat16,
-        params[0].scalar_type(),
-        "fused_adamw_kernel_cuda",
-        [&]() {
-          multi_tensor_apply_for_fused_optimizer<4>(
-              tensor_lists,
-              state_steps,
-              FusedAdamMathFunctor<scalar_t, 4, ADAM_MODE::ADAMW, false>(),
-              lr_ptr, // unused
-              lr,
-              beta1,
-              beta2,
-              weight_decay,
-              eps,
-              maximize,
-              grad_scale_ptr,
-              found_inf_ptr);
-        });
-  }
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf,
+      kBFloat16,
+      params[0].scalar_type(),
+      "fused_adamw_kernel_cuda",
+      [&]() {
+        multi_tensor_apply_for_fused_optimizer<4>(
+            tensor_lists,
+            state_steps,
+            FusedAdamMathFunctor<scalar_t, 4, ADAM_MODE::ADAMW, false>(),
+            lr_ptr, // unused
+            lr,
+            beta1,
+            beta2,
+            weight_decay,
+            eps,
+            maximize,
+            grad_scale_ptr,
+            found_inf_ptr);
+      });
 }
 
 // The following overload simply has a Tensor lr
@@ -111,59 +77,26 @@ void _fused_adamw_cuda_impl_(
       found_inf.has_value() ? found_inf->data_ptr<float>() : nullptr;
   const float* lr_ptr = lr.const_data_ptr<float>();
 
-  if (params[0].scalar_type() != exp_avgs[0].scalar_type()) {
-    validate_mixed_precision_dtypes(
-        params, grads, exp_avgs, exp_avg_sqs, "Mixed-precision fused AdamW");
-    AT_DISPATCH_V2(
-        exp_avgs[0].scalar_type(),
-        "fused_adamw_mp_kernel_cuda",
-        AT_WRAP([&]() {
-          multi_tensor_apply_for_fused_optimizer<4>(
-              tensor_lists,
-              state_steps,
-              FusedAdamMathFunctorMP<
-                  float,
-                  float,
-                  float,
-                  scalar_t,
-                  scalar_t,
-                  float,
-                  4,
-                  ADAM_MODE::ADAMW,
-                  false>(),
-              lr_ptr,
-              1.0, // unused
-              beta1,
-              beta2,
-              weight_decay,
-              eps,
-              maximize,
-              grad_scale_ptr,
-              found_inf_ptr);
-        }),
-        kBFloat16);
-  } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-        kHalf,
-        kBFloat16,
-        params[0].scalar_type(),
-        "fused_adamw_kernel_cuda",
-        [&]() {
-          multi_tensor_apply_for_fused_optimizer<4>(
-              tensor_lists,
-              state_steps,
-              FusedAdamMathFunctor<scalar_t, 4, ADAM_MODE::ADAMW, false>(),
-              lr_ptr,
-              1.0, // unused
-              beta1,
-              beta2,
-              weight_decay,
-              eps,
-              maximize,
-              grad_scale_ptr,
-              found_inf_ptr);
-        });
-  }
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf,
+      kBFloat16,
+      params[0].scalar_type(),
+      "fused_adamw_kernel_cuda",
+      [&]() {
+        multi_tensor_apply_for_fused_optimizer<4>(
+            tensor_lists,
+            state_steps,
+            FusedAdamMathFunctor<scalar_t, 4, ADAM_MODE::ADAMW, false>(),
+            lr_ptr,
+            1.0, // unused
+            beta1,
+            beta2,
+            weight_decay,
+            eps,
+            maximize,
+            grad_scale_ptr,
+            found_inf_ptr);
+      });
 }
 
 } // namespace at::native
