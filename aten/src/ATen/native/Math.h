@@ -9,11 +9,11 @@
 #include <c10/util/MathConstants.h>
 #include <cfloat>
 #include <cmath>
+#include <concepts>
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
 #include <type_traits>
-#include <concepts>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wimplicit-float-conversion")
