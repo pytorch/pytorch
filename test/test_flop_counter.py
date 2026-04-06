@@ -20,6 +20,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.utils.flop_counter import sdpa_flop_count
 
 
 try:
@@ -51,8 +52,6 @@ def T(*shape, requires_grad=False):
 class TestFlopCounter(TestCase):
     def test_sdpa_flop_count_gqa(self):
         """sdpa_flop_count should handle GQA where KV heads < Q heads."""
-        from torch.utils.flop_counter import sdpa_flop_count
-
         # MHA: q_heads == kv_heads
         q_shape = (2, 32, 128, 64)
         k_shape = (2, 32, 128, 64)
@@ -1174,6 +1173,94 @@ class TestFlopCounter(TestCase):
             )
 
         self.assertExpectedInline(get_total_flops(mode), """860160""")
+
+    @unittest.skipIf(not HAS_CUDA, "CUDA not available")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "Flash attention not supported (pre-SM80 hardware on CUDA)",
+    )
+    def test_varlen_attn(self):
+        import torch.nn.attention.varlen
+
+        n_heads = 8
+        head_dim = 64
+        dtype = torch.float16
+        seq_lens = [128, 64]
+        total_tokens = sum(seq_lens)
+        cu_seqs = torch.tensor(
+            [0] + list(torch.tensor(seq_lens).cumsum(0).tolist()),
+            dtype=torch.int32,
+            device="cuda",
+        )
+        max_s = max(seq_lens)
+
+        query = torch.randn(
+            total_tokens,
+            n_heads,
+            head_dim,
+            device="cuda",
+            dtype=dtype,
+            requires_grad=True,
+        )
+        key = torch.randn(
+            total_tokens,
+            n_heads,
+            head_dim,
+            device="cuda",
+            dtype=dtype,
+            requires_grad=True,
+        )
+        value = torch.randn(
+            total_tokens,
+            n_heads,
+            head_dim,
+            device="cuda",
+            dtype=dtype,
+            requires_grad=True,
+        )
+
+        mode = FlopCounterMode()
+        with mode:
+            out, _, _ = torch.ops.torch_attn._varlen_attn(
+                query,
+                key,
+                value,
+                cu_seqs,
+                cu_seqs,
+                max_s,
+                max_s,
+                is_causal=True,
+            )
+        fw_flops = int(get_total_flops(mode))
+        expected_fw = sum(
+            sdpa_flop_count(
+                (1, n_heads, s, head_dim),
+                (1, n_heads, s, head_dim),
+                (1, n_heads, s, head_dim),
+            )
+            for s in seq_lens
+        )
+        self.assertEqual(fw_flops, expected_fw)
+        # 2 bmms per sequence, each 2*h*s*d*s; total = 2048*(128^2 + 64^2) = 41943040
+        self.assertExpectedInline(str(fw_flops), """41943040""")
+
+        mode_bw = FlopCounterMode()
+        with mode_bw:
+            out, _, _ = torch.ops.torch_attn._varlen_attn(
+                query,
+                key,
+                value,
+                cu_seqs,
+                cu_seqs,
+                max_s,
+                max_s,
+                is_causal=True,
+            )
+            out.sum().backward()
+        fw_bw_flops = int(get_total_flops(mode_bw))
+        # fw=2 bmms, bw=5 bmms (flash recomputes scores), fw+bw = fw * 7/2
+        self.assertEqual(fw_bw_flops, fw_flops * 7 // 2)
+        self.assertExpectedInline(str(fw_bw_flops), """146800640""")
 
 
 if __name__ == "__main__":
