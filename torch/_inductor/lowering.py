@@ -959,15 +959,28 @@ def _foreach_map(subgraph, *args, **kwargs):
     This code allows us to inline the subgraph into the main graph lowering using the PontwiseSubgraphLowering.
     The graph outputs represent the vertically fused sequence of ops, and then register_operation_list
     below registers the buffers as horizontally fuseable in the scheduler.
+
+    For non-pointwise ops (e.g. mm) that cannot be fused, we fall back to FallbackSubgraphLowering
+    which delegates buffer creation to the root graph and skips horizontal fusion registration.
     """
-    from .subgraph_lowering import PointwiseSubgraphLowering
+    from .exc import SubgraphLoweringException
+    from .subgraph_lowering import FallbackSubgraphLowering, PointwiseSubgraphLowering
 
     inputs = args
 
     gm = subgraph.graph_module
-    pw_subgraph = PointwiseSubgraphLowering(gm, root_graph_lowering=V.graph)
-    with V.set_graph_handler(pw_subgraph):  # type: ignore[arg-type]
-        pw_subgraph.run(*inputs)
+    try:
+        pw_subgraph = PointwiseSubgraphLowering(gm, root_graph_lowering=V.graph)
+        with V.set_graph_handler(pw_subgraph):  # type: ignore[arg-type]
+            pw_subgraph.run(*inputs)
+        sub_outputs = pw_subgraph.graph_outputs
+    except SubgraphLoweringException:
+        fallback_subgraph = FallbackSubgraphLowering(gm, root_graph_lowering=V.graph)
+        with V.set_graph_handler(fallback_subgraph):  # type: ignore[arg-type]
+            fallback_subgraph.run(*inputs)
+        assert fallback_subgraph.graph_outputs is not None
+        assert all(x is not None for x in fallback_subgraph.graph_outputs)
+        return fallback_subgraph.graph_outputs
 
     sub_outputs = pw_subgraph.graph_outputs
     # group outputs by device and register as foreach

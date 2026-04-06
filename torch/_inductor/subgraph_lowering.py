@@ -130,6 +130,56 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
         self.graph_outputs = args[0]
 
 
+class FallbackSubgraphLowering(torch.fx.Interpreter):
+    """
+    Lowers a subgraph containing non-pointwise ops (e.g. mm) by delegating
+    buffer creation to the root graph. Used as fallback in foreach_map when
+    PointwiseSubgraphLowering raises SubgraphLoweringException.
+    """
+
+    graph_outputs: list[ir.IRNode] | None
+    root_graph: GraphLowering
+
+    def __init__(
+        self,
+        gm: torch.fx.GraphModule,
+        root_graph_lowering: GraphLowering,
+    ) -> None:
+        super().__init__(gm)
+        self.graph_outputs = None
+        self.root_graph = root_graph_lowering
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.root_graph, name)
+
+    def register_buffer(self, buffer: ir.Buffer, *, set_name: bool = False) -> str:
+        return self.root_graph.register_buffer(buffer, set_name=set_name)
+
+    def mark_buffer_mutated(self, name: str) -> None:
+        self.root_graph.mark_buffer_mutated(name)
+
+    def call_function(
+        self,
+        target: TargetType,
+        args: Any,
+        kwargs: dict[str, Any],
+    ) -> Any:
+        from .lowering import lowerings
+
+        if target is operator.getitem and isinstance(args[0], (list, tuple, dict)):
+            return super().call_function(target, args, kwargs)
+
+        if target not in lowerings:
+            raise SubgraphLoweringException(
+                f"{target} not supported in subgraph, (missing lowering)"
+            )
+        return lowerings[target](*args, **kwargs)
+
+    def output(self, target: str, args: tuple[Any], kwargs: dict[str, Any]) -> None:  # type: ignore[override]
+        assert len(args) == 1
+        self.graph_outputs = args[0]
+
+
 @dataclass
 class InputDescriptor:
     dtype: torch.dtype
