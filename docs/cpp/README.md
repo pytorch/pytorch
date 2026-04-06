@@ -296,8 +296,8 @@ python check_coverage.py --coverxygen
 
 This runs [coverxygen](https://github.com/psycofdj/coverxygen) on the Doxygen XML
 to measure what percentage of C++ symbols have doc comments in the source code.
-This is complementary to RST coverage — it tells you which headers need more
-doc comments, not which symbols need RST directives.
+This is complementary to file coverage — it tells you which headers need more
+doc comments, not which symbols need Sphinx directives.
 
 ## Known issues
 
