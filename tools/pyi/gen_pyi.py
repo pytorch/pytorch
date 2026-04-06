@@ -996,7 +996,7 @@ def add_docstr_to_hint(docstr: str, hint: str) -> str:
         hint = hint.removesuffix("...").rstrip()  # remove "..."
         content = hint + "\n" + textwrap.indent(f'r"""\n{docstr}\n"""', prefix="    ")
         # Remove trailing whitespace on each line
-        # pyrefly: ignore [no-matching-overload]
+        # pyrefly: ignore [bad-argument-type, no-matching-overload]
         return "\n".join(map(str.rstrip, content.splitlines())).rstrip()
 
     # attribute or property
