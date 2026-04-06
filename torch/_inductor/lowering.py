@@ -2663,6 +2663,9 @@ fallback_rand_generator = fallback_handler(aten.rand.generator)
 fallback_randn_default = fallback_handler(aten.randn.default)
 fallback_randn_generator = fallback_handler(aten.randn.generator)
 make_fallback(aten.randint)
+make_fallback(aten.rand_like, override_decomp=True)
+make_fallback(aten.randn_like, override_decomp=True)
+make_fallback(aten.randint_like, override_decomp=True)
 
 # TODO: mlazos reevaluate if we want to codegen something different
 make_fallback(torch.ops.streams.record_event.default)
