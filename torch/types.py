@@ -12,8 +12,8 @@ from builtins import (  # noqa: F401
     str as _str,
 )
 from collections.abc import Sequence
-from typing import Any, IO, TYPE_CHECKING, TypeAlias, Union
-from typing_extensions import Self
+from typing import Any, IO, TYPE_CHECKING, Union
+from typing_extensions import Self, TypeAliasType
 
 # `as` imports have better static analysis support than assignment `ExposedType: TypeAlias = HiddenType`
 from torch import (  # noqa: F401
@@ -38,41 +38,41 @@ __all__ = ["Number", "Device", "FileLike", "Storage"]
 
 # Convenience aliases for common composite types that we need
 # to talk about in PyTorch
-_TensorOrTensors: TypeAlias = Tensor | Sequence[Tensor]  # noqa: PYI047
-_TensorOrOptionalTensors: TypeAlias = Tensor | Sequence[Tensor | None]  # noqa: PYI047
-_TensorOrTensorsOrGradEdge: TypeAlias = Union[  # noqa: PYI047
-    Tensor,
-    Sequence[Tensor],
-    "GradientEdge",
-    Sequence["GradientEdge"],
-]
+_TensorOrTensors = TypeAliasType("_TensorOrTensors", Tensor | Sequence[Tensor])
+_TensorOrOptionalTensors = TypeAliasType(
+    "_TensorOrOptionalTensors", Tensor | Sequence[Tensor | None]
+)
+_TensorOrTensorsOrGradEdge = TypeAliasType(
+    "_TensorOrTensorsOrGradEdge",
+    Union[Tensor, Sequence[Tensor], "GradientEdge", Sequence["GradientEdge"]],
+)
 
-_size: TypeAlias = Size | list[int] | tuple[int, ...]  # noqa: PYI042,PYI047
-_symsize: TypeAlias = Size | Sequence[int | SymInt]  # noqa: PYI042,PYI047
-_dispatchkey: TypeAlias = str | DispatchKey  # noqa: PYI042,PYI047
+_size = TypeAliasType("_size", Size | list[int] | tuple[int, ...])
+_symsize = TypeAliasType("_symsize", Size | Sequence[int | SymInt])
+_dispatchkey = TypeAliasType("_dispatchkey", str | DispatchKey)
 
 # int or SymInt
-IntLikeType: TypeAlias = int | SymInt
+IntLikeType = TypeAliasType("IntLikeType", int | SymInt)
 # float or SymFloat
-FloatLikeType: TypeAlias = float | SymFloat
+FloatLikeType = TypeAliasType("FloatLikeType", float | SymFloat)
 # bool or SymBool
-BoolLikeType: TypeAlias = bool | SymBool
+BoolLikeType = TypeAliasType("BoolLikeType", bool | SymBool)
 
 py_sym_types = (SymInt, SymFloat, SymBool)  # left un-annotated intentionally
-PySymType: TypeAlias = SymInt | SymFloat | SymBool
+PySymType = TypeAliasType("PySymType", SymInt | SymFloat | SymBool)
 
 # Meta-type for "numeric" things; matches our docs
-Number: TypeAlias = int | float | bool
+Number = TypeAliasType("Number", int | float | bool)
 # tuple for isinstance(x, Number) checks.
 # FIXME: refactor once python 3.9 support is dropped.
 _Number = (int, float, bool)
 
-FileLike: TypeAlias = str | os.PathLike[str] | IO[bytes]
+FileLike = TypeAliasType("FileLike", str | os.PathLike[str] | IO[bytes])
 
 # Meta-type for "device-like" things.  Not to be confused with 'device' (a
 # literal device object).  This nomenclature is consistent with PythonArgParser.
 # None means use the default device (typically CPU)
-Device: TypeAlias = _device | str | int | None
+Device = TypeAliasType("Device", _device | str | int | None)
 
 
 # Storage protocol implemented by ${Type}StorageBase classes

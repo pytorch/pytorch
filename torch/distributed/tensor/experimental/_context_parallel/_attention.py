@@ -23,6 +23,7 @@ from torch.nn.attention.flex_attention import (
     BlockMask,
     create_block_mask,
 )
+from torch.utils._exposed_in import exposed_in
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 from ._cp_custom_ops import flex_cp_allgather
@@ -1510,6 +1511,7 @@ def _disable_context_parallel_dispatcher() -> None:
 #####################################################
 # Current public APIs, but are also subject to change
 #####################################################
+@exposed_in("torch.distributed.tensor.experimental")
 @contextlib.contextmanager
 @torch.no_grad()
 def context_parallel(
