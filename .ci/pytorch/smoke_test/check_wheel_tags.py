@@ -181,8 +181,14 @@ def _check_dylibs_minos(dylibs: list, expected_minos: str, source: str) -> None:
                         break
                 break
 
-        if minos and minos != expected_minos:
-            mismatches.append(f"{dylib.name}: minos={minos}, expected={expected_minos}")
+        # A dylib with a lower minos than the wheel tag is safe (forward compatible).
+        # Only flag dylibs that require a *higher* macOS than the wheel claims to support.
+        if minos and tuple(int(x) for x in minos.split(".")) > tuple(
+            int(x) for x in expected_minos.split(".")
+        ):
+            mismatches.append(
+                f"{dylib.name}: minos={minos}, expected<={expected_minos}"
+            )
 
     if mismatches:
         raise RuntimeError(
