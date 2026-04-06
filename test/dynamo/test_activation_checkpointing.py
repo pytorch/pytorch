@@ -2267,6 +2267,122 @@ class GraphModule(torch.nn.Module):
         with torch._dynamo.config.patch(capture_profiler_record_function=True):
             self._validate(fn, backend, x, y)
 
+    def _get_sac_annotations(self, checkpointed_fn, policy_fn, decompositions=None):
+        annotations = []
+
+        def capture_partition(joint_gm, joint_args, **kwargs):
+            for node in joint_gm.graph.nodes:
+                if node.op == "call_function":
+                    recompute = node.meta.get("recompute", None)
+                    if recompute is not None:
+                        annotations.append(
+                            f"{node.name}: {node.target} -> {recompute.name}"
+                        )
+            return min_cut_rematerialization_partition(joint_gm, joint_args, **kwargs)
+
+        backend = aot_autograd(
+            fw_compiler=nop,
+            bw_compiler=nop,
+            partition_fn=capture_partition,
+            decompositions=decompositions,
+        )
+
+        def fn(x):
+            return checkpoint(
+                checkpointed_fn,
+                x,
+                use_reentrant=False,
+                context_fn=functools.partial(
+                    create_selective_checkpoint_contexts, policy_fn
+                ),
+            )
+
+        x = torch.randn(4, requires_grad=True)
+        torch._dynamo.reset()
+        compiled = torch.compile(fn, backend=backend)
+        out = compiled(x)
+        out.sum().backward()
+        return "\n".join(annotations)
+
+    def test_pre_mode_decomp_has_sac_ignored_ops(self):
+        SAVE_OPS = {
+            torch.ops.aten.sin.default,
+            torch.ops.aten.add.Tensor,
+            torch.ops.aten.cos.default,
+        }
+
+        def policy_fn(ctx, func, *args, **kwargs):
+            if func in SAVE_OPS:
+                return CheckpointPolicy.MUST_SAVE
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        @torch._dynamo.allow_in_graph
+        def op_with_detach(x):
+            a = x.sin()
+            out = a.detach() + a
+            out = out.cos()
+            return out
+
+        self.assertExpectedInline(
+            self._get_sac_annotations(op_with_detach, policy_fn),
+            """\
+sin: aten.sin.default -> MUST_SAVE
+detach_1: aten.detach.default -> PREFER_RECOMPUTE
+add: aten.add.Tensor -> MUST_SAVE
+cos: aten.cos.default -> MUST_SAVE""",
+        )
+
+    def test_post_mode_decomp(self):
+        from torch._inductor.compile_fx import select_decomp_table
+
+        def policy_fn(ctx, func, *args, **kwargs):
+            if func == torch.ops.aten.silu.default:
+                return CheckpointPolicy.MUST_SAVE
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        def fn(x):
+            x = x.sin()
+            x = torch.nn.functional.silu(x)
+            x = x.cos()
+            return x
+
+        self.assertExpectedInline(
+            self._get_sac_annotations(
+                fn, policy_fn, decompositions=select_decomp_table
+            ),
+            """\
+sin: aten.sin.default -> PREFER_RECOMPUTE
+neg: aten.neg.default -> MUST_SAVE
+exp: aten.exp.default -> MUST_SAVE
+add: aten.add.Tensor -> MUST_SAVE
+div: aten.div.Tensor -> MUST_SAVE
+cos: aten.cos.default -> PREFER_RECOMPUTE""",
+        )
+
+    def test_multi_output_op(self):
+        def policy_fn(ctx, func, *args, **kwargs):
+            if func == torch.ops.aten.topk.default:
+                return CheckpointPolicy.MUST_SAVE
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        def fn(x):
+            x = x.sin()
+            vals, idxs = torch.topk(x, k=2)
+            out = vals.sum()
+            out = out.cos()
+            return out
+
+        self.assertExpectedInline(
+            self._get_sac_annotations(fn, policy_fn),
+            """\
+sin: aten.sin.default -> PREFER_RECOMPUTE
+topk: aten.topk.default -> MUST_SAVE
+getitem: <built-in function getitem> -> MUST_SAVE
+getitem_1: <built-in function getitem> -> MUST_SAVE
+sum_1: aten.sum.default -> PREFER_RECOMPUTE
+cos: aten.cos.default -> PREFER_RECOMPUTE""",
+        )
+
 
 class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
     """Tests for AC reordering optimization in full graph (forward+backward in one graph)."""
