@@ -1815,6 +1815,7 @@ class OutputGraph(OutputGraphCommon):
         # i.e. last element corresponds to root frame (1),
         # first element corresponds to current frame (N)
         all_stack_values = []
+        # pyrefly: ignore [implicit-any]
         all_stack_locals_metas = []
         cur_tx: InstructionTranslatorBase | None = tx
         while cur_tx is not None:

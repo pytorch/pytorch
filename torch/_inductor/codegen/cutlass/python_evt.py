@@ -169,6 +169,7 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         self.cur_node: ComputedBuffer | None = None
         self.name_to_buffer = V.graph.name_to_buffer | V.graph.graph_inputs
         for name in V.graph.constants:
+            # pyrefly: ignore [unsupported-operation]
             self.name_to_buffer[name] = V.graph.add_tensor_constant(
                 V.graph.constants[name], name
             )

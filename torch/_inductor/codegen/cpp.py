@@ -746,6 +746,7 @@ class CppOverrides(OpOverrides):
         return csevar
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def round_to_int(x, dtype, src_dtype=None, use_compute_types=True):
         assert isinstance(x, CppCSEVariable)
         if src_dtype is None:
@@ -763,14 +764,17 @@ class CppOverrides(OpOverrides):
         return f"c10::bit_cast<{DTYPE_TO_CPP[dtype]}>({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def abs(x):
         return f"std::abs({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def sin(x):
         return f"std::sin({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def cos(x):
         return f"std::cos({x})"
 
@@ -779,6 +783,7 @@ class CppOverrides(OpOverrides):
         return f"decltype({x})(-{x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def exp(x):
         # return f"Sleef_expf_u10({x})"
         return f"std::exp({x})"
@@ -792,6 +797,7 @@ class CppOverrides(OpOverrides):
         return f"std::expm1({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def erf(x):
         return f"std::erf({x})"
 
@@ -800,14 +806,17 @@ class CppOverrides(OpOverrides):
         return f"std::erfc({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def erfinv(x):
         return f"calc_erfinv({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def sqrt(x):
         return f"std::sqrt({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def rsqrt(x):
         return f"1 / std::sqrt({x})"
 
@@ -824,14 +833,17 @@ class CppOverrides(OpOverrides):
             )
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def tan(x):
         return f"std::tan({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def tanh(x):
         return f"std::tanh({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def signbit(x):
         """
         On windows std::signbit only support float type.
@@ -848,14 +860,17 @@ class CppOverrides(OpOverrides):
         return f"std::pow({a}, {b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def log(x):
         return f"std::log({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def round(x):
         return f"std::nearbyint({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def floor(x):
         return f"std::floor({x})"
 
@@ -867,75 +882,93 @@ class CppOverrides(OpOverrides):
         return f"(({a} < 0) != ({b} < 0) ? ({rem} != 0 ? {quot} - 1 : {quot}) : {quot})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def ceil(x):
         return f"std::ceil({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def trunc(x):
         return f"std::trunc({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def truncdiv(a, b):
         # a and b are integer type
         return f"{a} / {b}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def fmod(a, b):
         return f"std::fmod({a}, {b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def isinf(x):
         return f"std::isinf({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def isnan(x):
         return f"std::isnan({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def lgamma(x):
         return f"std::lgamma({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def acos(x):
         return f"std::acos({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def acosh(x):
         return f"std::acosh({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def cosh(x):
         return f"std::cosh({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def sinh(x):
         return f"std::sinh({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def asin(x):
         return f"std::asin({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def asinh(x):
         return f"std::asinh({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def atan2(x, y):
         return f"std::atan2({x}, {y})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def atan(x):
         return f"std::atan({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def atanh(x):
         return f"std::atanh({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def copysign(x, y):
         return f"std::copysign({x}, {y})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def frexp(x):
         cache_keys = f"frexp({x})[0]", f"frexp({x})[1]"
         if all(V.kernel.cse.try_get(cache_key) is not None for cache_key in cache_keys):
@@ -953,6 +986,7 @@ class CppOverrides(OpOverrides):
         return mantissa, exponent
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def hypot(x, y):
         return f"std::hypot({x}, {y})"
 
@@ -965,10 +999,12 @@ class CppOverrides(OpOverrides):
         return f"std::log2({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def ldexp(x, n):
         return f"std::ldexp({x}, {n})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def nextafter(x, y):
         return f"std::nextafter({x}, {y})"
 
@@ -989,14 +1025,17 @@ class CppOverrides(OpOverrides):
             )
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def minimum(a, b):
         return f"min_propagate_nan({a}, {b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def maximum(a, b):
         return f"max_propagate_nan({a}, {b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def where(a, b, c):
         return f"{a} ? {b} : {c}"
 
@@ -1034,6 +1073,7 @@ class CppOverrides(OpOverrides):
         return f"{mask} ? {body_var}() : {other_code}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def logical_and(a, b):
         return f"{a} && {b}"
 
@@ -1042,10 +1082,12 @@ class CppOverrides(OpOverrides):
         return f"!{a}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def logical_or(a, b):
         return f"{a} || {b}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def logical_xor(a, b):
         return f"{a} != {b}"
 
@@ -1133,6 +1175,7 @@ class CppOverrides(OpOverrides):
         return f"decltype({x})(1) / (decltype({x})(1) + std::exp(-{x}))"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def sign(x):
         code = BracesBuffer()
         scalar_zero = f"decltype({x})(0)"

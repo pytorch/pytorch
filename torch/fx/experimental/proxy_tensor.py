@@ -485,7 +485,7 @@ def get_proxy_slot(
             else:
                 # Attempt to build it from first principles.
                 _build_proxy_for_sym_expr(tracer, obj.node.expr, obj)
-                # pyrefly: ignore [no-matching-overload]
+                # pyrefly: ignore [bad-argument-type, no-matching-overload]
                 value = tracker.get(obj)
 
     if value is None and isinstance(obj, FakeScriptObject):

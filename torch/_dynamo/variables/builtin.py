@@ -3028,6 +3028,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
         # This is seen in inspect signature where we check if the value is a default value
         if isinstance(right, variables.UserDefinedClassVariable):
+            # pyrefly: ignore [bad-argument-type]
             return VariableTracker.build(tx, op(object(), None))
 
         proxy = tx.output.create_proxy(
@@ -3446,6 +3447,7 @@ class IterBuiltinVariable(BaseBuiltinVariable):
         return ret
 
 
+# pyrefly: ignore [deprecated]
 @contextlib.contextmanager
 def dynamo_disable_grad(tx: "InstructionTranslator") -> typing.Iterator[None]:
     from . import GradModeVariable

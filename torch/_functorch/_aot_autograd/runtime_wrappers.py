@@ -1903,6 +1903,7 @@ def merge_view_inputs(
                 raise AssertionError(
                     "every argument in the inner calling convention should be accounted for"
                 )
+        # pyrefly: ignore [bad-return]
         return (
             args_to_functionalization,
             args_to_functionalization_descs,

@@ -3380,6 +3380,7 @@ def handle_traced_output(
 
                 # WARNING: this assumes the same target_cls as this tuple/list call
                 unpacked.append(
+                    # pyrefly: ignore [bad-argument-type]
                     wrap_fx_proxy_cls(
                         # pyrefly: ignore[bad-argument-type]
                         target_cls=target_cls,
@@ -3629,6 +3630,7 @@ def construct_tensor_variable(
     if proxy.node.op != "placeholder":
         tx.output.current_tracer.track_produced_symints(example_value, proxy)
     options.update(get_specialized_props(target_cls, tx, example_value, subclass_type))
+    # pyrefly: ignore [bad-argument-count]
     return target_cls(proxy, **options)
 
 
