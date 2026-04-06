@@ -112,42 +112,52 @@ class PallasKernelOverrides(OpOverrides):
     """
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def sin(x: str) -> str:
         return f"jnp.sin({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def cos(x: str) -> str:
         return f"jnp.cos({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def tan(x: str) -> str:
         return f"jnp.tan({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def sinh(x: str) -> str:
         return f"jnp.sinh({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def cosh(x: str) -> str:
         return f"jnp.cosh({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def tanh(x: str) -> str:
         return f"jnp.tanh({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def asin(x: str) -> str:
         return f"jnp.arcsin({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def acos(x: str) -> str:
         return f"jnp.arccos({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def atan(x: str) -> str:
         return f"jnp.arctan({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def exp(x: str) -> str:
         return f"jnp.exp({x})"
 
@@ -160,6 +170,7 @@ class PallasKernelOverrides(OpOverrides):
         return f"jnp.expm1({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def log(x: str) -> str:
         return f"jnp.log({x})"
 
@@ -176,14 +187,17 @@ class PallasKernelOverrides(OpOverrides):
         return f"jnp.log1p({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def sqrt(x: str) -> str:
         return f"jnp.sqrt({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def rsqrt(x: str) -> str:
         return f"jax.lax.rsqrt({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def abs(x: str) -> str:
         return f"jnp.abs({x})"
 
@@ -192,18 +206,22 @@ class PallasKernelOverrides(OpOverrides):
         return f"(-{x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def floor(x: str) -> str:
         return f"jnp.floor({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def ceil(x: str) -> str:
         return f"jnp.ceil({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def trunc(x: str) -> str:
         return f"jnp.trunc({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def round(x: str) -> str:
         return f"jnp.round({x})"
 
@@ -220,14 +238,17 @@ class PallasKernelOverrides(OpOverrides):
         return f"jnp.power({a}, {b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def maximum(a: str, b: str) -> str:
         return f"jnp.maximum({a}, {b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def minimum(a: str, b: str) -> str:
         return f"jnp.minimum({a}, {b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def where(cond: str, a: str, b: str) -> str:
         return f"jnp.where({cond}, {a}, {b})"
 
@@ -352,10 +373,12 @@ class PallasKernelOverrides(OpOverrides):
         return f"({a} > {b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def isnan(x: str) -> str:
         return f"jnp.isnan({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def isinf(x: str) -> str:
         return f"jnp.isinf({x})"
 
@@ -369,10 +392,12 @@ class PallasKernelOverrides(OpOverrides):
 
     # Logical operations
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def logical_and(a: str, b: str) -> str:
         return f"jnp.logical_and({a}, {b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def logical_or(a: str, b: str) -> str:
         return f"jnp.logical_or({a}, {b})"
 
@@ -381,19 +406,23 @@ class PallasKernelOverrides(OpOverrides):
         return f"jnp.logical_not({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def logical_xor(a: str, b: str) -> str:
         return f"jnp.logical_xor({a}, {b})"
 
     # Math operations
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def atan2(a: str, b: str) -> str:
         return f"jnp.arctan2({a}, {b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def hypot(a: str, b: str) -> str:
         return f"jnp.hypot({a}, {b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def fmod(a: str, b: str) -> str:
         return f"jnp.fmod({a}, {b})"
 
@@ -402,6 +431,7 @@ class PallasKernelOverrides(OpOverrides):
         return f"jnp.remainder({a}, {b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def truncdiv(a: str, b: str) -> str:
         # Truncated division (rounds toward zero)
         # For integers: sign(a)*sign(b) * (abs(a) // abs(b))
@@ -419,16 +449,19 @@ class PallasKernelOverrides(OpOverrides):
 
     # Sign operations
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def sign(x: str) -> str:
         # PyTorch returns 0 for NaN, JAX returns NaN
         return f"jnp.where(jnp.isnan({x}), 0.0, jnp.sign({x}))"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def signbit(x: str) -> str:
         return f"jnp.signbit({x})"
 
     # Special math functions
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def erf(x: str) -> str:
         return f"jax.scipy.special.erf({x})"
 
@@ -437,10 +470,12 @@ class PallasKernelOverrides(OpOverrides):
         return f"jax.scipy.special.erfc({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def erfinv(x: str) -> str:
         return f"jax.scipy.special.erfinv({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def lgamma(x: str) -> str:
         return f"jax.scipy.special.gammaln({x})"
 
@@ -546,6 +581,7 @@ class PallasKernelOverrides(OpOverrides):
         return f"jax.scipy.special.xlog1py({x}, {y})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def chebyshev_polynomial_t(x: str, n: str) -> str:
         # Chebyshev polynomial of the first kind T_n(x)
         # For |x| <= 1: T_n(x) = cos(n * arccos(x))
@@ -560,6 +596,7 @@ class PallasKernelOverrides(OpOverrides):
         )
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def chebyshev_polynomial_u(x: str, n: str) -> str:
         # Chebyshev polynomial of the second kind U_n(x)
         # For |x| < 1: U_n(x) = sin((n+1) * arccos(x)) / sqrt(1 - x^2)
@@ -581,6 +618,7 @@ class PallasKernelOverrides(OpOverrides):
         )
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def chebyshev_polynomial_v(x: str, n: str) -> str:
         # Chebyshev polynomial of the third kind V_n(x)
         # V_n(x) = (T_n(x) - T_{n+1}(x)) / (1 - x) for x != 1
@@ -597,6 +635,7 @@ class PallasKernelOverrides(OpOverrides):
         )
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def chebyshev_polynomial_w(x: str, n: str) -> str:
         # Chebyshev polynomial of the fourth kind W_n(x)
         # W_n(x) = (T_n(x) + T_{n+1}(x)) / (1 + x) for x != -1
@@ -613,22 +652,27 @@ class PallasKernelOverrides(OpOverrides):
         )
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def shifted_chebyshev_polynomial_t(x: str, n: str) -> str:
         return PallasKernelOverrides.chebyshev_polynomial_t(f"(2 * {x} - 1)", n)
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def shifted_chebyshev_polynomial_u(x: str, n: str) -> str:
         return PallasKernelOverrides.chebyshev_polynomial_u(f"(2 * {x} - 1)", n)
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def shifted_chebyshev_polynomial_v(x: str, n: str) -> str:
         return PallasKernelOverrides.chebyshev_polynomial_v(f"(2 * {x} - 1)", n)
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def shifted_chebyshev_polynomial_w(x: str, n: str) -> str:
         return PallasKernelOverrides.chebyshev_polynomial_w(f"(2 * {x} - 1)", n)
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def hermite_polynomial_h(x: str, n: str) -> str:
         # Physicist's Hermite polynomial H_n(x)
         # H_n(x) = 2^n * x^n - n*(n-1)/2 * 2^(n-2) * x^(n-2) + ...
@@ -647,6 +691,7 @@ class PallasKernelOverrides(OpOverrides):
         )
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def hermite_polynomial_he(x: str, n: str) -> str:
         # Probabilist's Hermite polynomial He_n(x)
         # He_0 = 1, He_1 = x, He_2 = x^2 - 1, He_3 = x^3 - 3x
@@ -661,6 +706,7 @@ class PallasKernelOverrides(OpOverrides):
         )
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def laguerre_polynomial_l(x: str, n: str) -> str:
         # Laguerre polynomial L_n(x)
         # L_0 = 1, L_1 = 1 - x, L_2 = (x^2 - 4x + 2)/2, L_3 = (-x^3 + 9x^2 - 18x + 6)/6
@@ -675,6 +721,7 @@ class PallasKernelOverrides(OpOverrides):
         )
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def legendre_polynomial_p(x: str, n: str) -> str:
         # Legendre polynomial P_n(x)
         # P_0 = 1, P_1 = x, P_2 = (3x^2 - 1)/2, P_3 = (5x^3 - 3x)/2
@@ -708,18 +755,22 @@ class PallasKernelOverrides(OpOverrides):
         return f"(({a}) * ({b}) + ({c}))"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def copysign(a: str, b: str) -> str:
         return f"jnp.copysign({a}, {b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def nextafter(a: str, b: str) -> str:
         return f"jnp.nextafter({a}, {b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def ldexp(a: str, b: str) -> str:
         return f"jnp.ldexp({a}, {b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def frexp(x: str) -> str:
         return f"jnp.frexp({x})"
 
