@@ -63,6 +63,7 @@ def split_module(
     keep_original_input_name: bool = True,
     *,
     partition_affix: str | None = None,
+    tuple_return: bool = False,
 ):
     """
     Creates subgraphs out of main graph
@@ -87,6 +88,9 @@ def split_module(
             have the same input names as the original graph.
         partition_affix: Optional[str]: If specified, the submodules' names will contain
             the affix, e.g. "submod_<affix>_<idx>".
+        tuple_return: bool: If True, submodule outputs are always wrapped in a tuple,
+            even when there is only a single output value.  This makes all subgraphs
+            conform to the convention expected by ``torch._inductor.compile_fx``.
 
     Returns:
         GraphModule: the module after split.
@@ -604,15 +608,10 @@ def split_module(
             partition.environment[orig_nodes[name]] for name in partition.outputs
         )
 
-        # skip output node generation if there are no output values
-        num_output_vals = len(output_vals)
-        if num_output_vals == 1:
+        if len(output_vals) == 1 and not tuple_return:
             partition.graph.output(output_vals[0])
-        elif num_output_vals > 1:
-            partition.graph.output(output_vals)
         else:
-            # Invariant - Graph should always have an output node.
-            partition.graph.output(())
+            partition.graph.output(output_vals)
 
         if keep_original_order:
             # first get the attr nodes required by this partition
@@ -650,8 +649,8 @@ def split_module(
         )
 
         num_outputs = len(partition.outputs)
-        if num_outputs > 1:
-            # Unpack multiple return values from submodule
+        if num_outputs > 1 or (num_outputs == 1 and tuple_return):
+            # Unpack return values from submodule
             output_val_proxy = torch.fx.proxy.Proxy(output_val)
             for i, output_name in enumerate(partition.outputs):
                 base_mod_env[output_name] = output_val_proxy[i].node  # type: ignore[index]
