@@ -1604,7 +1604,10 @@ class DistributedDataParallel(Module, Joinable):
 
         Within this context, gradients will be accumulated on module
         variables, which will later be synchronized in the first
-        forward-backward pass exiting the context.
+        forward-backward pass outside the context, or with ``enabled=False``.
+
+        ``no_sync(enabled=False)`` can be nested within another ``no_sync``
+        block to re-enable gradient synchronization for that inner region.
 
         Example::
 
@@ -1622,14 +1625,10 @@ class DistributedDataParallel(Module, Joinable):
 
         Args:
             enabled (bool, optional): Whether this context manager is enabled.
-                ``no_sync`` does nothing when ``enabled=False``. Default: ``True``
+                Gradients are synchronized when ``enabled=False``. Default: ``True``
         """
-        if not enabled:
-            yield
-            return
-
         old_require_backward_grad_sync = self.require_backward_grad_sync
-        self.require_backward_grad_sync = False
+        self.require_backward_grad_sync = not enabled
         try:
             yield
         finally:
