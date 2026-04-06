@@ -3023,6 +3023,49 @@ class TestMaxAutotune(TestCase):
     @fresh_cache()
     @skipIfXpu
     @unittest.skipIf(TEST_WITH_ROCM, "Test requires CUDA")
+    @largeTensorTest("6 GB", device=GPU_TYPE)
+    def test_max_autotune_mm_large_storage_offset_i64_indexing(self):
+        """
+        Test mm with input having dynamic storage offset exceeding i32 range.
+        When a dynamic-shaped input is a slice with offset proportional to
+        the dynamic dim (e.g., offset=70000*s6), the ks parameter in the
+        triton template signature must use i64 to avoid overflow in pointer
+        arithmetic like `A = arg_A + 70000*ks0`.
+        """
+
+        def mm(x, w):
+            batch = x.shape[0] // 8
+            a = x[7 * batch :]
+            return torch.mm(a, w)
+
+        K, N = 10000, 32
+        batch = 32768
+        x = torch.randn(8 * batch, K, device=GPU_TYPE, dtype=torch.bfloat16)
+        w = torch.randn(K, N, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        expected_offset = 7 * batch * K
+        self.assertTrue(
+            expected_offset > 2**31 - 1,
+            f"Test requires offset > i32_max, got {expected_offset}",
+        )
+
+        torch._dynamo.mark_dynamic(x, 0)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "test_configs.autotune_choice_name_regex": r"^triton_mm_",
+            }
+        ):
+            result = torch.compile(mm)(x, w)
+
+        a = x[7 * batch :]
+        torch.testing.assert_close(result, torch.mm(a, w), rtol=1e-2, atol=1e-2)
+
+    @fresh_cache()
+    @skipIfXpu
+    @unittest.skipIf(TEST_WITH_ROCM, "Test requires CUDA")
     @unittest.skipIf(
         not SM90OrLater, "Requires SM90+ (H100/B200) for sufficient GPU memory"
     )
