@@ -507,6 +507,7 @@ def init_backend_registration() -> None:
     from .triton import TritonScheduling
     from .wrapper import PythonWrapperCodegen
     from .wrapper_fxir import WrapperFxCodegen
+    from .xpu.xpu_combined_scheduling import XPUCombinedScheduling
 
     if get_scheduling_for_device("cpu") is None:
         cpu_backends = {
@@ -552,7 +553,7 @@ def init_backend_registration() -> None:
     if get_scheduling_for_device("xpu") is None:
         register_backend_for_device(
             "xpu",
-            TritonScheduling,
+            XPUCombinedScheduling,
             PythonWrapperCodegen,
             CppWrapperGpu,
             WrapperFxCodegen,
