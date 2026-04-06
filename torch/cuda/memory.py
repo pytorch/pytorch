@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 __all__ = [
     "caching_allocator_alloc",
     "caching_allocator_delete",
+    "caching_allocator_disabled",
     "caching_allocator_enable",
     "get_per_process_memory_fraction",
     "set_per_process_memory_fraction",
@@ -155,6 +156,17 @@ def caching_allocator_enable(value: bool = True) -> None:
     r"""Enable or disable the CUDA memory allocator. On by default."""
     if is_initialized():
         torch._C._cuda_cudaCachingAllocator_enable(value)
+
+
+@contextlib.contextmanager
+def caching_allocator_disabled():
+    r"""Context manager that temporarily disables the CUDA caching allocator."""
+    prev = torch._C._cuda_cudaCachingAllocator_is_enabled()
+    caching_allocator_enable(False)
+    try:
+        yield
+    finally:
+        caching_allocator_enable(prev)
 
 
 def set_per_process_memory_fraction(fraction, device: "Device" = None) -> None:
