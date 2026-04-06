@@ -569,6 +569,16 @@ class TorchCommsFlightRecorderHandler(DebugHandler):
                 tabulate(db.ncclcalls, headers=NCCLCall._fields, tablefmt="plain"),
             ]
         )
+
+        parts.append("")
+        parts.append("=== TorchComms FR Dump File ===")
+        dump_addrs, dump_resps = fetch_all(
+            "torchcomms_fr_dump_file", timeout=self.fetch_timeout
+        )
+        for i, (_, resp) in enumerate(zip(dump_addrs, dump_resps)):
+            status = "OK" if resp.status_code == 200 else "FAILED"
+            parts.append(f"Rank {i}: {status} - {resp.text}")
+
         return "\n".join(parts)
 
     def dump_filename(self) -> str:
