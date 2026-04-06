@@ -1288,7 +1288,7 @@ static struct TritonKernelCompileInit {{
                 self.writeline(f"{wrapper_name}({', '.join(call_args)});")
         else:
             casted = []
-            # pyrefly: ignore [no-matching-overload]
+            # pyrefly: ignore [bad-argument-type, no-matching-overload]
             for arg_type, arg in zip(arg_types, call_args):
                 new_arg = arg
                 if arg_type.endswith("*") and arg != "nullptr":

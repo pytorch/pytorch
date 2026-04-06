@@ -3679,7 +3679,7 @@ def _unwrap(x):
     return x
 
 
-@register_lowering([torch.tensor, aten.scalar_tensor])
+@register_lowering([torch.tensor, aten.scalar_tensor, prims.scalar_tensor])
 def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
     assert_nyi(layout in (None, torch.strided), f"layout={layout}")
     assert_nyi(not pin_memory, "pin_memory")
@@ -5054,7 +5054,7 @@ def constant_boundary_condition(
 
         mask = functools.reduce(
             ops.and_,
-            # pyrefly: ignore [no-matching-overload]
+            # pyrefly: ignore [bad-argument-type, no-matching-overload]
             [range_mask(ih[i], h[i] + padding_h[i], -padding_h[i]) for i in range(dim)],
         )
         return (
@@ -5969,7 +5969,7 @@ def upsample_nearest2d_backward(
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=fn,
-        # pyrefly: ignore [no-matching-overload]
+        # pyrefly: ignore [bad-argument-type, no-matching-overload]
         ranges=list(input_size),
     )
 
