@@ -400,7 +400,7 @@ __global__ void tensor_kernel_scan_innermost_dim(
   T* sbuf2 = reinterpret_cast<T*>(sbuf);
   const uint32_t num_threads_x = 1 << log_num_threads_x;
   T* row_buf = reinterpret_cast<T*>(sbuf2 + num_threads_x * 2 * threadIdx.y);
-  if (num_rows * (size_t) row_size <= UINT_MAX) {
+  if (std::in_range<uint32_t>(num_rows * (size_t) row_size)) {
       tensor_kernel_scan_innermost_dim_impl<T, uint32_t>(
           row_buf, tgt_, src_, num_rows, row_size, log_num_threads_x, init, binary_op);
   } else {
