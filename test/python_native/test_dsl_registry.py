@@ -3,7 +3,6 @@
 from unittest.mock import Mock
 
 from torch._vendor.packaging.version import Version
-
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
