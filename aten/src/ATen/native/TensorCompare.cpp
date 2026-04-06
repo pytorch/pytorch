@@ -459,6 +459,12 @@ Tensor isinf(const Tensor& self) {
     return at::zeros_like(self, at::kBool, at::MemoryFormat::Preserve);
   }
 
+  // FP8 types other than e5m2 cannot encode infinity
+  if (c10::isFloat8Type(self.scalar_type()) &&
+      self.scalar_type() != kFloat8_e5m2) {
+    return at::zeros_like(self, at::kBool, at::MemoryFormat::Preserve);
+  }
+
   // Note: a complex value is infinite when either part is infinite
   if (self.is_complex()) {
     return at::isinf(at::real(self)).__ior__(at::isinf(at::imag(self)));
