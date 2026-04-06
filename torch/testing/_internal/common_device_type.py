@@ -25,7 +25,7 @@ from torch.testing._internal.common_cuda import (
     TEST_CUSPARSE_GENERIC,
     TEST_HIPSPARSE_GENERIC,
 )
-from torch.testing._internal.common_dtype import get_all_dtypes
+from torch.testing._internal.common_dtype import get_all_dtypes, get_unsupported_dtypes_for_device
 from torch.testing._internal.common_utils import (
     _TestParametrizer,
     clear_tracked_input,
@@ -389,7 +389,12 @@ class DeviceTypeTestBase(TestCase):
         if default_dtypes is None:
             raise AssertionError(msg)
 
-        return test.dtypes.get(cls.device_type, default_dtypes)
+        result = test.dtypes.get(cls.device_type, default_dtypes)
+        if result is not None and cls.device_type == "privateuse1":
+            result = result - get_unsupported_dtypes_for_device("privateuse1")
+            if not result:
+                return None
+        return result
 
     def _get_precision_override(self, test, dtype):
         if not hasattr(test, "precision_overrides"):
