@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from collections.abc import Sequence, Sized
+from collections.abc import Callable, Sequence, Sized
 from typing import cast
 
 import torch
@@ -1187,6 +1187,98 @@ def index_put_single_dim_strategy(
         ]
     )
     return strategies
+
+
+def _index_dim_strategy(
+    args_schema: ArgsType,
+    shard_row: Callable[[int], list[Placement | _ShardingPlaceholder]],
+    partial_rules: list[list[Placement | _ShardingPlaceholder]] | None = None,
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """Common strategy for index ops that shard on all dims except the indexed dim.
+
+    Args:
+        shard_row: given a dim d, returns the strategy row for sharding on that dim.
+        partial_rules: additional Partial passthrough strategies.
+    """
+    self_meta = cast(TensorMeta, args_schema[0])
+    ndim = len(self_meta.shape)
+    dim = normalize_dim(cast(int, args_schema[1]), ndim)
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for d in range(ndim):
+        if d != dim:
+            strategies.append(shard_row(d))
+    if partial_rules:
+        strategies.extend(partial_rules)
+    return strategies
+
+
+@register_single_dim_strategy(
+    [aten.index_fill.int_Scalar, aten.index_fill_.int_Scalar],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def index_fill_scalar_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    # index_fill(self, dim, index, value) — fills self[..., index, ...] with scalar value.
+    # Partial rules: each rank fills with the same scalar v, then reduces.
+    # Only idempotent reduces work: avg(v,v,...,v)=v, max(v,v,...,v)=v, min(v,v,...,v)=v.
+    # sum and product fail: sum(v,v,...,v)=nv, product(v,v,...,v)=v^n.
+    return _index_dim_strategy(
+        args_schema,
+        lambda d: [
+            _ShardingPlaceholder(d),  # result
+            _ShardingPlaceholder(d),  # self
+            Replicate(),  # value (scalar, same on all ranks)
+        ],
+        [[Partial(op), Partial(op), Replicate()] for op in ("avg", "max", "min")],
+    )
+
+
+@register_single_dim_strategy(
+    [aten.index_fill.int_Tensor, aten.index_fill_.int_Tensor],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def index_fill_tensor_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    # index_fill(self, dim, index, value) — fills self[..., index, ...] with 0-d tensor value.
+    # Partial rules: each rank fills with its partial value v_i, then reduces.
+    # All reduce ops work because reduce(v_0, ..., v_{n-1}) = V (the global value)
+    # regardless of op, since fill is a pure replacement (no mixing with self).
+    return _index_dim_strategy(
+        args_schema,
+        lambda d: [
+            _ShardingPlaceholder(d),  # result
+            _ShardingPlaceholder(d),  # self
+            Replicate(),  # index
+            Replicate(),  # value
+        ],
+        [
+            [Partial(op), Partial(op), Replicate(), Partial(op)]
+            for op in Partial.ALL_REDUCE_OPS
+        ],
+    )
+
+
+@register_single_dim_strategy(
+    [aten.index_reduce.default, aten.index_reduce_.default],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def index_reduce_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    # index_reduce(self, dim, index, source, reduce) — reduces source into self at index positions.
+    # No partial rules: reduce ops are "mean"/"amax"/"amin"/"prod", which don't match
+    # any Partial reduce op names ("avg"/"max"/"min"/"product"/"sum").
+    return _index_dim_strategy(
+        args_schema,
+        lambda d: [
+            _ShardingPlaceholder(d),  # result
+            _ShardingPlaceholder(d),  # self
+            Replicate(),  # index
+            _ShardingPlaceholder(d),  # source
+        ],
+    )
 
 
 @register_op_strategy(

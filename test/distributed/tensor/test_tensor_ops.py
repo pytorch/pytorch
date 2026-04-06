@@ -978,6 +978,42 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         self.assertIsInstance(output_dt, DTensor)
         self.assertEqual(output_dt.full_tensor(), ref)
 
+    def test_index_fill(self):
+        """Test index_fill with sharded input."""
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        global_input = torch.randn(4, 8, device=self.device_type)
+        idx = torch.tensor([1, 3], device=self.device_type)
+        fill_value = 5.0
+
+        ref = global_input.index_fill(1, idx, fill_value)
+
+        input_dt = distribute_tensor(global_input, device_mesh, [Shard(0)])
+        idx_dt = distribute_tensor(idx, device_mesh, [Replicate()])
+
+        output_dt = input_dt.index_fill(1, idx_dt, fill_value)
+
+        self.assertIsInstance(output_dt, DTensor)
+        self.assertEqual(output_dt.full_tensor(), ref)
+
+    @parametrize("reduce_op", ["mean", "amax", "amin", "prod"])
+    def test_index_reduce(self, reduce_op):
+        """Test index_reduce with sharded input."""
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        global_input = torch.randn(4, 8, device=self.device_type)
+        idx = torch.tensor([1, 3], device=self.device_type)
+        global_source = torch.randn(4, 2, device=self.device_type)
+
+        ref = global_input.index_reduce(1, idx, global_source, reduce_op)
+
+        input_dt = distribute_tensor(global_input, device_mesh, [Shard(0)])
+        idx_dt = distribute_tensor(idx, device_mesh, [Replicate()])
+        source_dt = distribute_tensor(global_source, device_mesh, [Shard(0)])
+
+        output_dt = input_dt.index_reduce(1, idx_dt, source_dt, reduce_op)
+
+        self.assertIsInstance(output_dt, DTensor)
+        self.assertEqual(output_dt.full_tensor(), ref)
+
     def test_where_type_promotion(self):
         mesh = self.build_device_mesh()  # 1D mesh
 
