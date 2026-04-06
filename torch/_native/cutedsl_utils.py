@@ -3,7 +3,7 @@ import logging
 import sys
 from typing import cast
 
-from packaging.version import Version
+from torch._vendor.packaging.version import Version
 
 from ..backends import cuda as _cuda
 from .common_utils import (
