@@ -538,13 +538,15 @@ PyObject* TensorGuards_check_verbose(
     PyObject* item = PyTuple_GET_ITEM(args, i);
     if (Py_TYPE(item) != checks[i].pytype) {
       std::stringstream fail_reason;
-      PyObject* type_str = PyObject_Str(PyObject_Type(item));
+      PyObject* type_str =
+          PyObject_Str(reinterpret_cast<PyObject*>(Py_TYPE(item)));
       fail_reason << "expected type of '" << tensor_check_names[i]
                   << "' to be a tensor type, ";
       if (!type_str) {
         fail_reason << "but found a different type";
       } else {
         fail_reason << "' but found " << PyUnicode_AsUTF8(type_str);
+        Py_DECREF(type_str);
       }
       return Py_BuildValue("s", fail_reason.str().c_str());
     }
@@ -4733,13 +4735,15 @@ class TENSOR_MATCH : public LeafGuard {
 
     if (Py_TYPE(value) != _tensor_check->pytype) {
       std::stringstream fail_reason;
-      PyObject* type_str = PyObject_Str(PyObject_Type(value));
+      PyObject* type_str =
+          PyObject_Str(reinterpret_cast<PyObject*>(Py_TYPE(value)));
       fail_reason << "expected type of '" << _tensor_name
                   << "' to be a tensor type, ";
       if (!type_str) {
         fail_reason << "but found a different type";
       } else {
         fail_reason << "' but found " << PyUnicode_AsUTF8(type_str);
+        Py_DECREF(type_str);
       }
       return GuardDebugInfo(false, fail_reason.str(), 0);
     }

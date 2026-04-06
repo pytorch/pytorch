@@ -438,12 +438,16 @@ class _SerializedFxCompile(FxCompile):
             gm, example_inputs, inputs_to_check, graph_kwargs
         )
         if not serialized:
-            return _InProcessFxCompile().codegen_and_compile(
+            eager_compile = _InProcessFxCompile()
+            eager_compile.compile_region_name = self.compile_region_name
+            return eager_compile.codegen_and_compile(
                 gm, example_inputs, inputs_to_check, graph_kwargs
             )
 
         inputs, constants = serialized
         output = self._send_to_child(inputs).deserialize(constants)
+        if isinstance(output.graph, CompiledFxGraph):
+            output.graph.compile_region_name = self.compile_region_name
 
         self._postprocess(output)
         self._compile_stats[type(self)].codegen_and_compile += 1

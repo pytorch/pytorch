@@ -482,6 +482,7 @@ class CompiledFxGraph(OutputCode):
 
     cudagraph_info: CudagraphCachedInfo | None
     partition_maps: list[GraphPartitionMap] | None
+    compile_region_name: str | None
     fx_kwargs: _CompileFxKwargs
     inputs_to_check: Sequence[int]
 
@@ -506,6 +507,7 @@ class CompiledFxGraph(OutputCode):
         cudagraphs: BoxedBool,
         example_inputs: Sequence[InputType],
         static_input_idxs: Sequence[int],
+        compile_region_name: str | None,
         fx_kwargs: _CompileFxKwargs,
         inputs_to_check: Sequence[int],
         runnable_graph_str: str,
@@ -637,6 +639,7 @@ class CompiledFxGraph(OutputCode):
                 )
 
         self.cudagraph_info = cudagraph_info
+        self.compile_region_name = compile_region_name
         self.inputs_to_check = inputs_to_check
         self.fx_kwargs = fx_kwargs
 
@@ -798,12 +801,19 @@ class CompiledFxGraph(OutputCode):
             original_callable = self.current_callable
 
             inductor_callable = InductorCompiledCallable(
-                original_callable, self._original_gm
+                original_callable,
+                self._original_gm,
+                compile_region_name=self.compile_region_name,
             )
 
             def wrapped_callable(inputs):
                 if is_in_torch_dispatch_mode():
-                    return inductor_compiled_code(inductor_callable, inputs)
+                    kwargs = (
+                        {"name": self.compile_region_name}
+                        if self.compile_region_name is not None
+                        else {}
+                    )
+                    return inductor_compiled_code(inductor_callable, inputs, **kwargs)
                 else:
                     return original_callable(inputs)
 

@@ -417,7 +417,9 @@ def _replace_pattern(
                 f"{len(copied_returning_nodes)}"  # pyrefly: ignore [bad-argument-type]
             )
         for gn, copied_node in zip(match.returning_nodes, copied_returning_nodes):  # type: ignore[arg-type]
+            # pyrefly: ignore [bad-argument-type]
             gn.replace_all_uses_with(copied_node)
+            # pyrefly: ignore [unsupported-operation]
             match_changed_node[gn] = copied_node
         # Remove the original nodes
         for node in reversed(pattern_graph.nodes):

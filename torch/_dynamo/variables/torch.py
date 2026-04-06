@@ -97,7 +97,7 @@ from .ctx_manager import (
 )
 from .distributed import DistributedVariable
 from .functions import bind_args_cached, NestedUserFunctionVariable
-from .lists import ListVariable, NamedTupleVariable, TupleVariable
+from .lists import ListVariable, TupleVariable
 from .script_object import TorchScriptObjectVariable
 from .torch_function import (
     can_dispatch_torch_function,
@@ -105,6 +105,7 @@ from .torch_function import (
     TensorWithTFOverrideVariable,
     TorchFunctionModeStackVariable,
 )
+from .user_defined import UserDefinedTupleVariable
 
 
 try:
@@ -258,7 +259,7 @@ def _check_for_gradient_edge(var: VariableTracker, arg_name: str) -> None:
     """
     from .lists import BaseListVariable
 
-    if isinstance(var, NamedTupleVariable) and var.tuple_cls is GradientEdge:
+    if isinstance(var, UserDefinedTupleVariable) and type(var.value) is GradientEdge:
         # Try to get source info for context
         source_info = var.source.name if var.source else None
         context = f"GradientEdge in {arg_name}"
@@ -685,6 +686,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
     def _get_handlers() -> dict[Callable[..., Any], Callable[..., Any]]:
         """Build a dict from function -> method to handle it so that we are O(1)
         in terms of the number of function with special handling."""
+        # pyrefly: ignore [implicit-any]
         handlers = {}
 
         def register(

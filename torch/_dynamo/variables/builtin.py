@@ -1588,6 +1588,13 @@ class BuiltinVariable(BaseBuiltinVariable):
                     tx, getattr(float, name)(args[0].as_python_constant())
                 )
 
+        if name == "__len__" and len(args) == 1 and not kwargs:
+            # type.__len__(instance) → len(instance)
+            # e.g. list.__len__(my_list) → len(my_list)
+            from .object_protocol import generic_len
+
+            return generic_len(tx, args[0])
+
         return super().call_method(tx, name, args, kwargs)
 
     def _call_int_float(
@@ -2234,10 +2241,9 @@ class BuiltinVariable(BaseBuiltinVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        try:
-            return args[0].call_method(tx, "__len__", list(args[1:]), kwargs)
-        except AttributeError as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
+        from .object_protocol import generic_len
+
+        return generic_len(tx, args[0])
 
     def call_getitem(
         self,
@@ -2553,7 +2559,6 @@ class BuiltinVariable(BaseBuiltinVariable):
             obj,
             (
                 variables.TensorVariable,
-                variables.NamedTupleVariable,
                 variables.ConstantVariable,
                 variables.DefaultDictVariable,
                 variables.DistributedVariable,
@@ -2648,7 +2653,6 @@ class BuiltinVariable(BaseBuiltinVariable):
             obj,
             (
                 variables.DefaultDictVariable,
-                variables.NamedTupleVariable,
                 variables.UserDefinedObjectVariable,
                 variables.NestedUserFunctionVariable,
                 variables.ExceptionVariable,
@@ -3022,6 +3026,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
         # This is seen in inspect signature where we check if the value is a default value
         if isinstance(right, variables.UserDefinedClassVariable):
+            # pyrefly: ignore [bad-argument-type]
             return VariableTracker.build(tx, op(object(), None))
 
         proxy = tx.output.create_proxy(
@@ -3440,6 +3445,7 @@ class IterBuiltinVariable(BaseBuiltinVariable):
         return ret
 
 
+# pyrefly: ignore [deprecated]
 @contextlib.contextmanager
 def dynamo_disable_grad(tx: "InstructionTranslator") -> typing.Iterator[None]:
     from . import GradModeVariable

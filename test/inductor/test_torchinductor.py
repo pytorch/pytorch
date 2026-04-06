@@ -10426,7 +10426,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, [torch.zeros([20, 20])], exact_stride=True)
 
     @config.patch(fallback_random=True)
-    @xfail_if_mps  # 100% are not close
     def test_like_rands_sliced(self):
         def fn(x):
             return (
@@ -10436,6 +10435,31 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             )
 
         self.common(fn, (torch.zeros([3, 4])[:, ::2].permute(1, 0),), exact_stride=True)
+
+    @config.patch(fallback_random=True)
+    def test_like_randn_non_contiguous_rng_consistency(self):
+        x = torch.zeros((3, 6), device=self.device).t()
+        self.assertFalse(x.is_contiguous())
+
+        randn_like_compiled = torch.compile(torch.randn_like, backend="inductor")
+
+        torch.manual_seed(0)
+        eager_out = torch.randn_like(x)
+        torch.manual_seed(0)
+        compiled_out = randn_like_compiled(x)
+
+        self.assertEqual(eager_out, compiled_out)
+
+    @config.patch(fallback_random=False)
+    def test_fast_like_rands_decomps_use_non_eager_path(self):
+        x = torch.zeros(3, 6, device=self.device)
+
+        randn_like_compiled = torch.compile(torch.randn_like, backend="inductor")
+        torch.manual_seed(0)
+        eager_randn_out = torch.randn_like(x)
+        torch.manual_seed(0)
+        compiled_randn_out = randn_like_compiled(x)
+        self.assertNotEqual(eager_randn_out, compiled_randn_out)
 
     @config.patch(check_stack_no_cycles_TESTING_ONLY=True)
     def test_check_stack_no_cycles(self):

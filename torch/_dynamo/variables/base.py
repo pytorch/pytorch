@@ -34,6 +34,7 @@ from ..utils import cmp_name_to_op_mapping, istype
 
 if TYPE_CHECKING:
     from ..codegen import PyCodegen
+    from ..side_effects import SideEffects
     from ..symbolic_convert import InstructionTranslator
     from .constant import ConstantVariable
     from .functions import UserFunctionVariable
@@ -304,9 +305,14 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         fn: Callable[["VariableTracker"], None],
         value: Any,
         cache: dict[int, Any] | None = None,
+        side_effects: "SideEffects | None" = None,
     ) -> None:
         """
-        Walk value and call fn on all the VariableTracker instances
+        Walk value and call fn on all the VariableTracker instances.
+
+        When side_effects is provided, also walks attributes stored in
+        store_attr_mutations (e.g. dataclass fields set during tracing
+        that aren't in the VT's __dict__).
         """
         if cache is None:
             cache = {}
@@ -324,13 +330,16 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             nonvars = value._nonvar_fields
             for key, subvalue in value.__dict__.items():
                 if key not in nonvars:
-                    cls.visit(fn, subvalue, cache)
+                    cls.visit(fn, subvalue, cache, side_effects)
+            if side_effects is not None and value in side_effects.store_attr_mutations:
+                for attr_vt in side_effects.store_attr_mutations[value].values():
+                    cls.visit(fn, attr_vt, cache, side_effects)
         elif istype(value, (list, tuple)):
             for subvalue in value:
-                cls.visit(fn, subvalue, cache)
+                cls.visit(fn, subvalue, cache, side_effects)
         elif istype(value, (dict, collections.OrderedDict)):
             for subvalue in value.values():
-                cls.visit(fn, subvalue, cache)
+                cls.visit(fn, subvalue, cache, side_effects)
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}()"
@@ -548,6 +557,22 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             ],
         )
 
+    def sq_length(self, tx: Any) -> "VariableTracker":
+        """Called when sq_length is not implemented."""
+        raise_observed_exception(
+            TypeError,
+            tx,
+            args=[f"object of type '{self.python_type_name()}' has no len()"],
+        )
+
+    def mp_length(self, tx: Any) -> "VariableTracker":
+        """Called when mp_length is not implemented."""
+        raise_observed_exception(
+            TypeError,
+            tx,
+            args=[f"object of type '{self.python_type_name()}' has no len()"],
+        )
+
     def call_method(
         self,
         tx: Any,
@@ -555,9 +580,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         args: list["VariableTracker"],
         kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
-        if name == "__len__" and self.has_unpack_var_sequence(tx):
-            assert not (args or kwargs)
-            return variables.ConstantVariable.create(len(self.unpack_var_sequence(tx)))
+        if name == "__len__" and not (args or kwargs):
+            from .object_protocol import generic_len
+
+            return generic_len(tx, self)
         elif (
             name == "__getattr__"
             and len(args) == 1
@@ -783,9 +809,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             tree_map_kwargs,
             keypath,
         )
-        # For fallback, we need to reconstruct the subtree rooted at this node
-        # and call tree_map_with_path on it. Since we're in the middle of the tree,
-        # we fall back to tracing the tree_map_with_path function.
         return tree_map_fn_copy.call_function(
             tx,
             [map_fn, self, *rest],

@@ -4,7 +4,7 @@ import functools
 import logging
 from typing import Protocol
 
-from packaging.version import Version
+from torch._vendor.packaging.version import Version
 
 from .registry import _OpFn
 
@@ -136,6 +136,17 @@ class DSLRegistry:
     def list_all_dsls(self) -> tuple[str, ...]:
         """Get all registered DSL names (available or not)"""
         return tuple(self._dsl_modules.keys())
+
+    def get_dsl_module(self, name: str) -> DSLModuleProtocol | None:
+        """Get a registered DSL module by name.
+
+        Args:
+            name: Name of the DSL to retrieve.
+
+        Returns:
+            The DSL module if registered, None otherwise.
+        """
+        return self._dsl_modules.get(name)
 
 
 # Global registry instance

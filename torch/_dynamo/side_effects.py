@@ -37,6 +37,7 @@ import torch
 import torch.nn
 from torch._dynamo.variables.misc import AutogradFunctionContextVariable
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._pytree import is_structseq_class
 
 from . import config, graph_break_hints, utils, variables
 from .bytecode_transformation import (
@@ -48,7 +49,7 @@ from .bytecode_transformation import (
 from .codegen import PyCodegen
 from .exc import collapse_resume_frames, get_stack_above_dynamo, unimplemented
 from .source import AttrSource, GlobalSource, LocalCellSource, Source, TempLocalSource
-from .utils import is_frozen_dataclass, nn_module_new, object_new
+from .utils import is_frozen_dataclass, is_namedtuple_cls, nn_module_new, object_new
 from .variables.base import (
     AttributeMutation,
     AttributeMutationExisting,
@@ -86,14 +87,6 @@ def _manual_dict_setitem(
 def _manual_list_update(list_from: list[Any], list_to: list[Any]) -> None:
     list.clear(list_to)
     list.extend(list_to, list_from)
-
-
-def _manual_list_replay(
-    list_to: list[Any], appended_items: list[Any], clear_first: bool
-) -> None:
-    if clear_first:
-        list.clear(list_to)
-    list.extend(list_to, appended_items)
 
 
 class SideEffects:
@@ -531,7 +524,10 @@ class SideEffects:
         elif issubclass(user_cls, (set, frozenset)):
             variable_cls = variables.UserDefinedSetVariable
         elif issubclass(user_cls, tuple):
-            variable_cls = variables.UserDefinedTupleVariable
+            if is_namedtuple_cls(user_cls):
+                variable_cls = variables.UserDefinedTupleVariable.get_vt_cls(user_cls)
+            else:
+                variable_cls = variables.UserDefinedTupleVariable
         elif issubclass(user_cls, list):
             variable_cls = variables.UserDefinedListVariable
         elif issubclass(user_cls, MutableMapping):
@@ -568,14 +564,12 @@ class SideEffects:
             assert variables.UserDefinedClassVariable.is_supported_new_method(
                 base_cls.__new__
             )
-            # TODO(anijain2305) - Consider adding get_example_value method to
-            # each VT to get an example value for all args. As we expand the
-            # scope to other __new__ methods, we might need to call __new__ with
-            # init_args (like functools.partial)
-            # init_args = [arg.get_example_value() for arg in init_args]
-            # obj = base_cls.__new__(user_cls, *init_args)
-
-            obj = base_cls.__new__(user_cls)
+            if is_structseq_class(user_cls):
+                # Structseq tp_new requires a sequence argument and rejects
+                # tuple.__new__, so create a dummy with None placeholders.
+                obj = user_cls([None] * user_cls.n_fields)
+            else:
+                obj = base_cls.__new__(user_cls)
         return obj
 
     def track_new_user_defined_object(
@@ -774,6 +768,19 @@ class SideEffects:
                 assert var.source is not None
                 continue
 
+            # Namedtuples/structseqs with no pending mutations should skip
+            # codegen_save_tempvars so that restore_stack handles them. In
+            # export, restore_stack uses value_from_source=False which makes
+            # child tensors become graph outputs. If we processed them here,
+            # add_cache would assign a TempLocalSource and restore_stack would
+            # load from cache with value_from_source=True, hiding the tensors
+            # from export.
+            if isinstance(
+                var,
+                (variables.NamedTupleVariable, variables.StructSequenceVariable),
+            ) and not self.has_pending_mutation(var):
+                continue
+
             if isinstance(var, variables.CellVariable):
                 # Cells created in the root frame are created either by
                 # `MAKE_CELL` or by them being in `co_cellvars`, so we only emit
@@ -846,11 +853,20 @@ class SideEffects:
                 cg.add_cache(var)
                 var.source = TempLocalSource(cg.tempvars[var])
 
-                if isinstance(var, variables.FrozenDataClassVariable):
-                    for name, value in self.store_attr_mutations.get(var, {}).items():
+                # For frozen dataclasses, we must emit object.__setattr__
+                # immediately after __new__ — before any other code can
+                # access the object.  The suffix-based codegen in
+                # codegen_update_mutated runs too late: if intervening code
+                # calls __repr__ (e.g. f-strings), the attributes won't be
+                # set yet.
+                if (
+                    isinstance(var, variables.FrozenDataClassVariable)
+                    and var in self.store_attr_mutations
+                ):
+                    for name, value in self.store_attr_mutations[var].items():
                         cg.load_import_from("builtins", "object")
                         cg.load_method("__setattr__")
-                        cg(var.source)  # type: ignore[attr-defined]
+                        cg(var.source)
                         cg(variables.ConstantVariable(name))
                         cg(value)
                         cg.extend_output(
@@ -1026,31 +1042,6 @@ class SideEffects:
                 # Log individual side effects for granular debugging
                 side_effects_log.debug(msg)
 
-        def _codegen_direct_list_replay(
-            list_vt: "ListVariable", source: Source | None
-        ) -> bool:
-            if source is None or not list_vt.has_direct_list_replay():
-                return False
-            appended_items = list_vt.direct_list_replay_appends()
-
-            cg.add_push_null(
-                lambda: cg.load_import_from(__name__, "_manual_list_replay")
-            )
-            cg(source)
-            cg.foreach(appended_items)
-            cg.append_output(create_instruction("BUILD_LIST", arg=len(appended_items)))
-            cg.append_output(
-                cg.create_load_const(list_vt.direct_list_replay_should_clear())
-            )
-            suffixes.append(
-                [
-                    *create_call_function(3, False),
-                    create_instruction("POP_TOP"),
-                ]
-            )
-            _maybe_log_side_effect(list_vt)
-            return True
-
         suffixes = []
         for var in self._get_modified_vars():
             # When replay_side_effects=False, only update variables with TempLocalSource
@@ -1059,8 +1050,6 @@ class SideEffects:
             ):
                 continue
             if isinstance(var, variables.ListVariable):
-                if _codegen_direct_list_replay(var, var.source):
-                    continue
                 # old[:] = new
                 cg(var, allow_cache=False)  # Don't codegen via source
                 cg(var.source)  # type: ignore[attr-defined]
@@ -1181,13 +1170,15 @@ class SideEffects:
                     _maybe_log_side_effect(var)
 
             elif self.is_attribute_mutation(var):
+                # FrozenDataClassVariable attributes were emitted in
+                # codegen_save_tempvars right after __new__. Skip here to
+                # avoid double-emitting.
                 if isinstance(var.mutation_type, AttributeMutationNew) and isinstance(
                     var, variables.FrozenDataClassVariable
                 ):
-                    # These frozen attribute initializations are handled in codegen_save_tempvars
-                    # and don't need to be reset in the suffix.
                     continue
-                elif isinstance(
+
+                if isinstance(
                     var,
                     variables.UserDefinedDictVariable,
                 ) and self.is_modified(var._dict_vt):
@@ -1246,42 +1237,41 @@ class SideEffects:
                     var,
                     variables.UserDefinedListVariable,
                 ) and self.is_modified(var._list_vt):
-                    if not _codegen_direct_list_replay(var._list_vt, var.source):
-                        # Update the list to the updated items. Be careful in
-                        # calling the list methods and not the overridden methods.
-                        varname_map = {}
-                        for name in _manual_list_update.__code__.co_varnames:
-                            varname_map[name] = cg.tx.output.new_var()
+                    # Update the list to the updated items. Be careful in
+                    # calling the list methods and not the overridden methods.
+                    varname_map = {}
+                    for name in _manual_list_update.__code__.co_varnames:
+                        varname_map[name] = cg.tx.output.new_var()
 
-                        cg(var.source)  # type: ignore[attr-defined]
-                        cg.extend_output(
-                            [
-                                create_instruction(
-                                    "STORE_FAST", argval=varname_map["list_to"]
-                                )
-                            ]
-                        )
+                    cg(var.source)  # type: ignore[attr-defined]
+                    cg.extend_output(
+                        [
+                            create_instruction(
+                                "STORE_FAST", argval=varname_map["list_to"]
+                            )
+                        ]
+                    )
 
-                        cg(var._list_vt, allow_cache=False)  # Don't codegen via source
-                        cg.extend_output(
-                            [
-                                create_instruction(
-                                    "STORE_FAST", argval=varname_map["list_from"]
-                                )
-                            ]
-                        )
+                    cg(var._list_vt, allow_cache=False)  # Don't codegen via source
+                    cg.extend_output(
+                        [
+                            create_instruction(
+                                "STORE_FAST", argval=varname_map["list_from"]
+                            )
+                        ]
+                    )
 
-                        list_update_insts = bytecode_from_template(
-                            _manual_list_update, varname_map=varname_map
-                        )
+                    list_update_insts = bytecode_from_template(
+                        _manual_list_update, varname_map=varname_map
+                    )
 
-                        suffixes.append(
-                            [
-                                *list_update_insts,
-                                create_instruction("POP_TOP"),
-                            ]
-                        )
-                        _maybe_log_side_effect(var._list_vt)
+                    suffixes.append(
+                        [
+                            *list_update_insts,
+                            create_instruction("POP_TOP"),
+                        ]
+                    )
+                    _maybe_log_side_effect(var._list_vt)
 
                 # Applying mutations involves two steps: 1) Push all
                 # reconstructed objects onto the stack.  2) Call STORE_ATTR to

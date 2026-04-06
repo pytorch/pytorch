@@ -776,22 +776,22 @@ def _rand_like(
     return result.permute(permutation).clone()
 
 
-@register_decomposition(aten.rand_like)
+@decomp.register_decomposition([aten.rand_like], extra_random_decomps)
 def rand_like(self: torch.Tensor, **kwargs: Any) -> torch.Tensor:
     return _rand_like(torch.rand, self, **kwargs)
 
 
-@register_decomposition(aten.randn_like)
+@decomp.register_decomposition([aten.randn_like], extra_random_decomps)
 def randn_like(self: torch.Tensor, **kwargs: Any) -> torch.Tensor:
     return _rand_like(torch.randn, self, **kwargs)
 
 
-@register_decomposition(aten.randint_like.default)
+@decomp.register_decomposition([aten.randint_like.default], extra_random_decomps)
 def randint_like(self: torch.Tensor, high: int, **kwargs: Any) -> torch.Tensor:
     return _rand_like(functools.partial(aten.randint.low, 0, high), self, **kwargs)
 
 
-@register_decomposition(aten.randint_like.low_dtype)
+@decomp.register_decomposition([aten.randint_like.low_dtype], extra_random_decomps)
 def randint_like_low(
     self: torch.Tensor, low: int, high: int, **kwargs: Any
 ) -> torch.Tensor:

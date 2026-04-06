@@ -1815,6 +1815,7 @@ class OutputGraph(OutputGraphCommon):
         # i.e. last element corresponds to root frame (1),
         # first element corresponds to current frame (N)
         all_stack_values = []
+        # pyrefly: ignore [implicit-any]
         all_stack_locals_metas = []
         cur_tx: InstructionTranslatorBase | None = tx
         while cur_tx is not None:
@@ -1994,8 +1995,8 @@ class OutputGraph(OutputGraphCommon):
                     and vt.tuple_cls
                     is torch._dynamo.functional_export.ExportTracerOutput
                 ):
-                    flat_returns = vt.items[0]
-                    out_spec = vt.items[1]
+                    flat_returns = vt._tuple_vt.items[0]
+                    out_spec = vt._tuple_vt.items[1]
                     assert isinstance(
                         flat_returns, torch._dynamo.variables.ListVariable
                     )
@@ -2015,7 +2016,7 @@ class OutputGraph(OutputGraphCommon):
                         elif (
                             vt.source is not None
                             and (source := getattr(vt.source, "base", None))  # type: ignore[assignment]
-                            and source.is_input
+                            and getattr(source, "is_input", False)
                         ):
                             self.export_metadata.output_return_type[idx] = (
                                 "input",
