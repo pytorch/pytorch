@@ -21,8 +21,7 @@
 #include <c10/cuda/CUDAStream.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 
-// TODO(NS): Investigate why FP8 conversion intrinsics end up being slower
-#ifdef AT_USE_NV_CVT_INTRINSICS
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 13000
 #include <cuda_fp8.h>
 #endif
 
@@ -69,25 +68,53 @@ void float16tofloat32_copy_kernel_cuda(TensorIteratorBase &iter) {
 }
 #endif
 
+template <typename SrcT>
+struct ConvertToFloat8E4M3fnOp {
+  __device__ __forceinline__ Float8_e4m3fn operator()(SrcT value) const {
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 13000 && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 890
+    __nv_fp8_storage_t x;
+    if constexpr (std::is_same_v<SrcT, float>) {
+      x = __nv_cvt_float_to_fp8(value, __NV_SATFINITE, __NV_E4M3);
+    } else if constexpr (std::is_same_v<SrcT, Half>) {
+      x = __nv_cvt_halfraw_to_fp8(static_cast<__half>(value), __NV_SATFINITE, __NV_E4M3);
+    } else if constexpr (std::is_same_v<SrcT, BFloat16>) {
+      x = __nv_cvt_bfloat16raw_to_fp8(static_cast<__nv_bfloat16>(value), __NV_SATFINITE, __NV_E4M3);
+    } else {
+      x = __nv_cvt_float_to_fp8(static_cast<float>(value), __NV_SATFINITE, __NV_E4M3);
+    }
+    return Float8_e4m3fn(x, Float8_e4m3fn::from_bits());
+#else
+    return Float8_e4m3fn(value);
+#endif
+  }
+};
+
+// e5m2 intrinsics are correct but slower; only used for float on Blackwell
+// to work around the ptxas subnormal codegen bug.
+struct ConvertFloatToFloat8E5M2Op {
+  __device__ __forceinline__ Float8_e5m2 operator()(float value) const {
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 13020 && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 1000
+    auto x = __nv_cvt_float_to_fp8(value, __NV_NOSAT, __NV_E5M2);
+    return Float8_e5m2(x, Float8_e5m2::from_bits());
+#else
+    return Float8_e5m2(value);
+#endif
+  }
+};
+
 void float8_copy_kernel_cuda(TensorIteratorBase &iter) {
   ScalarType dtype = iter.dtype(0);
   ScalarType other_dtype = iter.dtype(1);
   if (dtype == kFloat8_e4m3fn) {
     switch (other_dtype) {
       case kFloat:
-         gpu_kernel_nocast(iter, [] GPU_LAMBDA(float value) {
-             return Float8_e4m3fn(value);
-         });
+         gpu_kernel_nocast(iter, ConvertToFloat8E4M3fnOp<float>{});
          break;
       case kHalf:
-         gpu_kernel_nocast(iter, [] GPU_LAMBDA(Half value) {
-             return Float8_e4m3fn(value);
-         });
+         gpu_kernel_nocast(iter, ConvertToFloat8E4M3fnOp<Half>{});
          break;
       case kBFloat16:
-         gpu_kernel_nocast(iter, [] GPU_LAMBDA(BFloat16 value) {
-             return Float8_e4m3fn(value);
-         });
+         gpu_kernel_nocast(iter, ConvertToFloat8E4M3fnOp<BFloat16>{});
          break;
       default:
         gpu_kernel(iter, [] GPU_LAMBDA(Float8_e4m3fn x) { return x; });
@@ -96,33 +123,16 @@ void float8_copy_kernel_cuda(TensorIteratorBase &iter) {
   } else if (dtype == kFloat8_e5m2) {
     switch (other_dtype) {
       case kFloat:
-         gpu_kernel_nocast(iter, [] GPU_LAMBDA(float value) {
-#ifdef AT_USE_NV_CVT_INTRINSICS
-             const auto x =  __nv_cvt_float_to_fp8(value, __NV_NOSAT, __NV_E5M2);
-             return Float8_e5m2(x, Float8_e5m2::from_bits());
-#else
-             return Float8_e5m2(value);
-#endif
-         });
+         gpu_kernel_nocast(iter, ConvertFloatToFloat8E5M2Op{});
          break;
       case kHalf:
          gpu_kernel_nocast(iter, [] GPU_LAMBDA(Half value) {
-#ifdef AT_USE_NV_CVT_INTRINSICS
-             const auto x =  __nv_cvt_halfraw_to_fp8(static_cast<__half>(value), __NV_NOSAT, __NV_E5M2);
-             return Float8_e5m2(x, Float8_e5m2::from_bits());
-#else
              return Float8_e5m2(value);
-#endif
          });
          break;
       case kBFloat16:
          gpu_kernel_nocast(iter, [] GPU_LAMBDA(BFloat16 value) {
-#ifdef AT_USE_NV_CVT_INTRINSICS
-             const auto x =  __nv_cvt_bfloat16raw_to_fp8(static_cast<__nv_bfloat16>(value), __NV_NOSAT, __NV_E5M2);
-             return Float8_e5m2(x, Float8_e5m2::from_bits());
-#else
              return Float8_e5m2(value);
-#endif
          });
          break;
       default:
@@ -194,7 +204,7 @@ void float8_copy_kernel_cuda(TensorIteratorBase &iter) {
          break;
     }
   } else {
-    TORCH_CHECK(false, "This supposed ot be called only for Float8 types");
+    TORCH_CHECK(false, "This supposed to be called only for Float8 types");
   }
 }
 

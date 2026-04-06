@@ -32,7 +32,7 @@ from torch.distributed.tensor._collective_utils import (
 )
 from torch.distributed.tensor.placement_types import _Partial, Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, TEST_HPU, TEST_XPU, TestCase
+from torch.testing._internal.common_utils import run_tests, TEST_HPU, TEST_PRIVATEUSE1, TEST_XPU, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -83,7 +83,7 @@ def _with_torchcomm_env(func):
     return wrapper
 
 
-@unittest.skipIf(TEST_XPU or TEST_HPU, "XPU/HPU does not support gloo backend.")
+@unittest.skipIf(TEST_XPU or TEST_HPU or TEST_PRIVATEUSE1, "XPU/HPU does not support gloo backend.")
 class DeviceMeshTestGlooBackend(DTensorTestBase):
     @property
     def backend(self):
@@ -1900,6 +1900,40 @@ class CuTeLayoutTest(TestCase):
         result7 = layout7.remap_to_tensor(original_mesh)
         expected7 = torch.tensor([[[0, 1], [2, 4]]], dtype=torch.int)
         self.assertEqual(result7, expected7)
+
+
+class ProcessGroupOpaqueTypeTest(TestCase):
+    """Test that ProcessGroup opaque type members are registered and exist on the class."""
+
+    def test_registered_members_exist_on_process_group(self):
+        from torch._library.opaque_object import get_member_type
+
+        # Every member registered in _register_distributed_opaque_types()
+        # must actually exist on ProcessGroup. This catches renames or
+        # removals of C++ attributes that would cause torch.compile
+        # (fullgraph=True) to silently register a stale name while the
+        # real attribute has moved.
+        registered_members = [
+            "size",
+            "rank",
+            "_get_backend_name",
+            "group_name",
+            "group_desc",
+            "__eq__",
+        ]
+        for member_name in registered_members:
+            self.assertIsNotNone(
+                get_member_type(ProcessGroup, member_name),
+                f"'{member_name}' is not registered as a ProcessGroup opaque "
+                f"type member. Add it to _register_distributed_opaque_types() "
+                f"in torch/distributed/device_mesh.py",
+            )
+            self.assertTrue(
+                hasattr(ProcessGroup, member_name),
+                f"'{member_name}' is registered as a ProcessGroup opaque type "
+                f"member but does not exist on the ProcessGroup class. "
+                f"Was it renamed or removed?",
+            )
 
 
 if __name__ == "__main__":

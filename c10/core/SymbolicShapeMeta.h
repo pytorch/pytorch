@@ -141,7 +141,7 @@ class C10_API SymbolicShapeMeta {
     available_.fetch_or(is_contiguous_avail);
   }
   void assume_channels_last_contiguous(SymBool val = true) {
-    is_contiguous_ = std::move(val);
+    is_channels_last_contiguous_ = std::move(val);
     available_.fetch_or(is_channels_last_contiguous_avail);
   }
   void assume_channels_last_3d_contiguous(SymBool val = true) {

@@ -3,7 +3,6 @@
 import copy
 import dataclasses
 import functools
-from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -43,8 +42,8 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
 
     def _init_models_and_optims(
         self,
-        param_dtype: Optional[torch.dtype],
-        reduce_dtype: Optional[torch.dtype],
+        param_dtype: torch.dtype | None,
+        reduce_dtype: torch.dtype | None,
     ):
         torch.manual_seed(42)
         model = nn.Sequential(*[MLP(16, torch.device("cpu")) for _ in range(3)])

@@ -11,6 +11,8 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_standard_gamma_grad_native.h>
+#include <ATen/ops/_standard_gamma_native.h>
 #include <ATen/ops/argmax.h>
 #include <ATen/ops/bernoulli_native.h>
 #include <ATen/ops/cauchy_native.h>
@@ -419,38 +421,13 @@ Tensor& random_mps_(Tensor& self, std::optional<Generator> gen) {
   return random_mps_(self, 0, std::nullopt, gen);
 }
 
-// Exponential distribution
-Tensor& exponential_mps_(Tensor& self, double lambda, std::optional<Generator> gen) {
-  TORCH_CHECK(lambda > 0.0, "exponential_ expects lambda > 0.0, but found lambda=", lambda);
-
-  mps::RandomOpBlock random_op_block = ^RandomOpFn(cachedGraph, randomTensor) {
-    MPSGraph* mpsGraph = cachedGraph->graph();
-    MPSGraphTensor* unitTensor = [mpsGraph constantWithScalar:1.0f dataType:randomTensor.dataType];
-    MPSGraphTensor* minusLambdaTensor = [mpsGraph constantWithScalar:-lambda dataType:randomTensor.dataType];
-    MPSGraphTensor* subtractTensor = [mpsGraph subtractionWithPrimaryTensor:unitTensor
-                                                            secondaryTensor:randomTensor
-                                                                       name:nil];
-    MPSGraphTensor* logTensor = [mpsGraph logarithmWithTensor:subtractTensor name:nil];
-    return [mpsGraph divisionWithPrimaryTensor:logTensor secondaryTensor:minusLambdaTensor name:nil];
-  };
-  auto eps = std::numeric_limits<float>::epsilon();
-  return mps::random_mps_impl<double>(self,
-                                      eps,
-                                      1.0,
-                                      std::nullopt,
-                                      std::nullopt,
-                                      MPSGraphRandomDistributionUniform,
-                                      gen,
-                                      "exponential_mps_:" + std::to_string(lambda),
-                                      random_op_block);
-}
-
 static Tensor& distribution_kernel_mps_impl(Tensor& self,
                                             double param1,
                                             double param2,
                                             const std::string& kernel_name,
                                             int64_t randoms_per_element,
-                                            std::optional<Generator> gen) {
+                                            std::optional<Generator> gen,
+                                            int64_t elements_per_thread = 1) {
   if (self.numel() == 0) {
     return self;
   }
@@ -483,7 +460,13 @@ static Tensor& distribution_kernel_mps_impl(Tensor& self,
                     output,
                     std::array<float, 2>{static_cast<float>(param1), static_cast<float>(param2)},
                     std::array<long, 2>{seed, base_offset});
-        mtl_dispatch1DJob(computeEncoder, pso, output.numel());
+        if (elements_per_thread > 1) {
+          auto numel = static_cast<uint32_t>(output.numel());
+          mtl_setBytes(computeEncoder, numel, 3);
+          mtl_dispatch1DJob(computeEncoder, pso, (numel + elements_per_thread - 1) / elements_per_thread);
+        } else {
+          mtl_dispatch1DJob(computeEncoder, pso, output.numel());
+        }
       }
     });
   }
@@ -493,6 +476,11 @@ static Tensor& distribution_kernel_mps_impl(Tensor& self,
   }
 
   return self;
+}
+
+Tensor& exponential_mps_(Tensor& self, double lambda, std::optional<Generator> gen) {
+  TORCH_CHECK(lambda > 0.0, "exponential_ expects lambda > 0.0, but found lambda=", lambda);
+  return distribution_kernel_mps_impl(self, lambda, 0.0, "exponential", 1, gen, /*elements_per_thread=*/4);
 }
 
 Tensor& cauchy_mps_(Tensor& self, double median, double sigma, std::optional<Generator> gen) {
@@ -509,6 +497,74 @@ Tensor& geometric_mps_(Tensor& self, double p, std::optional<Generator> gen) {
   TORCH_CHECK(p > 0.0 && p < 1.0, "geometric_ expects p to be in (0, 1), but got p=", p);
   double log_one_minus_p = std::log1p(-p);
   return distribution_kernel_mps_impl(self, log_one_minus_p, 0.0, "geometric", 1, gen);
+}
+
+Tensor _s_gamma_mps(const Tensor& alpha, std::optional<Generator> gen) {
+  if (alpha.numel() == 0) {
+    return at::empty_like(alpha);
+  }
+
+  using namespace mps;
+
+  auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(gen, at::mps::detail::getDefaultMPSGenerator());
+  auto stream = getCurrentMPSStream();
+  Tensor ret = at::empty_like(alpha, alpha.options(), at::MemoryFormat::Contiguous);
+  auto alpha_contig = alpha.contiguous();
+
+  @autoreleasepool {
+    auto pso = lib.getPipelineStateForFunc("standard_gamma_" + scalarToMetalTypeString(ret));
+
+    int64_t seed;
+    int64_t base_offset;
+    // Each thread may consume up to GAMMA_RANDOMS_STRIDE random numbers
+    constexpr int64_t GAMMA_RANDOMS_STRIDE = 32;
+    {
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(mps_gen->mutex_);
+      seed = static_cast<int64_t>(mps_gen->current_seed());
+      base_offset = static_cast<int64_t>(mps_gen->get_offset());
+      mps_gen->set_offset(base_offset + GAMMA_RANDOMS_STRIDE * ret.numel());
+    }
+
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        auto computeEncoder = stream->commandEncoder();
+        [computeEncoder setComputePipelineState:pso];
+        mtl_setArgs(computeEncoder, ret, alpha_contig, std::array<long, 2>{seed, base_offset});
+        mtl_dispatch1DJob(computeEncoder, pso, ret.numel());
+      }
+    });
+  }
+
+  return ret;
+}
+
+Tensor _standard_gamma_grad_mps(const Tensor& self, const Tensor& output) {
+  if (self.numel() == 0) {
+    return at::empty_like(self);
+  }
+
+  using namespace mps;
+
+  auto stream = getCurrentMPSStream();
+  Tensor ret = at::empty_like(self, self.options(), at::MemoryFormat::Contiguous);
+  const auto self_contig = self.contiguous();
+  const auto output_contig = output.contiguous();
+
+  @autoreleasepool {
+    auto pso = lib.getPipelineStateForFunc("standard_gamma_grad_" + scalarToMetalTypeString(ret));
+
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        auto computeEncoder = stream->commandEncoder();
+        [computeEncoder setComputePipelineState:pso];
+        mtl_setArgs(computeEncoder, ret, self_contig, output_contig);
+        mtl_dispatch1DJob(computeEncoder, pso, ret.numel());
+      }
+    });
+  }
+
+  return ret;
 }
 
 Tensor& randperm_out_mps(int64_t n, std::optional<Generator> generator, Tensor& result) {

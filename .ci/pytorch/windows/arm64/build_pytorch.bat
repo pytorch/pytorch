@@ -5,6 +5,7 @@ set CMAKE_BUILD_TYPE=%BUILD_TYPE%
 set CMAKE_C_COMPILER_LAUNCHER=sccache
 set CMAKE_CXX_COMPILER_LAUNCHER=sccache
 set libuv_ROOT=%DEPENDENCIES_DIR%\libuv\install
+set INSTALL_TEST=0
 set MSSdk=1
 if defined PYTORCH_BUILD_VERSION (
   set PYTORCH_BUILD_VERSION=%PYTORCH_BUILD_VERSION%
@@ -27,8 +28,8 @@ where cl.exe
 :: change to source directory
 cd %PYTORCH_ROOT%
 
-:: copy libuv.dll
-copy %libuv_ROOT%\lib\Release\uv.dll torch\lib\uv.dll
+:: copy libuv.dll (cmake installs the dll to bin/, not lib/Release/)
+copy %libuv_ROOT%\bin\uv.dll torch\lib\uv.dll
 
 :: create virtual environment
 python -m venv .venv

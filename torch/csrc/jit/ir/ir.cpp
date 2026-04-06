@@ -929,12 +929,7 @@ void Value::replaceAllUsesAfterNodeWith(const Node* node, Value* newValue) {
     }
   });
 
-  uses_.erase(
-      std::remove_if(
-          uses_.begin(),
-          uses_.end(),
-          [&node](const Use& u) { return u.user->isAfter(node); }),
-      uses_.end());
+  std::erase_if(uses_, [&node](const Use& u) { return u.user->isAfter(node); });
 }
 
 void Value::replaceAllUsesDominatedByNodeWith(
@@ -947,12 +942,8 @@ void Value::replaceAllUsesDominatedByNodeWith(
     }
   });
 
-  uses_.erase(
-      std::remove_if(
-          uses_.begin(),
-          uses_.end(),
-          [&node](const Use& u) { return u.user->isDominatedBy(node); }),
-      uses_.end());
+  std::erase_if(
+      uses_, [&node](const Use& u) { return u.user->isDominatedBy(node); });
 }
 
 static size_t findArgument(

@@ -284,7 +284,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> batch_norm_backward_plumbing(
         training, eps);
     grad_input = makeBatched(std::move(std::get<0>(results)), std::get<1>(results), cur_level);
   }
-  return std::make_tuple(grad_input, grad_weight, grad_bias);
+  return std::make_tuple(std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
 }
 
 static std::tuple<Tensor,Tensor,Tensor> native_group_norm_plumbing(
@@ -351,7 +351,7 @@ static at::Tensor group_norm_backward_no_weight_bias_batch_rule(
   auto rstd_ = moveBatchDimToFront(rstd, rstd_bdim);
 
   const auto bdim_size = get_bdim_size2(grad_out, grad_out_bdim, input, input_bdim);
-  grad_out_ = ensure_has_bdim(grad_out, grad_out_bdim.has_value(), bdim_size);
+  grad_out_ = ensure_has_bdim(grad_out_, grad_out_bdim.has_value(), bdim_size);
   input_ = ensure_has_bdim(input_, input_bdim.has_value(), bdim_size);
   mean_ = ensure_has_bdim(mean_, mean_bdim.has_value(), bdim_size);
   rstd_ = ensure_has_bdim(rstd_, rstd_bdim.has_value(), bdim_size);
@@ -432,7 +432,7 @@ static std::tuple<Tensor,Tensor,Tensor> native_group_norm_backward_plumbing(
     );
     grad_input = makeBatched(std::move(tensor), 0, cur_level);
   }
-  return std::make_tuple(grad_input, grad_weight, grad_bias);
+  return std::make_tuple(std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
 }
 
 static bool has_same_shape(
@@ -524,7 +524,7 @@ native_layer_norm_batch_rule(
     bias_ = maybePadToLogicalRank(bias_, /*has_bdim*/bias_bdim, result_logical_rank);
     result0 = result0 + bias_;
   }
-  return std::make_tuple(result0, 0, mean, stats_bdim, rstd, stats_bdim);
+  return std::make_tuple(std::move(result0), 0, std::move(mean), stats_bdim, std::move(rstd), stats_bdim);
 }
 
 static std::tuple<at::Tensor, std::optional<int64_t>> native_layer_norm_backward_no_weight_bias_batch_rule(
@@ -536,9 +536,9 @@ static std::tuple<at::Tensor, std::optional<int64_t>> native_layer_norm_backward
 
   if (!grad_out_bdim.has_value() && !input_bdim.has_value() &&
       !mean_bdim.has_value() && !rstd_bdim.has_value()) {
-    const auto result = at::native_layer_norm_backward(
+    auto result = at::native_layer_norm_backward(
         grad_out, input, normalized_shape, mean, rstd, std::nullopt, std::nullopt, {true, false, false});
-    return std::make_tuple(std::get<0>(result), std::nullopt);
+    return std::make_tuple(std::get<0>(std::move(result)), std::nullopt);
   }
 
   auto grad_out_ = moveBatchDimToFront(grad_out, grad_out_bdim);
@@ -644,7 +644,7 @@ static std::tuple<at::Tensor,at::Tensor,at::Tensor> native_layer_norm_backward_p
         rstd_value, rstd_bdim);
     grad_input = makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
   }
-  return std::make_tuple(grad_input, grad_weight, grad_bias);
+  return std::make_tuple(std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
 }
 
 template <typename F, F Func>

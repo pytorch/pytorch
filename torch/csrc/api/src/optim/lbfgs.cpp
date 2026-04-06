@@ -179,7 +179,7 @@ std::tuple<double, Tensor> LBFGS::_directional_evaluate(
   }
   auto flat_grad = _gather_flat_grad();
   _set_param(x);
-  return std::make_tuple(loss, flat_grad);
+  return std::make_tuple(loss, std::move(flat_grad));
 }
 
 static double _cubic_interpolate(

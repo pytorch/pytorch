@@ -1,5 +1,5 @@
 {{def_kernel("X", "W")}}
-    # Depthwise conv1d – channels-last (NLC) layout
+    # Depthwise conv1d - channels-last (NLC) layout
     # Each group has exactly 1 input channel (groups == in_channels == out_channels)
     # 3D tiling: BLOCK_N x BLOCK_L x BLOCK_C
     # Matches the hand-written NLC kernel from depthwise_conv1d_benchmark.py

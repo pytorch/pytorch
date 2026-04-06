@@ -152,6 +152,10 @@ struct C10_API Storage {
     storage_impl_->set_data_ptr_noswap(std::move(data_ptr));
   }
 
+  void swap_data_ptr(Storage& other) const {
+    storage_impl_->swap_data_ptr(*other.storage_impl_);
+  }
+
   DeviceType device_type() const {
     return storage_impl_->device_type();
   }

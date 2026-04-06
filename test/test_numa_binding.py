@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 from unittest import skipUnless
 from unittest.mock import mock_open, patch
 
@@ -230,7 +230,7 @@ class NumaBindingTest(TestCase):
         return set(range(self._mock_num_logical_cpus))
 
     def _start_processes_for_str_entrypoint_and_get_command_args(
-        self, *, numa_options: Optional[NumaOptions], target_local_rank: int
+        self, *, numa_options: NumaOptions | None, target_local_rank: int
     ) -> tuple[str, ...]:
         with patch(
             "torch.distributed.elastic.multiprocessing.subprocess_handler.subprocess_handler.Popen"
@@ -256,8 +256,8 @@ class NumaBindingTest(TestCase):
             return call_args.kwargs["args"]
 
     def _start_processes_for_callable_entrypoint_and_get_sched_setaffinity_cpus(
-        self, *, numa_options: Optional[NumaOptions], target_local_rank: int
-    ) -> Optional[set[int]]:
+        self, *, numa_options: NumaOptions | None, target_local_rank: int
+    ) -> set[int] | None:
         target_sched_setaffinity_logical_cpu_indices = None
 
         def mock_sched_setaffinity(*args, **kwargs) -> None:

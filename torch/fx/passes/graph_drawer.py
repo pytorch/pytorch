@@ -3,7 +3,7 @@
 import hashlib
 from itertools import chain
 from types import ModuleType
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.fx
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
     HAS_PYDOT = True
 else:
-    pydot: Optional[ModuleType]
+    pydot: ModuleType | None
     try:
         import pydot
 
@@ -83,7 +83,7 @@ if HAS_PYDOT:
             ignore_parameters_and_buffers: bool = False,
             skip_node_names_in_args: bool = True,
             parse_stack_trace: bool = False,
-            dot_graph_shape: Optional[str] = None,
+            dot_graph_shape: str | None = None,
             normalize_args: bool = False,
         ):
             self._name = name
@@ -498,7 +498,7 @@ else:
                 ignore_parameters_and_buffers: bool = False,
                 skip_node_names_in_args: bool = True,
                 parse_stack_trace: bool = False,
-                dot_graph_shape: Optional[str] = None,
+                dot_graph_shape: str | None = None,
                 normalize_args: bool = False,
             ):
                 raise RuntimeError(

@@ -6,7 +6,7 @@ import traceback
 import warnings
 
 
-MIN_CUDA_VERSION = "11.6"
+MIN_CUDA_VERSION = "12.1"
 MIN_ROCM_VERSION = "5.4"
 MIN_PYTHON_VERSION = (3, 10)
 

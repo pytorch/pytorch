@@ -120,27 +120,24 @@ std::optional<std::vector<int64_t>> ConstantValueMap::
     GetShapeInto1DInt64VectorWithOneUnknown(const std::string& value_name) {
   if (ConstantValueMap::HasShape(value_name)) {
     auto shape_size = ConstantValueMap::GetShape(value_name).value();
-    std::vector<int64_t> shape_value;
     if (shape_size.isComplete()) {
-      shape_value =
-          ConstantValueMap::GetCompleteShapeInto1DInt64Vector(shape_size);
-      return shape_value;
-    } else {
-      size_t count_unknown = 0;
-      auto shape_size_sizes = shape_size.sizes();
-      if (shape_size_sizes.has_value()) {
-        auto shape_symbol_list = shape_size_sizes.value();
-        for (const auto& v : shape_symbol_list) {
-          if (v.is_static()) {
-            shape_value.emplace_back(v.static_size());
-          } else {
-            shape_value.emplace_back(-1);
-            count_unknown += 1;
-          }
+      return ConstantValueMap::GetCompleteShapeInto1DInt64Vector(shape_size);
+    }
+    size_t count_unknown = 0;
+    auto shape_size_sizes = shape_size.sizes();
+    if (shape_size_sizes.has_value()) {
+      std::vector<int64_t> shape_value;
+      auto shape_symbol_list = shape_size_sizes.value();
+      for (const auto& v : shape_symbol_list) {
+        if (v.is_static()) {
+          shape_value.emplace_back(v.static_size());
+        } else {
+          shape_value.emplace_back(-1);
+          count_unknown += 1;
         }
-        if (count_unknown == 1) {
-          return shape_value;
-        }
+      }
+      if (count_unknown == 1) {
+        return shape_value;
       }
     }
   }

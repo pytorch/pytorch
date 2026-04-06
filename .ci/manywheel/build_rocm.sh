@@ -97,19 +97,11 @@ ROCM_SO_FILES=(
     "libhipblaslt.so"
     "libhipsparselt.so"
     "libhiprtc.so"
+    "librocprofiler-sdk.so"
+    "librocprofiler-register.so"
+    "librocm-core.so"
+    "librocroller.so"
 )
-
-if [[ $ROCM_INT -ge 60100 ]]; then
-    ROCM_SO_FILES+=("librocprofiler-register.so")
-fi
-
-if [[ $ROCM_INT -ge 60200 ]]; then
-    ROCM_SO_FILES+=("librocm-core.so")
-fi
-
-if [[ $ROCM_INT -ge 70000 ]]; then
-    ROCM_SO_FILES+=("librocroller.so")
-fi
 
 OS_NAME=`awk -F= '/^NAME/{print $2}' /etc/os-release`
 if [[ "$OS_NAME" == *"CentOS Linux"* || "$OS_NAME" == *"AlmaLinux"* ]]; then
@@ -123,55 +115,14 @@ if [[ "$OS_NAME" == *"CentOS Linux"* || "$OS_NAME" == *"AlmaLinux"* ]]; then
     fi
     LIBDRM_PATH="/opt/amdgpu/lib64/libdrm.so.2"
     LIBDRM_AMDGPU_PATH="/opt/amdgpu/lib64/libdrm_amdgpu.so.1"
-    if [[ $ROCM_INT -ge 60100 && $ROCM_INT -lt 60300 ]]; then
-        # Below libs are direct dependencies of libhipsolver
-        LIBSUITESPARSE_CONFIG_PATH="/lib64/libsuitesparseconfig.so.4"
-        if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
-            LIBCHOLMOD_PATH="/lib64/libcholmod.so.2"
-            # Below libs are direct dependencies of libsatlas
-            LIBGFORTRAN_PATH="/lib64/libgfortran.so.3"
-        else
-            LIBCHOLMOD_PATH="/lib64/libcholmod.so.3"
-            # Below libs are direct dependencies of libsatlas
-            LIBGFORTRAN_PATH="/lib64/libgfortran.so.5"
-        fi
-        # Below libs are direct dependencies of libcholmod
-        LIBAMD_PATH="/lib64/libamd.so.2"
-        LIBCAMD_PATH="/lib64/libcamd.so.2"
-        LIBCCOLAMD_PATH="/lib64/libccolamd.so.2"
-        LIBCOLAMD_PATH="/lib64/libcolamd.so.2"
-        LIBSATLAS_PATH="/lib64/atlas/libsatlas.so.3"
-        # Below libs are direct dependencies of libsatlas
-        LIBQUADMATH_PATH="/lib64/libquadmath.so.0"
-    fi
     MAYBE_LIB64=lib64
 elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
     LIBGOMP_PATH="/usr/lib/x86_64-linux-gnu/libgomp.so.1"
     LIBNUMA_PATH="/usr/lib/x86_64-linux-gnu/libnuma.so.1"
     LIBELF_PATH="/usr/lib/x86_64-linux-gnu/libelf.so.1"
-    if [[ $ROCM_INT -ge 50300 ]]; then
-        LIBTINFO_PATH="/lib/x86_64-linux-gnu/libtinfo.so.6"
-    else
-        LIBTINFO_PATH="/lib/x86_64-linux-gnu/libtinfo.so.5"
-    fi
+    LIBTINFO_PATH="/lib/x86_64-linux-gnu/libtinfo.so.6"
     LIBDRM_PATH="/usr/lib/x86_64-linux-gnu/libdrm.so.2"
     LIBDRM_AMDGPU_PATH="/usr/lib/x86_64-linux-gnu/libdrm_amdgpu.so.1"
-    if [[ $ROCM_INT -ge 60100 && $ROCM_INT -lt 60300 ]]; then
-        # Below libs are direct dependencies of libhipsolver
-        LIBCHOLMOD_PATH="/lib/x86_64-linux-gnu/libcholmod.so.3"
-        # Below libs are direct dependencies of libcholmod
-        LIBSUITESPARSE_CONFIG_PATH="/lib/x86_64-linux-gnu/libsuitesparseconfig.so.5"
-        LIBAMD_PATH="/lib/x86_64-linux-gnu/libamd.so.2"
-        LIBCAMD_PATH="/lib/x86_64-linux-gnu/libcamd.so.2"
-        LIBCCOLAMD_PATH="/lib/x86_64-linux-gnu/libccolamd.so.2"
-        LIBCOLAMD_PATH="/lib/x86_64-linux-gnu/libcolamd.so.2"
-        LIBMETIS_PATH="/lib/x86_64-linux-gnu/libmetis.so.5"
-        LIBLAPACK_PATH="/lib/x86_64-linux-gnu/liblapack.so.3"
-        LIBBLAS_PATH="/lib/x86_64-linux-gnu/libblas.so.3"
-        # Below libs are direct dependencies of libblas
-        LIBGFORTRAN_PATH="/lib/x86_64-linux-gnu/libgfortran.so.5"
-        LIBQUADMATH_PATH="/lib/x86_64-linux-gnu/libquadmath.so.0"
-    fi
     MAYBE_LIB64=lib
 fi
 OS_SO_PATHS=($LIBGOMP_PATH $LIBNUMA_PATH\

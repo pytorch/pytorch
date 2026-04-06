@@ -15,11 +15,13 @@ from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, tf32_on_a
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_utils import (
+    IS_ARM64,
     raise_on_run_directly,
     set_default_dtype,
     skipCUDAMemoryLeakCheckIf,
     skipIfTorchDynamo,
     TEST_WITH_ROCM,
+    xfailIf,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.utils import mkldnn as mkldnn_utils
@@ -1433,6 +1435,8 @@ class TestFreezing(JitTestCase):
         self.assertTrue(fm.sub._has_method("method_a"))
         self.assertFalse(fm.sub._has_method("method_b"))
 
+    @xfailIf(IS_ARM64)
+    # see https://github.com/pytorch/pytorch/issues/177258
     @skipIfNoFBGEMM
     def test_module_with_shared_type_instances(self):
         class Child(nn.Module):

@@ -26,6 +26,7 @@ from torch.testing._internal.common_quantization import (
     _dynamically_quantize_per_channel,
 )
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     iter_indices,
     parametrize,
     run_tests,
@@ -175,6 +176,12 @@ class TestBasicGEMM(TestCase):
         self.assertEqual(res1, res2)
         self.assertEqual(res1, res3)
 
+        # Test inplace versions if they exist.
+        if hasattr(t, f.__name__ + "_"):
+            out_tensor = torch.broadcast_to(t, res1.shape).clone()
+            getattr(out_tensor, f.__name__ + "_")(m, v, alpha=alpha, beta=beta)
+            self.assertEqual(res1, out_tensor)
+
     def _test_addmm_impl(self, func, activation, device, dtype):
         M = torch.randn(10, 25, device="cpu", dtype=torch.float32).to(dtype).to(device)
         m1 = torch.randn(10, 50, device="cpu", dtype=torch.float32).to(dtype).to(device)
@@ -238,13 +245,13 @@ class TestBasicGEMM(TestCase):
                     activation=activation,
                 )
 
-    @precisionOverride({torch.float: 1e-4, torch.double: 1e-6, torch.half: 1e-1})
+    @precisionOverride({torch.float: 1e-4, torch.half: 1e-1})
     @dtypes(torch.float32, torch.half, torch.double, torch.complex64)
     @tf32_on_and_off(0.05)
     def test_addmm(self, device, dtype):
         self._test_addmm_impl(torch.addmm, None, device, dtype)
 
-    @precisionOverride({torch.float: 1e-4, torch.double: 1e-6, torch.half: 1e-1})
+    @precisionOverride({torch.float: 1e-4, torch.half: 1e-1})
     @dtypes(torch.float, torch.half, torch.double)
     def test_addmm_badmm_scalar_tnesor_input(self, device, dtype):
         input = torch.tensor(1).to(device=device, dtype=dtype)
@@ -638,7 +645,7 @@ class TestBasicGEMM(TestCase):
         for b1, b2, ref, out_tensor in generate_tensor():
             self._test_addbmm_baddbmm("addbmm", b1, b2, ref, out_tensor)
 
-    @precisionOverride({torch.half: 0.1, torch.bfloat16: 0.5, torch.float64: 1e-6})
+    @precisionOverride({torch.half: 0.1, torch.bfloat16: 0.5})
     @dtypes(torch.float64, torch.float32, torch.bfloat16, torch.half, torch.complex64)
     @tf32_on_and_off(0.01)
     def test_baddbmm(self, device, dtype):
@@ -864,6 +871,15 @@ class TestBasicGEMM(TestCase):
         torch.matmul(a, b, out=c)
         self.assertEqual(c, cpu_result)
 
+    @parametrize("shape", [513, 767])
+    @dtypes(torch.bfloat16, torch.half, torch.float, torch.double)
+    def test_matmul_deterministic_mode(self, device, shape, dtype):
+        with DeterministicGuard(True):
+            inp = torch.randn(shape, shape, device=device, dtype=dtype)
+            first = torch.matmul(inp, inp)
+            for _ in range(10):
+                self.assertEqual(first, torch.matmul(inp, inp), atol=0.0, rtol=0.0)
+
     @dtypes(
         torch.int16,
         torch.int32,
@@ -908,7 +924,6 @@ class TestBasicGEMM(TestCase):
                 y = torch.baddbmm(input, mat1, mat2, beta=0.0, out=out)
                 self.assertEqual(y_ref, y)
 
-    @precisionOverride({torch.double: 1e-6})
     @dtypes(torch.float, torch.double)
     @tf32_on_and_off(0.005)
     def test_addmm_sizes(self, device, dtype):
@@ -933,7 +948,6 @@ class TestBasicGEMM(TestCase):
 
     @precisionOverride(
         {
-            torch.double: 1e-6,
             torch.float: 1e-4,
             torch.bfloat16: 5e-2,
             torch.half: 5e-2,
@@ -948,7 +962,6 @@ class TestBasicGEMM(TestCase):
 
     @precisionOverride(
         {
-            torch.double: 1e-6,
             torch.float: 1e-4,
             torch.bfloat16: 5e-2,
             torch.half: 5e-2,
@@ -997,7 +1010,6 @@ class TestBasicGEMM(TestCase):
 
     @precisionOverride(
         {
-            torch.double: 1e-8,
             torch.float: 1e-4,
             torch.bfloat16: 0.6,
             torch.half: 1e-1,

@@ -10,6 +10,14 @@
 #include <ATen/ops/repeat_native.h>
 #include <fmt/format.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/view_as_complex.h>
+#include <ATen/ops/view_as_real.h>
+#endif
+
 namespace at::native {
 
 Tensor permute_mps(const Tensor& self, IntArrayRef dims) {
@@ -36,7 +44,13 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
 
   TORCH_CHECK(repeats.size() >= (size_t)self.dim(),
               "Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor");
-  TORCH_CHECK(!self.is_complex(), "repeat(): Not supported for complex yet!");
+
+  if (self.is_complex()) {
+    std::vector<int64_t> repeats_real = repeats.vec();
+    repeats_real.push_back(1);
+    auto self_real = at::view_as_real(self);
+    return at::view_as_complex(repeat_mps(self_real, repeats_real));
+  }
 
   // Add new leading dimensions to the tensor if the
   // number of target dimensions is larger than the

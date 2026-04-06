@@ -341,7 +341,7 @@ static std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
     }
     batch_norm_cpu_backward_stub(kCPU, grad_input, grad_weight, grad_bias,
         grad_out_, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps);
-    return std::make_tuple(grad_input, grad_weight, grad_bias);
+    return std::make_tuple(std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
   }
 
   auto weight_a = conditional_accessor_1d<const param_t>(weight);
@@ -491,7 +491,7 @@ static std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
         }
       }
     });
-  return std::make_tuple(grad_input, grad_weight, grad_bias);
+  return std::make_tuple(std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
 }
 
 BatchNormBackend _select_batch_norm_backend(
@@ -671,7 +671,7 @@ std::tuple<Tensor, Tensor, Tensor> _batch_norm_impl_index_backward(
     if (output_mask[0] && weight.defined()) {
       grad_input = grad_output * weight[0];
     }
-    return std::make_tuple(grad_input, grad_weight, grad_bias);
+    return std::make_tuple(std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
   }
 
   // backward in inference mode is not supported in cudnn, fallback to native

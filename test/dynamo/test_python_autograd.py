@@ -1,5 +1,5 @@
 # Owner(s): ["module: dynamo"]
-from typing import NamedTuple, Optional, TYPE_CHECKING
+from typing import NamedTuple, TYPE_CHECKING
 
 import torch
 import torch._dynamo
@@ -30,14 +30,14 @@ def fresh_name() -> str:
 
 
 class Variable:
-    def __init__(self, value: torch.Tensor, name: Optional[str] = None):
+    def __init__(self, value: torch.Tensor, name: str | None = None):
         self.value = value
         self.name = name or fresh_name()
 
     # We need to start with some tensors whose values were not computed
     # inside the autograd. This function constructs leaf nodes.
     @staticmethod
-    def constant(value: torch.Tensor, name: Optional[str] = None):
+    def constant(value: torch.Tensor, name: str | None = None):
         return Variable(value, name)
 
     def __repr__(self):
@@ -51,7 +51,7 @@ class Variable:
     def __add__(self, rhs: "Variable") -> "Variable":
         return operator_add(self, rhs)
 
-    def sum(self, name: Optional[str] = None) -> "Variable":
+    def sum(self, name: str | None = None) -> "Variable":
         return operator_sum(self, name)
 
     def expand(self, sizes: list[int]) -> "Variable":
@@ -168,7 +168,7 @@ def operator_add(self: Variable, rhs: Variable) -> Variable:
     return r
 
 
-def operator_sum(self: Variable, name: Optional[str]) -> "Variable":
+def operator_sum(self: Variable, name: str | None) -> "Variable":
     r = Variable(torch.sum(self.value), name=name)
     # print(f'{r.name} = {self.name}.sum()')
 

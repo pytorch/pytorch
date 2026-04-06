@@ -4,7 +4,7 @@ import logging
 import operator
 import textwrap
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from typing import Any
 
 import sympy
@@ -32,6 +32,7 @@ from torch.fx.experimental.symbolic_shapes import (
     DivideByKey,
 )
 from torch.utils import _pytree as pytree
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv
 from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
 from torch.utils._sympy.reference import OptimizedPythonReferenceAnalysis
@@ -230,6 +231,13 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         Override this behavior to generate prologues for FX subgraphs.
         """
         PythonWrapperCodegen.write_header(self)
+
+    def register_alignment_check_inputs(self) -> None:
+        """FXIR does not emit deferred alignment copies.
+        Alignment is handled by the runtime wrapper."""
+
+    def codegen_deferred_alignment_copies(self, input_names: Iterable[str]) -> None:
+        """FXIR does not emit deferred alignment copies."""
 
     @classmethod
     def create(
@@ -713,6 +721,9 @@ class FxConverter:
         )
         self._record_allocation(ir_node, fx_node)
 
+    def _generate_assert_size_stride(self, line: WrapperLine) -> None:
+        pass
+
     def _generate_comment(self, line: WrapperLine) -> None:
         assert isinstance(line, CommentLine)
         # We ignore comments in FX IR.
@@ -880,6 +891,11 @@ class FxConverter:
         )
         result_buffer = ir_node.codegen_reference()
         self.buffer_to_node[result_buffer] = fx_node
+        # For in-place mutation ops (e.g., scatter_reduce_, index_put_),
+        # update the buffer mapping for mutated inputs so downstream
+        # references to the mutated buffer see the post-mutation node.
+        for mutated_name in ir_node.get_mutation_names():
+            self.buffer_to_node[mutated_name] = fx_node
 
     def _generate_index_put_fallback(self, line: WrapperLine) -> None:
         assert isinstance(line, IndexPutFallbackLine)
@@ -914,6 +930,15 @@ class FxConverter:
         kwargs = {}
         if reduce := ir_node.kwargs.get("reduce"):
             kwargs["reduce"] = reduce
+        # Only pass kwargs that the op's schema actually accepts, since
+        # ScatterFallback stores both reduce and include_self for all
+        # scatter variants, but not all ops support them (e.g.,
+        # scatter_.value has no kwargs, scatter_reduce_.two has both).
+        assert isinstance(ir_node.op_overload, torch._ops.OpOverload)
+        schema_arg_names = OrderedSet(
+            [a.name for a in ir_node.op_overload._schema.arguments]
+        )
+        kwargs = {k: v for k, v in ir_node.kwargs.items() if k in schema_arg_names}
 
         self._generate_fallback_call(ir_node, args, kwargs)
 

@@ -30,7 +30,7 @@ void vectorized_gather_kernel_launch(char * out, char * inp, index_t * idx, int 
   constexpr int64_t max_num_threads=256;
   auto num_threads = at::round_up(
       at::ceil_div(slice_size_in_bytes, Alignment),
-      static_cast<int64_t>(C10_WARP_SIZE));
+      static_cast<int64_t>(at::cuda::warp_size()));
   uint32_t grid_y = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
   grid_y = std::min(static_cast<uint32_t>(at::ceil_div(slice_size_in_bytes, max_num_threads * Alignment)), grid_y);
   dim3 grid = {static_cast<uint32_t>(num_ind), grid_y, 1};

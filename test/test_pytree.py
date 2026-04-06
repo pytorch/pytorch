@@ -1,8 +1,10 @@
 # Owner(s): ["module: pytree"]
 
+import copy
 import enum
 import inspect
 import os
+import pickle
 import re
 import subprocess
 import sys
@@ -11,7 +13,7 @@ import unittest
 from collections import defaultdict, deque, namedtuple, OrderedDict, UserDict
 from dataclasses import dataclass, field
 from enum import auto
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple
 
 import torch
 import torch.utils._pytree as python_pytree
@@ -817,6 +819,38 @@ class TestGenericPytree(TestCase):
         deserialized_spec = pytree.treespec_loads(serialized)
         self.assertEqual(spec, deserialized_spec)
 
+    @parametrize_pytree_module
+    def test_treespec_deepcopy_roundtrip(self, pytree):
+        cases = [
+            1,
+            (1, 2),
+            [1, 2, 3],
+            {"a": 1, "b": 2},
+            (1, [2, {"a": 3}]),
+            {"a": [1, 2], "b": (3, 4)},
+        ]
+
+        for tree in cases:
+            treespec = pytree.tree_structure(tree)
+            reconstructed = copy.deepcopy(treespec)
+            self.assertEqual(treespec, reconstructed)
+
+    @parametrize_pytree_module
+    def test_treespec_pickle_roundtrip(self, pytree):
+        cases = [
+            1,
+            (1, 2),
+            [1, 2, 3],
+            {"a": 1, "b": 2},
+            (1, [2, {"a": 3}]),
+            {"a": [1, 2], "b": (3, 4)},
+        ]
+
+        for tree in cases:
+            treespec = pytree.tree_structure(tree)
+            reconstructed = pickle.loads(pickle.dumps(treespec))
+            self.assertEqual(treespec, reconstructed)
+
 
 class TestPythonPytree(TestCase):
     def test_deprecated_register_pytree_node(self):
@@ -1256,7 +1290,7 @@ if "optree" in sys.modules:
         class Data:
             a: torch.Tensor
             b: str = "moo"
-            c: Optional[str] = None
+            c: str | None = None
             d: str = field(init=False, default="")
 
         python_pytree.register_dataclass(Data)

@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 import argparse
 import os
 import subprocess
 import sys
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, cast, Optional, Union
+from typing import Any, cast
 
 import requests
 
@@ -100,7 +102,7 @@ def check_issue_open() -> bool:
         return False
 
 
-def get_workflow_id(run_id: str) -> Optional[str]:
+def get_workflow_id(run_id: str) -> str | None:
     # Get the workflow ID that corresponds to the file for the run ID
     url = f"https://api.github.com/repos/pytorch/pytorch/actions/runs/{run_id}"
     response = query_github_api(url)
@@ -228,13 +230,13 @@ def unzip_artifact_and_replace_files() -> None:
         old_version = f"+git{path.stem.split('+')[1].split('-')[0][3:]}"
         new_version = f"+git{head_sha[:7]}"
 
-        def rename_to_new_version(file: Union[str, Path]) -> None:
+        def rename_to_new_version(file: str | Path) -> None:
             # Rename file with old_version to new_version
             subprocess.check_output(
                 ["mv", file, str(file).replace(old_version, new_version)]
             )
 
-        def change_content_to_new_version(file: Union[str, Path]) -> None:
+        def change_content_to_new_version(file: str | Path) -> None:
             # Check if is a file
             if os.path.isdir(file):
                 return

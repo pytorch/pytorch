@@ -9,6 +9,7 @@ import sys
 import tempfile
 import warnings
 from collections import namedtuple
+from functools import cached_property
 from os.path import abspath, exists
 
 import torch
@@ -207,18 +208,11 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             "vision_maskrcnn",
         }
 
-    @property
-    def inline_inbuilt_nn_modules_models(self):
-        return {
-            "basic_gnn_edgecnn",
-            "drq",
-            "hf_Reformer",
-            "DALLE2_pytorch",
-            "detectron2_maskrcnn_r_50_fpn",
-            "detectron2_maskrcnn_r_101_fpn",
-            "vision_maskrcnn",
-            "doctr_reco_predictor",
-        }
+    @cached_property
+    def _fb_models_available(self):
+        """This property exists because importing IS_FBCODE causes some models to be
+        frozen out of setting certain config flags."""
+        return importlib.util.find_spec("torchbenchmark.models.fb") is not None
 
     def load_model(
         self,
@@ -234,11 +228,14 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             )
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
+
         candidates = [
             f"torchbenchmark.models.{model_name}",
             f"torchbenchmark.canary_models.{model_name}",
-            f"torchbenchmark.models.fb.{model_name}",
         ]
+        if self._fb_models_available:
+            candidates.append(f"torchbenchmark.models.fb.{model_name}")
+
         for c in candidates:
             try:
                 module = importlib.import_module(c)
@@ -384,7 +381,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         ):
             model.config.use_cache = False
 
-        self.validate_model(model, example_inputs)
+        self.validate_model(benchmark.name, model, example_inputs)
         return device, benchmark.name, model, example_inputs, batch_size
 
     def iter_model_names(self, args):
@@ -415,7 +412,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             yield model_name
 
     def pick_grad(self, name, is_training):
-        if is_training or name in ("maml",):
+        if is_training or name == "maml":
             return torch.enable_grad()
         else:
             return torch.no_grad()

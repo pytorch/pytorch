@@ -132,5 +132,5 @@ at::Tensor asarray(
     std::optional<c10::ScalarType> dtype,
     std::optional<c10::Device> device,
     std::optional<bool> copy,
-    bool requires_grad);
+    std::optional<bool> requires_grad);
 } // namespace torch::utils

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 from sympy import Integer, Number, Symbol
 from sympy.logic.boolalg import BooleanAtom
@@ -155,7 +155,7 @@ def tensorify_python_scalars(
         # cache constants, why not
         if isinstance(expr, (Integer, Number, BooleanAtom)):
             dtype = None
-            c: Union[bool, int, float]
+            c: bool | int | float
             if isinstance(expr, BooleanAtom):
                 dtype = torch.bool
                 c = bool(expr)
@@ -209,7 +209,8 @@ def tensorify_python_scalars(
                 and node.op == "call_function"
                 and node.target is torch.ops.aten._local_scalar_dense.default
             ):
-                dtype = node.args[0].meta["val"].dtype
+                source_tensor = node.args[0].meta["val"]
+                dtype = source_tensor.dtype
 
                 if not isinstance(node.args[0], fx.Node):
                     raise AssertionError(f"Expected fx.Node, got {node.args[0]}")
@@ -227,6 +228,15 @@ def tensorify_python_scalars(
                 expr_to_tensor_proxy[s] = MetaProxy(
                     node.args[0], tracer=tracer, fake_mode=fake_mode
                 )
+                if len(source_tensor.shape) != 0:
+                    # .item() always produces a scalar value, even when it is
+                    # called on a size-1 tensor with rank > 0. Preserve that 0-d
+                    # semantics before tensorifying the scalar expression so
+                    # later tensor math and autograd tangents do not keep an
+                    # accidental length-1 dimension.
+                    expr_to_tensor_proxy[s] = torch.ops.aten.reshape.default(
+                        expr_to_tensor_proxy[s], []
+                    )
                 # Upcast the float tensor to torch.float64 to avoid precision problem
                 expr_to_tensor_proxy[s] = torch.ops.prims.convert_element_type.default(
                     expr_to_tensor_proxy[s], torch.float64
@@ -337,7 +347,7 @@ def tensorify_python_scalars(
                     ):
                         failed_tensorify_ops.update(str(node.target))
 
-                        log.info("Failed to tensorify %s", str(node.target))
+                        log.info("Failed to tensorify %s", node.target)
 
     # Now do one more pass that specializes all symfloats we didn't manage
     # to tensorify away.

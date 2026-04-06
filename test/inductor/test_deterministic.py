@@ -14,14 +14,13 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_FBCODE,
     parametrize,
-    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU_AND_TRITON,
     IS_BIG_GPU,
-    IS_FBCODE,
 )
 
 
@@ -48,7 +47,6 @@ class DeterministicTest(TestCase):
         finally:
             torch.use_deterministic_algorithms(old_val, warn_only=True)
 
-    @skipIfXpu(msg="pad_mm is not enabled for XPU.")
     @parametrize("deterministic", [False, True])
     def test_mm_padding(self, deterministic):
         with inductor_config.patch(deterministic=deterministic):
@@ -114,6 +112,25 @@ class DeterministicTest(TestCase):
                 self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] == 0)
             else:
                 self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] > 0)
+
+    def test_reorder_for_locality_preserves_randint_order(self):
+        with inductor_config.patch(fallback_random=True):
+
+            def fn():
+                torch.manual_seed(0)
+                out = torch.randint(0, 100, (4, 1), dtype=torch.int64)
+                _ = torch.randint(0, 100, (2, 1), dtype=torch.int64)
+                return out
+
+            compiled = torch.compile(fn, backend="inductor")
+
+            torch.manual_seed(0)
+            eager = fn()
+
+            torch.manual_seed(0)
+            compiled_out = compiled()
+
+            torch.testing.assert_close(eager, compiled_out)
 
     @unittest.skipIf(IS_FBCODE, "Skipping run2run determinism test in fbcode")
     @parametrize("model_name", ["GoogleFnet", "BertForMaskedLM", "DistillGPT2"])

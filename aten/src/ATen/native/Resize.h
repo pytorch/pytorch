@@ -181,24 +181,76 @@ inline void checkSetStorage(Tensor& result, Storage storage, T storage_offset,
  * (size, stride, storage_offset) must be in bounds for self's storage.
  */
 template <typename T>
+void checkAsStridedArgs(
+    ArrayRef<T> size,
+    ArrayRef<T> stride,
+    T storage_offset) {
+  TORCH_CHECK(
+      size.size() == stride.size(), "mismatch in length of strides and shape");
+  for (const auto& val : stride) {
+    TORCH_CHECK(
+        val >= 0,
+        "as_strided: Negative strides are not supported at the moment, "
+        "got strides: ",
+        stride);
+  }
+  TORCH_CHECK(storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
+}
+
+template <typename T>
+void checkAsStridedArgsAllowUnbackedSymInts(
+    ArrayRef<T> size,
+    ArrayRef<T> stride,
+    T storage_offset) {
+  TORCH_CHECK(
+      size.size() == stride.size(), "mismatch in length of strides and shape");
+  if constexpr (std::is_same_v<T, c10::SymInt>) {
+    // FakeTensor/Meta view replay can pass ephemeral symbolic metadata here,
+    // so only validate values once the SymInts become concrete.
+    for (const auto& val : stride) {
+      if (auto maybe_val = val.maybe_as_int()) {
+        TORCH_CHECK(
+            *maybe_val >= 0,
+            "as_strided: Negative strides are not supported at the moment, "
+            "got strides: ",
+            stride);
+      }
+    }
+
+    if (auto maybe_storage_offset = storage_offset.maybe_as_int()) {
+      TORCH_CHECK(
+          *maybe_storage_offset >= 0,
+          "Tensor: invalid storage offset ",
+          storage_offset);
+    }
+  } else {
+    for (const auto& val : stride) {
+      TORCH_CHECK(
+          val >= 0,
+          "as_strided: Negative strides are not supported at the moment, "
+          "got strides: ",
+          stride);
+    }
+
+    TORCH_CHECK(
+        storage_offset >= 0,
+        "Tensor: invalid storage offset ",
+        storage_offset);
+  }
+}
+
+template <typename T>
 inline void setStrided(
     const Tensor& self,
     ArrayRef<T> size,
     ArrayRef<T> stride,
     T storage_offset) {
-  TORCH_CHECK(size.size() == stride.size(), "mismatch in length of strides and shape");
-  for (const auto& val : stride) {
-    TORCH_CHECK(val >= 0,
-                "as_strided: Negative strides are not supported at the moment, "
-                "got strides: ", stride);
-  }
+  checkAsStridedArgs(size, stride, storage_offset);
 
   auto* self_ = self.unsafeGetTensorImpl();
   checkInBoundsForStorage(
       size, stride, storage_offset, self_->dtype(), self_->storage());
 
-  /* storage offset */
-  TORCH_CHECK(storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
   self_->set_sizes_and_strides(size, stride, storage_offset);
 }
 

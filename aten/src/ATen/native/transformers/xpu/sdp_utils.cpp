@@ -80,9 +80,12 @@ inline bool check_flash_attention_datatype(
 inline bool check_flash_attention_head_dim_size(
     sdp_params const& params,
     bool debug) {
-  const int query_size_last = params.query.size(3);
-  const int key_size_last = params.key.size(3);
-  const int value_size_last = params.value.size(3);
+  // Use sym_size to preserve symbolic shapes during tracing.
+  // Using concrete .size() would materialize symbolic dimensions into static
+  // guards, preventing dynamic shape generalization across recompilations.
+  const auto query_size_last = params.query.sym_size(-1);
+  const auto key_size_last = params.key.sym_size(-1);
+  const auto value_size_last = params.value.sym_size(-1);
 
   const bool head_dims_equal = (query_size_last == key_size_last) &&
       (query_size_last == value_size_last);
@@ -101,7 +104,7 @@ inline bool check_flash_attention_head_dim_size(
     return false;
   }
 
-  constexpr auto max_supported_headdim = 192;
+  const auto max_supported_headdim = c10::SymInt(192);
   if (query_size_last > max_supported_headdim) {
     if (debug) {
       TORCH_WARN(

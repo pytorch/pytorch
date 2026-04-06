@@ -328,7 +328,7 @@ def lower_cpu(
         key,
         value,
     ]
-    res = autotune_select_algorithm(
+    res, _ = autotune_select_algorithm(
         "flex_attention",
         _choices,
         inputs_for_autotuning,

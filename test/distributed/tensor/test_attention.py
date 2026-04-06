@@ -5,7 +5,7 @@ import random
 import unittest
 import unittest.mock
 from collections.abc import Callable
-from typing import Any, ClassVar, Optional
+from typing import Any, ClassVar
 
 import torch
 import torch.distributed as dist
@@ -488,7 +488,7 @@ class CPFlexAttentionTest(DTensorTestBase):
         B: int = 1,
         block_mask,
         lb_type: str,
-        document_lengths: Optional[list[list[int]]] = None,
+        document_lengths: list[list[int]] | None = None,
     ) -> None:
         torch.use_deterministic_algorithms(True)
         torch.cuda.manual_seed(1234)
@@ -584,7 +584,7 @@ class CPFlexAttentionTest(DTensorTestBase):
 
     def _get_load_balancer(
         self, lb_type: str, kwargs: dict[str, Any]
-    ) -> Optional[_LoadBalancer]:
+    ) -> _LoadBalancer | None:
         seq_length = kwargs["seq_length"]
         document_lengths = kwargs["document_lengths"]
         block_mask = kwargs["block_mask"]

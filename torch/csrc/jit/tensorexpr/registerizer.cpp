@@ -161,17 +161,12 @@ AccessHashMap& Scope::getAccessMapByBuf(const BufPtr& b) {
 }
 
 void Scope::filterClosed() {
-  closedAccesses_.erase(
-      std::remove_if(
-          closedAccesses_.begin(),
-          closedAccesses_.end(),
-          [](auto info) {
-            return info->store_cost()->isConstant() &&
-                immediateAs<int>(info->store_cost()) <= 1 &&
-                info->load_cost()->isConstant() &&
-                immediateAs<int>(info->load_cost()) <= 1;
-          }),
-      closedAccesses_.end());
+  std::erase_if(closedAccesses_, [](auto info) {
+    return info->store_cost()->isConstant() &&
+        immediateAs<int>(info->store_cost()) <= 1 &&
+        info->load_cost()->isConstant() &&
+        immediateAs<int>(info->load_cost()) <= 1;
+  });
 }
 
 // RegisterizerAnalysis

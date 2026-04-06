@@ -109,7 +109,6 @@ def remove_dupe_metadata(
         subclass_inp_meta=[],
         subclass_fw_graph_out_meta=[],
         subclass_tangent_meta=subclass_tangent_meta,
-        is_train=m.is_train,
     )
 
 
@@ -308,7 +307,6 @@ def create_synthetic_base_metadata(
             subclass_inp_meta=[],
             subclass_fw_graph_out_meta=[],
             subclass_tangent_meta=subclass_tangent_meta,
-            is_train=m.is_train,
         ),
         outer_aliased_arg_idx_with_metadata_mutations,
     )

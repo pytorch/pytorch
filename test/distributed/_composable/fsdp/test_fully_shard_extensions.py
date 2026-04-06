@@ -5,7 +5,7 @@ import copy
 import functools
 import math
 import threading
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -56,8 +56,8 @@ def two_tensor_fsdp_post_all_gather(
     metadata: Any,
     param_dtype: torch.dtype,
     *,
-    out: Optional[torch.Tensor] = None,
-) -> Union[tuple[torch.Tensor, tuple[torch.Tensor, ...]], None]:
+    out: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]] | None:
     if metadata is not None:
         raise AssertionError(f"Expected metadata to be None, got {metadata}")
     a, b = all_gather_outputs
@@ -129,8 +129,8 @@ class BFloat16AllGatherTensor(torch.Tensor):
         metadata: Any,
         param_dtype: torch.dtype,
         *,
-        out: Optional[torch.Tensor] = None,
-    ) -> Union[tuple[torch.Tensor, tuple[torch.Tensor, ...]], None]:
+        out: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]] | None:
         if metadata is not None:
             raise AssertionError(f"Expected metadata to be None, got {metadata}")
         (tensor,) = all_gather_outputs
@@ -345,8 +345,8 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             metadata: Any,
             param_dtype: torch.dtype,
             *,
-            out: Optional[torch.Tensor] = None,
-        ) -> Union[tuple[torch.Tensor, tuple[torch.Tensor, ...]], None]:
+            out: torch.Tensor | None = None,
+        ) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]] | None:
             (tensor,) = all_gather_outputs
             if metadata is not None:
                 raise AssertionError(f"Expected metadata to be None, got {metadata}")
@@ -455,8 +455,8 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             metadata: Any,
             param_dtype: torch.dtype,
             *,
-            out: Optional[torch.Tensor] = None,
-        ) -> Union[tuple[torch.Tensor, tuple[torch.Tensor, ...]], None]:
+            out: torch.Tensor | None = None,
+        ) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]] | None:
             (tensor,) = all_gather_outputs
             if out is not None:
                 return

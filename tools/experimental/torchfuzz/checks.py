@@ -25,6 +25,22 @@ class EagerVsFullGraphDynamicCompileCheck(Check):
         ]
 
 
+class EagerVsFullGraphDynamicCompileWithBackwardCheck(Check):
+    """Check that runs eager then fullgraph+dynamic compilation with backward pass."""
+
+    def codegen(self, args_tuple: str) -> list[str]:
+        return [
+            f"args = {args_tuple}",
+            "result_original = fuzzed_program(*args)",
+            "result_original.sum().backward()",
+            "print('✅ eager + backward success')",
+            "compiled_program = torch.compile(fuzzed_program, fullgraph=True, dynamic=True)",
+            "result_compiled = compiled_program(*args)",
+            "result_compiled.sum().backward()",
+            "print('✅ compile + backward success')",
+        ]
+
+
 class EagerVsFullGraphDynamicCompileWithNumericsCheck(Check):
     """Check that runs eager and compiled, compares forward numerics."""
 

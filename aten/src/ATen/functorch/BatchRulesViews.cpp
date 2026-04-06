@@ -300,7 +300,7 @@ std::tuple<Tensor, std::optional<int64_t>> roll_batch_rule(const Tensor& self, s
   // NOTE: For scalar tensor, we don't need to unsqueeze as reshape
   // with `old_shape` takes care of it.
   output = output.reshape_symint(old_shape);
-  return std::make_tuple(output, 0);
+  return std::make_tuple(std::move(output), 0);
 }
 
 std::tuple<Tensor, std::optional<int64_t>> diagonal_batching_rule(
@@ -498,7 +498,6 @@ std::tuple<Tensor, std::optional<int64_t>> narrow_copy_batch_rule(
   auto logical_rank = rankWithoutBatchDim(self, self_bdim);
   dim = maybe_wrap_dim(dim, logical_rank) + 1;
   auto result = self_.narrow_copy_symint(dim, std::move(start), std::move(length));
-
   return std::make_tuple(std::move(result), 0);
 }
 

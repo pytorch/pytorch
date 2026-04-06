@@ -18,6 +18,11 @@ NCCL_VERSION=$(cat ci_commit_pins/nccl.txt)
 #   exit 1
 # fi
 
+# Use the NCCL version for CUDA 12.6 due to sm50 support
+if [[ ${CUDA_VERSION:0:4} == "12.6" ]]; then
+  NCCL_VERSION=$(cat ci_commit_pins/nccl-cu126.txt)
+fi
+
 if [[ -n "${NCCL_VERSION}" ]]; then
   # NCCL license: https://docs.nvidia.com/deeplearning/nccl/#licenses
   # Follow build: https://github.com/NVIDIA/nccl/tree/master?tab=readme-ov-file#build

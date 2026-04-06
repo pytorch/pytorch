@@ -29,16 +29,19 @@ class MDNotImplementedError(NotImplementedError):
 
 
 def ambiguity_warn(dispatcher, ambiguities):
-    """Raise warning when ambiguity is detected
+    """Raise warning when ambiguity is detected.
+
     Parameters
     ----------
     dispatcher : Dispatcher
         The dispatcher on which the ambiguity was detected
     ambiguities : set
         Set of type signature pairs that are ambiguous within this dispatcher
-    See Also:
-        Dispatcher.add
-        warning_text
+
+    See Also
+    --------
+    Dispatcher.add
+    warning_text
     """
     warn(warning_text(dispatcher.name, ambiguities), AmbiguityWarning)
 
@@ -62,21 +65,23 @@ def restart_ordering(on_ambiguity=ambiguity_warn):
 
 def variadic_signature_matches_iter(types, full_signature):
     """Check if a set of input types matches a variadic signature.
+
     Notes
     -----
     The algorithm is as follows:
-    Initialize the current signature to the first in the sequence
-    For each type in `types`:
-        If the current signature is variadic
-            If the type matches the signature
-                yield True
-            Else
-                Try to get the next signature
-                If no signatures are left we can't possibly have a match
-                    so yield False
-        Else
-            yield True if the type matches the current signature
-            Get the next signature
+
+    Initialize the current signature to the first in the sequence.
+    For each type in ``types``:
+
+    - If the current signature is variadic
+
+      - If the type matches the signature, yield True
+      - Else, try to get the next signature.
+        If no signatures are left we can't possibly have a match,
+        so yield False.
+
+    - Else, yield True if the type matches the current signature.
+      Get the next signature.
     """
     sigiter = iter(full_signature)
     sig = next(sigiter)

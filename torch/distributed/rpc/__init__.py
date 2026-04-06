@@ -87,6 +87,7 @@ if is_available():
     rendezvous_iterator: Generator[tuple[Store, int, int], None, None]
 
     __all__ += ["init_rpc", "BackendType", "TensorPipeRpcBackendOptions"]
+    # pyrefly: ignore [unresolvable-dunder-all]
     __all__ = __all__ + api.__all__ + backend_registry.__all__  # noqa: PLE0605
 
     def init_rpc(

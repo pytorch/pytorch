@@ -76,6 +76,11 @@ test_failures = {
     "test_weight_norm_conv2d": TestFailure(("cpu", "cuda"), is_skip=True),
 }
 
+if TEST_WITH_ROCM and not torch.cuda.has_magma:
+    test_failures["test_linalg_eig_stride_consistency"] = TestFailure(
+        ("cuda",), is_skip=True
+    )
+
 
 class TestSubprocess(TestCase):
     def setUp(self):

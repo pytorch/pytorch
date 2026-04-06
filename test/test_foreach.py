@@ -859,12 +859,12 @@ class TestForeach(TestCase):
 
     # note: Below three tests (postfixed with `_tensors_on_different_devices`)
     # checks whether foreach works with lists of tensors on different devices
-    # but tensors of the same index are on the same device, e.g., ['cuda', 'cpu].
+    # but tensors of the same index are on the same device, e.g., ['cuda', 'cpu'].
     @onlyCUDA
     @ops(foreach_unary_op_db)
     def test_unary_op_tensors_on_different_devices(self, device, dtype, op):
         method, ref, inplace_method, ref_inplace = self._get_funcs(op)
-        # tensors: ['cuda', 'cpu]
+        # tensors: ['cuda', 'cpu']
         tensors = next(
             iter(
                 op.sample_inputs(
@@ -876,26 +876,28 @@ class TestForeach(TestCase):
             )
         ).input
         tensors[1] = tensors[1].to("cpu")
-        if not op.supports_out:
-            try:
-                actual = method((tensors,), False, False, zero_size=False)
-            except RuntimeError as e:
-                with self.assertRaisesRegex(type(e), str(e).splitlines()[0]):
-                    ref((tensors,))
-            else:
-                expected = ref((tensors,))
-                self.assertEqual(expected, actual)
 
         try:
-            inplace_method((tensors,), False, False, zero_size=False)
+            actual = method((tensors,), False, False, zero_size=False)
         except RuntimeError as e:
             with self.assertRaisesRegex(type(e), str(e).splitlines()[0]):
-                ref_inplace((tensors,))
+                ref((tensors,))
         else:
-            if not op.supports_out:
-                self.assertEqual(expected, tensors)
+            expected = ref((tensors,))
+            self.assertEqual(expected, actual)
+
+        # Some foreach functions (e.g. _foreach_clone) don't have an inplace variant, so
+        # we explicitly test for that here.
+        if not inplace_method.is_inplace:
+            self.assertIsNone(ref_inplace.func)
+        else:
+            try:
+                inplace_method((tensors,), False, False, zero_size=False)
+            except RuntimeError as e:
+                with self.assertRaisesRegex(type(e), str(e).splitlines()[0]):
+                    ref_inplace((tensors,))
             else:
-                self.assertEqual([torch.zeros_like(t) for t in tensors], tensors)
+                self.assertEqual(expected, tensors)
 
     @onlyCUDA
     @ops(filter(lambda op: op.supports_out, foreach_binary_op_db))
@@ -1057,11 +1059,11 @@ class TestForeach(TestCase):
         # foreach_max cannot handle empty tensors as max requires an identity
         intersperse_empty_tensors = w_empty and op.name != "_foreach_max"
 
-        N = 600
+        N = 4000
         indices_with_empty_tensors = (
             set()
             if not intersperse_empty_tensors
-            else {200, 300, 301, 400, 401, 402, 404, 598}
+            else {200, 1500, 1501, 2800, 2801, 2802, 3500, 3998}
         )
         tensorlist = [
             make_tensor((2, 3), dtype=dtype, device=device, noncontiguous=False)
@@ -1109,7 +1111,7 @@ class TestForeach(TestCase):
     @ops(foreach_reduce_op_db)
     @parametrize("w_empty", (False, True))
     def test_foreach_reduce_large_input(self, device, dtype, op, w_empty):
-        # test inputs larger than kChunkSize (65536) * max_num_blocks (320)
+        # test inputs larger than kChunkSize (65536) * max_num_blocks (2240 for the 32kb config)
         N = 65536 * 320 * 2
         disable_fastpath = False
         kwargs = {}

@@ -48,18 +48,6 @@ annotation_log = getArtifactLogger(__name__, "annotation")
 strict_zip = partial(zip, strict=True)
 
 
-def _get_symint_hints(exprs: Any) -> Any:
-    """
-    Get the hints of a list/tuple of int/SymInt.
-    """
-    if isinstance(exprs, (list, tuple)):
-        return type(exprs)(_get_symint_hints(e) for e in exprs)
-    elif isinstance(exprs, torch.SymInt):
-        return exprs.node.shape_env.size_hint(exprs.node.expr)
-    else:
-        return exprs
-
-
 def partial_flatten_asdict(obj: object) -> Any:
     if dataclasses.is_dataclass(obj):
         return {

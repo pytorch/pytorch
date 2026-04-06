@@ -25,7 +25,6 @@ from torch.nn.modules.utils import _pair, _single
 
 hu.assert_deadline_disabled()
 
-from typing import Optional
 
 import torch.backends.xnnpack
 from torch.ao.quantization import PerChannelMinMaxObserver
@@ -168,7 +167,7 @@ def _get_random_tensor_and_q_params(shapes, rand_scale, torch_type):
         X_scale = 1e-10
     return X, X_scale, X_zero_point
 
-def _quantize_fp8e4m3(t: torch.Tensor, channelwise: bool, scale: Optional[torch.Tensor] = None):
+def _quantize_fp8e4m3(t: torch.Tensor, channelwise: bool, scale: torch.Tensor | None = None):
     quant_max = torch.finfo(torch.float8_e4m3fn).max
     eps = torch.Tensor([torch.finfo(torch.float32).eps])
     if channelwise:
@@ -3116,9 +3115,9 @@ class TestQuantizedOps(TestCase):
                 query,
                 key,
                 value,
-                key_padding_mask: Optional[torch.Tensor] = None,
+                key_padding_mask: torch.Tensor | None = None,
                 need_weights: bool = True,
-                attn_mask: Optional[torch.Tensor] = None,
+                attn_mask: torch.Tensor | None = None,
             ):
                 return self.layer(query, key, value, key_padding_mask, need_weights, attn_mask)
 

@@ -19,7 +19,7 @@ import math
 import operator
 import types
 from collections.abc import Callable
-from typing import Literal, TypeAlias, Union
+from typing import Literal, TypeAlias
 
 import torch
 import torch._ops
@@ -28,7 +28,7 @@ from torch.onnx._internal.exporter import _constants, _schemas
 from torch.onnx._internal.exporter._torchlib import _torchlib_registry
 
 
-TorchOp: TypeAlias = Union[torch._ops.OpOverload, types.BuiltinFunctionType, Callable]
+TorchOp: TypeAlias = torch._ops.OpOverload | types.BuiltinFunctionType | Callable
 
 logger = logging.getLogger(__name__)
 

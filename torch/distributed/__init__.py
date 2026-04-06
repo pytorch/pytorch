@@ -169,7 +169,8 @@ else:
     # stubs as necessary.
     # We cannot define stubs directly because they confuse pyre
 
-    class _ProcessGroupStub:
+    class _Stub:
         pass
 
-    sys.modules["torch.distributed"].ProcessGroup = _ProcessGroupStub  # type: ignore[attr-defined]
+    sys.modules["torch.distributed"].GroupName = _Stub  # type: ignore[attr-defined]
+    sys.modules["torch.distributed"].ProcessGroup = _Stub  # type: ignore[attr-defined]

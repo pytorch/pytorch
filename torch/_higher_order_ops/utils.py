@@ -1030,8 +1030,11 @@ def check_input_alias_and_mutation_return_outputs(
     def _get_example_value(n):
         if not isinstance(n, torch.fx.Node):
             return n
-        else:
-            return n.meta["val"] if "val" in n.meta else n.meta["example_value"]
+        if "val" in n.meta:
+            return n.meta["val"]
+        if "example_value" in n.meta:
+            return n.meta["example_value"]
+        return None
 
     fake_args = [
         _get_example_value(n)

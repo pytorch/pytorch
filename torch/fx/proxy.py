@@ -12,7 +12,7 @@ import traceback
 from collections import OrderedDict
 from collections.abc import Callable, Iterator
 from dataclasses import fields, is_dataclass
-from typing import Any, Optional, TypeVar
+from typing import Any, TypeVar
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -205,8 +205,8 @@ class TracerBase:
         target: Target,
         args: tuple[Argument, ...],
         kwargs: dict[str, Argument],
-        name: Optional[str] = None,
-        type_expr: Optional[Any] = None,
+        name: str | None = None,
+        type_expr: Any | None = None,
     ) -> Node:
         """
         Inserts a graph node given target, args, kwargs, and name.
@@ -324,8 +324,8 @@ class TracerBase:
         target: Target,
         args: tuple[Any, ...],
         kwargs: dict[str, Any],
-        name: Optional[str] = None,
-        type_expr: Optional[Any] = None,
+        name: str | None = None,
+        type_expr: Any | None = None,
         # fix noqa when updating bc tests
         proxy_factory_fn: Callable[[Node], "Proxy"] = None,  # noqa: RUF013
     ):
@@ -609,7 +609,7 @@ class Proxy:
     """
 
     @compatibility(is_backward_compatible=True)
-    def __init__(self, node: Node, tracer: "Optional[TracerBase]" = None):
+    def __init__(self, node: Node, tracer: "TracerBase | None" = None):
         if tracer is None:
             # This allows you to create a Proxy object around a raw Node
             tracer = GraphAppendingTracer(node.graph)
@@ -788,9 +788,7 @@ class MetaProxy(Proxy):
     A Proxy subclass that propagates metadata (meta['val']) during graph tracing.
     """
 
-    def __init__(
-        self, node: Node, tracer: "Optional[TracerBase]" = None, fake_mode=None
-    ):
+    def __init__(self, node: Node, tracer: "TracerBase | None" = None, fake_mode=None):
         super().__init__(node, tracer)
         self.fake_mode = fake_mode
 
@@ -829,7 +827,7 @@ class Attribute(Proxy):
         self.root = root
         self.attr = attr
         self.tracer = root.tracer
-        self._node: Optional[Node] = None
+        self._node: Node | None = None
 
     @property
     def node(self):

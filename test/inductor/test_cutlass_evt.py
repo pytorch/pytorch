@@ -12,7 +12,7 @@ from torch._inductor.codegen.cutlass.utils import (
 from torch._inductor.ir import ComputedBuffer, FixedLayout, PermuteView, Pointwise
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.utils import OrderedSet
-from torch.testing._internal.common_cuda import SM90OrLater
+from torch.testing._internal.common_cuda import IS_SM100, IS_SM90, SM90OrLater
 from torch.testing._internal.inductor_utils import (
     HAS_CPU,
     HAS_CUDA_AND_TRITON,
@@ -66,8 +66,16 @@ if try_import_cutlass():
         ),
     }
 
+    # For SM100
+    class MockMathInstruction:
+        def __init__(self):
+            self.opcode_class = cutlass_lib.library.OpcodeClass.TensorOp
+
     class MockTileDescription:
         threadblock_shape = (128, 128, 8)
+        # SM100 path
+        cluster_shape = (1, 1, 1)
+        math_instruction = MockMathInstruction()
 
     def _create_mock_buffer_name_map(example_tensors):
         name_to_buffer = {}
@@ -441,7 +449,7 @@ def fn(accum, bias):
 """,
         )
 
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(not SM90OrLater, "need sm_90 or later")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_codegen(self):
         _, _, code, _ = trace(
@@ -454,9 +462,10 @@ def fn(accum, bias):
             _create_mock_buffer_name_map(EXAMPLE_TENSORS),
             lambda x: x,  # static shapes
         )
-        self.assertExpectedInline(
-            code,
-            """\
+        if IS_SM90:
+            self.assertExpectedInline(
+                code,
+                """\
 
 using EpilogueDescriptor = cutlass::epilogue::collective::detail::EpilogueDescriptor<
   cute::Shape<_128, _128, _8>, cutlass::epilogue::collective::EpilogueTileAuto,
@@ -554,7 +563,110 @@ using ElementD = float;
 using StrideD = cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>;
 
 """,
-        )
+            )
+
+        if IS_SM100:
+            self.assertExpectedInline(
+                code,
+                """\
+
+using EpilogueDescriptor = cutlass::epilogue::collective::detail::Sm100EpilogueDescriptor<
+  cutlass::arch::OpClassTensorOp,
+  cute::Shape<_128, _128, _8>, cutlass::epilogue::collective::EpilogueTileAuto,
+  float, float, float,
+  cutlass::epilogue::collective::EpilogueScheduleAuto, cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>, cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>,
+  false /* IsPerColScaleSupported */,
+  false /* IsBlockScaleSupported */
+>;
+
+using ElementC = float;
+using StrideC = cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>;
+using TensorC = cutlass::epilogue::fusion::Sm90SrcFetch<float>;
+
+using Accum = cutlass::epilogue::fusion::Sm90AccFetch;
+
+using AuxDescriptor = cutlass::epilogue::collective::detail::Sm100AuxLoadDescriptor<EpilogueDescriptor, cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>, float>;
+
+using Aux = cutlass::epilogue::fusion::Sm90AuxLoad<
+    AuxDescriptor::Stages, typename AuxDescriptor::EpilogueTile, float,
+    cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>, typename AuxDescriptor::SmemLayoutAtom, typename AuxDescriptor::CopyOpS2R
+>;
+
+using Bias = cutlass::epilogue::fusion::Sm90ColBroadcast<
+    0 /*Stages*/, typename EpilogueDescriptor::TileShape, float, float,
+    cute::Stride<cute::Int<1>, cute::Int<0>, cute::Int<0>>
+>;
+
+using Compute0 = cutlass::epilogue::fusion::Sm90Compute<
+    cutlass::plus, float, float,
+    cutlass::FloatRoundStyle::round_to_nearest
+>;
+
+using EVTCompute0 = cutlass::epilogue::fusion::Sm90EVT<
+    Compute0,
+    Accum,
+    TensorC>;
+
+using Compute1 = cutlass::epilogue::fusion::Sm90Compute<
+    cutlass::plus, float, float,
+    cutlass::FloatRoundStyle::round_to_nearest
+>;
+
+using EVTCompute1 = cutlass::epilogue::fusion::Sm90EVT<
+    Compute1,
+    EVTCompute0,
+    Aux>;
+
+using FDescriptor = cutlass::epilogue::collective::detail::Sm100AuxStoreDescriptor<
+    EpilogueDescriptor, cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>, float
+>;
+
+using F = cutlass::epilogue::fusion::Sm90AuxStore<
+    FDescriptor::Stages, typename FDescriptor::EpilogueTile, float,
+    cutlass::FloatRoundStyle::round_to_nearest, cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>, typename FDescriptor::SmemLayoutAtom,
+    typename FDescriptor::CopyOpR2S
+>;
+
+using EVTF = cutlass::epilogue::fusion::Sm90EVT<
+    F,
+    EVTCompute1>;
+
+using Compute2 = cutlass::epilogue::fusion::Sm90Compute<
+    cutlass::epilogue::thread::ReLu, float, float,
+    cutlass::FloatRoundStyle::round_to_nearest
+>;
+
+using Compute3 = cutlass::epilogue::fusion::Sm90Compute<
+    cutlass::plus, float, float,
+    cutlass::FloatRoundStyle::round_to_nearest
+>;
+
+using Compute4 = cutlass::epilogue::fusion::Sm90Compute<
+    cutlass::plus, float, float,
+    cutlass::FloatRoundStyle::round_to_nearest
+>;
+
+using DagCompute4 = cutlass::epilogue::fusion::Sm90TopologicalVisitor<
+    float,
+    cute::tuple<
+        cute::seq<>,
+        cute::seq<>,
+        cute::seq<0>,
+        cute::seq<2, 1>,
+        cute::seq<3, 0>,
+    >,
+    EVTF,
+    Bias,
+    Compute2,
+    Compute3,
+    Compute4
+>;
+
+using ElementD = float;
+using StrideD = cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>;
+
+""",  # noqa: B950
+            )
 
 
 if __name__ == "__main__":

@@ -29,6 +29,7 @@ from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     FSDPInitMode,
     FSDPTestContinuous,
+    FSDPTestMultiThread,
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
@@ -405,9 +406,7 @@ class TestFSDPHybridShard(FSDPTestContinuous):
         hsdp_sharding_strategy: ShardingStrategy,
         sharding_strategy_mode: str,
         use_orig_params: bool,
-        hsdp_process_groups: Optional[
-            tuple[dist.ProcessGroup, dist.ProcessGroup]
-        ] = None,
+        hsdp_process_groups: tuple[dist.ProcessGroup, dist.ProcessGroup] | None = None,
         hsdp_device_mesh: Optional = None,
     ):
         if not (hsdp_process_groups is None or hsdp_device_mesh is None):
@@ -450,6 +449,69 @@ class TestFSDPHybridShard(FSDPTestContinuous):
                 use_orig_params=use_orig_params,
             )
         return hsdp_model
+
+
+class TestHSDPSyncModuleStates(FSDPTestMultiThread):
+    class _ModelWithBuffer(nn.Module):
+        def __init__(self, device):
+            super().__init__()
+            self.lin = nn.Linear(10, 10, device=device)
+            self.bn = nn.BatchNorm1d(10, device=device)
+
+        def forward(self, x):
+            return self.bn(self.lin(x))
+
+    @property
+    def world_size(self) -> int:
+        return 4
+
+    @skip_if_lt_x_gpu(1)
+    def test_hsdp_buffer_sync_from_meta_device(self):
+        """Test that HSDP sync_module_states correctly broadcasts buffers
+        when only rank 0 has real weights and other ranks use meta device.
+
+        _sync_module_params_and_buffers marks buffers with FSDP_SYNCED=True
+        to avoid redundant syncs in nested wrapping. With two-phase broadcast
+        (inter-node then intra-node), this flag must be reset between phases,
+        otherwise the intra-node broadcast skips buffers. Non-persistent
+        buffers (e.g. RoPE inv_freq) that are materialized from meta device
+        via to_empty() and not restored by reset_parameters() would remain
+        as uninitialized values on local ranks 1..N.
+
+        Parameters are unaffected by broadcast order because they are
+        unconditionally included in every sync call. This test specifically
+        targets buffers, which are the only tensors gated by FSDP_SYNCED.
+        """
+        dev = torch.device(device_type)
+        mesh_2d = init_device_mesh(device_type, (2, self.world_size // 2))
+
+        if self.rank == 0:
+            model = self._ModelWithBuffer(device=dev)
+            model.bn.running_mean.fill_(42.0)
+            model.bn.running_var.fill_(7.0)
+        else:
+            model = self._ModelWithBuffer(device="meta")
+
+        def param_init_fn(module):
+            if any(p.is_meta for p in module.parameters(recurse=False)) or any(
+                b.is_meta for b in module.buffers(recurse=False)
+            ):
+                module.to_empty(device=dev, recurse=False)
+
+        model = FSDP(
+            model,
+            device_mesh=mesh_2d,
+            sharding_strategy=ShardingStrategy.HYBRID_SHARD,
+            use_orig_params=True,
+            sync_module_states=True,
+            param_init_fn=param_init_fn,
+        )
+
+        # Buffers are not sharded by FSDP, so each rank has a local copy.
+        # If the FSDP_SYNCED reset is missing, ranks on non-source nodes
+        # will have uninitialized buffer values instead of rank 0's values.
+        self.assertEqual(model.bn.running_mean, torch.full((10,), 42.0))
+        self.assertEqual(model.bn.running_var, torch.full((10,), 7.0))
 
 
 instantiate_parametrized_tests(TestFSDPHybridShard)

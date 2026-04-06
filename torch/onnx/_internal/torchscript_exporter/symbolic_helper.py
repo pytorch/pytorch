@@ -110,7 +110,7 @@ from typing import (
     NoReturn,
     TypeVar as _TypeVar,
 )
-from typing_extensions import ParamSpec as _ParamSpec
+from typing_extensions import ParamSpec as _ParamSpec, TypeIs as _TypeIs
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -561,7 +561,7 @@ def _is_none(x: Any) -> bool:
     return x is None or (x.node().mustBeNone() if isinstance(x, _C.Value) else False)
 
 
-def _is_value(x: Any) -> bool:
+def _is_value(x: Any) -> _TypeIs[_C.Value]:
     return isinstance(x, _C.Value)
 
 

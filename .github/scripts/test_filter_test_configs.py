@@ -376,12 +376,30 @@ class TestConfigFilter(TestCase):
             scheduled_test_matrix = set_periodic_modes(test_matrix, job_name)
 
             expected_modes = [
-                m for m, c in SUPPORTED_PERIODICAL_MODES.items() if c(job_name)
+                m for m, c in SUPPORTED_PERIODICAL_MODES.items() if c(job_name, None)
             ]
             self.assertEqual(
                 len(test_matrix["include"]) * len(expected_modes),
                 len(scheduled_test_matrix["include"]),
             )
+
+    def test_set_periodic_modes_gpu_runner(self) -> None:
+        """Job name without 'cuda' but runner indicates a CUDA job (e.g. inductor-unittest)."""
+        test_matrix = yaml.safe_load(
+            "{include: ["
+            '{config: "inductor", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu"}, '
+            '{config: "inductor", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu"}'
+            "]}"
+        )
+        scheduled = set_periodic_modes(test_matrix, "inductor-build / build")
+
+        modes_per_config = [
+            entry.get("mem_leak_check") or entry.get("rerun_disabled_tests")
+            for entry in scheduled["include"]
+        ]
+        self.assertIn("mem_leak_check", modes_per_config)
+        self.assertIn("rerun_disabled_tests", modes_per_config)
+        self.assertEqual(len(scheduled["include"]), 4)
 
     @mock.patch("filter_test_configs.download_json")
     def test_remove_disabled_jobs(self, mock_download_json: Any) -> None:

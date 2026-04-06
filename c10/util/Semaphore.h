@@ -8,7 +8,13 @@
 
 // note: __cpp_lib_semaphore will not be defined in some apple platforms
 // even if >= C++20.
-#if __has_include(<semaphore>) && defined(__cpp_lib_semaphore) && __cpp_lib_semaphore >= 201907L
+//
+// libstdc++'s __atomic_semaphore has a lost-wakeup bug: _M_release skips
+// the futex notify when the counter is already positive, but a concurrent
+// _S_do_try_acquire can fail its CAS, see zero, and block — missing the
+// wakeup. https://gcc.gnu.org/bugzilla/show_bug.cgi?id=98033
+#if __has_include(<semaphore>) && defined(__cpp_lib_semaphore) && \
+    __cpp_lib_semaphore >= 201907L && !defined(__GLIBCXX__)
 #define C10_SEMAPHORE_USE_STL
 #endif
 

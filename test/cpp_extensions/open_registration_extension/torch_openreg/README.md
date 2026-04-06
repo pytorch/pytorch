@@ -6,7 +6,7 @@ The third-party device integration mechanism based on PrivateUse1 has become the
 
 **Note:**
 
-The goal of `torch_openreg` is **not to implement a fully functional, high-performance PyTorch backend**, but to serve as a **minimalist reference implementation for mechanism verification**.
+The goal of `OpenReg` codebase is **not to implement a fully functional, high-performance PyTorch backend**, but to serve as a **minimalist reference implementation for mechanism verification**.
 
 ### Purpose
 
@@ -17,7 +17,7 @@ The goal of `torch_openreg` is **not to implement a fully functional, high-perfo
 ### Design Principles
 
 - **Minimality Principle**: The fundamental goal is to enable/verify all integration paths/mechanisms for a new backend to integrate to PyTorch. All functions follow a "just right" strategy to ensure the correctness of relevant integration capabilities.
-- **Authenticity Principle**: To complete the OpenReg integration in the same way a real accelerator backend would integrate with PyTorch.
+- **Authenticity Principle**: To complete the `OpenReg` integration in the same way a real accelerator backend would integrate with PyTorch.
 
 ## Directory Structure
 
@@ -101,7 +101,7 @@ There are 4 DSOs in torch_openreg, and the dependencies between them are as foll
 - `csrc/`: Core device implementation, including operator registration, runtime, etc.
   - `csrc/amp/`: AMP(Automatic Mixed Precision)
   - `csrc/aten/`: Operator registration
-    - `csrc/aten/native/`: Specific operator implementations for the OpenReg device.
+    - `csrc/aten/native/`: Specific operator implementations for the `openreg` device.
       - `csrc/aten/native/OpenRegMinimal.cpp`: The most minimal set of operator implementations (allowing for the creation of Tensors and related operations upon completion).
       - `csrc/aten/native/OpenRegExtra.cpp`: Implementations for other types of operators.
   - `csrc/runtime/`: Implementations for Host memory, device memory, Guard, Hooks, etc.
@@ -131,7 +131,7 @@ There are 4 DSOs in torch_openreg, and the dependencies between them are as foll
 
 ### Autoload
 
-When `import torch`, installed accelerators (such as `torch_openreg`) will be automatically loaded, achieving the same experience as the built-in backends.
+When `import torch`, installed accelerators (such as `openreg`) will be automatically loaded, achieving the same experience as the built-in backends.
 
 - Register the backend with Python `entry points`: See `setup` in `setup.py`
 - Add a callable function for backend initialization: See `_autoload` in `torch_openreg/__init__.py`

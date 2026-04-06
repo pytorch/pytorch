@@ -39,6 +39,7 @@ from .streams import (
     insert_backward_syncs,
     populate_fw_metadata_with_stream_indices,
     sync_deallocations,
+    wrap_all_sync_nodes_with_control_deps,
 )
 from .utils import (
     call_and_expect_output_descs,
@@ -261,9 +262,9 @@ def aot_dispatch_base_graph(
 
     aot_graphs_log.debug(
         "aot_config id: %s, fw_metadata=%s,subclass_metadata=%s",
-        str(aot_config.aot_id),
-        str(fw_metadata),
-        str(maybe_subclass_meta),
+        aot_config.aot_id,
+        fw_metadata,
+        maybe_subclass_meta,
     )
 
     # We track buffer assignments when exporting in non-strict mode.
@@ -327,6 +328,8 @@ def aot_dispatch_base_graph(
     if not aot_config.disable_functionalization:
         copy_count = assert_functional_graph(fw_module.graph)
         assign_epilogue_copy_streams(fw_module)
+        # Wrap sync nodes with control_deps to prevent reordering
+        wrap_all_sync_nodes_with_control_deps(fw_module)
         # Populate fw_metadata with stream indices from the compiled graph
         populate_fw_metadata_with_stream_indices(fw_module, fw_metadata)
         fw_module.graph.eliminate_dead_code()
@@ -539,6 +542,10 @@ def aot_dispatch_autograd_graph(
     # Sync deallocations for tensors where the stream w/ their last usage
     # is distinct from their allocation stream
     sync_deallocations(fx_g)
+
+    # Wrap sync nodes with control_deps to prevent reordering
+    # (must be after sync_deallocations which inserts additional sync nodes)
+    wrap_all_sync_nodes_with_control_deps(fx_g)
 
     # Populate fw_metadata with stream indices from the compiled graph
     # NB: This needs to be done after the above stream assignments

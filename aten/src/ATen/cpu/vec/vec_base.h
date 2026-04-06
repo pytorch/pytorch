@@ -68,7 +68,7 @@ Windows llvm will not have this definition.
 #define VECTOR_WIDTH 64
 #define int_vector __m512i
 #elif defined(__aarch64__) && \
-    !defined(CPU_CAPABILITY_SVE) // CPU_CAPABILITY_AVX512
+    !defined(CPU_CAPABILITY_SVE256) // CPU_CAPABILITY_AVX512
 // SVE code expects 256-vectors; leave that set for SVE?
 #if defined(__GNUC__)
 #define __at_align__ __attribute__((aligned(16)))

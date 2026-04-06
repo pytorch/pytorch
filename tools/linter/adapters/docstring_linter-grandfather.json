@@ -31,7 +31,7 @@
   },
   "torch/_inductor/codegen/cpp.py": {
     "class CppKernelProxy": 616,
-    "class CppOverrides": 437,
+    "class CppOverrides": 496,
     "class CppScheduling": 819,
     "class CppVecKernel": 867,
     "class OuterLoopFusedSchedulerNode": 159,
@@ -79,7 +79,7 @@
   },
   "torch/_inductor/codegen/halide.py": {
     "class HalideKernel": 999,
-    "class HalideOverrides": 339,
+    "class HalideOverrides": 384,
     "class HalidePrinter": 128,
     "def HalideKernel.halide_kernel_meta()": 82
   },

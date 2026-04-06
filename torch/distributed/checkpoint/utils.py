@@ -261,6 +261,7 @@ class _DistWrapper:
         final_result = self.broadcast_object(result)
         if isinstance(final_result, CheckpointException):
             raise final_result
+        # pyrefly: ignore [redundant-cast]
         return cast(R, final_result)
 
     def all_gather(
@@ -310,6 +311,7 @@ class _DistWrapper:
         final_result = self.broadcast_object(result)
         if isinstance(final_result, CheckpointException):
             raise final_result
+        # pyrefly: ignore [redundant-cast]
         return cast(T, final_result)
 
     def barrier(self) -> None:

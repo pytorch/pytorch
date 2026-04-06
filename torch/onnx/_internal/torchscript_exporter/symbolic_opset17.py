@@ -19,7 +19,6 @@ New operators:
 
 import functools
 from collections.abc import Sequence
-from typing import Optional
 
 import torch
 from torch import _C
@@ -108,13 +107,13 @@ def stft(
     g: jit_utils.GraphContext,
     input: _C.Value,
     n_fft: int,
-    hop_length: Optional[int] = None,
-    win_length: Optional[int] = None,
-    window: Optional[_C.Value] = None,
+    hop_length: int | None = None,
+    win_length: int | None = None,
+    window: _C.Value | None = None,
     normalized: bool = False,
-    onesided: Optional[bool] = True,
-    return_complex: Optional[bool] = False,
-    align_to_window: Optional[bool] = None,
+    onesided: bool | None = True,
+    return_complex: bool | None = False,
+    align_to_window: bool | None = None,
 ) -> _C.Value:
     """Associates `torch.stft` with the `STFT` ONNX operator.
     Note that torch.stft calls _VF.stft, without centering or padding options.

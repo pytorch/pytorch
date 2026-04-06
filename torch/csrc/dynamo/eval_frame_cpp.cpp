@@ -96,9 +96,7 @@ py::object get_null_stack_value() {
 py::list _get_frame_value_stack_with_depth(
     const py::handle& frame_obj,
     int depth) {
-  if (!PyFrame_Check(frame_obj.ptr())) {
-    throw py::type_error("expected a frame object!");
-  }
+  TORCH_CHECK_TYPE(PyFrame_Check(frame_obj.ptr()), "expected a frame object!");
 
   py::list result;
   if (depth <= 0) {
@@ -211,6 +209,49 @@ py::list _get_frame_value_stack_with_depth(
 static constexpr const char* cache_lookup_profiler_str =
     "TorchDynamo Cache Lookup";
 
+// Cache the random module to avoid calling py::module_::import("random") at
+// arbitrary points during execution. torch.package overrides the import
+// machinery, and importing "random" inside a package archive context would fail
+// if random isn't in the extern list.
+// Stored as raw PyObject* (leaked ref) to avoid destructor running after Python
+// finalizes, same pattern as bytecode_debugger_callback_obj above.
+static PyObject* random_module = nullptr;
+static py::handle get_random_module() {
+  if (random_module == nullptr) {
+    random_module = py::module_::import("random").release().ptr();
+  }
+  return py::handle(random_module);
+}
+
+// Use RAII to save/restore global state across the dynamo callback
+class PreserveGlobalState {
+  py::object random_state;
+
+ public:
+  PreserveGlobalState() {
+    this->random_state = get_random_module().attr("getstate")();
+  }
+  PreserveGlobalState(const PreserveGlobalState&) = delete;
+  PreserveGlobalState(PreserveGlobalState&&) = delete;
+  PreserveGlobalState& operator=(const PreserveGlobalState&) = delete;
+  PreserveGlobalState& operator=(PreserveGlobalState&&) = delete;
+  ~PreserveGlobalState() {
+    try {
+      get_random_module().attr("setstate")(this->random_state);
+    } catch (py::error_already_set& e) {
+      try {
+        e.restore();
+      } catch (...) {
+        // Intentionally return to silence empty catch linter.
+        // We can't propagate exceptions since we are in a destructor.
+        return;
+      }
+    } catch (...) {
+      return;
+    }
+  }
+};
+
 // Remember to update the type signature for DynamoCallbackFn.__call__ in
 // torch/_dynamo/types.py if this function's signature changes.
 static py::object dynamo_call_callback(
@@ -251,9 +292,9 @@ static py::handle _callback_from_action(
 static int32_t c_recursion_limit = -1;
 
 void dynamo_set_c_recursion_limit(int32_t limit) {
-  if (limit < 1 && limit != -1) {
-    throw std::range_error("recursion limit must be >= 1, or -1 to reset");
-  }
+  TORCH_CHECK_VALUE(
+      limit >= 1 || limit == -1,
+      "recursion limit must be >= 1, or -1 to reset");
   c_recursion_limit = limit;
 }
 
@@ -353,7 +394,7 @@ PyObject* dynamo__custom_eval_frame(
     // immediately skip the frame, and (2) even if it did, this would only
     // be profitable if there was tensor code in the unwinding code.  Seems
     // unlikely.
-    DEBUG_TRACE("throw %s", get_frame_name(frame));
+    DEBUG_TRACE("throw %s", get_frame_name(frame)); // @allow-raw-throw
     return dynamo_eval_frame_default(tstate, frame, throw_flag);
   }
 
@@ -567,6 +608,7 @@ PyObject* dynamo__custom_eval_frame(
       fail();
       return eval_result;
     }
+    PreserveGlobalState preserve_global_state;
     callback_result = dynamo_call_callback(
         callback, frame, locals.get(), cache_entry, frame_state);
     new_strategy =

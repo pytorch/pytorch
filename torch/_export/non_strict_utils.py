@@ -9,7 +9,7 @@ import sys
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from contextlib import contextmanager
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, TypeGuard
 
 import torch
 import torch.utils._pytree as pytree
@@ -25,7 +25,8 @@ from torch._export.passes.lift_constants_pass import ConstantAttrMap
 from torch._export.utils import _fakify_params_buffers
 from torch._guards import Source
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_opaque_value
+from torch._opaque_base import OpaqueBase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Constraint
 from torch.export.dynamic_shapes import (
@@ -177,7 +178,7 @@ def fakify(
     if (
         _is_constant_argument(t)
         or isinstance(t, (torch.ScriptObject, torch.nn.Module))
-        or is_opaque_type(type(t))
+        or is_opaque_value(t)
     ):
         return t
 
@@ -257,11 +258,18 @@ def _create_symbolic_context_for_tensor(t, source, t_constraints, sources, mode)
 
         # Propagate outer tensor constraints to inner tensors if not already present
         for attr in attrs:
-            inner_tensor = getattr(t, attr)
-            inner_source = AttrSource(source, attr)
-            inner_contexts[attr] = _create_symbolic_context_for_tensor(
-                inner_tensor, inner_source, t_constraints, sources, mode
-            )
+            match getattr(t, attr):
+                case torch.Tensor() as inner_value:
+                    inner_source = AttrSource(source, attr)
+                    inner_contexts[attr] = _create_symbolic_context_for_tensor(
+                        inner_value, inner_source, t_constraints, sources, mode
+                    )
+                case OpaqueBase():
+                    pass
+                case unexpected:
+                    raise AssertionError(
+                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                    )
 
         symbolic_context = SubclassSymbolicContext(
             dynamic_sizes=dynamic_sizes,
@@ -615,7 +623,7 @@ def produce_guards_and_solve_constraints(
         raise constraint_violation_error
 
 
-def is_int(x: object) -> bool:
+def is_int(x: object) -> TypeGuard[int | torch.SymInt]:
     return isinstance(x, int) or (isinstance(x, torch.SymInt) and x.node.expr.is_number)
 
 
@@ -984,7 +992,7 @@ def _fakify_script_objects(
         for obj, fqns in constant_attrs.items():
             if torch._library.fake_class_registry._is_script_object(
                 obj
-            ) or is_opaque_type(obj):
+            ) or is_opaque_value(obj):
                 fake_script_obj = _maybe_fakify_obj(obj)
                 for fqn in fqns:
                     cur_mod, attr = _leaf_mod_and_attr(mod, fqn)

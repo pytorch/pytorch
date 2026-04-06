@@ -25,7 +25,7 @@ DOT_OPTIMIZED = True
 _n_dims_created = 0
 
 
-def _relevant_op(opcode: Optional[str]) -> bool:
+def _relevant_op(opcode: str | None) -> bool:
     """Check if opcode is relevant for variable assignment."""
     return bool(opcode and opcode.startswith("STORE_"))
 
@@ -35,14 +35,14 @@ def handle_from_tensor(tensor: torch.Tensor) -> torch.Tensor:
     return tensor
 
 
-def _create_dim(name: str, size: Optional[int] = None) -> Dim:
+def _create_dim(name: str, size: int | None = None) -> Dim:
     """Create a new Dim object."""
     return Dim(name, size if size is not None else -1)
 
 
 def dims(
-    n: Optional[int] = None, sizes: Optional[list[Optional[int]]] = None
-) -> Union[Dim, tuple[Dim, ...]]:
+    n: int | None = None, sizes: list[int | None] | None = None
+) -> Dim | tuple[Dim, ...]:
     """
     Create and return one or more Dim objects.
 
@@ -148,14 +148,14 @@ class DimList:
     2. Bound: Either created with specific dimensions/sizes, or bound later via bind() or bind_len()
     """
 
-    _name: Optional[str]
+    _name: str | None
     _dims: list[Dim]
     _bound: bool
 
     def __init__(
         self,
-        len_or_dims: Optional[Union[int, Sequence]] = None,
-        name: Optional[str] = None,
+        len_or_dims: int | Sequence | None = None,
+        name: str | None = None,
     ):
         """
         Initialize a new DimList object.
@@ -249,7 +249,7 @@ class DimList:
         """Return the length of the DimList."""
         return self.size()
 
-    def __getitem__(self, key: Union[int, slice]) -> Union[Dim, tuple[Dim, ...]]:
+    def __getitem__(self, key: int | slice) -> Dim | tuple[Dim, ...]:
         if not self._bound:
             raise DimensionBindError("DimList not bound")
 
@@ -288,14 +288,12 @@ class DimList:
         func: Callable,
         types: tuple,
         args: tuple = (),
-        kwargs: Optional[dict] = None,
+        kwargs: dict | None = None,
     ) -> Any:
         return _Tensor.__torch_function__(func, types, args, kwargs)
 
 
-def _create_dimlist(
-    name: str, size: Optional[Union[int, list[Optional[int]]]] = None
-) -> DimList:
+def _create_dimlist(name: str, size: int | list[int | None] | None = None) -> DimList:
     """Create a DimList object with the given name and optional size."""
     dimlist = DimList(name=name)
     if size is not None:
@@ -311,8 +309,8 @@ def _create_dimlist(
 
 
 def dimlists(
-    n: Optional[int] = None, sizes: Optional[list[Optional[int]]] = None
-) -> Union[DimList, tuple[DimList, ...]]:
+    n: int | None = None, sizes: list[int | None] | None = None
+) -> DimList | tuple[DimList, ...]:
     """
     Create and return one or more DimList objects.
 
@@ -429,7 +427,7 @@ class _Tensor:
     def _get_levels(self) -> list[Any]:
         raise NotImplementedError("_get_levels must be implemented by subclass")
 
-    def _get_tensor(self) -> Optional[torch.Tensor]:
+    def _get_tensor(self) -> torch.Tensor | None:
         raise NotImplementedError("_get_tensor must be implemented by subclass")
 
     @property
@@ -449,7 +447,7 @@ class _Tensor:
         func: Callable,
         types: tuple,
         args: tuple = (),
-        kwargs: Optional[dict] = None,
+        kwargs: dict | None = None,
     ) -> Any:
         if kwargs is None:
             kwargs = {}
@@ -714,14 +712,12 @@ class _Tensor:
 
     def index(
         self,
-        dims: Union[int, Dim, tuple[Union[int, Dim], ...], list[Union[int, Dim]]],
-        indices: Union[
-            int,
-            slice,
-            torch.Tensor,
-            tuple[Union[int, slice, torch.Tensor], ...],
-            list[Union[int, slice, torch.Tensor]],
-        ],
+        dims: int | Dim | tuple[int | Dim, ...] | list[int | Dim],
+        indices: int
+        | slice
+        | torch.Tensor
+        | tuple[int | slice | torch.Tensor, ...]
+        | list[int | slice | torch.Tensor],
     ) -> _Tensor:
         """
         Index tensor using first-class dimensions.
@@ -751,8 +747,8 @@ class _Tensor:
             else:
                 raise TypeError(f"dimension {repr(d.dim())} not in tensor")
 
-        dims_list: list[Union[int, Dim]] = []
-        indices_list: list[Union[int, slice, torch.Tensor]] = []
+        dims_list: list[int | Dim] = []
+        indices_list: list[int | slice | torch.Tensor] = []
 
         lhs_list = isinstance(dims, (tuple, list))
         rhs_list = isinstance(indices, (tuple, list))
@@ -890,8 +886,8 @@ class Dim(_Tensor):
     _level: int
     _name: str
     _size: int
-    _range: Optional[torch.Tensor]
-    _batchtensor: Optional[torch.Tensor]
+    _range: torch.Tensor | None
+    _batchtensor: torch.Tensor | None
 
     def __init__(self, name: str, s: int = -1) -> None:
         global _n_dims_created
@@ -968,13 +964,13 @@ class Dim(_Tensor):
 # is somewhat intentional, as FCD tensors are intended to be substitutable
 # with regular Tensor (just with some positional dims hidden).
 class Tensor(_Tensor):
-    _tensor: Optional[torch.Tensor]
-    _batchtensor: Optional[torch.Tensor]
+    _tensor: torch.Tensor | None
+    _batchtensor: torch.Tensor | None
     _levels: list[DimEntry]
     _has_device: bool
-    _delayed: Optional[Callable[[], torch.Tensor]]
-    _delayed_orig: Optional[Callable]
-    _delayed_args: Optional[tuple]
+    _delayed: Callable[[], torch.Tensor] | None
+    _delayed_orig: Callable | None
+    _delayed_args: tuple | None
 
     @property
     def ndim(self) -> int:
@@ -987,7 +983,7 @@ class Tensor(_Tensor):
     @classmethod
     def from_positional(
         cls, tensor: torch.Tensor, levels: list[DimEntry], has_device: bool
-    ) -> Union[_Tensor, torch.Tensor]:
+    ) -> _Tensor | torch.Tensor:
         """
         Create a functorch Tensor from a regular PyTorch tensor with specified dimension levels.
 
@@ -1073,7 +1069,7 @@ class Tensor(_Tensor):
 
         return result
 
-    def _get_tensor(self) -> Optional[torch.Tensor]:
+    def _get_tensor(self) -> torch.Tensor | None:
         """Get the underlying tensor, handling delayed operations if needed."""
         if (
             hasattr(self, "_delayed")
@@ -1096,7 +1092,7 @@ class Tensor(_Tensor):
         """Get whether this tensor has device information."""
         return self._has_device
 
-    def _get_batchtensor(self) -> Optional[torch.Tensor]:
+    def _get_batchtensor(self) -> torch.Tensor | None:
         """Get the batched tensor representation, creating it lazily if needed."""
         if self._batchtensor is None:
             self._batchtensor = self._add_batch_dims(
@@ -1105,8 +1101,8 @@ class Tensor(_Tensor):
         return self._batchtensor
 
     def _add_batch_dims(
-        self, t: Optional[torch.Tensor], levels_: list[Any]
-    ) -> Optional[torch.Tensor]:
+        self, t: torch.Tensor | None, levels_: list[Any]
+    ) -> torch.Tensor | None:
         levels = list(levels_)
 
         while True:
@@ -1407,7 +1403,7 @@ def dot_finish(parts: list[DotPart], result_tensor: torch.Tensor) -> Tensor:
     return tensor_result  # type: ignore[return-value]
 
 
-def dot(lhs: Any, rhs: Any, sum_dims: Any) -> Union[_Tensor, torch.Tensor]:
+def dot(lhs: Any, rhs: Any, sum_dims: Any) -> _Tensor | torch.Tensor:
     """
     Perform dot product between two tensors along specified dimensions.
 

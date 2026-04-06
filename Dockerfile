@@ -45,9 +45,12 @@ ARG INSTALL_CHANNEL=whl/nightly
 ARG TARGETPLATFORM
 
 # INSTALL_CHANNEL whl - release, whl/nightly - nightly, whl/test - test channels
-RUN case ${TARGETPLATFORM} in \
+# TODO: revert cu132->cu130 fallback once cu132 wheels are published
+RUN WHEEL_CUDA_PATH="${CUDA_PATH#.}"; \
+    if [ "${WHEEL_CUDA_PATH}" = "cu132" ]; then WHEEL_CUDA_PATH=cu130; fi; \
+    case ${TARGETPLATFORM} in \
          "linux/arm64")  pip3 install --extra-index-url https://download.pytorch.org/whl/cpu/ torch torchvision torchaudio ;; \
-         *)              pip3 install --index-url https://download.pytorch.org/${INSTALL_CHANNEL}/${CUDA_PATH#.}/ torch torchvision torchaudio ;; \
+         *)              pip3 install --index-url https://download.pytorch.org/${INSTALL_CHANNEL}/${WHEEL_CUDA_PATH}/ torch torchvision torchaudio ;; \
     esac
 RUN pip3 install torchelastic
 RUN IS_CUDA=$(python3 -c 'import torch ; print(torch.cuda._is_compiled())'); \

@@ -97,7 +97,7 @@ void XPUGeneratorState::increase(uint64_t increment) {
 }
 
 // State can be used by multiple graph
-void XPUGeneratorState::register_graph(xpu::XPUGraph* graph) {
+void XPUGeneratorState::register_graph(xpu::XPUGraphImpl* graph) {
   // Ensures that the RNG state is not currently being captured.
   at::xpu::assertNotCapturing(
       "Cannot register the state during capturing stage.");
@@ -113,7 +113,7 @@ void XPUGeneratorState::register_graph(xpu::XPUGraph* graph) {
   }
 }
 
-void XPUGeneratorState::unregister_graph(xpu::XPUGraph* graph) {
+void XPUGeneratorState::unregister_graph(xpu::XPUGraphImpl* graph) {
   TORCH_CHECK(
       registered_graphs_.find(graph) != registered_graphs_.end(),
       "The graph should be registered to the state");
@@ -280,12 +280,12 @@ uint64_t XPUGeneratorImpl::philox_offset_per_thread() const {
   }
 }
 
-void XPUGeneratorImpl::register_graph(xpu::XPUGraph* graph) {
+void XPUGeneratorImpl::register_graph(xpu::XPUGraphImpl* graph) {
   graph->register_generator_state(state_);
   state_->register_graph(graph);
 }
 
-void XPUGeneratorImpl::unregister_graph(xpu::XPUGraph* graph) {
+void XPUGeneratorImpl::unregister_graph(xpu::XPUGraphImpl* graph) {
   state_->unregister_graph(graph);
 }
 

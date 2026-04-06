@@ -400,6 +400,32 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
       }
       break;
     }
+    case c10::TypeKind::AnyType: {
+      // For Any type, dispatch based on the serialized type
+      if (serialized_arg_type == "as_string") {
+        stack.at(index) = serialized_arg_val.get<std::string>();
+      } else if (serialized_arg_type == "as_int") {
+        dynamic_args.emplace_back(index, DynamicArgType::IntType, 1);
+      } else if (serialized_arg_type == "as_float") {
+        stack.at(index) = serialized_arg_val.get<double>();
+      } else if (serialized_arg_type == "as_bool") {
+        stack.at(index) = serialized_arg_val.get<bool>();
+      } else if (serialized_arg_type == "as_tensor") {
+        dynamic_args.emplace_back(index, DynamicArgType::TensorType, 1);
+      } else if (serialized_arg_type == "as_none") {
+        stack.at(index) = c10::IValue{};
+      } else {
+        TORCH_CHECK(
+            false,
+            "Unsupported serialized type ",
+            serialized_arg_type,
+            " for Any type argument ",
+            index,
+            " in extern kernel ",
+            op_kernel->target_);
+      }
+      break;
+    }
     // TODO: handle the other input types
     default:
       TORCH_CHECK(

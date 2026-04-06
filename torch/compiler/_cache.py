@@ -242,7 +242,7 @@ class CacheArtifactManager:
         artifact = CacheArtifactFactory.encode_create(artifact_type, key, content)
         if artifact in cls._seen_artifacts:
             return
-        log.debug("Recording %s", str(artifact))
+        log.debug("Recording %s", artifact)
         cls._new_cache_artifacts[artifact_type].append(artifact)
         cls._seen_artifacts.add(artifact)
 

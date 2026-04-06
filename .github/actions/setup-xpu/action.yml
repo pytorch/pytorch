@@ -44,7 +44,7 @@ runs:
         fi
 
     - name: Runner diskspace health check
-      uses: ./.github/actions/diskspace-cleanup
+      uses: pytorch/pytorch/.github/actions/diskspace-cleanup@main
       if: always()
 
     - name: Runner health check disconnect on failure
@@ -53,11 +53,30 @@ runs:
       run: |
         killall runsvc.sh
 
+    - name: Setup useful environment variables
+      shell: bash
+      run: |
+        RUNNER_ARTIFACT_DIR="${RUNNER_TEMP}/artifacts"
+        rm -rf "${RUNNER_ARTIFACT_DIR}"
+        mkdir -p "${RUNNER_ARTIFACT_DIR}"
+        echo "RUNNER_ARTIFACT_DIR=${RUNNER_ARTIFACT_DIR}" >> "${GITHUB_ENV}"
+
+        RUNNER_TEST_RESULTS_DIR="${RUNNER_TEMP}/test-results"
+        rm -rf "${RUNNER_TEST_RESULTS_DIR}"
+        mkdir -p "${RUNNER_TEST_RESULTS_DIR}"
+        echo "RUNNER_TEST_RESULTS_DIR=${RUNNER_TEST_RESULTS_DIR}" >> "${GITHUB_ENV}"
+
+        RUNNER_DOCS_DIR="${RUNNER_TEMP}/docs"
+        rm -rf "${RUNNER_DOCS_DIR}"
+        mkdir -p "${RUNNER_DOCS_DIR}"
+        echo "RUNNER_DOCS_DIR=${RUNNER_DOCS_DIR}" >> "${GITHUB_ENV}"
+
     - name: Preserve github env variables for use in docker
       shell: bash
       run: |
-        env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-        env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+        env | grep '^GITHUB' >> "${RUNNER_TEMP}/github_env_${GITHUB_RUN_ID}"
+        env | grep '^CI' >> "${RUNNER_TEMP}/github_env_${GITHUB_RUN_ID}"
+        env | grep '^RUNNER' >> "${RUNNER_TEMP}/github_env_${GITHUB_RUN_ID}"
 
     - name: XPU set GPU_FLAG
       shell: bash
@@ -65,3 +84,6 @@ runs:
         # Add render group for container creation.
         render_gid=`cat /etc/group | grep render | cut -d: -f3`
         echo "GPU_FLAG=--device=/dev/mem --device=/dev/dri --group-add video --group-add $render_gid" >> "${GITHUB_ENV}"
+
+    - name: Login to ECR
+      uses: pytorch/pytorch/.github/actions/ecr-login@main

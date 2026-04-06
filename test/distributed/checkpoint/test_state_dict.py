@@ -5,7 +5,6 @@ import functools
 import sys
 from collections.abc import Callable
 from itertools import chain, product
-from typing import Union
 
 import torch
 import torch.distributed as dist
@@ -256,7 +255,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
     def _test_fsdp2(
         self,
         *,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool | int,
         optimizer_class: type[Optimizer],
         compile_model: bool,
         foreach: bool = True,
@@ -1099,7 +1098,7 @@ class TestNoComm(MultiProcessTestCase):
             model, options=StateDictOptions(full_state_dict=True, cpu_offload=True)
         )
         for v in msd.values():
-            self.assertFalse(v.is_cuda)
+            self.assertEqual(v.device, torch.device("cpu"))
         self.assertEqual(model.state_dict(), msd)
         set_model_state_dict(model, model.state_dict())
         osd = get_optimizer_state_dict(

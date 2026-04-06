@@ -2,7 +2,7 @@
 
 import copy
 import itertools
-from typing import cast, Optional
+from typing import cast
 
 import torch
 import torch.distributed as dist
@@ -37,7 +37,14 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTestMultiThread, get_devtype, MLP
+from torch.testing._internal.common_fsdp import (
+    FSDPTest,
+    FSDPTestMultiThread,
+    get_devtype,
+    MLP,
+    patch_all_gather,
+    patch_reduce_scatter,
+)
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
@@ -1207,7 +1214,7 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
     def test_init_1d_transformer_shard_largest_dim(self):
         model, ref_model = self._init_models()
 
-        def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+        def shard_placement_fn(param: nn.Parameter) -> Shard | None:
             largest_dim = largest_dim_size = -1
             for dim, dim_size in enumerate(param.shape):
                 if dim_size > largest_dim_size:
@@ -1238,7 +1245,7 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
     def test_init_1d_transformer_shard_dim_neg1(self):
         model, ref_model = self._init_models()
 
-        def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+        def shard_placement_fn(param: nn.Parameter) -> Shard | None:
             # Check that FSDP will normalize this dim to non-negative
             return Shard(-1)
 
@@ -1260,7 +1267,7 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
         )
         model = Transformer.parallelize(model, global_mesh["tp"], use_seq_parallel=True)
 
-        def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+        def shard_placement_fn(param: nn.Parameter) -> Shard | None:
             if isinstance(param, DTensor):
                 for placement in param.placements:
                     if isinstance(placement, Shard):
@@ -1308,7 +1315,7 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
         torch.manual_seed(42)
         model = nn.Sequential(nn.Linear(16, 17), nn.Linear(17, 8))
 
-        def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+        def shard_placement_fn(param: nn.Parameter) -> Shard | None:
             largest_dim = -1
             largest_dim_size = -1
             for dim, dim_size in enumerate(param.shape):
@@ -1333,7 +1340,7 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
     def test_invalid_shard_dim(self):
         model = nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 8))
 
-        def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+        def shard_placement_fn(param: nn.Parameter) -> Shard | None:
             return Shard(1)
 
         # Shard(1) is invalid for 1D bias parameters
@@ -1391,6 +1398,105 @@ class TestFullyShardMixedDtypeParam(FSDPTestMultiThread):
         model = Model()
         fully_shard(model, mesh=mesh)
         model(0)
+
+
+class TestFullyShardNonFloatParam(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @skip_if_lt_x_gpu(2)
+    def test_non_float_param(self):
+        """Non-float params (e.g. uint8, int64) are supported in all-gather,
+        excluded from reduce-scatter, and not cast by mp_policy.param_dtype."""
+        self.run_subtests(
+            {
+                "non_float_dtypes": [
+                    [torch.uint8],
+                    [torch.int64],
+                    [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64],
+                ],
+                "mp_policy": [
+                    MixedPrecisionPolicy(),
+                    MixedPrecisionPolicy(
+                        param_dtype=torch.bfloat16, reduce_dtype=torch.float32
+                    ),
+                ],
+                "frozen_float": [False, True],
+            },
+            self._test_non_float_param,
+        )
+
+    def _test_non_float_param(
+        self,
+        non_float_dtypes: list,
+        mp_policy: MixedPrecisionPolicy,
+        frozen_float: bool,
+    ):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(16, 16)
+                if frozen_float:
+                    self.frozen_float = nn.Parameter(
+                        torch.randn(16), requires_grad=False
+                    )
+                for i, dtype in enumerate(non_float_dtypes):
+                    self.register_parameter(
+                        f"non_float_{i}",
+                        nn.Parameter(
+                            torch.randint(0, 127, (16,), dtype=dtype),
+                            requires_grad=False,
+                        ),
+                    )
+
+            def forward(self, x):
+                return self.linear(x)
+
+        model = Model()
+        fully_shard(model, mp_policy=mp_policy)
+        for p in model.parameters():
+            self.assertEqual(p.size(0) % self.world_size, 0)
+        ag_input_dtypes = set()
+        expected_ag_output_bytes = 0
+        for p in model.parameters():
+            if p.dtype.is_floating_point and mp_policy.param_dtype is not None:
+                ag_input_dtypes.add(mp_policy.param_dtype)
+                expected_ag_output_bytes += p.numel() * mp_policy.param_dtype.itemsize
+            else:
+                # Non-float params keep their original dtype; param_dtype
+                # only applies to floating-point params
+                ag_input_dtypes.add(p.dtype)
+                expected_ag_output_bytes += p.numel() * p.element_size()
+        expected_ag_dtype = (
+            next(iter(ag_input_dtypes)) if len(ag_input_dtypes) == 1 else torch.uint8
+        )
+        orig_ag = dist.all_gather_into_tensor
+
+        def assert_all_gather(*args, **kw):
+            output = kw.get("output", args[0] if len(args) > 0 else None)
+            input = kw.get("input_tensor", args[1] if len(args) > 1 else None)
+            self.assertEqual(input.dtype, expected_ag_dtype)
+            self.assertEqual(output.nbytes, expected_ag_output_bytes)
+            return orig_ag(*args, **kw)
+
+        expected_rs_input_numel = sum(
+            p.numel() for p in model.parameters() if p.requires_grad
+        )
+        orig_rs = dist.reduce_scatter_tensor
+
+        def assert_reduce_scatter(*args, **kw):
+            input = kw.get("input", args[1] if len(args) > 1 else None)
+            self.assertEqual(input.numel(), expected_rs_input_numel)
+            return orig_rs(*args, **kw)
+
+        x = torch.randn(4, 16, device=device_type)
+        with (
+            patch_all_gather(assert_all_gather),
+            patch_reduce_scatter(assert_reduce_scatter),
+        ):
+            loss = model(x).sum()
+            loss.backward()
 
 
 if __name__ == "__main__":

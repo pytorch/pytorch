@@ -1,3 +1,4 @@
+// @allow-raw-throw
 #include <c10/util/Backtrace.h>
 #include <c10/util/Flags.h>
 #include <c10/util/Lazy.h>

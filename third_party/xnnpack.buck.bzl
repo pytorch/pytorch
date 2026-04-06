@@ -43,6 +43,15 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         "-Wno-error=incompatible-pointer-types-discards-qualifiers",
     ]
 
+    WASM_EMSCRIPTEN_COMPILER_FLAGS = select({
+        "DEFAULT": [],
+        "ovr_config//runtime:wasm-emscripten": [
+            "-pthread",
+            "-matomics",
+            "-mbulk-memory",
+        ],
+    })
+
     XNN_COMMON_MICROKERNEL_EXPORTED_DEPS = [
         ":interface",
         third_party("FP16"),
@@ -73,7 +82,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
-        ],
+        ] + WASM_EMSCRIPTEN_COMPILER_FLAGS,
         labels = labels,
         fbandroid_link_whole = True,
         preferred_linkage = "static",
@@ -100,7 +109,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
-        ],
+        ] + WASM_EMSCRIPTEN_COMPILER_FLAGS,
         labels = labels,
         fbandroid_link_whole = True,
         preferred_linkage = "static",
@@ -127,7 +136,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-fno-fast-math",
             "-fno-math-errno",
             "-ffp-contract=off",
-        ],
+        ] + WASM_EMSCRIPTEN_COMPILER_FLAGS,
         labels = labels,
         fbandroid_link_whole = True,
         preferred_linkage = "static",
@@ -135,6 +144,29 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
         windows_compiler_flags_override = WINDOWS_FLAGS,
+        deps = XNN_COMMON_MICROKERNEL_EXPORTED_DEPS,
+    )
+
+    fb_xplat_cxx_library(
+        name = "ukernels_wasm",
+        srcs = select({
+            "DEFAULT": [],
+            "ovr_config//runtime:wasm-emscripten": prod_srcs_for_arch_wrapper("wasm"),
+        }),
+        headers = get_xnnpack_headers(),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX),
+        compiler_flags = [
+            "-O2",
+            "-fno-fast-math",
+            "-fno-math-errno",
+            "-ffp-contract=off",
+        ] + WASM_EMSCRIPTEN_COMPILER_FLAGS,
+        labels = labels,
+        fbandroid_link_whole = True,
+        preferred_linkage = "static",
+        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        visibility = ["PUBLIC"],
         deps = XNN_COMMON_MICROKERNEL_EXPORTED_DEPS,
     )
 
@@ -1819,6 +1851,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "ovr_config//runtime:arm64-linux-ubuntu-neon": [":arm64_lib"],
             "ovr_config//runtime:fbcode-arm64": [":arm64_lib"],
             "ovr_config//runtime:platform010": [":x86_and_x86_64_lib"],
+            "ovr_config//runtime:wasm-emscripten": [":ukernels_wasm"],
         }),
     )
 
@@ -1843,7 +1876,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         compiler_flags = select({
             "DEFAULT": [],
             "ovr_config//os:macos": ["-fvisibility=default"],
-        }),
+        }) + WASM_EMSCRIPTEN_COMPILER_FLAGS,
         platforms = (APPLE, ANDROID, CXX, WINDOWS),
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS + [
             "-DXNN_NO_Q8_OPERATORS",

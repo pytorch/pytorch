@@ -1956,7 +1956,6 @@ case ScalingType::TensorWise:
 
     default:
       TORCH_CHECK(false);
-      return -1;
   }
 }
 

@@ -177,7 +177,7 @@ class ReferenceAnalysis:
 
     @staticmethod
     def pow(a, b):
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore [bad-argument-count, bad-argument-type]
         return _keep_float(FloatPow)(a, b)
 
     @staticmethod
@@ -339,6 +339,20 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
     @staticmethod
     def bitwise_xor(a, b):
         return a ^ b
+
+    @staticmethod
+    def expr_cond_pair(expr, cond):
+        return (expr, cond)
+
+    @staticmethod
+    def piecewise(*pairs):
+        # Build nested sym_ite from right to left.
+        # Piecewise((e1, c1), (e2, c2), ..., (en, True)) becomes
+        # sym_ite(c1, e1, sym_ite(c2, e2, ... en))
+        result = pairs[-1][0]
+        for expr, cond in reversed(pairs[:-1]):
+            result = torch.sym_ite(cond, expr, result)
+        return result
 
 
 # Like PythonReferenceAnalysis, but some export-unfriendly choices of

@@ -12,7 +12,7 @@ import warnings
 from collections.abc import Callable
 from itertools import chain
 from types import CodeType, FunctionType, ModuleType
-from typing import Any, get_args, NamedTuple, Optional, TypeAlias, Union
+from typing import Any, get_args, NamedTuple, TypeAlias
 
 import torch
 import torch.utils._pytree as pytree
@@ -40,9 +40,9 @@ _proxyable_classes: dict[type, None] = {}
 
 _is_fx_tracing_flag = False
 
-_ConstantAttributeType: TypeAlias = Union[
-    torch.Tensor, torch.ScriptObject, FakeScriptObject, pytree.TreeSpec
-]
+_ConstantAttributeType: TypeAlias = (
+    torch.Tensor | torch.ScriptObject | FakeScriptObject | pytree.TreeSpec
+)
 
 _constant_attribute_types = get_args(_ConstantAttributeType)
 
@@ -236,7 +236,7 @@ class PHWithMeta(PHBase):
     Object representing an input placeholder to `concrete_args`
     """
 
-    def __init__(self, ph_key: Optional[str] = None):
+    def __init__(self, ph_key: str | None = None):
         super().__init__()
 
         # Provide a hey for user to identify placeholder node during analysis
@@ -326,7 +326,7 @@ class Tracer(TracerBase):
         self._autowrap_search: list[ModuleType] = list(autowrap_modules)
         self.param_shapes_constant = param_shapes_constant
 
-        self.submodule_paths: Optional[dict[torch.nn.Module, str]] = None
+        self.submodule_paths: dict[torch.nn.Module, str] | None = None
         self.root_module_name: str = ""
         # Maps the containing module's name to the operator name
         self.scope = Scope("", None)
@@ -425,7 +425,7 @@ class Tracer(TracerBase):
         if isinstance(a, _constant_attribute_types) or (
             is_opaque_reference_type(type(a))
         ):
-            qualname: Optional[str] = self.tensor_attrs.get(a)
+            qualname: str | None = self.tensor_attrs.get(a)
 
             # Tensor was not found in the Module hierarchy, stow it away in a
             # special attribute and set the qualname to refer to that
@@ -750,8 +750,8 @@ class Tracer(TracerBase):
     @compatibility(is_backward_compatible=True)
     def trace(
         self,
-        root: Union[torch.nn.Module, Callable[..., Any]],
-        concrete_args: Optional[dict[str, Any]] = None,
+        root: torch.nn.Module | Callable[..., Any],
+        concrete_args: dict[str, Any] | None = None,
     ) -> Graph:
         """
         Trace ``root`` and return the corresponding FX ``Graph`` representation. ``root``
@@ -804,7 +804,7 @@ class Tracer(TracerBase):
                 self.root = torch.nn.Module()
                 fn = root
 
-            tracer_cls: Optional[type[Tracer]] = getattr(self, "__class__", None)
+            tracer_cls: type[Tracer] | None = getattr(self, "__class__", None)
             self.graph = Graph(tracer_cls=tracer_cls)
             if hasattr(fn, "__code__"):
                 code = fn.__code__
@@ -1179,7 +1179,7 @@ class _Patcher:
         self.visited.clear()
 
 
-CURRENT_PATCHER: Optional[_Patcher] = None
+CURRENT_PATCHER: _Patcher | None = None
 
 
 @contextlib.contextmanager
@@ -1249,7 +1249,7 @@ def _autowrap_check(
 
 
 @compatibility(is_backward_compatible=True)
-def wrap(fn_or_name: Union[str, Callable]):
+def wrap(fn_or_name: str | Callable):
     """
     This function can be called at module-level scope to register fn_or_name as a "leaf function".
     A "leaf function" will be preserved as a CallFunction node in the FX trace instead of being
@@ -1319,8 +1319,8 @@ def wrap(fn_or_name: Union[str, Callable]):
 
 @compatibility(is_backward_compatible=True)
 def symbolic_trace(
-    root: Union[torch.nn.Module, Callable[..., Any]],
-    concrete_args: Optional[dict[str, Any]] = None,
+    root: torch.nn.Module | Callable[..., Any],
+    concrete_args: dict[str, Any] | None = None,
 ) -> GraphModule:
     """
     Symbolic tracing API

@@ -49,6 +49,8 @@ test_python_mps() {
 test_python_openreg() {
   setup_test_python
 
+  git submodule update --init --depth 1 third_party/googletest
+
   time python test/run_test.py --openreg --verbose
 
   assert_git_not_dirty

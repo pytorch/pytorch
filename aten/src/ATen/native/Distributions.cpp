@@ -594,7 +594,8 @@ Tensor& multinomial_out(const Tensor& self,
   // https://github.com/pytorch/pytorch/issues/11931#issuecomment-625882503
   if (!with_replacement || n_sample == 1) {
     // Sanity checks on `self`.
-    auto is_valid = ((self.max() < INFINITY) & (self.min() >= 0));
+    auto [self_min, self_max] = self.aminmax();
+    auto is_valid = ((self_max < INFINITY) & (self_min >= 0));
     at::_assert_async(is_valid, "probability tensor contains either `inf`, `nan` or element < 0");
     at::Tensor zero_prob_condition;
     if (self.dim() == 1){

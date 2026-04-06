@@ -3267,7 +3267,7 @@ inline C10_HOST_DEVICE T modified_bessel_i0_forward(T x) {
             +8.04490411014108831608e-01,
     };
 
-    T p;
+    T p = T{0};
     T q = 0.0;
 
     if (std::abs(x) <= T(8.0)) {
@@ -3355,7 +3355,7 @@ inline C10_HOST_DEVICE T modified_bessel_i1_forward(T x) {
             +7.78576235018280120474e-01,
     };
 
-    T p;
+    T p = T{0};
     T q = 0.0;
 
     if (std::abs(x) <= T(8.0)) {
@@ -3440,7 +3440,7 @@ inline C10_HOST_DEVICE T modified_bessel_k0_forward(T x) {
         return std::numeric_limits<T>::quiet_NaN();
     }
 
-    T p;
+    T p = T{0};
     T q = 0.0;
 
     if (x <= T(2.0)) {
@@ -3518,7 +3518,7 @@ inline C10_HOST_DEVICE T modified_bessel_k1_forward(T x) {
         return std::numeric_limits<T>::quiet_NaN();
     }
 
-    T p;
+    T p = T{0};
     T q = 0.0;
 
     if (x <= T(2.0)) {
@@ -3595,7 +3595,7 @@ inline C10_HOST_DEVICE T scaled_modified_bessel_k0_forward(T x) {
         return std::numeric_limits<T>::quiet_NaN();
     }
 
-    T p;
+    T p = T{0};
     T q = 0.0;
 
     if (x <= T(2.0)) {
@@ -3673,7 +3673,7 @@ inline C10_HOST_DEVICE T scaled_modified_bessel_k1_forward(T x) {
         return std::numeric_limits<T>::quiet_NaN();
     }
 
-    T p;
+    T p = T{0};
     T q = 0.0;
 
     if (x <= T(2.0)) {

@@ -92,12 +92,15 @@ def merge_matmul(in_mod: torch.nn.Module):
     """
     A graph transformation that merges matrix multiplication operations that share the same right-hand
     side operand into one large matrix multiplication.
-               ____      _________        _________
-      ----    |    |    |         |     M|  A * C  |
-    M| A  |  T| B  | * K|    C    | =    |---------|
-      ---- ,  |    |    |         |     T|  B * C  |
-       K       ----      ---------        ---------
-                K            R                R
+
+    ::
+
+                   ____      _________        _________
+          ----    |    |    |         |     M|  A * C  |
+        M| A  |  T| B  | * K|    C    | =    |---------|
+          ---- ,  |    |    |         |     T|  B * C  |
+           K       ----      ---------        ---------
+                    K            R                R
     """
     gm = symbolic_trace(in_mod)
 

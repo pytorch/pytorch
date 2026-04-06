@@ -10,6 +10,7 @@ from torch._inductor.kernel.mm_common import load_kernel_template
 from .. import config as inductor_config, ir, lowering as L
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import lowerings, make_pointwise, make_reduction, transform_args
+from ..runtime.runtime_utils import get_max_y_grid
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
@@ -43,8 +44,14 @@ aten = torch.ops.aten
 
 
 @SymbolicGridFn
-def bmm_grid(b, m, n, meta, *, cdiv):
-    return (cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"]), b, 1)
+def bmm_grid(b, m, n, meta, *, cdiv, max):
+    tiles = cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"])
+    # Split batch across grid_y and grid_z to avoid exceeding CUDA grid_y limit.
+    # When b <= max_y_grid, grid_z = 1 and behavior is identical to the original.
+    max_y_grid = get_max_y_grid()
+    grid_z = max(cdiv(b, max_y_grid), 1)
+    grid_y = cdiv(b, grid_z)
+    return (tiles, grid_y, grid_z)
 
 
 # We define each template kernel in a separate file which is the name of the input to load_kernel_template
@@ -225,7 +232,8 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
 
         add_nv_universal_gemm_choices(choices, layout, kernel_inputs)
 
-    return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    node, _ = autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    return node
 
 
 @L.register_lowering(aten.baddbmm)
@@ -285,4 +293,5 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         V.choices.get_template_configs(kernel_inputs, templates_to_use, name)
     )
 
-    return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    node, _ = autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    return node

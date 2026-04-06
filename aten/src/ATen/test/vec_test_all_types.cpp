@@ -381,7 +381,7 @@ namespace {
     TYPED_TEST(Hyperbolic, Tanh) {
         using vec = TypeParam;
 // NOTE: Because SVE uses ACL logic, the precision changes, hence the adjusted tolerance.
-#if defined(CPU_CAPABILITY_SVE)
+#if defined(CPU_CAPABILITY_SVE256)
         using UVT = UvalueType<vec>;
         UVT tolerance = getDefaultTolerance<UVT>();
         test_unary<vec>(
@@ -621,14 +621,14 @@ namespace {
         }
       }
     }
-#if defined(CPU_CAPABILITY_SVE) && defined(__ARM_FEATURE_BF16)
+#if defined(CPU_CAPABILITY_SVE256) && defined(__ARM_FEATURE_BF16)
     TEST(NanBfloat16, IsNan) {
       for (unsigned int ii = 0; ii < 0xFFFF; ++ii) {
         c10::BFloat16 val(ii, c10::BFloat16::from_bits());
         bool expected = std::isnan(val);
-        CACHE_ALIGN c10::BFloat16 actual_vals[at::vec::SVE256::Vectorized<c10::BFloat16>::size()];
-        at::vec::SVE256::Vectorized<c10::BFloat16>(val).isnan().store(actual_vals);
-        for (int jj = 0; jj < at::vec::SVE256::Vectorized<c10::BFloat16>::size(); ++jj) {
+        CACHE_ALIGN c10::BFloat16 actual_vals[at::vec::CPU_CAPABILITY::Vectorized<c10::BFloat16>::size()];
+        at::vec::CPU_CAPABILITY::Vectorized<c10::BFloat16>(val).isnan().store(actual_vals);
+        for (int jj = 0; jj < at::vec::CPU_CAPABILITY::Vectorized<c10::BFloat16>::size(); ++jj) {
           EXPECT_EQ(expected, c10::bit_cast<uint16_t>(actual_vals[jj]) != 0) << "bf16 isnan failure for bit pattern " << std::hex << ii << std::dec;
         }
       }
@@ -2196,7 +2196,12 @@ namespace {
       ASSERT_TRUE(vec_pinf.has_inf_nan()) << "Test failed for positive Infinity\n";
       ASSERT_TRUE(vec_ninf.has_inf_nan()) << "Test failed for negative Infinity\n";
     }
-#if !defined(CPU_CAPABILITY_SVE)
+// Building below for SVE with gcc-13 fails with following internal error
+// during GIMPLE pass: sink
+// In member function ‘virtual void {anonymous}::VecConvertBFloat16_ExhaustiveToFloat_Test::TestBody()’:
+// vec_test_all_types.cpp:2265:10: internal compiler error: Segmentation fault
+// 2265 |     TEST(VecConvertBFloat16, ExhaustiveToFloat) {
+#if !defined(CPU_CAPABILITY_SVE256)
     template <typename vec, typename dst_t>
     void test_convert_to(const char* dst_t_name) {
       using src_t = ValueType<vec>;
@@ -2335,7 +2340,7 @@ namespace {
     #undef TEST_MASK_LOAD
     #undef TEST_MASK_LOAD_N
     }
-#if !defined(CPU_CAPABILITY_SVE)
+#if !defined(CPU_CAPABILITY_SVE256)
     TYPED_TEST(VecMaskTests, MaskedCheck) {
       using VT = ValueType<TypeParam>;
       using vec = TypeParam;
@@ -2360,7 +2365,7 @@ namespace {
     #undef TEST_MASK_CHECK_N
     }
 #endif
-#if !defined(CPU_CAPABILITY_SVE)
+#if !defined(CPU_CAPABILITY_SVE256)
     TYPED_TEST(VecMaskTests, ToFrom) {
       using vec = TypeParam;
       using VT = ValueType<TypeParam>;
@@ -2387,7 +2392,7 @@ namespace {
       }
     }
 #endif
-#if !defined(CPU_CAPABILITY_SVE)
+#if !defined(CPU_CAPABILITY_SVE256)
     TYPED_TEST(VecMaskTests, Cast) {
       using vec = TypeParam;
       using src_t = ValueType<TypeParam>;

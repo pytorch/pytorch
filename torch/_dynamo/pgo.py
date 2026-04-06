@@ -124,6 +124,20 @@ def _hash_containing_file(filepath: str) -> str:
         return hash
 
 
+def _get_closure_content(content: types.CellType) -> object:
+    if callable(content) and hasattr(content, "__code__"):
+        return content.__code__
+    return None
+
+
+def _get_cell_hash_content(content: types.CellType) -> object:
+    # Safely extract cell contents without blowing up the entire tuple hash
+    try:
+        return _get_closure_content(content.cell_contents)
+    except ValueError:
+        return None
+
+
 @dataclasses.dataclass(frozen=True)
 class CodeId:
     filename: str
@@ -136,6 +150,7 @@ class CodeId:
     # self.filename is kept in the object to give readable information/pointer to the actual file, in a local
     # code state it will refer to the first seen file path.
     file_hash: str
+    closure_hash: int | None = None
 
     # Exclude file name.
     def __eq__(self, other: object) -> bool:
@@ -145,22 +160,30 @@ class CodeId:
             self.file_hash == other.file_hash
             and self.firstlineno == other.firstlineno
             and self.name == other.name
+            and self.closure_hash == other.closure_hash
         )
 
     # Ensure if two CodeIds are the same, then they have the same hash by excluding filename.
     def __hash__(self) -> int:
-        return hash((self.file_hash, self.name, self.firstlineno))
+        return hash((self.file_hash, self.name, self.firstlineno, self.closure_hash))
 
     def __str__(self) -> str:
         return f"hash({self.file_hash}){self.filename}:{self.firstlineno}:{self.name}"
 
     @staticmethod
-    def make(code: types.CodeType) -> CodeId:
+    def make(
+        code: types.CodeType, closure: tuple[types.CellType, ...] | None = None
+    ) -> CodeId:
+        closure_hash = None
+        if closure:
+            closure_hash = hash(tuple(_get_cell_hash_content(c) for c in closure))
+
         return CodeId(
             code.co_filename,
             code.co_firstlineno,
             code.co_name,
             _hash_containing_file(code.co_filename),
+            closure_hash,
         )
 
 
@@ -236,6 +259,10 @@ class FrameStateSizeEntry:
     stride: AutoDynamic | AutoUnset | tuple[int | AutoDynamic | InferStride, ...] = (
         dataclasses.field(default=auto_unset)
     )
+    excluded_sizes: tuple[int | None, ...] | None = dataclasses.field(
+        default=None, compare=False
+    )
+    excluded_scalar: int | None = dataclasses.field(default=None, compare=False)
 
     def render(self) -> str:
         # Special cases
@@ -361,8 +388,33 @@ class FrameStateSizeEntry:
         return tuple(cls._merge_atom(x, y) for x, y in zip(xs, ys))
 
     def __ior__(self, other: Self) -> Self:
+        # Record current static sizes before merge. For dims that become
+        # dynamic, the exclusion guard will reject these values so inputs
+        # fall through to the earlier, more specialized cache entry.
+        # Already-dynamic dims become None and are ignored by the guard.
+        # When no dim transitions, clear stale excluded_sizes so later
+        # compilations don't inherit exclusions from earlier transitions.
+        new_size = self._merge_atom_tup(self.size, other.size)
+        if isinstance(self.size, tuple):
+            if new_size != self.size:
+                self.excluded_sizes = tuple(
+                    s if type(s) is int else None for s in self.size
+                )
+            elif self.excluded_sizes is not None:
+                self.excluded_sizes = None
+        self.size = new_size
+        # Same idea for scalars: record the static value about to become dynamic.
+        # Re-derive like excluded_sizes: only set when transitioning from a
+        # concrete int, clear when already dynamic.
+        if (
+            type(self.scalar) is int
+            and type(other.scalar) is int
+            and self.scalar != other.scalar
+        ):
+            self.excluded_scalar = self.scalar
+        elif self.scalar is auto_dynamic and self.excluded_scalar is not None:
+            self.excluded_scalar = None
         self.scalar = self._merge_atom(self.scalar, other.scalar)
-        self.size = self._merge_atom_tup(self.size, other.size)
         self.stride = self._merge_atom_tup(self.stride, other.stride)
         return self
 
@@ -374,7 +426,7 @@ def update_automatic_dynamic(
     *,
     is_unspecialized_nn_module: bool = False,
 ) -> FrameStateSizeEntry:
-    code_id = CodeId.make(tx.f_code)
+    code_id = CodeId.make(tx.f_code, tx.closure)
     frame_state = get_code_state()[code_id]
     if torch._dynamo.config.automatic_dynamic_shapes:
         is_update = name in frame_state.automatic_dynamic
@@ -647,7 +699,7 @@ def _collect_missing_sources(all_sources: OrderedSet[str]) -> OrderedSet[str]:
 
 def log_frame_dynamic_whitelist(f_code: types.CodeType) -> None:
     global _KNOWN_DYNAMIC_SOURCES
-    code_id = CodeId.make(f_code)
+    code_id = CodeId.make(f_code, None)
     frame_state = get_code_state()[code_id]
     all_dynamic_sources = _collect_dynamic_sources(frame_state)
     frame_whitelist = ",".join(all_dynamic_sources)

@@ -79,10 +79,10 @@ jobs:
 
   linux-jammy-rocm-py3_10-inductor-benchmark-build:
     if: github.repository_owner == 'pytorch'
-    name: rocm-py3_10-inductor-benchmark-build
+    name: linux-jammy-rocm-py3.10-mi355
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-jammy-rocm-py3_10
+      build-environment: linux-jammy-rocm-py3.10-mi355
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
       test-matrix: |
         { include: [
@@ -114,7 +114,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    name: rocm-py3_10-inductor-benchmark-test
+    name: linux-jammy-rocm-py3.10-mi355
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-jammy-rocm-py3_10-inductor-benchmark-build
     with:

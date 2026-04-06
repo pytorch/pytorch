@@ -15,9 +15,11 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import DDPMeshInfo
 from torch.distributed.fsdp._fully_shard._fsdp_init import (
     _apply_to_module,
     _get_device_from_mesh,
+    _get_mesh_info,
     _get_modules_and_states,
     _init_default_mesh,
     _init_param_group,
+    _validate_mesh as _validate_mesh_common,
     _validate_module as _validate_module_common,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_state import FSDPState, FSDPStateContext
@@ -30,6 +32,7 @@ from .contract import _get_registry, contract
 
 
 if TYPE_CHECKING:
+    from torch.distributed.fsdp._fully_shard._fsdp_api import DataParallelMeshDims
     from torch.distributed.tensor import DeviceMesh
 
 
@@ -85,6 +88,7 @@ def replicate(
     mp_policy: MixedPrecisionPolicy = ...,
     offload_policy: OffloadPolicy = ...,
     ignored_params: set[nn.Parameter] | None = ...,
+    dp_mesh_dims: DataParallelMeshDims | None = ...,
 ) -> ReplicateModule: ...
 
 
@@ -97,6 +101,7 @@ def replicate(
     mp_policy: MixedPrecisionPolicy = ...,
     offload_policy: OffloadPolicy = ...,
     ignored_params: set[nn.Parameter] | None = ...,
+    dp_mesh_dims: DataParallelMeshDims | None = ...,
 ) -> list[ReplicateModule]: ...
 
 
@@ -108,6 +113,7 @@ def replicate(
     mp_policy: MixedPrecisionPolicy = MixedPrecisionPolicy(),
     offload_policy: OffloadPolicy = OffloadPolicy(),
     ignored_params: set[nn.Parameter] | None = None,
+    dp_mesh_dims: DataParallelMeshDims | None = None,
 ):
     r"""Replicates a module
 
@@ -122,8 +128,17 @@ def replicate(
     torch._C._log_api_usage_once("torch.distributed._composable.replicate_with_fsdp")
     _validate_module(module)
     mesh = mesh or _init_default_mesh(mesh_dim_names=("replicate",))
-    _validate_mesh(mesh)
-    mesh_info = DDPMeshInfo(mesh, replicate_mesh_dim=0)
+    if dp_mesh_dims is not None:
+        _validate_mesh_common(mesh, dp_mesh_dims)
+        mesh_info = _get_mesh_info(mesh, dp_mesh_dims)
+        if not isinstance(mesh_info, DDPMeshInfo):
+            raise ValueError(
+                "replicate() with dp_mesh_dims requires replicate-only "
+                "dims (no shard dims). Use fully_shard() for sharding."
+            )
+    else:
+        _validate_mesh(mesh)
+        mesh_info = DDPMeshInfo(mesh, replicate_mesh_dim=0)
     device = _get_device_from_mesh(mesh)
     # managed_modules (3rd return) and buffers (5th return) are unused:
     # - managed_modules: FSDP uses this to set Dynamo-specific attributes

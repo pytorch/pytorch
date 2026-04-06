@@ -92,6 +92,10 @@ class C10_CUDA_API CUDAAllocatorConfig {
     return 128;
   }
 
+  static bool pinned_free_catch_all() {
+    return instance().m_pinned_free_catch_all;
+  }
+
   C10_DEPRECATED_MESSAGE(
       "c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::roundup_power2_divisions() is deprecated. Please use c10::CachingAllocator::AcceleratorAllocatorConfig::roundup_power2_divisions() instead.")
   static size_t roundup_power2_divisions(size_t size) {
@@ -157,7 +161,8 @@ class C10_CUDA_API CUDAAllocatorConfig {
         "graph_capture_record_stream_reuse",
         "pinned_reserve_segment_size_mb",
         "pinned_num_register_threads",
-        "per_process_memory_fraction"};
+        "per_process_memory_fraction",
+        "pinned_free_catch_all"};
     return keys;
   }
 
@@ -185,6 +190,9 @@ class C10_CUDA_API CUDAAllocatorConfig {
   double parsePerProcessMemoryFraction(
       const c10::CachingAllocator::ConfigTokenizer& tokenizer,
       size_t i);
+  size_t parsePinnedFreeCatchAll(
+      const c10::CachingAllocator::ConfigTokenizer& tokenizer,
+      size_t i);
 
   std::atomic<size_t> m_pinned_num_register_threads{1};
   std::atomic<size_t> m_pinned_reserve_segment_size_mb{0};
@@ -198,6 +206,7 @@ class C10_CUDA_API CUDAAllocatorConfig {
   std::atomic<bool> m_pinned_use_cuda_host_register{false};
   std::atomic<bool> m_graph_capture_record_stream_reuse{false};
   std::atomic<double> m_per_process_memory_fraction{1.0};
+  std::atomic<bool> m_pinned_free_catch_all{false};
 };
 
 // Keep this for backwards compatibility

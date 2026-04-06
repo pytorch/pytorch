@@ -4,7 +4,7 @@ import contextlib
 import itertools
 import sys
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch import distributed as dist
@@ -91,7 +91,7 @@ class TestGradAcc(FSDPTestContinuous):
         batch_dim: int,
         configs: list[_GradAccConfig],
         cpu_offload: CPUOffload,
-        backward_prefetch: Optional[BackwardPrefetch],
+        backward_prefetch: BackwardPrefetch | None,
         sharding_strategy: ShardingStrategy,
         use_orig_params: bool,
     ):

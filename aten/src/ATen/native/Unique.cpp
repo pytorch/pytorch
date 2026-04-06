@@ -433,7 +433,7 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
   output = output.view(new_sizes);
   output = output.moveaxis(0, dim);
 
-  return std::make_tuple(output, inverse_indices, counts);
+  return std::make_tuple(std::move(output), std::move(inverse_indices), std::move(counts));
 }
 
 } // namespace

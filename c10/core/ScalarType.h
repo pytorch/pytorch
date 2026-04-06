@@ -54,6 +54,31 @@ inline size_t elementSize(ScalarType t) {
 #undef CASE_ELEMENTSIZE_CASE
 }
 
+inline ScalarType opaqueScalarType(ScalarType t) {
+  auto esize = elementSize(t);
+  ScalarType result;
+  switch (esize) {
+    case 1:
+      result = kByte;
+      break;
+    case 2:
+      result = kUInt16;
+      break;
+    case 4:
+      result = kUInt32;
+      break;
+    case 8:
+      result = kUInt64;
+      break;
+    case 16:
+      result = kComplexDouble;
+      break;
+    default:
+      TORCH_CHECK(false, "Unknown ScalarType");
+  }
+  return result;
+}
+
 inline bool isIntegralType(ScalarType t, bool includeBool) {
   bool isIntegral =
       (t == ScalarType::Byte || t == ScalarType::Char || t == ScalarType::Int ||

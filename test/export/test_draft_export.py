@@ -427,7 +427,7 @@ class TestDraftExport(TestCase):
             for node in _ep.graph.nodes:
                 if bindings := node.meta.get("unbacked_bindings"):
                     unbacked_binding_symbols.update(bindings.keys())
-            self.assertEqual(len(unbacked_binding_symbols), 2)
+            self.assertEqual(len(unbacked_binding_symbols), 1)
 
     def test_offsets(self):
         class M(torch.nn.Module):

@@ -66,31 +66,34 @@
 
         rm = pid_m * BLOCK_M
         rn = pid_n * BLOCK_N
+        rm_desc = rm.to(tl.int32)
+        rn_desc = rn.to(tl.int32)
         acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
 
         for rk in tl.range(0, K, BLOCK_K):
+            rk_desc = rk.to(tl.int32)
 
             {%- if TMA_EXPERIMENTAL_API %}
             a = tl._experimental_descriptor_load(
                 a_desc_ptr,
-                [rm, rk] if A_ROW_MAJOR else [rk, rm],
+                [rm_desc, rk_desc] if A_ROW_MAJOR else [rk_desc, rm_desc],
                 [BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
                 A.dtype.element_ty,
             )
             b = tl._experimental_descriptor_load(
                 b_desc_ptr,
-                [rk, rn] if B_ROW_MAJOR else [rn, rk],
+                [rk_desc, rn_desc] if B_ROW_MAJOR else [rn_desc, rk_desc],
                 [BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
                 B.dtype.element_ty,
             )
             {%- else %}
             a = tl.load_tensor_descriptor(
                 a_desc,
-                [rm, rk] if A_ROW_MAJOR else [rk, rm],
+                [rm_desc, rk_desc] if A_ROW_MAJOR else [rk_desc, rm_desc],
             )
             b = tl.load_tensor_descriptor(
                 b_desc,
-                [rk, rn] if B_ROW_MAJOR else [rn, rk],
+                [rk_desc, rn_desc] if B_ROW_MAJOR else [rn_desc, rk_desc],
             )
             {%- endif %}
             if USE_FAST_ACCUM:

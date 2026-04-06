@@ -29,7 +29,7 @@ except ImportError:
 #
 # to globally disable CuDNN/MIOpen
 
-__cudnn_version: Optional[int] = None
+__cudnn_version: int | None = None
 
 if _cudnn is not None:
 

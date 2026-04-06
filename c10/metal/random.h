@@ -33,7 +33,7 @@ uint4 single_round(uint4 ctr, uint2 key) {
   constexpr uint kPhiloxSB = 0xCD9E8D57;
   auto rc0 = mulhilo(kPhiloxSA, ctr.x);
   auto rc1 = mulhilo(kPhiloxSB, ctr.z);
-  return uint4(rc1.y ^ ctr.y ^ key.x, rc1.x, rc0.y ^ ctr.w ^ key.y, rc0.x);
+  return uint4(rc1.x ^ ctr.y ^ key.x, rc1.y, rc0.x ^ ctr.w ^ key.y, rc0.y);
 }
 
 uint4 multiple_rounds(uint4 ctr, uint2 key, uint rounds) {

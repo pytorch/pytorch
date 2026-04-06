@@ -16,7 +16,7 @@ import time
 import unittest
 import uuid
 from contextlib import closing
-from typing import Any, Optional
+from typing import Any
 from unittest import mock
 from unittest.mock import MagicMock, Mock, patch
 
@@ -59,7 +59,7 @@ def get_test_launch_config(
     nproc_per_node: int,
     run_id: str = "",
     rdzv_backend: str = "etcd",
-    config: Optional[dict[str, Any]] = None,
+    config: dict[str, Any] | None = None,
 ) -> LaunchConfig:
     rdzv_configs = {}
     if config:

@@ -663,6 +663,10 @@ with torch.profiler():
 
 Please refer to the [profiler documentation](https://pytorch.org/docs/main/profiler.html) for a full overview of profiler features.
 
+```{eval-rst}
+.. autofunction:: torch.distributed.distributed_c10d.record_comm
+```
+
 ## Optimization with Symmetric Memory
 
 ### Copy Engine Collectives

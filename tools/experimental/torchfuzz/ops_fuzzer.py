@@ -51,6 +51,10 @@ def _get_template_filtered_operators(
         from torchfuzz.codegen import UnbackedFuzzTemplate
 
         fuzz_template = UnbackedFuzzTemplate()
+    elif template == "streams":
+        from torchfuzz.codegen import StreamFuzzTemplate
+
+        fuzz_template = StreamFuzzTemplate()
     else:
         from torchfuzz.codegen import DefaultFuzzTemplate
 
@@ -252,6 +256,10 @@ def fuzz_spec(template: str = "default") -> Spec:
             from torchfuzz.codegen import UnbackedFuzzTemplate
 
             fuzz_template = UnbackedFuzzTemplate()
+        elif template == "streams":
+            from torchfuzz.codegen import StreamFuzzTemplate
+
+            fuzz_template = StreamFuzzTemplate()
         else:
             from torchfuzz.codegen import DefaultFuzzTemplate
 

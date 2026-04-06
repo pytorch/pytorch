@@ -127,7 +127,7 @@ aiter::mha_bwd_args get_ck_fmha_bwd_args(const mask_info &mask,
     return aiter::mha_bwd_args{
         // aiter args
         static_cast<int>(mask.type),
-        true,   // use_asm_v3
+        hdim <= 192,   // use_asm_v3: ASM v3 only supports head dim <= 192
         true,   // v3_atomic_fp32
         1,      // v3_bf16_cvt
         false,  // v3_api_check
@@ -375,11 +375,16 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
         dv_expanded = dv;
     }
 
-    uint64_t drop_seed = 1, drop_offset = 0;
-    drop_seed = *philox_seed.data_ptr<int64_t>();
-    drop_offset = *philox_offset.data_ptr<int64_t>();
-    auto drop_seed_offset = std::make_pair(&drop_seed, &drop_offset);
+    auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
+            std::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
 
+    uint64_t* drop_seed, drop_offset;
+    int64_t counter_offset = batch_size * num_heads * ck_tile::get_warp_size();
+    std::pair<uint64_t*, uint64_t*> drop_seed_offset = {nullptr,nullptr};
+    if(is_dropout) {
+        drop_seed_offset.first = philox_seed.data_ptr<uint64_t>();
+        drop_seed_offset.second = philox_offset.data_ptr<uint64_t>();
+    }
 
     if (seqlen_q > 0) {
         ck_tile::stream_config stream_config{stream};

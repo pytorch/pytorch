@@ -35,9 +35,11 @@ from torch._inductor.output_code import (
     OutputCode,
 )
 from torch._inductor.utils import should_use_remote_fx_graph_cache
+from torch._logging import getArtifactLogger
 
 from .runtime_wrappers import (
     AOTDispatchAutograd,
+    AOTDispatchAutogradCompileSpec,
     AOTDispatchSubclassWrapper,
     CachedAutogradLazyBackwardCompileInfo,
     CompilerWrapper,
@@ -57,6 +59,7 @@ if TYPE_CHECKING:
     from .schemas import AOTConfig, ViewAndMutationMeta
 
 log = logging.getLogger(__name__)
+aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
 
 TOut = TypeVar("TOut", bound=OutputCode)
@@ -122,6 +125,9 @@ class BundledOutputCodeLoadable(InductorOutput[TOutputCode], Generic[TOutputCode
                 payload_fn=lambda: json.dumps(cache_info),
             )
             result = graph  # type: ignore[assignment]
+            result.compile_region_name = (  # pyrefly: ignore[missing-attribute]
+                fx_config.get("compile_region_name")
+            )
 
         # Run normal post compile
         result.post_compile(self.example_inputs, constants, fx_config)
@@ -216,6 +222,9 @@ class FxGraphCacheLoadable(InductorOutput[CompiledFxGraph]):
         """
         Called after FXGraphCacheLoadable.load, mutates fx_config
         """
+        result.compile_region_name = fx_config.get(  # pyrefly: ignore[bad-assignment]
+            "compile_region_name"
+        )
         result.post_compile(self.example_inputs, self.constants, fx_config)
         return result
 
@@ -408,12 +417,12 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
 
         # Log the output of AOTAutogradCache
         if aot_config.enable_log:
-            # TODO: maybe also log to aot_graphs_log
-            # Unfortunately aot_graphs_log uses
-            # slightly different formatting though
             if self.aot_joint_graph_str is not None:
                 torch._logging.trace_structured(
                     "aot_joint_graph", payload_fn=lambda: self.aot_joint_graph_str
+                )
+                aot_graphs_log.info(
+                    "Joint graph (from cache)\n\n%s", self.aot_joint_graph_str
                 )
 
             if self.aot_forward_graph_str is not None:
@@ -438,18 +447,23 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
                     )
 
                 # It's called an inference graph if not running with autograd
-                name = (
-                    "aot_forward_graph"
-                    if self.aot_backward_graph_str is not None
-                    else "aot_inference_graph"
-                )
+                has_backward = self.aot_backward_graph_str is not None
                 torch._logging.trace_structured(
-                    name, payload_fn=lambda: self.aot_forward_graph_str
+                    "aot_forward_graph" if has_backward else "aot_inference_graph",
+                    payload_fn=lambda: self.aot_forward_graph_str,
+                )
+                aot_graphs_log.info(
+                    "Forward graph (from cache)\n\n%s",
+                    self.aot_forward_graph_str,
                 )
 
             if self.aot_backward_graph_str is not None:
                 torch._logging.trace_structured(
                     "aot_backward_graph", payload_fn=lambda: self.aot_backward_graph_str
+                )
+                aot_graphs_log.info(
+                    "Backward graph (from cache)\n\n%s",
+                    self.aot_backward_graph_str,
                 )
         with dynamo_timed("AOTAutogradCache.inductor_load"):
             compiled_fw_func = self.compiled_fw.load(args)
@@ -531,19 +545,20 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
             # 1. the bw is already compiled
             # 2. we don't need to save to the cache again
             # so those corresponding arguments are set to None.
-            compiled_function = AOTDispatchAutograd.post_compile(
-                compiled_fw_func,
-                compiled_bw_func,
-                self.maybe_subclass_meta,
-                self.compiled_bw.num_symints_saved_for_bw_,
-                self.compiled_bw.backward_state_indices,
-                disable_amp,
-                self.indices_of_inps_to_detach,
-                cached_lazy_backward,
-                aot_config,
+            compile_spec = AOTDispatchAutogradCompileSpec(
+                compiled_fw_func=compiled_fw_func,
+                compiled_bw_func=compiled_bw_func,
+                maybe_subclass_meta=self.maybe_subclass_meta,
+                num_symints_saved_for_bw=self.compiled_bw.num_symints_saved_for_bw_,
+                backward_state_indices=self.compiled_bw.backward_state_indices,
+                disable_amp=disable_amp,
+                indices_of_inps_to_detach=self.indices_of_inps_to_detach,
+                lazy_backward_info=cached_lazy_backward,
+                aot_config=aot_config,
                 fw_metadata=self.runtime_metadata,
                 try_save_cache_entry=None,
             )
+            compiled_function = AOTDispatchAutograd.post_compile(compile_spec)
 
         else:
             compiled_function = RuntimeWrapper(

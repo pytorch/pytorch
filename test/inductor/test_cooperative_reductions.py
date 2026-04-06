@@ -19,7 +19,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
-class TestingHeuristics(InductorChoices):
+class _TestingHeuristics(InductorChoices):
     def __init__(self, *, cooperative: bool, persistent: bool, cfg: dict[str, int]):
         super().__init__()
         self.cooperative = cooperative
@@ -255,7 +255,7 @@ class MultiKernelCooperativeReductionTests(CooperativeReductionTests):
 class TestFixedConfigs(TestCase):
     def _check(self, fn, args, *, persistent=False, cooperative=True, cfg):
         expected = fn(*args)
-        heuristic = TestingHeuristics(
+        heuristic = _TestingHeuristics(
             persistent=persistent, cooperative=cooperative, cfg=cfg
         )
         with torch._inductor.virtualized.V.set_choices_handler(heuristic):

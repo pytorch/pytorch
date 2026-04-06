@@ -58,7 +58,7 @@ std::tuple<Tensor, Tensor> _sobol_engine_draw(const Tensor& quasi, int64_t n, co
   });
 
   result.mul_(RECIPD);
-  return std::tuple<Tensor, Tensor>(result, wquasi);
+  return std::tuple<Tensor, Tensor>(std::move(result), std::move(wquasi));
 }
 
 /// This is the core function to fast-forward a `SobolEngine` given

@@ -40,7 +40,7 @@ set INCLUDE=%INCLUDE%;%install_root%\include;%install_root%\include\torch\csrc\a
 set LIB=%LIB%;%install_root%\lib
 set PATH=%PATH%;%install_root%\lib
 
-cl %PYTORCH_ROOT%\.ci\pytorch\test_example_code\simple-torch-test.cpp c10.lib torch_cpu.lib /EHsc /std:c++17
+cl %PYTORCH_ROOT%\.ci\pytorch\test_example_code\simple-torch-test.cpp c10.lib torch_cpu.lib /EHsc /std:c++20
 if ERRORLEVEL 1 exit /b 1
 
 .\simple-torch-test.exe

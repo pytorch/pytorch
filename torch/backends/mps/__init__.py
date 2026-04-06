@@ -60,7 +60,7 @@ def get_core_count() -> int:
     return torch._C._mps_get_core_count()
 
 
-_lib: Optional[_Library] = None
+_lib: _Library | None = None
 
 
 def _init() -> None:

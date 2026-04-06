@@ -59,6 +59,9 @@ functional_collectives: set[torch._ops.OpOverload] = {
     _c10d_functional.reduce_scatter_tensor_coalesced.default,
     _c10d_functional_autograd.reduce_scatter_tensor.default,
     _c10d_functional.broadcast_.default,
+    _c10d_functional.isend.default,
+    _c10d_functional.irecv.default,
+    _c10d_functional.batch_p2p_ops.default,
     _dtensor.shard_dim_alltoall.default,
 }
 
@@ -117,7 +120,13 @@ class CollectiveOp:
         _c10d_functional_autograd.reduce_scatter_tensor.default,
         _c10d_functional.all_to_all_single.default,
         _c10d_functional_autograd.all_to_all_single.default,
+        _c10d_functional.isend.default,
+        _c10d_functional.irecv.default,
         _dtensor.shard_dim_alltoall.default,
+    }
+
+    PG_ARG_5 = {
+        _c10d_functional.batch_p2p_ops.default,
     }
 
     WK_ARG_1 = {
@@ -129,6 +138,8 @@ class CollectiveOp:
         c10d._allgather_base_.default,
         c10d.scatter_.default,
         c10d.alltoall_.default,
+        _c10d_functional.isend.default,
+        _c10d_functional.irecv.default,
     }
 
     WK = {
@@ -212,6 +223,8 @@ class CollectiveOp:
             return _resolve_process_group(args[2])
         if func in CollectiveOp.PG_ARG_4:
             return _resolve_process_group(args[3])
+        if func in CollectiveOp.PG_ARG_5:
+            return _resolve_process_group(args[4])
         raise TypeError(f"Func {func} not found in {collective_ops}")
 
     @staticmethod
@@ -244,6 +257,8 @@ class CollectiveOp:
         if func in CollectiveOp.COMM_TENSOR_ARG_0_AND_RES:
             # TODO(@sanketpurandare) - Confirm size computation
             return args[0].untyped_storage().nbytes() + res.untyped_storage().nbytes()
+        if func is _c10d_functional.batch_p2p_ops.default:
+            return CollectiveOp.sum_tensors(args[3])
         raise TypeError(f"Unknown function: {func} in {collective_ops}")
 
     @staticmethod

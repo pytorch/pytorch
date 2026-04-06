@@ -270,7 +270,7 @@ def is_supported(g: NativeFunctionsGroup | NativeFunctionsViewGroup) -> bool:
         # the string, just test the dang thing directly
         if "at::Tensor" != cpp.returns_type(func.returns, symint=False).cpp_type():
             # Returns a non-Tensor value.
-            logger.info("NON-TENSOR RET TYPE: %s", str(func))
+            logger.info("NON-TENSOR RET TYPE: %s", func)
             return False
         return True
 

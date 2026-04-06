@@ -209,6 +209,28 @@ def get_all_int_dtypes() -> list[torch.dtype]:
     return [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]
 
 
+def get_unsupported_dtypes_for_device(device_type: str) -> set[torch.dtype]:
+    """Return the set of dtypes a device declares as unsupported.
+
+    Uses ``torch.accelerator.get_device_capability()`` which returns
+    ``{"supported_dtypes": set(torch.dtype)}``. Dtypes not in that set
+    are considered unsupported. Returns an empty set if the capability
+    cannot be queried.
+    """
+    try:
+        if device_type == "privateuse1":
+            device_type = torch._C._get_privateuse1_backend_name()
+        caps = torch.accelerator.get_device_capability(device_type + ":0")
+        supported = caps.get("supported_dtypes", None)
+        if supported is not None:
+            return set(get_all_dtypes(include_complex=True, include_complex32=True)) - supported
+    except Exception:
+        # If querying capabilities fails for any reason, treat the device as
+        # having no declared unsupported dtypes and fall back to an empty set.
+        pass
+    return set()
+
+
 def get_all_fp_dtypes(include_half=True, include_bfloat16=True) -> list[torch.dtype]:
     dtypes = [torch.float32, torch.float64]
     if include_half:
@@ -220,6 +242,20 @@ def get_all_fp_dtypes(include_half=True, include_bfloat16=True) -> list[torch.dt
 
 def get_all_qint_dtypes() -> list[torch.dtype]:
     return [torch.qint8, torch.quint8, torch.qint32, torch.quint4x2, torch.quint2x4]
+
+
+def highest_precision_float(device):
+    if torch.device(device).type == "mps":
+        return torch.float32
+    else:
+        return torch.float64
+
+
+def highest_precision_complex(device):
+    if torch.device(device).type == "mps":
+        return torch.complex64
+    else:
+        return torch.complex128
 
 
 float_to_corresponding_complex_type_map = {

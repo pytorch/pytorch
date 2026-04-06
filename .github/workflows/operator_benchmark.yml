@@ -28,6 +28,7 @@ concurrency:
 permissions:
   id-token: write
   contents: read
+  actions: read
 
 jobs:
   x86-opbenchmark-build:

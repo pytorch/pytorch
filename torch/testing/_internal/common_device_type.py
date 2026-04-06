@@ -17,6 +17,7 @@ from typing_extensions import ParamSpec
 
 import torch
 from torch._inductor.utils import GPU_TYPES
+from torch._utils import _is_privateuse1_backend_available
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     _get_torch_hipblaslt_version,
@@ -24,7 +25,7 @@ from torch.testing._internal.common_cuda import (
     TEST_CUSPARSE_GENERIC,
     TEST_HIPSPARSE_GENERIC,
 )
-from torch.testing._internal.common_dtype import get_all_dtypes
+from torch.testing._internal.common_dtype import get_all_dtypes, get_unsupported_dtypes_for_device
 from torch.testing._internal.common_utils import (
     _TestParametrizer,
     clear_tracked_input,
@@ -33,7 +34,6 @@ from torch.testing._internal.common_utils import (
     get_tracked_input,
     IS_FBCODE,
     IS_MACOS,
-    is_privateuse1_backend_available,
     IS_REMOTE_GPU,
     IS_S390X,
     IS_SANDCASTLE,
@@ -318,6 +318,15 @@ def _update_param_kwargs(param_kwargs, name, value):
 class DeviceTypeTestBase(TestCase):
     device_type: str = "generic_device_type"
 
+    # When True, @onlyOn-based decorators (@onlyCUDA, @onlyMPS, etc.) will not
+    # skip tests for this device type. This is a pragmatic short-term solution to
+    # allow PrivateUse1 backends to run tests that are currently gated behind
+    # device-specific decorators. It is intended to be used together with the
+    # skip mechanism (see https://github.com/pytorch/pytorch/issues/177253).
+    # In the longer term, we are incrementally migrating accelerator tests to be
+    # device-generic and removing @onlyCUDA on tests that should be device-generic.
+    bypass_device_restrictions: bool = False
+
     # Flag to disable test suite early due to unrecoverable error such as CUDA error.
     _stop_test_suite = False
 
@@ -380,7 +389,12 @@ class DeviceTypeTestBase(TestCase):
         if default_dtypes is None:
             raise AssertionError(msg)
 
-        return test.dtypes.get(cls.device_type, default_dtypes)
+        result = test.dtypes.get(cls.device_type, default_dtypes)
+        if result is not None and cls.device_type == "privateuse1":
+            result = result - get_unsupported_dtypes_for_device("privateuse1")
+            if not result:
+                return None
+        return result
 
     def _get_precision_override(self, test, dtype):
         if not hasattr(test, "precision_overrides"):
@@ -670,6 +684,7 @@ class PrivateUse1TestBase(DeviceTypeTestBase):
     primary_device: ClassVar[str]
     device_mod = None
     device_type = "privateuse1"
+    bypass_device_restrictions = False
 
     @classmethod
     def get_primary_device(cls):
@@ -723,7 +738,7 @@ def get_device_type_test_bases():
         if torch.cuda.is_available():
             test_bases.append(CUDATestBase)
 
-        if is_privateuse1_backend_available():
+        if _is_privateuse1_backend_available():
             test_bases.append(PrivateUse1TestBase)
         # Disable MPS testing in generic device testing temporarily while we're
         # ramping up support.
@@ -750,7 +765,7 @@ def filter_desired_device_types(device_type_test_bases, except_for=None, only_fo
     # This handles the case where PrivateUse1TestBase.device_type has been
     # changed from "privateuse1" to the actual backend name (e.g., "openreg")
     # by setUpClass being called during previous instantiate_device_type_tests calls
-    if is_privateuse1_backend_available():
+    if _is_privateuse1_backend_available():
         privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
 
         def func_replace(x: str) -> str:
@@ -1444,6 +1459,8 @@ class onlyOn:
         @wraps(fn)
         def only_fn(slf, *args, **kwargs):
             if slf.device_type not in self.device_type:
+                if getattr(slf, "bypass_device_restrictions", False):
+                    return fn(slf, *args, **kwargs)
                 reason = f"Only runs on {self.device_type}"
                 if IS_SANDCASTLE or IS_FBCODE:
                     print(

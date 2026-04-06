@@ -1911,6 +1911,33 @@ class TestUnaryUfuncs(TestCase):
         self.assertTrue(result.dtype.is_floating_point)
         self.assertTrue(torch.all(torch.isfinite(result)))
 
+    @onlyCUDA
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_fp8_e4m3fn_conversion_subnormals(self, device, dtype):
+        # Regression test for ptxas codegen bug on sm_100 where FADD in the
+        # subnormal conversion path gets wrong source register for odd elements
+        # in the 8-wide unrolled vectorized_elementwise_kernel.
+        # e4m3fn subnormals: |x| < 2^-6
+        torch.manual_seed(0)
+        N = 2**20
+        x = (torch.randn(N, dtype=dtype, device=device) * 1e-3).clamp(-448, 448)
+        y = x.to(torch.float8_e4m3fn)
+        ref = x.cpu().float().to(torch.float8_e4m3fn)
+        self.assertEqual(y.cpu().view(torch.uint8), ref.view(torch.uint8))
+
+    @onlyCUDA
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_fp8_e5m2_conversion_subnormals(self, device, dtype):
+        # Same regression test for e5m2.
+        # e5m2 subnormals: |x| < 2^-14
+        torch.manual_seed(0)
+        N = 2**20
+        x = (torch.randn(N, dtype=dtype, device=device) * 1e-4).clamp(-57344, 57344)
+        y = x.to(torch.float8_e5m2)
+        ref = x.cpu().float().to(torch.float8_e5m2)
+        self.assertEqual(y.cpu().view(torch.uint8), ref.view(torch.uint8))
+
+
 instantiate_device_type_tests(TestUnaryUfuncs, globals())
 
 if __name__ == "__main__":

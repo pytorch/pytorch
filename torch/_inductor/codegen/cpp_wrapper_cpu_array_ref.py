@@ -117,6 +117,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         inductor_meta=None,
         graph_name="",
         original_fxnode_name=None,
+        current_stream_idx=None,
     ):
         """
         Generates kernel call code.

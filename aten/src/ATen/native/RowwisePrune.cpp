@@ -53,8 +53,8 @@ std::tuple<Tensor, Tensor> _rowwise_prune_helper(
       }
     }
   });
-  return std::tuple<Tensor, Tensor>(pruned_2d_tensor,
-      compressed_indices_mapping);
+  return std::tuple<Tensor, Tensor>(std::move(pruned_2d_tensor),
+      std::move(compressed_indices_mapping));
 }
 
 } // namespace

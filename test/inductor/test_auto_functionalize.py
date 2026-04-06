@@ -477,6 +477,35 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
 
         return [compiled_args, result, graph]
 
+    def test_cumulative_out_preserves_out_dtype_under_compile(self):
+        test_cases = [
+            (torch.cumsum, torch.tensor([0.9201, 0.1166], dtype=torch.float32)),
+            (torch.cumprod, torch.tensor([2.0, 0.6], dtype=torch.float32)),
+        ]
+
+        for op, x in test_cases:
+            with self.subTest(op=op.__name__):
+
+                def f(out, x):
+                    return op(x, 0, out=out)
+
+                eager_out = torch.tensor([0, 0], dtype=torch.int32)
+                aot_eager_out = eager_out.clone()
+                inductor_out = eager_out.clone()
+
+                eager_ret = f(eager_out, x)
+                aot_eager_ret = torch.compile(f, backend="aot_eager", fullgraph=True)(
+                    aot_eager_out, x
+                )
+                inductor_ret = torch.compile(f, backend="inductor", fullgraph=True)(
+                    inductor_out, x
+                )
+
+                self.assertEqual(aot_eager_out, eager_out)
+                self.assertEqual(inductor_out, eager_out)
+                self.assertEqual(aot_eager_ret, eager_ret)
+                self.assertEqual(inductor_ret, eager_ret)
+
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_auto_functionalize_with_returns_v2(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:

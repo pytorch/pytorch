@@ -351,6 +351,7 @@ class OpsWrapper(DefaultHandler):
         return OpsValue(x)
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def indirect_indexing(index, size, check=True, wrap_neg=True):
         # Returns a sympy value, not IR value
         index = OpsWrapper._unwrap(index)

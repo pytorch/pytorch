@@ -223,6 +223,7 @@ class OpNamespace:
         assert not hasattr(self, name)
         result = Op(name, fn, is_custom_function)
         if is_traceable:
+            # pyrefly: ignore [deprecated]
             setattr(self, name, torch._dynamo.allow_in_graph(result))
         else:
             # C++ autograd function was not marked as traceable
@@ -503,6 +504,7 @@ class AutogradCompilerInstance:
 
         pgrads = self.fx_tracer.create_proxy(
             kind="call_function",
+            # pyrefly: ignore [bad-argument-type]
             target=call_aot_bwd_prologue,
             args=(
                 psaved_tensors,
@@ -633,6 +635,7 @@ class AutogradCompilerInstance:
 
             poutput = self.fx_tracer.create_proxy(
                 kind="call_function",
+                # pyrefly: ignore [bad-argument-type]
                 target=make_subclass,
                 args=tuple(punwrapped_args),
                 kwargs={},

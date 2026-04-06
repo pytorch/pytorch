@@ -209,16 +209,25 @@ COLLECTIVES = {
     "reduce",
     "_reduce_oop",
     "all_gather",
+    "all_gather_single",
+    "all_gather_v",
     "all_reduce",
     "_all_gather_base",
     "all_gather_into_tensor_coalesced",
     "reduce_scatter",
+    "reduce_scatter_single",
+    "reduce_scatter_v",
     "reduce_scatter_tensor_coalesced",
     "_reduce_scatter_base",
     "gather",
     "scatter",
     "all_to_all",
+    "all_to_all_single",
+    "all_to_all_v_single",
     "all_reduce_barrier",
+    "barrier",
+    "split",
+    "new_window",
     "allreduce_coalesced",
     "ALLGATHER_coalesced",
     "REDUCE_SCATTER_coalesced",
@@ -283,7 +292,7 @@ class EntryState:
         logger.info("input sizes: %s", self.input_sizes)
         logger.info("output sizes: %s", self.output_sizes)
         logger.info("world size: %d", len(self.expected_ranks))
-        logger.info("expected ranks: %s", str(self.expected_ranks))
+        logger.info("expected ranks: %s", self.expected_ranks)
         logger.info("collective state: %s", self.collective_state)
         if errors:
             self.errors = errors

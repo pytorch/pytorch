@@ -101,7 +101,7 @@ SpacesInContainerLiterals: true
 SpacesInCStyleCastParentheses: false
 SpacesInParentheses: false
 SpacesInSquareBrackets: false
-Standard:        c++17
+Standard:        c++20
 StatementMacros:
   - PyObject_HEAD
   - PyObject_VAR_HEAD

@@ -68,4 +68,5 @@
   {"USE_CUSPARSELT", "${USE_CUSPARSELT}"}, \
   {"USE_XPU", "${USE_XPU}"}, \
   {"USE_XCCL", "${USE_XCCL}"}, \
+  {"SYCL_COMPILER_VERSION", "${SYCL_COMPILER_VERSION}"}, \
 }

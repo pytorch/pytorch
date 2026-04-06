@@ -3,7 +3,7 @@
 
 import itertools
 from copy import deepcopy
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 import torch
 import torch.distributed as dist
@@ -55,9 +55,9 @@ reduce_scatter, all_gather, all_reduce = (
 
 
 class ExpCommCounts(NamedTuple):
-    fwd: Optional[dict] = None
-    bwd: Optional[dict] = None
-    optim: Optional[dict] = None
+    fwd: dict | None = None
+    bwd: dict | None = None
+    optim: dict | None = None
 
 
 class DistTensorParallelExampleTest(DTensorTestBase):

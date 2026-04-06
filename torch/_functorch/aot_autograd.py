@@ -5,7 +5,7 @@ import itertools
 import time
 from contextlib import nullcontext
 from functools import wraps
-from typing import Any, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING
 from typing_extensions import ParamSpec, TypeVar
 from unittest.mock import patch
 
@@ -25,19 +25,17 @@ from torch._dynamo.utils import (
     set_feature_use,
 )
 from torch._guards import detect_fake_mode
-from torch._inductor.utils import BoxedBool
+from torch._inductor.codecache import resolve_pre_grad_pass_timing
+
+# Runtime annotation consumers still resolve BoxedBool from module globals.
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.export._tree_utils import reorder_kwargs
 from torch.fx.experimental.proxy_tensor import make_fx
 
-
-static_inputs_log = torch._logging.getArtifactLogger(
-    __name__, "cudagraph_static_inputs"
-)
 from . import config
+from ._aot_autograd import autograd_cache
 from ._aot_autograd.autograd_cache import (  # noqa: F401
     AOTAutogradCache,
-    autograd_cache_key,
     should_use_local_autograd_cache,
     should_use_remote_autograd_cache,
 )
@@ -123,6 +121,7 @@ from ._aot_autograd.schemas import (  # noqa: F401
     InputAliasInfo,
     JointWithDescriptors,
     MutationType,
+    OpaqueMeta,
     OutputAliasInfo,
     OutputType,
     SerializableAOTDispatchCompiler,
@@ -140,7 +139,6 @@ from ._aot_autograd.subclass_utils import (  # noqa: F401
 )
 from ._aot_autograd.utils import (  # noqa: F401
     _get_autocast_states,
-    _get_symint_hints,
     call_func_at_runtime_with_args,
     create_tree_flattened_fn,
     KNOWN_TYPES,
@@ -160,7 +158,7 @@ from .partitioners import default_partition
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
 
-    from torch._inductor.cudagraph_utils import BoxedDeviceIndex
+    from torch._inductor.compile_fx import CompilerConfigExtra
     from torch._inductor.output_code import OutputCode
     from torch._inductor.utils import InputType
     from torch._ops import OpOverload
@@ -183,6 +181,7 @@ zip = strict_zip
 # one counter is allocated per entire compiled block (but this block
 # may involve compiling multiple subgraphs; e.g., for forwards/backwards)
 AOT_COUNTER = itertools.count()
+
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -585,7 +584,6 @@ def create_aot_state(
                     flat_args_descs=flat_args_descs,
                     static_input_indices=aot_config.static_input_indices,
                     keep_input_mutations=aot_config.keep_inference_input_mutations,
-                    is_train=needs_autograd,
                     pre_dispatch=aot_config.pre_dispatch,
                 )(*_dup_fake_script_obj(fake_flat_args))
 
@@ -621,35 +619,6 @@ def create_aot_state(
                 # and none of the inputs that require grad are mutated.
                 # so we actually have an inference graph.
                 needs_autograd = False
-                # A bit silly: right now in the subclass codepath, our ViewAndMutationMeta
-                # changes depending on whether we pass in is_train / keep_input_mutations,
-                # so we're forced to recompute the metadata.
-                # TODO: refactor the subclass path of run_functionalized_fw_and_collect_metadata
-                # so that this is unnecessary.
-                if req_subclass_dispatch:
-                    fw_metadata = run_functionalized_fw_and_collect_metadata(
-                        flat_fn,
-                        flat_args_descs=flat_args_descs,
-                        keep_input_mutations=aot_config.keep_inference_input_mutations,
-                        is_train=False,
-                        pre_dispatch=aot_config.pre_dispatch,
-                        static_input_indices=aot_config.static_input_indices,
-                    )(*fake_flat_args)
-                else:
-                    fw_metadata = ViewAndMutationMeta(
-                        input_info=fw_metadata.input_info,
-                        output_info=fw_metadata.output_info,
-                        num_intermediate_bases=fw_metadata.num_intermediate_bases,
-                        keep_input_mutations=aot_config.keep_inference_input_mutations,
-                        traced_tangents=fw_metadata.traced_tangents,
-                        traced_tangents_descs=fw_metadata.traced_tangents_descs,
-                        subclass_inp_meta=fw_metadata.subclass_inp_meta,
-                        subclass_fw_graph_out_meta=fw_metadata.subclass_fw_graph_out_meta,
-                        subclass_tangent_meta=fw_metadata.subclass_tangent_meta,
-                        is_train=False,
-                        tokens=fw_metadata.tokens,
-                        static_input_indices=fw_metadata.static_input_indices,
-                    )
 
     if fw_metadata.num_intermediate_bases > 0:
         if req_subclass_dispatch:
@@ -920,13 +889,50 @@ def aot_module(mod: nn.Module, *args: Any, **kwargs: Any) -> nn.Module:
     return AOTModule()
 
 
+def autograd_cache_key(
+    graph,
+    example_inputs,
+    ignore_shape_env: bool,
+    decompositions,
+    compiler_config_extra: CompilerConfigExtra,
+    keep_inference_input_mutations: bool = False,
+    disable_functionalization: bool = False,
+):
+    (
+        functional_call,
+        params_buffers_flat,
+        _params_spec,
+        _buffers_spec,
+        fake_flat_args,
+        full_args_descs,
+        aot_config,
+        fake_mode,
+        shape_env,
+        _in_spec,
+        _out_spec,
+    ) = prepare_aot_module_simplified(
+        graph,
+        example_inputs,
+        None,
+        decompositions,
+        keep_inference_input_mutations,
+        ignore_shape_env,
+        flatten=False,
+        force_non_lazy_backward_lowering=config.force_non_lazy_backward_lowering,
+        disable_functionalization=disable_functionalization,
+    )
+
+    return autograd_cache.autograd_cache_key(
+        graph, fake_flat_args, aot_config, compiler_config_extra
+    )
+
+
 def prepare_aot_module_simplified(
     mod: nn.Module,
     args: Iterable[Any],
     kwargs: dict[str, Any] | None,
     decompositions: dict[OpOverload, Callable[..., Any]] | None,
     keep_inference_input_mutations: bool,
-    boxed_forward_device_index: BoxedDeviceIndex | None,
     ignore_shape_env: bool,
     flatten: bool,
     *,
@@ -1049,6 +1055,9 @@ def prepare_aot_module_simplified(
         disable_functionalization=disable_functionalization,
         _disable_torch_fn_metadata_mode=_disable_torch_fn_metadata_mode,
     )
+
+    # TODO: Split the remainder of this function into a separate preparation function for input processing.
+    # Only the aot_config above is needed for the cache key computation.
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
     # NB: full_args_descs not needed here, fake_flat_args is 1:1 with full_args
     fake_flat_args = process_inputs(
@@ -1081,10 +1090,15 @@ def aot_module_simplified(
     inference_compiler: AOTDispatchCompiler | None = None,
     # TODO: This doesn't seem to be used in any nontrivial way, check if it's
     # actually needed
-    cudagraphs: BoxedBool | None = None,
-    boxed_forward_device_index: BoxedDeviceIndex | None = None,
+    compiler_config_extra: CompilerConfigExtra | None = None,
     ignore_shape_env: bool = False,
     disable_functionalization: bool = False,
+    # Optional callback to run passes on the module at the start of AOT autograd.
+    pre_grad_passes: Callable[
+        [torch.fx.GraphModule, Sequence[InputType]], torch.fx.GraphModule
+    ]
+    | None = None,
+    compile_region_name: str | None = None,
 ) -> Callable[..., Any]:
     """
     This is the simplified or low overhead version of aot_module. For frontends
@@ -1096,9 +1110,6 @@ def aot_module_simplified(
 
     :func:`aot_module_simplified` removes these overheads.
     """
-
-    if cudagraphs is None:
-        cudagraphs = BoxedBool(torch._inductor.config.triton.cudagraphs)
 
     with contextlib.ExitStack() as stack:
         (
@@ -1119,7 +1130,6 @@ def aot_module_simplified(
             None,
             decompositions,
             keep_inference_input_mutations,
-            boxed_forward_device_index,
             ignore_shape_env,
             flatten=False,
             force_non_lazy_backward_lowering=config.force_non_lazy_backward_lowering,
@@ -1127,6 +1137,15 @@ def aot_module_simplified(
         )
 
         compiled_fn = None
+
+        pre_grad_pass_timing: Literal["early", "late"] = resolve_pre_grad_pass_timing()
+
+        if (
+            pre_grad_pass_timing == "early"
+            and pre_grad_passes
+            and isinstance(mod, torch.fx.GraphModule)
+        ):
+            mod = pre_grad_passes(mod, fake_flat_args)
 
         if (
             isinstance(fw_compiler, SerializableAOTDispatchCompiler)
@@ -1140,13 +1159,20 @@ def aot_module_simplified(
                     mod,
                     fake_flat_args,
                     aot_config,
-                    cudagraphs,
-                    boxed_forward_device_index,
+                    compiler_config_extra,
                     local,
                     remote,
+                    compile_region_name=compile_region_name,
                 )
 
         if compiled_fn is None:
+            if (
+                pre_grad_pass_timing == "late"
+                and pre_grad_passes
+                and isinstance(mod, torch.fx.GraphModule)
+            ):
+                mod = pre_grad_passes(mod, fake_flat_args)
+
             stack.enter_context(compiled_autograd._disable())
             aot_state = create_aot_state(
                 stack,
@@ -1320,7 +1346,6 @@ def aot_export_joint_with_descriptors(
         # In contrast, decompositions are needed at this stage.
         decompositions,
         keep_inference_input_mutations,
-        None,
         ignore_shape_env,
         flatten=True,
         # Without this, we will attempt to "compile" the backward lazily
@@ -1837,9 +1862,6 @@ def _aot_export_function(
         decompositions=decompositions,
         num_params_buffers=num_params_buffers,
         aot_id=next(AOT_COUNTER),
-        # For now there's no use case involving keeping input mutations in the graph
-        # (which we can only do in the inference case anyway).
-        # We can add this later if we need to.
         keep_inference_input_mutations=keep_input_mutations,
         dynamic_shapes=dynamic_shapes,
         aot_autograd_arg_pos_to_source=None,

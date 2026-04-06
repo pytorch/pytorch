@@ -751,6 +751,7 @@ def reinplace(gm, *sample_args):
                         and len(node_res_storage) == 1
                         and old_res_storage == node_res_storage
                     ):
+                        # pyrefly: ignore [missing-attribute]
                         new_flattened_res = pytree.tree_leaves(new.meta["fake_result"])
                         new_res_storage = {
                             StorageWeakRef(x._typed_storage())

@@ -154,6 +154,7 @@ class PackageImporter(Importer):
         # used for torch.serialization._load
         self.Unpickler = lambda *args, **kwargs: PackageUnpickler(self, *args, **kwargs)
 
+    # pyrefly: ignore [bad-override]
     def import_module(self, name: str, package=None):
         """Load a module from the package if it hasn't already been loaded, and then return
         the module. Modules are loaded locally
@@ -328,11 +329,11 @@ class PackageImporter(Importer):
         """Returns a file structure representation of package's zipfile.
 
         Args:
-            include (Union[List[str], str]): An optional string e.g. ``"my_package.my_subpackage"``, or optional list of strings
+            include (list[str] | str): An optional string e.g. ``"my_package.my_subpackage"``, or optional list of strings
                 for the names of the files to be included in the zipfile representation. This can also be
                 a glob-style pattern, as described in :meth:`PackageExporter.mock`
 
-            exclude (Union[List[str], str]): An optional pattern that excludes files whose name match the pattern.
+            exclude (list[str] | str): An optional pattern that excludes files whose name match the pattern.
 
         Returns:
             :class:`Directory`
@@ -348,7 +349,7 @@ class PackageImporter(Importer):
         file later on.
 
         Returns:
-            :class:`Optional[str]` a python version e.g. 3.8.9 or None if no version was stored with this package
+            :class:`str | None` a python version e.g. 3.8.9 or None if no version was stored with this package
         """
         python_version_path = ".data/python_version"
         return (

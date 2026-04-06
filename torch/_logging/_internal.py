@@ -1024,11 +1024,7 @@ class TorchLogsFormatter(logging.Formatter):
         if self._is_trace:
             if s != "":
                 raise AssertionError(f"expected empty string for trace, got {s!r}")
-            try:
-                r = f"{prefix} {json.dumps(record.metadata)}"
-            except TypeError:
-                log.warning("failing metadata: %r", record.metadata)
-                raise
+            r = f"{prefix} {json.dumps(record.metadata, default=repr)}"
             if record.payload is not None:
                 r += "".join(f"\n\t{l}" for l in record.payload.split("\n"))
             return r
@@ -1200,6 +1196,7 @@ class LazyTraceHandler(logging.StreamHandler):
         logging.Handler.__init__(self)
         self.stream = None
         self._builtin_open = open
+        self._pending_log_version = False
 
     # cloned from FileHandler in cpython
     def close(self) -> None:
@@ -1271,12 +1268,36 @@ class LazyTraceHandler(logging.StreamHandler):
                 # TORCH_LOGS="inductor" is enabled
                 inductor_log = logging.getLogger("torch._inductor")
                 inductor_log.info("tlparse raw data: %s", self.stream.name)
+                self._pending_log_version = True
             else:
                 # We go poof, remove and no-op
                 trace_log.removeHandler(self)
                 return
         if self.stream:
             super().emit(record)
+            if self._pending_log_version:
+                self._pending_log_version = False
+                _log_torch_version()
+
+
+def _log_torch_version() -> None:
+    import torch
+    from torch._environment import is_fbcode
+    from torch._utils_internal import get_torch_source_version
+
+    version_info: dict[str, object] = {
+        "pytorch_version": torch.__version__,
+        "commit": get_torch_source_version(),
+        "oss": not is_fbcode(),
+    }
+
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {"name": "torch_version", "encoding": "json"},
+        payload_fn=lambda: version_info,
+        suppress_context=True,
+        expect_trace_id=False,
+    )
 
 
 @functools.cache

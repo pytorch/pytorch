@@ -8,7 +8,7 @@ from collections.abc import Callable
 from enum import Enum
 from inspect import Parameter, Signature, signature
 from types import MethodType
-from typing import Any, Union
+from typing import Any
 
 import torch
 import torch.fx as fx
@@ -364,7 +364,7 @@ class MultiUseParameterConfig(Enum):
     REPLICATE = 2
 
 
-MultiUseParamSpec = Union[MultiUseParameterConfig, dict[str, MultiUseParameterConfig]]
+MultiUseParamSpec = MultiUseParameterConfig | dict[str, MultiUseParameterConfig]
 
 
 class DetachExecutor(fx.Interpreter):

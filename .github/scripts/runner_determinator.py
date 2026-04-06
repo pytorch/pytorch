@@ -1,9 +1,5 @@
 # flake8: noqa: G004
 
-# Note: Copies of this script in runner_determinator.py and _runner-determinator.yml
-#       must be kept in sync. You can do it easily by running the following command:
-#           python .github/scripts/update_runner_determinator.py
-
 """
 This runner determinator is used to determine which set of runners to run a
 GitHub job on. It uses the first comment of a GitHub issue (by default
@@ -79,12 +75,17 @@ WORKFLOW_LABEL_LF_CANARY = "lf.c."  # use canary runners from the linux foundati
 GITHUB_OUTPUT = os.getenv("GITHUB_OUTPUT", "")
 GH_OUTPUT_KEY_AMI = "runner-ami"
 GH_OUTPUT_KEY_LABEL_TYPE = "label-type"
+GH_OUTPUT_KEY_USE_ARC = "use-arc"
 OPT_OUT_LABEL = "no-runner-experiments"
 
 SETTING_EXPERIMENTS = "experiments"
 
 LF_FLEET_EXPERIMENT = "lf"
+ARC_FLEET_EXPERIMENT = "arc"
 CANARY_FLEET_SUFFIX = ".c"
+
+ARC_LABEL_PREFIX = "mt-"
+ARC_CANARY_LABEL_PREFIX = "c-"
 
 
 class Experiment(NamedTuple):
@@ -99,6 +100,11 @@ class Experiment(NamedTuple):
     )
 
     # Add more fields as needed
+
+
+class RunnerPrefixResult(NamedTuple):
+    prefix: str
+    use_arc: bool = False
 
 
 class Settings(NamedTuple):
@@ -352,11 +358,8 @@ def parse_settings_from_text(settings_text: str) -> Settings:
     """
     try:
         if settings_text:
-            # Escape the backtick as well so that we can have the settings in a code block on the GH issue
-            # for easy reading
-            # Note: Using ascii for the backtick so that the cat step in _runner-determinator.yml doesn't choke on
-            #       the backtick character in shell commands.
-            backtick = chr(96)  # backtick character
+            # Strip backticks so settings can be in a code block on the GH issue
+            backtick = chr(96)
             settings_text = settings_text.strip(f"\r\n\t{backtick} ")
             settings = load_yaml(settings_text)
 
@@ -439,12 +442,13 @@ def get_runner_prefix(
     eligible_experiments: frozenset[str] = frozenset(),
     opt_out_experiments: frozenset[str] = frozenset(),
     is_canary: bool = False,
-) -> str:
+) -> RunnerPrefixResult:
     settings = parse_settings(rollout_state)
     user_optins = parse_users(rollout_state)
 
     fleet_prefix = ""
     prefixes = []
+    use_arc = False
     for experiment_name, experiment_settings in settings.experiments.items():
         if not experiment_settings.all_branches and is_exception_branch(branch):
             log.info(
@@ -510,7 +514,12 @@ def get_runner_prefix(
 
         if enabled:
             label = experiment_name
-            if experiment_name == LF_FLEET_EXPERIMENT:
+            if experiment_name == ARC_FLEET_EXPERIMENT:
+                use_arc = True
+                log.info(
+                    f"ARC experiment enabled. Using ARC runner prefix ({'canary' if is_canary else 'production'})."
+                )
+            elif experiment_name == LF_FLEET_EXPERIMENT:
                 # We give some special treatment to the "lf" experiment since determines the fleet we use
                 #  - If it's enabled, then we always list it's prefix first
                 #  - If we're in the canary branch, then we append ".c" to the lf prefix
@@ -519,6 +528,15 @@ def get_runner_prefix(
                 fleet_prefix = label
             else:
                 prefixes.append(label)
+
+    # ARC experiment takes precedence: return a fixed label prefix
+    if use_arc:
+        arc_prefix = (
+            ARC_CANARY_LABEL_PREFIX + ARC_LABEL_PREFIX
+            if is_canary
+            else ARC_LABEL_PREFIX
+        )
+        return RunnerPrefixResult(prefix=arc_prefix, use_arc=True)
 
     if len(prefixes) > 1:
         log.error(
@@ -530,7 +548,8 @@ def get_runner_prefix(
     if fleet_prefix:
         prefixes.insert(0, fleet_prefix)
 
-    return ".".join(prefixes) + "." if prefixes else ""
+    prefix = ".".join(prefixes) + "." if prefixes else ""
+    return RunnerPrefixResult(prefix=prefix)
 
 
 def get_rollout_state_from_issue(github_token: str, repo: str, issue_num: int) -> str:
@@ -619,7 +638,7 @@ def main() -> None:
 
         is_canary = args.github_repo == "pytorch/pytorch-canary"
 
-        runner_label_prefix = get_runner_prefix(
+        result = get_runner_prefix(
             rollout_state,
             (args.github_issue_owner, username),
             args.github_branch,
@@ -627,6 +646,8 @@ def main() -> None:
             args.opt_out_experiments,
             is_canary,
         )
+        runner_label_prefix = result.prefix
+        set_github_output(GH_OUTPUT_KEY_USE_ARC, str(result.use_arc).lower())
 
     except Exception as e:
         log.error(

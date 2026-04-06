@@ -41,6 +41,23 @@ Dynamo makes a best-effort attempt to hint if a graph break is caused by your co
 But it can still sometimes be difficult to tell from the logs if the graph break is caused by an error in your code,
 is a more complicated graph break, or is a `torch.compile` bug. In order to differentiate, we recommend trying to run your code without `torch.compile` to see if you still get the error reported by the graph break.
 
+You can also use `torch.compiler.set_stance("force_eager")` to quickly disable `torch.compile` without needing to modify the `torch.compile` call:
+
+```{code-cell}
+@torch.compile
+def fn(x):
+    y = torch.sin(x, x)
+    return y
+
+try:
+    with torch.compiler.set_stance("force_eager"):
+        fn(torch.ones(3, 3))
+except Exception as e:
+    print(e)
+```
+
+See https://docs.pytorch.org/tutorials/recipes/torch_compiler_set_stance_tutorial.html#crashing-sooner for more examples of `set_stance` usage for debugging.
+
 ## Data-dependent operations
 
 `torch.compile` graph breaks on data-dependent operations such as data-dependent control flow (if-statements, loops with tensors) and direct tensor data accesses (`.item`, `.data_ptr`).

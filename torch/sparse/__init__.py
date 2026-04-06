@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 # The Tensor classes are added to this module by python_tensor.cpp
 # A workaround to support both TorchScript and MyPy:
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch import Tensor
@@ -19,11 +19,11 @@ from .semi_structured import (
 if TYPE_CHECKING:
     from torch.types import _dtype as DType
 
-    DimOrDims = Optional[int | tuple[int, ...] | list[int]]
+    DimOrDims = int | tuple[int, ...] | list[int] | None
 else:
     # The JIT doesn't understand Union, nor torch.dtype here
     DType = int
-    DimOrDims = Optional[tuple[int]]
+    DimOrDims = tuple[int] | None
 
 
 __all__ = [
@@ -642,20 +642,27 @@ def as_sparse_gradcheck(gradcheck):
                     if obj.layout is torch.sparse_coo:
                         # pyrefly: ignore [no-matching-overload]
                         d.update(
-                            indices=obj._indices(), is_coalesced=obj.is_coalesced()
+                            # pyrefly: ignore [bad-argument-type]
+                            indices=obj._indices(),
+                            # pyrefly: ignore [bad-argument-type]
+                            is_coalesced=obj.is_coalesced(),
                         )
                         values = obj._values()
                     elif obj.layout in {torch.sparse_csr, torch.sparse_bsr}:
                         # pyrefly: ignore [no-matching-overload]
                         d.update(
+                            # pyrefly: ignore [bad-argument-type]
                             compressed_indices=obj.crow_indices(),
+                            # pyrefly: ignore [bad-argument-type]
                             plain_indices=obj.col_indices(),
                         )
                         values = obj.values()
                     else:
                         # pyrefly: ignore [no-matching-overload]
                         d.update(
+                            # pyrefly: ignore [bad-argument-type]
                             compressed_indices=obj.ccol_indices(),
+                            # pyrefly: ignore [bad-argument-type]
                             plain_indices=obj.row_indices(),
                         )
                         values = obj.values()

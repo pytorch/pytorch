@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import warnings
 from collections.abc import Callable
-from typing import Any, Optional, TYPE_CHECKING, TypeAlias, TypeVar
+from typing import Any, TYPE_CHECKING, TypeAlias, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 else:
     # The JIT doesn't understand Union, nor torch.dtype here
     DType = int
-    DimOrDims = Optional[tuple[int, ...]]
+    DimOrDims = tuple[int, ...] | None
 
 
 __all__: list[str] = []

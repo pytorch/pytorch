@@ -1,7 +1,6 @@
 import importlib.util
 import os
 from types import ModuleType
-from typing import Optional
 
 import torch
 from torch.torch_version import TorchVersion
@@ -15,7 +14,7 @@ test/test_scaled_matmul_cuda.py. This module provides common imports
 and utilities to reduce code duplication.
 """
 
-_TEST_SCALED_MATMUL_CUDA_MOD: Optional[ModuleType] = None
+_TEST_SCALED_MATMUL_CUDA_MOD: ModuleType | None = None
 
 
 # Shared benchmark shapes for scaled matmul operations

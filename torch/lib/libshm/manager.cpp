@@ -46,12 +46,7 @@ static void register_fd(int fd) {
 }
 
 static void unregister_fd(int fd) {
-  pollfds.erase(
-      std::remove_if(
-          pollfds.begin(),
-          pollfds.end(),
-          [fd](const struct pollfd& pfd) { return pfd.fd == fd; }),
-      pollfds.end());
+  std::erase_if(pollfds, [fd](const struct pollfd& pfd) { return pfd.fd == fd; });
   client_sessions.erase(fd);
 }
 

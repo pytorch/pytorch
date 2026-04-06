@@ -1,0 +1,21 @@
+# torchtitan Test Library Configuration
+# Each test plan maps to torchtitan's own test runners.
+# When tests are added/removed in torchtitan, the daily pin bump picks them up.
+# Test filtering and exclusions are managed in the torchtitan repo via
+# scripts/ci/pytorch_ci_test_runner.sh.
+
+torchtitan_features_integration:
+  title: torchtitan Feature Integration Tests (8 GPU)
+  id: torchtitan_features_integration
+  env_vars:
+    NGPU: "8"
+  steps:
+    - scripts/ci/pytorch_ci_test_runner.sh feature_tests
+
+torchtitan_models_integration:
+  title: torchtitan Model Integration Tests (8 GPU)
+  id: torchtitan_models_integration
+  env_vars:
+    NGPU: "8"
+  steps:
+    - scripts/ci/pytorch_ci_test_runner.sh model_tests

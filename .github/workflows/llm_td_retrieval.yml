@@ -26,15 +26,8 @@ jobs:
     continue-on-error: true
     needs: get-label-type
     steps:
-      - name: Clone PyTorch
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          repository: pytorch/pytorch
-          fetch-depth: 0
-          path: pytorch
-
       - name: Setup Linux
-        uses: ./pytorch/.github/actions/setup-linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@main
 
       - name: Clone CodeLlama
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2

@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import contextlib
 import math
 import random
 import unittest
@@ -313,6 +314,75 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         y1 = fn(inp, *get_rng())
         y2 = opt_fn(inp, *get_rng())
         self.assertEqual(y1, y2)
+
+    def test_random_in_dynamo(self):
+        # test that system random calls still work even
+        # if Dynamo calls random methods.
+
+        exit_stack = contextlib.ExitStack()
+
+        def patch_fn_with_rng_burn(name):
+            orig_fn = eval(name)
+
+            def bad(*args, **kwargs):
+                # burn random call within dynamo
+                random.random()
+                return orig_fn(*args, **kwargs)
+
+            exit_stack.enter_context(unittest.mock.patch(name, bad))
+
+        x = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+
+        # we don't guard against random calls in eval_frame.py today
+        # patch_fn_with_rng_burn("torch._dynamo.eval_frame._maybe_set_eval_frame")
+        patch_fn_with_rng_burn("torch._dynamo.convert_frame._compile")
+        patch_fn_with_rng_burn(
+            "torch._dynamo.symbolic_convert.InstructionTranslator.run"
+        )
+
+        def f1(x):
+            # simple test
+            r1 = random.randint(1, 9)
+            y = x + random.uniform(10, 20)
+            r2 = random.randrange(0, 10)
+            return y + r1, r2
+
+        random.seed(1)
+        ref1 = f1(x)
+        opt_f1 = torch.compile(f1, backend="eager", fullgraph=True)
+        random.seed(1)
+        res1 = opt_f1(x)
+        self.assertEqual(ref1, res1)
+
+        def f2(x):
+            # test with graph breaks
+            r1 = random.randint(1, 9)
+            x = x + r1
+            torch._dynamo.graph_break()
+            r2 = random.randint(10, 19)
+            x = x + r2
+            return x, r1, r2
+
+        random.seed(2)
+        ref2 = f2(x)
+        opt_f2 = torch.compile(f2, backend="eager")
+        random.seed(2)
+        res2 = opt_f2(x)
+        self.assertEqual(ref2, res2)
+
+        def f3(x):
+            # test consecutive calls
+            return x + random.randint(1, 10)
+
+        random.seed(3)
+        ref3 = f3(x)
+        ref3_ = f3(x)
+        opt_f3 = torch.compile(f3, backend="eager", fullgraph=True)
+        random.seed(3)
+        res3 = opt_f3(x)
+        res3_ = opt_f3(x)
+        self.assertEqual(ref3, res3)
+        self.assertEqual(ref3_, res3_)
 
     def test_builtin_getitem(self):
         # builtin getitem args[0] is python list and args[1] is unspec
@@ -914,6 +984,31 @@ def forward(self):
         o1_2_ref = main_model(x2, 2)
         o1_2 = opt_model(x2, 2)
         self.assertEqual(o1_2_ref, o1_2)
+
+    def test_float_guard_source_on_recompile(self):
+        # Regression test: when a float attribute triggers recompilation and
+        # becomes dynamic, the guard produced by produce_guards_verbose should
+        # have a proper source annotation, not "(unknown source)".
+        cache = {}
+
+        class Module(torch.nn.Module):
+            def __init__(self, key: float):
+                super().__init__()
+                self.key = key
+                cache[key] = torch.randn(16)
+
+            def forward(self, x):
+                return x + cache[self.key]
+
+        x = torch.randn(16)
+        log_stream, ctx = logs_to_string("torch._dynamo.guards", "guards")
+        with ctx():
+            for key in [1.0, 2.0, 3.0]:
+                model = torch.compile(Module(key))
+                model(x)
+
+        guard_log = log_stream.getvalue()
+        self.assertNotIn("unknown source", guard_log)
 
 
 class UnspecTestsDevice(torch._dynamo.test_case.TestCase):

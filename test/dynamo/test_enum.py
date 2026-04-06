@@ -428,7 +428,6 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, Priority.HIGH)
         self.assertEqual(ref, res)
 
-    @unittest.expectedFailure  # TODO: Support Flag enum membership check
     def test_flag_enum(self):
         """Test Flag enum operations."""
 
@@ -451,6 +450,25 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x, combined)
         self.assertEqual(ref, res)
+
+    def test_flag_enum_membership_combined(self):
+        """Test Flag enum membership check with combined flags."""
+
+        class LocalReduction(enum.Flag):
+            MEAN = enum.auto()
+            SUM = enum.auto()
+            MAX = enum.auto()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, local_reduction):
+            if LocalReduction.MEAN in local_reduction:
+                return x.mean()
+            return x.sum()
+
+        x = torch.tensor([1.0, 2.0, 3.0])
+        self.assertEqual(fn(x, LocalReduction.MEAN | LocalReduction.SUM), x.mean())
+        torch._dynamo.reset()
+        self.assertEqual(fn(x, LocalReduction.SUM | LocalReduction.MAX), x.sum())
 
     def test_enum_comparison(self):
         """Test enum comparison operations."""
@@ -515,7 +533,6 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         res = compiled_fn(x, 3)
         self.assertEqual(ref, res)
 
-    @unittest.expectedFailure
     def test_enum_construction_no_extra_init(self):
         # Real-world instance of the metaclass __call__ issue above.
         # EnumMeta.__call__ only calls __new__ (value lookup), NOT __init__.

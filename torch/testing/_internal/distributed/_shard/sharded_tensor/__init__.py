@@ -23,7 +23,11 @@ class ShardedTensorTestBase(MultiProcessTestCase):
 
     def init_pg(self, backend="nccl"):
         if backend not in ["nccl", "gloo", "mpi", "hccl"]:
-            raise RuntimeError(f"Backend {backend} not supported!")
+            if torch.accelerator.is_available():
+                device_type = torch.accelerator.current_accelerator().type
+                backend = dist.Backend.default_device_backend_map[device_type]
+            else:
+                raise RuntimeError(f"Backend {backend} not supported!")
 
         dist.init_process_group(
             backend=backend,

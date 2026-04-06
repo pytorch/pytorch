@@ -81,7 +81,7 @@ bool use_mkldnn_matmul(
     const Tensor& mat2,
     const Tensor& result);
 
-// x:s8 * w:s8 -> y:s32
+// x:u8 or s8 * w:s8 -> y:s32
 TORCH_API void mkldnn_matmul_i8i8i32(
     const Tensor &mat1,
     const Tensor &mat2,

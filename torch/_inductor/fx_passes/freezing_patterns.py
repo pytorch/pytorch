@@ -187,7 +187,7 @@ def addmm_patterns_init():
 
             if not all(
                 inp.op == "get_attr"
-                and inp.meta["val"].shape == inps[0].meta["val"].shape
+                and inp.meta["val"].shape[:-1] == inps[0].meta["val"].shape[:-1]
                 for inp in inps
             ):
                 return False
@@ -221,9 +221,10 @@ def addmm_patterns_init():
         return (inp @ w1, inp @ w2, inp @ w3)
 
     def matmul_replacement(inp, w1, w2, w3):
-        cat_t = torch.cat((w1, w2, w3), dim=1)
+        weights = (w1, w2, w3)
+        cat_t = torch.cat(weights, dim=1)
         mm = inp @ cat_t
-        return mm.chunk(3, dim=1)
+        return mm.split([w.size(1) for w in weights], dim=1)
 
     register_replacement(
         # pyrefly: ignore [bad-argument-type]
@@ -243,9 +244,10 @@ def addmm_patterns_init():
         return (inp @ w1, inp @ w2)
 
     def matmul_replacement_two(inp, w1, w2):
-        cat_t = torch.cat((w1, w2), dim=1)
+        weights = (w1, w2)
+        cat_t = torch.cat(weights, dim=1)
         mm = inp @ cat_t
-        return mm.chunk(2, dim=1)
+        return mm.split([w.size(1) for w in weights], dim=1)
 
     register_replacement(
         # pyrefly: ignore [bad-argument-type]
@@ -269,9 +271,10 @@ def addmm_patterns_init():
         )
 
     def addmm_fuse_replacement_second(inp, w1, w2, w3, b1, b2, b3):
-        cat_w = torch.cat((w1, w2, w3), dim=1)
+        weights = (w1, w2, w3)
+        cat_w = torch.cat(weights, dim=1)
         cat_b = torch.cat((b1, b2, b3))
-        return aten.addmm(cat_b, inp, cat_w).chunk(3, dim=1)
+        return aten.addmm(cat_b, inp, cat_w).split([w.size(1) for w in weights], dim=1)
 
     register_replacement(
         # pyrefly: ignore [bad-argument-type]

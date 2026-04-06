@@ -647,7 +647,7 @@ std::tuple<Tensor, std::optional<int64_t>> index_put_batch_rule(
   values_ = maybe_permute_values(values_, indices, indices_bdims);
 
   auto result = at::index_put(self_, List<std::optional<Tensor>>(indices_), values_, accumulate);
-  return std::make_tuple(result, 0);
+  return std::make_tuple(std::move(result), 0);
 }
 
 // plumbing done since we don't support List<std::optional<Tensor>> in codegen
@@ -704,7 +704,7 @@ std::tuple<Tensor, std::optional<int64_t>> scatter_batch_rule(
   if (self_logical_rank == 0) {
     result = result.squeeze(-1);
   }
-  return std::make_tuple(result, 0);
+  return std::make_tuple(std::move(result), 0);
 }
 
 template <typename Func, typename ...Args>
@@ -742,7 +742,7 @@ inline std::tuple<Tensor, std::optional<int64_t>> scatter_batch_rule(
   if (self_logical_rank == 0) {
     result = result.squeeze(-1);
   }
-  return std::make_tuple(result, 0);
+  return std::make_tuple(std::move(result), 0);
 }
 
 } // namespace
@@ -852,7 +852,7 @@ std::tuple<Tensor, std::optional<int64_t>> gather_batch_rule(
   if (index_logical_rank == 0) {
     result = result.squeeze(-1);
   }
-  return std::make_tuple(result, 0);
+  return std::make_tuple(std::move(result), 0);
 }
 
 Tensor get_expanded_index(const Tensor& index, SymIntArrayRef self_size, int64_t dim) {
@@ -1000,7 +1000,7 @@ std::tuple<Tensor, std::optional<int64_t>> index_add_batch_rule_impl(
     if (self_logical_rank == 0) {
       result = result.squeeze(-1);
     }
-    return std::make_tuple(result, 0);
+    return std::make_tuple(std::move(result), 0);
   }
 
   // Index is batched. For-loop and stack is the best thing I can come up with
@@ -1071,7 +1071,7 @@ std::tuple<Tensor,Tensor> binary_pointwise_align(
   tensor_ = maybePadToLogicalRank(tensor_, self_bdim, max_logical_rank);
   other_ = maybePadToLogicalRank(other_, mask_bdim, max_logical_rank);
 
-  return std::make_tuple(tensor_, other_);
+  return std::make_tuple(std::move(tensor_), std::move(other_));
 }
 
 std::tuple<Tensor, std::optional<int64_t>> masked_fill_scalar_batch_rule(
@@ -1082,7 +1082,7 @@ std::tuple<Tensor, std::optional<int64_t>> masked_fill_scalar_batch_rule(
     const Scalar& source) {
   auto tensors = binary_pointwise_align(self, self_bdim, mask, mask_bdim);
   auto result = at::masked_fill(std::get<0>(tensors), std::get<1>(tensors), source);
-  return std::make_tuple(result, 0);
+  return std::make_tuple(std::move(result), 0);
 }
 
 std::tuple<Tensor, std::optional<int64_t>> index_fill_batch_rule_helper(

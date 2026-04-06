@@ -448,9 +448,10 @@ def _tuned_grouped_mm_common(
         input_gen_fns[input_offs_idx] = lambda x: create_offsets(
             x, a_is_2d, b_is_2d, m, n, k, alignment
         )
-    return autotune_select_algorithm(
+    node, _ = autotune_select_algorithm(
         algorithm_name, choices, input_nodes, layout, input_gen_fns=input_gen_fns
     )
+    return node
 
 
 @register_lowering(aten._grouped_mm.default, type_promotion_kind=None)

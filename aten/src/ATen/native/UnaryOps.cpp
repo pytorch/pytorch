@@ -936,7 +936,7 @@ std::tuple<Tensor, Tensor> frexp(const Tensor& self) {
   Tensor exponent = at::empty_like(self, self.options().dtype(at::kInt));
 
   at::frexp_out(mantissa, exponent, self);
-  return std::tuple<Tensor, Tensor>(mantissa, exponent);
+  return std::tuple<Tensor, Tensor>(std::move(mantissa), std::move(exponent));
 }
 
 std::tuple<Tensor&, Tensor&> frexp_out(const Tensor& self,

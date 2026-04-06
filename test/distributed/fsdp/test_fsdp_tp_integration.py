@@ -2,7 +2,6 @@
 import copy
 import sys
 from collections import OrderedDict
-from typing import Optional
 
 import torch
 from torch import distributed as dist
@@ -183,9 +182,9 @@ class TestTPFSDPIntegration(FSDPTestContinuous):
         uses_tp: bool,
         param_name_to_numel: dict[str, int],
         param_name_to_sharding_info: dict[str, tuple[torch.Size, int]],
-        tp_pg: Optional[dist.ProcessGroup],
-        fsdp_pg: Optional[dist.ProcessGroup],
-        sharded_param_names: Optional[list[str]],
+        tp_pg: dist.ProcessGroup | None,
+        fsdp_pg: dist.ProcessGroup | None,
+        sharded_param_names: list[str] | None,
     ) -> torch.Tensor:
         """
         Returns all unsharded gradients as a single flattened tensor. This

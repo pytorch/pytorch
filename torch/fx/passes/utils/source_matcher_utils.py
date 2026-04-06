@@ -2,7 +2,7 @@ import logging
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from torch.fx._compatibility import compatibility
 from torch.fx.graph import Graph
@@ -56,7 +56,7 @@ class SourcePartition:
 def get_source_partitions(
     graph: Graph,
     wanted_sources: list[Any],
-    filter_fn: Optional[Callable[[Node], bool]] = None,
+    filter_fn: Callable[[Node], bool] | None = None,
 ) -> dict[Any, list[SourcePartition]]:
     """
     Args:

@@ -52,6 +52,7 @@
 #define C10_LIBCUDA_DRIVER_API_REQUIRED(_)         \
   _(cuDeviceGet, 12000)                            \
   _(cuDeviceGetAttribute, 12000)                   \
+  _(cuMemGetAddressRange, 12000)                   \
   _(cuMemAddressReserve, 12000)                    \
   _(cuMemRelease, 12000)                           \
   _(cuMemMap, 12000)                               \

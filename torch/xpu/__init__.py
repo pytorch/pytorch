@@ -7,16 +7,22 @@ This package is lazily initialized, so you can always import it, and use
 :func:`is_available()` to determine if your system supports XPU.
 """
 
+from __future__ import annotations
+
 import threading
 import traceback
-from collections.abc import Callable
 from functools import lru_cache
-from typing import Any, NewType, Optional
+from typing import Any, NewType, TYPE_CHECKING
 
 import torch
 import torch._C
 from torch._utils import _dummy_type, _LazySeedTracker
-from torch.types import Device
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from torch.types import Device
 
 from ._utils import _get_device_index
 from .graphs import (
@@ -279,6 +285,8 @@ def get_device_properties(
     - ``gpu_eu_count`` (int): number of EUs (Execution Unit).
     - ``max_work_group_size``: (int): maximum number of work-items permitted in a work-group.
     - ``max_num_sub_groups`` (int): maximum number of sub-groups supported in a work-group.
+    - ``memory_clock_rate`` (int) maximum clock rate of device's global memory in MHz.
+    - ``memory_bus_width`` (int) maximum bus width between device and memory in bits.
     - ``sub_group_sizes``: (list[int]): a list of supported sub-group sizes.
     - ``local_mem_size`` (int): device local memory capacity that can be allocated per work-group in bytes.
     - ``has_fp16`` (bool): whether float16 dtype is supported.
@@ -353,9 +361,9 @@ class StreamContext:
     .. note:: Streams are per-device.
     """
 
-    cur_stream: Optional["torch.xpu.Stream"]
+    cur_stream: torch.xpu.Stream | None
 
-    def __init__(self, stream: Optional["torch.xpu.Stream"]) -> None:
+    def __init__(self, stream: torch.xpu.Stream | None) -> None:
         self.stream = stream
         self.idx = _get_device_index(None, True)
         if self.idx is None:
@@ -384,7 +392,7 @@ class StreamContext:
         torch.xpu.set_stream(self.src_prev_stream)
 
 
-def stream(stream: Optional["torch.xpu.Stream"]) -> StreamContext:
+def stream(stream: torch.xpu.Stream | None) -> StreamContext:
     r"""Wrap around the Context-manager StreamContext that selects a given stream.
 
     Arguments:

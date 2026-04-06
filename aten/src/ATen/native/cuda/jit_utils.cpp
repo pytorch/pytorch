@@ -981,7 +981,6 @@ int calc_thread_work_size(
     } else {
         return 4;
     }
-    return io_size;
 #else
     auto io_size = at::cuda::jit::calc_io_size(nInputs, nOutputs, inputs_type, result_type);
     TORCH_INTERNAL_ASSERT(io_size > 0);
@@ -990,7 +989,6 @@ int calc_thread_work_size(
     } else {
         return 8;
     }
-    return io_size;
 #endif
 }
 
@@ -1599,7 +1597,7 @@ NvrtcFunction jit_pwise_function(
       &program, code.c_str(), nullptr, 0, nullptr, nullptr));
 
 #ifdef USE_ROCM
-  std::vector<const char*> args = {"--std=c++17"};
+  std::vector<const char*> args = {"--std=c++20"};
 #else
   // Constructs nvrtc build arguments
   // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
@@ -1613,7 +1611,7 @@ NvrtcFunction jit_pwise_function(
       (compile_to_sass ? "sm_" : "compute_") + std::to_string(cuda_major) +
       std::to_string(cuda_minor);
   std::vector<const char*> args = {
-      "--std=c++17", compute.c_str(), "-default-device"};
+      "--std=c++20", compute.c_str(), "-default-device"};
 #endif
 
   #ifndef NDEBUG

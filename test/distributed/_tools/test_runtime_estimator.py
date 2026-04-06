@@ -2,7 +2,7 @@
 import unittest
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, cast, Union
+from typing import Any, cast
 
 import torch
 from torch import nn, optim
@@ -105,7 +105,7 @@ class TestRuntimeEstimator(TestCase):
     def _init_model_and_args(
         self,
         model_type: str,
-        model_args: Union[ConvArgs, ModelArgs],
+        model_args: ConvArgs | ModelArgs,
         bsz: int,
     ) -> tuple[nn.Module, optim.Optimizer, torch.Tensor]:
         dev = torch.cuda.current_device()

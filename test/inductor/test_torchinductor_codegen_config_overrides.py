@@ -1,7 +1,7 @@
 # Owner(s): ["module: inductor"]
 import importlib
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
 from unittest import skipIf
 
 import torch
@@ -30,8 +30,8 @@ class CodegenInductorTest(InductorTestCase):
         self,
         func: Callable[..., Any],
         *args,
-        compile_kwargs: Optional[dict] = None,
-        config_patches: Optional[dict] = None,
+        compile_kwargs: dict | None = None,
+        config_patches: dict | None = None,
         atol: float | None = 1e-05,
         rtol: float | None = 1e-08,
     ):
@@ -59,7 +59,7 @@ class CodegenInductorTest(InductorTestCase):
 
         return result, code
 
-    def count_code(self, substr: str, code: list[str], expected: Optional[int]):
+    def count_code(self, substr: str, code: list[str], expected: int | None):
         count = sum(prog.count(substr) for prog in code)
         if expected is not None:
             self.assertEqual(count, expected)

@@ -21,7 +21,6 @@ New operators:
 
 import functools
 from collections.abc import Sequence
-from typing import Optional
 
 import torch
 from torch import _C
@@ -266,7 +265,7 @@ def linalg_vector_norm(
     g: jit_utils.GraphContext,
     self: torch._C.Value,
     ord: float,
-    dim: Optional[Sequence[int]],
+    dim: Sequence[int] | None,
     keepdim: bool,
     dtype: torch._C.Value,
 ):

@@ -86,7 +86,7 @@ std::tuple<Tensor, Tensor> fake_quantize_per_tensor_affine_cachemask(
       self.device().type(), Y, mask, self, scale, zero_point, quant_min, quant_max);
   // TODO(future, optional): look into packing the mask further (BoolTensor uses
   //   1 byte per element, we only need 1 bit per element).
-  return std::make_tuple(Y, mask);
+  return std::make_tuple(std::move(Y), std::move(mask));
 }
 
 std::tuple<Tensor, Tensor> _fake_quantize_per_tensor_affine_cachemask_tensor_qparams(
@@ -106,7 +106,7 @@ std::tuple<Tensor, Tensor> _fake_quantize_per_tensor_affine_cachemask_tensor_qpa
       self.device().type(), Y, mask, self, scale, zero_point, fake_quant_enabled, quant_min, quant_max);
   // TODO(future, optional): look into packing the mask further (BoolTensor uses
   //   1 byte per element, we only need 1 bit per element).
-  return std::make_tuple(Y, mask);
+  return std::make_tuple(std::move(Y), std::move(mask));
 }
 
 /* Backward path to fake-quantize the 'inputs' tensor, with mask.
@@ -231,7 +231,7 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_tensor_affine_ba
   auto dScale = dScale_vec.sum().unsqueeze(0).to(scale_.device());
   auto dZeroPoint = dZeroPoint_vec.sum().unsqueeze(0).to(zero_point_.device());
 
-  return std::make_tuple(dX, dScale, dZeroPoint);
+  return std::make_tuple(std::move(dX), std::move(dScale), std::move(dZeroPoint));
 }
 
 } // namespace at::native

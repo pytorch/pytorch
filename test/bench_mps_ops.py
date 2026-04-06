@@ -5,7 +5,6 @@ import itertools
 import sys
 import timeit
 import warnings
-from typing import Optional
 
 import torch
 from torch.utils.benchmark import Compare, Measurement, Timer
@@ -56,7 +55,7 @@ def bench_binary(
     binary_func,
     device: str = "mps",
     dt_a: torch.dtype = torch.float32,
-    dt_b: Optional[torch.dtype] = None,
+    dt_b: torch.dtype | None = None,
 ) -> list[Measurement]:
     dt_b = dt_b if dt_b is not None else dt_a
     x = torch.testing.make_tensor(1024, 1024, device=device, dtype=dt_a)

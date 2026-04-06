@@ -19,12 +19,17 @@ using CaptureStatus = c10::cuda::CaptureStatus;
 
 // Use this version where you don't want to create a CUDA context if none exists.
 inline CaptureStatus currentStreamCaptureStatus() {
-  // don't create a context if we don't have to
   if (c10::cuda::hasPrimaryContext(c10::cuda::current_device())) {
     return c10::cuda::currentStreamCaptureStatusMayInitCtx();
-  } else {
-    return CaptureStatus::None;
   }
+  return CaptureStatus::None;
+}
+
+inline std::optional<CaptureId_t> currentStreamCaptureId() {
+  if (c10::cuda::hasPrimaryContext(c10::cuda::current_device())) {
+    return c10::cuda::currentStreamCaptureIdMayInitCtx();
+  }
+  return std::nullopt;
 }
 
 inline void assertNotCapturing(const std::string& attempt) {

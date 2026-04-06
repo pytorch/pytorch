@@ -46,6 +46,7 @@ from torch.testing._internal.common_utils import (
     skip_but_pass_in_sandcastle_if,
     TEST_CUDA,
     TEST_HPU,
+    TEST_PRIVATEUSE1,
     TEST_WITH_ROCM,
     TEST_WITH_TSAN,
     TEST_XPU,
@@ -63,7 +64,7 @@ logger.setLevel(logging.INFO)
 
 ACCELERATOR_DIST_BACKENDS = ["nccl", "xccl", "hccl"]
 DDP_RANK_DEVICES = ["cuda", "xpu"]
-HAS_ACCELERATOR = TEST_CUDA or TEST_HPU or TEST_XPU
+HAS_ACCELERATOR = TEST_CUDA or TEST_HPU or TEST_XPU or TEST_PRIVATEUSE1
 
 
 class TestSkip(NamedTuple):
@@ -94,6 +95,14 @@ TEST_SKIPS = {
     ),
     "importerror": TestSkip(88, "Test skipped due to missing import"),
     "no_accelerator": TestSkip(89, "accelerator is not available."),
+    "multi-device-1": TestSkip(90, "Need at least 1 accelerator device"),
+    "multi-device-2": TestSkip(91, "Need at least 2 accelerator devices"),
+    "multi-device-3": TestSkip(92, "Need at least 3 accelerator devices"),
+    "multi-device-4": TestSkip(93, "Need at least 4 accelerator devices"),
+    "multi-device-5": TestSkip(94, "Need at least 5 accelerator devices"),
+    "multi-device-6": TestSkip(95, "Need at least 6 accelerator devices"),
+    "multi-device-7": TestSkip(96, "Need at least 7 accelerator devices"),
+    "multi-device-8": TestSkip(97, "Need at least 8 accelerator devices"),
 }
 
 
@@ -122,14 +131,12 @@ class DistTestCases:
 def requires_ddp_rank(device):
     return device in DDP_RANK_DEVICES
 
-
 def skip_if_no_gpu(func):
     """Skips if the world size exceeds the number of GPUs, ensuring that if the
     test is run, each rank has its own GPU via ``torch.cuda.device(rank)``."""
-
     @wraps(func)
     def wrapper(*args, **kwargs):
-        if not (TEST_CUDA or TEST_HPU or TEST_XPU):
+        if not (TEST_CUDA or TEST_HPU or TEST_XPU or TEST_PRIVATEUSE1):
             sys.exit(TEST_SKIPS["no_cuda"].exit_code)
         world_size = int(os.environ["WORLD_SIZE"])
         if TEST_CUDA and torch.cuda.device_count() < world_size:
@@ -138,6 +145,25 @@ def skip_if_no_gpu(func):
             sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
         if TEST_XPU and torch.xpu.device_count() < world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
+        if TEST_PRIVATEUSE1 and torch.accelerator.device_count() < world_size:
+            sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
+
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
+def skip_if_no_accelerator(func):
+    """Skips if the world size exceeds the number of devices, ensuring that if the
+    test is run, each rank has its own device via ``torch.accelerator.device_index(rank)``."""
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if not (TEST_PRIVATEUSE1):
+            sys.exit(TEST_SKIPS["no_accelerator"].exit_code)
+        world_size = int(os.environ["WORLD_SIZE"])
+        if TEST_PRIVATEUSE1 and torch.accelerator.device_count() < world_size:
+            sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
 
         return func(*args, **kwargs)
 
@@ -209,7 +235,8 @@ def at_least_x_gpu(x):
         return True
     if TEST_XPU and torch.xpu.device_count() >= x:
         return True
-    return False
+    return torch.accelerator.is_available() and torch.accelerator.device_count() >= x
+
 
 
 def _maybe_handle_skip_if_lt_x_gpu(args, msg) -> bool:
@@ -237,7 +264,9 @@ def skip_if_lt_x_gpu(x, *, allow_cpu=False):
                 return func(*args, **kwargs)
             if TEST_XPU and torch.xpu.device_count() >= x:
                 return func(*args, **kwargs)
-            if allow_cpu and not (torch.cuda.is_available() or TEST_HPU or TEST_XPU):
+            if TEST_PRIVATEUSE1 and torch.accelerator.device_count() >= x:
+                return func(*args, **kwargs)
+            if allow_cpu and not (torch.cuda.is_available() or TEST_HPU or TEST_XPU or TEST_PRIVATEUSE1):
                 return func(*args, **kwargs)
             test_skip = TEST_SKIPS[f"multi-gpu-{x}"]
             if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
@@ -455,8 +484,11 @@ def requires_accelerator_dist_backend(backends=None):
     Decorator to skip tests if no accelerator communication backend (NCCL, XCCL, HCCL) is available.
 
     Args:
-        backends (Optional[List[str]]): Specific accelerator backends to check (e.g., ["nccl", "xccl", "hccl"]).
-                                       If None, checks all supported accelerator backends (NCCL, XCCL, HCCL).
+        backends (Optional[List[str]]): Specific accelerator backends to check
+            (e.g., ["nccl", "xccl", "hccl"]). Any registered PrivateUse1 backend
+            is always checked in addition to the listed backends.
+            If None, checks all known accelerator backends (NCCL, XCCL, HCCL)
+            plus any registered PrivateUse1 backend.
 
     Returns:
         callable: A decorator that skips the test if no specified accelerator backend is available.
@@ -464,14 +496,21 @@ def requires_accelerator_dist_backend(backends=None):
     if backends is None:
         backends = ACCELERATOR_DIST_BACKENDS
 
+    _backend_availability_checks = {
+        "nccl": c10d.is_nccl_available,
+        "xccl": c10d.is_xccl_available,
+        "hccl": lambda: TEST_HPU,
+    }
+
+    def _is_privateuse1_backend_available() -> bool:
+        """Check if a PrivateUse1 backend is registered."""
+        pu1_device = torch._C._get_privateuse1_backend_name()
+        return c10d.Backend.default_device_backend_map.get(pu1_device) is not None
+
     backend_available = any(
-        {
-            "nccl": c10d.is_nccl_available,
-            "xccl": c10d.is_xccl_available,
-            "hccl": lambda: TEST_HPU,
-        }.get(backend, lambda: False)()
+        _backend_availability_checks.get(backend, lambda: False)()
         for backend in backends
-    )
+    ) or _is_privateuse1_backend_available()
 
     return skip_but_pass_in_sandcastle_if(
         not backend_available,
@@ -609,7 +648,10 @@ if TEST_WITH_TSAN:
     TIMEOUT_DEFAULT = 500
 else:
     TIMEOUT_DEFAULT = int(os.getenv("DISTRIBUTED_TESTS_DEFAULT_TIMEOUT", "300"))
-TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
+TIMEOUT_OVERRIDE = {
+    "test_ddp_uneven_inputs": 400,
+    "test_DistributedDataParallel": 500,
+}
 
 
 # https://github.com/pytorch/pytorch/issues/75665
@@ -698,6 +740,8 @@ def init_multigpu_helper(world_size: int, backend: str):
         nGPUs = torch.hpu.device_count()
     if TEST_XPU:
         nGPUs = torch.xpu.device_count()
+    if TEST_PRIVATEUSE1:
+        nGPUs = torch.accelerator.device_count()
     visible_devices = range(nGPUs)
 
     # If rank is less than or equal to number of available GPU's
@@ -735,6 +779,32 @@ def initialize_temp_directories(init_method: str | None = None) -> None:
 def cleanup_temp_dir() -> None:
     if tmp_dir is not None:
         tmp_dir.cleanup()
+
+
+def retrieve_result_from_completion_queue(
+    process: torch.multiprocessing.Process,
+    completion_queue: torch.multiprocessing.Queue,
+    timeout: int | None = None,
+) -> Any:
+    """Get result from the completion_queue associated with process.
+
+    When the process finished without putting a result or the timeout expired an exception instance will be returned"""
+    queue_timeout = 120 if timeout is None else max(10, min(120, timeout // 4))
+    start_time = time.time()
+    # Periodically check the process for liveness
+    while True:
+        try:
+            return completion_queue.get(timeout=queue_timeout)
+        except queue.Empty:
+            # If the process is no longer alive we cannot get a result from the queue unless it is there right now.
+            # This can happen if the timeout occurred just before the process put its result and terminated.
+            # So do a last check for emptiness before considering it as a failure.
+            if not process.is_alive() and completion_queue.empty():
+                return RuntimeError(f"Exited with {process.exitcode}")
+        if timeout is not None:
+            elapsed = time.time() - start_time
+            if elapsed > timeout:
+                return RuntimeError(f"Process timed out out after {elapsed}s")
 
 
 # Most tests operate with this worldsize
@@ -860,6 +930,7 @@ class MultiProcessTestCase(TestCase):
                 ),
                 kwargs={
                     "fake_pg": getattr(self, "fake_pg", False),
+                    "world_size": self.world_size,
                 },
             )
             process.start()
@@ -945,7 +1016,7 @@ class MultiProcessTestCase(TestCase):
                 "Process %s skipping test %s for following reason: %s",
                 self.rank,
                 test_name,
-                str(se),
+                se,
             )
             sys.exit(TEST_SKIPS["generic"].exit_code)
         except Exception:
@@ -1163,14 +1234,8 @@ class DistributedTestBase(MultiProcessTestCase):
             pass
 
     def backend(self, device) -> str:
-        if "cuda" in device:
-            return "nccl"
-        elif "hpu" in device:  # intel gaudi
-            return "hccl"
-        elif "xpu" in device:
-            return "xccl"
-        else:
-            return "gloo"
+        device_type = torch.device(device).type if isinstance(device, str) else device.type
+        return c10d.Backend.default_device_backend_map.get(device_type, "gloo")
 
     def create_pg(self, device, world_size=None):
         if world_size is None:
@@ -1183,7 +1248,8 @@ class DistributedTestBase(MultiProcessTestCase):
             rank=self.rank,
             store=store,
         )
-        if "nccl" in self.backend(device) or "xccl" in self.backend(device):
+        backend = self.backend(device)
+        if backend in ACCELERATOR_DIST_BACKENDS:
             torch.accelerator.set_device_index(self.rank)
         return torch.distributed.distributed_c10d._get_default_group()
 
@@ -1496,7 +1562,7 @@ class MultiThreadedTestCase(TestCase):
                     "Thread %s skipping test %s for following reason: %s",
                     rank,
                     fn,
-                    str(exc),
+                    exc,
                 )
                 if skip_code < 0:
                     skip_code = TEST_SKIPS["generic"].exit_code
@@ -1922,11 +1988,18 @@ class MultiProcContinuousTest(TestCase):
         if cls._processes_spawned:
             return
 
-        # Handle both method and string attribute for device_type
+        # Handle method, property, and string attribute for device_type
         # (instantiate_device_type_tests sets device_type as a string attribute,
         # making this compatible as a drop-in replacement for MultiProcessTestCase)
-        device_type_attr = cls.device_type
-        if callable(device_type_attr):
+        device_type_attr = cls.__dict__.get("device_type", cls.device_type)
+        if isinstance(device_type_attr, classmethod):
+            device_type = device_type_attr.__func__(cls)
+        elif isinstance(device_type_attr, property):
+            # Note: fget expects an instance but we pass cls since no instance
+            # exists yet. This works because DTensorTestMixin.device_type only
+            # accesses class-level attributes (world_size, module constants).
+            device_type = device_type_attr.fget(cls)
+        elif callable(device_type_attr):
             device_type = device_type_attr()
         else:
             device_type = device_type_attr
@@ -1992,6 +2065,9 @@ class MultiProcContinuousTest(TestCase):
         # Ensure processes are spawned (lazy initialization for instantiate_device_type_tests)
         self.__class__._ensure_processes_spawned()
 
+        for hook in _test_env_setup_hooks:
+            hook(world_size=self.world_size)
+
         # I am the dispatcher
         self.rank = self.MAIN_PROCESS_RANK
 
@@ -2009,21 +2085,29 @@ class MultiProcContinuousTest(TestCase):
         def wrapper(self):
             if self.rank == self.MAIN_PROCESS_RANK:
                 logger.debug(f"Waiting for workers to finish {self.id()}")  # noqa: G004
-                # Wait for the workers to finish the test
-                for i, completion_queue in enumerate(self.completion_queues):
-                    rv = completion_queue.get()
+                # Drain all completion queues before raising any exception,
+                # so stale results don't desync subsequent tests.
+                deferred_exception = None
+                for i, (p, completion_queue) in enumerate(
+                    zip(self.processes, self.completion_queues)
+                ):
+                    rv = retrieve_result_from_completion_queue(
+                        p, completion_queue, timeout=get_timeout(self.id())
+                    )
+                    if deferred_exception is not None:
+                        # Already captured an exception; just drain
+                        continue
                     if isinstance(rv, unittest.SkipTest):
-                        raise rv
+                        deferred_exception = rv
+                        continue
                     if isinstance(rv, BaseException):
-                        # Hit an exception, re-raise it in the main process.
                         logger.warning(
                             f"Detected failure from Rank {i} in: {self.id()}, "  # noqa: G004
                             f"skipping rest of tests in Test class: {self.__class__.__name__}"  # noqa: G004
                         )
-                        # Poison rest of tests (because ProcessGroup may be not
-                        # reusable now)
                         self.__class__.poison_pill = True
-                        raise rv
+                        deferred_exception = rv
+                        continue
 
                     # Success
                     if rv != self.id():
@@ -2033,6 +2117,9 @@ class MultiProcContinuousTest(TestCase):
                     logger.debug(
                         f"Main proc detected rank {i} finished {self.id()}"  # noqa: G004
                     )
+
+                if deferred_exception is not None:
+                    raise deferred_exception
             else:
                 # Worker just runs the test
                 fn()

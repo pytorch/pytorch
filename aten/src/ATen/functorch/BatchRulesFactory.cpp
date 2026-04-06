@@ -94,14 +94,14 @@ static std::tuple<Tensor, std::optional<int64_t>> _new_zeros_with_same_feature_m
       // [K0, K1, B, 6], [B, 5], 2 -> [K0, K1, B, 5]
       tangent_ = tangent.movedim(*tangent_bdim, self_num_batch_dims);
     }
-    const auto result = at::_new_zeros_with_same_feature_meta(tangent_, base_, self_num_batch_dims);
-    return std::make_tuple(result, self_num_batch_dims);
+    auto result = at::_new_zeros_with_same_feature_meta(tangent_, base_, self_num_batch_dims);
+    return std::make_tuple(std::move(result), self_num_batch_dims);
   }
 
   // Case 1:
   auto tangent_ = moveBatchDimToFront(tangent, tangent_bdim);
   auto result = at::_new_zeros_with_same_feature_meta(tangent_, base, self_num_batch_dims + 1);
-  return std::make_tuple(result, 0);
+  return std::make_tuple(std::move(result), 0);
 }
 
 static std::tuple<Tensor, std::optional<int64_t>> linspace_logspace_batch_rule_helper(
@@ -139,7 +139,7 @@ static std::tuple<Tensor, std::optional<int64_t>> linspace_logspace_batch_rule_h
     result = result.to(*dtype);
   }
 
-  return std::make_tuple(result, 0);
+  return std::make_tuple(std::move(result), 0);
 }
 
 static std::tuple<Tensor, std::optional<int64_t>> linspace_Tensor_Tensor_batch_rule(

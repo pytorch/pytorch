@@ -49,6 +49,30 @@ def T(*shape, requires_grad=False):
     TEST_WITH_TORCHDYNAMO, "torchdynamo doesn't work with __torch_dispatch__ right now"
 )
 class TestFlopCounter(TestCase):
+    def test_sdpa_flop_count_gqa(self):
+        """sdpa_flop_count should handle GQA where KV heads < Q heads."""
+        from torch.utils.flop_counter import sdpa_flop_count
+
+        # MHA: q_heads == kv_heads
+        q_shape = (2, 32, 128, 64)
+        k_shape = (2, 32, 128, 64)
+        v_shape = (2, 32, 128, 64)
+        mha_flops = sdpa_flop_count(q_shape, k_shape, v_shape)
+        self.assertTrue(mha_flops > 0)
+
+        # GQA: q_heads=32, kv_heads=8 (ratio 4:1)
+        k_gqa = (2, 8, 128, 64)
+        v_gqa = (2, 8, 128, 64)
+        gqa_flops = sdpa_flop_count(q_shape, k_gqa, v_gqa)
+        # Flops should be equal since KV heads are broadcast to match Q heads
+        self.assertEqual(gqa_flops, mha_flops)
+
+        # Incompatible: q_heads not a multiple of kv_heads
+        k_bad = (2, 5, 128, 64)
+        v_bad = (2, 5, 128, 64)
+        with self.assertRaises(AssertionError):
+            sdpa_flop_count(q_shape, k_bad, v_bad)
+
     def test_flop_counter_variety(self):
         mod = torch.nn.Linear(9, 10)
         with FlopCounterMode() as mode:
@@ -463,6 +487,70 @@ class TestFlopCounter(TestCase):
         flops_fw_bw_math, flops_fw_bw_efficient = flops
         self.assertExpectedInline(str(flops_fw_bw_math), """805306368""")
         self.assertExpectedInline(str(flops_fw_bw_efficient), """939524096""")
+
+    @unittest.skipIf(not HAS_CUDA, "CUDA not available")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "Flash attention not supported (pre-SM80 hardware on CUDA)",
+    )
+    def test_sdpa_gqa(self):
+        """Test flop counting for grouped-query attention (GQA)."""
+        batch_size = 2
+        n_heads_q = 32
+        n_heads_kv = 8
+        seq_len = 128
+        head_dim = 64
+        dtype = torch.float16
+
+        query = torch.randn(
+            batch_size,
+            n_heads_q,
+            seq_len,
+            head_dim,
+            device="cuda",
+            dtype=dtype,
+        )
+        key = torch.randn(
+            batch_size,
+            n_heads_kv,
+            seq_len,
+            head_dim,
+            device="cuda",
+            dtype=dtype,
+        )
+        value = torch.randn(
+            batch_size,
+            n_heads_kv,
+            seq_len,
+            head_dim,
+            device="cuda",
+            dtype=dtype,
+        )
+
+        mode = FlopCounterMode()
+        with mode:
+            out = F.scaled_dot_product_attention(
+                query, key, value, dropout_p=0, is_causal=True, enable_gqa=True
+            )
+        gqa_flops = int(get_total_flops(mode))
+
+        # Compare with MHA (KV heads expanded to match Q heads)
+        key_expanded = key.repeat_interleave(n_heads_q // n_heads_kv, dim=1)
+        value_expanded = value.repeat_interleave(n_heads_q // n_heads_kv, dim=1)
+        mode_mha = FlopCounterMode()
+        with mode_mha:
+            out_mha = F.scaled_dot_product_attention(
+                query,
+                key_expanded,
+                value_expanded,
+                dropout_p=0,
+                is_causal=True,
+            )
+        mha_flops = int(get_total_flops(mode_mha))
+
+        # GQA flops should equal MHA flops (kernel broadcasts KV heads)
+        self.assertEqual(gqa_flops, mha_flops)
+        self.assertTrue(gqa_flops > 0)
 
     @unittest.skipIf(not HAS_CUDA, "CUDA not available")
     @unittest.skipIf(

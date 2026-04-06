@@ -75,6 +75,10 @@ def check_file(
                 '"runs-on" section must be sequence node but got mapping node with "!!map" tag',
                 "-ignore",
                 'input "freethreaded" is not defined in action "actions/setup-python@v',
+                # GitHub increased workflow_dispatch limit to 25 inputs (Dec 2025).
+                # actionlint fixed this in v1.7.10; remove after upgrading from v1.7.7.
+                "-ignore",
+                'maximum number of inputs for "workflow_dispatch" event is 10 but',
                 file,
             ]
         )

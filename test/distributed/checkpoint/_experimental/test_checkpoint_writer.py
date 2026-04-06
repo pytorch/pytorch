@@ -3,7 +3,7 @@
 import os
 import shutil
 import tempfile
-from typing import Any, Optional
+from typing import Any
 from unittest.mock import MagicMock
 
 import torch
@@ -22,10 +22,10 @@ class MockWriterHook(WriterHook):
     def __init__(self):
         self.pre_commit_called = False
         self.commit_called = False
-        self.pre_commit_path: Optional[str] = None
-        self.commit_path: Optional[str] = None
-        self.pre_commit_kwargs: Optional[dict[str, Any]] = None
-        self.commit_kwargs: Optional[dict[str, Any]] = None
+        self.pre_commit_path: str | None = None
+        self.commit_path: str | None = None
+        self.pre_commit_kwargs: dict[str, Any] | None = None
+        self.commit_kwargs: dict[str, Any] | None = None
 
     def pre_commit(self, path: str, **kwargs: Any):
         self.pre_commit_called = True

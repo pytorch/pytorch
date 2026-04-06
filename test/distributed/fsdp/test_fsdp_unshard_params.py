@@ -3,7 +3,7 @@ import contextlib
 import itertools
 import math
 import sys
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import torch.distributed.fsdp._traversal_utils as traversal_utils
@@ -67,8 +67,8 @@ class TestUnshardParamsBase(FSDPTestContinuous):
         offloading_params = model.cpu_offload.offload_params
 
         # Assumes depth-first `.parameters()`
-        outer_param: Union[FlatParameter, nn.Parameter] = next(model.parameters())
-        inner_param: Union[FlatParameter, nn.Parameter] = next(model[0].parameters())
+        outer_param: FlatParameter | nn.Parameter = next(model.parameters())
+        inner_param: FlatParameter | nn.Parameter = next(model[0].parameters())
         param_to_check = outer_param if check_outer else inner_param
 
         # Write a known value to all elements of the *sharded* parameter or
@@ -118,7 +118,7 @@ class TestUnshardParamsBase(FSDPTestContinuous):
         rank0_only: bool,
         offload_to_cpu: bool,
         cpu_offload: CPUOffload,
-        mixed_precision: Optional[MixedPrecision],
+        mixed_precision: MixedPrecision | None,
         use_orig_params: bool,
     ):
         local_model = NestedWrappedModule.init(
@@ -280,7 +280,7 @@ class TestUnshardParams(TestUnshardParamsBase):
         self,
         rank0_only: bool,
         offload_to_cpu: bool,
-        mixed_precision: Optional[MixedPrecision],
+        mixed_precision: MixedPrecision | None,
         use_orig_params: bool,
     ):
         """NOTE: This method depends on FSDP internals."""
@@ -369,7 +369,7 @@ class TestUnshardParams(TestUnshardParamsBase):
         self,
         recurse: bool,
         unshard_outer: bool,
-        mixed_precision: Optional[MixedPrecision],
+        mixed_precision: MixedPrecision | None,
         use_orig_params: bool,
     ):
         """NOTE: This method depends on FSDP internals."""
@@ -493,7 +493,7 @@ class TestUnshardParams(TestUnshardParamsBase):
         def _check_grads(
             ddp_model: DDP,
             fsdp_model: FSDP,
-            old_fsdp_grads: Optional[list[torch.Tensor]],
+            old_fsdp_grads: list[torch.Tensor] | None,
         ):
             """
             Checks that writes to the FSDP parameters' gradients persist or do

@@ -27,6 +27,9 @@
         ) | indent_except_first(2) }}
         return tSrS_ssa
     {{ set_cute_hash("score_mod", "score") }}
+    {% if SCORE_MOD_VEC_SIZE %}
+    score_mod.__vec_size__ = {{SCORE_MOD_VEC_SIZE}}
+    {% endif %}
     {% else %}
     score_mod = None
     {% endif %}

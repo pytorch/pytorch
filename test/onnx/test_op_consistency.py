@@ -25,7 +25,6 @@ Note:
 from __future__ import annotations
 
 import copy
-from typing import Optional
 
 import onnx_test_common
 import parameterized
@@ -236,7 +235,7 @@ class SingleOpModel(torch.nn.Module):
 
 def _should_skip_xfail_test_sample(
     op_name: str, sample
-) -> tuple[Optional[str], Optional[str]]:
+) -> tuple[str | None, str | None]:
     """Returns a reason if a test sample should be skipped."""
     if op_name not in OP_WITH_SKIPPED_XFAIL_SUBTESTS:
         return None, None

@@ -3,6 +3,7 @@
 
 #include <torch/csrc/inductor/aoti_torch/c/macros.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim_deprecated.h>
+#include <torch/headeronly/util/Exception.h>
 
 // This header defines a stable C API for certain ATen functionality in
 // libtorch. The AOTInductor compiled model.so will only refer to this header
@@ -63,6 +64,10 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e5m2();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e4m3fn();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e5m2fnuz();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e4m3fnuz();
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e8m0fnu();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float4_e2m1fn_x2();
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_bfloat16();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float16();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float32();
@@ -629,24 +634,24 @@ AOTI_TORCH_EXPORT void aoti_torch_check(
     const char* msg);
 
 #ifdef STRIP_ERROR_MESSAGES
-#define AOTI_TORCH_CHECK(cond, ...)              \
-  if (!(cond)) {                                 \
-    aoti_torch_check(                            \
-        false,                                   \
-        __func__,                                \
-        __FILE__,                                \
-        static_cast<uint32_t>(__LINE__),         \
-        TORCH_CHECK_MSG(cond, "", __VA_ARGS__)); \
+#define AOTI_TORCH_CHECK(cond, ...)                  \
+  if (!(cond)) {                                     \
+    aoti_torch_check(                                \
+        false,                                       \
+        __func__,                                    \
+        __FILE__,                                    \
+        static_cast<uint32_t>(__LINE__),             \
+        STD_TORCH_CHECK_MSG(cond, "", __VA_ARGS__)); \
   }
 #else
-#define AOTI_TORCH_CHECK(cond, ...)                \
-  if (!(cond)) {                                   \
-    aoti_torch_check(                              \
-        false,                                     \
-        __func__,                                  \
-        __FILE__,                                  \
-        static_cast<uint32_t>(__LINE__),           \
-        TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__)); \
+#define AOTI_TORCH_CHECK(cond, ...)                    \
+  if (!(cond)) {                                       \
+    aoti_torch_check(                                  \
+        false,                                         \
+        __func__,                                      \
+        __FILE__,                                      \
+        static_cast<uint32_t>(__LINE__),               \
+        STD_TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__)); \
   }
 #endif
 

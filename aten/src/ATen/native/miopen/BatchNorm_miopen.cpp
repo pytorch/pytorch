@@ -156,7 +156,7 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
   // save_mean and save_var can be undefined
   // If this causes problems, we can initialize them to empty tensors
   // of the correct type
-  return std::tuple<Tensor, Tensor, Tensor>{output_t, save_mean, save_var};
+  return std::tuple<Tensor, Tensor, Tensor>{std::move(output_t), std::move(save_mean), std::move(save_var)};
 }
 
 std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
@@ -235,7 +235,7 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
     save_mean->const_data_ptr(),
     save_var->const_data_ptr()));
 
-  return std::tuple<Tensor,Tensor,Tensor>{grad_input_t, grad_weight_t, grad_bias_t};
+  return std::tuple<Tensor,Tensor,Tensor>{std::move(grad_input_t), std::move(grad_weight_t), std::move(grad_bias_t)};
 }
 
 }}  // namespace native

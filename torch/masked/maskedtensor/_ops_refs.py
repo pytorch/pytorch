@@ -93,7 +93,7 @@ class _MaskedToDense(torch.autograd.Function):
             return grad_output.to_sparse_csr()
         elif layout == torch.strided:
             return grad_output.to_dense()
-        raise ValueError("to_dense: Unsupported input layout: ", layout)
+        raise ValueError(f"to_dense: Unsupported input layout: {layout}")
 
 
 class _MaskedToSparse(torch.autograd.Function):

@@ -177,7 +177,7 @@ class EtcdServer:
                 curr_retries += 1
                 stop_etcd(self._etcd_proc)
                 logger.warning(  # noqa: G200
-                    "Failed to start etcd server, got error: %s, retrying", str(e)
+                    "Failed to start etcd server, got error: %s, retrying", e
                 )
                 if curr_retries >= num_retries:
                     shutil.rmtree(self._base_data_dir, ignore_errors=True)

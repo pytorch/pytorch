@@ -26,9 +26,27 @@ bool GraphPassManager::run(Graph* graph) {
 bool GraphPassManager::run_pass(Graph* graph, const GraphPassIdentifier& name) {
   const auto& pass = GraphPassRegistry::get().get_pass(name);
 
+  size_t nodesBefore = 0;
+  if (VLOG_IS_ON(1)) {
+    nodesBefore = graph->nodes().size();
+  }
+
   bool changed = pass_pre_run_hook(graph, pass);
   changed |= (pass.get())(graph);
   changed |= pass_post_run_hook(graph, pass);
+
+  if (VLOG_IS_ON(1)) {
+    size_t nodesAfter = graph->nodes().size();
+    if (changed) {
+      VLOG(1) << "Pass " << name << ": " << nodesBefore << " -> " << nodesAfter
+              << " nodes (delta: "
+              << static_cast<int64_t>(nodesAfter) -
+              static_cast<int64_t>(nodesBefore)
+              << ")";
+    } else {
+      VLOG(1) << "Pass " << name << ": no change (" << nodesAfter << " nodes)";
+    }
+  }
 
   return changed;
 }

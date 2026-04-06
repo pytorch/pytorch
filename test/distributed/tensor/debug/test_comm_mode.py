@@ -5,6 +5,7 @@ import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
 from torch.distributed.tensor import DeviceMesh, DTensor, Shard
+from torch.distributed.tensor._redistribute import use_min_cost_redistribution_plan
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import requires_accelerator_dist_backend
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -105,7 +106,7 @@ class TestCommMode(TestCase):
         x_dtensor = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
         y_dtensor = DTensor.from_local(y, mesh, [Shard(0)], run_check=False)
 
-        with comm_mode:
+        with comm_mode, use_min_cost_redistribution_plan():
             f(x_dtensor, y_dtensor)
 
         comm_counts = comm_mode.get_comm_counts()

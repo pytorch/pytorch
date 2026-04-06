@@ -41,6 +41,8 @@ project-excludes = [
   "torch/overrides.py",
   "*/__pycache__/**",
   "*/.*",
+  "torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**",
+  "torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py",
 ]
 ignore-missing-imports = [
     # XPU memory symbols not present for builds without XPU support
@@ -95,6 +97,7 @@ ignore-missing-imports = [
     "boto3.*",
     "dill.*",
     "usort.*",
+    "cutlass.*",
     "cutlass_library.*",
     "cutlass_api.*",
     "deeplearning.*",

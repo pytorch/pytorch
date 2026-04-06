@@ -40,7 +40,7 @@ from torch.utils._pytree import (
     _deregister_pytree_node,
     _register_pytree_node,
     Context,
-    FlattenFunc,
+    FlattenFn,
     FromDumpableContextFn,
     GetAttrKey,
     KeyPath,
@@ -49,7 +49,7 @@ from torch.utils._pytree import (
     SequenceKey,
     ToDumpableContextFn,
     tree_flatten_with_path,
-    UnflattenFunc,
+    UnflattenFn,
 )
 
 
@@ -489,8 +489,8 @@ def _check_input_constraints_for_graph(
 
 def register_dataclass_as_pytree_node(
     cls: type[Any],
-    flatten_fn: FlattenFunc | None = None,
-    unflatten_fn: UnflattenFunc | None = None,
+    flatten_fn: FlattenFn | None = None,
+    unflatten_fn: UnflattenFn | None = None,
     *,
     serialized_type_name: str | None = None,
     to_dumpable_context: ToDumpableContextFn | None = None,

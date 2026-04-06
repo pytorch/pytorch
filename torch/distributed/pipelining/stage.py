@@ -4,7 +4,7 @@ import logging
 import operator
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import Any, cast, Union
+from typing import Any, cast
 
 import torch
 import torch.distributed as dist
@@ -95,7 +95,7 @@ class _RecvInfo:
 
 
 # An input can be either a received activation or a model input
-InputInfo = Union[_RecvInfo, _RootArgPlaceholder]
+InputInfo = _RecvInfo | _RootArgPlaceholder
 
 
 def _make_tensor_from_meta(

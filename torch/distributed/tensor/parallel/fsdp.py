@@ -37,6 +37,7 @@ def _get_box(tensor: DTensor) -> tuple[torch.Size, torch.Size]:
     offsets = [0] * len(tensor.size())
     num_chunks = device_mesh.size(mesh_dim=0)
 
+    # NOTE: is_shard() does not match _StridedShard; see _is_shard_like().
     if tensor.placements[0].is_shard():
         shard_dim = cast(DShard, placement).dim
         chunk_size = tensor.size(shard_dim) // num_chunks
@@ -81,6 +82,7 @@ def _create_sharded_tensor_md_from_dt(
     my_rank = dist.get_rank(dt_pg)
     scapegoat_rank = 0 if my_rank > 0 else 1
 
+    # NOTE: is_shard() does not match _StridedShard; see _is_shard_like().
     if dt.placements[0].is_shard():
         shard_count = dt_pg.size()
     else:

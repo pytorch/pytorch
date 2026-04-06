@@ -3,7 +3,6 @@
 import copy
 import functools
 from contextlib import nullcontext
-from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -82,7 +81,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
             MLP(mlp_dim),
         )
 
-        def _shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+        def _shard_placement_fn(param: nn.Parameter) -> Shard | None:
             largest_dim = largest_dim_size = -1
             for dim, dim_size in enumerate(param.shape):
                 if dim_size > largest_dim_size:
@@ -142,14 +141,14 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
             )
         else:
             model = model.cpu()
-            model = model.cuda()
+            model = model.to(device_type)
             self.assertTrue(
                 sd["weight"]._local_tensor.untyped_storage().data_ptr()
                 != model.weight._local_tensor.untyped_storage().data_ptr()
             )
 
         torch.manual_seed(42 + self.rank)
-        inp = torch.rand(mlp_dim, mlp_dim, device="cuda")
+        inp = torch.rand(mlp_dim, mlp_dim, device=device_type)
         for _ in range(5):
             optim.zero_grad()
             loss = model(inp).sum()

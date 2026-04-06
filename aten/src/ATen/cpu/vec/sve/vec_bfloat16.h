@@ -586,7 +586,7 @@ Vectorized<BFloat16> inline fmadd(
   return a * b + c;
 }
 
-#endif // defined(CPU_CAPABILITY_SVE) && defined(__ARM_FEATURE_BF16)
+#endif // defined(CPU_CAPABILITY_SVE256) && defined(__ARM_FEATURE_BF16)
 
 } // namespace CPU_CAPABILITY
 } // namespace vec

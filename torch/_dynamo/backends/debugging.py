@@ -166,6 +166,7 @@ def invoke_subgraph_inner_compiler(
     from torch._higher_order_ops.invoke_subgraph import invoke_subgraph_infer
 
     @disable
+    # pyrefly: ignore [deprecated]
     @torch._dynamo.allow_in_graph
     def invoke_subgraph_wrapper_unboxed(*operands: Any) -> Any:
         return invoke_subgraph_infer(subgraph, *operands)

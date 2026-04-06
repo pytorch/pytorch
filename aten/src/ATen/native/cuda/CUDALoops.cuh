@@ -316,12 +316,11 @@ static inline void launch_vectorized_kernel(
   if (p->major != 9 && p->major != 10) {
     vec_size = std::min<uint16_t>(vec_size, 4);
   }
-  // Here we purposely omit vec8 for 1-byte data because of a bug in NVCC
-  // that causes some numerical mismatches with uint8 on sm80 and sm90.
-  // TODO: Revisit this after CUDA 12.8 update.
+#if !defined(CUDA_VERSION) || CUDA_VERSION < 12080
   if constexpr (sizeof(cpp_type) < 2) {
     vec_size = std::min<uint16_t>(vec_size, 4);
   }
+#endif
   int tws = elems_per_thread<io_size>();
 #endif
   int bws = tws * num_threads();
@@ -649,7 +648,6 @@ void gpu_kernel_impl_nocast(TensorIteratorBase& iter, const func_t& f) {
   TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());
   TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
   TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
-  TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
 
   std::array<char*, ntensors> data;
   for (int i = 0; i < ntensors; i++) {

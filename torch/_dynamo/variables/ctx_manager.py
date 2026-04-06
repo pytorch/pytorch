@@ -843,7 +843,7 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
                 )
                 if not self.only_subclass:
                     tx.symbolic_torch_function_state.torch_function_mode_enabled = (
-                        self.initial_torch_function_subclass_enabled
+                        self.initial_torch_function_mode_enabled
                     )
 
         self.cleanup_fn = fn

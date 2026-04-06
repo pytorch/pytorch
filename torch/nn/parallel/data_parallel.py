@@ -259,7 +259,7 @@ def data_parallel(
 
     device_ids = [_get_device_index(x, True) for x in device_ids]
     output_device = _get_device_index(output_device, True)
-    # pyrefly: ignore [no-matching-overload]
+    # pyrefly: ignore [bad-argument-type, no-matching-overload]
     src_device_obj = torch.device(device_type, device_ids[0])
 
     # pyrefly: ignore [bad-argument-type]

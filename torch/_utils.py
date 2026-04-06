@@ -703,17 +703,6 @@ def _take_tensors(tensors, size_limit):
             yield buf
 
 
-# annotation decorator to get annotations in a way that is compatible
-# with both Python 2 and 3
-def annotate(ret, **kwargs):
-    def dec(fun):
-        fun.__annotations__ = dict(kwargs)
-        fun.__annotations__["return"] = ret
-        return fun
-
-    return dec
-
-
 def render_call(fn, args, kwargs):
     str_fn = torch.overrides.resolve_name(fn)
     if str_fn is None:
@@ -783,6 +772,19 @@ class ExceptionWrapper:
             # be constructed, don't try to instantiate since we don't know how to
             raise RuntimeError(msg) from None
         raise exception
+
+
+def cpu_count() -> int | None:
+    """Return the number of CPUs available to the current process.
+
+    Prefers ``os.sched_getaffinity`` (respects cgroups / taskset) and
+    falls back to ``os.cpu_count``.
+    """
+    # os.process_cpu_count was added in CPython 3.13, see
+    # https://docs.python.org/3/library/os.html#os.process_cpu_count
+    if hasattr(os, "sched_getaffinity"):
+        return len(os.sched_getaffinity(0))
+    return os.cpu_count()
 
 
 def _get_available_device_type():
@@ -1379,3 +1381,17 @@ def _augment_memory_snapshot_stack_traces(
                 _augment_frames(trace_entry["frames"])
 
     return snapshot_dict
+
+
+def _is_privateuse1_backend_available():
+    """
+    Determines whether the privateuse1 backend is registered and available.
+
+    Returns:
+        Return True if the privateuse1 backend is registered and available.
+    """
+    privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
+    privateuse1_backend_module = getattr(torch, privateuse1_backend_name, None)
+    return (
+        is_available := getattr(privateuse1_backend_module, "is_available", None)
+    ) and is_available()

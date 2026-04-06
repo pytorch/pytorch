@@ -123,7 +123,12 @@ class DefaultSavePlanner(SavePlanner):
                 )
                 return SavePlan([], usable=False)
             else:
-                SavePlanner._cached_save_plan[self._cached_plans_key] = plan
+                # Store the plan as pending. It will be promoted to the
+                # class-level cache in finish_plan after the global plan
+                # has succeeded. This avoids a stale local cache when
+                # the global plan fails (e.g. validation error) but the
+                # local cache was already populated.
+                self._pending_local_plan = plan
 
         return self.plan
 
@@ -146,8 +151,12 @@ class DefaultSavePlanner(SavePlanner):
             merged_mappings = dict(ChainMap(*planner_data_dict))
             metadata = dataclasses.replace(metadata, planner_data=merged_mappings)
 
-        if not _validate_global_plan(global_plan, metadata):
-            raise ValueError("Failed to validate global plan")
+        validation_errors = _validate_global_plan(global_plan, metadata)
+        if validation_errors:
+            error_summary = "; ".join(validation_errors)
+            if len(error_summary) > 500:
+                error_summary = error_summary[:500] + "... (truncated)"
+            raise ValueError(f"Failed to validate global plan: {error_summary}")
 
         return global_plan, metadata
 
@@ -164,12 +173,13 @@ class DefaultSavePlanner(SavePlanner):
             # Case 1: If the plans are not cached, the cache will be hydrated with the
             # all_plans, global_plans (Deduped), and metadata.
 
-            # Cache the original all_plans
-            SavePlanner._cached_all_plans[self._cached_plans_key] = all_plans
+            # First create and validate the global plan. Only cache everything
+            # after success to avoid partial cache state
             global_plan, metadata = self._create_global_plan(all_plans)
-            # Cache the deduped and validated global_plan
+
+            # Cache all plans atomically after successful validation
+            SavePlanner._cached_all_plans[self._cached_plans_key] = all_plans
             SavePlanner._cached_global_plan[self._cached_plans_key] = global_plan
-            # Cache the metadata
             SavePlanner._cached_metadata[self._cached_plans_key] = metadata
             # If plans are not cached, global_plan delta will be the same as global plan.
             return global_plan, global_plan, metadata
@@ -247,6 +257,16 @@ class DefaultSavePlanner(SavePlanner):
 
         if self._enable_plan_caching:
             finished_plan = self._finish_plan_with_caching(new_plan)
+
+            # Promote the pending local plan to the class-level cache now
+            # that the global plan has succeeded and we are finalizing.
+            # This ensures the local cache is only populated after a
+            # successful end-to-end checkpoint plan creation.
+            if hasattr(self, "_pending_local_plan"):
+                SavePlanner._cached_save_plan[self._cached_plans_key] = (
+                    self._pending_local_plan
+                )
+                del self._pending_local_plan
 
         self.plan = finished_plan
         return self.plan
@@ -628,8 +648,9 @@ def _check_box_bounds(
     return True
 
 
-def _validate_global_plan(global_plan: list[SavePlan], metadata: Metadata) -> bool:
-    all_good = True
+def _validate_global_plan(global_plan: list[SavePlan], metadata: Metadata) -> list[str]:
+    """Validate the global plan and return a list of error messages (empty if valid)."""
+    errors: list[str] = []
     for key, value in metadata.state_dict_metadata.items():
         if isinstance(value, BytesStorageMetadata):
             continue
@@ -640,16 +661,12 @@ def _validate_global_plan(global_plan: list[SavePlan], metadata: Metadata) -> bo
         for chunk in chunks:
             # Compute the volume
             if not _check_box_bounds(value.size, chunk):
-                logger.warning(
-                    """
-                        key:%s has out of bounds chunk:
-                        tensor-size:%s chunk: %s
-                    """,
-                    key,
-                    value.size,
-                    chunk,
+                msg = (
+                    f"key:{key} has out of bounds chunk: "
+                    f"tensor-size:{value.size} chunk: {chunk}"
                 )
-                all_good = False
+                logger.warning(msg)
+                errors.append(msg)
             chunks_volume += math.prod(chunk.sizes)
 
         if len(chunks) > 1:
@@ -675,28 +692,20 @@ def _validate_global_plan(global_plan: list[SavePlan], metadata: Metadata) -> bo
                 for _, other_idx in active:
                     other = chunks[other_idx]
                     if _check_box_overlap(current, other):
-                        logger.warning(
-                            "key:%s has overlapping chunks: %s %s",
-                            key,
-                            current,
-                            other,
-                        )
-                        all_good = False
+                        msg = f"key:{key} has overlapping chunks: {current} {other}"
+                        logger.warning(msg)
+                        errors.append(msg)
 
                 insort(active, (end, idx))
 
         # Check whether combined chunk cover the whole tensor
         tensor_volume = math.prod(value.size)
         if len(global_plan) > 1 and chunks_volume != tensor_volume:
-            logger.warning(
-                """
-                    key:%s invalid fill tensor-volume:
-                    %s chunks-volume: %s
-                """,
-                key,
-                tensor_volume,
-                chunks_volume,
+            msg = (
+                f"key:{key} invalid fill tensor-volume: "
+                f"{tensor_volume} chunks-volume: {chunks_volume}"
             )
-            all_good = False
+            logger.warning(msg)
+            errors.append(msg)
 
-    return all_good
+    return errors

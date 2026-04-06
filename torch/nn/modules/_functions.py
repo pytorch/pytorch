@@ -124,6 +124,7 @@ class SyncBatchNorm(Function):
             return torch.empty_like(input)
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def backward(self, grad_output):
         if not (
             grad_output.is_contiguous(memory_format=torch.channels_last)

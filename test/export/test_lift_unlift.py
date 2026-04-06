@@ -1,6 +1,6 @@
 # Owner(s): ["oncall: export"]
 from collections import OrderedDict
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch._export.passes.lift_constants_pass import (
@@ -64,7 +64,7 @@ class GraphBuilder:
         self.nodes[out] = node
 
     def constant(
-        self, name: str, value: Any, target: Optional[str] = None, module_fqn: str = ""
+        self, name: str, value: Any, target: str | None = None, module_fqn: str = ""
     ):
         if target is None:
             target = name

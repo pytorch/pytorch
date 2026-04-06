@@ -1,7 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import unittest
 from collections.abc import Callable, Sequence
-from typing import Any, Union
+from typing import Any
 
 import torch
 import torch._dynamo
@@ -80,11 +80,10 @@ class ResBlock(torch.nn.Module):
 
 
 class InstallParamsAsGraphAttrTests(torch._dynamo.test_case.TestCase):
-    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     @torch._dynamo.config.patch(install_free_tensors=False)
     def check_num_inputs_and_equality_no_install(
         self,
-        fn_to_compile: Union[torch.nn.Module, Callable],
+        fn_to_compile: torch.nn.Module | Callable,
         expected_num_inline_inputs: int,
         example_inputs: Sequence[Any],
     ) -> None:
@@ -99,11 +98,10 @@ class InstallParamsAsGraphAttrTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(actual_num_inputs, expected_num_inline_inputs)
         self.assertEqual(opt_fn(*example_inputs), fn_to_compile(*example_inputs))
 
-    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     @torch._dynamo.config.patch(install_free_tensors=True)
     def check_num_inputs_and_equality_install(
         self,
-        fn_to_compile: Union[torch.nn.Module, Callable],
+        fn_to_compile: torch.nn.Module | Callable,
         expected_num_installed_inputs: int,
         example_inputs: Sequence[Any],
     ) -> None:
@@ -333,7 +331,6 @@ class InstallParamsAsGraphAttrTests(torch._dynamo.test_case.TestCase):
 
 
 class InstallParamsWhenExport(torch._dynamo.test_case.TestCase):
-    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     @torch._dynamo.config.patch(install_free_tensors=True)
     def check_export_matches_expectation(
         self,
@@ -476,7 +473,6 @@ class InstallParamsWhenExport(torch._dynamo.test_case.TestCase):
         inp = torch.randn((5, 5))
         self.check_export_matches_expectation(fn, 1, (inp,))
 
-    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     @torch._dynamo.config.patch(install_free_tensors=True)
     def test_modify_net_state(self) -> None:
         class Mod(torch.nn.Module):
@@ -508,7 +504,7 @@ class InstallParamsWhenExport(torch._dynamo.test_case.TestCase):
         self.check_export_matches_expectation(fn, 2, (inp,))
 
     def test_nested_list_of_tensor(self) -> None:
-        def fn(x: list[Union[list[torch.Tensor], torch.Tensor]]):
+        def fn(x: list[list[torch.Tensor] | torch.Tensor]):
             return x[0][0] + x[1]  # type: ignore[index]
 
         inp = [[torch.tensor([1.3, 3.77, 0.1])], torch.tensor([8.7, 6.23, 9.9])]

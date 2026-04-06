@@ -318,8 +318,16 @@ mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x 
                    persistent_counter,
                    stream);
   }
-
-  return {out, q_padded, k_padded, v_padded, M.view({batch_size, num_heads, seqlen_q}), seed_t, offset_t, softmax_fa_t};
+  // Note: These are propagated up to the return of mha_fwd(). comments
+  //       represent the assignments at that level
+  return {out,          // output
+          q_padded,     // q_padded
+          k_padded,     // k_padded
+          v_padded,     // v_padded
+          M.view({batch_size, num_heads, seqlen_q}),   // logsumexp
+          seed_t,       // philox_seed
+          offset_t,     // philox_offset
+          softmax_fa_t};// debug_attn_mask
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
@@ -635,7 +643,7 @@ mha_bwd_aot(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x hea
     TORCH_CHECK(dv.stride(-1) == 1, "dv must have contiguous last dimension");
     CHECK_SHAPE(dv, batch_size, seqlen_k, num_heads_k, head_size);
   } else {
-    dv = at::empty_like(k);
+    dv = at::empty_like(v);
   }
 
   auto [needs_swa, window_left, window_right] = calculate_swa(window_size_left,

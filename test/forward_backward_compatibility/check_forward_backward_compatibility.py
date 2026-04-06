@@ -301,7 +301,7 @@ def check_bc(existing_schemas):
             log.warning(
                 "Can NOT find backward compatible schemas after changes "
                 "for schema %s from the following candidates:\n[\n%s\n]",
-                str(existing_schema),
+                existing_schema,
                 "\n\t".join(str(s) for s in matching_new_schemas),
             )
             # TODO Print out more details about why candidates don't match.
@@ -346,7 +346,7 @@ def check_fc(existing_schemas):
             log.warning(
                 "Can NOT find forward compatible schemas after changes "
                 "for schema %s from the following candidates:\n[\n\t%s\n]",
-                str(existing_schema),
+                existing_schema,
                 "\n\t".join(str(s) for s in matching_new_schemas),
             )
             log.warning(

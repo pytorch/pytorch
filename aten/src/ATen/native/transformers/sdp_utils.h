@@ -37,9 +37,7 @@ void alloc_with_matching_layout(
     ordered_strides[dim_idx] = current_stride;
     current_stride *= shape[dim_idx];
   }
-  output = at::empty(at::IntArrayRef(shape), q.options())
-               .as_strided(
-                   at::IntArrayRef(shape), at::IntArrayRef(ordered_strides), 0);
+  output = at::empty_strided(at::IntArrayRef(shape), at::IntArrayRef(ordered_strides), q.options());
 }
 
 void permute_to_matching_layout(const Tensor& output, Tensor& grad_output) {

@@ -6,7 +6,6 @@ import sys
 import unittest
 from collections import namedtuple
 from collections.abc import Callable
-from typing import Optional, Union
 from unittest import expectedFailure
 from unittest.mock import patch
 
@@ -329,7 +328,7 @@ class TestFlexDecoding(InductorTestCase):
         ref_out: torch.Tensor,
         compiled_out: torch.Tensor,
         fudge_factor: float,
-        tensor_name: Optional[str] = None,
+        tensor_name: str | None = None,
     ):
         compiled_error = (golden_out - compiled_out).abs().mean()
         ref_error = (golden_out - ref_out).abs().mean()
@@ -372,7 +371,7 @@ class TestFlexDecoding(InductorTestCase):
 
     def run_test(
         self,
-        score_mod: Optional[Callable] = None,
+        score_mod: Callable | None = None,
         dtype: torch.dtype = torch.float16,
         Q_B: int = B,
         Q_H: int = Hq,
@@ -382,7 +381,7 @@ class TestFlexDecoding(InductorTestCase):
         KV_H: int = Hkv,
         KV_S: int = S,
         V_D: int = D,
-        block_mask: Optional[BlockMask] = None,
+        block_mask: BlockMask | None = None,
         device="cuda",
         kernel_options=None,
     ):
@@ -445,7 +444,7 @@ class TestFlexDecoding(InductorTestCase):
     def run_test_with_call(
         self,
         sdpa_call: Callable,
-        golden_call: Optional[Callable] = None,
+        golden_call: Callable | None = None,
         dtype: torch.dtype = torch.float16,
         Q_B: int = B,
         Q_H: int = Hq,
@@ -497,7 +496,7 @@ class TestFlexDecoding(InductorTestCase):
 
     def preprocess_paged_attention(
         self,
-        score_mod: Optional[Callable],
+        score_mod: Callable | None,
         q: Tensor,
         k: Tensor,
         v: Tensor,
@@ -580,12 +579,12 @@ class TestFlexDecoding(InductorTestCase):
 
     def run_paged_attention(
         self,
-        score_mod: Optional[Callable],
+        score_mod: Callable | None,
         q: Tensor,
         k: Tensor,
         v: Tensor,
         dtype: torch.dtype = torch.float16,
-        block_mask: Optional[BlockMask] = None,
+        block_mask: BlockMask | None = None,
         device="cuda",
     ):
         Q_B, Q_H, KV_H = q.shape[0], q.shape[1], k.shape[1]
@@ -632,7 +631,7 @@ class TestFlexDecoding(InductorTestCase):
 
     def run_test_with_paged_attention(
         self,
-        score_mod: Optional[Callable],
+        score_mod: Callable | None,
         dtype: torch.dtype = torch.float16,
         Q_B: int = B,
         Q_H: int = Hq,
@@ -642,7 +641,7 @@ class TestFlexDecoding(InductorTestCase):
         KV_H: int = Hkv,
         KV_S: int = S,
         V_D: int = D,
-        block_mask: Optional[BlockMask] = None,
+        block_mask: BlockMask | None = None,
         device="cuda",
     ):
         if Q_H % KV_H != 0:
@@ -697,8 +696,8 @@ class TestFlexDecoding(InductorTestCase):
 
     def run_test_with_call_paged_attention(
         self,
-        score_mod: Optional[Callable],
-        mask_mod: Optional[Callable],
+        score_mod: Callable | None,
+        mask_mod: Callable | None,
         sdpa_mask: Tensor,
         dtype: torch.dtype = torch.float16,
         Q_B: int = B,
@@ -858,7 +857,7 @@ class TestFlexDecoding(InductorTestCase):
         device,
         dtype: torch.dtype,
         score_mod: Callable,
-        BLOCK_SIZE: Union[int, tuple[int, int]],
+        BLOCK_SIZE: int | tuple[int, int],
     ):
         block_mask = create_block_mask(
             noop_mask, B, 1, 1, S, BLOCK_SIZE=BLOCK_SIZE, device=device

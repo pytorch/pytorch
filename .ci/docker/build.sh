@@ -95,7 +95,6 @@ case "$tag" in
     CUDA_VERSION=12.4
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
-    VISION=yes
     KATEX=yes
     TRITON=yes
     ;;
@@ -103,7 +102,6 @@ case "$tag" in
     CUDA_VERSION=12.8.1
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
-    VISION=yes
     KATEX=yes
     TRITON=yes
     INSTALL_MINGW=yes
@@ -112,7 +110,6 @@ case "$tag" in
     CUDA_VERSION=13.0.2
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
-    VISION=yes
     KATEX=yes
     TRITON=yes
     ;;
@@ -120,7 +117,6 @@ case "$tag" in
     CUDA_VERSION=13.0.2
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
-    VISION=yes
     KATEX=yes
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
@@ -129,35 +125,29 @@ case "$tag" in
     CUDA_VERSION=13.0.2
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=11
-    VISION=yes
     KATEX=yes
     TRITON=yes
     ;;
-  pytorch-linux-jammy-py3-clang15-onnx)
+  pytorch-linux-jammy-py3.10-clang18)
     ANACONDA_PYTHON_VERSION=3.10
-    CLANG_VERSION=15
-    VISION=yes
+    CLANG_VERSION=18
     ONNX=yes
     ;;
-  pytorch-linux-jammy-py3.10-clang15)
-    ANACONDA_PYTHON_VERSION=3.10
-    CLANG_VERSION=15
-    ;;
-  pytorch-linux-jammy-py3.11-clang15)
+  pytorch-linux-jammy-py3.11-clang18)
     ANACONDA_PYTHON_VERSION=3.11
-    CLANG_VERSION=15
+    CLANG_VERSION=18
     ;;
-  pytorch-linux-jammy-py3.12-clang15)
+  pytorch-linux-jammy-py3.12-clang18)
     ANACONDA_PYTHON_VERSION=3.12
-    CLANG_VERSION=15
+    CLANG_VERSION=18
     ;;
-  pytorch-linux-jammy-py3.13-clang15)
+  pytorch-linux-jammy-py3.13-clang18)
     ANACONDA_PYTHON_VERSION=3.13
-    CLANG_VERSION=15
+    CLANG_VERSION=18
     ;;
-  pytorch-linux-jammy-py3.14-clang15)
+  pytorch-linux-jammy-py3.14-clang18)
     ANACONDA_PYTHON_VERSION=3.14
-    CLANG_VERSION=15
+    CLANG_VERSION=18
     ;;
   pytorch-linux-jammy-rocm-n-py3 | pytorch-linux-jammy-rocm-n-py3-benchmarks | pytorch-linux-noble-rocm-n-py3)
     if [[ $tag =~ "jammy" ]]; then
@@ -166,7 +156,6 @@ case "$tag" in
       ANACONDA_PYTHON_VERSION=3.12
     fi
     GCC_VERSION=13
-    VISION=yes
     ROCM_VERSION=7.2
     NINJA_VERSION=1.9.0
     TRITON=yes
@@ -179,7 +168,6 @@ case "$tag" in
   pytorch-linux-noble-rocm-nightly-py3)
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=13
-    VISION=yes
     ROCM_VERSION=nightly
     NINJA_VERSION=1.9.0
     TRITON=yes
@@ -189,18 +177,20 @@ case "$tag" in
   pytorch-linux-jammy-xpu-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
-    VISION=yes
     XPU_VERSION=2025.2
     XPU_DRIVER_TYPE=LTS
     NINJA_VERSION=1.9.0
     TRITON=yes
     ;;
-  pytorch-linux-noble-xpu-n-py3 | pytorch-linux-noble-xpu-n-py3-inductor-benchmarks)
+  pytorch-linux-noble-xpu-n-py3 | pytorch-linux-noble-xpu-n-py3-client | pytorch-linux-noble-xpu-n-py3-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=13
-    VISION=yes
     XPU_VERSION=2025.3
-    XPU_DRIVER_TYPE=LTS
+    if [[ $tag =~ "client" ]]; then
+      XPU_DRIVER_TYPE=CLIENT
+    else
+      XPU_DRIVER_TYPE=LTS
+    fi
     NINJA_VERSION=1.9.0
     TRITON=yes
     if [[ $tag =~ "benchmarks" ]]; then
@@ -210,36 +200,25 @@ case "$tag" in
   pytorch-linux-jammy-py3-gcc11-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
-    VISION=yes
     KATEX=yes
-    TRITON=yes
     DOCS=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-clang15)
+  pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-clang18)
     ANACONDA_PYTHON_VERSION=3.10
     CUDA_VERSION=12.8.1
-    CLANG_VERSION=15
-    VISION=yes
-    TRITON=yes
-    ;;
-  pytorch-linux-jammy-py3-clang18-asan)
-    ANACONDA_PYTHON_VERSION=3.10
     CLANG_VERSION=18
-    VISION=yes
+    TRITON=yes
     ;;
   pytorch-linux-jammy-py3.10-gcc11)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
-    VISION=yes
     KATEX=yes
-    TRITON=yes
     DOCS=yes
-    UNINSTALL_DILL=yes
     ;;
-  pytorch-linux-jammy-py3-clang15-executorch)
+  pytorch-linux-jammy-py3-clang18-executorch)
     ANACONDA_PYTHON_VERSION=3.10
-    CLANG_VERSION=15
+    CLANG_VERSION=18
     EXECUTORCH=yes
     ;;
   pytorch-linux-jammy-py3.12-halide)
@@ -284,21 +263,13 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=13
     ACL=yes
-    VISION=yes
     OPENBLAS=yes
-    # snadampal: skipping llvm src build install because the current version
-    # from pytorch/llvm:9.0.1 is x86 specific
-    SKIP_LLVM_SRC_BUILD_INSTALL=yes
     ;;
   pytorch-linux-jammy-aarch64-py3.10-gcc13-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=13
     ACL=yes
-    VISION=yes
     OPENBLAS=yes
-    # snadampal: skipping llvm src build install because the current version
-    # from pytorch/llvm:9.0.1 is x86 specific
-    SKIP_LLVM_SRC_BUILD_INSTALL=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-noble-riscv64-py3.12-gcc14)
@@ -306,7 +277,6 @@ case "$tag" in
     ;;
   *)
     # Catch-all for builds that are not hardcoded.
-    VISION=yes
     echo "image '$image' did not match an existing build configuration"
     if [[ "$image" == *py* ]]; then
       extract_version_from_image_name py ANACONDA_PYTHON_VERSION
@@ -362,7 +332,6 @@ docker buildx build \
        ${progress_flag} \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
        --build-arg "LLVMDEV=${LLVMDEV:-}" \
-       --build-arg "VISION=${VISION:-}" \
        --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}" \
        --build-arg "DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION}" \
        --build-arg "GLIBC_VERSION=${GLIBC_VERSION}" \
@@ -388,11 +357,9 @@ docker buildx build \
        --build-arg "TPU=${TPU}" \
        --build-arg "XPU_VERSION=${XPU_VERSION}" \
        --build-arg "XPU_DRIVER_TYPE=${XPU_DRIVER_TYPE}" \
-       --build-arg "UNINSTALL_DILL=${UNINSTALL_DILL}" \
        --build-arg "ACL=${ACL:-}" \
        --build-arg "OPENBLAS=${OPENBLAS:-}" \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
-       --build-arg "SKIP_LLVM_SRC_BUILD_INSTALL=${SKIP_LLVM_SRC_BUILD_INSTALL:-}" \
        --build-arg "INSTALL_MINGW=${INSTALL_MINGW:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        --load \

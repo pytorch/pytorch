@@ -55,7 +55,7 @@ class InputData:
     values: Tensor
 
 
-torch.utils._pytree.register_dataclass(InputData)
+pytree.register_dataclass(InputData)
 
 
 @dataclass
@@ -73,7 +73,7 @@ class OutputData:
     result2: Tensor
 
 
-torch.utils._pytree.register_dataclass(OutputData)
+pytree.register_dataclass(OutputData)
 
 
 @dataclass

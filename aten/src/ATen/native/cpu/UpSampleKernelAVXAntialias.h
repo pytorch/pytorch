@@ -176,7 +176,7 @@ void ImagingResampleHorizontal(
   //
 
   // TODO: we may want to merge that into the fallback code (currently called
-  // basic_loop_aa_horizontal<uint8_t>)
+  // basic_loop_separable_1d_horizontal<uint8_t>)
   // Although this may not be needed if / when we port all this code to use
   // Vec.h since this would potentially give us another fall-back implem
 
@@ -252,7 +252,7 @@ void ImagingResampleVertical(
   //   oB[xoffset + i] = b[xoffset + ymin[i]] * w[i, 0] + ... + b[xoffset + ymin[i] + (K-1) * xsize] * w[i, K-1]
 
   // TODO: we may want to merge that into the fallback code (currently called
-  // basic_loop_aa_vertical<uint8_t>)
+  // basic_loop_separable_1d_vertical<uint8_t>)
   // Although this may not be needed if / when we port all this code to use
   // Vec.h since this would potentially give us another fall-back implem
   const int16_t* kk = (int16_t*)(vert_indices_weights[3].const_data_ptr<double>());
@@ -289,7 +289,7 @@ void ImagingResampleVertical(
 // mode for uint8 dtype when C <= 4, with or without antialias. The
 // implem is based on PIL-SIMD.
 // Its equivalent implementation (fallback) for when AVX isn't supported or when
-// C > 4 is separable_upsample_generic_Nd_kernel_impl()  There are a bunch of
+// C > 4 is upsample_separable_Nd_kernel_impl()  There are a bunch of
 // future improvement that can be done: look for the TODOs in this file.
 // For details on how the weights are computed and how the multiplications are
 // run on int (instead of float weights), see

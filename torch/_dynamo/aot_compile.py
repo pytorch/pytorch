@@ -317,6 +317,9 @@ def aot_compile_fullgraph(
     from torch._dynamo.guards import CheckFunctionManager
     from torch._dynamo.package import SourceInfo
     from torch._dynamo.utils import dynamo_timed, get_metrics_context
+    from torch._dynamo.variables.torch_function import (
+        torch_function_mode_stack_state_mgr,
+    )
     from torch._guards import TracingContext
 
     args, kwargs = example_inputs
@@ -332,6 +335,7 @@ def aot_compile_fullgraph(
         dynamo_timed("fullgraph_capture"),
         torch._functorch.config.patch(strict_autograd_cache=True),
         dynamic_ctx,
+        torch_function_mode_stack_state_mgr,
     ):
         capture_output = convert_frame.fullgraph_capture(model, args, kwargs)
         graph_capture_output = capture_output.graph_capture_output
@@ -403,9 +407,17 @@ def aot_compile_fullgraph(
                 + f"from backend {compiler_fn}) does not implement SerializableCallable."
             )
 
-        check_fn = graph_capture_output.build_guards(
-            fn.__code__, hooks=hooks, save=True, strict_error=True
-        )
+        # Temporarily restore the mode stack so guard expressions that
+        # reference modes can evaluate, matching the compile_inner path.
+        build_guards_ctx = ExitStack()
+        if torch_function_mode_stack_state_mgr.stack:
+            build_guards_ctx.enter_context(
+                torch_function_mode_stack_state_mgr.temp_restore_stack()
+            )
+        with build_guards_ctx:
+            check_fn = graph_capture_output.build_guards(
+                fn.__code__, hooks=hooks, save=True, strict_error=True
+            )
 
         assert check_fn.guards_state is not None
 

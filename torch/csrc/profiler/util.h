@@ -201,6 +201,7 @@ constexpr auto kGroupRanks = "Process Group Ranks";
 constexpr auto kRank = "Rank";
 constexpr auto kP2pSrc = "Src Rank";
 constexpr auto kP2pDst = "Dst Rank";
+constexpr auto kSeqNum = "Seq";
 constexpr auto kInTensorsStart = "Input Tensors start";
 constexpr auto kOutTensorsStart = "Output Tensors start";
 constexpr auto kIsAsynchronizedOp = "Is asynchronized op";

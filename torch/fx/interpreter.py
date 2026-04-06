@@ -2,7 +2,7 @@
 import inspect
 import logging
 from contextlib import contextmanager
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -117,7 +117,7 @@ class Interpreter:
         self,
         module: torch.nn.Module,
         garbage_collect_values: bool = True,
-        graph: Optional[Graph] = None,
+        graph: Graph | None = None,
     ):
         self.module = module
         self.submodules = dict(self.module.named_modules())
@@ -151,7 +151,7 @@ class Interpreter:
     def run(
         self,
         *args,
-        initial_env: Optional[dict[Node, Any]] = None,
+        initial_env: dict[Node, Any] | None = None,
         enable_io_processing: bool = True,
     ) -> Any:
         """
@@ -655,7 +655,7 @@ class Transformer(Interpreter):
             result = super().run(enable_io_processing=False)
         if result is not None:
 
-            def strip_proxy(a: Union[Argument, Proxy]) -> Any:
+            def strip_proxy(a: Argument | Proxy) -> Any:
                 return a.node if isinstance(a, Proxy) else a
 
             new_output_node = self.new_graph.output(map_aggregate(result, strip_proxy))

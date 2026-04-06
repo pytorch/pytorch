@@ -1774,10 +1774,6 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
         IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
         bool transposed, IntArrayRef output_padding, int64_t groups, std::array<bool, 3> output_mask) {
    TORCH_CHECK_NOT_IMPLEMENTED(false, "convolution_backward_overrideable: You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use TORCH_LIBRARY_IMPL to override this function ");
-  return std::tuple<Tensor, Tensor, Tensor>(
-          at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT),
-          at::empty_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT),
-          at::empty({}));
 }
 
 static Tensor subvariable(const Tensor& var, int64_t dim, int64_t groups, int64_t g) {
@@ -1980,7 +1976,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const std::option
     }
   }
 
-  return std::tuple<Tensor,Tensor,Tensor>{ggO, gI, gW};
+  return std::tuple<Tensor,Tensor,Tensor>{std::move(ggO), std::move(gI), std::move(gW)};
 }
 
 static std::tuple<at::Tensor, at::Tensor, at::Tensor> _convolution_backward_nogroup_backend(
@@ -2325,7 +2321,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
     }
   }
 
-  return std::make_tuple(backend_grad_input, backend_grad_weight, backend_grad_bias);
+  return std::make_tuple(std::move(backend_grad_input), std::move(backend_grad_weight), std::move(backend_grad_bias));
 }
 
 void _cudnn_set_conv_benchmark_empty_cache(bool enable) {

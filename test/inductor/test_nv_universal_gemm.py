@@ -12,11 +12,79 @@ from torch._inductor.template_heuristics.nv_universal_gemm import (
     NVUniversalGemmHeuristics,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import ensure_nv_universal_gemm_available, run_and_get_code
+from torch._inductor.utils import (
+    ceildiv,
+    ensure_nv_universal_gemm_available,
+    ensure_nvmatmul_heuristics_available,
+    run_and_get_code,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+from torch.utils._ordered_set import OrderedSet
+
+
+def _round_up(x, multiple):
+    return ((x + multiple - 1) // multiple) * multiple
+
+
+def _prep_k(K, scale_size):
+    """Prepare K dimension for swizzle requirements (round up ceildiv to multiple of 4)."""
+    return _round_up(ceildiv(K, scale_size), 4)
+
+
+def _create_tensor_with_layout(layout, rows, cols, dtype, device="cuda"):
+    """Create a tensor with the specified layout and dtype.
+
+    Supports float16, bfloat16, float8_e4m3fn, and float4_e2m1fn_x2.
+    """
+    is_fp4 = dtype == torch.float4_e2m1fn_x2
+    is_fp8 = dtype in (torch.float8_e4m3fn, torch.float8_e5m2)
+
+    def _make_flat(n):
+        if is_fp4:
+            return torch.randint(0, 256, (n,), device=device, dtype=torch.uint8).view(
+                torch.float4_e2m1fn_x2
+            )
+        elif is_fp8:
+            return torch.randint(-1, 2, (n,), device=device).to(dtype)
+        else:
+            return torch.randn(n, device=device, dtype=dtype)
+
+    if layout == "contiguous":
+        if is_fp4:
+            return torch.randint(
+                0, 256, (rows, cols), device=device, dtype=torch.uint8
+            ).view(torch.float4_e2m1fn_x2)
+        elif is_fp8:
+            return torch.randint(-1, 2, (rows, cols), device=device).to(dtype)
+        else:
+            return torch.randn(rows, cols, device=device, dtype=dtype)
+    elif layout == "aligned_offset":
+        storage = _make_flat(rows * cols + 512)
+        offset = 16 // storage.element_size()
+        return torch.as_strided(storage[offset:], (rows, cols), (cols, 1))
+    elif layout == "view":
+        return _make_flat(rows * cols).view(rows, cols)
+    elif layout == "padded":
+        row_pitch = cols + 8
+        storage = _make_flat(rows * row_pitch)
+        return torch.as_strided(storage, (rows, cols), (row_pitch, 1))
+    else:
+        raise ValueError(f"Unknown layout: {layout}")
+
+
+def _nvgemm_config(**overrides):
+    """Standard NVGEMM test config. Always disables ATen fallback."""
+    cfg = {
+        "max_autotune": True,
+        "max_autotune_gemm_backends": "NVGEMM",
+        "nvgemm_max_profiling_configs": 3,
+        "autotune_fallback_to_aten": False,
+    }
+    cfg.update(overrides)
+    return cfg
 
 
 # TODO(nikhilap): Remove Blackwell restriction once cutlass_api includes H100 kernels
@@ -34,59 +102,31 @@ class TestNVUniversalGemm(TestCase):
         (
             ("contiguous", "contiguous"),
             ("aligned_offset", "contiguous"),
+            ("contiguous", "aligned_offset"),
             ("contiguous", "view"),
             ("aligned_offset", "view"),
             ("padded", "contiguous"),
+            ("contiguous", "padded"),
         ),
     )
     def test_matmul(self, dtype, layout_a, layout_b):
         """Test matmul with various dtypes and tensor layouts.
 
-        These layouts test various alignment scenarios:
-        - contiguous/view/aligned_offset: Standard aligned layouts
-        - padded: Non-16-byte-aligned stride, Inductor pads to aligned size
-        M=513 tests that non-divisible M dimension works (only N and K must be divisible by 16).
+        M=513 tests that non-divisible M dimension works
+        (only N and K must be divisible by 16).
         """
         m, n, k = 513, 512, 512
-        device = "cuda"
 
         def matmul(a, b):
             return a @ b
 
-        def create_tensor_with_layout(layout, rows, cols):
-            """Create a tensor with the specified layout."""
-            if layout == "contiguous":
-                return torch.randn(rows, cols, device=device, dtype=dtype)
-            elif layout == "aligned_offset":
-                # Allocate bigger buffer than needed, use 16-byte aligned offset
-                # offset=128 elements * 2 bytes = 256 bytes (16-byte aligned)
-                storage = torch.randn(rows * cols + 512, device=device, dtype=dtype)
-                offset = 128
-                return torch.as_strided(storage[offset:], (rows, cols), (cols, 1))
-            elif layout == "view":
-                storage = torch.randn(rows * cols, device=device, dtype=dtype)
-                return storage.view(rows, cols)
-            elif layout == "padded":
-                # Simulate row pitch > cols with non-16-byte-aligned stride
-                # row_stride = cols + 8 = 520, 520 * 2 bytes = 1040 bytes (not 16-byte aligned)
-                row_pitch = cols + 8
-                storage = torch.randn(rows * row_pitch, device=device, dtype=dtype)
-                return torch.as_strided(storage, (rows, cols), (row_pitch, 1))
-
-        a = create_tensor_with_layout(layout_a, m, k)
-        b = create_tensor_with_layout(layout_b, k, n)
-
+        a = _create_tensor_with_layout(layout_a, m, k, dtype)
+        b = _create_tensor_with_layout(layout_b, k, n, dtype)
         expected = matmul(a, b)
 
         torch._dynamo.reset()
 
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "NVGEMM",
-                "nvgemm_max_profiling_configs": 3,
-            }
-        ):
+        with config.patch(_nvgemm_config()):
             compiled_fn = torch.compile(matmul)
             result = compiled_fn(a, b)
 
@@ -106,7 +146,6 @@ class TestNVUniversalGemm(TestCase):
         def matmul(a, b):
             return a @ b
 
-        # Create tensor with unaligned base pointer
         # offset=117 elements * 2 bytes = 234 bytes (NOT 16-byte aligned)
         storage = torch.randn(m * k + 512, device=device, dtype=dtype)
         a = torch.as_strided(storage[117:], (m, k), (k, 1))
@@ -114,13 +153,7 @@ class TestNVUniversalGemm(TestCase):
 
         torch._dynamo.reset()
 
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "NVGEMM",
-                "nvgemm_max_profiling_configs": 3,
-            }
-        ):
+        with config.patch(_nvgemm_config()):
             compiled_fn = torch.compile(matmul)
             with self.assertRaisesRegex(
                 Exception, "NoValidChoicesError|no valid choice"
@@ -132,34 +165,23 @@ class TestNVUniversalGemm(TestCase):
         """Test that sliced tensors (creating ReinterpretViews) work correctly.
 
         When tensors are slices of a shared buffer (e.g., from a fused projection),
-        they become ReinterpretViews with non-contiguous strides. NVIDIA Universal GEMM must
-        handle these correctly.
+        they become ReinterpretViews with non-contiguous strides.
         """
         m, n, k = 512, 512, 512
         device = "cuda"
 
         def fn(x, weight):
-            # Fused projection creates a single large output
             projected = x @ weight  # (m, 2*n)
-            # Slicing creates ReinterpretViews
             a, b = projected.split(n, dim=1)  # Each is (m, n)
             return a @ b.t()  # (m, m)
 
         x = torch.randn(m, k, device=device, dtype=dtype)
-        # Weight projects to 2*n so we can split
         weight = torch.randn(k, 2 * n, device=device, dtype=dtype)
-
         expected = fn(x, weight)
 
         torch._dynamo.reset()
 
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "NVGEMM",
-                "nvgemm_max_profiling_configs": 3,
-            }
-        ):
+        with config.patch(_nvgemm_config()):
             compiled_fn = torch.compile(fn)
             result = compiled_fn(x, weight)
 
@@ -169,8 +191,7 @@ class TestNVUniversalGemm(TestCase):
         """Test that workspace allocation works correctly.
 
         Since no current CUTLASS kernels require a workspace, we mock the
-        kernel.get_workspace_size method to return a non-zero value. This
-        exercises the workspace allocation/deallocation code paths.
+        kernel.get_workspace_size method to return a non-zero value.
         """
         m, n, k = 512, 512, 512
         dtype = torch.bfloat16
@@ -181,12 +202,10 @@ class TestNVUniversalGemm(TestCase):
 
         a = torch.randn(m, k, device=device, dtype=dtype)
         b = torch.randn(k, n, device=device, dtype=dtype)
-
         expected = matmul(a, b)
 
         torch._dynamo.reset()
 
-        # Patch cutlass_api.Kernel.get_workspace_size to return non-zero
         import cutlass_api
 
         def patched_get_workspace_size(self, args):
@@ -197,13 +216,7 @@ class TestNVUniversalGemm(TestCase):
             "get_workspace_size",
             patched_get_workspace_size,
         ):
-            with config.patch(
-                {
-                    "max_autotune": True,
-                    "max_autotune_gemm_backends": "NVGEMM",
-                    "nvgemm_max_profiling_configs": 3,
-                }
-            ):
+            with config.patch(_nvgemm_config()):
                 result, (code,) = run_and_get_code(
                     torch.compile(matmul),
                     a,
@@ -211,7 +224,6 @@ class TestNVUniversalGemm(TestCase):
                 )
 
         self.assertIn("workspace=workspace", code)
-
         torch.testing.assert_close(result, expected)
 
     @parametrize("dtype", (torch.float16, torch.bfloat16))
@@ -223,17 +235,13 @@ class TestNVUniversalGemm(TestCase):
         def bmm(a, b):
             return torch.bmm(a, b)
 
-        # Create tensors with non-largest batch stride by transposing
-        # a_base shape: (m, batch, k), stride: (batch*k, k, 1)
-        # After transpose: shape (batch, m, k), stride: (k, batch*k, 1)
-        # batch_stride = k = 128, but m*k = 64*128 = 8192, so batch_stride < m*k
+        # Transpose creates non-largest batch stride
         a_base = torch.randn(m, batch, k, device=device, dtype=dtype)
         a = a_base.transpose(0, 1)  # (batch, m, k) with stride (k, batch*k, 1)
 
         b_base = torch.randn(k, batch, n, device=device, dtype=dtype)
         b = b_base.transpose(0, 1)  # (batch, k, n) with stride (n, batch*n, 1)
 
-        # Verify batch stride is not largest (i.e., batch_stride_largest_or_zero would be False)
         if a.stride()[0] == a.shape[1] * a.shape[2]:
             raise AssertionError(
                 "Test setup error: a should have non-standard batch stride"
@@ -247,81 +255,152 @@ class TestNVUniversalGemm(TestCase):
 
         torch._dynamo.reset()
 
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "NVGEMM",
-                "nvgemm_max_profiling_configs": 3,
-            }
-        ):
+        with config.patch(_nvgemm_config()):
             compiled_fn = torch.compile(bmm)
             result = compiled_fn(a, b)
 
         torch.testing.assert_close(result, expected)
 
-    def test_scaled_gemm_mxfp8(self):
-        """Test MXFP8 scaled GEMM with NVGEMM backend.
-
-        Note: Invalid inputs (wrong shapes, dtypes, K not divisible by 16, etc.)
-        are caught early by Dynamo's _check_scaled_mm_sizes in torch/_meta_registrations.py.
-        NVGEMM can assume inputs are valid by the time they reach kernel selection.
-        """
-        from torch._inductor.utils import ceildiv
-
-        m, n, k = 256, 512, 1024
+    @parametrize(
+        "layout_a",
+        ("contiguous", "aligned_offset", "view"),
+    )
+    @parametrize(
+        "m,n,k",
+        (
+            (256, 512, 1024),
+            (256, 1024, 512),
+            (128, 256, 512),
+            (512, 256, 1024),
+        ),
+    )
+    def test_scaled_gemm_mxfp8(self, layout_a, m, n, k):
+        """Test MXFP8 scaled GEMM with NVGEMM backend."""
         block_size = 32
-        device = "cuda"
-
-        def _round_up(x, multiple):
-            return ((x + multiple - 1) // multiple) * multiple
-
-        def _prep_k(K, scale_size):
-            """Prepare K dimension for 32-4-4 swizzle requirements."""
-            return _round_up(ceildiv(K, scale_size), 4)
 
         def scaled_mm(a, b, scale_a, scale_b):
             return torch._scaled_mm(
                 a, b, scale_a=scale_a, scale_b=scale_b, out_dtype=torch.float32
             )
 
-        # Create FP8 tensors
-        a_fp8 = torch.randint(-1, 2, (m, k), device=device).to(torch.float8_e4m3fn)
-        # B is N x K, then transposed to K x N for scaled_mm
-        b_fp8 = torch.randint(-1, 2, (n, k), device=device).to(torch.float8_e4m3fn).T
+        a_fp8 = _create_tensor_with_layout(layout_a, m, k, torch.float8_e4m3fn)
+        b_fp8 = torch.randint(-1, 2, (n, k), device="cuda").to(torch.float8_e4m3fn).T
 
-        # Scale factors in float8_e8m0fnu (MXFP8 format)
-        # Shape: (M, prep_k(K, 32)) for A, (prep_k(K, 32), N) for B
-        scale_a = torch.rand(m, _prep_k(k, block_size), device=device).to(
+        scale_a = torch.rand(m, _prep_k(k, block_size), device="cuda").to(
             torch.float8_e8m0fnu
         )
-        scale_b = torch.rand(_prep_k(k, block_size), n, device=device).to(
+        scale_b = torch.rand(_prep_k(k, block_size), n, device="cuda").to(
             torch.float8_e8m0fnu
         )
 
-        # Get reference result from eager mode (ATen)
         expected = scaled_mm(a_fp8, b_fp8, scale_a, scale_b)
 
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "NVGEMM",
-                "nvgemm_max_profiling_configs": 3,
-                "autotune_fallback_to_aten": False,
-            }
-        ):
+        torch._dynamo.reset()
+
+        with config.patch(_nvgemm_config()):
             compiled_fn = torch.compile(scaled_mm)
             result = compiled_fn(a_fp8, b_fp8, scale_a, scale_b)
 
         torch.testing.assert_close(result, expected)
 
-    def test_grouped_gemm(self):
-        """Test grouped GEMM with NVGEMM backend.
+    @parametrize("out_dtype", (torch.float32, torch.bfloat16))
+    @parametrize(
+        "layout_a",
+        ("contiguous", "aligned_offset", "view"),
+    )
+    @parametrize(
+        "m,n,k",
+        (
+            (256, 512, 1024),
+            (256, 1024, 512),
+            (128, 256, 512),
+            (512, 256, 1024),
+        ),
+    )
+    def test_scaled_gemm_nvf4(self, out_dtype, layout_a, m, n, k):
+        """Test NVF4 (Float4 + Float8E4M3FN scales, block_size=16) with NVGEMM backend."""
+        packed_k = k // 2
+        block_size = 16
 
-        This test runs the same shape twice with different offsets to verify that
-        different offset distributions produce correct results.
+        def scaled_mm(a, b, scale_a, scale_b):
+            return torch._scaled_mm(
+                a, b, scale_a=scale_a, scale_b=scale_b, out_dtype=out_dtype
+            )
 
-        Note: GroupedGemm currently only supports TN layout (column-major B).
-        B is created with shape (g, k, n) but column-major inner layout via permute.
+        a_fp4 = _create_tensor_with_layout(
+            layout_a, m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b_fp4 = torch.randint(
+            0, 256, (n, packed_k), device="cuda", dtype=torch.uint8
+        ).view(torch.float4_e2m1fn_x2)
+        b_fp4_t = b_fp4.T
+
+        num_k_blocks = ceildiv(k, block_size)
+        padded_k_blocks = _round_up(num_k_blocks, 4)
+        block_size_mn = 128
+        scale_a_numel = block_size_mn * ceildiv(m, block_size_mn) * padded_k_blocks
+        scale_b_numel = block_size_mn * ceildiv(n, block_size_mn) * padded_k_blocks
+
+        scale_a = torch.rand(scale_a_numel, device="cuda").to(torch.float8_e4m3fn)
+        scale_b = torch.rand(scale_b_numel, device="cuda").to(torch.float8_e4m3fn)
+
+        expected = scaled_mm(a_fp4, b_fp4_t, scale_a, scale_b)
+
+        torch._dynamo.reset()
+
+        with config.patch(
+            _nvgemm_config(
+                **{"test_configs.autotune_choice_desc_regex": "inductor_vendored"}
+            )
+        ):
+            compiled_fn = torch.compile(scaled_mm)
+            result = compiled_fn(a_fp4, b_fp4_t, scale_a, scale_b)
+
+        # a_fp4 and b_fp4_t could come with NaNs.
+        torch.testing.assert_close(result, expected, equal_nan=True)
+
+    @parametrize(
+        "layout_a",
+        ("contiguous", "aligned_offset", "view", "padded"),
+    )
+    def test_grouped_gemm(self, layout_a):
+        """Test grouped GEMM with NVGEMM backend and various A layouts.
+
+        GroupedGemm currently only supports TN layout (column-major B).
+        """
+        g, k, n = 4, 256, 256
+        dtype = torch.bfloat16
+        device = "cuda"
+
+        def grouped_mm(a, b, offsets):
+            return torch._grouped_mm(a, b, offs=offsets)
+
+        b = torch.randn(g, n, k, device=device, dtype=dtype).permute(0, 2, 1)
+
+        m_per_group = [64, 64, 64, 64]
+        total_m = sum(m_per_group)
+        offsets = torch.tensor(
+            [sum(m_per_group[: i + 1]) for i in range(g)],
+            device=device,
+            dtype=torch.int32,
+        )
+        a = _create_tensor_with_layout(layout_a, total_m, k, dtype, device)
+
+        expected = grouped_mm(a, b, offsets)
+
+        torch._dynamo.reset()
+
+        with config.patch(_nvgemm_config()):
+            compiled_fn = torch.compile(grouped_mm)
+            result = compiled_fn(a, b, offsets)
+
+        torch.testing.assert_close(result, expected)
+
+    def test_grouped_gemm_varying_offsets(self):
+        """Test that different offset distributions produce correct results.
+
+        Runs the same compiled function with two different offset distributions
+        (same total_m) to verify offsets are handled dynamically at runtime.
         """
         g, k, n = 4, 256, 256
         dtype = torch.bfloat16
@@ -333,35 +412,30 @@ class TestNVUniversalGemm(TestCase):
         b = torch.randn(g, n, k, device=device, dtype=dtype).permute(0, 2, 1)
 
         m_per_group_1 = [64, 64, 64, 64]
-        total_m_1 = sum(m_per_group_1)
+        total_m = sum(m_per_group_1)
         offsets_1 = torch.tensor(
             [sum(m_per_group_1[: i + 1]) for i in range(g)],
             device=device,
             dtype=torch.int32,
         )
-        a_1 = torch.randn(total_m_1, k, device=device, dtype=dtype)
+        a_1 = torch.randn(total_m, k, device=device, dtype=dtype)
 
         m_per_group_2 = [32, 96, 48, 80]
-        total_m_2 = sum(m_per_group_2)
-        if total_m_1 != total_m_2:
+        if sum(m_per_group_2) != total_m:
             raise AssertionError("Total M must match for cache key test")
         offsets_2 = torch.tensor(
             [sum(m_per_group_2[: i + 1]) for i in range(g)],
             device=device,
             dtype=torch.int32,
         )
-        a_2 = torch.randn(total_m_2, k, device=device, dtype=dtype)
+        a_2 = torch.randn(total_m, k, device=device, dtype=dtype)
 
         expected_1 = grouped_mm(a_1, b, offsets_1)
         expected_2 = grouped_mm(a_2, b, offsets_2)
 
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "NVGEMM",
-                "autotune_fallback_to_aten": False,
-            }
-        ):
+        torch._dynamo.reset()
+
+        with config.patch(_nvgemm_config()):
             compiled_fn = torch.compile(grouped_mm)
 
             result_1 = compiled_fn(a_1, b, offsets_1)
@@ -464,6 +538,72 @@ class TestNVUniversalGemmHeuristics(TestCase):
 
 
 @unittest.skipIf(
+    not (
+        ensure_nv_universal_gemm_available()
+        and is_datacenter_blackwell_arch()
+        and ensure_nvmatmul_heuristics_available()
+    ),
+    "Requires cutlass_api, nvMatmulHeuristics, and Blackwell GPU",
+)
+class TestNVUniversalGemmHeuristicsIntegration(TestCase):
+    """Integration tests for nvMatmulHeuristics with real library calls."""
+
+    def test_fp4_heuristic_configs(self):
+        """Test that nvMatmulHeuristics returns configs for FP4 blockscaled GEMM."""
+        heuristics = NVUniversalGemmHeuristics()
+
+        m, n, k = 256, 512, 1024
+        configs = heuristics._get_heuristic_configs(
+            m,
+            n,
+            k,
+            dtype_a=torch.float4_e2m1fn_x2,
+            layout_a="row",
+            layout_b="col",
+            count=5,
+            valid_configs=OrderedSet(),
+            accumulator_type=torch.float32,
+            dtype_b=torch.float4_e2m1fn_x2,
+            out_dtype=torch.float32,
+        )
+
+        self.assertGreater(
+            len(configs), 0, "nvMatmulHeuristics returned no FP4 configs"
+        )
+        for cfg in configs:
+            self.assertGreater(cfg.tile_m, 0)
+            self.assertGreater(cfg.tile_n, 0)
+            self.assertGreater(cfg.estimated_runtime, 0)
+
+    def test_fp8_heuristic_configs(self):
+        """Test that nvMatmulHeuristics returns configs for FP8 GEMM."""
+        heuristics = NVUniversalGemmHeuristics()
+
+        m, n, k = 256, 512, 1024
+        configs = heuristics._get_heuristic_configs(
+            m,
+            n,
+            k,
+            dtype_a=torch.float8_e4m3fn,
+            layout_a="row",
+            layout_b="col",
+            count=5,
+            valid_configs=OrderedSet(),
+            accumulator_type=torch.float32,
+            dtype_b=torch.float8_e4m3fn,
+            out_dtype=torch.float32,
+        )
+
+        self.assertGreater(
+            len(configs), 0, "nvMatmulHeuristics returned no FP8 configs"
+        )
+        for cfg in configs:
+            self.assertGreater(cfg.tile_m, 0)
+            self.assertGreater(cfg.tile_n, 0)
+            self.assertGreater(cfg.estimated_runtime, 0)
+
+
+@unittest.skipIf(
     not (ensure_nv_universal_gemm_available() and is_datacenter_blackwell_arch()),
     "NVIDIA Universal GEMM (cutlass_api) library not available or not on Blackwell",
 )
@@ -476,7 +616,6 @@ class TestNVUniversalGemmDynamicShapes(TestCase):
 
         def fn(x, w):
             nz = torch.nonzero(x)  # Creates unbacked symint for nz.size(0)
-            # Use unbacked symint as M dimension in matmul
             a = torch.ones(nz.size(0), w.size(0), dtype=w.dtype, device=w.device)
             return a @ w
 
@@ -485,13 +624,7 @@ class TestNVUniversalGemmDynamicShapes(TestCase):
 
         torch._dynamo.reset()
 
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "NVGEMM",
-                "nvgemm_max_profiling_configs": 2,
-            }
-        ):
+        with config.patch(_nvgemm_config(nvgemm_max_profiling_configs=2)):
             compiled_fn = torch.compile(fn, dynamic=True)
             with self.assertRaisesRegex(
                 Exception, "NoValidChoicesError|no valid choice"
@@ -506,13 +639,7 @@ class TestNVUniversalGemmDynamicShapes(TestCase):
 
         torch._dynamo.reset()
 
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "NVGEMM",
-                "nvgemm_max_profiling_configs": 2,
-            }
-        ):
+        with config.patch(_nvgemm_config(nvgemm_max_profiling_configs=2)):
             compiled_fn = torch.compile(matmul, dynamic=True)
 
             shapes = [

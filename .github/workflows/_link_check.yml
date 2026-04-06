@@ -11,15 +11,10 @@ on:
 jobs:
   lint-urls:
     if: ${{ github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'skip-url-lint') }}
-    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    uses: ./.github/workflows/_lint.yml
     with:
-      job-name: lint-urls
-      timeout: 120
-      runner: ${{ inputs.runner }}linux.2xlarge
-      docker-image: ci-image:pytorch-linux-jammy-linter
-      fetch-depth: 0
-      submodules: false
-      ref: ${{ inputs.ref }}
+      runner: mt-l-x86iamx-8-16
+      docker-image: ghcr.io/pytorch/test-infra:cpu-x86_64-810d48d
       script: |
         ./scripts/lint_urls.sh $(
           if [ "${{ github.event_name }}" = "pull_request" ]; then
@@ -37,15 +32,10 @@ jobs:
 
   lint-xrefs:
     if: ${{ github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'skip-xref-lint') }}
-    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    uses: ./.github/workflows/_lint.yml
     with:
-      job-name: lint-xrefs
-      timeout: 60
-      runner: ${{ inputs.runner }}linux.2xlarge
-      docker-image: ci-image:pytorch-linux-jammy-linter
-      fetch-depth: 0
-      submodules: false
-      ref: ${{ inputs.ref }}
+      runner: mt-l-x86iamx-8-16
+      docker-image: ghcr.io/pytorch/test-infra:cpu-x86_64-810d48d
       script: |
         ./scripts/lint_xrefs.sh $(
           if [ "${{ github.event_name }}" = "pull_request" ]; then

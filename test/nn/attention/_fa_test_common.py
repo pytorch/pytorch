@@ -8,7 +8,7 @@ test_fa3.py and test_fa4.py.
 
 import itertools
 from contextlib import contextmanager
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 import torch
 import torch.nn.functional as F
@@ -32,7 +32,7 @@ class SdpaShape(NamedTuple):
 
 
 @contextmanager
-def cuda_kernel_profiler(kernel_pattern: str, activities: Optional[list] = None):
+def cuda_kernel_profiler(kernel_pattern: str, activities: list | None = None):
     """
     Context manager to profile CUDA kernels and check if a pattern is found.
 
@@ -341,7 +341,7 @@ class FlashAttentionTestMixin:
         dtype,
         is_causal,
         head_dim: int = 128,
-        min_atol: Optional[float] = None,
+        min_atol: float | None = None,
     ):
         """Test compiled flash attention backward numerical correctness against math backend."""
         shape = SdpaShape(2, 8, 512, head_dim)

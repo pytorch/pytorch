@@ -204,7 +204,6 @@ import itertools
 import operator
 import unittest
 import io
-from typing import Optional
 from collections.abc import Callable
 
 class BinaryOp(torch.nn.Module):
@@ -5793,7 +5792,7 @@ class TestQuantizeFx(QuantizationTestCase):
             qconfig: QConfig,
             backend_config: BackendConfig,
             satisfies_constraints: bool,
-            qconfig_name: Optional[str] = None):
+            qconfig_name: str | None = None):
         """
         Helper method to validate whether `qconfig` satisfies the constraints specified in `backend_config`.
         """
@@ -9677,8 +9676,8 @@ class TestQuantizeFxModels(QuantizationTestCase):
                     self.emb = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12, mode='sum')
                     self.linear = torch.nn.Linear(12, 1).to(dtype=torch.float)
 
-                def forward(self, input: torch.Tensor, offsets: Optional[torch.Tensor] = None,
-                            per_sample_weights: Optional[torch.Tensor] = None):
+                def forward(self, input: torch.Tensor, offsets: torch.Tensor | None = None,
+                            per_sample_weights: torch.Tensor | None = None):
                     x = self.emb(input, offsets, per_sample_weights)
                     x = self.linear(x)
                     return x

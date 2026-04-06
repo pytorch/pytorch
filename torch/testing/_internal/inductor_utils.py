@@ -43,7 +43,6 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     IS_CI,
-    IS_FBCODE,
     IS_WINDOWS,
     LazyVal,
     TestCase,
@@ -57,7 +56,7 @@ log: logging.Logger = logging.getLogger(__name__)
 def test_cpu():
     try:
         CppCodeCache.load("")
-        return not IS_FBCODE
+        return True
     except (
         CalledProcessError,
         OSError,
@@ -182,14 +181,19 @@ requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires t
 requires_helion = functools.partial(unittest.skipIf, not HAS_HELION, "requires helion")
 
 
-def requires_cuda_with_enough_memory(min_mem_required):
+def requires_gpu_with_enough_memory(min_mem_required):
     def inner(fn):
+        total_memory = sys.maxsize
+        if torch.xpu.is_available():
+            total_memory = torch.xpu.get_device_properties().total_memory
+        elif torch.cuda.is_available():
+            total_memory = torch.cuda.get_device_properties().total_memory
         if (
-            not torch.cuda.is_available()
-            or torch.cuda.get_device_properties().total_memory < min_mem_required
+            not (torch.cuda.is_available() or torch.xpu.is_available())
+            or total_memory < min_mem_required
         ):
             return unittest.skip(
-                f"Only if the CUDA device has at least {min_mem_required / 1e9:.3f}GB memory to be safe"
+                f"Only if the GPU device has at least {min_mem_required / 1e9:.3f}GB memory to be safe"
             )(fn)
         else:
             return fn

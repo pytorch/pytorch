@@ -125,8 +125,6 @@ enum class ParameterType {
   DISPATCH_KEY_SET
 };
 
-struct FunctionParameter;
-struct FunctionSignature;
 struct PythonArgs;
 
 // Contains bound Python arguments in declaration order
@@ -135,6 +133,81 @@ struct ParsedArgs {
   ParsedArgs() : args() {}
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   PyObject* args[N];
+};
+
+// FunctionParameter is a single formal parameter of a Python function.
+// It is immutable once constructed.
+struct FunctionParameter {
+  FunctionParameter(const std::string& fmt, bool keyword_only);
+
+  bool check(
+      PyObject* obj,
+      std::vector<PyObject*>& overloaded_args,
+      int argnum,
+      int64_t* failed_idx = nullptr);
+
+  bool _check(
+      PyObject* obj,
+      std::vector<PyObject*>& overloaded_args,
+      int argnum,
+      int64_t* failed_idx = nullptr);
+
+  void set_default_str(const std::string& str);
+  TORCH_PYTHON_API std::string type_name() const;
+
+  ParameterType type_;
+  bool optional{false};
+  bool allow_none{false};
+  bool keyword_only;
+  bool allow_numbers_as_tensors = false;
+  int size{0};
+  std::string name;
+  // having this as a raw PyObject * will presumably leak it, but these are only
+  // held by static objects anyway, and Py_Finalize can already be called when
+  // this is destructed.
+  PyObject* python_name;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  at::SmallVector<PyObject*, 5> numpy_python_names;
+  at::Scalar default_scalar;
+  std::vector<int64_t> default_intlist;
+  std::string default_string;
+  union {
+    bool default_bool;
+    int64_t default_int;
+    double default_double;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+    double default_complex[2]; // see Scalar
+    at::ScalarType default_scalartype;
+    at::Layout default_layout;
+  };
+  std::string default_value;
+};
+
+// FunctionSignature represents a single valid signature for a Python function.
+// It is immutable once constructed. The contained data can be concurrently
+// accessed by multiple calls.
+struct FunctionSignature {
+  explicit FunctionSignature(const std::string& fmt, int index);
+
+  bool parse(
+      PyObject* self,
+      PyObject* args,
+      PyObject* kwargs,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+      PyObject* dst[],
+      std::vector<PyObject*>& overloaded_args,
+      bool raise_exception);
+
+  std::string toString() const;
+
+  std::string name;
+  std::vector<FunctionParameter> params;
+  size_t min_args{0};
+  size_t max_args{0};
+  size_t max_pos_args{0};
+  int index;
+  bool hidden{false};
+  bool deprecated{false};
 };
 
 // A PythonArgParser contains a list of valid signatures. Instances are
@@ -179,33 +252,6 @@ struct PYBIND11_EXPORT PythonArgParser {
   std::string function_name;
   size_t max_args{0};
   bool traceable;
-};
-
-// FunctionSignature represents a single valid signature for a Python function.
-// It is immutable once constructed. The contained data can be concurrently
-// accessed by multiple calls.
-struct FunctionSignature {
-  explicit FunctionSignature(const std::string& fmt, int index);
-
-  bool parse(
-      PyObject* self,
-      PyObject* args,
-      PyObject* kwargs,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-      PyObject* dst[],
-      std::vector<PyObject*>& overloaded_args,
-      bool raise_exception);
-
-  std::string toString() const;
-
-  std::string name;
-  std::vector<FunctionParameter> params;
-  size_t min_args{0};
-  size_t max_args{0};
-  size_t max_pos_args{0};
-  int index;
-  bool hidden{false};
-  bool deprecated{false};
 };
 
 // PythonArgs contains bound Python arguments for an actual invocation
@@ -309,54 +355,6 @@ struct TORCH_PYTHON_API PythonArgs {
   at::Tensor tensor_slow(int i);
   at::Scalar scalar_slow(int i);
   at::Scalar scalar_slow(PyObject* arg);
-};
-
-// FunctionParameter is a single formal parameter of a Python function.
-// It is immutable once constructed.
-struct FunctionParameter {
-  FunctionParameter(const std::string& fmt, bool keyword_only);
-
-  bool check(
-      PyObject* obj,
-      std::vector<PyObject*>& overloaded_args,
-      int argnum,
-      int64_t* failed_idx = nullptr);
-
-  bool _check(
-      PyObject* obj,
-      std::vector<PyObject*>& overloaded_args,
-      int argnum,
-      int64_t* failed_idx = nullptr);
-
-  void set_default_str(const std::string& str);
-  TORCH_PYTHON_API std::string type_name() const;
-
-  ParameterType type_;
-  bool optional{false};
-  bool allow_none{false};
-  bool keyword_only;
-  bool allow_numbers_as_tensors = false;
-  int size{0};
-  std::string name;
-  // having this as a raw PyObject * will presumably leak it, but these are only
-  // held by static objects anyway, and Py_Finalize can already be called when
-  // this is destructed.
-  PyObject* python_name;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  at::SmallVector<PyObject*, 5> numpy_python_names;
-  at::Scalar default_scalar;
-  std::vector<int64_t> default_intlist;
-  std::string default_string;
-  union {
-    bool default_bool;
-    int64_t default_int;
-    double default_double;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-    double default_complex[2]; // see Scalar
-    at::ScalarType default_scalartype;
-    at::Layout default_layout;
-  };
-  std::string default_value;
 };
 
 template <int N>

@@ -3,8 +3,6 @@
 
 #include <type_traits>
 
-#include <thrust/tuple.h>
-
 #include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
@@ -54,7 +52,7 @@ __global__ void RowwiseMomentsCUDAKernel(
     // https://github.com/pytorch/pytorch/pull/13967
     __shared__ typename std::aligned_storage<
         sizeof(WelfordType),
-        alignof(WelfordType)>::type val_shared[C10_WARP_SIZE];
+        alignof(WelfordType)>::type val_shared[C10_WARP_SIZE_UPPER_BOUND];
     WelfordType* val_shared_ptr = reinterpret_cast<WelfordType*>(val_shared);
     val = cuda_utils::BlockReduce(
         val,
@@ -125,8 +123,8 @@ __global__ void Compute1dBackwardFusedParamsCUDAKernel(
     sum1 = cuda_utils::WarpReduceSum<T_ACC>(sum1);
     sum2 = cuda_utils::WarpReduceSum<T_ACC>(sum2);
   } else {
-    __shared__ T_ACC ds_shared[C10_WARP_SIZE];
-    __shared__ T_ACC db_shared[C10_WARP_SIZE];
+    __shared__ T_ACC ds_shared[C10_WARP_SIZE_UPPER_BOUND];
+    __shared__ T_ACC db_shared[C10_WARP_SIZE_UPPER_BOUND];
     sum1 = cuda_utils::BlockReduceSum<T_ACC>(sum1, ds_shared);
     sum2 = cuda_utils::BlockReduceSum<T_ACC>(sum2, db_shared);
   }
@@ -292,8 +290,8 @@ __global__ void ComputeInternalGradientsCUDAKernel(
     sum1 = cuda_utils::WarpReduceSum<T_ACC>(sum1);
     sum2 = cuda_utils::WarpReduceSum<T_ACC>(sum2);
   } else {
-    __shared__ T_ACC ds_shared[C10_WARP_SIZE];
-    __shared__ T_ACC db_shared[C10_WARP_SIZE];
+    __shared__ T_ACC ds_shared[C10_WARP_SIZE_UPPER_BOUND];
+    __shared__ T_ACC db_shared[C10_WARP_SIZE_UPPER_BOUND];
     sum1 = cuda_utils::BlockReduceSum<T_ACC>(sum1, ds_shared);
     sum2 = cuda_utils::BlockReduceSum<T_ACC>(sum2, db_shared);
   }
@@ -335,8 +333,8 @@ __global__ void ComputeBackwardFusedParamsCUDAKernel(
     sum1 = cuda_utils::WarpReduceSum<T_ACC>(sum1);
     sum2 = cuda_utils::WarpReduceSum<T_ACC>(sum2);
   } else {
-    __shared__ T_ACC ds_shared[C10_WARP_SIZE];
-    __shared__ T_ACC db_shared[C10_WARP_SIZE];
+    __shared__ T_ACC ds_shared[C10_WARP_SIZE_UPPER_BOUND];
+    __shared__ T_ACC db_shared[C10_WARP_SIZE_UPPER_BOUND];
     sum1 = cuda_utils::BlockReduceSum<T_ACC>(sum1, ds_shared);
     sum2 = cuda_utils::BlockReduceSum<T_ACC>(sum2, db_shared);
   }

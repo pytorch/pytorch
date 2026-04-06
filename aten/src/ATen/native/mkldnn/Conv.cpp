@@ -87,6 +87,10 @@ static void check_shape_forward(const Tensor& input,
 
   std::vector<int64_t> input_shape;
   std::vector<int64_t> kernel_shape;
+  if (k > 2) {
+    input_shape.reserve(k - 2);
+    kernel_shape.reserve(k - 2);
+  }
   bool kernel_size_correct = true;
 
   for (const auto i : c10::irange(2, k)) {
@@ -442,7 +446,9 @@ Tensor mkldnn_convolution_pointwise_binary(
     auto weight =
         weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
     auto other = other_t.contiguous(memory_format);
-    auto output = at::empty(output_sizes, input_t.options()).contiguous(memory_format);
+    auto output = at::empty(
+        output_sizes,
+        input_t.options().memory_format(memory_format));
     const ideep::tensor x = itensor_from_tensor(input);
     const ideep::tensor w = itensor_from_tensor(weight);
     const ideep::tensor z = itensor_from_tensor(other);

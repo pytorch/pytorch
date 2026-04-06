@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 import torch
 import torch.nn as nn
@@ -26,7 +26,7 @@ class _ConvNd(torch.nn.modules.conv._ConvNd, ReferenceQuantizedModule):
     this is useful when user want to use this module in other backends like Glow.
     """
 
-    __annotations__ = {"bias": Optional[torch.Tensor]}
+    __annotations__ = {"bias": torch.Tensor | None}
     _IS_REFERENCE = True
 
     @staticmethod

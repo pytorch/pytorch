@@ -20,6 +20,7 @@ on:
       - rocm-mi300
       - rocm-mi355
       - rocm-navi31
+      - rocm-nightly
       - inductor-micro-benchmark
       - inductor-micro-benchmark-x86
       - inductor-cu124

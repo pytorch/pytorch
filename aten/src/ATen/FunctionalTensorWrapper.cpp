@@ -864,6 +864,18 @@ void functionalize_op_helper(const c10::OperatorHandle& op, torch::jit::Stack* s
         "The composite op functionalization fallback expects its inputs all not to be functional tensors");
       auto t_new = c10::IValue(at::functionalization::impl::to_functional_tensor(opt_tensors));
       (*stack)[arguments_begin + idx] = t_new;
+    } else if (ivalue.isList()) {
+      // Handle nested lists containing tensor lists (e.g., Tensor[][]).
+      auto list = ivalue.toList();
+      for (const auto i : c10::irange(list.size())) {
+        const auto& elem = list.get(i);
+        if (elem.isTensorList()) {
+          auto tensors = elem.toTensorList();
+          TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(tensors),
+            "The composite op functionalization fallback expects its inputs all not to be functional tensors");
+          list.set(i, c10::IValue(at::functionalization::impl::to_functional_tensor(tensors)));
+        }
+      }
     }
   }
 
@@ -907,6 +919,17 @@ void functionalize_op_helper(const c10::OperatorHandle& op, torch::jit::Stack* s
       at::functionalization::impl::sync(opt_tensors);
       auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(opt_tensors));
       (*stack)[returns_begin + idx] = t_new;
+    } else if (ivalue.isList()) {
+      // Handle nested lists containing tensor lists (e.g., Tensor[][]).
+      auto list = ivalue.toList();
+      for (const auto i : c10::irange(list.size())) {
+        const auto& elem = list.get(i);
+        if (elem.isTensorList()) {
+          auto tensors = elem.toTensorList();
+          at::functionalization::impl::sync(tensors);
+          list.set(i, c10::IValue(at::functionalization::impl::from_functional_tensor(tensors)));
+        }
+      }
     }
   }
 }

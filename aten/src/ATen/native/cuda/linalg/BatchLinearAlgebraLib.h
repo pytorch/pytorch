@@ -59,8 +59,7 @@ void svd_cusolver(const Tensor& A,
 
 // entrance of calculations of `cholesky` using cusolver potrf and potrfBatched
 void cholesky_helper_cusolver(const Tensor& input, bool upper, const Tensor& info);
-Tensor _cholesky_solve_helper_cuda_cusolver(const Tensor& self, const Tensor& A, bool upper);
-Tensor& cholesky_inverse_kernel_impl_cusolver(Tensor& result, Tensor& infos, bool upper);
+void _cholesky_solve_helper_cuda_cusolver(Tensor& self, const Tensor& A, bool upper);
 
 void geqrf_cusolver(const Tensor& input, const Tensor& tau);
 void ormqr_cusolver(const Tensor& input, const Tensor& tau, const Tensor& other, bool left, bool transpose);

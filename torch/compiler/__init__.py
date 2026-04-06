@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import contextlib
 import io
 from collections.abc import Callable
 from typing import Any, TypeVar
@@ -433,6 +434,7 @@ def wrap_numpy(fn):
 
 _is_compiling_flag: bool = False
 _is_exporting_flag: bool = False
+_is_non_strict_tracing_flag: bool = False
 
 
 def is_compiling() -> bool:
@@ -455,6 +457,25 @@ def is_compiling() -> bool:
         return False
     else:
         return _is_compiling_flag
+
+
+def _is_non_strict_tracing() -> bool:
+    """
+    Indicates whether we are inside a non-strict make_fx-based tracing session.
+    """
+    return _is_non_strict_tracing_flag
+
+
+@contextlib.contextmanager
+def _non_strict_tracing_context():
+    """Context manager that sets the non-strict tracing flag."""
+    global _is_non_strict_tracing_flag
+    old = _is_non_strict_tracing_flag
+    try:
+        _is_non_strict_tracing_flag = True
+        yield
+    finally:
+        _is_non_strict_tracing_flag = old
 
 
 def is_dynamo_compiling() -> bool:
@@ -658,7 +679,13 @@ def skip_all_guards_unsafe(guard_entries):
     return [False for entry in guard_entries]
 
 
-def nested_compile_region(fn=None, options: NestedCompileRegionOptions | None = None):
+def nested_compile_region(
+    fn=None,
+    *,
+    options: NestedCompileRegionOptions | None = None,
+    max_reuse_entries: int = 8,
+    reuse_hash_fn=None,
+):
     """
     Tells **``torch.compile``** that the marked set of operations forms a nested
     compile region (which is often repeated in the full model) whose code can be
@@ -688,6 +715,17 @@ def nested_compile_region(fn=None, options: NestedCompileRegionOptions | None = 
         options: Optional backend to use for compiling the subgraph.
             Warning: this is an experimental feature under development and
             not ready for use yet.
+        max_reuse_entries: Maximum number of reuse cache entries per function
+            before raising an error. If this limit is hit, guards keep failing
+            across invocations and hierarchical compilation is not effective.
+        reuse_hash_fn: Optional callable that takes the same ``*args, **kwargs``
+            as the wrapped function and returns an integer hash key. When
+            provided, Dynamo traces this function to obtain a constant integer
+            and uses it as the cache key for subgraph reuse, bypassing the
+            automatic fingerprint/guard machinery. Two calls that produce the
+            same hash key reuse the same cached subgraph. The hash function
+            must be fully traceable (no graph breaks) and must return a
+            constant integer.
     """
 
     if options is not None:
@@ -702,7 +740,12 @@ def nested_compile_region(fn=None, options: NestedCompileRegionOptions | None = 
         mark_compile_region as _mark_compile_region,
     )
 
-    return _mark_compile_region(fn, options=options)
+    return _mark_compile_region(
+        fn,
+        options=options,
+        max_reuse_entries=max_reuse_entries,
+        reuse_hash_fn=reuse_hash_fn,
+    )
 
 
 def load_compiled_function(

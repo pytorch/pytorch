@@ -24,6 +24,7 @@ These backends include:
 - `torch.backends.nnpack`
 - `torch.backends.openmp`
 - `torch.backends.opt_einsum`
+- `torch.backends.python_native`
 - `torch.backends.xeon`
 
 ## torch.backends.cpu
@@ -103,6 +104,10 @@ These backends include:
 
 ```{eval-rst}
 .. autofunction:: torch.backends.cuda.preferred_rocm_fa_library
+```
+
+```{eval-rst}
+.. autofunction:: torch.backends.cuda.is_ck_sdpa_available
 ```
 
 ```{eval-rst}
@@ -394,6 +399,122 @@ These backends include:
     inputs as it tries all possible paths. See more details in opt_einsum's docs
     (https://optimized-einsum.readthedocs.io/en/stable/path_finding.html).
 
+```
+
+## torch.backends.python_native
+
+```{eval-rst}
+.. automodule:: torch.backends.python_native
+```
+
+The `torch.backends.python_native` module provides user control over native operators implemented in python
+via. DSLs (Domain Specific Languages) that are defined in `torch._native`. This allows users to selectively
+enable or disable high-performance implementations from various DSLs like Triton and CuteDSL.
+
+### Module-level Functions
+
+```{eval-rst}
+.. autofunction:: torch.backends.python_native.get_dsl_operations
+```
+
+```{eval-rst}
+.. autofunction:: torch.backends.python_native.disable_operations
+```
+
+```{eval-rst}
+.. autofunction:: torch.backends.python_native.enable_operations
+```
+
+```{eval-rst}
+.. autofunction:: torch.backends.python_native.disable_dispatch_keys
+```
+
+```{eval-rst}
+.. autofunction:: torch.backends.python_native.enable_dispatch_keys
+```
+
+```{eval-rst}
+.. autofunction:: torch.backends.python_native.operations_disabled
+```
+
+### Module-level Properties
+
+```{eval-rst}
+.. attribute:: available_dsls
+
+    A :class:`list` of :class:`str` containing the names of DSLs that are available at runtime.
+    This is a subset of :attr:`all_dsls` that have their runtime dependencies satisfied.
+```
+
+```{eval-rst}
+.. attribute:: all_dsls
+
+    A :class:`list` of :class:`str` containing the names of all registered DSLs, whether
+    available at runtime or not.
+```
+
+### DSL Controllers
+
+For each registered DSL (e.g., `triton`, `cutedsl`), auto-populated controller modules are available:
+
+```{eval-rst}
+.. currentmodule:: torch.backends.python_native
+```
+
+#### DSL Properties
+
+Each DSL controller (e.g., `torch.backends.python_native.triton`) provides the following properties:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `name` | `str` | The name of the DSL |
+| `available` | `bool` | Whether the DSL's runtime dependencies are available |
+| `enabled` | `bool` | Controls whether all operations from this DSL are enabled. Setting to `False` disables all operations from the DSL, while `True` re-enables them |
+| `version` | `Version` or `None` | The version of the DSL runtime, if available. Returns `None` if the DSL is not available |
+
+#### DSL Methods
+
+Each DSL controller provides the following methods:
+
+**disable()**
+    Disable all operations from this DSL.
+
+**enable()**
+    Re-enable all operations from this DSL.
+
+**disabled()**
+    Context manager that temporarily disables all operations from this DSL.
+    Operations are automatically re-enabled when exiting the context.
+
+    Example::
+
+        with torch.backends.python_native.triton.disabled():
+            # Triton operations are disabled here
+            result = model(input)
+        # Triton operations restored here
+
+### Usage Examples
+
+```{eval-rst}
+.. code-block:: python
+
+    import torch.backends.python_native as pn
+
+    # Query available DSLs
+    print(pn.available_dsls)  # ['triton', 'cutedsl']
+
+    # Disable all Triton operations
+    pn.triton.enabled = False
+
+    # Temporarily disable CuteDSL operations
+    with pn.cutedsl.disabled():
+        result = model(input)  # CuteDSL ops disabled
+
+    # Disable specific operations across all DSLs
+    pn.disable_operations('scaled_mm', '_flash_attention_forward')
+
+    # Query operations for a specific DSL
+    triton_ops = pn.get_dsl_operations('triton')
 ```
 
 ## torch.backends.xeon

@@ -98,15 +98,6 @@ def _host_allocator():
     return torch._C._cuda_cudaHostAllocator()
 
 
-@contextlib.contextmanager
-def _free_mutex():
-    torch._C._cuda_lock_mutex()
-    try:
-        yield
-    finally:
-        torch._C._cuda_unlock_mutex()
-
-
 def caching_allocator_alloc(size, device: "Device" = None, stream=None):
     r"""Perform a memory allocation using the CUDA memory allocator.
 
@@ -989,6 +980,21 @@ def _record_memory_history_impl(
 _record_memory_history.__signature__ = signature(_record_memory_history_impl)  # type: ignore[attr-defined]
 
 
+def _allocation_traceback(data_ptr: int) -> list[dict[str, Any]] | None:
+    r"""Return the allocation traceback for a currently-allocated CUDA pointer,
+    or ``None`` if the pointer is not found or recording was not enabled.
+
+    ``data_ptr`` must be the base address of a recorded allocation, e.g. the
+    result of ``tensor.untyped_storage().data_ptr()``. Passing the result of
+    ``tensor.data_ptr()`` for a view with a nonzero ``storage_offset`` may
+    return ``None`` even if the underlying allocation is still live.
+
+    Requires :func:`_record_memory_history` to have been called with
+    ``context != None`` beforehand.
+    """
+    return torch._C._cuda_allocationTraceback(data_ptr)
+
+
 def _snapshot(device: "Device" = None, augment_with_fx_traces=False):
     """Save a snapshot of CUDA memory state at the time it was called.
 
@@ -1012,6 +1018,9 @@ def _snapshot(device: "Device" = None, augment_with_fx_traces=False):
             total_size: int  #  cudaMalloc'd size of segment
             stream: int
             segment_type: Literal["small", "large"]  # 'large' (>1MB)
+            segment_pool_id: Tuple[
+                int, int
+            ]  # id of the memory pool owning this segment
             allocated_size: int  # size of memory in use
             active_size: int  # size of memory in use or in active_awaiting_free state
             blocks: List[Block]
@@ -1070,6 +1079,7 @@ def _snapshot(device: "Device" = None, augment_with_fx_traces=False):
             stream: int
             device_free: int  # only present for OOM, the amount of
             # memory cuda still reports to be free
+            pool_id: Tuple[int, int]  # id of the memory pool for this entry
 
     Args:
         device: Device to capture snapshot for. If None, captures for current device.

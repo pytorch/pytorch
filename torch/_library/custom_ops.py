@@ -714,6 +714,7 @@ class CustomOpDef:
                     f"{self._name} does not have a kernel registered for {device}. "
                     "Please use register_kernel to do so."
                 )
+            # pyrefly: ignore [bad-argument-type]
             dispatch_key = _C._dispatch_key_for_device(device)
             dispatch_key = getattr(_C.DispatchKey, dispatch_key)
             return self._opoverload.redispatch(

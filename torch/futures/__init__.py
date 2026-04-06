@@ -2,7 +2,7 @@
 # pylint: disable=useless-parent-delegation
 from __future__ import annotations
 
-from typing import cast, Generic, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import cast, Generic, TYPE_CHECKING, TypeVar
 
 import torch
 
@@ -27,9 +27,7 @@ class Future(torch._C.Future, Generic[T]):
     .. warning:: GPU support is a beta feature, subject to changes.
     """
 
-    def __init__(
-        self, *, devices: Optional[list[Union[int, str, torch.device]]] = None
-    ):
+    def __init__(self, *, devices: list[int | str | torch.device] | None = None):
         r"""
         Create an empty unset ``Future``. If the future is intended to hold
         values containing CUDA tensors, (a superset of) their CUDA devices must

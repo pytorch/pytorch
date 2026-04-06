@@ -175,7 +175,7 @@ class _DistributedAutotuneBuffer(MultiTemplateBuffer):
             kernel_inputs = MMKernelInputs([*self.original_inputs])
             assert isinstance(self.layout, Layout)
             choice = ser_choice.get_choice(self.layout, kernel_inputs)
-            buffer = autotune_select_algorithm(
+            buffer, _ = autotune_select_algorithm(
                 self._kernel_name,
                 [choice],
                 kernel_inputs.nodes(),

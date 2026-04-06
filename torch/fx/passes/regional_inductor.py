@@ -23,25 +23,6 @@ def _dummy_wrapper(fn):
     return inner
 
 
-def _partition_by_supported_nodes(gm, supported_ops, prefix):
-    from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
-    from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
-
-    partitioner = CapabilityBasedPartitioner(
-        gm, supported_ops, allows_single_node_partition=True
-    )
-
-    candidate_partitions = partitioner.propose_partitions()
-    partitioned_gm = fuse_by_partitions(
-        partitioner.graph_module,
-        [partition.nodes for partition in candidate_partitions],
-        prefix=prefix,
-        always_return_tuple=True,
-    )
-
-    return partitioned_gm
-
-
 def _compile_submod(gm, prefix):
     from torch._inductor.standalone_compile import AOTCompiledArtifact
 
@@ -134,29 +115,59 @@ class _RegionScooper:
 
     @staticmethod
     def scoop_regions(gm):
-        from torch.fx.passes.operator_support import OperatorSupport
+        from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
+        from torch.fx.passes.operator_support import create_op_support
+        from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
 
-        found_marked_node = False
+        # Group tagged nodes by region ID.  The region ID comes from the
+        # optional "inductor_region" key inside the compile_with_inductor
+        # annotation. When absent, all tagged nodes share a single default region
+        _DEFAULT_REGION = object()
+        regions: dict[object, set[torch.fx.Node]] = {}
         for node in gm.graph.nodes:
             if _needs_inductor_compile(node):
-                found_marked_node = True
-                break
+                compile_value = node.meta["custom"]["compile_with_inductor"]
+                if (
+                    isinstance(compile_value, dict)
+                    and "inductor_region" in compile_value
+                ):
+                    rid = compile_value["inductor_region"]
+                else:
+                    rid = _DEFAULT_REGION
+                regions.setdefault(rid, set()).add(node)
 
-        if not found_marked_node:
+        if not regions:
             logger.info("No inductor marked nodes found")
             return gm
 
-        class InductorMarkedNodes(OperatorSupport):
-            def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
-                return _needs_inductor_compile(node)
+        # Run CapabilityBasedPartitioner per region to get cycle-safe partitions
+        # without merging across region boundaries.
+        def _is_in_region(region_nodes):
+            def is_node_supported(_submodules, node):
+                return node in region_nodes
 
-        marked_nodes = InductorMarkedNodes()
-        return _partition_by_supported_nodes(
-            gm, marked_nodes, "__marked_inductor_submod"
+            return is_node_supported
+
+        all_partitions: list[dict[torch.fx.Node, int | None]] = []
+        for region_nodes in regions.values():
+            support = create_op_support(_is_in_region(region_nodes))
+            partitioner = CapabilityBasedPartitioner(
+                gm, support, allows_single_node_partition=True
+            )
+            for partition in partitioner.propose_partitions():
+                all_partitions.append(partition.nodes)
+
+        return fuse_by_partitions(
+            gm,
+            all_partitions,
+            prefix="__marked_inductor_submod",
+            always_return_tuple=True,
         )
 
     @staticmethod
-    def recursively_scoop_regions(gm):
+    def recursively_scoop_regions(gm, _processed=None):
+        if _processed is None:
+            _processed = set()
         for node in gm.graph.find_nodes(op="get_attr"):
             if _needs_inductor_compile(node):
                 # If the get_attr itself is marked for compile, the outer graph will
@@ -164,8 +175,13 @@ class _RegionScooper:
                 # regional inductor compiles that do not work well.
                 continue
             submod = getattr(gm, node.target)
-            if isinstance(submod, torch.fx.GraphModule):
-                _RegionScooper.recursively_scoop_regions(submod)
+            # Track by id: multiple get_attr nodes may reference the same GraphModule
+            if (
+                isinstance(submod, torch.fx.GraphModule)
+                and id(submod) not in _processed
+            ):
+                _processed.add(id(submod))
+                _RegionScooper.recursively_scoop_regions(submod, _processed)
 
         return _RegionScooper.scoop_regions(gm)
 

@@ -3,7 +3,7 @@
 import contextlib
 import os
 import sys
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -208,7 +208,7 @@ class TestJoin(MultiProcessTestCase):
         throw_on_early_termination: bool,
         num_allreduces: int,
         run_post_hooks: bool,
-        expected_total: Optional[int] = None,
+        expected_total: int | None = None,
     ):
         r"""
         Skeleton for all :class:`Join` tests.

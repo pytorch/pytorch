@@ -15,12 +15,14 @@ configure_file(
     ${CMAKE_BINARY_DIR}/c10/xpu/impl/xpu_cmake_macros.h)
 
 set(C10_XPU_SRCS
+    PeerToPeerAccess.cpp
     XPUCachingAllocator.cpp
     XPUFunctions.cpp
     XPUStream.cpp
     impl/XPUGuardImpl.cpp
 )
 set(C10_XPU_HEADERS
+    PeerToPeerAccess.h
     XPUCachingAllocator.h
     XPUDeviceProp.h
     XPUException.h

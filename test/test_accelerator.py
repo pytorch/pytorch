@@ -3,6 +3,7 @@
 import gc
 import sys
 import unittest
+from contextlib import nullcontext
 
 import torch
 from torch.testing._internal.common_utils import (
@@ -109,6 +110,21 @@ class TestAccelerator(TestCase):
         prev_stream = torch.accelerator.current_stream()
         with torch.Stream() as s:
             self.assertEqual(torch.accelerator.current_stream(), s)
+        self.assertEqual(torch.accelerator.current_stream(), prev_stream)
+
+    def test_stream_context_manager_reentrance(self):
+        prev_stream = torch.accelerator.current_stream()
+        s0 = torch.Stream()
+        with s0, s0:
+            self.assertEqual(torch.accelerator.current_stream(), s0)
+        self.assertEqual(torch.accelerator.current_stream(), prev_stream)
+        s1 = torch.Stream()
+        with s0:
+            self.assertEqual(torch.accelerator.current_stream(), s0)
+            with s1:
+                self.assertEqual(torch.accelerator.current_stream(), s1)
+                with s0:
+                    self.assertEqual(torch.accelerator.current_stream(), s0)
         self.assertEqual(torch.accelerator.current_stream(), prev_stream)
 
     @unittest.skipIf(not TEST_MULTIACCELERATOR, "only one accelerator detected")
@@ -244,6 +260,36 @@ class TestAccelerator(TestCase):
         free_bytes, total_bytes = torch.accelerator.get_memory_info()
         self.assertGreaterEqual(free_bytes, 0)
         self.assertGreaterEqual(total_bytes, 0)
+
+    def test_device_capability_supported_dtypes(self):
+        try:
+            caps = torch.accelerator.get_device_capability()
+        except RuntimeError:
+            self.skipTest("Backend doesn't support get_device_capability")
+
+        supported_dtypes = caps["supported_dtypes"]
+        self.assertIsInstance(supported_dtypes, set)
+        self.assertGreater(len(supported_dtypes), 0)
+
+        acc = torch.accelerator.current_accelerator()
+        reference_dtype = next(iter(supported_dtypes))
+
+        all_dtypes = [
+            getattr(torch, name)
+            for name in dir(torch)
+            if isinstance(getattr(torch, name), torch.dtype)
+        ]
+        for dtype in all_dtypes:
+            with self.subTest(dtype=dtype):
+                ctx = (
+                    nullcontext()
+                    if dtype in supported_dtypes
+                    else self.assertRaises((RuntimeError, TypeError))
+                )
+                with ctx:
+                    t = torch.empty(16, dtype=dtype, device=acc)
+                    t = t.to(reference_dtype)
+                    t = t.to(dtype)
 
 
 if __name__ == "__main__":

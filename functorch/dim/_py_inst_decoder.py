@@ -1,5 +1,5 @@
 import dis
-from typing import Any, Optional
+from typing import Any
 
 
 class _PyInstDecoder:
@@ -28,7 +28,7 @@ class _PyInstDecoder:
         """Advance to the next instruction."""
         self.offset += 1
 
-    def opcode(self) -> Optional[str]:
+    def opcode(self) -> str | None:
         """Get the opcode name of the current instruction."""
         if self.offset < len(self.instructions):
             return self.instructions[self.offset].opname
@@ -40,7 +40,7 @@ class _PyInstDecoder:
             return self.instructions[self.offset].arg or 0
         return 0
 
-    def name(self) -> Optional[str]:
+    def name(self) -> str | None:
         """
         Extract variable name from current instruction.
         """

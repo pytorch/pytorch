@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import keyword
 import warnings
-from typing import Optional, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 
 if TYPE_CHECKING:
@@ -72,12 +72,12 @@ class ParsedExpression:
             allow_duplicates (bool): whether to allow an identifier to appear more than once in the expression
         """
         self.has_ellipsis: bool = False
-        self.has_ellipsis_parenthesized: Optional[bool] = None
-        self.identifiers: set[Union[str, AnonymousAxis]] = set()
+        self.has_ellipsis_parenthesized: bool | None = None
+        self.identifiers: set[str | AnonymousAxis] = set()
         # that's axes like 2, 3, 4 or 5. Axes with size 1 are exceptional and replaced with empty composition
         self.has_non_unitary_anonymous_axes: bool = False
         # composition keeps structure of composite axes, see how different corner cases are handled in tests
-        self.composition: list[Union[list[Union[str, AnonymousAxis]], str]] = []
+        self.composition: list[list[str | AnonymousAxis] | str] = []
         if "." in expression:
             if "..." not in expression:
                 raise ValueError(
@@ -90,7 +90,7 @@ class ParsedExpression:
             expression = expression.replace("...", _ellipsis)
             self.has_ellipsis = True
 
-        bracket_group: Optional[list[Union[str, AnonymousAxis]]] = None
+        bracket_group: list[str | AnonymousAxis] | None = None
 
         def add_axis_name(x: str) -> None:
             if x in self.identifiers:
@@ -120,9 +120,7 @@ class ParsedExpression:
                 )
                 if not (is_number or is_axis_name):
                     raise ValueError(f"Invalid axis identifier: {x}\n{reason}")
-                axis_name: Union[str, AnonymousAxis] = (
-                    AnonymousAxis(x) if is_number else x
-                )
+                axis_name: str | AnonymousAxis = AnonymousAxis(x) if is_number else x
                 self.identifiers.add(axis_name)
                 if is_number:
                     self.has_non_unitary_anonymous_axes = True
@@ -278,7 +276,7 @@ def validate_rearrange_expressions(
         )
 
 
-def comma_separate(collection: Collection[Union[str, Collection[str]]]) -> str:
+def comma_separate(collection: Collection[str | Collection[str]]) -> str:
     """Convert a collection of strings representing first class dims into a comma-separated string.
 
     Args:

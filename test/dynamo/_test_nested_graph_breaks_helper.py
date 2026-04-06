@@ -16,3 +16,16 @@ def fn(val, call):
     val = call(val)
     val = val + 1
     return val
+
+
+HELPER_CONSTANT = torch.tensor([100.0])
+
+
+def closure_with_graph_break(x):
+    captured = x + 1
+
+    def inner():
+        torch._dynamo.graph_break()
+        return captured + HELPER_CONSTANT
+
+    return inner()

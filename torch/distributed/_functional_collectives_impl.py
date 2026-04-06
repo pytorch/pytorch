@@ -115,3 +115,23 @@ def _all_to_all_single(
 
 def _wait_tensor(tensor: torch.Tensor) -> torch.Tensor:
     return torch.ops._c10d_functional.wait_tensor(tensor)
+
+
+def _isend(tensor: torch.Tensor, dst: int, tag: str, group_name):
+    return torch.ops._c10d_functional.isend(tensor, dst, tag, group_name)
+
+
+def _irecv(tensor: torch.Tensor, src: int, tag: str, group_name):
+    return torch.ops._c10d_functional.irecv(tensor, src, tag, group_name)
+
+
+def _batch_p2p_ops(
+    op_list: list[str],
+    peer_list: list[int],
+    tag_list: list[int],
+    tensors: list[torch.Tensor],
+    group_name: str,
+):
+    return torch.ops._c10d_functional.batch_p2p_ops(
+        op_list, peer_list, tag_list, tensors, group_name
+    )

@@ -54,24 +54,19 @@ jobs:
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
     runs-on: linux.aws.h100
-    timeout-minutes: ${{ inputs.timeout-minutes || 30 }}
+    timeout-minutes: ${{ inputs.timeout-minutes || 60 }}
     permissions:
       id-token: write
       contents: read
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
-        with:
-          no-sudo: true
+      - name: Setup Linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@main
 
       - name: Checkout flash-attention as a secondary repository
         uses: actions/checkout@v4
         with:
           repository: Dao-AILab/flash-attention
           path: flash-attention
-
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
 
       - name: Login to ECR
         uses: ./.github/actions/ecr-login

@@ -15,6 +15,7 @@ from torch.distributed.tensor._api import (
     zeros,
 )
 from torch.distributed.tensor.placement_types import (
+    _StridedShard,
     Partial,
     Placement,
     Replicate,
@@ -63,6 +64,7 @@ torch.serialization.add_safe_globals(
         Partial,
         Replicate,
         Shard,
+        _StridedShard,
     ]
 )
 

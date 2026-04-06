@@ -4,7 +4,8 @@ Getting Started on Intel GPU
 Hardware Prerequisite
 ---------------------
 
-For Intel Data Center GPU
+Intel Data Center GPU
+^^^^^^^^^^^^^^^^^^^^^
 
 .. list-table::
    :widths: 50 50 50 50
@@ -19,7 +20,8 @@ For Intel Data Center GPU
      - yes
      - yes
 
-For Intel Client GPU
+Intel Client GPU
+^^^^^^^^^^^^^^^^
 
 +---------------------------------------+-----------------------------------------------------------------------------------------------------+
 | Supported OS                          | Validated Hardware                                                                                  |
@@ -51,37 +53,42 @@ Binaries
 
 Now that we have `Intel GPU Driver <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu.html>`_ installed, use the following commands to install ``pytorch``, ``torchvision``, ``torchaudio``.
 
-For release wheels
+Stable Releases
+~~~~~~~~~~~~~~~
+
+To install the latest stable release wheels for Intel GPU (XPU):
 
 .. code-block:: bash
 
     pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/xpu
 
-For nightly wheels
+Nightly Builds
+~~~~~~~~~~~~~~
+
+To install the latest preview/nightly wheels:
 
 .. code-block:: bash
 
     pip3 install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/xpu
 
-For previous versions
+Previous Versions
+~~~~~~~~~~~~~~~~~
 
-v2.9.1
+**v2.10.0**
+
+.. code-block:: bash
+
+    pip install torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 --index-url https://download.pytorch.org/whl/xpu
+
+**v2.9.1**
 
 .. code-block:: bash
 
     pip install torch==2.9.1 torchvision==0.24.1 torchaudio==2.9.1 --index-url https://download.pytorch.org/whl/xpu
 
-v2.9.0
+.. note::
 
-.. code-block:: bash
-
-    pip install torch==2.9.0 torchvision==0.24.0 torchaudio==2.9.0 --index-url https://download.pytorch.org/whl/xpu
-
-v2.8.0
-
-.. code-block:: bash
-
-    pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/xpu
+   For older wheels, please refer to the `previous versions <https://pytorch.org/get-started/previous-versions/>`_ page and ensure you use the ``xpu`` index URL.
 
 From Source
 ^^^^^^^^^^^
@@ -137,7 +144,7 @@ Here are a few inference workflow examples.
 
 
 Inference with FP32
-"""""""""""""""""""
+~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -157,7 +164,7 @@ Inference with FP32
     print("Execution finished")
 
 Inference with AMP
-""""""""""""""""""
+~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -181,7 +188,7 @@ Inference with AMP
     print("Execution finished")
 
 Inference with ``torch.compile``
-""""""""""""""""""""""""""""""""
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -222,7 +229,7 @@ Training Examples
 Here is a few training workflow examples.
 
 Train with FP32
-"""""""""""""""
+~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -279,7 +286,7 @@ Train with FP32
     print("Execution finished")
 
 Train with AMP
-""""""""""""""
+~~~~~~~~~~~~~~
 
 .. note::
    Training with ``GradScaler`` requires hardware support for ``FP64``. ``FP64`` is not natively supported by the Intel® Arc™ A-Series Graphics. If you run your workloads on Intel® Arc™ A-Series Graphics, please disable ``GradScaler``.
@@ -347,7 +354,7 @@ Train with AMP
     print("Execution finished")
 
 Train with ``torch.compile``
-""""""""""""""""""""""""""""
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 

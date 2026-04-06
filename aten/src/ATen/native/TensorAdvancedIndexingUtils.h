@@ -66,7 +66,7 @@ inline std::tuple<bool, Tensor> canDispatchToMaskedFill(
        c10::irange(num_ind, self.ndimension())) {
     mask = mask.unsqueeze(-1);
   }
-  return std::make_tuple(true, mask);
+  return std::make_tuple(true, std::move(mask));
 }
 
 inline AdvancedIndex make_info(Tensor self, IOptTensorListRef orig) {
