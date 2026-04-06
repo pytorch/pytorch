@@ -3295,6 +3295,42 @@
   device_guard: False
   manual_cpp_binding: True
 
+- func: numel(Tensor self) -> int
+  variants: method
+  device_check: NoCheck
+  device_guard: False
+  manual_cpp_binding: True
+
+- func: dim(Tensor self) -> int
+  variants: method
+  device_check: NoCheck
+  device_guard: False
+  manual_cpp_binding: True
+
+- func: get_device(Tensor self) -> int
+  variants: method
+  device_check: NoCheck
+  device_guard: False
+  manual_cpp_binding: True
+
+- func: storage_offset(Tensor self) -> int
+  variants: method
+  device_check: NoCheck
+  device_guard: False
+  manual_cpp_binding: True
+
+- func: is_contiguous(Tensor self) -> bool
+  variants: method
+  device_check: NoCheck
+  device_guard: False
+  manual_cpp_binding: True
+
+- func: is_contiguous.memory_format(Tensor self, MemoryFormat memory_format) -> bool
+  variants: method
+  device_check: NoCheck
+  device_guard: False
+  manual_cpp_binding: True
+
 - func: kl_div(Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
 
 - func: kron(Tensor self, Tensor other) -> Tensor

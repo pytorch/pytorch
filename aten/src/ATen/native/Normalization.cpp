@@ -118,14 +118,14 @@ struct Var {
   }
 };
 
-static inline bool is_contiguous(const Tensor& t) {
+static bool is_contiguous_in_any_format(const Tensor& t) {
   return t.is_contiguous() || t.is_contiguous(at::MemoryFormat::ChannelsLast) || t.is_contiguous(at::MemoryFormat::ChannelsLast3d);
 }
 
 // For some ambiguous cases, it is possible a channels last contiguous Tensor has
 //   `suggest_memory_format` of Contiguous.
 // See https://github.com/pytorch/pytorch/issues/63224 for details.
-static inline MemoryFormat suggest_memory_format_contig(const Tensor& t) {
+static MemoryFormat suggest_memory_format_contig(const Tensor& t) {
   return t.is_contiguous() ?
     at::MemoryFormat::Contiguous : (t.is_contiguous(at::MemoryFormat::ChannelsLast3d) ?
     at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast);
@@ -138,8 +138,8 @@ static std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
     const Tensor& running_mean /* optional */, const Tensor& running_var /* optional */,
     bool train, double eps, Tensor& output) {
 
-  bool all_contiguous = is_contiguous(input)
-    && is_contiguous(output)
+  bool all_contiguous = is_contiguous_in_any_format(input)
+    && is_contiguous_in_any_format(output)
     && (!weight.defined() || weight.is_contiguous())
     && (!bias.defined() || bias.is_contiguous())
     && running_mean.is_contiguous()
@@ -207,7 +207,7 @@ static std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
   TORCH_CHECK(input.numel() != 0, "input tensor must have at least one element, but got input_sizes = ", input.sizes());
   int64_t n = input.numel() / n_input;
 
-  bool all_contiguous = is_contiguous(input);
+  bool all_contiguous = is_contiguous_in_any_format(input);
   constexpr bool mixed_type = !std::is_same_v<scalar_t, param_t>;
   // Using float data type for Half _var_sum in batchnorm stats updating on CPU
   // to avoid _var_sum overflow since the representation range of Half is small.
@@ -300,7 +300,7 @@ static std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
 
   constexpr bool mixed_type = !std::is_same_v<scalar_t, param_t>;
   const auto dtype = mixed_type ? kFloat : input.scalar_type();
-  Tensor save_mean = is_contiguous(input) ? at::empty({n_input}, input.options().dtype(dtype)) : at::mean(input, /*dim=*/reduce_dims, /*keepdim=*/false, dtype);
+  Tensor save_mean = is_contiguous_in_any_format(input) ? at::empty({n_input}, input.options().dtype(dtype)) : at::mean(input, /*dim=*/reduce_dims, /*keepdim=*/false, dtype);
   Tensor save_var_transform = at::empty({n_input}, input.options().dtype(dtype));
   return batch_norm_cpu_update_stats_template<scalar_t, param_t, VarTransform>(input, running_mean, running_var, momentum, eps, save_mean, save_var_transform);
 }
@@ -331,8 +331,8 @@ static std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
 
   // since we are directly manipulating pointers in contiguous path,
   // need to make sure input and grad_out have the same memory format.
-  bool all_contiguous = is_contiguous(input)
-      && is_contiguous(grad_out_)
+  bool all_contiguous = is_contiguous_in_any_format(input)
+      && is_contiguous_in_any_format(grad_out_)
       && input.suggest_memory_format() == grad_out_.suggest_memory_format();
 
   if (all_contiguous) {
@@ -863,7 +863,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const std:
   checkBackend("batch_norm_cpu", {self, weight, bias, running_mean, running_var}, Backend::CPU);
 
   // Prepare output tensor
-  const bool all_contiguous = is_contiguous(self)
+  const bool all_contiguous = is_contiguous_in_any_format(self)
     && (!weight.defined() || weight.is_contiguous())
     && (!bias.defined() || bias.is_contiguous())
     && running_mean.is_contiguous()
@@ -885,7 +885,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const std:
       save_mean = at::empty({0}, self.options().dtype(kFloat));
       save_var = at::empty({0}, self.options().dtype(kFloat));
     } else {
-      save_mean = is_contiguous(self) ? at::empty({self.size(1)}, self.options().dtype(kFloat)) : at::mean(self, /*dim=*/reduce_dims, /*keepdim=*/false, kFloat);
+      save_mean = is_contiguous_in_any_format(self) ? at::empty({self.size(1)}, self.options().dtype(kFloat)) : at::mean(self, /*dim=*/reduce_dims, /*keepdim=*/false, kFloat);
       save_var = at::empty({self.size(1)}, self.options().dtype(kFloat));
     }
   } else {
@@ -893,7 +893,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const std:
       save_mean = at::empty({0}, self.options());
       save_var = at::empty({0}, self.options());
     } else {
-      save_mean = is_contiguous(self) ? at::empty({self.size(1)}, self.options()) : at::mean(self, /*dim=*/reduce_dims, /*keepdim=*/false);
+      save_mean = is_contiguous_in_any_format(self) ? at::empty({self.size(1)}, self.options()) : at::mean(self, /*dim=*/reduce_dims, /*keepdim=*/false);
       save_var = at::empty({self.size(1)}, self.options());
     }
   }

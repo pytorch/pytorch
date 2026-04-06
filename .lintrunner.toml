@@ -191,6 +191,11 @@ exclude_patterns = [
     'aten/src/ATen/cpu/FlushDenormal.cpp',
     'aten/src/ATen/cpu/vml.h',
     'aten/src/ATen/CPUFixedAllocator.h',
+    # interned_strings.h includes the generated aten_interned_strings.h which
+    # #errors under TORCH_ASSERT_ONLY_METHOD_OPERATORS. The .cpp file #undefs
+    # the macro before including the header, but clang-tidy lints the .h
+    # standalone using the .cpp's compile flags, so the #error always fires.
+    'aten/src/ATen/core/interned_strings.h',
     'aten/src/ATen/Parallel*.h',
     'c10/xpu/**/*.h',
     'c10/xpu/**/*.cpp',
