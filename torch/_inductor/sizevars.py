@@ -602,7 +602,7 @@ class SizeVarAllocator:
             return right
 
         # Min/Max fallback: we can prove Min(a, b) <= c when any arg <= c, but
-        # sympy doesn't simplify this yet. So, evaluate it here.
+        # sympy doesn't simplify this yet. So, evaluate it here. Same for Max.
         for lhs, rhs in [(left, right), (right, left)]:
 
             def le_rhs(a: Expr) -> bool:
@@ -610,6 +610,9 @@ class SizeVarAllocator:
 
             # Min(Min(a, b), c) ==> Min(a, b) if (a <= c) or (b <= c).
             if isinstance(lhs, sympy.Min) and any(le_rhs(a) for a in lhs.args):
+                return lhs
+            # Min(Max(a, b), c) ==> Max(a, b) if (a <= c) and (b <= c).
+            if isinstance(lhs, sympy.Max) and all(le_rhs(a) for a in lhs.args):
                 return lhs
 
         raise TypeError(

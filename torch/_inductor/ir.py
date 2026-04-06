@@ -3639,6 +3639,11 @@ class DtypeView(BaseView):
 
 
 class SliceView(View):
+    """View that represents a slice along a single dimension.
+
+    Corresponds to tensor[..., start:end:step, ...].
+    """
+
     @classmethod
     def normalize_start_end(
         cls, x: IRNode, dim: int, start: int, end: int
@@ -3651,6 +3656,14 @@ class SliceView(View):
         dim_size = x.get_size()[dim]
 
         if any(free_unbacked_symbols(x) for x in (start, end, dim_size)):
+            min_func = sympy.Min
+            max_func = sympy.Max
+        elif any(
+            # Only needed when backed_size_oblivious is on.
+            x.has(sympy.Min, sympy.Max)
+            for x in (start, end, dim_size)
+            if isinstance(x, Expr)
+        ):
             min_func = sympy.Min
             max_func = sympy.Max
         else:
