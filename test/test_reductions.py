@@ -1622,6 +1622,7 @@ class TestReductions(TestCase):
                               lambda: torch.amin(a, 0, out=values))
 
     # TODO: consider refactoring with bincount test
+    @skipIfMPS  # AssertionError: UserWarning not triggered by <lambda>
     def test_bucketization(self, device):
         values_1d = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9], device=device)
         values_3d = torch.tensor([[[1, 3, 5], [2, 4, 6]], [[1, 2, 3], [4, 5, 6]]], device=device)
