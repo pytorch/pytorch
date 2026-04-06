@@ -260,6 +260,10 @@ autosummary_filename_map = {
 coverage_ignore_functions = [
     "main",  # utility script
     "run",  # utility script
+    # TorchVitals (C++ bindings still in torch._C, Python wrappers removed)
+    "read_vitals",
+    "set_vital",
+    "vitals_enabled",
     # torch.hub
     "import_module",
     # torch.jit.unsupported_tensor_ops
