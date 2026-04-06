@@ -82,9 +82,10 @@ class TestProcessGroupOCCL(TestDistBackend, DistributedTest._DistTestBase):
         fut.wait()
         self.assertTrue(fut.done())
 
-        # OCCL is currently a dummy backend and all communication methods return None.
         res = fut.value()
-        self.assertEqual(res, None)
+        self.assertIsInstance(res, list)
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0].shape, tensors[0].shape)
 
 
 # Drop inherited torch distributed backend tests; we only need the OCCL smoke test.
