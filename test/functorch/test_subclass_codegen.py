@@ -70,11 +70,9 @@ def inner_fn(args):
     unwrapped_args.extend(args[1:])
     args.clear()
     unwrapped_outs = compiled_fn(unwrapped_args)
-    wrapped_outs = []
     _out_inner_2 = {'a': unwrapped_outs[0], 'b': unwrapped_outs[1]}
     _out_5 = _subclass_type_3.__tensor_unflatten__(_out_inner_2, _meta_4, (4,), (1,))
-    wrapped_outs.append(_out_5)
-    return tuple(wrapped_outs)""",
+    return (_out_5,)""",
         )
 
     def test_compile_nested_subclass(self):
@@ -117,15 +115,13 @@ def inner_fn(args):
     unwrapped_args.extend(args[1:])
     args.clear()
     unwrapped_outs = compiled_fn(unwrapped_args)
-    wrapped_outs = []
     _out_inner_5 = {'a': unwrapped_outs[0], 'b': unwrapped_outs[1]}
     _out_8 = _subclass_type_6.__tensor_unflatten__(_out_inner_5, _meta_7, (4,), (1,))
     _out_inner_9 = {'a': unwrapped_outs[2], 'b': unwrapped_outs[3]}
     _out_12 = _subclass_type_10.__tensor_unflatten__(_out_inner_9, _meta_11, (4,), (1,))
     _out_inner_4 = {'a': _out_8, 'b': _out_12}
     _out_15 = _subclass_type_13.__tensor_unflatten__(_out_inner_4, _meta_14, (4,), (1,))
-    wrapped_outs.append(_out_15)
-    return tuple(wrapped_outs)""",
+    return (_out_15,)""",
         )
 
     def test_trailing_args_forwarded(self):

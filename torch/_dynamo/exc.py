@@ -456,6 +456,11 @@ def raise_observed_exception(
     raise raised_exc
 
 
+def raise_type_error(tx: InstructionTranslatorBase, msg: str) -> NoReturn:
+    """Raise a TypeError as an observed exception during tracing."""
+    raise_observed_exception(TypeError, tx, args=[msg])
+
+
 def handle_observed_exception(tx: Any) -> None:
     # This is essentially exception handling code, equivalent of this pseudo code
     #

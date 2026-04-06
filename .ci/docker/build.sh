@@ -201,7 +201,6 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     KATEX=yes
-    TRITON=yes
     DOCS=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
@@ -215,9 +214,7 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     KATEX=yes
-    TRITON=yes
     DOCS=yes
-    UNINSTALL_DILL=yes
     ;;
   pytorch-linux-jammy-py3-clang18-executorch)
     ANACONDA_PYTHON_VERSION=3.10
@@ -267,18 +264,12 @@ case "$tag" in
     GCC_VERSION=13
     ACL=yes
     OPENBLAS=yes
-    # snadampal: skipping llvm src build install because the current version
-    # from pytorch/llvm:9.0.1 is x86 specific
-    SKIP_LLVM_SRC_BUILD_INSTALL=yes
     ;;
   pytorch-linux-jammy-aarch64-py3.10-gcc13-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=13
     ACL=yes
     OPENBLAS=yes
-    # snadampal: skipping llvm src build install because the current version
-    # from pytorch/llvm:9.0.1 is x86 specific
-    SKIP_LLVM_SRC_BUILD_INSTALL=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-noble-riscv64-py3.12-gcc14)
@@ -366,11 +357,9 @@ docker buildx build \
        --build-arg "TPU=${TPU}" \
        --build-arg "XPU_VERSION=${XPU_VERSION}" \
        --build-arg "XPU_DRIVER_TYPE=${XPU_DRIVER_TYPE}" \
-       --build-arg "UNINSTALL_DILL=${UNINSTALL_DILL}" \
        --build-arg "ACL=${ACL:-}" \
        --build-arg "OPENBLAS=${OPENBLAS:-}" \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
-       --build-arg "SKIP_LLVM_SRC_BUILD_INSTALL=${SKIP_LLVM_SRC_BUILD_INSTALL:-}" \
        --build-arg "INSTALL_MINGW=${INSTALL_MINGW:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        --load \
