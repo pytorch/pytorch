@@ -1122,7 +1122,7 @@ def prepare_aot_module_simplified(
 
 def aot_module_simplified(
     mod: torch.fx.GraphModule | torch._dynamo.utils.GmWrapper,
-    args: Iterable[Any],
+    args: Sequence[Any],
     fw_compiler: AOTDispatchCompiler,
     bw_compiler: AOTDispatchCompiler | None = None,
     partition_fn: Callable[..., Any] = default_partition,
@@ -1152,6 +1152,15 @@ def aot_module_simplified(
     :func:`aot_module_simplified` removes these overheads.
     """
 
+    pre_grad_pass_timing: Literal["early", "late"] = resolve_pre_grad_pass_timing()
+
+    if (
+        pre_grad_pass_timing == "early"
+        and pre_grad_passes
+        and isinstance(mod, torch.fx.GraphModule)
+    ):
+        mod = pre_grad_passes(mod, args)
+
     with contextlib.ExitStack() as stack:
         (
             functional_call,
@@ -1179,15 +1188,6 @@ def aot_module_simplified(
 
         compiled_fn = None
 
-        pre_grad_pass_timing: Literal["early", "late"] = resolve_pre_grad_pass_timing()
-
-        if (
-            pre_grad_pass_timing == "early"
-            and pre_grad_passes
-            and isinstance(mod, torch.fx.GraphModule)
-        ):
-            mod = pre_grad_passes(mod, fake_flat_args)
-
         if (
             isinstance(fw_compiler, SerializableAOTDispatchCompiler)
             or torch._functorch.config.force_autograd_cache
@@ -1212,7 +1212,7 @@ def aot_module_simplified(
                 and pre_grad_passes
                 and isinstance(mod, torch.fx.GraphModule)
             ):
-                mod = pre_grad_passes(mod, fake_flat_args)
+                mod = pre_grad_passes(mod, args)
 
             stack.enter_context(compiled_autograd._disable())
             aot_state = create_aot_state(
