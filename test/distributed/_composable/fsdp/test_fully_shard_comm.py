@@ -68,6 +68,7 @@ from torch.testing._internal.common_utils import (
     requires_cuda_p2p_access,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    TEST_CUDA,
     TEST_WITH_ROCM,
     TEST_XPU,
     xfailIf,
@@ -1645,6 +1646,7 @@ class TestFullyShardAllocFromPG(FSDPTest):
         super()._run(*args, **kwargs)
 
     @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not TEST_CUDA, "NCCL log parsing requires CUDA")
     # The NCCL PG refuses to allocate tensors if multicast is unavailable, see
     # https://github.com/pytorch/pytorch/blob/503362d019b3782581492af7767945dbd75ca1c9/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp#L5634
     def test_fully_shard_alloc_from_pg(self):
@@ -1665,13 +1667,13 @@ class TestFullyShardAllocFromPG(FSDPTest):
         fully_shard(model)
 
         torch.manual_seed(42 + self.rank)
-        inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type)
 
         loss = model(inp)
         loss.sum().backward()
 
         torch.distributed.barrier()
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         with open(self.nccl_log_dir.name + "/nccl_log") as f:
             self.assertNotRegex(f.read(), self.MEMORY_REGISTER_RE)
@@ -1685,7 +1687,7 @@ class TestFullyShardAllocFromPG(FSDPTest):
         loss.sum().backward()
 
         torch.distributed.barrier()
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         with open(self.nccl_log_dir.name + "/nccl_log") as f:
             self.assertRegex(f.read(), self.MEMORY_REGISTER_RE)
@@ -1730,13 +1732,13 @@ class TestFullyShardSymmMem(MultiProcContinuousTest):
 
     @property
     def device(self) -> torch.device:
-        return torch.device("cuda", self.rank)
+        return torch.device(device_type, self.rank)
 
     @parametrize("sum_reduction", [True, False])
     def test_fully_shard_symm_mem(self, sum_reduction: bool):
         torch.manual_seed(42 + self.rank)
-        device = torch.device("cuda", self.rank)
-        torch.cuda.set_device(device)
+        device = torch.device(device_type, self.rank)
+        torch.get_device_module(device_type).set_device(device)
         seq_len = 64
         model_args = ModelArgs()
         model_args.dim = 4096
@@ -1759,7 +1761,7 @@ class TestFullyShardSymmMem(MultiProcContinuousTest):
             loss.sum().backward()
 
         run()
-        torch.cuda.synchronize(device)
+        torch.accelerator.synchronize()
 
 
 instantiate_parametrized_tests(TestFullyShardSymmMem)
@@ -1794,6 +1796,7 @@ class TestFullyShardForceSumReduction(FSDPTest):
 
     # Test reduce-scatter only on plain FSDP on 2 GPUs
     @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not TEST_CUDA, "NCCL log parsing requires CUDA")
     @unittest.skipIf(
         TEST_XPU, "Related environment variable is not supported with XCCL"
     )
@@ -1817,13 +1820,13 @@ class TestFullyShardForceSumReduction(FSDPTest):
         )
 
         torch.manual_seed(42 + self.rank)
-        inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type)
 
         loss = model(inp)
         loss.sum().backward()
 
         torch.distributed.barrier()
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         with open(self.nccl_log_dir.name + "/nccl_log") as f:
             logs = f.read()
@@ -1840,7 +1843,7 @@ class TestFullyShardForceSumReduction(FSDPTest):
         loss.sum().backward()
 
         torch.distributed.barrier()
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         with open(self.nccl_log_dir.name + "/nccl_log") as f:
             logs = f.read()
@@ -1849,6 +1852,7 @@ class TestFullyShardForceSumReduction(FSDPTest):
 
     # Test both reduce-scatter and all-reduce on HSDP (DDP+FSDP) on 4 GPUs
     @skip_if_lt_x_gpu(4)
+    @unittest.skipIf(not TEST_CUDA, "NCCL log parsing requires CUDA")
     @unittest.skipIf(
         TEST_XPU, "Related environment variable is not supported with XCCL"
     )
@@ -1882,13 +1886,13 @@ class TestFullyShardForceSumReduction(FSDPTest):
         )
 
         torch.manual_seed(42 + self.rank)
-        inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type)
 
         loss = model(inp)
         loss.sum().backward()
 
         torch.distributed.barrier()
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         with open(self.nccl_log_dir.name + "/nccl_log") as f:
             logs = f.read()
@@ -1907,7 +1911,7 @@ class TestFullyShardForceSumReduction(FSDPTest):
         loss.sum().backward()
 
         torch.distributed.barrier()
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         with open(self.nccl_log_dir.name + "/nccl_log") as f:
             logs = f.read()
