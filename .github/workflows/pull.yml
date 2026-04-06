@@ -421,20 +421,20 @@ jobs:
     secrets: inherit
 
   # ╠══════════════════════════════════════════════════════════════════════╣
-  # ║ linux-jammy-cuda12.8-cudnn9-py3.10-clang18 (build only)              ║
+  # ║ linux-jammy-cuda13.0-cudnn9-py3.10-clang18 (build only)              ║
   # ╠══════════════════════════════════════════════════════════════════════╣
 
-  linux-jammy-cuda12_8-cudnn9-py3_10-clang18-build:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda12.8-cudnn9-py3.10-clang18 ') }}
-    name: linux-jammy-cuda12.8-cudnn9-py3.10-clang18
+  linux-jammy-cuda13_0-cudnn9-py3_10-clang18-build:
+    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda13.0-cudnn9-py3.10-clang18 ') }}
+    name: linux-jammy-cuda13.0-cudnn9-py3.10-clang18
     uses: ./.github/workflows/_linux-build.yml
     needs:
       - get-label-type
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-cuda12.8-cudnn9-py3.10-clang18
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-clang18
+      build-environment: linux-jammy-cuda13.0-cudnn9-py3.10-clang18
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3.10-clang18
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
@@ -457,8 +457,8 @@ jobs:
       - get-label-type
       - job-filter
     with:
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-bazel-test
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-bazel-test
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11
       cuda-version: cpu
       test-matrix: |
         { include: [
