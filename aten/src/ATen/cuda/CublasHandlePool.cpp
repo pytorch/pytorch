@@ -142,24 +142,16 @@ void clearCublasWorkspacesForStream(cudaStream_t stream) {
   {
     auto& workspace = cublas_handle_stream_to_workspace();
     std::unique_lock<std::shared_mutex> lock(workspace.mutex);
-    for (auto it = workspace.map.begin(); it != workspace.map.end(); ) {
-      if (std::get<1>(it->first) == stream_ptr) {
-        it = workspace.map.erase(it);
-      } else {
-        ++it;
-      }
-    }
+    std::erase_if(workspace.map, [stream_ptr](const auto& entry) {
+      return std::get<1>(entry.first) == stream_ptr;
+    });
   }
   {
     auto& workspace = cublaslt_handle_stream_to_workspace();
     std::unique_lock<std::shared_mutex> lock(workspace.mutex);
-    for (auto it = workspace.map.begin(); it != workspace.map.end(); ) {
-      if (std::get<1>(it->first) == stream_ptr) {
-        it = workspace.map.erase(it);
-      } else {
-        ++it;
-      }
-    }
+    std::erase_if(workspace.map, [stream_ptr](const auto& entry) {
+      return std::get<1>(entry.first) == stream_ptr;
+    });
   }
 }
 
@@ -255,10 +247,10 @@ size_t parseCUDABlasLtWorkspaceSize() {
 }
 
 size_t getCUDABlasLtWorkspaceSize() {
-  size_t pool_size = parseCUDABlasLtWorkspaceSize();
+  static size_t pool_size = parseCUDABlasLtWorkspaceSize();
 #ifndef USE_ROCM
   if (unified_cublas_and_lt_workspaces()) {
-    auto cublasWorkspaceSize = parseChosenWorkspaceSize();
+    static size_t cublasWorkspaceSize = parseChosenWorkspaceSize();
     if (cublasWorkspaceSize < pool_size) {
       TORCH_WARN_ONCE("Requested unified CUBLASLT workspace size of ", pool_size,
                       " bytes exceeds CUBLAS workspace size of ", cublasWorkspaceSize,
