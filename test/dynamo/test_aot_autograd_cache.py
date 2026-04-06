@@ -201,8 +201,99 @@ def _unpack_fp8_with_scale_wrap(x):
     return y.to(dtype)
 
 
+class CacheKeyEquivalenceMixin:
+    """Mixin that verifies the standalone autograd_cache_key API produces the
+    same key as the internal compilation pipeline for every torch.compile
+    invocation in the test."""
+
+    def setUp(self):
+        super().setUp()
+        self._compile_fx_patcher = self._install_compile_fx_patcher()
+        self._compile_fx_patcher.start()
+
+    def _install_compile_fx_patcher(self):
+        real_compile_fx = torch._inductor.compile_fx.compile_fx
+
+        def capturing_compile_fx(mod, example_inputs_, **kwargs):
+            mod.recompile()
+            mod_code = mod.code
+
+            # Record standalone key before invoking the inner compile_fx function.
+            standalone_key = standalone_debug_lines = None
+            standalone_bypassed = False
+            try:
+                standalone_key, standalone_debug_lines = compile_fx.autograd_cache_key(
+                    mod, example_inputs_, ignore_shape_env=False
+                )
+            except BypassAOTAutogradCache:
+                standalone_bypassed = True
+            mod.recompile()
+            self.assertEqual(
+                mod.code,
+                mod_code,
+                "compile_fx.autograd_cache_key must not mutate the model",
+            )
+
+            # Setup to capture the ground truth key.
+            captured_gt_key = captured_gt_debug_lines = None
+            real_cache_key = autograd_cache.autograd_cache_key
+
+            def capturing_cache_key(mod, ei, config, compiler_config_extra=None):
+                nonlocal captured_gt_key, captured_gt_debug_lines
+                result = real_cache_key(mod, ei, config, compiler_config_extra)
+                captured_gt_key, captured_gt_debug_lines = result
+                return result
+
+            # Setup to capture pre grad changes.
+            captured_pre_grad_change = False
+            real_run_pre_grad_passes = torch._inductor.compile_fx.run_pre_grad_passes
+
+            def capturing_run_pre_grad_passes(
+                mod_inner: GraphModule, example_inputs_: Sequence[InputType]
+            ) -> torch.fx.GraphModule:
+                nonlocal captured_pre_grad_change
+                mod_inner.recompile()
+                mod_inner_code = mod_inner.code
+                result = real_run_pre_grad_passes(mod_inner, example_inputs_)
+                mod_inner.recompile()
+                captured_pre_grad_change = mod_inner.code != mod_inner_code
+                return result
+
+            # Invoke the inner compile_fx function with capture patches.
+            with (
+                patch(
+                    "torch._functorch._aot_autograd.autograd_cache.autograd_cache_key",
+                    side_effect=capturing_cache_key,
+                ),
+                patch(
+                    "torch._inductor.compile_fx.run_pre_grad_passes",
+                    side_effect=capturing_run_pre_grad_passes,
+                ),
+            ):
+                result = real_compile_fx(mod, example_inputs_, **kwargs)
+
+            # Verify standalone key matches the one produced during compilation.
+            if not standalone_bypassed and not captured_pre_grad_change:
+                self.assertEqual(
+                    standalone_key,
+                    captured_gt_key,
+                    "standalone cache key differs from compile_fx cache key",
+                )
+
+            return result
+
+        return patch(
+            "torch._inductor.compile_fx.compile_fx",
+            side_effect=capturing_compile_fx,
+        )
+
+    def tearDown(self):
+        self._compile_fx_patcher.stop()
+        super().tearDown()
+
+
 @instantiate_parametrized_tests
-class AOTAutogradCacheTests(InductorTestCase):
+class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     def setUp(self):
         """
         Reset all counters and caches before each unit test
@@ -3512,7 +3603,7 @@ def _create_sac_ctx_fn(policy, cache_hash=None):
     return ctx_fn
 
 
-class HOPCacheTests(torch._dynamo.test_case.TestCase):
+class HOPCacheTests(CacheKeyEquivalenceMixin, torch._dynamo.test_case.TestCase):
     def setUp(self):
         super().setUp()
         counters.clear()
