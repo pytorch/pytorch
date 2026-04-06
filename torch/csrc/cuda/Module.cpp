@@ -297,6 +297,11 @@ PyObject* THCPModule_cudaCachingAllocator_raw_alloc(
     return nullptr;
   }
   auto size = PyLong_AsSsize_t(size_o);
+  TORCH_CHECK_VALUE(
+      size >= 0,
+      "Invalid memory size: ",
+      size,
+      ". caching_allocator_alloc requires a non-negative size.");
   cudaStream_t stream = static_cast<cudaStream_t>(PyLong_AsVoidPtr(stream_o));
   void* mem = nullptr;
   {
