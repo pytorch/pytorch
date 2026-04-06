@@ -1111,9 +1111,6 @@ def aot_module_simplified(
     :func:`aot_module_simplified` removes these overheads.
     """
 
-    if cudagraphs is None:
-        cudagraphs = BoxedBool(torch._inductor.config.triton.cudagraphs)
-
     pre_grad_pass_timing: Literal["early", "late"] = resolve_pre_grad_pass_timing()
 
     if (
