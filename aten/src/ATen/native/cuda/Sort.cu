@@ -141,7 +141,7 @@ struct WarpMergeSort {
     const auto stream = at::cuda::getCurrentCUDAStream();
 
     if (descending) {
-      const K invalid_key = at::numeric_limits<K>::lower_bound();
+      constexpr K invalid_key = at::numeric_limits<K>::lower_bound();
       warpMergeSortKVInPlace<A, -1, sort_size, max_block_y>
         <<<grid, block, 0, stream>>>(
           keyInfo,
@@ -154,7 +154,7 @@ struct WarpMergeSort {
           invalid_key);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
-      const K invalid_key = []{
+      constexpr K invalid_key = []{
         // NAN is sorted after inf
         if constexpr(has_nan<K>()) {
           return K(NAN);
