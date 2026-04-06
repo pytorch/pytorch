@@ -56,6 +56,7 @@ from torch.distributions import (
     Exponential,
     ExponentialFamily,
     FisherSnedecor,
+    Frechet,
     Gamma,
     GeneralizedPareto,
     Geometric,
@@ -330,6 +331,22 @@ def _get_examples():
                 {
                     "df1": torch.tensor([1.0]),
                     "df2": 1.0,
+                },
+            ],
+        ),
+        Example(
+            Frechet,
+            [
+                {
+                    "loc": torch.randn(5, 5, requires_grad=True),
+                    # Use .abs() + 2.1 to ensure variance is defined for Scipy tests
+                    "scale": torch.randn(5, 5).abs().requires_grad_() + 0.1,
+                    "concentration": torch.randn(5, 5).abs().requires_grad_() + 2.1,
+                },
+                {
+                    "loc": 0.0,
+                    "scale": 1.0,
+                    "concentration": torch.randn(1).abs().requires_grad_() + 2.1,
                 },
             ],
         ),
@@ -943,6 +960,21 @@ def _get_bad_examples():
                 {
                     "df1": torch.tensor([1.0, 1.0], requires_grad=True),
                     "df2": torch.tensor([0.0, 0.0], requires_grad=True),
+                },
+            ],
+        ),
+        Example(
+            Frechet,
+            [
+                {
+                    "loc": 0.0,
+                    "scale": -1.0,  # Invalid: scale must be positive
+                    "concentration": 1.0,
+                },
+                {
+                    "loc": 0.0,
+                    "scale": 1.0,
+                    "concentration": -0.5, # Invalid: concentration must be positive
                 },
             ],
         ),
@@ -6452,6 +6484,14 @@ class TestAgainstScipy(DistributionsTestCase):
                     positive_var, 4 + positive_var2
                 ),  # var for df2<=4 is undefined
                 scipy.stats.f(positive_var, 4 + positive_var2),
+            ),
+            (
+                # Use .clamp(min=2.1) to ensure mean and variance are always finite 
+                # for the sake of the SciPy comparison test.
+                Frechet(random_var, positive_var, positive_var2.clamp(min=2.1)),
+                scipy.stats.invweibull(c=positive_var2.clamp(min=2.1).numpy(), 
+                                       scale=positive_var.numpy(), 
+                                       loc=random_var.numpy()),
             ),
             (
                 Gamma(positive_var, positive_var2),

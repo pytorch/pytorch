@@ -85,6 +85,7 @@ from .distribution import Distribution
 from .exp_family import ExponentialFamily
 from .exponential import Exponential
 from .fishersnedecor import FisherSnedecor
+from .frechet import Frechet
 from .gamma import Gamma
 from .generalized_pareto import GeneralizedPareto
 from .geometric import Geometric
@@ -135,6 +136,7 @@ __all__ = [
     "Exponential",
     "ExponentialFamily",
     "FisherSnedecor",
+    "Frechet",
     "Gamma",
     "GeneralizedPareto",
     "Geometric",
