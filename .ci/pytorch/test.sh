@@ -17,7 +17,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 # Only change workspace permissions if passwordless sudo is available
 # (e.g. ROCm and s390x CI jobs lack it, and changing permissions
 # can leave the workspace in a bad state for cancelled jobs)
-if sudo -n true 2>/dev/null && [[ -d /var/lib/jenkins/workspace ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && -d /var/lib/jenkins/workspace ]]; then
   # Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
   WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
   cleanup_workspace() {
