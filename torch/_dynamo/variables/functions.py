@@ -520,6 +520,9 @@ class BaseUserFunctionVariable(VariableTracker):
 class UserFunctionVariable(BaseUserFunctionVariable):
     """Some unsupported user-defined global function"""
 
+    # PyFunction_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/funcobject.c#L1046
+    _cpython_type = types.FunctionType
+
     _nonvar_fields = {
         "fn",
         "is_constant",
@@ -1091,6 +1094,9 @@ class BuiltinMethodVariable(BaseUserFunctionVariable):
 
 
 class LocalGeneratorObjectVariable(VariableTracker):
+    # PyGen_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/genobject.c#L814
+    _cpython_type = types.GeneratorType
+
     def __init__(
         self,
         code: types.CodeType,
@@ -1553,6 +1559,9 @@ class FunctionDecoratedByContextlibContextManagerVariable(
 
 class UserMethodVariable(UserFunctionVariable):
     """Some unsupported user-defined method"""
+
+    # PyMethod_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/classobject.c#L332
+    _cpython_type = types.MethodType
 
     def __init__(
         self,
@@ -2708,6 +2717,9 @@ class CollectionsNamedTupleFunction(UserFunctionVariable):
 
 
 class FunctoolsPartialVariable(VariableTracker):
+    # partial_type_spec: https://github.com/python/cpython/blob/v3.13.0/Modules/_functoolsmodule.c#L538
+    _cpython_type = functools.partial
+
     _nonvar_fields = {
         "original_cache_hash",
         *VariableTracker._nonvar_fields,
