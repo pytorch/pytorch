@@ -563,6 +563,11 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     return device_has_multicast_support(device_idx);
   }
 
+  bool has_allocation(void* ptr) override {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return find_allocation_covering(ptr, allocations_) != allocations_.end();
+  }
+
   c10::DeviceType supported_device_type() override {
     return c10::DeviceType::CUDA;
   }

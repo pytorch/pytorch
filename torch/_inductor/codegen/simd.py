@@ -802,7 +802,10 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     if not sv.statically_known_multiple_of(
                         size, remaining[current_group] * remaining[current_group + 1]
                     ):
-                        raise CantSplit
+                        raise CantSplit(
+                            size,
+                            remaining[current_group] * remaining[current_group + 1],
+                        )
 
                     size1 = remaining[current_group]
                     size2 = remaining[current_group + 1]

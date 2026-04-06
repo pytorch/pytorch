@@ -486,41 +486,6 @@ PyObject* THCPModule_cudaSleep(PyObject* _unused, PyObject* cycles) {
   END_HANDLE_TH_ERRORS
 }
 
-// We need to ensure that as long as a thread will NEVER loose the GIL as long
-// as it holds the CUDA mutex. Otherwise another thread might be scheduled and
-// try to e.g. allocate a new tensor which will cause a deadlock. It's enough to
-// have a single global, because it can be only set once (cudaMutex is not
-// recursive) by the thread that owns the mutex (obviously there can be only one
-// such thread).
-static PyGILState_STATE cudaMutexGILState;
-
-PyObject* THCPModule_cudaLockMutex(PyObject* module, PyObject* noargs) {
-  auto mutex = c10::cuda::getFreeMutex();
-  // This has to be a busy loop because we **absolutely need to** hold the GIL
-  // or it's a recipe for a deadlock otherwise (if we let other Python threads
-  // run while we have the cudaMutex, but not the GIL, they might try to e.g.
-  // free a CUDA tensor and acquire the cudaMutex without giving up the GIL,
-  // because it happens deep within THC).
-  while (true) {
-    if (mutex->try_lock())
-      break;
-    {
-      pybind11::gil_scoped_release no_gil;
-      std::this_thread::sleep_for(std::chrono::microseconds(10));
-    }
-  }
-
-  cudaMutexGILState = PyGILState_Ensure();
-  Py_RETURN_NONE;
-}
-
-PyObject* THCPModule_cudaUnlockMutex(PyObject* module, PyObject* noargs) {
-  auto mutex = c10::cuda::getFreeMutex();
-  PyGILState_Release(cudaMutexGILState);
-  mutex->unlock();
-  Py_RETURN_NONE;
-}
-
 PyObject* THCPModule_hasPrimaryContext(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
@@ -2153,8 +2118,6 @@ static struct PyMethodDef _THCPModule_methods[] = {
     {"_cuda_synchronize", THCPModule_cudaSynchronize, METH_NOARGS, nullptr},
     {"_cuda_ipc_collect", THCPModule_cudaIPCCollect, METH_NOARGS, nullptr},
     {"_cuda_sleep", THCPModule_cudaSleep, METH_O, nullptr},
-    {"_cuda_lock_mutex", THCPModule_cudaLockMutex, METH_NOARGS, nullptr},
-    {"_cuda_unlock_mutex", THCPModule_cudaUnlockMutex, METH_NOARGS, nullptr},
     {"_cuda_set_sync_debug_mode",
      THCPModule_cudaSetSyncDebugMode,
      METH_O,

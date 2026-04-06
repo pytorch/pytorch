@@ -2893,8 +2893,7 @@ def module_error_inputs_torch_nn_Embedding(module_info, device, dtype, requires_
 
     # Out of range indices: index exceeds num_embeddings
     # Only test on CPU - CUDA triggers kernel assertion instead of Python exception
-    device_str = str(device)
-    if 'cuda' not in device_str and 'mps' not in device_str:
+    if torch.device(device).type == 'cpu':
         samples.append(
             ErrorModuleInput(
                 ModuleInput(

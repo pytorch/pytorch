@@ -2010,6 +2010,38 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(y.requires_grad)
         self.assertFalse(z.requires_grad)
 
+    def test_locals_traced_correctly_under_compile(self):
+        def fn(x):
+            if x.dim() > 2:
+                batch_size, seq_len, hidden_dim = x.shape
+                x = x.view(-1, hidden_dim)
+
+            x = x + 1
+
+            if "batch_size" in locals() and "seq_len" in locals():
+                x = x.view(batch_size, seq_len, -1)
+            return x
+
+        x = torch.randn(2, 3, 4)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertTrue(same(fn(x), opt_fn(x)))
+
+    def test_vars_traced_correctly_under_compile(self):
+        def fn(x):
+            if x.dim() > 2:
+                batch_size, seq_len, hidden_dim = x.shape
+                x = x.view(-1, hidden_dim)
+
+            x = x + 1
+
+            if "batch_size" in vars() and "seq_len" in vars():
+                x = x.view(batch_size, seq_len, -1)
+            return x
+
+        x = torch.randn(2, 3, 4)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertTrue(same(fn(x), opt_fn(x)))
+
     def test_abc_setattr(self):
         # tests that we correctly bail out of __setattr__ calls
 
@@ -4849,11 +4881,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         model = SimpleModel().eval()
         input_tensor = torch.randn(1, 10, dtype=torch.float32)
         opt = torch.compile(model.eval(), backend="eager", fullgraph=True)
-        actual = opt(input_tensor)
         try:
             expected = model(input_tensor)
         except Exception as e:
-            raise unittest.SkipTest("eager failed, requires Python>=3.12") from e
+            raise unittest.SkipTest(
+                "eager failed, requires Python between 3.9 and 3.12"
+            ) from e
+        actual = opt(input_tensor)
         self.assertEqual(actual, expected)
 
     def test_invalid_seq_unpack(self):
@@ -8040,7 +8074,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
     @skipIfHpu
     @unittest.skipIf(
-        TEST_WITH_ROCM or not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "flash attention not supported",
     )
     def test_flash_attn_backward_mixed_strides(self, device):
