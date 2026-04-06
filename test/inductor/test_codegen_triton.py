@@ -7,11 +7,19 @@ import sympy
 import torch
 import torch._inductor.config as inductor_config
 from torch._inductor.codegen import triton_utils
-from torch._inductor.codegen.common import CSEVariable, SizeArg
+from torch._inductor.codegen.common import (
+    CSE,
+    CSEProxy,
+    CSEVariable,
+    IndentedBuffer,
+    SizeArg,
+)
 from torch._inductor.codegen.triton import (
     _materialize_trunc_to_float_expr,
+    TritonKernel,
     TritonKernelOverrides,
 )
+from torch._inductor.codegen.triton_ir import StructuredTritonKernelIR
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler, promote_types
 from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -243,6 +251,222 @@ class TestCodegenTriton(InductorTestCase):
         self.assertFalse(sv.statically_known_multiple_of(s4, 8))
         shape_env.axioms[sympy.Eq(Mod(s4, 8), 0)] = sympy.true
         self.assertTrue(sv.statically_known_multiple_of(s4, 8))
+
+    def test_structured_ir_tracks_reduction_loop_scope(self):
+        structured_ir = StructuredTritonKernelIR(
+            kernel_name=None,
+            kernel_kind="TritonKernel",
+            numels={"x": sympy.Integer(16), "r0_": sympy.Integer(8)},
+            range_trees=[
+                {
+                    "name": "xindex",
+                    "prefix": "x",
+                    "numel": sympy.Integer(16),
+                    "is_loop": False,
+                    "is_reduction": False,
+                    "grid_dim": 0,
+                    "tensor_dim": 0,
+                },
+                {
+                    "name": "r0_index",
+                    "prefix": "r0_",
+                    "numel": sympy.Integer(8),
+                    "is_loop": True,
+                    "is_reduction": True,
+                    "grid_dim": None,
+                    "tensor_dim": 1,
+                },
+            ],
+        )
+
+        structured_ir.register_loop_carried(
+            CSEVariable("accum0", ValueRanges.unknown(), torch.float32, ("XBLOCK",))
+        )
+        with structured_ir.scope(
+            "masked", "masked", section="compute", attrs={"mask": "xmask"}
+        ):
+            structured_ir.record_node(
+                kind="op",
+                op="add",
+                section="compute",
+                inputs=("tmp0", "tmp1"),
+                outputs=("tmp2",),
+                attrs={"expr": "(tmp0 + tmp1)"},
+                dedupe_outputs=True,
+            )
+
+        structured = structured_ir.to_dict()
+        self.assertEqual(structured["section_scopes"]["compute"], 1)
+        self.assertEqual(structured["scopes"][1]["kind"], "loop")
+        self.assertEqual(structured["scopes"][1]["loop_carried"][0]["name"], "accum0")
+        self.assertEqual(structured["scopes"][2]["parent"], 1)
+        self.assertEqual(structured["nodes"][0]["scope"], 2)
+
+    def test_cse_proxy_records_structured_ir_for_triton_ops(self):
+        class FakeTritonKernel:
+            def __init__(self):
+                self.compute = IndentedBuffer()
+                self.cse = CSE()
+                self.current_node = None
+                self.node_to_bounds = None
+                self.structured_ir = StructuredTritonKernelIR(
+                    kernel_name="fake_kernel",
+                    kernel_kind="FakeTritonKernel",
+                    numels={"x": sympy.Integer(8)},
+                    range_trees=[
+                        {
+                            "name": "xindex",
+                            "prefix": "x",
+                            "numel": sympy.Integer(8),
+                            "is_loop": False,
+                            "is_reduction": False,
+                            "grid_dim": 0,
+                            "tensor_dim": 0,
+                        }
+                    ],
+                )
+
+            def create_cse_var(self, name, bounds, dtype, shape):
+                return CSEVariable(name, bounds, dtype, shape)
+
+            def record_codegen_operation(
+                self, *, name, args, kwargs, raw_value, result, section
+            ):
+                self.structured_ir.record_node(
+                    kind="op",
+                    op=name,
+                    section=section,
+                    inputs=args,
+                    outputs=result,
+                    attrs={"expr": raw_value, "kwargs": kwargs},
+                    dedupe_outputs=True,
+                )
+
+        kernel = FakeTritonKernel()
+        proxy = CSEProxy(kernel, TritonKernelOverrides())
+        lhs = CSEVariable("tmp_lhs", ValueRanges.unknown(), torch.float32, ("XBLOCK",))
+        rhs = CSEVariable("tmp_rhs", ValueRanges.unknown(), torch.float32, ("XBLOCK",))
+
+        with (
+            unittest.mock.patch(
+                "torch._inductor.codegen.common.get_current_backend",
+                return_value="triton",
+            ),
+            V.set_kernel_handler(kernel),
+            V.set_ops_handler(proxy),
+        ):
+            first = V.ops.add(lhs, rhs)
+            second = V.ops.add(lhs, rhs)
+
+        self.assertEqual(str(first), str(second))
+        self.assertEqual(len(kernel.compute._lines), 1)
+        structured = kernel.structured_ir.to_dict()
+        self.assertEqual(len(structured["nodes"]), 1)
+        self.assertEqual(structured["nodes"][0]["op"], "add")
+        self.assertEqual(structured["nodes"][0]["outputs"][0]["name"], str(first))
+        self.assertEqual(structured["nodes"][0]["inputs"][0]["value"], "tmp_lhs")
+        self.assertEqual(structured["nodes"][0]["inputs"][1]["value"], "tmp_rhs")
+
+    def test_cse_proxy_records_partial_accumulate_with_named_args(self):
+        class FakeTritonKernel:
+            def __init__(self):
+                self.compute = IndentedBuffer()
+                self.cse = CSE()
+                self.current_node = None
+                self.node_to_bounds = None
+                self.saved_partial_accumulates = []
+                self.structured_ir = StructuredTritonKernelIR(
+                    kernel_name="fake_kernel",
+                    kernel_kind="FakeTritonKernel",
+                    numels={},
+                    range_trees=[],
+                )
+
+            def partial_accumulate(self, name, reduction_type, value, extra_meta):
+                self.saved_partial_accumulates.append(
+                    (name, reduction_type, value, extra_meta)
+                )
+
+            def record_codegen_partial_accumulate(
+                self, *, name, reduction_type, value, extra_meta
+            ):
+                self.structured_ir.record_node(
+                    kind="reduction",
+                    op="partial_accumulate",
+                    section="compute",
+                    inputs=(value,),
+                    attrs={
+                        "buffer": name,
+                        "reduction_type": reduction_type,
+                        "extra_meta": extra_meta,
+                    },
+                )
+
+        kernel = FakeTritonKernel()
+        proxy = CSEProxy(kernel, TritonKernelOverrides())
+        value = CSEVariable(
+            "tmp_val", ValueRanges.unknown(), torch.float32, ("XBLOCK",)
+        )
+
+        proxy.partial_accumulate(
+            "acc",
+            "sum",
+            value,
+            {"is_first_reduction": True},
+        )
+
+        self.assertEqual(
+            kernel.saved_partial_accumulates,
+            [("acc", "sum", value, {"is_first_reduction": True})],
+        )
+        structured = kernel.structured_ir.to_dict()
+        self.assertEqual(len(structured["nodes"]), 1)
+        self.assertEqual(structured["nodes"][0]["op"], "partial_accumulate")
+        self.assertEqual(structured["nodes"][0]["attrs"]["buffer"], "acc")
+        self.assertEqual(structured["nodes"][0]["attrs"]["reduction_type"], "sum")
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_real_triton_codegen_exposes_structured_ir(self):
+        captured_structured_irs = []
+        original_codegen_kernel = TritonKernel.codegen_kernel
+
+        def capture_codegen_kernel(kernel, name=None):
+            code = original_codegen_kernel(kernel, name)
+            captured_structured_irs.append(kernel.structured_ir_to_dict())
+            return code
+
+        def fn(x):
+            return torch.argmax(x, dim=1)
+
+        x = torch.randn(64, 32, device=GPU_TYPE)
+        expected = fn(x)
+        with unittest.mock.patch.object(
+            TritonKernel,
+            "codegen_kernel",
+            new=capture_codegen_kernel,
+        ):
+            actual = torch.compile(fn)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertTrue(captured_structured_irs)
+        self.assertTrue(
+            any(
+                any(node["op"] == "argmax" for node in structured_ir["nodes"])
+                for structured_ir in captured_structured_irs
+            )
+        )
+        self.assertTrue(
+            any(
+                any(
+                    value["name"].endswith("_index")
+                    and value["dtype"] is not None
+                    and value["shape"] is not None
+                    for scope in structured_ir["scopes"]
+                    for value in scope["loop_carried"]
+                )
+                for structured_ir in captured_structured_irs
+            )
+        )
 
 
 if __name__ == "__main__":
