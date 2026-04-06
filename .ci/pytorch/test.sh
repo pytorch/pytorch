@@ -50,6 +50,11 @@ if [[ "$TEST_CONFIG" != "onnx" ]]; then
   pip uninstall -y onnxruntime 2>/dev/null || true
 fi
 
+# Remove dill to test that serialization works without it
+if [[ "$BUILD_ENVIRONMENT" == *py3.10-gcc11 ]]; then
+  pip uninstall -y dill 2>/dev/null || true
+fi
+
 echo "Environment variables:"
 env
 
@@ -149,6 +154,29 @@ echo "Environment variables"
 env
 
 echo "Testing pytorch"
+
+# Set OMP_NUM_THREADS to nproc/4 on k8s ARC runners if not already set.
+#
+# We use nproc (cgroup-aware) rather than os.cpu_count() because on k8s (ARC)
+# pods, os.cpu_count() returns the host's CPU count (e.g., 192) rather than
+# the pod's cpuset allocation (e.g., 16).
+#
+# We use nproc/4 rather than nproc because OpenMP spin-waits at thread barriers.
+# When thread count equals cpuset size (e.g., 16 threads on 16 CPUs), spinning
+# barrier threads monopolize all CPUs and the OS must context-switch to let
+# actual work complete. This causes ~5000x slowdowns on small tensor ops
+# (e.g., aten::copy_ on 147KB: ~34ms instead of ~7us). Using nproc/4 leaves
+# headroom for the main thread and for NUM_PROCS=3 parallel test processes.
+if [[ -z "${OMP_NUM_THREADS:-}" ]] && [[ -n "${USE_ARC:-}" ]]; then
+  OMP_NUM_THREADS=$(( $(nproc) / 4 ))
+  # Floor of 4: low OMP_NUM_THREADS (1-2) changes floating-point reduction
+  # order, causing numerical mismatches in tests with tight tolerances
+  # (e.g., test_batchnorm_nhwc_cpu).
+  if [[ "$OMP_NUM_THREADS" -lt 4 ]]; then
+    OMP_NUM_THREADS=4
+  fi
+  export OMP_NUM_THREADS
+fi
 
 export LANG=C.UTF-8
 
