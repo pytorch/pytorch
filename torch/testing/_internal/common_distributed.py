@@ -1017,6 +1017,7 @@ class MultiProcessTestCase(TestCase):
                 ),
                 kwargs={
                     "fake_pg": getattr(self, "fake_pg", False),
+                    "world_size": self.world_size,
                 },
             )
             process.start()

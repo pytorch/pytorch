@@ -57,7 +57,7 @@ def _tp_shard_fn(param):
 class TestFullyShardDTensor(FSDPTest):
     @property
     def world_size(self):
-        return min(4, torch.cuda.device_count())
+        return min(4, torch.accelerator.device_count())
 
     def _run_train_parity(
         self, model, ref_model, dp_pg, mesh=None, num_iters=5, mlp_dim=16
