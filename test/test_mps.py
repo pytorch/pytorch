@@ -976,6 +976,16 @@ class TestMPS(TestCaseMPS):
         helper(0.2 + 0.5j, [2, 3], torch.complex64)
         helper(2**63 + 100, [3], torch.uint64)
 
+    def test_fill_strided(self):
+        # Regression test: strided fill_ must convert byte strides to element strides
+        for dtype in [torch.cfloat, torch.float32, torch.int32, torch.uint16, torch.uint8]:
+            x_mps = torch.zeros(4, 4, device='mps', dtype=dtype)
+            x_cpu = x_mps.cpu()
+            # Every other row — non-contiguous view
+            for t in (x_mps, x_cpu):
+                t[::2].fill_(1)
+            self.assertEqual(x_mps, x_cpu)
+
     def test_fill_storage_offset(self):
         shape = [2, 10]
         val = 0.2
