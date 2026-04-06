@@ -352,12 +352,21 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 //
 // If C10_WARP_SIZE was previously used to determine kernel launch sizes, users
 // must now use at::cuda::warp_size() for the dynamic runtime query.
-#ifdef USE_ROCM
+//
+// Unfortunately, C10_WARP_SIZE has been public and available for both host and
+// device since approximately 2019, so forcing it to be device-only would break
+// existing code in the wild.
+#if defined(USE_ROCM)
+namespace at::cuda {
+TORCH_CUDA_CPP_API int warp_size();
+}
 #if defined(__HIPCC__)
+static __host__ inline int C10_WARP_SIZE_INTERNAL() {
+  return at::cuda::warp_size();
+}
 static __device__ inline int C10_WARP_SIZE_INTERNAL() {
   return warpSize;
 }
-#define C10_WARP_SIZE (C10_WARP_SIZE_INTERNAL())
 #if defined(__SPIRV__)
 #define C10_WARP_SIZE_LOWER_BOUND 32
 #define C10_WARP_SIZE_UPPER_BOUND 64
@@ -368,7 +377,14 @@ static __device__ inline int C10_WARP_SIZE_INTERNAL() {
 #define C10_WARP_SIZE_LOWER_BOUND 32
 #define C10_WARP_SIZE_UPPER_BOUND 32
 #endif
+#else // !__HIPCC__
+static inline int C10_WARP_SIZE_INTERNAL() {
+  return at::cuda::warp_size();
+}
+#define C10_WARP_SIZE_LOWER_BOUND 32
+#define C10_WARP_SIZE_UPPER_BOUND 64
 #endif // __HIPCC__
+#define C10_WARP_SIZE (C10_WARP_SIZE_INTERNAL())
 #else // !USE_ROCM
 #define C10_WARP_SIZE 32
 #define C10_WARP_SIZE_LOWER_BOUND 32
