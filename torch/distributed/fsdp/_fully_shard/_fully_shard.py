@@ -625,33 +625,6 @@ class FSDPModule:
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.force_sum_reduction_for_comms = enable
 
-    def set_reduce_scatter_unused_params(
-        self, reduce_scatter_unused_params: bool, *, recurse: bool = True
-    ) -> None:
-        """
-        Sets whether to include zero gradients for parameters that did not
-        receive a gradient in backward. This is needed when different ranks
-        use different parameters due to conditional control flow (e.g.
-        multi-modal models, mixture of experts), causing mismatched
-        reduce-scatter collectives. Similar to DDP's
-        ``find_unused_parameters``.
-
-        Args:
-            reduce_scatter_unused_params (bool): Whether to include zero
-                gradients for unused parameters in gradient reduction.
-            recurse (bool): Whether to set for all FSDP submodules or just
-                the passed-in module.
-        """
-        self_module = cast(nn.Module, self)
-        modules = list(self_module.modules()) if recurse else [self_module]
-        for module in modules:
-            if isinstance(module, FSDPModule):
-                state = module._get_fsdp_state()
-                for fsdp_param_group in state._fsdp_param_groups:
-                    fsdp_param_group.reduce_scatter_unused_params = (
-                        reduce_scatter_unused_params
-                    )
-
     def set_unshard_in_backward(self, unshard_in_backward: bool) -> None:
         """
         Sets whether the FSDP module's parameters need to be unsharded in
