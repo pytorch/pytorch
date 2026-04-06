@@ -2736,8 +2736,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
-    CPU, CUDA: fill_
-    MPS: fill_scalar_mps
+    CPU, CUDA, MPS: fill_
     QuantizedCPU, QuantizedCUDA: fill_quantized_
     Meta: fill_meta_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: fill_sparse_csr_
@@ -2748,8 +2747,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
-    CPU, CUDA: fill_
-    MPS: fill_tensor_mps_
+    CPU, CUDA, MPS: fill_
     QuantizedCPU, QuantizedCUDA: fill_quantized_
     Meta: fill_meta_
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: fill_nested_
@@ -3888,7 +3886,7 @@
   device_check: NoCheck   # TensorIterator
   structured: True
   dispatch:
-    CPU, CUDA, MTIA: aminmax_out
+    CPU, CUDA: aminmax_out
     MPS: aminmax_out_mps
   tags: reduction
 
@@ -3943,7 +3941,7 @@
 - func: amax.out(Tensor self, int[1] dim=[], bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
-    CPU, CUDA, MTIA: amax_out
+    CPU, CUDA: amax_out
     MPS: amax_out_mps
   tags: reduction
 
@@ -4132,7 +4130,7 @@
 - func: amin.out(Tensor self, int[1] dim=[], bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
-    CPU, CUDA, MTIA: amin_out
+    CPU, CUDA: amin_out
     MPS: amin_out_mps
   tags: reduction
 
@@ -6658,7 +6656,6 @@
   dispatch:
     CPU, CUDA: var
     MPS: var_mps
-    MTIA: var_mtia
   tags: [core, reduction]
 
 - func: var.out(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
@@ -7142,8 +7139,7 @@
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
-    CPU, CUDA: zero_
-    MPS: zero_mps_
+    CPU, CUDA, MPS: zero_
     Meta: zero_meta_
     SparseCPU, SparseCUDA, SparseMPS, SparseMeta: zero_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: zero_sparse_csr_

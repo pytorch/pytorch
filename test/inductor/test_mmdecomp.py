@@ -202,10 +202,14 @@ class TestDecomp(NNTestCase):
             rhs_unbacked_k = torch.empty((b, rhs_k_unbacked, n), device=device)
 
             self.assertIsNot(
+                decomp_bmm(lhs_static_k, rhs_static_k),
+                NotImplemented,
+            )
+            self.assertIs(
                 decomp_bmm(lhs_static_k, rhs_unbacked_k),
                 NotImplemented,
             )
-            self.assertIsNot(
+            self.assertIs(
                 decomp_bmm(lhs_unbacked_k, rhs_static_k),
                 NotImplemented,
             )
