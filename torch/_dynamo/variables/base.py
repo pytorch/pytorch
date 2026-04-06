@@ -548,6 +548,22 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             ],
         )
 
+    def sq_length(self, tx: Any) -> "VariableTracker":
+        """Called when sq_length is not implemented."""
+        raise_observed_exception(
+            TypeError,
+            tx,
+            args=[f"object of type '{self.python_type_name()}' has no len()"],
+        )
+
+    def mp_length(self, tx: Any) -> "VariableTracker":
+        """Called when mp_length is not implemented."""
+        raise_observed_exception(
+            TypeError,
+            tx,
+            args=[f"object of type '{self.python_type_name()}' has no len()"],
+        )
+
     def call_method(
         self,
         tx: Any,
@@ -555,9 +571,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         args: list["VariableTracker"],
         kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
-        if name == "__len__" and self.has_unpack_var_sequence(tx):
-            assert not (args or kwargs)
-            return variables.ConstantVariable.create(len(self.unpack_var_sequence(tx)))
+        if name == "__len__" and not (args or kwargs):
+            from .object_protocol import generic_len
+
+            return generic_len(tx, self)
         elif (
             name == "__getattr__"
             and len(args) == 1
@@ -565,6 +582,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             and not kwargs
         ):
             return self.var_getattr(tx, args[0].as_python_constant())
+        elif name == "__index__" and not args and not kwargs:
+            return self.nb_index_impl(tx)
         elif name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
             other = args[0]
             if not isinstance(self, type(other)) and not (
@@ -907,6 +926,25 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             ],
         )
 
+    def nb_index_impl(
+        self,
+        tx: Any,
+    ) -> "VariableTracker":
+        """Mirrors CPython's PyNumber_Index / nb_index slot.
+
+        https://github.com/python/cpython/blob/c09ccd9c429/Objects/abstract.c#L1411-L1450
+
+        The base implementation raises TypeError, matching CPython's behavior
+        when tp_as_number->nb_index is NULL (_PyIndex_Check fails).
+        """
+        raise_observed_exception(
+            TypeError,
+            tx,
+            args=[
+                f"'{self.python_type_name()}' object cannot be interpreted as an integer"
+            ],
+        )
+
     def __init__(
         self,
         *,
@@ -1002,10 +1040,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
         guarded_method._call_once_guarded = True  # pyrefly: ignore[missing-attribute]
         setattr(cls, method, guarded_method)
-
-
-def raise_type_error_exc(tx: Any, msg_str: str) -> NoReturn:
-    raise_observed_exception(TypeError, tx, args=[msg_str])
 
 
 def typestr(*objs: object) -> str:

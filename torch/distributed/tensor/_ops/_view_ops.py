@@ -65,11 +65,26 @@ class Singleton(DimSpec):
     """Output dimension is a singleton."""
 
 
-@dataclass
+@dataclass(eq=False)
 class InputDim(DimSpec):
     """Output dimension maps directly to an input dimension."""
 
     input_dim: int
+
+    def __eq__(self, other: object) -> bool:
+        """Raises TypeError for non-DimSpec comparisons to catch accidental
+        ``shard.dim == input_dim`` bugs where ``.input_dim`` was intended."""
+        if isinstance(other, InputDim):
+            return self.input_dim == other.input_dim
+        if not isinstance(other, DimSpec):
+            raise TypeError(
+                f"Cannot compare InputDim with {type(other).__name__}. "
+                f"Did you mean to use .input_dim?"
+            )
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        return hash((InputDim, self.input_dim))
 
 
 @dataclass

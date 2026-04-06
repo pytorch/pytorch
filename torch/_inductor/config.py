@@ -822,7 +822,17 @@ assume_unaligned_fallback_output = (
     os.environ.get("TORCHINDUCTOR_ASSUME_UNALIGNED_FALLBACK_OUTPUT") == "1"
 )
 
-# Custom InductorChoices callable to use (can be a class or functools.partial with kwargs)
+# Factory callable that returns a custom InductorChoices instance.
+# A callable (rather than a class) is used to defer imports and avoid circular
+# dependencies between config and the choices module. Example:
+#
+#     def _custom_choices_factory():
+#         from my_package.choices import MyInductorChoices
+#         return MyInductorChoices()
+#
+#     config.inductor_choices_class = _custom_choices_factory
+#
+# The returned instance must implement uuid() for cache key serialization.
 inductor_choices_class: Callable[[], "InductorChoices"] | None = None
 
 # fuse even in cases without common reads
@@ -1939,6 +1949,11 @@ class aot_inductor:
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
     debug_symbols = os.environ.get("AOT_INDUCTOR_DEBUG_SYMBOLS", "0") == "1"
 
+    # Enable frame pointers for profiling tools (e.g. strobelight)
+    enable_frame_pointer = (
+        os.environ.get("AOT_INDUCTOR_ENABLE_FRAME_POINTER", "0") == "1"
+    )
+
     # Annotate generated main wrapper function, i.e. AOTInductorModel::run_impl,
     # to use which cpp compiler optimization level, default to O1
     compile_wrapper_opt_level = os.environ.get(
@@ -2523,6 +2538,12 @@ _cache_config_ignore_prefix: list[str] = [
     "fx_graph_remote_cache",
     "autotune_local_cache",
     "autotune_remote_cache",
+]
+
+# Config keys whose values are callable factories. save_config_portable will
+# instantiate the factory and use .uuid() for serialization.
+_cache_config_factory_keys: list[str] = [
+    "inductor_choices_class",
 ]
 
 # External callable for matmul tuning candidates

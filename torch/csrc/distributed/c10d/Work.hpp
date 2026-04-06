@@ -183,7 +183,4 @@ struct TORCH_API WorkInfo {
   std::chrono::duration<float> activeDuration;
 };
 
-TORCH_API void set_comm_profiling_name(const std::string& name);
-TORCH_API const std::string& get_comm_profiling_name();
-
 } // namespace c10d
