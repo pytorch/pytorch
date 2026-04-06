@@ -143,7 +143,7 @@ from .utils import (
 )
 from .variables.base import typestr, ValueMutationNew, VariableTracker
 from .variables.builder import FrameStateSizeEntry, VariableBuilder, wrap_fx_proxy
-from .variables.builtin import BuiltinVariable
+from .variables.builtin import BuiltinVariable, DictBuiltinVariable
 from .variables.constant import CONSTANT_VARIABLE_NONE, ConstantVariable
 from .variables.ctx_manager import (
     ContextWrappingVariable,
@@ -182,7 +182,7 @@ from .variables.misc import (
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.streams import SymbolicStreamState
-from .variables.tensor import supported_comparison_ops, SymNodeVariable
+from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
 from .variables.torch_function import (
     SymbolicTorchFunctionState,
     TorchFunctionModeVariable,
@@ -284,6 +284,8 @@ class SpeculationLog:
     # If True, graph break at autograd.grad instead of tracing it.
     # Set when we detect that autograd.grad consumed grad_fns that are returned.
     graph_break_on_autograd_grad: bool = False
+    # Names of output tensors whose grad_fns were consumed by autograd.grad.
+    autograd_grad_leaked_tensors: list[str] = dataclasses.field(default_factory=list)
     # If True, graph break at requires_grad_() on source-less intermediates
     # instead of tracing it. Set when we detect that such an intermediate
     # leaks as a graph output with requires_grad=True.
@@ -744,9 +746,7 @@ def generic_jump(
             # ConstDictVariable is optimized to be very lazy about insertion of
             # guards, so we have to manually insert a SEQUENCE_LENGTH guard
             # here.
-            if isinstance(value, BaseListVariable):
-                value._install_list_length_guard()
-            elif isinstance(value, ConstDictVariable) and value.source:
+            if isinstance(value, ConstDictVariable) and value.source:
                 install_guard(value.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
             if truth_fn(value.as_python_constant()):
                 if push:
@@ -1737,6 +1737,9 @@ class InstructionTranslatorBase(
                         exc=e,
                     )
 
+                if not isinstance(e, exc.RestartAnalysis):
+                    self.output.side_effects.log_side_effects_summary()
+
                 if hasattr(e, "msg") and "Data-dependent" in e.msg:
                     readable_graph = torch.fx.GraphModule(
                         self.output.nn_modules, self.output.graph
@@ -1750,6 +1753,8 @@ class InstructionTranslatorBase(
             except Exception as e:
                 if self.exec_recorder:
                     e.exec_record = self.exec_recorder.get_record()  # type: ignore[attr-defined]
+                if not isinstance(e, exc.RestartAnalysis):
+                    self.output.side_effects.log_side_effects_summary()
 
                 raise
             finally:
@@ -1838,7 +1843,53 @@ class InstructionTranslatorBase(
             self.is_tracing_resume_prologue = val
 
     def DELETE_FAST(self, inst: Instruction) -> None:
+        var = self.symbolic_locals.get(inst.argval)
+        if isinstance(var, TensorVariable):
+            self._maybe_emit_sync_dealloc(var)
         del self.symbolic_locals[inst.argval]
+
+    def _maybe_emit_sync_dealloc(self, var: TensorVariable) -> None:
+        from .variables.streams import get_current_stream, new_event
+
+        device = var.device
+        if device is None or device.type not in ("cuda", "xpu"):
+            return
+
+        node = var.proxy.node
+        alloc_stream = node.meta.get("custom", {}).get("stream", None)
+
+        users = set(node.users.keys())
+        if not users:
+            return
+        last_user = None
+        for n in self.output.graph.nodes:
+            if n in users:
+                last_user = n
+        if last_user is None or last_user.op == "output":
+            return
+
+        last_use_stream = last_user.meta.get("custom", {}).get("stream", None)
+        if alloc_stream == last_use_stream:
+            return
+
+        if alloc_stream is None:
+            alloc_stream = get_current_stream(device)
+        if last_use_stream is None:
+            last_use_stream = get_current_stream(device)
+
+        event_idx = new_event()
+        self.output.create_proxy(
+            "call_function",
+            torch.ops.streams.record_event,
+            (event_idx, last_use_stream),
+            {},
+        )
+        self.output.create_proxy(
+            "call_function",
+            torch.ops.streams.sync_dealloc,
+            (event_idx, alloc_stream, var.as_proxy()),
+            {},
+        )
 
     def STORE_DEREF(self, inst: Instruction) -> None:  # type: ignore[override]
         assert inst.argval in self.cell_and_freevars()
@@ -2207,7 +2258,7 @@ class InstructionTranslatorBase(
             # Pass the stored python_stack to preserve the original exception location
             python_stack = getattr(val, "python_stack", None)
             raise observed_exception_type(
-                f"raised exception {val}", real_stack=python_stack
+                f"raised exception {val.debug_repr()}", real_stack=python_stack
             )
 
         exc.raise_observed_exception(
@@ -2349,7 +2400,7 @@ class InstructionTranslatorBase(
             assert isinstance(raised_exception, dynamo_exc)  # sanity check
             unimplemented(
                 gb_type="Observed exception",
-                context=f"raised exception {curr_exc.python_type_name()}({curr_exc.args})",  # type: ignore[union-attr]
+                context=f"raised exception {curr_exc.debug_repr()}",
                 explanation=observed_exn_gb_explanation,
                 hints=[
                     *graph_break_hints.USER_ERROR,
@@ -2667,7 +2718,7 @@ class InstructionTranslatorBase(
 
         # Unpack for cases like fn(**obj) where obj is a map
         if isinstance(kwargsvars, UserDefinedObjectVariable):
-            kwargsvars = BuiltinVariable.call_custom_dict(self, dict, kwargsvars)  # type: ignore[arg-type]
+            kwargsvars = DictBuiltinVariable.call_custom_dict(self, dict, kwargsvars)  # type: ignore[arg-type]
 
         # pyrefly: ignore [unbound-name]
         if not isinstance(argsvars, BaseListVariable) or not isinstance(
@@ -2773,11 +2824,21 @@ class InstructionTranslatorBase(
 
     def DELETE_ATTR(self, inst: Instruction) -> None:
         obj = self.pop()
+        self._maybe_sync_dealloc_attr(obj, inst.argval)
         VariableTracker.build(self, delattr).call_function(
             self,  # type: ignore[arg-type]
             [obj, VariableTracker.build(self, inst.argval)],
             {},
         )
+
+    def _maybe_sync_dealloc_attr(self, obj: VariableTracker, name: str) -> None:
+        # Only check side_effects — a pure dict lookup with no observable
+        # side effects. We intentionally avoid var_getattr here because it
+        # can trigger __getattr__, add graph nodes, or cause graph breaks.
+        if self.output.side_effects.has_pending_mutation_of_attr(obj, name):
+            attr_var = self.output.side_effects.load_attr(obj, name)
+            if isinstance(attr_var, TensorVariable):
+                self._maybe_emit_sync_dealloc(attr_var)
 
     @staticmethod
     def codegen_return_with_pops(
@@ -3327,7 +3388,31 @@ class InstructionTranslatorBase(
 
     def DELETE_SUBSCR(self, inst: Instruction) -> None:
         obj, key = self.popn(2)
+        # Check for tensor items using side-effect-free internal lookups
+        # only. We avoid call_method("__getitem__") because it can execute
+        # user code and add unwanted graph nodes.
+        self._maybe_sync_dealloc_subscr(obj, key)
         obj.call_method(self, "__delitem__", [key], {})
+
+    def _maybe_sync_dealloc_subscr(
+        self, obj: VariableTracker, key: VariableTracker
+    ) -> None:
+        from .variables.dicts import ConstDictVariable
+        from .variables.lists import BaseListVariable
+
+        item_var = None
+        try:
+            if isinstance(obj, BaseListVariable):
+                item_var = obj.getitem_const(
+                    self,  # pyrefly: ignore [bad-argument-type]
+                    key,
+                )
+            elif isinstance(obj, ConstDictVariable):
+                item_var = obj.maybe_getitem_const(key)
+        except Exception:
+            pass
+        if isinstance(item_var, TensorVariable):
+            self._maybe_emit_sync_dealloc(item_var)
 
     def BUILD_TUPLE(self, inst: Instruction) -> None:
         items = self.popn(inst.argval)
@@ -4240,7 +4325,8 @@ class InstructionTranslatorBase(
         self.push(fn)
 
     def CONVERT_VALUE(self, inst: Instruction) -> None:
-        self.push(self._convert_value(self.pop(), inst.argval))
+        assert inst.arg is not None
+        self.push(self._convert_value(self.pop(), inst.arg))
 
     def FORMAT_SIMPLE(self, inst: Instruction) -> None:
         self._format_value(VariableTracker.build(self, ""), 0)

@@ -1675,19 +1675,17 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"inputs": Inputs(x, weakref.ref(x))}, True)
 
     def test_unused_stream(self):
-        if not torch.cuda.is_available():
-            self.skipTest("CUDA is not available")
+        if not torch.accelerator.is_available():
+            self.skipTest("Accelerator is not available")
 
         def foo(inputs):
             return inputs.x + 1
 
         x = torch.randn(3, 2)
         ref, loaded = self._test_serialization(
-            "TENSOR_MATCH", foo, Inputs(x, torch.cuda.Stream())
+            "TENSOR_MATCH", foo, Inputs(x, torch.Stream())
         )
-        self._test_check_fn(
-            ref, loaded, {"inputs": Inputs(x, torch.cuda.Stream())}, True
-        )
+        self._test_check_fn(ref, loaded, {"inputs": Inputs(x, torch.Stream())}, True)
 
     def test_unused_process_group(self):
         import torch.distributed as dist

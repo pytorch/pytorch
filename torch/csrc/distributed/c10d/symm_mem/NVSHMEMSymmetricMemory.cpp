@@ -459,6 +459,18 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     return device_has_multicast_support(device_idx);
   }
 
+  bool has_allocation(void* ptr) override {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto alloc_it = std::find_if(
+        allocations_.begin(), allocations_.end(), [&](const auto& pair) {
+          auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
+          auto base_ptr = reinterpret_cast<uintptr_t>(pair.second->ptr);
+          return ptr_int >= base_ptr &&
+              ptr_int < base_ptr + pair.second->buffer_size;
+        });
+    return alloc_it != allocations_.end();
+  }
+
   c10::DeviceType supported_device_type() override {
     return c10::DeviceType::CUDA;
   }

@@ -802,7 +802,10 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     if not sv.statically_known_multiple_of(
                         size, remaining[current_group] * remaining[current_group + 1]
                     ):
-                        raise CantSplit
+                        raise CantSplit(
+                            size,
+                            remaining[current_group] * remaining[current_group + 1],
+                        )
 
                     size1 = remaining[current_group]
                     size2 = remaining[current_group + 1]
@@ -1648,6 +1651,7 @@ class SIMDScheduling(BaseScheduling):
             src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
         return kernel, ws_name, src_code
 
+    # pyrefly: ignore [bad-override]
     def benchmark_codegened_module(
         self, mod, n_spills_threshold=8, node_names: OrderedSet[str] | None = None
     ) -> tuple[float, str]:

@@ -958,6 +958,9 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
     def _get_primitive_bitwidth(dtype):
         if dtype.is_floating_point:
             return torch.finfo(dtype).bits
+        elif dtype == torch.bool:
+            # torch.iinfo doesn't support bool; bools are stored as uint8 (8 bits)
+            return 8
         else:
             return torch.iinfo(dtype).bits
 
@@ -1458,6 +1461,41 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
             ambiguous_slice = False
 
     if not ambiguous_slice:
+        # Even though the bounds are resolvable now, the FX node may have
+        # allocated unbacked symbols for the slice output size because dynamo
+        # couldn't prove the bounds at trace time (constraints may have been
+        # learned after tracing the slice). We still need to define those
+        # symbols so the assertion new_unbacked_defs >= renamed_unbacked_bindings
+        # passes. Register a DynamicSliceSize operation to define the size symbol.
+        # Note: storage_offset bindings should not appear here because
+        # a resolved start_index means the offset is computable directly
+        # (base_offset + start * stride), so dynamo wouldn't allocate an
+        # unbacked symbol for it.
+        # Note: current_node may be None when slice_ is called from template
+        # rendering (e.g. cpp_template_kernel.slice_nd) rather than FX graph
+        # lowering, so we handle that.
+        current_node = V.graph.current_node
+        node_unbacked_bindings = resolve_unbacked_bindings(
+            V.graph.sizevars.shape_env,
+            current_node.meta.get("unbacked_bindings", {})
+            if current_node is not None
+            else {},
+        )
+        if node_unbacked_bindings:
+            for sym, keypath in node_unbacked_bindings.items():
+                if keypath == (CallMethodKey("size"), pytree.SequenceKey(dim)):
+                    b_size = ir.DynamicSliceSize(sym, start, end, step, size)
+                    b_size.name = V.graph.register_buffer(b_size)
+                    V.graph.register_operation(b_size)
+                elif keypath == (CallMethodKey("storage_offset"),):
+                    # Not handled yet — would require materializing the
+                    # tensor layout. Unlikely to be hit because a resolved
+                    # start_index means the offset is computable directly.
+                    raise AssertionError(
+                        "Unexpected storage_offset unbacked binding when both "
+                        "start and end indices are resolved"
+                    )
+
         return TensorBox(
             ir.SliceView.create(x.data, dim, start, end, step, clamp=clamp)
         )  # go to SliceView/ReinterpretView
@@ -2625,6 +2663,9 @@ fallback_rand_generator = fallback_handler(aten.rand.generator)
 fallback_randn_default = fallback_handler(aten.randn.default)
 fallback_randn_generator = fallback_handler(aten.randn.generator)
 make_fallback(aten.randint)
+make_fallback(aten.rand_like, override_decomp=True)
+make_fallback(aten.randn_like, override_decomp=True)
+make_fallback(aten.randint_like, override_decomp=True)
 
 # TODO: mlazos reevaluate if we want to codegen something different
 make_fallback(torch.ops.streams.record_event.default)
@@ -3641,7 +3682,7 @@ def _unwrap(x):
     return x
 
 
-@register_lowering([torch.tensor, aten.scalar_tensor])
+@register_lowering([torch.tensor, aten.scalar_tensor, prims.scalar_tensor])
 def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
     assert_nyi(layout in (None, torch.strided), f"layout={layout}")
     assert_nyi(not pin_memory, "pin_memory")
@@ -5016,7 +5057,7 @@ def constant_boundary_condition(
 
         mask = functools.reduce(
             ops.and_,
-            # pyrefly: ignore [no-matching-overload]
+            # pyrefly: ignore [bad-argument-type, no-matching-overload]
             [range_mask(ih[i], h[i] + padding_h[i], -padding_h[i]) for i in range(dim)],
         )
         return (
@@ -5931,7 +5972,7 @@ def upsample_nearest2d_backward(
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=fn,
-        # pyrefly: ignore [no-matching-overload]
+        # pyrefly: ignore [bad-argument-type, no-matching-overload]
         ranges=list(input_size),
     )
 
@@ -7759,7 +7800,11 @@ for method, func in magic_methods.items():
 
 
 @register_lowering(torch.sym_sum)
-def sym_sum(args):
+def sym_sum(*args):
+    # sym_sum can be called as sym_sum([a, b]) or sym_sum(a, b).
+    # Normalize to a flat list before summing.
+    if len(args) == 1 and isinstance(args[0], (list, tuple)):
+        args = args[0]
     return sympy.Add(*args)
 
 

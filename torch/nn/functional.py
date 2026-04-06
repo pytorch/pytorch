@@ -5996,7 +5996,7 @@ scaled_dot_product_attention = _add_docstr(
             attn_bias = torch.zeros(L, S, dtype=query.dtype, device=query.device)
             if is_causal:
                 assert attn_mask is None
-                temp_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
+                temp_mask = torch.ones(L, S, dtype=torch.bool, device=query.device).tril(diagonal=0)
                 attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
 
             if attn_mask is not None:
@@ -6582,10 +6582,10 @@ def multi_head_attention_forward(
     #
     # reshape q, k, v for multihead attention and make them batch first
     #
-    # pyrefly: ignore [no-matching-overload]
+    # pyrefly: ignore [bad-argument-type, no-matching-overload]
     q = q.view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
     if static_k is None:
-        # pyrefly: ignore [no-matching-overload]
+        # pyrefly: ignore [bad-argument-type, no-matching-overload]
         k = k.view(k.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
@@ -6599,7 +6599,7 @@ def multi_head_attention_forward(
             )
         k = static_k
     if static_v is None:
-        # pyrefly: ignore [no-matching-overload]
+        # pyrefly: ignore [bad-argument-type, no-matching-overload]
         v = v.view(v.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
@@ -6708,10 +6708,11 @@ def multi_head_attention_forward(
             else:
                 attn_mask = attn_mask.view(bsz, num_heads, -1, src_len)
 
+        # pyrefly: ignore [bad-argument-type]
         q = q.view(bsz, num_heads, tgt_len, head_dim)
-        # pyrefly: ignore [no-matching-overload]
+        # pyrefly: ignore [bad-argument-type]
         k = k.view(bsz, num_heads, src_len, head_dim)
-        # pyrefly: ignore [no-matching-overload]
+        # pyrefly: ignore [bad-argument-type]
         v = v.view(bsz, num_heads, src_len, head_dim)
 
         attn_output = scaled_dot_product_attention(

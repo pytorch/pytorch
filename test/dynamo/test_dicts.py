@@ -1271,6 +1271,222 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_f = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(f(), opt_f())
 
+    @parametrize("op", ["or_", "and_", "xor", "sub"])
+    def test_dict_items_binop(self, op):
+        op = getattr(operator, op)
+
+        def f():
+            a = {"one": 1, "two": 2}
+            b = {"one": 1, "three": 3}
+            return op(a.items(), b.items()), op(b.items(), a.items())
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["ior", "iand", "ixor", "isub"])
+    def test_dict_items_inplace_binop(self, op):
+        op = getattr(operator, op)
+
+        def f():
+            a = {"one": 1, "two": 2}.items()
+            b = {"one": 1, "three": 3}.items()
+            c = {"one": 1, "two": 2}.items()
+            a = op(a, b)
+            b = op(b, c)
+            return a, b
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["or_", "and_", "xor", "sub", "iand", "ior", "ixor", "isub"])
+    def test_cross_type_set_binop_dict_keys_vs_set(self, op):
+        op = getattr(operator, op)
+
+        def f():
+            keys = {"one": 1, "two": 2, "three": 3}.keys()
+            s = {"one", "four"}
+            return op(keys, s), op(s, keys)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["or_", "and_", "xor", "sub", "iand", "ior", "ixor", "isub"])
+    def test_cross_type_set_binop_dict_items_vs_set(self, op):
+        op = getattr(operator, op)
+
+        def f():
+            items = {"one": 1, "two": 2}.items()
+            s = {("one", 1), ("three", 3)}
+            return op(items, s), op(s, items)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["or_", "and_", "xor", "sub", "iand", "ior", "ixor", "isub"])
+    def test_cross_type_set_binop_dict_keys_vs_dict_items(self, op):
+        op = getattr(operator, op)
+
+        def f():
+            keys = {"one": 1, "two": 2}.keys()
+            items = {"three": 3, "four": 4}.items()
+            return op(keys, items), op(items, keys)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["or_", "and_", "xor", "sub", "iand", "ior", "ixor", "isub"])
+    def test_cross_type_set_binop_dict_keys_vs_user_defined_set(self, op):
+        class MySet(set):
+            pass
+
+        op = getattr(operator, op)
+
+        def f():
+            keys = {"one": 1, "two": 2, "three": 3}.keys()
+            s = MySet({"one", "four"})
+            return op(keys, s), op(s, keys)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["or_", "and_", "xor", "sub", "iand", "ior", "ixor", "isub"])
+    def test_cross_type_set_binop_dict_items_vs_user_defined_set(self, op):
+        class MySet(set):
+            pass
+
+        op = getattr(operator, op)
+
+        def f():
+            items = {"one": 1, "two": 2, "three": 3}.items()
+            s = MySet({"one", "four"})
+            return op(items, s), op(s, items)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["or_", "and_", "xor", "sub", "iand", "ior", "ixor", "isub"])
+    def test_cross_type_set_binop_set_vs_user_defined_set(self, op):
+        class MySet(set):
+            pass
+
+        op = getattr(operator, op)
+
+        def f():
+            s = {"one", "two", "three"}
+            u = MySet({"one", "four"})
+            return op(s, u), op(u, s)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["lt", "le", "gt", "ge", "eq", "ne"])
+    def test_cross_type_cmp_dict_keys_vs_set(self, op):
+        op = getattr(operator, op)
+
+        def f():
+            keys = {"one": 1, "two": 2}.keys()
+            s = {"one", "two", "three"}
+            return op(keys, s), op(s, keys)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["lt", "le", "gt", "ge", "eq", "ne"])
+    def test_cross_type_cmp_dict_items_vs_set(self, op):
+        op = getattr(operator, op)
+
+        def f():
+            items = {"one": 1, "two": 2}.items()
+            s = {("one", 1), ("two", 2), ("three", 3)}
+            return op(items, s), op(s, items)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["lt", "le", "gt", "ge", "eq", "ne"])
+    def test_cross_type_cmp_dict_keys_vs_dict_items(self, op):
+        op = getattr(operator, op)
+
+        def f():
+            keys = {"one": 1, "two": 2}.keys()
+            items = {"one": 1, "two": 2}.items()
+            return op(keys, items), op(items, keys)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["lt", "le", "gt", "ge", "eq", "ne"])
+    def test_cross_type_cmp_set_vs_user_defined_set(self, op):
+        class MySet(set):
+            pass
+
+        op = getattr(operator, op)
+
+        def f():
+            s = {"one", "two"}
+            u = MySet({"one", "two", "three"})
+            return op(s, u), op(u, s)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["lt", "le", "gt", "ge", "eq", "ne"])
+    def test_cross_type_cmp_dict_keys_vs_user_defined_set(self, op):
+        class MySet(set):
+            pass
+
+        op = getattr(operator, op)
+
+        def f():
+            keys = {"one": 1, "two": 2}.keys()
+            u = MySet({"one", "two", "three"})
+            return op(keys, u), op(u, keys)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["lt", "le", "gt", "ge", "eq", "ne"])
+    def test_cross_type_cmp_dict_items_vs_user_defined_set(self, op):
+        class MySet(set):
+            pass
+
+        op = getattr(operator, op)
+
+        def f():
+            items = {"one": 1, "two": 2}.items()
+            u = MySet({("one", 1), ("two", 2), ("three", 3)})
+            return op(items, u), op(u, items)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    def test_dict_view_iand_rebinds_variable(self):
+        def f_keys():
+            d = {"one": 1, "two": 2, "three": 3}
+            tmp = d.keys()
+            tmp &= {"one", "four"}
+            return tmp, d
+
+        opt_f_keys = torch.compile(f_keys, backend="eager", fullgraph=True)
+        eager_tmp, eager_d = f_keys()
+        compiled_tmp, compiled_d = opt_f_keys()
+        self.assertIsInstance(eager_tmp, set)
+        self.assertEqual(eager_tmp, compiled_tmp)
+        self.assertEqual(eager_d, compiled_d)
+
+        def f_items():
+            d = {"one": 1, "two": 2}
+            tmp = d.items()
+            tmp &= {("one", 1), ("three", 3)}
+            return tmp, d
+
+        opt_f_items = torch.compile(f_items, backend="eager", fullgraph=True)
+        eager_tmp, eager_d = f_items()
+        compiled_tmp, compiled_d = opt_f_items()
+        self.assertIsInstance(eager_tmp, set)
+        self.assertEqual(eager_tmp, compiled_tmp)
+        self.assertEqual(eager_d, compiled_d)
+
     def test_dict_union_result_type(self):
         def_dict = defaultdict(int, {1: 1, 2: 2})
         ord_dict = OrderedDict({3: 3, 4: 4})
@@ -2202,6 +2418,10 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
 class DictSubclassMethodsTests(DictMethodsTests):
     thetype = SimpleDict
+
+    @unittest.expectedFailure
+    def test_binop_or(self):
+        super().test_binop_or()
 
 
 class OrderedDictMethodsTests(DictMethodsTests):

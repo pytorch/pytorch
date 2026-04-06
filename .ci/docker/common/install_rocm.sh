@@ -29,6 +29,8 @@ install_ubuntu() {
     # When ROCM_VERSION=nightly, install ROCm from TheRock nightly tarballs
     # Mirrors: https://github.com/ROCm/TheRock/blob/main/dockerfiles/install_rocm_tarball.sh
     if [[ "${ROCM_VERSION}" == "nightly" ]]; then
+      apt-get install -y --no-install-recommends pkg-config
+
       if [[ -d /opt/rocm ]]; then
         rm -rf /opt/rocm
       fi
@@ -133,6 +135,11 @@ export C_INCLUDE_PATH=/opt/rocm/lib/rocm_sysdeps/include:\${C_INCLUDE_PATH:-}
 # Device library path
 export HIP_DEVICE_LIB_PATH=/opt/rocm/amdgcn/bitcode
 export MAGMA_HOME=/opt/rocm/magma
+# Tarball bundles sysdeps (libdrm, liblzma, etc.); expose their libs and .pc files
+if [ -d /opt/rocm/lib/rocm_sysdeps/lib ]; then
+  export LD_LIBRARY_PATH=/opt/rocm/lib/rocm_sysdeps/lib:\${LD_LIBRARY_PATH}
+  export PKG_CONFIG_PATH=/opt/rocm/lib/rocm_sysdeps/lib/pkgconfig:\${PKG_CONFIG_PATH:-}
+fi
 # Disable MSLK for theRock nightly (not yet supported)
 export USE_MSLK=0
 ROCM_ENV

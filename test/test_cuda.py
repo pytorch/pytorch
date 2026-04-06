@@ -364,6 +364,10 @@ print(t.is_pinned())
                 torch.cuda.caching_allocator_delete(mem)
                 self.assertEqual(torch.cuda.memory_allocated(), prev)
 
+    def test_caching_allocator_alloc_negative_size(self):
+        with self.assertRaisesRegex(ValueError, "Invalid memory size"):
+            torch.cuda.memory.caching_allocator_alloc(-1024)
+
     def test_memory_stats(self):
         gc.collect()
         torch.cuda.empty_cache()

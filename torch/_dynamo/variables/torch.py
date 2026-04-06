@@ -63,7 +63,13 @@ from ..create_parameter_op import (
     tracable_create_parameter,
 )
 from ..device_interface import get_registered_device_interfaces
-from ..exc import raise_observed_exception, unimplemented, UserError, UserErrorType
+from ..exc import (
+    raise_observed_exception,
+    raise_type_error,
+    unimplemented,
+    UserError,
+    UserErrorType,
+)
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
@@ -82,7 +88,7 @@ from ..utils import (
     proxy_args_kwargs,
     unwrap_if_wrapper,
 )
-from .base import raise_type_error_exc, typestr, VariableTracker
+from .base import typestr, VariableTracker
 from .ctx_manager import (
     AutocastModeVariable,
     ProfilerContextVariable,
@@ -679,6 +685,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
     def _get_handlers() -> dict[Callable[..., Any], Callable[..., Any]]:
         """Build a dict from function -> method to handle it so that we are O(1)
         in terms of the number of function with special handling."""
+        # pyrefly: ignore [implicit-any]
         handlers = {}
 
         def register(
@@ -1023,6 +1030,46 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             prev = torch.is_autocast_cache_enabled()
             torch.set_autocast_cache_enabled(enabled.as_python_constant())
             tx.output.add_cleanup_hook(lambda: torch.set_autocast_cache_enabled(prev))
+            return CONSTANT_VARIABLE_NONE
+
+        @register(torch._C._functorch._grad_increment_nesting)
+        def handle_grad_increment_nesting(
+            self, tx: "InstructionTranslator"
+        ) -> VariableTracker:
+            tx.output.create_node(
+                "call_function", torch._C._functorch._grad_increment_nesting
+            )
+            level = torch._C._functorch._grad_increment_nesting()
+            tx.output.add_cleanup_hook(torch._C._functorch._grad_decrement_nesting)
+            return VariableTracker.build(tx, level)
+
+        @register(torch._C._functorch._grad_decrement_nesting)
+        def handle_grad_decrement_nesting(
+            self, tx: "InstructionTranslator"
+        ) -> VariableTracker:
+            tx.output.create_node(
+                "call_function", torch._C._functorch._grad_decrement_nesting
+            )
+            level = torch._C._functorch._grad_decrement_nesting()
+            tx.output.add_cleanup_hook(torch._C._functorch._grad_increment_nesting)
+            return VariableTracker.build(tx, level)
+
+        @register(torch._C._functorch.set_inplace_requires_grad_allowed)
+        def handle_set_inplace_requires_grad_allowed(
+            self, tx: "InstructionTranslator", allowed: VariableTracker
+        ) -> VariableTracker:
+            tx.output.create_node(
+                "call_function",
+                torch._C._functorch.set_inplace_requires_grad_allowed,
+                (allowed.as_proxy(),),
+            )
+            prev = torch._C._functorch.get_inplace_requires_grad_allowed()
+            torch._C._functorch.set_inplace_requires_grad_allowed(
+                allowed.as_python_constant()
+            )
+            tx.output.add_cleanup_hook(
+                lambda: torch._C._functorch.set_inplace_requires_grad_allowed(prev)
+            )
             return CONSTANT_VARIABLE_NONE
 
         @register(torch.are_deterministic_algorithms_enabled)
@@ -1746,7 +1793,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             **kwargs: VariableTracker,
         ) -> VariableTracker:
             if len(args) != 1 or kwargs:
-                raise_type_error_exc(
+                raise_type_error(
                     tx,
                     f"push_torch_function takes exactly one argument ({len(args)} given)",
                 )
@@ -1763,7 +1810,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             **kwargs: VariableTracker,
         ) -> VariableTracker:
             if args or kwargs:
-                raise_type_error_exc(tx, "len_torch_function_stack takes no arguments")
+                raise_type_error(tx, "len_torch_function_stack takes no arguments")
             return VariableTracker.build(
                 tx, len(tx.symbolic_torch_function_state.mode_stack)
             )
@@ -1776,7 +1823,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             **kwargs: VariableTracker,
         ) -> TorchFunctionModeVariable:
             if len(args) != 1 or kwargs:
-                raise_type_error_exc(
+                raise_type_error(
                     tx,
                     f"get_function_stack_at takes exactly one argument ({len(args)} given)",
                 )
@@ -2035,7 +2082,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             fn: Callable[[int], int | None],
         ) -> VariableTracker:
             if len(args) != 1 or kwargs:
-                raise_type_error_exc(
+                raise_type_error(
                     tx,
                     f"{fn.__name__} takes exactly one argument ({len(args)} given)",
                 )
@@ -2152,17 +2199,21 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # consumed grad_fns of returned tensors. This gives better compile
             # coverage than failing the entire compile.
             if tx.speculation_log.graph_break_on_autograd_grad:
+                leaked = tx.speculation_log.autograd_grad_leaked_tensors
+                leaked_str = ", ".join(leaked) if leaked else "unknown"
                 unimplemented(
                     gb_type="autograd.grad consumed returned tensor's grad_fn",
-                    context="",
+                    context=f"Leaked output tensors: {leaked_str}",
                     explanation=(
                         "torch.autograd.grad() consumes grad_fns that are needed by tensors "
                         "returned from this compiled function. This would cause 'backward "
-                        "through graph a second time' errors."
+                        "through graph a second time' errors.\n"
+                        f"  The following returned tensors have consumed grad_fns: {leaked_str}"
                     ),
                     hints=[
-                        "If you don't need to backward through the returned tensor, "
-                        "call .detach() before returning: `return loss.detach()`",
+                        f"Detach the problematic tensor(s) before returning: e.g. `{leaked[0]}.detach()`"
+                        if leaked
+                        else "Call .detach() on the tensor before returning.",
                         "If you need to backward through the returned tensor, use retain_graph=True in autograd.grad().",
                     ],
                 )

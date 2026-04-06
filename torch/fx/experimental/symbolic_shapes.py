@@ -2664,8 +2664,16 @@ def cast_symbool_to_symint_guardless(
     )
 
 
+def _eval_is_non_overlapping_and_dense_flat(*args: int) -> int:
+    # Guard code strings print IsNonOverlappingAndDenseIndicator with flat args
+    # (s0, s1, ..., stride0, stride1, ...) but eval_is_non_overlapping_and_dense
+    # expects two sequences (sizes, strides). This wrapper bridges the gap.
+    dim = len(args) // 2
+    return eval_is_non_overlapping_and_dense(list(args[:dim]), list(args[dim:]))
+
+
 SYMPY_INTERP = {
-    "IsNonOverlappingAndDenseIndicator": eval_is_non_overlapping_and_dense,
+    "IsNonOverlappingAndDenseIndicator": _eval_is_non_overlapping_and_dense_flat,
     "cast_symbool_to_symint_guardless": cast_symbool_to_symint_guardless,
     "math": math,
     "torch": torch,
@@ -5993,7 +6001,7 @@ class ShapeEnv:
                 s = sympy.Float(val)
                 input_guards.append((source, s))
 
-        # pyrefly: ignore [no-matching-overload]
+        # pyrefly: ignore [bad-argument-type, no-matching-overload]
         for t, source, context in zip(placeholders, sources, input_contexts):
             if isinstance(source, str):
                 from torch._dynamo.source import LocalSource
