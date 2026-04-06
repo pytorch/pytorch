@@ -13,6 +13,7 @@ ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
 # Install common dependencies (so that this step can be cached separately)
 COPY ./common/install_base.sh install_base.sh
 RUN bash ./install_base.sh && rm install_base.sh
+RUN apt-get update && apt-get install -y --no-install-recommends libtbb-dev && rm -rf /var/lib/apt/lists/*
 
 # Install user
 COPY ./common/install_user.sh install_user.sh
