@@ -28,6 +28,7 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and,
     floating_types,
     get_all_dtypes,
+    get_unsupported_dtypes_for_device,
 )
 from torch.testing._internal.common_utils import (
     extract_test_fn,
@@ -1586,7 +1587,7 @@ def test_foo(self, device, dtype, op):
         if device_type == "cuda" and TEST_WITH_ROCM:
             device_type = "rocm"
         result = self.dtypesIf.get(device_type, self.dtypes)
-        return result
+        return result - get_unsupported_dtypes_for_device(device_type)
 
     def supported_backward_dtypes(self, device_type):
         if not self.supports_autograd:
@@ -1612,7 +1613,7 @@ def test_foo(self, device, dtype, op):
         allowed_backward_dtypes = floating_and_complex_types_and(
             torch.bfloat16, torch.float16, torch.complex32
         )
-        return set(allowed_backward_dtypes).intersection(backward_dtypes)
+        return set(allowed_backward_dtypes).intersection(backward_dtypes) - get_unsupported_dtypes_for_device(device_type)
 
     def supports_dtype(self, dtype, device_type) -> bool:
         return dtype in self.supported_dtypes(device_type)
