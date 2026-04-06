@@ -1712,7 +1712,7 @@ def speculate_subgraph_with_auto_output_flattening(
                 ):
                     graph_output_vt_list.append(vt)
 
-            VariableTracker.visit(visit, output)
+            VariableTracker.visit(visit, output, side_effects=tx.output.side_effects)
             graph_output_vts = tuple(graph_output_vt_list)
 
             # NOTE - [Return subgraph intermediates as subgraph outputs]
