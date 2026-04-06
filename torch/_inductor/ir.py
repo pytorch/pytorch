@@ -1308,12 +1308,13 @@ class Reduction(Loops):
 
     def constant_to_device(self, device: torch.device) -> IRNode:
         """Move this to a given device. Requires that all reads are to constants."""
-        loader = self.make_loader()
-        loader = patch.object(ConstantBuffer, "override_device", device)(loader)
+        inner_fn = patch.object(ConstantBuffer, "override_device", device)(
+            self.inner_fn
+        )
         return Reduction(
             device=device,
             dtype=self.dtype,
-            inner_fn=loader,
+            inner_fn=inner_fn,
             ranges=self.ranges,
             reduction_ranges=self.reduction_ranges,
             reduction_type=self.reduction_type,
@@ -8057,6 +8058,7 @@ class DeviceCopy(ExternKernelOut):
             not x.is_extern()
             # Can not apply this optimization if x has been mutated
             and try_get_name(x) not in V.graph.mutated_buffers
+            and x.get_read_names()
             and all(r in V.graph.constants for r in x.get_read_names())
             and not config.aot_inductor.use_runtime_constant_folding
         ):
