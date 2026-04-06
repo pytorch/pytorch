@@ -4430,6 +4430,14 @@
       "Hints": []
     }
   ],
+  "GB8887": [
+    {
+      "Gb_type": "NamedTupleVariable.__setattr__ bad args",
+      "Context": "{len(args)} args and {len(kwargs)} kwargs",
+      "Explanation": "Expected exactly 2 positional args for __setattr__.",
+      "Hints": []
+    }
+  ],
   "GB0349": [
     {
       "Gb_type": "cannot unwrap variable for check_meta_consistency",

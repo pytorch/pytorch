@@ -37,6 +37,7 @@ import torch
 import torch.nn
 from torch._dynamo.variables.misc import AutogradFunctionContextVariable
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._pytree import is_structseq_class
 
 from . import config, graph_break_hints, utils, variables
 from .bytecode_transformation import (
@@ -48,7 +49,7 @@ from .bytecode_transformation import (
 from .codegen import PyCodegen
 from .exc import collapse_resume_frames, get_stack_above_dynamo, unimplemented
 from .source import AttrSource, GlobalSource, LocalCellSource, Source, TempLocalSource
-from .utils import is_frozen_dataclass, nn_module_new, object_new
+from .utils import is_frozen_dataclass, is_namedtuple_cls, nn_module_new, object_new
 from .variables.base import (
     AttributeMutation,
     AttributeMutationExisting,
@@ -523,7 +524,10 @@ class SideEffects:
         elif issubclass(user_cls, (set, frozenset)):
             variable_cls = variables.UserDefinedSetVariable
         elif issubclass(user_cls, tuple):
-            variable_cls = variables.UserDefinedTupleVariable
+            if is_namedtuple_cls(user_cls):
+                variable_cls = variables.UserDefinedTupleVariable.get_vt_cls(user_cls)
+            else:
+                variable_cls = variables.UserDefinedTupleVariable
         elif issubclass(user_cls, list):
             variable_cls = variables.UserDefinedListVariable
         elif issubclass(user_cls, MutableMapping):
@@ -560,14 +564,12 @@ class SideEffects:
             assert variables.UserDefinedClassVariable.is_supported_new_method(
                 base_cls.__new__
             )
-            # TODO(anijain2305) - Consider adding get_example_value method to
-            # each VT to get an example value for all args. As we expand the
-            # scope to other __new__ methods, we might need to call __new__ with
-            # init_args (like functools.partial)
-            # init_args = [arg.get_example_value() for arg in init_args]
-            # obj = base_cls.__new__(user_cls, *init_args)
-
-            obj = base_cls.__new__(user_cls)
+            if is_structseq_class(user_cls):
+                # Structseq tp_new requires a sequence argument and rejects
+                # tuple.__new__, so create a dummy with None placeholders.
+                obj = user_cls([None] * user_cls.n_fields)
+            else:
+                obj = base_cls.__new__(user_cls)
         return obj
 
     def track_new_user_defined_object(
@@ -764,6 +766,19 @@ class SideEffects:
         for var in self._get_modified_vars():
             if not isinstance(var.mutation_type, AttributeMutationNew):
                 assert var.source is not None
+                continue
+
+            # Namedtuples/structseqs with no pending mutations should skip
+            # codegen_save_tempvars so that restore_stack handles them. In
+            # export, restore_stack uses value_from_source=False which makes
+            # child tensors become graph outputs. If we processed them here,
+            # add_cache would assign a TempLocalSource and restore_stack would
+            # load from cache with value_from_source=True, hiding the tensors
+            # from export.
+            if isinstance(
+                var,
+                (variables.NamedTupleVariable, variables.StructSequenceVariable),
+            ) and not self.has_pending_mutation(var):
                 continue
 
             if isinstance(var, variables.CellVariable):

@@ -2559,7 +2559,6 @@ class BuiltinVariable(BaseBuiltinVariable):
             obj,
             (
                 variables.TensorVariable,
-                variables.NamedTupleVariable,
                 variables.ConstantVariable,
                 variables.DefaultDictVariable,
                 variables.DistributedVariable,
@@ -2654,7 +2653,6 @@ class BuiltinVariable(BaseBuiltinVariable):
             obj,
             (
                 variables.DefaultDictVariable,
-                variables.NamedTupleVariable,
                 variables.UserDefinedObjectVariable,
                 variables.NestedUserFunctionVariable,
                 variables.ExceptionVariable,

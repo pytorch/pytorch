@@ -800,9 +800,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             tree_map_kwargs,
             keypath,
         )
-        # For fallback, we need to reconstruct the subtree rooted at this node
-        # and call tree_map_with_path on it. Since we're in the middle of the tree,
-        # we fall back to tracing the tree_map_with_path function.
         return tree_map_fn_copy.call_function(
             tx,
             [map_fn, self, *rest],

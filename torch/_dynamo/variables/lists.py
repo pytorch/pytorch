@@ -22,7 +22,7 @@ from typing import Any, Literal, Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
-from torch.utils._pytree import GetAttrKey, SequenceKey
+from torch.utils._pytree import SequenceKey
 
 from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import (
@@ -31,17 +31,15 @@ from ..bytecode_transformation import (
     create_call_method,
     create_dup_top,
     create_instruction,
-    create_rot_n,
 )
 from ..exc import raise_observed_exception, raise_type_error, unimplemented
-from ..source import AttrSource, NamedTupleFieldsSource
+from ..source import AttrSource
 from ..utils import (
     cmp_name_to_op_mapping,
     cmp_name_to_op_str_mapping,
     get_fake_value,
     guard_if_dyn,
     iter_contains,
-    namedtuple_fields,
     odict_values,
     raise_args_mismatch,
     range_iterator,
@@ -51,7 +49,6 @@ from .base import AsPythonConstantNotImplementedError, ValueMutationNew, Variabl
 from .constant import CONSTANT_VARIABLE_FALSE, CONSTANT_VARIABLE_NONE, ConstantVariable
 from .functions import UserFunctionVariable
 from .iter import IteratorVariable
-from .user_defined import UserDefinedTupleVariable
 
 
 if TYPE_CHECKING:
@@ -1518,323 +1515,6 @@ class SizeVariable(TupleVariable):
         self, tx: "InstructionTranslator", name: str
     ) -> ConstantVariable:
         return VariableTracker.build(tx, hasattr(torch.Size, name))
-
-
-class NamedTupleVariable(UserDefinedTupleVariable):
-    _nonvar_fields = {
-        "tuple_cls",
-        "dynamic_attributes",
-        *UserDefinedTupleVariable._nonvar_fields,
-    }
-
-    def __init__(
-        self,
-        items: list[VariableTracker],
-        # pyrefly: ignore [implicit-any]
-        tuple_cls: type[tuple],
-        dynamic_attributes: dict[str, VariableTracker] | None = None,
-        tuple_vt: TupleVariable | None = None,
-        **kwargs: Any,
-    ) -> None:
-        if tuple_vt is None:
-            assert getattr(kwargs, "source", None) is None
-            tuple_vt = variables.TupleVariable(
-                items, mutation_type=kwargs.get("mutation_type", ValueMutationNew())
-            )
-
-        if tuple_cls.__module__ == "torch.return_types":
-            # Structseq: single iterable argument
-            dummy_value = tuple_cls(items)
-        else:
-            # Namedtuple: positional arguments
-            dummy_value = tuple_cls(*items)  # type: ignore[arg-type]
-
-        super().__init__(
-            value=dummy_value,
-            tuple_vt=tuple_vt,
-            init_args=items,
-            **kwargs,
-        )
-        self.tuple_cls = tuple_cls
-        if len(self.tuple_cls.__mro__) < 3:
-            raise ValueError("NamedTuple should inherit from Tuple and Object.")
-        self.dynamic_attributes = dynamic_attributes if dynamic_attributes else {}
-
-    @property
-    def items(self) -> list[VariableTracker]:
-        return self._tuple_vt.items
-
-    def is_namedtuple(self) -> bool:
-        return isinstance(getattr(self.tuple_cls, "_fields", None), tuple) and callable(
-            getattr(self.tuple_cls, "_make", None)
-        )
-
-    def is_structseq(self) -> bool:
-        return not self.is_namedtuple()
-
-    def fields(self) -> tuple[str, ...]:
-        return namedtuple_fields(self.tuple_cls)
-
-    def as_python_constant(self) -> Any:
-        if self.is_structseq():
-            # StructSequenceType(iterable)
-            result = self.python_type()([x.as_python_constant() for x in self.items])
-        else:
-            # NamedTupleType(*iterable)
-            result = self.python_type()(*[x.as_python_constant() for x in self.items])
-
-        # Apply dynamic attributes if any were set
-        if self.dynamic_attributes:
-            for attr_name, attr_value in self.dynamic_attributes.items():
-                # Convert VariableTracker to Python constant if needed
-                if hasattr(attr_value, "as_python_constant"):
-                    python_value = attr_value.as_python_constant()
-                else:
-                    raise NotImplementedError(
-                        "Can not convert dynamic attribute without python constant value to python constant."
-                    )
-                setattr(result, attr_name, python_value)
-
-        return result
-
-    def as_proxy(self) -> Any:
-        if self.is_structseq():
-            return self.python_type()([x.as_proxy() for x in self._tuple_vt.items])
-        return self.python_type()(*[x.as_proxy() for x in self._tuple_vt.items])
-
-    def call_tree_map(
-        self,
-        tx: "InstructionTranslator",
-        tree_map_fn: UserFunctionVariable,
-        map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
-        tree_map_kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        is_leaf_var = tree_map_kwargs.get("is_leaf")
-        if is_leaf_var is not None and not is_leaf_var.is_constant_none():
-            pred_result = is_leaf_var.call_function(tx, [self], {})
-            try:
-                leaf_decision = pred_result.as_python_constant()
-            except NotImplementedError:
-                return self._tree_map_fallback(
-                    tx, tree_map_fn, map_fn, rest, tree_map_kwargs
-                )
-            if leaf_decision:
-                return map_fn.call_function(tx, [self, *rest], {})
-
-        return self.call_tree_map_branch(
-            tx,
-            tree_map_fn,
-            map_fn,
-            rest,
-            tree_map_kwargs,
-        )
-
-    def call_tree_map_branch(
-        self,
-        tx: "InstructionTranslator",
-        tree_map_fn: UserFunctionVariable,
-        map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
-        tree_map_kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        other_tuples: list[NamedTupleVariable] = []
-        for candidate in rest:
-            if (
-                not isinstance(candidate, NamedTupleVariable)
-                or len(candidate.items) != len(self.items)
-                or candidate.tuple_cls is not self.tuple_cls
-            ):
-                return self._tree_map_fallback(
-                    tx, tree_map_fn, map_fn, rest, tree_map_kwargs
-                )
-            other_tuples.append(candidate)
-
-        new_items: list[VariableTracker] = []
-        for idx, item in enumerate(self.items):
-            sibling_leaves = [candidate.items[idx] for candidate in other_tuples]
-            new_items.append(
-                item.call_tree_map(
-                    tx,
-                    tree_map_fn,
-                    map_fn,
-                    sibling_leaves,
-                    tree_map_kwargs,
-                )
-            )
-
-        return NamedTupleVariable(
-            new_items,
-            self.tuple_cls,
-            mutation_type=ValueMutationNew(),
-        )
-
-    def call_tree_map_with_path(
-        self,
-        tx: "InstructionTranslator",
-        tree_map_fn: UserFunctionVariable,
-        map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
-        tree_map_kwargs: dict[str, VariableTracker],
-        keypath: tuple[Any, ...],
-    ) -> VariableTracker:
-        is_leaf_var = tree_map_kwargs.get("is_leaf")
-        if is_leaf_var is not None and not is_leaf_var.is_constant_none():
-            pred_result = is_leaf_var.call_function(tx, [self], {})
-            try:
-                leaf_decision = pred_result.as_python_constant()
-            except NotImplementedError:
-                # For namedtuples, they're always pytree containers, so is_leaf
-                # should return False. Assume False and proceed with fast path.
-                leaf_decision = False
-            if leaf_decision:
-                keypath_var = variables.TupleVariable(
-                    [VariableTracker.build(tx, k) for k in keypath]
-                )
-                return map_fn.call_function(tx, [keypath_var, self, *rest], {})
-
-        return self.call_tree_map_with_path_branch(
-            tx,
-            tree_map_fn,
-            map_fn,
-            rest,
-            tree_map_kwargs,
-            keypath,
-        )
-
-    def call_tree_map_with_path_branch(
-        self,
-        tx: "InstructionTranslator",
-        tree_map_fn: UserFunctionVariable,
-        map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
-        tree_map_kwargs: dict[str, VariableTracker],
-        keypath: tuple[Any, ...],
-    ) -> VariableTracker:
-        other_tuples: list[NamedTupleVariable] = []
-        for candidate in rest:
-            if (
-                not isinstance(candidate, NamedTupleVariable)
-                or len(candidate.items) != len(self.items)
-                or candidate.tuple_cls is not self.tuple_cls
-            ):
-                return self._tree_map_with_path_fallback(
-                    tx, tree_map_fn, map_fn, rest, tree_map_kwargs, keypath
-                )
-            other_tuples.append(candidate)
-
-        fields = self.fields()
-        new_items: list[VariableTracker] = []
-        for idx, item in enumerate(self.items):
-            sibling_leaves = [candidate.items[idx] for candidate in other_tuples]
-            child_keypath = keypath + (GetAttrKey(fields[idx]),)
-            new_items.append(
-                item.call_tree_map_with_path(
-                    tx,
-                    tree_map_fn,
-                    map_fn,
-                    sibling_leaves,
-                    tree_map_kwargs,
-                    child_keypath,
-                )
-            )
-
-        return NamedTupleVariable(
-            new_items,
-            self.tuple_cls,
-            mutation_type=ValueMutationNew(),
-        )
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        if self.is_structseq():
-            create_fn = self.tuple_cls
-        else:
-            create_fn = self.tuple_cls._make  # type: ignore[attr-defined]
-
-        codegen.add_push_null(
-            lambda: codegen.append_output(
-                codegen.create_load_const_unchecked(create_fn)
-            )
-        )
-        codegen.foreach(self._tuple_vt.items)
-        codegen.extend_output(
-            [
-                create_build_tuple(len(self._tuple_vt.items)),
-            ]
-            + create_call_function(1, False)
-        )
-
-        # Apply initial dynamic attributes after construction (if any)
-        # Runtime dynamic attributes are tracked via side effects system
-        for name, value in self.dynamic_attributes.items():
-            codegen.dup_top()
-            codegen(value)
-            codegen.extend_output(create_rot_n(2))
-            codegen.store_attr(name)
-
-    def _is_method_overridden(self, method_name: str) -> bool:
-        if len(self.tuple_cls.__mro__) < 3:
-            raise ValueError("NamedTuple should inherit from Tuple and Object.")
-        if getattr(self.tuple_cls, method_name, None) == getattr(
-            self.tuple_cls.__mro__[-3], method_name, None
-        ):
-            return False
-        return True
-
-    def call_method(
-        self,
-        tx: "InstructionTranslator",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if self._is_method_overridden(name):
-            # Fall back to UserDefinedTupleVariable
-            return super().call_method(tx, name, args, kwargs)
-        elif name == "__setattr__":
-            if kwargs or len(args) != 2:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "2 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            attr_var, value = args
-            attr = attr_var.as_python_constant()
-
-            if (
-                # structseq is immutable
-                self.is_structseq()
-                # namedtuple directly created by `collections.namedtuple` is immutable
-                or self.tuple_cls.__bases__ == (tuple,)
-                or attr in self.fields()
-            ):
-                raise_observed_exception(AttributeError, tx)
-
-            result = self.method_setattr_standard(tx, attr_var, value)
-            # Also update self.dynamic_attributes
-            self.dynamic_attributes[attr] = value
-            return result
-
-        return super().call_method(tx, name, args, kwargs)
-
-    def python_type(self) -> type:
-        return self.tuple_cls
-
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
-        if name == "_fields":
-            source = NamedTupleFieldsSource(self.source) if self.source else None
-            return VariableTracker.build(tx, self.fields(), source=source)
-
-        if name in self.dynamic_attributes:
-            return self.dynamic_attributes[name]
-
-        fields = self.fields()
-        if name in fields:
-            field_index = fields.index(name)
-            return self._tuple_vt.items[field_index]
-
-        return super().var_getattr(tx, name)
 
 
 class SliceVariable(VariableTracker):

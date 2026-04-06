@@ -1995,8 +1995,8 @@ class OutputGraph(OutputGraphCommon):
                     and vt.tuple_cls
                     is torch._dynamo.functional_export.ExportTracerOutput
                 ):
-                    flat_returns = vt.items[0]
-                    out_spec = vt.items[1]
+                    flat_returns = vt._tuple_vt.items[0]
+                    out_spec = vt._tuple_vt.items[1]
                     assert isinstance(
                         flat_returns, torch._dynamo.variables.ListVariable
                     )
@@ -2016,7 +2016,7 @@ class OutputGraph(OutputGraphCommon):
                         elif (
                             vt.source is not None
                             and (source := getattr(vt.source, "base", None))  # type: ignore[assignment]
-                            and source.is_input
+                            and getattr(source, "is_input", False)
                         ):
                             self.export_metadata.output_return_type[idx] = (
                                 "input",
