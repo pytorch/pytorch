@@ -27,7 +27,7 @@ try:
         for elem in iterable:
             mapping[elem] = mapping_get(elem, 0) + 1
 
-    __all__.append("_count_elements")
+    __all__[len(__all__) :] = ["_count_elements"]
 
 except ImportError:
     pass
