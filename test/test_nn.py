@@ -9844,7 +9844,7 @@ class TestNNDeviceType(NNTestCase):
 
         with self.assertRaisesRegex(
             ValueError,
-            r"'invalid' is not a valid reduction mode\. Expected 'none', 'mean', or 'sum'\.",
+            "'invalid' is not a valid reduction mode. Expected 'none', 'mean', or 'sum'.",
         ):
             F.poisson_nll_loss(input, target, reduction="invalid")
 
