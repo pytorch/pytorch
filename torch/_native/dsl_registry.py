@@ -137,6 +137,17 @@ class DSLRegistry:
         """Get all registered DSL names (available or not)"""
         return tuple(self._dsl_modules.keys())
 
+    def get_dsl_module(self, name: str) -> DSLModuleProtocol | None:
+        """Get a registered DSL module by name.
+
+        Args:
+            name: Name of the DSL to retrieve.
+
+        Returns:
+            The DSL module if registered, None otherwise.
+        """
+        return self._dsl_modules.get(name)
+
 
 # Global registry instance
 dsl_registry = DSLRegistry()

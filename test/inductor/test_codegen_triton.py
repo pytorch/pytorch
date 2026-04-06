@@ -7,7 +7,7 @@ import sympy
 import torch
 import torch._inductor.config as inductor_config
 from torch._inductor.codegen import triton_utils
-from torch._inductor.codegen.common import CSEVariable, SizeArg
+from torch._inductor.codegen.common import CSEVariable, SizeArg, TensorArg
 from torch._inductor.codegen.triton import (
     _materialize_trunc_to_float_expr,
     TritonKernelOverrides,
@@ -243,6 +243,19 @@ class TestCodegenTriton(InductorTestCase):
         self.assertFalse(sv.statically_known_multiple_of(s4, 8))
         shape_env.axioms[sympy.Eq(Mod(s4, 8), 0)] = sympy.true
         self.assertTrue(sv.statically_known_multiple_of(s4, 8))
+
+    def test_signature_of_fp8_dtypes(self):
+        """fp8 dtypes should produce correct Triton pointer signatures via _type_of."""
+        expected = {
+            torch.float8_e4m3fn: "*fp8e4nv",
+            torch.float8_e5m2: "*fp8e5",
+            torch.float8_e4m3fnuz: "*fp8e4b8",
+            torch.float8_e5m2fnuz: "*fp8e5b16",
+        }
+        for dtype, expected_sig in expected.items():
+            arg = TensorArg(name="x", buffer="buf0", dtype=dtype)
+            sig = triton_utils.signature_of(arg, size_dtype=None)
+            self.assertEqual(sig, expected_sig, f"wrong signature for {dtype}")
 
 
 if __name__ == "__main__":

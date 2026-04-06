@@ -928,6 +928,16 @@
       "Hints": []
     }
   ],
+  "GB6012": [
+    {
+      "Gb_type": "Cannot trace user-defined __len__",
+      "Context": "{self.python_type_name()}.__len__()",
+      "Explanation": "Dynamo cannot trace len() on {self.python_type_name()} because the __len__ method is either not traceable (e.g., defined in C or built-in) or returns a non-constant value.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0075": [
     {
       "Gb_type": "LOAD_BUILD_CLASS bytecode not supported",
@@ -1983,6 +1993,16 @@
       "Explanation": "Argument mismatch when attempting to trace function {func.get_name()}.",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB4841": [
+    {
+      "Gb_type": "Unsupported python_type() call",
+      "Context": "{obj} does not implement python_type()",
+      "Explanation": "This VariableTracker does not implement python_type(), which is required for object protocol operations.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
       ]
     }
   ],
@@ -3658,6 +3678,16 @@
       "Explanation": "Tracing numpy.* functions as methods is not supported.",
       "Hints": [
         "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      ]
+    }
+  ],
+  "GB7906": [
+    {
+      "Gb_type": "Missing len_impl",
+      "Context": "len({type(self).__name__})",
+      "Explanation": "Dynamo does not support len() on {type(self).__name__}. Add len_impl to this VariableTracker subclass.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
