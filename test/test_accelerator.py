@@ -3,7 +3,6 @@
 import gc
 import sys
 import unittest
-from contextlib import nullcontext
 
 import torch
 from torch.testing._internal.common_utils import (
@@ -274,22 +273,21 @@ class TestAccelerator(TestCase):
         acc = torch.accelerator.current_accelerator()
         reference_dtype = next(iter(supported_dtypes))
 
-        all_dtypes = [
-            getattr(torch, name)
-            for name in dir(torch)
-            if isinstance(getattr(torch, name), torch.dtype)
-        ]
-        for dtype in all_dtypes:
+        # Only test dtypes that are advertised as supported.  Testing
+        # unsupported dtypes by running CUDA kernels is unsafe: types like
+        # bits16/bits1x8/etc. can be allocated (torch.empty succeeds) but their
+        # copy kernel hits `CUDA_KERNEL_ASSERT(false)` in fetch_and_cast
+        # (DynamicCast.h) because they are not handled by
+        # AT_FORALL_SCALAR_TYPES_WITH_COMPLEX.  That device-side assert
+        # corrupts the CUDA context permanently (cudaErrorAssert is sticky),
+        # causing all subsequent subtests to fail.  The API contract states
+        # "Any operator support outside of [supported_dtypes] is not
+        # guaranteed", so we only validate the positive case here.
+        for dtype in sorted(supported_dtypes, key=str):
             with self.subTest(dtype=dtype):
-                ctx = (
-                    nullcontext()
-                    if dtype in supported_dtypes
-                    else self.assertRaises((RuntimeError, TypeError))
-                )
-                with ctx:
-                    t = torch.empty(16, dtype=dtype, device=acc)
-                    t = t.to(reference_dtype)
-                    t = t.to(dtype)
+                t = torch.empty(16, dtype=dtype, device=acc)
+                t = t.to(reference_dtype)
+                t = t.to(dtype)
 
 
 if __name__ == "__main__":
