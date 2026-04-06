@@ -3841,6 +3841,7 @@ class CppTile2DKernel(CppVecKernel):
     def _adjust_argreduce_index(self, index: sympy.Expr) -> sympy.Expr:
         return self.transform_indexing(index)
 
+
 def get_loop_body_lowp_fp(_body: LoopBody) -> tuple[torch.dtype | None, bool]:
     """
     Returns the low precision data type (torch.float16/torch.bfloat16) contained in the nodes
