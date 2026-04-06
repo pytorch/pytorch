@@ -1114,6 +1114,49 @@ terrible spacing
         actual = torch.compile(moe, backend=backend)(inp)
         torch.testing.assert_close(actual, expected)
 
+    def test_split_module_placeholders_before_get_attr(self):
+        # Manually construct a graph matching what torch.cond + dynamo
+        # produces: placeholder, get_attr(nn.Module), placeholder, ...
+        # Manual construction avoids dynamo/torch.compile dependency.
+        class DummyModule(torch.nn.Module):
+            def forward(self, x):
+                return x
+
+        root = torch.nn.Module()
+        root.branch = DummyModule()
+
+        graph = torch.fx.Graph()
+        ph_x = graph.placeholder("x")
+        branch = graph.get_attr("branch")
+        ph_y = graph.placeholder("y")
+        op1 = graph.call_function(torch.mul, (ph_x, branch))
+        op2 = graph.call_function(torch.add, (op1, ph_y))
+        graph.output(op2)
+
+        for node in graph.nodes:
+            node.meta = {}
+
+        gm = torch.fx.GraphModule(root, graph)
+
+        split_gm = split_module(
+            gm,
+            root_m=None,
+            split_callback=lambda node: 0,
+            keep_original_order=True,
+        )
+
+        for name, submod in split_gm.named_children():
+            seen_get_attr = False
+            for node in submod.graph.nodes:
+                if node.op == "get_attr":
+                    seen_get_attr = True
+                elif node.op == "placeholder":
+                    self.assertFalse(
+                        seen_get_attr,
+                        f"placeholder '{node.name}' found after get_attr "
+                        f"in submodule '{name}'",
+                    )
+
     def test_normalize_binary_operators(self):
         ops_to_test = {
             torch.add,
