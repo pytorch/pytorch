@@ -376,8 +376,7 @@ def get_closure(fn):
 # annotations on `eg``, but starting in Python 4.0, they will represented as
 # strings and no longer present. Furthermore, since the body of `eg` does
 # not reference those names, they do not appear in the list of closed over
-# variables. In Python 2.x, type annotations are in comments, leading to a
-# similar situation where their definitions are not available. We anticipate
+# variables. We anticipate
 # that most users will not run into this issue because their modules and
 # functions will be defined at a global scope like MyGlobalClass. In cases
 # where they are not, it is possible to work around issues by declaring the

@@ -708,6 +708,7 @@ def normalize_placeholder_names(
 
 def create_fx_config(
     compiler_config_extra: CompilerConfigExtra | None = None,
+    compile_region_name: str | None = None,
 ) -> _CompileFxKwargs:
     if compiler_config_extra is None:
         cudagraphs = BoxedBool(torch._inductor.config.triton.cudagraphs)
@@ -718,6 +719,7 @@ def create_fx_config(
     return {
         "cudagraphs": cudagraphs,
         "boxed_forward_device_index": boxed_forward_device_index,
+        "compile_region_name": compile_region_name,  # pyrefly: ignore[bad-typed-dict-key]
     }
 
 
@@ -794,6 +796,7 @@ def sanitize_gm_for_cache(
     """
     # Mapping from each field to a default value
     IGNORED_FIELDS: dict[str, Any] = {
+        # pyrefly: ignore [implicit-any]
         "meta": {},  # metadata used by export
         "compile_subgraph_reason": None,  # Used by dynamo only for logging, no change in inductor/autograd behavior
         "_param_name_to_source": None,  # Encapsulated by aot_config.aot_autograd_arg_pos_to_source
@@ -876,6 +879,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         compiler_config_extra: CompilerConfigExtra | None,
         local: bool,
         remote: bool,
+        compile_region_name: str | None = None,
     ) -> Callable[..., Any] | None:
         """
         Load a result from the cache, and reconstruct a runtime wrapper around the object
@@ -897,7 +901,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             )
             if result is not None:
                 (entry, pickled_content) = result
-                fx_config = create_fx_config(compiler_config_extra)
+                fx_config = create_fx_config(compiler_config_extra, compile_region_name)
                 compiled_fn = entry.wrap_post_compile(args, aot_config, fx_config)
                 # Make the compiled_fn serializable, where the serialize function just
                 # makes a copy of the original entry before post compile via the pickled content

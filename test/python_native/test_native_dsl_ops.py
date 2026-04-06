@@ -224,27 +224,48 @@ class TestNativeDSLOps(TestCase):
 
     def test_registry_mechanics(self):
         """_get_or_create_library caches Library instances per (lib, dispatch_key)."""
+        import torch._native.registry as registry
         import torch.library
 
-        registry = _import_module_directly("torch._native.registry", "registry.py")
+        # Save original state for restoration
+        original_libs = dict(registry._libs)
+        original_filter_state = (
+            set(registry._filter_state._dsl_names),
+            set(registry._filter_state._op_symbols),
+            set(registry._filter_state._dispatch_keys),
+        )
 
-        key = ("_test_native_dsl_registry", "CPU")
-        registry._libs.pop(key, None)
+        try:
+            key = ("_test_native_dsl_registry", "CPU")
+            registry._libs.pop(key, None)
 
-        lib1 = registry._get_or_create_library(*key)
-        self.assertIsInstance(lib1, torch.library.Library)
-        lib2 = registry._get_or_create_library(*key)
-        self.assertIs(lib1, lib2, "should return cached instance")
+            lib1 = registry._get_or_create_library(*key)
+            self.assertIsInstance(lib1, torch.library.Library)
+            lib2 = registry._get_or_create_library(*key)
+            self.assertIs(lib1, lib2, "should return cached instance")
 
-        # Different dispatch key -> different Library
-        key2 = ("_test_native_dsl_registry", "CUDA")
-        registry._libs.pop(key2, None)
-        lib3 = registry._get_or_create_library(*key2)
-        self.assertIsNot(lib1, lib3)
+            # Different dispatch key -> different Library
+            key2 = ("_test_native_dsl_registry", "CUDA")
+            registry._libs.pop(key2, None)
+            lib3 = registry._get_or_create_library(*key2)
+            self.assertIsNot(lib1, lib3)
 
-        # cleanup
-        registry._libs.pop(key, None)
-        registry._libs.pop(key2, None)
+            # cleanup
+            registry._libs.pop(key, None)
+            registry._libs.pop(key2, None)
+        finally:
+            # Restore original registry state
+            registry._libs.clear()
+            registry._libs.update(original_libs)
+
+            # Restore filter state
+            filter_state = registry._filter_state
+            filter_state._dsl_names.clear()
+            filter_state._op_symbols.clear()
+            filter_state._dispatch_keys.clear()
+            filter_state._dsl_names.update(original_filter_state[0])
+            filter_state._op_symbols.update(original_filter_state[1])
+            filter_state._dispatch_keys.update(original_filter_state[2])
 
     def test_deregister_op_overrides_functionality(self):
         """Test deregister_op_overrides methods exist, are callable, and work correctly."""
@@ -253,21 +274,39 @@ class TestNativeDSLOps(TestCase):
             ("cutedsl_utils.py", "torch._native.cutedsl_utils"),
         ]
 
-        for file_name, module_name in modules_to_test:
-            with self.subTest(module=module_name):
-                mod = _import_module_directly(module_name, file_name)
+        # Use the preserve_filter_state context manager pattern
+        from torch._native.registry import _filter_state
 
-                # Test method exists and is callable
-                self.assertTrue(hasattr(mod, "deregister_op_overrides"))
-                self.assertTrue(callable(mod.deregister_op_overrides))
+        original_filter_state = (
+            set(_filter_state._dsl_names),
+            set(_filter_state._op_symbols),
+            set(_filter_state._dispatch_keys),
+        )
 
-                # Test method can be called without error (should be no-op when no overrides registered)
-                try:
-                    mod.deregister_op_overrides()
-                except Exception as e:
-                    self.fail(
-                        f"deregister_op_overrides on {module_name} raised exception: {e}"
-                    )
+        try:
+            for file_name, module_name in modules_to_test:
+                with self.subTest(module=module_name):
+                    mod = _import_module_directly(module_name, file_name)
+
+                    # Test method exists and is callable
+                    self.assertTrue(hasattr(mod, "deregister_op_overrides"))
+                    self.assertTrue(callable(mod.deregister_op_overrides))
+
+                    # Test method can be called without error (should be no-op when no overrides registered)
+                    try:
+                        mod.deregister_op_overrides()
+                    except Exception as e:
+                        self.fail(
+                            f"deregister_op_overrides on {module_name} raised exception: {e}"
+                        )
+        finally:
+            # Restore original filter state
+            _filter_state._dsl_names.clear()
+            _filter_state._op_symbols.clear()
+            _filter_state._dispatch_keys.clear()
+            _filter_state._dsl_names.update(original_filter_state[0])
+            _filter_state._op_symbols.update(original_filter_state[1])
+            _filter_state._dispatch_keys.update(original_filter_state[2])
 
     def test_register_op_skips_when_jit_disabled(self):
         """register_op_override does not call through when TORCH_DISABLE_NATIVE_JIT=1."""
