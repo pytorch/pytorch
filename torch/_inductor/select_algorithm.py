@@ -1689,8 +1689,13 @@ class TritonTemplateKernel(TritonKernel):
             inductor_meta=inductor_meta,
             triton=True,
         )
+        self._emit_post_kernel_code(wrapper, name)
         if self.workspace_arg is not None:
             wrapper.generate_workspace_deallocation(self.workspace_arg)
+
+    def _emit_post_kernel_code(self, wrapper, kernel_name: str) -> None:
+        """Hook for subclasses to emit code after kernel call, before workspace dealloc."""
+        pass  # noqa: PIE790
 
     def kernel_benchmark_extra_args(self) -> list[str]:
         # Grid args are only used for benchmarking, not correctness
