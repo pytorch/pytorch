@@ -400,6 +400,8 @@ def _optimization_hint_base(
         ):
             original = sympy.factor(original)
         expr = _sub_unbacked_exprs(shape_env, original)
+        if isinstance(expr, sympy.Expr):
+            expr = expr.expand(identity=True)
 
     # For multiple expressions that depend on an unbacked symint,
     # we want to compute them consistently for a size hint we have chosen.
