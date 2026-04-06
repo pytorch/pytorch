@@ -99,6 +99,7 @@ ROCM_SO_FILES=(
     "libhiprtc.so"
     "librocprofiler-sdk.so"
     "librocprofiler-register.so"
+    "libhsa-amd-aqlprofile64.so"
     "librocm-core.so"
     "librocroller.so"
 )
@@ -113,6 +114,7 @@ if [[ "$OS_NAME" == *"CentOS Linux"* || "$OS_NAME" == *"AlmaLinux"* ]]; then
     else
         LIBTINFO_PATH="/usr/lib64/libtinfo.so.6"
     fi
+    LIBDW_PATH="/usr/lib64/libdw.so.1"
     LIBDRM_PATH="/opt/amdgpu/lib64/libdrm.so.2"
     LIBDRM_AMDGPU_PATH="/opt/amdgpu/lib64/libdrm_amdgpu.so.1"
     MAYBE_LIB64=lib64
@@ -121,12 +123,14 @@ elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
     LIBNUMA_PATH="/usr/lib/x86_64-linux-gnu/libnuma.so.1"
     LIBELF_PATH="/usr/lib/x86_64-linux-gnu/libelf.so.1"
     LIBTINFO_PATH="/lib/x86_64-linux-gnu/libtinfo.so.6"
+    LIBDW_PATH="/usr/lib/x86_64-linux-gnu/libdw.so.1"
     LIBDRM_PATH="/usr/lib/x86_64-linux-gnu/libdrm.so.2"
     LIBDRM_AMDGPU_PATH="/usr/lib/x86_64-linux-gnu/libdrm_amdgpu.so.1"
     MAYBE_LIB64=lib
 fi
 OS_SO_PATHS=($LIBGOMP_PATH $LIBNUMA_PATH\
              $LIBELF_PATH $LIBTINFO_PATH\
+             $LIBDW_PATH\
              $LIBDRM_PATH $LIBDRM_AMDGPU_PATH\
              $LIBSUITESPARSE_CONFIG_PATH\
              $LIBCHOLMOD_PATH $LIBAMD_PATH\
