@@ -4,6 +4,7 @@ const std::string reduction_template_0 = R"ESCAPE(
   #define C10_HOST_DEVICE __host__ __device__
   #define C10_DEVICE __device__
   #if defined(__clang__) && defined(__HIP__)
+  #define USE_ROCM 1
   #ifndef __forceinline__
   #define __forceinline__ inline __attribute__((always_inline))
   #endif
@@ -577,7 +578,7 @@ struct ReduceJitOp {
   // If multiple stores are done in a row there is option to skip
   // waiting for commit for all but the last store.
   template <typename T, bool wait_for_commit = true>
-  __device__ inline void cmtdStore(void* address, T value) {
+  __device__ inline void cmtdStore(void* address, T value) const {
         int constexpr num_long_per_val = sizeof(value)/sizeof(long);
         int constexpr num_int_per_val = sizeof(value)/sizeof(int);
         int constexpr num_short_per_val = sizeof(value)/sizeof(short);
