@@ -2737,7 +2737,7 @@ class SomeUnusedParamModel(nn.Module):
         self._use_sometimes = value
 
 
-class TestFSDPMissingParamGrad(FSDPTest):
+class TestFSDPDivergentRanks(FSDPTest):
     """
     This test makes sure that even when a layer is sometimes used during the forward of the backward computation
     in FSDP, the fsdp_params will gather all the params with the requires_grad=True flag so the reduce-scatter
@@ -2784,18 +2784,17 @@ class TestFSDPMissingParamGrad(FSDPTest):
         for param, param_clone in zip(
             model.parameters(), cloned_param_list, strict=True
         ):
-            assert torch.equal(param.full_tensor(), param_clone), (
-                "FSDP should not modify the original parameters"
+            self.assertEqual(
+                param.full_tensor(),
+                param_clone,
+                "FSDP backward should not corrupt values.",
             )
-
-
-class TestZeroGradMomentum(FSDPTest):
-    @property
-    def world_size(self) -> int:
-        return 2
 
     @skip_if_lt_x_gpu(2)
     def test_unused_param_optimizer_state_unchanged(self):
+        """
+        Test for divergent rank behavior where a parameter group is unused on both ranks.
+        """
         torch.cuda.set_device(self.rank)
         device = torch.device("cuda", self.rank)
 
@@ -2839,6 +2838,45 @@ class TestZeroGradMomentum(FSDPTest):
             state_after_use["exp_avg_sq"],
             state_after_skip["exp_avg_sq"],
             msg="exp_avg_sq changed for unused param — zero grad corrupted adaptive LR",
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_rank_divergent_shard_consistency(self):
+        """
+        Test for divergent rank behavior where a parameter group is unused on one rank and used on the other.
+        """
+        torch.cuda.set_device(self.rank)
+        device = torch.device("cuda", self.rank)
+
+        # Rank 0 uses sometimes_used, rank 1 does not
+        model = SomeUnusedParamModel(use_sometimes=self.rank == 0).to(device)
+        fully_shard(model)
+
+        x = torch.randn(2, 8, device=device)
+        loss = model(x).sum()
+        loss.backward()
+
+        # check if gradient was written back to sometimes_used on each rank
+        grad = model.sometimes_used.weight.grad
+        has_grad = grad is not None
+
+        # Gather has_grad from all ranks
+        has_grad_tensor = torch.tensor([int(has_grad)], device=device)
+        gathered = [
+            torch.zeros(1, device=device, dtype=torch.int64)
+            for _ in range(self.world_size)
+        ]
+        dist.all_gather(gathered, has_grad_tensor)
+        rank0_has_grad = gathered[0].item()
+        rank1_has_grad = gathered[1].item()
+
+        # Both ranks should have gradient for sometimes_used since rank 0 used it.
+        # If rank 1 has no gradient, then the optimizer will not update anything for rank 1's shard
+        # leading to inconsistencies in the shards amongst ranks.
+        self.assertTrue(
+            rank0_has_grad and rank1_has_grad,
+            f"Gradient not set on all ranks (rank0={bool(rank0_has_grad)}, rank1={bool(rank1_has_grad)}) "
+            "This indicates that the shard after reduce-scatter is inconsistent.",
         )
 
 

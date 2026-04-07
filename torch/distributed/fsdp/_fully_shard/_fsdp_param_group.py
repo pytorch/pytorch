@@ -259,6 +259,8 @@ class FSDPParamGroup:
         self._all_reduce_state: AllReduceState | None = None
         # Create a zero buffer for missing parameters
         self._zero_buf: torch.Tensor | None = None
+        # keep track of locally unused parameters indices for optimizer momentum and adaptive lrs
+        self._locally_unused_params: set[int] = set()
 
     # Initialization #
     def _init_mp_dtypes(self) -> None:
@@ -609,8 +611,9 @@ class FSDPParamGroup:
             # access the unsharded parameters when their data is present
             fsdp_params_with_grad: list[FSDPParam | None] = []
             unsharded_grads: list[torch.Tensor] = []
+            self._locally_unused_params.clear()
 
-            for fsdp_param in self.fsdp_params:
+            for i, fsdp_param in enumerate(self.fsdp_params):
                 if not hasattr(fsdp_param, "_unsharded_param"):
                     continue
                 # May have an accumulated gradient of the reduce dtype if the
@@ -625,7 +628,6 @@ class FSDPParamGroup:
                     fsdp_param.unsharded_param.grad = None
                 elif (
                     fsdp_param.sharded_param.requires_grad
-                    and not self.is_sharded
                     and self._zero_buf is not None
                 ):
                     # Models like the Qwen3 with mixture of experts will trigger different experts in different ranks.
@@ -636,6 +638,10 @@ class FSDPParamGroup:
                     zero_grad = self._zero_buf.expand(fsdp_param._orig_size)
                     fsdp_params_with_grad.append(fsdp_param)
                     unsharded_grads.append(fsdp_param.unsharded_zero_grad_data)
+                    self._locally_unused_params.add(
+                        i
+                    )  # keep track of the index of unused params.
+
             if self.reshard_after_backward:
                 self.reshard()
         # Wait on prior module's RS states (assumes backward fires groups
@@ -759,10 +765,22 @@ class FSDPParamGroup:
         self.comm_ctx._last_post_reduce_events = dict()
         self._post_reduce_event = None
         self._all_reduce_state = None
-        for fsdp_param in self.fsdp_params:
+        for i, fsdp_param in enumerate(self.fsdp_params):
+            # For unused parameters, we set their gradients to None to avoid optimizer issues
+            # (e.g. with momentum or adaptive methods) else keep the zero gradients for legitimate parameters
+            # to ensure consistent sharded parameters across ranks.
+            if (
+                i in self._locally_unused_params
+                and fsdp_param.sharded_param.grad is not None
+                and hasattr(fsdp_param.sharded_param.grad, "_local_tensor")
+                and not fsdp_param.sharded_param.grad._local_tensor.any()
+            ):
+                fsdp_param.sharded_param.grad = None
+
             if fsdp_param.grad_offload_event is not None:
                 fsdp_param.grad_offload_event.synchronize()
                 fsdp_param.grad_offload_event = None
+        self._locally_unused_params.clear()
         if self._all_gather_result is not None:
             # If there was a mistargeted unshard without a corresponding wait,
             # then we wait here and clear the unshard
