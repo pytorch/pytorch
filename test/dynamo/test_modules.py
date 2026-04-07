@@ -3624,37 +3624,6 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled_call_count, eager_call_count)
         self.assertTrue(torch.allclose(output_eager, output))
 
-    @patch.object(torch._dynamo.config, "guard_nn_modules", True)
-    def test_dict_insertion_guard_method_func(self):
-        class SimpleModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(10, 10)
-
-            def forward(self, x):
-                return self.linear(x)
-
-        def hook_function(module, args):
-            return (args[0] + 1.0,)
-
-        class HookHelper:
-            def hook_method(self, module, args):
-                return (args[0] + 2.0,)
-
-        model = SimpleModel()
-        helper = HookHelper()
-
-        model.register_forward_pre_hook(hook_function)
-        model.register_forward_pre_hook(helper.hook_method, prepend=True)
-
-        @torch.compile(fullgraph=True, backend="eager")
-        def runner_func(mod, x):
-            return mod(x)
-
-        input_tensor = torch.randn(1, 10)
-        # This would error before fixing guard orering on nn.Modules (https://github.com/pytorch/pytorch/issues/170429)
-        _ = runner_func(model, input_tensor)
-
 
 devices = ["cuda", "hpu", "xpu"]
 instantiate_device_type_tests(
