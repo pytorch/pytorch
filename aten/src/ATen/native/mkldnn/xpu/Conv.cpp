@@ -385,9 +385,7 @@ Tensor _convolution_out(
       ? get_cl_tag_by_ndim(input.ndimension())
       : at::MemoryFormat::Contiguous;
 
-  auto bias = bias_r.defined()
-      ? make_contiguous_and_aligned(bias_r)
-      : bias_r;
+  auto bias = bias_r.defined() ? make_contiguous_and_aligned(bias_r) : bias_r;
   input = make_contiguous_and_aligned(input, mfmt);
   weight = make_contiguous_and_aligned(weight, mfmt);
   check_shape_forward(input, weight, bias, params, true);
