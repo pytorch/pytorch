@@ -145,8 +145,7 @@ static inline std::tuple<Tensor, Tensor> ctc_loss_mps_template(const Tensor& log
 
   auto target_lengths_t = at::tensor(target_lengths, targets.options().dtype(kLong));
   auto input_lengths_t = at::tensor(input_lengths, targets.options().dtype(kLong));
-  // tg_batch_offsets = tg_batch_offsets.to(log_probs.device());
-  tg_batch_offsets = tg_batch_offsets.mps();
+  tg_batch_offsets = tg_batch_offsets.to(log_probs.device());
 
   Tensor log_alpha = at::empty({batch_size, log_probs.size(0), 2*max_target_length+1}, log_probs.options());
   Tensor neg_log_likelihood = at::empty({batch_size}, log_probs.options());
@@ -274,8 +273,7 @@ static inline Tensor ctc_loss_backward_mps_template(const Tensor& grad_out,
   }
   auto target_lengths_t = at::tensor(target_lengths, targets.options().dtype(kLong));
   auto input_lengths_t = at::tensor(input_lengths, targets.options().dtype(kLong));
-  // tg_batch_offsets = tg_batch_offsets.to(log_probs.device());
-  tg_batch_offsets = tg_batch_offsets.mps();
+  tg_batch_offsets = tg_batch_offsets.to(log_probs.device());
 
   Tensor log_beta = at::empty_like(log_alpha, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   log_beta.fill_(neginf);
