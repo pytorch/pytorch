@@ -21,8 +21,6 @@ function do_install() {
         curr_dir=$(pwd)
         tmp_dir=$(mktemp -d)
 
-        sudo apt update -y && sudo apt install -y libibverbs-dev
-
         git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git ${tmp_dir}/rocm-systems
         cd ${tmp_dir}/rocm-systems
         git sparse-checkout set --cone projects/rocshmem
