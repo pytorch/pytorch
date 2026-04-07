@@ -782,6 +782,10 @@ test_perf_for_dashboard() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
+  if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" ]]; then
+    mkdir -p "$TEST_REPORTS_DIR/profiler_traces"
+  fi
+
   local suite="$1"
   shift
 
@@ -841,50 +845,90 @@ test_perf_for_dashboard() {
       fi
 
       if [[ "$DASHBOARD_TAG" == *default-true* ]]; then
+        local profiler_trace_flags=()
+        if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
+          profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_${device}")
+        fi
         $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
+            "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *cudagraphs-true* ]]; then
+        local profiler_trace_flags=()
+        if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
+          profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_${device}")
+        fi
         $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" \
+            "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *dynamic-true* ]]; then
+        local profiler_trace_flags=()
+        if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
+          profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_dynamic_${suite}_${dtype}_${mode}_${device}")
+        fi
         $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
             --dynamic-batch-only "$@" \
+            "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *cppwrapper-true* ]]; then
+        local profiler_trace_flags=()
+        if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
+          profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_${device}")
+        fi
         TORCHINDUCTOR_CPP_WRAPPER=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
+            "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *freezing_cudagraphs-true* ]] && [[ "$mode" == "inference" ]]; then
+        local profiler_trace_flags=()
+        if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
+          profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_with_cudagraphs_freezing_${suite}_${dtype}_${mode}_${device}")
+        fi
         $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" --freezing \
+            "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_freezing_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *freeze_autotune_cudagraphs-true* ]] && [[ "$mode" == "inference" ]]; then
+        local profiler_trace_flags=()
+        if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
+          profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_with_cudagraphs_freezing_autotune_${suite}_${dtype}_${mode}_${device}")
+        fi
         TORCHINDUCTOR_MAX_AUTOTUNE=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" --freezing \
+            "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_freezing_autotune_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *aotinductor-true* ]] && [[ "$mode" == "inference" ]]; then
-        if [[ "$target" == "accuracy" ]]; then
           # Also collect Export pass rate and display as a separate row
+          if [[ "$target" == "accuracy" ]]; then
           $TASKSET python "benchmarks/dynamo/$suite.py" \
               "${target_flag[@]}" --"$mode" --"$dtype" --export --disable-cudagraphs "$@" \
               --output "$TEST_REPORTS_DIR/${backend}_export_${suite}_${dtype}_${mode}_${device}_${target}.csv"
         fi
+        local profiler_trace_flags=()
+        if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
+          profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_aot_inductor_${suite}_${dtype}_${mode}_${device}")
+        fi
         $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --export-aot-inductor --disable-cudagraphs "$@" \
+            "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_aot_inductor_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *maxautotune-true* ]]; then
+        local profiler_trace_flags=()
+        if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
+          profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_max_autotune_${suite}_${dtype}_${mode}_${device}")
+        fi
         TORCHINDUCTOR_MAX_AUTOTUNE=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" \
+            "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *deterministic_perf-true* ]]; then
@@ -919,9 +963,15 @@ test_single_dynamo_benchmark() {
   fi
 
   if [[ "${TEST_CONFIG}" == *perf_compare* ]]; then
+    local profiler_trace_flags=()
+    if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" ]]; then
+      mkdir -p "$TEST_REPORTS_DIR/profiler_traces"
+      profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${name}_${suite}")
+    fi
     python "benchmarks/dynamo/$suite.py" \
       --ci --performance --disable-cudagraphs --inductor \
       "${DYNAMO_BENCHMARK_FLAGS[@]}" "$@" "${partition_flags[@]}" \
+      "${profiler_trace_flags[@]}" \
       --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
   elif [[ "${TEST_CONFIG}" == *perf* ]]; then
     test_perf_for_dashboard "$suite" \
@@ -973,6 +1023,49 @@ test_inductor_pallas() {
 test_inductor_triton_cpu() {
   python test/run_test.py --include inductor/test_triton_cpu_backend.py inductor/test_torchinductor_strided_blocks.py --verbose
   assert_git_not_dirty
+}
+
+setup_torch_trace() {
+  if [[ "${ENABLE_TORCH_TRACE:-0}" != "1" ]]; then
+    return
+  fi
+  local trace_dir="${RUNNER_TEMP:-/tmp}/torch_traces"
+  mkdir -p "$trace_dir"
+  export TORCH_TRACE="$trace_dir"
+  echo "TORCH_TRACE enabled: writing structured trace logs to $trace_dir"
+}
+
+collect_tlparse_output() {
+  if [[ "${ENABLE_TORCH_TRACE:-0}" != "1" ]]; then
+    return
+  fi
+  local trace_dir="${RUNNER_TEMP:-/tmp}/torch_traces"
+  local test_reports_dir
+  test_reports_dir=$(pwd)/test/test-reports
+
+  if [[ ! -d "$trace_dir" ]] || [[ -z "$(ls -A "$trace_dir" 2>/dev/null)" ]]; then
+    echo "No torch trace files found in $trace_dir, skipping tlparse"
+    return
+  fi
+
+  echo "Collecting tlparse output from $trace_dir"
+
+  # Install tlparse if not already available
+  if ! command -v tlparse &>/dev/null; then
+    pip install tlparse 2>/dev/null || {
+      echo "Warning: failed to install tlparse, skipping HTML generation"
+      return
+    }
+  fi
+
+  # Run tlparse to generate HTML report
+  mkdir -p "$test_reports_dir/tlparse_output"
+  tlparse -o "$test_reports_dir/tlparse_output/" --no-browser --overwrite "$trace_dir" 2>&1 || {
+    echo "Warning: tlparse failed to generate HTML output"
+    return
+  }
+
+  echo "TLParse output generated in $test_reports_dir/tlparse_output/"
 }
 
 test_dynamo_benchmark() {
@@ -2158,7 +2251,9 @@ elif [[ "${TEST_CONFIG}" == *operator_microbenchmark* ]]; then
 elif [[ "${TEST_CONFIG}" == *attention_microbenchmark* ]]; then
   test_attention_microbenchmark
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
+  setup_torch_trace
   test_inductor_distributed
+  collect_tlparse_output
 elif [[ "${TEST_CONFIG}" == *inductor-halide* ]]; then
   test_inductor_halide
 elif [[ "${TEST_CONFIG}" == *inductor-pallas* ]]; then
@@ -2172,15 +2267,19 @@ elif [[ "${TEST_CONFIG}" == *aoti_cross_compile_for_windows* ]]; then
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   install_torchvision
   id=$((SHARD_NUMBER-1))
+  setup_torch_trace
   if [[ "${TEST_CONFIG}" == *unbacked_parity* ]]; then
     test_unbacked_parity_smoketest
   else
     test_dynamo_benchmark huggingface "$id"
   fi
+  collect_tlparse_output
 elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   install_torchvision
   id=$((SHARD_NUMBER-1))
+  setup_torch_trace
   test_dynamo_benchmark timm_models "$id"
+  collect_tlparse_output
 elif [[ "${TEST_CONFIG}" == cachebench ]]; then
   install_torchaudio
   install_torchvision
@@ -2211,19 +2310,27 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
       LIBTBB_PATH="$(find "$(dirname "$(which python)")/../lib/" -name libtbb.so.12)"
       export LD_PRELOAD="$LIBTBB_PATH":"$LD_PRELOAD"
     fi
+    setup_torch_trace
     PYTHONPATH=/torchbench test_dynamo_benchmark torchbench "$id"
+    collect_tlparse_output
   fi
 elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
   install_torchvision
+  setup_torch_trace
   PYTHONPATH=/torchbench test_inductor_cpp_wrapper_shard "$SHARD_NUMBER"
   if [[ "$SHARD_NUMBER" -eq "1" ]]; then
     test_inductor_aoti_cpp
   fi
+  collect_tlparse_output
 elif [[ "${TEST_CONFIG}" == *inductor_core* ]]; then
+  setup_torch_trace
   test_inductor_core
+  collect_tlparse_output
 elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision
+  setup_torch_trace
   test_inductor_shard "${SHARD_NUMBER}"
+  collect_tlparse_output
 elif [[ "${TEST_CONFIG}" == *einops* ]]; then
   test_einops
 elif [[ "${TEST_CONFIG}" == *dynamo_core* ]]; then

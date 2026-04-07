@@ -92,6 +92,18 @@ on:
         type: string
         default: ""
         description: CUDA version to use for the OSDC test.
+      export-profiler-trace:
+        description: |
+          If set to "1", export Chrome profiler traces from performance benchmarks.
+        required: false
+        type: string
+        default: ""
+      enable-torch-trace:
+        description: |
+          If set to "1", enable TORCH_TRACE structured logging and collect tlparse output.
+        required: false
+        type: string
+        default: ""
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
@@ -348,6 +360,8 @@ jobs:
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
           TESTS_TO_INCLUDE: ${{ inputs.tests-to-include }}
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
+          EXPORT_PROFILER_TRACE: ${{ inputs.export-profiler-trace }}
+          ENABLE_TORCH_TRACE: ${{ inputs.enable-torch-trace }}
           VLLM_TEST_HUGGING_FACE_TOKEN: ${{ secrets.VLLM_TEST_HUGGING_FACE_TOKEN }}
           HF_CACHE: /mnt/hf_cache
           # Use offline mode by default, only enable online mode to refresh the models
@@ -457,6 +471,8 @@ jobs:
             -e HF_DATASETS_OFFLINE \
             -e SCRIBE_GRAPHQL_ACCESS_TOKEN \
             -e DASHBOARD_TAG \
+            -e EXPORT_PROFILER_TRACE \
+            -e ENABLE_TORCH_TRACE \
             -e ARTIFACTS_FILE_SUFFIX \
             -e TORCH_TPU \
             -e TORCH_TPU_TEXT_FILE \
