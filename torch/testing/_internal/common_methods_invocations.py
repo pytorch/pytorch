@@ -16630,7 +16630,6 @@ op_db: list[OpInfo] = [
            supports_out=False,
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
                DecorateInfo(unittest.expectedFailure, 'TestInductorOpInfo', 'test_comprehensive'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
                # Error: The operator 'aten::_upsample_bilinear2d_aa_backward.grad_input'
