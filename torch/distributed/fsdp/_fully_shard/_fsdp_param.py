@@ -260,8 +260,26 @@ class FSDPParam:
         # `distribute_tensor` after https://github.com/pytorch/pytorch/issues/116101
         # TODO: Simplify the following sharded parameter padding logic after
         # https://github.com/pytorch/pytorch/issues/113045
+        if hasattr(param, "_fsdp_orig_uid"):
+            prev_owner = getattr(param, "_fsdp_orig_owner", "unknown")
+            curr_owner = (
+                f"{type(self._module_info.module).__qualname__}."
+                f"{self._module_info.param_name}"
+            )
+            raise ValueError(
+                f"Parameter '{curr_owner}' is already managed by another FSDP "
+                f"group (first claimed as '{prev_owner}'). This usually means "
+                f"the same module or parameter appears under multiple parents "
+                f"that were sharded separately. Either:\n"
+                f"  1. fully_shard the shared module before its parents, or\n"
+                f"  2. use fully_shard([parent_a, parent_b]) to group them."
+            )
         self.is_dtensor = isinstance(param, DTensor)
         self._orig_param_uid = _get_orig_param_uid(param)
+        param._fsdp_orig_owner = (  # pyrefly: ignore[missing-attribute]
+            f"{type(self._module_info.module).__qualname__}."
+            f"{self._module_info.param_name}"
+        )
         param_data = self._init_sharding_spec(param, fsdp_placement, shard_dim)
         if not param_data.is_contiguous():
             raise AssertionError(
@@ -324,6 +342,12 @@ class FSDPParam:
         # Let `param_data` be freed normally when its ref count reaches 0 when
         # the `fully_shard` call returns to allow provided parameters to alias
         self._setattr_on_modules(self.sharded_param)
+        self.sharded_param._fsdp_orig_uid = (  # pyrefly: ignore[missing-attribute]
+            self._orig_param_uid
+        )
+        self.sharded_param._fsdp_orig_owner = (  # pyrefly: ignore[missing-attribute]
+            param._fsdp_orig_owner
+        )
         self.sharded_state = ShardedState.SHARDED
 
     def _init_sharding_spec(

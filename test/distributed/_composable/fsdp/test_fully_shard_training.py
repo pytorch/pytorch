@@ -1102,10 +1102,10 @@ class TestFullyShardSharedParams(FSDPTest):
         model.tok_embeddings.reshard()
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
-    def test_shared_params_separate_fsdp_groups_error(self):
+    def test_tied_weight_across_fsdp_groups_error(self):
         """
         Test that applying fully_shard to modules with shared parameters
-        in separate calls raises an error at lazy init (first forward).
+        in separate calls raises an error at init time.
         """
         hidden_size = 16
         vocab_size = 17
@@ -1122,11 +1122,31 @@ class TestFullyShardSharedParams(FSDPTest):
 
         model = TiedModel()
         fully_shard(model.tok_embeddings)
-        fully_shard(model.output)
-        fully_shard(model)
-        ids = torch.randint(0, vocab_size, (2, 8), device=device_type.type)
-        with self.assertRaisesRegex(ValueError, "already managed by another"):
-            model(ids)
+        with self.assertRaisesRegex(ValueError, "already managed by another FSDP"):
+            fully_shard(model.output)
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_shared_module_across_fsdp_groups_error(self):
+        """
+        Test that applying fully_shard to two modules that share the same
+        child module raises an error at init time (not a confusing
+        RuntimeError about overlapping meshes).
+        """
+
+        class SharedModuleModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                shared = nn.Linear(16, 16)
+                self.branch_a = nn.Sequential(shared, nn.ReLU())
+                self.branch_b = nn.Sequential(shared, nn.ReLU())
+
+            def forward(self, x):
+                return self.branch_a(x) + self.branch_b(x)
+
+        model = SharedModuleModel().to(device_type.type)
+        fully_shard(model.branch_a)
+        with self.assertRaisesRegex(ValueError, "already managed by another FSDP"):
+            fully_shard(model.branch_b)
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
     def test_layer_by_layer_shard_no_false_positive(self):
