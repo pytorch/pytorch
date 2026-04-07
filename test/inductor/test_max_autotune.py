@@ -708,7 +708,7 @@ class TestMaxAutotune(TestCase):
         a = a.repeat(8, 8)
         b = b.repeat(8, 8)
 
-        torch._dynamo.mark_dynamic(a, 0)
+        torch._dynamo.maybe_mark_dynamic(a, 0)
 
         with config.patch(
             {
@@ -906,7 +906,7 @@ class TestMaxAutotune(TestCase):
         a = a.repeat(8, 8)
         b = b.repeat(8, 8)
 
-        torch._dynamo.mark_dynamic(a, 0)
+        torch._dynamo.maybe_mark_dynamic(a, 0)
 
         with config.patch(
             {
@@ -2131,20 +2131,32 @@ class TestMaxAutotune(TestCase):
 
         a = torch.randn(2, 3, 4, device=GPU_TYPE, dtype=torch.float16)
         b = torch.randn(2, 4, 5, device=GPU_TYPE, dtype=torch.float16)
+        expected = torch.bmm(a.float(), b.float())
+        with config.patch(
+            max_autotune=False,
+            max_autotune_gemm_backends="ATEN",
+        ):
+            compiled_f = torch.compile(f)
+            out, code = run_and_get_code(compiled_f, a, b)
+            FileCheck().check("extern_kernels.bmm_dtype").run(code[0])
+            self.assertEqual(out, expected, atol=1e-3, rtol=1e-3)
+
+    @unittest.skipIf(config.cpp_wrapper, "out_dtype override not supported for AOTI")
+    def test_triton_bmm_out_dtype(self):
+        def f(a, b, out_dtype=torch.float32):
+            return torch.bmm(a, b, out_dtype=out_dtype)
+
+        a = torch.randn(2, 3, 4, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.randn(2, 4, 5, device=GPU_TYPE, dtype=torch.float16)
+        expected = torch.bmm(a.float(), b.float())
         with config.patch(
             max_autotune=True,
             max_autotune_gemm_backends="TRITON",
         ):
             compiled_f = torch.compile(f)
-            with self.assertRaisesRegex(
-                torch._inductor.exc.InductorError,
-                r"LoweringException: NoValidChoicesError: No choices to select",
-            ):
-                out, code = run_and_get_code(compiled_f, a, b)
-
-        compiled_f = torch.compile(f)
-        out, code = run_and_get_code(compiled_f, a, b)
-        FileCheck().check("extern_kernels.bmm_dtype").run(code[0])
+            out, code = run_and_get_code(compiled_f, a, b, out_dtype=torch.float32)
+            FileCheck().check("triton_tem_fused_bmm").run(code[0])
+            self.assertEqual(out, expected, atol=1e-3, rtol=1e-3)
 
     def test_triton_template_generated_code_cache_key(self):
         generate_and_load_args = len(
@@ -2252,7 +2264,7 @@ class TestMaxAutotune(TestCase):
                         'num_consumer_groups':0,'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','tma_store':False,
                         'transpose_discontiguous_tensor_descriptors_override':None,
                         'kwargs':{'EVEN_K':False,'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32',
-                        'BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':True},
+                        'OUT_DTYPE':'tl.float32','BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':True},
                         'hint_override':None,'triton_meta':None}"""
 
                 expected = expected.replace("cuda", GPU_TYPE)
@@ -2293,7 +2305,7 @@ class TestMaxAutotune(TestCase):
                     'layout':"[[s77,s94],[s94,1],torch.float32,device(type='cuda',index=0),0]",'num_consumer_groups':0,
                     'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','tma_store':False,
                     'transpose_discontiguous_tensor_descriptors_override':None,
-                    'kwargs':{'EVEN_K':False,'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32','BLOCK_M':16,'BLOCK_N':32,
+                    'kwargs':{'EVEN_K':False,'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32','OUT_DTYPE':'tl.float32','BLOCK_M':16,'BLOCK_N':32,
                     'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':True},'hint_override':None,'triton_meta':None}"""
                 expected = expected.replace("cuda", GPU_TYPE)
                 self.assertExpectedInline(
