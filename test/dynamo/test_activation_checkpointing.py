@@ -3044,6 +3044,83 @@ def forward(self, arg0_1, arg1_1):
         )
 
 
+class ActivationCheckpointingNestedCompileTests(torch._dynamo.test_case.TestCase):
+    @requires_cuda_and_triton
+    def test_checkpoint_recompute_preserves_nested_fx_trace_policy(self):
+        from torch._guards import tracing, TracingContext
+        from torch._subclasses import FakeTensorMode
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.fx.traceback import preserve_node_meta
+
+        compiled_f = torch.compile(lambda x: x.sin().cos(), fullgraph=True)
+
+        @contextlib.contextmanager
+        def skip_nested_compile():
+            prev = torch._dynamo.config.error_on_nested_fx_trace
+            torch._dynamo.config.error_on_nested_fx_trace = False
+            try:
+                yield
+            finally:
+                torch._dynamo.config.error_on_nested_fx_trace = prev
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return checkpoint(self.block, x, use_reentrant=False)
+
+            def block(self, x):
+                return compiled_f(x)
+
+        m = M().cuda()
+        x = torch.randn(8, device="cuda", requires_grad=True)
+
+        def fn(x):
+            y = m(x).sum()
+            (gx,) = torch.autograd.grad(y, (x,))
+            return y.detach(), gx
+
+        fake_mode = FakeTensorMode(
+            allow_non_fake_inputs=True,
+            shape_env=torch.fx.experimental.symbolic_shapes.ShapeEnv(),
+        )
+        fx_x = fake_mode.from_tensor(x, static_shapes=True)
+        if x.requires_grad and not fx_x.requires_grad:
+            fx_x.requires_grad_(True)
+
+        ctx = TracingContext(fake_mode)
+
+        with (
+            fake_mode,
+            tracing(ctx),
+            preserve_node_meta(),
+            skip_nested_compile(),
+            torch.compiler._non_strict_tracing_context(),
+        ):
+            gm = make_fx(fn)(fx_x)
+
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x_1):
+    sin = torch.ops.aten.sin.default(x_1)
+    cos = torch.ops.aten.cos.default(sin);  sin = None
+    sum_1 = torch.ops.aten.sum.default(cos);  cos = None
+    ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format)
+    expand = torch.ops.aten.expand.default(ones_like, [8]);  ones_like = None
+    detach = torch.ops.aten.detach.default(x_1)
+    sin_1 = torch.ops.aten.sin.default(x_1);  x_1 = None
+    detach_1 = torch.ops.aten.detach.default(sin_1);  sin_1 = None
+    detach_2 = torch.ops.aten.detach.default(detach_1);  detach_1 = None
+    sin_2 = torch.ops.aten.sin.default(detach_2);  detach_2 = None
+    neg = torch.ops.aten.neg.default(sin_2);  sin_2 = None
+    mul = torch.ops.aten.mul.Tensor(expand, neg);  expand = neg = None
+    detach_3 = torch.ops.aten.detach.default(detach);  detach = None
+    cos_1 = torch.ops.aten.cos.default(detach_3);  detach_3 = None
+    mul_1 = torch.ops.aten.mul.Tensor(mul, cos_1);  mul = cos_1 = None
+    detach_4 = torch.ops.aten.detach.default(sum_1);  sum_1 = None
+    return (detach_4, mul_1)""",
+        )
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
