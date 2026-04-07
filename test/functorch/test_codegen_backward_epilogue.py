@@ -14,29 +14,13 @@ trace_structured, analogous to the "subclass_wrapper" artifact emitted
 by the forward path.
 """
 
-import importlib.util
 import logging
 from contextlib import contextmanager
 
 import torch
 import torch._functorch.config
-
-
-_orig_find_spec = importlib.util.find_spec
-
-
-def _no_numba_find_spec(name: str, *a: object, **kw: object) -> object:
-    if name == "numba":
-        return None
-    return _orig_find_spec(name, *a, **kw)
-
-
-importlib.util.find_spec = _no_numba_find_spec  # type: ignore[assignment]
-from torch.testing._internal.common_utils import run_tests, TestCase  # noqa: E402
-from torch.testing._internal.two_tensor import TwoTensor  # noqa: E402
-
-
-importlib.util.find_spec = _orig_find_spec  # type: ignore[assignment]
+from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.two_tensor import TwoTensor
 
 
 trace_log = logging.getLogger("torch.__trace")

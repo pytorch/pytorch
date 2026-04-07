@@ -116,6 +116,10 @@ zip = strict_zip
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
 
+def _unwrap_no_symints(args: list[Any]) -> list[Any]:
+    return runtime_unwrap_tensor_subclasses(args, append_symints=False)
+
+
 def _describe_arg_for_logging(arg: object) -> str:
     from torch._library import opaque_object
 
@@ -1334,11 +1338,23 @@ class AOTDedupeWrapper(CompilerWrapper):
         if not self.needs_post_compile:
             return compiled_fn
 
-        @wraps(compiled_fn)
-        def wrapped_compiled_fn(args: list[Any]) -> Any:
-            deduped_args = self.remove_dupe_args(args)
-            args.clear()
-            return compiled_fn(deduped_args)
+        keep_indices = [i for i, keep in enumerate(self.keep_arg_mask) if keep]
+        idx_list = ", ".join(f"args[{i}]" for i in keep_indices)
+        source = (
+            f"def inner_fn(args):\n"
+            f"    deduped_args = [{idx_list}]\n"
+            f"    args.clear()\n"
+            f"    return compiled_fn(deduped_args)\n"
+        )
+        from .subclass_codegen import _compile_and_exec_source
+
+        wrapped_compiled_fn: Callable[..., Any] = _compile_and_exec_source(  # type: ignore[assignment]
+            source,
+            {"compiled_fn": compiled_fn},
+            "inner_fn",
+            "dedup_wrapper",
+            wrapped_fn=compiled_fn,
+        )
 
         wrapped_compiled_fn._boxed_call = True  # type: ignore[attr-defined]
 
@@ -2139,7 +2155,7 @@ def _backward_prologue_functional(
         if codegen_unwrap_fn is not None:
             unwrap = codegen_unwrap_fn
         else:
-            unwrap = _unwrap_tensor_subclasses_no_symints
+            unwrap = _unwrap_no_symints
         all_args = (
             unwrap(all_args[:tangents_start_idx])
             + flat_processed_tangents
