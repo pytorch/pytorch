@@ -2708,13 +2708,18 @@ class Sort(Loops):
         sizevars = V.graph.sizevars
         sort_numel = sizevars.simplify(sympy_product(sort_ranges))
 
-        # Heuristic, smallest rblock where triton usually outperforms aten.sort
+        # Heuristic, smallest rblock where triton usually outperforms aten.sort.
         # It also isn't bandwidth bound so fusion is unlikely to help.
-        max_rblock = 512
-        is_persistent_kernel = (
-            config.triton.persistent_reductions
-            and sizevars.statically_known_true(sympy.Le(sort_numel, max_rblock))
-        )
+        # When decompose_sort_ops is enabled, skip the size limit to always
+        # attempt Triton sort (index dtype is widened to int32 in lowering).
+        if config.triton.decompose_sort_ops:
+            is_persistent_kernel = config.triton.persistent_reductions
+        else:
+            max_rblock = 512
+            is_persistent_kernel = (
+                config.triton.persistent_reductions
+                and sizevars.statically_known_true(sympy.Le(sort_numel, max_rblock))
+            )
         if not is_persistent_kernel:
             # We only support persistent triton kernels
             return [None] * len(dtypes)

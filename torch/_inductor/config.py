@@ -1776,6 +1776,15 @@ class triton:
         os.environ.get("TORCHINDUCTOR_PERSISTENT_REDUCTIONS", "1") == "1"
     )
 
+    # Decompose sort-based ops (sort, mode, median) to generate Triton
+    # kernels instead of falling back to ATen eager.  When enabled, sort
+    # removes the default 512-element dimension limit and uses int32
+    # indices (up to 2^31-1 elements), and mode/median decompose into
+    # sort + reduction / pointwise ops that Inductor can lower to Triton.
+    decompose_sort_ops: bool = (
+        os.environ.get("TORCHINDUCTOR_DECOMPOSE_SORT_OPS", "0") == "1"
+    )
+
     # For small output size reductions uses cross thread-block synchronization to gain more parallelism
     cooperative_reductions = (
         os.environ.get("TORCHINDUCTOR_COOPERATIVE_REDUCTIONS", "0") == "1"
