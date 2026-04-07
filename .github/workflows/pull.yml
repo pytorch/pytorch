@@ -123,9 +123,54 @@ jobs:
     secrets: inherit
 
   # ╠══════════════════════════════════════════════════════════════════════╣
+  # ║ linux-jammy-aarch64-py3.10-gcc11 (build + test)                      ║
+  # ╠══════════════════════════════════════════════════════════════════════╣
+  linux-jammy-aarch64-py3_10-gcc13-build:
+    name: linux-jammy-aarch64-py3.10
+    uses: ./.github/workflows/_linux-build.yml
+    needs:
+      - get-label-type
+      - job-filter
+    with:
+      runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
+      build-environment: linux-jammy-aarch64-py3.10
+      docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.10-gcc13
+      runner: linux.arm64.m8g.4xlarge
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m8g.4xlarge" },
+          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m8g.4xlarge" },
+          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m8g.4xlarge" },
+          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m8g.4xlarge" },
+          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m8g.4xlarge" },
+          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m8g.4xlarge" },
+        ]}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      python-version: "3.10"
+      compiler: gcc13
+    secrets: inherit
+
+  linux-jammy-aarch64-py3_10-gcc13-test:
+    name: linux-jammy-aarch64-py3.10
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-jammy-aarch64-py3_10-gcc13-build
+      - target-determination
+      - job-filter
+      - get-label-type
+    with:
+      build-environment: ${{ needs.linux-jammy-aarch64-py3_10-gcc13-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-aarch64-py3_10-gcc13-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-aarch64-py3_10-gcc13-build.outputs.test-matrix }}
+      tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      python-version: "3.10"
+      compiler: gcc13
+    secrets: inherit
+
+  # ╠══════════════════════════════════════════════════════════════════════╣
   # ║ linux-jammy-py3.14t-clang18 (build + test)                           ║
   # ╠══════════════════════════════════════════════════════════════════════╣
-
   linux-jammy-py3_14t-clang18-build:
     name: linux-jammy-py3.14t-clang18
     uses: ./.github/workflows/_linux-build.yml
