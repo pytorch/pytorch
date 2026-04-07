@@ -1,5 +1,7 @@
 #include <torch/csrc/autograd/python_function.h>
 
+#include <atomic>
+
 #include <ATen/ATen.h>
 #include <ATen/SequenceNumber.h>
 #include <c10/util/irange.h>
@@ -1304,11 +1306,14 @@ THPObjectPtr make_ctx_input_output_tuple(
   return result;
 }
 
-static PyObject* THPFunction_setup_context = nullptr;
-
 static PyObject* get_base_setup_context() {
-  if (THPFunction_setup_context != nullptr) {
-    return THPFunction_setup_context;
+  // NOTE: THPFunction_setup_context is intentionally leaked and never freed.
+  static std::atomic<PyObject*> THPFunction_setup_context = nullptr;
+
+  PyObject* setup_context =
+      THPFunction_setup_context.load(std::memory_order_acquire);
+  if (setup_context != nullptr) {
+    return setup_context;
   }
 
   auto module = THPObjectPtr(PyImport_ImportModule("torch.autograd.function"));
@@ -1322,11 +1327,17 @@ static PyObject* get_base_setup_context() {
 
   // setup_context gets "leaked" - we return a new reference and hold onto it
   // forever.
-  auto setup_context = PyObject_GetAttrString(function, "setup_context");
+  setup_context = PyObject_GetAttrString(function, "setup_context");
   if (!setup_context)
     return nullptr;
-  THPFunction_setup_context = setup_context;
-  return THPFunction_setup_context;
+
+  PyObject* expected = nullptr;
+  if (!THPFunction_setup_context.compare_exchange_strong(
+          expected, setup_context, std::memory_order_acq_rel)) {
+    Py_DECREF(setup_context);
+    return expected;
+  }
+  return setup_context;
 }
 
 PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
