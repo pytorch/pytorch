@@ -439,15 +439,19 @@ def _unique(
 
     return_if_dim_and_cpu = dim is not None and arg.fake_device == torch.device("cpu")
     if return_inverse or return_if_dim_and_cpu:
-        inverse = arg.new_empty(arg.shape if dim is None else (arg.shape[dim],))
+        inverse = arg.new_empty(
+            arg.shape if dim is None else (arg.shape[dim],), dtype=torch.int64
+        )
     else:
-        inverse = arg.new_empty(0)
+        inverse = arg.new_empty(0, dtype=torch.int64)
     ret.append(inverse)
 
     if return_counts or return_if_dim_and_cpu:
-        counts = arg.new_empty(ret[0].shape if dim is None else (ret[0].shape[dim],))
+        counts = arg.new_empty(
+            ret[0].shape if dim is None else (ret[0].shape[dim],), dtype=torch.int64
+        )
     else:
-        counts = arg.new_empty(0)
+        counts = arg.new_empty(0, dtype=torch.int64)
     ret.append(counts)
 
     return tuple(ret)
