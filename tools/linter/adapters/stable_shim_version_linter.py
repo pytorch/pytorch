@@ -236,7 +236,7 @@ def get_added_lines(filename: str) -> set[int]:
         # Check uncommitted changes (working directory vs HEAD)
         result = subprocess.run(
             ["git", "diff", "HEAD", filename],
-            capture_output=True,
+            check=False, capture_output=True,
             text=True,
             timeout=5,
         )
@@ -246,7 +246,7 @@ def get_added_lines(filename: str) -> set[int]:
         # Get merge-base with origin/main to check all PR commits
         result = subprocess.run(
             ["git", "fetch", "origin", "main"],
-            capture_output=True,
+            check=False, capture_output=True,
             text=True,
             timeout=600,
         )
@@ -257,7 +257,7 @@ def get_added_lines(filename: str) -> set[int]:
 
         result = subprocess.run(
             ["git", "merge-base", "HEAD", "origin/main"],
-            capture_output=True,
+            check=False, capture_output=True,
             text=True,
             timeout=5,
         )
@@ -271,7 +271,7 @@ def get_added_lines(filename: str) -> set[int]:
         merge_base = result.stdout.strip()
         result = subprocess.run(
             ["git", "diff", f"{merge_base}..HEAD", filename],
-            capture_output=True,
+            check=False, capture_output=True,
             text=True,
             timeout=5,
         )

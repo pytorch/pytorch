@@ -160,11 +160,11 @@ def apply_patch(patch_file: str, target_dir: str | None, strip_count: int) -> No
                 1, f"-d{target_dir}"
             )  # Insert -d option right after 'patch'
             print(f"Running command: {' '.join(patch_command)}")
-            result = subprocess.run(patch_command, capture_output=True, text=True)
+            result = subprocess.run(patch_command, check=False, capture_output=True, text=True)
         else:
             patch_command.insert(1, f"-d{target_dir}")
             print(f"Running command: {' '.join(patch_command)}")
-            result = subprocess.run(patch_command, capture_output=True, text=True)
+            result = subprocess.run(patch_command, check=False, capture_output=True, text=True)
 
         # Check if the patch was applied successfully
         if result.returncode != 0:

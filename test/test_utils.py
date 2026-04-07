@@ -813,7 +813,7 @@ class TestStandaloneCPPJIT(TestCase):
             for shell in [True, False]:
                 r = subprocess.run(
                     [exec_path],
-                    shell=shell,
+                    check=False, shell=shell,
                     stdout=subprocess.PIPE,
                 )
                 self.assertEqual(r.returncode, 0)

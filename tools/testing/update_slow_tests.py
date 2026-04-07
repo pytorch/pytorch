@@ -192,11 +192,11 @@ if __name__ == "__main__":
     if open_pr is not None:
         pr_num, branch_name = open_pr
 
-    subprocess.run(["git", "checkout", "-b", branch_name], cwd=REPO_ROOT)
-    subprocess.run(["git", "add", "test/slow_tests.json"], cwd=REPO_ROOT)
-    subprocess.run(["git", "commit", "-m", "Update slow tests"], cwd=REPO_ROOT)
+    subprocess.run(["git", "checkout", "-b", branch_name], check=False, cwd=REPO_ROOT)
+    subprocess.run(["git", "add", "test/slow_tests.json"], check=False, cwd=REPO_ROOT)
+    subprocess.run(["git", "commit", "-m", "Update slow tests"], check=False, cwd=REPO_ROOT)
     subprocess.run(
-        f"git push --set-upstream origin {branch_name} -f".split(), cwd=REPO_ROOT
+        f"git push --set-upstream origin {branch_name} -f".split(), check=False, cwd=REPO_ROOT
     )
 
     params = {

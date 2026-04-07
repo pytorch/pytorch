@@ -1303,7 +1303,7 @@ for t in threads:
 """
         result = subprocess.run(
             [sys.executable, "-c", script],
-            capture_output=True,
+            check=False, capture_output=True,
             timeout=60,
         )
         self.assertEqual(

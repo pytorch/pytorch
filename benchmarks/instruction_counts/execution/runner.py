@@ -266,7 +266,7 @@ class Runner:
             cmd = f'{source_cmd}{PYTHON_CMD} -c "import torch"'
             proc = subprocess.run(
                 cmd,
-                shell=True,
+                check=False, shell=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 encoding="utf-8",

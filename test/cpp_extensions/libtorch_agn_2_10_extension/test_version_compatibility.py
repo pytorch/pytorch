@@ -97,7 +97,7 @@ if not IS_WINDOWS:
 
             cmd.extend([str(source_file), "-o", str(output_file)])
 
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            result = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=30)
 
             if result.returncode == 0:
                 return True, ""
@@ -131,7 +131,7 @@ if not IS_WINDOWS:
 
             cmd.extend([str(source_file), "-o", str(output_file)])
 
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            result = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=30)
 
             if result.returncode == 0:
                 return True, ""

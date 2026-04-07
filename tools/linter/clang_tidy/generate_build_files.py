@@ -9,7 +9,7 @@ def run_cmd(cmd: list[str]) -> None:
     print(f"Running: {cmd}")
     result = subprocess.run(
         cmd,
-        capture_output=True,
+        check=False, capture_output=True,
     )
     stdout, stderr = (
         result.stdout.decode("utf-8").strip(),

@@ -4577,7 +4577,7 @@ except RuntimeError as e:
 """
         result = subprocess.run(
             [sys.executable, "-c", script],
-            capture_output=True,
+            check=False, capture_output=True,
             text=True,
         )
         self.assertEqual(result.returncode, 0, result.stderr)

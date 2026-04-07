@@ -724,7 +724,7 @@ def command_line_usage() -> None:
                 # mechanisms. The subprocess reads run_state and bisect_range from
                 # files, and writes the actual count during find_max_bounds.
 
-            result = subprocess.run(run_cmd, env=env)
+            result = subprocess.run(run_cmd, check=False, env=env)
             return result.returncode == 0
 
         bisection_manager.delete_bisect_status()

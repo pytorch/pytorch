@@ -3023,7 +3023,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
                 )
                 result = subprocess.run(
                     [sys.executable, "-c", script],
-                    env=env,
+                    check=False, env=env,
                     capture_output=True,
                     text=True,
                 )

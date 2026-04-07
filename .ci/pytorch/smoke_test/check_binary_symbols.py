@@ -131,7 +131,7 @@ def _compile_and_extract_symbols(
 
         result = subprocess.run(
             compile_flags + [str(cpp_file), "-o", str(obj_file)],
-            capture_output=True,
+            check=False, capture_output=True,
             text=True,
             timeout=60,
         )
@@ -212,7 +212,7 @@ int main() { return 0; }
 
             result = subprocess.run(
                 compile_flags + [str(cpp_file), "-o", str(obj_file)],
-                capture_output=True,
+                check=False, capture_output=True,
                 text=True,
                 timeout=60,
             )

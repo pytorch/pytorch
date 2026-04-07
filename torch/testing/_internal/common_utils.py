@@ -6015,7 +6015,7 @@ def remove_cpp_extensions_build_root():
         if IS_WINDOWS:
             # rmtree returns permission error: [WinError 5] Access is denied
             # on Windows, this is a workaround
-            subprocess.run(["rm", "-rf", default_build_root], stdout=subprocess.PIPE)
+            subprocess.run(["rm", "-rf", default_build_root], check=False, stdout=subprocess.PIPE)
         else:
             shutil.rmtree(default_build_root, ignore_errors=True)
 

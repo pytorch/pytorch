@@ -157,7 +157,7 @@ def _check_dylibs_minos(dylibs: list, expected_minos: str, source: str) -> None:
         try:
             result = subprocess.run(
                 ["otool", "-l", str(dylib)],
-                capture_output=True,
+                check=False, capture_output=True,
                 text=True,
                 timeout=30,
             )

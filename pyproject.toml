@@ -227,6 +227,7 @@ select = [
     "PLW1501", # bad open mode
     "PLW1507", # shallow copy os.environ
     "PLW1509", # preexec_fn not safe with threads
+    "PLW1510", # subprocess.run without explicit check
     "PLW2101", # useless lock statement
     "PLW3301", # nested min max
     "PT006", # TODO: enable more PT rules

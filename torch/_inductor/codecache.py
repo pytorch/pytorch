@@ -2978,7 +2978,7 @@ def _precompile_header(
             but calling a fast hashing utility in a subprocess is cheap."""
             # If Windows support needs to be added here, use certutil -hashfile.
             cmd_output = subprocess.run(
-                ("openssl", "sha512", filename), capture_output=True, text=True
+                ("openssl", "sha512", filename), check=False, capture_output=True, text=True
             )
             return cmd_output.stdout.split()[-1]
 

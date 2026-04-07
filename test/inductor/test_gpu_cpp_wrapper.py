@@ -265,7 +265,7 @@ class TestLazyCompileKernelCollision(InductorTestCase):
             # First run: cold compile, populates on-disk caches.
             r1 = subprocess.run(
                 [sys.executable, "-c", _LAZY_COMPILE_COLLISION_SCRIPT],
-                capture_output=True,
+                check=False, capture_output=True,
                 text=True,
                 env=env,
             )
@@ -273,7 +273,7 @@ class TestLazyCompileKernelCollision(InductorTestCase):
             # Second run: warm caches trigger the collision without the fix.
             r2 = subprocess.run(
                 [sys.executable, "-c", _LAZY_COMPILE_COLLISION_SCRIPT],
-                capture_output=True,
+                check=False, capture_output=True,
                 text=True,
                 env=env,
             )

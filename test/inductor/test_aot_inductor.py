@@ -8162,7 +8162,7 @@ import torch
 torch._inductor.aoti_load_package("{model_path}")
 """
             result = subprocess.run(
-                [sys.executable, "-c", script], capture_output=True, text=True
+                [sys.executable, "-c", script], check=False, capture_output=True, text=True
             )
             self.assertEqual(
                 result.returncode,

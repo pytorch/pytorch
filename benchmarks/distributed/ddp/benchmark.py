@@ -33,7 +33,7 @@ def allgather_object(obj):
 
 
 def allgather_run(cmd):
-    proc = subprocess.run(shlex.split(cmd), capture_output=True)
+    proc = subprocess.run(shlex.split(cmd), check=False, capture_output=True)
     if proc.returncode != 0:
         raise AssertionError(
             f"Command '{cmd}' failed with return code {proc.returncode}: {proc.stderr.decode('utf-8')}"
