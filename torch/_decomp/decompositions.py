@@ -1517,7 +1517,7 @@ def tensor_split_tensor_indices_or_sections_py_impl(
 
 
 # TODO: this doesn't appear to have enough precision in bfloat16
-@register_decomposition(aten.addmm)
+@register_decomposition([aten.addmm.default, aten.addmm.out])
 @out_wrapper(exact_dtype=True)
 @pw_cast_for_opmath
 def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 1):
@@ -1535,6 +1535,22 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
     # Alternative, we can write `(beta * self + out).contiguous()`, but it introduces another copy in some cases.
     # This implementation is not ideal, and we should revisit this when we have a better solution.
     return out + beta * self
+
+
+@register_decomposition([aten.addmm.dtype, aten.addmm.dtype_out])
+@out_wrapper(exact_dtype=True)
+def addmm_dtype(
+    self: Tensor,
+    mat1: Tensor,
+    mat2: Tensor,
+    out_dtype: torch.dtype,
+    beta: int = 1,
+    alpha: int = 1,
+):
+    out = alpha * torch.mm(mat1, mat2, out_dtype=out_dtype)
+    if beta == 0:
+        return out
+    return out + beta * self.to(out_dtype)
 
 
 @register_decomposition(aten._addmm_activation)
