@@ -6477,9 +6477,7 @@ def meta__flash_attention_forward(
             logsumexp_shape = (batch_size, max_seqlen_batch_q, num_heads)
         else:
             logsumexp_shape = (batch_size, num_heads, max_seqlen_batch_q)
-        logsumexp = torch.empty(
-            logsumexp_shape, dtype=torch.float, device=query.device
-        )
+        logsumexp = torch.empty(logsumexp_shape, dtype=torch.float, device=query.device)
     else:
         total_q = query.size(0)
         logsumexp = torch.empty(
