@@ -2065,9 +2065,6 @@ class MultiProcContinuousTest(TestCase):
         # Ensure processes are spawned (lazy initialization for instantiate_device_type_tests)
         self.__class__._ensure_processes_spawned()
 
-        for hook in _test_env_setup_hooks:
-            hook(world_size=self.world_size)
-
         # I am the dispatcher
         self.rank = self.MAIN_PROCESS_RANK
 
