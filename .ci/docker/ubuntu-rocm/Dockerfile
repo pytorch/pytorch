@@ -65,8 +65,9 @@ RUN if [ "${ROCM_VERSION}" != "nightly" ]; then bash ./install_miopen.sh ${ROCM_
 ADD ./common/install_rocm_drm.sh install_rocm_drm.sh
 RUN if [ "${ROCM_VERSION}" != "nightly" ]; then bash ./install_rocm_drm.sh /usr ; fi && rm install_rocm_drm.sh
 
-# Default ROCm environment; /etc/rocm_env.sh (created by install_rocm.sh) may
-# override these at runtime for different install methods (tarballs vs wheels).
+# Default ROCm environment for apt-based installs; /etc/rocm_env.sh (created by
+# install_rocm.sh) overrides these at runtime for wheel-based nightly installs
+# where ROCm lives in Python site-packages rather than /opt/rocm.
 ENV ROCM_PATH=/opt/rocm \
     ROCM_HOME=/opt/rocm \
     ROCM_SOURCE_DIR=/opt/rocm \
