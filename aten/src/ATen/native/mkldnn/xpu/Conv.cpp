@@ -384,9 +384,10 @@ Tensor _convolution_out(
   at::MemoryFormat mfmt = is_channels_last_suggested
       ? get_cl_tag_by_ndim(input.ndimension())
       : at::MemoryFormat::Contiguous;
-  auto bias = bias_r.defined() ? bias_r.contiguous() : bias_r;
-  input = input.contiguous(mfmt);
-  weight = weight.contiguous(mfmt);
+
+  auto bias = bias_r.defined() ? make_contiguous_and_aligned(bias_r) : bias_r;
+  input = make_contiguous_and_aligned(input, mfmt);
+  weight = make_contiguous_and_aligned(weight, mfmt);
   check_shape_forward(input, weight, bias, params, true);
 
   Tensor output;
@@ -591,9 +592,9 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
   auto mfmt = is_channels_last_suggested
       ? get_cl_tag_by_ndim(input_.ndimension())
       : at::MemoryFormat::Contiguous;
-  grad_output_ = grad_output_.contiguous(mfmt);
-  weight_ = weight_.contiguous(mfmt);
-  input_ = input_.contiguous(mfmt);
+  grad_output_ = make_contiguous_and_aligned(grad_output_, mfmt);
+  weight_ = make_contiguous_and_aligned(weight_, mfmt);
+  input_ = make_contiguous_and_aligned(input_, mfmt);
 
   auto opt = grad_output_.options();
   Tensor grad_input;
