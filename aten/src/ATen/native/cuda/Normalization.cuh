@@ -335,6 +335,7 @@ __global__ void batch_norm_collect_statistics_kernel(
 
   // first warpSum to get one value per thread to
   // one value per warp
+#pragma unroll
   for (int i = 0; i < getMSB(C10_WARP_SIZE); ++i) {
     stat_accscalar_t o_avg = WARP_SHFL_XOR(avg, 1 << i, C10_WARP_SIZE);
     int o_n = WARP_SHFL_XOR(n, 1 << i, C10_WARP_SIZE);
@@ -363,6 +364,7 @@ __global__ void batch_norm_collect_statistics_kernel(
     avg = (tid < blockDim.x * blockDim.y  / C10_WARP_SIZE ? shared_avg_var[2 * tid] : stat_accscalar_t(0));
     var_n = (tid < blockDim.x * blockDim.y  / C10_WARP_SIZE ? shared_avg_var[2 * tid + 1] : stat_accscalar_t(0));
   }
+#pragma unroll
   for (int i = 0; i < getMSB(C10_WARP_SIZE); ++i) {
     stat_accscalar_t o_avg = WARP_SHFL_XOR(avg, 1 << i, C10_WARP_SIZE);
     int o_n = WARP_SHFL_XOR(n, 1 << i, C10_WARP_SIZE);
@@ -586,6 +588,7 @@ __global__ void batch_norm_backward_elemt_kernel(
     GenericPackedTensorAccessor<input_scalar_t, 3, DefaultPtrTraits, index_t> grad_input,
     const int* __restrict__ numel, const int world_size) {
   int64_t total_numel = 0;
+#pragma unroll
   for (int i = 0; i < world_size; i ++) {
     total_numel += numel[i];
   }
@@ -1006,6 +1009,7 @@ batch_norm_collect_statistics_channels_last_kernel(
   int address_base = m_offset * stride + c_offset;
   int address_increment = inner_loop_stride * stride;
 
+#pragma unroll
   for (int i = 0; i < loop_count; i++) {
     accscalar_t x_math[PARALLEL_LOADS];
     accscalar_t x_count_inv[PARALLEL_LOADS];
@@ -1159,6 +1163,7 @@ __global__ void batch_norm_transform_input_channels_last_kernel(
   int address_base = m_offset * stride + c_offset;
   int address_increment = inner_loop_stride * stride;
 
+#pragma unroll
   for (int i = 0; i < loop_count; i++) {
 #pragma unroll
     for (int j = 0; j < PARALLEL_LOADS; j++) {
@@ -1249,6 +1254,7 @@ __global__ void batch_norm_backward_reduce_channels_last_kernel(
   auto r_mean = mean[c_offset];
   auto factor = inv_std[c_offset];
 
+#pragma unroll
   for (int i = 0; i < loop_count; i++) {
     accscalar_t x_input[PARALLEL_LOADS];
     accscalar_t x_grad_output[PARALLEL_LOADS];
@@ -1406,6 +1412,7 @@ __device__ __forceinline__ void batch_norm_backward_elemt_channels_last_kernel_i
   int address_base = m_offset * stride + c_offset;
   int address_increment = inner_loop_stride * stride;
 
+#pragma unroll
   for (int i = 0; i < loop_count; i++) {
 #pragma unroll
     for (int j = 0; j < PARALLEL_LOADS; j++) {
@@ -1441,6 +1448,7 @@ __global__ void batch_norm_backward_elemt_channels_last_kernel(
       const int stride) {
 
   int64_t total_numel = 0;
+#pragma unroll
   for (int i = 0; i < world_size; i++) {
     total_numel += numel[i];
   }
