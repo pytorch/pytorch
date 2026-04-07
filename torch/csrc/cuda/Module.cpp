@@ -297,6 +297,11 @@ PyObject* THCPModule_cudaCachingAllocator_raw_alloc(
     return nullptr;
   }
   auto size = PyLong_AsSsize_t(size_o);
+  TORCH_CHECK_VALUE(
+      size >= 0,
+      "Invalid memory size: ",
+      size,
+      ". caching_allocator_alloc requires a non-negative size.");
   cudaStream_t stream = static_cast<cudaStream_t>(PyLong_AsVoidPtr(stream_o));
   void* mem = nullptr;
   {
@@ -448,6 +453,14 @@ PyObject* THCPModule_cudaCachingAllocator_enable(
       THPUtils_typename(arg));
   c10::cuda::CUDACachingAllocator::enable(THPUtils_unpackBool(arg));
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THCPModule_cudaCachingAllocator_is_enabled(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return PyBool_FromLong(c10::cuda::CUDACachingAllocator::isEnabled());
   END_HANDLE_TH_ERRORS
 }
 
@@ -2110,6 +2123,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
     {"_cuda_cudaCachingAllocator_enable",
      THCPModule_cudaCachingAllocator_enable,
      METH_O,
+     nullptr},
+    {"_cuda_cudaCachingAllocator_is_enabled",
+     THCPModule_cudaCachingAllocator_is_enabled,
+     METH_NOARGS,
      nullptr},
     {"_cuda_getAllocatorBackend",
      THCPModule_getAllocatorBackend,

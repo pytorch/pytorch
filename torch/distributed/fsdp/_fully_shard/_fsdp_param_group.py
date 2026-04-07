@@ -205,11 +205,6 @@ class FSDPParamGroup:
         # Optional custom factor for the gradient reduction op (e.g. to divide
         # by a factor other than the world size)
         self.gradient_divide_factor: float | None = None
-        # Whether to include zero gradients for parameters that did not
-        # receive a gradient in backward (e.g. due to conditional parameter
-        # usage across ranks). This ensures all ranks participate in the same
-        # reduce-scatter collectives, avoiding collective mismatch errors.
-        self.reduce_scatter_unused_params: bool = False
         # Whether reduce-scatter and all-reduce should be issued using only
         # summations, potentially with separate pre-/post-scaling.
         self.force_sum_reduction_for_comms: bool = False
@@ -381,6 +376,7 @@ class FSDPParamGroup:
                 *self.comm_ctx.get_all_gather_streams(async_op, self._training_state),
                 self.device,
                 self._all_gather_comm,
+                self._label_suffix,
             )
 
     def wait_for_unshard(self):
@@ -538,7 +534,6 @@ class FSDPParamGroup:
             # access the unsharded parameters when their data is present
             fsdp_params_with_grad: list[FSDPParam] = []
             unsharded_grads: list[torch.Tensor] = []
-
             for fsdp_param in self.fsdp_params:
                 if not hasattr(fsdp_param, "_unsharded_param"):
                     continue
@@ -552,12 +547,6 @@ class FSDPParamGroup:
                     fsdp_params_with_grad.append(fsdp_param)
                     unsharded_grads.append(fsdp_param.unsharded_grad_data)
                     fsdp_param.unsharded_param.grad = None
-                elif (
-                    self.reduce_scatter_unused_params
-                    and fsdp_param.unsharded_param.requires_grad
-                ):
-                    fsdp_params_with_grad.append(fsdp_param)
-                    unsharded_grads.append(torch.zeros_like(fsdp_param.unsharded_param))
             if self.reshard_after_backward:
                 self.reshard()
         # Wait on prior module's RS states (assumes backward fires groups
@@ -624,6 +613,7 @@ class FSDPParamGroup:
                 self._partial_reduce_output,
                 self._all_reduce_hook,
                 self.force_sum_reduction_for_comms,
+                self._label_suffix,
             )
             self.comm_ctx.reduce_scatter_states.append(
                 ReduceScatterState(reduce_scatter_input, reduce_scatter_event)
@@ -849,11 +839,17 @@ class FSDPParamGroup:
             )
         return self.mesh_info.replicate_process_group
 
-    def _with_fqn(self, label: str) -> str:
-        if self._module_fqn:
-            label = f"{label} ({self._module_fqn})"
+    @property
+    def _label_suffix(self) -> str:
+        suffix = f"({self._module_fqn})" if self._module_fqn else ""
         if self._num_param_groups > 1 and isinstance(self.mesh_info, FSDPMeshInfo):
-            label = f"{label} [pg={self.mesh_info.shard_mesh_size}]"
+            suffix = f"{suffix} [pg={self.mesh_info.shard_mesh_size}]".lstrip()
+        return suffix
+
+    def _with_fqn(self, label: str) -> str:
+        suffix = self._label_suffix
+        if suffix:
+            return f"{label} {suffix}"
         return label
 
     def __repr__(self):

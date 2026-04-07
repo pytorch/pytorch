@@ -895,7 +895,7 @@ bool is_tensor_and_append_overloaded(
 static bool is_scalar_list(
     PyObject* obj,
     std::vector<PyObject*>* overloaded_args = nullptr) {
-  auto tuple = six::isTuple(obj);
+  auto tuple = PyTuple_Check(obj);
   if (!(tuple || PyList_Check(obj))) {
     return false;
   }
@@ -926,7 +926,7 @@ bool is_tensor_list_and_append_overloaded(
     std::vector<PyObject*>* overloaded_args,
     size_t argnum,
     bool throw_error) {
-  auto tuple = six::isTuple(obj);
+  auto tuple = PyTuple_Check(obj);
   if (!(tuple || PyList_Check(obj))) {
     return false;
   }
@@ -967,7 +967,7 @@ static bool is_float_or_symfloat(PyObject* obj) {
 static bool is_float_or_complex_list(
     PyObject* obj,
     std::vector<PyObject*>* overloaded_args = nullptr) {
-  auto tuple = six::isTuple(obj);
+  auto tuple = PyTuple_Check(obj);
   if (!(tuple || PyList_Check(obj))) {
     return false;
   }

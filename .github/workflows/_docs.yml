@@ -215,3 +215,15 @@ jobs:
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()
+
+  memory-viz-tests:
+    # Tests for torch memory visualizer
+    # tag shangdiy for any issue with this test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Run MemoryViz JS tests (nonretryable)
+        run: node test/profiler/test_memory_viz.js

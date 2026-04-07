@@ -1488,6 +1488,56 @@ def forward(self, arg0_1):
         _, spec_c = pytree.tree_flatten(mask_c)
         self.assertNotEqual(spec_a, spec_c)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_blockmask_and_masks_closure_extraction(self):
+        """and_masks closure tensors are recursively extracted into pytree leaves.
+
+        and_masks(fn1, fn2) returns a closure capturing a tuple of functions.
+        _extract_closure_pytree must recursively process these functions
+        (extracting their closure tensors) rather than emitting the functions
+        themselves as leaves, since functions are not supported export input
+        types.
+        """
+        from torch.nn.attention.flex_attention import (
+            and_masks,
+            BlockMask,
+            create_block_mask,
+        )
+
+        _register_blockmask_pytree()
+
+        def causal(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        offset = torch.tensor(3, device="cuda")
+
+        def offset_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx + offset
+
+        mask_mod = and_masks(causal, offset_mask)
+        block_mask = create_block_mask(
+            mask_mod, B=1, H=None, Q_LEN=128, KV_LEN=128, device="cuda"
+        )
+
+        leaves, spec = pytree.tree_flatten(block_mask)
+
+        # 8 regular BlockMask tensor attrs + offset extracted from
+        # offset_mask's closure
+        n_regular = len(BlockMask._TENSOR_ATTRS)
+        self.assertEqual(len(leaves), n_regular + 1)
+        self.assertTrue(all(isinstance(l, torch.Tensor) for l in leaves))
+        self.assertIs(leaves[n_regular], offset)
+
+        # Leaves must all pass check_user_input_output
+        from torch._dynamo.eval_frame import check_user_input_output
+        from torch._dynamo.exc import UserErrorType
+
+        check_user_input_output(leaves, UserErrorType.INVALID_INPUT)
+
+        # Round-trip: unflatten should reconstruct a working mask_mod
+        restored = pytree.tree_unflatten(leaves, spec)
+        self.assertTrue(callable(restored.mask_mod))
+
     def test_aot_export_closure_buffer_mutation(self):
         class Mod(torch.nn.Module):
             def __init__(self):

@@ -22,11 +22,18 @@ from torch import Tensor
 from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
 from torch._higher_order_ops.utils import setup_compilation_env
 from torch.nn.attention._utils import _validate_sdpa_input
-from torch.utils._pytree import GetAttrKey, tree_flatten, tree_map_only, tree_unflatten
+from torch.utils._pytree import (
+    GetAttrKey,
+    tree_flatten,
+    tree_map_only,
+    tree_unflatten,
+    TreeSpec,
+)
 
 
 if typing.TYPE_CHECKING:
     from torch._prims_common import DeviceLikeType
+    from torch.fx.node import BaseArgumentTypes
 
 
 # Private debug flag to disable internal compilation wrapping for debugging purposes.
@@ -447,6 +454,29 @@ def _adjust_num_blocks_and_indices(
 _EMPTY_CLOSURE_SPEC = tree_flatten(())[1]
 
 
+class _ExtractedLeaf:
+    """Sentinel in _StrippedClosure.leaf_entries marking a position that is
+    filled from the extracted pytree leaves list during reconstruction."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "_EXTRACTED_LEAF"
+
+
+_EXTRACTED_LEAF = _ExtractedLeaf()
+
+
+class _FunctionLeaf(typing.NamedTuple):
+    """Entry in _StrippedClosure.leaf_entries for a recursively processed
+    function.  Stores enough information to reconstruct the function from
+    the extracted leaves during unflattening."""
+
+    stripped: _StrippedClosure | Callable[..., Any]
+    closure_spec: TreeSpec
+    n_extracted: int  # number of extracted leaves this function contributes
+
+
 class _StrippedClosure(typing.NamedTuple):
     """Data container holding the parts of a function needed for reconstruction.
 
@@ -462,16 +492,31 @@ class _StrippedClosure(typing.NamedTuple):
     defaults: tuple[Any, ...] | None
     kwdefaults: dict[str, Any] | None
     extra_dict: dict[str, Any]
+    # Per-position info for the closure's flattened leaves.
+    # _EXTRACTED_LEAF → position filled from the extracted leaves list.
+    # _FunctionLeaf   → recursively processed function (not a valid pytree leaf).
+    leaf_entries: tuple[_ExtractedLeaf | _FunctionLeaf, ...]
 
 
-def _extract_closure_pytree(fn):
+def _extract_closure_pytree(
+    fn, _seen: set[int] | None = None
+) -> tuple[
+    tuple[BaseArgumentTypes, ...], TreeSpec, _StrippedClosure | Callable[..., Any]
+]:
     """Extract closure contents as a flattened sub-pytree.
 
-    Returns (closure_leaves, closure_spec, fn_or_stripped) where:
-    - closure_leaves: flattened tensor/scalar contents from the closure
+    Returns (extracted_leaves, closure_spec, fn_or_stripped) where:
+    - extracted_leaves: flattened non-function contents from the closure,
+      plus any tensors/scalars recursively extracted from nested function
+      closures
     - closure_spec: TreeSpec describing how to reconstruct the closure contents
     - fn_or_stripped: either the original fn (no extraction) or a
       _StrippedClosure carrying the function parts needed for reconstruction
+
+    Functions found among the closure leaves are recursively processed: their
+    own closure tensors are extracted into the leaves list, and their skeleton
+    is stored in _StrippedClosure.leaf_entries as a _FunctionLeaf.  All other
+    values (tensors, scalars, None, etc.) remain as extracted leaves.
 
     If fn is not a plain function, has no closure, or has empty cells, returns
     the original function unchanged with no closure leaves.
@@ -482,6 +527,13 @@ def _extract_closure_pytree(fn):
     """
     if not inspect.isfunction(fn) or torch.compiler.is_compiling():
         return (), _EMPTY_CLOSURE_SPEC, fn
+
+    # Cycle detection for self-referencing closures.
+    if _seen is None:
+        _seen = set()
+    if id(fn) in _seen:
+        return (), _EMPTY_CLOSURE_SPEC, fn
+    _seen.add(id(fn))
 
     closure = fn.__closure__
     if not closure:
@@ -495,6 +547,21 @@ def _extract_closure_pytree(fn):
 
     closure_leaves, closure_spec = tree_flatten(contents)
 
+    extracted: list[BaseArgumentTypes] = []
+    leaf_entries: list[_ExtractedLeaf | _FunctionLeaf] = []
+    for leaf in closure_leaves:
+        if inspect.isfunction(leaf):
+            child_extracted, child_spec, child_stripped = _extract_closure_pytree(
+                leaf, _seen
+            )
+            extracted.extend(child_extracted)
+            leaf_entries.append(
+                _FunctionLeaf(child_stripped, child_spec, len(child_extracted))
+            )
+        else:
+            extracted.append(leaf)
+            leaf_entries.append(_EXTRACTED_LEAF)
+
     stripped = _StrippedClosure(
         code=fn.__code__,
         globals_dict=fn.__globals__,
@@ -503,17 +570,34 @@ def _extract_closure_pytree(fn):
         defaults=fn.__defaults__,
         kwdefaults=fn.__kwdefaults__,
         extra_dict=dict(fn.__dict__) if fn.__dict__ else {},
+        leaf_entries=tuple(leaf_entries),
     )
 
-    return tuple(closure_leaves), closure_spec, stripped
+    return tuple(extracted), closure_spec, stripped
 
 
-def _reconstruct_closure_fn(stripped, closure_leaves, closure_spec):
-    """Rebuild a function from a _StrippedClosure and flattened closure leaves."""
+def _reconstruct_closure_fn(stripped, extracted_leaves, closure_spec):
+    """Rebuild a function from a _StrippedClosure and flattened extracted leaves."""
     if not isinstance(stripped, _StrippedClosure):
         return stripped
 
-    contents = tree_unflatten(list(closure_leaves), closure_spec)
+    all_leaves: list[BaseArgumentTypes | Callable[..., Any]] = []
+    idx = 0
+    for entry in stripped.leaf_entries:
+        if isinstance(entry, _FunctionLeaf):
+            child_fn = _reconstruct_closure_fn(
+                entry.stripped,
+                extracted_leaves[idx : idx + entry.n_extracted],
+                entry.closure_spec,
+            )
+            all_leaves.append(child_fn)
+            idx += entry.n_extracted
+        else:
+            # _EXTRACTED_LEAF — take from extracted leaves
+            all_leaves.append(extracted_leaves[idx])
+            idx += 1
+
+    contents = tree_unflatten(all_leaves, closure_spec)
     new_cells = tuple(types.CellType(v) for v in contents)
 
     restored = types.FunctionType(
@@ -1146,7 +1230,7 @@ class BlockMask:
 
     def _flatten(
         self,
-    ) -> tuple[tuple[Tensor | None, ...], tuple[Any, ...]]:
+    ) -> tuple[tuple[BaseArgumentTypes | None, ...], tuple[Any, ...]]:
         """Flatten BlockMask into a list of tensors and context.
 
         Closure tensors from mask_mod are extracted into the leaves via

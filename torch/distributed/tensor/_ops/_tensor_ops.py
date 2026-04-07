@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from collections.abc import Sequence, Sized
+from collections.abc import Callable, Sequence, Sized
 from typing import cast
 
 import torch
@@ -1128,21 +1128,52 @@ def index_put_single_dim_strategy(
     index_shapes = [idx.shape for idx in indices_meta if idx is not None]
     broadcast_ndim = len(torch.broadcast_shapes(*index_shapes)) if index_shapes else 0
 
-    # values shape = (*broadcast_shape, *non_indexed_dim_sizes)
     # Strategy format: [output, input, *indices, value]
     # The infra flattens the indices list and drops None entries, so only
     # non-None index tensors get a placement slot (all Replicate).
+    #
+    # Values dim mapping depends on whether indexed dims are contiguous:
+    #   Contiguous (e.g., (None, idx0, idx1)): broadcast replaces indexed block in-place.
+    #     values shape = (*non_indexed_before, *broadcast_shape, *non_indexed_after)
+    #   Non-contiguous (e.g., (idx0, None, idx1)): broadcast goes to front.
+    #     values shape = (*broadcast_shape, *non_indexed_dim_sizes)
+    indexed_dims_sorted = sorted(indexed_dims)
+    contiguous_indexed = len(indexed_dims_sorted) <= 1 or (
+        indexed_dims_sorted[-1] - indexed_dims_sorted[0] + 1 == len(indexed_dims_sorted)
+    )
+
     strategies: list[list[Placement | _ShardingPlaceholder]] = []
-    for values_dim in range(broadcast_ndim, values_ndim):
-        self_dim = non_indexed_dims[values_dim - broadcast_ndim]
+    for i, self_dim in enumerate(non_indexed_dims):
+        if contiguous_indexed and indexed_dims_sorted:
+            # Broadcast replaces the indexed block in-place.
+            first_indexed = indexed_dims_sorted[0]
+            if self_dim < first_indexed:
+                values_dim = self_dim
+            else:
+                values_dim = self_dim - n_indexed + broadcast_ndim
+        else:
+            # Broadcast goes to front (non-contiguous or no indexed dims).
+            values_dim = broadcast_ndim + i
+
+        # values_dim is the position in the result tensor, but values may
+        # have fewer dims (right-aligned broadcasting). Convert to the
+        # actual values tensor dimension.
+        result_ndim = broadcast_ndim + len(non_indexed_dims)
+        values_tensor_dim = values_dim - (result_ndim - values_ndim)
+
+        if values_tensor_dim < 0:
+            values_placement: Placement | _ShardingPlaceholder = Replicate()
+        elif values_meta.shape[values_tensor_dim] == 1:
+            values_placement = Replicate()
+        else:
+            values_placement = _ShardingPlaceholder(values_tensor_dim)
+
         strategies.append(
             [
                 _ShardingPlaceholder(self_dim),
                 _ShardingPlaceholder(self_dim),
                 *([Replicate()] * n_indexed),
-                Replicate()
-                if values_meta.shape[values_dim] == 1
-                else _ShardingPlaceholder(values_dim),
+                values_placement,
             ]
         )
 
@@ -1156,6 +1187,98 @@ def index_put_single_dim_strategy(
         ]
     )
     return strategies
+
+
+def _index_dim_strategy(
+    args_schema: ArgsType,
+    shard_row: Callable[[int], list[Placement | _ShardingPlaceholder]],
+    partial_rules: list[list[Placement | _ShardingPlaceholder]] | None = None,
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """Common strategy for index ops that shard on all dims except the indexed dim.
+
+    Args:
+        shard_row: given a dim d, returns the strategy row for sharding on that dim.
+        partial_rules: additional Partial passthrough strategies.
+    """
+    self_meta = cast(TensorMeta, args_schema[0])
+    ndim = len(self_meta.shape)
+    dim = normalize_dim(cast(int, args_schema[1]), ndim)
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for d in range(ndim):
+        if d != dim:
+            strategies.append(shard_row(d))
+    if partial_rules:
+        strategies.extend(partial_rules)
+    return strategies
+
+
+@register_single_dim_strategy(
+    [aten.index_fill.int_Scalar, aten.index_fill_.int_Scalar],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def index_fill_scalar_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    # index_fill(self, dim, index, value) — fills self[..., index, ...] with scalar value.
+    # Partial rules: each rank fills with the same scalar v, then reduces.
+    # Only idempotent reduces work: avg(v,v,...,v)=v, max(v,v,...,v)=v, min(v,v,...,v)=v.
+    # sum and product fail: sum(v,v,...,v)=nv, product(v,v,...,v)=v^n.
+    return _index_dim_strategy(
+        args_schema,
+        lambda d: [
+            _ShardingPlaceholder(d),  # result
+            _ShardingPlaceholder(d),  # self
+            Replicate(),  # value (scalar, same on all ranks)
+        ],
+        [[Partial(op), Partial(op), Replicate()] for op in ("avg", "max", "min")],
+    )
+
+
+@register_single_dim_strategy(
+    [aten.index_fill.int_Tensor, aten.index_fill_.int_Tensor],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def index_fill_tensor_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    # index_fill(self, dim, index, value) — fills self[..., index, ...] with 0-d tensor value.
+    # Partial rules: each rank fills with its partial value v_i, then reduces.
+    # All reduce ops work because reduce(v_0, ..., v_{n-1}) = V (the global value)
+    # regardless of op, since fill is a pure replacement (no mixing with self).
+    return _index_dim_strategy(
+        args_schema,
+        lambda d: [
+            _ShardingPlaceholder(d),  # result
+            _ShardingPlaceholder(d),  # self
+            Replicate(),  # index
+            Replicate(),  # value
+        ],
+        [
+            [Partial(op), Partial(op), Replicate(), Partial(op)]
+            for op in Partial.ALL_REDUCE_OPS
+        ],
+    )
+
+
+@register_single_dim_strategy(
+    [aten.index_reduce.default, aten.index_reduce_.default],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def index_reduce_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    # index_reduce(self, dim, index, source, reduce) — reduces source into self at index positions.
+    # No partial rules: reduce ops are "mean"/"amax"/"amin"/"prod", which don't match
+    # any Partial reduce op names ("avg"/"max"/"min"/"product"/"sum").
+    return _index_dim_strategy(
+        args_schema,
+        lambda d: [
+            _ShardingPlaceholder(d),  # result
+            _ShardingPlaceholder(d),  # self
+            Replicate(),  # index
+            _ShardingPlaceholder(d),  # source
+        ],
+    )
 
 
 @register_op_strategy(

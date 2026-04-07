@@ -19,6 +19,7 @@ import torch.fx.graph as fx_graph
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._dynamo.bytecode_transformation import transform_code_object
+from torch._dynamo.compile_options import DynamoCompileOptions
 from torch._dynamo.exc import PackageError
 from torch._dynamo.guards import CheckFunctionManager, CompileId
 from torch._dynamo.package import CompilePackage
@@ -409,14 +410,11 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
                 torch.overrides._get_current_function_mode_stack(),
                 code_options,
                 torch._dynamo.lookup_backend("eager"),
-                one_graph=False,
-                export=False,
-                export_constraints=None,
+                compile_options=DynamoCompileOptions(),
                 frame_state=None,
                 speculation_log=SpeculationLog(),
                 exn_vt_stack=ExceptionStack(),
                 distributed_state=None,
-                package=None,
             )
             with (
                 compile_context(

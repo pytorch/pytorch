@@ -29,7 +29,6 @@ import dataclasses
 import enum
 import functools
 import inspect
-import itertools
 import random
 import sys
 import threading
@@ -45,6 +44,7 @@ import torch._dynamo.config
 import torch.nn
 from torch._guards import Source, TracingContext
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
+from torch.utils._pytree import GetAttrKey, is_structseq_class
 
 from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function
@@ -64,7 +64,6 @@ from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
     CallFunctionNoArgsSource,
-    DataclassFieldsSource,
     DictGetItemSource,
     GetItemSource,
     RandomValueSource,
@@ -80,7 +79,6 @@ from ..utils import (
     frozenset_methods,
     get_custom_getattr,
     has_torch_function,
-    is_frozen_dataclass,
     is_lru_cache_wrapped_function,
     is_namedtuple_cls,
     is_wrapper_or_member_descriptor,
@@ -283,9 +281,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     @staticmethod
     def is_supported_new_method(value: object) -> bool:
-        # TODO(anijain2305) - Extend this to support objects with default tp_new
-        # functions.
-        return value in UserDefinedClassVariable.supported_c_new_functions()
+        if value in UserDefinedClassVariable.supported_c_new_functions():
+            return True
+        # Structseq types each define their own C tp_new.
+        owner = getattr(value, "__self__", None)
+        return isinstance(owner, type) and is_structseq_class(owner)
 
     def can_constant_fold_through(self) -> bool:
         if self.value in self._constant_fold_classes():
@@ -1000,9 +1000,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 kwargs,
             )
         elif is_namedtuple_cls(self.value):
-            fields = namedtuple_fields(self.value)  # type: ignore[arg-type]
-            # check if this a quasi-namedtuple or a real one
-            if self.value.__module__ == "torch.return_types":
+            if is_structseq_class(self.value):
                 if kwargs or len(args) != 1:
                     raise_args_mismatch(
                         tx,
@@ -1010,41 +1008,26 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         "1 args and 0 kwargs",
                         f"{len(args)} args and {len(kwargs)} kwargs",
                     )
-                items = args[0].force_unpack_var_sequence(tx)
+                # Structseq tp_new is a C function, so we can't trace into
+                # it like namedtuples. Use track_new_user_defined_object
+                # directly with self as both base_cls_vt and cls_vt.
+                return tx.output.side_effects.track_new_user_defined_object(
+                    self,
+                    self,
+                    list(args),
+                )
             else:
-                field_defaults = self.value._field_defaults  # type: ignore[attr-defined]
-
-                items = list(args)
-                # pyrefly: ignore[bad-argument-type]
-                items.extend([None] * (len(fields) - len(items)))
-
-                var_tracker_kwargs: dict[str, VariableTracker] = {}
-                for field_name, var_tracker in zip(fields, items):
-                    if var_tracker is None:
-                        if field_name in kwargs:
-                            field_var = kwargs[field_name]
-                        else:
-                            assert field_name in field_defaults
-                            field_var = VariableTracker.build(
-                                tx, field_defaults[field_name]
-                            )
-                        var_tracker_kwargs[field_name] = field_var
-
-                for name, value in var_tracker_kwargs.items():
-                    assert name in fields
-                    items[fields.index(name)] = value  # type: ignore[call-overload]
-
-                assert all(x is not None for x in items)
-
-            # Modify mutability of namedtuple for sourcelesss instantiations.
-            from .base import AttributeMutationNew
-            from .lists import NamedTupleVariable
-
-            return NamedTupleVariable(
-                items,
-                self.value,  # type: ignore[arg-type]
-                mutation_type=AttributeMutationNew(),
-            )
+                # Namedtuple __new__ is a Python function that calls
+                # tuple.__new__(cls, (field_values,)). Let Dynamo trace
+                # into it so default values and kwargs are handled by
+                # the generated __new__ itself.
+                return tx.inline_user_function_return(
+                    VariableTracker.build(
+                        tx, polyfills.instantiate_user_defined_class_object
+                    ),
+                    [self, *args],
+                    kwargs,
+                )
         elif self.value is torch.Size:
             # This simulates `THPSize_pynew`, the C impl for `Size.__new__`.
             from .lists import SizeVariable
@@ -1061,49 +1044,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 "because validation mutates the instance outside traced bytecode.",
                 hints=graph_break_hints.SUPPORTABLE,
             )
-        elif is_frozen_dataclass(self.value) and self.is_standard_new():
-            fields = dataclasses.fields(self.value)  # type: ignore[arg-type]
-            assert self.source is not None
-            fields_source = DataclassFieldsSource(self.source)
-            items = list(args)
-            items.extend([None] * (len(fields) - len(items)))  # type: ignore[arg-type]
-
-            default_kwargs = {}
-            for ind, field, var_tracker in zip(itertools.count(), fields, items):
-                if var_tracker is None:
-                    if field.name in kwargs:
-                        var_tracker = kwargs[field.name]
-                    else:
-                        if not field.init:
-                            continue
-
-                        if field.default is not dataclasses.MISSING:
-                            var_tracker = VariableTracker.build(
-                                tx,
-                                field.default,
-                                source=AttrSource(
-                                    GetItemSource(fields_source, ind), "default"
-                                ),
-                            )
-                        elif field.default_factory is not dataclasses.MISSING:
-                            factory_fn = VariableTracker.build(
-                                tx, field.default_factory
-                            )
-                            var_tracker = factory_fn.call_function(tx, [], {})
-                        else:
-                            # if we are subclass, the constructor could possibly
-                            # be missing args
-                            continue
-
-                    default_kwargs[field.name] = var_tracker
-            kwargs.update(default_kwargs)
-            var = tx.output.side_effects.track_new_user_defined_object(
-                SourcelessBuilder.create(tx, object),
-                self,
-                args,  # type: ignore[arg-type]
-            )
-            var.call_method(tx, "__init__", args, kwargs)  # type: ignore[arg-type]
-            return var
         elif (
             self.value in self._in_graph_classes()
             or is_traceable_wrapper_subclass_type(self.value)
@@ -2578,36 +2518,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
 
 class FrozenDataClassVariable(UserDefinedObjectVariable):
-    @staticmethod
-    def create(
-        tx: "InstructionTranslator", value: object, source: Source
-    ) -> "FrozenDataClassVariable":
-        from dataclasses import fields
+    """Frozen dataclass variable for as_proxy/as_python_constant/hashability.
 
-        assert is_frozen_dataclass(value)
+    Construction is handled by the generic polyfill path (tracing through
+    the auto-generated __init__). Field values are retrieved dynamically
+    via var_getattr using InstructionTranslator.current_tx().
+    """
 
-        field_map = {}
-        for field in fields(value):  # type: ignore[arg-type]
-            if hasattr(value, field.name):
-                field_map[field.name] = VariableTracker.build(
-                    tx,
-                    getattr(value, field.name),
-                    source and AttrSource(source, field.name),
-                )
+    def _get_field_vt(self, field_name: str) -> VariableTracker:
+        from torch._dynamo.symbolic_convert import InstructionTranslator
 
-        return FrozenDataClassVariable(value, fields=field_map, source=source)
-
-    def __init__(
-        self, value: object, fields: dict[str, Any] | None = None, **kwargs: Any
-    ) -> None:
-        super().__init__(value, **kwargs)
-        if fields is None:
-            fields = {}
-        self.fields = fields
+        tx = InstructionTranslator.current_tx()
+        return self.var_getattr(tx, field_name)
 
     def as_python_constant(self) -> object:
-        # NOTE: this is an intentionally limited version of
-        # `as_python_constant` for `nonstrict_trace` implementation.
         from dataclasses import fields
 
         import torch.utils._pytree as pytree
@@ -2615,154 +2539,74 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
         if not istype(
             self.value, (pytree.TreeSpec, pytree.LeafSpec, pytree.ConstantNode)
         ):
-            # TODO loosen this restriction and fix `as_proxy`.
             raise NotImplementedError(
                 "currently can't reconstruct arbitrary frozen dataclass instances"
             )
 
-        # LeafSpec is deprecated, use treespec_leaf() instead
         if istype(self.value, pytree.LeafSpec):
             return pytree.treespec_leaf()
 
-        args = []
-        kwargs = {}
+        args: list[object] = []
+        kwargs: dict[str, object] = {}
         for field in fields(self.value):  # type: ignore[arg-type]
             if field.init:
-                data = self.fields[field.name].as_python_constant()
+                data = self._get_field_vt(field.name).as_python_constant()
                 if getattr(field, "kw_only", False):
                     kwargs[field.name] = data
                 else:
                     args.append(data)
 
-        # This is safe because we know the TreeSpec classes constructors don't
-        # have external side effects.
-        ctor = self.python_type()
-        return ctor(*args, **kwargs)
+        return self.python_type()(*args, **kwargs)
 
     def as_proxy(self) -> object:
         from dataclasses import fields
 
-        args = []
-        kwargs = {}
+        args: list[object] = []
+        kwargs: dict[str, object] = {}
         for field in fields(self.value):  # type: ignore[arg-type]
-            proxy = self.fields[field.name].as_proxy()
+            proxy = self._get_field_vt(field.name).as_proxy()
             if hasattr(field, "kw_only") and field.kw_only:
                 kwargs[field.name] = proxy
             else:
                 args.append(proxy)
 
-        # TODO this isn't really safe, because
-        # 1. it could invoke a user defined `__post_init__`.
-        # 2. it could invoke a user defined `__init__` if the class _subclasses_
-        #    a frozen dataclass.
-        # Either of the above could end up mutating external state.
-        ctor = self.python_type()
-        return ctor(*args, **kwargs)
+        return self.python_type()(*args, **kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        from dataclasses import fields
-
-        # Handle specific pytree classes
-        import torch.utils._pytree as pytree
-
-        if isinstance(self.value, pytree.TreeSpec) and self.value.is_leaf():
-            # Create a new LeafSpec instance by calling the constructor
-            codegen.add_push_null(
-                lambda: codegen.load_import_from("torch.utils._pytree", "LeafSpec")
-            )
-            codegen.extend_output(create_call_function(0, False))
+        if self.source is not None:
+            codegen(self.source)
             return
-
-        # For general frozen dataclasses, reconstruct by calling the constructor
-        # with the field values as arguments
-        dataclass_cls = self.python_type()
-
-        if hasattr(dataclass_cls, "__post_init__"):
-            unimplemented(
-                gb_type="Frozen dataclass with __post_init__",
-                context=f"dataclass={dataclass_cls.__name__}",
-                explanation="Cannot reconstruct frozen dataclass with __post_init__ method, "
-                "as it may have side effects that would be incorrectly replayed.",
-                hints=[
-                    "Remove the __post_init__ method from the frozen dataclass.",
-                    *graph_break_hints.SUPPORTABLE,
-                ],
-            )
-
-        # Collect positional and keyword-only arguments
-        pos_args = []
-        # pyrefly: ignore [implicit-any]
-        kw_args = []
-        for field in fields(dataclass_cls):
-            if not field.init:
-                continue
-            field_vt = self.fields.get(field.name)
-            if field_vt is None:
-                unimplemented(
-                    gb_type="Frozen dataclass with missing field",
-                    context=f"dataclass={dataclass_cls.__name__}, field={field.name}",
-                    explanation=f"Cannot reconstruct frozen dataclass: field '{field.name}' "
-                    "was not tracked during tracing.",
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
-            if getattr(field, "kw_only", False):
-                kw_args.append((field.name, field_vt))
-            else:
-                pos_args.append(field_vt)
-
-        # Load the dataclass constructor
-        codegen.add_push_null(
-            lambda: codegen.append_output(
-                codegen.create_load_const_unchecked(dataclass_cls)
-            )
+        codegen.append_output(
+            codegen.create_load_const_unchecked(self.as_python_constant())
         )
-        # Reconstruct all arguments
-        for arg_vt in pos_args:
-            codegen(arg_vt)
-        for _, arg_vt in kw_args:
-            codegen(arg_vt)
-        # Call the constructor
-        total_args = len(pos_args) + len(kw_args)
-        if kw_args:
-            kw_names = tuple(name for name, _ in kw_args)
-            codegen.extend_output(
-                codegen.create_call_function_kw(total_args, kw_names, push_null=False)
-            )
-        else:
-            codegen.extend_output(create_call_function(total_args, False))
-
-    # NB: This is called during __init__ for a frozen dataclass
-    # use this to accumulate the most up-to-date field values
-    def method_setattr_standard(
-        self,
-        tx: "InstructionTranslator",
-        name: VariableTracker,
-        value: VariableTracker,
-        directly_update_dict: bool = False,
-    ) -> VariableTracker:
-        self.fields[name.as_python_constant()] = value
-        return super().method_setattr_standard(tx, name, value, directly_update_dict)
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value_type.__name__})"
 
     def is_python_hashable(self) -> Literal[True]:
-        # TODO - Check corner cases like eq=False, hash=False etc
         return True
 
     def get_python_hash(self) -> int:
-        return hash(tuple(arg.get_python_hash() for arg in self.fields.values()))
+        from dataclasses import fields as dc_fields
+
+        return hash(
+            tuple(
+                self._get_field_vt(f.name).get_python_hash()
+                for f in dc_fields(self.value)  # type: ignore[arg-type]
+            )
+        )
 
     def is_python_equal(self, other: object) -> bool:
         if not isinstance(other, FrozenDataClassVariable):
             return False
-        is_class_same = self.python_type() is other.python_type()
-        is_field_name_same = self.fields.keys() == other.fields.keys()
-        is_field_value_same = all(
-            value_a.is_python_equal(value_b)
-            for value_a, value_b in zip(self.fields.values(), other.fields.values())
+        if self.python_type() is not other.python_type():
+            return False
+        from dataclasses import fields as dc_fields
+
+        return all(
+            self._get_field_vt(f.name).is_python_equal(other._get_field_vt(f.name))
+            for f in dc_fields(self.value)  # type: ignore[arg-type]
         )
-        return is_class_same and is_field_name_same and is_field_value_same
 
 
 class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
@@ -3233,9 +3077,21 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
     Internally, it uses a TupleVariable to represent the tuple part of the
     variable tracker. For everything else, it falls back to
     UserDefinedObjectVariable.
+
+    NamedTupleVariable and StructSequenceVariable are subclasses that handle
+    namedtuples and structseqs (torch.return_types.*) respectively.
     """
 
-    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
+    _nonvar_fields = {
+        "tuple_cls",
+        *UserDefinedObjectVariable._nonvar_fields,
+    }
+
+    @staticmethod
+    def get_vt_cls(cls: type) -> type["UserDefinedTupleVariable"]:
+        if is_structseq_class(cls):
+            return StructSequenceVariable
+        return NamedTupleVariable
 
     def __init__(self, value, tuple_vt=None, init_args=None, **kwargs):  # type: ignore[all]
         from .lists import TupleVariable
@@ -3259,21 +3115,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             self._tuple_vt = TupleVariable(elems, mutation_type=ValueMutationNew())
         else:
             self._tuple_vt = tuple_vt
-
-    def resolve_data_descriptor(
-        self,
-        tx: "InstructionTranslator",
-        name: str,
-        type_attr: object,
-        source: Source | None,
-    ) -> VariableTracker:
-        if isinstance(type_attr, _collections._tuplegetter):
-            # namedtuple fields are _tuplegetter descriptors implemented in C.
-            # We emulate _tuplegetter.__get__ by indexing into the tracked
-            # tuple items, because self.value may not hold actual runtime values.
-            _, (idx, _) = type_attr.__reduce__()
-            return self._tuple_vt.items[idx]  # type: ignore[union-attr]
-        return super().resolve_data_descriptor(tx, name, type_attr, source)
+        self.tuple_cls = type(value)
 
     def call_method(
         self,
@@ -3295,6 +3137,127 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         if method in tuple_methods:
             return self._tuple_vt.call_method(tx, name, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        # Sourceless namedtuples/structseqs (e.g. tensor subclass metadata from
+        # SourcelessBuilder) aren't in id_to_variable so codegen_save_tempvars
+        # never processes them. When they appear in return values, codegen falls
+        # through to call_reconstruct. This is the same pattern as other
+        # sourceless containers (ConstDictVariable, TupleVariable, etc.).
+        # UserDefinedDictVariable doesn't need this because it's never created
+        # sourceless — it only comes from VariableBuilder which always has a
+        # source.
+        assert self.source is None
+        create_fn = self.get_construct_fn()
+        codegen.add_push_null(
+            lambda: codegen.append_output(
+                codegen.create_load_const_unchecked(create_fn)
+            )
+        )
+        codegen(self._tuple_vt)
+        codegen.extend_output(create_call_function(1, False))
+
+    def get_construct_fn(self) -> Callable[..., Any]:
+        raise NotImplementedError
+
+    def _validate_rest_for_tree_map(
+        self, rest: "collections.abc.Sequence[VariableTracker]"
+    ) -> list["UserDefinedTupleVariable"] | None:
+        """Validate that rest args are compatible for tree_map fast-path."""
+        others: list[UserDefinedTupleVariable] = []
+        n = len(self._tuple_vt.items)
+        for candidate in rest:
+            if (
+                not isinstance(candidate, UserDefinedTupleVariable)
+                or len(candidate._tuple_vt.items) != n
+                or candidate.tuple_cls is not self.tuple_cls
+            ):
+                return None
+            others.append(candidate)
+        return others
+
+    def _make_tree_map_result(
+        self, new_items: list[VariableTracker]
+    ) -> "UserDefinedTupleVariable":
+        from .lists import TupleVariable
+
+        tuple_vt = TupleVariable(new_items, mutation_type=ValueMutationNew())
+        return type(self)(
+            self.value,
+            tuple_vt=tuple_vt,
+            mutation_type=ValueMutationNew(),
+        )
+
+    def _is_pytree_node(self) -> bool:
+        from torch.utils._pytree import is_namedtuple_class
+
+        return is_namedtuple_class(self.tuple_cls) or is_structseq_class(self.tuple_cls)
+
+    def call_tree_map_branch(
+        self,
+        tx: "InstructionTranslator",
+        tree_map_fn: "variables.functions.UserFunctionVariable",
+        map_fn: "VariableTracker",
+        rest: "collections.abc.Sequence[VariableTracker]",
+        tree_map_kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if not self._is_pytree_node():
+            return super().call_tree_map_branch(
+                tx, tree_map_fn, map_fn, rest, tree_map_kwargs
+            )
+        others = self._validate_rest_for_tree_map(rest)
+        if others is None:
+            return self._tree_map_fallback(
+                tx, tree_map_fn, map_fn, rest, tree_map_kwargs
+            )
+
+        new_items: list[VariableTracker] = []
+        for idx, item in enumerate(self._tuple_vt.items):
+            sibling_leaves = [o._tuple_vt.items[idx] for o in others]
+            new_items.append(
+                item.call_tree_map(
+                    tx, tree_map_fn, map_fn, sibling_leaves, tree_map_kwargs
+                )
+            )
+
+        return self._make_tree_map_result(new_items)
+
+    def call_tree_map_with_path_branch(
+        self,
+        tx: "InstructionTranslator",
+        tree_map_fn: "variables.functions.UserFunctionVariable",
+        map_fn: "VariableTracker",
+        rest: "collections.abc.Sequence[VariableTracker]",
+        tree_map_kwargs: "dict[str, VariableTracker]",
+        keypath: "tuple[Any, ...]",
+    ) -> "VariableTracker":
+        if not self._is_pytree_node():
+            return super().call_tree_map_with_path_branch(
+                tx, tree_map_fn, map_fn, rest, tree_map_kwargs, keypath
+            )
+        others = self._validate_rest_for_tree_map(rest)
+        if others is None:
+            return self._tree_map_with_path_fallback(
+                tx, tree_map_fn, map_fn, rest, tree_map_kwargs, keypath
+            )
+
+        fields = namedtuple_fields(self.tuple_cls)
+        new_items: list[VariableTracker] = []
+        for idx, item in enumerate(self._tuple_vt.items):
+            sibling_leaves = [o._tuple_vt.items[idx] for o in others]
+            child_keypath = keypath + (GetAttrKey(fields[idx]),)
+            new_items.append(
+                item.call_tree_map_with_path(
+                    tx,
+                    tree_map_fn,
+                    map_fn,
+                    sibling_leaves,
+                    tree_map_kwargs,
+                    child_keypath,
+                )
+            )
+
+        return self._make_tree_map_result(new_items)
 
     def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
         assert self._tuple_vt is not None
@@ -3319,6 +3282,74 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             other._tuple_vt if isinstance(other, UserDefinedTupleVariable) else other
         )
         return self._tuple_vt.is_python_equal(other)
+
+
+class NamedTupleVariable(UserDefinedTupleVariable):
+    """Represents Python namedtuples (created via collections.namedtuple).
+
+    Namedtuples use _tuplegetter descriptors for field access and
+    Type(*args) / Type._make(iterable) for construction.
+    """
+
+    def resolve_data_descriptor(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        type_attr: object,
+        source: Source | None,
+    ) -> VariableTracker:
+        if isinstance(type_attr, _collections._tuplegetter):
+            # namedtuple fields are _tuplegetter descriptors implemented in C.
+            # We emulate _tuplegetter.__get__ by indexing into the tracked
+            # tuple items, because self.value may not hold actual runtime values.
+            _, (idx, _) = type_attr.__reduce__()
+            return self._tuple_vt.items[idx]  # type: ignore[union-attr]
+        return super().resolve_data_descriptor(tx, name, type_attr, source)
+
+    def get_construct_fn(self) -> Callable[..., Any]:
+        return self.tuple_cls._make  # type: ignore[attr-defined]
+
+    def as_python_constant(self) -> Any:
+        items = [x.as_python_constant() for x in self._tuple_vt.items]
+        return self.tuple_cls(*items)  # type: ignore[arg-type]
+
+    def as_proxy(self) -> Any:
+        items = [x.as_proxy() for x in self._tuple_vt.items]
+        return self.tuple_cls(*items)  # type: ignore[arg-type]
+
+
+class StructSequenceVariable(UserDefinedTupleVariable):
+    """Represents C-implemented PyStructSequence types (torch.return_types.*).
+
+    Structseqs use Type(iterable) calling convention and reject tuple.__new__.
+    """
+
+    def resolve_data_descriptor(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        type_attr: object,
+        source: Source | None,
+    ) -> VariableTracker:
+        if isinstance(type_attr, types.MemberDescriptorType):
+            # Structseq fields are member_descriptor objects. We emulate
+            # field access by looking up the field name in _fields and
+            # indexing into the tracked tuple items.
+            fields = namedtuple_fields(self.tuple_cls)
+            if name in fields:
+                return self._tuple_vt.items[fields.index(name)]
+        return super().resolve_data_descriptor(tx, name, type_attr, source)
+
+    def get_construct_fn(self) -> Callable[..., Any]:
+        return self.tuple_cls
+
+    def as_python_constant(self) -> Any:
+        items = [x.as_python_constant() for x in self._tuple_vt.items]
+        return self.tuple_cls(items)
+
+    def as_proxy(self) -> Any:
+        items = [x.as_proxy() for x in self._tuple_vt.items]
+        return self.tuple_cls(items)
 
 
 class MutableMappingVariable(UserDefinedObjectVariable):

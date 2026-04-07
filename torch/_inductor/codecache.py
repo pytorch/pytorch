@@ -801,6 +801,9 @@ class BypassFxGraphCache(Exception):
     """
 
 
+_warned_pre_grad_pass_missing_uuid: OrderedSet[str] = OrderedSet()
+
+
 def resolve_pre_grad_pass_timing() -> Literal["early", "late"]:
     """Resolve the effective pre-grad pass timing from the config.
 
@@ -822,6 +825,21 @@ def resolve_pre_grad_pass_timing() -> Literal["early", "late"]:
     if timing == "default":
         supports_late = custom_pass is None or has_uuid
         timing = "late" if supports_late else "early"
+        if timing == "early" and custom_pass:
+            pass_name = type(custom_pass).__qualname__
+            if pass_name not in _warned_pre_grad_pass_missing_uuid:
+                _warned_pre_grad_pass_missing_uuid.add(pass_name)
+                log.warning(
+                    "pre_grad_custom_pass %s does not implement uuid(); "
+                    "falling back to early timing (pre-grad pass cache will be bypassed). "
+                    "Implement uuid() on your CustomGraphPass to enable caching.",
+                    pass_name,
+                )
+                CompileEventLogger.try_add_pt2_compile(
+                    "backend_compile",
+                    pre_grad_pass_missing_uuid=True,
+                    pre_grad_pass_name=pass_name,
+                )
 
     if timing == "late" and custom_pass and not has_uuid:
         raise RuntimeError(

@@ -335,6 +335,8 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
 class StreamVariable(StreamContextVariable):
     """Represents the device-agnostic torch.Stream class"""
 
+    _cpython_type = torch.Stream
+
     def __init__(
         self,
         proxy: Proxy,
@@ -473,6 +475,8 @@ class StreamVariable(StreamContextVariable):
 
 class CudaStreamVariable(StreamVariable):
     """Represents torch.cuda.Stream, preserving device-specific type and attributes."""
+
+    _cpython_type = torch.cuda.Stream
 
     def python_type(self) -> type:
         return torch.cuda.Stream

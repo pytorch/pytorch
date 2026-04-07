@@ -35,6 +35,15 @@ class ConstantVariable(VariableTracker):
     nested collections.
     """
 
+    # PyLong_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L6585
+    # PyFloat_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L1880
+    # PyBool_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/boolobject.c#L171
+    # PyUnicode_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/unicodeobject.c#L14931
+    # PyBytes_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/bytesobject.c#L3017
+    # PyComplex_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L1099
+    # _PyNone_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/object.c#L2022
+    _cpython_type = (int, float, str, bytes, bool, type(None), complex, type(...))
+
     @overload
     @staticmethod
     def create(value: None) -> Never: ...
@@ -408,6 +417,9 @@ class FakeIdVariable(VariableTracker):
     (hashing and equality).  It intentionally blocks reconstruction so that a
     graph break does not silently bake a stale id into the resumed bytecode.
     """
+
+    # PyLong_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L6585
+    _cpython_type = int
 
     def __init__(self, value: int, **kwargs: Any) -> None:
         super().__init__(**kwargs)
