@@ -1993,8 +1993,8 @@ class OutputGraph(OutputGraphCommon):
                     and vt.tuple_cls
                     is torch._dynamo.functional_export.ExportTracerOutput
                 ):
-                    flat_returns = vt._tuple_vt.items[0]
-                    out_spec = vt._tuple_vt.items[1]
+                    flat_returns = vt.items[0]
+                    out_spec = vt.items[1]
                     assert isinstance(
                         flat_returns, torch._dynamo.variables.ListVariable
                     )
@@ -2186,7 +2186,13 @@ class OutputGraph(OutputGraphCommon):
                         if isinstance(var, UserDefinedDictVariable) and isinstance(
                             var.value, _ExportModuleSpecTrackerDict
                         ):
-                            for k, v in var.items.items():
+                            assert var._base_vt is not None
+                            for (
+                                k,
+                                v,
+                            ) in (
+                                var._base_vt.items.items()  # pyrefly: ignore[missing-attribute]
+                            ):
                                 # pyrefly: ignore [implicit-any]
                                 specs = {}
                                 # pyrefly: ignore[missing-attribute]

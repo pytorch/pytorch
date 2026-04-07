@@ -924,6 +924,12 @@ class ConstDictVariable(VariableTracker):
                     variables.DefaultDictVariable,
                 ),
             ):
+                # Unwrap UserDefinedDictVariable to its underlying ConstDictVariable
+                if isinstance(other, variables.UserDefinedDictVariable):
+                    assert other._base_vt is not None
+                    assert isinstance(other._base_vt, ConstDictVariable)
+                    other = other._base_vt
+
                 # Always return the specialized dictionary, and in the case
                 # both are specialized, take the first to be the type of the
                 # new dictionary
