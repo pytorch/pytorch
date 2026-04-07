@@ -79,25 +79,15 @@ compilation pipeline without modifying TorchInductor internals.
 
 ## Pattern Matching
 
-TorchInductor includes a pattern matching framework for recognizing and
-replacing subgraph patterns across the pass stages.
+TorchInductor includes a pattern matching framework used across all three pass
+stages. The framework represents patterns as a DAG, searches for them
+concurrently in a single graph traversal, and provides APIs for registering
+custom patterns.
 
-### `register_replacement()`
-
-The primary API for adding new patterns. You provide a search pattern and a
-replacement function, and the framework handles matching and substitution during
-compilation.
-
-### `gen_register_replacement()`
-
-New patterns added using `register_replacement()` can have compile-time overhead
-because they need to be traced before use. To avoid that overhead, patterns can
-be **precompiled** using `gen_register_replacement()`.
-
-The arguments are the same as `register_replacement()` except for an additional
-unique name used as a lookup key. `gen_register_replacement()` is more
-appropriate for patterns that are heavily parameterized or use joint graph
-forward + backward training matching.
+For details on how the pattern matcher works, the registration APIs
+(`register_replacement`, `register_graph_pattern`, `register_lowering_pattern`),
+and worked examples, see
+[Pattern Matching](torch.compiler_inductor_pattern_matching.md).
 
 ## Key Invariants for FX Passes
 

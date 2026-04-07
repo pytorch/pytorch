@@ -38,6 +38,7 @@ For a walkthrough of these steps with a concrete example, see the
 torch.compiler_inductor_overview.md
 torch.compiler_inductor_decomposition.md
 torch.compiler_inductor_fx_passes.md
+torch.compiler_inductor_pattern_matching.md
 torch.compiler_inductor_ir.md
 torch.compiler_inductor_scheduler.md
 torch.compiler_inductor_codegen.md

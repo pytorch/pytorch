@@ -426,5 +426,7 @@ fused_graph_module = capability_partitioner.fuse_partitions(partition_list)
 :::{seealso}
 For details on the built-in FX graph passes that TorchInductor applies during
 compilation (pre-grad, joint graph, and post-grad stages), see
-[TorchInductor FX Graph Passes](torch.compiler_inductor_fx_passes.md).
+[TorchInductor FX Graph Passes](torch.compiler_inductor_fx_passes.md). For
+TorchInductor's pattern matching framework and registration APIs, see
+[Pattern Matching](torch.compiler_inductor_pattern_matching.md).
 :::
