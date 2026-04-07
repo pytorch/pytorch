@@ -355,17 +355,43 @@ class FSDPParamGroup:
         else:
             world_size = 1
         if world_size == 1:
-            # can't skip due to early return in wait_for_unshard if
-            # no self._all_gather_result
+            copy_in_stream, _ = self.comm_ctx.get_all_gather_streams(
+                async_op, self._training_state
+            )
+            param_all_gather_input_dtypes: list[list[torch.dtype]] = []
+            param_all_gather_input_numels: list[list[int]] = []
+            with (
+                record_function(self._with_fqn("FSDP::all_gather")),
+                self.device_handle.stream(copy_in_stream),
+            ):
+                for fsdp_param in self.fsdp_params:
+                    all_gather_inputs = fsdp_param.all_gather_inputs
+                    all_gather_input = all_gather_inputs[0]
+                    param_all_gather_input_dtypes.append(
+                        [inp.dtype for inp in all_gather_inputs]
+                    )
+                    param_all_gather_input_numels.append(
+                        [inp.numel() for inp in all_gather_inputs]
+                    )
+                    fsdp_param.init_all_gather_outputs(
+                        [all_gather_input.numel()],
+                        [all_gather_input.dtype],
+                        world_size,
+                        self.device,
+                        force_recreate=False,
+                    )
+                    tensor = fsdp_param.all_gather_outputs[0]
+                    alloc_storage(tensor)
+                    with torch.autograd._unsafe_preserve_version_counter(tensor):
+                        tensor.copy_(all_gather_input, non_blocking=True)
             self._all_gather_result = AllGatherResult(
                 all_gather_output=self._all_gather_output,
-                all_gather_event=self.device_handle.Event().record(),
+                all_gather_event=copy_in_stream.record_event(),
                 all_gather_work=None,
-                param_all_gather_input_dtypes=[],
-                param_all_gather_input_numels=[],
+                param_all_gather_input_dtypes=param_all_gather_input_dtypes,
+                param_all_gather_input_numels=param_all_gather_input_numels,
                 all_gather_input_split_sizes=[],
             )
-
             return
 
         with record_function(self._with_fqn("FSDP::all_gather")):
@@ -399,30 +425,11 @@ class FSDPParamGroup:
         else:
             world_size = 1
         if world_size == 1:
-            # directly initialize unsharded parameters from sharded parameters
-
-            for fsdp_param in self.fsdp_params:
-                # Use all_gather_inputs which already handles conversion to param_dtype
-                # This is consistent with the world_size > 1 path
-                all_gather_input = fsdp_param.all_gather_inputs[0]
-
-                # Make sure the all_gather_outputs has proper storage size before using it
-                # First ensure we have at least one tensor in all_gather_outputs
-                fsdp_param.init_all_gather_outputs(
-                    [all_gather_input.numel()],
-                    [all_gather_input.dtype],
-                    world_size,
-                    self.device,
-                    force_recreate=False,
+            # H2D was issued on copy_in_stream in unshard(); wait for it here
+            if self._all_gather_result.all_gather_event is not None:
+                self.device_handle.current_stream().wait_event(
+                    self._all_gather_result.all_gather_event
                 )
-
-                tensor = fsdp_param.all_gather_outputs[0]
-                alloc_storage(tensor)
-
-                # find alternative way to check if tensor.is_inference
-                with torch.autograd._unsafe_preserve_version_counter(tensor):
-                    tensor.copy_(all_gather_input)
-
         else:
             with record_function(self._with_fqn("FSDP::all_gather_copy_out")):
                 foreach_all_gather_copy_out(
@@ -438,11 +445,7 @@ class FSDPParamGroup:
         all_gather_copy_out_event = self.device_handle.Event()
         all_gather_copy_out_event.record()
 
-        if (
-            not async_op
-            and self._training_state == TrainingState.FORWARD
-            and world_size > 1
-        ):
+        if not async_op and self._training_state == TrainingState.FORWARD:
             # Defer free to allow for overlap of this copy-out with next
             # all-gather collective
             self.comm_ctx.all_gather_state = AllGatherState(
