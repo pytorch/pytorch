@@ -42,6 +42,7 @@ __all__ = [
     "load",
     "StorageType",
     "LoadEndianness",
+    "StorageIO",
     "get_crc32_options",
     "set_crc32_options",
     "get_default_load_endianness",
@@ -146,6 +147,20 @@ class LoadEndianness(Enum):
     NATIVE = 1
     LITTLE = 2
     BIG = 3
+
+
+class StorageIO(str, Enum):
+    """Storage I/O backend for :func:`torch.save` and :func:`torch.load`.
+
+    .. attribute:: GDS
+
+        Use GPUDirect Storage to transfer CUDA tensor data directly between
+        GPU memory and NVMe storage via DMA, bypassing CPU and system memory.
+        Requires a GDS-compatible filesystem and ``cuFile`` driver.
+        See :func:`torch.cuda.gds.is_available`.
+    """
+
+    GDS = "gds"
 
 
 def get_default_load_endianness() -> LoadEndianness | None:
@@ -967,8 +982,9 @@ def _try_gds_save(
 ) -> bool:
     """Attempt GDS save. Returns True if handled, False to fall back.
 
-    When explicit=True (user passed use_gds=True), raises on incompatible args.
-    When explicit=False (from config), returns False to fall back silently.
+    When explicit=True (user passed storage_io=StorageIO.GDS), raises on
+    incompatible args. When explicit=False (from config), returns False to
+    fall back silently.
     """
     _can_handle = (
         _is_path(f) and _use_new_zipfile_serialization and pickle_module is pickle
@@ -977,12 +993,10 @@ def _try_gds_save(
         if not explicit:
             return False
         if not _is_path(f):
-            raise ValueError(
-                "f must be a file path in order to use the use_gds argument"
-            )
+            raise ValueError("f must be a file path when using StorageIO.GDS")
         if not _use_new_zipfile_serialization:
-            raise ValueError("use_gds requires new zipfile serialization format")
-        raise ValueError("use_gds does not support custom pickle_module")
+            raise ValueError("StorageIO.GDS requires new zipfile serialization format")
+        raise ValueError("StorageIO.GDS does not support custom pickle_module")
 
     import torch.cuda.gds as _gds
 
@@ -1005,14 +1019,14 @@ def save(
     _use_new_zipfile_serialization: bool = True,
     _disable_byteorder_record: bool = False,
     *,
-    use_gds: bool | None = None,
+    storage_io: StorageIO | None = None,
 ) -> None:
     # Reference: https://github.com/pytorch/pytorch/issues/54354
     # The first line of this docstring overrides the one Sphinx generates for the
     # documentation. We need it so that Sphinx doesn't leak `pickle`s path from
     # the build environment (e.g. `<module 'pickle' from '/leaked/path').
 
-    """save(obj, f, pickle_module=pickle, pickle_protocol=2, _use_new_zipfile_serialization=True, *, use_gds=None)
+    """save(obj, f, pickle_module=pickle, pickle_protocol=2, _use_new_zipfile_serialization=True, *, storage_io=None)
 
     Saves an object to a disk file.
 
@@ -1026,10 +1040,11 @@ def save(
            os.PathLike object containing a file name
         pickle_module: module used for pickling metadata and objects
         pickle_protocol: can be specified to override the default protocol
-        use_gds: Use GPUDirect Storage (GDS) to write CUDA tensor data directly
-            from GPU memory to NVMe. Requires ``f`` to be a file path.
-            Defaults to ``torch.utils.serialization.config.save.use_gds`` when ``None``.
-            See :func:`torch.cuda.gds.is_available`.
+        storage_io: Storage I/O backend for tensor data. Use
+            :attr:`StorageIO.GDS` for GPUDirect Storage.
+            Requires ``f`` to be a file path.
+            Defaults to ``torch.utils.serialization.config.save.storage_io``
+            when ``None``. See :class:`StorageIO`.
 
     .. note::
         A common PyTorch convention is to save tensors using .pt file extension.
@@ -1057,19 +1072,21 @@ def save(
     _check_dill_version(pickle_module)
     _check_save_filelike(f)
 
-    use_gds_explicit = use_gds is not None
-    if not use_gds_explicit:
+    storage_io_explicit = storage_io is not None
+    if not storage_io_explicit:
         from torch.utils.serialization import config
 
-        use_gds = config.save.use_gds
+        storage_io = (
+            StorageIO(config.save.storage_io) if config.save.storage_io else None
+        )
 
-    if use_gds and _try_gds_save(
+    if storage_io == StorageIO.GDS and _try_gds_save(
         obj,
         f,
         pickle_module,
         pickle_protocol,
         _use_new_zipfile_serialization,
-        use_gds_explicit,
+        storage_io_explicit,
     ):
         return
 
@@ -1405,8 +1422,9 @@ def _try_gds_load(
 ) -> Any | None:
     """Attempt GDS load. Returns loaded object, or None to fall back to normal load.
 
-    When explicit=True (user passed use_gds=True), raises on incompatible args.
-    When explicit=False (from config), silently returns None to fall back.
+    When explicit=True (user passed storage_io=StorageIO.GDS), raises on
+    incompatible args. When explicit=False (from config), silently returns
+    None to fall back.
     Extra kwargs (e.g. weights_only, pickle_load_args) are forwarded to gds.load.
     """
     _can_handle = (
@@ -1416,12 +1434,10 @@ def _try_gds_load(
         if not explicit:
             return None
         if mmap:
-            raise ValueError("use_gds and mmap cannot both be True")
+            raise ValueError("StorageIO.GDS and mmap cannot both be True")
         if not _is_path(f):
-            raise ValueError(
-                "f must be a file path in order to use the use_gds argument"
-            )
-        raise ValueError("use_gds does not support custom pickle_module")
+            raise ValueError("f must be a file path when using StorageIO.GDS")
+        raise ValueError("StorageIO.GDS does not support custom pickle_module")
 
     import torch.cuda.gds as _gds
 
@@ -1441,7 +1457,7 @@ def load(
     *,
     weights_only: bool | None = None,
     mmap: bool | None = None,
-    use_gds: bool | None = None,
+    storage_io: StorageIO | None = None,
     **pickle_load_args: Any,
 ) -> Any:
     # Reference: https://github.com/pytorch/pytorch/issues/54354
@@ -1449,7 +1465,7 @@ def load(
     # documentation. We need it so that Sphinx doesn't leak `pickle`s path from
     # the build environment (e.g. `<module 'pickle' from '/leaked/path').
 
-    """load(f, map_location=None, pickle_module=pickle, *, weights_only=True, mmap=None, use_gds=None, **pickle_load_args)
+    """load(f, map_location=None, pickle_module=pickle, *, weights_only=True, mmap=None, storage_io=None, **pickle_load_args)
 
     Loads an object saved with :func:`torch.save` from a file.
 
@@ -1506,10 +1522,11 @@ def load(
             second step is a no-op if the final location is CPU. When the ``mmap`` flag is set, instead of copying the
             tensor storages from disk to CPU memory in the first step, ``f`` is mapped, which means tensor storages
             will be lazily loaded when their data is accessed.
-        use_gds: Use GPUDirect Storage (GDS) to load CUDA tensor data directly
-            from NVMe into GPU memory. Requires ``f`` to be a file path.
-            Defaults to ``torch.utils.serialization.config.load.use_gds`` when ``None``.
-            See :func:`torch.cuda.gds.is_available`.
+        storage_io: Storage I/O backend for tensor data. Use
+            :attr:`StorageIO.GDS` for GPUDirect Storage.
+            Requires ``f`` to be a file path.
+            Defaults to ``torch.utils.serialization.config.load.storage_io``
+            when ``None``. See :class:`StorageIO`.
         pickle_load_args: optional keyword arguments passed over to
             :func:`pickle_module.load` and :func:`pickle_module.Unpickler`,
             only works if :attr:`weights_only=False`, e.g., :attr:`errors=...`.
@@ -1643,24 +1660,24 @@ def load(
         warnings.warn("pickle_load_args only works if `weights_only=False`.")
 
     # None → resolve from config, so the default can be flipped globally.
-    use_gds_explicit = use_gds is not None
-    if mmap is None or use_gds is None:
+    storage_io_explicit = storage_io is not None
+    if mmap is None or storage_io is None:
         from torch.utils.serialization import config
 
         if mmap is None:
             mmap = config.load.mmap
-        if use_gds is None:
-            use_gds = config.load.use_gds
+        if storage_io is None and config.load.storage_io:
+            storage_io = StorageIO(config.load.storage_io)
 
     _check_dill_version(pickle_module)
 
-    if use_gds:
+    if storage_io == StorageIO.GDS:
         gds_result = _try_gds_load(
             f,
             map_location,
             mmap,
             pickle_module,
-            use_gds_explicit,
+            storage_io_explicit,
             weights_only=weights_only,
             **pickle_load_args,
         )

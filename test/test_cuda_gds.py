@@ -7,6 +7,7 @@ import tempfile
 import unittest
 
 import torch
+from torch.serialization import StorageIO
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     NoTest,
@@ -98,33 +99,33 @@ class TestCudaGds(TestCase):
             loaded["enc"].storage().data_ptr(), loaded["dec"].storage().data_ptr()
         )
 
-    def test_torch_save_load_use_gds(self):
+    def test_torch_save_load_storage_io_gds(self):
         sd = {f"layer{i}": torch.randn(256, 256, device="cuda") for i in range(4)}
         with tempfile.TemporaryDirectory(prefix="test_gds_", dir=_GDS_TEST_DIR) as d:
-            # save with use_gds, load normally
+            # save with storage_io=StorageIO.GDS, load normally
             path = os.path.join(d, "save_gds.pt")
-            torch.save(sd, path, use_gds=True)
+            torch.save(sd, path, storage_io=StorageIO.GDS)
             loaded = torch.load(path, map_location="cuda:0", weights_only=True)
             for k in sd:
                 self.assertEqual(sd[k], loaded[k])
-            # save normally, load with use_gds
+            # save normally, load with storage_io=StorageIO.GDS
             path2 = os.path.join(d, "load_gds.pt")
             torch.cuda.gds.save(sd, path2)
-            loaded = torch.load(path2, map_location="cuda:0", use_gds=True)
+            loaded = torch.load(path2, map_location="cuda:0", storage_io=StorageIO.GDS)
             for k in sd:
                 self.assertEqual(sd[k], loaded[k])
 
-    def test_use_gds_validation(self):
+    def test_storage_io_gds_validation(self):
         with tempfile.TemporaryDirectory(prefix="test_gds_", dir=_GDS_TEST_DIR) as d:
             path = os.path.join(d, "data.pt")
             torch.save({"w": torch.randn(8)}, path)
             with self.assertRaises(ValueError):
-                torch.load(path, use_gds=True, mmap=True)
+                torch.load(path, storage_io=StorageIO.GDS, mmap=True)
             with open(path, "rb") as f:
                 with self.assertRaises(ValueError):
-                    torch.load(f, use_gds=True)
+                    torch.load(f, storage_io=StorageIO.GDS)
         with self.assertRaises(ValueError):
-            torch.save({"w": torch.randn(8)}, io.BytesIO(), use_gds=True)
+            torch.save({"w": torch.randn(8)}, io.BytesIO(), storage_io=StorageIO.GDS)
 
 
 if __name__ == "__main__":

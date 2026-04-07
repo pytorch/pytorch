@@ -102,6 +102,7 @@ class GdsFile:
         self.close()
 
     def close(self) -> None:
+        """Closes the GDS file, deregistering the handle and file descriptor."""
         try:
             if self.handle is not None:
                 self.deregister_handle()
@@ -182,7 +183,7 @@ def save(
     :func:`torch.load`.
 
     This is equivalent to calling
-    ``torch.save(obj, f, use_gds=True)``.
+    ``torch.save(obj, f, storage_io=StorageIO.GDS)``.
 
     Args:
         obj: Object to save. CUDA tensors are written via GDS; CPU tensors
@@ -220,7 +221,7 @@ def save(
     _serialization_tls.storage_alignment = 4096
     _serialization_tls.storage_save_hook = _gds_save_hook
     try:
-        torch.save(obj, f, pickle_protocol=pickle_protocol, use_gds=False)
+        torch.save(obj, f, pickle_protocol=pickle_protocol)
     finally:
         _serialization_tls.storage_alignment = None
         _serialization_tls.storage_save_hook = None
@@ -288,14 +289,13 @@ def load(
             gds_reader.load_storage(storage, offset)  # noqa: F821
             return storage
 
-        kwargs.pop("use_gds", None)
+        kwargs.pop("storage_io", None)
         _serialization_tls.storage_load_hook = _gds_load_hook
         try:
             return torch.load(
                 f,
                 map_location=map_location,
                 weights_only=weights_only,
-                use_gds=False,
                 **kwargs,
             )
         finally:
