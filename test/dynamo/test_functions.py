@@ -4036,6 +4036,7 @@ class GraphModule(torch.nn.Module):
         g = torch.compile(fn, backend="eager", fullgraph=True)(t)
         self.assertEqual(e, g)
 
+    @unittest.skipIf(sys.platform == "darwin", "No mkldnn on MacOS")
     def test_quantize_per_tensor(self):
         def fn(t, scale, zero_point):
             return torch.quantize_per_tensor(t, scale, zero_point, torch.quint8)
