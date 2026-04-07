@@ -386,10 +386,8 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x), self._compile(fn, x))
 
     def test_typing_subscript_dict(self):
-        import typing
-
         def fn(x):
-            operator.getitem(typing.Dict, (str, int))
+            operator.getitem(dict, (str, int))
             return x + 1
 
         x = torch.randn(4)
@@ -857,13 +855,8 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(torch._dynamo.exc.Unsupported):
             self._compile(fn, x)
 
-    # TODO: str/bytes subscript works via constant fold fallback (base mp_subscript_impl
-    # raises Unsupported → _make_handler → operator.getitem("hello", 0) evaluates at
-    # Python level), not via a proper mp_subscript_impl override mirroring CPython's
-    # unicode_subscript / bytes_subscript. Should add dedicated overrides on
-    # ConstantVariable to match CPython's dispatch path.
-    # CPython: Objects/unicodeobject.c:13809 (unicode_subscript)
-    # CPython: Objects/bytesobject.c (bytes_subscript)
+    # --- ConstantVariable (str) ---
+    # CPython: unicode_subscript (Objects/unicodeobject.c:13809)
 
     def test_str_subscript(self):
         def fn(x):
@@ -874,6 +867,35 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(fn(x), self._compile(fn, x))
 
+    def test_str_slice(self):
+        def fn(x):
+            s = "hello"
+            return x + len(operator.getitem(s, slice(1, 3)))
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
+    def test_str_negative_index(self):
+        def fn(x):
+            s = "hello"
+            return x + len(operator.getitem(s, -1))
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
+    def test_str_invalid_key_type(self):
+        """CPython: TypeError('string indices must be integers or slices, not float')."""
+
+        def fn(x):
+            return operator.getitem("hello", 1.5)
+
+        x = torch.randn(4)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            self._compile(fn, x)
+
+    # --- ConstantVariable (bytes) ---
+    # CPython: bytes_subscript (Objects/bytesobject.c)
+
     def test_bytes_subscript(self):
         def fn(x):
             b = b"hello"
@@ -882,6 +904,32 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(4)
         self.assertEqual(fn(x), self._compile(fn, x))
+
+    def test_bytes_slice(self):
+        def fn(x):
+            b = b"hello"
+            return x + len(operator.getitem(b, slice(1, 3)))
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
+    def test_bytes_negative_index(self):
+        def fn(x):
+            b = b"hello"
+            return x + operator.getitem(b, -1)
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
+    def test_bytes_invalid_key_type(self):
+        """CPython: TypeError('bytes indices must be integers or slices, not float')."""
+
+        def fn(x):
+            return operator.getitem(b"hello", 1.5)
+
+        x = torch.randn(4)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            self._compile(fn, x)
 
     # ===================================================================
     # Explicit __getitem__ dunder call path tests
@@ -919,6 +967,7 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(4)
         self.assertEqual(fn(x), self._compile(fn, x))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

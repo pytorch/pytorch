@@ -147,12 +147,39 @@ its type to `common_constant_types`.
         """
         return self.unpack_var_sequence(tx=None)
 
+    def mp_subscript_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: VariableTracker,
+    ) -> VariableTracker:
+        # unicode_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/unicodeobject.c#L13809
+        # bytes_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/bytesobject.c
+        if not isinstance(self.value, (str, bytes)):
+            return super().mp_subscript_impl(tx, key)
+
+        from .object_protocol import type_implements_nb_index
+
+        try:
+            key_type = key.python_type()
+        except NotImplementedError:
+            key_type = None
+        if key_type not in (int, bool, slice):
+            if key_type is not None and not type_implements_nb_index(key_type):
+                container_name = "string" if isinstance(self.value, str) else "bytes"
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[
+                        f"{container_name} indices must be integers or slices, not {key.python_type_name()}"
+                    ],
+                )
+            key = key.nb_index_impl(tx)
+
+        return self.getitem_const(tx, key)
+
     def getitem_const(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
-        # TODO(follow-up): str/bytes subscript works here via constant fold but
-        # bypasses CPython's type checking (unicode_subscript, bytes_subscript).
-        # Should add dedicated mp_subscript_impl for ConstantVariable str/bytes.
         return ConstantVariable.create(
             self.value[arg.as_python_constant()],
         )

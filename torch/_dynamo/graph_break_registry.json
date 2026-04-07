@@ -303,6 +303,27 @@
       ]
     }
   ],
+  "GB2029": [
+    {
+      "Gb_type": "unhashable dict key",
+      "Context": "dict[{vt_type.__name__}] — type has tp_hash = PyObject_HashNotImplemented",
+      "Explanation": "Cannot use {vt_type.__name__} as a dictionary key because it is not hashable.",
+      "Hints": [
+        "Use a hashable type (int, str, tuple, etc.) instead of {vt_type.__name__}.",
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB6806": [
+    {
+      "Gb_type": "non-constant typing subscript",
+      "Context": "TypingVariable[{key}]",
+      "Explanation": "Cannot subscript typing construct {self.value} with a non-constant key.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0029": [
     {
       "Gb_type": "Compilation of intermediate hooks requires compiled autograd",

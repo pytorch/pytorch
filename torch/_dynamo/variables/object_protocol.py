@@ -195,9 +195,6 @@ def vt_getitem(
     Branch 3 is handled by TypingVariable.mp_subscript_impl for typing module types
     and by BuiltinVariable for builtin types like list[int].
 
-    Types that work via constant fold fallback (no dedicated mp_subscript_impl):
-    TODO(follow-up): str (unicode_subscript, Objects/unicodeobject.c:13809)
-    TODO(follow-up): bytes (bytes_subscript, Objects/bytesobject.c)
     """
     from ..exc import raise_observed_exception
 
