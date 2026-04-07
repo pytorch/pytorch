@@ -5410,14 +5410,10 @@ def max_pool2d_with_indices_backward(
     else:
         x_stride = x.maybe_get_stride()
 
-    is_channels_last = (x_stride is not None and x_stride[1] == 1) or (
-        gO_stride is not None and gO_stride[1] == 1
+    is_channels_last = len(x.get_size()) == 4 and (
+        (x_stride is not None and x_stride[1] == 1)
+        or (gO_stride is not None and gO_stride[1] == 1)
     )
-    if any(d != 1 for d in dilation):
-        # dilation NYI
-        return fallback_max_pool2d_with_indices_backward(
-            grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
-        )
 
     *_batch, _height, width = x.get_size()
     *_, pooled_height, pooled_width = grad_output.get_size()
@@ -5426,13 +5422,17 @@ def max_pool2d_with_indices_backward(
     grad_loader = grad_output.make_loader()
     new_size = list(x.get_size())
 
+    # Effective kernel size accounts for dilation
+    effective_kh = (kernel_size[0] - 1) * dilation[0] + 1
+    effective_kw = (kernel_size[1] - 1) * dilation[1] + 1
+
     h_window_size = max(
-        max(FloorDiv(h, stride[0]) - max(0, FloorDiv(h - kernel_size[0], stride[0])), 1)
-        for h in range(kernel_size[0] * 2)
+        max(FloorDiv(h, stride[0]) - max(0, FloorDiv(h - effective_kh, stride[0])), 1)
+        for h in range(effective_kh * 2)
     )
     w_window_size = max(
-        max(FloorDiv(w, stride[1]) - max(0, FloorDiv(w - kernel_size[1], stride[1])), 1)
-        for w in range(kernel_size[1] * 2)
+        max(FloorDiv(w, stride[1]) - max(0, FloorDiv(w - effective_kw, stride[1])), 1)
+        for w in range(effective_kw * 2)
     )
 
     window_size = h_window_size * w_window_size
@@ -5451,10 +5451,10 @@ def max_pool2d_with_indices_backward(
         h = h + padding[0]
         w = w + padding[1]
         phstart = ops.index_expr(
-            FloorDiv(h - kernel_size[0] + stride[0], stride[0]), torch.int32
+            FloorDiv(h - effective_kh + stride[0], stride[0]), torch.int32
         )
         pwstart = ops.index_expr(
-            FloorDiv(w - kernel_size[1] + stride[1], stride[1]), torch.int32
+            FloorDiv(w - effective_kw + stride[1], stride[1]), torch.int32
         )
         phend = ops.index_expr(FloorDiv(h, stride[0]) + 1, torch.int32)
         pwend = ops.index_expr(FloorDiv(w, stride[1]) + 1, torch.int32)
