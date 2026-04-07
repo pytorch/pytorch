@@ -5,6 +5,7 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/PeerToPeerAccess.h>
 #include <c10/util/Gauge.h>
 #include <c10/util/Logging.h>
 #include <c10/util/ScopeExit.h>
@@ -685,11 +686,15 @@ struct ExpandableSegment {
         C10_CUDA_CHECK(hipMemImportFromShareableHandle(
             &handle, myfd_handle, hipMemHandleTypePosixFileDescriptor));
 #else
-        C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemImportFromShareableHandle_(
-            &handle,
-            // NOLINTNEXTLINE(performance-no-int-to-ptr)
-            (void*)(uintptr_t)myfd,
-            CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR));
+        C10_CUDA_DRIVER_CHECK_MSG(
+            DriverAPI::get()->cuMemImportFromShareableHandle_(
+                &handle,
+                // NOLINTNEXTLINE(performance-no-int-to-ptr)
+                (void*)(uintptr_t)myfd,
+                CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR),
+            " fabric_info: {",
+            get_nvml_fabric_info(device),
+            "}");
 #endif
         LOG(INFO) << "use posix fd to import expandable segments.";
         close(static_cast<int>(myfd));
@@ -708,11 +713,15 @@ struct ExpandableSegment {
         buf.read(
             reinterpret_cast<char*>(&fabric_handle), sizeof(CUmemFabricHandle));
         CUmemGenericAllocationHandle handle = 0;
-        C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemImportFromShareableHandle_(
-            &handle,
-            // NOLINTNEXTLINE(performance-no-int-to-ptr)
-            (void*)&fabric_handle,
-            CU_MEM_HANDLE_TYPE_FABRIC));
+        C10_CUDA_DRIVER_CHECK_MSG(
+            DriverAPI::get()->cuMemImportFromShareableHandle_(
+                &handle,
+                // NOLINTNEXTLINE(performance-no-int-to-ptr)
+                (void*)&fabric_handle,
+                CU_MEM_HANDLE_TYPE_FABRIC),
+            " fabric_info: {",
+            get_nvml_fabric_info(device),
+            "}");
         LOG(INFO) << "use fabric handle to import expandable segments.";
         segment->handles_.emplace_back(Handle{handle, std::nullopt});
       }

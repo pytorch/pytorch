@@ -5,6 +5,7 @@
 #include <c10/macros/Macros.h>
 
 #include <cstdint>
+#include <string>
 
 namespace c10::cuda {
 
@@ -31,5 +32,18 @@ C10_CUDA_API bool get_p2p_access(
 /// @param device The device index to check.
 /// @return true if fabric access is available, false otherwise.
 C10_CUDA_API bool get_fabric_access(c10::DeviceIndex device);
+
+constexpr int kCliqueIdNotQueried = -2;
+constexpr int kCliqueIdUnsupported = -1;
+
+/// Query the NVLink fabric clique ID for a device.
+/// Returns the clique ID (>= 0) if fabric is supported, or kCliqueIdUnsupported
+/// if unsupported.
+C10_CUDA_API int get_fabric_clique_id(c10::DeviceIndex device);
+
+/// Returns a formatted string with NVML fabric info (clique_id, cluster_uuid,
+/// state, status, health_mask) for the given device. Intended for error
+/// diagnostics — only call on failure paths.
+C10_CUDA_API std::string get_nvml_fabric_info(c10::DeviceIndex device);
 
 } // namespace c10::cuda
