@@ -101,8 +101,8 @@ struct ShareableHandle {
 };
 
 struct StreamSegmentSize {
-  StreamSegmentSize(cudaStream_t s, bool small, size_t sz)
-      : stream(s), is_small_pool(small), total_size(sz) {}
+  StreamSegmentSize(cudaStream_t s, bool small_, size_t sz)
+      : stream(s), is_small_pool(small_), total_size(sz) {}
   cudaStream_t stream;
   bool is_small_pool;
   size_t total_size;
