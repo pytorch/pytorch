@@ -3212,7 +3212,7 @@ aten::copy_""",
         )
 
     def test_profiler_name_pattern(self):
-        x = torch.ones((4096, 4096))
+        x = torch.ones((128, 128))
         with profile() as prof:
             for _ in range(5):
                 x = x @ x
