@@ -49,6 +49,8 @@ from .base import AsPythonConstantNotImplementedError, ValueMutationNew, Variabl
 from .constant import CONSTANT_VARIABLE_FALSE, CONSTANT_VARIABLE_NONE, ConstantVariable
 from .functions import UserFunctionVariable
 from .iter import IteratorVariable
+from .object_protocol import type_implements_nb_index, validate_sequence_index
+from .user_defined import UserDefinedTupleVariable
 
 
 if TYPE_CHECKING:
@@ -110,9 +112,9 @@ class BaseListVariable(VariableTracker):
     def getitem_const(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
-        # TODO(follow-up): this assumes the caller (mp_subscript_impl) has already
-        # run _PyIndex_Check → nb_index_impl. Direct callers bypassing
-        # mp_subscript_impl will skip that validation.
+        # list_subscript/tuple_subscript validate keys internally in CPython.
+        # We do the same here so direct callers don't need to pre-validate.
+        arg = validate_sequence_index(tx, arg, self.python_type_name())
         from .tensor import SymNodeVariable
 
         if isinstance(arg, SymNodeVariable):
@@ -585,10 +587,9 @@ class RangeVariable(BaseListVariable):
     def getitem_const(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
-        # range_subscript: https://github.com/python/cpython/blob/main/Objects/rangeobject.c
-        # TODO(follow-up): this assumes the caller (mp_subscript_impl) has already
-        # run _PyIndex_Check → nb_index_impl. Direct callers bypassing
-        # mp_subscript_impl will skip that validation.
+        # range_subscript validates keys internally in CPython.
+        # We do the same here so direct callers don't need to pre-validate.
+        arg = validate_sequence_index(tx, arg, "range")
         index = arg.as_python_constant()
 
         if isinstance(index, slice):

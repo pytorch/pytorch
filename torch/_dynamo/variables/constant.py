@@ -180,6 +180,13 @@ its type to `common_constant_types`.
     def getitem_const(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
+        # unicode_subscript/bytes_subscript validate keys internally in CPython.
+        # We do the same here so direct callers don't need to pre-validate.
+        if isinstance(self.value, (str, bytes)):
+            from .object_protocol import validate_sequence_index
+
+            container_name = "string" if isinstance(self.value, str) else "bytes"
+            arg = validate_sequence_index(tx, arg, container_name)
         return ConstantVariable.create(
             self.value[arg.as_python_constant()],
         )

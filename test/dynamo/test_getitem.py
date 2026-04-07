@@ -968,6 +968,67 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(fn(x), self._compile(fn, x))
 
+    # --- getitem_const self-validation tests ---
+    # These verify that getitem_const validates keys internally (matching CPython
+    # where each *_subscript function validates its own keys), so direct callers
+    # that bypass mp_subscript_impl still get proper type checking.
+
+    def test_list_getitem_const_rejects_float_key(self):
+        """List getitem_const should reject float keys even without mp_subscript_impl."""
+
+        def fn(x):
+            items = [x, x + 1]
+            return items[1.5]
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            self._compile(fn, torch.randn(4))
+
+    def test_tuple_getitem_const_rejects_float_key(self):
+        def fn(x):
+            items = (x, x + 1)
+            return items[1.5]
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            self._compile(fn, torch.randn(4))
+
+    def test_range_getitem_const_rejects_float_key(self):
+        def fn(x):
+            r = range(10)
+            return x + r[1.5]
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            self._compile(fn, torch.randn(4))
+
+    def test_str_getitem_const_rejects_float_key(self):
+        def fn(x):
+            s = "hello"
+            return x + len(s[1.5])
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            self._compile(fn, torch.randn(4))
+
+    def test_bytes_getitem_const_rejects_float_key(self):
+        def fn(x):
+            b = b"hello"
+            return x + b[1.5]
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            self._compile(fn, torch.randn(4))
+
+    def test_list_getitem_const_accepts_index_dunder(self):
+        """getitem_const should accept __index__-able keys via nb_index coercion."""
+
+        class MyIndex:
+            def __index__(self):
+                return 1
+
+        def fn(x):
+            items = [x, x + 1, x + 2]
+            return items[MyIndex()]
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

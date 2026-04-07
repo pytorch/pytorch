@@ -176,6 +176,36 @@ def _try_get_python_type(obj: VariableTracker) -> type | None:
         return None
 
 
+def validate_sequence_index(
+    tx: "InstructionTranslator",
+    key: VariableTracker,
+    container_name: str,
+) -> VariableTracker:
+    """Validate and coerce a sequence index via _PyIndex_Check -> nb_index.
+
+    Mirrors the key validation done inside CPython's list_subscript, tuple_subscript,
+    range_subscript, unicode_subscript, and bytes_subscript. Each of those C functions
+    checks _PyIndex_Check(key) internally before calling PyNumber_AsSsize_t.
+
+    _PyIndex_Check: https://github.com/python/cpython/blob/62a6e898e01/Include/internal/pycore_abstract.h#L13-L17
+    """
+    from ..exc import raise_observed_exception
+
+    key_type = _try_get_python_type(key)
+    if key_type not in (int, bool, slice):
+        if key_type is not None and not type_implements_nb_index(key_type):
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    f"{container_name} indices must be integers or slices, "
+                    f"not {key.python_type_name()}"
+                ],
+            )
+        key = key.nb_index_impl(tx)
+    return key
+
+
 def vt_getitem(
     tx: "InstructionTranslator",
     obj: VariableTracker,
