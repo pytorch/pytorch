@@ -4810,6 +4810,20 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(M(), example_args)
 
+    @requires_gpu
+    @skipIfRocm(msg="cudnn_grid_sampler not supported on ROCm")
+    def test_cudnn_grid_sampler(self):
+        class M(torch.nn.Module):
+            def forward(self, input, grid):
+                return torch.cudnn_grid_sampler(input, grid)
+
+        # input: (N, C, H, W), grid: (N, H_out, W_out, 2)
+        example_args = (
+            torch.randn(1, 1, 4, 4, device=self.device),
+            torch.randn(1, 3, 3, 2, device=self.device),
+        )
+        self.check_model(M(), example_args)
+
     def test_proxy_executor_permute(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
