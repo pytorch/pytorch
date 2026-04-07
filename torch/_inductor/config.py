@@ -2298,6 +2298,11 @@ class xpu(cutlass):
     # e.g. "20250201".
     version: str | None = None
 
+    # Path to Intel OneAPI.
+    oneapi_root: str | None = None
+
+    cutlass_dir = os.path.realpath(os.environ.get("TORCHINDUCTOR_CUTLASS_DIR", ""))
+
 
 class rocm:
     # Offload arch list for device code compilation, e.g. ["gfx90a", "gfx942"].
