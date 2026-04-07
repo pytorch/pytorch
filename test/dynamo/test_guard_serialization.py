@@ -1866,6 +1866,17 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
         self.assertEqual(pickle.dumps(src1), pickle.dumps(src2))
 
+    def test_source_serialization_init_false_fields(self):
+        # Test that source serialization handles fields that are not initialized
+        from torch._dynamo.source import DefaultsSource, LocalSource
+
+        base = LocalSource("x")
+        source = DefaultsSource(base=base, idx_key=0, is_kw=False)
+
+        # Round-trip through pickle should work even with init=False fields
+        restored = pickle.loads(pickle.dumps(source))
+        self.assertEqual(source, restored)
+
 
 class SimpleModule(torch.nn.Module):
     def __init__(self, c):
