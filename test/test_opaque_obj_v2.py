@@ -211,8 +211,13 @@ class NestedCounters(OpaqueBase):
 
     def __getitem__(self, idx):
         counter = self.c[idx]
-        # Create a new counter to match device mesh's __getitem__
-        return Counter(counter.start, counter.end)
+        # Create a new counter to match device mesh's __getitem__.
+        # Use unset_fake_temporarily as an escape hatch to allow creating
+        # a reference-type opaque mid-trace when we know the value is guarded.
+        from torch._subclasses.fake_tensor import unset_fake_temporarily
+
+        with unset_fake_temporarily():
+            return Counter(counter.start, counter.end)
 
 
 class AddModule(OpaqueBase, torch.nn.Module):
@@ -354,6 +359,92 @@ register_opaque_type(NestedValueSize, typ="value")
 register_opaque_type(OpaqueMultiplier, typ="reference")
 register_opaque_type(Color, typ="reference")
 register_opaque_type(ColorWithDescriptor, typ="reference")
+
+
+class CacheMeta(OpaqueBase):
+    pass
+
+
+register_opaque_type(CacheMeta, typ="reference")
+
+
+@torch.library.custom_op("_cache_meta_base::apply", mutates_args=[])
+def _cache_meta_apply(data: torch.Tensor, meta: CacheMeta) -> torch.Tensor:
+    if meta is None:
+        raise RuntimeError("opaque object is None at runtime (cache bug)")
+    return data * 2
+
+
+@_cache_meta_apply.register_fake
+def _(data: torch.Tensor, meta: CacheMeta) -> torch.Tensor:
+    return torch.empty_like(data)
+
+
+_cache_meta_apply.register_autograd(
+    lambda ctx, grad_output: (grad_output * 2, None),
+    setup_context=lambda ctx, inputs, output: None,
+)
+
+
+@torch.library.custom_op("_cache_meta::call", mutates_args=[])
+def _cache_meta_call(x: torch.Tensor) -> torch.Tensor:
+    return x * 2
+
+
+@_cache_meta_call.register_fake
+def _(x: torch.Tensor) -> torch.Tensor:
+    return torch.empty_like(x)
+
+
+_cache_meta_call.register_autograd(
+    lambda ctx, grad_output: (grad_output * 2,),
+    setup_context=lambda ctx, inputs, output: None,
+)
+
+
+class WrappedTensor(torch.Tensor):
+    @staticmethod
+    def __new__(cls, data):
+        return torch.Tensor._make_wrapper_subclass(
+            cls,
+            data.shape,
+            dtype=data.dtype,
+            device=data.device,
+            requires_grad=data.requires_grad,
+        )
+
+    def __init__(self, data):
+        self._data = data
+
+    def __repr__(self):
+        return f"WrappedTensor({self.shape})"
+
+    def __tensor_flatten__(self):
+        return ["_data"], {}
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+        return WrappedTensor(inner_tensors["_data"])
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        def unwrap(t):
+            return t._data if isinstance(t, WrappedTensor) else t
+
+        out = func(
+            *pytree.tree_map(unwrap, args),
+            **pytree.tree_map(unwrap, kwargs or {}),
+        )
+        return pytree.tree_map(
+            lambda t: WrappedTensor(t) if isinstance(t, torch.Tensor) else t,
+            out,
+        )
+
+
+@_cache_meta_call.register_torch_dispatch(WrappedTensor)
+def _(mode, func, types, args, kwargs):
+    meta = CacheMeta()
+    return WrappedTensor(torch.ops._cache_meta_base.apply(args[0]._data, meta))
 
 
 # A tensor subclass (similar to TwoTensor) that also holds an opaque Counter
@@ -3126,6 +3217,17 @@ def forward(self, x_1, hoisted_str_1):
         )
         self.assertEqual(gm(x, HoistedString("double")), x * 2)
         self.assertEqual(gm(x, HoistedString("square")), x * x)
+
+    def test_reference_opaque_errors_on_mid_trace_creation(self):
+        def fn(x):
+            return torch.ops._cache_meta.call(x)
+
+        x = WrappedTensor(torch.randn(4, requires_grad=True))
+        self.assertRaisesRegex(
+            RuntimeError,
+            "was created during tracing",
+            lambda: torch.compile(fn, fullgraph=True)(x),
+        )
 
     def test_opaque_class_literal_attribute_inlined(self):
         """Test that literal attributes on opaque classes are inlined without source tracking.
