@@ -656,6 +656,10 @@ class TestSparseSemiStructuredTraining(TestCase):
     @training_dtypes
     @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
     @unittest.skipIf(
+        not torch.backends.cusparselt.is_available(),
+        "cuSPARSELt not available",
+    )
+    @unittest.skipIf(
         "RelWithAssert" in torch.__config__.show(),
         "failing in debug build, see https://github.com/pytorch/pytorch/pull/165158 for context",
     )
@@ -749,6 +753,10 @@ class TestSparseSemiStructuredTraining(TestCase):
             )
 
     @training_dtypes
+    @unittest.skipIf(
+        not torch.backends.cusparselt.is_available(),
+        "cuSPARSELt not available",
+    )
     def test_gemm(self, dtype) -> None:
         M, N, K = 32, 32, 64
         a = torch.randn([M, K], device="cuda", dtype=dtype)
@@ -995,6 +1003,10 @@ class TestSparseSemiStructuredTraining(TestCase):
 
     @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
     @unittest.skipIf(
+        not torch.backends.cusparselt.is_available(),
+        "cuSPARSELt not available",
+    )
+    @unittest.skipIf(
         "RelWithAssert" in torch.__config__.show(),
         "failing in debug build, see https://github.com/pytorch/pytorch/pull/165158 for context",
     )
@@ -1008,6 +1020,10 @@ class TestSparseSemiStructuredTraining(TestCase):
             torch.testing.assert_close(a_s @ b, (a * a_m) @ b, **atol_rtol_kw[a.dtype])
 
     @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
+    @unittest.skipIf(
+        not torch.backends.cusparselt.is_available(),
+        "cuSPARSELt not available",
+    )
     @unittest.skipIf(
         "RelWithAssert" in torch.__config__.show(),
         "failing in debug build, see https://github.com/pytorch/pytorch/pull/165158 for context",
