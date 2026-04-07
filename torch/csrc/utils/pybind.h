@@ -16,6 +16,7 @@
 #include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/Stream.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
+#include <torch/csrc/Layout.h>
 
 namespace py = pybind11;
 
@@ -359,6 +360,52 @@ struct type_caster<c10::complex<T>> {
   }
 };
 
+template <>
+struct type_caster<c10::Layout>
+{
+  private:
+    //order must be the same as c10::Layout
+    inline static constexpr auto layout_str = std::to_array({
+      "strided",
+      "sparse_coo",
+      "sparse_csr",
+      "_mkldnn",
+      "sparse_csc",
+      "sparse_bsr",
+      "sparse_bsc",
+      "jagged"
+    });
+  static_assert(layout_str.size() == static_cast<size_t>(c10::Layout::NumOptions), "layout_str must have the same number of elements as c10::Layout");
+  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  PYBIND11_TYPE_CASTER(c10::Layout, _("torch.layout"));
+
+  static handle
+    cast(c10::Layout& layout, return_value_policy /*unused*/, handle /*parent*/) {
+      const auto _torch = py::module_::import("torch");
+      const auto cast_layout = static_cast<uint8_t>(layout);
+      if(cast_layout >= static_cast<uint8_t>(c10::Layout::NumOptions))
+      {
+        //not found
+        throw py::type_error("Unvalid layout specification");
+      }
+      return _torch.attr(layout_str.at(cast_layout));
+    }
+
+    bool load(handle src, bool /*convert*/) {
+      if (!src)
+      {
+        return false;
+      }
+      if(!THPLayout_Check(src.ptr()))
+      {
+        return false;
+      }
+      const auto layout = reinterpret_cast<THPLayout*>(src.ptr()); 
+      value = layout->layout;
+      return true;
+    }
+  };
 } // namespace pybind11::detail
 
 namespace torch::impl {

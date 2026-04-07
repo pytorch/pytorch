@@ -197,7 +197,6 @@ struct type_caster<std::vector<torch::jit::Node*>> : ListCasterBase {
     return cast(*src, pol, parent);
   }
 };
-
 } // namespace pybind11::detail
 
 namespace torch::jit {
