@@ -174,9 +174,14 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && echo "${TORCH_CUDA_ARCH_LIST}" | tr '
   export BUILD_CUSTOM_STEP="ninja -C build flash_attention -j ${J}"
 fi
 
-# TODO: Removeme once all the wrappers are gone
-if [[ "$BUILD_ENVIRONMENT" == *clang* ]] && [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-  sudo rm -f /opt/cache/bin/clang++
+if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
+  export CC=clang
+  export CXX=clang++
+  # TODO: Removeme once all the wrappers are gone
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+    sudo rm -f /opt/cache/bin/clang++
+  fi
+
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-clang*-asan* ]]; then
