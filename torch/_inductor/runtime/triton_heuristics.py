@@ -978,6 +978,12 @@ class CachingAutotuner(KernelInterface):
             # reset to zero before evaluating any config
             self.reset_to_zero_args(*args, **kwargs)
             kernel_name = self.inductor_meta.get("kernel_name", "triton kernel")
+            expected_nargs = getattr(launcher, "n_args", None)
+            if expected_nargs is not None and len(cloned_args) != expected_nargs:
+                raise TypeError(
+                    f"Expected {expected_nargs} arguments for Triton kernel "
+                    f"'{self.fn.__name__}', but got {len(cloned_args)}"
+                )
             if autograd_profiler._is_profiler_enabled:
                 profiler_kwargs = self.get_profiler_kwargs(stream, launcher)
                 with torch._C._profiler._RecordFunctionFast(
@@ -1740,6 +1746,13 @@ class CachingAutotuner(KernelInterface):
                     args, self.filename, self.kernel_hash, self.fn.__name__
                 )
 
+        expected_nargs = getattr(launcher, "n_args", None)
+        if expected_nargs is not None and len(args) != expected_nargs:
+            raise TypeError(
+                f"Expected {expected_nargs} arguments for Triton kernel "
+                f"'{self.fn.__name__}', but got {len(args)}"
+            )
+
         # it is faster than entering and exiting a context manager, even if the context
         # manager is a nullcontext.
         if autograd_profiler._is_profiler_enabled:
@@ -2103,6 +2116,7 @@ class StaticTritonCompileResult(CompileResult[_T]):
         launcher.cache_hash = triton_hash_to_path_key(self.kernel.hash)  # type: ignore[attr-defined]
         launcher.store_cubin = False  # type: ignore[attr-defined]
         launcher._is_static = True  # type: ignore[attr-defined]
+        launcher.n_args = len(def_args)  # type: ignore[attr-defined]
         return launcher
 
 
@@ -2302,6 +2316,7 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
         launcher.shared = binary_shared
         launcher.cache_hash = triton_hash_to_path_key(binary.hash)
         launcher.store_cubin = self.inductor_meta.get("store_cubin", False)
+        launcher.n_args = len(def_args)
         # store this global variable to avoid the high overhead of reading it when calling run
         if launcher.store_cubin:
             launcher.fn = fn
