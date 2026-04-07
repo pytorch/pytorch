@@ -84,8 +84,7 @@ from .schemas import AOTAutogradCacheInfo, AOTConfig, ViewAndMutationMeta  # noq
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Sequence
 
-    from torch._inductor.compile_fx import _CompileFxKwargs
-    from torch._inductor.cudagraph_utils import BoxedDeviceIndex
+    from torch._inductor.compile_fx import _CompileFxKwargs, CompilerConfigExtra
     from torch._inductor.remote_cache import JsonDataTy, RemoteCache
 
 
@@ -708,13 +707,19 @@ def normalize_placeholder_names(
 
 
 def create_fx_config(
-    cudagraphs: BoxedBool | None, boxed_forward_device_index: BoxedDeviceIndex | None
+    compiler_config_extra: CompilerConfigExtra | None = None,
+    compile_region_name: str | None = None,
 ) -> _CompileFxKwargs:
-    if cudagraphs is None:
+    if compiler_config_extra is None:
         cudagraphs = BoxedBool(torch._inductor.config.triton.cudagraphs)
+        boxed_forward_device_index = None
+    else:
+        cudagraphs = compiler_config_extra.cudagraphs
+        boxed_forward_device_index = compiler_config_extra.forward_device
     return {
         "cudagraphs": cudagraphs,
         "boxed_forward_device_index": boxed_forward_device_index,
+        "compile_region_name": compile_region_name,  # pyrefly: ignore[bad-typed-dict-key]
     }
 
 
@@ -722,7 +727,7 @@ def autograd_cache_key(
     mod: torch.fx.GraphModule | torch._dynamo.utils.GmWrapper,
     example_inputs: Sequence[Any],
     config: AOTConfig,
-    fx_config: _CompileFxKwargs,
+    compiler_config_extra: CompilerConfigExtra | None = None,
     # TODO: add args and parameters
 ) -> tuple[str, list[str]]:
     """
@@ -747,7 +752,9 @@ def autograd_cache_key(
                     raise BypassAOTAutogradCache(
                         "AOTAutogradCache requires triton 3.2.0"
                     )
-            details = AOTAutogradCacheDetails(gm, example_inputs, config, fx_config)
+            details = AOTAutogradCacheDetails(
+                gm, example_inputs, config, create_fx_config(compiler_config_extra)
+            )
             pickler = AOTAutogradCachePickler(gm)
             # The prefix distinguishes among the other kinds of objects we cache
             key = "a" + pickler.get_hash(details)
@@ -789,6 +796,7 @@ def sanitize_gm_for_cache(
     """
     # Mapping from each field to a default value
     IGNORED_FIELDS: dict[str, Any] = {
+        # pyrefly: ignore [implicit-any]
         "meta": {},  # metadata used by export
         "compile_subgraph_reason": None,  # Used by dynamo only for logging, no change in inductor/autograd behavior
         "_param_name_to_source": None,  # Encapsulated by aot_config.aot_autograd_arg_pos_to_source
@@ -868,9 +876,10 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         mod: torch.fx.GraphModule | torch._dynamo.utils.GmWrapper,
         args: list[Any],
         aot_config: AOTConfig,
-        fx_config: _CompileFxKwargs,
+        compiler_config_extra: CompilerConfigExtra | None,
         local: bool,
         remote: bool,
+        compile_region_name: str | None = None,
     ) -> Callable[..., Any] | None:
         """
         Load a result from the cache, and reconstruct a runtime wrapper around the object
@@ -883,7 +892,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         cache_state = None
         try:
             cache_key, debug_lines = autograd_cache_key(
-                mod, args, aot_config, fx_config
+                mod, args, aot_config, compiler_config_extra
             )
             result: tuple[GenericAOTAutogradResult[Any, Any], bytes] | None = (
                 AOTAutogradCache._lookup(
@@ -892,6 +901,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             )
             if result is not None:
                 (entry, pickled_content) = result
+                fx_config = create_fx_config(compiler_config_extra, compile_region_name)
                 compiled_fn = entry.wrap_post_compile(args, aot_config, fx_config)
                 # Make the compiled_fn serializable, where the serialize function just
                 # makes a copy of the original entry before post compile via the pickled content

@@ -34,6 +34,7 @@ from ..utils import cmp_name_to_op_mapping, istype
 
 if TYPE_CHECKING:
     from ..codegen import PyCodegen
+    from ..side_effects import SideEffects
     from ..symbolic_convert import InstructionTranslator
     from .constant import ConstantVariable
     from .functions import UserFunctionVariable
@@ -282,6 +283,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     Prefer the factory function VariableTracker.build() over VariableTracker.__init__().
     """
 
+    # The CPython type(s) this VT is designed to represent.
+    # Single type or tuple of types. None means no static CPython type mapping
+    # (e.g., dynamic types like UserDefinedObjectVariable, or Dynamo-internal VTs).
+    _cpython_type: type | tuple[type, ...] | None = None
+
     # fields to leave unmodified in apply()
     _nonvar_fields = {
         "value",
@@ -304,9 +310,14 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         fn: Callable[["VariableTracker"], None],
         value: Any,
         cache: dict[int, Any] | None = None,
+        side_effects: "SideEffects | None" = None,
     ) -> None:
         """
-        Walk value and call fn on all the VariableTracker instances
+        Walk value and call fn on all the VariableTracker instances.
+
+        When side_effects is provided, also walks attributes stored in
+        store_attr_mutations (e.g. dataclass fields set during tracing
+        that aren't in the VT's __dict__).
         """
         if cache is None:
             cache = {}
@@ -324,13 +335,16 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             nonvars = value._nonvar_fields
             for key, subvalue in value.__dict__.items():
                 if key not in nonvars:
-                    cls.visit(fn, subvalue, cache)
+                    cls.visit(fn, subvalue, cache, side_effects)
+            if side_effects is not None and value in side_effects.store_attr_mutations:
+                for attr_vt in side_effects.store_attr_mutations[value].values():
+                    cls.visit(fn, attr_vt, cache, side_effects)
         elif istype(value, (list, tuple)):
             for subvalue in value:
-                cls.visit(fn, subvalue, cache)
+                cls.visit(fn, subvalue, cache, side_effects)
         elif istype(value, (dict, collections.OrderedDict)):
             for subvalue in value.values():
-                cls.visit(fn, subvalue, cache)
+                cls.visit(fn, subvalue, cache, side_effects)
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}()"
@@ -548,6 +562,22 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             ],
         )
 
+    def sq_length(self, tx: Any) -> "VariableTracker":
+        """Called when sq_length is not implemented."""
+        raise_observed_exception(
+            TypeError,
+            tx,
+            args=[f"object of type '{self.python_type_name()}' has no len()"],
+        )
+
+    def mp_length(self, tx: Any) -> "VariableTracker":
+        """Called when mp_length is not implemented."""
+        raise_observed_exception(
+            TypeError,
+            tx,
+            args=[f"object of type '{self.python_type_name()}' has no len()"],
+        )
+
     def call_method(
         self,
         tx: Any,
@@ -555,9 +585,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         args: list["VariableTracker"],
         kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
-        if name == "__len__" and self.has_unpack_var_sequence(tx):
-            assert not (args or kwargs)
-            return variables.ConstantVariable.create(len(self.unpack_var_sequence(tx)))
+        if name == "__len__" and not (args or kwargs):
+            from .object_protocol import generic_len
+
+            return generic_len(tx, self)
         elif (
             name == "__getattr__"
             and len(args) == 1
@@ -565,6 +596,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             and not kwargs
         ):
             return self.var_getattr(tx, args[0].as_python_constant())
+        elif name == "__index__" and not args and not kwargs:
+            return self.nb_index_impl(tx)
         elif name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
             other = args[0]
             if not isinstance(self, type(other)) and not (
@@ -781,9 +814,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             tree_map_kwargs,
             keypath,
         )
-        # For fallback, we need to reconstruct the subtree rooted at this node
-        # and call tree_map_with_path on it. Since we're in the middle of the tree,
-        # we fall back to tracing the tree_map_with_path function.
         return tree_map_fn_copy.call_function(
             tx,
             [map_fn, self, *rest],
@@ -907,6 +937,25 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             ],
         )
 
+    def nb_index_impl(
+        self,
+        tx: Any,
+    ) -> "VariableTracker":
+        """Mirrors CPython's PyNumber_Index / nb_index slot.
+
+        https://github.com/python/cpython/blob/c09ccd9c429/Objects/abstract.c#L1411-L1450
+
+        The base implementation raises TypeError, matching CPython's behavior
+        when tp_as_number->nb_index is NULL (_PyIndex_Check fails).
+        """
+        raise_observed_exception(
+            TypeError,
+            tx,
+            args=[
+                f"'{self.python_type_name()}' object cannot be interpreted as an integer"
+            ],
+        )
+
     def __init__(
         self,
         *,
@@ -1004,10 +1053,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         setattr(cls, method, guarded_method)
 
 
-def raise_type_error_exc(tx: Any, msg_str: str) -> NoReturn:
-    raise_observed_exception(TypeError, tx, args=[msg_str])
-
-
 def typestr(*objs: object) -> str:
     if len(objs) == 1:
         (obj,) = objs
@@ -1020,5 +1065,52 @@ def typestr(*objs: object) -> str:
 
 
 instancecheck = type.__instancecheck__
+
+
+_CPYTHON_BASE_URL = "https://github.com/python/cpython/blob/v3.13.0/"
+
+
+def print_cpython_to_vt_mapping() -> None:
+    """Print the mapping from CPython types to Dynamo VariableTracker classes.
+
+    Reads _cpython_type from each VT subclass (own attribute only, not inherited).
+    """
+    # Ensure all VT modules are imported so all_subclasses is complete
+    from . import (  # noqa: F401
+        builtin,
+        constant,
+        ctx_manager,
+        dicts,
+        distributed,
+        functions,
+        higher_order_ops,
+        iter,
+        lazy,
+        lists,
+        misc,
+        nn_module,
+        streams,
+        tensor,
+        torch,
+        torch_function,
+        user_defined,
+    )
+
+    mapping: dict[type, list[type]] = {}
+    for vt_cls in VariableTrackerMeta.all_subclasses:
+        cpython_type = vt_cls.__dict__.get("_cpython_type")
+        if cpython_type is None:
+            continue
+        types = cpython_type if isinstance(cpython_type, tuple) else (cpython_type,)
+        for t in types:
+            mapping.setdefault(t, []).append(vt_cls)
+
+    for py_type, vt_classes in sorted(mapping.items(), key=lambda x: x[0].__qualname__):
+        for vt_cls in vt_classes:
+            print(
+                f"{py_type.__module__}.{py_type.__qualname__:30s} -> {vt_cls.__name__}"
+            )
+
+
 from . import builder
 from .lazy import LazyVariableTracker

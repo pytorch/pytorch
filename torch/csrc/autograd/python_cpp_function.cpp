@@ -326,16 +326,11 @@ void registerCppFunction(const std::type_info& type, PyTypeObject* pytype) {
 }
 
 bool THPCppFunction_Check(PyObject* obj) {
-  THPObjectPtr type = THPObjectPtr(PyObject_Type(obj));
-  if ((PyTypeObject*)type.get() == get_default_type()) {
+  PyTypeObject* type = Py_TYPE(obj);
+  if (type == get_default_type()) {
     return true;
   }
-  if (cpp_function_types_set.find((PyTypeObject*)type.get()) ==
-      cpp_function_types_set.end()) {
-    return false;
-  } else {
-    return true;
-  }
+  return cpp_function_types_set.contains(type);
 }
 
 static PyObject* callRegisterFn(PyObject* dict, PyObject* hook) {

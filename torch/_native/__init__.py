@@ -3,7 +3,8 @@ from functools import cache
 from typing import cast
 
 # This handles collecting registration of all native ops
-from . import ops, registry
+# Also need to import DSL utils to make sure DSL registration is ok
+from . import cutedsl_utils, dsl_registry, ops, registry, triton_utils
 
 
 @cache

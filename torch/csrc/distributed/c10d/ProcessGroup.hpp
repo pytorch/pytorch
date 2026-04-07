@@ -793,7 +793,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   virtual c10::intrusive_ptr<Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) {
-    static at::Tensor tensor;
+    at::Tensor tensor;
     // TODO: if nccl was specified then use it
     auto device = opts.device;
     if (device.has_value()) {

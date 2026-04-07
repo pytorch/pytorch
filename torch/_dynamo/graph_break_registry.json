@@ -896,6 +896,22 @@
       ]
     }
   ],
+  "GB7230": [
+    {
+      "Gb_type": "iter() with no arguments",
+      "Context": "iter()",
+      "Explanation": "iter() requires at least one argument",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    },
+    {
+      "Gb_type": "iter() with no arguments",
+      "Context": "iter()",
+      "Explanation": "iter() requires at least one argument",
+      "Hints": []
+    }
+  ],
   "GB0073": [
     {
       "Gb_type": "Invoking an nn.Module inside a HigherOrderOperator",
@@ -910,6 +926,16 @@
       "Context": "Higher order op name: {self.source_target}",
       "Explanation": "This is not supported.",
       "Hints": []
+    }
+  ],
+  "GB6012": [
+    {
+      "Gb_type": "Cannot trace user-defined __len__",
+      "Context": "{self.python_type_name()}.__len__()",
+      "Explanation": "Dynamo cannot trace len() on {self.python_type_name()} because the __len__ method is either not traceable (e.g., defined in C or built-in) or returns a non-constant value.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
     }
   ],
   "GB0075": [
@@ -1060,6 +1086,14 @@
     }
   ],
   "GB0088": [
+    {
+      "Gb_type": "Observed exception",
+      "Context": "raised exception {curr_exc.debug_repr()}",
+      "Explanation": "observed_exn_gb_explanation",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    },
     {
       "Gb_type": "Observed exception",
       "Context": "raised exception {curr_exc.python_type_name()}({curr_exc.args})",
@@ -1959,6 +1993,16 @@
       "Explanation": "Argument mismatch when attempting to trace function {func.get_name()}.",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB4841": [
+    {
+      "Gb_type": "Unsupported python_type() call",
+      "Context": "{obj} does not implement python_type()",
+      "Explanation": "This VariableTracker does not implement python_type(), which is required for object protocol operations.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
       ]
     }
   ],
@@ -3211,6 +3255,16 @@
   "GB4927": [
     {
       "Gb_type": "autograd.grad consumed returned tensor's grad_fn",
+      "Context": "Leaked output tensors: {leaked_str}",
+      "Explanation": "torch.autograd.grad() consumes grad_fns that are needed by tensors returned from this compiled function. This would cause 'backward through graph a second time' errors.\n  The following returned tensors have consumed grad_fns: {leaked_str}",
+      "Hints": [
+        "Detach the problematic tensor(s) before returning: e.g. `{leaked[0]}.detach()`",
+        "Call .detach() on the tensor before returning.",
+        "If you need to backward through the returned tensor, use retain_graph=True in autograd.grad()."
+      ]
+    },
+    {
+      "Gb_type": "autograd.grad consumed returned tensor's grad_fn",
       "Context": "",
       "Explanation": "torch.autograd.grad() consumes grad_fns that are needed by tensors returned from this compiled function. This would cause 'backward through graph a second time' errors.",
       "Hints": [
@@ -3627,6 +3681,16 @@
       ]
     }
   ],
+  "GB7906": [
+    {
+      "Gb_type": "Missing len_impl",
+      "Context": "len({type(self).__name__})",
+      "Explanation": "Dynamo does not support len() on {type(self).__name__}. Add len_impl to this VariableTracker subclass.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0291": [
     {
       "Gb_type": "logging.Logger method not supported for non-export cases",
@@ -3887,6 +3951,14 @@
       "Hints": [
         "Register '{name}' with a MemberType in register_opaque_type(members=...)."
       ]
+    }
+  ],
+  "GB5458": [
+    {
+      "Gb_type": "Custom metaclass with __getattribute__",
+      "Context": "type({self.value}) = {metacls}",
+      "Explanation": "Dynamo does not trace attribute access on classes whose metaclass overrides __getattribute__",
+      "Hints": []
     }
   ],
   "GB0310": [
@@ -4355,6 +4427,14 @@
       "Gb_type": "autograd.Function.apply: non-function or method backward",
       "Context": "str(self.bwd_graph)",
       "Explanation": "Expected backward function to be a function or method.",
+      "Hints": []
+    }
+  ],
+  "GB8887": [
+    {
+      "Gb_type": "NamedTupleVariable.__setattr__ bad args",
+      "Context": "{len(args)} args and {len(kwargs)} kwargs",
+      "Explanation": "Expected exactly 2 positional args for __setattr__.",
       "Hints": []
     }
   ],

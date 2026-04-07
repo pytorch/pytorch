@@ -35,7 +35,7 @@ import traceback
 import types
 import warnings
 import weakref
-from collections.abc import Callable, Generator, Sequence
+from collections.abc import Callable, Generator
 from dataclasses import dataclass, field as dc_field
 from types import CodeType
 from typing import Any, cast, Optional, TYPE_CHECKING, Union
@@ -63,7 +63,6 @@ from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_type
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import signpost_event
-from torch.export.dynamic_shapes import _ConstraintTarget
 from torch.fx._lazy_graph_module import _make_graph_module  # type: ignore[attr-defined]
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import (
@@ -177,8 +176,8 @@ from .variables.user_defined import UserDefinedDictVariable
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.compile_options import DynamoCompileOptions
     from torch._dynamo.dynamo_profiler import DynamoProfilerState
-    from torch._dynamo.package import CompilePackage
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._inductor import _CudagraphAnnotation
     from torch.multiprocessing.reductions import StorageWeakRef
@@ -602,15 +601,12 @@ class OutputGraph(OutputGraphCommon):
         code_options: dict[str, Any],
         compiler_fn: CompilerFn | None,
         root_tx: "InstructionTranslatorBase",
-        export: bool,
-        export_constraints: Sequence[_ConstraintTarget],
+        compile_options: "DynamoCompileOptions",
         frame_state: Any,
         local_scope: Scope,
         global_scope: Scope,
         f_code: CodeType,
         torch_function_mode_stack: list[torch.overrides.TorchFunctionMode],
-        package: Optional["CompilePackage"],
-        one_graph: bool = False,
     ) -> None:
         OutputGraphGuardsState.__init__(
             self,
@@ -629,6 +625,7 @@ class OutputGraph(OutputGraphCommon):
             _guards=torch._guards.GuardsSet(),
             _aotautograd_guards=[],
         )
+        export = compile_options.export
         self.tracers = [SubgraphTracer(self, is_export=export)]
         # Map from graph input's `Source` to its `VariableTracker` to
         # de-duplicate graph inputs by source and reuse the tracker
@@ -638,7 +635,7 @@ class OutputGraph(OutputGraphCommon):
         # tracked separately from input_source_to_var for backward() auto-detection.
         self.leaf_var_creation_order: list[VariableTracker] = []
         self.export = export
-        self.export_constraints = export_constraints  # type: ignore[assignment]
+        self.export_constraints = compile_options.export_constraints  # type: ignore[assignment]
         self.frame_state = frame_state
         self.cleanup_hooks: list[Callable[[], Any]] = []
         # compile_id is an id number for the current torch.compile
@@ -679,8 +676,9 @@ class OutputGraph(OutputGraphCommon):
             # the program execution.
             tracked_fakes=self.tracked_fakes,
             # We want to allow capture scalar outputs and allow_dynamic_output_shape_ops when fullgraph=True
-            allow_scalar_outputs=one_graph or config.capture_scalar_outputs,
-            allow_dynamic_output_shape_ops=one_graph
+            allow_scalar_outputs=compile_options.one_graph
+            or config.capture_scalar_outputs,
+            allow_dynamic_output_shape_ops=compile_options.one_graph
             or config.capture_dynamic_output_shape_ops,
             prefer_deferred_runtime_asserts_over_guards=config.prefer_deferred_runtime_asserts_over_guards,
             co_fields=self.co_fields,
@@ -760,7 +758,7 @@ class OutputGraph(OutputGraphCommon):
         # Profiler state for tracking function trace timings
         self.profiler_state: DynamoProfilerState | None = None
 
-        self.package = package
+        self.package = compile_options.package
         # Given a source, what are the user stacks of all locations that
         # accessed it?
         #
@@ -1815,6 +1813,7 @@ class OutputGraph(OutputGraphCommon):
         # i.e. last element corresponds to root frame (1),
         # first element corresponds to current frame (N)
         all_stack_values = []
+        # pyrefly: ignore [implicit-any]
         all_stack_locals_metas = []
         cur_tx: InstructionTranslatorBase | None = tx
         while cur_tx is not None:
@@ -1994,8 +1993,8 @@ class OutputGraph(OutputGraphCommon):
                     and vt.tuple_cls
                     is torch._dynamo.functional_export.ExportTracerOutput
                 ):
-                    flat_returns = vt.items[0]
-                    out_spec = vt.items[1]
+                    flat_returns = vt._tuple_vt.items[0]
+                    out_spec = vt._tuple_vt.items[1]
                     assert isinstance(
                         flat_returns, torch._dynamo.variables.ListVariable
                     )
@@ -2015,7 +2014,7 @@ class OutputGraph(OutputGraphCommon):
                         elif (
                             vt.source is not None
                             and (source := getattr(vt.source, "base", None))  # type: ignore[assignment]
-                            and source.is_input
+                            and getattr(source, "is_input", False)
                         ):
                             self.export_metadata.output_return_type[idx] = (
                                 "input",
@@ -2459,11 +2458,16 @@ class OutputGraph(OutputGraphCommon):
             # if any node was consumed by autograd.grad
             reachable_grad_fns = collect_reachable_grad_fns([(fake_tensor, None)])
             if reachable_grad_fns & self.autograd_grad_consumed_grad_fns:
-                # Set the flag to graph break at autograd.grad on retry
-                tx.speculation_log.graph_break_on_autograd_grad = True
-                raise exc.AutogradGradRestartAnalysis(
-                    restart_reason="autograd.grad consumed grad_fns of returned tensors"
-                )
+                # Record info about the leaked tensor for the error message
+                tensor_name = str(var.source) if var.source else var.proxy.node.name
+                tx.speculation_log.autograd_grad_leaked_tensors.append(tensor_name)
+
+        if tx.speculation_log.autograd_grad_leaked_tensors:
+            # Set the flag to graph break at autograd.grad on retry
+            tx.speculation_log.graph_break_on_autograd_grad = True
+            raise exc.AutogradGradRestartAnalysis(
+                restart_reason="autograd.grad consumed grad_fns of returned tensors"
+            )
 
     def _check_requires_grad_intermediate_outputs(
         self, rv: list["VariableTracker"], tx: "InstructionTranslatorBase"

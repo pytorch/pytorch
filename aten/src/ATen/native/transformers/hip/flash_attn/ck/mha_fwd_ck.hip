@@ -6,72 +6,6 @@
 #include <fmha_fwd.hpp>
 #include <mask.hpp>
 
-#include <cstdio>
-
-namespace {
-
-const char* mask_enum_str(mask_enum m) {
-    switch (m) {
-        case mask_enum::no_mask:          return "no_mask";
-        case mask_enum::mask_top_left:    return "mask_top_left";
-        case mask_enum::mask_bottom_right:return "mask_bottom_right";
-        case mask_enum::window_generic:   return "window_generic";
-        default:                          return "unknown";
-    }
-}
-
-const char* bias_enum_str(bias_enum b) {
-    switch (b) {
-        case bias_enum::no_bias:          return "no_bias";
-        case bias_enum::elementwise_bias: return "elementwise_bias";
-        case bias_enum::alibi:            return "alibi";
-        default:                          return "unknown";
-    }
-}
-
-const char* qscale_enum_str(quant_scale_enum q) {
-    switch (q) {
-        case quant_scale_enum::no_scale:      return "no_scale";
-        case quant_scale_enum::pertensor:      return "pertensor";
-        case quant_scale_enum::blockscale:     return "blockscale";
-        case quant_scale_enum::kv_blockscale:  return "kv_blockscale";
-        default:                               return "unknown";
-    }
-}
-
-void dump_fmha_fwd_kernel_selection_params(const fmha_fwd_traits& t,
-                                           const fmha_fwd_args& a) {
-    std::printf("=== fmha_fwd kernel selection params ===\n");
-    std::printf("--- traits ---\n");
-    std::printf("  data_type          : %s\n",  t.data_type.c_str());
-    std::printf("  hdim_q             : %d\n",  t.hdim_q);
-    std::printf("  hdim_v             : %d\n",  t.hdim_v);
-    std::printf("  is_group_mode      : %s\n",  t.is_group_mode      ? "true" : "false");
-    std::printf("  is_v_rowmajor      : %s\n",  t.is_v_rowmajor      ? "true" : "false");
-    std::printf("  has_logits_soft_cap: %s\n",  t.has_logits_soft_cap ? "true" : "false");
-    std::printf("  mask_type          : %s (%d)\n", mask_enum_str(t.mask_type),
-                static_cast<int>(t.mask_type));
-    std::printf("  bias_type          : %s (%d)\n", bias_enum_str(t.bias_type),
-                static_cast<int>(t.bias_type));
-    std::printf("  has_lse            : %s\n",  t.has_lse             ? "true" : "false");
-    std::printf("  has_dropout        : %s\n",  t.has_dropout         ? "true" : "false");
-    std::printf("  qscale_type        : %s (%d)\n", qscale_enum_str(t.qscale_type),
-                static_cast<int>(t.qscale_type));
-    std::printf("  skip_min_seqlen_q  : %s\n",  t.skip_min_seqlen_q  ? "true" : "false");
-    std::printf("  has_sink           : %s\n",  t.has_sink            ? "true" : "false");
-    std::printf("--- args ---\n");
-    std::printf("  hdim_q             : %d\n",  static_cast<int>(a.hdim_q));
-    std::printf("  hdim_v             : %d\n",  static_cast<int>(a.hdim_v));
-    std::printf("  seqlen_k           : %d\n",  static_cast<int>(a.seqlen_k));
-    std::printf("  cu_seqlen_k_ptr    : %p\n",  a.cu_seqlen_k_ptr);
-    std::printf("  batch              : %d\n",  static_cast<int>(a.batch));
-    std::printf("  nhead_q            : %d\n",  static_cast<int>(a.nhead_q));
-    std::printf("  max_seqlen_q       : %d\n",  static_cast<int>(a.max_seqlen_q));
-    std::printf("========================================\n");
-    std::fflush(stdout);
-}
-
-} // anonymous namespace
 
 namespace pytorch_flash {
 
@@ -178,8 +112,6 @@ fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
                          nullptr, // seqlen_k_ptr
                          nullptr, // cu_seqlen_q_ptr
                          nullptr, // cu_seqlen_k_ptr
-                         nullptr, // block_scale_seqstart_q_ptr
-                         nullptr, // block_scale_seqstart_k_ptr
                          nullptr, // sink_ptr
                          seqlen_q,
                          seqlen_k,
@@ -204,9 +136,6 @@ fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
                          nhead_stride_randval,
                          nhead_stride_lse,
                          nhead_stride_o,
-                         0, // nhead_stride_q_descale
-                         0, // nhead_stride_k_descale
-                         0, // nhead_stride_v_descale
                          batch_stride_q,
                          batch_stride_k,
                          batch_stride_v,
@@ -214,9 +143,6 @@ fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
                          batch_stride_randval,
                          batch_stride_lse,
                          batch_stride_o,
-                         0, // batch_stride_q_descale
-                         0, // batch_stride_k_descale
-                         0, // batch_stride_v_descale
                          mask.left,
                          mask.right,
                          0,                                 // sink_size
@@ -224,10 +150,7 @@ fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
                          -1,                                // min_seqlen_q
                          p_dropout,
                          has_dropout_randval,
-                         drop_seed_offset,
-                         0, // block_scale_size_q
-                         0 // block_scale_size_kv
-                         };
+                         drop_seed_offset};
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
@@ -260,7 +183,6 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
     TORCH_CHECK(v.stride(-1) == 1, "Input tensor must have contiguous last dimension");
 
     const auto sizes = q.sizes();
-
     const int batch_size = sizes[0];
     int seqlen_q = sizes[1];
     int num_heads = sizes[2];
@@ -309,7 +231,6 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
     CHECK_SHAPE(k, batch_size, seqlen_k, num_heads_k, head_size);
     CHECK_SHAPE(v, batch_size, seqlen_k, num_heads_k, head_size);
 
-
     at::Tensor q_padded, k_padded, v_padded;
     if (head_size % 8 != 0) {
         q_padded = at::pad(temp_q, {0, 8 - head_size % 8});
@@ -321,7 +242,6 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
         k_padded = k;
         v_padded = v;
     }
-
 
     at::Tensor out;
     if (out_.has_value()) {
@@ -349,7 +269,6 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
     auto opts = q.options();
     bool has_lse = true;
     bool has_dropout = p_dropout > 0.0f;
-
     at::Tensor softmax_lse;
     // TODO - check gradient, only training require lse
     softmax_lse = at::empty({batch_size, num_heads, seqlen_q}, opts.dtype(at::kFloat));
@@ -360,47 +279,46 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
         p = at::empty({batch_size, num_heads, seqlen_q, seqlen_k}, opts.dtype(at::kByte));
     }
     else {
-        p = at::empty({ 0 }, opts);
+        p = at::empty({ 0, 0, 0, 0 }, opts.dtype(at::kByte));
     }
 
-    int64_t counter_offset = batch_size * num_heads * ck_tile::get_warp_size();
-    auto rng_state = at::empty({2}, opts.dtype(at::kLong));
-    auto rng_state_ptr = reinterpret_cast<uint64_t*>(rng_state.data_ptr());
-
-
-
+    uint64_t drop_seed = 1, drop_offset = 0;
     at::Tensor seed_t, offset_t;
+    int64_t counter_offset = batch_size * num_heads * ck_tile::get_warp_size();
+
+
+    // rng_state is used to pass philox params to CK in a type it likes i.e. uint64
+    auto rng_state_options = at::TensorOptions().dtype(at::kUInt64).device(at::kCUDA);
+    auto rng_state = at::zeros({2}, rng_state_options.dtype(at::kUInt64));
+    auto _unused = at::empty({}, at::dtype(c10::kUInt64).device(at::kCUDA));
 
     if (p_dropout > 0.0)  {
+
         auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
             gen_, at::cuda::detail::getDefaultCUDAGenerator());
+
         // See Note [Acquire lock when using random generators]
         std::lock_guard<std::mutex> lock(gen->mutex_);
-
         auto philox_args = gen->philox_cuda_state(counter_offset);
 
+        std::tie(drop_seed, drop_offset) = at::cuda::philox::unpack(philox_args);
+        rng_state[0] = *(reinterpret_cast<int64_t*>(&drop_seed));
+        rng_state[1] = *(reinterpret_cast<int64_t*>(&drop_offset));
 
-
-        hipLaunchKernelGGL(
-            flash::ParsePhiloxCudaState, dim3(1), dim3(64), 0, at::cuda::getCurrentCUDAStream(), philox_args, rng_state_ptr);
-        seed_t = at::scalar_tensor(at::Scalar(static_cast<uint64_t>(rng_state_ptr[0])), at::dtype(at::kLong));
-        offset_t = at::scalar_tensor(at::Scalar(static_cast<uint64_t>(rng_state_ptr[1])), at::dtype(at::kLong));
-    }
-    else
-    {
+    } else {
         seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
         offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
     }
-
     std::optional<at::Tensor> attn_bias;
+    std::pair<uint64_t*, uint64_t*> drop_seed_offset;
     if( attn_bias_.has_value())
     {
       attn_bias = attn_bias_;
     }
-
     if (seqlen_k > 0) {
-        auto drop_seed_offset = std::make_pair(rng_state_ptr, rng_state_ptr + 1);
-        auto stream = at::cuda::getCurrentCUDAStream().stream();
+        drop_seed_offset.first = rng_state[0].data_ptr<uint64_t>();
+        drop_seed_offset.second = rng_state[1].data_ptr<uint64_t>();
+        auto stream = at::cuda::getCurrentHIPStream().stream();
         ck_tile::stream_config stream_config{stream};
 
         auto traits =
@@ -441,12 +359,28 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
         out.zero_();
         softmax_lse.fill_(std::numeric_limits<float>::infinity());
     }
-
     if (seqlenq_ngroups_swapped) {
         out = out.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size});
         q_padded = q_padded.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size});
         softmax_lse = softmax_lse.reshape({batch_size, num_heads_k * seqlen_q, 1});
     }
-    return {out, q_padded, k_padded, v_padded, softmax_lse, seed_t, offset_t, p};
+    // Before returning populate seed_t and offset_t if dropout is used
+    if(p_dropout > 0.0)
+    {
+        seed_t = at::scalar_tensor(at::Scalar(reinterpret_cast<uint64_t>(*(drop_seed_offset.first))),
+                                   at::dtype(at::kUInt64).device(at::kCUDA));
+        offset_t = at::scalar_tensor(at::Scalar(reinterpret_cast<uint64_t>(*(drop_seed_offset.second))),
+                                   at::dtype(at::kUInt64).device(at::kCUDA));
+    }
+    // Note: These are propagated up to the return of mha_fwd(). comments
+    //       represent the assignments at that level
+    return {out,            // output
+            q_padded,       // q_padded
+            k_padded,       // k_padded
+            v_padded,       // v_padded
+            softmax_lse,    // logsumexp
+            seed_t,         // philox_seed
+            offset_t,       // philox_offset
+            p};             // debug_attn_mask
 }
 } //namespace pytorch_flash
