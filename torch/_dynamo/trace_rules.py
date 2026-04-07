@@ -369,6 +369,7 @@ manual_torch_name_rule_map: dict[
     "torch.fx.experimental.symbolic_shapes.has_static_value": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.has_free_unbacked_symbols": TorchInGraphFunctionVariable,
     "torch.cuda._get_device_properties": TorchInGraphFunctionVariable,
+    "torch.utils.checkpoint.checkpoint_name": TorchInGraphFunctionVariable,
     "torch.utils.hooks.BackwardHook": TorchInGraphFunctionVariable,
     "torch.set_default_device": UserFunctionVariable,
     "torch.sparse_bsc_tensor": SparseTensorCreationSkipVariable,
