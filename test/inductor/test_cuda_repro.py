@@ -1579,6 +1579,24 @@ class CudaReproTests(TestCase):
         actual = opt_fn(x)
         self.assertEqual(expected, actual)
 
+    def test_explicit_precision_cast_not_elided(self):
+        # Regression test for #179561: explicit fp32->bf16->fp32 round-trip
+        # should preserve the mantissa truncation even with default config.
+        torch.manual_seed(0)
+        x = torch.randn(4, 32, 32, device=device_type)
+        w = torch.randn(32, 32, device=device_type)
+
+        def fn(x, w):
+            x = torch.matmul(x, w)
+            x = x.to(torch.bfloat16).float()
+            x = x * torch.sigmoid(x)
+            return x.sum(dim=1)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        expected = fn(x, w)
+        actual = opt_fn(x.clone(), w.clone())
+        self.assertEqual(expected, actual)
+
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_norm_rounding(self):
         torch.manual_seed(0)
