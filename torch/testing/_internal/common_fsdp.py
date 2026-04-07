@@ -1765,7 +1765,28 @@ if os.environ.get("PYTORCH_TESTING_PREFER_MULTIPROCESS"):
     # Some backends may not support multi-threaded test execution.
     # Setting PYTORCH_TESTING_PREFER_MULTIPROCESS=1 falls back to
     # multi-process which tests the same FSDP logic with process isolation.
+    # Subclass world_size properties are capped to avoid spawning too many
+    # processes (threads are cheap, processes are not).
+    _PREFER_MULTIPROCESS_MAX_WORLD_SIZE = int(
+        os.environ.get("PYTORCH_TESTING_PREFER_MULTIPROCESS_MAX_WORLD_SIZE", "4")
+    )
+
     class FSDPTestMultiThread(FSDPTest):  # type: ignore[no-redef]
+        @property
+        def world_size(self):
+            return min(_PREFER_MULTIPROCESS_MAX_WORLD_SIZE, DEVICE_COUNT)
+
+        def __init_subclass__(cls, **kwargs):
+            super().__init_subclass__(**kwargs)
+            if "world_size" in cls.__dict__:
+                orig = cls.__dict__["world_size"]
+                if isinstance(orig, property):
+                    cls.world_size = property(
+                        lambda self, f=orig.fget: min(
+                            _PREFER_MULTIPROCESS_MAX_WORLD_SIZE, f(self)
+                        )
+                    )
+
         def perThreadSetUp(self):
             pass
 
