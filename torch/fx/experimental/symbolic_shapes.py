@@ -2951,6 +2951,38 @@ class _CppShapeGuardsHelper(_ShapeGuardsHelper):
     source_to_symbol: dict[Source, sympy.Symbol]
 
 
+_ConstraintViolation: TypeAlias = tuple[bool, str, Callable[[], str]]
+_InputGuard: TypeAlias = tuple[Source, sympy.Expr]
+
+
+@dataclass(slots=True)
+class _ProduceGuardsContext:
+    langs: tuple[str, ...]
+    source_ref: Callable[[Source], str]
+    py_printer: ShapeGuardPythonPrinter
+    printers: list[_ShapeGuardPrinter]
+    all_exprs: list[list[str]]
+    symbol_to_source: defaultdict[sympy.Symbol, list[Source]] = field(
+        default_factory=lambda: defaultdict(list)
+    )
+    symbol_to_constraints: defaultdict[sympy.Symbol, set[Constraint]] = field(
+        default_factory=lambda: defaultdict(set)
+    )
+    input_guards: list[_InputGuard] = field(default_factory=list)
+    constraint_violations: list[_ConstraintViolation] = field(default_factory=list)
+
+    def record_constraint_violation(
+        self,
+        warn_only: bool,
+        debug_name: str,
+        msg: str,
+        hint: Callable[[], str] | None = None,
+    ) -> None:
+        self.constraint_violations.append(
+            (warn_only, debug_name, lambda: f"{msg}{hint()}" if hint else msg)
+        )
+
+
 class LoggingShapeGuardPrinter(ShapeGuardPythonPrinter):
     def __init__(self, var_to_sources: Mapping[sympy.Symbol, list[Source]]):
         super().__init__(var_to_sources, lambda n: n.name, var_to_sources)
@@ -5614,6 +5646,809 @@ class ShapeEnv:
             return c_render
         return c.render(source)
 
+    def _create_no_constraints_context(self, t: Tensor) -> StatelessSymbolicContext:
+        return StatelessSymbolicContext(
+            # Ignored; only the constraints part is relevant below.
+            dynamic_sizes=[DimDynamic.DYNAMIC] * t.dim(),
+            dynamic_strides=[DimDynamic.INFER_STRIDE] * t.dim(),
+            constraint_sizes=[None] * t.dim(),
+            constraint_strides=[None] * t.dim(),
+        )
+
+    def _normalize_input_contexts(
+        self,
+        placeholders: Sequence[object],
+        input_contexts: DimList[SymbolicContext] | None,
+    ) -> list[SymbolicContext | None]:
+        Tensorlike = (torch.Tensor, FakeTensorMeta)
+
+        if input_contexts is None:
+            return [
+                self._create_no_constraints_context(cast(torch.Tensor, t))
+                if isinstance(t, Tensorlike)
+                else None
+                for t in placeholders
+            ]
+
+        if len(input_contexts) != len(placeholders):
+            raise AssertionError("len(input_contexts) != len(placeholders)")
+
+        for i, (t, context) in enumerate(zip(placeholders, input_contexts)):
+            if isinstance(t, Tensorlike):
+                if context is None:
+                    input_contexts[i] = self._create_no_constraints_context(
+                        cast(torch.Tensor, t)
+                    )
+            else:
+                if not isinstance(t, (SymInt, int, SymFloat, float)):
+                    raise AssertionError(
+                        f"Expected SymInt, int, SymFloat, or float, got {type(t)}"
+                    )
+                if isinstance(context, list):
+                    raise AssertionError("context must not be a list")
+
+        return cast(list[SymbolicContext | None], input_contexts)
+
+    def _create_produce_guards_context(
+        self,
+        langs: tuple[str, ...],
+        source_ref: Callable[[Source], str],
+    ) -> _ProduceGuardsContext:
+        symbol_to_source: defaultdict[sympy.Symbol, list[Source]] = defaultdict(list)
+        py_printer = ShapeGuardPythonPrinter(
+            symbol_to_source, source_ref, self.var_to_sources
+        )
+        printers: list[_ShapeGuardPrinter] = []
+        for lang in langs:
+            if lang in ["python", "verbose_python"]:
+                printers.append(py_printer)
+            elif lang == "cpp":
+                printers.append(
+                    _ShapeGuardCppPrinter(
+                        symbol_to_source, source_ref, self.var_to_sources
+                    )
+                )
+            else:
+                raise NotImplementedError(f"Unknown lang: {lang}")
+
+        return _ProduceGuardsContext(
+            langs=langs,
+            source_ref=source_ref,
+            py_printer=py_printer,
+            printers=printers,
+            all_exprs=[[] for _ in langs],
+            symbol_to_source=symbol_to_source,
+        )
+
+    @staticmethod
+    def _is_dim_source(src: object) -> TypeGuard[TensorPropertySource]:
+        from torch._dynamo.source import TensorProperty, TensorPropertySource
+
+        return isinstance(src, TensorPropertySource) and src.prop is TensorProperty.SIZE
+
+    def _process_input_equalities(
+        self,
+        placeholders: Sequence[object],
+        sources: Sequence[Source],
+        equalities_inputs: EqualityConstraint | None,
+        ctx: _ProduceGuardsContext,
+    ) -> None:
+        if not equalities_inputs:
+            return
+
+        source_index = {}
+        for i, src in enumerate(sources):
+            source_index[src.name] = i
+
+        def get_expression(tensor_dim_src: Source) -> sympy.Expr:
+            fake = placeholders[source_index[tensor_dim_src.base.name]]  # type: ignore[attr-defined]
+            if tensor_dim_src.idx is None:  # type: ignore[attr-defined]
+                raise AssertionError("tensor_dim_src.idx must not be None")
+            symint = fake.shape[tensor_dim_src.idx]  # type: ignore[attr-defined]
+            if isinstance(symint, torch.SymInt):
+                return symint.node.expr
+            if type(symint) is not int:
+                raise AssertionError(f"Expected int, got {type(symint)}")
+            return sympy.Integer(symint)
+
+        for src1, src2 in equalities_inputs.source_pairs:
+            expr1, expr2 = get_expression(src1), get_expression(src2)  # type: ignore[]
+            concrete_val = self.evaluate_expr(sympy.Eq(expr1, expr2))
+            if not concrete_val:
+                raise ConstraintViolationError(
+                    f"{src1.name} = {expr1 if isinstance(expr1, int) else expr1.xreplace(self.backed_var_to_val)}"
+                    " is not equal to "
+                    f"{src2.name} = {expr2 if isinstance(expr2, int) else expr2.xreplace(self.backed_var_to_val)}"
+                )
+
+        for srcEq, root, fn in equalities_inputs.derived_equalities:
+            expr1 = get_expression(srcEq)
+            if isinstance(root, sympy.Symbol):
+                expr2, debug_name = root, self.var_to_sources[root][0].name
+            elif isinstance(root, sympy.Integer):
+                expr2, debug_name = root, str(root)
+            else:
+                expr2, debug_name = get_expression(root), self._debug_name(root)
+            expr2_ = fn(expr2)
+            concrete_val = self.evaluate_expr(sympy.Eq(expr1, expr2_))
+            if not concrete_val:
+                raise ConstraintViolationError(
+                    f"Expected input {srcEq.name} to be equal to "
+                    f"{fn(sympy.Symbol(debug_name))}, "
+                    f"where {debug_name} = {expr2.xreplace(self.backed_var_to_val)}, "
+                    f"but got {expr1.xreplace(self.backed_var_to_val)}"
+                )
+
+        for phantom_symbol in equalities_inputs.phantom_symbols:
+            if isinstance(phantom_symbol, sympy.Symbol):
+                ctx.symbol_to_source[phantom_symbol].extend(
+                    self.var_to_sources[phantom_symbol]
+                )
+
+    def _track_input_symint(
+        self,
+        source: Source,
+        val: IntLikeType,
+        constraint: DimConstraint = None,
+        *,
+        ctx: _ProduceGuardsContext,
+    ) -> None:
+        log.debug(
+            "track_symint %s %s %s",
+            LazyString(lambda: source.name),
+            val,
+            constraint,
+        )
+        if isinstance(val, SymInt) and not is_symbolic(val):
+            raise AssertionError("val must be symbolic if it is a SymInt")
+
+        if isinstance(val, SymInt) and val.node.maybe_as_int() is not None:
+            val = val.node.maybe_as_int()
+
+        if isinstance(val, SymInt):
+            s = val.node.expr
+            if isinstance(s, sympy.Symbol):
+                ctx.symbol_to_source[s].append(source)
+                if constraint is not None and not isinstance(
+                    constraint, RelaxedUnspecConstraint
+                ):
+                    ctx.symbol_to_constraints[s].add(constraint)
+            else:
+                constraint_violated = False
+                if isinstance(constraint, StrictMinMaxConstraint):
+                    sym_vrs = {
+                        x: self.var_to_range.get(x, None) for x in s.free_symbols
+                    }
+                    if any(vr is None for vr in sym_vrs.values()):
+                        constraint_violated = True
+                elif isinstance(constraint, RelaxedUnspecConstraint):
+                    if s.is_number:
+                        i = int(s)
+                        if i not in (0, 1):
+                            constraint_violated = True
+                if constraint_violated:
+                    if constraint is None:
+                        raise AssertionError("constraint must not be None")
+
+                    def hint(expr: sympy.Expr) -> str:
+                        return f"{ctx.py_printer.doprint(expr)}."
+
+                    var_with_range = self._render_range_for_constraint_violation(
+                        source, constraint
+                    )
+                    msg = (
+                        f"Not all values of {var_with_range} are valid because "
+                        f"{self._debug_name(source)} was inferred to be equal to "
+                    )
+                    ctx.record_constraint_violation(
+                        constraint.warn_only,
+                        self._debug_name(source),
+                        msg,
+                        hint=functools.partial(hint, s),
+                    )
+
+            ctx.input_guards.append((source, s))
+            return
+
+        s = sympy.Integer(val)
+        ctx.input_guards.append((source, s))
+        constraint_violated = False
+        if isinstance(constraint, StrictMinMaxConstraint):
+            if not (s == constraint.vr.lower == constraint.vr.upper):
+                constraint_violated = True
+        elif isinstance(constraint, RelaxedUnspecConstraint):
+            if val not in (0, 1):
+                constraint_violated = True
+        if constraint_violated:
+            if constraint is None:
+                raise AssertionError("constraint must not be None")
+            var_with_range = self._render_range_for_constraint_violation(
+                source, constraint
+            )
+            user_stack = self.specialization_stacks.get(source, None)
+            msg = (
+                f"You marked {self._debug_name(source)} as dynamic but your code "
+                f"specialized it to be a constant ({val}). If you're using mark_dynamic, "
+                f"either remove it or use maybe_mark_dynamic. If you're using Dim.DYNAMIC, "
+                f"replace it with either Dim.STATIC or Dim.AUTO."
+                + (
+                    "\n\nUser stack:\n" + "".join(user_stack.format())
+                    if user_stack
+                    else ""
+                )
+            )
+            ctx.record_constraint_violation(
+                constraint.warn_only, self._debug_name(source), msg
+            )
+
+    def _track_input_symfloat(
+        self, source: Source, val: FloatLikeType, *, ctx: _ProduceGuardsContext
+    ) -> None:
+        log.debug("track_symfloat %s %s", LazyString(lambda: source.name), val)
+        if isinstance(val, SymFloat) and not is_symbolic(val):
+            raise AssertionError("val must be symbolic if it is a SymFloat")
+
+        if isinstance(val, SymFloat) and val.node.maybe_as_float() is not None:
+            val = val.node.maybe_as_float()
+
+        if isinstance(val, SymFloat):
+            s = val.node.expr
+            if isinstance(s, sympy.Symbol):
+                ctx.symbol_to_source[s].append(source)
+            ctx.input_guards.append((source, s))
+            return
+
+        ctx.input_guards.append((source, sympy.Float(val)))
+
+    def _track_tensor_input_sources(
+        self,
+        source: Source,
+        t: Tensor,
+        context: SymbolicContext | None,
+        *,
+        ctx: _ProduceGuardsContext,
+    ) -> None:
+        from torch._dynamo.source import (
+            AttrSource,
+            TensorProperty,
+            TensorPropertySource,
+        )
+
+        if context is None:
+            raise AssertionError("context must not be None for tensor inputs")
+
+        if is_traceable_wrapper_subclass(t):
+            if not isinstance(context, SubclassSymbolicContext):
+                raise AssertionError(
+                    f"Expected SubclassSymbolicContext, got {type(context)}"
+                )
+
+            sources_tensors_constraints: list[tuple[Source, Any, Any, Any]] = [
+                (source, t, context.constraint_sizes, context.constraint_strides)
+            ]
+            attrs, _ = t.__tensor_flatten__()
+            for attr in attrs:
+                match getattr(t, attr):
+                    case torch.Tensor() as inner_t:
+                        inner_context = context.inner_contexts[attr]
+                        sources_tensors_constraints.append(
+                            (
+                                AttrSource(source, attr),
+                                inner_t,
+                                inner_context.constraint_sizes,  # type: ignore[attr-defined]
+                                inner_context.constraint_strides,  # type: ignore[attr-defined]
+                            )
+                        )
+                    case OpaqueBase():
+                        pass
+                    case unexpected:
+                        raise AssertionError(
+                            f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        )
+        else:
+            sources_tensors_constraints = [
+                (source, t, context.constraint_sizes, context.constraint_strides)  # type: ignore[attr-defined]
+            ]
+
+        for (
+            src,
+            curr_t,
+            constraint_size,
+            constraint_stride,
+        ) in sources_tensors_constraints:
+            if is_sparse_any(curr_t):
+                for i, ss in enumerate(curr_t.size()):
+                    property_source = TensorPropertySource(src, TensorProperty.SIZE, i)
+                    self._track_input_symint(
+                        property_source, ss, constraint_size[i], ctx=ctx
+                    )
+            else:
+                for i, ss in enumerate(curr_t.size()):
+                    property_source = TensorPropertySource(src, TensorProperty.SIZE, i)
+                    self._track_input_symint(
+                        property_source, ss, constraint_size[i], ctx=ctx
+                    )
+
+                for i, ss in enumerate(curr_t.stride()):
+                    property_source = TensorPropertySource(
+                        src, TensorProperty.STRIDE, i
+                    )
+                    self._track_input_symint(
+                        property_source, ss, constraint_stride[i], ctx=ctx
+                    )
+                self._track_input_symint(
+                    TensorPropertySource(src, TensorProperty.STORAGE_OFFSET),
+                    curr_t.storage_offset(),
+                    ctx=ctx,
+                )
+
+    def _track_symbol_to_source(
+        self,
+        placeholders: Sequence[object],
+        sources: Sequence[Source],
+        input_contexts: Sequence[SymbolicContext | None],
+        *,
+        ctx: _ProduceGuardsContext,
+    ) -> None:
+        Tensorlike = (torch.Tensor, FakeTensorMeta)
+
+        # Fresh variables can only be bound by inputs, so we record where each
+        # symbol came from. In practice this means only the outermost ShapeEnv
+        # user can evaluate guards: Dynamo may guard on tensors that are later
+        # pruned, so inner users may not even have those inputs available.
+        for t, source, context in zip(placeholders, sources, input_contexts):
+            if isinstance(source, str):
+                from torch._dynamo.source import LocalSource
+
+                source = LocalSource(source)
+            if not isinstance(source, Source):
+                raise AssertionError(f"Expected Source, got {type(source)}")
+            if t is None:
+                continue
+            if isinstance(t, (SymInt, int)):
+                constraint = (
+                    None if context is None else getattr(context, "constraint", None)
+                )
+                self._track_input_symint(source, t, constraint, ctx=ctx)
+                continue
+            if isinstance(t, (SymFloat, float)):
+                self._track_input_symfloat(source, t, ctx=ctx)
+                continue
+            if not isinstance(t, Tensorlike):
+                raise AssertionError(f"Expected Tensorlike, got {type(t)}")
+            self._track_tensor_input_sources(
+                source, cast(torch.Tensor, t), context, ctx=ctx
+            )
+
+    def _emit_input_equality_guards(
+        self,
+        ignore_static: bool,
+        equalities_inputs: EqualityConstraint | None,
+        *,
+        simplified: bool,
+        ctx: _ProduceGuardsContext,
+    ) -> None:
+        from torch._dynamo.source import TensorProperty, TensorPropertySource
+
+        if simplified:
+            return
+
+        if self.dim_constraints is None:
+            raise AssertionError("dim_constraints must not be None")
+
+        for source, expr in ctx.input_guards:
+            srcname = source.name
+            if (
+                self._translation_validation_enabled
+                and srcname in self.source_to_symbol
+            ):
+                self._add_target_expr(sympy.Eq(self.source_to_symbol[srcname], expr))
+
+            if (
+                isinstance(expr, sympy.Symbol)
+                and ctx.symbol_to_source.get(expr)
+                and source == ctx.symbol_to_source[expr][0]
+            ):
+                continue
+
+            # This logic excludes static values found on tensors from guarding,
+            # because Dynamo's check_tensor_fn does that (see guards.cpp).
+            # However, for non-tensor sources, we still need to guard here.
+            if (
+                ignore_static
+                and isinstance(source, TensorPropertySource)
+                and expr.is_number
+            ):
+                self.log.debug(
+                    "Skipping guard %s", f"{ctx.source_ref(source)} == {expr}"
+                )
+                continue
+
+            if self._is_dim_source(source):
+                self.dim_constraints.add_equality(source, expr)
+
+            for exprs, printer, lang in zip(ctx.all_exprs, ctx.printers, ctx.langs):
+                res = f"{printer.print_source(source)} == {printer.doprint(expr)}"
+                if lang == "verbose_python":
+                    if (s0 := self.source_to_var.get(srcname)) is not None:
+                        if source != self.var_to_sources[s0][0]:
+                            res = (
+                                f"{res}  # duck sizing added this equality because these "
+                                f"variables had the same size {self.backed_var_to_val[s0]} "
+                                "(to avoid this specialization, set torch.fx.experimental._config.use_duck_shape = False)"
+                            )
+                        elif (sloc := self.replacements_slocs.get(s0)) is not None:
+                            res = f"{res}  # {sloc}"
+                        else:
+                            res = f"{res}  # (unknown var {s0}, please file a bug)"
+                    else:
+                        res = f"{res}  # (unknown source {srcname}, please file a bug)"
+                exprs.append(res)
+
+            if (
+                isinstance(source, TensorPropertySource)
+                and source.prop is TensorProperty.SIZE
+                and equalities_inputs
+                and len(expr.free_symbols) == 1
+            ):
+                symbol = next(iter(expr.free_symbols))
+                if (
+                    isinstance(expr, sympy.Symbol)
+                    and expr in ctx.symbol_to_constraints
+                    and not equalities_inputs.is_equal(
+                        source, ctx.symbol_to_source[expr][0]
+                    )
+                ):
+                    msg = (
+                        f"The values of {self._debug_name(source)} = {source.name} and "
+                        f"{self._debug_name(ctx.symbol_to_source[expr][0])} = {ctx.symbol_to_source[expr][0].name} "
+                        "must always be equal."
+                    )
+                    ctx.record_constraint_violation(
+                        equalities_inputs.warn_only,
+                        self._debug_name(source),
+                        msg,
+                    )
+
+                if (
+                    not isinstance(expr, sympy.Symbol)
+                    and symbol in ctx.symbol_to_constraints
+                    and not equalities_inputs.is_derived(
+                        source,
+                        ctx.symbol_to_source[symbol][0],
+                        lambda x: expr.xreplace({symbol: x}),
+                    )
+                ):
+                    src = ctx.symbol_to_source[symbol][0]
+                    msg = (
+                        f"The values of {self._debug_name(source)} = {source.name} must always be related to "
+                        f"the values of {self._debug_name(src)} = {src.name} by "
+                        f"{self._debug_name(source)} = {expr.xreplace({symbol: sympy.sympify(self._debug_name(src))})}."
+                    )
+                    ctx.record_constraint_violation(
+                        equalities_inputs.warn_only,
+                        self._debug_name(source),
+                        msg,
+                    )
+
+    def _emit_shape_guard(
+        self,
+        guard: ShapeGuard,
+        issued: set[sympy.Expr],
+        *,
+        ctx: _ProduceGuardsContext,
+    ) -> None:
+        expr = self.simplify(guard.expr)
+
+        if expr in issued:
+            return
+
+        issued.add(expr)
+
+        try:
+            is_trivial = False
+            if any(
+                self._is_dim_source(source)
+                for s in expr.free_symbols
+                for source in ctx.symbol_to_source[s]
+            ):
+                if self.dim_constraints is None:
+                    raise AssertionError("dim_constraints must not be None")
+                is_trivial = self.dim_constraints.add(expr)
+
+            for exprs, printer, lang in zip(ctx.all_exprs, ctx.printers, ctx.langs):
+                guard_expr = printer.doprint(expr)
+                if lang == "verbose_python":
+                    guard_expr = f"{guard_expr}  # {guard.sloc}"
+                exprs.append(guard_expr)
+
+            self._add_target_expr(expr)
+            if not is_trivial and len(expr.free_symbols) == 1:
+                symbol = next(iter(expr.free_symbols))
+                source = ctx.symbol_to_source[symbol][0]
+                constraints = ctx.symbol_to_constraints[symbol]
+                for c in constraints:
+                    if isinstance(c, StrictMinMaxConstraint):
+                        var_with_range = self._render_range_for_constraint_violation(
+                            source, c
+                        )
+                        msg = (
+                            f"Not all values of {var_with_range} "
+                            f"satisfy the generated guard {ctx.py_printer.doprint(expr)}."
+                        )
+                        ctx.record_constraint_violation(
+                            c.warn_only,
+                            self._debug_name(source),
+                            msg,
+                        )
+                    elif isinstance(c, RelaxedUnspecConstraint):
+                        pass
+                    else:
+                        raise AssertionError(f"unrecognized constraint {c}")
+        except Exception:
+            self.log.warning("Failing guard allocated at %s", guard.sloc)
+            raise
+
+    def _emit_shape_guards(
+        self, guards: list[ShapeGuard] | None, *, ctx: _ProduceGuardsContext
+    ) -> None:
+        issued: set[sympy.Expr] = set()
+
+        for guard in guards if guards is not None else self.guards:
+            if (
+                self._maybe_evaluate_static(
+                    guard.expr, axioms=(), size_oblivious=guard.size_oblivious
+                )
+                is not None
+            ):
+                continue
+
+            self._emit_shape_guard(guard, issued, ctx=ctx)
+
+        if self.dim_constraints is None:
+            raise AssertionError("dim_constraints must not be None")
+
+        # Because there are guards that export's constraint solver can suggest
+        # good fixes for, that we may have deferred as runtime asserts, and that
+        # produce_guards() alone won't do anything with (e.g. divisibility
+        # guards), we want to send runtime asserts to export's constraint solver
+        # too. These will still stay in the graph as asserts, but export's
+        # constraint solver can decide whether to do anything with them.
+        for ra in self.deferred_runtime_asserts.get(None, []):
+            if self._maybe_evaluate_static(ra.expr, axioms=()) is not None:
+                continue
+            self.dim_constraints.add(self.simplify(ra.expr))
+
+    def _emit_value_range_bounds(
+        self, *, simplified: bool, ctx: _ProduceGuardsContext
+    ) -> None:
+        for symbol, sources in ctx.symbol_to_source.items():
+            r = self.var_to_range.get(symbol)
+            if r is None:
+                continue
+            vr_sloc = self.var_to_range_sloc[symbol]
+
+            if not sources:
+                raise AssertionError(f"sources must not be empty for symbol {symbol}")
+
+            bounds = []
+            source = sources[0]
+            rf = ctx.source_ref(source)
+            verbose_expr = ""
+            if r.lower not in (-sympy.oo, -int_oo):
+                if any(self._is_dim_source(src) for src in sources):
+                    if self.dim_constraints is None:
+                        raise AssertionError("dim_constraints must not be None")
+                    self.dim_constraints.add(sympy.Ge(symbol, r.lower))
+                if not simplified or r.lower != self._default_value_range().lower:
+                    bounds.append(sympy.Le(r.lower, symbol, evaluate=False))
+                verbose_expr = f"{r.lower} <= {rf}  # {vr_sloc.lower}"
+            if r.upper not in (sympy.oo, int_oo):
+                if any(self._is_dim_source(src) for src in sources):
+                    if self.dim_constraints is None:
+                        raise AssertionError("dim_constraints must not be None")
+                    self.dim_constraints.add(sympy.Le(symbol, r.upper))
+                bounds.append(sympy.Le(symbol, r.upper, evaluate=False))
+                if verbose_expr:
+                    verbose_expr = f"{r.lower} <= {rf} <= {r.upper}  # {vr_sloc.lower} and {vr_sloc.upper}"
+                else:
+                    verbose_expr = f"{rf} <= {r.upper}  # {vr_sloc.upper}"
+            if bounds:
+                bound = sympy.And(*bounds, evaluate=False)
+
+                for exprs, printer, lang in zip(ctx.all_exprs, ctx.printers, ctx.langs):
+                    if lang == "verbose_python":
+                        exprs.append(verbose_expr)
+                    else:
+                        exprs.append(printer.doprint(bound))
+
+                constraints = ctx.symbol_to_constraints[symbol]
+                for c in constraints:
+                    if isinstance(c, StrictMinMaxConstraint):
+                        if not (c.vr & self._default_value_range()).issubset(r):
+                            expr = sympy.And(
+                                sympy.Le(r.lower, symbol), sympy.Le(symbol, r.upper)
+                            )
+                            guard_expr = ctx.py_printer.doprint(expr)
+                            var_with_range = (
+                                self._render_range_for_constraint_violation(source, c)
+                            )
+                            msg = (
+                                f"Not all values of {var_with_range} satisfy the generated guard "
+                                f"{guard_expr}"
+                            )
+                            ctx.record_constraint_violation(
+                                c.warn_only,
+                                self._debug_name(source),
+                                msg,
+                            )
+            # We NaN specialize, which means similar to 0/1 specialization we
+            # should assume that the float is NOT nan. This is load bearing if
+            # you have something like an equality guard, where nan will play
+            # merry hell with the reasoning.
+            if symbol_is_type(symbol, SymT.FLOAT):
+                res = f"not math.isnan({ctx.py_printer.print_source(source)})"
+                for exprs, printer, lang in zip(ctx.all_exprs, ctx.printers, ctx.langs):
+                    if lang == "verbose_python":
+                        exprs.append(
+                            f"{res}  # implicit guard for float input due to NaN specialization in the framework"
+                        )
+                    elif lang == "python":
+                        exprs.append(res)
+                    elif lang == "cpp":
+                        exprs.append(f"~std::isnan({printer.print_source(source)})")
+                    else:
+                        raise NotImplementedError(f"Unimplemented for lang: {lang}")
+
+    def _emit_exclusion_guards(self, *, ctx: _ProduceGuardsContext) -> None:
+        import torch._dynamo.config as dynamo_config
+
+        # Exclusion guard for stable graph selection with automatic dynamic.
+        #
+        # When automatic_dynamic promotes a static dim to dynamic, the new
+        # (more general) graph is inserted *before* the old (specialized) graph
+        # in the guard cache. Without an exclusion guard, inputs that exactly
+        # match the old graph's static sizes would be captured by the new
+        # dynamic graph instead, violating the invariant "once an input is
+        # served by graph X it is always served by graph X". This condition is
+        # true iff there is no branching on dynamic shapes.
+        #
+        # Soundness argument (cache-flip / LIFO order):
+        #   Graph_new sits before Graph_old in the cache. Graph_old accepts
+        #   only inputs whose sizes match its static constraints exactly.
+        #   Graph_new must therefore reject exactly that set of inputs so they
+        #   fall through to Graph_old. The excluded values are the static sizes
+        #   from Graph_old, so the guard
+        #       Or(Ne(s0, v0), Ne(s1, v1), ...)
+        #   passes iff at least one dim differs from the old sizes, i.e. the
+        #   input does NOT fully match Graph_old. Conversely, when every dim
+        #   matches the old sizes the guard fails and the input falls through to
+        #   Graph_old, which is guaranteed to accept it.
+        #
+        # Theorem: For graphs G0, ..., Gn compiled via progressive dynamism
+        # (one dim per step), each input is accepted by at most one graph.
+        #
+        #   Setup: G0 is all-static with shape S. Gk is created by making
+        #   dim d_k dynamic, with exclusion guard d_k != S[d_k].
+        #
+        #   Proof by induction on n:
+        #
+        #   Base case (n=0): Only G0, all-static. Trivially unique.
+        #
+        #   Inductive step: Assume the property holds for G0, ..., G_{n-1}.
+        #   We add Gn with newly-dynamic dim d_n and exclusion d_n != S[d_n].
+        #
+        #   For any input X that passes Gn's shape guards, exactly one of:
+        #
+        #   Case A - exclusion passes (X[d_n] != S[d_n]):
+        #     Dim d_n is static in all G0, ..., G_{n-1} with value S[d_n],
+        #     so X fails all prior graphs on that dim. Only Gn accepts X.
+        #
+        #   Case B - exclusion rejects (X[d_n] == S[d_n]):
+        #     X matches Gn's shape guards on all other dims, and matches the
+        #     static value for d_n. So X satisfies G_{n-1}'s shape guards. By
+        #     the inductive hypothesis, exactly one of G0, ..., G_{n-1} accepts
+        #     X. Gn rejects X.
+        #
+        #   Corollary: Evaluation order does not affect correctness.
+        #
+        # All exclusion pairs across all tensors and scalars are flattened into
+        # a single list; each pair is just (symbol, excluded_int), and the
+        # multi-tensor case is the same logic as multi-dim within one tensor.
+        # The combined Or rejects only when ALL pairs match simultaneously,
+        # which is the exact condition for Graph_old to accept. If the current
+        # concrete values already match every excluded value the guard is
+        # skipped, because it would fail on creation.
+        if (
+            not dynamo_config.automatic_dynamic_exclusion_guard
+            or dynamo_config.enable_compiler_collectives
+            or not self.exclusion_constraints
+        ):
+            return
+
+        all_pairs = [
+            (sym, val)
+            for sym, val in self.exclusion_constraints
+            if ctx.symbol_to_source.get(sym)
+        ]
+        if not all_pairs or all(
+            self.backed_var_to_val.get(sym) == val for sym, val in all_pairs
+        ):
+            return
+
+        if len(all_pairs) == 1:
+            excl_expr = sympy.Ne(all_pairs[0][0], all_pairs[0][1], evaluate=False)
+        else:
+            excl_expr = sympy.Or(
+                *[sympy.Ne(sym, val, evaluate=False) for sym, val in all_pairs]
+            )
+        for exprs, printer, lang in zip(ctx.all_exprs, ctx.printers, ctx.langs):
+            guard_expr = printer.doprint(excl_expr)
+            if lang == "verbose_python":
+                guard_expr = f"{guard_expr}  # exclusion guard for automatic dynamic"
+            exprs.append(guard_expr)
+
+    def _detect_constraint_violations(self, *, ctx: _ProduceGuardsContext) -> None:
+        if not ctx.constraint_violations:
+            return
+
+        warn_msgs: list[str] = []
+        error_msgs: list[str] = []
+        debug_names = set()
+        for warn_only, debug_name, msg_cb in ctx.constraint_violations:
+            if warn_only:
+                warn_msgs.append(f"  {len(warn_msgs) + 1}. {msg_cb()}")
+            else:
+                error_msgs.append(f"  - {msg_cb()}")
+                debug_names.add(debug_name)
+        if error_msgs:
+            debug_names_str = ", ".join(sorted(debug_names))
+            err = "\n".join(error_msgs)
+            raise ConstraintViolationError(
+                f"Constraints violated ({debug_names_str})! "
+                'For more information, run with TORCH_LOGS="+dynamic".\n'
+                f"{err}"
+            )
+        if warn_msgs:
+            log.debug("%s Warning only constraints violated", len(warn_msgs))
+
+    def _run_guard_translation_validation(
+        self, guards: list[ShapeGuard] | None
+    ) -> None:
+        if self._translation_validation_enabled:
+            from torch.fx.experimental.validator import PopulateValidator
+
+            for ras in self.deferred_runtime_asserts.values():
+                for ra in ras:
+                    self._add_target_expr(ra.expr)
+
+            for sym, vr in self.var_to_range.items():
+                if vr.lower not in (-sympy.oo, -int_oo):
+                    self._add_target_expr(sympy.Le(vr.lower, sym))
+                if vr.upper not in (sympy.oo, int_oo):
+                    self._add_target_expr(sympy.Le(sym, vr.upper))
+
+            with fx_traceback.preserve_node_meta():
+                PopulateValidator(self.graph, self.validator).run()
+
+        if guards is None:
+            self._check_translation_validate()
+
+    def _build_shape_guards_helpers(
+        self, *, ctx: _ProduceGuardsContext
+    ) -> list[_ShapeGuardsHelper]:
+        helpers: list[_ShapeGuardsHelper] = []
+        for exprs, printer, lang in zip(ctx.all_exprs, ctx.printers, ctx.langs):
+            if lang == "cpp":
+                if not isinstance(printer, _ShapeGuardCppPrinter):
+                    raise AssertionError(
+                        f"Expected _ShapeGuardCppPrinter, got {type(printer)}"
+                    )
+                helpers.append(_CppShapeGuardsHelper(exprs, printer.source_to_symbol))
+            else:
+                helpers.append(_ShapeGuardsHelper(exprs))
+        return helpers
+
     def produce_guards(self, *args: Any, **kwargs: Any) -> list[str]:
         """
         Like produce_guards_verbose, but only returns the non-verbose python guard expressions
@@ -5675,42 +6510,12 @@ class ShapeEnv:
 
         if len(placeholders) != len(sources):
             raise AssertionError(f"len({placeholders}) != len({sources})")
-        Tensorlike = (torch.Tensor, FakeTensorMeta)
+        normalized_input_contexts = self._normalize_input_contexts(
+            placeholders, input_contexts
+        )
+        ctx = self._create_produce_guards_context(langs, source_ref)
 
-        def _create_no_constraints_context(t: Tensor) -> StatelessSymbolicContext:
-            return StatelessSymbolicContext(
-                # Ignored; only the constraints part is relevant below.
-                dynamic_sizes=[DimDynamic.DYNAMIC] * t.dim(),
-                dynamic_strides=[DimDynamic.INFER_STRIDE] * t.dim(),
-                constraint_sizes=[None] * t.dim(),
-                constraint_strides=[None] * t.dim(),
-            )
-
-        # Expand optional inputs, or verify invariants are upheld
-        if input_contexts is None:
-            # pyrefly: ignore [bad-assignment]
-            input_contexts = [
-                # pyrefly: ignore [bad-argument-type]
-                _create_no_constraints_context(t) if isinstance(t, Tensorlike) else None
-                for t in placeholders
-            ]
-        else:
-            if len(input_contexts) != len(placeholders):
-                raise AssertionError("len(input_contexts) != len(placeholders)")
-
-            for i, (t, context) in enumerate(zip(placeholders, input_contexts)):
-                if isinstance(t, Tensorlike):
-                    if context is None:
-                        input_contexts[i] = _create_no_constraints_context(t)
-                else:
-                    if not isinstance(t, (SymInt, int, SymFloat, float)):
-                        raise AssertionError(
-                            f"Expected SymInt, int, SymFloat, or float, got {type(t)}"
-                        )
-                    if isinstance(context, list):
-                        raise AssertionError("context must not be a list")
-
-        # It took a lot of sweat to figure out the algorithm here.  Let's
+        # It took a lot of sweat to figure out the algorithm here. Let's
         # explain how it works.
         #
         # The ShapeEnv lifecycle looks something like this:
@@ -5720,763 +6525,79 @@ class ShapeEnv:
         #   preexisting symbol or expression, skipping the symbol allocation
         #   (e.g., duck sizing to a preexisting symbol, or expressing a
         #   stride as a multiplication of a separate stride and size.)
-        #   Naively, you might expect to bind a fresh Sympy symbol for
-        #   every input, but this is fairly wasteful as most of these
-        #   symbols immediately simplify away, and if you don't eagerly
-        #   specialize, e.g., 0/1 symbols, you end up with very complicated
-        #   expressions that are not optimizable in practice.
+        #   Naively, you might expect to bind a fresh Sympy symbol for every
+        #   input, but this is fairly wasteful as most of these symbols
+        #   immediately simplify away, and if you don't eagerly specialize,
+        #   e.g., 0/1 symbols, you end up with very complicated expressions
+        #   that are not optimizable in practice.
         #
         # - You perform some compute on these symbols, occasionally
-        #   introducing guards on boolean expressions on these symbols.
-        #   In particular, whenever we guard on equality (_maybe_guard_rel),
-        #   we can simplify shapes; e.g., when s0 == s1 * 2, we can now
-        #   replace all occurrences of s0 with s1 * 2.  Sometimes, a
-        #   boolean expression evaluation doesn't introduce a guard, as
-        #   the guard is already entailed by the simplifications we have
-        #   applied.
+        #   introducing guards on boolean expressions on these symbols. In
+        #   particular, whenever we guard on equality (_maybe_guard_rel), we
+        #   can simplify shapes; e.g., when s0 == s1 * 2, we can now replace
+        #   all occurrences of s0 with s1 * 2. Sometimes, a boolean expression
+        #   evaluation doesn't introduce a guard, as the guard is already
+        #   entailed by the simplifications we have applied.
         #
         # - In the end, you have a bunch of replacements (saying how to
-        #   simplify shapes) and a bunch of guards (all the equality guards
-        #   are trivial, because they're covered by the replacements).
+        #   simplify shapes) and a bunch of guards (all the equality guards are
+        #   trivial, because they're covered by the replacements).
         #
         # From the ShapeEnv, we must generate a Python expression that, when
         # evaluated on a set of inputs, tells us whether or not these boolean
-        # expressions would have evaluated in the same way.  However,
-        # we cannot easily compute this, as we elide recording boolean
-        # expressions when we think they are vacuously true.  Thus, we seek
-        # an approximation: we must generate an expression, if true, would have
-        # produced an "equivalent" ShapeEnv, which would answer guard
-        # expressions in the same way.
+        # expressions would have evaluated in the same way. However, we cannot
+        # easily compute this, as we elide recording boolean expressions when
+        # we think they are vacuously true. Thus, we seek an approximation: we
+        # must generate an expression, if true, would have produced an
+        # "equivalent" ShapeEnv, which would answer guard expressions in the
+        # same way.
         #
-        # Our notion of equivalence is a bit subtle.  For example, consider
-        # the ShapeEnv created from an input of size (5, 4) versus (4, 4)
-        # (no other guards.)  Duck sizing would generate (s0, s1) in the first
-        # case but (s0, s0) in the second.  We do NOT assume that size
-        # variables are disjoint; so in fact a graph that assumes the input
-        # could be (s0, s1) subsumes (s0, s0) (setting s0 == s1), but not
-        # vice versa.  However, consider an analogous case (1,) versus (2,).
-        # Duck sizing generates (1,) and (s0,); the (s0,) graph does NOT
-        # subsume the (1,) graph because we assume that any size variables
-        # is NOT 0/1 (and make simplifications according to this; e.g., if
-        # we queried s0 == 0, we would immediately return False without
-        # returning a guard.)
+        # Our notion of equivalence is a bit subtle. For example, consider the
+        # ShapeEnv created from an input of size (5, 4) versus (4, 4) (no other
+        # guards.) Duck sizing would generate (s0, s1) in the first case but
+        # (s0, s0) in the second. We do NOT assume that size variables are
+        # disjoint; so in fact a graph that assumes the input could be
+        # (s0, s1) subsumes (s0, s0) (setting s0 == s1), but not vice versa.
+        # However, consider an analogous case (1,) versus (2,). Duck sizing
+        # generates (1,) and (s0,); the (s0,) graph does NOT subsume the (1,)
+        # graph because we assume that any size variable is NOT 0/1 (and make
+        # simplifications according to this; e.g., if we queried s0 == 0, we
+        # would immediately return False without returning a guard.)
         #
         # So, it is perhaps easier to flip things on their head: the guard
-        # expressions we generate here say what simplifications are valid,
-        # and what are not. Below, we explain each of the guard expressions
-        # we generate
-
+        # expressions we generate here say what simplifications are valid, and
+        # what are not. Below, we explain each of the guard expressions we
+        # generate.
+        #
         # TODO: Make this more efficient by binding all the size/stride/offsets
         # to locals before performing tests on them.
 
-        from torch._dynamo.source import TensorProperty, TensorPropertySource
-
-        # Actual codegen must be delayed as we don't necessarily know what
-        # the symbol mapping is
-        input_guards = []
-
-        symbol_to_source: dict[sympy.Symbol, list[Source]] = collections.defaultdict(
-            list
+        # Guard generation proceeds in ordered phases so each transformation has
+        # a single responsibility and consumes the artifacts of the prior phase.
+        self._process_input_equalities(placeholders, sources, equalities_inputs, ctx)
+        self._track_symbol_to_source(
+            placeholders,
+            sources,
+            normalized_input_contexts,
+            ctx=ctx,
         )
-        symbol_to_constraints: defaultdict[sympy.Symbol, set[Constraint]] = (
-            collections.defaultdict(set)
-        )
-        constraint_violations: list[tuple[bool, str, Callable[[], str]]] = []
-
-        printers: list[_ShapeGuardPrinter] = []
-        py_printer = ShapeGuardPythonPrinter(
-            symbol_to_source, source_ref, self.var_to_sources
-        )
-        for lang in langs:
-            if lang in ["python", "verbose_python"]:
-                printers.append(py_printer)
-            elif lang == "cpp":
-                printers.append(
-                    _ShapeGuardCppPrinter(
-                        symbol_to_source, source_ref, self.var_to_sources
-                    )
-                )
-            else:
-                raise NotImplementedError(f"Unknown lang: {lang}")
-
-        def record_constraint_violation(
-            warn_only: bool,
-            debug_name: str,
-            msg: str,
-            hint: Callable[[], str] | None = None,
-        ) -> None:
-            constraint_violations.append(
-                (warn_only, debug_name, lambda: f"{msg}{hint()}" if hint else msg)
-            )
-
-        def is_dim(src: object) -> TypeGuard[TensorPropertySource]:
-            return (
-                isinstance(src, TensorPropertySource)
-                and src.prop is TensorProperty.SIZE
-            )
-
-        if equalities_inputs:
-            source_index = {}
-            for i, src in enumerate(sources):
-                source_index[src.name] = i
-
-            def get_expression(tensor_dim_src: Source) -> sympy.Expr:
-                fake = placeholders[source_index[tensor_dim_src.base.name]]  # type: ignore[attr-defined]
-                if tensor_dim_src.idx is None:  # type: ignore[attr-defined]
-                    raise AssertionError("tensor_dim_src.idx must not be None")
-                symint = fake.shape[tensor_dim_src.idx]  # type: ignore[attr-defined]
-                if isinstance(symint, torch.SymInt):
-                    return symint.node.expr
-                else:
-                    if type(symint) is not int:
-                        raise AssertionError(f"Expected int, got {type(symint)}")
-                    return sympy.Integer(symint)
-
-            for src1, src2 in equalities_inputs.source_pairs:
-                expr1, expr2 = get_expression(src1), get_expression(src2)  # type: ignore[]
-                # Check whether given input shape values satisfy a specified equation s = s'.
-                # - Raise when the equation was violated by the given input shape values.
-                # - Otherwise issue a guard to constrain them.
-                concrete_val = self.evaluate_expr(sympy.Eq(expr1, expr2))
-                if not concrete_val:
-                    raise ConstraintViolationError(
-                        f"{src1.name} = {expr1 if isinstance(expr1, int) else expr1.xreplace(self.backed_var_to_val)}"
-                        " is not equal to "
-                        f"{src2.name} = {expr2 if isinstance(expr2, int) else expr2.xreplace(self.backed_var_to_val)}"
-                    )
-
-            for srcEq, root, fn in equalities_inputs.derived_equalities:
-                expr1 = get_expression(srcEq)
-                # recall that root is either a phantom symbol or an input source
-                if isinstance(root, sympy.Symbol):
-                    expr2, debug_name = root, self.var_to_sources[root][0].name
-                elif isinstance(root, sympy.Integer):
-                    expr2, debug_name = root, str(root)
-                else:
-                    expr2, debug_name = get_expression(root), self._debug_name(root)
-                expr2_ = fn(expr2)
-                # Check whether given input shape values satisfy a specified equation s = fn(s').
-                # - Raise when the equation was violated by the given input shape values.
-                # - Otherwise issue a guard to constrain them.
-                concrete_val = self.evaluate_expr(sympy.Eq(expr1, expr2_))
-                if not concrete_val:
-                    raise ConstraintViolationError(
-                        f"Expected input {srcEq.name} to be equal to "
-                        f"{fn(sympy.Symbol(debug_name))}, "
-                        f"where {debug_name} = {expr2.xreplace(self.backed_var_to_val)}, "
-                        f"but got {expr1.xreplace(self.backed_var_to_val)}"
-                    )
-
-            for phantom_symbol in equalities_inputs.phantom_symbols:
-                if isinstance(phantom_symbol, sympy.Symbol):
-                    # we created additional phantom symbols that are not input shape dimensions
-                    symbol_to_source[phantom_symbol].extend(
-                        self.var_to_sources[phantom_symbol]
-                    )
-
-        # How do we know what the value of s0 is?  Fresh variables can only be
-        # bound by inputs, so there MUST be some other input which binds the
-        # variable.  If there is no such input, this is an error in our
-        # system.  We record where all symbols come from, to help you diagnose
-        # why those symbols didn't occur.
-        #
-        # In fact, generally speaking it is only possible for the "outermost"
-        # user of a ShapeEnv to evaluate the guards, because some inputs may
-        # not be available to inner levels.  For example, Dynamo can guard on
-        # tensors that never actually become graph arguments (they are
-        # pruned).  In this case, only Dynamo knows about these arguments.
-        def track_symint(
-            source: Source, val: IntLikeType, constraint: DimConstraint = None
-        ) -> None:
-            log.debug(
-                "track_symint %s %s %s",
-                LazyString(lambda: source.name),
-                val,
-                constraint,
-            )
-            if isinstance(val, SymInt) and not is_symbolic(val):
-                raise AssertionError("val must be symbolic if it is a SymInt")
-
-            if isinstance(val, SymInt) and val.node.maybe_as_int() is not None:
-                val = val.node.maybe_as_int()
-
-            if isinstance(val, SymInt):
-                s = val.node.expr
-                if isinstance(s, sympy.Symbol):
-                    symbol_to_source[s].append(source)
-                    if constraint is not None and not isinstance(
-                        constraint, RelaxedUnspecConstraint
-                    ):
-                        symbol_to_constraints[s].add(constraint)
-                else:
-                    constraint_violated = False
-                    if isinstance(constraint, StrictMinMaxConstraint):
-                        # try inferring the ranges of the expr s
-                        sym_vrs = {
-                            x: self.var_to_range.get(x, None) for x in s.free_symbols
-                        }
-                        if any(vr is None for vr in sym_vrs.values()):
-                            # some of the free symbols in s don't have ranges
-                            constraint_violated = True
-                    elif isinstance(constraint, RelaxedUnspecConstraint):
-                        if s.is_number:
-                            i = int(s)
-                            # Don't complain about 0/1 specialization, we
-                            # expect to have to compile in this case anyway
-                            if i not in (0, 1):
-                                constraint_violated = True
-                    if constraint_violated:
-                        if constraint is None:
-                            raise AssertionError("constraint must not be None")
-
-                        def hint(s: sympy.Expr) -> str:
-                            sexpr = py_printer.doprint(s)
-                            return f"{sexpr}."
-
-                        var_with_range = self._render_range_for_constraint_violation(
-                            source, constraint
-                        )
-                        msg = (
-                            f"Not all values of {var_with_range} are valid because "
-                            f"{self._debug_name(source)} was inferred to be equal to "
-                        )
-                        record_constraint_violation(
-                            constraint.warn_only,
-                            self._debug_name(source),
-                            msg,
-                            hint=functools.partial(hint, s),
-                        )
-
-                input_guards.append((source, s))
-            else:
-                s = sympy.Integer(val)
-                input_guards.append((source, s))
-                constraint_violated = False
-                if isinstance(constraint, StrictMinMaxConstraint):
-                    if not (
-                        s == constraint.vr.lower == constraint.vr.upper
-                    ):  # allow static constraints
-                        constraint_violated = True
-                elif isinstance(constraint, RelaxedUnspecConstraint):
-                    # Don't complain about 0/1 specialization, we
-                    # expect to have to compile in this case anyway
-                    if val not in (0, 1):
-                        constraint_violated = True
-                if constraint_violated:
-                    if constraint is None:
-                        raise AssertionError("constraint must not be None")
-                    var_with_range = self._render_range_for_constraint_violation(
-                        source, constraint
-                    )
-                    user_stack = self.specialization_stacks.get(source, None)
-                    msg = (
-                        f"You marked {self._debug_name(source)} as dynamic but your code "
-                        f"specialized it to be a constant ({val}). If you're using mark_dynamic, "
-                        f"either remove it or use maybe_mark_dynamic. If you're using Dim.DYNAMIC, "
-                        f"replace it with either Dim.STATIC or Dim.AUTO."
-                        + (
-                            "\n\nUser stack:\n" + "".join(user_stack.format())
-                            if user_stack
-                            else ""
-                        )
-                    )
-                    record_constraint_violation(
-                        constraint.warn_only, self._debug_name(source), msg
-                    )
-
-        def track_symfloat(source: Source, val: FloatLikeType) -> None:
-            log.debug("track_symfloat %s %s", LazyString(lambda: source.name), val)
-            if isinstance(val, SymFloat) and not is_symbolic(val):
-                raise AssertionError("val must be symbolic if it is a SymFloat")
-
-            if isinstance(val, SymFloat) and val.node.maybe_as_float() is not None:
-                val = val.node.maybe_as_float()
-
-            if isinstance(val, SymFloat):
-                s = val.node.expr
-                if isinstance(s, sympy.Symbol):
-                    symbol_to_source[s].append(source)
-                input_guards.append((source, s))
-            else:
-                s = sympy.Float(val)
-                input_guards.append((source, s))
-
-        # pyrefly: ignore [bad-argument-type, no-matching-overload]
-        for t, source, context in zip(placeholders, sources, input_contexts):
-            if isinstance(source, str):
-                from torch._dynamo.source import LocalSource
-
-                source = LocalSource(source)
-            if not isinstance(source, Source):
-                raise AssertionError(f"Expected Source, got {type(source)}")
-            if t is None:
-                continue
-            if isinstance(t, (SymInt, int)):
-                constraint = (
-                    None if context is None else getattr(context, "constraint", None)
-                )
-                track_symint(source, t, constraint)
-                continue
-            elif isinstance(t, (SymFloat, float)):
-                track_symfloat(source, t)
-                continue
-            if not isinstance(t, Tensorlike):
-                raise AssertionError(f"Expected Tensorlike, got {type(t)}")
-            if is_traceable_wrapper_subclass(t):
-                from torch._dynamo.source import AttrSource
-
-                if not isinstance(context, SubclassSymbolicContext):
-                    raise AssertionError(
-                        f"Expected SubclassSymbolicContext, got {type(context)}"
-                    )
-
-                # For subclasses, we need to track symints on BOTH the outer
-                # and inner tensors.
-                # TODO: type this better
-                sources_tensors_constraints: list[tuple[Source, Any, Any, Any]] = [
-                    (source, t, context.constraint_sizes, context.constraint_strides)
-                ]
-                attrs, _ = t.__tensor_flatten__()
-                for attr in attrs:
-                    match getattr(t, attr):
-                        case torch.Tensor() as inner_t:
-                            inner_context = context.inner_contexts[attr]
-                            sources_tensors_constraints.append(
-                                (
-                                    AttrSource(source, attr),
-                                    inner_t,
-                                    inner_context.constraint_sizes,  # type: ignore[attr-defined]
-                                    inner_context.constraint_strides,  # type: ignore[attr-defined]
-                                )
-                            )
-                        case OpaqueBase():
-                            pass
-                        case unexpected:
-                            raise AssertionError(
-                                f"expected Tensor or OpaqueBase, got {type(unexpected)}"
-                            )
-            else:
-                sources_tensors_constraints = [
-                    (source, t, context.constraint_sizes, context.constraint_strides)  # type: ignore[attr-defined]
-                ]
-
-            for (
-                src,
-                curr_t,
-                constraint_size,
-                constraint_stride,
-            ) in sources_tensors_constraints:
-                if is_sparse_any(curr_t):
-                    for i, ss in enumerate(curr_t.size()):
-                        property_source = TensorPropertySource(
-                            src, TensorProperty.SIZE, i
-                        )
-                        track_symint(property_source, ss, constraint_size[i])
-                else:
-                    for i, ss in enumerate(curr_t.size()):
-                        property_source = TensorPropertySource(
-                            src, TensorProperty.SIZE, i
-                        )
-                        track_symint(property_source, ss, constraint_size[i])
-
-                    for i, ss in enumerate(curr_t.stride()):
-                        property_source = TensorPropertySource(
-                            src, TensorProperty.STRIDE, i
-                        )
-                        track_symint(property_source, ss, constraint_stride[i])
-                    track_symint(
-                        TensorPropertySource(src, TensorProperty.STORAGE_OFFSET),
-                        curr_t.storage_offset(),
-                    )
-
-        # 1. Every input must equal the final simplified symbolic expression
-        #    stored on the placeholder.  Given a placeholder (s0*2, s1),
-        #    if we have an input (2, 3), we must show s0*2 == 2 and s1 == 3.
-        #    This does a lot of work: it covers duck sizing and equality guards.
-        all_exprs: list[list[str]] = [[] for _ in langs]
 
         self.dim_constraints = DimConstraints(
-            symbol_to_source,
+            ctx.symbol_to_source,
             self.backed_var_to_val,
-            set(symbol_to_constraints.keys()),
+            set(ctx.symbol_to_constraints.keys()),
             self.source_name_to_debug_name,
         )
-
-        if not _simplified:
-            for source, expr in input_guards:
-                srcname = source.name
-                if self._translation_validation_enabled:
-                    # Ignore sources that were not turned into SymInts.
-                    if srcname in self.source_to_symbol:
-                        self._add_target_expr(
-                            sympy.Eq(self.source_to_symbol[srcname], expr)
-                        )
-
-                # Small optimization
-                if (
-                    isinstance(expr, sympy.Symbol)
-                    and symbol_to_source.get(expr)
-                    and source == symbol_to_source[expr][0]
-                ):
-                    continue
-
-                # This logic excludes static values found on tensors from guarding, because
-                # dynamo's check_tensor_fn does that (see guards.cpp).
-                # However, for non tensor sources, we still need to guard here.
-                if ignore_static and isinstance(source, TensorPropertySource):
-                    if expr.is_number:
-                        self.log.debug(
-                            "Skipping guard %s", f"{source_ref(source)} == {expr}"
-                        )
-                        continue
-
-                if is_dim(source):
-                    self.dim_constraints.add_equality(source, expr)
-
-                for exprs, printer, lang in zip(all_exprs, printers, langs):
-                    res = f"{printer.print_source(source)} == {printer.doprint(expr)}"
-
-                    if lang == "verbose_python":
-                        if (s0 := self.source_to_var.get(srcname)) is not None:
-                            if source != self.var_to_sources[s0][0]:
-                                res = (
-                                    f"{res}  # duck sizing added this equality because these "
-                                    f"variables had the same size {self.backed_var_to_val[s0]} "
-                                    "(to avoid this specialization, set torch.fx.experimental._config.use_duck_shape = False)"
-                                )
-                            elif (sloc := self.replacements_slocs.get(s0)) is not None:
-                                res = f"{res}  # {sloc}"
-                            else:
-                                res = f"{res}  # (unknown var {s0}, please file a bug)"
-                        else:
-                            res = f"{res}  # (unknown source {srcname}, please file a bug)"
-                    exprs.append(res)
-
-                if (
-                    isinstance(source, TensorPropertySource)
-                    and source.prop is TensorProperty.SIZE
-                    and equalities_inputs
-                    and len(expr.free_symbols) == 1
-                ):
-                    symbol = next(iter(expr.free_symbols))
-                    if (
-                        isinstance(expr, sympy.Symbol)
-                        and expr in symbol_to_constraints
-                        and not equalities_inputs.is_equal(
-                            source, symbol_to_source[expr][0]
-                        )
-                    ):
-                        msg = (
-                            f"The values of {self._debug_name(source)} = {source.name} and "
-                            f"{self._debug_name(symbol_to_source[expr][0])} = {symbol_to_source[expr][0].name} "
-                            "must always be equal."
-                        )
-                        record_constraint_violation(
-                            equalities_inputs.warn_only, self._debug_name(source), msg
-                        )
-
-                    if (
-                        not isinstance(expr, sympy.Symbol)
-                        and symbol in symbol_to_constraints
-                        and not equalities_inputs.is_derived(
-                            source,
-                            symbol_to_source[symbol][0],
-                            lambda x: expr.xreplace({symbol: x}),
-                        )
-                    ):
-                        src = symbol_to_source[symbol][0]
-                        msg = (
-                            f"The values of {self._debug_name(source)} = {source.name} must always be related to "
-                            f"the values of {self._debug_name(src)} = {src.name} by "
-                            f"{self._debug_name(source)} = {expr.xreplace({symbol: sympy.sympify(self._debug_name(src))})}."
-                        )
-                        record_constraint_violation(
-                            equalities_inputs.warn_only, self._debug_name(source), msg
-                        )
-
-                # NB: Not necessary to report constraint violations here:
-                # constraints are guaranteed to be on symbols (we've already
-                # caught constants and non-atomic expressions), so we only
-                # have relational constraints, but we don't support those
-                # at the moment
-
-        # 2. Every guard must evaluate to True (but remember many guards
-        #    like s0 == s1*2 because trivial due to simplification)
-        issued = set()
-
-        def issue_guard(guard: ShapeGuard) -> None:
-            expr = self.simplify(guard.expr)
-
-            # Avoid re-issuing the same guard.
-            if expr in issued:
-                return
-
-            issued.add(expr)
-
-            try:
-                is_trivial = False
-                if any(
-                    is_dim(source)
-                    for s in expr.free_symbols
-                    for source in symbol_to_source[s]
-                ):
-                    if self.dim_constraints is None:
-                        raise AssertionError("dim_constraints must not be None")
-                    is_trivial = self.dim_constraints.add(expr)
-
-                for exprs, printer, lang in zip(all_exprs, printers, langs):
-                    guard_expr = printer.doprint(expr)
-                    if lang == "verbose_python":
-                        guard_expr = f"{guard_expr}  # {guard.sloc}"
-                    exprs.append(guard_expr)
-
-                self._add_target_expr(expr)
-                # A non-relational constraint on a single sizevar can violate
-                # a constraint
-                if not is_trivial and len(expr.free_symbols) == 1:
-                    symbol = next(iter(expr.free_symbols))
-                    source = symbol_to_source[symbol][0]
-                    constraints = symbol_to_constraints[symbol]
-                    for c in constraints:
-                        if isinstance(c, StrictMinMaxConstraint):
-                            var_with_range = (
-                                self._render_range_for_constraint_violation(source, c)
-                            )
-                            msg = (
-                                f"Not all values of {var_with_range} "
-                                f"satisfy the generated guard {py_printer.doprint(expr)}."
-                            )
-                            record_constraint_violation(
-                                c.warn_only, self._debug_name(source), msg
-                            )
-                        elif isinstance(c, RelaxedUnspecConstraint):
-                            # This is fine, we allow guards here as long as it
-                            # didn't constrain it to one value  (we don't
-                            # actually know this; this depends on our
-                            # ValueRanges reasoning capability)
-                            pass
-                        else:
-                            raise AssertionError(f"unrecognized constraint {c}")
-            except Exception:
-                self.log.warning("Failing guard allocated at %s", guard.sloc)
-                raise
-
-        # First, issue all guards.
-        # This removes all the checks that follow from bounds
-        # We could simply emit those and also the bounds 2 <= size when necessary
-        for guard in guards if guards is not None else self.guards:
-            if (
-                self._maybe_evaluate_static(
-                    guard.expr, axioms=(), size_oblivious=guard.size_oblivious
-                )
-                is not None
-            ):
-                continue
-
-            issue_guard(guard)
-
-        # Because there are guards that export's constraint solver can suggest good fixes for, that we may have
-        # deferred as runtime asserts, and that produce_guards() alone won't do anything with (e.g. divisiblity guards),
-        # we want to send runtime asserts to export's constraint solver too. These will still stay in the graph as asserts,
-        # but export's constraint solver can decide whether to do anything with them (i.e. raise an error and provide
-        # suggested fixes, or decide it's out of scope and leave as a runtime assert in the graph).
-        for ra in self.deferred_runtime_asserts.get(None, []):
-            if self._maybe_evaluate_static(ra.expr, axioms=()) is not None:
-                continue
-            expr = self.simplify(ra.expr)
-
-            self.dim_constraints.add(expr)
-
-        # 3. Every symbol must be within its value range (this handles 0/1
-        # specialization too).
-        for symbol, sources in symbol_to_source.items():
-            r = self.var_to_range.get(symbol)
-            if r is None:
-                continue
-            vr_sloc = self.var_to_range_sloc[symbol]
-
-            if not sources:
-                raise AssertionError(f"sources must not be empty for symbol {symbol}")
-            bounds = []
-            rf = source_ref(sources[0])
-            verbose_expr = ""
-            if r.lower not in (-sympy.oo, -int_oo):
-                if any(is_dim(source) for source in sources):
-                    self.dim_constraints.add(sympy.Ge(symbol, r.lower))
-                # Only print lower bound in simplified mode if it is not the
-                # default
-                if not _simplified or r.lower != self._default_value_range().lower:
-                    bounds.append(sympy.Le(r.lower, symbol, evaluate=False))
-                verbose_expr = f"{r.lower} <= {rf}  # {vr_sloc.lower}"
-            if r.upper not in (sympy.oo, int_oo):
-                if any(is_dim(source) for source in sources):
-                    self.dim_constraints.add(sympy.Le(symbol, r.upper))
-                # nontrivial upper bound is always interesting
-                bounds.append(sympy.Le(symbol, r.upper, evaluate=False))
-                if verbose_expr:
-                    verbose_expr = f"{r.lower} <= {rf} <= {r.upper}  # {vr_sloc.lower} and {vr_sloc.upper}"
-                else:
-                    verbose_expr = f"{rf} <= {r.upper}  # {vr_sloc.upper}"
-            if bounds:
-                bound = sympy.And(*bounds, evaluate=False)
-
-                for exprs, printer, lang in zip(all_exprs, printers, langs):
-                    if lang == "verbose_python":
-                        exprs.append(verbose_expr)
-                    else:
-                        exprs.append(printer.doprint(bound))
-                # NB: verbose_exprs are done above
-
-                # Check constraints
-                constraints = symbol_to_constraints[symbol]
-                for c in constraints:
-                    if isinstance(c, StrictMinMaxConstraint):
-                        # TODO: With int_oo, I think this condition is a noop
-                        # now
-                        if not (c.vr & self._default_value_range()).issubset(r):
-                            source = sources[0]
-
-                            expr = sympy.And(
-                                sympy.Le(r.lower, symbol), sympy.Le(symbol, r.upper)
-                            )
-                            guard_expr = py_printer.doprint(expr)
-                            var_with_range = (
-                                self._render_range_for_constraint_violation(source, c)
-                            )
-                            msg = f"Not all values of {var_with_range} satisfy the generated guard {guard_expr}"
-                            record_constraint_violation(
-                                c.warn_only,
-                                self._debug_name(source),
-                                msg,
-                            )
-            # We NaN specialize, which means similar to 0/1 specialization we
-            # should assume that the float is NOT nan.  This is load bearing
-            # if you have something like an equality guard, nan will play
-            # merry hell with the reasoning.
-            if symbol_is_type(symbol, SymT.FLOAT):
-                res = f"not math.isnan({py_printer.print_source(sources[0])})"
-                for exprs, printer, lang in zip(all_exprs, printers, langs):
-                    if lang == "verbose_python":
-                        exprs.append(
-                            f"{res}  # implicit guard for float input due to NaN specialization in the framework"
-                        )
-                    elif lang == "python":
-                        exprs.append(res)
-                    elif lang == "cpp":
-                        exprs.append(f"~std::isnan({printer.print_source(sources[0])})")
-                    else:
-                        raise NotImplementedError(f"Unimplemented for lang: {lang}")
-
-        # Exclusion guard for stable graph selection with automatic dynamic.
-        #
-        # When automatic_dynamic promotes a static dim to dynamic, the new
-        # (more general) graph is inserted *before* the old (specialized) graph
-        # in the guard cache.  Without an exclusion guard, inputs that exactly
-        # match the old graph's static sizes would be captured by the new
-        # dynamic graph instead, violating the invariant "once an input is
-        # served by graph X it is always served by graph X". This condition
-        # is true iff there is no branching on dynamic shapes.
-        #
-        # Soundness argument (cache-flip / LIFO order):
-        #   Graph_new sits before Graph_old in the cache.  Graph_old accepts
-        #   only inputs whose sizes match its static constraints exactly.
-        #   Graph_new must therefore reject exactly that set of inputs so they
-        #   fall through to Graph_old.  The excluded values are the static
-        #   sizes from Graph_old, so the guard
-        #       Or(Ne(s0, v0), Ne(s1, v1), ...)
-        #   passes iff at least one dim differs from the old sizes — i.e. the
-        #   input does NOT fully match Graph_old.  Conversely, when every dim
-        #   matches the old sizes the guard fails and the input falls through
-        #   to Graph_old, which is guaranteed to accept it.
-        #
-        # Theorem: For graphs G0, ..., Gn compiled via progressive dynamism
-        # (one dim per step), each input is accepted by at most one graph.
-        #
-        #   Setup: G0 is all-static with shape S. Gk is created by making
-        #   dim d_k dynamic, with exclusion guard d_k != S[d_k].
-        #
-        #   Proof by induction on n:
-        #
-        #   Base case (n=0): Only G0, all-static. Trivially unique.
-        #
-        #   Inductive step: Assume the property holds for G0, ..., G_{n-1}.
-        #   We add Gn with newly-dynamic dim d_n and exclusion d_n != S[d_n].
-        #
-        #   For any input X that passes Gn's shape guards, exactly one of:
-        #
-        #   Case A — exclusion passes (X[d_n] != S[d_n]):
-        #     Dim d_n is static in all G0, ..., G_{n-1} with value S[d_n],
-        #     so X fails all prior graphs on that dim. Only Gn accepts X.
-        #
-        #   Case B — exclusion rejects (X[d_n] == S[d_n]):
-        #     X matches Gn's shape guards on all other dims, and matches
-        #     the static value for d_n. So X satisfies G_{n-1}'s shape
-        #     guards. By the inductive hypothesis, exactly one of
-        #     G0, ..., G_{n-1} accepts X. Gn rejects X.
-        #
-        #   Corollary: Evaluation order does not affect correctness.
-        #
-        # All exclusion pairs across all tensors and scalars are flattened
-        # into a single list — each pair is just (symbol, excluded_int),
-        # and the multi-tensor case is the same logic as multi-dim within
-        # one tensor.  The combined Or rejects only when ALL pairs match
-        # simultaneously, which is the exact condition for Graph_old to
-        # accept.  If the current concrete values already match every
-        # excluded value the guard is skipped (it would fail on creation).
-        import torch._dynamo.config as dynamo_config
-
-        if (
-            dynamo_config.automatic_dynamic_exclusion_guard
-            and not dynamo_config.enable_compiler_collectives
-            and self.exclusion_constraints
-        ):
-            all_pairs = [
-                (sym, val)
-                for sym, val in self.exclusion_constraints
-                if symbol_to_source.get(sym)
-            ]
-            if all_pairs and not all(
-                self.backed_var_to_val.get(sym) == val for sym, val in all_pairs
-            ):
-                if len(all_pairs) == 1:
-                    excl_expr = sympy.Ne(
-                        all_pairs[0][0], all_pairs[0][1], evaluate=False
-                    )
-                else:
-                    excl_expr = sympy.Or(
-                        *[sympy.Ne(sym, val, evaluate=False) for sym, val in all_pairs]
-                    )
-                for exprs, printer, lang in zip(all_exprs, printers, langs):
-                    guard_expr = printer.doprint(excl_expr)
-                    if lang == "verbose_python":
-                        guard_expr = (
-                            f"{guard_expr}  # exclusion guard for automatic dynamic"
-                        )
-                    exprs.append(guard_expr)
-
-        if constraint_violations:
-            warn_msgs: list[str] = []
-            error_msgs: list[str] = []
-            debug_names = set()
-            for warn_only, debug_name, msg_cb in constraint_violations:
-                if warn_only:
-                    str_msg = f"  {len(warn_msgs) + 1}. {msg_cb()}"
-                    warn_msgs.append(str_msg)
-                else:
-                    str_msg = f"  - {msg_cb()}"
-                    error_msgs.append(str_msg)
-                    # pyrefly: ignore [bad-argument-type]
-                    debug_names.add(debug_name)
-            if len(error_msgs) > 0:
-                debug_names_str = ", ".join(sorted(debug_names))
-                err = "\n".join(error_msgs)
-                raise ConstraintViolationError(
-                    f"Constraints violated ({debug_names_str})! "
-                    'For more information, run with TORCH_LOGS="+dynamic".\n'
-                    f"{err}"
-                )
-            elif len(warn_msgs) > 0:
-                log.debug("%s Warning only constraints violated", len(warn_msgs))
+        self._emit_input_equality_guards(
+            ignore_static,
+            equalities_inputs,
+            simplified=_simplified,
+            ctx=ctx,
+        )
+        self._emit_shape_guards(guards, ctx=ctx)
+        self._emit_value_range_bounds(simplified=_simplified, ctx=ctx)
+        self._emit_exclusion_guards(ctx=ctx)
+        self._detect_constraint_violations(ctx=ctx)
 
         signpost_event(
             "dynamic",
@@ -6484,8 +6605,8 @@ class ShapeEnv:
             {
                 **self.co_fields,
                 **self.counter,
-                "num_guards": len(all_exprs[0]),
-                "free_symbols": sum(1 for v in symbol_to_source.values() if v),
+                "num_guards": len(ctx.all_exprs[0]),
+                "free_symbols": sum(1 for v in ctx.symbol_to_source.values() if v),
                 # The keys are meaningless from an aggregate perspective, so
                 # don't include them.  Biggest first.
                 "symbol_guard_counts": sorted(
@@ -6493,46 +6614,8 @@ class ShapeEnv:
                 ),
             },
         )
-
-        if self._translation_validation_enabled:
-            from torch.fx.experimental.validator import PopulateValidator
-
-            # Add all deferred runtime assertions; these are not technically
-            # handled by produce_guards but we need to put them in the target
-            # set
-            for ras in self.deferred_runtime_asserts.values():
-                for ra in ras:
-                    self._add_target_expr(ra.expr)
-
-            # Add value range bound guards for all symbols with no trivial bounds.
-            # Reason: '_maybe_evaluate_static' may eliminate guards based on the
-            # refined value ranges.
-            for sym, vr in self.var_to_range.items():
-                if vr.lower not in (-sympy.oo, -int_oo):
-                    self._add_target_expr(sympy.Le(vr.lower, sym))
-                if vr.upper not in (sympy.oo, int_oo):
-                    self._add_target_expr(sympy.Le(sym, vr.upper))
-
-            # Before validating, populate the input of the validator with the
-            # built FX graph.
-            with fx_traceback.preserve_node_meta():
-                PopulateValidator(self.graph, self.validator).run()
-
-        # Only run translation validation when we are not passing custom guards
-        if guards is None:
-            self._check_translation_validate()
-
-        helpers: list[_ShapeGuardsHelper] = []
-        for exprs, printer, lang in zip(all_exprs, printers, langs):
-            if lang == "cpp":
-                if not isinstance(printer, _ShapeGuardCppPrinter):
-                    raise AssertionError(
-                        f"Expected _ShapeGuardCppPrinter, got {type(printer)}"
-                    )
-                helpers.append(_CppShapeGuardsHelper(exprs, printer.source_to_symbol))
-            else:
-                helpers.append(_ShapeGuardsHelper(exprs))
-        return helpers
+        self._run_guard_translation_validation(guards)
+        return self._build_shape_guards_helpers(ctx=ctx)
 
     def produce_guards_expression(
         self,
