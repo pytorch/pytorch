@@ -479,9 +479,9 @@ def flex_attention(
         + list(mask_mod_other_buffers)
     )
     input_gen_fns = {
-        5: create_num_blocks_fake_generator(kv_indices),
+        5: create_num_blocks_fake_generator(kv_indices, has_full_blocks=has_full_blocks),
         6: create_indices_fake,
-        7: create_num_blocks_fake_generator(full_kv_indices),
+        7: create_num_blocks_fake_generator(full_kv_indices, is_full_blocks=True),
         8: create_indices_fake,
     }
 
@@ -1002,13 +1002,13 @@ def flex_attention_backward(*args, **kwargs):
         + joint_outputs.mutated_grads
     )
     input_gen_fns = {
-        8: create_num_blocks_fake_generator(kv_indices),  # kv_num_blocks
+        8: create_num_blocks_fake_generator(kv_indices, has_full_blocks=has_full_blocks),  # kv_num_blocks
         9: create_indices_fake,
-        10: create_num_blocks_fake_generator(q_indices),  # q_num_blocks
+        10: create_num_blocks_fake_generator(q_indices, has_full_blocks=has_full_blocks),  # q_num_blocks
         11: create_indices_fake,
-        12: create_num_blocks_fake_generator(full_kv_indices),  # full_kv_num_blocks
+        12: create_num_blocks_fake_generator(full_kv_indices, is_full_blocks=True),  # full_kv_num_blocks
         13: create_indices_fake,
-        14: create_num_blocks_fake_generator(full_q_indices),  # full_q_num_blocks
+        14: create_num_blocks_fake_generator(full_q_indices, is_full_blocks=True),  # full_q_num_blocks
         15: create_indices_fake,
     }
 

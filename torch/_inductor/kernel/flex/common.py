@@ -274,7 +274,9 @@ def create_indices_fake(x) -> torch.Tensor:
     return indices
 
 
-def create_num_blocks_fake_generator(sparse_indices):
+def create_num_blocks_fake_generator(
+    sparse_indices, is_full_blocks=False, has_full_blocks=True
+):
     """Create a fake num_blocks that is used for autotuning.
 
     The idea here is that we need to create a real tensor with real data
@@ -283,20 +285,39 @@ def create_num_blocks_fake_generator(sparse_indices):
     that we are computing 0 blocks for each row, which would provide bogus
     autotuning results.
 
-    In this case, we choose to use min(16, max_block) blocks, because I
-    (Horace) think it'll probably result in pretty representative performance.
-    If it's too short then prefetching won't help. If it's too long then
-    autotuning will take longer for no good reason.
+    For flex attention kernels, KV blocks are split into "normal" blocks
+    (which need mask evaluation) and "full" blocks (where the mask always
+    passes, skipping evaluation). These two sets are disjoint: their counts
+    should sum to the total number of KV blocks.
+
+    When has_full_blocks is True (the kernel has both loops):
+      - normal blocks = 1 (one boundary block with mask evaluation)
+      - full blocks = max_blocks - 1 (remaining blocks skip mask evaluation)
+    This is representative of typical workloads where most blocks are full.
+
+    When has_full_blocks is False (the kernel only has the normal loop):
+      - normal blocks = max_blocks (all work goes through the single loop)
+      - full blocks: N/A (no full blocks loop in the kernel)
+
+    Previously, both normal and full were independently set to max_blocks,
+    causing the kernel to process 2x the actual workload during autotuning.
     """
 
     def create_num_blocks_fake(x) -> torch.Tensor:
-        num_blocks_for_autotuning = V.graph.sizevars.optimization_hint(
-            sparse_indices.shape[-1]
-        )
+        max_blocks = V.graph.sizevars.optimization_hint(sparse_indices.shape[-1])
         size = V.graph.sizevars.optimization_hints(x.get_size())
+        if not has_full_blocks:
+            # No full blocks loop in the kernel; all work is in normal blocks.
+            count = max_blocks
+        elif is_full_blocks:
+            # Full blocks: most blocks skip mask evaluation.
+            count = max(0, max_blocks - 1)
+        else:
+            # Normal blocks: just 1 boundary block needs mask evaluation.
+            count = min(1, max_blocks)
         return torch.full(
             size,
-            num_blocks_for_autotuning,
+            count,
             dtype=x.get_dtype(),
             device=x.get_device(),
         )
