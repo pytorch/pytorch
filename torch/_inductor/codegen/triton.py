@@ -6376,9 +6376,13 @@ class FusedUserDefinedTritonKernel(TritonKernel):
 
         # Generate a new AST where the store value expr is replaced with the new value
         new_ast = copy.deepcopy(self.ir_node.kernel_ast)
-        from torch._higher_order_ops.triton_kernel_wrap import identify_triton_stores
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            identify_triton_stores,
+            identify_triton_stores_from_ast,
+        )
 
-        kernel_stores = identify_triton_stores(new_ast)
+        # avoid redundant cache entry of new_ast
+        kernel_stores = identify_triton_stores_from_ast(new_ast)
         assert len(kernel_stores.stores) == 1
 
         new_store_value_node = ast.Name(self.new_store_cse_var.name)
@@ -6408,7 +6412,7 @@ class FusedUserDefinedTritonKernel(TritonKernel):
         src_lines = src_with_store_replaced.splitlines()
 
         # identify the store again, because the previous parse-modify-unparse could've change its location
-        kernel_stores = identify_triton_stores(ast.parse(src_with_store_replaced))
+        kernel_stores = identify_triton_stores(src_with_store_replaced)
         # python ast lineno is 1-indexed
         store_line_index = kernel_stores.stores[0].store_node.lineno - 1
 
