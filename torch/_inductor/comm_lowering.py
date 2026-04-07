@@ -196,11 +196,12 @@ def register_comm_lowerings():
         )
         return
 
+    # `copy_` is needed before `lowering.py` reaches its end-of-file reexports.
+    from .elementwise_lowerings import copy_
     from .lowering import (
         add_layout_constraint,
         clone,
         constrain_to_fx_strides,
-        copy_,
         register_lowering,
     )
 
