@@ -28,6 +28,7 @@ import inspect
 import itertools
 import logging
 import operator
+import os
 import re
 import sys
 import time
@@ -77,6 +78,9 @@ from torch.fx.node import Target
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+# Cached prefix for filtering torch-internal frames in call_hierarchy.
+_TORCH_FILE_PREFIX: str = os.path.dirname(torch.__file__) + os.sep
 
 from . import config, exc, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
@@ -3804,14 +3808,14 @@ class SubgraphTracer(fx.Tracer):
                         )
                     ]
 
+        # Walk the tx parent chain for stack_trace.
         if "stack_trace" not in rv.node.meta:
             frame_summaries: list[traceback.FrameSummary] = []
-            while tx:
-                # Avoid frame summaries from inside the torch/nn/modules. This ensures that we keep the stack trace of
-                # the user code.
-                if not tx.is_co_filename_from_nn_modules():
-                    frame_summaries.append(tx.frame_summary())
-                tx = getattr(tx, "parent", None)
+            tx_walk = self.output_graph.current_tx
+            while tx_walk is not None:
+                if not tx_walk.is_co_filename_from_nn_modules():
+                    frame_summaries.append(tx_walk.frame_summary())
+                tx_walk = getattr(tx_walk, "parent", None)
 
             filtered_frame_summaries = [
                 frame
@@ -3825,6 +3829,102 @@ class SubgraphTracer(fx.Tracer):
             # official from_list stub doesn't have new-style type
             msgs = traceback.StackSummary.from_list(filtered_frame_summaries).format()
             rv.node.stack_trace = "".join(msgs)
+
+        if (
+            config.record_call_hierarchy
+            and "call_hierarchy" not in rv.node.meta
+        ):
+            # Build a unified call hierarchy from the tx chain.
+            # Collect frames first (inner→outer), then iterate outer→inner
+            # to detect module entries by diffing nn_module_stack keys.
+            all_frames: list[Any] = []
+            tx_walk = self.output_graph.current_tx
+            while tx_walk is not None:
+                all_frames.append(tx_walk)
+                tx_walk = getattr(tx_walk, "parent", None)
+
+            hierarchy: list[dict[str, Any]] = []
+            prev_module_keys: set[str] = set()
+
+            for frame in reversed(all_frames):
+                nn_stack = getattr(frame, "nn_module_stack", {})
+                cur_keys = set(nn_stack.keys())
+                new_keys = cur_keys - prev_module_keys
+
+                if new_keys:
+                    # New module scope(s) entered — emit one entry per new key,
+                    # preserving insertion order from the ordered dict.
+                    for key in nn_stack:
+                        if key not in new_keys:
+                            continue
+                        path, cls = nn_stack[key]
+                        # Strip the Dynamo-internal L['self']. prefix.
+                        if path.startswith("L['self']."):
+                            path = path[len("L['self']."):]
+                        elif path == "L['self']":
+                            path = ""
+                        cls_name = (
+                            cls.__name__
+                            if hasattr(cls, "__name__")
+                            else str(cls)
+                        )
+                        attr = (
+                            path.rsplit(".", 1)[-1] if "." in path else path
+                        )
+                        # nn_module_stack keys use an @N suffix for the Nth
+                        # invocation of a shared module instance (see
+                        # record_nn_module_stack in variables/nn_module.py).
+                        key_str = str(key)
+                        call_count = (
+                            int(key_str.split("@")[1])
+                            if "@" in key_str
+                            else 0
+                        )
+                        hierarchy.append(
+                            {
+                                "type": "module",
+                                "class": cls_name,
+                                "attr": attr,
+                                "count": call_count,
+                            }
+                        )
+                else:
+                    # No new modules — check if this is a user function frame.
+                    func_name = frame.f_code.co_name
+                    filename = frame.f_code.co_filename
+                    # Skip non-meaningful scopes:
+                    # - "<module>": top-level script scope, not a real call.
+                    # - "<lambda>": anonymous, unnamed — not useful in a
+                    #   hierarchy string.
+                    # Module entry points (e.g. "forward") are NOT excluded
+                    # here because they are already handled: when Dynamo
+                    # inlines a module's forward, record_nn_module_stack adds
+                    # to nn_module_stack before the frame is created, so the
+                    # frame always lands in the `if new_keys` branch above.
+                    # Torch-internal frames (e.g. _call_impl,
+                    # _wrapped_call_impl) are filtered by _TORCH_FILE_PREFIX.
+                    if func_name not in (
+                        "<module>",
+                        "<lambda>",
+                    ) and not filename.startswith(_TORCH_FILE_PREFIX):
+                        fcc = getattr(frame, "function_call_counts", {})
+                        fcc_key = f"{filename}:{func_name}"
+                        # 0-indexed to match module count convention:
+                        # first invocation = 0, second = 1, etc.
+                        count = fcc.get(fcc_key, 0) - 1
+                        hierarchy.append(
+                            {
+                                "type": "function",
+                                "name": func_name,
+                                "count": max(count, 0),
+                            }
+                        )
+
+                prev_module_keys = cur_keys
+
+            if hierarchy:
+                rv.node.meta["call_hierarchy"] = hierarchy
+
 
         if (
             torch._dynamo.config.use_graph_deduplication

@@ -627,6 +627,11 @@ debug_disable_compile_counter = False
 # torch._dynamo.utilsCompileTimeInstructionCounter.
 record_compile_time_instruction_count = False
 
+# When set, a structured call_hierarchy metadata field is attached to each FX
+# node during tracing.  The field is a list of dicts describing the interleaved
+# module + function call chain that produced the node, with invocation counts.
+record_call_hierarchy = False
+
 
 def default_debug_dir_root() -> str:
     # [@compile_ignored: debug]

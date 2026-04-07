@@ -4696,6 +4696,9 @@ class InstructionTranslatorBase(
         # in original hierarchy.  The second field is the type of current nn.module
         self.nn_module_stack: dict[str, tuple[str, type[Any]]] = {}
         self.num_calls: dict[str, int] = {}
+        # Tracks per-function invocation counts for call_hierarchy metadata.
+        # Shared across the entire tx chain (parent and all inlined children).
+        self.function_call_counts: dict[str, int] = {}
         # Flag to indicate whether tracing is used for export.
         self.export = export
         # NOTE: one_graph is used for export/fullgraph=True to always force errors on graph breaks.
@@ -5338,6 +5341,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         parent.is_child_tracer_active = True
         code = self.f_code
 
+        # Track per-function invocation counts for call_hierarchy metadata
+        _fcc_key = f"{code.co_filename}:{code.co_name}"
+        self.function_call_counts[_fcc_key] = (
+            self.function_call_counts.get(_fcc_key, 0) + 1
+        )
+
         strict_ctx: Any = contextlib.nullcontext()
         if parent.strict_checks_fn:
             strict_ctx = self.strict_translation_mode(parent.strict_checks_fn)
@@ -5468,6 +5477,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self.funcvar = funcvar
         self.parent = parent
         self.num_calls = parent.num_calls
+        self.function_call_counts = parent.function_call_counts
         self.symbolic_result = None
         self.nn_module_stack = parent.nn_module_stack.copy()
         self.one_graph = parent.one_graph
