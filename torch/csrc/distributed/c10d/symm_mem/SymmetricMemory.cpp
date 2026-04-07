@@ -295,14 +295,6 @@ TORCH_API c10::intrusive_ptr<SymmetricMemory> rendezvous(
   return allocator->rendezvous(tensor.storage().data_ptr().get(), group_name);
 }
 
-TORCH_API bool is_symm_mem_tensor(const at::Tensor& tensor) {
-  if (!has_allocator(tensor.device().type())) {
-    return false;
-  }
-  auto allocator = get_allocator(tensor.device().type());
-  return allocator->has_allocation(tensor.storage().data_ptr().get());
-}
-
 TORCH_API bool has_multicast_support(
     c10::DeviceType device_type,
     int device_idx) {
@@ -504,33 +496,53 @@ at::Tensor one_shot_all_reduce_copy_meta(
 TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def(
       "multimem_all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)");
+  m.register_symm_mem_args("multimem_all_reduce_", {"input"});
+
   m.def(
       "multimem_one_shot_all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor");
+  m.register_symm_mem_args("multimem_one_shot_all_reduce", {"input"});
+
   m.def(
       "multimem_one_shot_all_reduce_out(Tensor input, str reduce_op, str group_name, Tensor(a!) out) -> Tensor(a!)");
+  m.register_symm_mem_args("multimem_one_shot_all_reduce_out", {"input"});
+
   m.def(
       "multimem_one_shot_reduce_out(Tensor input, str reduce_op, int root, str group_name, Tensor(a!) out) -> Tensor(a!)");
+  m.register_symm_mem_args("multimem_one_shot_reduce_out", {"input"});
+
   m.def(
       "multimem_all_gather_out(Tensor input, str group_name, Tensor(a!) out) -> Tensor(a!)");
+  m.register_symm_mem_args("multimem_all_gather_out", {"out"});
+
   m.def(
       "one_shot_all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor");
+  m.register_symm_mem_args("one_shot_all_reduce", {"input"});
+
   m.def(
       "one_shot_all_reduce_out(Tensor input, str reduce_op, str group_name, Tensor(a!) out) -> Tensor(a!)");
+  m.register_symm_mem_args("one_shot_all_reduce_out", {"input"});
+
   m.def(
       "one_shot_all_reduce_copy(Tensor symm_buffer, Tensor local_input, str reduce_op, str group_name) -> Tensor");
+  m.register_symm_mem_args("one_shot_all_reduce_copy", {"symm_buffer"});
+
   m.def(
       "one_shot_all_reduce_copy_out(Tensor symm_buffer, Tensor local_input, str reduce_op, str group_name, Tensor(a!) out) -> Tensor(a!)");
+  m.register_symm_mem_args("one_shot_all_reduce_copy_out", {"symm_buffer"});
 
   m.def(
       "two_shot_all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)");
+  m.register_symm_mem_args("two_shot_all_reduce_", {"input"});
 
   // note this implementation also modified the input tensor
   m.def(
       "two_shot_all_reduce_out(Tensor(a!) input, str reduce_op, str group_name, Tensor(b!) output) -> Tensor(b!)");
+  m.register_symm_mem_args("two_shot_all_reduce_out", {"input"});
 
   // note this implementation also modified the input tensor
   m.def(
       "reduce_scatter_out(Tensor(a!) input, str group_name, bool split_last_dim, Tensor(b!) output) -> Tensor(b!)");
+  m.register_symm_mem_args("reduce_scatter_out", {"input"});
 
   // An mm that supports consuming asynchronous input. It guarantees the
   // following rasterization order, and that the corresponding signal arrives
@@ -560,19 +572,26 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def("nccl_wait_for_signal(Tensor sigpad, int signal) -> ()");
   m.def("nccl_put_with_signal(Tensor(a) tensor, int signal, int peer) -> ()");
   m.def(
-      "nccl_reduce_scatter_offset(Tensor input, Tensor(a!)[] out, str group_name, int dim, int[]? offsets=None, int[]? dst_ranks=None, str red_op='sum') -> ()");
-  m.def(
       "nvshmem_all_to_all(Tensor input, Tensor(a!) out, str group_name) -> Tensor(a!)");
   m.def(
       "all_to_all_vdev(Tensor input, Tensor(a!) out, Tensor in_splits, Tensor(a!) out_splits_offsets, str group_name) -> ()");
+  m.register_symm_mem_args("all_to_all_vdev", {"input", "out"});
+
   m.def(
       "all_to_all_vdev_2d(Tensor input, Tensor(a!) out, Tensor in_splits, Tensor(a!) out_splits_offsets, str group_name, int? major_align=None) -> ()");
+  m.register_symm_mem_args("all_to_all_vdev_2d", {"input", "out"});
+
   m.def(
       "all_to_all_vdev_2d_offset(Tensor input, Tensor(a!) out, Tensor in_splits_offsets, Tensor(a!) out_splits_offsets, str group_name) -> ()");
+  m.register_symm_mem_args("all_to_all_vdev_2d_offset", {"input", "out"});
+
   m.def(
       "tile_reduce(Tensor in_tile, Tensor(a!) out_tile, int root, str group_name, str reduce_op='sum') -> ()");
+  m.register_symm_mem_args("tile_reduce", {"in_tile", "out_tile"});
+
   m.def(
       "multi_root_tile_reduce(Tensor[] in_tiles, Tensor(a!) out_tile, int[] roots, str group_name, str reduce_op='sum') -> ()");
+  m.register_symm_mem_args("multi_root_tile_reduce", {"in_tiles", "out_tile"});
 
   // Dispatcher-visible (TorchBind) SymmetricMemory API.
   // For now, `_rendezvous` and `_barrier` are for testing dispatcher support
