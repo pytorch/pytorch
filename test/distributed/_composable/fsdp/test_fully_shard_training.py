@@ -2719,14 +2719,22 @@ class SomeUnusedParamModel(nn.Module):
         self.sometimes_used = nn.Linear(8, 8, bias=False)
         self.frozen_layer = nn.Linear(8, 8, bias=False)
         self.frozen_layer.weight.requires_grad = False
-        self.use_sometimes = use_sometimes
+        self._use_sometimes = use_sometimes
 
     def forward(self, x):
         out = self.always_used(x)
-        if self.use_sometimes:
+        if self._use_sometimes:
             out += self.sometimes_used(x)
         out += self.frozen_layer(x)
         return out
+
+    @property
+    def use_sometimes(self) -> bool:
+        return self._use_sometimes
+
+    @use_sometimes.setter
+    def use_sometimes(self, value: bool):
+        self._use_sometimes = value
 
 
 class TestFSDPMissingParamGrad(FSDPTest):
@@ -2780,6 +2788,57 @@ class TestFSDPMissingParamGrad(FSDPTest):
                 "FSDP should not modify the original parameters"
             )
 
+class TestZeroGradMomentum(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @skip_if_lt_x_gpu(2)
+    def test_unused_param_optimizer_state_unchanged(self):
+        torch.cuda.set_device(self.rank)
+        device = torch.device("cuda", self.rank)
+
+        model = SomeUnusedParamModel(use_sometimes=True).to(device)
+        fully_shard(model)
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+
+        x = torch.randn(2, 8, device=device)
+
+        # Step 1: use both params to initialize optimizer state
+        loss = model(x).sum()
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+
+        # Snapshot optimizer state for sometimes_used after it was legitimately used
+        sometimes_param = model.sometimes_used.weight
+        state_after_use = {
+            "exp_avg": optimizer.state[sometimes_param]["exp_avg"].clone(),
+            "exp_avg_sq": optimizer.state[sometimes_param]["exp_avg_sq"].clone(),
+            "step": optimizer.state[sometimes_param]["step"].clone(),
+        }
+
+        # Step 2: do NOT use sometimes_used
+        model.use_sometimes = False
+        loss = model(x).sum()
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+
+        # Optimizer state for sometimes_used should NOT have changed
+        # If the bug exists (fsdp_param appended instead of None),
+        # a zero grad flows through reduce-scatter and Adam updates state
+        state_after_skip = optimizer.state[sometimes_param]
+        self.assertEqual(
+            state_after_use["exp_avg"],
+            state_after_skip["exp_avg"],
+            msg="exp_avg changed for unused param — zero grad corrupted momentum",
+        )
+        self.assertEqual(
+            state_after_use["exp_avg_sq"],
+            state_after_skip["exp_avg_sq"],
+            msg="exp_avg_sq changed for unused param — zero grad corrupted adaptive LR",
+        )
 
 if __name__ == "__main__":
     run_tests()
