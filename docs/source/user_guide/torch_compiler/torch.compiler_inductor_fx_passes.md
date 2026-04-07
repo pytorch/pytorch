@@ -16,47 +16,50 @@ For a walkthrough of where these passes fit in the overall pipeline, see the
 
 Pre-grad passes run on the high-level Torch IR before AOT Autograd. At this
 stage, the graph contains the full set of 2000+ PyTorch operators (for example,
-`torch.nn.functional.linear`). The high-level IR makes it easier to perform
-pattern matching and can expose fusion opportunities.
+`torch.nn.functional.linear`). These passes transform the graph to improve
+performance through operator fusion, elimination of redundant operations, and
+graph simplification. The high-level IR can make it easier to perform pattern
+matching and can expose fusion opportunities that would be harder to recognize
+after decomposition.
 
 However, the IR at this stage has **not** been normalized (canonicalized) or
-functionalized (put in SSA form). This means:
+functionalized (put in SSA form), making pre-grad passes more challenging to
+write than post-grad passes. Specifically:
 
-- Pre-grad passes **must be safe with respect to aliasing and mutation**. A pass
-  cannot assume that two tensor arguments point to different storage.
+- Passes **must be safe with respect to aliasing and mutation**. A pass cannot
+  assume that two tensor arguments point to different storage.
+- Passes **must handle all possible argument schemas** for an operation, since
+  the IR has not been canonicalized to a standard form.
 - Manipulation at this stage is discouraged. TorchInductor uses limited-to-no
   manipulation on pre-grad IR.
-
-Pre-grad passes are primarily used for pattern matching on high-level operations
-that would be harder to recognize after decomposition.
 
 ## Joint Graph Passes
 
 **Source**: [torch/_inductor/fx_passes/joint_graph.py](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/fx_passes/joint_graph.py)
 
-Joint graph passes run on the combined forward and backward graphs produced by
-AOT Autograd. These optimizations are used when you need to change **both** the
-forward and backward implementation of an operator simultaneously.
-
-At this stage, the IR has been:
+Joint graph passes run on the combined forward and backward graph produced by
+AOT Autograd. At this stage, the IR has been:
 
 - **Functionalized** — put in SSA form with no mutations
 - **Normalized** — canonicalized to a standard form
 - **Decomposed** — reduced to fundamental ATen IR
 
-Some pattern matching is run at this stage. For example, patterns that need to
-see the relationship between forward and backward operations are matched here.
+This makes joint graph passes easier to write than pre-grad passes, since
+the IR is functional and standardized. These passes focus on optimizations
+that benefit from seeing both forward and backward operations together — for
+example, patterns that need to match across the forward-backward boundary.
 
 ## Post-Grad Passes
 
 **Source**: [torch/_inductor/fx_passes/post_grad.py](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/fx_passes/post_grad.py)
 
-Post-grad passes run on the normalized, functionalized, and **partitioned**
-forward and backward graphs. By this point, the joint graph has been split into
-separate forward and backward graphs by the
+Post-grad passes run separately on the forward and backward graphs after the
+joint graph has been split by the
 [min-cut partitioner](https://dev-discuss.pytorch.org/t/min-cut-optimal-recomputation-i-e-activation-checkpointing-with-aotautograd/467).
-
-These passes perform optimizations such as:
+These passes operate on normalized, functional ATen IR, making pattern matching
+and transformations more straightforward than pre-grad passes. They focus on
+low-level optimizations that benefit from seeing the fully decomposed and
+functionalized representation, such as:
 
 - **No-op elimination** — removing operations that have no effect
 - **Dead code elimination** — removing unused computations
