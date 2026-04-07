@@ -1924,11 +1924,15 @@ class NestedRedistribute(torch.autograd.Function):
         backward_dtype: torch.dtype | None = None,
     ):
         ctx.async_op = async_op
-        ctx.backward_dtype = backward_dtype or ctx.original_dtype
         ctx.original_dtype = grad_output._local_tensor.dtype
+        ctx.backward_dtype = backward_dtype or ctx.original_dtype
 
         output, spec = _redistribute_backward(
-            grad_output, previous_spec, ctx.original_dtype, backward_dtype, async_op
+            grad_output,
+            previous_spec,
+            ctx.backward_dtype,
+            backward_dtype,
+            async_op,
         )
 
         ctx.current_spec = spec
