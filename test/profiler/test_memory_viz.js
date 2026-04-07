@@ -158,7 +158,7 @@ function test_pool_free_without_alloc_no_inflation() {
   const envelopes = result.allocations_over_time.filter(
     d => typeof d.elem === 'string' && d.elem.startsWith('pool:'));
   assertEqual(envelopes.length, 1, 'should have 1 pool envelope');
-  assertEqual(envelopes[0].elem, 'pool:1,42', 'envelope key matches pool id');
+  assertEqual(envelopes[0].elem, 'pool:1,42,s0', 'envelope key matches pool id and stream');
 
   const stripes = result.allocations_over_time.filter(
     d => typeof d.elem === 'number' && d.opacity === 0.5);
@@ -542,6 +542,38 @@ function test_post177717_mixed_events_with_and_without_pool_id() {
   assertContains(ctx1, 'pool_id (2, 8)', 'private pool from event-level segment_pool_id');
 }
 
+
+// ============================================================
+// Pool grouping by (pool_id, stream) tests
+// ============================================================
+
+function test_pool_grouped_by_stream() {
+  console.log('test_pool_grouped_by_stream');
+  // Same pool_id but different streams should produce separate envelopes.
+  const poolId = [1, 5];
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 1000, size: 500, frames: [], stream: 1 },
+      { action: 'alloc', addr: 2000, size: 300, frames: [], stream: 2 },
+      { action: 'free_completed', addr: 1000, size: 500, frames: [], stream: 1 },
+      { action: 'free_completed', addr: 2000, size: 300, frames: [], stream: 2 },
+    ],
+    segments: [
+      { device: 0, address: 0, total_size: 4096, segment_pool_id: poolId,
+        stream: 0, blocks: [] },
+    ],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, true);
+
+  const envelopes = result.allocations_over_time.filter(
+    d => typeof d.elem === 'string' && d.elem.startsWith('pool:'));
+  assertEqual(envelopes.length, 2, 'should have 2 pool envelopes (one per stream)');
+
+  const keys = envelopes.map(e => e.elem).sort();
+  assertEqual(keys[0], 'pool:1,5,s1', 'first envelope key includes stream 1');
+  assertEqual(keys[1], 'pool:1,5,s2', 'second envelope key includes stream 2');
+}
 
 // ============================================================
 // Initially Added Blocks Tests
@@ -978,7 +1010,7 @@ function test_full_snapshot_private_pools() {
 
   const envelopes = aot.filter(d => typeof d.elem === 'string' && d.elem.startsWith('pool:'));
   assertEqual(envelopes.length, 1, 'should have 1 pool envelope');
-  assertEqual(envelopes[0].elem, 'pool:0,1', 'envelope key matches pool (0,1)');
+  assertEqual(envelopes[0].elem, 'pool:0,1,s0', 'envelope key matches pool (0,1)');
 
   const stripes = aot.filter(d => typeof d.elem === 'number' && d.opacity === 0.5);
   assertEqual(stripes.length, 3, 'should have 3 pool stripes (elements 1, 3, 4)');
@@ -1082,6 +1114,7 @@ test_context_for_id_free_without_alloc();
 test_post177717_pool_id_from_trace_event();
 test_post177717_pool_free_without_alloc_no_segment();
 test_post177717_mixed_events_with_and_without_pool_id();
+test_pool_grouped_by_stream();
 test_segment_snapshot_with_trace_history();
 test_segment_snapshot_no_trace();
 test_default_pool_ghost_block();

@@ -46,6 +46,36 @@
 //   "oom"            - Allocator failed to satisfy an allocation after all retries.
 //                      addr=device_free (bytes free on GPU), size=requested allocation.
 //                      Recorded in malloc() (CUDACachingAllocator.cpp:1629).
+//
+// HOW SEGMENT EVENTS ARE USED IN VISUALIZATION:
+//
+//   The snapshot pickle contains two separate data sources:
+//     1. device_traces  - Ring buffer of TraceEntry actions (alloc, free, segment_map, etc.)
+//     2. segments       - Point-in-time dump of all segments/blocks at _snapshot() time
+//
+//   Block-level views ("Active Memory Timeline", "Allocated Memory (incl. Private Pools)"):
+//     - process_alloc_data matches "alloc" and "free_completed" from device_traces.
+//     - segment_alloc/segment_free/segment_map/segment_unmap are ignored (skipped in switch).
+//     - The segments snapshot is used only to resolve pool_id via find_pool_id().
+//
+//   Segment-level view ("Active Cached Segment Timeline"):
+//     - process_alloc_data is called with plot_segments=true.
+//     - Matches "segment_alloc" and "segment_free" instead of alloc/free.
+//     - segment_map/segment_unmap are NOT matched (they don't appear in the switch).
+//     - Segments from the snapshot that weren't seen in the trace are added as
+//       initially_allocated (Phase 2).
+//
+//   Allocator State History ("Allocator State History"):
+//     - EventSelector lists ALL trace events including segment_map/segment_unmap.
+//     - MemoryView renders the segment/block layout from the segments snapshot.
+//     - Clicking an event in the list redraws the layout at that point in time.
+//
+//   Ring buffer overflow:
+//     - All trace event types share the same ring buffer. When it overflows, older
+//       events are overwritten. The allocator_settings.trace_alloc_overflowed flag
+//       indicates this happened, and trace_alloc_max_entries gives the buffer size.
+//     - Segment snapshot data (segments array) is NOT affected by ring buffer overflow.
+//     - The segment snapshot is always complete regardless of overflow.
 
 /**
  * Returns true if pool_id represents a private (user-created) memory pool,
@@ -533,7 +563,8 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
   function get_pool_key(elem_idx) {
     const pid = elements[elem_idx].segment_pool_id;
     if (!isPrivatePoolId(pid)) return null;
-    return `${pid[0]},${pid[1]}`;
+    const stream = elements[elem_idx].stream;
+    return `${pid[0]},${pid[1]},s${stream}`;
   }
 
   function get_or_create_pool(pool_key) {
