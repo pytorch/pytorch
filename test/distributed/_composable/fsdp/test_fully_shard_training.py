@@ -91,7 +91,7 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
         return 2
 
     def test_root_move_forward_input_to_device(self):
-        device = torch.device(device_type.type, 0)
+        device = torch.device(device_type.type, self.rank)
 
         class ParamlessModule(nn.Module):
             def forward(self, x: torch.Tensor, ys: tuple[torch.Tensor, ...]):
