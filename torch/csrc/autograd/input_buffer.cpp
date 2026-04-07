@@ -77,6 +77,14 @@ void record_stream_any_impl(Variable& var, const c10::Stream& stream) {
   }
 }
 
+bool has_version(const Variable& v) {
+  return v.defined() && v.unsafeGetTensorImpl()->version_counter().enabled();
+}
+
+uint32_t get_version(const Variable& v) {
+  return v.unsafeGetTensorImpl()->version_counter().current_version();
+}
+
 bool can_accumulate_inplace(const Variable& v) {
   return (
       // `v` is a "vanilla" Tensor
@@ -210,9 +218,11 @@ void InputBuffer::add(
     if (!buffer[pos].defined()) {
       buffer[pos] = std::move(var);
     } else {
+      check_version_at(pos, fn);
       c10::OptionalDeviceGuard device_guard{device};
       accumulate(buffer, pos, std::move(var));
     }
+    save_version_at(pos);
     return;
   }
   // Handle the case where var is on an accelerator but producer node has no
@@ -273,6 +283,7 @@ void InputBuffer::add(
     }
     // 2)
     buffer[pos] = std::move(var);
+    save_version_at(pos);
     // 3)
     auto& opt_accum_stream = opt_accum_streams[pos];
     TORCH_INTERNAL_ASSERT(opt_accum_stream.has_value());
@@ -305,8 +316,10 @@ void InputBuffer::add(
       record_stream_any_impl(buffer[pos], *accum_stream);
     }
     // 2)
+    check_version_at(pos, fn);
     c10::OptionalStreamGuard stream_guard{accum_stream};
     accumulate(buffer, pos, std::move(var));
+    save_version_at(pos);
     // 3)
     if (*opt_consumer_stream != *accum_stream) {
       // Only the consumer stream needs to wait for this event
@@ -321,6 +334,59 @@ void InputBuffer::add(
 auto InputBuffer::variables(InputBuffer&& g) -> std::vector<Variable> {
   std::vector<Variable> result = std::move(g.buffer);
   return result;
+}
+
+void InputBuffer::save_version_at(size_t pos) {
+  if (has_version(buffer[pos])) {
+    saved_versions_[pos] = get_version(buffer[pos]);
+  }
+}
+
+void InputBuffer::check_version_at(size_t pos, const Node* fn) {
+  if (!has_version(buffer[pos])) {
+    return;
+  }
+  auto current = get_version(buffer[pos]);
+  TORCH_CHECK(
+      current == saved_versions_[pos],
+      "gradient input ",
+      pos,
+      " of ",
+      fn->name(),
+      " was modified in-place after the gradient was produced by the "
+      "autograd engine. This is not allowed because it can lead to "
+      "incorrect gradient computation. (expected version ",
+      saved_versions_[pos],
+      " but found version ",
+      current,
+      ")");
+}
+
+void InputBuffer::check_versions(const Node& consumer) const {
+  if (saved_versions_.empty()) {
+    return;
+  }
+  for (const auto i : c10::irange(buffer.size())) {
+    if (!buffer[i].defined() ||
+        !buffer[i].unsafeGetTensorImpl()->version_counter().enabled()) {
+      continue;
+    }
+    auto current_version =
+        buffer[i].unsafeGetTensorImpl()->version_counter().current_version();
+    TORCH_CHECK(
+        current_version == saved_versions_[i],
+        "gradient input ",
+        i,
+        " of ",
+        consumer.name(),
+        " was modified in-place after the gradient was produced by the "
+        "autograd engine. This is not allowed because it can lead to "
+        "incorrect gradient computation. (expected version ",
+        saved_versions_[i],
+        " but found version ",
+        current_version,
+        ")");
+  }
 }
 
 } // namespace torch::autograd

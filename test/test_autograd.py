@@ -7212,6 +7212,36 @@ Done""",
         xz.add_(1)
         self.assertTrue(x._version == xz._version)
 
+    def test_gradient_version_check_no_false_positive(self):
+        # Verify that the gradient version check in the engine does not produce
+        # false positives for various graph topologies.
+
+        # Simple chain: a -> b -> c
+        a = torch.randn(3, requires_grad=True)
+        b = a * 2
+        c = b.sum()
+        c.backward()
+
+        # Fan-in: a used by both b and c, gradients accumulate at a
+        a = torch.randn(3, requires_grad=True)
+        b = a * 2
+        c = a * 3
+        (b + c).sum().backward()
+
+        # Hooks that return new tensors (not in-place)
+        a = torch.randn(3, requires_grad=True)
+        b = a * 2
+        b.register_hook(lambda grad: grad * 0.5)
+        c = b.sum()
+        c.backward()
+
+        # Multiple backward with retain_graph
+        a = torch.randn(3, requires_grad=True)
+        b = (a * 2).sum()
+        b.backward(retain_graph=True)
+        b.backward(retain_graph=True)
+        b.backward()
+
     def test_set_data_tensorimpl_type(self):
         # Dense tensor has impl of type `TensorImpl`, while sparse tensor has impl
         # of type `SparseTensorImpl`.

@@ -1088,6 +1088,8 @@ void Engine::evaluate_function(
     }
   }
 
+  inputs.check_versions(*func);
+
   // If exec_info_ is not empty, we have to instrument the execution
   auto& exec_info_ = graph_task->exec_info_;
   if (!exec_info_.empty()) {
