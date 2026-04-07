@@ -7600,12 +7600,8 @@ class Scheduler:
                 backend_ = self.get_backend(device)
                 from .codegen.cuda_combined_scheduling import CUDACombinedScheduling
                 from .codegen.simd import SIMDScheduling
-                from .codegen.xpu.xpu_combined_scheduling import XPUCombinedScheduling
 
-                if isinstance(
-                    backend_,
-                    (SIMDScheduling, CUDACombinedScheduling, XPUCombinedScheduling),
-                ):
+                if isinstance(backend_, (SIMDScheduling, CUDACombinedScheduling)):
                     backend = backend_
                 else:
                     raise AssertionError(f"{type(self)=}")

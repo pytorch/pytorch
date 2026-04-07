@@ -11,19 +11,17 @@ log = logging.getLogger(__name__)
 @clear_on_fresh_cache
 @functools.lru_cache(1)
 def get_xpu_arch() -> str | None:
-    from torch.testing._internal.common_xpu import get_xpu_codename, XPUCodename
-
-    name2arch = {
-        XPUCodename.PVC: "Xe12",
-        XPUCodename.BMG: "Xe20",
+    arch_code2name = {
+        13136561920: "Xe12",
+        21479031808: "Xe20",
+        21483225088: "Xe20",
     }
-
-    codename = get_xpu_codename()
-    if not codename or codename not in name2arch:
-        log.warning("Unknown XPU codename, cannot determine architecture")
+    try:
+        arch_code = torch.xpu.get_device_capability()["architecture"]
+        return arch_code2name[arch_code]
+    except Exception:
+        log.exception("Error in getting xpu arch.")
         return None
-
-    return name2arch[codename]
 
 
 @clear_on_fresh_cache
@@ -31,7 +29,7 @@ def get_xpu_arch() -> str | None:
 def get_xpu_version() -> str | None:
     # string of version, like 20250101
     try:
-        xpu_version = torch.version.xpu or ""
+        xpu_version = torch.version.xpu
         return xpu_version
     except Exception:
         log.exception("Error getting xpu version")
