@@ -57,19 +57,6 @@ struct VecRoundConvert {
   }
 };
 
-template <typename dst_t, int dst_n, typename src_t, int src_n>
-struct VecConvert<
-    dst_t,
-    dst_n,
-    src_t,
-    src_n,
-    std::enable_if_t<std::is_same_v<dst_t, src_t> && dst_n == src_n>> {
-  static inline VectorizedN<dst_t, dst_n> apply(
-      const VectorizedN<src_t, src_n>& src) {
-    return src;
-  }
-};
-
 template <typename dst_t, typename src_t>
 inline std::enable_if_t<std::is_same_v<dst_t, src_t>, Vectorized<src_t>> convert(
     const Vectorized<src_t>& src) {
@@ -77,9 +64,21 @@ inline std::enable_if_t<std::is_same_v<dst_t, src_t>, Vectorized<src_t>> convert
 }
 
 template <typename dst_t, typename src_t>
+inline std::enable_if_t<std::is_same_v<dst_t, src_t>, Vectorized<src_t>>
+round_convert(const Vectorized<src_t>& src) {
+  return src;
+}
+
+template <typename dst_t, typename src_t>
 inline std::enable_if_t<!std::is_same_v<dst_t, src_t>, Vectorized<dst_t>>
 convert(const Vectorized<src_t>& src) {
   return VecConvert<dst_t, 1, src_t, 1>::apply(src);
+}
+
+template <typename dst_t, typename src_t>
+inline std::enable_if_t<!std::is_same_v<dst_t, src_t>, Vectorized<dst_t>>
+round_convert(const Vectorized<src_t>& src) {
+  return VecRoundConvert<dst_t, 1, src_t, 1>::apply(src);
 }
 
 template <
@@ -103,12 +102,6 @@ inline VectorizedN<dst_t, dst_n> round_convert(
   return VecRoundConvert<dst_t, dst_n, src_t, src_n>::apply(src);
 }
 
-template <typename dst_t, typename src_t>
-inline std::enable_if_t<!std::is_same_v<dst_t, src_t>, Vectorized<dst_t>>
-round_convert(const Vectorized<src_t>& src) {
-  return VecRoundConvert<dst_t, 1, src_t, 1>::apply(src);
-}
-
 template <
     typename dst_t,
     int dst_n,
@@ -119,6 +112,18 @@ template <
 inline std::conditional_t<keep, VectorizedN<dst_t, 1>, Vectorized<dst_t>>
 convert(const VectorizedN<src_t, src_n>& src) {
   return VecConvert<dst_t, dst_n, src_t, src_n>::apply(src);
+}
+
+template <
+    typename dst_t,
+    int dst_n,
+    typename src_t,
+    int src_n,
+    bool keep = false,
+    std::enable_if_t<dst_n == 1, int> = 0>
+inline std::conditional_t<keep, VectorizedN<dst_t, 1>, Vectorized<dst_t>>
+round_convert(const VectorizedN<src_t, src_n>& src) {
+  return VecRoundConvert<dst_t, dst_n, src_t, src_n>::apply(src);
 }
 
 } // namespace CPU_CAPABILITY

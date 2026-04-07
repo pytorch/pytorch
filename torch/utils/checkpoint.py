@@ -138,10 +138,11 @@ class DefaultDeviceType:
 def _infer_device_type(*args):
     device_types = []
 
-    def add_device_types(arg) -> None:
+    def add_device_types(arg):
         nonlocal device_types
         if isinstance(arg, torch.Tensor) and arg.device.type != "cpu":
             device_types.append(arg.device.type)
+        return arg
     tree_map(add_device_types, args)
 
     device_types_set = set(device_types)
@@ -174,10 +175,11 @@ def get_device_states(*args) -> Tuple[List[int], List[torch.Tensor]]:
     # the conditionals short-circuit.
     fwd_device_ids = []
 
-    def add_device_ids(arg) -> None:
+    def add_device_ids(arg):
         nonlocal fwd_device_ids
         if isinstance(arg, torch.Tensor) and arg.device.type not in {"cpu", "meta"}:
             fwd_device_ids.append(arg.get_device())
+        return arg
     tree_map(add_device_ids, args)
 
     fwd_device_states = []
@@ -993,8 +995,7 @@ def _get_debug_context_and_cb() -> Tuple[Callable[[], Any], Callable[[Checkpoint
     # checkpointing mechanism. error_cb is invoked when an error is detected
     # during unpack.
 
-    # record_context_cpp is not support on non-linux non-x86_64 platforms
-    cpp_tb = platform.machine() == 'x86_64' and platform.system() == 'Linux'
+    cpp_tb = platform.machine() in ('x86_64', 'aarch64', 'arm64') and platform.system() == 'Linux'
 
     class CaptureLogs:
         def __init__(self) -> None:
@@ -1069,6 +1070,10 @@ class _StopRecomputationError(Exception):
 
 class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
     def __init__(self, target_frame_ref: ReferenceType, gid: GraphExecGroup | int) -> None:
+        # Dynamo guards on WeakKeyDictionary internals are unstable here
+        # (dict length/keys change every call), causing recompilation storms.
+        # with `.compile()` so we disable
+        @torch._dynamo.disable
         def pack_hook(x):
             x = x.detach() if x.requires_grad else x
             target_frame = target_frame_ref()
@@ -1196,8 +1201,10 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
 
 
 def _is_compiling(func, args, kwargs):
-    # Check if we are under AOTAutograd tracing
-    # Checking that a functional mode is active should always do what we want
+    # Check if we are under AOTAutograd tracing or export tracing
+    # Checking that a proxy mode is active should always do what we want
+    if torch.compiler._is_non_strict_tracing():
+        return False
     return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY) is not None
 
 
@@ -1316,9 +1323,10 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         return True
 
     # Used together with _CachedTorchDispatchMode to implement SAC.
-    def __init__(self, policy_fn, storage) -> None:
+    def __init__(self, policy_fn, storage, ac_graph_id=None) -> None:
         self.policy_fn = policy_fn
         self.storage = storage
+        self.ac_graph_id = ac_graph_id
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if func in SAC_IGNORED_OPS:
@@ -1330,11 +1338,14 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         if isinstance(policy, bool):
             policy = _policy_from_bool(policy)
 
+        # TODO: eventually we will only rely on tagging for the compile path
+        # and remove the eager checkpoint machinery entirely in compile path.
         is_compiling = _is_compiling(func, args, kwargs)
 
         if is_compiling:
             # Overwrite each node's "recompute" tag to add in the user annotation.
             fx_traceback.current_meta["recompute"] = policy
+            fx_traceback.current_meta["ac_graph_id"] = self.ac_graph_id
 
         out = func(*args, **kwargs)
 

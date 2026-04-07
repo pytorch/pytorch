@@ -620,7 +620,7 @@ class <lambda>(torch.nn.Module):
         add_node.args = (args[0], add_2)
         self.assertExpectedInline(
             _detect_cycles(mod.graph, {add_2: OrderedSet([add_2])}),
-            """cycle detected in path: deque([output, add_2, add_2])""",
+            """cycle detected in path: [output, add_2, sum_1, add, add_2]""",
         )
 
     def test_cycle_detection_two_node(self):
@@ -644,7 +644,7 @@ class <lambda>(torch.nn.Module):
                 mod.graph,
                 {add_2: OrderedSet([add_node]), add_node: OrderedSet([add_2])},
             ),
-            """cycle detected in path: deque([output, add_2, add, add_2])""",
+            """cycle detected in path: [output, add_2, sum_1, add, add_2]""",
         )
 
     def test_cycle_detection_arg_and_additional_deps(self):
@@ -665,7 +665,7 @@ class <lambda>(torch.nn.Module):
         add_node.args = (args[0], add_2)
         self.assertExpectedInline(
             _detect_cycles(mod.graph, {add_2: OrderedSet([add_node])}),
-            """cycle detected in path: deque([output, add_2, add, add_2])""",
+            """cycle detected in path: [output, add_2, sum_1, add, add_2]""",
         )
 
     def test_cycle_detection_simple(self):
@@ -676,7 +676,7 @@ class <lambda>(torch.nn.Module):
         add_node.args = (args[0], add_2)
         self.assertExpectedInline(
             _detect_cycles(mod.graph, {}),
-            """cycle detected in path: deque([output, add_2, sum_1, add, add_2])""",
+            """cycle detected in path: [output, add_2, sum_1, add, add_2]""",
         )
 
     def test_cycle_detection_complex(self):
@@ -711,7 +711,7 @@ class <lambda>(torch.nn.Module):
         invoke_subgraph_node.args = (add_2, args[1])
         self.assertExpectedInline(
             _detect_cycles(mod.graph, {}),
-            """cycle detected in path: deque([output, add_2, add_1, sum_1, getitem, invoke_subgraph, add_2])""",
+            """cycle detected in path: [output, add_2, add_1, sum_1, getitem, invoke_subgraph, add_2]""",
         )
 
     def test_autocast_ordering(self):

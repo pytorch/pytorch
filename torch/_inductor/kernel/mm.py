@@ -100,6 +100,14 @@ persistent_tma_mm_template = TritonTemplate(
     source=load_kernel_template("triton_persistent_tma_mm"),
 )
 
+# Non-TMA Triton template for persistent MM
+# used on AMD
+persistent_mm_template = TritonTemplate(
+    name="mm_persistent",
+    grid=persistent_mm_grid,
+    source=load_kernel_template("triton_persistent_mm"),
+)
+
 
 scaled_mm_device_tma_epilogue_scaling_template = TritonTemplate(
     name="scaled_mm_device_tma_epilogue_scaling",
@@ -359,7 +367,6 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
                 return ops.to_dtype(x, mat1.dtype, use_compute_types=False)
 
             args = [make_pointwise(_to_dtype)(x) for x in args]
-
         mul_pointwise = make_pointwise(ops.dot)(*args)
         dot_reduction = make_reduction("dot")(mul_pointwise, 1)
 
@@ -398,14 +405,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
 
     templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
     kwarg_overrides: dict[str, dict[str, Any]] = {}
-
-    # Check if TLX force mode is enabled (fbcode only)
-    tlx_force_mode = (
-        inductor_config.is_fbcode() and inductor_config.triton.tlx_mode == "force"
-    )
-
-    # Add ATEN kernels unless in TLX force mode (force mode uses only TLX)
-    if use_aten_gemm_kernels() and not tlx_force_mode:
+    if use_aten_gemm_kernels():
         templates_to_use.append(aten_handler)
         if aten_extra_kwargs:
             kwarg_overrides[aten_handler.uid] = aten_extra_kwargs
@@ -426,25 +426,19 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         if is_exhaustive or not use_decompose_k_choice(m, n, k, threshold_multiple=2):
             templates_to_use.append(mm_template)
 
-            if use_triton_blackwell_tma_template(mat1, mat2, output_layout=layout):
+            if use_triton_blackwell_tma_template(
+                mat1, mat2, output_layout=layout, add_guards=True
+            ):
                 templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
-            elif use_triton_tma_template(mat1, mat2, output_layout=layout):
-                templates_to_use.append(persistent_tma_mm_template)
+            elif use_triton_tma_template(
+                mat1, mat2, output_layout=layout, add_guards=True
+            ):
+                if torch.version.hip is None:
+                    templates_to_use.append(persistent_tma_mm_template)
+                else:
+                    templates_to_use.append(persistent_mm_template)
 
         templates_to_use.append(mm_contiguous_subgraph_template)
-
-    # TLX templates hook (fbcode only)
-    if inductor_config.is_fbcode():
-        from torch._inductor.fb.tlx_templates.mm_templates import apply_tlx_templates
-
-        templates_to_use = apply_tlx_templates(
-            templates_to_use,
-            m,
-            n,
-            k,
-            use_decompose_k_choice,
-            decompose_k_subgraph_template,
-        )
 
     choices.extend(
         V.choices.get_template_configs(
@@ -639,6 +633,10 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     kernel_inputs = MMKernelInputs(
         [inp_expanded, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
     )
+    kernel_inputs_aten = MMKernelInputs(
+        [inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
+    )
+
     choices: list[ChoiceCaller] = []
 
     # below is for getting an overview logging info of inductor mms
@@ -655,15 +653,9 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     if (not is_nonzero) or (
         not (inductor_config.max_autotune or inductor_config.max_autotune_gemm)
     ):
-        # TODO(coconutruben): combine this with the main flow of addmm through
-        # a subgraph or something as inp vs inp_expanded causes some slight numeric
-        # differences
-        kernel_inputs = MMKernelInputs(
-            [inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
-        )
         choices.extend(
             V.choices.get_template_configs(
-                kernel_inputs,
+                kernel_inputs_aten,
                 [aten_addmm],
                 name,
             )
@@ -673,22 +665,35 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         )
         return node
 
-    # Collect all templates for unified call
     templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
+
     if use_aten_gemm_kernels():
-        templates_to_use.append(aten_addmm)
+        aten_templates: list[ExternKernelChoice | KernelTemplate] = [aten_addmm]
+        # For ROCm, check original inp since kernel_inputs_aten uses inp (not inp_expanded)
+        bias_to_check = inp if torch.version.hip else inp_expanded
         if (
-            inp_expanded.get_stride()[0] == 0
+            bias_to_check.get_stride()[0] == 0
             and inductor_config.triton.autotune_cublasLt
+            and not V.graph.cpp_wrapper  # bias_addmm only has a Python implementation
         ):
-            templates_to_use.append(aten_bias_addmm)
+            aten_templates.append(aten_bias_addmm)
+
+        # On ROCm, ATen choices use original bias input; non-ROCm keeps unified inputs.
+        if torch.version.hip:
+            choices.extend(
+                V.choices.get_template_configs(kernel_inputs_aten, aten_templates, name)
+            )
+        else:
+            templates_to_use.extend(aten_templates)
 
     if is_nonzero and use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(mm_template)
 
-        if use_triton_blackwell_tma_template(mat1, mat2, output_layout=layout):
+        if use_triton_blackwell_tma_template(
+            mat1, mat2, output_layout=layout, add_guards=True
+        ):
             templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
-        elif use_triton_tma_template(mat1, mat2, output_layout=layout):
+        elif use_triton_tma_template(mat1, mat2, output_layout=layout, add_guards=True):
             templates_to_use.append(persistent_tma_mm_template)
 
         templates_to_use.append(addmm_contiguous_subgraph_template)
@@ -972,7 +977,10 @@ def tuned_scaled_mm(
 
         # TODO (paulzhan): There is no template that exists for bias and TMA
         # Don't run tma template currently if bias exist
-        if use_triton_tma_template(mat_a, mat_b, output_layout=layout) and not bias:
+        if (
+            use_triton_tma_template(mat_a, mat_b, output_layout=layout, add_guards=True)
+            and not bias
+        ):
             overriders["SCALE_RECIPE_A"] = scale_option_a.value
             overriders["SCALE_RECIPE_B"] = scale_option_b.value
 
@@ -1000,7 +1008,9 @@ def tuned_scaled_mm(
                 )
 
         if (
-            use_triton_blackwell_tma_template(mat_a, mat_b, output_layout=layout)
+            use_triton_blackwell_tma_template(
+                mat_a, mat_b, output_layout=layout, add_guards=True
+            )
             and not bias
         ):
             templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)

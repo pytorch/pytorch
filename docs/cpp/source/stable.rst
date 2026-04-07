@@ -227,8 +227,9 @@ Header-Only Utilities
 ---------------------
 
 The ``torch::headeronly`` namespace provides header-only versions of common
-PyTorch types and utilities. These can be used without linking against libtorch,
-making them ideal for maintaining binary compatibility across PyTorch versions.
+PyTorch types and utilities. These can be used without linking against libtorch
+at all! This portability makes them ideal for maintaining binary compatibility
+across PyTorch versions.
 
 Error Checking
 ^^^^^^^^^^^^^^
@@ -240,6 +241,11 @@ Error Checking
    #include <torch/headeronly/util/Exception.h>
 
    STD_TORCH_CHECK(condition, "Error message with ", variable, " interpolation");
+
+Wherever you used ``TORCH_CHECK`` before, you can replace usage with ``STD_TORCH_CHECK``
+to remove the need to link against libtorch. The only difference is that when the
+condition check fails, ``TORCH_CHECK`` throws a fancier ``c10::Error`` while
+``STD_TORCH_CHECK`` throws a ``std::runtime_error``.
 
 Core Types
 ^^^^^^^^^^
@@ -289,16 +295,90 @@ Dispatch Macros
 ^^^^^^^^^^^^^^^
 
 Header-only dispatch macros (THO = Torch Header Only) are available for
-dtype and device dispatching:
+dtype dispatching:
 
 .. code-block:: cpp
 
+   #include <torch/headeronly/core/Dispatch_v2.h>
+
+   THO_DISPATCH_V2(
+      tensor.scalar_type(),  // will be resolved as scalar_t
+      "my_kernel",
+      AT_WRAP(([&]() {
+      // code to specialize with scalar_t
+      // scalar_t is the resolved C++ type (e.g. float, double)
+      auto* data = static_cast<scalar_t*>(tensor.mutable_data_ptr());
+      Scalar s(*data);
+      })),
+      AT_EXPAND(AT_ALL_TYPES),
+      AT_EXPAND(AT_COMPLEX_TYPES),
+      torch::headeronly::ScalarType::Half,
+      // as many type arguments as needed
+   );
+
+``THO_DISPATCH_V2`` works the same way as ``AT_DISPATCH_V2`` (see
+``ATen/Dispatch_v2.h``) but does not require linking against libtorch.
+As a result, whereas ``AT_DISPATCH_V2`` would have thrown ``c10::NotImplementedError``
+for unimplemented paths, ``THO_DISPATCH_V2`` will throw ``std::runtime_error``.
+
+For ease of use, we've also migrated the below AT_* macros representing
+collections of types to be header-only and thus have no dependency on libtorch:
+
+- ``AT_FLOATING_TYPES``
+- ``AT_INTEGRAL_TYPES``
+- ``AT_INTEGRAL_TYPES_V2``
+- ``AT_ALL_TYPES``
+- ``AT_COMPLEX_TYPES``
+- ``AT_ALL_TYPES_AND_COMPLEX``
+- ``AT_FLOAT8_TYPES``
+- ``AT_BAREBONES_UNSIGNED_TYPES``
+- ``AT_QINT_TYPES``
+
+If your extension uses our older AT_DISPATCH version 1 infrastructure,
+you can also migrate to a header-only libtorch-free world without upgrading
+everything to version 2.
+
+``THO_DISPATCH_SWITCH`` and ``THO_DISPATCH_CASE`` are the header-only
+equivalents of ``AT_DISPATCH_SWITCH`` and ``AT_DISPATCH_CASE``. Similarly,
+the only user-visible difference is the exception type on an unhandled dtype,
+where the ``AT_`` version throws a ``c10::NotImplementedError`` and the ``THO_``
+version throws a ``std::runtime_error``.
+
+The migration is pretty mechanical:
+
+- ``AT_DISPATCH_SWITCH`` → ``THO_DISPATCH_SWITCH``
+- ``AT_DISPATCH_CASE`` → ``THO_DISPATCH_CASE``
+- ``AT_PRIVATE_CASE_TYPE_USING_HINT`` → ``THO_PRIVATE_CASE_TYPE_USING_HINT``
+- ``at::ScalarType::X`` → ``torch::headeronly::ScalarType::X``
+
+.. code-block:: cpp
+
+   // ---- Before (requires linking against libtorch) ----
+   #include <torch/all.h>
+
+   #define MY_DISPATCH_CASE_FLOATING_TYPES(...)            \
+     AT_DISPATCH_CASE(at::ScalarType::Float, __VA_ARGS__) \
+     AT_DISPATCH_CASE(at::ScalarType::Half, __VA_ARGS__)  \
+     AT_DISPATCH_CASE(at::ScalarType::BFloat16, __VA_ARGS__)
+
+   #define MY_DISPATCH_FLOATING_TYPES(TYPE, NAME, ...) \
+     AT_DISPATCH_SWITCH(TYPE, NAME,                    \
+                        MY_DISPATCH_CASE_FLOATING_TYPES(__VA_ARGS__))
+
+.. code-block:: cpp
+
+   // ---- After (header-only, no libtorch dependency) ----
    #include <torch/headeronly/core/Dispatch.h>
 
-   THO_DISPATCH_FLOATING_TYPES(tensor.scalar_type(), "my_kernel", [&] {
-       // scalar_t is the resolved type
-       auto* data = tensor.data_ptr<scalar_t>();
-   });
+   #define MY_DISPATCH_CASE_FLOATING_TYPES(...)                          \
+     THO_DISPATCH_CASE(torch::headeronly::ScalarType::Float, __VA_ARGS__) \
+     THO_DISPATCH_CASE(torch::headeronly::ScalarType::Half, __VA_ARGS__)  \
+     THO_DISPATCH_CASE(torch::headeronly::ScalarType::BFloat16, __VA_ARGS__)
+
+   #define MY_DISPATCH_FLOATING_TYPES(TYPE, NAME, ...) \
+     THO_DISPATCH_SWITCH(TYPE, NAME,                   \
+                         MY_DISPATCH_CASE_FLOATING_TYPES(__VA_ARGS__))
+
 
 Full API List
 ^^^^^^^^^^^^^

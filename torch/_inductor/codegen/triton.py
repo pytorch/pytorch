@@ -28,7 +28,13 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import identity, preserve_rng_state
 from torch._prims_common import is_integer_dtype, type_to_dtype
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import (
+    CeilDiv,
+    FloorDiv,
+    ModularIndexing,
+    TruncToFloat,
+    TruncToInt,
+)
 from torch.utils._triton import (
     get_triton_version,
     has_triton_package,
@@ -158,6 +164,47 @@ def is_sympy_integer_like(expr: object):
     return isinstance(expr, sympy.Integer) or (
         expr.is_integer and len(expr.free_symbols) == 0
     )
+
+
+def _materialize_trunc_to_float_expr(
+    expr: sympy.Expr, dtype: torch.dtype
+) -> sympy.Expr:
+    if not dtype.is_floating_point or not expr.has(TruncToInt):
+        return expr
+
+    # Preserve float truncation semantics when materializing symbolic scalars
+    # into floating tensors. Casting to the kernel index dtype first can
+    # overflow before the requested floating-point conversion happens. Only
+    # rewrite truncations that are already participating in floating-point
+    # computation; integer subexpressions and predicates must keep exact
+    # integer semantics until the final materialization cast.
+    if expr.func is TruncToInt:
+        return TruncToFloat(*expr.args)
+
+    def is_predicate_expr(node: sympy.Basic) -> bool:
+        return bool(
+            getattr(node, "is_Boolean", False) or getattr(node, "is_Relational", False)
+        )
+
+    def rewrite_float_subexpr(node: sympy.Expr) -> sympy.Expr:
+        if not node.has(TruncToInt):
+            return node
+        if node.func is TruncToInt:
+            return TruncToFloat(*node.args)
+        if is_predicate_expr(node) or node.is_integer:
+            return node
+
+        new_args = tuple(
+            rewrite_float_subexpr(arg)
+            if isinstance(arg, sympy.Expr) and not is_predicate_expr(arg)
+            else arg
+            for arg in node.args
+        )
+        if new_args == node.args:
+            return node
+        return node.func(*new_args)
+
+    return rewrite_float_subexpr(expr)
 
 
 class OpDtypeSupport:
@@ -768,6 +815,15 @@ class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
             f"libdevice.trunc({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
         )
 
+    def _print_TruncToFloat(self, expr: sympy.Expr) -> str:
+        assert len(expr.args) == 1
+        # pyrefly: ignore [missing-attribute]
+        value = self._print(expr.args[0])
+        # Adding +0.0 preserves large floating results while canonicalizing
+        # libdevice.trunc(-0.0) back to Python's +0.0 materialization behavior.
+        # pyrefly: ignore [missing-attribute]
+        return f"(libdevice.trunc({value}) + tl.zeros_like({value}))"
+
     def _print_Float(self, expr: sympy.Expr) -> str:
         if expr.is_integer:
             # sympy considers 0.0 to be integer, but triton doesn't.
@@ -1231,6 +1287,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def abs(x):
         return f"tl_math.abs({x})"
 
@@ -1293,6 +1350,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def exp(x):
         """
         When use_fast_math, use the ftz (flushing to zero) variant
@@ -1318,6 +1376,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def sqrt(x):
         return f"tl.sqrt_rn({x})"
 
@@ -1340,6 +1399,7 @@ class TritonOverrides(OpOverrides):
             )
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def minimum(a, b):
         if torch.version.hip:
             return f"tl.minimum({a}, {b}, tl.PropagateNan.ALL)"
@@ -1347,6 +1407,7 @@ class TritonOverrides(OpOverrides):
             return f"triton_helpers.minimum({a}, {b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def maximum(a, b):
         if torch.version.hip:
             return f"tl.maximum({a}, {b}, tl.PropagateNan.ALL)"
@@ -1354,10 +1415,12 @@ class TritonOverrides(OpOverrides):
             return f"triton_helpers.maximum({a}, {b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def where(a, b, c):
         return f"tl.where({a}, {b}, {c})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def dot(a, b):
         """
         Triton code generation for lowering ops.dot to tl.dot.
@@ -1546,21 +1609,68 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def inline_asm_elementwise(
-        *inputs, asm, constraints=None, dtype=torch.float32, is_pure=True, pack=1
+        *inputs,
+        asm,
+        constraints=None,
+        dtype=torch.float32,
+        is_pure=True,
+        pack=1,
+        input_dtypes=None,
     ):
-        triton_type = triton_compute_type(dtype)
-        input_refs = ", ".join([str(i) for i in inputs])
+        # Use the actual dtype, not the compute type — the asm operates on
+        # specific register types and Triton needs to know the real output type.
+        asm_triton_type = triton_type(dtype)
         if constraints is None:
             constraints = ", ".join(["=r"] + ["r" for _ in inputs])
-        return f"tl.inline_asm_elementwise('{asm}', '{constraints}', [{input_refs}], dtype={triton_type}, is_pure={is_pure}, pack={pack})"  # noqa: B950
+
+        # Inductor computes bf16/fp16 in fp32. For "h" (16-bit register)
+        # constraints, cast back to the original dtype so the asm sees the
+        # right register type.
+        constraint_parts = [p.strip() for p in constraints.split(",")]
+        input_constraints = [p for p in constraint_parts if not p.startswith("=")]
+        cast_inputs = []
+        for i, (inp, c) in enumerate(zip(inputs, input_constraints[: len(inputs)])):
+            if (
+                c == "h"
+                and input_dtypes is not None
+                and isinstance(inp, CSEVariable)
+                and inp.dtype != input_dtypes[i]
+            ):
+                cast_inputs.append(f"{inp}.to({triton_type(input_dtypes[i])})")
+            else:
+                cast_inputs.append(str(inp))
+
+        def asm_call(args):
+            return (
+                f"tl.inline_asm_elementwise('{asm}', '{constraints}', "
+                f"[{args}], dtype={asm_triton_type}, is_pure={is_pure}, pack={pack})"
+            )
+
+        if pack <= 1:
+            return asm_call(", ".join(cast_inputs))
+
+        first_input = inputs[0]
+        compute = V.kernel.compute
+        cse = V.kernel.cse
+        result = cse.newvar(dtype=dtype, shape=first_input.shape)
+        packed_args = ", ".join(
+            f"triton_helpers.inline_asm_pack({inp}, {pack})" for inp in cast_inputs
+        )
+        compute.writeline(f"{result} = {asm_call(packed_args)}")
+        compute.writeline(
+            f"{result} = triton_helpers.inline_asm_unpack({result}, {first_input}, {pack})"
+        )
+        return result
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def cos(x):
         return f"tl_math.cos({x})"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def sin(x):
         return f"tl_math.sin({x})"
 
@@ -1574,61 +1684,73 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def lgamma(x):
         return f"libdevice.lgamma({x})"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def erf(x):
         return f"libdevice.erf({x})"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def cosh(x):
         return f"libdevice.cosh({x})"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def sinh(x):
         return f"libdevice.sinh({x})"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def acos(x):
         return f"libdevice.acos({x})"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def acosh(x):
         return f"libdevice.acosh({x})"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def asin(x):
         return f"libdevice.asin({x})"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def asinh(x):
         return f"libdevice.asinh({x})"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def atan2(x, y):
         return f"libdevice.atan2({x}, {y})"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def atan(x):
         return f"libdevice.atan({x})"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def atanh(x):
         return f"libdevice.atanh({x})"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def copysign(x, y):
         return f"libdevice.copysign({x}, {y})"
 
@@ -1639,11 +1761,13 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def erfinv(x):
         return f"libdevice.erfinv({x})"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def hypot(x, y):
         return f"libdevice.hypot({x}, {y})"
 
@@ -1658,15 +1782,18 @@ class TritonOverrides(OpOverrides):
         return f"libdevice.log2({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def ldexp(x, n):
         return f"libdevice.ldexp({x}, {n}.to(tl.int32))"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def nextafter(x, y):
         return f"libdevice.nextafter({x}, {y})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def logical_and(a, b):
         return f"{a} & {b}"
 
@@ -1675,10 +1802,12 @@ class TritonOverrides(OpOverrides):
         return f"{a} == 0"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def logical_or(a, b):
         return f"{a} | {b}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def logical_xor(a, b):
         return f"({a} ^ {b})"
 
@@ -1712,6 +1841,16 @@ class TritonOverrides(OpOverrides):
         return f"tl.rand({seed}, {offset})"
 
     @staticmethod
+    def rand_eager(seed, base_offset, threads_per_round, tid, vec):
+        # vec: 4 for fp32, 8 for fp16/bf16
+        tid_u32 = f"({tid}).to(tl.uint32)"
+        denom = f"(({vec})*({threads_per_round}))"
+        r = f"(({tid_u32})//({denom})*({vec}//4))"
+        tid_trunc = f"(({tid_u32})%({denom}))"
+
+        return f"triton_helpers.rand_eager_kernel({seed}, {base_offset}+{r}, {tid_trunc}, VEC={vec})"
+
+    @staticmethod
     def randn(seed, offset):
         offset = f"({offset}).to(tl.uint32)"
         return f"tl.randn({seed}, {offset})"
@@ -1727,6 +1866,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def rsqrt(x):
         if torch.version.hip:
             return f"tl.rsqrt({x})"
@@ -1740,11 +1880,13 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def tan(x):
         return f"libdevice.tan({x})"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def tanh(x):
         cse_var = V.kernel.cse.varname_map.get(x)
         if cse_var and hasattr(cse_var, "dtype"):
@@ -1770,6 +1912,7 @@ class TritonOverrides(OpOverrides):
         return f"tl.sigmoid({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def signbit(x):
         # XX: This is wrong for the value -0.0 in floating point
         return (
@@ -1778,6 +1921,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def fmod(a, b):
         return f"libdevice.fmod({a}, {b})"
 
@@ -1818,26 +1962,31 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def log(x):
         return f"tl_math.log({x})"
 
     @staticmethod
     @maybe_upcast_float32(convert_output=False)
+    # pyrefly: ignore [bad-override]
     def isinf(x):
         return f"libdevice.isinf({x}).to(tl.int1)"
 
     @staticmethod
     @maybe_upcast_float32(convert_output=False)
+    # pyrefly: ignore [bad-override]
     def isnan(x):
         return f"libdevice.isnan({x}).to(tl.int1)"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def round(x):
         return f"libdevice.nearbyint({x})"
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def floor(x):
         return f"libdevice.floor({x})"
 
@@ -1853,15 +2002,24 @@ class TritonOverrides(OpOverrides):
         #   floor_div(a, b) = ~(~a // b) when a < 0, a // b when a >= 0
         # For negative b we negate both operands first.
         zero = ops.constant(0, torch.int32)
+        one = ops.constant(1, torch.int32)
+        # Guard against integer division by zero before the division to
+        # avoid undefined behavior (LLVM may optimize away a post-division
+        # check assuming UB doesn't happen). Replace b with 1 when b is 0
+        # so the division is safe, then select 0 as the final result.
+        b_zero = ops.eq(b, zero)
+        b = ops.where(b_zero, one, b)
         b_neg = ops.lt(b, zero)
         a = ops.where(b_neg, ops.sub(zero, a), a)
         b = ops.where(b_neg, ops.sub(zero, b), b)
         a_neg = ops.lt(a, zero)
         a = ops.where(a_neg, ops.bitwise_not(a), a)
         quot = ops.truncdiv(a, b)
-        return ops.where(a_neg, ops.bitwise_not(quot), quot)
+        quot = ops.where(a_neg, ops.bitwise_not(quot), quot)
+        return ops.where(b_zero, zero, quot)
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def sign(x):
         z = ops.constant(0, torch.int32)
         left = ops.to_dtype((ops.lt(z, x)), torch.int8)
@@ -1871,10 +2029,12 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def trunc(x):
         return f"libdevice.trunc({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def truncdiv(a, b):
         # See the comment in lowering.div_mode. a and b are integer type.
         # Notice that // in triton behaves as truncdiv instead of floordiv
@@ -1882,6 +2042,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
+    # pyrefly: ignore [bad-override]
     def ceil(x):
         return f"libdevice.ceil({x})"
 
@@ -1956,6 +2117,7 @@ class TritonKernelOverrides(TritonOverrides):
 
     @classmethod
     def index_expr(cls, expr, dtype):
+        expr = _materialize_trunc_to_float_expr(expr, dtype)
         indexing = V.kernel.indexing(
             expr, block_ptr=False, tma_compatibility_checker=None
         )
@@ -2071,6 +2233,7 @@ class TritonKernelOverrides(TritonOverrides):
         )
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def frexp(x):
         cache_key = f"frexp({x})"
         if cse_val := V.kernel.cse.try_get(cache_key):
@@ -3433,7 +3596,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         )
 
         # workaround https://github.com/triton-lang/triton/issues/2814
-        value = f"{value}.to({triton_store_type(V.graph.get_dtype(name))})"
+        # For inplace-mutated buffers, the block pointer element type comes from
+        # the actual tensor (input buffer), which may differ from the graph dtype
+        # (e.g., _to_copy produces fp32 values stored into a bf16 gradient buffer).
+        store_dtype = V.graph.get_dtype(name)
+        if name in self.args.inplace_buffers:
+            buf = self.args.inplace_buffers[name]
+            if not isinstance(buf, RemovedArg):
+                store_dtype = V.graph.get_dtype(buf.other_names[0])
+        value = f"{value}.to({triton_store_type(store_dtype)})"
         if isinstance(indexing, BlockPtrOptions):
             return f"tl.store({block_ptr}, {value}{other})"
         return f"{block_ptr}.store({V.kernel.index_to_str(indexing.offsets)}, {value})"
@@ -5650,8 +5821,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if flops is not None:
                 inductor_meta["kernel_flop"] = flops
 
-        triton_meta["configs"] = [config_of(signature)]
-
         # Triton compiler includes equal_to_1 args into constants even
         # when they are not constexpr. otherwise there may be a segfault
         # during launching the Inductor-compiled Triton kernel.
@@ -5666,6 +5835,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.codegen_prologue(self.body)
         self.codegen_body()
         self._filter_pdl(self.body)
+
+        # Compute configs after codegen_body() so we know if the kernel
+        # uses atomic ops. On HIP, buffer ops don't support atomics, so
+        # we must not tag any args with pointer_range_32 in that case.
+        if torch.version.hip is not None and self.atomic_add_found:
+            triton_meta["configs"] = [config_of(signature, pointer_range_override=())]
+        else:
+            triton_meta["configs"] = [config_of(signature)]
 
         for helper in self.helper_functions:
             code.writeline("")
@@ -6370,6 +6547,8 @@ class TritonScheduling(SIMDScheduling):
                 if config.triton.descriptive_names
                 else ""
             )
+            if fused_name:
+                fused_name = V.choices.customize_fused_kernel_name(fused_name, src_code)
             kernel_category = get_kernel_category_by_source_code(src_code)[:3]
             kernel_name = "_".join(
                 ["triton", kernel_category, fused_name, wrapper.next_kernel_suffix()]
@@ -6729,11 +6908,16 @@ def debug_triton_code(node: BaseSchedulerNode) -> list[str]:
         from torch._inductor.codegen.cuda_combined_scheduling import (
             CUDACombinedScheduling,
         )
+        from torch._inductor.codegen.xpu.xpu_combined_scheduling import (
+            XPUCombinedScheduling,
+        )
 
         device = node.get_device()
         assert device is not None
         backend = node.scheduler.get_backend(device)
-        assert isinstance(backend, (SIMDScheduling, CUDACombinedScheduling)), (
+        assert isinstance(
+            backend, (SIMDScheduling, CUDACombinedScheduling, XPUCombinedScheduling)
+        ), (
             f"Scheduling backend should be SIMD or CUDACombined when generating debug Triton strings, got: {type(backend)}"
         )
 

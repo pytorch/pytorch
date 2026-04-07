@@ -26,6 +26,8 @@ from torch.testing._internal.common_quantized import (
     _calculate_dynamic_per_channel_qparams,
 )
 from torch.testing._internal.common_utils import (
+    IS_ARM64,
+    IS_CPU_EXT_SVE_SUPPORTED,
     IS_MACOS,
     IS_WINDOWS,
     parametrize,
@@ -58,15 +60,17 @@ def patches(fn):
         timings = benchmark(choices)
         for choice, timing in timings.items():
             if isinstance(choice, select_algorithm.ExternKernelCaller):
-                # we intentionally make ATEN kernel slower to cover the cases
+                # We intentionally make ATEN kernel slower to cover the cases
                 # where template kernels are always chosen with fusions applied
-                # and correctness checks at runtime.
-                timings[choice] = timing * 1000
+                # and correctness checks at runtime. On k8s ARC runner pods,
+                # CPU contention from parallel tests can make cpp template
+                # benchmarks 2-3x slower than normal, so the multiplier needs
+                # to be large enough to still exceed those inflated times.
+                timings[choice] = timing * 1000000
         return timings
 
     for patcher in [
         dynamo_config.patch(verbose=True),
-        dynamo_config.patch(inline_inbuilt_nn_modules=True),
         inductor_config.patch(
             debug=True,
             max_autotune=True,
@@ -1630,6 +1634,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     )
     @parametrize("in_features", (128, 144, 1024))
     @parametrize("out_features", (64, 65, 1024))
+    @unittest.skipIf(
+        IS_ARM64 and not IS_CPU_EXT_SVE_SUPPORTED, "flaky on AArch64 (no SVE)"
+    )
     def test_int8_woq_mm(self, dtype, batch_size, mid_dim, in_features, out_features):
         def _convert_weight_to_int8pack(w):
             scale, zp = _calculate_dynamic_per_channel_qparams(
@@ -1692,6 +1699,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     )
     @parametrize("in_features", (128,))
     @parametrize("out_features", (64,))
+    @unittest.skipIf(
+        IS_ARM64 and not IS_CPU_EXT_SVE_SUPPORTED, "flaky on AArch64 (no SVE)"
+    )
     def test_int8_woq_mm_concat(
         self, dtype, batch_size, mid_dim, in_features, out_features
     ):

@@ -69,7 +69,6 @@ BATCH_SIZE_DIVISORS = {
 REQUIRE_HIGHER_TOLERANCE = {
     "inception_v3",
     "mobilenetv3_large_100",
-    "convnextv2_nano.fcmae_ft_in22k_in1k",
 }
 
 REQUIRE_HIGHER_TOLERANCE_FP16_XPU = {
@@ -235,10 +234,6 @@ class TimmRunner(BenchmarkRunner):
     def guard_on_nn_module_models(self):
         return {}
 
-    @property
-    def inline_inbuilt_nn_modules_models(self):
-        return {}
-
     @download_retry_decorator
     def _download_model(self, model_name):
         model = create_model(
@@ -318,7 +313,7 @@ class TimmRunner(BenchmarkRunner):
         else:
             model.eval()
 
-        self.validate_model(model, example_inputs)
+        self.validate_model(model_name, model, example_inputs)
 
         return device, model_name, model, example_inputs, batch_size
 

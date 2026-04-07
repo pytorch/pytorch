@@ -3,6 +3,7 @@
 
 #include <torch/csrc/inductor/aoti_torch/c/macros.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim_deprecated.h>
+#include <torch/headeronly/util/Exception.h>
 
 // This header defines a stable C API for certain ATen functionality in
 // libtorch. The AOTInductor compiled model.so will only refer to this header
@@ -633,24 +634,24 @@ AOTI_TORCH_EXPORT void aoti_torch_check(
     const char* msg);
 
 #ifdef STRIP_ERROR_MESSAGES
-#define AOTI_TORCH_CHECK(cond, ...)              \
-  if (!(cond)) {                                 \
-    aoti_torch_check(                            \
-        false,                                   \
-        __func__,                                \
-        __FILE__,                                \
-        static_cast<uint32_t>(__LINE__),         \
-        TORCH_CHECK_MSG(cond, "", __VA_ARGS__)); \
+#define AOTI_TORCH_CHECK(cond, ...)                  \
+  if (!(cond)) {                                     \
+    aoti_torch_check(                                \
+        false,                                       \
+        __func__,                                    \
+        __FILE__,                                    \
+        static_cast<uint32_t>(__LINE__),             \
+        STD_TORCH_CHECK_MSG(cond, "", __VA_ARGS__)); \
   }
 #else
-#define AOTI_TORCH_CHECK(cond, ...)                \
-  if (!(cond)) {                                   \
-    aoti_torch_check(                              \
-        false,                                     \
-        __func__,                                  \
-        __FILE__,                                  \
-        static_cast<uint32_t>(__LINE__),           \
-        TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__)); \
+#define AOTI_TORCH_CHECK(cond, ...)                    \
+  if (!(cond)) {                                       \
+    aoti_torch_check(                                  \
+        false,                                         \
+        __func__,                                      \
+        __FILE__,                                      \
+        static_cast<uint32_t>(__LINE__),               \
+        STD_TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__)); \
   }
 #endif
 

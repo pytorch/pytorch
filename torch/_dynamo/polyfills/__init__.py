@@ -11,7 +11,8 @@ from collections import OrderedDict
 from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, Sequence
 from itertools import repeat as _repeat
 from operator import eq, ne
-from typing import Any, TYPE_CHECKING, TypeVar
+from typing import Any, TYPE_CHECKING, TypeGuard, TypeVar
+from typing_extensions import TypeIs
 
 import torch
 
@@ -62,6 +63,16 @@ class NoEnterTorchFunctionMode(BaseTorchFunctionMode):
         pass
 
 
+# Used by WrappedUserFunctionVariable and similar to inline decorated function
+# calls with bytecode backing. Without this, the context enter/exit happens in
+# Python-level VT code, so a nested graph break inside `fn` would skip applying
+# the context in the compiled fn/resume. By inlining through this polyfill, the
+# `with` statement has real bytecode that the resume function can continue from.
+def _fn_with_ctx(ctx: Any, fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+    with ctx:
+        return fn(*args, **kwargs)
+
+
 def index(
     iterator: Iterator[T], item: T, start: int = 0, end: int | None = None
 ) -> int:
@@ -85,11 +96,11 @@ def radians(x: float) -> float:
     return math.pi / 180.0 * x
 
 
-def impl_IS_MAPPING(a: object) -> bool:
+def impl_IS_MAPPING(a: object) -> TypeIs[Mapping[Any, Any]]:
     return isinstance(a, Mapping)
 
 
-def impl_MATCH_SEQUENCE(a: object) -> bool:
+def impl_MATCH_SEQUENCE(a: object) -> TypeGuard[Sequence[Any]]:
     return isinstance(a, Sequence) and not isinstance(a, (str, bytes, bytearray))
 
 
@@ -316,7 +327,7 @@ def set_union(
         set_update(union_set, set2)
 
     # frozenset also uses this function
-    # pyrefly: ignore[not-callable]
+    # pyrefly: ignore [bad-argument-count, not-callable]
     return cls(union_set)
 
 
@@ -404,9 +415,12 @@ def instantiate_user_defined_class_object(
 ) -> T:
     obj = cls.__new__(cls, *args, **kwargs)
 
-    # Only call __init__ if the object is an instance of the class
+    # Only call __init__ if the object's type is a subclass of cls.
+    # CPython uses PyType_IsSubtype(Py_TYPE(obj), type) at the C level, which does NOT
+    # go through metaclass __instancecheck__. Using isinstance() here would be wrong
+    # for classes with custom __instancecheck__ (e.g. torch.ByteStorage).
     # Reference: https://github.com/python/cpython/blob/3.12/Objects/typeobject.c#L1670-L1673
-    if isinstance(obj, cls):
+    if issubclass(type(obj), cls):
         obj.__init__(*args, **kwargs)
     return obj
 
@@ -550,20 +564,47 @@ def cmp_eq(a: object, b: object) -> bool:
     # slow in some corner cases.
     # if a is b:
     #     return True
-    result = a.__eq__(b)
+    if isinstance(a, type):
+        # Default metaclass equality is identity-based. Preserve the reflected
+        # operand fallback without tracing through type.__eq__.
+        if type(a).__eq__ is type.__eq__:
+            result = True if a is b else NotImplemented
+        else:
+            result = type(a).__eq__(a, b)
+    else:
+        result = a.__eq__(b)
     if result is NotImplemented:
-        result = b.__eq__(a)
+        if isinstance(b, type):
+            if type(b).__eq__ is type.__eq__:
+                result = True if a is b else NotImplemented
+            else:
+                result = type(b).__eq__(b, a)
+        else:
+            result = b.__eq__(a)
     return result is not NotImplemented and result
 
 
 def cmp_ne(a: object, b: object) -> bool:
-    # Check if __ne__ is overridden
-    if isinstance(type(a).__ne__, types.FunctionType):
+    if isinstance(a, type):
+        if type(a).__ne__ is type.__ne__:
+            result = False if a is b else NotImplemented
+        else:
+            result = type(a).__ne__(a, b)
+        if result is not NotImplemented:
+            return result
+    elif isinstance(type(a).__ne__, types.FunctionType):
         result = a.__ne__(b)
         if result is not NotImplemented:
             return result
         # Fall through to try b.__ne__(a) or cmp_eq
-    if isinstance(type(b).__ne__, types.FunctionType):
+    if isinstance(b, type):
+        if type(b).__ne__ is type.__ne__:
+            result = False if a is b else NotImplemented
+        else:
+            result = type(b).__ne__(b, a)
+        if result is not NotImplemented:
+            return result
+    elif isinstance(type(b).__ne__, types.FunctionType):
         result = b.__ne__(a)
         if result is not NotImplemented:
             return result

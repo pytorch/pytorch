@@ -1,10 +1,12 @@
 # mypy: allow-untyped-defs
 import bisect
 import itertools
+import json
 import math
 from collections import defaultdict, namedtuple
+from collections.abc import Callable
 from operator import attrgetter
-from typing import Any
+from typing import Any, NamedTuple
 from typing_extensions import deprecated
 
 import torch
@@ -13,6 +15,7 @@ from torch.autograd import DeviceType
 
 __all__ = [
     "EventList",
+    "EventMetadata",
     "FormattedTimesMixin",
     "Interval",
     "Kernel",
@@ -549,6 +552,104 @@ class Interval:
 Kernel = namedtuple("Kernel", ["name", "device", "duration"])
 
 
+class EventMetadata(NamedTuple):
+    # Kernel fields
+    registers_per_thread: int | None
+    shared_memory: int | None
+    grid: list[int] | None
+    block: list[int] | None
+    blocks_per_sm: float | None
+    warps_per_sm: float | None
+    occupancy: float | None
+    queued: int | None
+    graph_id: int | None
+    graph_node_id: int | None
+    stream: int | None
+    context: int | None
+    # Memory fields
+    bytes: int | None
+    bandwidth_gb_s: float | None
+    # NCCL fields
+    collective_name: str | None
+    dtype: str | None
+    in_msg_nelems: int | None
+    out_msg_nelems: int | None
+    in_split_size: str | None
+    out_split_size: str | None
+    global_rank_start: int | None
+    global_rank_stride: int | None
+    group_size: int | None
+    process_group_name: str | None
+    process_group_desc: str | None
+    group_ranks: str | None
+    rank: int | None
+    src_rank: int | None
+    dst_rank: int | None
+    seq: int | None
+    is_async: bool | None
+
+
+def _to_int_list(v: str) -> list[int]:
+    return json.loads(v)
+
+
+def _to_str(v: str) -> str:
+    return v.strip('"')
+
+
+def _to_bool(v: str) -> bool:
+    return v in ("1", "true")
+
+
+# Kineto key → (EventMetadata field name, converter from string)
+_EVENT_METADATA_KEYS: dict[str, tuple[str, Callable[[str], Any]]] = {
+    "registers per thread": ("registers_per_thread", int),
+    "shared memory": ("shared_memory", int),
+    "grid": ("grid", _to_int_list),
+    "block": ("block", _to_int_list),
+    "blocks per SM": ("blocks_per_sm", float),
+    "warps per SM": ("warps_per_sm", float),
+    "est. achieved occupancy %": ("occupancy", float),
+    "queued": ("queued", int),
+    "graph id": ("graph_id", int),
+    "graph node id": ("graph_node_id", int),
+    "stream": ("stream", int),
+    "context": ("context", int),
+    "bytes": ("bytes", int),
+    "memory bandwidth (GB/s)": ("bandwidth_gb_s", float),
+    "Collective name": ("collective_name", _to_str),
+    "dtype": ("dtype", _to_str),
+    "In msg nelems": ("in_msg_nelems", int),
+    "Out msg nelems": ("out_msg_nelems", int),
+    "In split size": ("in_split_size", _to_str),
+    "Out split size": ("out_split_size", _to_str),
+    "Global rank start": ("global_rank_start", int),
+    "Global rank stride": ("global_rank_stride", int),
+    "Group size": ("group_size", int),
+    "Process Group Name": ("process_group_name", _to_str),
+    "Process Group Description": ("process_group_desc", _to_str),
+    "Process Group Ranks": ("group_ranks", _to_str),
+    "Rank": ("rank", int),
+    "Src Rank": ("src_rank", int),
+    "Dst Rank": ("dst_rank", int),
+    "Seq": ("seq", int),
+    "Is asynchronized op": ("is_async", _to_bool),
+}
+
+
+def _build_metadata(extra_meta):
+    fields: dict[str, Any] = {}
+    any_populated = False
+    for kineto_key, (field_name, convert) in _EVENT_METADATA_KEYS.items():
+        v = extra_meta.get(kineto_key)
+        if v is not None:
+            fields[field_name] = convert(v)
+            any_populated = True
+        else:
+            fields[field_name] = None
+    return EventMetadata(**fields) if any_populated else None
+
+
 class FunctionEvent(FormattedTimesMixin):
     """Profiling information about a single function.
 
@@ -591,6 +692,7 @@ class FunctionEvent(FormattedTimesMixin):
         flops (int): Estimated floating point operations.
         is_user_annotation (bool): Whether this is a user-annotated region.
         metadata_json (str): Additional metadata in JSON format.
+        event_metadata (EventMetadata): Additional metadata in structured format.
 
     Properties:
         cpu_time_total (float): Total CPU time in microseconds.
@@ -637,7 +739,15 @@ class FunctionEvent(FormattedTimesMixin):
         concrete_inputs=None,
         kwinputs=None,
         is_user_annotation=False,
+        is_python_function=False,
+        activity_type=None,
         metadata_json=None,
+        flow_id=None,
+        flow_type=None,
+        flow_start=None,
+        external_id=0,
+        linked_correlation_id=0,
+        extra_meta=None,
     ):
         self.id: int = id
         self.node_id: int = node_id
@@ -676,10 +786,20 @@ class FunctionEvent(FormattedTimesMixin):
         self.is_legacy: bool = is_legacy
         self.flops: int | None = flops
         self.is_user_annotation: bool | None = is_user_annotation
+        self.is_python_function: bool = is_python_function
+        self.activity_type: str | None = activity_type
         self.self_cpu_percent = -1
         self.total_cpu_percent = -1
         self.total_device_percent = -1
         self.metadata_json = metadata_json
+        self.flow_id: int | None = flow_id
+        self.flow_type: int | None = flow_type
+        self.flow_start: bool | None = flow_start
+        self.external_id: int = external_id
+        self.linked_correlation_id: int = linked_correlation_id
+        self.event_metadata: EventMetadata | None = (
+            _build_metadata(extra_meta) if extra_meta else None
+        )
 
     def append_kernel(self, name, device, duration):
         if self.device_type != DeviceType.CPU:
@@ -1160,7 +1280,6 @@ def _build_table(
     if append_node_id:
         headers.append("Node ID")
 
-    # Have to use a list because nonlocal is Py3 only...
     SPACING_SIZE = 2
     row_format_lst = [""]
     header_sep_lst = [""]
@@ -1221,7 +1340,6 @@ def _build_table(
     line_length = line_length_lst[0]
     add_column = None  # type: ignore[assignment]
 
-    # Have to use a list because nonlocal is Py3 only...
     result = []
 
     def append(s):

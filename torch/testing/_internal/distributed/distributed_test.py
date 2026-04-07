@@ -198,9 +198,6 @@ skipIfNoTorchVision = skip_but_pass_in_sandcastle_if(
 BACKEND = os.environ["BACKEND"]
 INIT_METHOD = os.getenv("INIT_METHOD", "env://")
 
-DEFAULT_TIMEOUT = 300
-CUSTOMIZED_TIMEOUT = {"test_DistributedDataParallel": 500}
-
 
 def get_profiling_event(event_name, profiler, dedup_gpu_user_annotation=False):
     event_list = (
@@ -400,14 +397,6 @@ class ControlFlowToyModel(nn.Module):
             return self.lin2(F.relu(self.lin1(x)))
         else:
             return F.relu(self.lin1(x))
-
-
-def get_timeout(test_id):
-    test_name = test_id.split(".")[-1]
-    if test_name in CUSTOMIZED_TIMEOUT:
-        return CUSTOMIZED_TIMEOUT[test_name]
-    else:
-        return DEFAULT_TIMEOUT
 
 
 default_pg_timeout = 60
@@ -904,6 +893,24 @@ class DistributedTest:
             _, group_id, _ = self._init_full_group_test(timeout=timeout)
             if group_id is not None:
                 self._test_barrier_timeout(group_id, timeout)
+
+        @skip_but_pass_in_sandcastle_if(
+            BACKEND != "gloo", "Only gloo backend supports timeouts"
+        )
+        def test_barrier_timeout_arg(self):
+            """Test that the timeout argument to barrier() overrides PG default.
+
+            Create a PG with a large default timeout, then have only rank 0
+            call barrier with a tiny timeout. The barrier should time out using
+            the per-call timeout (1ms) rather than the PG default (300s).
+            """
+            pg = dist.new_group(timeout=timedelta(seconds=300))
+
+            if dist.get_rank() == 0:
+                with self.assertRaisesRegex(RuntimeError, "Timed out waiting 1ms"):
+                    dist.barrier(group=pg, timeout=timedelta(seconds=0.001))
+
+            dist.destroy_process_group(pg)
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND not in DistTestCases.backend_feature["subgroup"],

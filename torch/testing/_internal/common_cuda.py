@@ -5,7 +5,7 @@ r"""This file is allowed to initialize CUDA context when imported."""
 import functools
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS
+from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU
 import inspect
 import contextlib
 import os
@@ -76,7 +76,15 @@ def evaluate_platform_supports_flash_attention():
         return evaluate_gfx_arch_within(arch_list)
     if TEST_CUDA:
         return not IS_WINDOWS and SM80OrLater
+    if TEST_XPU:
+        return True
     return False
+
+def evaluate_platform_supports_ck_sdpa():
+    if TEST_WITH_ROCM:
+        return torch.backends.cuda.is_ck_sdpa_available()
+    else:
+        return False
 
 def evaluate_platform_supports_efficient_attention():
     if TEST_WITH_ROCM:
@@ -85,6 +93,8 @@ def evaluate_platform_supports_efficient_attention():
             arch_list += ["gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]
         return evaluate_gfx_arch_within(arch_list)
     if TEST_CUDA:
+        return True
+    if TEST_XPU:
         return True
     return False
 
@@ -111,11 +121,15 @@ PLATFORM_SUPPORTS_FUSED_ATTENTION: bool = LazyVal(lambda: PLATFORM_SUPPORTS_FLAS
 
 PLATFORM_SUPPORTS_FUSED_SDPA: bool = TEST_CUDA and not TEST_WITH_ROCM
 
+PLATFORM_SUPPORTS_CK_SDPA: bool = LazyVal(lambda: evaluate_platform_supports_ck_sdpa())
+
 
 def evaluate_platform_supports_bf16():
     if torch.version.cuda:
         return SM80OrLater
     elif torch.version.hip:
+        return True
+    elif TEST_XPU:
         return True
     return False
 
@@ -140,6 +154,18 @@ PLATFORM_SUPPORTS_HALF_ATOMICS: bool = LazyVal(lambda: evaluate_platform_support
 
 PLATFORM_SUPPORTS_GREEN_CONTEXT: bool = LazyVal(lambda: evaluate_platform_supports_green_context())
 
+def evaluate_platform_supports_workqueue_config():
+    if IS_WINDOWS:
+        return False
+    if not _get_torch_cuda_version() >= (13, 1):
+        return False
+    driver_version = torch.utils.collect_env.get_nvidia_driver_version(torch.utils.collect_env.run)
+    if driver_version is None:
+        return False
+    return int(driver_version.split('.')[0]) >= 590
+
+PLATFORM_SUPPORTS_WORKQUEUE_CONFIG: bool = LazyVal(lambda: evaluate_platform_supports_workqueue_config())
+
 def evaluate_platform_supports_fp8():
     if torch.cuda.is_available():
         if torch.version.hip:
@@ -153,7 +179,10 @@ def evaluate_platform_supports_fp8():
                     return True
         else:
             return SM90OrLater or torch.cuda.get_device_capability() == (8, 9)
-    return False
+    if torch.xpu.is_available():
+        return True
+    # As CPU supports FP8 and is always available, return True.
+    return True
 
 def evaluate_platform_supports_fp8_grouped_gemm():
     if torch.cuda.is_available():
@@ -192,7 +221,7 @@ if TEST_NUMBA:
     try:
         import numba.cuda
         TEST_NUMBA_CUDA = numba.cuda.is_available()
-    except (ImportError, RuntimeError):
+    except (ImportError, RuntimeError, OSError):
         TEST_NUMBA_CUDA = False
         TEST_NUMBA = False
 else:

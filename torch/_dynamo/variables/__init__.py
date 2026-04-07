@@ -17,13 +17,17 @@ allows Dynamo to accurately trace and optimize Python code while preserving its 
 """
 
 from .base import VariableTracker
-from .builtin import BuiltinVariable
+from .builtin import (
+    BaseBuiltinVariable,
+    BuiltinVariable,
+    DictBuiltinVariable,
+    IterBuiltinVariable,
+)
 from .constant import (
     CONSTANT_VARIABLE_FALSE,
     CONSTANT_VARIABLE_NONE,
     CONSTANT_VARIABLE_TRUE,
     ConstantVariable,
-    EnumVariable,
 )
 from .ctx_manager import (
     CatchWarningsCtxManagerVariable,
@@ -64,6 +68,7 @@ from .dicts import (
 )
 from .distributed import BackwardHookVariable, DistributedVariable
 from .functions import (
+    BaseUserFunctionVariable,
     BuiltinMethodVariable,
     CollectionsNamedTupleFunction,
     CreateTMADescriptorExperimentalVariable,
@@ -81,7 +86,7 @@ from .functions import (
     SparseTensorCreationSkipVariable,
     TMADescriptorExperimentalVariable,
     TMADescriptorStableVariable,
-    TritonSetAllocatorSkipVariable,
+    TritonSetAllocatorVariable,
     UserFunctionVariable,
     UserMethodVariable,
     WrapperUserFunctionVariable,
@@ -108,7 +113,6 @@ from .lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
-    NamedTupleVariable,
     RangeVariable,
     SliceVariable,
     TupleIteratorVariable,
@@ -145,7 +149,12 @@ from .nn_module import (
 )
 from .optimizer import OptimizerVariable
 from .sdpa import SDPAParamsVariable
-from .streams import EventVariable, StreamContextVariable, StreamVariable
+from .streams import (
+    CudaStreamVariable,
+    EventVariable,
+    StreamContextVariable,
+    StreamVariable,
+)
 from .tensor import (
     DataPtrVariable,
     FakeItemVariable,
@@ -160,7 +169,9 @@ from .user_defined import (
     FrozenDataClassVariable,
     InspectVariable,
     MutableMappingVariable,
+    NamedTupleVariable,
     RemovableHandleVariable,
+    StructSequenceVariable,
     UserDefinedClassVariable,
     UserDefinedDictVariable,
     UserDefinedExceptionClassVariable,
@@ -169,6 +180,7 @@ from .user_defined import (
     UserDefinedObjectVariable,
     UserDefinedSetVariable,
     UserDefinedTupleVariable,
+    UserDefinedVariable,
 )
 
 
@@ -176,6 +188,7 @@ __all__ = [
     "AutogradFunctionContextVariable",
     "AutogradFunctionVariable",
     "BackwardHookVariable",
+    "BaseBuiltinVariable",
     "BaseListVariable",
     "BuiltinVariable",
     "CatchWarningsCtxManagerVariable",
@@ -184,6 +197,7 @@ __all__ = [
     "CONSTANT_VARIABLE_TRUE",
     "ConstantVariable",
     "ConstDictVariable",
+    "DictBuiltinVariable",
     "ContextWrappingVariable",
     "CountIteratorVariable",
     "CreateTMADescriptorExperimentalVariable",
@@ -195,12 +209,12 @@ __all__ = [
     "DeletedVariable",
     "DictKeySetVariable",
     "DynamoConfigPatchVariable",
-    "EnumVariable",
     "FakeItemVariable",
     "GetAttrVariable",
     "GradModeVariable",
     "InspectSignatureVariable",
     "InspectVariable",
+    "IterBuiltinVariable",
     "IteratorVariable",
     "ItertoolsVariable",
     "LambdaVariable",
@@ -208,7 +222,6 @@ __all__ = [
     "LazyVariableTracker",
     "ListIteratorVariable",
     "ListVariable",
-    "NamedTupleVariable",
     "NestedUserFunctionVariable",
     "CellVariable",
     "NewGlobalVariable",
@@ -241,6 +254,8 @@ __all__ = [
     "UntypedStorageVariable",
     "UserDefinedClassVariable",
     "UserDefinedTupleVariable",
+    "NamedTupleVariable",
+    "StructSequenceVariable",
     "UserDefinedObjectVariable",
     "UserFunctionVariable",
     "UserMethodVariable",
