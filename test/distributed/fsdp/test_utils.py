@@ -14,11 +14,13 @@ from torch.distributed.fsdp._common_utils import _get_param_to_fqns
 from torch.distributed.utils import _apply_to_tensors, _replace_by_prefix
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_fsdp import FSDP_DEVICES
 from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     subtest,
     TEST_HPU,
+    TEST_PRIVATEUSE1,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_XPU,
     TestCase,
@@ -40,6 +42,8 @@ if TEST_HPU:
     list_device = "hpu"
 elif TEST_XPU:
     list_device = "xpu"
+elif TEST_PRIVATEUSE1:
+    list_device = torch._C._get_privateuse1_backend_name()
 else:
     list_device = "cuda"
 
@@ -203,7 +207,7 @@ class TestUtils(TestCase):
         )
 
 
-devices = ("cuda", "hpu", "xpu")
+devices = FSDP_DEVICES
 instantiate_device_type_tests(TestUtils, globals(), only_for=devices, allow_xpu=True)
 if __name__ == "__main__":
     run_tests()
