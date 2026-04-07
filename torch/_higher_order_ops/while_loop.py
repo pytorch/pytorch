@@ -14,10 +14,10 @@ from torch._higher_order_ops.utils import (
     _check_alias_and_mutation,
     _maybe_run_with_interpreter,
     autograd_not_implemented,
-    check_input_alias_and_mutation_return_outputs,
     check_meta_consistency,
     fill_none_with_masks,
     filter_with_masks,
+    get_graph_output_example_values,
     HopInstance,
     materialize_as_graph,
     reenter_make_fx,
@@ -43,6 +43,8 @@ class WhileLoopOp(HigherOrderOperator):
         carried_inputs: tuple[torch.Tensor | int | float | bool],
         additional_inputs: tuple[torch.Tensor | torch.SymInt | int, ...],
         /,
+        *,
+        mutated_arg_indices: str = "",
     ):
         if not isinstance(carried_inputs, (tuple, list)):
             raise RuntimeError(
@@ -55,59 +57,49 @@ class WhileLoopOp(HigherOrderOperator):
 
         validate_subgraph_args_types(carried_inputs)
         validate_subgraph_args_types(additional_inputs)
+        kwargs = {}
+        if mutated_arg_indices:
+            kwargs["mutated_arg_indices"] = mutated_arg_indices
         # pyrefly: ignore [missing-attribute]
-        return super().__call__(cond_fn, body_fn, carried_inputs, additional_inputs)
+        return super().__call__(
+            cond_fn,
+            body_fn,
+            carried_inputs,
+            additional_inputs,
+            **kwargs,
+        )
 
     # pyrefly: ignore [bad-override]
-    def gen_schema(self, cond_fn, body_fn, carried_inputs, additional_inputs):
+    def gen_schema(
+        self,
+        cond_fn,
+        body_fn,
+        carried_inputs,
+        additional_inputs,
+        mutated_arg_indices="",
+    ):
         from torch._higher_order_ops.schema import HopSchemaGenerator
         from torch._higher_order_ops.utils import materialize_as_graph
 
         all_inputs = carried_inputs + additional_inputs
 
-        def _needs_rematerialization(fn):
-            """Check if a GraphModule needs re-tracing to detect mutations.
-
-            check_input_alias_and_mutation_return_outputs only detects mutations
-            via call_function nodes targeting OpOverloads with is_write args.
-            Dynamo-level graphs may express mutations as call_method nodes
-            (e.g. tensor.add_()) which would be missed. Re-materialize to get
-            an ATen-level graph where all mutations are OpOverload calls.
-            """
-            if not isinstance(fn, torch.fx.GraphModule):
-                return True
-            return any(node.op == "call_method" for node in fn.graph.nodes)
-
         cond_gm: torch.fx.GraphModule = (
             cond_fn
             if isinstance(cond_fn, torch.fx.GraphModule)
-            and not _needs_rematerialization(cond_fn)
             else materialize_as_graph(cond_fn, all_inputs)
         )
         body_gm: torch.fx.GraphModule = (
             body_fn
             if isinstance(body_fn, torch.fx.GraphModule)
-            and not _needs_rematerialization(body_fn)
             else materialize_as_graph(body_fn, all_inputs)
         )
 
-        (
-            _,
-            _,
-            _,
-            body_mutated_inputs,
-            body_outputs,
-        ) = check_input_alias_and_mutation_return_outputs(body_gm)
-
-        (
-            _,
-            _,
-            _,
-            cond_mutated_inputs,
-            _,
-        ) = check_input_alias_and_mutation_return_outputs(cond_gm)
-
-        mutated_inputs = set(body_mutated_inputs) | set(cond_mutated_inputs)
+        body_outputs = get_graph_output_example_values(body_gm)
+        mutated_inputs = (
+            {int(i) for i in mutated_arg_indices.split(",") if i}
+            if mutated_arg_indices
+            else set()
+        )
 
         schema_gen = HopSchemaGenerator(self)
         schema_gen.add_arg("cond_fn", cond_gm)
@@ -130,7 +122,10 @@ class WhileLoopOp(HigherOrderOperator):
             schema_gen.add_output(out)
 
         schema_gen.add_schema_tree_spec(
-            cond_fn, body_fn, carried_inputs, additional_inputs
+            cond_fn,
+            body_fn,
+            carried_inputs,
+            additional_inputs,
         )
         return schema_gen.gen_schema()
 
@@ -264,7 +259,12 @@ def while_loop(cond_fn, body_fn, carried_inputs):
 
 @while_loop_op.py_impl(DispatchKey.CompositeExplicitAutograd)
 def while_loop_dense(
-    cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False
+    cond_fn,
+    body_fn,
+    carried_inputs,
+    additional_inputs,
+    stack_output=False,
+    mutated_arg_indices="",
 ):
     from torch.fx.experimental.proxy_tensor import _CURRENT_MAKE_FX_TRACER
 
@@ -338,7 +338,9 @@ def while_loop_dense(
 
 
 @while_loop_op.py_autograd_impl
-def while_loop_autograd(cond_fn, body_fn, operands, additional_inputs):
+def while_loop_autograd(
+    cond_fn, body_fn, operands, additional_inputs, mutated_arg_indices=""
+):
     return WhileLoopAutogradOp.apply(
         cond_fn,
         body_fn,
@@ -381,11 +383,18 @@ def while_loop_tracing(
     carried_inputs,
     additional_inputs,
     stack_output=False,
+    mutated_arg_indices="",
 ):
     op = while_loop_stack_output_op if stack_output else while_loop_op
 
     def _trace_while_loop(
-        proxy_mode, op, cond_fn, body_fn, carried_inputs, additional_inputs
+        proxy_mode,
+        op,
+        cond_fn,
+        body_fn,
+        carried_inputs,
+        additional_inputs,
+        mutated_arg_indices,
     ):
         # NOTE [unspecialize int carry with unbacked symints]
         # When we support int carry, we'll also need to support int output of body_fn because.
@@ -485,16 +494,17 @@ def while_loop_tracing(
         proxy_mode.tracer.root.register_module(body_graph_name, body_graph)
 
         args = (cond_graph, body_graph, carried_inputs, additional_inputs)
+        kwargs = {}
+        if not stack_output and mutated_arg_indices:
+            kwargs["mutated_arg_indices"] = mutated_arg_indices
 
         proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
 
         out_proxy = proxy_mode.tracer.create_proxy(
-            "call_function", op, proxy_args, {}, name=op._name
+            "call_function", op, proxy_args, kwargs, name=op._name
         )
 
-        out = op(
-            cond_graph, body_graph, unspecialized_carried_inputs, additional_inputs
-        )
+        out = op(*args, **kwargs)
         return track_tensor_tree(
             out, out_proxy, constant=None, tracer=proxy_mode.tracer
         )
@@ -506,12 +516,19 @@ def while_loop_tracing(
         body_fn,
         carried_inputs,
         additional_inputs,
+        mutated_arg_indices,
     )
 
 
 @while_loop_op.py_impl(FakeTensorMode)
 def while_loop_fake_tensor_mode(
-    mode, cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False
+    mode,
+    cond_fn,
+    body_fn,
+    carried_inputs,
+    additional_inputs,
+    stack_output=False,
+    mutated_arg_indices="",
 ):
     with mode:
         # NOTE: [Handling unback symints in subgraph of while_loop]
@@ -593,14 +610,25 @@ def while_loop_fake_tensor_mode(
 
 @while_loop_op.py_functionalize_impl
 def while_loop_func(
-    ctx, cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False
+    ctx,
+    cond_fn,
+    body_fn,
+    carried_inputs,
+    additional_inputs,
+    stack_output=False,
+    mutated_arg_indices="",
 ):
     op = while_loop_stack_output_op if stack_output else while_loop_op
     # For now, we only support auto-functionalization for while_loop when using python
     # functionalization mode
     if not stack_output and hasattr(ctx, "mode"):
         hop_instance = HopInstance.create(
-            op, cond_fn, body_fn, carried_inputs, additional_inputs
+            op,
+            cond_fn,
+            body_fn,
+            carried_inputs,
+            additional_inputs,
+            mutated_arg_indices=mutated_arg_indices,
         )
         if can_auto_functionalize(hop_instance):
             return do_auto_functionalize_v2(
@@ -626,11 +654,15 @@ def while_loop_func(
             (body_fn, "body_fn"),
         ]:
             _check_alias_and_mutation(fn, unwrapped_inputs, fn_name, pre_dispatch)
+        op_kwargs = {}
+        if not stack_output and mutated_arg_indices:
+            op_kwargs["mutated_arg_indices"] = mutated_arg_indices
         ret = op(
             functional_cond_fn,
             functional_body_fn,
             unwrapped_carried_inputs,
             unwrapped_additional_inputs,
+            **op_kwargs,
         )
         return ctx.wrap_tensors(ret)
 

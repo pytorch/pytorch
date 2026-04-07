@@ -840,6 +840,29 @@ def _call_while_loop(
         remove_consts_from_outputs=False,
     )
     validate_subgraph_output_types(body_r)
+    cond_mutated_inputs = set(getattr(cond_graph, "_dynamo_mutated_input_indices", ()))
+    body_mutated_inputs = set(getattr(body_graph, "_dynamo_mutated_input_indices", ()))
+
+    def _mutated_tensor_storages(
+        graph: torch.fx.Graph, mutated_input_indices: set[int]
+    ) -> set[StorageWeakRef]:
+        placeholders = [node for node in graph.nodes if node.op == "placeholder"]
+        storages: set[StorageWeakRef] = set()
+        for idx in mutated_input_indices:
+            assert idx < len(placeholders), (
+                f"mutated input index {idx} out of range for {len(placeholders)} placeholders"
+            )
+            placeholder = placeholders[idx]
+            example_value = placeholder.meta.get(
+                "example_value", placeholder.meta.get("val", None)
+            )
+            if isinstance(example_value, torch.Tensor):
+                storages |= get_tensor_storages(example_value)
+        return storages
+
+    mutated_input_storages = _mutated_tensor_storages(
+        cond_graph, cond_mutated_inputs
+    ) | _mutated_tensor_storages(body_graph, body_mutated_inputs)
 
     # We set include contiguity=False because we have vmap x HOP tests, where if
     # include_contiguity=True will call t.is_contiguous inside of vmap and get an error
@@ -873,6 +896,33 @@ def _call_while_loop(
     # Note: cond_shared and body_shared refer to the same proxy in parent graph
     # so using either of them is OK. Use cond_shared as it doesn't matter.
     additional_lifted_inputs = cond_shared + cond_unique + body_unique
+    all_while_loop_inputs: list[VariableTracker | Proxy] = (
+        list(operands_seq)
+        + list(additional_inputs_seq)
+        + list(additional_lifted_inputs)
+    )
+    storage_to_while_loop_input_indices: dict[StorageWeakRef, set[int]] = {}
+    for idx, inp in enumerate(all_while_loop_inputs):
+        example_value = None
+        if isinstance(inp, VariableTracker):
+            if inp.is_tensor():
+                example_value = inp.as_proxy().node.meta.get("example_value", None)
+        else:
+            assert isinstance(inp, Proxy)
+            example_value = inp.node.meta.get("example_value", inp.node.meta.get("val"))
+
+        if isinstance(example_value, torch.Tensor):
+            for storage in get_tensor_storages(example_value):
+                storage_to_while_loop_input_indices.setdefault(storage, set()).add(idx)
+
+    mutated_inputs = sorted(
+        {
+            i
+            for storage in mutated_input_storages
+            for i in storage_to_while_loop_input_indices.get(storage, set())
+        }
+    )
+    mutated_arg_indices = ",".join(str(i) for i in mutated_inputs)
 
     body_nn_modules = dict(tx.output.nn_modules)
 
@@ -894,11 +944,16 @@ def _call_while_loop(
         operands_proxy,
         additional_inputs_proxy,
     )
+    hop_kwargs = (
+        {"mutated_arg_indices": mutated_arg_indices}
+        if not stack_output and mutated_arg_indices
+        else {}
+    )
     return _call_function_and_unflatten_output(
         tx,
         self.value,
         p_args,
-        {},
+        hop_kwargs,
         None,
         body_treespec,
         body_r,
@@ -2015,6 +2070,10 @@ def speculate_subgraph(
                     supports_input_mutation,
                     supports_aliasing,
                     source_target,
+                )
+                mutation_info = subtracer.has_input_mutation()
+                graph._dynamo_mutated_input_indices = (
+                    mutation_info.mutated_input_indices
                 )
 
                 return (

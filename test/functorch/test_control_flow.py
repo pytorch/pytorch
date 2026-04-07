@@ -10483,6 +10483,7 @@ class TestHopSchema(TestCase):
             body_fn,
             (torch.randn(3, 3), torch.randn(3, 3), torch.randn(3, 3)),
             (c,),
+            "0,1,2,3",
         )
         self.assertExpectedInline(
             str(schema),
