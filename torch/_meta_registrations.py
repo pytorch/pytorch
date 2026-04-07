@@ -6474,17 +6474,12 @@ def meta__flash_attention_forward(
         # ROCm CK flash attention returns logsumexp as (batch, seqlen, heads)
         # rather than CUDA's (batch, heads, seqlen)
         if torch.version.hip and torch.cuda.is_available():
-            logsumexp = torch.empty(
-                (batch_size, max_seqlen_batch_q, num_heads),
-                dtype=torch.float,
-                device=query.device,
-            )
+            logsumexp_shape = (batch_size, max_seqlen_batch_q, num_heads)
         else:
-            logsumexp = torch.empty(
-                (batch_size, num_heads, max_seqlen_batch_q),
-                dtype=torch.float,
-                device=query.device,
-            )
+            logsumexp_shape = (batch_size, num_heads, max_seqlen_batch_q)
+        logsumexp = torch.empty(
+            logsumexp_shape, dtype=torch.float, device=query.device
+        )
     else:
         total_q = query.size(0)
         logsumexp = torch.empty(
