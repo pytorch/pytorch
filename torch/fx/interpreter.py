@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import inspect
 import logging
-import operator
 from contextlib import contextmanager
 from typing import Any, TYPE_CHECKING
 
@@ -377,11 +376,7 @@ class Interpreter:
         if isinstance(target, str):
             raise AssertionError("target should not be a string for call_function")
 
-        # getitem under inference_mode(False): avoid inference views during FX replay
-        if target is operator.getitem and torch.is_inference_mode_enabled():
-            with torch.inference_mode(False):
-                return target(*args, **kwargs)
-
+        # Execute the function and return the result
         return target(*args, **kwargs)
 
     @compatibility(is_backward_compatible=True)
