@@ -2640,9 +2640,9 @@ if HAS_CUDA_AND_TRITON:
                 t = torch.rand([32], device="cuda")
                 self.assertEqual(foo(t), foo_c(t))
 
-            FileCheck().check("skipping cudagraphs due to cpp wrapper enabled").run(
-                log_stream.getvalue()
-            )
+            FileCheck().check(
+                "skipping cudagraphs due to cpp-wrapper does not support graph partition yet"
+            ).run(log_stream.getvalue())
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
         def test_storage_access_error(self):
