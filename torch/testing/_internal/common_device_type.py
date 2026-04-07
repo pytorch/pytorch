@@ -329,10 +329,9 @@ class DeviceTypeTestBase(TestCase):
 
     # Decorators and skips to apply to tests that are parametrized by ops.
     # Keys are OpInfo.full_name (e.g. "op" or "linalg.norm"), NOT OpInfo.name.
-    # Note that OpInfo.full_name and OpInfo.name differ for namespaced ops:
-    # OpInfo.name omits the namespace prefix, while OpInfo.full_name includes it.
-    # Values are lists of DecorateInfo objects, each of which may target a
-    # specific device type or dtype.
+    # Note that OpInfo.full_name and OpInfo.name have difference: OpInfo.full_name
+    # includes the variant suffix (e.g., "div.floor_rounding") if it has, otherwise,
+    # OpInfo.full_name identical to OpInfo.name.
     # These are intentionally placed on DeviceTypeTestBase (rather than solely on
     # PrivateUse1TestBase) so that in-tree backends can adopt the same mechanism
     # in the future.

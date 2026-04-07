@@ -106,9 +106,6 @@ class TestDeviceTypeOpenReg(TestCase):
             )
         super().tearDownClass()
 
-    def test_normal(self, device):
-        pass
-
     @ops([op_normal, op_skip, op_skip_f32, op_xfail, op_precision])
     def test_op(self, device, dtype, op):
         if op.name in ("op_skip", "op_xfail"):
