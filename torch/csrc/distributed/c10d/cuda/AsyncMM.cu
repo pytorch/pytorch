@@ -5,9 +5,6 @@
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/record_function.h>
 #include <c10/cuda/CUDAGuard.h>
-#if defined(USE_ROCM)
-#include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h>
-#endif
 
 // Two warnings in Cutlass included header files
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wset-but-not-used")
@@ -220,8 +217,6 @@ at::Tensor async_input_mm_impl(
 #include <ck_tile/host/kernel_launch.hpp>
 
 
-#include <ATen/ops/matmul.h>
-
 namespace {
 
 // Pipeline type traits for mapping pipeline enum to pipeline implementation
@@ -282,8 +277,8 @@ struct AsyncGemmConfig
     static constexpr ck_tile::index_t NumWaveGroups = 2;
     static constexpr bool Preshuffle = false;
 
-    static constexpr ck_tile::index_t TileParitionerGroupNum = 8;
-    static constexpr ck_tile::index_t TileParitionerM01 = 4;
+    static constexpr ck_tile::index_t TilePartitionerGroupNum = 8;
+    static constexpr ck_tile::index_t TilePartitionerM01 = 4;
     static constexpr bool PermuteA = false;
     static constexpr bool PermuteB = false;
 
@@ -300,7 +295,7 @@ at::Tensor async_input_mm_impl_ck_tile(
     int64_t a_chunk_pivot,
     at::Tensor out) {
 
-  c10::hip::HIPGuardMasqueradingAsCUDA hip_guard(a.device());
+  c10::cuda::CUDAGuard device_guard(a.device());
 
   using ElementA = ck_tile::bf16_t;
   using LayoutA = ck_tile::tensor_layout::gemm::RowMajor;
@@ -353,8 +348,8 @@ at::Tensor async_input_mm_impl_ck_tile(
 
   using TilePartitioner =
       ck_tile::GemmSpatiallyLocalTilePartitioner<GemmShape,
-                                                 GemmConfig::TileParitionerGroupNum,
-                                                 GemmConfig::TileParitionerM01>;
+                                                 GemmConfig::TilePartitionerGroupNum,
+                                                 GemmConfig::TilePartitionerM01>;
 
   using GemmUniversalTraits =
       ck_tile::TileGemmUniversalTraits<GemmConfig::kPadM,
@@ -471,7 +466,7 @@ at::Tensor async_input_mm_impl_ck_tile(
   auto kargs = Kernel::UniversalGemmKernel::MakeKernelArgs(host_args);
 
   ck_tile::stream_config stream_cfg{
-      at::hip::getCurrentHIPStreamMasqueradingAsCUDA(),
+      at::cuda::getCurrentCUDAStream(),
       false,
       0
   };
