@@ -972,9 +972,7 @@ def _fused_all_gather_matmul_native(
     # CK scheduler currently pivots signal-index mapping without pivoting
     # the tile's M-coordinate itself. Keep pivot 0 so signal i always
     # corresponds to data chunk i when communication overlaps compute.
-    async_mm_chunk_pivot = rank
-    if torch.version.hip is not None:
-        async_mm_chunk_pivot = 0
+    async_mm_chunk_pivot = 0 if torch.version.hip else rank
 
     out = torch.ops.symm_mem._async_input_mm(A, B, A_signals, async_mm_chunk_pivot)
     for step in range(1, world_size):
