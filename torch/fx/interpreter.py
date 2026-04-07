@@ -111,10 +111,6 @@ class Interpreter:
         graph (Optional[Graph]): If passed, the interpreter will execute this
             graph instead of `module.graph`, using the provided `module`
             argument to satisfy any requests for state.
-        disable_inference_mode_for_getitem (bool): If True, ``call_function`` runs
-            ``operator.getitem`` with inference mode temporarily disabled when it
-            would otherwise be enabled. Used by AOT metadata replay so slicing
-            does not produce inference views that break functionalization.
     """
 
     @compatibility(is_backward_compatible=True)
@@ -123,7 +119,6 @@ class Interpreter:
         module: torch.nn.Module,
         garbage_collect_values: bool = True,
         graph: Graph | None = None,
-        disable_inference_mode_for_getitem: bool = False,
     ):
         self.module = module
         self.submodules = dict(self.module.named_modules())
@@ -134,7 +129,6 @@ class Interpreter:
         self.env: dict[Node, Any] = {}
         self.name = "Interpreter"
         self.garbage_collect_values = garbage_collect_values
-        self.disable_inference_mode_for_getitem = disable_inference_mode_for_getitem
         self.extra_traceback = True
 
         if self.garbage_collect_values:
@@ -383,15 +377,11 @@ class Interpreter:
         if isinstance(target, str):
             raise AssertionError("target should not be a string for call_function")
 
-        if (
-            self.disable_inference_mode_for_getitem
-            and target is operator.getitem
-            and torch.is_inference_mode_enabled()
-        ):
+        # getitem under inference_mode(False): avoid inference views during FX replay
+        if target is operator.getitem and torch.is_inference_mode_enabled():
             with torch.inference_mode(False):
                 return target(*args, **kwargs)
 
-        # Execute the function and return the result
         return target(*args, **kwargs)
 
     @compatibility(is_backward_compatible=True)
