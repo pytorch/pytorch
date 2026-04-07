@@ -5659,6 +5659,8 @@ class NCCLTraceTestBase(MultiProcessTestCase):
         return pg
 
     def tearDown(self):
+        os.environ.pop("TORCH_NCCL_DEBUG_INFO_TEMP_FILE", None)
+        os.environ.pop("TORCH_NCCL_DEBUG_INFO_PIPE_FILE", None)
         super().tearDown()
         try:
             os.remove(self.file_name)
