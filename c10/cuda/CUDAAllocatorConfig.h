@@ -65,6 +65,13 @@ class C10_CUDA_API CUDAAllocatorConfig {
     return instance().m_per_process_memory_fraction;
   }
 
+  // When enabled, throws OOM error before calling cudaMalloc if the allocation
+  // would likely fail due to insufficient memory. This provides early failure
+  // with clear error messages instead of letting cudaMalloc fail.
+  static bool throw_on_cudamalloc_oom() {
+    return instance().m_throw_on_cudamalloc_oom;
+  }
+
   /** Pinned memory allocator settings */
   static bool pinned_use_cuda_host_register() {
     return instance().m_pinned_use_cuda_host_register;
@@ -162,7 +169,8 @@ class C10_CUDA_API CUDAAllocatorConfig {
         "pinned_reserve_segment_size_mb",
         "pinned_num_register_threads",
         "per_process_memory_fraction",
-        "pinned_free_catch_all"};
+        "pinned_free_catch_all",
+        "throw_on_cudamalloc_oom"};
     return keys;
   }
 
@@ -193,6 +201,9 @@ class C10_CUDA_API CUDAAllocatorConfig {
   size_t parsePinnedFreeCatchAll(
       const c10::CachingAllocator::ConfigTokenizer& tokenizer,
       size_t i);
+  size_t parseThrowOnCudaMallocOom(
+      const c10::CachingAllocator::ConfigTokenizer& tokenizer,
+      size_t i);
 
   std::atomic<size_t> m_pinned_num_register_threads{1};
   std::atomic<size_t> m_pinned_reserve_segment_size_mb{0};
@@ -207,6 +218,9 @@ class C10_CUDA_API CUDAAllocatorConfig {
   std::atomic<bool> m_graph_capture_record_stream_reuse{false};
   std::atomic<double> m_per_process_memory_fraction{1.0};
   std::atomic<bool> m_pinned_free_catch_all{false};
+  // When true, throw OOM error before calling cudaMalloc if allocation would
+  // fail
+  std::atomic<bool> m_throw_on_cudamalloc_oom{false};
 };
 
 // Keep this for backwards compatibility
