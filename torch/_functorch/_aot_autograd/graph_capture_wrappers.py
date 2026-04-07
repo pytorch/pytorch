@@ -1530,7 +1530,9 @@ def create_functional_call(
                         if fake_mode is None:
                             raise AssertionError("fake_mode must not be None")
                         fake_mode.epoch += 1
-                        out = PropagateUnbackedSymInts(mod).run(*args)
+                        out = PropagateUnbackedSymInts(
+                            mod, disable_inference_mode_for_getitem=True
+                        ).run(*args)
             else:
                 out = mod(*args[params_len:], **kwargs)
 
