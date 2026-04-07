@@ -4,6 +4,7 @@ import contextlib
 import enum
 import gc
 import random
+import re
 import unittest
 from contextlib import ExitStack
 from dataclasses import dataclass
@@ -3263,23 +3264,26 @@ def forward(self, L_x_ : torch.Tensor):
         res.sum().backward()
 
         actual = normalize_gm(backend.graphs[0].print_readable(print_output=False))
+        # Normalize module-qualified opaque type names since they differ
+        # depending on how the test is invoked (__main__ vs test_opaque_obj_v2).
+        actual = re.sub(r"\w+_OpaqueMultiplier", "OpaqueMultiplier", actual)
         self.assertExpectedInline(
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[2, 2]", L_scale_obj_ : __main___OpaqueMultiplier):
+    def forward(self, L_x_: "f32[2, 2]", L_scale_obj_ : OpaqueMultiplier):
         l_x_ = L_x_
         l_scale_obj_ = L_scale_obj_
 
         subgraph_0 = self.subgraph_0
         invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_scale_obj_, l_x_);  subgraph_0 = l_scale_obj_ = l_x_ = None
-        getitem_2: "f32[2, 2]" = invoke_subgraph[0];  invoke_subgraph = None
+        getitem: "f32[2, 2]" = invoke_subgraph[0];  invoke_subgraph = None
 
-        add: "f32[2, 2]" = getitem_2 + getitem_2;  getitem_2 = None
+        add: "f32[2, 2]" = getitem + getitem;  getitem = None
         return (add,)
 
     class subgraph_0(torch.nn.Module):
-        def forward(self, l_scale_obj_ : __main___OpaqueMultiplier, l_x_: "f32[2, 2]"):
+        def forward(self, l_scale_obj_ : OpaqueMultiplier, l_x_: "f32[2, 2]"):
             result: "f32[2, 2]" = torch.ops._TestOpaqueObject.mul_with_scale(l_scale_obj_, l_x_);  l_scale_obj_ = l_x_ = None
 
             result_1: "f32[2, 2]" = result * 2;  result = None
