@@ -14,61 +14,14 @@ Tests verify that a "compiled_fn_wrapper" artifact is emitted via
 trace_structured.
 """
 
-import importlib.util
-import logging
-from contextlib import contextmanager
+from _codegen_test_utils import CodegenArtifactMixin
 
 import torch
 import torch._functorch.config
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-_orig_find_spec = importlib.util.find_spec
-
-
-def _no_numba_find_spec(name, *a, **kw):  # type: ignore[no-untyped-def]
-    if name == "numba":
-        return None
-    return _orig_find_spec(name, *a, **kw)
-
-
-importlib.util.find_spec = _no_numba_find_spec  # type: ignore[assignment]
-from torch.testing._internal.common_utils import run_tests, TestCase  # noqa: E402
-
-
-importlib.util.find_spec = _orig_find_spec  # type: ignore[assignment]
-
-
-trace_log = logging.getLogger("torch.__trace")
-
-
-class TestCodegenCompiledFn(TestCase):
-    @contextmanager
-    def _capture_codegen_source(self, artifact_name):
-        """Capture codegen artifacts from the structured trace log."""
-        captured: list[str] = []
-
-        class _ArtifactHandler(logging.Handler):
-            def emit(self, record):
-                metadata = getattr(record, "metadata", {})
-                if (
-                    "artifact" in metadata
-                    and metadata["artifact"].get("name") == artifact_name
-                ):
-                    payload = getattr(record, "payload", None)
-                    if payload is not None:
-                        captured.append(payload)
-
-        handler = _ArtifactHandler()
-        handler.setLevel(logging.DEBUG)
-        old_level = trace_log.level
-        trace_log.setLevel(logging.DEBUG)
-        trace_log.addHandler(handler)
-        try:
-            yield captured
-        finally:
-            trace_log.removeHandler(handler)
-            trace_log.setLevel(old_level)
-
+class TestCodegenCompiledFn(CodegenArtifactMixin, TestCase):
     def test_aliased_output_tensor_alias_wrapping(self):
         """
         Training mode: output that aliases input should get wrapped in
