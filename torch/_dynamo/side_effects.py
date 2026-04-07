@@ -431,7 +431,9 @@ class SideEffects:
 
         if isinstance(item, variables.UserDefinedObjectVariable):
             # Checks if the underlying dict or tuple vt has been modified
-            return item in self.store_attr_mutations or item.is_base_vt_modified(self)
+            return item in self.store_attr_mutations or item.is_underlying_vt_modified(
+                self
+            )
 
         if self.is_attribute_mutation(item):
             return item in self.store_attr_mutations
@@ -1179,9 +1181,7 @@ class SideEffects:
                 if isinstance(
                     var,
                     variables.UserDefinedDictVariable,
-                ) and self.is_modified(
-                    var._base_vt  # pyrefly: ignore[bad-argument-type]
-                ):
+                ) and self.is_modified(var._dict_vt):
                     # Do dict related update manually here. The store_attr
                     # mutations will be applied later.
                     varname_map = {}
@@ -1213,7 +1213,7 @@ class SideEffects:
                         ]
                     )
 
-                    cg(var._base_vt, allow_cache=False)  # Don't codegen via source
+                    cg(var._dict_vt, allow_cache=False)  # Don't codegen via source
                     cg.extend_output(
                         [
                             create_instruction(
@@ -1232,15 +1232,11 @@ class SideEffects:
                             create_instruction("POP_TOP"),
                         ]
                     )
-                    _maybe_log_side_effect(
-                        var._base_vt  # pyrefly: ignore[bad-argument-type]
-                    )
+                    _maybe_log_side_effect(var._dict_vt)
                 elif isinstance(
                     var,
                     variables.UserDefinedListVariable,
-                ) and self.is_modified(
-                    var._base_vt  # pyrefly: ignore[bad-argument-type]
-                ):
+                ) and self.is_modified(var._list_vt):
                     # Update the list to the updated items. Be careful in
                     # calling the list methods and not the overridden methods.
                     varname_map = {}
@@ -1256,7 +1252,7 @@ class SideEffects:
                         ]
                     )
 
-                    cg(var._base_vt, allow_cache=False)  # Don't codegen via source
+                    cg(var._list_vt, allow_cache=False)  # Don't codegen via source
                     cg.extend_output(
                         [
                             create_instruction(
@@ -1275,9 +1271,7 @@ class SideEffects:
                             create_instruction("POP_TOP"),
                         ]
                     )
-                    _maybe_log_side_effect(
-                        var._base_vt  # pyrefly: ignore[bad-argument-type]
-                    )
+                    _maybe_log_side_effect(var._list_vt)
 
                 # Applying mutations involves two steps: 1) Push all
                 # reconstructed objects onto the stack.  2) Call STORE_ATTR to
