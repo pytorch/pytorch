@@ -18,8 +18,6 @@ void PyObjectPreservation::init_fresh_nonatomic(
       c10::detail::kUniqueRef);
 
   slot->pyobj_.store(pyobj, std::memory_order_relaxed);
-  slot->pyobj_interpreter_.store(
-      c10::impl::getGlobalPyInterpreter(), std::memory_order_relaxed);
   target->combined_refcount_.store(
       c10::detail::kHasPyObject | c10::detail::kUniqueRef,
       std::memory_order_relaxed);
@@ -35,9 +33,6 @@ PyObject* PyObjectPreservation::init_once(
     TORCH_INTERNAL_ASSERT(expected != nullptr);
     return expected;
   }
-
-  slot->pyobj_interpreter_.store(
-      c10::impl::getGlobalPyInterpreter(), std::memory_order_release);
 
   bool increfed = false;
   auto combined = target->combined_refcount_.load(std::memory_order_relaxed);

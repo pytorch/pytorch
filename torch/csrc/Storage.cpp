@@ -68,10 +68,6 @@ PyObject* THPStorage_NewWithStorage(PyTypeObject* type, c10::Storage _storage) {
 // Returns a PyObject wrapper for the c10::Storage object. The existing
 // wrapper is returned if it already exists.
 PyObject* THPStorage_Wrap(c10::Storage storage) {
-  if (c10::impl::HermeticPyObjectTLS::get_state()) {
-    return THPStorage_New(THPStorageClass, std::move(storage));
-  }
-
   c10::StorageImpl* storage_impl = storage.unsafeGetStorageImpl();
   c10::impl::PyObjectSlot* pyobj_slot = storage_impl->pyobj_slot();
 

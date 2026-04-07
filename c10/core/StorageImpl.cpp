@@ -56,20 +56,19 @@ void StorageImpl::incref_pyobject() const noexcept {
   std::atomic_thread_fence(std::memory_order_acquire);
 
   PyObject* obj = pyobj_slot_.load_pyobj();
-  (*pyobj_slot_.pyobj_interpreter())->incref(obj);
+  (*c10::impl::getGlobalPyInterpreter())->incref(obj);
 }
 
 void StorageImpl::decref_pyobject() const noexcept {
   PyObject* obj = pyobj_slot_.load_pyobj();
-  (*pyobj_slot_.pyobj_interpreter())->decref(obj);
+  (*c10::impl::getGlobalPyInterpreter())->decref(obj);
 }
 
 bool StorageImpl::try_incref_pyobject() const noexcept {
-  c10::impl::PyInterpreter* interp = pyobj_slot_.pyobj_interpreter();
-  if (C10_UNLIKELY(!interp)) {
+  if (C10_UNLIKELY(!pyobj_slot_.load_pyobj())) {
     return false;
   }
-  return (*interp)->try_incref(pyobj_slot_);
+  return (*c10::impl::getGlobalPyInterpreter())->try_incref(pyobj_slot_);
 }
 
 void SetStorageImplCreate(DeviceType t, StorageImplCreateHelper fptr) {
