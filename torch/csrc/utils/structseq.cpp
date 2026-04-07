@@ -20,9 +20,8 @@
 
 namespace torch::utils {
 
-// NOTE: The built-in repr method from PyStructSequence was updated in
-// https://github.com/python/cpython/commit/c70ab02df2894c34da2223fc3798c0404b41fd79
-// so this function might not be required in Python 3.8+.
+// The built-in repr from CPython is single-line. We override it here to get
+// a multi-line format that is more readable for tensor outputs.
 PyObject* returned_structseq_repr(PyStructSequence* obj) {
   PyTypeObject* typ = Py_TYPE(obj);
   THPObjectPtr tup = six::maybeAsTuple(obj);
