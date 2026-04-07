@@ -19,7 +19,7 @@ from torch.utils._sympy.printers import CppPrinter, ExprPrinter as ExprPrinter_
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from ..utils import ceildiv, get_bounds_index_expr, get_kernel_metadata
-from ..virtualized import ops, OpsWrapper, V
+from ..virtualized import NullHandler, ops, OpsWrapper, V
 from .common import (
     CSEVariable,
     DeferredLine,
@@ -1183,6 +1183,8 @@ class MetalScheduling(SIMDScheduling):
 
     def __init__(self, scheduler: Scheduler | None) -> None:
         super().__init__(scheduler)
+        if isinstance(V.graph, NullHandler):
+            return
         wrapper = V.graph.wrapper_code
         if wrapper is not None:
             if not V.graph.cpp_wrapper:

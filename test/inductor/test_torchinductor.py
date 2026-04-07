@@ -6811,7 +6811,6 @@ class CommonTemplate:
             )
             self.assertEqual(fn(*inputs), opt_fn(*inputs))
 
-    @xfail_if_mps  # 'NullHandler' object has no attribute 'wrapper_code'
     def test_masked_scatter(self):
         def fn(value, mask, source):
             return torch.masked_scatter(value, mask, source)
