@@ -5340,6 +5340,15 @@ class BytesIOContext(io.BytesIO):
 # For more information see https://github.com/pytorch/pytorch/issues/56202
 GRADCHECK_NONDET_TOL = 1e-12
 
+# Default gradcheck parameters — these match the values already used by
+# torch.autograd.gradcheck (see torch/autograd/gradcheck.py).
+# Extracting them as constants lets privateuse1 backends override them
+# with dtype-appropriate values (e.g. wider tolerances for float32-only
+# hardware) in their test overlay.
+GRADCHECK_DEFAULT_EPS = 1e-6
+GRADCHECK_DEFAULT_ATOL = 1e-5
+GRADCHECK_DEFAULT_RTOL = 1e-3
+
 TEST_WITH_SLOW_GRADCHECK: bool = TestEnvironment.def_flag(
     "TEST_WITH_SLOW_GRADCHECK",
     env_var="PYTORCH_TEST_WITH_SLOW_GRADCHECK",
@@ -5361,6 +5370,9 @@ def gradcheck(fn, inputs, **kwargs):
     default_values = {
         "check_batched_grad": True,
         "fast_mode": True,
+        "eps": GRADCHECK_DEFAULT_EPS,
+        "atol": GRADCHECK_DEFAULT_ATOL,
+        "rtol": GRADCHECK_DEFAULT_RTOL,
     }
 
     if TEST_WITH_SLOW_GRADCHECK:
@@ -5381,6 +5393,9 @@ def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
     default_values = {
         "check_batched_grad": True,
         "fast_mode": True,
+        "eps": GRADCHECK_DEFAULT_EPS,
+        "atol": GRADCHECK_DEFAULT_ATOL,
+        "rtol": GRADCHECK_DEFAULT_RTOL,
     }
 
     if TEST_WITH_SLOW_GRADCHECK:
