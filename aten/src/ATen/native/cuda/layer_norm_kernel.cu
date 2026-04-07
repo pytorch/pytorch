@@ -32,12 +32,6 @@ namespace at::native {
 namespace {
 
 constexpr int kCUDANumThreads = 256;
-#ifdef USE_ROCM
-// C10_WARP_SIZE is not constexpr for host code.
-#define kWarpSize C10_WARP_SIZE
-#else
-constexpr unsigned int kWarpSize = C10_WARP_SIZE;
-#endif
 constexpr int vec_size = 4; //we could make it dependent on dtype, but that would lead to different results between float and low-p types
 
 // aligned vector generates vectorized load/store on CUDA (copy-pasted from MemoryAccess.cuh)
@@ -67,7 +61,7 @@ __global__ void RowwiseMomentsCUDAKernel(
 
   __shared__
       typename std::aligned_storage<sizeof(WelfordType), alignof(WelfordType)>::
-          type val_shared[C10_WARP_SIZE];
+          type val_shared[C10_WARP_SIZE_UPPER_BOUND];
   WelfordType* val_shared_ptr = reinterpret_cast<WelfordType*>(val_shared);
 
   const int64_t i = blockIdx.x;
@@ -662,7 +656,7 @@ blockReduceGammaBetaBackwardsHelper(
   constexpr int rows_per_thread_y = rows_per_block_y / block_dim_y;
   int64_t thread_x = blockIdx.x * block_dim_x + threadIdx.x;
 
-    int lane_id = (threadIdx.y * blockDim.x + threadIdx.x) & (kWarpSize - 1);
+    int lane_id = (threadIdx.y * blockDim.x + threadIdx.x) & (C10_WARP_SIZE - 1);
     int64_t mean_index = M_start + threadIdx.y * rows_per_thread_y;
     T_ACC warp_mean = 0, warp_rstd = 0;
     if (lane_id < rows_per_thread_y && mean_index + lane_id < M) {
@@ -695,9 +689,9 @@ blockReduceGammaBetaBackwardsHelper(
 
     #pragma unroll
     for (int i = 0; i < rows_per_thread_y; ++i) {
-      T_ACC rstd_reg = WARP_SHFL(warp_rstd, i, kWarpSize);
+      T_ACC rstd_reg = WARP_SHFL(warp_rstd, i, C10_WARP_SIZE);
       if constexpr (!rms_norm){
-        T_ACC mean_reg = WARP_SHFL(warp_mean, i, kWarpSize);
+        T_ACC mean_reg = WARP_SHFL(warp_mean, i, C10_WARP_SIZE);
         dg_sum += dY_regs[i] * (X_regs[i] - mean_reg) * rstd_reg;
         db_sum += dY_regs[i];
       } else{
@@ -775,7 +769,7 @@ __launch_bounds__(block_dim_x * block_dim_y)
     T* __restrict__ db) {
   // This assert is a compile-time check only.
   constexpr int rows_per_thread_y = rows_per_block_y / block_dim_y;
-  static_assert(rows_per_thread_y <= kWarpSize);
+  static_assert(rows_per_thread_y <= C10_WARP_SIZE_LOWER_BOUND);
 
   T_ACC dg_sum = 0;
   T_ACC db_sum = 0;
@@ -818,7 +812,7 @@ __launch_bounds__(block_dim_x * block_dim_y)
   } else {
     // The caller requested a full reduction so we must reduce across
     // warps using shared memory and warp shuffles.
-    static_assert(rows_per_thread_y <= C10_WARP_SIZE);
+    static_assert(rows_per_thread_y <= C10_WARP_SIZE_LOWER_BOUND);
     alignas(sizeof(double)) extern __shared__ char s_data1[];
     T_ACC* s_data_typed = reinterpret_cast<T_ACC*>(&s_data1);
     T_ACC* s_dg;
@@ -834,8 +828,8 @@ __launch_bounds__(block_dim_x * block_dim_y)
     // Load transposed so that a warp holds an entire column
     // Because block_dim_x != block_dim_y in the general case, we need
     // some code to handle the general case.
-    static_assert(block_dim_x * block_dim_y % C10_WARP_SIZE == 0);
-    constexpr int warps_available_to_reduce = block_dim_x * block_dim_y / C10_WARP_SIZE;
+    static_assert(block_dim_x * block_dim_y % C10_WARP_SIZE_LOWER_BOUND == 0);
+    const int warps_available_to_reduce = block_dim_x * block_dim_y / C10_WARP_SIZE;
     int thread_id = threadIdx.y * block_dim_x + threadIdx.x;
     int warp_id = thread_id / C10_WARP_SIZE;
     int lane_id = thread_id & (C10_WARP_SIZE - 1);
@@ -848,8 +842,8 @@ __launch_bounds__(block_dim_x * block_dim_y)
       }
       #pragma unroll
       for (unsigned delta = block_dim_y >> 1; delta >= 1; delta >>= 1) {
-        reg_dg += WARP_SHFL_XOR(reg_dg, delta, kWarpSize);
-        reg_db += WARP_SHFL_XOR(reg_db, delta, kWarpSize);
+        reg_dg += WARP_SHFL_XOR(reg_dg, delta, C10_WARP_SIZE);
+        reg_db += WARP_SHFL_XOR(reg_db, delta, C10_WARP_SIZE);
       }
       // Reduce is done. Now write it out to global memory.
       int64_t out_index = ((int64_t)blockIdx.x) * block_dim_x + i;
