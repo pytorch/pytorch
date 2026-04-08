@@ -7,6 +7,7 @@ import torch.distributed as dist
 from torch.distributed.tensor import DeviceMesh, DTensor, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import OpSchema
+from torch.distributed.tensor.debug import _clear_sharding_prop_cache
 from torch.testing._internal.common_utils import requires_cuda, run_tests, TestCase
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
@@ -21,6 +22,7 @@ class TestDTensorLogging(TestCase):
 
     def setUp(self):
         super().setUp()
+        _clear_sharding_prop_cache()
         self.world_size = 2
         store = FakeStore()
         dist.init_process_group(
@@ -90,6 +92,35 @@ sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[8, 4](S(0))), Spec(
 sharding_prop python cache MISS: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on DeviceMesh((2,), 'cuda', stride=(1,))) -> Spec(f32[4, 4](S(0)))
 sharding_prop python cache HIT: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on DeviceMesh((2,), 'cuda', stride=(1,))) -> Spec(f32[4, 4](S(0)))""",  # noqa: B950
         )
+
+    def test_logging_level_change_resets_cpp_cache(self):
+        """setLevel on the dispatch logger resets the C++ cached logging flag."""
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        dispatch_logger = logging.getLogger("torch.distributed.tensor._dispatch")
+
+        log_records: list[logging.LogRecord] = []
+        handler = logging.Handler()
+        handler.emit = lambda record: log_records.append(record)
+        dispatch_logger.addHandler(handler)
+
+        x_dt = DTensor.from_local(torch.randn(2, 4), mesh, [Shard(0)], run_check=False)
+
+        # With logging off, the C++ hit path should produce no records.
+        dispatch_logger.setLevel(logging.WARNING)
+        x_dt + x_dt  # miss (not logged)
+        x_dt + x_dt  # hit (not logged)
+        self.assertEqual(len(log_records), 0)
+
+        # After enabling DEBUG, the C++ side should pick it up
+        # automatically (via the setLevel hook) without any manual reset.
+        _clear_sharding_prop_cache()
+        log_records.clear()
+        dispatch_logger.setLevel(logging.DEBUG)
+        x_dt + x_dt  # miss (logged)
+        x_dt + x_dt  # hit (logged)
+        self.assertEqual(len(log_records), 2)
+        self.assertIn("MISS", log_records[0].getMessage())
+        self.assertIn("HIT", log_records[1].getMessage())
 
 
 if __name__ == "__main__":

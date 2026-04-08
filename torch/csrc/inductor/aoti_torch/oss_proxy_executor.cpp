@@ -5,6 +5,7 @@
 
 #include <c10/util/Exception.h>
 #include <c10/util/FileSystem.h>
+#include <torch/csrc/inductor/aoti_torch/generated_enum_converters.h>
 #include <torch/csrc/inductor/aoti_torch/oss_proxy_executor.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
@@ -18,6 +19,10 @@ bool has_key(
     const std::string& key) {
   return map.find(key) != map.end();
 }
+
+using torch::aot_inductor::convertSerializedLayout;
+using torch::aot_inductor::convertSerializedMemoryFormat;
+using torch::aot_inductor::convertSerializedScalarType;
 
 } // namespace
 
@@ -164,7 +169,8 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
           index,
           " but got ",
           serialized_arg_type);
-      stack.at(index) = serialized_arg_val.get<c10::ScalarType>();
+      stack.at(index) =
+          convertSerializedScalarType(serialized_arg_val.get<int>());
       break;
     }
     case c10::TypeKind::MemoryFormatType: {
@@ -176,7 +182,8 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
           index,
           " but got ",
           serialized_arg_type);
-      stack.at(index) = serialized_arg_val.get<c10::MemoryFormat>();
+      stack.at(index) =
+          convertSerializedMemoryFormat(serialized_arg_val.get<int>());
       break;
     }
     case c10::TypeKind::LayoutType: {
@@ -188,7 +195,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
           index,
           " but got ",
           serialized_arg_type);
-      stack.at(index) = serialized_arg_val.get<c10::Layout>();
+      stack.at(index) = convertSerializedLayout(serialized_arg_val.get<int>());
       break;
     }
     case c10::TypeKind::DeviceObjType: {
@@ -390,6 +397,32 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
       } else {
         prefill_stack_with_static_arguments(
             index, inner_type, serialized_arg, op_kernel, torchbind_obj_name);
+      }
+      break;
+    }
+    case c10::TypeKind::AnyType: {
+      // For Any type, dispatch based on the serialized type
+      if (serialized_arg_type == "as_string") {
+        stack.at(index) = serialized_arg_val.get<std::string>();
+      } else if (serialized_arg_type == "as_int") {
+        dynamic_args.emplace_back(index, DynamicArgType::IntType, 1);
+      } else if (serialized_arg_type == "as_float") {
+        stack.at(index) = serialized_arg_val.get<double>();
+      } else if (serialized_arg_type == "as_bool") {
+        stack.at(index) = serialized_arg_val.get<bool>();
+      } else if (serialized_arg_type == "as_tensor") {
+        dynamic_args.emplace_back(index, DynamicArgType::TensorType, 1);
+      } else if (serialized_arg_type == "as_none") {
+        stack.at(index) = c10::IValue{};
+      } else {
+        TORCH_CHECK(
+            false,
+            "Unsupported serialized type ",
+            serialized_arg_type,
+            " for Any type argument ",
+            index,
+            " in extern kernel ",
+            op_kernel->target_);
       }
       break;
     }

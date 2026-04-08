@@ -121,7 +121,6 @@ class Event(torch._C._XpuEventBase):
     def __new__(cls, enable_timing=False):
         return super().__new__(cls, enable_timing=enable_timing)
 
-    # pyrefly: ignore [bad-override]
     def record(self, stream: Stream | torch.Stream | None = None) -> None:
         r"""Record the event in a given stream.
 
@@ -131,7 +130,6 @@ class Event(torch._C._XpuEventBase):
         """
         if stream is None:
             stream = torch.xpu.current_stream()
-        # pyrefly: ignore [bad-argument-type]
         super().record(stream)
 
     def wait(self, stream: Stream | torch.Stream | None = None) -> None:
@@ -142,7 +140,6 @@ class Event(torch._C._XpuEventBase):
         """
         if stream is None:
             stream = torch.xpu.current_stream()
-        # pyrefly: ignore [bad-argument-type]
         super().wait(stream)
 
     def query(self) -> bool:

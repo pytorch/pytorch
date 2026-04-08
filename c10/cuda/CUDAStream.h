@@ -256,6 +256,28 @@ inline c10::cuda::CUDAStream getCurrentHIPStream(
   return c10::cuda::getCurrentCUDAStream(device_index);
 }
 inline auto& setCurrentHIPStream = c10::cuda::setCurrentCUDAStream;
+inline c10::cuda::CUDAStream getStreamFromPoolMasqueradingAsCUDA(
+    const bool isHighPriority = false,
+    DeviceIndex device = -1) {
+  return c10::cuda::getStreamFromPool(isHighPriority, device);
+}
+inline c10::cuda::CUDAStream getStreamFromPoolMasqueradingAsCUDA(
+    const int priority,
+    DeviceIndex device = -1) {
+  return c10::cuda::getStreamFromPool(priority, device);
+}
+inline auto& getStreamFromExternalMasqueradingAsCUDA =
+    c10::cuda::getStreamFromExternal;
+inline c10::cuda::CUDAStream getDefaultHIPStreamMasqueradingAsCUDA(
+    DeviceIndex device_index = -1) {
+  return c10::cuda::getDefaultCUDAStream(device_index);
+}
+inline c10::cuda::CUDAStream getCurrentHIPStreamMasqueradingAsCUDA(
+    DeviceIndex device_index = -1) {
+  return c10::cuda::getCurrentCUDAStream(device_index);
+}
+inline auto& setCurrentHIPStreamMasqueradingAsCUDA =
+    c10::cuda::setCurrentCUDAStream;
 } // namespace c10::hip
 #endif
 

@@ -18,6 +18,7 @@ runs:
   using: composite
   steps:
     - name: Setup uv
+      if: ${{ !env.UV_PYTHON }}
       uses: pytorch/test-infra/.github/actions/setup-uv@main
       with:
         python-version: "3.12"

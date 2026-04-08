@@ -6,13 +6,14 @@ import functools
 import itertools
 import re
 from enum import auto, Enum
-from typing import Any, NamedTuple, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, NamedTuple, TYPE_CHECKING, TypeVar
 
 import sympy
 
 import torch.fx
 from torch._dynamo.utils import identity
 from torch.fx.proxy import Scope, TracerBase
+from torch.utils._sympy.functions import Mod
 from torch.utils._sympy.symbol import SymT
 
 from . import config, dependencies
@@ -73,8 +74,8 @@ class LightTracer(TracerBase):
 
 class MemoryEntry(NamedTuple):
     index_name: str  # LoopBody.indexing_exprs[index_name]
-    buffer_name: Optional[str]
-    mode: Optional[str]  # V.ops.store(..., mode=mode)
+    buffer_name: str | None
+    mode: str | None  # V.ops.store(..., mode=mode)
 
 
 class MemoryUsageType(Enum):
@@ -268,7 +269,7 @@ class LoopBody:
             reduce_idx = index[len(iter_size) :]
 
             new_iter_idx = list(iter_idx)
-            new_iter_idx[dimension] = iter_idx[dimension] % original_range
+            new_iter_idx[dimension] = Mod(iter_idx[dimension], original_range)
 
             return old_body(new_iter_idx, reduce_idx)
 
@@ -427,8 +428,8 @@ class LoopBody:
         self,
         expr: sympy.Expr,
         mtype: MemoryUsageType,
-        buffer_name: Optional[str] = None,
-        mode: Optional[str] = None,
+        buffer_name: str | None = None,
+        mode: str | None = None,
     ):
         name = self.indexing_exprs_name.get(expr)
         if not name:
@@ -689,8 +690,8 @@ class CaptureIndexing(WrapperHandler):
         boundary_indices: T,
         indexing_dtype: torch.dtype,
         right: bool,
-        sorter: Optional[tuple[str, sympy.Expr]] = None,
-        sorter_indices: Optional[T] = None,
+        sorter: tuple[str, sympy.Expr] | None = None,
+        sorter_indices: T | None = None,
     ) -> T:
         """
         See [Note: Inductor bucketize op]

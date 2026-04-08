@@ -24,7 +24,6 @@ MATH_TRANSPILATIONS = collections.OrderedDict([
     ("std::frexp", ("::frexp")),
 ])
 
-# pyrefly: ignore  # no-matching-overload
 CUDA_TYPE_NAME_MAP = collections.OrderedDict([
     ("CUresult", "hipError_t"),
     ("cudaError_t", "hipError_t"),
@@ -350,7 +349,6 @@ CUDA_INCLUDE_MAP = collections.OrderedDict([
     ("tensorpipe/tensorpipe_cuda.h", "tensorpipe/tensorpipe_hip.h"),
 ])
 
-# pyrefly: ignore  # no-matching-overload
 CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("__CUDACC__", "__HIPCC__"),
     ("CUDA_ERROR_INVALID_CONTEXT", "hipErrorInvalidContext"),
@@ -768,6 +766,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("CU_MEM_HANDLE_TYPE_WIN32", "hipMemHandleTypeWin32"),
     ("CU_MEM_HANDLE_TYPE_WIN32_KMT", "hipMemHandleTypeWin32Kmt"),
     ("CU_MEM_LOCATION_TYPE_DEVICE", "hipMemLocationTypeDevice"),
+    ("CU_MEM_LOCATION_TYPE_HOST", "hipMemLocationTypeHost"),
     ("CU_MEM_LOCATION_TYPE_INVALID", "hipMemLocationTypeInvalid"),
     ("CU_MEM_OPERATION_TYPE_MAP", "hipMemOperationTypeMap"),
     ("CU_MEM_OPERATION_TYPE_UNMAP", "hipMemOperationTypeUnmap"),
@@ -1362,6 +1361,10 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("cudaEventBlockingSync", "hipEventBlockingSync"),
     ("cudaEventDisableTiming", "hipEventDisableTiming"),
     ("cudaEventInterprocess", "hipEventInterprocess"),
+    ("cudaEventRecordDefault", "hipEventRecordDefault"),
+    ("cudaEventRecordExternal", "hipEventRecordExternal"),
+    ("cudaEventWaitDefault", "hipEventWaitDefault"),
+    ("cudaEventWaitExternal", "hipEventWaitExternal"),
     ("cudaStreamCreate", "hipStreamCreate"),
     ("cudaStreamCreateWithFlags", "hipStreamCreateWithFlags"),
     ("cudaStreamCreateWithPriority", "hipStreamCreateWithPriority"),
@@ -3417,6 +3420,7 @@ C10_MAPPINGS = collections.OrderedDict([
     ("c10/cuda/CUDAEvent.h", "c10/hip/HIPEvent.h"),
     ("c10/cuda/impl/CUDAGuardImpl.h", "c10/hip/impl/HIPGuardImpl.h"),
     ("c10/cuda/impl/CUDATest.h", "c10/hip/impl/HIPTest.h"),
+    ("CUDATest.hpp", "HIPTest.hpp"),
     ("c10/cuda/impl/cuda_cmake_macros.h", "c10/hip/impl/hip_cmake_macros.h"),
     # TODO: Remove these. They were necessary for Meta-internal builds.
     ("c10::hip::c10_hip_check_implementation", "c10::cuda::c10_cuda_check_implementation"),

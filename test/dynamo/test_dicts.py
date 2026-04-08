@@ -134,6 +134,46 @@ class DictTests(torch._dynamo.test_case.TestCase):
         with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
             self.assertEqual(fn(x), opt_fn(x))
 
+    def test_dict_torch_size_dynamic_key(self):
+        class DynamicShapeModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer_configs = {
+                    torch.Size([32, 64]): torch.nn.Linear(32, 64),
+                    torch.Size([64, 128]): torch.nn.Linear(64, 128),
+                    torch.Size([128, 256]): torch.nn.Linear(128, 256),
+                }
+                self.activation_functions = {
+                    torch.Size([32]): torch.nn.ReLU(),
+                    torch.Size([64]): torch.nn.Tanh(),
+                    torch.Size([128]): torch.nn.Sigmoid(),
+                }
+
+            def forward(self, x):
+                current_shape = torch.tensor(x.shape[1:])
+                shape_key = torch.Size([current_shape[0], 64])
+                if shape_key in self.layer_configs:
+                    x = self.layer_configs[shape_key](x)
+
+                activation_shape = torch.Size([x.shape[1]])
+                if activation_shape in self.activation_functions:
+                    x = self.activation_functions[activation_shape](x)
+                return x
+
+        model = DynamicShapeModel().eval()
+
+        for features in (32, 64, 128, 16):
+            x = torch.randn(4, features)
+            with torch.no_grad():
+                eager_out = model(x)
+
+            torch._dynamo.reset()
+            compiled_model = torch.compile(model, backend="eager")
+            with torch.no_grad():
+                compiled_out = compiled_model(x)
+
+            self.assertTrue(same(eager_out, compiled_out))
+
     def test_dict_subclass_methods_fallback_readonly(self):
         sd = SimpleDict()
         sd[2] = 5
@@ -445,7 +485,8 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         args1 = {"a": torch.randn(10), "b": torch.randn(10)}
         args2 = dict(args1)
-        assert fn(args1) is args1
+        if fn(args1) is not args1:
+            raise AssertionError("Expected fn(args1) to be args1")
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         self.assertIs(opt_fn(args2), args2)
@@ -608,6 +649,33 @@ class DictTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_len_dunder_dict_after_delete(self):
+        # After deleting an attribute during tracing, len(obj.__dict__) must
+        # reflect the deletion. The bug: SideEffectsProxyDict.__len__ returned
+        # len(item_dict) + len(side_effects_table), double-counting deleted
+        # entries and keys mutated from item_dict.
+        class UserDefined:
+            def __init__(self) -> None:
+                self.a = 3
+                self.b = 5
+
+            def run(self, x):
+                del self.a
+                # len should be 1 (only b remains), not 3 (item_dict=2 + mutations=1)
+                return x * len(self.__dict__)
+
+        obj1 = UserDefined()
+        obj2 = UserDefined()
+
+        def fn(x, obj):
+            return obj.run(x)
+
+        x = torch.ones(2)
+        ref = fn(x, obj1)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x, obj2)
+        self.assertEqual(ref, res)
+
     def test_contains_module_dunder_dict(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -706,7 +774,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             def fn(x):
                 c = CustomDict()
                 c["key"] = x
-                assert "key" in c
+                assert "key" in c  # noqa: S101
                 return c["key"] + 1
 
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
@@ -1203,6 +1271,222 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_f = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(f(), opt_f())
 
+    @parametrize("op", ["or_", "and_", "xor", "sub"])
+    def test_dict_items_binop(self, op):
+        op = getattr(operator, op)
+
+        def f():
+            a = {"one": 1, "two": 2}
+            b = {"one": 1, "three": 3}
+            return op(a.items(), b.items()), op(b.items(), a.items())
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["ior", "iand", "ixor", "isub"])
+    def test_dict_items_inplace_binop(self, op):
+        op = getattr(operator, op)
+
+        def f():
+            a = {"one": 1, "two": 2}.items()
+            b = {"one": 1, "three": 3}.items()
+            c = {"one": 1, "two": 2}.items()
+            a = op(a, b)
+            b = op(b, c)
+            return a, b
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["or_", "and_", "xor", "sub", "iand", "ior", "ixor", "isub"])
+    def test_cross_type_set_binop_dict_keys_vs_set(self, op):
+        op = getattr(operator, op)
+
+        def f():
+            keys = {"one": 1, "two": 2, "three": 3}.keys()
+            s = {"one", "four"}
+            return op(keys, s), op(s, keys)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["or_", "and_", "xor", "sub", "iand", "ior", "ixor", "isub"])
+    def test_cross_type_set_binop_dict_items_vs_set(self, op):
+        op = getattr(operator, op)
+
+        def f():
+            items = {"one": 1, "two": 2}.items()
+            s = {("one", 1), ("three", 3)}
+            return op(items, s), op(s, items)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["or_", "and_", "xor", "sub", "iand", "ior", "ixor", "isub"])
+    def test_cross_type_set_binop_dict_keys_vs_dict_items(self, op):
+        op = getattr(operator, op)
+
+        def f():
+            keys = {"one": 1, "two": 2}.keys()
+            items = {"three": 3, "four": 4}.items()
+            return op(keys, items), op(items, keys)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["or_", "and_", "xor", "sub", "iand", "ior", "ixor", "isub"])
+    def test_cross_type_set_binop_dict_keys_vs_user_defined_set(self, op):
+        class MySet(set):
+            pass
+
+        op = getattr(operator, op)
+
+        def f():
+            keys = {"one": 1, "two": 2, "three": 3}.keys()
+            s = MySet({"one", "four"})
+            return op(keys, s), op(s, keys)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["or_", "and_", "xor", "sub", "iand", "ior", "ixor", "isub"])
+    def test_cross_type_set_binop_dict_items_vs_user_defined_set(self, op):
+        class MySet(set):
+            pass
+
+        op = getattr(operator, op)
+
+        def f():
+            items = {"one": 1, "two": 2, "three": 3}.items()
+            s = MySet({"one", "four"})
+            return op(items, s), op(s, items)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["or_", "and_", "xor", "sub", "iand", "ior", "ixor", "isub"])
+    def test_cross_type_set_binop_set_vs_user_defined_set(self, op):
+        class MySet(set):
+            pass
+
+        op = getattr(operator, op)
+
+        def f():
+            s = {"one", "two", "three"}
+            u = MySet({"one", "four"})
+            return op(s, u), op(u, s)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["lt", "le", "gt", "ge", "eq", "ne"])
+    def test_cross_type_cmp_dict_keys_vs_set(self, op):
+        op = getattr(operator, op)
+
+        def f():
+            keys = {"one": 1, "two": 2}.keys()
+            s = {"one", "two", "three"}
+            return op(keys, s), op(s, keys)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["lt", "le", "gt", "ge", "eq", "ne"])
+    def test_cross_type_cmp_dict_items_vs_set(self, op):
+        op = getattr(operator, op)
+
+        def f():
+            items = {"one": 1, "two": 2}.items()
+            s = {("one", 1), ("two", 2), ("three", 3)}
+            return op(items, s), op(s, items)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["lt", "le", "gt", "ge", "eq", "ne"])
+    def test_cross_type_cmp_dict_keys_vs_dict_items(self, op):
+        op = getattr(operator, op)
+
+        def f():
+            keys = {"one": 1, "two": 2}.keys()
+            items = {"one": 1, "two": 2}.items()
+            return op(keys, items), op(items, keys)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["lt", "le", "gt", "ge", "eq", "ne"])
+    def test_cross_type_cmp_set_vs_user_defined_set(self, op):
+        class MySet(set):
+            pass
+
+        op = getattr(operator, op)
+
+        def f():
+            s = {"one", "two"}
+            u = MySet({"one", "two", "three"})
+            return op(s, u), op(u, s)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["lt", "le", "gt", "ge", "eq", "ne"])
+    def test_cross_type_cmp_dict_keys_vs_user_defined_set(self, op):
+        class MySet(set):
+            pass
+
+        op = getattr(operator, op)
+
+        def f():
+            keys = {"one": 1, "two": 2}.keys()
+            u = MySet({"one", "two", "three"})
+            return op(keys, u), op(u, keys)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["lt", "le", "gt", "ge", "eq", "ne"])
+    def test_cross_type_cmp_dict_items_vs_user_defined_set(self, op):
+        class MySet(set):
+            pass
+
+        op = getattr(operator, op)
+
+        def f():
+            items = {"one": 1, "two": 2}.items()
+            u = MySet({("one", 1), ("two", 2), ("three", 3)})
+            return op(items, u), op(u, items)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    def test_dict_view_iand_rebinds_variable(self):
+        def f_keys():
+            d = {"one": 1, "two": 2, "three": 3}
+            tmp = d.keys()
+            tmp &= {"one", "four"}
+            return tmp, d
+
+        opt_f_keys = torch.compile(f_keys, backend="eager", fullgraph=True)
+        eager_tmp, eager_d = f_keys()
+        compiled_tmp, compiled_d = opt_f_keys()
+        self.assertIsInstance(eager_tmp, set)
+        self.assertEqual(eager_tmp, compiled_tmp)
+        self.assertEqual(eager_d, compiled_d)
+
+        def f_items():
+            d = {"one": 1, "two": 2}
+            tmp = d.items()
+            tmp &= {("one", 1), ("three", 3)}
+            return tmp, d
+
+        opt_f_items = torch.compile(f_items, backend="eager", fullgraph=True)
+        eager_tmp, eager_d = f_items()
+        compiled_tmp, compiled_d = opt_f_items()
+        self.assertIsInstance(eager_tmp, set)
+        self.assertEqual(eager_tmp, compiled_tmp)
+        self.assertEqual(eager_d, compiled_d)
+
     def test_dict_union_result_type(self):
         def_dict = defaultdict(int, {1: 1, 2: 2})
         ord_dict = OrderedDict({3: 3, 4: 4})
@@ -1285,8 +1569,8 @@ class DictTests(torch._dynamo.test_case.TestCase):
         from typing import Union
 
         def fn(x):
-            d = {Union[int, str]: x * 2, Union[float, bool]: x * 3}
-            return d[Union[int, str]] + d[Union[float, bool]]
+            d = {Union[int, str]: x * 2, Union[float, bool]: x * 3}  # noqa: UP007
+            return d[Union[int, str]] + d[Union[float, bool]]  # noqa: UP007
 
         x = torch.randn(4)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
@@ -1361,6 +1645,117 @@ class DictTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(Unsupported, "Observed exception"):
             opt_fn(x)
 
+    def test_property_backed_by_dunder_dict(self):
+        class Obj:
+            def __init__(self, x):
+                self.__dict__["x"] = x
+
+            @property
+            def x(self):
+                return self.__dict__["x"]
+
+        def fn(obj):
+            return obj.x
+
+        obj = Obj(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(obj), opt_fn(obj))
+
+    def test_property_backed_by_dunder_dict_mutated(self):
+        class Obj:
+            def __init__(self, x):
+                self.__dict__["x"] = x
+
+            @property
+            def x(self):
+                return self.__dict__["x"]
+
+            @x.setter
+            def x(self, value):
+                self.__dict__["x"] = value
+
+        def fn(obj):
+            a = obj.x
+            obj.x = a + 1
+            return obj.x
+
+        obj = Obj(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(Obj(3)), opt_fn(obj))
+
+    def test_property_backed_by_dunder_dict_pending_side_effects(self):
+        class Obj:
+            def __init__(self, x):
+                self.__dict__["x"] = x
+
+            @property
+            def x(self):
+                return self.__dict__["x"]
+
+        def fn(obj):
+            a = obj.__dict__["x"]
+            obj.__dict__["x"] = a + 1
+            return obj.__dict__["x"]
+
+        obj = Obj(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(Obj(3)), opt_fn(obj))
+
+    def test_dunder_dict_getitem_guard_recompiles(self):
+        class Obj:
+            def __init__(self):
+                self.__dict__["x"] = 3
+
+            @property
+            def x(self):
+                return 999
+
+        def fn(obj, t):
+            return t + obj.__dict__["x"]
+
+        obj = Obj()
+        t = torch.tensor(0.0)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        self.assertEqual(opt_fn(obj, t), torch.tensor(3.0))
+        self.assertEqual(cnt.frame_count, 1)
+
+        obj.__dict__["x"] = 5
+        self.assertEqual(opt_fn(obj, t), torch.tensor(5.0))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_dunder_dict_get_with_property(self):
+        class Obj:
+            def __init__(self, x):
+                self.__dict__["x"] = x
+
+            @property
+            def x(self):
+                return self.__dict__["x"]
+
+        def fn(obj):
+            return obj.__dict__.get("x")
+
+        obj = Obj(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(obj), opt_fn(obj))
+
+    def test_dunder_dict_getitem_tensor(self):
+        class Obj:
+            def __init__(self, x):
+                self.__dict__["x"] = x
+
+            @property
+            def x(self):
+                return self.__dict__["x"]
+
+        def fn(obj):
+            return obj.x + 1
+
+        obj = Obj(torch.tensor(3.0))
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(obj), opt_fn(obj))
+
     def test_get_default_nowrap_functions_as_dict_key(self):
         def fn(x):
             # Get the set of default nowrap functions
@@ -1375,6 +1770,44 @@ class DictTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_custom_bool(self):
+        class CustomBoolDict:
+            def __init__(self, bool_result: bool):
+                super().__init__()
+                self._bool_result = bool_result
+
+            def __bool__(self):
+                return self._bool_result
+
+        def fn(t: torch.Tensor, d, apply_not: bool):
+            if apply_not:
+                return t.sin(), bool(not d)
+            else:
+                return t.sin(), bool(d)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        t = CustomBoolDict(True)
+        self.assertTrue(
+            opt_fn(x, t, False)[1],
+            "CustomBoolDict(True) should evaluate to True in boolean context",
+        )
+        self.assertFalse(
+            opt_fn(x, t, True)[1],
+            "not CustomBoolDict(True) should evaluate to False in boolean context",
+        )
+
+        f = CustomBoolDict(False)
+        self.assertFalse(
+            opt_fn(x, f, False)[1],
+            "CustomBoolDict(False) should evaluate to False in boolean context",
+        )
+        self.assertTrue(
+            opt_fn(x, f, True)[1],
+            "not CustomBoolDict(False) should evaluate to True in boolean context",
+        )
 
 
 instantiate_parametrized_tests(DictTests)
@@ -1520,6 +1953,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
     thetype = dict
 
     # Methods:
+    # + bool
     # + clear
     # + copy
     # + fromkeys
@@ -1968,9 +2402,26 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertTrue(same(f(A(), x), opt_f(A(), x)))
 
+    @make_dynamo_test
+    def test_bool(self):
+        p = self.thetype()
+        q = self.thetype({"a": 1, "b": 2})
+        if p:
+            self.fail("empty mapping must compare to False")
+        if not q:
+            self.fail("non-empty mapping must compare to True")
+        if bool(p):
+            self.fail("empty mapping must compare to False")
+        if not bool(q):
+            self.fail("non-empty mapping must compare to True")
+
 
 class DictSubclassMethodsTests(DictMethodsTests):
     thetype = SimpleDict
+
+    @unittest.expectedFailure
+    def test_binop_or(self):
+        super().test_binop_or()
 
 
 class OrderedDictMethodsTests(DictMethodsTests):
@@ -2073,6 +2524,151 @@ class OrderedDictSubclassOverload(torch._dynamo.test_case.TestCase):
         p = self.thetype({"a": 1, "b": 2, "c": 3})
         p.move_to_end("a")
         self.assertEqual(list(p.keys()), list("bc"))
+
+
+class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
+    """Tests for DunderDictVariable (object.__dict__ handling in Dynamo)"""
+
+    def test_dunder_dict_items_includes_mutations(self):
+        """Test that __dict__.items() includes both original and mutated keys"""
+
+        class MyClass:
+            def __init__(self):
+                self.a = 1
+                self.b = 2
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            obj.c = 3
+            items = dict(obj.__dict__.items())
+            return items
+
+        obj = MyClass()
+        result = fn(obj)
+        self.assertEqual(result, {"a": 1, "b": 2, "c": 3})
+
+    def test_dunder_dict_keys_includes_mutations(self):
+        """Test that __dict__.keys() includes both original and mutated keys"""
+
+        class MyClass:
+            def __init__(self):
+                self.a = 1
+                self.b = 2
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            obj.c = 3
+            obj.d = 4
+            keys = sorted(obj.__dict__.keys())
+            return keys
+
+        obj = MyClass()
+        result = fn(obj)
+        self.assertEqual(result, ["a", "b", "c", "d"])
+
+    def test_dunder_dict_values_includes_mutations(self):
+        """Test that __dict__.values() includes both original and mutated values"""
+
+        class MyClass:
+            def __init__(self):
+                self.a = 1
+                self.b = 2
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            obj.c = 3
+            values = sorted(obj.__dict__.values())
+            return values
+
+        obj = MyClass()
+        result = fn(obj)
+        self.assertEqual(result, [1, 2, 3])
+
+    def test_dunder_dict_comprehension_with_mutations(self):
+        """Test dict comprehension over __dict__ with mutations (scheduler use case)"""
+
+        class SimpleScheduler:
+            def __init__(self):
+                self.base_lrs = [0.1]
+                self.last_epoch = 0
+
+            def state_dict(self):
+                state = dict(self.__dict__.items())
+                return state
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(scheduler):
+            scheduler.last_epoch = 5
+            scheduler.new_attr = "test"
+            return scheduler.state_dict()
+
+        scheduler = SimpleScheduler()
+        result = fn(scheduler)
+        self.assertEqual(result["base_lrs"], [0.1])
+        self.assertEqual(result["last_epoch"], 5)
+        self.assertEqual(result["new_attr"], "test")
+
+    def test_dunder_dict_multiple_mutations(self):
+        """Test __dict__ operations with multiple mutations"""
+
+        class MyClass:
+            def __init__(self):
+                self.x = 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            obj.y = 2
+            obj.z = 3
+            obj.y = 20
+            items = dict(obj.__dict__.items())
+            keys = set(obj.__dict__.keys())
+            return items, keys
+
+        obj = MyClass()
+        items, keys = fn(obj)
+        self.assertEqual(items, {"x": 1, "y": 20, "z": 3})
+        self.assertEqual(keys, {"x", "y", "z"})
+
+    def test_dunder_dict_items_iteration(self):
+        """Test iterating over __dict__.items() with mutations"""
+
+        class MyClass:
+            def __init__(self):
+                self.a = 1
+                self.b = 2
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            obj.c = 3
+            result = []
+            for k, v in obj.__dict__.items():
+                result.append((k, v))
+            return sorted(result)
+
+        obj = MyClass()
+        result = fn(obj)
+        self.assertEqual(result, [("a", 1), ("b", 2), ("c", 3)])
+
+    def test_method_dict_direct_fullgraph(self):
+        """
+        Regression test: Accessing __dict__ directly on UserMethodVariable.
+        This should fail with: unsupported variable type for __dict__ access
+        """
+
+        class Foo:
+            def bar(self):
+                return 42
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            obj = Foo()
+            # Access __dict__ on bound method - creates UserMethodVariable
+            method = obj.bar
+            d = method.__dict__
+            return d
+
+        # This should not raise Unsupported
+        fn()
 
 
 if __name__ == "__main__":

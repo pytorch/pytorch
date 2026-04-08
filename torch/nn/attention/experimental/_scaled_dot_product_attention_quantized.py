@@ -6,7 +6,6 @@ This operator is experimental and subject to change.
 
 import warnings
 from enum import IntEnum
-from typing import Optional
 
 import torch
 from torch import Tensor
@@ -27,7 +26,7 @@ class DescaleType(IntEnum):
 
 
 def _validate_descale(
-    descale: Optional[Tensor],
+    descale: Tensor | None,
     name: str,
     query: Tensor,
     key: Tensor,
@@ -92,10 +91,10 @@ def _scaled_dot_product_attention_quantized(
     key: Tensor,
     value: Tensor,
     is_causal: bool = False,
-    scale: Optional[float] = None,
-    q_descale: Optional[Tensor] = None,
-    k_descale: Optional[Tensor] = None,
-    v_descale: Optional[Tensor] = None,
+    scale: float | None = None,
+    q_descale: Tensor | None = None,
+    k_descale: Tensor | None = None,
+    v_descale: Tensor | None = None,
     q_descale_type: DescaleType = DescaleType.PER_HEAD,
     k_descale_type: DescaleType = DescaleType.PER_HEAD,
     v_descale_type: DescaleType = DescaleType.PER_HEAD,

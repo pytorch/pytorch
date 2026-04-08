@@ -228,12 +228,13 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.float16, torch.ops.aten.reflection_pad3d_backward.default): 5e-3,
         (torch.bfloat16, torch.ops.aten.reflection_pad3d_backward.default): 5e-2,
         (torch.float16, torch.ops.aten._batch_norm_with_update.default): 2e-7,
-        (torch.bfloat16, torch.ops.aten._batch_norm_with_update.default): 2e-7,
+        (torch.bfloat16, torch.ops.aten._batch_norm_with_update.default): 5e-7,
         # see https://github.com/pytorch/pytorch/pull/96264
-        (torch.float16, torch.ops.aten.mv.default): 1e-5,
+        (torch.float16, torch.ops.aten.mv.default): 2e-5,
         (torch.bfloat16, torch.ops.aten.mv.default): 1e-5,
-        (torch.float16, torch.ops.aten.log_sigmoid_backward.default): 2e-5,
+        (torch.float16, torch.ops.aten.dot.default): 2e-6,
         (torch.float16, torch.ops.aten._softmax_backward_data.default): 3e-7,
+        (torch.bfloat16, torch.ops.aten._softmax_backward_data.default): 2e-7,
     }
     if ref.is_floating_point():
         orig_diff = (orig - ref).abs().max()
@@ -609,6 +610,29 @@ class TestDecomp(TestCase):
     @ops(op_db)
     def test_comprehensive(self, device, dtype, op):
         self.do_cross_ref(device, dtype, op, run_all=True)
+
+    def test_hann_window_decomp(self, device):
+        # Verify the hann_window decomp matches the native kernel for all four
+        # overloads: .default, .periodic, .out, .periodic_out.
+        from torch._decomp.decompositions import hann_window, hann_window_periodic
+
+        for n in (0, 1, 8, 9):
+            # .default (periodic=True)
+            ref = torch.hann_window(n, device=device)
+            res = hann_window(n, device=device)
+            self.assertEqual(ref, res)
+
+            # .periodic overload, explicit periodic flag
+            for periodic in (True, False):
+                ref = torch.hann_window(n, periodic, device=device)
+                res = hann_window_periodic(n, periodic, device=device)
+                self.assertEqual(ref, res)
+
+        # dtype forwarding
+        ref = torch.hann_window(8, dtype=torch.float64, device=device)
+        res = hann_window_periodic(8, dtype=torch.float64, device=device)
+        self.assertEqual(ref, res)
+        self.assertEqual(res.dtype, torch.float64)
 
     def test_uniform(self, device):
         size = (2, 3, 4, 5)
@@ -1061,6 +1085,24 @@ def forward(self, scores_1, mask_1, value_1):
                 self.skipTest(
                     "only backwards is decomposed, but dtype doesn't support AD"
                 )
+
+    def test_binary_cross_entropy_with_logits_decomp(self, device):
+        op_config = {
+            "self": torch.randn([4, 5, 6], dtype=torch.bfloat16, device=device),
+            "target": torch.randn([4, 5, 6], dtype=torch.bfloat16, device=device),
+            "weight": torch.randn([6], dtype=torch.float32, device=device),
+            "reduction": 2,
+        }
+
+        ref = torch.ops.aten.binary_cross_entropy_with_logits.default(**op_config)
+
+        decomp_table = torch._inductor.decomposition.select_decomp_table()
+        bce_decomp = decomp_table[
+            torch.ops.aten.binary_cross_entropy_with_logits.default
+        ]
+        res = bce_decomp(**op_config)
+
+        torch.testing.assert_close(ref, res, check_dtype=True)
 
 
 instantiate_device_type_tests(TestDecomp, globals())

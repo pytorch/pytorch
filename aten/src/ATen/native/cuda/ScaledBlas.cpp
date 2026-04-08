@@ -12,7 +12,7 @@
 #include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/CUDABlas.h>
-#include <ATen/cuda/CUDAScaledBlas.h>
+#include <ATen/native/ScaledBlasUtils.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <ATen/cuda/tunable/TunableGemm.h>
 #include <ATen/native/Resize.h>
@@ -35,6 +35,7 @@
 #include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_efficientzerotensor.h>
 #include <ATen/ops/_scaled_mm_native.h>
+#include <ATen/ops/_scaled_mm_v2_native.h>
 #include <ATen/ops/_unsafe_view_native.h>
 #include <ATen/ops/abs.h>
 #include <ATen/ops/addmm_native.h>
@@ -61,14 +62,15 @@ class cublasCommonArgs;
 using at::blas::ScalingType;
 using at::blas::SwizzleType;
 
-namespace scaled_blas = at::cuda::scaled;
+namespace scaled_blas = at::native::scaled;
 using scaled_blas::ScaledGemmImplementation;
 using scaled_blas::convert_int_to_enum;
-using scaled_blas::_scaled_mm_allowed_device;
 
 namespace at::native {
 
-static bool _scaled_mm_allowed_device(bool sm90_only=false, bool sm100_only=false) {
+namespace{
+
+bool _scaled_mm_allowed_device(bool sm90_only=false, bool sm100_only=false) {
 #ifdef USE_ROCM
     static const std::vector<std::string> archs = {
         "gfx942",
@@ -92,12 +94,10 @@ static bool _scaled_mm_allowed_device(bool sm90_only=false, bool sm100_only=fals
 }
 
 #ifdef USE_ROCM
-static bool _scaled_mm_is_fnuz() {
+bool _scaled_mm_is_fnuz() {
     return at::detail::getCUDAHooks().isGPUArch({"gfx942"});
 }
 #endif
-
-namespace{
 
 /*
  * Scaling Type Determination:
@@ -206,8 +206,7 @@ bool is_desired_scaling(const at::Tensor& t, const at::Tensor& scale, ScalingTyp
     case ScalingType::BlockWise128x128:
       return is_blockwise_128x128_scaling(t, scale);
     default:
-      TORCH_CHECK(false);
-      return false;
+      TORCH_CHECK(false, "Unknown scaling type");
   }
 }
 
@@ -428,7 +427,6 @@ _scaled_gemm(
   }
 }
 
-} // namespace
 
 // NOTE(slayton58): This is defined as part of the _v2 code (way) below - declare the signature here
 //                  to help cleanup v1 call structure.
@@ -440,6 +438,8 @@ _scaled_rowwise_rowwise(
           const c10::ScalarType /*out_dtype*/,
           bool /*use_fast_accum*/,
           Tensor& /*out*/);
+
+} // namespace
 
 
 // Computes matrix multiply + bias while applying scaling to input and output matrices
@@ -661,12 +661,10 @@ _scaled_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
   return _scaled_mm_out_cuda(mat_a, mat_b, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, out);
 }
 
+namespace {
+
 using acceptance_fn = std::function<bool(c10::ScalarType, std::vector<ScalingType>&, ArrayRef<Tensor>&, c10::ScalarType, std::vector<ScalingType>&, ArrayRef<Tensor>&)>;
 using namespace std::placeholders;
-
-namespace scaled_blas = at::cuda::scaled;
-using scaled_blas::ScaledGemmImplementation;
-using scaled_blas::convert_int_to_enum;
 
 std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 9> scale_kernel_dispatch = {{
   { "tensorwise_tensorwise", scaled_blas::check_tensorwise_recipe, ScaledGemmImplementation::TENSORWISE_TENSORWISE },
@@ -829,7 +827,7 @@ _scaled_block1x128_block1x128(
     scale_a.stride(0) == 1 &&
     (
       scale_a.stride(1) == M ||
-      (scale_a.size(1) == 1 && scale_b.stride(1) == 1)
+      (scale_a.size(1) == 1 && scale_a.stride(1) == 1)
     ),
     "scale_a strides must be (", 1, ", ", M, "); got: ", scale_a.strides()
   );
@@ -851,7 +849,7 @@ _scaled_block1x128_block1x128(
         scale_b.stride(1) == 1
       )
     ),
-    "scale_b strides must be (", 1, ", ", N, "); got: ", scale_a.strides()
+    "scale_b strides must be (", 1, ", ", N, "); got: ", scale_b.strides()
   );
 
   auto scaling_choice_a = ScalingType::BlockWise1x128;
@@ -989,7 +987,7 @@ _scaled_block1x128_block128x128(
         scale_a.stride(1) == 1
       )
     ),
-    "scale_a must have strides (1, ", M, "); got ", scale_b.strides()
+    "scale_a must have strides (1, ", M, "); got ", scale_a.strides()
   );
   // scale_b shape
   TORCH_CHECK_VALUE(
@@ -1228,6 +1226,39 @@ _scaled_nvfp4_nvfp4(
   return _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, false /* use_fast_accum */, out, alpha);
 }
 
+void check_swizzle_lengths(ScaledGemmImplementation impl,
+                           std::vector<SwizzleType>& swizzle_a,
+                           std::vector<SwizzleType>& swizzle_b) {
+#ifdef USE_ROCM
+  // ROCM doesn't swizzle their formats - we don't care what's passed.
+  return;
+#else
+  // Store implementations that care about swizzling, and how many swizzle arguments
+  // they have to have
+  // NOTE(slayton): auto here is unable to deduce the correct type..
+  std::array<std::tuple<ScaledGemmImplementation, unsigned int>, 4> swizzled_impl = {{
+    // {implementation, # required arguments}
+    {ScaledGemmImplementation::MXFP8_MXFP8, 1},
+    {ScaledGemmImplementation::NVFP4_NVFP4, 2},
+    {ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE, 1},
+    {ScaledGemmImplementation::MXFP4_MXFP4, 1}
+  }};
+
+  // Only check MX/NVFP formats on NVIDIA
+  for (auto [check_impl, num_args] : swizzled_impl) {
+    if (impl != check_impl) {
+      continue;
+    }
+    TORCH_CHECK_VALUE(swizzle_a.size() == num_args, "swizzle_a must have ", num_args, " values, got ", swizzle_a.size());
+    TORCH_CHECK_VALUE(swizzle_b.size() == num_args, "swizzle_b must have ", num_args, " values, got ", swizzle_b.size());
+
+    // No need to check anything else
+    break;
+  }
+#endif
+}
+
+};  // anonymous namespace
 
 // V2: Computes matrix multiply + bias while applying scaling to input and output matrices
 // Scales are only applicable when matrices are of Float8 type and assumed to be equal to 1.0 by default.
@@ -1419,6 +1450,8 @@ _scaled_mm_cuda_v2_out(
   at::native::resize_output(out, {mat_a.size(0), mat_b.size(1)});
 
   auto bias_ = bias.value_or(Tensor());
+
+  check_swizzle_lengths(gemm_impl, swizzle_a_enum, swizzle_b_enum);
 
   // dispatch to appropriate lower-level calls for error checking & execution
   if (gemm_impl == ScaledGemmImplementation::TENSORWISE_TENSORWISE) {

@@ -144,7 +144,7 @@ def _with_callable_args(cls_or_self, **kwargs):
     return r.with_callable_args(**kwargs)
 
 
-ABC: Any = ABCMeta("ABC", (object,), {})  # compatible with Python 2 *and* 3:
+ABC: Any = ABCMeta("ABC", (object,), {})
 
 
 class ObserverBase(ABC, nn.Module):
@@ -1158,7 +1158,6 @@ class HistogramObserver(UniformQuantizationObserverBase):
             # find the left and right bins between the quantile bounds
             l = start_bin
             r = end_bin
-            # pyrefly: ignore [bad-assignment]
             while l < end_bin and cSum[l] < next_alpha * total:
                 l = l + 1
             while r > start_bin and cSum[r] > next_beta * total:

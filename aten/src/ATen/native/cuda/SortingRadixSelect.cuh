@@ -3,6 +3,7 @@
 #include <ATen/cuda/AsmUtils.cuh>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/DeviceUtils.cuh>
+#include <type_traits>
 
 namespace at::native {
 
@@ -215,10 +216,17 @@ __device__ void countRadixUsingMask(
   }
 
   // Now, for each warp, sum values
+  // Note: uint64_t on Linux is unsigned long, but CUDA atomicAdd expects
+  // unsigned long long. We use reinterpret_cast for compatibility.
   if (at::cuda::getLaneId() == 0) {
 #pragma unroll
     for (uint32_t i = 0; i < RadixSize; ++i) {
-      gpuAtomicAddNoReturn(&smem[i], counts[i]);
+      if constexpr (std::is_same_v<CountType, uint64_t>) {
+        atomicAdd(reinterpret_cast<unsigned long long*>(smem) + i,
+                  static_cast<unsigned long long>(counts[i]));
+      } else {
+        atomicAdd(&smem[i], counts[i]);
+      }
     }
   }
 
@@ -318,6 +326,7 @@ template <
     typename CountType,
     int RadixSize,
     int RadixBits,
+    bool prefetch,
     typename DataAccessor>
 __device__ __forceinline__ void countRadixLoop(
     CountType counts[RadixSize], // counts[i] will be the number of matching
@@ -395,32 +404,38 @@ __device__ __forceinline__ void countRadixLoop(
 
   // phase 2: processing 1 element at an iteration.
 
-  // prefetching. This is specifically useful for global memory access.
-  scalar_t v = unroll_segment + threadIdx.x < loopBound
-      ? getData(unroll_segment + threadIdx.x)
-      : static_cast<scalar_t>(0);
-  // we pad loopbound to round_up(loopbound, warpSize) to make sure all threads
-  // in the warp participate in the ballot.
+  // prefetching pattern if prefetch is true.
+  // prefetching pattern is only useful for global memory access.
+  scalar_t v_curr;
+  if constexpr (prefetch) {
+    v_curr = unroll_segment + threadIdx.x < loopBound
+        ? getData(unroll_segment + threadIdx.x)
+        : static_cast<scalar_t>(0);
+  }
   for (index_t i = unroll_segment + threadIdx.x;
-       i < round_up(
-               static_cast<index_t>(loopBound), static_cast<index_t>(warpSize));
+       i < loopBound;
        i += blockDim.x) {
-    // prefetch the next element.
-    scalar_t v_next = i + blockDim.x < loopBound ? getData(i + blockDim.x)
-                                                 : static_cast<scalar_t>(0);
+        scalar_t v_local; // the current element.
+        scalar_t v_next; // the next element. Used for prefetching.
 
-    bool hasVal = false;
-    bitwise_t digitInRadix = static_cast<bitwise_t>(0);
-    if (i < loopBound) {
-      bitwise_t val = TopKTypeConfig<scalar_t>::convert(v);
-      // check if bit pattern matches the pattern we have already discovered for
-      // topk value v.
-      hasVal = ((val & desiredMask) == desired);
-      // get the bits [radixDigitPos, radixDigitPos+RADIX_BITS-1] of the value
-      // v.
-      digitInRadix = at::cuda::Bitfield<bitwise_t>::getBitfield(
-          val, radixDigitPos, RadixBits);
-    }
+        if constexpr (prefetch) {
+          // prefetch the next element.
+          v_local = v_curr;
+          v_next = i + blockDim.x < loopBound ? getData(i + blockDim.x)
+                                              : static_cast<scalar_t>(0);
+        }
+        else {
+          v_local = getData(i); // if no prefetching, just get the current element.
+        }
+
+        bitwise_t val = TopKTypeConfig<scalar_t>::convert(v_local);
+        // check if bit pattern matches the pattern we have already discovered for
+        // topk value v.
+        bool hasVal = ((val & desiredMask) == desired);
+        // get the bits [radixDigitPos, radixDigitPos+RADIX_BITS-1] of the value
+        // v.
+        bitwise_t digitInRadix = at::cuda::Bitfield<bitwise_t>::getBitfield(
+            val, radixDigitPos, RadixBits);
 
 // counting across the warp.
 #pragma unroll
@@ -432,7 +447,79 @@ __device__ __forceinline__ void countRadixLoop(
       counts[j] += __popcll(WARP_BALLOT(vote));
     }
 
-    v = v_next; // closing the prefetching loop.
+    if constexpr (prefetch) {
+      v_curr = v_next; // closing the prefetching loop.
+    }
+  }
+}
+
+// Aggregates radix matches across all warps and distributes results back to all threads.
+// Uses double-buffering via buffer_index (0 or 1) to alternate between two smem segments,
+// preventing race conditions between concurrent iterations. Since countRadixUsingMaskDataSmem
+// performs __syncthreads() internally, at most two loop iterations can be in flight
+// simultaneously, so two buffers are sufficient. buffer_index is toggled after each
+// countRadixUsingMaskDataSmem invocation.
+template <
+    typename CountType,
+    int RadixSize,
+    int RadixBits>
+__device__ __forceinline__ void countRadixAggregateCounts(
+    CountType counts[RadixSize], // counts[i] will be the number of matching
+                                 // elements ((val & desiredMask) == desired)
+                                 // that have the digits [radixDigitPos,
+                                 // radixDigitPos+RADIX_BITS-1] set to i.
+    CountType* smem, // shared memory for inter-warp reduction of counts.
+    int buffer_index){ // buffer index for smem.
+
+  // Maximum number of warps per workgroup. HIP workgroups have at most 1024 threads.
+  // Warp size is at least 32 (can be 64 on some architectures), so we use 32 for safety.
+  // This sizes shared memory buffers to accommodate all possible warps: 1024/32 = 32.
+  constexpr uint MAX_WARPS = 1024/C10_WARP_SIZE_LOWER_BOUND;
+  const int buffer_offset = buffer_index * MAX_WARPS * RadixSize; // offset of the buffer in smem.
+  const uint WARP_BITS = __builtin_ctz(C10_WARP_SIZE);
+
+  const uint num_warps = blockDim.x >> WARP_BITS;  // Actual number of warps in this block
+  const uint warp_id = threadIdx.x >> WARP_BITS; // = threadIdx.x / C10_WARP_SIZE
+  const int lane_id = at::cuda::getLaneId(); // = threadIdx.x % C10_WARP_SIZE
+
+  // Stage 1: Each warp's lane 0 stores its counts in smem.
+  // Layout after Stage 1: [warp0: all radix bins], [warp1: all radix bins], ...
+  // this layout starts from index buffer_offset.
+  if (lane_id == 0) {
+#pragma unroll
+    for (uint32_t i = 0; i < RadixSize; ++i) {
+      smem[
+            buffer_offset
+          + warp_id * RadixSize
+          + i
+          ] = counts[i];
+    }
+  }
+
+  __syncthreads(); // wait for all warps to finish storing their counts to smem.
+
+  // Stage 2: Warp0 performs reduction for all bins.
+  // Layout after Stage 2: [final radix0 sum], [final radix1 sum], ..., [final radix(RadixSize-1) sum]
+  // this layout starts from index buffer_offset.
+  if (warp_id == 0 && lane_id < RadixSize) {
+    CountType sum = 0;
+#pragma unroll
+    for (int w = 0; w < num_warps; ++w) {
+      sum += smem[
+                    buffer_offset
+                  + w * RadixSize
+                  + lane_id
+                  ];
+    }
+    smem[buffer_offset + lane_id] = sum;
+  }
+
+  __syncthreads(); // Wait for warp 0 to finish reduction.
+
+  // Stage 3: Each thread reads the final counts from smem.
+#pragma unroll
+  for (uint32_t i = 0; i < RadixSize; ++i) {
+    counts[i] = smem[buffer_offset + i];
   }
 }
 
@@ -457,6 +544,7 @@ __device__ void countRadixUsingMaskDataSmem(
                            // digits [radixDigitPos, radixDigitPos+RADIX_BITS-1]
                            // set to i in the warp.
     CountType* smem, // shared memory for inter-warp reduction of counts.
+    int buffer_index, // buffer index for smem.
     bitwise_t
         desired, // combined with desiredMask to filter relevant elements. An
                  // element is relevant if ((val & desiredMask) == desired).
@@ -479,21 +567,13 @@ __device__ void countRadixUsingMaskDataSmem(
     counts[i] = 0; // initialize counts to 0.
   }
 
-  // initialize smem to 0. This is for reduction of counts across all warps.
-  if (threadIdx.x < RadixSize) {
-    smem[threadIdx.x] = 0;
-  }
-
-  __syncthreads(); // wait for all threads in the block to finish initializing
-                   // smem.
-
   // count the distribution of the bits in the radix digit at `radixDigitPos` to
   // `radixDigitPos`+RADIX_BITS-1 for values that match the desired pattern
   // ((val & desiredMask) == desired). counts[] will hold the results for the
   // current warp.
   if (dataSmemSize >
       0) { // if shared memory is filled, use dataSmem as the input data.
-    countRadixLoop<scalar_t, bitwise_t, index_t, int, RadixSize, RadixBits>(
+    countRadixLoop<scalar_t, bitwise_t, index_t, CountType, RadixSize, RadixBits, /*prefetch =*/ false>(
         counts,
         desired,
         desiredMask,
@@ -501,7 +581,7 @@ __device__ void countRadixUsingMaskDataSmem(
         dataSmemSize,
         [&](index_t i) -> scalar_t { return dataSmem[i]; });
   } else { // if shared memory is not filled, fall back to global memory.
-    countRadixLoop<scalar_t, bitwise_t, index_t, int, RadixSize, RadixBits>(
+    countRadixLoop<scalar_t, bitwise_t, index_t, CountType, RadixSize, RadixBits, /*prefetch =*/ true>(
         counts,
         desired,
         desiredMask,
@@ -512,27 +592,11 @@ __device__ void countRadixUsingMaskDataSmem(
         });
   }
 
-  // accumulate the counts across all warps.
-  // sum for each warp is added to smem by thread 0 in the warp.
-  if (at::cuda::getLaneId() == 0) {
-#pragma unroll
-    for (uint32_t i = 0; i < RadixSize; ++i) {
-      gpuAtomicAddNoReturn(
-          &smem[i],
-          counts[i]); // thread0 in warp atomically adds the counts to smem.
-    }
-  }
-
-  __syncthreads(); // wait for all warps to finish adding their counts to smem.
-
-// each thread reads the final counts from smem.
-#pragma unroll
-  for (uint32_t i = 0; i < RadixSize; ++i) {
-    counts[i] = smem[i];
-  }
-
-  __syncthreads(); // wait for all threads in the block to finish reading the
-                   // counts.
+  // aggregate counts across all warps and distribute results back to all threads.
+  countRadixAggregateCounts<CountType, RadixSize, RadixBits>(
+    counts,
+    smem,
+    buffer_index);
 }
 
 // This is the main loop of the findPattern function that finds the unique value
@@ -626,6 +690,15 @@ __device__ scalar_t findPatternDataSmem(
                      // element is relevant if ((val & desiredMask) == desired).
     const scalar_t* dataSmem, // input data stored in shared memory.
     index_t dataSmemSize) { // input data size stored in shared memory.
+
+  // Ensure all threads have finished reading from smem before overwriting it.
+  // countRadixAggregateCounts Stage 3 reads from smem[buffer_offset + i];
+  // when buffer_offset == 0, those locations overlap with smem[0]/smem[1]
+  // written below. Warp 0 (which writes smem[0]/smem[1]) may get ahead of
+  // lagging warps still in Stage 3. Syncing here (rather than at the end of
+  // Stage 3) is cheaper because findPatternDataSmem is called at most once per
+  // radixSelect invocation, only when a unique element is found (count == 1).
+  __syncthreads();
 
   // initialize smem to 0.
   // smem[0] is a flag to indicate if a value has been found.
@@ -740,21 +813,15 @@ __device__ __forceinline__ void fillDataSmem(
     scalar_t v = threadIdx.x < sliceSize
         ? doLdg(&data[threadIdx.x * withinSliceStride])
         : static_cast<scalar_t>(0);
-    // we pad sliceSize to round_up(sliceSize, warpSize) to make sure all
-    // threads in the warp participate in the ballot.
-    for (index_t i = threadIdx.x; i <
-         round_up(static_cast<index_t>(sliceSize),
-                  static_cast<index_t>(warpSize));
+
+    for (index_t i = threadIdx.x; i < sliceSize;
          i += blockDim.x) {
       scalar_t v_next = (i + blockDim.x) < sliceSize
           ? doLdg(&data[(i + blockDim.x) * withinSliceStride])
           : static_cast<scalar_t>(0);
 
-      bool match = false;
-      if (i < sliceSize) {
-        match =
-            ((TopKTypeConfig<scalar_t>::convert(v) & desiredMask) == desired);
-      }
+      bool match =
+          (TopKTypeConfig<scalar_t>::convert(v) & desiredMask) == desired;
 
       // Warp-level ballot
       uint64_t ballot = WARP_BALLOT(
@@ -813,11 +880,13 @@ __device__ void radixSelect(
     bool largest,
     index_t sliceSize,
     index_t withinSliceStride,
-    int* smem,
+    index_t* smem,
     scalar_t* topK) {
   // Per-thread buckets into which we accumulate digit counts in our
   // radix
-  int counts[RADIX_SIZE];
+  //
+  // counts must be index_t to safely handle sliceSize > INT_MAX.
+  index_t counts[RADIX_SIZE];
 
 #ifdef USE_ROCM
 
@@ -849,6 +918,14 @@ __device__ void radixSelect(
   __syncthreads(); // so the initialization is visible to all threads in the
                    // blocks.
 
+  // buffer index for smem. We use two segments of smem for inter-warp communication of counts.
+  // Given the counting operation in countRadixUsingMaskDataSmem performs __syncthreads() internally,
+  // we need to alternate between the at most two segments of smem to avoid race conditions.
+  // No more than two iterations of the loop will be "in flight" at any given time because
+  // of the __syncthreads() in countRadixUsingMaskDataSmem.
+  // buffer_index is either 0 or 1. It is toggled after each countRadixUsingMaskDataSmem invocation.
+  int buffer_index = 0;
+
 #endif
 
   // We only consider elements x such that (x & desiredMask) == desired
@@ -860,7 +937,7 @@ __device__ void radixSelect(
   // We are looking for the top kToFind-th element when iterating over
   // digits; this count gets reduced by elimination when counting
   // successive digits
-  int kToFind = k;
+  index_t kToFind = k;
 
   // We start at the most significant digit in our radix, scanning
   // through to the least significant digit
@@ -890,11 +967,12 @@ __device__ void radixSelect(
         scalar_t,
         bitwise_t,
         index_t,
-        int,
+        index_t,
         RADIX_SIZE,
         RADIX_BITS>(
         counts,
         smem,
+        buffer_index,
         desired,
         desiredMask,
         digitPos,
@@ -903,12 +981,15 @@ __device__ void radixSelect(
         data,
         dataSmem,
         dataSmemSize);
+
+    buffer_index ^= 1; // toggle buffer index.
+
 #else
     countRadixUsingMask<
         scalar_t,
         bitwise_t,
         index_t,
-        int,
+        index_t,
         RADIX_SIZE,
         RADIX_BITS>(
         counts,
@@ -921,7 +1002,7 @@ __device__ void radixSelect(
         data);
 
 #endif
-    auto found_unique = [&](int i, int count) -> bool {
+    auto found_unique = [&](int i, index_t count) -> bool {
       /* All threads have the same value in counts here, so all */
       /* threads will return from the function. */
       if (count == 1 && kToFind == 1) {
@@ -963,7 +1044,7 @@ __device__ void radixSelect(
       }
       return false;
     };
-    auto found_non_unique = [&](int i, int count) -> bool {
+    auto found_non_unique = [&](int i, index_t count) -> bool {
       if (count >= kToFind) {
         desired = at::cuda::Bitfield<bitwise_t>::setBitfield(
             desired, i, digitPos, RADIX_BITS);
@@ -999,7 +1080,7 @@ __device__ void radixSelect(
       // Process in descending order
 #pragma unroll
       for (int i = RADIX_SIZE - 1; i >= 0; --i) {
-        int count = counts[i];
+        index_t count = counts[i];
         if (found_unique(i, count)) {
           return;
         }
@@ -1011,7 +1092,7 @@ __device__ void radixSelect(
       // Process in ascending order
 #pragma unroll
       for (int i = 0; i < RADIX_SIZE; ++i) {
-        int count = counts[i];
+        index_t count = counts[i];
         if (found_unique(i, count)) {
           return;
         }

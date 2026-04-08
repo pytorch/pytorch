@@ -171,8 +171,15 @@ __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
     constexpr auto io_size = calc_io_size<func_t>();
     int remaining = N - io_block_work_size<io_size>() * blockIdx.x;
 
-    if (remaining < io_block_work_size<io_size>()) { // if this block handles the reminder,
-                  // just do a naive unrolled loop
+    // note: unless the compiler has a good reason to move code, it won't.
+    // Thus, the if-condition typically comes first in SASS, so the "hot" path
+    // should go first, improving instruction cache use.
+    if (remaining >= io_block_work_size<io_size>()) { // if this block has a full `block_work_size` data to handle, use
+      // vectorized memory access
+      elementwise_kernel_helper(
+        f, memory::policies::vectorized<vec_size, array_t, elems_per_thread<io_size>()>(data));
+    } else { // if this block handles the reminder,
+      // just do a naive unrolled loop
       auto input_calc = TrivialOffsetCalculator<traits::arity>();
       auto output_calc = TrivialOffsetCalculator<1>();
       auto loader = memory::LoadWithoutCast();
@@ -186,10 +193,6 @@ __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
       elems_per_thread<io_size>()>(
       data, remaining, input_calc, output_calc, loader, storer);
       elementwise_kernel_helper(f, policy);
-    } else { // if this block has a full `block_work_size` data to handle, use
-        // vectorized memory access
-      elementwise_kernel_helper(
-      f, memory::policies::vectorized<vec_size, array_t, elems_per_thread<io_size>()>(data));
     }
 #else
     CUDA_KERNEL_ASSERT(false && "Fatal! vectorized_elementwise_kernel<8,...> supports only sm_90 and sm_10x. Please report an issue on GitHub.");
@@ -199,8 +202,12 @@ __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
     constexpr auto io_size = calc_io_size<func_t>();
     int remaining = N - io_block_work_size<io_size>() * blockIdx.x;
 
-    if (remaining < io_block_work_size<io_size>()) { // if this block handles the reminder,
-                   // just do a naive unrolled loop
+    if (remaining >= io_block_work_size<io_size>()) { // if this block has a full `block_work_size` data to handle, use
+      // vectorized memory access
+      elementwise_kernel_helper(
+        f, memory::policies::vectorized<vec_size, array_t, elems_per_thread<io_size>()>(data));
+    } else { // if this block handles the reminder,
+      // just do a naive unrolled loop
       auto input_calc = TrivialOffsetCalculator<traits::arity>();
       auto output_calc = TrivialOffsetCalculator<1>();
       auto loader = memory::LoadWithoutCast();
@@ -214,26 +221,15 @@ __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
       elems_per_thread<io_size>()>(
       data, remaining, input_calc, output_calc, loader, storer);
       elementwise_kernel_helper(f, policy);
-    } else { // if this block has a full `block_work_size` data to handle, use
-         // vectorized memory access
-      elementwise_kernel_helper(
-      f, memory::policies::vectorized<vec_size, array_t, elems_per_thread<io_size>()>(data));
     }
   }
 }
 
 #else // USE_ROCM
-template <int vec_size, typename func_t, typename array_t>
-C10_LAUNCH_BOUNDS_1(num_threads())
-__global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
+template <int vec_size, int tws, typename func_t, typename array_t>
+__forceinline__ __device__ void vectorized_elementwise_kernel_impl(int N, func_t f, array_t data) {
   using traits = function_traits<func_t>;
   constexpr auto io_size = calc_io_size<func_t>();
-#if defined(USE_ROCM) && defined(__gfx942__)
-  // Similar check in launch_vectorized_kernel() as well. Both should be in sync.
-  constexpr int tws = 16;
-#else
-  constexpr int tws = elems_per_thread<io_size>();
-#endif
   constexpr int bws = tws * num_threads();
   int remaining = N - bws * blockIdx.x;
 
@@ -258,6 +254,18 @@ __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
     elementwise_kernel_helper(
         f, memory::policies::vectorized<optimal_vec_size, array_t, tws>(data));
   }
+}
+
+template <int vec_size, typename func_t, typename array_t>
+C10_LAUNCH_BOUNDS_1(num_threads())
+__global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
+  constexpr auto io_size = calc_io_size<func_t>();
+  constexpr auto tws_942 = 16;
+  constexpr auto tws = elems_per_thread<io_size>();
+  if (__builtin_amdgcn_processor_is("gfx942"))
+    return vectorized_elementwise_kernel_impl<vec_size, tws_942>(N, f, data);
+
+  vectorized_elementwise_kernel_impl<vec_size, tws>(N, f, data);
 }
 #endif // USE_ROCM
 
@@ -313,12 +321,11 @@ static inline void launch_vectorized_kernel(
   if (p->major != 9 && p->major != 10) {
     vec_size = std::min<uint16_t>(vec_size, 4);
   }
-  // Here we purposely omit vec8 for 1-byte data because of a bug in NVCC
-  // that causes some numerical mismatches with uint8 on sm80 and sm90.
-  // TODO: Revisit this after CUDA 12.8 update.
+#if !defined(CUDA_VERSION) || CUDA_VERSION < 12080
   if constexpr (sizeof(cpp_type) < 2) {
     vec_size = std::min<uint16_t>(vec_size, 4);
   }
+#endif
   int tws = elems_per_thread<io_size>();
 #endif
   int bws = tws * num_threads();
@@ -646,7 +653,6 @@ void gpu_kernel_impl_nocast(TensorIteratorBase& iter, const func_t& f) {
   TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());
   TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
   TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
-  TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
 
   std::array<char*, ntensors> data;
   for (int i = 0; i < ntensors; i++) {

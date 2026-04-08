@@ -74,7 +74,7 @@ import io
 import os
 
 import unittest
-from typing import Any, Optional, Union
+from typing import Any
 from collections.abc import Callable
 
 import numpy as np
@@ -1067,7 +1067,7 @@ class QuantizationTestCase(TestCase):
 
             def _get_underlying_op_type(
                 node: Node, gm: GraphModule
-            ) -> Union[Callable, str]:
+            ) -> Callable | str:
                 if node.op == "call_module":
                     mod = getattr(gm, node.target)
                     return type(mod)
@@ -2478,8 +2478,8 @@ class ManualEmbeddingBagLinear(nn.Module):
     def forward(
         self,
         input: torch.Tensor,
-        offsets: Optional[torch.Tensor] = None,
-        per_sample_weights: Optional[torch.Tensor] = None,
+        offsets: torch.Tensor | None = None,
+        per_sample_weights: torch.Tensor | None = None,
     ):
         x = self.emb(input, offsets, per_sample_weights)
         x = self.quant(x)

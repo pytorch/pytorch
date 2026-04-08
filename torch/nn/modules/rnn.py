@@ -655,12 +655,10 @@ class RNN(RNNBase):
 
     @overload
     @torch._jit_internal._overload_method  # noqa: F811
-    # pyrefly: ignore [bad-override]
     def forward(
         self,
         input: Tensor,
         hx: Tensor | None = None,
-        # pyrefly: ignore [bad-return]
     ) -> tuple[Tensor, Tensor]:
         pass
 
@@ -670,7 +668,6 @@ class RNN(RNNBase):
         self,
         input: PackedSequence,
         hx: Tensor | None = None,
-        # pyrefly: ignore [bad-return]
     ) -> tuple[PackedSequence, Tensor]:
         pass
 
@@ -802,7 +799,6 @@ class RNN(RNNBase):
         if isinstance(orig_input, PackedSequence):
             output_packed = PackedSequence(
                 output,
-                # pyrefly: ignore [bad-argument-type]
                 batch_sizes,
                 sorted_indices,
                 unsorted_indices,
@@ -1063,12 +1059,10 @@ class LSTM(RNNBase):
     # Same as above, see torch/nn/modules/module.py::_forward_unimplemented
     @overload  # type: ignore[override]
     @torch._jit_internal._overload_method  # noqa: F811
-    # pyrefly: ignore [bad-override]
     def forward(
         self,
         input: Tensor,
         hx: tuple[Tensor, Tensor] | None = None,
-        # pyrefly: ignore [bad-return]
     ) -> tuple[Tensor, tuple[Tensor, Tensor]]:  # noqa: F811
         pass
 
@@ -1079,7 +1073,6 @@ class LSTM(RNNBase):
         self,
         input: PackedSequence,
         hx: tuple[Tensor, Tensor] | None = None,
-        # pyrefly: ignore [bad-return]
     ) -> tuple[PackedSequence, tuple[Tensor, Tensor]]:  # noqa: F811
         pass
 
@@ -1196,7 +1189,6 @@ class LSTM(RNNBase):
         if isinstance(orig_input, PackedSequence):
             output_packed = PackedSequence(
                 output,
-                # pyrefly: ignore [bad-argument-type]
                 batch_sizes,
                 sorted_indices,
                 unsorted_indices,
@@ -1365,12 +1357,10 @@ class GRU(RNNBase):
 
     @overload  # type: ignore[override]
     @torch._jit_internal._overload_method  # noqa: F811
-    # pyrefly: ignore [bad-override]
     def forward(
         self,
         input: Tensor,
         hx: Tensor | None = None,
-        # pyrefly: ignore [bad-return]
     ) -> tuple[Tensor, Tensor]:  # noqa: F811
         pass
 
@@ -1380,7 +1370,6 @@ class GRU(RNNBase):
         self,
         input: PackedSequence,
         hx: Tensor | None = None,
-        # pyrefly: ignore [bad-return]
     ) -> tuple[PackedSequence, Tensor]:  # noqa: F811
         pass
 
@@ -1477,7 +1466,6 @@ class GRU(RNNBase):
         if isinstance(orig_input, PackedSequence):
             output_packed = PackedSequence(
                 output,
-                # pyrefly: ignore [bad-argument-type]
                 batch_sizes,
                 sorted_indices,
                 unsorted_indices,

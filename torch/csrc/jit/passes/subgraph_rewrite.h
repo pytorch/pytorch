@@ -18,8 +18,18 @@
 
 namespace torch::jit {
 
+/** Rewrite pattern descriptor.
+ *
+ * This structure is used in the implementation of `SubgraphRewriter` and
+ * is not supposed to be used externally.
+ */
+struct RewritePatternDescr {
+  std::string pattern;
+  std::string replacement;
+  std::unordered_map<std::string, std::string> value_name_map;
+};
+
 // Forward declarations.
-struct RewritePatternDescr;
 struct Match;
 
 using MatchFilter = std::function<
@@ -99,17 +109,6 @@ class TORCH_API SubgraphRewriter {
       const std::vector<MatchFilter>& filters);
 
   bool overlapsWithPreviousMatches(const Match* match);
-};
-
-/** Rewrite pattern descriptor.
- *
- * This structure is used in the implementation of `SubgraphRewriter` and
- * is not supposed to be used externally.
- */
-struct RewritePatternDescr {
-  std::string pattern;
-  std::string replacement;
-  std::unordered_map<std::string, std::string> value_name_map;
 };
 
 } // namespace torch::jit

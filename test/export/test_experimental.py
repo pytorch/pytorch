@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: export"]
 # flake8: noqa
+import contextlib
 import copy
 import types
 import unittest
@@ -14,11 +15,19 @@ from torch._dynamo.functional_export import (
     dynamo_graph_capture_for_export,
 )
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._functorch.aot_autograd import aot_export_module
+from torch._export.utils import _compiling_state_context
+from torch._functorch.aot_autograd import (
+    aot_export_joint_with_descriptors,
+    aot_export_module,
+)
+from torch._guards import tracing as torch_tracing, TracingContext
 from torch.export import export
 from torch.export.experimental import _export_forward_backward, _sticky_export
 from torch.export.graph_signature import OutputKind
 from torch.testing import FileCheck
+from torch.testing._internal.common_device_type import (
+    IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
+)
 from torch.testing._internal.common_utils import TEST_CUDA
 from torch.utils import _pytree as pytree
 
@@ -59,7 +68,11 @@ class GlobalContext:
         """Reconstructs from (leaves, ctx)."""
         output = cls()
         summary_spec, tensor_spec = ctx
-        assert len(leaves) == summary_spec.num_leaves + tensor_spec.num_leaves
+        if len(leaves) != summary_spec.num_leaves + tensor_spec.num_leaves:
+            raise AssertionError(
+                f"Expected {summary_spec.num_leaves + tensor_spec.num_leaves} leaves, "
+                f"got {len(leaves)}"
+            )
         output._summaries = pytree.tree_unflatten(
             leaves[: summary_spec.num_leaves], summary_spec
         )
@@ -439,6 +452,78 @@ def forward(self, args_0):
         ):
             _dynamo_graph_capture_for_export(module)(x)
 
+    @unittest.skipUnless(
+        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED and not torch.version.hip,
+        "Requires CUDA with SM >= 8.0, Triton, and not ROCm",
+    )
+    def test_aot_export_flex_attention_callable_mask_mod(self):
+        """Test flex_attention AOT export with callable class as mask_mod.
+
+        _MaskModWrapper must delegate __eq__ to callable objects for TreeSpec
+        comparison in AOTAutograd's PytreeThunk.set() (utils.py:162).
+        """
+        from torch._functorch.aot_autograd import aot_export_module
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
+        _register_blockmask_pytree()
+
+        class ComposedMaskMod:
+            def __init__(self, *mask_fns):
+                self.mask_fns = mask_fns
+
+            def __call__(self, b, h, q, k):
+                result = True
+                for fn in self.mask_fns:
+                    result = result & fn(b, h, q, k)
+                return result
+
+            def __eq__(self, other):
+                if not isinstance(other, ComposedMaskMod):
+                    return NotImplemented
+                return self.mask_fns == other.mask_fns
+
+            def __hash__(self):
+                return hash(self.mask_fns)
+
+        def causal_mask(b, h, q, k):
+            return q >= k
+
+        class FlexAttentionModel(torch.nn.Module):
+            def __init__(self, embed_dim: int, num_heads: int):
+                super().__init__()
+                self.num_heads = num_heads
+                self.head_dim = embed_dim // num_heads
+                self.q_proj = torch.nn.Linear(embed_dim, embed_dim)
+                self.k_proj = torch.nn.Linear(embed_dim, embed_dim)
+                self.v_proj = torch.nn.Linear(embed_dim, embed_dim)
+
+            def forward(self, x):
+                B, L, D = x.shape
+                q = self.q_proj(x).view(B, L, self.num_heads, self.head_dim)
+                k = self.k_proj(x).view(B, L, self.num_heads, self.head_dim)
+                v = self.v_proj(x).view(B, L, self.num_heads, self.head_dim)
+                q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
+
+                mask_mod = ComposedMaskMod(causal_mask)
+                block_mask = create_block_mask(
+                    mask_mod, B=B, H=self.num_heads, Q_LEN=L, KV_LEN=L, device=x.device
+                )
+                out = flex_attention(q, k, v, block_mask=block_mask)
+                return (out.transpose(1, 2).contiguous().view(B, L, D),)
+
+        embed_dim, num_heads, seq_len = 64, 2, 128
+        model = FlexAttentionModel(embed_dim, num_heads).cuda()
+        x = torch.randn(1, seq_len, embed_dim, device="cuda")
+
+        gm, signature = aot_export_module(model, [x], trace_joint=False)
+
+        # aot_export_module flattens params/buffers into the graph signature
+        params = [p for p in model.parameters()]
+        out_eager = model(x)[0]
+        out_export = gm(*params, x)[0]
+        self.assertEqual(out_eager.shape, out_export.shape)
+        self.assertTrue(torch.allclose(out_eager, out_export, atol=1e-5))
+
     def test_joint_dynamic(self) -> None:
         from torch.export import Dim
 
@@ -714,6 +799,34 @@ def forward(self, x):
         res_eager = Foo()(*eager_inputs[0], **eager_inputs[1])
 
         self.assertEqual(res_export, res_eager)
+
+    def test_single_op(self):
+        # from torch._dynamo.functional_export import dynamo_graph_capture_for_export
+        x, y = (torch.randn(2, 3), torch.randn(2, 3))
+        graph = dynamo_graph_capture_for_export(torch.ops.aten.add.Tensor)(x, y)
+        self.assertExpectedInline(
+            graph.code.strip("\r\n "),
+            """\
+def forward(self, other):
+    _fn_args = (self, other)
+    self, L_self_ , L_other_ , = self._dynamo_bytecode_flatten(*_fn_args)
+    l_self_ = L_self_
+    l_other_ = L_other_
+    add_tensor = torch.ops.aten.add.Tensor(self = l_self_, other = l_other_, alpha = 1);  l_self_ = l_other_ = None
+    return self._dynamo_bytecode_unflatten((add_tensor,), _fn_args)""",
+        )
+        out = torch.empty(10)
+        graph = dynamo_graph_capture_for_export(torch.ops.aten.range.out)(0, 9, out=out)
+        self.assertExpectedInline(
+            graph.code.strip("\r\n "),
+            """\
+def forward(self, start, end, out):
+    _fn_args = (start, end, out)
+    L_out_ , = self._dynamo_bytecode_flatten(*_fn_args)
+    l_out_ = L_out_
+    range_out = torch.ops.aten.range.out(start = 0, end = 9, step = 1, out = l_out_);  l_out_ = None
+    return self._dynamo_bytecode_unflatten((range_out,), _fn_args)""",
+        )
 
     def test_export_leaf(self):
         class Foo(torch.nn.Module):
@@ -1327,8 +1440,14 @@ def forward(self, arg0_1):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_aot_export_blockmask_closure_spec_mismatch(self):
-        """BlockMasks with same closure code but different captured values must
-        produce different TreeSpecs, so pytree won't confuse them."""
+        """BlockMasks with same closure structure produce equal TreeSpecs.
+
+        Closure values are extracted into pytree leaves, so two BlockMasks
+        whose mask_mod closures have the same code + structure but different
+        captured values have the same spec (values differ in the leaves, not
+        the context).  BlockMasks with different closure *structure* (e.g.
+        different code) must still produce different specs.
+        """
         from torch.nn.attention.flex_attention import create_block_mask
 
         _register_blockmask_pytree()
@@ -1355,8 +1474,154 @@ def forward(self, arg0_1):
 
         # Same closure code + same captured value -> same spec
         self.assertEqual(spec_a, spec_a_same)
-        # Same closure code + different captured value -> different spec
-        self.assertNotEqual(spec_a, spec_b)
+        # Same closure code + different captured value -> same spec
+        # (values are in the leaves, not the context)
+        self.assertEqual(spec_a, spec_b)
+
+        # Different closure *code* -> different spec
+        def different_mask(b, h, q, k):
+            return q > k
+
+        mask_c = create_block_mask(
+            different_mask, B=1, H=1, Q_LEN=64, KV_LEN=64, device="cuda"
+        )
+        _, spec_c = pytree.tree_flatten(mask_c)
+        self.assertNotEqual(spec_a, spec_c)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_blockmask_and_masks_closure_extraction(self):
+        """and_masks closure tensors are recursively extracted into pytree leaves.
+
+        and_masks(fn1, fn2) returns a closure capturing a tuple of functions.
+        _extract_closure_pytree must recursively process these functions
+        (extracting their closure tensors) rather than emitting the functions
+        themselves as leaves, since functions are not supported export input
+        types.
+        """
+        from torch.nn.attention.flex_attention import (
+            and_masks,
+            BlockMask,
+            create_block_mask,
+        )
+
+        _register_blockmask_pytree()
+
+        def causal(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        offset = torch.tensor(3, device="cuda")
+
+        def offset_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx + offset
+
+        mask_mod = and_masks(causal, offset_mask)
+        block_mask = create_block_mask(
+            mask_mod, B=1, H=None, Q_LEN=128, KV_LEN=128, device="cuda"
+        )
+
+        leaves, spec = pytree.tree_flatten(block_mask)
+
+        # 8 regular BlockMask tensor attrs + offset extracted from
+        # offset_mask's closure
+        n_regular = len(BlockMask._TENSOR_ATTRS)
+        self.assertEqual(len(leaves), n_regular + 1)
+        self.assertTrue(all(isinstance(l, torch.Tensor) for l in leaves))
+        self.assertIs(leaves[n_regular], offset)
+
+        # Leaves must all pass check_user_input_output
+        from torch._dynamo.eval_frame import check_user_input_output
+        from torch._dynamo.exc import UserErrorType
+
+        check_user_input_output(leaves, UserErrorType.INVALID_INPUT)
+
+        # Round-trip: unflatten should reconstruct a working mask_mod
+        restored = pytree.tree_unflatten(leaves, spec)
+        self.assertTrue(callable(restored.mask_mod))
+
+    def test_aot_export_closure_buffer_mutation(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.zeros(()))
+
+            def forward(self, x):
+                self.buf.add_(x.sum())
+                return x.sin()
+
+        def make_closure(mod):
+            def fn(x):
+                mod._buffers["buf"].add_(x.sum())
+                return x.sin()
+
+            return fn
+
+        class Wrapper(torch.nn.Module):
+            def __init__(self, fn, mod):
+                super().__init__()
+                self._parameters = mod._parameters
+                self._buffers = mod._buffers
+                self._modules = mod._modules
+                self._fn = fn
+
+            def forward(self, x):
+                return self._fn(x)
+
+        def run_export(capture_fn):
+            mod = Mod()
+            wrapped = Wrapper(make_closure(mod), mod)
+            x = torch.randn(4)
+            gm = capture_fn(wrapped)(x)
+
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(
+                    torch_tracing(
+                        gm.meta.get(
+                            "tracing_context", TracingContext(gm.meta["fake_mode"])
+                        )
+                    )
+                )
+                stack.enter_context(_compiling_state_context())
+                stack.enter_context(gm.meta["fake_mode"])
+
+                jd = aot_export_joint_with_descriptors(
+                    stack,
+                    gm,
+                    args=(x,),
+                    kwargs={},
+                    keep_inference_input_mutations=True,
+                    disable_functionalization=True,
+                )
+            return jd.graph_module, wrapped, x
+
+        # Verify Dynamo-captured graph mutates the buffer via closure
+        mod = Mod()
+        wrapped = Wrapper(make_closure(mod), mod)
+        x = torch.randn(4)
+        gm = dynamo_graph_capture_for_export(wrapped)(x)
+        wrapped.buf.zero_()
+        gm(x)
+        self.assertEqual(wrapped.buf, x.sum())
+
+        # Verify joint graphs from both APIs match
+        joint_public, _, _ = run_export(dynamo_graph_capture_for_export)
+        joint_private, _, _ = run_export(_dynamo_graph_capture_for_export)
+        self.assertEqual(
+            str(joint_public.code).strip(), str(joint_private.code).strip()
+        )
+
+        # Verify numerical correctness of both joint graphs against eager
+        mod = Mod()
+        x = torch.randn(4)
+        eager_out = mod(x)
+        eager_buf = mod.buf.clone()
+
+        for label, joint_gm in [("public", joint_public), ("private", joint_private)]:
+            buf_input = torch.zeros(())
+            (exported_out,) = joint_gm(buf_input, x)
+            self.assertEqual(exported_out, eager_out, msg=f"{label}: output mismatch")
+            self.assertEqual(
+                buf_input, eager_buf, msg=f"{label}: buffer mutation mismatch"
+            )
 
 
 if __name__ == "__main__":

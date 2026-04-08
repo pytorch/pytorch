@@ -3,13 +3,16 @@ import collections
 import inspect
 import typing
 from types import GenericAlias
-from typing import Optional, Union
 
 import torch
 from torch import device, dtype, Tensor, types
 from torch.utils._exposed_in import exposed_in
 
-from .opaque_object import _OPAQUE_TYPES, is_opaque_type
+from .opaque_object import (
+    _resolve_opaque_type_info,
+    is_opaque_reference_type,
+    is_opaque_type,
+)
 
 
 # This is used as a negative test for
@@ -23,7 +26,7 @@ def infer_schema(
     /,
     *,
     mutates_args,
-    op_name: Optional[str] = None,
+    op_name: str | None = None,
 ) -> str:
     r"""Parses the schema of a given function with type hints. The schema is inferred from the
     function's type hints, and can be used to define a new operator.
@@ -79,7 +82,7 @@ def infer_schema(
             )
 
     def unstringify_types(
-        tys: tuple[Union[type[object], str], ...],
+        tys: tuple[type[object] | str, ...],
     ) -> tuple[tuple[typing.Any, ...], bool]:
         res = []
         changed = False
@@ -92,7 +95,7 @@ def infer_schema(
         else:
             return tys, False  # type: ignore[return-value]
 
-    def unstringify_type(ty: Union[type[object], str]) -> tuple[typing.Any, bool]:
+    def unstringify_type(ty: type[object] | str) -> tuple[typing.Any, bool]:
         # Dig through a generic type and if it contains a stringified type
         # convert that to a real type. The second return value indicates if the
         # type contained a string or not.
@@ -128,7 +131,7 @@ def infer_schema(
         schema_type = None
         if annotation_type not in SUPPORTED_PARAM_TYPES:
             if is_opaque_type(annotation_type):
-                schema_type = _OPAQUE_TYPES[annotation_type].class_name
+                schema_type = _resolve_opaque_type_info(annotation_type).class_name  # type: ignore[union-attr]
             elif annotation_type == torch._C.ScriptObject:
                 error_fn(
                     f"Parameter {name}'s type cannot be inferred from the schema "
@@ -217,19 +220,19 @@ def infer_schema(
 
 
 def derived_types(
-    base_type: Union[type, typing._SpecialForm],
+    base_type: type | typing._SpecialForm,
     cpp_type: str,
     list_base: bool,
     optional_base_list: bool,
     optional_list_base: bool,
 ):
-    result: list[tuple[Union[type, typing._SpecialForm, GenericAlias], str]] = [
+    result: list[tuple[type | typing._SpecialForm | GenericAlias, str]] = [
         (base_type, cpp_type),
         # pyrefly: ignore [not-a-type]
-        (typing.Optional[base_type], f"{cpp_type}?"),
+        (typing.Optional[base_type], f"{cpp_type}?"),  # noqa: UP045
     ]
 
-    def derived_seq_types(typ: Union[type, typing._SpecialForm]):
+    def derived_seq_types(typ: type | typing._SpecialForm):
         return (
             typing.Sequence[typ],  # type: ignore[valid-type]  # noqa: UP006
             typing.List[typ],  # type: ignore[valid-type]  # noqa: UP006
@@ -245,18 +248,18 @@ def derived_types(
         result.extend(
             (seq_typ, f"{cpp_type}?[]")
             # pyrefly: ignore [not-a-type]
-            for seq_typ in derived_seq_types(typing.Optional[base_type])
+            for seq_typ in derived_seq_types(typing.Optional[base_type])  # noqa: UP045
         )
     if optional_list_base:
         result.extend(
-            (typing.Optional[seq_typ], f"{cpp_type}[]?")
+            (typing.Optional[seq_typ], f"{cpp_type}[]?")  # noqa: UP045
             for seq_typ in derived_seq_types(base_type)
         )
     return result
 
 
 def get_supported_param_types():
-    data: list[tuple[Union[type, typing._SpecialForm], str, bool, bool, bool]] = [
+    data: list[tuple[type | typing._SpecialForm, str, bool, bool, bool]] = [
         # (python type, schema type, type[] variant, type?[] variant, type[]? variant
         (Tensor, "Tensor", True, True, False),
         (int, "SymInt", True, False, True),
@@ -300,6 +303,8 @@ def parse_return(annotation, error_fn):
     origin = typing.get_origin(annotation)
     if origin is not tuple:
         if annotation not in SUPPORTED_RETURN_TYPES:
+            if is_opaque_reference_type(annotation):
+                return _resolve_opaque_type_info(annotation).class_name  # type: ignore[union-attr]
             error_fn(
                 f"Return has unsupported type {annotation}. "
                 f"The valid types are: {SUPPORTED_RETURN_TYPES}."
@@ -309,12 +314,18 @@ def parse_return(annotation, error_fn):
 
     args = typing.get_args(annotation)
     for arg in args:
-        if arg not in SUPPORTED_RETURN_TYPES:
+        if arg not in SUPPORTED_RETURN_TYPES and not is_opaque_reference_type(arg):
             error_fn(
                 f"Return has unsupported type {annotation}. "
                 f"The valid types are: {SUPPORTED_RETURN_TYPES}."
             )
-    output_ty = ", ".join([SUPPORTED_RETURN_TYPES[arg] for arg in args])
+
+    def _return_type_str(arg):
+        if ty := SUPPORTED_RETURN_TYPES.get(arg):
+            return ty
+        return _resolve_opaque_type_info(arg).class_name  # type: ignore[union-attr]
+
+    output_ty = ", ".join(_return_type_str(arg) for arg in args)
 
     # use (()) to represent tuple with single element
     if len(args) == 1:
@@ -353,4 +364,4 @@ def tuple_to_list(tuple_type: type[tuple]) -> type[list]:
     elif len(type_args) == 2 and type_args[1] is Ellipsis:
         return list[type_args[0]]  # type: ignore[valid-type]
     else:
-        return list[typing.Union[tuple(type_args)]]  # type: ignore[misc, return-value]
+        return list[typing.Union[tuple(type_args)]]  # type: ignore[misc, return-value]  # noqa: UP007

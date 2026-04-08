@@ -1,6 +1,6 @@
 # mypy: ignore-errors
 import random
-from typing import NamedTuple, Union
+from typing import NamedTuple, TypeAlias
 
 import torch
 
@@ -30,8 +30,7 @@ class ScalarSpec(NamedTuple):
     )
 
 
-# Union type for specs
-Spec = Union[TensorSpec, ScalarSpec]
+Spec: TypeAlias = TensorSpec | ScalarSpec
 
 
 def fuzz_torch_tensor_type(template: str = "default") -> torch.dtype:

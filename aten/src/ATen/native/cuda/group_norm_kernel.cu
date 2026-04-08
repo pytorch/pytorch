@@ -3,8 +3,6 @@
 
 #include <type_traits>
 
-#include <thrust/tuple.h>
-
 #include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
@@ -27,6 +25,19 @@ namespace {
 
 constexpr int kCUDANumThreads = 256;
 constexpr int kReduceTileSize = 32;
+
+// Reduce across exactly 32 lanes (offsets 16, 8, 4, 2, 1).
+// On NVIDIA (warp=32) this is identical to WarpReduceSum.
+// On AMD (wavefront=64) this avoids summing across two tile columns
+// when the block is (32, 16) and consecutive y-rows share a wavefront.
+template <typename T>
+__inline__ __device__ T ReduceSum32(T val) {
+#pragma unroll
+  for (int offset = 16; offset > 0; offset >>= 1) {
+    val += WARP_SHFL_DOWN(val, offset);
+  }
+  return val;
+}
 
 template <typename T>
 __global__ void RowwiseMomentsCUDAKernel(
@@ -54,7 +65,7 @@ __global__ void RowwiseMomentsCUDAKernel(
     // https://github.com/pytorch/pytorch/pull/13967
     __shared__ typename std::aligned_storage<
         sizeof(WelfordType),
-        alignof(WelfordType)>::type val_shared[C10_WARP_SIZE];
+        alignof(WelfordType)>::type val_shared[C10_WARP_SIZE_UPPER_BOUND];
     WelfordType* val_shared_ptr = reinterpret_cast<WelfordType*>(val_shared);
     val = cuda_utils::BlockReduce(
         val,
@@ -125,8 +136,8 @@ __global__ void Compute1dBackwardFusedParamsCUDAKernel(
     sum1 = cuda_utils::WarpReduceSum<T_ACC>(sum1);
     sum2 = cuda_utils::WarpReduceSum<T_ACC>(sum2);
   } else {
-    __shared__ T_ACC ds_shared[C10_WARP_SIZE];
-    __shared__ T_ACC db_shared[C10_WARP_SIZE];
+    __shared__ T_ACC ds_shared[C10_WARP_SIZE_UPPER_BOUND];
+    __shared__ T_ACC db_shared[C10_WARP_SIZE_UPPER_BOUND];
     sum1 = cuda_utils::BlockReduceSum<T_ACC>(sum1, ds_shared);
     sum2 = cuda_utils::BlockReduceSum<T_ACC>(sum2, db_shared);
   }
@@ -240,8 +251,11 @@ __global__ void GammaBeta1dBackwardCUDAKernel2(
   // Do warp reduce for the 1st 16 cols in the tile.
   T_ACC sum1 = g_shared[threadIdx.x][threadIdx.y];
   T_ACC sum2 = b_shared[threadIdx.x][threadIdx.y];
-  sum1 = cuda_utils::WarpReduceSum<T_ACC>(sum1);
-  sum2 = cuda_utils::WarpReduceSum<T_ACC>(sum2);
+  // Use ReduceSum32 (not WarpReduceSum) to reduce exactly 32 lanes.
+  // On AMD wavefront-64, WarpReduceSum would incorrectly sum across two
+  // tile columns since consecutive y-rows share a wavefront.
+  sum1 = ReduceSum32<T_ACC>(sum1);
+  sum2 = ReduceSum32<T_ACC>(sum2);
   if (threadIdx.x == 0) {
     const int64_t c = blockIdx.x * blockDim.x + threadIdx.y;
     if (c < C) {
@@ -257,8 +271,8 @@ __global__ void GammaBeta1dBackwardCUDAKernel2(
   // Do warp reduce for the 2nd 16 cols in the tile.
   sum1 = g_shared[threadIdx.x][threadIdx.y + blockDim.y];
   sum2 = b_shared[threadIdx.x][threadIdx.y + blockDim.y];
-  sum1 = cuda_utils::WarpReduceSum<T_ACC>(sum1);
-  sum2 = cuda_utils::WarpReduceSum<T_ACC>(sum2);
+  sum1 = ReduceSum32<T_ACC>(sum1);
+  sum2 = ReduceSum32<T_ACC>(sum2);
   if (threadIdx.x == 0) {
     const int64_t c = blockIdx.x * blockDim.x + threadIdx.y + blockDim.y;
     if (c < C) {
@@ -292,8 +306,8 @@ __global__ void ComputeInternalGradientsCUDAKernel(
     sum1 = cuda_utils::WarpReduceSum<T_ACC>(sum1);
     sum2 = cuda_utils::WarpReduceSum<T_ACC>(sum2);
   } else {
-    __shared__ T_ACC ds_shared[C10_WARP_SIZE];
-    __shared__ T_ACC db_shared[C10_WARP_SIZE];
+    __shared__ T_ACC ds_shared[C10_WARP_SIZE_UPPER_BOUND];
+    __shared__ T_ACC db_shared[C10_WARP_SIZE_UPPER_BOUND];
     sum1 = cuda_utils::BlockReduceSum<T_ACC>(sum1, ds_shared);
     sum2 = cuda_utils::BlockReduceSum<T_ACC>(sum2, db_shared);
   }
@@ -335,8 +349,8 @@ __global__ void ComputeBackwardFusedParamsCUDAKernel(
     sum1 = cuda_utils::WarpReduceSum<T_ACC>(sum1);
     sum2 = cuda_utils::WarpReduceSum<T_ACC>(sum2);
   } else {
-    __shared__ T_ACC ds_shared[C10_WARP_SIZE];
-    __shared__ T_ACC db_shared[C10_WARP_SIZE];
+    __shared__ T_ACC ds_shared[C10_WARP_SIZE_UPPER_BOUND];
+    __shared__ T_ACC db_shared[C10_WARP_SIZE_UPPER_BOUND];
     sum1 = cuda_utils::BlockReduceSum<T_ACC>(sum1, ds_shared);
     sum2 = cuda_utils::BlockReduceSum<T_ACC>(sum2, db_shared);
   }
@@ -442,10 +456,11 @@ __global__ void GammaBetaBackwardCUDAKernel2(
   __syncthreads();
 
   // Do warp reduce for the 1st 16 cols in the tile.
+  // Use ReduceSum32 for correctness on AMD wavefront-64 (see above).
   T_ACC sum1 = g_shared[threadIdx.x][threadIdx.y];
   T_ACC sum2 = b_shared[threadIdx.x][threadIdx.y];
-  sum1 = cuda_utils::WarpReduceSum<T_ACC>(sum1);
-  sum2 = cuda_utils::WarpReduceSum<T_ACC>(sum2);
+  sum1 = ReduceSum32<T_ACC>(sum1);
+  sum2 = ReduceSum32<T_ACC>(sum2);
   if (threadIdx.x == 0) {
     const int64_t c = blockIdx.x * blockDim.x + threadIdx.y;
     if (c < C) {
@@ -461,8 +476,8 @@ __global__ void GammaBetaBackwardCUDAKernel2(
   // Do warp reduce for the 2nd 16 cols in the tile.
   sum1 = g_shared[threadIdx.x][threadIdx.y + blockDim.y];
   sum2 = b_shared[threadIdx.x][threadIdx.y + blockDim.y];
-  sum1 = cuda_utils::WarpReduceSum<T_ACC>(sum1);
-  sum2 = cuda_utils::WarpReduceSum<T_ACC>(sum2);
+  sum1 = ReduceSum32<T_ACC>(sum1);
+  sum2 = ReduceSum32<T_ACC>(sum2);
   if (threadIdx.x == 0) {
     const int64_t c = blockIdx.x * blockDim.x + threadIdx.y + blockDim.y;
     if (c < C) {

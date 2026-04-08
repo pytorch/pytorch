@@ -45,6 +45,7 @@ from torch.fx.operator_schemas import (
 from torch.fx.passes import graph_manipulation
 from torch.fx.passes.param_fetch import lift_lowering_attrs_to_nodes
 from torch.fx.passes.shape_prop import ShapeProp
+from torch.fx._lazy_graph_module import _use_lazy_graph_module
 from torch.fx.passes.split_module import split_module
 from torch.fx.passes.annotate_getitem_nodes import annotate_getitem_nodes
 from torch.testing._internal.common_device_type import (
@@ -54,7 +55,14 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_nn import module_tests, get_new_module_tests
-from torch.testing._internal.common_utils import TEST_Z3, run_tests, TestCase, TEST_WITH_CROSSREF
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    TEST_Z3,
+    run_tests,
+    TestCase,
+    TEST_WITH_CROSSREF,
+)
 from torch.testing._internal.jit_utils import JitTestCase
 import torch.utils._pytree as pytree
 
@@ -72,7 +80,7 @@ skipIfNoMkldnn = unittest.skipIf(
 )
 
 
-def symbolic_trace_with_rewrite(root: Union[torch.nn.Module, Callable]) -> GraphModule:
+def symbolic_trace_with_rewrite(root: torch.nn.Module | Callable) -> GraphModule:
     return GraphModule(
         root if isinstance(root, torch.nn.Module) else torch.nn.Module(),
         RewritingTracer().trace(root),
@@ -754,7 +762,8 @@ terrible spacing
         # Confirm that the output is correct
         self.assertEqual(traced(3, 3), m(3, 3))
 
-    def test_subgraph_creation(self):
+    @parametrize("use_lazy", [True, False])
+    def test_subgraph_creation(self, use_lazy):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -786,9 +795,10 @@ terrible spacing
             return partition
 
         # split module in module with submodules
-        module_with_submodules = split_module(
-            my_module_traced, my_module, mod_partition
-        )
+        with _use_lazy_graph_module(use_lazy):
+            module_with_submodules = split_module(
+                my_module_traced, my_module, mod_partition
+            )
 
         # Check that test_meta_info was still on all nodes.
         submodules = dict(module_with_submodules.named_modules())
@@ -896,6 +906,40 @@ terrible spacing
                 break
         else:
             raise RuntimeError("Expected the subgraph to have an output node.")
+
+    def test_split_module_tuple_return(self):
+        from torch._inductor.compile_fx import graph_returns_tuple
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                a = x + y
+                return a * x
+
+        gm = torch.fx.symbolic_trace(M())
+
+        # Assign ops to different partitions so a single-output submodule exists.
+        def partition_fn(node):
+            return 0 if node.target == operator.add else 1
+
+        # Without tuple_return: single-output submodules return a bare value.
+        sp = split_module(gm, None, partition_fn)
+        self.assertTrue(
+            any(
+                not graph_returns_tuple(submod)
+                for submod in sp.children()
+            ),
+            "expected at least one non-tuple-returning submodule",
+        )
+        x, y = torch.randn(4), torch.randn(4)
+        self.assertEqual(sp(x, y), gm(x, y))
+
+        # With tuple_return: all submodules return a tuple.
+        sp_boxed = split_module(gm, None, partition_fn, tuple_return=True)
+        self.assertTrue(
+            all(graph_returns_tuple(submod) for submod in sp_boxed.children()),
+            "all submodules should return a tuple with tuple_return=True",
+        )
+        self.assertEqual(sp_boxed(x, y), gm(x, y))
 
 
     def test_split_module_kwargs_expansion(self):
@@ -1679,8 +1723,8 @@ class {test_classname}(torch.nn.Module):
             (numbers.Number, int),
             (numbers.Number, float),
             (int, type(torch.float)),
-            (Union[int, float], int),
-            (Union[int, float], float),
+            (Union[int, float], int),  # noqa: UP007
+            (Union[int, float], float),  # noqa: UP007
             (list[int], int),
             (list[int], create_type_hint([int, int])),
             (list[int], create_type_hint((int, int))),
@@ -1700,8 +1744,8 @@ class {test_classname}(torch.nn.Module):
             (torch.Tensor, torch.nn.Parameter),
             (list[torch.Tensor], create_type_hint((torch.nn.Parameter, torch.Tensor))),
             (list[torch.Tensor], create_type_hint((torch.Tensor, torch.nn.Parameter))),
-            (Optional[list[torch.Tensor]], list[torch.Tensor]),
-            (Optional[list[int]], list[int]),
+            (Optional[list[torch.Tensor]], list[torch.Tensor]),  # noqa: UP045
+            (Optional[list[int]], list[int]),  # noqa: UP045
         ] + [
             # pre-PEP585 signatures
             (typing.List[int], int),  # noqa: UP006
@@ -1721,8 +1765,8 @@ class {test_classname}(torch.nn.Module):
             ),
             (typing.List[torch.Tensor], create_type_hint((torch.nn.Parameter, torch.Tensor))),  # noqa: UP006
             (typing.List[torch.Tensor], create_type_hint((torch.Tensor, torch.nn.Parameter))),  # noqa: UP006
-            (Optional[typing.List[torch.Tensor]], typing.List[torch.Tensor]),  # noqa: UP006
-            (Optional[typing.List[int]], typing.List[int]),  # noqa: UP006
+            (Optional[typing.List[torch.Tensor]], typing.List[torch.Tensor]),  # noqa: UP006, UP045
+            (Optional[typing.List[int]], typing.List[int]),  # noqa: UP006, UP045
         ]
 
         for sig_type, arg_type in should_be_equal:
@@ -1730,7 +1774,7 @@ class {test_classname}(torch.nn.Module):
 
         should_fail = [
             (int, float),
-            (Union[int, float], str),
+            (Union[int, float], str),  # noqa: UP007
             (list[torch.Tensor], typing.List[int]),  # noqa: UP006
         ] + [
             # pre-PEP585 signatures
@@ -2152,6 +2196,7 @@ if TEST_Z3:
                 self.assertEqual(z3str(expr), expected)
 
 
+instantiate_parametrized_tests(TestFXExperimental)
 instantiate_device_type_tests(TestNormalizeOperators, globals())
 
 if __name__ == "__main__":

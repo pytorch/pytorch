@@ -133,10 +133,8 @@ class TorchTensor(ir.Tensor):
         # view the tensor as that dtype so that it is convertible to NumPy,
         # and then view it back to the proper dtype (using ml_dtypes obtained by
         # calling dtype.numpy()).
-        # pyrefly: ignore [missing-attribute]
         if self.dtype == ir.DataType.BFLOAT16:
             return (
-                # pyrefly: ignore [missing-attribute]
                 self.raw.view(torch.uint16).numpy(force=True).view(self.dtype.numpy())
             )
         if self.dtype in {
@@ -145,11 +143,9 @@ class TorchTensor(ir.Tensor):
             ir.DataType.FLOAT8E5M2,
             ir.DataType.FLOAT8E5M2FNUZ,
         }:
-            # pyrefly: ignore [missing-attribute]
             return self.raw.view(torch.uint8).numpy(force=True).view(self.dtype.numpy())
         if self.dtype == ir.DataType.FLOAT4E2M1:
             return _type_casting.unpack_float4x2_as_uint8(self.raw).view(
-                # pyrefly: ignore [missing-attribute]
                 self.dtype.numpy()
             )
 
@@ -171,7 +167,6 @@ class TorchTensor(ir.Tensor):
 
         if isinstance(tensor, torch._subclasses.fake_tensor.FakeTensor):
             raise TypeError(
-                # pyrefly: ignore [missing-attribute]
                 f"Cannot take content out from the FakeTensor ('{self.name}'). Please replace the tensor "
                 "with a tensor backed by real data using ONNXProgram.apply_weights() "
                 "or save the model without initializers by setting include_initializers=False."

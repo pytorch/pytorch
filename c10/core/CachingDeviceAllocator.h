@@ -56,6 +56,9 @@ struct DeviceStats {
   // un-mapped and free memory.
   int64_t num_device_free = 0;
 
+  // COUNT: total number of allocations rejected by OOM preemption policy
+  int64_t num_oom_rejections = 0;
+
   // SIZE: maximum block size that is allowed to be split.
   int64_t max_split_size = 0;
 };

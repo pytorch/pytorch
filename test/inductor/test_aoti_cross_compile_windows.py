@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch._inductor.config
@@ -21,8 +21,8 @@ class ModelTestConfig:
     name: str
     model_class: type
     example_inputs: tuple[torch.Tensor, ...]
-    dynamic_shapes: Optional[dict[str, Any]] = None
-    inductor_configs: Optional[dict[str, Any]] = None
+    dynamic_shapes: dict[str, Any] | None = None
+    inductor_configs: dict[str, Any] | None = None
     rtol: float = 1e-4
     atol: float = 1e-4
 
@@ -34,8 +34,8 @@ class WindowsCrossCompilationTestFramework:
     Provides reusable logic for creating compile and load test methods.
     """
 
-    _base_path: Optional[Path] = None
-    _win_torch_libs_path: Optional[str] = None
+    _base_path: Path | None = None
+    _win_torch_libs_path: str | None = None
 
     @classmethod
     def base_path(cls) -> Path:
@@ -45,12 +45,12 @@ class WindowsCrossCompilationTestFramework:
         return cls._base_path
 
     @classmethod
-    def set_base_path(cls, path: Optional[Path | str] = None) -> None:
+    def set_base_path(cls, path: Path | str | None = None) -> None:
         """Set the base path for package files."""
         cls._base_path = Path(path) if path else None
 
     @classmethod
-    def set_win_torch_libs_path(cls, path: Optional[str] = None) -> None:
+    def set_win_torch_libs_path(cls, path: str | None = None) -> None:
         """Set the path for Windows torch libs."""
         cls._win_torch_libs_path = path
 

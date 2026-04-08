@@ -55,7 +55,12 @@ class TestComplement(TestCase):
         # Post-condition: test disjointedness of the codomains
         for a in range(size(layout)):
             for b in range(size(layoutR)):
-                assert (layout(a) != layoutR(b)) or (layout(a) == 0 and layoutR(b) == 0)
+                if not (
+                    (layout(a) != layoutR(b)) or (layout(a) == 0 and layoutR(b) == 0)
+                ):
+                    raise AssertionError(
+                        f"Invariant violated at a={a}, b={b}: layout(a)={layout(a)}, layoutR(b)={layoutR(b)}"
+                    )
 
     def test_complement(self):
         test = Layout(1, 0)

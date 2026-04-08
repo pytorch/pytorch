@@ -168,13 +168,13 @@ def synchronize(device: Device = None) -> None:
 
 def device_count() -> int:
     r"""Return the number of MTIA devices available."""
-    # TODO: Update _accelerator_hooks_device_count to abstract a MTIA device count API
     return torch._C._mtia_getDeviceCount()
 
 
 def current_device() -> int:
     r"""Return the index of a currently selected device."""
-    return torch._C._accelerator_hooks_get_current_device()
+    # pyrefly: ignore [missing-attribute]
+    return torch._C._mtia_getDevice()
 
 
 def current_stream(device: Device = None) -> Stream:
@@ -186,7 +186,8 @@ def current_stream(device: Device = None) -> Stream:
             by :func:`~torch.mtia.current_device`, if :attr:`device` is ``None``
             (default).
     """
-    return torch._C._mtia_getCurrentStream(_get_device_index(device, optional=True))
+    device_idx = _get_device_index(device, optional=True)
+    return torch._C._mtia_getCurrentStream(device_idx)
 
 
 def default_stream(device: Device = None) -> Stream:
@@ -277,7 +278,8 @@ def set_device(device: Device) -> None:
     """
     device = _get_device_index(device)
     if device >= 0:
-        torch._C._accelerator_hooks_set_current_device(device)
+        # pyrefly: ignore [missing-attribute]
+        torch._C._mtia_setDevice(device)
 
 
 def get_device_properties(device: Device = None) -> dict[str, Any]:
@@ -304,10 +306,12 @@ class device:
         self.prev_idx = -1
 
     def __enter__(self):
-        self.prev_idx = torch._C._accelerator_hooks_maybe_exchange_device(self.idx)
+        # pyrefly: ignore [missing-attribute]
+        self.prev_idx = torch._C._mtia_maybeExchangeDevice(self.idx)
 
     def __exit__(self, type: Any, value: Any, traceback: Any):
-        self.idx = torch._C._accelerator_hooks_maybe_exchange_device(self.prev_idx)
+        # pyrefly: ignore [missing-attribute]
+        self.idx = torch._C._mtia_maybeExchangeDevice(self.prev_idx)
         return False
 
 

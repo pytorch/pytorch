@@ -364,7 +364,8 @@ class DeviceMeshTest(DTensorTestBase):
     def test_from_group_with_invalid_mesh(self):
         global_pg = _get_default_group()
         global_pg_size = global_pg.size()
-        assert global_pg_size == 4, "Test assumes global world size of 4"
+        if global_pg_size != 4:
+            raise AssertionError("Test assumes global world size of 4")
         invalid_mesh = [[0, 1], [2, 3]]  # 2D mesh when we need 1D
         regex = r"Invalid mesh \[\[0, 1\], \[2, 3\]\] for ProcessGroup with ranks \[0, 1, 2, 3\]"
         with self.assertRaisesRegex(ValueError, regex):
@@ -1899,6 +1900,40 @@ class CuTeLayoutTest(TestCase):
         result7 = layout7.remap_to_tensor(original_mesh)
         expected7 = torch.tensor([[[0, 1], [2, 4]]], dtype=torch.int)
         self.assertEqual(result7, expected7)
+
+
+class ProcessGroupOpaqueTypeTest(TestCase):
+    """Test that ProcessGroup opaque type members are registered and exist on the class."""
+
+    def test_registered_members_exist_on_process_group(self):
+        from torch._library.opaque_object import get_member_type
+
+        # Every member registered in _register_distributed_opaque_types()
+        # must actually exist on ProcessGroup. This catches renames or
+        # removals of C++ attributes that would cause torch.compile
+        # (fullgraph=True) to silently register a stale name while the
+        # real attribute has moved.
+        registered_members = [
+            "size",
+            "rank",
+            "_get_backend_name",
+            "group_name",
+            "group_desc",
+            "__eq__",
+        ]
+        for member_name in registered_members:
+            self.assertIsNotNone(
+                get_member_type(ProcessGroup, member_name),
+                f"'{member_name}' is not registered as a ProcessGroup opaque "
+                f"type member. Add it to _register_distributed_opaque_types() "
+                f"in torch/distributed/device_mesh.py",
+            )
+            self.assertTrue(
+                hasattr(ProcessGroup, member_name),
+                f"'{member_name}' is registered as a ProcessGroup opaque type "
+                f"member but does not exist on the ProcessGroup class. "
+                f"Was it renamed or removed?",
+            )
 
 
 if __name__ == "__main__":

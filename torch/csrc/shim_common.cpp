@@ -667,7 +667,8 @@ AOTI_TORCH_EXPORT AOTITorchError torch_from_blob(
     int32_t layout,
     const uint8_t* opaque_metadata,
     int64_t opaque_metadata_size,
-    void (*deleter)(void*)) {
+    void (*deleter_callback)(void* data, void* ctx),
+    void* deleter_ctx) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     c10::IntArrayRef sizes(sizes_ptr, ndim);
     c10::IntArrayRef strides(strides_ptr, ndim);
@@ -676,11 +677,14 @@ AOTI_TORCH_EXPORT AOTITorchError torch_from_blob(
         static_cast<c10::ScalarType>(dtype));
     at::Tensor tensor;
     if (data != nullptr) {
-      if (deleter != nullptr) {
+      if (deleter_callback != nullptr) {
+        auto wrapped_deleter = [deleter_callback, deleter_ctx](void* data) {
+          deleter_callback(data, deleter_ctx);
+        };
         tensor = at::for_blob(data, sizes)
                      .strides(strides)
                      .storage_offset(storage_offset)
-                     .deleter(deleter)
+                     .deleter(wrapped_deleter)
                      .options(options)
                      .make_tensor();
       } else {

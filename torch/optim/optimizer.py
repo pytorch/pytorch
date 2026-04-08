@@ -8,7 +8,7 @@ from collections.abc import Callable, Hashable, Iterable, Sequence
 from copy import deepcopy
 from itertools import chain
 from typing import Any, cast, overload, TypeAlias, TypeVar
-from typing_extensions import ParamSpec, Self
+from typing_extensions import deprecated, ParamSpec, Self
 
 import torch
 import torch.utils.hooks as hooks
@@ -60,7 +60,6 @@ def _use_grad_for_differentiable(func: Callable[_P, _T]) -> Callable[_P, _T]:
     def _use_grad(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         import torch._dynamo
 
-        # pyrefly: ignore [unsupported-operation]
         self = cast(Optimizer, args[0])  # assume first positional arg is `self`
         prev_grad = torch.is_grad_enabled()
         try:
@@ -134,13 +133,11 @@ def _disable_dynamo_if_unsupported(
             if torch.compiler.is_compiling() and (
                 not kwargs.get("capturable", False)
                 and has_state_steps
-                # pyrefly: ignore [unsupported-operation]
                 and (arg := args[state_steps_ind])
                 and isinstance(arg, Sequence)
                 and arg[0].is_cuda
                 or (
                     "state_steps" in kwargs
-                    # pyrefly: ignore [unsupported-operation]
                     and (kwarg := kwargs["state_steps"])
                     and isinstance(kwarg, Sequence)
                     and kwarg[0].is_cuda
@@ -494,6 +491,11 @@ class Optimizer:
                     stacklevel=2,
                 )
                 self._warned_capturable_if_run_uncaptured = True
+
+    # Backward compatibility alias for internal callers still using the old name.
+    _cuda_graph_capture_health_check = deprecated(
+        "Use _accelerator_graph_capture_health_check instead",
+    )(_accelerator_graph_capture_health_check)
 
     def _optimizer_step_code(self) -> None:
         """Entry point for `torch.profile.profiler`.

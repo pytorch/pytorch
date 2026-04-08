@@ -189,7 +189,7 @@ def all_gather(
             raise RuntimeError(  # type: ignore[misc]
                 error_msg,
                 exception_list,
-            ) from exception_list[0]  # pyrefly: ignore [bad-raise, invalid-inheritance]
+            ) from exception_list[0]  # pyrefly: ignore [bad-raise]
         return ret_list
     else:
         if not sync_obj.success:
@@ -274,13 +274,10 @@ def _summarize_ranks(ranks: Iterable[int]) -> str:
     result = []
     for r in ranges:
         if len(r) == 1:
-            # pyrefly: ignore [bad-argument-type]
             result.append(f"{r.start}")
         elif r.step == 1:
-            # pyrefly: ignore [bad-argument-type]
             result.append(f"{r.start}:{r.stop}")
         else:
-            # pyrefly: ignore [bad-argument-type]
             result.append(f"{r.start}:{r.stop}:{r.step}")
     return ",".join(result)
 

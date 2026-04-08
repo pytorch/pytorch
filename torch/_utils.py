@@ -703,17 +703,6 @@ def _take_tensors(tensors, size_limit):
             yield buf
 
 
-# annotation decorator to get annotations in a way that is compatible
-# with both Python 2 and 3
-def annotate(ret, **kwargs):
-    def dec(fun):
-        fun.__annotations__ = dict(kwargs)
-        fun.__annotations__["return"] = ret
-        return fun
-
-    return dec
-
-
 def render_call(fn, args, kwargs):
     str_fn = torch.overrides.resolve_name(fn)
     if str_fn is None:
@@ -783,6 +772,19 @@ class ExceptionWrapper:
             # be constructed, don't try to instantiate since we don't know how to
             raise RuntimeError(msg) from None
         raise exception
+
+
+def cpu_count() -> int | None:
+    """Return the number of CPUs available to the current process.
+
+    Prefers ``os.sched_getaffinity`` (respects cgroups / taskset) and
+    falls back to ``os.cpu_count``.
+    """
+    # os.process_cpu_count was added in CPython 3.13, see
+    # https://docs.python.org/3/library/os.html#os.process_cpu_count
+    if hasattr(os, "sched_getaffinity"):
+        return len(os.sched_getaffinity(0))
+    return os.cpu_count()
 
 
 def _get_available_device_type():
@@ -1128,6 +1130,32 @@ NAME_MAPPING = {
 }
 
 
+def _chunk_or_narrow_cat(
+    tensor: "torch.Tensor",
+    num_chunks: int,
+    narrow_dim: int,
+    cat_dim: int = 0,
+) -> "torch.Tensor":
+    """
+    Splits tensor along narrow_dim into num_chunks and concatenates along cat_dim.
+    Uses torch.chunk in eager mode, but torch.narrow under tracing to be unbacked-symint safe.
+    """
+    if torch.distributed.is_available():
+        from torch.distributed._functional_collectives import _are_we_tracing
+        from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
+
+        # TODO(pianpwk): remove the unbacked symbols check and fix AsyncTP pattern matching
+        # for test_micro_pipeline_tp.py.
+        if _are_we_tracing() and has_free_unbacked_symbols(tensor):
+            chunk_size = tensor.size(narrow_dim) // num_chunks
+            chunks = [
+                torch.narrow(tensor, narrow_dim, i * chunk_size, chunk_size)
+                for i in range(num_chunks)
+            ]
+            return torch.cat(chunks, dim=cat_dim)
+    return torch.cat(torch.chunk(tensor, num_chunks, dim=narrow_dim), dim=cat_dim)
+
+
 def _maybe_view_chunk_cat(
     res: "torch.Tensor", group_size: int, gather_dim: int
 ) -> "torch.Tensor":
@@ -1176,9 +1204,11 @@ def _maybe_view_chunk_cat(
     # Optimization: Can use view instead of split+cat when:
     # 1. res.shape[0] == group_size (invariant after all_gather)
     # 2. All dims between 0 and gather_dim (exclusive) have size 1
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
     numel_between = math.prod(shape[1:gather_dim]) if gather_dim > 1 else 1
 
-    if shape[0] == group_size and numel_between == 1:
+    if guard_or_false(shape[0] == group_size) and guard_or_false(numel_between == 1):
         # View optimization: reshape to collapse dim 0 into gather_dim
         final_shape = (
             [1]  # Dim 0 becomes 1
@@ -1191,7 +1221,7 @@ def _maybe_view_chunk_cat(
         # General case: fall back to split + cat
         # This is better than torch.flatten as cat can be vectorized, whereas
         # the contiguous kernel is always bad.
-        return torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
+        return _chunk_or_narrow_cat(res, group_size, narrow_dim=0, cat_dim=gather_dim)
 
 
 class _Frame(TypedDict):
@@ -1351,3 +1381,17 @@ def _augment_memory_snapshot_stack_traces(
                 _augment_frames(trace_entry["frames"])
 
     return snapshot_dict
+
+
+def _is_privateuse1_backend_available():
+    """
+    Determines whether the privateuse1 backend is registered and available.
+
+    Returns:
+        Return True if the privateuse1 backend is registered and available.
+    """
+    privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
+    privateuse1_backend_module = getattr(torch, privateuse1_backend_name, None)
+    return (
+        is_available := getattr(privateuse1_backend_module, "is_available", None)
+    ) and is_available()

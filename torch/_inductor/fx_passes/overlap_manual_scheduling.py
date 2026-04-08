@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import heapq
 from collections import Counter, defaultdict
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.fx as fx
@@ -17,7 +17,7 @@ from torch._inductor.fx_passes.bucketing import (
     merge_reduce_scatter_bucket,
 )
 from torch._inductor.fx_passes.overlap_preserving_bucketer import (
-    bucket_key,
+    get_full_bucket_key,
     OverlapPreservingBucketer,
 )
 from torch._inductor.fx_passes.overlap_scheduling import (
@@ -124,7 +124,7 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
                 or is_fsdp_reduce_scatter(node)
             ):
                 continue
-            key = bucket_key(node)
+            key = get_full_bucket_key(node, "custom_ops")
             if key is not None:
                 grouped_collectives[key].add(node)
 
@@ -270,7 +270,7 @@ class ManualOverlapScheduler(OverlapScheduler):
 
         self.scheduled = OrderedSet(reversed(list(self.scheduled)))
         picked_ag: list[fx.Node] = []
-        last_compute: Optional[fx.Node] = None
+        last_compute: fx.Node | None = None
 
         for node in self.scheduled:
             node_type = node.meta.get("manual_bucket_node_type", "")

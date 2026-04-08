@@ -103,7 +103,8 @@ class BaseExtensionBackendTests(TestCase):
         # this file, so we'll change the working directory temporarily
         self.old_working_dir = os.getcwd()
         os.chdir(os.path.dirname(os.path.abspath(__file__)))
-        assert self.module is not None
+        if self.module is None:
+            raise AssertionError
 
     def tearDown(self):
         super().tearDown()

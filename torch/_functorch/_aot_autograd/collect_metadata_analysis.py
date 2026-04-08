@@ -13,7 +13,7 @@ a functionalized version of the graph under compilation.
 import collections
 import contextlib
 import logging
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
@@ -168,10 +168,8 @@ def run_functionalized_fw_and_collect_metadata(
     *,
     flat_args_descs: list[AOTInput],
     keep_input_mutations: bool,
-    # TODO: refactor to kill this flag
-    is_train: bool = False,
     # Note: this is guaranteed to be set when running under dynamo
-    static_input_indices: Optional[list[int]] = None,
+    static_input_indices: list[int] | None = None,
     pre_dispatch: bool = False,
 ) -> Callable[..., ViewAndMutationMeta]:
     memo: dict[Tensor, Tensor] = {}
@@ -325,7 +323,7 @@ def run_functionalized_fw_and_collect_metadata(
         ] = collections.defaultdict(int)
 
         out_storage_to_metadata_key_to_tensors: collections.defaultdict[
-            Optional[StorageWeakRef],
+            StorageWeakRef | None,
             collections.defaultdict[MetadataKey, set[torch.Tensor]],
         ] = collections.defaultdict(lambda: collections.defaultdict(set))
 
@@ -690,12 +688,18 @@ from a multi-output view call"
                 if isinstance(o, FunctionalTensor):
                     view_meta_sequence = ViewMetaSequence(o)
 
+            requires_grad = isinstance(o, torch.Tensor) and o.requires_grad
             out_info = OutputAliasInfo(
                 output_type=output_type,
                 raw_type=type(o),
                 base_idx=base_idx,
                 dynamic_dims=dynamic_dims,
-                requires_grad=isinstance(o, torch.Tensor) and o.requires_grad,
+                requires_grad=requires_grad,
+                # A view created under no_grad() inherits requires_grad from
+                # its base but has no grad_fn and does not participate in
+                # differentiation.
+                requires_grad_for_backward=requires_grad
+                and (o._base is None or grad_fn is not None),
                 view_meta_sequence=view_meta_sequence,
             )
             output_info.append(out_info)
@@ -784,7 +788,7 @@ from a multi-output view call"
                 OutputType.custom_function_view,
             ]
             and issubclass(info.raw_type, torch.Tensor)
-            and info.requires_grad
+            and info.requires_grad_for_backward
         ]
         f_output_tangents, f_output_tangents_descs = (
             [x[0] for x in f_output_tangents_pairs],
@@ -829,25 +833,15 @@ from a multi-output view call"
             for inp, info in zip(flat_f_args, input_info)
             if info.mutation_type == MutationType.MUTATED_OUT_GRAPH
         ]
-        f_metadata_mutated_inputs = [
-            inp for inp, info in zip(flat_f_args, input_info) if info.mutates_metadata
-        ]
-        # This logic (annoyingly) re-figures out exactly what the outputs to the compiled fw graph will be.
-        # When handling subclasses, we need info about **all** outputs of compiled forward graph,
-        # so we know precisely which graph outputs to wrap back into tensor subclasses
-        # Ideally we would refactor this so not have an is_train flag, and have the separate
-        # inference and training paths decide which inputs/output to ask for subclass info on.
-        # However, we currently stash indexing information on each SubclassMeta about its order
-        # in the graph outputs list.
-        f_fw_graph_outs = list(flat_f_outs)
-        if is_train or not keep_input_mutations:
-            f_fw_graph_outs = f_mutated_inputs + f_fw_graph_outs
-        else:
-            # even when "keep_input_mutations" is True,
-            # we never keep metadata-only mutations in the fw graph
-            f_fw_graph_outs = f_metadata_mutated_inputs + f_fw_graph_outs
-        if is_train:
-            f_fw_graph_outs = f_fw_graph_outs + intermediate_bases
+        # Build the full list of forward graph outputs so the subclass wrapping
+        # code knows exactly which graph outputs to wrap back into subclasses.
+        # Including intermediate_bases unconditionally is safe: they are only
+        # populated when outputs require grad (line ~539), so they are naturally
+        # empty during pure inference.  In the "downgrade from training to
+        # inference" path, num_intermediate_bases > 0 is already gated behind
+        # `assert not req_subclass_dispatch` (aot_autograd.py), so the subclass
+        # wrapping code that consumes subclass_fw_graph_out_meta never sees them.
+        f_fw_graph_outs = [*f_mutated_inputs, *flat_f_outs, *intermediate_bases]
         fw_graph_outs = pytree.tree_map(from_fun, f_fw_graph_outs)
 
         grad_enabled_mutation = None
@@ -864,6 +858,12 @@ from a multi-output view call"
                 grad_enabled_mutation,
             )
 
+        subclass_inp_meta = create_subclass_meta(flat_args)
+        subclass_fw_graph_out_meta = create_subclass_meta(fw_graph_outs)
+        subclass_tangent_meta = create_subclass_meta(
+            traced_tangents, count_symints=False, with_memory_format=True
+        )
+
         metadata = ViewAndMutationMeta(
             input_info=input_info,
             output_info=output_info,
@@ -871,12 +871,9 @@ from a multi-output view call"
             keep_input_mutations=keep_input_mutations,
             traced_tangents=traced_tangents,
             traced_tangents_descs=traced_tangents_descs,
-            subclass_inp_meta=create_subclass_meta(flat_args),
-            subclass_fw_graph_out_meta=create_subclass_meta(fw_graph_outs),
-            subclass_tangent_meta=create_subclass_meta(
-                traced_tangents, count_symints=False, with_memory_format=True
-            ),
-            is_train=is_train,
+            subclass_inp_meta=subclass_inp_meta,
+            subclass_fw_graph_out_meta=subclass_fw_graph_out_meta,
+            subclass_tangent_meta=subclass_tangent_meta,
             grad_enabled_mutation=grad_enabled_mutation,
             static_input_indices=static_input_indices,
             tokens=mode._tokens,

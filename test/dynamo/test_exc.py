@@ -7,7 +7,12 @@ import torch._dynamo
 import torch._dynamo.config
 import torch._dynamo.test_case
 from torch._dynamo.comptime import comptime
-from torch._dynamo.exc import Unsupported
+from torch._dynamo.exc import (
+    TorchDynamoException,
+    Unsupported,
+    UserError,
+    UserErrorType,
+)
 from torch.testing._internal.common_device_type import skipIf
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
@@ -20,6 +25,27 @@ from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_
 
 class ExcTests(LoggingTestCase):
     maxDiff = None
+
+    @torch._dynamo.config.patch(suppress_errors=True)
+    def test_user_error_backend_soft_fail(self):
+        def backend(_, __):
+            raise UserError(UserErrorType.INVALID_INPUT, "backend user error")
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(2)
+        self.assertEqual(torch.compile(fn, backend=backend)(x), fn(x))
+
+    def test_user_error_separated_from_unsupported(self):
+        err = UserError(UserErrorType.INVALID_INPUT, "bad input")
+
+        self.assertIsInstance(err, TorchDynamoException)
+        self.assertNotIsInstance(err, Unsupported)
+        self.assertEqual(err.error_type, UserErrorType.INVALID_INPUT)
+        self.assertEqual(err.msg, "bad input")
+        self.assertEqual(err.message, "bad input")
+        self.assertEqual(str(err), "bad input")
 
     def test_unsupported_real_stack(self):
         # exercise Unsupported constructor and augment_exc_message

@@ -249,8 +249,8 @@ class _CPUinfo:
                 "Numa Aware: cores:%s on different NUMA nodes:%s. To avoid \
 this behavior, please use --ncores-per-instance knob to make sure number of cores is divisible by --ncores-per-\
 instance. Alternatively, please use --skip-cross-node-cores knob.",
-                str(core_list),
-                str(numa_ids),
+                core_list,
+                numa_ids,
             )
         if len(numa_ids) == 0:
             raise RuntimeError(

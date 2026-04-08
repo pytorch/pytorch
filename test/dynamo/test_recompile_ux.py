@@ -42,7 +42,8 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
         def compiler(gm, input):
             nonlocal attached
             f = gm.forward
-            assert not attached
+            if attached:
+                raise AssertionError("Expected not attached")
             # NB: making this a weakref.ref causes the cycle to no
             # longer be promptly GC'ed
             weakref.finalize(f, trigger)
@@ -318,6 +319,120 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
         res = opt_f(inp, 1)
 
         self.assertEqual(res, inp + 3)
+
+
+class RecompileLimitKwargTests(torch._dynamo.test_case.TestCase):
+    @staticmethod
+    def _num_cache_entries(code):
+        return len(torch._dynamo.eval_frame._debug_get_cache_entry_list(code))
+
+    def test_recompile_limit_basic(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        def f(x, y):
+            return x + y
+
+        opt_f = torch.compile(f, backend=cnt, recompile_limit=2)
+
+        opt_f(torch.randn(3), torch.randn(3))
+        self.assertEqual(self._num_cache_entries(f), 1)
+
+        opt_f(torch.randn(3, dtype=torch.float64), torch.randn(3, dtype=torch.float64))
+        self.assertEqual(self._num_cache_entries(f), 2)
+
+        # Third dtype should NOT trigger recompilation (recompile_limit=2)
+        opt_f(torch.randn(3, dtype=torch.float16), torch.randn(3, dtype=torch.float16))
+        self.assertEqual(self._num_cache_entries(f), 2)
+
+    def test_recompile_limit_none_uses_global(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        def f(x, y):
+            return x + y
+
+        # Without recompile_limit kwarg, uses global config (default 8)
+        opt_f = torch.compile(f, backend=cnt)
+
+        for i in range(10):
+            dtype = [
+                torch.float32,
+                torch.float64,
+                torch.float16,
+                torch.bfloat16,
+                torch.int32,
+                torch.int64,
+                torch.int16,
+                torch.int8,
+                torch.uint8,
+                torch.complex64,
+            ][i]
+            opt_f(torch.ones(3, dtype=dtype), torch.ones(3, dtype=dtype))
+
+        self.assertEqual(
+            self._num_cache_entries(f), torch._dynamo.config.recompile_limit
+        )
+
+    def test_recompile_limit_fullgraph_raises(self):
+        """With fullgraph=True, hitting the recompile_limit kwarg raises
+        FailOnRecompileLimitHit, consistent with the fullgraph contract."""
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        def f(x):
+            return x.sin()
+
+        opt_f = torch.compile(f, backend=cnt, fullgraph=True, recompile_limit=1)
+
+        opt_f(torch.randn(3))
+        self.assertEqual(cnt.frame_count, 1)
+
+        with self.assertRaises(FailOnRecompileLimitHit):
+            opt_f(torch.randn(3, dtype=torch.float64))
+
+    @torch._dynamo.config.patch(automatic_dynamic_shapes=True)
+    def test_recompile_limit_resume_function_auto_dynamic(self):
+        """With automatic dynamic shapes and recompile_limit=2, the resume
+        function recompiles via dimension changes on a global tensor while
+        the main function gets cache hits. The resume function should stop
+        at 2 entries and fall back to eager."""
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        y_holder = {"tensor": torch.randn(4, 8, 2)}
+
+        def f(x):
+            x.sin()
+            print("graph break")
+            return y_holder["tensor"].cos()
+
+        opt_f = torch.compile(f, backend=cnt, recompile_limit=2)
+
+        # Call 1: static compile
+        y_holder["tensor"] = torch.randn(4, 8, 2)
+        opt_f(torch.randn(4, 8, 2))
+
+        # Call 2: y dim0 changes -> f cache hit, resume recompiles
+        y_holder["tensor"] = torch.randn(5, 8, 2)
+        opt_f(torch.randn(4, 8, 2))
+        frame_count_after_2 = cnt.frame_count
+
+        # Call 3: y dim1 changes -> resume should NOT recompile
+        # (resume already has 2 entries = recompile_limit)
+        y_holder["tensor"] = torch.randn(5, 9, 2)
+        opt_f(torch.randn(4, 8, 2))
+        self.assertEqual(cnt.frame_count, frame_count_after_2)
+
+        # Verify f has 1 entry, resume has 2
+        num_f_entries = len(torch._dynamo.eval_frame._debug_get_cache_entry_list(f))
+        self.assertEqual(num_f_entries, 1)
+
+        from torch._dynamo.resume_execution import ContinueExecutionCache
+
+        resume_codes = list(ContinueExecutionCache.cache[f.__code__].values())
+        self.assertTrue(len(resume_codes) > 0, "No resume functions found")
+        for resume_code in resume_codes:
+            num_resume_entries = len(
+                torch._dynamo.eval_frame._debug_get_cache_entry_list(resume_code)
+            )
+            self.assertEqual(num_resume_entries, 2)
 
 
 if __name__ == "__main__":

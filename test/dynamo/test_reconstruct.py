@@ -309,16 +309,16 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         def fn(x):
             x = x + 1
             torch._dynamo.graph_break()
-            assert torch.compiler.is_compiling()
-            assert not torch.is_grad_enabled()
+            assert torch.compiler.is_compiling()  # noqa: S101
+            assert not torch.is_grad_enabled()  # noqa: S101
             return x + 2
 
         @torch.compile(backend="eager")
         def gn(x):
             x = torch.no_grad()(fn)(x)
             # reconstruction failure would cause a skipped frame
-            assert torch.compiler.is_compiling()
-            assert torch.is_grad_enabled()
+            assert torch.compiler.is_compiling()  # noqa: S101
+            assert torch.is_grad_enabled()  # noqa: S101
             return x
 
         inp = torch.randn(3)
@@ -333,8 +333,8 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             def fn(self, x):
                 x = x + self.a
                 torch._dynamo.graph_break()
-                assert torch.compiler.is_compiling()
-                assert not torch.is_grad_enabled()
+                assert torch.compiler.is_compiling()  # noqa: S101
+                assert not torch.is_grad_enabled()  # noqa: S101
                 return x + self.b
 
         obj = Foo()
@@ -344,8 +344,8 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             obj.fn = torch.no_grad()(obj.fn)
             x = obj.fn(x)
             # reconstruction failure would cause a skipped frame
-            assert torch.compiler.is_compiling()
-            assert torch.is_grad_enabled()
+            assert torch.compiler.is_compiling()  # noqa: S101
+            assert torch.is_grad_enabled()  # noqa: S101
             return x
 
         inp = torch.randn(3)
@@ -361,14 +361,14 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             def fn(x):
                 x = x + a
                 torch._dynamo.graph_break()
-                assert torch.compiler.is_compiling()
-                assert not torch.is_grad_enabled()
+                assert torch.compiler.is_compiling()  # noqa: S101
+                assert not torch.is_grad_enabled()  # noqa: S101
                 return x + b
 
             x = fn(x)
             # reconstruction failure would cause a skipped frame
-            assert torch.compiler.is_compiling()
-            assert torch.is_grad_enabled()
+            assert torch.compiler.is_compiling()  # noqa: S101
+            assert torch.is_grad_enabled()  # noqa: S101
             return x
 
         inp = torch.randn(3)
@@ -387,16 +387,16 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         def fn(x):
             x = x + 1
             torch._dynamo.graph_break()
-            assert torch.compiler.is_compiling()
-            assert not torch.is_grad_enabled()
+            assert torch.compiler.is_compiling()  # noqa: S101
+            assert not torch.is_grad_enabled()  # noqa: S101
             return x + 2
 
         @torch.compile(backend="eager")
         def gn(x):
             x = torch.no_grad()(_skipped_function_for_test_reconstruct)(fn, x)
             # reconstruction failure would cause a skipped frame
-            assert torch.compiler.is_compiling()
-            assert torch.is_grad_enabled()
+            assert torch.compiler.is_compiling()  # noqa: S101
+            assert torch.is_grad_enabled()  # noqa: S101
             return x
 
         inp = torch.randn(3)
@@ -471,7 +471,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             print(l)
             x += 1
             # if reconstruction failed on the graph break, we should error here
-            assert torch.compiler.is_compiling()
+            assert torch.compiler.is_compiling()  # noqa: S101
             return l
 
         @torch.compile(backend="eager", fullgraph=True)
@@ -547,7 +547,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             dup_top_inst = create_dup_top().opname
             for i, inst in enumerate(instructions):
                 if inst.opname == "BUILD_LIST" and i + 2 < len(instructions):
-                    assert not (
+                    assert not (  # noqa: S101
                         instructions[i + 1].opname == dup_top_inst
                         and instructions[i + 2].opname == "STORE_FAST"
                     ), "found list stored as tmp"

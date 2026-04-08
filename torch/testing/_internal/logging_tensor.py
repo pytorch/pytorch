@@ -2,7 +2,6 @@
 
 import torch
 from torch.utils._pytree import tree_map
-from typing import Optional
 from collections.abc import Iterator
 import logging
 import contextlib
@@ -84,7 +83,7 @@ class LoggingTensorReentrant(LoggingTensor):
 class LoggingTensorHandler(logging.Handler):
     def __init__(
             self, log_list: list[str], use_shortid_for_all_tensors: bool,
-            with_type: bool, tracebacks_list: Optional[list]) -> None:
+            with_type: bool, tracebacks_list: list | None) -> None:
         logging.Handler.__init__(self)
         self.log_list = log_list
         self.use_shortid_for_all_tensors = use_shortid_for_all_tensors

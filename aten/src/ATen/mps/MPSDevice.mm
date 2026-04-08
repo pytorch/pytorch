@@ -110,8 +110,8 @@ unsigned MPSDevice::getCoreCount() const {
   return core_count;
 }
 
-at::Allocator* GetMPSAllocator(bool useSharedAllocator) {
-  return getIMPSAllocator(useSharedAllocator);
+at::Allocator* GetMPSAllocator() {
+  return getIMPSAllocator();
 }
 bool is_available() {
   return MPSDevice::getInstance()->device() != nil;

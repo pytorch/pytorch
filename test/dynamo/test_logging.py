@@ -817,6 +817,25 @@ Mutating object of type dict (source name: L['mod']._buffers)
 
         self.assertEqual(len(records), 0)
 
+    @make_logging_test(side_effects=True)
+    def test_side_effects_logs_fullgraph_graph_break(self, records):
+        """Test that side effects are logged even when fullgraph=True causes an error."""
+        my_list = [1, 2, 3]
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, lst):
+            lst.append(4)
+            # Force a graph break after the side effect
+            torch._dynamo.graph_break()
+            return x + len(lst)
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            fn(torch.ones(1), my_list)
+
+        # Side effects should still be logged even though codegen never ran
+        self.assertGreater(len(records), 0)
+        self.assertIn("Mutating object of type list", records[0].getMessage())
+
     @make_settings_test("torch._dynamo.utils")
     def test_dump_compile_times(self, records):
         fn_opt = torch.compile(example_fn, backend="inductor")
@@ -1390,6 +1409,8 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             env["TORCH_LOGS_OUT"] = file_path
             _, stderr = self.run_process_no_exception(
                 """\
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning, module="torch.utils._config_module")
 import torch
 @torch.compile(backend="eager")
 def fn(a):
@@ -1419,7 +1440,7 @@ fn(torch.randn(5))
         torch._dynamo.eval_frame.clear_dynamo_tls()
 
         # Test program
-        @torch.compile()
+        @torch.compile(backend="eager")
         def foo():
             x = torch.ones([10])
 

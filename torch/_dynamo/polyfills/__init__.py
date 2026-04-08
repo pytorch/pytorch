@@ -11,7 +11,8 @@ from collections import OrderedDict
 from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, Sequence
 from itertools import repeat as _repeat
 from operator import eq, ne
-from typing import Any, TYPE_CHECKING, TypeVar
+from typing import Any, TYPE_CHECKING, TypeGuard, TypeVar
+from typing_extensions import TypeIs
 
 import torch
 
@@ -62,6 +63,16 @@ class NoEnterTorchFunctionMode(BaseTorchFunctionMode):
         pass
 
 
+# Used by WrappedUserFunctionVariable and similar to inline decorated function
+# calls with bytecode backing. Without this, the context enter/exit happens in
+# Python-level VT code, so a nested graph break inside `fn` would skip applying
+# the context in the compiled fn/resume. By inlining through this polyfill, the
+# `with` statement has real bytecode that the resume function can continue from.
+def _fn_with_ctx(ctx: Any, fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+    with ctx:
+        return fn(*args, **kwargs)
+
+
 def index(
     iterator: Iterator[T], item: T, start: int = 0, end: int | None = None
 ) -> int:
@@ -85,11 +96,11 @@ def radians(x: float) -> float:
     return math.pi / 180.0 * x
 
 
-def impl_IS_MAPPING(a: object) -> bool:
+def impl_IS_MAPPING(a: object) -> TypeIs[Mapping[Any, Any]]:
     return isinstance(a, Mapping)
 
 
-def impl_MATCH_SEQUENCE(a: object) -> bool:
+def impl_MATCH_SEQUENCE(a: object) -> TypeGuard[Sequence[Any]]:
     return isinstance(a, Sequence) and not isinstance(a, (str, bytes, bytearray))
 
 
@@ -316,7 +327,7 @@ def set_union(
         set_update(union_set, set2)
 
     # frozenset also uses this function
-    # pyrefly: ignore[not-callable]
+    # pyrefly: ignore [bad-argument-count, not-callable]
     return cls(union_set)
 
 
@@ -404,11 +415,33 @@ def instantiate_user_defined_class_object(
 ) -> T:
     obj = cls.__new__(cls, *args, **kwargs)
 
-    # Only call __init__ if the object is an instance of the class
+    # Only call __init__ if the object's type is a subclass of cls.
+    # CPython uses PyType_IsSubtype(Py_TYPE(obj), type) at the C level, which does NOT
+    # go through metaclass __instancecheck__. Using isinstance() here would be wrong
+    # for classes with custom __instancecheck__ (e.g. torch.ByteStorage).
     # Reference: https://github.com/python/cpython/blob/3.12/Objects/typeobject.c#L1670-L1673
-    if isinstance(obj, cls):
+    if issubclass(type(obj), cls):
         obj.__init__(*args, **kwargs)
     return obj
+
+
+def reduce_ex_user_defined_object(obj: T, protocol: int, /) -> tuple:  # type: ignore[type-arg]
+    """Traceable polyfill for object.__reduce_ex__ on user-defined objects.
+
+    Returns the same tuple that CPython's _common_reduce produces:
+    (copyreg.__newobj__, (cls,), obj.__dict__, None, None).
+    copy._reconstruct then calls cls.__new__(cls) and updates __dict__.
+    """
+    import copyreg
+
+    cls = type(obj)
+    return (
+        copyreg.__newobj__,  # pyrefly: ignore[missing-attribute]
+        (cls,),
+        obj.__dict__,
+        None,
+        None,
+    )
 
 
 def mutable_mapping_update(
@@ -486,26 +519,51 @@ def foreach_map_fn(*args: Any) -> Any:
 
 def foreach_lerp_inplace(
     self,
-    end: list[torch.Tensor] | tuple[torch.Tensor, ...] | None,
-    weight: Sequence[bool | complex | float | int],
+    end: list[torch.Tensor] | tuple[torch.Tensor, ...],
+    weight: float | int | torch.Tensor,
 ) -> None:
-    # decompose foreach lerp into constituent ops, prevents a graph break due to
-    # converting a value to a scalar when arg[2] is a single tensor
-    result = torch._foreach_sub(end, self)
-    result = torch._foreach_mul(result, weight)
-    return torch._foreach_add_(self, result)
+    # Decompose lerp via addcmul_ for FMA.  Uses the same dual-formula
+    # approach as CUDA's native lerp to get bitwise identical results:
+    #   |w| <  0.5  (low):  fma(w, diff, start)
+    #   |w| >= 0.5  (high): fma(-(1-w), diff, end)
+    # For tensor weights (e.g. 0-dim tensor from tensor betas in Adam) the
+    # low formula is always used because the native lerp_scalar lowering
+    # would crash on float(weight) for symbolic expressions.
+    diff = torch._foreach_sub(end, self)
+    if isinstance(weight, torch.Tensor):
+        # Select base and weight for the dual formula before a single addcmul:
+        #   low  (|w| <  0.5): fma(w,      diff, self)
+        #   high (|w| >= 0.5): fma(-(1-w), diff, end)
+        mask = weight.abs() >= 0.5
+        neg_omw = -(1.0 - weight)
+        w = torch.where(mask, neg_omw, weight)
+        bases = [torch.where(mask, e, s) for s, e in zip(self, end)]
+        w_list = [w] * len(diff)
+        torch._foreach_addcmul_(bases, w_list, diff)
+        for s, b in zip(self, bases):
+            s.copy_(b)
+    else:
+        abs_weight = weight if weight >= 0 else -weight
+        if abs_weight >= 0.5:
+            # High formula: end + (-(1-w)) * diff  →  fma(-(1-w), diff, end)
+            # Compute 1-w in target dtype to match CUDA rounding.
+            d0 = self[0]
+            neg_omw = -(1.0 - torch.tensor(weight, dtype=d0.dtype, device=d0.device))
+            neg_omw_list = [neg_omw] * len(diff)
+            for s, e in zip(self, end):
+                s.copy_(e)
+            torch._foreach_addcmul_(self, neg_omw_list, diff)
+        else:
+            # Low formula: start + w * diff  →  fma(w, diff, start)
+            weights = [torch.full_like(d, weight) for d in diff]
+            torch._foreach_addcmul_(self, weights, diff)
+    return self
 
 
 def foreach_pow_scalar(
     scalar: Any, exps: Sequence[bool | complex | float | int]
 ) -> tuple[torch.Tensor, ...]:
     return torch._foreach_pow([scalar for _ in exps], exps)
-
-
-def addcmul_inplace(
-    self, tensor1: torch.Tensor, tensor2: torch.Tensor, value: Any
-) -> None:
-    return self.add_(tensor1 * tensor2 * value)
 
 
 def predicate(obj: object) -> bool:
@@ -525,20 +583,47 @@ def cmp_eq(a: object, b: object) -> bool:
     # slow in some corner cases.
     # if a is b:
     #     return True
-    result = a.__eq__(b)
+    if isinstance(a, type):
+        # Default metaclass equality is identity-based. Preserve the reflected
+        # operand fallback without tracing through type.__eq__.
+        if type(a).__eq__ is type.__eq__:
+            result = True if a is b else NotImplemented
+        else:
+            result = type(a).__eq__(a, b)
+    else:
+        result = a.__eq__(b)
     if result is NotImplemented:
-        result = b.__eq__(a)
+        if isinstance(b, type):
+            if type(b).__eq__ is type.__eq__:
+                result = True if a is b else NotImplemented
+            else:
+                result = type(b).__eq__(b, a)
+        else:
+            result = b.__eq__(a)
     return result is not NotImplemented and result
 
 
 def cmp_ne(a: object, b: object) -> bool:
-    # Check if __ne__ is overridden
-    if isinstance(type(a).__ne__, types.FunctionType):
+    if isinstance(a, type):
+        if type(a).__ne__ is type.__ne__:
+            result = False if a is b else NotImplemented
+        else:
+            result = type(a).__ne__(a, b)
+        if result is not NotImplemented:
+            return result
+    elif isinstance(type(a).__ne__, types.FunctionType):
         result = a.__ne__(b)
         if result is not NotImplemented:
             return result
         # Fall through to try b.__ne__(a) or cmp_eq
-    if isinstance(type(b).__ne__, types.FunctionType):
+    if isinstance(b, type):
+        if type(b).__ne__ is type.__ne__:
+            result = False if a is b else NotImplemented
+        else:
+            result = type(b).__ne__(b, a)
+        if result is not NotImplemented:
+            return result
+    elif isinstance(type(b).__ne__, types.FunctionType):
         result = b.__ne__(a)
         if result is not NotImplemented:
             return result

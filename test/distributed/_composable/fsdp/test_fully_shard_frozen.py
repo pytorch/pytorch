@@ -3,7 +3,6 @@
 import copy
 import functools
 import itertools
-from typing import Union
 
 import torch
 import torch.distributed as dist
@@ -55,7 +54,7 @@ class TestFullyShardFrozen(FSDPTest):
 
     def _test_train_mixed_requires_grad_per_group(
         self,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool | int,
         use_activation_checkpointing: bool,
         freeze_after_init: bool,
     ):
@@ -89,10 +88,11 @@ class TestFullyShardFrozen(FSDPTest):
                 if "bias" not in param_name:
                     param.requires_grad_(False)
         for mlp in model:
-            assert isinstance(mlp, MLP), (
-                "The reduce-scatter numel check assumes the model consists of "
-                f"only the same MLP class but got {type(mlp)}"
-            )
+            if not isinstance(mlp, MLP):
+                raise AssertionError(
+                    "The reduce-scatter numel check assumes the model consists of "
+                    f"only the same MLP class but got {type(mlp)}"
+                )
         expected_numel = sum(
             p._local_tensor.numel()
             for n, p in model[0].named_parameters()
@@ -151,7 +151,7 @@ class TestFullyShardFrozen(FSDPTest):
 
     def _test_train_mixed_requires_grad_across_groups(
         self,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool | int,
         unfreeze_params: bool,
     ):
         torch.manual_seed(42)
@@ -225,7 +225,7 @@ class TestFullyShardFrozen(FSDPTest):
 
     def _test_multi_forward_mixed_requires_grad(
         self,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool | int,
     ):
         class MultiForwardModule(nn.Module):
             def __init__(self, device: torch.device):

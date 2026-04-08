@@ -570,7 +570,8 @@ def tuned_b2b_gemm(
         )
     )
     # autotune
-    return autotune_select_algorithm("b2b_gemm", choices, [A, B, C], layout)
+    node, _ = autotune_select_algorithm("b2b_gemm", choices, [A, B, C], layout)
+    return node
 
 
 # match the inner mm of a potential b2b_gemm

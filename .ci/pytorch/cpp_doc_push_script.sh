@@ -60,6 +60,34 @@ time python tools/setup_helpers/generate_code.py \
 pushd docs/cpp
 time make VERBOSE=1 html
 
+# Run C++ API coverage check (allowlist-based + HTML formatting)
+echo "Running C++ docs coverage check..."
+python check_coverage.py --coverxygen || coverage_exit=$?
+
+# Generate coverxygen HTML report if coverxygen produced output
+if [ -f coverxygen.info ] && command -v genhtml &> /dev/null; then
+  genhtml --no-function-coverage coverxygen.info -o build/html/_coverage \
+    --title "PyTorch C++ API Doc Coverage" \
+    --legend --highlight 2>/dev/null || true
+fi
+
+# Copy coverage reports into the build output so they get uploaded
+mkdir -p build/html/_coverage
+cp -f cpp_coverage.txt cpp_html_issues.txt build/html/_coverage/ 2>/dev/null || true
+cp -f coverxygen.info build/html/_coverage/ 2>/dev/null || true
+
+if [ "${coverage_exit:-0}" -ne 0 ]; then
+  echo ""
+  echo "========================================"
+  echo "C++ DOCS COVERAGE: HIGH-PRIORITY GAPS"
+  echo "========================================"
+  echo ""
+  cat cpp_coverage.txt
+  echo ""
+  echo "See the full coverage report at: _coverage/cpp_coverage.txt"
+  echo "See the HTML issues report at: _coverage/cpp_html_issues.txt"
+fi
+
 popd
 popd
 
@@ -76,6 +104,7 @@ cp -r "${pt_checkout}"/docs/cpp/build/html/* .
 # Copy back _config.yml
 rm -rf _config.yml
 mv /tmp/cppdocs-sync/* .
+touch .nojekyll
 
 # Make a new commit
 git add . || true

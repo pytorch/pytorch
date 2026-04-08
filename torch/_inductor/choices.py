@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import typing
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import sympy
 
@@ -58,12 +58,17 @@ class FusionScore:
     template_score: int
     node_type_score: bool
     memory_score: int
+    buffer_overlap_score: int
     proximity_score: int
 
     def __lt__(self, other):
         """
         node_type_score has higher priority than memory_score unless
-        the memory_score differs too much
+        the memory_score differs too much.
+
+        buffer_overlap_score is prioritized below memory_score so that
+        strict global memory savings (exact dep matches) are preferred
+        over buffer overlap scoring (same buffer, different indexing).
         """
         threshold = 16
         if self.template_score != other.template_score:
@@ -75,16 +80,22 @@ class FusionScore:
         ):
             return self.memory_score < other.memory_score
 
-        return (self.node_type_score, self.memory_score, self.proximity_score) < (
+        return (
+            self.node_type_score,
+            self.memory_score,
+            self.buffer_overlap_score,
+            self.proximity_score,
+        ) < (
             other.node_type_score,
             other.memory_score,
+            other.buffer_overlap_score,
             other.proximity_score,
         )
 
 
 class InductorChoices:
     """
-    This class contains a collection of default heuristics that effect performance of our generated
+    This class contains a collection of default heuristics that affect performance of our generated
     code.  We try to not put correctness requirements in this file.
 
     You can override the choices made here by doing:
@@ -93,10 +104,13 @@ class InductorChoices:
                 ...
 
             torch._inductor.virtualized.V.set_choices_handler(MyHeuristics())
+
+    Subclasses used with inductor_choices_class must implement uuid() for
+    cache key computation.
     """
 
     def get_config_heuristics(
-        self, device_type: Optional[str] = "cuda"
+        self, device_type: str | None = "cuda"
     ) -> BaseConfigHeuristic:
         if device_type == "cuda":
             if torch.version.hip is None:
@@ -114,27 +128,31 @@ class InductorChoices:
 
     # Conv configs
     def get_conv_configs(
-        self, device_type: Optional[str] = "cuda"
+        self, device_type: str | None = "cuda"
     ) -> partial[Generator[TritonConfig, None, None]]:
         conv_heuristics = self.get_config_heuristics(device_type)
         return conv_heuristics.get_conv_configs()
 
+    def get_depthwise_conv_configs(self, device_type: str | None = "cuda") -> list[Any]:
+        heuristics = self.get_config_heuristics(device_type)
+        return heuristics.get_depthwise_conv_configs()
+
     # Flex attention configs
     # TODO(coconutruben): break out flexattention/decode configs into the new retrieval mechanism
     def get_flex_attention_fwd_configs(
-        self, head_dim: int, dtype: torch.dtype, device_type: Optional[str] = "cuda"
+        self, head_dim: int, dtype: torch.dtype, device_type: str | None = "cuda"
     ) -> list[Any]:
         flex_heuristics = self.get_config_heuristics(device_type)
         return flex_heuristics.get_flex_attn_fwd_configs(head_dim, dtype)
 
     def get_flex_attention_bwd_configs(
-        self, head_dim: int, dtype: torch.dtype, device_type: Optional[str] = "cuda"
+        self, head_dim: int, dtype: torch.dtype, device_type: str | None = "cuda"
     ) -> list[Any]:
         flex_heuristics = self.get_config_heuristics(device_type)
         return flex_heuristics.get_flex_attn_bwd_configs(head_dim, dtype)
 
     def get_flex_decode_configs(
-        self, head_dim: int, dtype: torch.dtype, device_type: Optional[str] = "cuda"
+        self, head_dim: int, dtype: torch.dtype, device_type: str | None = "cuda"
     ) -> list[Any]:
         flex_heuristics = self.get_config_heuristics(device_type)
         return flex_heuristics.get_flex_decode_configs(head_dim, dtype)
@@ -143,9 +161,9 @@ class InductorChoices:
         self,
         template_choices: dict[str, Generator[KernelTemplateChoice, None, None]],
         kernel_inputs: KernelInputs,
-        templates: list[Union[KernelTemplate, ExternKernelChoice]],
+        templates: list[KernelTemplate | ExternKernelChoice],
         op_name: str,
-        kwarg_overrides: Optional[dict[str, dict[str, Any]]] = None,
+        kwarg_overrides: dict[str, dict[str, Any]] | None = None,
     ) -> list[KernelTemplateChoice]:
         """
         This method can be subclassed to perform any override/modification of the choices.
@@ -174,9 +192,9 @@ class InductorChoices:
     def get_ktc(
         self,
         kernel_inputs: KernelInputs,
-        template: Union[KernelTemplate, ExternKernelChoice],
+        template: KernelTemplate | ExternKernelChoice,
         op_name: str,
-        kwarg_overrides: Optional[dict[str, Any]] = None,
+        kwarg_overrides: dict[str, Any] | None = None,
     ) -> Generator[KernelTemplateChoice, None, None]:
         """
         Utility to get the KernelTemplateChoice generator for a specific input.
@@ -269,9 +287,9 @@ class InductorChoices:
     def get_template_configs(
         self,
         kernel_inputs: KernelInputs,
-        templates: list[Union[KernelTemplate, ExternKernelChoice]],
+        templates: list[KernelTemplate | ExternKernelChoice],
         op_name: str,
-        kwarg_overrides: Optional[dict[str, dict[str, Any]]] = None,
+        kwarg_overrides: dict[str, dict[str, Any]] | None = None,
     ) -> list[ChoiceCaller]:
         """
         Get list of ChoiceCallers for MM templates using template-specific heuristics.
@@ -331,6 +349,18 @@ class InductorChoices:
     ) -> dict[str, Any]:
         """Hook to change the kwargs passed to TritonKernel, used to apply fixed configurations"""
         return kernel_kwargs
+
+    def override_best_choice(
+        self,
+        best_choice: ChoiceCaller,
+        timings: dict[ChoiceCaller, float],
+    ) -> ChoiceCaller:
+        """Hook to override the autotuning best choice after benchmarking."""
+        return best_choice
+
+    def customize_fused_kernel_name(self, fused_name: str, src_code: str) -> str:
+        """Hook to transform fused kernel names during codegen"""
+        return fused_name
 
     @staticmethod
     def should_use_cooperative_reduction(features: SIMDKernelFeatures) -> bool:
@@ -628,8 +658,8 @@ class InductorChoices:
         - Fusions closer together in original graph order
         """
 
-        memory_score, is_mix_order_reduction = typing.cast(
-            tuple[int, bool],
+        memory_score, buffer_overlap_score, is_mix_order_reduction = typing.cast(
+            tuple[int, int, bool],
             scheduler.score_fusion_memory(
                 node1, node2, return_is_mix_order_reduction=True
             ),
@@ -654,5 +684,6 @@ class InductorChoices:
             template_score,
             type_score,
             memory_score,
+            buffer_overlap_score,
             proximity_score,
         )

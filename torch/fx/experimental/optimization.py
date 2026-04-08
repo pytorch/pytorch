@@ -6,7 +6,7 @@ import time
 from collections import defaultdict
 from collections.abc import Iterable
 from enum import Enum
-from typing import Any, cast, Optional
+from typing import Any, cast
 
 import torch
 import torch.fx as fx
@@ -291,7 +291,7 @@ def use_mkl_length(graph: MklSubgraph) -> bool:
 
 class UnionFind:
     def __init__(self, n):
-        self.parent: list[Optional[int]] = [None] * n
+        self.parent: list[int | None] = [None] * n
         self.size: list[int] = [0] * n
 
     def make_set(self, v: int):
@@ -319,7 +319,7 @@ class UnionFind:
 
 def optimize_for_inference(
     model: torch.nn.Module,
-    pass_config: Optional[dict[str, Any]] = None,
+    pass_config: dict[str, Any] | None = None,
     tracer: type[fx.Tracer] = fx.Tracer,
 ) -> torch.nn.Module:
     """

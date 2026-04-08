@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 
@@ -12,10 +12,10 @@ if TYPE_CHECKING:
 
 @dataclass
 class TensorInfo:
-    tensor: Optional[torch.Tensor]
+    tensor: torch.Tensor | None
     levels: list[DimEntry]
     has_device: bool
-    batchedtensor: Optional[torch.Tensor]
+    batchedtensor: torch.Tensor | None
 
     def __post_init__(self) -> None:
         from ._dim_entry import DimEntry

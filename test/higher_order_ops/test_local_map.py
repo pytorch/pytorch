@@ -6,7 +6,7 @@ import functools
 import unittest
 from collections.abc import Callable
 from contextlib import contextmanager, ExitStack
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch._dynamo
@@ -756,8 +756,8 @@ class GraphModule(torch.nn.Module):
 
         def _all_to_all(
             self: torch.Tensor,
-            output_split_sizes: Optional[list[int]],
-            input_split_sizes: Optional[list[int]],
+            output_split_sizes: list[int] | None,
+            input_split_sizes: list[int] | None,
             group_name: str,
         ):
             group_size = c10d._get_group_size_by_name(group_name)
@@ -781,8 +781,8 @@ class GraphModule(torch.nn.Module):
             def forward(
                 ctx: Any,
                 x: torch.Tensor,
-                output_split_sizes: Optional[list[int]],
-                input_split_sizes: Optional[list[int]],
+                output_split_sizes: list[int] | None,
+                input_split_sizes: list[int] | None,
                 axis_name: str,
             ):
                 group_name = _get_group_name_from_axis_name(axis_name)
@@ -931,6 +931,34 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(mm_nodes[1].meta["custom"]["inside_local_map"], 1)
         self.assertEqual(mm_nodes[2].meta["custom"]["inside_local_map"], 1)
         self.assertEqual(mm_nodes[3].meta["custom"]["inside_local_map"], 0)
+
+    @unittest.skipIf(*get_skip_reasons())
+    def test_local_map_make_contiguous_strides_for(self):
+        # make_contiguous_strides_for inside local_map must compile with dynamic shapes.
+        from torch._prims_common import make_contiguous_strides_for
+
+        @local_map(
+            out_placements=((Shard(0), Replicate()),),
+            in_placements=((Shard(0), Replicate()),),
+            redistribute_inputs=True,
+            device_mesh=self.mesh,
+        )
+        def fn(x):
+            strides = make_contiguous_strides_for(x.shape)
+            return (x.as_strided(x.shape, strides),)
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                return fn(x)
+
+        model = MyModule()
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        backend = EagerAndRecordGraphs()
+        x = torch.randn(80, 80)
+        with enable_local_map_wrapping():
+            out = torch.compile(model, backend=backend)(x)
+        self.assertEqual(out[0].shape, x.shape)
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ import cmath
 import collections.abc
 import contextlib
 from collections.abc import Callable, Collection, Sequence
-from typing import Any, NoReturn, Optional, Union
+from typing import Any, NoReturn
 from typing_extensions import deprecated
 
 import torch
@@ -17,6 +17,37 @@ try:
 except ModuleNotFoundError:
     HAS_NUMPY = False
     np = None  # type: ignore[assignment]
+
+_HAS_DTENSOR = torch.distributed.is_available()
+
+
+def _unwrap_dtensor_for_comparison(actual, expected):
+    """Handle DTensor inputs for assertEqual/assert_close."""
+    if not _HAS_DTENSOR:
+        return actual, expected
+    from torch.distributed.tensor import DTensor
+
+    actual_dt = isinstance(actual, DTensor)
+    expected_dt = isinstance(expected, DTensor)
+    if actual_dt and expected_dt:
+        if actual.placements != expected.placements:
+            raise AssertionError(
+                f"DTensor placements do not match: "
+                f"{actual.placements} != {expected.placements}"
+            )
+        if actual.device_mesh != expected.device_mesh:
+            raise AssertionError(
+                f"DTensor device meshes do not match: "
+                f"{actual.device_mesh} != {expected.device_mesh}"
+            )
+        return actual.to_local(), expected.to_local()
+    elif actual_dt != expected_dt:
+        raise TypeError(
+            "Comparing a DTensor to a non-DTensor is ambiguous. "
+            "Call .full_tensor() to compare the full logical tensor "
+            "or .to_local() to compare the local shard."
+        )
+    return actual, expected
 
 
 class ErrorMeta(Exception):
@@ -35,9 +66,7 @@ class ErrorMeta(Exception):
         self.msg = msg
         self.id = id
 
-    def to_error(
-        self, msg: Optional[Union[str, Callable[[str], str]]] = None
-    ) -> Exception:
+    def to_error(self, msg: str | Callable[[str], str] | None = None) -> Exception:
         if not isinstance(msg, str):
             generated_msg = self.msg
             if self.id:
@@ -71,8 +100,8 @@ _DTYPE_PRECISIONS.update(
 
 
 def default_tolerances(
-    *inputs: Union[torch.Tensor, torch.dtype],
-    dtype_precisions: Optional[dict[torch.dtype, tuple[float, float]]] = None,
+    *inputs: torch.Tensor | torch.dtype,
+    dtype_precisions: dict[torch.dtype, tuple[float, float]] | None = None,
 ) -> tuple[float, float]:
     """Returns the default absolute and relative testing tolerances for a set of inputs based on the dtype.
 
@@ -99,9 +128,9 @@ def default_tolerances(
 
 
 def get_tolerances(
-    *inputs: Union[torch.Tensor, torch.dtype],
-    rtol: Optional[float],
-    atol: Optional[float],
+    *inputs: torch.Tensor | torch.dtype,
+    rtol: float | None,
+    atol: float | None,
     id: tuple[Any, ...] = (),
 ) -> tuple[float, float]:
     """Gets absolute and relative to be used for numeric comparisons.
@@ -133,9 +162,9 @@ def get_tolerances(
 def _make_bitwise_mismatch_msg(
     *,
     default_identifier: str,
-    identifier: Optional[Union[str, Callable[[str], str]]] = None,
-    extra: Optional[str] = None,
-    first_mismatch_idx: Optional[tuple[int, ...]] = None,
+    identifier: str | Callable[[str], str] | None = None,
+    extra: str | None = None,
+    first_mismatch_idx: tuple[int, ...] | None = None,
 ):
     """Makes a mismatch error message for bitwise values.
 
@@ -164,13 +193,13 @@ def _make_bitwise_mismatch_msg(
 def _make_mismatch_msg(
     *,
     default_identifier: str,
-    identifier: Optional[Union[str, Callable[[str], str]]] = None,
-    extra: Optional[str] = None,
+    identifier: str | Callable[[str], str] | None = None,
+    extra: str | None = None,
     abs_diff: float,
-    abs_diff_idx: Optional[Union[int, tuple[int, ...]]] = None,
+    abs_diff_idx: int | tuple[int, ...] | None = None,
     atol: float,
     rel_diff: float,
-    rel_diff_idx: Optional[Union[int, tuple[int, ...]]] = None,
+    rel_diff_idx: int | tuple[int, ...] | None = None,
     rtol: float,
 ) -> str:
     """Makes a mismatch error message for numeric values.
@@ -196,7 +225,7 @@ def _make_mismatch_msg(
         *,
         type: str,
         diff: float,
-        idx: Optional[Union[int, tuple[int, ...]]],
+        idx: int | tuple[int, ...] | None,
         tol: float,
     ) -> str:
         if idx is None:
@@ -224,12 +253,12 @@ def _make_mismatch_msg(
 
 
 def make_scalar_mismatch_msg(
-    actual: Union[bool, int, float, complex],
-    expected: Union[bool, int, float, complex],
+    actual: bool | int | float | complex,
+    expected: bool | int | float | complex,
     *,
     rtol: float,
     atol: float,
-    identifier: Optional[Union[str, Callable[[str], str]]] = None,
+    identifier: str | Callable[[str], str] | None = None,
 ) -> str:
     """Makes a mismatch error message for scalars.
 
@@ -263,7 +292,7 @@ def make_tensor_mismatch_msg(
     *,
     rtol: float,
     atol: float,
-    identifier: Optional[Union[str, Callable[[str], str]]] = None,
+    identifier: str | Callable[[str], str] | None = None,
 ):
     """Makes a mismatch error message for tensors.
 
@@ -374,7 +403,7 @@ class Pair(abc.ABC):
         raise UnsupportedInputs
 
     @staticmethod
-    def _check_inputs_isinstance(*inputs: Any, cls: Union[type, tuple[type, ...]]):
+    def _check_inputs_isinstance(*inputs: Any, cls: type | tuple[type, ...]):
         """Checks if all inputs are instances of a given class and raise :class:`UnsupportedInputs` otherwise."""
         if not all(isinstance(input, cls) for input in inputs):
             Pair._inputs_not_supported()
@@ -395,7 +424,7 @@ class Pair(abc.ABC):
     def compare(self) -> None:
         """Compares the inputs and raises an :class`ErrorMeta` in case they mismatch."""
 
-    def extra_repr(self) -> Sequence[Union[str, tuple[str, Any]]]:
+    def extra_repr(self) -> Sequence[str | tuple[str, Any]]:
         """Returns extra information that will be included in the representation.
 
         Should be overwritten by all subclasses that use additional options. The representation of the object will only
@@ -561,8 +590,8 @@ class NumberPair(Pair):
         expected: Any,
         *,
         id: tuple[Any, ...] = (),
-        rtol: Optional[float] = None,
-        atol: Optional[float] = None,
+        rtol: float | None = None,
+        atol: float | None = None,
         equal_nan: bool = False,
         check_dtype: bool = False,
         **other_parameters: Any,
@@ -589,7 +618,7 @@ class NumberPair(Pair):
 
     def _process_inputs(
         self, actual: Any, expected: Any, *, id: tuple[Any, ...]
-    ) -> tuple[Union[int, float, complex], Union[int, float, complex]]:
+    ) -> tuple[int | float | complex, int | float | complex]:
         self._check_inputs_isinstance(actual, expected, cls=self._supported_types)
         actual, expected = (
             self._to_number(number_like, id=id) for number_like in (actual, expected)
@@ -598,7 +627,7 @@ class NumberPair(Pair):
 
     def _to_number(
         self, number_like: Any, *, id: tuple[Any, ...]
-    ) -> Union[int, float, complex]:
+    ) -> int | float | complex:
         # pyrefly: ignore [missing-attribute]
         if HAS_NUMPY and isinstance(number_like, np.number):
             return number_like.item()
@@ -673,8 +702,8 @@ class TensorLikePair(Pair):
         *,
         id: tuple[Any, ...] = (),
         allow_subclasses: bool = True,
-        rtol: Optional[float] = None,
-        atol: Optional[float] = None,
+        rtol: float | None = None,
+        atol: float | None = None,
         equal_nan: bool = False,
         check_device: bool = True,
         check_dtype: bool = True,
@@ -880,7 +909,7 @@ class TensorLikePair(Pair):
                 rtol: float,
                 atol: float,
                 equal_nan: bool,
-                identifier: Optional[Union[str, Callable[[str], str]]] = None,
+                identifier: str | Callable[[str], str] | None = None,
             ) -> None:
                 if rtol != 0.0 or atol != 0.0:
                     raise ErrorMeta(
@@ -1063,7 +1092,7 @@ class TensorLikePair(Pair):
         expected: torch.Tensor,
         *,
         equal_nan: bool = False,
-        identifier: Optional[Union[str, Callable[[str], str]]] = None,
+        identifier: str | Callable[[str], str] | None = None,
     ) -> None:
         """Checks if the values of two tensors are equal."""
         self._compare_regular_values_close(
@@ -1078,7 +1107,7 @@ class TensorLikePair(Pair):
         rtol: float,
         atol: float,
         equal_nan: bool,
-        identifier: Optional[Union[str, Callable[[str], str]]] = None,
+        identifier: str | Callable[[str], str] | None = None,
     ) -> None:
         """Checks if the values of two tensors are close up to a desired tolerance."""
         matches = torch.isclose(
@@ -1330,14 +1359,14 @@ def assert_close(
     expected: Any,
     *,
     allow_subclasses: bool = True,
-    rtol: Optional[float] = None,
-    atol: Optional[float] = None,
+    rtol: float | None = None,
+    atol: float | None = None,
     equal_nan: bool = False,
     check_device: bool = True,
     check_dtype: bool = True,
     check_layout: bool = True,
     check_stride: bool = False,
-    msg: Optional[Union[str, Callable[[str], str]]] = None,
+    msg: str | Callable[[str], str] | None = None,
 ):
     r"""Asserts that ``actual`` and ``expected`` are close.
 
@@ -1575,6 +1604,8 @@ def assert_close(
     # Hide this function from `pytest`'s traceback
     __tracebackhide__ = True
 
+    actual, expected = _unwrap_dtensor_for_comparison(actual, expected)
+
     error_metas = not_close_error_metas(
         actual,
         expected,
@@ -1609,8 +1640,8 @@ def assert_close(
 def assert_allclose(
     actual: Any,
     expected: Any,
-    rtol: Optional[float] = None,
-    atol: Optional[float] = None,
+    rtol: float | None = None,
+    atol: float | None = None,
     equal_nan: bool = True,
     msg: str = "",
 ) -> None:

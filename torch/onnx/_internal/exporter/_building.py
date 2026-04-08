@@ -14,7 +14,7 @@ import copy
 import inspect
 import logging
 from collections.abc import Iterable, Mapping, Sequence
-from typing import Any, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 from onnxscript import evaluator
 
@@ -29,13 +29,18 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-ValidAttributeType = Union[
-    ir.TensorProtocol, int, float, bool, str, Sequence[int], Sequence[float], None
-]
+ValidAttributeType = (
+    ir.TensorProtocol
+    | int
+    | float
+    | bool
+    | str
+    | Sequence[int]
+    | Sequence[float]
+    | None
+)
 
-AllowedArgType = Union[
-    ir.Value, Sequence[Union[ir.Value, ValidAttributeType]], ValidAttributeType
-]
+AllowedArgType = ir.Value | Sequence[ir.Value | ValidAttributeType] | ValidAttributeType
 
 
 # Logic for adapting inputs from general Python or PyTorch inputs to ONNX ir.Value
@@ -271,7 +276,6 @@ def _get_or_create_constant(
     # float representation of complex numbers
     if isinstance(arg, complex):
         # Convert the complex number to a float
-        # pyrefly: ignore [bad-assignment]
         arg = (arg.real, arg.imag)
 
     if isinstance(arg, list):
@@ -440,7 +444,6 @@ def _process_python_sequences(
             # when the expected input type is INT64
             # We assume this only happens for 0D cases
             if all(isinstance(val, ir.Value) for val in arg):
-                # pyrefly: ignore
                 expanded_args = [_reshape_to_1d_tensor(opset, val) for val in arg]
                 named_inputs[name] = opset.Concat(*expanded_args, axis=0)
                 continue

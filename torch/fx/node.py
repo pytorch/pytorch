@@ -29,7 +29,7 @@ __all__ = ["Node", "map_arg", "map_aggregate", "has_side_effect"]
 
 log = logging.getLogger(__name__)
 
-BaseArgumentTypes = Union[
+BaseArgumentTypes = Union[  # noqa: UP007
     str,
     int,
     float,
@@ -47,9 +47,9 @@ BaseArgumentTypes = Union[
 ]
 base_types = typing.get_args(BaseArgumentTypes)
 
-Target: TypeAlias = Union[Callable[..., Any], str]
+Target: TypeAlias = Callable[..., Any] | str
 
-Argument = Optional[
+Argument = Optional[  # noqa: UP007, UP045
     Union[
         tuple["Argument", ...],
         Sequence["Argument"],
@@ -185,6 +185,7 @@ def _get_qualified_name(func: Callable[..., Any]) -> str:
     ):
         return f"torch.Tensor.{func.__name__}"
     name = func.__name__
+
     if name == "<lambda>":
         # For lambdas, try to get their defining name in the module
         try:
@@ -291,10 +292,10 @@ class Node(_NodeBase):
     # generated function return type. (Note this is a special case. ``return``
     # does not produce a value, it's more of a notation. Thus, this value
     # describes the type of args[0] in the ``return`` node.
-    type: Optional[Any]
+    type: Any | None
     _sort_key: Any
     # If set, use this fn to print this node
-    _repr_fn: Optional[Callable[["Node"], str]]
+    _repr_fn: Callable[["Node"], str] | None
     # Dictionary to store metadata passes need to do their
     # transformations. This metadata is preserved across node copies
     meta: dict[str, Any]
@@ -308,7 +309,7 @@ class Node(_NodeBase):
         target: "Target",
         args: tuple["Argument", ...],
         kwargs: dict[str, "Argument"],
-        return_type: Optional[Any] = None,
+        return_type: Any | None = None,
     ) -> None:
         """
         Instantiate an instance of ``Node``. Note: most often, you want to use the
@@ -543,7 +544,7 @@ class Node(_NodeBase):
         self.kwargs = {**self.kwargs, key: arg}
 
     @property
-    def stack_trace(self) -> Optional[str]:
+    def stack_trace(self) -> str | None:
         """
         Return the Python stack trace that was recorded during tracing, if any.
         When traced with fx.Tracer, this property is usually populated by
@@ -557,7 +558,7 @@ class Node(_NodeBase):
         return self.meta.get("stack_trace", None)
 
     @stack_trace.setter
-    def stack_trace(self, trace: Optional[str]) -> None:
+    def stack_trace(self, trace: str | None) -> None:
         self.meta["stack_trace"] = trace
 
     def __repr__(self) -> str:
@@ -593,11 +594,11 @@ class Node(_NodeBase):
     @compatibility(is_backward_compatible=True)
     def format_node(
         self,
-        placeholder_names: Optional[list[str]] = None,
-        maybe_return_typename: Optional[list[str]] = None,
+        placeholder_names: list[str] | None = None,
+        maybe_return_typename: list[str] | None = None,
         *,
         include_tensor_metadata: bool = False,
-    ) -> Optional[str]:
+    ) -> str | None:
         """
         Return a descriptive string representation of ``self``.
 
@@ -654,7 +655,7 @@ class Node(_NodeBase):
             return f"return {self.args[0]}"
         else:
 
-            def stringify_shape(shape: Iterable) -> str:
+            def stringify_shape(shape: Iterable[Any]) -> str:
                 return f"[{', '.join([str(x) for x in shape])}]"
 
             meta_val = self.meta.get(
@@ -691,7 +692,7 @@ class Node(_NodeBase):
     def replace_all_uses_with(
         self,
         replace_with: "Node",
-        delete_user_cb: Optional[Callable[["Node"], bool]] = None,
+        delete_user_cb: Callable[["Node"], bool] | None = None,
         *,
         propagate_meta: bool = False,
     ) -> list["Node"]:
@@ -785,10 +786,10 @@ class Node(_NodeBase):
     def normalized_arguments(
         self,
         root: torch.nn.Module,
-        arg_types: Optional[tuple[Any]] = None,
-        kwarg_types: Optional[dict[str, Any]] = None,
+        arg_types: tuple[Any] | None = None,
+        kwarg_types: dict[str, Any] | None = None,
         normalize_to_only_use_kwargs: bool = False,
-    ) -> Optional[ArgsKwargsPair]:
+    ) -> ArgsKwargsPair | None:
         """
         Returns normalized arguments to Python targets. This means that
         `args/kwargs` will be matched up to the module/functional's

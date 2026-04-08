@@ -78,8 +78,8 @@ endif()
 message(STATUS "PyTorch: CUDA detected: " ${CUDA_VERSION})
 message(STATUS "PyTorch: CUDA nvcc is: " ${CUDA_NVCC_EXECUTABLE})
 message(STATUS "PyTorch: CUDA toolkit directory: " ${CUDA_TOOLKIT_ROOT_DIR})
-if(CUDA_VERSION VERSION_LESS 12.0)
-  message(FATAL_ERROR "PyTorch requires CUDA 12.0 or above.")
+if(CUDA_VERSION VERSION_LESS 12.1)
+  message(FATAL_ERROR "PyTorch requires CUDA 12.1 or above.")
 endif()
 
 if(CUDA_FOUND)
@@ -374,6 +374,11 @@ if(MSVC)
   endif()
 elseif(CUDA_DEVICE_DEBUG)
   list(APPEND CUDA_NVCC_FLAGS "-g" "-G")  # -G enables device code debugging symbols
+endif()
+
+# needed for compat with newer versions of clang that use C++20 mangling rules
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 18)
+  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler=-fclang-abi-compat=17")
 endif()
 
 # Set expt-relaxed-constexpr to suppress Eigen warnings

@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 import sys
-from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -25,11 +24,11 @@ if not dist.is_available() or not dist.is_nccl_available():
 @requires_cuda_p2p_access()
 class NCCLCopyEngineCollectives(MultiProcContinuousTest):
     @classmethod
-    def backend_str(cls) -> Optional[str]:
+    def backend_str(cls) -> str | None:
         return "nccl"
 
     @classmethod
-    def opts(cls) -> Optional[dist.ProcessGroupNCCL.Options]:
+    def opts(cls) -> dist.ProcessGroupNCCL.Options | None:
         # Enable Zero-CTA policy for CE collectives
         opts = dist.ProcessGroupNCCL.Options()
         opts.config.cta_policy = dist.ProcessGroupNCCL.NCCL_CTA_POLICY_ZERO

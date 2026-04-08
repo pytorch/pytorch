@@ -635,10 +635,10 @@ struct ReduceOp {
     using args_vec_t = std::array<arg_t, output_vec_size>;
     int dim_x = blockDim.x;
     args_vec_t* shared = (args_vec_t*)shared_memory;
-    if (dim_x > warpSize) {
+    if (dim_x > C10_WARP_SIZE) {
       int address_base = threadIdx.x + threadIdx.y*blockDim.x;
       shared[address_base] = value;
-      for (int offset = dim_x/2; offset >= warpSize; offset >>= 1) {
+      for (int offset = dim_x/2; offset >= C10_WARP_SIZE; offset >>= 1) {
         __syncthreads();
         if (threadIdx.x < offset && threadIdx.x + offset < blockDim.x) {
           args_vec_t other = shared[address_base + offset];
@@ -649,7 +649,7 @@ struct ReduceOp {
           shared[address_base] = value;
         }
       }
-      dim_x = warpSize;
+      dim_x = C10_WARP_SIZE;
     }
 
     __syncthreads();
@@ -836,9 +836,9 @@ struct ReduceOp {
           }
         }
       } else {
+#if defined(USE_ROCM) && ROCM_VERSION <= 71300
         index_t input_offset = threadIdx.y;
         index_t step = blockDim.y;
-#ifdef USE_ROCM // Prefetch loads to better hide their latency
         #define PRFCH 4
         for (; input_offset < config.ctas_per_output; input_offset += step*PRFCH) {
          arg_vec_t next[PRFCH];
@@ -855,6 +855,14 @@ struct ReduceOp {
          }
         }
 #else
+#if defined(USE_ROCM)
+        int input_offset = threadIdx.y;
+        int step = blockDim.y;
+        #pragma unroll
+#else
+        index_t input_offset = threadIdx.y;
+        index_t step = blockDim.y;
+#endif
         for (; input_offset < config.ctas_per_output; input_offset += step) {
           index_t idx = config.staging_memory_offset(input_offset);
           arg_vec_t next = reduce_buffer[idx];
@@ -1117,7 +1125,7 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
   if (iter.ndim() == 0 || reduction_on_fastest_striding_dimension) {
     // Split the input across lanes if the input is contiguous in the reduced
     // dimension. This will require reduction between threads using warp
-    // shuffle instructions and shared memory (if block_width > warpSize).
+    // shuffle instructions and shared memory (if block_width > C10_WARP_SIZE).
     config.input_mult[0] = config.split_input(block_width);
   } else {
     // Otherwise split the output across lanes in a warp.

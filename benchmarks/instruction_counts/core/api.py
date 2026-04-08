@@ -7,7 +7,7 @@ import enum
 import itertools as it
 import re
 import textwrap
-from typing import Optional, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 from worker.main import WorkerTimerArgs
 
@@ -148,22 +148,22 @@ class GroupedBenchmark:
     # `GroupedStmts` (init_from_stmts) they are passed through from user args.
     # In the case of `GroupedModules` (init_from_model) they are generated
     # using `signature`. (e.g. `f(x, y) -> z` generates `z = model(x, y)`)
-    py_fwd_stmt: Optional[str]
-    cpp_fwd_stmt: Optional[str]
+    py_fwd_stmt: str | None
+    cpp_fwd_stmt: str | None
 
     # Code block used to define a model. `init_from_stmts` will never populate
     # `cpp_model_setup`, but if TorchScript is requested it will generate
     # `py_model_setup` using `torch.jit.script`.
-    py_model_setup: Optional[str]
-    cpp_model_setup: Optional[str]
+    py_model_setup: str | None
+    cpp_model_setup: str | None
 
     # True if this benchmark used `init_from_stmts`, otherwise False.
     inferred_model_setup: bool
 
     # Described above
     setup: GroupedSetup
-    signature_args: Optional[tuple[str, ...]]
-    signature_output: Optional[str]
+    signature_args: tuple[str, ...] | None
+    signature_output: str | None
     torchscript: bool
     autograd: bool
     num_threads: tuple[int, ...]
@@ -171,14 +171,14 @@ class GroupedBenchmark:
     @classmethod
     def init_from_stmts(
         cls,
-        py_stmt: Optional[str] = None,
-        cpp_stmt: Optional[str] = None,
+        py_stmt: str | None = None,
+        cpp_stmt: str | None = None,
         # Generic constructor arguments
         setup: GroupedSetup = GroupedSetup(),
-        signature: Optional[str] = None,
+        signature: str | None = None,
         torchscript: bool = False,
         autograd: bool = False,
-        num_threads: Union[int, tuple[int, ...]] = 1,
+        num_threads: int | tuple[int, ...] = 1,
     ) -> "GroupedBenchmark":
         """Create a set of benchmarks from free-form statements.
 
@@ -219,14 +219,14 @@ class GroupedBenchmark:
     @classmethod
     def init_from_model(
         cls,
-        py_model_setup: Optional[str] = None,
-        cpp_model_setup: Optional[str] = None,
+        py_model_setup: str | None = None,
+        cpp_model_setup: str | None = None,
         # Generic constructor arguments
         setup: GroupedSetup = GroupedSetup(),
-        signature: Optional[str] = None,
+        signature: str | None = None,
         torchscript: bool = False,
         autograd: bool = False,
-        num_threads: Union[int, tuple[int, ...]] = 1,
+        num_threads: int | tuple[int, ...] = 1,
     ) -> "GroupedBenchmark":
         """Create a set of benchmarks using torch.nn Modules.
 
@@ -263,8 +263,8 @@ class GroupedBenchmark:
         cls,
         py_block: str = "",
         cpp_block: str = "",
-        num_threads: Union[int, tuple[int, ...]] = 1,
-    ) -> dict[Union[tuple[str, ...], Optional[str]], "GroupedBenchmark"]:
+        num_threads: int | tuple[int, ...] = 1,
+    ) -> dict[tuple[str, ...] | str | None, "GroupedBenchmark"]:
         py_cases, py_setup, py_global_setup = cls._parse_variants(
             py_block, Language.PYTHON
         )
@@ -285,7 +285,7 @@ class GroupedBenchmark:
         # NB: The key is actually `Tuple[str, ...]`, however MyPy gets confused
         #     and we use the superset `Union[Tuple[str, ...], Optional[str]` to
         #     match the expected signature.
-        variants: dict[Union[tuple[str, ...], Optional[str]], GroupedBenchmark] = {}
+        variants: dict[tuple[str, ...] | str | None, GroupedBenchmark] = {}
 
         seen_labels: set[str] = set()
         for label in it.chain(py_cases.keys(), cpp_cases.keys()):
@@ -338,8 +338,8 @@ class GroupedBenchmark:
 
     @staticmethod
     def _parse_signature(
-        signature: Optional[str],
-    ) -> tuple[Optional[tuple[str, ...]], Optional[str]]:
+        signature: str | None,
+    ) -> tuple[tuple[str, ...] | None, str | None]:
         if signature is None:
             return None, None
 
@@ -362,9 +362,9 @@ class GroupedBenchmark:
 
     @staticmethod
     def _model_from_py_stmt(
-        py_stmt: Optional[str],
-        signature_args: Optional[tuple[str, ...]],
-        signature_output: Optional[str],
+        py_stmt: str | None,
+        signature_args: tuple[str, ...] | None,
+        signature_output: str | None,
     ) -> str:
         if py_stmt is None:
             raise ValueError("`py_stmt` must be defined in order to derive a model.")
@@ -383,7 +383,7 @@ class GroupedBenchmark:
     @staticmethod
     def _make_model_invocation(
         signature_args: tuple[str, ...],
-        signature_output: Optional[str],
+        signature_output: str | None,
         runtime: RuntimeMode,
     ) -> tuple[str, str]:
         py_prefix, cpp_prefix = "", ""

@@ -367,6 +367,25 @@ to configure quantization settings for individual ops.
     default_qat_qconfig_v2
 ```
 
+## torch.ao.quantization.quantization_mappings
+
+```{eval-rst}
+.. automodule:: torch.ao.quantization.quantization_mappings
+```
+
+```{eval-rst}
+.. currentmodule:: torch.ao.quantization.quantization_mappings
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    no_observer_set
+```
+
 ## torch.ao.nn.intrinsic
 
 ```{eval-rst}

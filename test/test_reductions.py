@@ -14,7 +14,8 @@ import warnings
 from torch import inf, nan
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
-    all_types_and_complex_and, get_all_math_dtypes, integral_types, complex_types, floating_types_and,
+    all_types_and_complex_and, get_all_math_dtypes, highest_precision_float,
+    integral_types, complex_types, floating_types_and,
     integral_types_and, floating_and_complex_types_and, all_types_and, all_types,
 )
 from torch.testing._internal.common_utils import (
@@ -427,8 +428,6 @@ class TestReductions(TestCase):
          allowed_dtypes=[torch.float32, torch.complex64])
     def test_ref_extremal_values(self, device, dtype, op: ReductionOpInfo):
         """Compares op against reference for input tensors with extremal values"""
-        if "xpu" in device and dtype is torch.complex64 and op.name == "mean":
-            self.skipTest("accuracy issue with this test, see https://github.com/intel/torch-xpu-ops/issues/2300")
         t = make_tensor((5,), dtype=dtype, device=device, exclude_zero=True)
         extremals = [0, 1, nan, inf, -inf]
         for extremal in extremals:
@@ -1607,8 +1606,8 @@ class TestReductions(TestCase):
         self.assertEqual(torch.bucketize(values_0_el, boundaries), expected_result)
 
         # nan input
-        values_nan = torch.tensor([1.0, float('nan'), 2.0, float('nan')], device=device, dtype=torch.float64)
-        boundaries = torch.tensor([0.0, 1.0, 2.0, 3.0], device=device, dtype=torch.float64)
+        values_nan = torch.tensor([1.0, float('nan'), 2.0, float('nan')], device=device, dtype=highest_precision_float(device))
+        boundaries = torch.tensor([0.0, 1.0, 2.0, 3.0], device=device, dtype=highest_precision_float(device))
         expected_result = torch.tensor([1, 4, 2, 4], device=device)
         self.assertEqual(torch.searchsorted(boundaries, values_nan), expected_result)
         expected_result = torch.tensor([2, 4, 3, 4], device=device)
@@ -1617,7 +1616,7 @@ class TestReductions(TestCase):
 
         # type promotion and non contiguous tensors
         values_3d_permute = values_3d.permute(2, 1, 0).to(torch.int32)
-        boundaries_permute = values_3d.permute(2, 1, 0).to(torch.float64)
+        boundaries_permute = values_3d.permute(2, 1, 0).to(highest_precision_float(device))
         expected_result = torch.tensor([[[0, 0], [0, 1]], [[2, 0], [0, 1]], [[2, 0], [0, 0]]], device=device)
         if self.device_type != 'xla':
             self.assertWarnsRegex(

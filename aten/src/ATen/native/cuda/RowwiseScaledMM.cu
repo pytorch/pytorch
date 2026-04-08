@@ -198,7 +198,7 @@ void f8f8bf16_rowwise_impl(
           cutlass::epilogue::collective::EpilogueTileAuto,
           DtypeAccum,
           DtypeEpilogue,
-          DtypeOutput,
+          void, // Indicate there is no beta scaling to save register
           LayoutOutput,
           AlignmentOutput,
           DtypeOutput,
@@ -255,7 +255,7 @@ void f8f8bf16_rowwise_impl(
                            : nullptr},
          {{reinterpret_cast<DtypeScale*>(w_scale.data_ptr())},
           {{reinterpret_cast<DtypeScale*>(x_scale.data_ptr())}}}}},
-       reinterpret_cast<DtypeOutput*>(out.data_ptr()),
+       nullptr,
        stride_output,
        reinterpret_cast<DtypeOutput*>(out.data_ptr()),
        stride_output}};
@@ -288,7 +288,7 @@ void f8f8bf16_rowwise_impl(
   }
 
   // Initialize CUTLASS kernel with arguments and workspace pointer
-  status = gemm.initialize(arguments, workspace.data_ptr());
+  status = gemm.initialize(arguments, workspace.data_ptr(), at::cuda::getCurrentCUDAStream());
   if (status != cutlass::Status::kSuccess) {
     throw std::runtime_error("cutlass cannot initialize");
   }
@@ -390,7 +390,7 @@ void f8f8bf16_rowwise_impl_sm100_sm120(
       TileShape, ClusterShape,
       cutlass::epilogue::collective::EpilogueTileAuto,
       DtypeAccum, DtypeEpilogue,
-      DtypeOutput, LayoutOutput, AlignmentOutput,
+      void, LayoutOutput, AlignmentOutput,
       DtypeOutput, LayoutOutput, AlignmentOutput,
       EpilogueScheduleType,
       EpilogueEVT>::CollectiveOp;
@@ -448,7 +448,7 @@ void f8f8bf16_rowwise_impl_sm100_sm120(
                            : nullptr},
          {{reinterpret_cast<DtypeScale*>(w_scale.data_ptr())},
           {{reinterpret_cast<DtypeScale*>(x_scale.data_ptr())}}}}},
-       reinterpret_cast<DtypeOutput*>(out.data_ptr()),
+       nullptr,
        stride_output,
        reinterpret_cast<DtypeOutput*>(out.data_ptr()),
        stride_output}};
@@ -481,7 +481,7 @@ void f8f8bf16_rowwise_impl_sm100_sm120(
   }
 
   // Initialize CUTLASS kernel with arguments and workspace pointer
-  status = gemm.initialize(arguments, workspace.data_ptr());
+  status = gemm.initialize(arguments, workspace.data_ptr(), at::cuda::getCurrentCUDAStream());
   if (status != cutlass::Status::kSuccess) {
     throw std::runtime_error("cutlass cannot initialize");
   }
@@ -697,7 +697,7 @@ void f8f8bf16_rowwise_impl_sm89(
   }
 
   // Initialize CUTLASS kernel with arguments and workspace pointer
-  status = gemm.initialize(arguments, workspace.data_ptr());
+  status = gemm.initialize(arguments, workspace.data_ptr(), at::cuda::getCurrentCUDAStream());
   if (status != cutlass::Status::kSuccess) {
     throw std::runtime_error("cutlass cannot initialize");
   }

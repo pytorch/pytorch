@@ -5,7 +5,6 @@ import functools
 import sys
 from collections.abc import Callable
 from itertools import chain, product
-from typing import Union
 
 import torch
 import torch.distributed as dist
@@ -256,7 +255,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
     def _test_fsdp2(
         self,
         *,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool | int,
         optimizer_class: type[Optimizer],
         compile_model: bool,
         foreach: bool = True,
@@ -952,7 +951,10 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             model.state_dict().items(),
             expected_state_dict.items(),
         ):
-            assert actual_name == expected_name
+            if actual_name != expected_name:
+                raise AssertionError(
+                    f"Expected name {expected_name}, got {actual_name}"
+                )
             torch.testing.assert_close(tensor, expected_tensor, msg=expected_name)
 
     @with_comms

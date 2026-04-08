@@ -23,7 +23,7 @@ from collections.abc import Sequence
 from ctypes import cdll, wintypes
 from ctypes.util import find_library
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 from torch._dynamo.utils import dynamo_timed
@@ -437,6 +437,56 @@ def convert_cubin_to_obj(
     return obj_file
 
 
+def batch_convert_cubins_to_obj(
+    cubins: list[tuple[str, str]],
+    output_dir: str,
+    cpp_compiler: str = "gcc",
+) -> str:
+    """Convert multiple cubin files to a single .o using batched .incbin assembly.
+
+    Instead of spawning 3 subprocesses per cubin (ld + 2x objcopy), generates
+    a single .S file with .incbin directives for all cubins and compiles it
+    with one compiler invocation. Produces bit-identical rodata and symbols
+    as the per-cubin convert_cubin_to_obj approach.
+
+    Args:
+        cubins: list of (cubin_file_path, kernel_name) tuples.
+        output_dir: directory for the generated .S and .o files.
+        cpp_compiler: C compiler to use for assembling (default: gcc).
+
+    Returns:
+        Path to the combined .o file.
+    """
+    asm_path = os.path.join(output_dir, "cubins_combined.S")
+    obj_path = os.path.join(output_dir, "cubins_combined.o")
+
+    with open(asm_path, "w") as f:
+        f.write(".section .rodata\n")
+        for cubin_file, kernel_name in cubins:
+            # Use absolute path to avoid issues with working directory
+            abs_cubin = os.path.abspath(cubin_file)
+            escaped_path = abs_cubin.replace("\\", "\\\\").replace('"', '\\"')
+            f.write(
+                f".balign 16\n"
+                f".global __{kernel_name}_start\n"
+                f".global __{kernel_name}_end\n"
+                f"__{kernel_name}_start:\n"
+                f'.incbin "{escaped_path}"\n'
+                f"__{kernel_name}_end:\n"
+                f".global __{kernel_name}_size\n"
+                f".set __{kernel_name}_size, "
+                f"__{kernel_name}_end - __{kernel_name}_start\n"
+            )
+
+    subprocess.run(
+        [cpp_compiler, "-c", asm_path, "-o", obj_path],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return obj_path
+
+
 @functools.cache
 def _is_apple_clang(cpp_compiler: str) -> bool:
     version_string = subprocess.check_output([cpp_compiler, "--version"]).decode("utf8")
@@ -654,13 +704,13 @@ class BuildOptionsBase:
     def __init__(
         self,
         compiler: str = "",
-        definitions: Optional[list[str]] = None,
-        include_dirs: Optional[list[str]] = None,
-        cflags: Optional[list[str]] = None,
-        ldflags: Optional[list[str]] = None,
-        libraries_dirs: Optional[list[str]] = None,
-        libraries: Optional[list[str]] = None,
-        passthrough_args: Optional[list[str]] = None,
+        definitions: list[str] | None = None,
+        include_dirs: list[str] | None = None,
+        cflags: list[str] | None = None,
+        ldflags: list[str] | None = None,
+        libraries_dirs: list[str] | None = None,
+        libraries: list[str] | None = None,
+        passthrough_args: list[str] | None = None,
         aot_mode: bool = False,
         use_relative_path: bool = False,
         compile_only: bool = False,
@@ -679,7 +729,7 @@ class BuildOptionsBase:
 
         # Optionally, the path to a precompiled header which should be included on the
         # build command line.
-        self.precompiled_header: Optional[str] = None
+        self.precompiled_header: str | None = None
 
         self._aot_mode: bool = aot_mode
         self._use_relative_path: bool = use_relative_path
@@ -688,9 +738,10 @@ class BuildOptionsBase:
         self._preprocessing: bool = preprocessing
 
     def _process_compile_only_options(self) -> None:
-        if self._compile_only:
+        if self._compile_only or self._precompiling or self._preprocessing:
             self._libraries_dirs = []
             self._libraries = []
+            self._ldflags = []
 
     def _remove_duplicate_options(self) -> None:
         self._definitions = _remove_duplication_in_list(self._definitions)
@@ -770,7 +821,7 @@ def _get_warning_all_cflag(warning_all: bool = True) -> list[str]:
         return []
 
 
-def _get_cpp_std_cflag(std_num: str = "c++17") -> list[str]:
+def _get_cpp_std_cflag(std_num: str = "c++20") -> list[str]:
     if _IS_WINDOWS:
         """
         On Windows, only c++20 can support `std::enable_if_t`.
@@ -911,6 +962,12 @@ def _get_optimization_cflags(
         debug_cflags, debug_ldflags = _get_inductor_debug_symbol_cflags()
         cflags += debug_cflags
         ldflags += debug_ldflags
+
+    if config.aot_inductor.enable_frame_pointer:
+        if _IS_WINDOWS:
+            cflags.append("Oy-")
+        else:
+            cflags.append("fno-omit-frame-pointer")
 
     cflags += _get_ffast_math_flags()
 
@@ -1063,7 +1120,10 @@ class CppOptions(BuildOptionsBase):
 
 
 def _get_torch_cpp_wrapper_definition() -> list[str]:
-    return ["TORCH_INDUCTOR_CPP_WRAPPER", "STANDALONE_TORCH_HEADER"]
+    defs = ["TORCH_INDUCTOR_CPP_WRAPPER", "STANDALONE_TORCH_HEADER"]
+    if config.cpp_cache_precompile_headers:
+        defs.append("TORCH_INDUCTOR_PRECOMPILE_HEADERS")
+    return defs
 
 
 def _use_custom_generated_macros() -> list[str]:
@@ -1078,6 +1138,11 @@ def _use_fb_internal_macros() -> list[str]:
                 "C10_USE_MINIMAL_GLOG",
                 "C10_DISABLE_TENSORIMPL_EXTENSIBILITY",
             ]
+            if platform.machine() == "x86_64":
+                fb_internal_macros += [
+                    "ATEN_MKL_ENABLED_FBCODE=1",
+                    "ATEN_MKLDNN_ENABLED_FBCODE=1",
+                ]
             return fb_internal_macros
         else:
             return []
@@ -1089,12 +1154,13 @@ def _setup_standard_sys_libs(
     cpp_compiler: str,
     aot_mode: bool,
     use_relative_path: bool,
-) -> tuple[list[str], list[str], list[str]]:
+) -> tuple[list[str], list[str], list[str], list[str]]:
     cflags: list[str] = []
     include_dirs: list[str] = []
     passthrough_args: list[str] = []
+    ldflags: list[str] = []
     if _IS_WINDOWS:
-        return cflags, include_dirs, passthrough_args
+        return cflags, include_dirs, passthrough_args, ldflags
 
     if config.is_fbcode():
         # TODO(T203137008) Can we unify these flags with triton_cc_command?
@@ -1119,12 +1185,12 @@ def _setup_standard_sys_libs(
 
         if _is_clang(cpp_compiler):
             passthrough_args.append(" --rtlib=compiler-rt")
-            passthrough_args.append(" -fuse-ld=lld")
-            passthrough_args.append(f" -Wl,--script={linker_script}")
             passthrough_args.append(" -B" + build_paths.glibc_lib)
-            passthrough_args.append(" -L" + build_paths.glibc_lib)
+            ldflags.append("fuse-ld=lld")
+            ldflags.append(f"Wl,--script={linker_script}")
+            ldflags.append("L" + build_paths.glibc_lib)
 
-    return cflags, include_dirs, passthrough_args
+    return cflags, include_dirs, passthrough_args, ldflags
 
 
 def _get_build_args_of_chosen_isa(vec_isa: VecISA) -> tuple[list[str], list[str]]:
@@ -1159,6 +1225,8 @@ def _get_torch_related_args(
         libraries_dirs = [TORCH_LIB_PATH]
         if sys.platform != "darwin" and not config.is_fbcode():
             libraries.extend(["torch", "torch_cpu"])
+            if _IS_WINDOWS:
+                libraries.append("c10")
             if not aot_mode:
                 libraries.append("torch_python")
     else:
@@ -1393,9 +1461,8 @@ def _get_openmp_args(
         if config.is_fbcode():
             include_dir_paths.append(build_paths.openmp_include)
 
-            openmp_lib = build_paths.openmp_lib_so
-            fb_openmp_extra_flags = f"-Wp,-fopenmp {openmp_lib}"
-            passthrough_args.append(fb_openmp_extra_flags)
+            passthrough_args.append("-Wp,-fopenmp")
+            lib_dir_paths.append(os.path.dirname(build_paths.openmp_lib_so))
 
             libs.append("omp")
         else:
@@ -1483,6 +1550,7 @@ def get_cpp_torch_options(
         sys_libs_cflags,
         sys_libs_include_dirs,
         sys_libs_passthrough_args,
+        sys_libs_ldflags,
     ) = _setup_standard_sys_libs(cpp_compiler, aot_mode, use_relative_path)
 
     isa_macros, isa_ps_args_build_flags = _get_build_args_of_chosen_isa(vec_isa)
@@ -1524,7 +1592,7 @@ def get_cpp_torch_options(
         + omp_include_dir_paths
     )
     cflags = sys_libs_cflags + omp_cflags
-    ldflags = omp_ldflags
+    ldflags = sys_libs_ldflags + omp_ldflags
     libraries_dirs = python_libraries_dirs + torch_libraries_dirs + omp_lib_dir_paths
     libraries = torch_libraries + omp_lib
     passthrough_args = (
@@ -1623,7 +1691,7 @@ def _set_gpu_runtime_env() -> None:
 
 
 @functools.lru_cache(8)
-def _find_libcudart_static(path: str) -> Optional[Path]:
+def _find_libcudart_static(path: str) -> Path | None:
     lib_dirs = list(Path(path).rglob("libcudart_static.a"))
     if lib_dirs:
         return lib_dirs[0].resolve().parent
@@ -1638,7 +1706,7 @@ def _transform_cuda_paths(lpaths: list[str]) -> None:
     # 2. Linux machines may have CUDA installed under either lib64/ or lib/
     for i, path in enumerate(lpaths):
         if "CUDA_HOME" in os.environ and path.startswith(os.environ["CUDA_HOME"]):
-            lib_dir: Optional[Path] = _find_libcudart_static(path)
+            lib_dir: Path | None = _find_libcudart_static(path)
             if lib_dir is None:
                 continue
             lpaths[i] = str(lib_dir)
@@ -1781,6 +1849,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
         min_optimize: bool = False,
         precompiling: bool = False,
         preprocessing: bool = False,
+        compiler: str = "",
     ) -> None:
         super().__init__(
             vec_isa=vec_isa,
@@ -1794,6 +1863,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
             min_optimize=min_optimize,
             precompiling=precompiling,
             preprocessing=preprocessing,
+            compiler=compiler,
         )
 
         device_definitions: list[str] = []
@@ -1906,7 +1976,7 @@ class CppBuilder:
     def __init__(
         self,
         name: str,
-        sources: Union[str, list[str]],
+        sources: str | list[str],
         BuildOption: BuildOptionsBase,
         output_dir: str = "",
     ) -> None:
@@ -1994,6 +2064,11 @@ class CppBuilder:
             assert len(sources) == 1
             # See above; we can currently assume this is not on MSVC.
             self._sources_args = f"-x c++-header {sources[0]}"
+            if self._use_relative_path and _is_clang(BuildOption.get_compiler()):
+                # Store PCH paths relative to -isysroot so the .pch can
+                # be used from a different build directory.  The matching
+                # -isysroot is injected by build_fbcode_re().
+                self._cflags_args += " -relocatable-pch -Xclang -fno-pch-timestamp "
         else:
             self._sources_args = " ".join(sources)
 
@@ -2017,6 +2092,13 @@ class CppBuilder:
                 )
             else:
                 self._include_dirs_args = f"-include {precompiled_header} "
+                if self._use_relative_path and _is_clang(BuildOption.get_compiler()):
+                    # Skip clang's own PCH validation during consumption.
+                    # _precompile_header() already handles cache invalidation
+                    # via content hashing, and -fno-validate-pch allows the
+                    # PCH to be used even when the original source file is at
+                    # a different path (e.g. across Remote Execution workers).
+                    self._cflags_args += " -Xclang -fno-validate-pch "
 
         for inc_dir in BuildOption.get_include_dirs():
             if _IS_WINDOWS:
@@ -2098,7 +2180,7 @@ class CppBuilder:
         self,
     ) -> None:
         with dynamo_timed("compile_file"):
-            command = self.get_command_line().split()
+            command = shlex.split(self.get_command_line())
             try:
                 output_path = self._target_file
                 # When we build remotely, we need to make sure to carefully copy any files
@@ -2112,9 +2194,43 @@ class CppBuilder:
                         shutil.copy(src, os.path.join(tmp_dir, os.path.basename(src)))
                     dest_include_path = os.path.join(tmp_dir, "include")
                     shutil.copytree(torch_includes_path, dest_include_path)
-                    # Run the build
+
+                    # Copy precompiled header (.h and .gch/.pch) into the
+                    # build directory and rewrite the -include flag so the
+                    # compiler can find it.
+                    pch_header = self._build_option.precompiled_header
+                    if pch_header and os.path.isfile(pch_header):
+                        pch_ext = ".pch" if _IS_WINDOWS or not is_gcc() else ".gch"
+                        pch_compiled = pch_header + pch_ext
+                        pch_basename = os.path.basename(pch_header)
+                        shutil.copy(pch_header, os.path.join(tmp_dir, pch_basename))
+                        if os.path.isfile(pch_compiled):
+                            shutil.copy(
+                                pch_compiled,
+                                os.path.join(tmp_dir, pch_basename + pch_ext),
+                            )
+                        command = [
+                            pch_basename if arg == pch_header else arg
+                            for arg in command
+                        ]
+
+                    # Relocatable PCH stores include paths relative to
+                    # -isysroot.  Set sysroot to the tmp build dir so
+                    # paths resolve correctly in both precompilation and
+                    # later kernel compilations that consume the PCH.
+                    if self._precompiling or (
+                        pch_header and os.path.isfile(pch_header)
+                    ):
+                        command[1:1] = ["-isysroot", "."]
+
+                    # Run the build, raising RuntimeError on failure instead of
+                    # SkipFrame so compilation errors propagate rather than
+                    # silently falling back to eager execution.
                     tmp_output_path = _run_build_command(
-                        command, tmp_dir, os.path.basename(output_path)
+                        command,
+                        tmp_dir,
+                        os.path.basename(output_path),
+                        exception_class=RuntimeError,
                     )
                     # Copy output from the build
                     if os.path.exists(output_path):
@@ -2125,8 +2241,7 @@ class CppBuilder:
                     elif output_path.endswith(".so"):
                         os.chmod(output_path, 0o755)
             except subprocess.CalledProcessError as e:
-                output = e.output.decode("utf-8")
-                raise exc.CppCompileError(command, output) from e
+                raise exc.CppCompileError(command, e.output.decode("utf-8")) from e
 
     def build(self) -> None:
         """
@@ -2165,7 +2280,7 @@ class CppBuilder:
             f"""
             cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
             project({self._target_name} LANGUAGES CXX)
-            set(CMAKE_CXX_STANDARD 17)
+            set(CMAKE_CXX_STANDARD 20)
 
             # Set a library target
             add_library({self._target_name} {target_library_type})

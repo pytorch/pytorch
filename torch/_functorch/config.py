@@ -13,7 +13,7 @@ Global flags for aot autograd
 
 import os
 import sys
-from typing import Literal, Optional, TYPE_CHECKING
+from typing import Literal, TYPE_CHECKING
 
 from torch.utils._config_module import Config, install_config_module
 
@@ -99,7 +99,7 @@ check_custom_op_aliasing = True
 error_on_custom_op_aliasing = bool(os.getenv("CI"))
 
 
-def remote_autograd_cache_default() -> Optional[bool]:
+def remote_autograd_cache_default() -> bool | None:
     if os.environ.get("TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE") == "1":
         return True
     if os.environ.get("TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE") == "0":
@@ -230,6 +230,10 @@ activation_offload_sink_wait = False
 # activation reloading with prefetching when using separate streams (bwd graph)
 activation_reload_prefetch = False
 
+# CPU ↔ GPU bandwidth in GB/s, used to estimate transfer times for prefetch
+# scheduling. This is hardware-specific and should be set by the user.
+activation_offload_cpu_gpu_bw: float = 50.0
+
 # If FakeTensor.data_ptr() should error.
 # This option is independent of AOTAutograd and torch.compile, but our policy
 # is to turn it off during torch.compile.
@@ -347,7 +351,7 @@ generate_fake_kernels_from_real_mismatches = False
 # compiler to proceed with compilation by choosing the preferred device type
 # for consistency. For example, set to "mtia" to prefer MTIA devices over
 # CPU, or "cuda" to prefer CUDA devices over CPU.
-fake_tensor_prefer_device_type: Optional[str] = None
+fake_tensor_prefer_device_type: str | None = None
 
 # CUDAGraph safe run_with_rng functionalization.
 # TODO: turn on by default
@@ -399,7 +403,8 @@ disable_guess_zero_tangent_for_mutated_input_subclass = False
 # At runtime non contiguous tangents will be coerced to be contiguous.
 # This config changes this guess for tangents strides to be the same as outputs.
 # TODO(ivankobzarev): Remove this config once extra memory usage is investigated.
-guess_tangent_strides_as_outputs = False
+guess_tangent_strides_as_outputs = not is_fbcode()
+
 
 # This is a temporary config to ensure all ranks take the same decision in the partitioner
 # it will ultimately be removed once we share size_hints across ranks through compiler collectives

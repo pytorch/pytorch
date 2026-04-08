@@ -615,7 +615,6 @@ Tensor squeeze_nested(const Tensor& self) {
   "squeeze(): For nested tensors, squeeze without the dim argument is not supported ",
   "at the moment, however you can use squeeze(Tensor self, int dim) instead ",
   "if you need this feature, please open an issue on github describing your use case.");
-  return self;
 }
 
 Tensor squeeze_dim_nested(const Tensor& self, IntArrayRef dims) {
@@ -1022,6 +1021,7 @@ static Tensor cat_nested_as_jagged(
   const auto first_item_dim = first_item.dim();
   const auto first_item_batch_size = first_item.size(0);
   std::vector<Tensor> jagged_views;
+  jagged_views.reserve(tensors.size());
   for (auto i : c10::irange(tensors.size())) {
     auto t = tensors[i].get();
     TORCH_CHECK(t.is_nested(),
@@ -1073,6 +1073,8 @@ static Tensor cat_nested_impl(
     // handle simple case of dim=0: concat NT components
     std::vector<at::Tensor> buffers;
     std::vector<at::Tensor> sizes;
+    buffers.reserve(tensors.size());
+    sizes.reserve(tensors.size());
     for (const auto i : c10::irange(tensors.size())) {
       const Tensor& t = tensors[i];
       TORCH_CHECK(

@@ -29,14 +29,20 @@ public:
 static ReduceMultiply reduce_multiply;
 
 class ReduceAdd {
-public:
+ public:
   template <typename scalar_t>
   constexpr C10_DEVICE void operator() (scalar_t* self_data_start, int64_t index, int64_t numel, const scalar_t * src_data) const {
-#if (defined(__gfx942__) || defined(__gfx950__))
-    opportunistic_fastAtomicAdd(self_data_start, index, numel, *src_data);
-#else
+#if defined(USE_ROCM)
+    // TODO: this check is too coarse, revisit, we should only be checking for
+    //       the availability of the builtins required by the implementation, at
+    //       most.
+    if (__builtin_amdgcn_processor_is("gfx942") ||
+        __builtin_amdgcn_processor_is("gfx950"))
+      return opportunistic_fastAtomicAdd(self_data_start, index, numel, *src_data);
     fastAtomicAdd(self_data_start, index, numel, *src_data, true);
-#endif
+  #else
+    fastAtomicAdd(self_data_start, index, numel, *src_data, true);
+  #endif
   }
 };
 static ReduceAdd reduce_add;

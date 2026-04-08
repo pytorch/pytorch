@@ -29,6 +29,8 @@
 #else
 #undef C10_RDTSC
 #endif
+#elif defined(__aarch64__) && !defined(__CUDACC__) && !defined(__HIPCC__)
+#define C10_ARMTSC
 #endif
 
 namespace c10 {
@@ -70,6 +72,14 @@ inline time_t getTime(bool allow_monotonic = false) {
 #endif
 }
 
+#if defined(C10_ARMTSC)
+inline uint64_t getArmApproximateTime() {
+  uint64_t val;
+  __asm__ __volatile__("mrs %0, cntvct_el0" : "=r"(val));
+  return val;
+}
+#endif
+
 // We often do not need to capture true wall times. If a fast mechanism such
 // as TSC is available we can use that instead and convert back to epoch time
 // during post processing. This greatly reduce the clock's contribution to
@@ -81,6 +91,8 @@ inline time_t getTime(bool allow_monotonic = false) {
 inline auto getApproximateTime() {
 #if defined(C10_RDTSC)
   return static_cast<uint64_t>(__rdtsc());
+#elif defined(C10_ARMTSC)
+  return getArmApproximateTime();
 #else
   return getTime();
 #endif

@@ -136,7 +136,7 @@ class TestPDT(JitTestCase):
         class TestModelWithExport(torch.nn.Module):
             @torch.jit.export
             def fn(self, x, y) -> Any:
-                assert not (isinstance(x, bool) and isinstance(y, bool))
+                assert not (isinstance(x, bool) and isinstance(y, bool))  # noqa: S101
                 if isinstance(x, int) and isinstance(y, int):
                     return x + y
                 elif isinstance(x, float) and isinstance(y, float):
@@ -669,7 +669,7 @@ class TestPDT(JitTestCase):
 
     def test_any(self):
         def test_multiple_types(a):
-            assert not isinstance(a, bool)
+            assert not isinstance(a, bool)  # noqa: S101
             return a
 
         def test_multiple_type_refinement(a):
@@ -718,7 +718,7 @@ class TestPDT(JitTestCase):
     def test_class_as_profiled_types(self):
         class UserDefinedClass:
             def fn(self, b) -> Any:
-                assert b is not None
+                assert b is not None  # noqa: S101
                 if isinstance(b, int):
                     return b if b > 0 else -1
                 elif isinstance(b, float):
@@ -726,7 +726,7 @@ class TestPDT(JitTestCase):
                 return 0
 
         def test_model(a, m):
-            assert not isinstance(a, bool)
+            assert not isinstance(a, bool)  # noqa: S101
             return m.fn(a)
 
         make_global(UserDefinedClass, test_model)
@@ -772,7 +772,7 @@ class TestPDT(JitTestCase):
                     return -1
 
         def test_model_with_args(a, m):
-            assert not isinstance(a, bool)
+            assert not isinstance(a, bool)  # noqa: S101
             return m.fn(a)
 
         make_global(ClassWithArgs, test_model_with_args)

@@ -8,7 +8,7 @@ NOTE: Fake implementations:
 # flake8: noqa: B950
 import math
 from collections.abc import Callable
-from typing import Optional, TypeVar
+from typing import TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -54,7 +54,7 @@ def _rotary_embedding_23_fake_impl(
     x: torch.Tensor,
     cos_cache: torch.Tensor,
     sin_cache: torch.Tensor,
-    position_ids: Optional[torch.Tensor] = None,
+    position_ids: torch.Tensor | None = None,
     *,
     interleaved: bool = False,
     num_heads: int = 0,
@@ -69,7 +69,7 @@ def rotary_embedding_23(
     x: torch.Tensor,
     cos_cache: torch.Tensor,
     sin_cache: torch.Tensor,
-    position_ids: Optional[torch.Tensor] = None,
+    position_ids: torch.Tensor | None = None,
     *,
     interleaved: bool = False,
     num_heads: int = 0,
@@ -200,7 +200,7 @@ def rotary_embedding_23(
     return torch.permute(output, (0, 2, 1, 3))
 
 
-def _get_scale_factor(scale: Optional[float], head_size: int) -> float:
+def _get_scale_factor(scale: float | None, head_size: int) -> float:
     """Get the scale factor for attention computation."""
     return scale if scale is not None else (1.0 / math.sqrt(head_size))
 
@@ -223,7 +223,7 @@ def _get_qk_output_for_aten_spda(
     K: torch.Tensor,
     current_q_num_heads: int,
     current_kv_num_heads: int,
-    scale: Optional[float],
+    scale: float | None,
     qk_matmul_output_mode: int,
 ) -> torch.Tensor:
     """Get QK output tensor based on the specified mode."""
@@ -251,7 +251,7 @@ def _compute_qk_output_for_mode_0(
     K: torch.Tensor,
     current_q_num_heads: int,
     current_kv_num_heads: int,
-    scale: Optional[float],
+    scale: float | None,
 ) -> torch.Tensor:
     """Helper function to compute QK output for qk_matmul_output_mode == 0."""
     # Handle GQA manually for QK output
@@ -272,17 +272,17 @@ def _attention_23_fake_impl(
     Q: torch.Tensor,
     K: torch.Tensor,
     V: torch.Tensor,
-    attn_mask: Optional[torch.Tensor] = None,
-    past_key: Optional[torch.Tensor] = None,
-    past_value: Optional[torch.Tensor] = None,
+    attn_mask: torch.Tensor | None = None,
+    past_key: torch.Tensor | None = None,
+    past_value: torch.Tensor | None = None,
     *,
     is_causal: bool = False,
     kv_num_heads: int = 0,
     q_num_heads: int = 0,
     qk_matmul_output_mode: int = 0,
-    scale: Optional[float] = None,
+    scale: float | None = None,
     softcap: float = 0.0,
-    softmax_precision: Optional[int] = None,
+    softmax_precision: int | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Fake implementation for Attention-23 for torch.compile purposes."""
     batch_size = Q.shape[0]
@@ -357,17 +357,17 @@ def attention_23(
     Q: torch.Tensor,
     K: torch.Tensor,
     V: torch.Tensor,
-    attn_mask: Optional[torch.Tensor] = None,
-    past_key: Optional[torch.Tensor] = None,
-    past_value: Optional[torch.Tensor] = None,
+    attn_mask: torch.Tensor | None = None,
+    past_key: torch.Tensor | None = None,
+    past_value: torch.Tensor | None = None,
     *,
     is_causal: bool = False,
     kv_num_heads: int = 0,
     q_num_heads: int = 0,
     qk_matmul_output_mode: int = 0,
-    scale: Optional[float] = None,
+    scale: float | None = None,
     softcap: float = 0.0,
-    softmax_precision: Optional[int] = None,
+    softmax_precision: int | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Attention-23 https://onnx.ai/onnx/operators/onnx__Attention.html#attention-23"""
 

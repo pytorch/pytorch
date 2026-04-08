@@ -679,6 +679,33 @@ class TestDillSerializationFeatures(TestCase):
             self.assertIn("nested_closure", node.meta)
             self.assertEqual(node.meta["nested_closure"](3), 3 + 5 + 20)
 
+    def test_node_with_slice(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        def foo(x):
+            return x[0 : x.shape[0]]
+
+        gm = torch.fx.symbolic_trace(foo)
+
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x):
+    getattr_1 = x.shape
+    getitem = getattr_1[0];  getattr_1 = None
+    getitem_1 = x[slice(0, getitem, None)];  x = getitem = None
+    return getitem_1""",
+        )
+        options = self.Options(node_metadata_key_filter=None)
+        serialized = self.GraphPickler.dumps(gm, options)
+
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        deserialized = self.GraphPickler.loads(serialized, fake_mode)
+        deserialized.recompile()
+
+        self.assertEqual(gm.code, deserialized.code)
+
     def test_lambda_with_default_arguments(self):
         """
         Test that lambdas with default arguments can be serialized. Standard
@@ -829,6 +856,243 @@ class TestNodeMetadataKeyFilter(TestCase):
             self.assertIn("source_fn_stack", pickle_data.meta)
             self.assertIn("nn_module_stack", pickle_data.meta)
             self.assertIn("custom_key", pickle_data.meta)
+
+
+class TestNodeStateSerialization(TestCase):
+    def test_type_entry_preserved_in_getstate(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                y = torch.neg(x)
+                return y + 1
+
+        gm = torch.fx.symbolic_trace(M())
+        node = next(n for n in gm.graph.nodes if n.op == "call_function")
+        node.type = torch.Tensor
+        state = node.__getstate__()
+        self.assertIs(state["type"], torch.Tensor)
+
+
+@unittest.skipUnless(HAS_DILL, "dill not available")
+class TestIgnoreRawNode(TestCase):
+    """Tests for the ignore_raw_node option in GraphPickler.Options."""
+
+    def setUp(self):
+        super().setUp()
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx._graph_pickler import GraphPickler, Options
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        self.GraphPickler = GraphPickler
+        self.Options = Options
+        self.fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+
+    def _make_graph_with_raw_node_in_meta(self):
+        """Return a graph module whose first call_function node has a raw
+        torch.fx.Node stored in its metadata under the key 'raw_ref'."""
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        gm = torch.fx.symbolic_trace(M())
+        call_node = next((n for n in gm.graph.nodes if n.op == "call_function"), None)
+        self.assertIsNotNone(call_node)
+        # Store a raw Node reference in meta – this is the problematic case.
+        call_node.meta["raw_ref"] = call_node
+        return gm
+
+    def test_raw_node_in_meta_raises_by_default(self):
+        """Pickling should raise AssertionError when a raw Node is in metadata
+        and ignore_raw_node is False (the default)."""
+        gm = self._make_graph_with_raw_node_in_meta()
+        with self.assertRaises(AssertionError) as cm:
+            self.GraphPickler.dumps(gm)
+        self.assertIn("raw Node", str(cm.exception))
+
+    def test_raw_node_in_meta_with_ignore_raw_node(self):
+        """With ignore_raw_node=True, pickling should succeed and the raw Node
+        should be replaced with None after round-trip deserialization."""
+        gm = self._make_graph_with_raw_node_in_meta()
+        options = self.Options(ignore_raw_node=True)
+        data = self.GraphPickler.dumps(gm, options)
+        restored = self.GraphPickler.loads(data, self.fake_mode)
+        self.assertIsInstance(restored, torch.fx.GraphModule)
+        call_node = next(
+            (n for n in restored.graph.nodes if n.op == "call_function"), None
+        )
+        self.assertIsNotNone(call_node)
+        self.assertIsNone(call_node.meta.get("raw_ref"))
+
+
+class _WeakrefTarget:
+    """A simple picklable class that supports weak references, for use in tests.
+
+    Plain dicts do not support weak references in Python, so tests must use
+    instances of a regular class instead.
+    """
+
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
+@unittest.skipUnless(HAS_DILL, "dill not available")
+class TestWeakrefPickle(TestCase):
+    """Tests that weakref objects are properly serialized and reconstructed."""
+
+    def setUp(self):
+        super().setUp()
+        import weakref
+
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx._graph_pickler import GraphPickler, Options
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        self.weakref = weakref
+        self.GraphPickler = GraphPickler
+        self.Options = Options
+        self.fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+
+    def _make_graph_with_weakref_in_meta(self, ref_obj):
+        """Return a graph module with a weakref stored in node metadata."""
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        gm = torch.fx.symbolic_trace(M())
+        call_node = next((n for n in gm.graph.nodes if n.op == "call_function"), None)
+        self.assertIsNotNone(call_node)
+        call_node.meta["weak_ref"] = ref_obj
+        return gm
+
+    def test_alive_weakref_in_meta_is_reconstructed(self):
+        """An alive weakref.ref in node metadata should be reconstructed as a weakref."""
+        target = _WeakrefTarget(key="value")
+        weak = self.weakref.ref(target)
+        gm = self._make_graph_with_weakref_in_meta(weak)
+        # Also store a strong ref so the referent survives after unpickling
+        call_node = next((n for n in gm.graph.nodes if n.op == "call_function"), None)
+        call_node.meta["strong_ref"] = target
+
+        options = self.Options(node_metadata_key_filter=None)
+        data = self.GraphPickler.dumps(gm, options)
+        restored = self.GraphPickler.loads(data, self.fake_mode)
+
+        self.assertIsInstance(restored, torch.fx.GraphModule)
+        call_node = next(
+            (n for n in restored.graph.nodes if n.op == "call_function"), None
+        )
+        self.assertIsNotNone(call_node)
+        restored_ref = call_node.meta.get("weak_ref")
+        self.assertIsInstance(restored_ref, self.weakref.ref)
+        self.assertEqual(restored_ref().key, "value")
+
+    def test_dead_weakref_in_meta_unpickles_as_callable_none(self):
+        """A dead weakref should unpickle as a callable that returns None."""
+        target = _WeakrefTarget()
+        weak = self.weakref.ref(target)
+        gm = self._make_graph_with_weakref_in_meta(weak)
+        # Kill the referent so the weakref is dead at pickle time
+        del target
+
+        options = self.Options(node_metadata_key_filter=None)
+        data = self.GraphPickler.dumps(gm, options)
+        restored = self.GraphPickler.loads(data, self.fake_mode)
+
+        self.assertIsInstance(restored, torch.fx.GraphModule)
+        call_node = next(
+            (n for n in restored.graph.nodes if n.op == "call_function"), None
+        )
+        self.assertIsNotNone(call_node)
+        restored_ref = call_node.meta.get("weak_ref")
+        # Should be callable and return None, like a dead weakref
+        self.assertIsNotNone(restored_ref)
+        self.assertIsNone(restored_ref())
+
+    def test_keyed_ref_in_meta_is_reconstructed(self):
+        """A weakref.KeyedRef (from WeakValueDictionary) should be reconstructed."""
+        wvd = self.weakref.WeakValueDictionary()
+        target = _WeakrefTarget(val=42)
+        wvd["k"] = target
+        keyed_ref = wvd.data["k"]
+        self.assertIsInstance(keyed_ref, self.weakref.KeyedRef)
+
+        gm = self._make_graph_with_weakref_in_meta(keyed_ref)
+        # Also store a strong ref so the referent survives after unpickling
+        call_node = next((n for n in gm.graph.nodes if n.op == "call_function"), None)
+        call_node.meta["strong_ref"] = target
+
+        options = self.Options(node_metadata_key_filter=None)
+        data = self.GraphPickler.dumps(gm, options)
+        restored = self.GraphPickler.loads(data, self.fake_mode)
+
+        self.assertIsInstance(restored, torch.fx.GraphModule)
+        call_node = next(
+            (n for n in restored.graph.nodes if n.op == "call_function"), None
+        )
+        self.assertIsNotNone(call_node)
+        restored_ref = call_node.meta.get("weak_ref")
+        self.assertIsInstance(restored_ref, self.weakref.ref)
+        self.assertEqual(restored_ref().val, 42)
+
+    def test_weakref_in_module_dict_is_reconstructed(self):
+        """A weakref stored in the graph module's __dict__ should be reconstructed."""
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        gm = torch.fx.symbolic_trace(M())
+        target = _WeakrefTarget(key="value")
+        gm._weak_cache = self.weakref.ref(target)
+        # Also store a strong ref so the referent survives after unpickling
+        gm._strong_cache = target
+
+        options = self.Options(node_metadata_key_filter=None)
+        data = self.GraphPickler.dumps(gm, options)
+        restored = self.GraphPickler.loads(data, self.fake_mode)
+
+        self.assertIsInstance(restored, torch.fx.GraphModule)
+        restored_ref = restored._weak_cache
+        self.assertIsInstance(restored_ref, self.weakref.ref)
+        self.assertEqual(restored_ref().key, "value")
+
+    def test_weakref_and_strong_ref_share_same_object(self):
+        """When a weakref and a strong ref point to the same object, pickle's
+        memo should deduplicate them so they share identity after unpickling.
+        This also covers the case where the weakref is the first reference
+        pickle encounters — the memo must still work correctly."""
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        gm = torch.fx.symbolic_trace(M())
+        target = _WeakrefTarget(key="value")
+        weak = self.weakref.ref(target)
+
+        call_node = next((n for n in gm.graph.nodes if n.op == "call_function"), None)
+        self.assertIsNotNone(call_node)
+        # Put weakref first so it's the first reference pickle encounters
+        call_node.meta["weak_ref"] = weak
+        call_node.meta["strong_ref"] = target
+
+        options = self.Options(node_metadata_key_filter=None)
+        data = self.GraphPickler.dumps(gm, options)
+        restored = self.GraphPickler.loads(data, self.fake_mode)
+
+        self.assertIsInstance(restored, torch.fx.GraphModule)
+        restored_node = next(
+            (n for n in restored.graph.nodes if n.op == "call_function"), None
+        )
+        self.assertIsNotNone(restored_node)
+
+        restored_weak = restored_node.meta["weak_ref"]
+        restored_strong = restored_node.meta["strong_ref"]
+
+        self.assertIsInstance(restored_weak, self.weakref.ref)
+        # The weakref's referent and the strong ref should be the same object
+        self.assertIs(restored_weak(), restored_strong)
 
 
 if __name__ == "__main__":

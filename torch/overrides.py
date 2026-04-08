@@ -30,7 +30,7 @@ import types
 import warnings
 from collections.abc import Callable, Iterable
 from functools import wraps
-from typing import Any, TypeVar
+from typing import Any, cast, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -132,6 +132,7 @@ def get_ignored_functions() -> set[Callable]:
         torch.manual_seed,
         torch.initial_seed,
         torch.seed,
+        torch.thread_safe_generator,
         torch.save,
         torch.load,
         torch.set_printoptions,
@@ -315,9 +316,6 @@ def get_ignored_functions() -> set[Callable]:
         torch.unify_type_list,
         torch.is_warn_always_enabled,
         torch.set_warn_always,
-        torch.vitals_enabled,
-        torch.set_vital,
-        torch.read_vitals,
         torch.vmap,
         torch.cond,
         torch.frombuffer,
@@ -384,6 +382,8 @@ def get_ignored_functions() -> set[Callable]:
         Tensor._addmm_activation,
         Tensor.to_padded_tensor,
         Tensor._use_count,
+        Tensor._philox_normal_,
+        Tensor._philox_uniform_,
     }
 
     if sys.version_info >= (3, 14):
@@ -1567,10 +1567,41 @@ def get_testing_overrides() -> dict[Callable, Callable]:
                 ret2[func] = v
 
     ret.update(ret2)
+
+    # Distributed functions are added after the auto-generation loop above
+    # to avoid generating spurious Tensor method entries (e.g., dist.reduce
+    # would otherwise generate __reduce__ on Tensor).
+    if torch.distributed.is_available():
+        import torch.distributed as dist
+
+        ret.update(
+            {
+                dist.broadcast: lambda tensor, src=None, group=None, async_op=False, group_src=None: -1,
+                dist.all_reduce: lambda tensor, op=None, group=None, async_op=False: -1,
+                dist.reduce: lambda tensor, dst=None, op=None, group=None, async_op=False, group_dst=None: -1,
+                dist.all_reduce_coalesced: lambda tensors, op=None, group=None, async_op=False: -1,
+                dist.all_gather: lambda tensor_list, tensor, group=None, async_op=False: -1,
+                dist.all_gather_into_tensor: lambda output_tensor, input_tensor, group=None, async_op=False: -1,
+                dist.all_gather_coalesced: lambda output_tensor_lists, input_tensor_list, group=None, async_op=False: -1,
+                dist.gather: lambda tensor, gather_list=None, dst=None, group=None, async_op=False, group_dst=None: -1,
+                dist.scatter: lambda tensor, scatter_list=None, src=None, group=None, async_op=False, group_src=None: -1,
+                dist.reduce_scatter: lambda output, input_list, op=None, group=None, async_op=False: -1,
+                dist.reduce_scatter_tensor: lambda output, input, op=None, group=None, async_op=False: -1,
+                dist.all_to_all_single: lambda output, input, output_split_sizes=None, input_split_sizes=None, group=None, async_op=False: -1,  # noqa: B950
+                dist.all_to_all: lambda output_tensor_list, input_tensor_list, group=None, async_op=False: -1,
+                dist.isend: lambda tensor, dst=None, group=None, tag=0, group_dst=None: -1,
+                dist.irecv: lambda tensor, src=None, group=None, tag=0, group_src=None: -1,
+                dist.send: lambda tensor, dst=None, group=None, tag=0, group_dst=None: -1,
+                dist.recv: lambda tensor, src=None, group=None, tag=0, group_src=None: -1,
+            }
+        )  # fmt: skip
+
     return ret
 
 
-def wrap_torch_function(dispatcher: Callable):
+def wrap_torch_function(
+    dispatcher: Callable[_P, Iterable[Any]],
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """Wraps a given function with ``__torch_function__`` -related functionality.
 
     Parameters
@@ -1594,16 +1625,18 @@ def wrap_torch_function(dispatcher: Callable):
     ...     return a + 0
     """
 
-    def inner(func):
+    def inner(func: Callable[_P, _R]) -> Callable[_P, _R]:
         @functools.wraps(func)
-        def wrapped(*args, **kwargs):
+        def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
             relevant_args = dispatcher(*args, **kwargs)
             if has_torch_function(relevant_args):
-                return handle_torch_function(wrapped, relevant_args, *args, **kwargs)
+                return handle_torch_function(
+                    cast(Callable[_P, _R], wrapped), relevant_args, *args, **kwargs
+                )
 
             return func(*args, **kwargs)
 
-        return wrapped
+        return cast(Callable[_P, _R], wrapped)
 
     return inner
 
@@ -1688,11 +1721,11 @@ def _get_overloaded_args(
 
 
 def handle_torch_function(
-    public_api: Callable,
+    public_api: Callable[_P, _R],
     relevant_args: Iterable[Any],
-    *args,
-    **kwargs,
-) -> Any:
+    *args: _P.args,
+    **kwargs: _P.kwargs,
+) -> _R:
     """Implement a function with checks for ``__torch_function__`` overrides.
 
     See torch::autograd::handle_torch_function for the equivalent of this

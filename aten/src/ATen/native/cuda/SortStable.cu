@@ -21,11 +21,11 @@ namespace {
 struct offset_t {
   int stride;
   int begin;
-  __device__ int operator[](int i) const {
+  __host__ __device__ int operator[](int i) const {
     return stride * (begin + i);
   }
 #if CCCL_VERSION >= 3001000
-  __device__ offset_t& operator+=(int i) {
+  __host__ __device__ offset_t& operator+=(int i) {
     begin += i;
     return *this;
   }

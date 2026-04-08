@@ -251,7 +251,6 @@ def set_per_process_memory_fraction(fraction: float, device: Device = None) -> N
     device = _get_device_index(device, optional=True)
     if not isinstance(fraction, float):
         raise TypeError("Invalid type for fraction argument, must be `float`")
-    # pyrefly: ignore [missing-attribute]
     torch._C._xpu_setMemoryFraction(fraction, device)
 
 
@@ -271,7 +270,6 @@ def memory_snapshot(
     """
     if not is_initialized():
         return []
-    # pyrefly: ignore [missing-attribute]
     return torch._C._xpu_memorySnapshot(mempool_id)["segments"]
 
 
@@ -358,7 +356,6 @@ def _snapshot(device: Device = None, augment_with_fx_traces: bool = False):
     Returns:
         The Snapshot dictionary object
     """
-    # pyrefly: ignore [missing-attribute]
     s = torch._C._xpu_memorySnapshot(None)
     if augment_with_fx_traces:
         s = _augment_memory_snapshot_stack_traces(s)  # type: ignore[assignment, arg-type]
@@ -467,7 +464,6 @@ def _record_memory_history(
 
             Defaults to ``None`` (record all actions).
     """
-    # pyrefly: ignore [missing-attribute]
     torch._C._xpu_recordMemoryHistory(
         enabled,
         context,
@@ -481,7 +477,6 @@ def _record_memory_history(
 class _XPUAllocator:
     r"""Wrapper over internal XPU memory allocators."""
 
-    # pyrefly: ignore [missing-attribute]
     def __init__(self, allocator: torch._C._xpu_XPUAllocator):
         self._allocator = allocator
 
@@ -528,7 +523,6 @@ class XPUPluggableAllocator(_XPUAllocator):
                 "Failed to load allocator symbols from the shared library."
             )
 
-        # pyrefly: ignore [missing-attribute]
         self._allocator = torch._C._xpu_customAllocator(alloc_fn_addr, free_fn_addr)
 
 
@@ -541,7 +535,6 @@ def change_current_allocator(allocator: _XPUAllocator) -> None:
     Arguments:
         allocator (torch.xpu.memory._XPUAllocator): allocator to be set as the active one.
     """
-    # pyrefly: ignore [missing-attribute]
     torch._C._xpu_changeCurrentAllocator(allocator.allocator())
 
 
@@ -551,7 +544,6 @@ def _get_current_allocator() -> _XPUAllocator:
     Returns:
         _XPUAllocator: the allocator being currently used.
     """
-    # pyrefly: ignore [missing-attribute]
     return _XPUAllocator(torch._C._xpu_getAllocator())
 
 

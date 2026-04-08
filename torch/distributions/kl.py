@@ -970,4 +970,5 @@ def _add_kl_info():
         )
     kl_info = "\n\t".join(rows)
     if kl_divergence.__doc__:
+        # pyrefly: ignore [missing-attribute]
         kl_divergence.__doc__ += kl_info

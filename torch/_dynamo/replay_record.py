@@ -17,7 +17,7 @@ import dataclasses
 from dataclasses import field
 from io import BufferedReader, BufferedWriter
 from types import CellType, CodeType, ModuleType
-from typing import Any, IO, Union
+from typing import Any, IO
 from typing_extensions import Self
 
 from torch.utils._import_utils import import_dill
@@ -52,12 +52,12 @@ class ExecutionRecord:
     builtins: dict[str, Any] = field(default_factory=dict)
     code_options: dict[str, Any] = field(default_factory=dict)
 
-    def dump(self, f: Union[IO[str], BufferedWriter]) -> None:
+    def dump(self, f: IO[str] | BufferedWriter) -> None:
         assert dill is not None, "replay_record requires `pip install dill`"
         dill.dump(self, f)
 
     @classmethod
-    def load(cls, f: Union[IO[bytes], BufferedReader]) -> Self:
+    def load(cls, f: IO[bytes] | BufferedReader) -> Self:
         assert dill is not None, "replay_record requires `pip install dill`"
         return dill.load(f)
 

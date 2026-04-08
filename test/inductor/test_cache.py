@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 from __future__ import annotations
 
+import json
 import pickle
 from concurrent.futures import ThreadPoolExecutor
 from inspect import isclass
@@ -12,6 +13,7 @@ from typing import Any, TYPE_CHECKING
 from typing_extensions import Self
 from unittest.mock import patch
 
+import torch._inductor.config as inductor_config
 from torch._inductor import cache as icache
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
@@ -75,7 +77,8 @@ class TestMixin:
         key_type: type[icache.Key],
         value_type: type[icache.Value],
     ) -> bool:
-        assert len(cache_type.__orig_bases__) == 1
+        if len(cache_type.__orig_bases__) != 1:
+            raise AssertionError
         generic_base = cache_type.__orig_bases__[0]
         _key_type, _value_type = generic_base.__args__
         if ((_key_type != icache.Key) and (_key_type != key_type)) or (
@@ -812,6 +815,71 @@ class OtherTest(TestMixin, TestCase):
         self.assertIsNone(cache.get(key))
         self.assertTrue(cache.insert(key, value))
         self.assertEqual(cache.get(key), value)
+
+
+class ConfigSerializationTest(TestCase):
+    def test_callable_config_not_json_serializable_1(self):
+        # Repro: setting callable configs to a non-None value
+        # save_config_portable() return a dict that is not JSON-serializable.
+        with inductor_config.patch(
+            bucket_all_gathers_fx_bucket_size_determinator=lambda: None
+        ):
+            portable = inductor_config.save_config_portable(
+                ignore_private_configs=False
+            )
+            self.assertIn("bucket_all_gathers_fx_bucket_size_determinator", portable)
+            with self.assertRaises(TypeError, msg="not JSON serializable"):
+                json.dumps(portable)
+
+    def test_callable_config_not_json_serializable_2(self):
+        # save_config_portable calls the factory and then .uuid(),
+        # producing a JSON-serializable value for the cache key.
+        from torch._inductor.choices import InductorChoices
+
+        class ChoicesA(InductorChoices):
+            def uuid(self):
+                return "choices_a"
+
+        class ChoicesB(InductorChoices):
+            def uuid(self):
+                return "choices_b"
+
+        # None default stays as None in the config hash.
+        with inductor_config.patch(inductor_choices_class=None):
+            portable = inductor_config.save_config_portable(
+                ignore_private_configs=False
+            )
+            self.assertIsNone(portable["inductor_choices_class"])
+            json.dumps(portable)
+
+        # Factory returning ChoicesA → uuid string
+        with inductor_config.patch(inductor_choices_class=ChoicesA):
+            portable = inductor_config.save_config_portable(
+                ignore_private_configs=False
+            )
+            self.assertEqual(portable["inductor_choices_class"], "choices_a")
+            json_a = json.dumps(portable)
+
+        # Factory returning ChoicesB → different uuid string
+        with inductor_config.patch(inductor_choices_class=ChoicesB):
+            portable = inductor_config.save_config_portable(
+                ignore_private_configs=False
+            )
+            self.assertEqual(portable["inductor_choices_class"], "choices_b")
+            json_b = json.dumps(portable)
+
+        self.assertNotEqual(json_a, json_b)
+
+    def test_callable_config_without_uuid(self):
+        from torch._inductor.choices import InductorChoices
+
+        # A subclass without uuid() raises RuntimeError.
+        class PlainChoices(InductorChoices):
+            pass
+
+        with inductor_config.patch(inductor_choices_class=PlainChoices):
+            with self.assertRaises(RuntimeError):
+                inductor_config.save_config_portable(ignore_private_configs=False)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,6 @@
 # Owner(s): ["module: fsdp"]
 import functools
 import gc
-from typing import Union
 
 import torch
 import torch.nn as nn
@@ -73,7 +72,7 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
 
     def _test_tracker_multi_group(
         self,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool | int,
         offload_policy: OffloadPolicy,
         mp_policy: MixedPrecisionPolicy,
     ):
@@ -241,9 +240,12 @@ class TestTrackerFullyShard1DTrainingCompose(FSDPTest):
         )
 
     def _test_tracker_with_activation_checkpointing(
-        self, reshard_after_forward: Union[bool, int], checkpoint_impl: str
+        self, reshard_after_forward: bool | int, checkpoint_impl: str
     ):
-        assert checkpoint_impl in ("composable", "wrapper")
+        if checkpoint_impl not in ("composable", "wrapper"):
+            raise AssertionError(
+                f"Expected checkpoint_impl in ('composable', 'wrapper'), got {checkpoint_impl}"
+            )
         debug = False
         dev = torch.device(torch.accelerator.current_device_index())
         _init_cublas_workspace(dev)

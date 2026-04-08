@@ -1,12 +1,14 @@
 # Security Policy
 
  - [**Reporting a Vulnerability**](#reporting-a-vulnerability)
+ - [**Issues That Are Not Security Vulnerabilities**](#issues-that-are-not-security-vulnerabilities)
  - [**Using PyTorch Securely**](#using-pytorch-securely)
    - [Untrusted models](#untrusted-models)
    - [TorchScript models](#torchscript-models)
    - [Untrusted inputs](#untrusted-inputs)
    - [Data privacy](#data-privacy)
    - [Using distributed features](#using-distributed-features)
+- [**Backporting Security Fixes**](#security-fixes-and-old-releases)
 - [**CI/CD security principles**](#cicd-security-principles)
 ## Reporting Security Issues
 
@@ -18,14 +20,25 @@ Please report security issues using https://github.com/pytorch/pytorch/security/
 
 All reports submitted through the security advisories mechanism would **either be made public or dismissed by the team within 90 days of the submission**. If advisory has been closed on the grounds that it is not a security issue, please do not hesitate to create an [new issue](https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml) as it is still likely a valid issue within the framework.
 
-**Note on crashes and out of bounds access**: PyTorch is a computational framework that performs operations on behalf of the caller. Like many low-level libraries, PyTorch generally does not validate all inputs to every function—the responsibility for providing valid arguments lies with the calling code. While crashes and out of bounds memory access should be reported as bugs, they are generally not considered security vulnerabilities in PyTorch's threat model.
-
-**Note on numerical stability**: Issues related to incorrect calculations, numerical instability, or precision loss (CWE-682: Incorrect Calculation) should be reported as regular bugs, not as security vulnerabilities.
-
 Please refer to the following page for our responsible disclosure policy, reward guidelines, and those things that should not be reported:
 
 https://www.facebook.com/whitehat
 
+## Issues That Are Not Security Vulnerabilities
+
+PyTorch is a framework that executes user-provided code, including model definitions, custom operators, and training scripts. Like many low-level computational libraries, PyTorch generally does not validate all inputs to every function - the responsibility for providing valid arguments lies with the calling code. An attacker who already has the ability to execute arbitrary code locally, or to modify files on the system, does not gain any additional capability by exploiting PyTorch. The following categories of reports should be filed as regular bugs, **not** as security vulnerabilities:
+
+- **Crashes and out-of-bounds access**: Passing invalid arguments (wrong shapes, dtypes, device placement, etc.) may result in crashes, segfaults, or out-of-bounds memory access. These are often caused by missing input validation and are bugs worth reporting as regular issues, but not security vulnerabilities — the caller is already running native code and could achieve the same effect without PyTorch.
+
+- **Numerical accuracy and stability**: Differences in numerical results between devices (CPU vs. CUDA), dtypes, platforms, or library versions are expected behavior in floating-point computing. This includes precision loss (CWE-682), non-determinism across runs, and results that diverge from a reference implementation.
+
+- **Internal or "unsafe" functions**: Some PyTorch functions are intentionally low-level or unchecked (e.g., functions prefixed with `_`, internal C++ APIs, or APIs documented as unsafe). These exist for performance or flexibility and are not intended to be hardened against adversarial callers. If an attacker can invoke such functions with arbitrary arguments, they likely have local execution access already.
+
+- **Denial of service via resource consumption**: PyTorch is designed to run computationally intensive workloads that fully utilize CPU, GPU, and memory. Crafting inputs that cause high resource consumption or long-running operations is trivial and expected — this is not a security vulnerability.
+
+- **Local filesystem and cache trust**: PyTorch heavily uses local caching for performance (e.g., compiled kernel artifacts, Triton cache). These cache should be located in local user-only accessible locations and those are trusted by design. If an attacker has write access to the local filesystem, they can already execute arbitrary code — poisoning a PyTorch cache does not grant any additional capability.
+
+If your security advisory is closed because it falls into one of these categories, please don't be discouraged — these are still valuable reports. We encourage you to re-file them as a [regular issue](https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml) so they can be tracked and fixed as bugs.
 
 ## Using PyTorch Securely
 **PyTorch models are programs**, so treat its security seriously -- running untrusted models is equivalent to running untrusted code. In general we recommend that model weights and the python code for the model are distributed independently. That said, be careful about where you get the python code from and who wrote it (preferentially check for a provenance or checksums, do not run any pip installed package).
@@ -74,6 +87,10 @@ If applicable, prepare your model against bad inputs and prompt injections. Some
 PyTorch can be used for distributed computing, and as such there is a `torch.distributed` package. PyTorch Distributed features are intended for internal communication only. They are not built for use in untrusted environments or networks.
 
 For performance reasons, none of the PyTorch Distributed primitives (including c10d, RPC, and TCPStore) include any authorization protocol and will send messages unencrypted. They accept connections from anywhere, and execute the workload sent without performing any checks. Therefore, if you run a PyTorch Distributed program on your network, anybody with access to the network can execute arbitrary code with the privileges of the user running PyTorch.
+
+## Backporting Security Fixes
+
+Security fixes are only applied to the current release. Fixes are never backported to older versions of PyTorch. The only security concern applicable to previously published releases is tampering with the published binaries themselves (e.g., unauthorized modification of packages on PyPI or download indexes). If you believe a published binary has been compromised, please report it through the [security advisory process](#reporting-security-issues).
 
 ## CI/CD security principles
 _Audience_: Contributors and reviewers, especially if modifying the workflow files/build system.

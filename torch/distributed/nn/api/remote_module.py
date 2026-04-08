@@ -5,7 +5,7 @@ import io
 import sys
 import types
 from collections.abc import Callable, Iterator, Mapping
-from typing import Any, TypeVar, Union
+from typing import Any, TypeVar
 from typing_extensions import Self
 
 import torch
@@ -21,7 +21,7 @@ from torch.utils.hooks import RemovableHandle
 
 __all__ = ["RemoteModule"]
 
-_grad_t = Union[tuple[Tensor, ...], Tensor]
+_grad_t = tuple[Tensor, ...] | Tensor
 # See https://mypy.readthedocs.io/en/latest/generics.html#generic-methods-and-generic-self for the use
 # of `T` to annotate `self`. Many methods of `Module` return `self` and we want those return values to be
 # the type of the subclass, not the looser type of `Module`.
@@ -457,7 +457,8 @@ class _RemoteModule(nn.Module):
     def _prepare_init(self, remote_device_str: str) -> bool:
         """Prepare the initialization and returns whether to enable automatically moving CPU tensors to CUDA devices."""
         # Sanity check.
-        assert rpc._is_current_rpc_agent_set(), "RemoteModule only works in RPC."
+        if not rpc._is_current_rpc_agent_set():
+            raise AssertionError("RemoteModule only works in RPC.")
 
         remote_device = _remote_device(remote_device_str)
         self.on = (
@@ -579,31 +580,23 @@ class _RemoteModule(nn.Module):
 
         remote_module = object.__new__(RemoteModule)
 
-        # pyrefly: ignore [missing-attribute]
         enable_moving_cpu_tensors_to_cuda = remote_module._prepare_init(remote_device)
 
         if _module_interface_cls is not None:
             # Users reply on this field to know if this generated RemoteModule is TorchScript-able.
-            # pyrefly: ignore [missing-attribute]
             remote_module.is_scriptable = True
 
-            # pyrefly: ignore [missing-attribute]
             remote_module._init_template(
                 _module_interface_cls, enable_moving_cpu_tensors_to_cuda
             )
         else:
-            # pyrefly: ignore [missing-attribute]
             remote_module.is_scriptable = False
-            # pyrefly: ignore [missing-attribute]
             remote_module.generated_methods = (
                 _NON_SCRIPTABLE_REMOTE_MODULE_MODULE._generated_methods
             )
-        # pyrefly: ignore [missing-attribute]
         remote_module.module_rref = module_rref
 
-        # pyrefly: ignore [missing-attribute]
         remote_module._install_generated_methods()
-        # pyrefly: ignore [missing-attribute]
         remote_module._check_attribute_picklability()
 
         return remote_module
@@ -706,11 +699,9 @@ def _remote_module_receiver(
     m.__dict__.update(serialized_remote_module._asdict())
 
     # Unpickling the attribute `module_rref` must invoke RRef's `_deserialize()` method.
-    # pyrefly: ignore [missing-attribute]
     m.module_rref = rpc.PyRRef._deserialize(m.module_rref)
 
     # Install generated methods when unpickled.
-    # pyrefly: ignore [missing-attribute]
     for method in m.generated_methods:
         method_name = method.__name__
         method = torch.jit.export(method)

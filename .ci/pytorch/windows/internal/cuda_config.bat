@@ -22,6 +22,10 @@ if "%CUDA_VER%"=="126" (
     set "CUDA_DOTTED_VERSION=13.0"
     set "CUDA_ARCH_LIST=7.5;8.0;8.6;9.0;10.0;12.0"
     set "VISION_GENCODE=-gencode=arch=compute_75,code=sm_75 -gencode=arch=compute_80,code=compute_80 -gencode=arch=compute_86,code=compute_86 -gencode=arch=compute_90,code=compute_90 -gencode=arch=compute_100,code=compute_100 -gencode=arch=compute_120,code=compute_120"
+) else if "%CUDA_VER%"=="132" (
+    set "CUDA_DOTTED_VERSION=13.2"
+    set "CUDA_ARCH_LIST=7.5;8.0;8.6;9.0;10.0;12.0"
+    set "VISION_GENCODE=-gencode=arch=compute_75,code=sm_75 -gencode=arch=compute_80,code=compute_80 -gencode=arch=compute_86,code=compute_86 -gencode=arch=compute_90,code=compute_90 -gencode=arch=compute_100,code=compute_100 -gencode=arch=compute_120,code=compute_120"
 ) else (
     echo Unknown CUDA version: %CUDA_VER%
     exit /b 1

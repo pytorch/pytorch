@@ -15,10 +15,17 @@ from typing import Any
 
 import torch
 import torch.distributed.elastic.rendezvous.registry as rdzv_registry
-from torch._utils_internal import get_default_numa_options
+from torch._utils_internal import get_default_numa_options, justknobs_check
 from torch.distributed.elastic import events, metrics
 from torch.distributed.elastic.agent.server.api import WorkerSpec
-from torch.distributed.elastic.agent.server.local_elastic_agent import LocalElasticAgent
+from torch.distributed.elastic.agent.server.health_check_server import (
+    create_healthcheck_server,
+)
+from torch.distributed.elastic.agent.server.local_elastic_agent import (
+    _AliveCallbackProxy,
+    LocalElasticAgent,
+    TORCHELASTIC_HEALTH_CHECK_PORT,
+)
 from torch.distributed.elastic.multiprocessing import (
     DefaultLogsSpecs,
     LogsSpecs,
@@ -79,6 +86,9 @@ class LaunchConfig:
                            When enabled, LOCAL_RANK is set to 0 for all workers and
                            CUDA_VISIBLE_DEVICES is adjusted so each worker accesses its
                            assigned GPU at device index 0.
+        shutdown_timeout: Time in seconds to wait for graceful shutdown of workers before
+                        sending SIGKILL. Can also be set via TORCH_ELASTIC_SHUTDOWN_TIMEOUT
+                        environment variable. Defaults to 30 seconds.
 
 
     .. note::
@@ -109,6 +119,7 @@ class LaunchConfig:
     duplicate_stdout_filters: list[str] | None = None
     duplicate_stderr_filters: list[str] | None = None
     virtual_local_rank: bool = False
+    shutdown_timeout: int | None = None
 
     def __post_init__(self):
         default_timeout = 900
@@ -129,6 +140,16 @@ class LaunchConfig:
         ):
             self.numa_options = get_default_numa_options()
             logger.info("Using default numa options = %r", self.numa_options)
+
+        # Set shutdown_timeout from environment variable if not explicitly set
+        if self.shutdown_timeout is None:
+            self.shutdown_timeout = int(
+                os.environ.get("TORCH_ELASTIC_SHUTDOWN_TIMEOUT", "30")
+            )
+        elif self.shutdown_timeout < 0:
+            raise ValueError(
+                f"shutdown_timeout must be non-negative, got {self.shutdown_timeout}"
+            )
 
 
 class elastic_launch:
@@ -276,6 +297,34 @@ def launch_agent(
     # Set the signals to handle in the environment variable
     os.environ["TORCHELASTIC_SIGNALS_TO_HANDLE"] = config.signals_to_handle
 
+    # Start health check server before rendezvous so TW sees a healthy
+    # thrift port during the potentially long MAST rendezvous store barrier
+    # (10-22+ min for large jobs).  The _AliveCallbackProxy returns
+    # time.time() until wired to the agent after construction.
+    health_check_server = None
+    alive_callback_proxy = None
+    healthcheck_port = os.getenv(TORCHELASTIC_HEALTH_CHECK_PORT)
+    if healthcheck_port is not None and justknobs_check(
+        "ai_infra/pytorch_distributed:torchelastic_enable_healthcheck_before_rendezvous",
+        default=False,
+    ):
+        try:
+            alive_callback_proxy = _AliveCallbackProxy()
+            health_check_server = create_healthcheck_server(
+                alive_callback=alive_callback_proxy,
+                port=int(healthcheck_port),
+                timeout=60,
+            )
+            health_check_server.start()
+            logger.info(
+                "Started early health check server on port %s before rendezvous",
+                healthcheck_port,
+            )
+        except Exception:
+            logger.warning("Failed to start early health check server", exc_info=True)
+            health_check_server = None
+            alive_callback_proxy = None
+
     spec = WorkerSpec(
         role=config.role,
         local_world_size=config.nproc_per_node,
@@ -299,7 +348,12 @@ def launch_agent(
         logs_specs=config.logs_specs,  # type: ignore[arg-type]
         start_method=config.start_method,
         log_line_prefix_template=config.log_line_prefix_template,
+        shutdown_timeout=config.shutdown_timeout,  # type: ignore[arg-type]
+        health_check_server=health_check_server,
     )
+
+    if alive_callback_proxy is not None:
+        alive_callback_proxy.set_delegate(agent._get_alive_time)
 
     shutdown_rdzv = True
     try:

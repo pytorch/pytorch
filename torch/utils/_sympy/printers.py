@@ -70,7 +70,6 @@ class ExprPrinter(StrPrinter):
     # NB: this pow by natural, you should never have used builtin sympy.pow
     # for FloatPow, and a symbolic exponent should be PowByNatural.  These
     # means exp is guaranteed to be integer.
-    # pyrefly: ignore [bad-override]
     def _print_Pow(self, expr: sympy.Expr) -> str:
         base, exp = expr.args
         if exp != int(exp):
@@ -192,8 +191,17 @@ class PythonPrinter(ExprPrinter):
         return self.stringify(expr.args, " / ", PRECEDENCE["Atom"] - 0.5)
 
     def _helper_sqrt(self, expr: sympy.Expr) -> str:
+        # NB: We use torch._sym_sqrt here instead of math.sqrt because the
+        # guard expression may be evaluated with SymInt/SymFloat inputs (e.g.
+        # during cache hit re-evaluation in evaluate_guards_expression).
+        # math.sqrt on a SymFloat triggers evaluate_expr which forces
+        # concretization/specialization of the symbol, creating spurious
+        # guards that didn't exist in the original program.
+        # torch._sym_sqrt properly propagates through the symbolic system
+        # without forcing specialization.
+        # See https://github.com/pytorch/pytorch/issues/152435
         # pyrefly: ignore [missing-attribute]
-        return f"math.sqrt({self._print(expr)})"
+        return f"torch._sym_sqrt({self._print(expr)})"
 
     def _print_OpaqueUnaryFn_sqrt(self, expr: sympy.Expr) -> str:
         return self._helper_sqrt(expr.args[0])
@@ -372,6 +380,9 @@ class CppPrinter(ExprPrinter):
             self.parenthesize(arg, PRECEDENCE["Atom"] - 0.5) for arg in expr.args
         )
         return f"{c} ? {p} : {q}"
+
+    def _print_Or(self, expr: sympy.Expr) -> str:
+        return self.stringify(expr.args, " || ", precedence(expr))
 
     def _print_Piecewise(self, expr: sympy.Expr) -> str:
         # Convert Piecewise(expr_cond_pairs) to nested ternary operators

@@ -779,7 +779,8 @@ class MultiprocessContext(PContext):
         return len(self._return_values) == self.nprocs
 
     def _poll(self) -> RunProcsResult | None:
-        assert self._pc is not None  # assertion for mypy type checker
+        if self._pc is None:
+            raise AssertionError  # assertion for mypy type checker
 
         try:
             # torch.mp.ProcessContext Throws an Exception if some/all of
@@ -858,7 +859,8 @@ class MultiprocessContext(PContext):
             )
 
     def pids(self) -> dict[int, int]:
-        assert self._pc is not None  # assertion for mypy type checking
+        if self._pc is None:
+            raise AssertionError  # assertion for mypy type checking
         return dict(enumerate(self._pc.pids()))
 
     def _close(self, death_sig: signal.Signals, timeout: int = 30) -> None:

@@ -10,7 +10,7 @@ import signal
 import subprocess
 import time
 import uuid
-from typing import Optional, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 from core.api import AutoLabels
 from core.types import Label
@@ -46,8 +46,8 @@ class WorkOrder:
     label: Label
     autolabels: AutoLabels
     timer_args: WorkerTimerArgs
-    source_cmd: Optional[str] = None
-    timeout: Optional[float] = None
+    source_cmd: str | None = None
+    timeout: float | None = None
     retries: int = 0
 
     def __hash__(self) -> int:
@@ -67,17 +67,17 @@ class _BenchmarkProcess:
     """Wraps subprocess.Popen for a given WorkOrder."""
 
     _work_order: WorkOrder
-    _cpu_list: Optional[str]
+    _cpu_list: str | None
     _proc: PopenType
 
     # Internal bookkeeping
     _communication_file: str
     _start_time: float
-    _end_time: Optional[float] = None
-    _retcode: Optional[int]
-    _result: Optional[Union[WorkerOutput, WorkerFailure]] = None
+    _end_time: float | None = None
+    _retcode: int | None
+    _result: WorkerOutput | WorkerFailure | None = None
 
-    def __init__(self, work_order: WorkOrder, cpu_list: Optional[str]) -> None:
+    def __init__(self, work_order: WorkOrder, cpu_list: str | None) -> None:
         self._work_order = work_order
         self._cpu_list = cpu_list
         self._start_time = time.time()
@@ -129,13 +129,13 @@ class _BenchmarkProcess:
         return (self._end_time or time.time()) - self._start_time
 
     @property
-    def result(self) -> Union[WorkerOutput, WorkerFailure]:
+    def result(self) -> WorkerOutput | WorkerFailure:
         self._maybe_collect()
         if self._result is None:
             raise AssertionError("result is None after collection")
         return self._result
 
-    def poll(self) -> Optional[int]:
+    def poll(self) -> int | None:
         self._maybe_collect()
         return self._retcode
 
@@ -189,7 +189,7 @@ class InProgress:
     _proc: _BenchmarkProcess
     _timeouts: int = 0
 
-    def __init__(self, work_order: WorkOrder, cpu_list: Optional[str]):
+    def __init__(self, work_order: WorkOrder, cpu_list: str | None):
         self._work_order = work_order
         self._proc = _BenchmarkProcess(work_order, cpu_list)
 
@@ -198,7 +198,7 @@ class InProgress:
         return self._proc._work_order
 
     @property
-    def cpu_list(self) -> Optional[str]:
+    def cpu_list(self) -> str | None:
         return self._proc._cpu_list
 
     @property
@@ -232,7 +232,7 @@ class InProgress:
         raise subprocess.TimeoutExpired(cmd=self._proc.cmd, timeout=timeout)
 
     @property
-    def result(self) -> Union[WorkerOutput, WorkerFailure]:
+    def result(self) -> WorkerOutput | WorkerFailure:
         return self._proc.result
 
     def __hash__(self) -> int:

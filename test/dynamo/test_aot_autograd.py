@@ -1109,7 +1109,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             )
 
     def test_aot_autograd_raises_invalid_leaf_set(self):
-        @torch.compile
+        @torch.compile(backend="aot_eager")
         def f(x):
             x.set_(torch.ones(2))
 

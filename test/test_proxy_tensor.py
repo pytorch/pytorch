@@ -2046,16 +2046,10 @@ make_fx_failures = {
 only_real_tensor_failures = {
     xfail('narrow'),
     xfail('tensor_split'),
-    # C++ CIA kernel calls aten::equal (data-dependent); Python decomposition only active with python dispatcher
-    xfail('quantile'),
-    xfail('nanquantile'),
 }
 
 only_fake_tensor_failures = {
     xfail('tensor_split'),
-    # C++ CIA kernel calls aten::equal (data-dependent); Python decomposition only active with python dispatcher
-    xfail('quantile'),
-    xfail('nanquantile'),
 }
 
 fake_tensor_failures = set()
