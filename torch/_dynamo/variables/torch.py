@@ -2401,14 +2401,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     )
                 tx.output.autograd_grad_consumed_grad_fns.update(non_leaf_consumed)
 
-            return wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
+            with (
+                torch.fx.traceback.preserve_node_meta(),
+                torch.fx.traceback.annotate({"autograd_backward": True}),
+            ):
+                proxy = tx.output.create_proxy(
                     "call_function",
                     torch.autograd.grad,
                     *proxy_args_kwargs(args, kwargs),
-                ),
-            )
+                )
+            return wrap_fx_proxy(tx=tx, proxy=proxy)
 
         return handlers
 
