@@ -23,8 +23,6 @@ accurate graph capture while handling Python's various function-related behavior
 
 import builtins
 import functools
-import importlib.metadata
-import importlib.util
 import inspect
 import itertools
 import logging
@@ -2164,24 +2162,6 @@ class SkipFunctionVariable(VariableTracker):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        # importlib functions are frozen builtins that Dynamo cannot trace
-        # into.  They are deterministic for a given package name, so
-        # constant-fold them when all args are constants.
-        if self.value is importlib.util.find_spec and all(
-            a.is_python_constant() for a in args
-        ):
-            spec = self.value(*(a.as_python_constant() for a in args))
-            # Return a bool-like sentinel instead of ModuleSpec which
-            # SourcelessBuilder cannot wrap.  Callers only check `is not None`.
-            return VariableTracker.build(tx, spec is not None or None)
-
-        if self.value is importlib.metadata.version and all(
-            a.is_python_constant() for a in args
-        ):
-            return VariableTracker.build(
-                tx, self.value(*(a.as_python_constant() for a in args))
-            )
-
         # object.__reduce_ex__ is a C builtin that copy.deepcopy calls
         # via `reductor = getattr(x, "__reduce_ex__"); rv = reductor(4)`.
         # Intercept bound __reduce_ex__ calls and delegate to the polyfill.
