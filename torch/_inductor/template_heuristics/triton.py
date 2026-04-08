@@ -936,8 +936,9 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             + gemm_config.block_n * gemm_config.block_k
         )
 
-        # Extra bytes to account for barriers in boundary conditions
-        extra_bytes = 128
+        # Extra bytes to account for barriers, alignment padding,
+        # and other Triton compiler overhead in boundary conditions
+        extra_bytes = 1024
 
         # In persistent tma case, the layout conversion from mma -> blocked layout
         # is not free and takes additional shared memory, while next loads are prefetched
