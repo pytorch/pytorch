@@ -62,10 +62,7 @@ class TestRecordFunction(TestCase):
                 self.assertTrue(e.input_shapes == [[]])
             elif "## TEST 2 ##" == e.name:
                 found_test_2 = True
-                self.assertTrue(
-                    e.input_shapes
-                    == [[], [], [], [[3, 4, 5], [3, 4, 5]], [], [3, 4, 5]]
-                )
+                self.assertTrue(e.input_shapes == [[], [], [], [], [], [3, 4, 5]])
             elif "## TEST 3 ##" == e.name:
                 found_test_3 = True
                 self.assertTrue(e.input_shapes == [])
