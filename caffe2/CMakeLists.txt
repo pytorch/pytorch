@@ -1466,8 +1466,24 @@ if(USE_ROCM)
 
   message(INFO "USE_NVSHMEM=${USE_NVSHMEM} USE_ROCM=${USE_ROCM} rocshmem_FOUND=${rocshmem_FOUND}")
   if(USE_NVSHMEM)
-    if(rocshmem_FOUND)
-      message(STATUS "rocSHMEM found, building with rocSHMEM support")
+    # rocSHMEM upstream ships device code for a subset of AMD gfx targets only.
+    set(ROCSHMEM_SUPPORTED_ARCH gfx90a gfx942 gfx950 gfx1100 gfx1201)
+    set(_torch_rocshmem_build_arches)
+    foreach(_arch ${PYTORCH_ROCM_ARCH})
+      list(FIND ROCSHMEM_SUPPORTED_ARCH "${_arch}" _rocsmem_supported_idx)
+      if(NOT _rocsmem_supported_idx EQUAL -1)
+        # rocSHMEM device archives are commonly built for gfx90a xnack variants,
+        # so map plain gfx90a to gfx90a:xnack-/gfx90a:xnack+ to match device
+        # symbols during HIP RDC link.
+        if(_arch STREQUAL "gfx90a")
+          list(APPEND _torch_rocshmem_build_arches "gfx90a:xnack-" "gfx90a:xnack+")
+        else()
+          list(APPEND _torch_rocshmem_build_arches "${_arch}")
+        endif()
+      endif()
+    endforeach()
+    if(rocshmem_FOUND AND _torch_rocshmem_build_arches)
+      message(STATUS "rocSHMEM found, building with rocSHMEM support for arches: ${_torch_rocshmem_build_arches}")
       message(STATUS "ROCSHMEM_INCLUDE_DIR: '${ROCSHMEM_INCLUDE_DIR}'")
       set(TORCH_ROCSHMEM_SRCS
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/utils.cpp"
@@ -1494,21 +1510,8 @@ if(USE_ROCM)
 
       # torch_rocshmem is built with -fgpu-rdc, so its HIP link step performs
       # device linking and must carry the full arch list explicitly.
-      # rocSHMEM device archives are commonly built for gfx90a xnack variants,
-      # so map plain gfx90a to gfx90a:xnack-/gfx90a:xnack+ to match device
-      # symbols during HIP RDC link.
-      set(_torch_rocshmem_arches)
-      foreach(_arch ${PYTORCH_ROCM_ARCH})
-        if(_arch STREQUAL "gfx90a")
-          list(APPEND _torch_rocshmem_arches "gfx90a:xnack-" "gfx90a:xnack+")
-        else()
-          list(APPEND _torch_rocshmem_arches "${_arch}")
-        endif()
-      endforeach()
-      list(REMOVE_DUPLICATES _torch_rocshmem_arches)
-      list(JOIN _torch_rocshmem_arches ";" _torch_rocshmem_arch_list)
       set_target_properties(
-          torch_rocshmem PROPERTIES HIP_ARCHITECTURES "${_torch_rocshmem_arch_list}")
+          torch_rocshmem PROPERTIES HIP_ARCHITECTURES "${_torch_rocshmem_build_arches}")
 
 
       target_compile_definitions(torch_hip PUBLIC USE_NVSHMEM)
@@ -1519,9 +1522,14 @@ if(USE_ROCM)
 
       install(TARGETS torch_rocshmem EXPORT Caffe2Targets DESTINATION
         "${TORCH_INSTALL_LIB_DIR}")
+    elseif(rocshmem_FOUND)
+      message(STATUS
+        "rocSHMEM found but skipped: PYTORCH_ROCM_ARCH has no entry in "
+        "ROCSHMEM_SUPPORTED_ARCH (${ROCSHMEM_SUPPORTED_ARCH}). "
+        "Building without rocSHMEM support.")
     else()
       message(WARNING "rocSHMEM not found (USE_NVSHMEM=ON). Building without rocSHMEM support.")
-    endif() #rocshmem_FOUND
+    endif() #rocshmem_FOUND / arch intersection
   endif() #USE_NVSHMEM
 endif()
 
