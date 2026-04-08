@@ -359,7 +359,6 @@ struct type_caster<c10::complex<T>> {
     return handle(PyComplex_FromDoubles(complex.real(), complex.imag()));
   }
 };
-
 template <>
 struct type_caster<c10::Layout>
 {
@@ -381,15 +380,12 @@ struct type_caster<c10::Layout>
   PYBIND11_TYPE_CASTER(c10::Layout, _("torch.layout"));
 
   static handle
-    cast(c10::Layout& layout, return_value_policy /*unused*/, handle /*parent*/) {
-      const auto _torch = py::module_::import("torch");
-      const auto cast_layout = static_cast<uint8_t>(layout);
-      if(cast_layout >= static_cast<uint8_t>(c10::Layout::NumOptions))
-      {
-        //not found
-        throw py::type_error("Unvalid layout specification");
-      }
-      return _torch.attr(layout_str.at(cast_layout));
+    cast(c10::Layout layout, return_value_policy /*unused*/, handle /*parent*/) {
+        PyObject* layout_obj = reinterpret_cast<PyObject*>(torch::getTHPLayout(layout));
+        if (!layout_obj) {
+            throw py::type_error("Unsupported or invalid layout for casting");
+        }
+        return handle(layout_obj).inc_ref(); // Increment ref count to ensure the object isn't deallocated
     }
 
     bool load(handle src, bool /*convert*/) {
@@ -401,11 +397,12 @@ struct type_caster<c10::Layout>
       {
         return false;
       }
-      const auto layout = reinterpret_cast<THPLayout*>(src.ptr()); 
+      const auto layout = reinterpret_cast<THPLayout*>(src.ptr());
       value = layout->layout;
       return true;
     }
   };
+
 } // namespace pybind11::detail
 
 namespace torch::impl {
