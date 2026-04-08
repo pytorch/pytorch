@@ -45,7 +45,7 @@ jobs:
 
       - name: Run AI Advisor
         id: claude
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@v1.0.89
         with:
           allowed_bots: "pytorch-auto-revert[bot]"
           use_bedrock: "true"
