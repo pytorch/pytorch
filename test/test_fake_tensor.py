@@ -1348,6 +1348,36 @@ for t in threads:
             delattr(torch, backend_name)
             del sys.modules[f"torch.{backend_name}"]
 
+    def test_unique_output_dtype(self):
+        shape_env = ShapeEnv()
+        for input_dtype in [torch.float32, torch.float16, torch.bfloat16]:
+            x_real = torch.randn(10, dtype=input_dtype)
+            real_unique, real_inverse, real_counts = torch.unique(
+                x_real, return_inverse=True, return_counts=True
+            )
+            with FakeTensorMode(shape_env=shape_env):
+                x = torch.randn(10, dtype=input_dtype)
+                fake_unique, fake_inverse, fake_counts = torch.unique(
+                    x, return_inverse=True, return_counts=True
+                )
+                self.assertEqual(fake_unique.dtype, real_unique.dtype)
+                self.assertEqual(fake_inverse.dtype, real_inverse.dtype)
+                self.assertEqual(fake_counts.dtype, real_counts.dtype)
+
+        # Also test with dim argument
+        x_real = torch.randn(3, 4, dtype=torch.float32)
+        real_unique, real_inverse, real_counts = torch.unique(
+            x_real, dim=0, return_inverse=True, return_counts=True
+        )
+        with FakeTensorMode(shape_env=shape_env):
+            x = torch.randn(3, 4, dtype=torch.float32)
+            fake_unique, fake_inverse, fake_counts = torch.unique(
+                x, dim=0, return_inverse=True, return_counts=True
+            )
+            self.assertEqual(fake_unique.dtype, real_unique.dtype)
+            self.assertEqual(fake_inverse.dtype, real_inverse.dtype)
+            self.assertEqual(fake_counts.dtype, real_counts.dtype)
+
 
 instantiate_parametrized_tests(FakeTensorTest)
 
