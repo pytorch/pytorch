@@ -69,7 +69,7 @@ __global__ void triu_tril_kernel(
       bool mask_all_true = upper ? (col - row >= k) : (col + elements_per_thread - row <= k);
       if (mask_all_true)
 #if !defined(USE_ROCM)
-        break;
+        return;
 #else
         // The strided loop must proceed on ROCm
         continue;
