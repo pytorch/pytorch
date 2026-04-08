@@ -18,7 +18,7 @@ runs:
   using: composite
   steps:
     - name: Upload PyTorch Build Artifacts to S3
-      if: ${{ !inputs.use-gha }}
+      if: inputs.use-gha == '' || inputs.use-gha == 'false'
       uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
       with:
         name: ${{ inputs.name }}
@@ -28,7 +28,7 @@ runs:
         s3-bucket: ${{ inputs.s3-bucket }}
 
     - name: Upload PyTorch Build Artifacts to GHA
-      if: ${{ inputs.use-gha }}
+      if: inputs.use-gha != '' && inputs.use-gha != 'false'
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:
         name: ${{ inputs.name }}
