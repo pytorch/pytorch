@@ -428,6 +428,14 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(IntType::get());
   }
 
+  // Check for types registered in _tryToInferTypeImpl (e.g. ProcessGroup)
+  // before falling through to the expensive inspect.isclass / JIT compilation
+  // path below.
+  auto ty = detail::_tryToInferTypeImpl(input);
+  if (ty.has_value()) {
+    return ty.value();
+  }
+
   auto enum_type = py::module::import("enum").attr("Enum");
   py::bool_ isEnumValue = py::isinstance(input, enum_type);
   if (py::cast<bool>(isEnumValue)) {
@@ -515,11 +523,6 @@ inline InferredType tryToInferType(py::handle input) {
   py::bool_ is_module = py::isinstance(input, module_type);
   if (py::cast<bool>(is_module)) {
     return InferredType("Cannot infer concrete type of torch.nn.Module");
-  }
-
-  auto ty = detail::_tryToInferTypeImpl(input);
-  if (ty.has_value()) {
-    return ty.value();
   }
 
   // Try container types

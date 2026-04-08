@@ -10,6 +10,7 @@ import builtins
 import collections
 import contextlib
 import enum
+import functools
 import inspect
 import io
 import pickle
@@ -408,6 +409,7 @@ def createResolutionCallbackFromClosure(fn) -> Callable[[str], Any]:
     return createResolutionCallbackFromEnv(closure_lookup())
 
 
+@functools.cache
 def can_compile_class(cls) -> bool:
     # If any of the functions on a type don't have a code object, this type can't
     # be compiled and is probably a builtin / bound from C
