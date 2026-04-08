@@ -215,7 +215,7 @@ jobs:
           else
             TEST_COMMAND=.ci/pytorch/test.sh
           fi
-          export USE_SCCACHE=0
+          export USE_SCCACHE=1
           echo "ADDITIONAL_FLAGS=$ADDITIONAL_FLAGS"
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
