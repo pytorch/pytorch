@@ -676,12 +676,6 @@ class profile:
                 end_us=rel_end_ns / 1000,
                 fwd_thread=kineto_event.fwd_thread_id(),
                 input_shapes=kineto_event.shapes(),
-                structured_input_shapes=kineto_event.structured_input_shapes(),
-                structured_input_strides=kineto_event.structured_input_strides(),
-                input_dtypes=kineto_event.dtypes(),
-                python_id=kineto_event.python_id(),
-                python_parent_id=kineto_event.python_parent_id(),
-                python_module_id=kineto_event.python_module_id(),
                 concrete_inputs=kineto_event.concrete_inputs(),
                 kwinputs=kineto_event.kwinputs(),
                 stack=[
@@ -709,6 +703,12 @@ class profile:
                 flow_start=kineto_event.flow_start(),
                 external_id=kineto_event.external_id(),
                 linked_correlation_id=kineto_event.linked_correlation_id(),
+                structured_input_shapes=kineto_event.structured_input_shapes(),
+                structured_input_strides=kineto_event.structured_input_strides(),
+                input_dtypes=kineto_event.dtypes(),
+                python_id=kineto_event.python_id(),
+                python_parent_id=kineto_event.python_parent_id(),
+                python_module_id=kineto_event.python_module_id(),
             )
             max_evt_id = max(max_evt_id, fe.id)
             if fe.device_type == DeviceType.CPU and not fe.is_async:
