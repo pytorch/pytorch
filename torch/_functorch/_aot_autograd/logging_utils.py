@@ -139,6 +139,16 @@ def setup_stacktrace_preservation_hooks(roots: list[torch.autograd.graph.Node]) 
         node.register_hook(get_posthook(special_stack, node._sequence_nr()))
 
 
+def setup_stacktrace_preservation_hooks_from_tensors(outputs: Any) -> None:
+    roots = [
+        t.grad_fn
+        for t in (outputs if isinstance(outputs, (list, tuple)) else (outputs,))
+        if isinstance(t, torch.Tensor) and t.grad_fn is not None
+    ]
+    if roots:
+        setup_stacktrace_preservation_hooks(roots)
+
+
 def describe_input(i: int, aot_config: AOTConfig) -> str:
     if i < aot_config.num_params_buffers:
         return f"parameter/buffer {i}"
