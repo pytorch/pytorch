@@ -279,16 +279,17 @@ class TestPybindTypeCasters(common.TestCase):
         for funcs in union_functions:
             with self.subTest(msg=f"check {[f.__name__ for f in funcs]}"):
                 self.check_union(funcs)
-    
+
     def test_pybind_layout_types(self):
-        layouts = [torch.strided,
+        layouts = [
+            torch.strided,
             torch.sparse_coo,
             torch.sparse_csr,
             torch.sparse_csc,
             torch.sparse_bsr,
             torch.sparse_bsc,
             torch._mkldnn,
-            torch.jagged
+            torch.jagged,
         ]
         for layout in layouts:
             with self.subTest(msg=f"check {layout}"):
