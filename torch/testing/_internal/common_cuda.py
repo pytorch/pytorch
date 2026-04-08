@@ -213,8 +213,21 @@ def evaluate_platform_supports_mxfp8_grouped_gemm():
         return built_with_mslk and IS_SM100
     return False
 
+def evaluate_platform_supports_fp8_sparse():
+    if torch.cuda.is_available():
+        if torch.version.hip:
+            return 'gfx950' in torch.cuda.get_device_properties(0).gcnArchName
+        else:
+            return (
+                (SM90OrLater or torch.cuda.get_device_capability() == (8, 9))
+                and torch.backends.cusparselt.is_available()
+                and torch.backends.cusparselt.version() >= 602
+            )
+    return False
+
 PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mx_gemm())
 PLATFORM_SUPPORTS_FP8: bool = LazyVal(lambda: evaluate_platform_supports_fp8())
+PLATFORM_SUPPORTS_FP8_SPARSE: bool = LazyVal(lambda: evaluate_platform_supports_fp8_sparse())
 PLATFORM_SUPPORTS_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_fp8_grouped_gemm())
 PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mxfp8_grouped_gemm())
 
