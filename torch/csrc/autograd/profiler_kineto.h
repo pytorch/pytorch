@@ -32,10 +32,6 @@ struct TORCH_API KinetoEvent {
   uint64_t fwdThreadId() const;
   bool hasShapes() const;
   const c10::ArrayRef<std::vector<int64_t>> shapes() const;
-  const c10::ArrayRef<torch::profiler::impl::shape> structuredInputShapes()
-      const;
-  const c10::ArrayRef<torch::profiler::impl::shape> structuredInputStrides()
-      const;
   bool hasTypes() const;
   const c10::ArrayRef<std::string> dtypes() const;
   bool hasConcreteInputs() const;
@@ -69,14 +65,19 @@ struct TORCH_API KinetoEvent {
   int64_t deviceResourceId() const;
   std::string backend() const;
   bool isPythonFunction() const;
-  int64_t pythonId() const;
-  int64_t pythonParentId() const;
-  int64_t pythonModuleId() const;
   int64_t cudaElapsedUs() const;
   int64_t privateuse1ElapsedUs() const;
   void getPerfEventCounters(torch::profiler::perf_counters_t& /*in*/) const;
   extra_meta_t extraMeta() const;
   std::string metadataJson() const;
+
+  const c10::ArrayRef<torch::profiler::impl::shape> structuredInputShapes()
+      const;
+  const c10::ArrayRef<torch::profiler::impl::shape> structuredInputStrides()
+      const;
+  int64_t pythonId() const;
+  int64_t pythonParentId() const;
+  int64_t pythonModuleId() const;
 
  private:
   torch::profiler::impl::ProfilerVoidEventStub fallbackStart() const;
@@ -87,11 +88,11 @@ struct TORCH_API KinetoEvent {
 
   // Copy fields from result so we can return ArrayRefs.
   std::vector<std::vector<int64_t>> shapes_;
-  std::vector<torch::profiler::impl::shape> structured_input_shapes_;
-  std::vector<torch::profiler::impl::shape> structured_input_strides_;
   std::vector<std::string> dtypes_;
   std::vector<c10::IValue> concrete_inputs_;
   std::unordered_map<std::string, c10::IValue> kwinputs_;
+  std::vector<torch::profiler::impl::shape> structured_input_shapes_;
+  std::vector<torch::profiler::impl::shape> structured_input_strides_;
 };
 
 // Consolidating events returned directly from Kineto
