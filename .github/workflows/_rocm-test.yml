@@ -268,8 +268,6 @@ jobs:
             --detach \
             --name="${container_name}" \
             --user jenkins \
-            --memory 56g \
-            --memory-swap 57344m \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
