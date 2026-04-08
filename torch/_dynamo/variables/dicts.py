@@ -297,6 +297,11 @@ class ConstDictVariable(VariableTracker):
     def as_proxy(self) -> dict[Any, Any]:
         return {k.vt.as_proxy(): v.as_proxy() for k, v in self.items.items()}
 
+    def repr_impl(
+        self, tx: "InstructionTranslator"
+    ) -> "VariableTracker | None":
+        return VariableTracker.build(tx, self.debug_repr())
+
     def debug_repr(self) -> str:
         items: list[str] = []
         for k, v in self.items.items():
@@ -1631,6 +1636,11 @@ class OrderedSetClassVariable(VariableTracker):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
 
+    def repr_impl(
+        self, tx: "InstructionTranslator"
+    ) -> "VariableTracker | None":
+        return VariableTracker.build(tx, self.debug_repr())
+
     def as_python_constant(self) -> type[OrderedSet[Any]]:
         return OrderedSet
 
@@ -1905,6 +1915,11 @@ class DictViewVariable(VariableTracker):
             return CONSTANT_VARIABLE_TRUE
         return CONSTANT_VARIABLE_FALSE
 
+    def repr_impl(
+        self, tx: "InstructionTranslator"
+    ) -> "VariableTracker | None":
+        return VariableTracker.build(tx, self.debug_repr())
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -1918,8 +1933,6 @@ class DictViewVariable(VariableTracker):
             return ListIteratorVariable(
                 self.view_items_vt, mutation_type=ValueMutationNew()
             )
-        elif name == "__repr__":
-            return VariableTracker.build(tx, self.debug_repr())
         return super().call_method(tx, name, args, kwargs)
 
     def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:

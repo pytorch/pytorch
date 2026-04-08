@@ -219,6 +219,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value})"
 
+    def repr_impl(
+        self, tx: "InstructionTranslator"
+    ) -> "VariableTracker | None":
+        # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/typeobject.c#L1382-L1407
+        if type(self.value).__repr__ is type.__repr__:
+            return VariableTracker.build(tx, repr(self.value))
+        return None
+
     @staticmethod
     @functools.cache
     def _constant_fold_classes() -> set[type[object]]:
@@ -1335,6 +1343,27 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value_type.__name__})"
+
+    def repr_impl(
+        self, tx: "InstructionTranslator"
+    ) -> "VariableTracker | None":
+        # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/object.c#L734-L779
+        repr_method = self.value.__repr__
+
+        if type(self.value).__repr__ is object.__repr__:
+            fn_vt = VariableTracker.build(tx, repr_method)
+            return fn_vt.call_function(tx, [], {})
+        elif is_wrapper_or_member_descriptor(repr_method):
+            unimplemented(
+                gb_type="Attempted to call repr() method implemented in C/C++",
+                context="",
+                explanation=f"{type(self.value)} has a C/C++ based repr method. This is not supported.",
+                hints=["Write the repr method in Python"],
+            )
+        else:
+            bound_method = repr_method.__func__
+            fn_vt = VariableTracker.build(tx, bound_method)
+            return fn_vt.call_function(tx, [self], {})
 
     def get_dict_vt(self, tx: "InstructionTranslator") -> "DunderDictVariable":
         if self.dict_vt is None:
@@ -2737,6 +2766,11 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
     @property
     def python_stack(self) -> traceback.StackSummary | None:
         return self.exc_vt.python_stack
+
+    def repr_impl(
+        self, tx: "InstructionTranslator"
+    ) -> "VariableTracker | None":
+        return self.exc_vt.repr_impl(tx)
 
     def debug_repr(self) -> str:
         return self.exc_vt.debug_repr()

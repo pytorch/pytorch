@@ -687,6 +687,22 @@ class ExceptionVariable(VariableTracker):
             )
         return super().var_getattr(tx, name)
 
+    def repr_impl(
+        self, tx: "InstructionTranslator"
+    ) -> VariableTracker | None:
+        # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/exceptions.c#L230-L250
+        try:
+            const_args = tuple(a.as_python_constant() for a in self.args)
+        except NotImplementedError:
+            return None
+        if len(const_args) == 0:
+            value = f"{self.exc_type.__name__}()"
+        elif len(const_args) == 1:
+            value = f"{self.exc_type.__name__}({const_args[0]!r})"
+        else:
+            value = f"{self.exc_type.__name__}{const_args!r}"
+        return VariableTracker.build(tx, value)
+
     def __str__(self) -> str:
         return f"{self.__class__.__name__}({self.exc_type})"
 

@@ -464,6 +464,11 @@ class RangeVariable(BaseListVariable):
         assert stop is not None
         super().__init__([start, stop, step], **kwargs)
 
+    def repr_impl(
+        self, tx: "InstructionTranslator"
+    ) -> "VariableTracker | None":
+        return VariableTracker.build(tx, self.debug_repr())
+
     def debug_repr(self) -> str:
         repr = f"range({self.start()}, {self.stop()}"
         if self.step() != 1:

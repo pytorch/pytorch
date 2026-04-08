@@ -589,6 +589,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             from .object_protocol import generic_len
 
             return generic_len(tx, self)
+        elif name == "__repr__" and not (args or kwargs):
+            from .object_protocol import generic_repr
+
+            return generic_repr(tx, self)
         elif (
             name == "__getattr__"
             and len(args) == 1
@@ -955,6 +959,20 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 f"'{self.python_type_name()}' object cannot be interpreted as an integer"
             ],
         )
+
+    def repr_impl(
+        self,
+        tx: Any,
+    ) -> "VariableTracker":
+        """Mirrors CPython's tp_repr slot.
+
+        https://github.com/python/cpython/blob/v3.13.3/Objects/object.c#L734-L779
+
+        Subclasses override to provide repr() for their type. The base
+        implementation signals that this VT does not implement repr, which
+        causes generic_repr to fall through to unimplemented.
+        """
+        return None  # type: ignore[return-value]
 
     def __init__(
         self,

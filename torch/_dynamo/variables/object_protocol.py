@@ -2,8 +2,8 @@
 Dynamo implementations of CPython's PyObject_* default slot algorithms.
 
 Analogous to CPython's Objects/object.c, this module holds the general
-comparison dispatch machinery that is independent of any specific type.
-Per-type richcompare_impl hooks live in their respective VT files.
+dispatch machinery that is independent of any specific type.
+Per-type tp_slot hooks (repr_impl, etc.) live in their respective VT files.
 """
 
 from functools import lru_cache
@@ -136,3 +136,31 @@ def generic_len(
     if type_implements_sq_length(T):
         return obj.sq_length(tx)
     return vt_mapping_size(tx, obj)
+
+
+def generic_repr(
+    tx: "InstructionTranslator", obj: "VariableTracker"
+) -> "VariableTracker":
+    # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/object.c#L734-L779
+    """
+    Implements PyObject_Repr semantics for VariableTracker objects.
+
+    Dispatches to obj.repr_impl(tx). If the VT does not implement repr_impl
+    (returns None), falls through to unimplemented to trigger a graph break.
+
+    CPython checks tp_repr != NULL; if NULL it returns a default
+    "<%s object at %p>" string. In Dynamo, VTs that don't override repr_impl
+    cause a graph break since we cannot produce a meaningful repr at trace time.
+    """
+    result = obj.repr_impl(tx)
+    if result is not None:
+        return result
+
+    unimplemented(
+        gb_type="Unsupported repr() call",
+        context=f"repr({obj})",
+        explanation=f"Dynamo does not know how to trace repr() on {obj.python_type_name()}",
+        hints=[
+            *graph_break_hints.SUPPORTABLE,
+        ],
+    )

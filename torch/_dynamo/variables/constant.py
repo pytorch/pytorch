@@ -124,6 +124,11 @@ its type to `common_constant_types`.
     def __repr__(self) -> str:
         return f"ConstantVariable({type(self.value).__name__}: {repr(self.value)})"
 
+    def repr_impl(
+        self, tx: "InstructionTranslator"
+    ) -> "VariableTracker | None":
+        return ConstantVariable.create(repr(self.value))
+
     def as_python_constant(self) -> Any:
         return self.value
 
