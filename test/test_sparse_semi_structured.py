@@ -23,6 +23,7 @@ from torch.sparse._semi_structured_conversions import (
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_FP8_SPARSE,
     xfailIfSM89PreCUDA13,
 )
 from torch.testing._internal.common_device_type import (
@@ -1608,6 +1609,56 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         sparse_result = torch.mm(A_sparse, B).to(torch.float16)
         torch.testing.assert_close(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8_SPARSE,
+        "FP8 sparse requires cuSPARSELt v0.6.2+ on SM 8.9+ or MI350+ (gfx950) on ROCm",
+    )
+    def test_cslt_compress_fp8(self, device):
+        A = rand_sparse_semi_structured_mask(256, 128, dtype=torch.float16)
+        A_fp8, _ = to_float8(A)
+        compressed = torch._cslt_compress(A_fp8)
+        self.assertEqual(compressed.dtype, torch.float8_e4m3fn)
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8_SPARSE,
+        "FP8 sparse requires cuSPARSELt v0.6.2+ on SM 8.9+ or MI350+ (gfx950) on ROCm",
+    )
+    @parametrize("dense_input_shape", [(256, 128)])
+    def test_cslt_sparse_mm_fp8_to_fp32(self, dense_input_shape, device):
+        A = rand_sparse_semi_structured_mask(256, 128, dtype=torch.float16)
+        B = torch.rand(dense_input_shape, device=device).to(torch.float16).t()
+
+        A_fp8, _ = to_float8(A)
+        B_fp8, _ = to_float8(B)
+
+        compressed = torch._cslt_compress(A_fp8)
+        sparse_result = torch._cslt_sparse_mm(compressed, B_fp8, out_dtype=torch.float32)
+
+        self.assertEqual(sparse_result.dtype, torch.float32)
+
+        dense_result = torch.mm(A_fp8.to(torch.float32), B_fp8.to(torch.float32))
+        torch.testing.assert_close(sparse_result, dense_result, rtol=1e-1, atol=1e-1)
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8_SPARSE,
+        "FP8 sparse requires cuSPARSELt v0.6.2+ on SM 8.9+ or MI350+ (gfx950) on ROCm",
+    )
+    @unittest.skipIf(not TEST_WITH_ROCM, "ROCm-specific out_dtype restriction")
+    @parametrize("out_dtype", [torch.float16, torch.bfloat16, torch.float8_e4m3fn])
+    def test_cslt_sparse_mm_fp8_unsupported_out_dtype_rocm(self, out_dtype, device):
+        A = rand_sparse_semi_structured_mask(256, 128, dtype=torch.float16)
+        B = torch.rand(128, 128, device=device).to(torch.float16).t()
+
+        A_fp8, _ = to_float8(A)
+        B_fp8, _ = to_float8(B)
+
+        compressed = torch._cslt_compress(A_fp8)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Unsupported out_dtype passed, must be float32 for fp8 inputs on ROCm",
+        ):
+            torch._cslt_sparse_mm(compressed, B_fp8, out_dtype=out_dtype)
 
 if len(SEMI_STRUCTURED_SUPPORTED_BACKENDS) > 0:
     instantiate_device_type_tests(TestSparseSemiStructured, globals(), only_for="cuda")
