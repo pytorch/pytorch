@@ -106,7 +106,6 @@ class TestMHADeviceType(TestCase):
     @dtypesIfXPU(torch.float)
     @dtypes(torch.float)
     @skipMeta
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2182")
     @onlyOn(["cuda", "xpu"])
     def test_transform_bias_rescale_qkv_nested(self, device, dtype):
         for use_padding in (False, True):
