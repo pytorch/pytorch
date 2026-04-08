@@ -80,6 +80,22 @@ class _SingleDimStrategyInfo:
     # than the op's compute mesh.  These args must be Replicate.
     # See Note [Multi-mesh args] in expand_to_full_mesh_op_strategy.
     different_mesh_args: list[int] | None = field(default=None)
+    # When set, the expansion bypasses normal strategy enumeration and calls
+    # this function to validate the actual input placements against the actual
+    # mesh.  The function must return an OpStrategy (zero-cost) on success or
+    # raise RuntimeError on failure.  Used for strict view ops where
+    # communication is not allowed and validation requires the real mesh sizes.
+    reject_redistribution: (
+        Callable[
+            [OpSchema, DeviceMesh, TensorMeta | Sequence[TensorMeta | None] | None],
+            OpStrategy,
+        ]
+        | None
+    ) = field(default=None)
+    # View ops are metadata-only, so inplace variants (e.g. squeeze_) should
+    # not be subject to the inplace placement constraint in
+    # expand_to_full_mesh_op_strategy.
+    is_view_op: bool = field(default=False)
 
     # Delegate to func so this can be used interchangeably with a raw
     # _SingleDimStrategyFunc (e.g. in tests that call strategy functions directly).
@@ -494,6 +510,16 @@ def _expand_single_dim_strategy_to_mesh(
     # Note: circular import, failed to untangle with #168221, reverted
     from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
 
+    # For ops that reject redistribution (e.g. strict view ops), call the
+    # validation function with the actual mesh sizes.  This must be OUTSIDE
+    # the cached _create_expanded_strategy_impl because op_schema placements
+    # differ across calls but the cache key may not distinguish them.
+    if strategy_info.reject_redistribution is not None:
+        result = strategy_info.reject_redistribution(
+            op_schema, mesh, output_tensor_meta
+        )
+        return lambda op, args_schema, kwargs_schema: result
+
     def _create_expanded_strategy_impl(
         op_schema: OpSchema,
         output_tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None,
@@ -505,10 +531,14 @@ def _expand_single_dim_strategy_to_mesh(
                 strategy_info, op_schema, output_tensor_meta
             )
 
-            # Detect inplace ops by checking if the base op name ends with '_'
-            op_name = op.name()
-            base_name = op_name.split("::")[1].split(".")[0]
-            is_inplace = base_name.endswith("_")
+            # Detect inplace ops by checking if the base op name ends with '_'.
+            # View ops are metadata-only so inplace variants (e.g. squeeze_)
+            # don't need the inplace placement constraint.
+            is_inplace = False
+            if not strategy_info.is_view_op:
+                op_name = op.name()
+                base_name = op_name.split("::")[1].split(".")[0]
+                is_inplace = base_name.endswith("_")
 
             element_mesh = prepared_strategy.element_mesh or mesh
 
@@ -662,6 +692,14 @@ def register_single_dim_strategy(
     allow_unbacked_sharding: bool | None = None,
     allow_uneven_sharding: bool = False,
     different_mesh_args: list[int] | None = None,
+    reject_redistribution: (
+        Callable[
+            [OpSchema, DeviceMesh, TensorMeta | Sequence[TensorMeta | None] | None],
+            OpStrategy,
+        ]
+        | None
+    ) = None,
+    is_view_op: bool = False,
 ) -> Callable[[_SingleDimStrategyFunc], _SingleDimStrategyFunc]:
     """
     Registers a single_dim_strategy function for the given op.
@@ -711,6 +749,8 @@ def register_single_dim_strategy(
             allow_unbacked_sharding=allow_unbacked_sharding,
             allow_uneven_sharding=allow_uneven_sharding,
             different_mesh_args=different_mesh_args,
+            reject_redistribution=reject_redistribution,
+            is_view_op=is_view_op,
         )
         registration_wrapper(info)
         return impl

@@ -25,6 +25,7 @@ from torch.distributed.tensor._ops._view_ops import (
     Flatten,
     InputDim,
     propagate_shape_and_sharding,
+    propagate_single_dim,
     Repeat,
     Singleton,
     Split,
@@ -301,6 +302,98 @@ class TestViewOps(DTensorContinuousTestBase):
                 (2, 3),
                 strict_view=True,
             )
+
+    def test_build_input_to_output_map(self):
+        """_build_input_to_output_map produces a complete mesh-free structural mapping."""
+        build = _ViewShardingPropagator._build_input_to_output_map
+
+        # Identity: (6,) → (6,)
+        rule = view_groups((6,), (6,))
+        self.assertEqual(build(rule), {0: [0]})
+
+        # Flatten: (2, 3, 4) → (6, 4)
+        rule = view_groups((2, 3, 4), (6, 4))
+        m = build(rule)
+        self.assertEqual(m[0], [0])
+        self.assertEqual(m[1], [0])
+        self.assertEqual(m[2], [1])
+
+        # Split: (6,) → (2, 3)
+        rule = view_groups((6,), (2, 3))
+        self.assertEqual(build(rule), {0: [0, 1]})
+
+        # Split(Flatten): (2, 3) → (3, 2)
+        rule = view_groups((2, 3), (3, 2))
+        m = build(rule)
+        # Both input dims participate in the flatten group
+        self.assertIn(0, m)
+        self.assertIn(1, m)
+        # At least one maps to both output dims
+        has_both = any(len(v) == 2 for v in m.values())
+        self.assertTrue(has_both)
+
+    def test_propagate_single_dim(self):
+        """propagate_single_dim matches propagate_shape_and_sharding for 1D mesh."""
+        cases = [
+            # (in_shape, out_shape, placement, mesh_dim_size)
+            ((6,), (2, 3), Shard(0), 2),
+            ((2, 3, 4), (6, 4), Shard(0), 2),
+            ((2, 3, 4), (6, 4), Shard(0), 3),
+            ((2, 3, 4), (6, 4), Shard(2), 2),
+            ((24,), (4, 6), Shard(0), 2),
+            ((4, 6), (24,), Shard(0), 2),
+            ((4, 6), (24,), Shard(1), 2),
+            ((6, 4), (3, 8), Shard(0), 3),
+        ]
+        for in_shape, out_shape, placement, mesh_size in cases:
+            rule = view_groups(in_shape, out_shape)
+            # Multi-dim with 1D mesh
+            inp_tgt_multi, out_multi = propagate_shape_and_sharding(
+                [placement], in_shape, rule, (mesh_size,)
+            )
+            # Single-dim
+            inp_tgt_single, out_single = propagate_single_dim(
+                placement, in_shape, rule, mesh_size
+            )
+            self.assertEqual(
+                inp_tgt_single,
+                inp_tgt_multi[0],
+                f"input mismatch for {in_shape}→{out_shape} {placement} mesh={mesh_size}",
+            )
+            self.assertEqual(
+                out_single,
+                out_multi[0],
+                f"output mismatch for {in_shape}→{out_shape} {placement} mesh={mesh_size}",
+            )
+
+    def test_propagate_single_dim_strided_shard(self):
+        """propagate_single_dim handles _StridedShard inputs correctly."""
+        # (2, 3, 4) → (6, 4): Shard(1) produces _StridedShard(0, sf=2)
+        # strict_view=True needed because non-strict disallows non-first flatten dims
+        in_shape = (2, 3, 4)
+        out_shape = (6, 4)
+        rule = view_groups(in_shape, out_shape)
+        inp_tgt, out_plc = propagate_single_dim(
+            Shard(1), in_shape, rule, 3, strict_view=True
+        )
+        self.assertEqual(inp_tgt, Shard(1))
+        self.assertEqual(out_plc, _StridedShard(0, split_factor=2))
+
+        # Then unflatten back: (6, 4) → (2, 3, 4) with _StridedShard(0, sf=2)
+        # should resolve back to Shard(1)
+        reverse_rule = view_groups(out_shape, in_shape)
+        inp_tgt2, out_plc2 = propagate_single_dim(
+            _StridedShard(0, split_factor=2), out_shape, reverse_rule, 3
+        )
+        self.assertEqual(inp_tgt2, _StridedShard(0, split_factor=2))
+        self.assertEqual(out_plc2, Shard(1))
+
+    def test_propagate_single_dim_replicate_passthrough(self):
+        """Replicate and Partial pass through unchanged in single-dim mode."""
+        rule = view_groups((6,), (2, 3))
+        inp_tgt, out_plc = propagate_single_dim(Replicate(), (6,), rule, 2)
+        self.assertEqual(inp_tgt, Replicate())
+        self.assertEqual(out_plc, Replicate())
 
     def test_view_ops(self):
         mesh_shape = (dist.get_world_size() // 2, 2)
