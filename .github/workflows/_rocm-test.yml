@@ -269,7 +269,7 @@ jobs:
             --name="${container_name}" \
             --user jenkins \
             --memory 56g \
-            --memory-swap 510m \
+            --memory-swap 56510m \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
