@@ -361,9 +361,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def(
           "python_parent_id",
           [](const KinetoEvent& e) { return e.pythonParentId(); })
-      .def(
-          "python_module_id",
-          [](const KinetoEvent& e) { return e.pythonModuleId(); });
+      .def("python_module_id", [](const KinetoEvent& e) {
+        return e.pythonModuleId();
+      });
 
   m.def("_soft_assert_raises", &setSoftAssertRaises);
   m.def("_get_sequence_nr", &at::sequence_number::peek);
