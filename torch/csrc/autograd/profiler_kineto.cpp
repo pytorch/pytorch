@@ -876,10 +876,16 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
   profiler_state_info_ptr = nullptr;
 
   auto state_ptr = ProfilerStateBase::pop();
+  if (!state_ptr) {
+    LOG(WARNING)
+        << "disableProfiler called but no active profiling session found. "
+        << "This can happen if profiling was cancelled during warmup.";
+    return std::make_unique<ProfilerResult>();
+  }
   const auto& config = state_ptr->config();
   TORCH_CHECK(
-      state_ptr && isValidDisableState(config.state),
-      "Can't disable Kineto profiler when it's not running");
+      isValidDisableState(config.state),
+      "Can't disable Kineto profiler: config is not in a valid disable state");
 
   state_ptr->removeCallback();
 
