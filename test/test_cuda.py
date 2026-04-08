@@ -9329,5 +9329,35 @@ instantiate_device_type_tests(TestCudaDeviceParametrized, globals())
 instantiate_device_type_tests(TestCudaGreenContexts, globals(), except_for="cpu")
 
 
+# Tests for fp32_precision flag propagation that don't require an actual CUDA
+# device — they only exercise C++ context state management.
+class TestFP32PrecisionFlags(TestCase):
+    @recover_orig_fp32_precision
+    @serialTest()
+    def test_generic_fp32_precision_propagates_to_cudnn_conv_rnn(self):
+        # Setting the top-level generic fp32_precision should propagate to
+        # cudnn.conv and cudnn.rnn when they are in "inherit" mode (NONE or
+        # initial DEFAULT).  This is a regression test for the bug where their
+        # initial DEFAULT value was not inheriting from the generic setting.
+        #
+        # Reset to "inherit" (NONE) first so the test is not order-dependent on
+        # whether a prior test left explicit TF32 in place.
+        torch.backends.cudnn.conv.fp32_precision = "none"
+        torch.backends.cudnn.rnn.fp32_precision = "none"
+
+        # Use the flags() context manager to avoid flags_frozen() errors when
+        # setting the top-level generic precision via ContextProp.
+        with torch.backends.flags(fp32_precision="ieee"):
+            self.assertEqual(torch.backends.cudnn.fp32_precision, "ieee")
+            self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "ieee")
+            self.assertEqual(torch.backends.cudnn.conv.fp32_precision, "ieee")
+            self.assertEqual(torch.backends.cudnn.rnn.fp32_precision, "ieee")
+
+            # A more-specific override still takes precedence over the generic
+            torch.backends.cudnn.conv.fp32_precision = "tf32"
+            self.assertEqual(torch.backends.cudnn.conv.fp32_precision, "tf32")
+            self.assertEqual(torch.backends.cudnn.rnn.fp32_precision, "ieee")
+
+
 if __name__ == "__main__":
     run_tests()

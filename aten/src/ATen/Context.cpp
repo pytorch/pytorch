@@ -81,6 +81,9 @@ std::string precision2str(Float32Precision prec) {
       return "tf32";
     case Float32Precision::BF16:
       return "bf16";
+    case Float32Precision::DEFAULT:
+      // DEFAULT is an internal sentinel and should be resolved before reaching here
+      TORCH_CHECK(false, "DEFAULT precision should not be visible externally");
   }
   TORCH_CHECK(false, "Invalid enum Float32Precision(", static_cast<int>(prec), ")");
 }
@@ -391,13 +394,30 @@ Float32Precision Context::float32Precision(Float32Backend backend, Float32Op op)
   TORCH_CHECK(it != fp32_precision.end(), "Invalid (backend, op) pair: (", backend, ", ", op, ")");
 
   Float32Precision precision = it->second;
-  if (precision == Float32Precision::NONE) {
+  // DEFAULT and NONE both fall through to parent settings.
+  // We track whether the original stored value was DEFAULT so we can apply the
+  // correct legacy fallback at the end (TF32 for CUDA conv/rnn).
+  bool started_as_default = (precision == Float32Precision::DEFAULT);
+  if (precision == Float32Precision::NONE || precision == Float32Precision::DEFAULT) {
     key.second = Float32Op::ALL;
     precision = fp32_precision.find(key)->second;
   }
-  if (precision == Float32Precision::NONE) {
+  if (precision == Float32Precision::NONE || precision == Float32Precision::DEFAULT) {
     key.first = Float32Backend::GENERIC;
     precision = fp32_precision.find(key)->second;
+  }
+
+  // When the original stored value was DEFAULT and no parent specifies a concrete
+  // precision, apply the legacy backend default (TF32 for CUDA conv/rnn).
+  if (started_as_default && (precision == Float32Precision::NONE || precision == Float32Precision::DEFAULT)) {
+    if (backend == Float32Backend::CUDA && (op == Float32Op::CONV || op == Float32Op::RNN)) {
+      return Float32Precision::TF32;
+    }
+    return Float32Precision::NONE;
+  }
+
+  if (precision == Float32Precision::DEFAULT) {
+    precision = Float32Precision::NONE;
   }
 
   // "cuda" does not support "bf16"
@@ -445,6 +465,9 @@ void Context::setFloat32Precision(Float32Backend backend, Float32Op op, Float32P
   TORCH_CHECK(
       !(backend == Float32Backend::CUDA && p == Float32Precision::BF16),
       "backend 'cuda' does not support precision 'bf16'");
+  TORCH_CHECK(
+      p != Float32Precision::DEFAULT,
+      "DEFAULT precision is internal and cannot be set explicitly");
 
   it->second = p;
 }
