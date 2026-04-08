@@ -1492,8 +1492,15 @@ class PythonKeyTracer(Tracer):
         if result is None:
             return None
 
-        # result is a Proxy from dispatching through a custom op.
-        # The op dispatch already registered the output in opaque_tracker.
+        # The reconstruct_fn dispatches through a custom op with a Proxy
+        # argument, which goes through Proxy.__torch_function__.  That path
+        # creates a graph node but does NOT populate meta["val"] (unlike the
+        # ProxyTorchDispatchMode.__torch_dispatch__ path which calls
+        # track_tensor_tree).  Set it here so downstream consumers (e.g. the
+        # min-cut partitioner) can classify the node correctly.
+        if "val" not in result.node.meta:
+            set_meta(result, a)
+
         # Also register for the *input* object so dedup works for re-encounters.
         set_proxy_slot(a, self, result)
         if id(real_obj) not in self._opaque_real_obj_proxy:

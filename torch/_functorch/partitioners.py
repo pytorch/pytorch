@@ -1352,14 +1352,20 @@ def default_partition(
             # Must be ordered before MUST_SAVE tags to avoid saving tuples marked MUST_SAVE.
             continue
         if node.meta.get("recompute") == CheckpointPolicy.MUST_SAVE:
-            saved_values.append(node)
+            if is_opaque_node(node):
+                saved_opaque_nodes.append(node)
+            else:
+                saved_values.append(node)
             continue
         if is_impure(node):
             if graph_has_recomputable_ops:
                 raise AssertionError(
                     f"Trying to apply AC on a graph with impure op: {node}, {node.target}"
                 )
-            saved_values.append(node)
+            if is_opaque_node(node):
+                saved_opaque_nodes.append(node)
+            else:
+                saved_values.append(node)
             continue
         if is_opaque_node(node):
             saved_opaque_nodes.append(node)
