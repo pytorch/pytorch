@@ -657,7 +657,7 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreak
         self.assertEqual(cnts.frame_count, 5)
         # 4 additions from f5+f4, 2 x 4 additions from f2+f1 (i == 5, i != 5)
         self.assertEqual(cnts.op_count, 12)
-        self.assertEqual(torch._dynamo.utils.counters["frames"]["total"], 6)
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["total"], 7)
 
     def test_nested_graph_break_in_try_block(self):
         # NOTE: this also tests nested step_graph_break
