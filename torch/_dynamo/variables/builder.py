@@ -198,11 +198,7 @@ from .ctx_manager import (
 from .dicts import (
     ConstDictVariable,
     DefaultDictVariable,
-    DictKeySetVariable,
-    FrozensetVariable,
     MappingProxyVariable,
-    OrderedSetClassVariable,
-    OrderedSetVariable,
     SetVariable,
 )
 from .distributed import WorldMetaClassVariable
@@ -269,6 +265,12 @@ from .nn_module import (
 from .optimizer import OptimizerVariable
 from .script_object import OpaqueObjectClassVariable, TorchScriptObjectVariable
 from .sdpa import SDPAParamsVariable
+from .sets import (
+    DictKeySetVariable,
+    FrozensetVariable,
+    OrderedSetClassVariable,
+    OrderedSetVariable,
+)
 from .streams import EventVariable, StreamContextVariable, StreamVariable
 from .tensor import (
     NumpyNdarrayVariable,
@@ -855,7 +857,7 @@ class VariableBuilder:
                 self.tx.output.guard_on_key_order.add(self.source)
 
             # We need all the keys to be hashable. We do this within the
-            # _HashableTracker class in dicts.py
+            # HashableTracker class in hashable.py
             def build_key_value(
                 i: Any, k: Any, v: Any
             ) -> tuple[VariableTracker, VariableTracker]:
@@ -1661,7 +1663,7 @@ class VariableBuilder:
             self.tx.output.guard_on_key_order.add(self.source)
 
             # We need all the keys to be hashable. We do this within the
-            # _HashableTracker class in dicts.py
+            # HashableTracker class in hashable.py
             def build_key_value(
                 i: Any, k: Any, v: Any
             ) -> tuple[VariableTracker, VariableTracker]:

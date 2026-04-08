@@ -151,7 +151,7 @@ from .variables.ctx_manager import (
     WithEnterFunctionVariable,
     WithExitFunctionVariable,
 )
-from .variables.dicts import ConstDictVariable, SetVariable
+from .variables.dicts import ConstDictVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
     LocalGeneratorFunctionVariable,
@@ -181,6 +181,7 @@ from .variables.misc import (
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
+from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
 from .variables.torch_function import (
