@@ -563,7 +563,7 @@ class SetVariable(VariableTracker):
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
         raise RuntimeError("Illegal to getitem on a set")
-    
+
     def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:
         return VariableTracker.build(tx, len(self.set_items))
 
