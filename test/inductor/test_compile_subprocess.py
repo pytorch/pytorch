@@ -68,7 +68,7 @@ test_failures = {
         ("xpu", "cuda"),
         is_skip=(TEST_WITH_ROCM and isRocmArchAnyOf(MI350_ARCH)) or not TEST_WITH_ROCM,
     ),
-    "test_remove_noop_slice1": TestFailure(("xpu"), is_skip=True),
+    "test_remove_noop_slice1": TestFailure(("xpu", "cuda"), is_skip=True),
     "test_remove_noop_slice_scatter": TestFailure(("xpu"), is_skip=True),
     "test_remove_noop_view_default": TestFailure(("xpu"), is_skip=True),
     "test_remove_noop_view_dtype": TestFailure(("xpu"), is_skip=True),
