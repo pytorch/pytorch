@@ -1,4 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -20,11 +21,19 @@ def implicit_replication() -> Iterator[None]:
     .. warning:: This might possible lead to incorrect results if ``torch.Tensor`` s are not replicated
         in practice, please use it at your discretion.
     """
+    # Store the original state to restore it safely afterward
+    original_state = getattr(DTensor._op_dispatcher, "_allow_implicit_replication", False)
+    
     try:
+        # Enable implicit replication while the context manager is active
         DTensor._op_dispatcher._allow_implicit_replication = True
         yield
     finally:
-        DTensor._op_dispatcher._allow_implicit_replication = False
+        # Restore to True if the environment variable is set, otherwise restore to original state
+        if os.environ.get("TORCH_DTENSOR_ALLOW_IMPLICIT_REPLICATION") == "1":
+            DTensor._op_dispatcher._allow_implicit_replication = True
+        else:
+            DTensor._op_dispatcher._allow_implicit_replication = original_state
 
 
 # Set namespace for exposed private names
