@@ -336,6 +336,32 @@ class TestCallHierarchy(TestCase):
                     break
         self.assertTrue(found, "standalone forward() function not captured")
 
+    def test_fwd_call_hierarchy_on_backward_nodes(self):
+        """Backward nodes should carry fwd_call_hierarchy from their
+        corresponding forward node."""
+        from torch._dynamo.backends.common import aot_autograd
+
+        model = SimpleLinear()
+        x = torch.randn(2, 4, requires_grad=True)
+
+        bw_hierarchies = []
+
+        def bw_compiler(gm, example_inputs):
+            for node in gm.graph.nodes:
+                h = node.meta.get("fwd_call_hierarchy")
+                if h is not None:
+                    bw_hierarchies.append(h)
+            return gm
+
+        backend = aot_autograd(fw_compiler=lambda gm, _: gm, bw_compiler=bw_compiler)
+        compiled = torch.compile(model, backend=backend)
+        compiled(x).sum().backward()
+
+        self.assertTrue(
+            len(bw_hierarchies) > 0,
+            "No backward nodes with fwd_call_hierarchy found",
+        )
+
 
 if __name__ == "__main__":
     run_tests()
