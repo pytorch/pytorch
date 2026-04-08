@@ -28,6 +28,7 @@ from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     requires_nccl,
     requires_nccl_version,
+    skip_if_rocm_ver_lessthan_multiprocess,
 )
 from torch.testing._internal.common_utils import (
     run_tests,
@@ -317,6 +318,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
             self.assertEqual(xs.item(), expected_val)
 
     @requires_nccl()
+    @skip_if_rocm_ver_lessthan_multiprocess((7, 2, 1))
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_nccl_watchdog_cudagraph(self):
         # test that the watchdog does not crash graphs with disallowed event query

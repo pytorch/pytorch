@@ -48,6 +48,7 @@ from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
     requires_gloo,
     skip_if_lt_x_gpu,
+    skip_if_rocm_ver_lessthan_multiprocess,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -151,6 +152,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_rocm_ver_lessthan_multiprocess((7, 2, 1))
     @skip_if_lt_x_gpu(2)
     def test_allreduce_inductor_cudagraph_trees(self):
         """

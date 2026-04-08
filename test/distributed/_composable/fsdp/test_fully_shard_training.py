@@ -41,6 +41,7 @@ from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     skip_if_rocm_arch_multiprocess,
+    skip_if_rocm_ver_lessthan_multiprocess,
 )
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
@@ -2151,6 +2152,7 @@ class TestFullyShardCudaGraph(FSDPTest):
         return 2
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
+    @skip_if_rocm_ver_lessthan_multiprocess((7, 2, 1))
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
