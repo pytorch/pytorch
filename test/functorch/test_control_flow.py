@@ -10329,7 +10329,7 @@ class TestControlFlowAndRNG(TestCase):
         compiled_func = torch.compile(func, backend="cudagraphs")
         with self.assertRaisesRegex(
             RuntimeError,
-            "RNG within data-dependent conditional nodes is not supported yet",
+            "RNG op during graph capture but generator is not registered",
         ):
             compiled_func(pred, x)
 
