@@ -678,13 +678,6 @@ class FunctionEvent(FormattedTimesMixin):
             For plain tensor inputs, each entry is a list of dimensions (e.g. ``[16, 16]``).
             TensorList inputs are represented as an empty list ``[]``; use
             ``structured_input_shapes`` to get per-element shapes for TensorList inputs.
-        structured_input_shapes (List[List[int] | List[List[int]]]): Like ``input_shapes``
-            but distinguishes TensorList inputs.  Plain tensor inputs are ``List[int]``;
-            TensorList inputs are ``List[List[int]]`` containing one shape per tensor in the list.
-            Matches the ``"Input Dims"`` field in the Chrome trace JSON.
-        structured_input_strides (List[List[int] | List[List[int]]]): Strides of input
-            tensors in the same format as ``structured_input_shapes`` (requires
-            record_shapes=True).
         concrete_inputs (List[Any]): Concrete input values (requires record_shapes=true).
         kwinputs (Dict[str, Any]): Keyword arguments (requires record_shapes=true).
         stack (List[str]): Python stack trace where the operation was called (requires with_stack=true).
@@ -703,6 +696,13 @@ class FunctionEvent(FormattedTimesMixin):
         is_user_annotation (bool): Whether this is a user-annotated region.
         metadata_json (str): Additional metadata in JSON format.
         event_metadata (EventMetadata): Additional metadata in structured format.
+        structured_input_shapes (List[List[int] | List[List[int]]]): Like ``input_shapes``
+            but distinguishes TensorList inputs.  Plain tensor inputs are ``List[int]``;
+            TensorList inputs are ``List[List[int]]`` containing one shape per tensor in the list.
+            Matches the ``"Input Dims"`` field in the Chrome trace JSON.
+        structured_input_strides (List[List[int] | List[List[int]]]): Strides of input
+            tensors in the same format as ``structured_input_shapes`` (requires
+            record_shapes=True).
 
     Properties:
         cpu_time_total (float): Total CPU time in microseconds.
