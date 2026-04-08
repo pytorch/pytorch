@@ -572,6 +572,15 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         input_tensor_meta: TensorMeta | list[TensorMeta] = TensorMeta.from_irnodes(
             self.input_nodes
         )
+        # When input_reorder is set (e.g. [2, 0, 1] for addmm), the kernel
+        # function signature is reordered (e.g. from [X, W, Bias] to
+        # [Bias, X, W]).  input_tensor_meta must follow the same order
+        # because subprocess benchmarking creates tensors from this metadata
+        # and passes them positionally to the compiled kernel.  Without this
+        # reorder the kernel receives mismatched pointers/strides, causing
+        # out-of-bounds GPU memory access for large shapes.
+        if self.input_reorder is not None and isinstance(input_tensor_meta, list):
+            input_tensor_meta = [input_tensor_meta[idx] for idx in self.input_reorder]
         output_tensor_meta: TensorMeta | list[TensorMeta] = TensorMeta.from_irnodes(
             self.output_node
         )
