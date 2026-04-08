@@ -2345,12 +2345,13 @@ class CatchErrorsWrapper:
             return ConvertFrameReturn()
 
         if (
-            frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__"
+            frame.f_code.co_filename == "<string>"
+            and frame.f_code.co_name in ("__new__", "__init__")
         ) or (
             frame.f_code.co_filename.endswith("collections/__init__.py")
             and frame.f_code.co_name == "_make"
         ):
-            # nametuple constructor/_make
+            # namedtuple constructor/_make, dataclass __init__, etc.
             return ConvertFrameReturn()
 
         if (
