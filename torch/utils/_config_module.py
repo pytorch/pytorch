@@ -529,7 +529,9 @@ class ConfigModule(ModuleType):
                 it skips it.
         """
         config: dict[str, Any] = {}
-        for key in self._config:
+        for key, entry in self._config.items():
+            if entry.alias is not None:
+                continue
             if ignored_keys and key in ignored_keys:
                 continue
             if ignored_prefixes:
@@ -537,14 +539,23 @@ class ConfigModule(ModuleType):
                     continue
             if skip_default and self._is_default(key):
                 continue
-            if self._config[key].alias is not None:
-                continue
 
-            curr_entry = self._config[key]
-            has_been_warned = curr_entry._deprecation_warned
-            curr_entry._deprecation_warned = True
-            config[key] = copy.deepcopy(getattr(self, key))
-            curr_entry._deprecation_warned = has_been_warned
+            # Read value directly, bypassing __getattr__ overhead
+            # (deprecation warnings, alias resolution).
+            user_override = entry.user_override.get()
+            if entry.env_value_force is not _UNSET_SENTINEL:
+                val = entry.env_value_force
+            elif user_override is not _UNSET_SENTINEL:
+                val = user_override
+            elif entry.env_value_default is not _UNSET_SENTINEL:
+                val = entry.env_value_default
+            elif entry.justknob is not None:
+                val = justknobs_check(name=entry.justknob, default=entry.default)
+            else:
+                val = entry.default
+            if isinstance(val, (list, set, dict)):
+                val = copy.deepcopy(val)
+            config[key] = val
 
         return config
 
