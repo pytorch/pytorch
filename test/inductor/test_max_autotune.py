@@ -2863,6 +2863,10 @@ class TestMaxAutotune(TestCase):
 
         with (
             fresh_cache(),
+            mock.patch(
+                "torch._inductor.autotune_process.run_autotune_in_subprocess",
+                mock_benchmark_choice_wrapper(aten_time=1.0, triton_time=0.1),
+            ),
             mock.patch.object(
                 AlgorithmSelectorCache,
                 "benchmark_choice",
