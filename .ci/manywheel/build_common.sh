@@ -118,6 +118,9 @@ retry pip install -qUr requirements-build.txt
 python setup.py clean
 retry pip install -qr requirements.txt
 case ${DESIRED_PYTHON} in
+  cp314*)
+    retry pip install -q --pre numpy==2.3.4
+    ;;
   cp31*)
     retry pip install -q --pre numpy==2.1.0
     ;;
