@@ -54,6 +54,11 @@
   torch::headeronly::ScalarType::UInt16,     \
       torch::headeronly::ScalarType::UInt32, \
       torch::headeronly::ScalarType::UInt64
+#define AT_OPAQUE_TYPES                                                       \
+  torch::headeronly::ScalarType::Byte, torch::headeronly::ScalarType::UInt16, \
+      torch::headeronly::ScalarType::UInt32,                                  \
+      torch::headeronly::ScalarType::UInt64,                                  \
+      torch::headeronly::ScalarType::ComplexDouble
 #define AT_INTEGRAL_TYPES_V2 \
   AT_EXPAND(AT_INTEGRAL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES)
 #define AT_COMPLEX_TYPES                        \
@@ -81,24 +86,6 @@
 // Ensure we never have too many scalar types for the expansion here to
 // support.  To bump this, you must regenerate the macros below.
 static_assert(static_cast<int>(torch::headeronly::ScalarType::NumOptions) < 60);
-
-// Python code to regenerate generate code below:
-#if 0
-
-num_args = 60
-
-nums = ', '.join(str(i) for i in reversed(range(num_args+1)))
-args = ', '.join(f'_{i}' for i in range(1, num_args+1))
-
-print(f'#define AT_NUM_ARGS(...) AT_EXPAND(AT_NUM_ARGS_AUX(__VA_ARGS__, {nums}))')
-print(f'#define AT_NUM_ARGS_AUX({args}, N, ...) N')
-
-for i in range(1, num_args+1):
-    args = ', '.join(f'_{i}' for i in range(1, i+1))
-    cases = ' '.join([f'C(_{j}, N)' for j in range(1, i+1)])
-    print(f'#define THO_AP{i}(C, N, {args}) {cases}')
-
-#endif
 
 // Begin generated code
 // clang-format off

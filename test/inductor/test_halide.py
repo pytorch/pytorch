@@ -130,7 +130,7 @@ class HalideTests(TestCase):
                         out_ptr0.set_estimates([hl.Range(1024, 1024)])
 
                 __name__ == '__main__' and hl.main()
-                """
+                """,  # noqa: S101
             ),
         )
         a = torch.randn(1024)
@@ -204,7 +204,7 @@ class HalideTests(TestCase):
                         tmp1.compute_inline()
 
                 __name__ == '__main__' and hl.main()
-                """
+                """,  # noqa: S101
             ),
         )
         a = torch.randn(1024)

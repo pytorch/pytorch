@@ -365,7 +365,13 @@ class LoggingTests(LoggingTestCase):
 WON'T CONVERT dynamo_error_fn test_logging.py line N
 due to:
 Traceback (most recent call last):
-torch._dynamo.exc.TorchRuntimeError: Dynamo failed to run FX node with fake tensors: call_method add(*(FakeTensor(..., size=(1000, 1000), grad_fn=<MulBackward0>), FakeTensor(..., size=(10, 10))), **{}): got RuntimeError('Attempting to broadcast a dimension of length 10 at -1! Mismatching argument at index 1 had torch.Size([10, 10]); but expected shape should be broadcastable to [1000, 1000]')
+torch._dynamo.exc.TorchRuntimeError: RuntimeError when making fake tensor call
+  Explanation: Dynamo failed to run FX node with fake tensors: call_method add(*(FakeTensor(..., size=(1000, 1000), grad_fn=<MulBackward0>), FakeTensor(..., size=(10, 10))), **{}): got RuntimeError('Attempting to broadcast a dimension of length 10 at -1! Mismatching argument at index 1 had torch.Size([10, 10]); but expected shape should be broadcastable to [1000, 1000]')
+  Hint: Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance("force_eager")`.
+
+  Developer debug context:
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb4315.html
 
 from user code:
    File "test_logging.py", line N, in dynamo_error_fn
@@ -412,7 +418,14 @@ torch._inductor.exc.InductorError: LoweringException: AssertionError:
   target: aten.round.default
   args[0]: TensorBox(StorageBox(
     InputBuffer(name='primals_1', layout=FixedLayout('cpu', torch.float32, size=[1000, 1000], stride=[1000, 1]))
-  ))""",
+  ))AssertionError:
+  target: aten.round.default
+  args[0]: TensorBox(StorageBox(
+    InputBuffer(name='primals_1', layout=FixedLayout('cpu', torch.float32, size=[1000, 1000], stride=[1000, 1]))
+  ))
+Found from :
+   File "test_logging.py", line N, in inductor_error_fn
+    output = torch.round(a)""",
         )
 
         exitstack.close()
@@ -803,6 +816,25 @@ Mutating object of type dict (source name: L['mod']._buffers)
         fn(torch.ones(1), my_list)
 
         self.assertEqual(len(records), 0)
+
+    @make_logging_test(side_effects=True)
+    def test_side_effects_logs_fullgraph_graph_break(self, records):
+        """Test that side effects are logged even when fullgraph=True causes an error."""
+        my_list = [1, 2, 3]
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, lst):
+            lst.append(4)
+            # Force a graph break after the side effect
+            torch._dynamo.graph_break()
+            return x + len(lst)
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            fn(torch.ones(1), my_list)
+
+        # Side effects should still be logged even though codegen never ran
+        self.assertGreater(len(records), 0)
+        self.assertIn("Mutating object of type list", records[0].getMessage())
 
     @make_settings_test("torch._dynamo.utils")
     def test_dump_compile_times(self, records):
@@ -1377,6 +1409,8 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             env["TORCH_LOGS_OUT"] = file_path
             _, stderr = self.run_process_no_exception(
                 """\
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning, module="torch.utils._config_module")
 import torch
 @torch.compile(backend="eager")
 def fn(a):
@@ -1406,7 +1440,7 @@ fn(torch.randn(5))
         torch._dynamo.eval_frame.clear_dynamo_tls()
 
         # Test program
-        @torch.compile()
+        @torch.compile(backend="eager")
         def foo():
             x = torch.ones([10])
 
@@ -1490,6 +1524,7 @@ exclusions = {
     "annotation",
     "node_runtime_estimation",
     "caching",
+    "overlap_scheduling",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

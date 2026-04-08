@@ -13,6 +13,7 @@
 #include <ck/tensor_operation/gpu/device/tensor_layout.hpp>
 #include <ck/tensor_operation/gpu/device/gemm_specialization.hpp>
 #include <ck/tensor_operation/gpu/device/impl/device_grouped_gemm_multiple_d_splitk_xdl_cshuffle_two_stage.hpp>
+#include <ck/tensor_operation/gpu/device/impl/device_grouped_gemm_xdl_splitk_cshuffle.hpp>
 #include <ck/tensor_operation/gpu/element/element_wise_operation.hpp>
 #include <ck/utility/tuple.hpp>
 
@@ -31,7 +32,54 @@ namespace CkTypes {
 }
 
 template <typename ALayout, typename BLayout, typename DataType>
-using GroupedGemmKernel = ck::tensor_operation::device::DeviceGroupedGemmMultipleDSplitKXdlCShuffleTwoStage<
+using GroupedGemmXdlSplit = ck::tensor_operation::device::DeviceGroupedGemmXdlSplitKCShuffle<
+    ALayout,                                 // Layout for A
+    BLayout,                                 // Layout for B
+    ck::Tuple<>,                             // DsLayout
+    ck::tensor_layout::gemm::RowMajor,       // ELayout/CLayout
+    DataType,                                // A type
+    DataType,                                // B type
+    CkTypes::F32,                            // Accumulator type
+    DataType,                                // CShuffle type
+    ck::Tuple<>,                             // Ds type
+    DataType,                                // E type
+    CkTypes::PassThrough,                    // Elementwise functors
+    CkTypes::PassThrough,
+    CkTypes::PassThrough,
+    ck::tensor_operation::device::GemmSpecialization::MNKPadding,
+    1,                                       // NumGemmKPrefetchStage
+    256,                                     // BlockSize
+    256,                                     // MPerBlock
+    128,                                     // NPerBlock
+    32,                                      // KPerBlock
+    8,                                       // AK1
+    8,                                       // BK1
+    32,                                      // MPerXDL
+    32,                                      // NPerXDL
+    4,                                       // MXdlPerWave
+    2,                                       // NXdlPerWave
+    S<1,4,64,1>,                             // ABlockTransferThreadClusterLengths_K0_M_K1
+    S<0,2,1,3>,                              // ABlockTransferThreadClusterArrangeOrder
+    S<0,2,1,3>,                              // ABlockTransferSrcAccessOrder
+    3,                                       // ABlockTransferSrcVectorDim
+    8,                                       // ABlockTransferSrcScalarPerVector
+    8,                                       // ABlockTransferDstScalarPerVector_K1
+    1,                                       // ABlockLdsExtraM
+    S<1,4,64,1>,                             // BBlockTransferThreadClusterLengths_K0_N_K1
+    S<0,2,1,3>,                              // BBlockTransferThreadClusterArrangeOrder
+    S<0,2,1,3>,                              // BBlockTransferSrcAccessOrder
+    3,                                       // BBlockTransferSrcVectorDim
+    8,                                       // BBlockTransferSrcScalarPerVector
+    8,                                       // BBlockTransferDstScalarPerVector_K1
+    1,                                       // BBlockLdsExtraN
+    1,                                       // CShuffleMXdlPerWavePerShuffle
+    1,                                       // CShuffleNXdlPerWavePerShuffle
+    S<1,32,1,8>,                             // CDEBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock
+    4                                        // CDEBlockTransferScalarPerVector_NPerBlock
+>;
+
+template <typename ALayout, typename BLayout, typename DataType>
+using GroupedGemmMultipleDSplit = ck::tensor_operation::device::DeviceGroupedGemmMultipleDSplitKXdlCShuffleTwoStage<
     ALayout, BLayout, ck::Tuple<>, ck::tensor_layout::gemm::RowMajor,
     DataType, DataType, CkTypes::F32, DataType, ck::Tuple<>, DataType,
     CkTypes::PassThrough, CkTypes::PassThrough, CkTypes::PassThrough,
@@ -52,7 +100,6 @@ void launch_grouped_bgemm_ck_impl_dispatch(
     const std::optional<at::Tensor>& offs,
     at::Tensor& out)
 {
-    using DeviceOp = GroupedGemmKernel<ALayout, BLayout, DataType>;
     using PassThrough = CkTypes::PassThrough;
 
     std::vector<ck::tensor_operation::device::GemmDesc> gemm_descs;
@@ -72,7 +119,7 @@ void launch_grouped_bgemm_ck_impl_dispatch(
 
     // Synchronize the stream to ensure all prior GPU ops
     // affecting host memory are done.
-    AT_CUDA_CHECK(hipStreamSynchronize(c10::hip::getCurrentHIPStream()));
+    AT_CUDA_CHECK(hipStreamSynchronize(c10::cuda::getCurrentCUDAStream()));
 
     // for each group, calculate m,n,k,lda,ldb,ldc and A,B,out pointer base addresses.
     if (mat_a_dim == 2 && mat_b_dim == 2) {
@@ -88,6 +135,12 @@ void launch_grouped_bgemm_ck_impl_dispatch(
             int start_k = (i == 0) ? 0 : offs_accessor[i-1];
             int end_k = offs_accessor[i];
             int k = end_k - start_k;
+
+            // Skip zero-sized groups but continue processing subsequent groups.
+            // Output for this group is pre-initialized to zeros (correct for K=0 matmul).
+            if (k <= 0) {
+                continue;
+            }
 
             //K dimension are sliced, hence select stride(1) always.
             //K dimension is always dimension 1, regardless of memory layout (row/column major)
@@ -365,32 +418,61 @@ void launch_grouped_bgemm_ck_impl_dispatch(
         TORCH_CHECK(false, "CK Group GEMM: Unsupported dimensions, mat A dim is ", mat_a_dim, ", mat B dim is ", mat_b_dim);
     }
 
-    TORCH_INTERNAL_ASSERT(p_a_ptrs.size() > 0, "CK Group GEMM: No valid groups");
+    // TORCH_INTERNAL_ASSERT(p_a_ptrs.size() > 0, "CK Group GEMM: No valid groups");
+    // If all groups were skipped (e.g., all K=0 in 2D-2D case), return early.
+    // Output is already pre-initialized to zeros which is the correct result.
+    if (p_a_ptrs.size() == 0) {
+        return;
+    }
 
     // Initialize d_ptrs with the correct size
     std::vector<std::array<const void*, 0>> d_ptrs(p_a_ptrs.size());
 
-    static DeviceOp gemm_instance;
-    auto argument = gemm_instance.MakeArgument(
-        p_a_ptrs, p_b_ptrs, d_ptrs, p_e_ptrs,
-        gemm_descs, PassThrough{}, PassThrough{}, PassThrough{}
-    );
-    TORCH_INTERNAL_ASSERT(gemm_instance.IsSupportedArgument(argument),
-        "CK Group GEMM: argument unsupported (shape/strides/type config)");
-    size_t arg_buf_size = gemm_instance.GetDeviceKernelArgSize(&argument);
-    size_t ws_size = gemm_instance.GetWorkSpaceSize(&argument);
+    bool all_K_equal = true;
+    ck::index_t base_K = gemm_descs.empty() ? 0 : gemm_descs[0].K_;
+    for (const auto& desc : gemm_descs) {
+        if (desc.K_ != base_K) {
+           all_K_equal = false;
+           break;
+       }
+    }
 
-    void* gemm_arg_buf = c10::hip::HIPCachingAllocator::raw_alloc(arg_buf_size);
-    void* ws_buf = c10::hip::HIPCachingAllocator::raw_alloc(ws_size);
+    auto run_gemm = [](auto& gemm_instance, auto& argument) {
+        TORCH_INTERNAL_ASSERT(gemm_instance.IsSupportedArgument(argument),
+            "CK Group GEMM: argument unsupported (shape/strides/type config)");
+        size_t arg_buf_size = gemm_instance.GetDeviceKernelArgSize(&argument);
+        size_t ws_size = gemm_instance.GetWorkSpaceSize(&argument);
 
-    gemm_instance.SetDeviceKernelArgs(&argument, gemm_arg_buf);
-    gemm_instance.SetWorkSpacePointer(&argument, ws_buf);
+        void* gemm_arg_buf = c10::cuda::CUDACachingAllocator::raw_alloc(arg_buf_size);
+        void* ws_buf = c10::cuda::CUDACachingAllocator::raw_alloc(ws_size);
 
-    auto invoker = gemm_instance.MakeInvoker();
-    hipStream_t stream = c10::hip::getCurrentHIPStream();
-    invoker.Run(argument, {stream});
-    c10::hip::HIPCachingAllocator::raw_delete(gemm_arg_buf);
-    c10::hip::HIPCachingAllocator::raw_delete(ws_buf);
+        gemm_instance.SetDeviceKernelArgs(&argument, gemm_arg_buf);
+        gemm_instance.SetWorkSpacePointer(&argument, ws_buf);
+
+        auto invoker = gemm_instance.MakeInvoker();
+        hipStream_t stream = c10::cuda::getCurrentCUDAStream();
+        invoker.Run(argument, {stream});
+        c10::cuda::CUDACachingAllocator::raw_delete(gemm_arg_buf);
+        c10::cuda::CUDACachingAllocator::raw_delete(ws_buf);
+    };
+
+    if (all_K_equal) {
+        using DeviceOp = GroupedGemmXdlSplit<ALayout, BLayout, DataType>;
+        static DeviceOp gemm_instance;
+        auto argument = gemm_instance.MakeArgument(
+            p_a_ptrs, p_b_ptrs, d_ptrs, p_e_ptrs,
+            gemm_descs, PassThrough{}, PassThrough{}, PassThrough{}
+        );
+        run_gemm(gemm_instance, argument);
+    } else {
+        using DeviceOp = GroupedGemmMultipleDSplit<ALayout, BLayout, DataType>;
+        static DeviceOp gemm_instance;
+        auto argument = gemm_instance.MakeArgument(
+            p_a_ptrs, p_b_ptrs, d_ptrs, p_e_ptrs,
+            gemm_descs, PassThrough{}, PassThrough{}, PassThrough{}
+        );
+        run_gemm(gemm_instance, argument);
+    }
 }
 
 void group_gemm_ck(

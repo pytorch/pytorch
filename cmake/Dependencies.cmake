@@ -1023,7 +1023,7 @@ if(USE_ROCM)
       list(APPEND HIP_CXX_FLAGS -DUSE_ROCM_CK_GEMM)
     endif()
     list(APPEND HIP_HIPCC_FLAGS --offload-compress)
-    list(APPEND HIP_HIPCC_FLAGS -std=c++17)
+    list(APPEND HIP_HIPCC_FLAGS -std=c++20)
     # Pass device library path for theRock nightly builds
     if(DEFINED ENV{HIP_DEVICE_LIB_PATH})
       file(TO_CMAKE_PATH "$ENV{HIP_DEVICE_LIB_PATH}" _hip_device_lib_path)
@@ -1087,6 +1087,16 @@ if(USE_ROCM)
       list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
         roc::hipsparselt
       )
+      if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "7.12.0")
+          set(CAFFE2_USE_HIPSPARSELT ON)
+      endif()
+    endif()
+
+    # ROCM-SMI needed to support symmetric memory
+    if(USE_DISTRIBUTED AND UNIX)
+      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
+        rocm_smi64
+      )
     endif()
 
     # ---[ Kernel asserts
@@ -1100,6 +1110,12 @@ if(USE_ROCM)
 
   else()
     caffe2_update_option(USE_ROCM OFF)
+  endif()
+
+  # Add ROCm includes as SYSTEM includes (lower priority than regular includes).
+  # This ensures third_party vendored headers take precedence over ROCm headers.
+  if(USE_ROCM AND ROCM_INCLUDE_DIRS)
+    include_directories(SYSTEM ${ROCM_INCLUDE_DIRS})
   endif()
 endif()
 
@@ -1455,26 +1471,6 @@ if(NOT INTERN_BUILD_MOBILE)
 
   # ARM specific flags
   find_package(ARM)
-  if(ASIMD_FOUND)
-    message(STATUS "asimd/Neon found with compiler flag : -D__NEON__")
-    add_compile_options(-D__NEON__)
-  elseif(NEON_FOUND)
-    if(APPLE)
-      message(STATUS "Neon found with compiler flag : -D__NEON__")
-      add_compile_options(-D__NEON__)
-    else()
-      message(STATUS "Neon found with compiler flag : -mfpu=neon -D__NEON__")
-      add_compile_options(-mfpu=neon -D__NEON__)
-    endif()
-  endif()
-  if(CORTEXA8_FOUND)
-    message(STATUS "Cortex-A8 Found with compiler flag : -mcpu=cortex-a8")
-    add_compile_options(-mcpu=cortex-a8 -fprefetch-loop-arrays)
-  endif()
-  if(CORTEXA9_FOUND)
-    message(STATUS "Cortex-A9 Found with compiler flag : -mcpu=cortex-a9")
-    add_compile_options(-mcpu=cortex-a9)
-  endif()
 
   find_package(LAPACK)
   if(LAPACK_FOUND)
@@ -1653,7 +1649,7 @@ if(USE_KINETO)
 
   if(NOT LIBKINETO_NOROCTRACER)
     if("$ENV{ROCM_SOURCE_DIR}" STREQUAL "")
-      set(ENV{ROCM_SOURCE_DIR} "/opt/rocm")
+      set(ENV{ROCM_SOURCE_DIR} "${ROCM_PATH}")
     endif()
   endif()
 

@@ -16,7 +16,7 @@ import pickle
 import sys
 import warnings
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from typing import Any, TypeVar, Union
+from typing import Any, TypeVar
 from typing_extensions import deprecated, Self
 
 import torch
@@ -823,6 +823,7 @@ if _enabled:
 
         @property
         def original_name(self):
+            # pyrefly: ignore [unnecessary-comparison]
             if type(self) is str(self._c._type().name()):
                 return ""
             return str(self._c._type().name())
@@ -1135,7 +1136,7 @@ def _script_impl(
     optimize=None,
     _frames_up=0,
     _rcb=None,
-    example_inputs: Union[list[tuple], dict[Callable, list[tuple]], None] = None,
+    example_inputs: list[tuple] | dict[Callable, list[tuple]] | None = None,
 ):
     global type_trace_db
 
@@ -1274,7 +1275,7 @@ def script(
     optimize: None = None,
     _frames_up: int = 0,
     _rcb: Callable[[str], Any] | None = None,
-    example_inputs: Union[list[tuple], dict[Callable, list[tuple]], None] = None,
+    example_inputs: list[tuple] | dict[Callable, list[tuple]] | None = None,
 ) -> Any:
     r"""Script the function.
 
@@ -1588,6 +1589,9 @@ def _check_directly_compile_overloaded(obj):
 def interface(obj: _T) -> _T:
     r"""Decorate to annotate classes or modules of different types.
 
+    .. deprecated:: 2.5
+        TorchScript is deprecated, please use ``torch.compile`` instead.
+
     This decorator can be used to define an interface that can be used to annotate
     classes or modules of different types. This can be used for to annotate a submodule
     or attribute class that could have different types that implement the same
@@ -1633,6 +1637,10 @@ def interface(obj: _T) -> _T:
         user_fn_jit(impls, 0, val)
         user_fn_jit(impls, 1, val)
     """
+    warnings.warn(
+        "`torch.jit.interface` is deprecated. Please use `torch.compile` instead.",
+        DeprecationWarning,
+    )
     if not inspect.isclass(obj):
         raise RuntimeError("interface must be applied to a class")
     if not _is_new_style_class(obj):
@@ -1783,7 +1791,8 @@ class _ScriptProfile:
 
 
 def _unwrap_optional(x):
-    assert x is not None, "Unwrapping null optional"
+    if x is None:
+        raise AssertionError("Unwrapping null optional")
     return x
 
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # ruff: noqa: LOG015
+from __future__ import annotations
 
 import json
 import logging
@@ -8,14 +9,17 @@ import re
 import subprocess
 import sys
 import warnings
-from collections.abc import Callable
 from enum import Enum
 from functools import cache
 from logging import info
-from typing import Any, Optional
+from typing import Any, TYPE_CHECKING
 from urllib.request import Request, urlopen
 
 import yaml
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 REENABLE_TEST_REGEX = "(?i)(Close(d|s)?|Resolve(d|s)?|Fix(ed|es)?) (#|https://github.com/pytorch/pytorch/issues/)([0-9]+)"
@@ -26,19 +30,31 @@ PREFIX = "test-config/"
 logging.basicConfig(level=logging.INFO)
 
 
-def is_cuda_or_rocm_job(job_name: Optional[str]) -> bool:
-    if not job_name:
-        return False
+def is_cuda_or_rocm_job(
+    job_name: str | None, config: dict[str, Any] | None = None
+) -> bool:
+    if job_name and ("cuda" in job_name or "rocm" in job_name):
+        return True
 
-    return "cuda" in job_name or "rocm" in job_name
+    # Also check the runner name in the config, since some workflows (e.g.
+    # inductor-unittest) use job names that don't include "cuda" even though
+    # they target CUDA runners.
+    if config:
+        runner = config.get("runner", "")
+        if "nvidia.gpu" in runner or "rocm.gpu" in runner:
+            return True
+
+    return False
 
 
 # Supported modes when running periodically. Only applying the mode when
-# its lambda condition returns true
-SUPPORTED_PERIODICAL_MODES: dict[str, Callable[[Optional[str]], bool]] = {
+# its lambda condition returns true. Each callable receives (job_name, config).
+SUPPORTED_PERIODICAL_MODES: dict[
+    str, Callable[[str | None, dict[str, Any] | None], bool]
+] = {
     # Memory leak check is only needed for CUDA and ROCm jobs which utilize GPU memory
     "mem_leak_check": is_cuda_or_rocm_job,
-    "rerun_disabled_tests": lambda job_name: True,
+    "rerun_disabled_tests": lambda job_name, config=None: True,
 }
 
 # The link to the published list of disabled jobs
@@ -210,7 +226,7 @@ def filter_selected_test_configs(
 
 
 def set_periodic_modes(
-    test_matrix: dict[str, list[Any]], job_name: Optional[str]
+    test_matrix: dict[str, list[Any]], job_name: str | None
 ) -> dict[str, list[Any]]:
     """
     Apply all periodic modes when running under a schedule
@@ -221,7 +237,7 @@ def set_periodic_modes(
 
     for config in test_matrix.get("include", []):
         for mode, cond in SUPPORTED_PERIODICAL_MODES.items():
-            if not cond(job_name):
+            if not cond(job_name, config):
                 continue
 
             cfg = config.copy()
@@ -266,7 +282,7 @@ def remove_disabled_jobs(
 def _filter_jobs(
     test_matrix: dict[str, list[Any]],
     issue_type: IssueType,
-    target_cfg: Optional[str] = None,
+    target_cfg: str | None = None,
 ) -> dict[str, list[Any]]:
     """
     An utility function used to actually apply the job filter
@@ -466,7 +482,7 @@ def set_output(name: str, val: Any) -> None:
         print(f"::set-output name={name}::{val}")
 
 
-def parse_reenabled_issues(s: Optional[str]) -> list[str]:
+def parse_reenabled_issues(s: str | None) -> list[str]:
     # NB: When the PR body is empty, GitHub API returns a None value, which is
     # passed into this function
     if not s:
@@ -502,8 +518,8 @@ def perform_misc_tasks(
     test_matrix: dict[str, list[Any]],
     job_name: str,
     pr_body: str,
-    branch: Optional[str] = None,
-    tag: Optional[str] = None,
+    branch: str | None = None,
+    tag: str | None = None,
 ) -> None:
     """
     In addition to apply the filter logic, the script also does the following
@@ -650,6 +666,9 @@ def main() -> None:
     # and also put a flag if the test matrix is empty, so subsequent jobs can
     # quickly check it without the need to parse the JSON string
     set_output("is-test-matrix-empty", filtered_test_matrix_len == 0)
+
+    # Save the labels from the PR, so that we can use it later
+    set_output("labels", json.dumps(list(labels)))
 
 
 if __name__ == "__main__":

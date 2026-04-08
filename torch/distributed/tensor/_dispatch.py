@@ -11,13 +11,11 @@ import torch.distributed.tensor._api as dtensor
 import torch.distributed.tensor._random as random
 from torch._library.utils import fill_defaults
 from torch._logging import LazyString
+from torch._prims.rng_prims import run_dtensor_rng_op
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
-from torch.distributed.tensor._nonlinear_redux import (
-    argminmax_handler,
-    minmax_dim_handler,
-)
+from torch.distributed.tensor._nonlinear_redux import argminmax_handler
 from torch.distributed.tensor._op_schema import (
     OpInfo,
     OpSchema,
@@ -49,6 +47,18 @@ except ImportError:
 aten = torch.ops.aten
 logger = logging.getLogger(__name__)
 
+# The C++ DTensor dispatch fast path caches whether debug logging is
+# enabled.  Wrap setLevel so the cached flag is reset automatically.
+_orig_setLevel = logger.setLevel
+
+
+def _setLevel_and_reinit(level: int) -> None:
+    _orig_setLevel(level)
+    torch._C._reinit_DTensor_dispatch_logger()
+
+
+logger.setLevel = _setLevel_and_reinit  # type: ignore[method-assign]
+
 
 def as_strided_handler(
     op_call: torch._ops.OpOverload,
@@ -56,7 +66,8 @@ def as_strided_handler(
     kwargs: dict[str, object],
 ):
     args, kwargs = fill_defaults(op_call._schema, args, kwargs)
-    assert not kwargs
+    if kwargs:
+        raise AssertionError
     tensor, size, stride, storage_offset = args
     if (
         tensor.size() == tuple(size)
@@ -75,6 +86,15 @@ def is_same_size_handler(
     lhs = cast(torch.Tensor, args[0])
     rhs = cast(torch.Tensor, args[1])
     return lhs.shape == rhs.shape
+
+
+def is_pinned_handler(
+    op_call: torch._ops.OpOverload,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+) -> bool:
+    tensor = cast(dtensor.DTensor, args[0])
+    return tensor._local_tensor.is_pinned()
 
 
 def found_inf_reduce_handler(
@@ -153,16 +173,20 @@ class OpDispatcher:
             aten.bernoulli.default,
             aten.bernoulli_.float,
         }
+        self._squeeze_inplace_ops = {
+            aten.squeeze_.dim,
+            aten.squeeze_.default,
+            aten.squeeze_.dims,
+        }
         self._custom_op_handlers = {
             aten.is_same_size.default: is_same_size_handler,
+            aten.is_pinned.default: is_pinned_handler,
             aten.convolution.default: convolution_handler,
             aten.convolution_backward.default: convolution_backward_handler,
             aten._amp_foreach_non_finite_check_and_unscale_.default: found_inf_reduce_handler,
             aten.as_strided.default: as_strided_handler,
             aten.argmin.default: argminmax_handler,
             aten.argmax.default: argminmax_handler,
-            aten.max.dim: minmax_dim_handler,
-            aten.min.dim: minmax_dim_handler,
         }
 
     # ********************************************************************************************
@@ -215,19 +239,28 @@ class OpDispatcher:
         # NOTE: schema should always be populated when calling this function,
         # as it's only called from C++ after unwrap_to_op_info (create_schema=True).
         # See dispatchDTensorOp in python_variable.cpp line 1453-1460.
-        assert op_info.schema is not None, (
-            "op_info.schema should not be None in sharding propagation. "
-            "This function should only be called after unwrap_to_op_info."
-        )
+        if op_info.schema is None:
+            raise AssertionError(
+                "op_info.schema should not be None in sharding propagation. "
+                "This function should only be called after unwrap_to_op_info."
+            )
         try:
             # We have basically inlined propagate() here, but WITHOUT the
             # output_sharding assignment
             if try_cache and not _are_we_tracing():
-                return self.sharding_propagator.propagate_op_sharding(op_info.schema)
+                result = self.sharding_propagator.propagate_op_sharding(op_info.schema)
             else:
-                return self.sharding_propagator.propagate_op_sharding_non_cached(
+                result = self.sharding_propagator.propagate_op_sharding_non_cached(
                     op_info.schema
                 )
+            if logger.handlers and logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "sharding_prop MISS (C++ fast path): %s -> %s",
+                    op_info.schema,
+                    # pyrefly: ignore [missing-attribute]
+                    result.output_spec,
+                )
+            return result
         except NotImplementedError:
             if torch._C._dispatch_has_kernel_for_dispatch_key(
                 op_call.name(), torch._C.DispatchKey.CompositeImplicitAutograd
@@ -235,7 +268,8 @@ class OpDispatcher:
                 # When running under inference mode, CompositeImplicitAutograd ops show up in __torch_dispatch__,
                 # so we manually decompose them, here
                 out = op_call.decompose(*args, **kwargs)
-                assert out is not NotImplemented
+                if out is NotImplemented:
+                    raise AssertionError from None
                 return out
             else:
                 raise
@@ -251,8 +285,10 @@ class OpDispatcher:
         op_info: OpInfo,
     ) -> object:
         output_sharding = op_info.output_sharding
-        assert output_sharding is not None, "output sharding should not be None"
-        assert op_info is not None, "op_info should never be None"
+        if output_sharding is None:
+            raise AssertionError("output sharding should not be None")
+        if op_info is None:
+            raise AssertionError("op_info should never be None")
 
         # Record output placements for debugging
         debug_mode = get_active_debug_mode()
@@ -267,7 +303,8 @@ class OpDispatcher:
             if output_sharding.needs_redistribute:
                 # If sharding propagation decision needs redistribute, perform redistribute
                 # on args first, which could potentially modify args (i.e. allgather certain arg)
-                assert output_sharding.redistribute_schema is not None
+                if output_sharding.redistribute_schema is None:
+                    raise AssertionError
                 self.redistribute_local_args(
                     op_info,
                     output_sharding.redistribute_schema,
@@ -288,9 +325,20 @@ class OpDispatcher:
             local_tensor_args = cast(tuple[object, ...], local_tensor_args)
             if op_call in self._random_ops:
                 if not random._rng_tracker and is_rng_supported_mesh(mesh):
-                    # Default to `OffsetBasedRNGTracker` if the parallelism API
-                    # did not already construct one
-                    random._rng_tracker = random.OffsetBasedRNGTracker(mesh)
+                    # Default to `OffsetBasedRNGTracker` if the parallelism API did not already construct one
+                    # Skip RNG state sync during tracing to avoid lazily initializing real RNG state under fake mode.
+                    run_state_sync = not _are_we_tracing()
+                    if not run_state_sync:
+                        logger.info(
+                            "DTensor RNG tracker is being lazily initialized during tracing. "
+                            "RNG states may not be synchronized across ranks, which can lead "
+                            "to silent incorrectness. Please call `torch.manual_seed()` with "
+                            "the same seed on all ranks before compiling DTensor random ops.",
+                            stacklevel=2,
+                        )
+                    random._rng_tracker = random.OffsetBasedRNGTracker(
+                        mesh, run_state_sync
+                    )
 
                 first_arg, first_local_arg = (
                     cast(dtensor.DTensor, args[0]),
@@ -301,24 +349,63 @@ class OpDispatcher:
                 # so the op_call does not directly use it (we want op_call to fall back to the 'default' which is
                 # our RNG manager)
                 maybe_user_generator = op_info.local_kwargs.pop("generator", None)
-                assert maybe_user_generator is None or isinstance(
-                    maybe_user_generator, torch.Generator
-                )
-                # maybe_user_generator = None
-                rng_context = (
-                    random._rng_tracker._distribute_region(
-                        first_arg._spec, generator=maybe_user_generator
-                    )
-                    if random._rng_tracker and not first_local_arg.is_meta
-                    else contextlib.nullcontext()
-                )
-                # For DTensor random operator, run it within a RNGTracker context to
-                # ensure the random number generator is properly distributed.
-                with rng_context:
+                if not (
+                    maybe_user_generator is None
+                    or isinstance(maybe_user_generator, torch.Generator)
+                ):
+                    raise AssertionError
+
+                if (
+                    random._rng_tracker
+                    and not first_local_arg.is_meta
+                    and random._rng_tracker.distribute_region_enabled
+                ):
+                    if (
+                        maybe_user_generator is not None
+                        or first_local_arg.device.type != "cuda"
+                        or (
+                            not _are_we_tracing()
+                            and type(first_local_arg) is not torch.Tensor
+                        )
+                    ):
+                        with random._rng_tracker._distribute_region(
+                            first_arg._spec, generator=maybe_user_generator
+                        ):
+                            local_results = op_call(
+                                *local_tensor_args, **op_info.local_kwargs
+                            )
+                    else:
+                        # CUDA device without user generator, use HOP for traceability
+                        if not isinstance(
+                            random._rng_tracker, random.OffsetBasedRNGTracker
+                        ):
+                            raise AssertionError
+                        start_offset_incr, end_offset_incr = (
+                            random._rng_tracker._compute_rng_offsets(first_arg._spec)
+                        )
+                        local_results = run_dtensor_rng_op(
+                            start_offset_incr,
+                            end_offset_incr,
+                            op_call,
+                            *local_tensor_args,
+                            **op_info.local_kwargs,
+                        )
+                else:
+                    # No rng_tracker, meta tensor, or distribute_region disabled
                     local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
             else:
                 # normal case, run local sharded op computation
-                local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
+                if (
+                    output_sharding.needs_redistribute
+                    and output_sharding.redistribute_schema is not None
+                    and output_sharding.redistribute_schema.op != op_call
+                ):
+                    # Op was rewritten (e.g., squeeze.default → squeeze.dims)
+                    local_results = output_sharding.redistribute_schema.op(
+                        *local_tensor_args, **op_info.local_kwargs
+                    )
+                else:
+                    local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
 
         else:
             # For a non-participating device (happens on rank that does not belong to
@@ -356,7 +443,8 @@ class OpDispatcher:
                     local_results = [
                         default_tensor(s) if s is not None else None for s in spec
                     ]
-                    assert isinstance(local_results, list)
+                    if not isinstance(local_results, list):
+                        raise AssertionError
                     if None in local_results:
                         ret_type = str(ret_list[0].type)
                         raise NotImplementedError(
@@ -390,7 +478,8 @@ class OpDispatcher:
                 # The output of the equal op is a bool, by converting it into a
                 # a single value tensor, we can use all-reduce with min reduce op
                 # to simulate logical and.
-                assert local_results is None or isinstance(local_results, bool)
+                if not (local_results is None or isinstance(local_results, bool)):
+                    raise AssertionError
                 r = torch.tensor(
                     int(local_results) if local_results is not None else 1,
                     device=compute_mesh.device_type,
@@ -402,14 +491,14 @@ class OpDispatcher:
             # inplace op should return self instead of re-wrapping
             if output_sharding.output_spec is not None:
                 output_spec = output_sharding.output_spec
-                assert isinstance(output_spec, DTensorSpec)
-                assert isinstance(args[0], dtensor.DTensor)
+                if not isinstance(output_spec, DTensorSpec):
+                    raise AssertionError
+                if not isinstance(args[0], dtensor.DTensor):
+                    raise AssertionError
 
-                # NOTE: aten.squeeze_.dim is an inplace op but it also may change
-                # the inplace argument's tensor meta. Here we choose to special case
-                # this op because as far as I know this is the only inplace op that
-                # has such as behavior. We can extend this special case if necessary.
-                if op_call == aten.squeeze_.dim:
+                # NOTE: squeeze_ inplace ops may change the tensor's metadata
+                # (shape/strides). We special-case them to update the spec.
+                if op_call in self._squeeze_inplace_ops:
                     # update the spec to handle tensor meta changes
                     args[0]._spec = output_spec
                     # use return_and_correct_aliasing to match the outer and the inner
@@ -448,10 +537,12 @@ class OpDispatcher:
                     out_dts.append(out_dt)
                     spec_idx += 1
 
-            assert len(out_dts) >= 1, "out variant should have at least one out arg"
+            if len(out_dts) < 1:
+                raise AssertionError("out variant should have at least one out arg")
             return tuple(out_dts) if len(out_dts) > 1 else out_dts[0]
         else:
-            assert op_call == aten.equal.default, op_call
+            if op_call != aten.equal.default:
+                raise AssertionError(op_call)
             ret = self.wrap(local_results, output_sharding.output_spec)  # type: ignore[possibly-undefined]
             if participating and op_call._schema._is_view_op():
                 return return_and_correct_aliasing(op_call, args, kwargs, ret)
@@ -515,6 +606,13 @@ class OpDispatcher:
                 else:
                     new_local_args.append(arg_spec)
 
+        # Append extra non-tensor args from rewritten schema (e.g., dims tuple).
+        if use_val_from_redistribute_schema:
+            for i in range(
+                len(op_info.flat_args_schema), len(flatten_args_schema_to_reshard)
+            ):
+                new_local_args.append(flatten_args_schema_to_reshard[i])
+
         op_info.local_args = tuple(new_local_args)
 
     def unwrap_to_op_info(
@@ -536,9 +634,25 @@ class OpDispatcher:
         runtime_schema_info = self.sharding_propagator.op_to_schema_info.get(
             op_call, None
         )
+        if runtime_schema_info is None:
+            runtime_schema_info = (
+                self.sharding_propagator.op_to_schema_info_for_single_dim_strategy.get(
+                    op_call, None
+                )
+            )
 
-        if runtime_schema_info is not None and runtime_schema_info.needs_pytree:
-            # flatten args/kwargs when op says necessary
+        # Auto-detect needs_pytree if any arg is a list/tuple containing tensors
+        def _contains_tensor(arg: object) -> bool:
+            if isinstance(arg, (list, tuple)):
+                return any(isinstance(item, torch.Tensor) for item in arg)
+            return False
+
+        needs_pytree = (
+            runtime_schema_info is not None and runtime_schema_info.needs_pytree
+        ) or any(_contains_tensor(arg) for arg in args)
+
+        if needs_pytree:
+            # flatten args/kwargs when op says necessary or args contain lists/tuples
             tree_args, args_spec = pytree.tree_flatten(args)
             args_list: Sequence[object] = tree_args
         else:
@@ -576,6 +690,9 @@ class OpDispatcher:
             if isinstance(v, dtensor.DTensor):
                 local_kwargs[k] = v._local_tensor
                 kwargs_schema[k] = v._spec
+                if compute_mesh is None:
+                    # record the first compute device mesh from kwargs
+                    compute_mesh = v.device_mesh
             elif isinstance(v, torch.Tensor):
                 compute_mesh = compute_mesh or try_find_mesh_from_args(
                     op_call, args_list
@@ -591,9 +708,10 @@ class OpDispatcher:
                 kwargs_schema[k] = v
                 local_kwargs[k] = v
 
-        assert compute_mesh is not None, (
-            f"found no DeviceMesh from dtensor args for {op_call}!"
-        )
+        if compute_mesh is None:
+            raise AssertionError(
+                f"found no DeviceMesh from dtensor args for {op_call}!"
+            )
         op_info = OpInfo(
             compute_mesh,
             OpSchema(
@@ -620,19 +738,22 @@ class OpDispatcher:
     def wrap(res: object, spec: OutputSpecType) -> object:
         if isinstance(res, torch.Tensor):
             if spec is not None:
-                assert isinstance(spec, DTensorSpec), (
-                    f"output spec does not match with output! Expected DTensorSpec, got {spec}."
-                )
+                if not isinstance(spec, DTensorSpec):
+                    raise AssertionError(
+                        f"output spec does not match with output! Expected DTensorSpec, got {spec}."
+                    )
                 # pyrefly: ignore [bad-argument-type, bad-argument-count, unexpected-keyword]
                 return dtensor.DTensor(res, spec, requires_grad=res.requires_grad)
             else:
                 # if output does not have a DTensorSpec due to specific ops, it must be a scalar tensor
-                assert res.ndim == 0, "output tensor should be scalar!"
+                if res.ndim != 0:
+                    raise AssertionError("output tensor should be scalar!")
                 return res
         elif isinstance(res, (list, tuple)):
-            assert spec is not None and isinstance(spec, (list, tuple)), (
-                f"output spec does not match with output! Expected list/tuple, got {spec}."
-            )
+            if not (spec is not None and isinstance(spec, (list, tuple))):
+                raise AssertionError(
+                    f"output spec does not match with output! Expected list/tuple, got {spec}."
+                )
             res_list = []
             for e, s in zip(res, spec):
                 # pyrefly: ignore [bad-argument-type]

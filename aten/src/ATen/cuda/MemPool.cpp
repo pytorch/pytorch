@@ -20,7 +20,7 @@ MemPool::MemPool(
     bool is_user_created,
     bool use_on_oom,
     bool no_split)
-    : allocator_(allocator.get()), is_user_created_(is_user_created) {
+    : is_user_created_(is_user_created) {
   if (is_user_created_) {
     id_ = {0, uid_++};
   } else {
@@ -50,10 +50,6 @@ MemPool::~MemPool() {
 
 MempoolId_t MemPool::id() {
   return id_;
-}
-
-CUDACachingAllocator::CUDAAllocator* MemPool::allocator() {
-  return allocator_;
 }
 
 int MemPool::use_count() {

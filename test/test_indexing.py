@@ -23,6 +23,7 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
     onlyNativeDeviceTypes,
     onlyOn,
+    skipMPS,
     skipXLA,
     skipXPUIf,
 )
@@ -31,6 +32,7 @@ from torch.testing._internal.common_dtype import (
     all_types_and,
     all_types_and_complex_and,
     all_types_complex_float8_and,
+    highest_precision_float,
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -914,6 +916,11 @@ class TestIndexing(TestCase):
         with self.assertRaisesRegex(IndexError, "too many indices"):
             windowed_data = t[indices[:31]]
 
+    def test_index_tensor_empty_indices(self, device):
+        t = torch.tensor([1.0], device=device)
+        with self.assertRaisesRegex(IndexError, "at least one index must be provided"):
+            torch.ops.aten.index.Tensor(t, [])
+
     def test_bool_indices_accumulate(self, device):
         mask = torch.zeros(size=(10,), dtype=torch.bool, device=device)
         y = torch.ones(size=(10, 10), device=device)
@@ -1211,7 +1218,7 @@ class TestIndexing(TestCase):
 
     @onlyNativeDeviceTypes
     def test_index_put_accumulate_duplicate_indices(self, device):
-        dtype = torch.float if device.startswith("mps") else torch.double
+        dtype = highest_precision_float(device)
         for i in range(1, 512):
             # generate indices by random walk, this will create indices with
             # lots of duplicates interleaved with each other
@@ -1811,17 +1818,20 @@ class TestIndexing(TestCase):
 
     @parametrize("reduce", ["prod", "amin", "amax", "mean"])
     @dtypes(*all_types_and(torch.half, torch.bfloat16))
-    @expectedFailureMPS  # Unimplemented for MPS device
+    @dtypesIfMPS(
+        torch.half, torch.bfloat16, torch.float32, torch.int32, torch.int16, torch.int8
+    )
     def test_index_reduce(self, device, dtype, reduce):
         size = (3, 4, 5)
         index_dtypes = [torch.int, torch.long]
         include_selfs = [True, False]
+        noncontig_opts = [True, False]
         amin_init = float("inf") if dtype.is_floating_point else torch.iinfo(dtype).max
         amax_init = -float("inf") if dtype.is_floating_point else torch.iinfo(dtype).min
         reduction_init = {"prod": 1, "mean": 0, "amin": amin_init, "amax": amax_init}
 
         for dest_noncontig, src_noncontig, index_noncontig in product(
-            [True, False], repeat=3
+            noncontig_opts, repeat=3
         ):
             for idx_dtype, include_self in product(index_dtypes, include_selfs):
                 for dim in range(len(size)):
@@ -1879,7 +1889,16 @@ class TestIndexing(TestCase):
                             expected.div_(counts, rounding_mode="floor")
                     expected = expected.transpose(0, dim)
 
-                    self.assertEqual(dest, expected)
+                    # MPS uses atomics for index_reduce which causes
+                    # non-deterministic rounding for low-precision types
+                    kwargs = {}
+                    if (
+                        "mps" in device
+                        and dtype in [torch.bfloat16, torch.float16]
+                        and reduce in ["mean", "prod"]
+                    ):
+                        kwargs = {"atol": 0.02, "rtol": 0.1}
+                    self.assertEqual(dest, expected, **kwargs)
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat))
@@ -1969,7 +1988,8 @@ class TestIndexing(TestCase):
     def _prepare_data_for_index_copy_and_add_deterministic(
         self, dim: int, device: torch.device
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        assert dim >= 0 and dim < 3
+        if not (dim >= 0 and dim < 3):
+            raise AssertionError(f"dim must be in [0, 3), got {dim}")
         a = [5, 4, 3]
         a[dim] = 2000
         x = torch.zeros(a, device=device)
@@ -2002,6 +2022,109 @@ class TestIndexing(TestCase):
                     x0[:, :, index_list[i]] = src[:, :, i]
 
             self.assertEqual(x0, y0, atol=0, rtol=0)
+
+    @onlyNativeDeviceTypes
+    @skipMPS  # https://github.com/pytorch/pytorch/issues/161029
+    @dtypes(torch.float, torch.bfloat16, torch.half)
+    def test_index_add_large_index_vectorized_path(self, device, dtype):
+        # Tests that exercise both the VecSize=4 (vectorized) and VecSize=1
+        # (scalar) paths in the indexFuncLargeIndex CUDA kernel.
+        # VecSize=4 activates when: IndexIsMajor=true, sliceSize % 4 == 0,
+        # and both dst/src have stride-1 on their innermost dimension.
+        # numIndex must be > 16 to hit the LargeIndex kernel at all.
+        #
+        # Strategy: for each shape that hits the vectorized path, also run
+        # the same operation with sliceSize+1 (which forces the scalar path)
+        # and compare both against a CPU float reference.  We use UNIQUE
+        # indices to avoid non-deterministic atomic accumulation ordering.
+        num_idx = 64
+        num_dest = 100
+
+        def _run_and_check(dst_shape, dim, num_idx, num_dest_dim, tag):
+            dst = torch.zeros(dst_shape, dtype=dtype, device=device)
+            src_shape = list(dst_shape)
+            src_shape[dim] = num_idx
+            src = torch.randn(src_shape, dtype=dtype, device=device)
+            index = torch.randperm(num_dest_dim, device=device)[:num_idx]
+
+            # Reference: run the same op on CPU in float
+            dst_ref = dst.detach().cpu().float()
+            src_ref = src.detach().cpu().float()
+            idx_cpu = index.cpu()
+            dst_ref.index_add_(dim, idx_cpu, src_ref)
+
+            dst.index_add_(dim, index, src)
+
+            atol, rtol = (
+                (1e-2, 1e-2) if dtype in (torch.bfloat16, torch.half) else (1e-5, 1e-5)
+            )
+            self.assertEqual(
+                dst.cpu().float(),
+                dst_ref,
+                atol=atol,
+                rtol=rtol,
+                msg=f"Failed for {tag}, shape={dst_shape}, dim={dim}",
+            )
+
+        # --- VecSize=4 path: contiguous, dim=0, sliceSize divisible by 4 ---
+        for slice_size in [32, 128, 256]:
+            _run_and_check(
+                (num_dest, slice_size),
+                0,
+                num_idx,
+                num_dest,
+                f"vec4 sliceSize={slice_size}",
+            )
+
+        # --- VecSize=1 path: sliceSize NOT divisible by 4 ---
+        for slice_size in [3, 17, 33]:
+            _run_and_check(
+                (num_dest, slice_size),
+                0,
+                num_idx,
+                num_dest,
+                f"scalar sliceSize={slice_size}",
+            )
+
+        # --- VecSize=1 path: non-contiguous (stride != 1 on inner dim) ---
+        dst_base = torch.zeros(num_dest, 256, dtype=dtype, device=device)
+        src_base = torch.randn(num_idx, 256, dtype=dtype, device=device)
+        dst = dst_base[:, ::2]  # shape [100, 128], stride [256, 2]
+        src = src_base[:, ::2]
+        index = torch.randperm(num_dest, device=device)[:num_idx]
+
+        dst_ref = dst.detach().cpu().float().contiguous()
+        src_ref = src.detach().cpu().float().contiguous()
+        dst_ref.index_add_(0, index.cpu(), src_ref)
+        dst.index_add_(0, index, src)
+        atol, rtol = (
+            (1e-2, 1e-2) if dtype in (torch.bfloat16, torch.half) else (1e-5, 1e-5)
+        )
+        self.assertEqual(
+            dst.cpu().float(),
+            dst_ref,
+            atol=atol,
+            rtol=rtol,
+            msg="Failed for non-contiguous (stride-2)",
+        )
+
+        # --- VecSize=1 path: IndexIsMajor=false (dim=1 on row-major tensor) ---
+        _run_and_check(
+            (32, num_dest),
+            1,
+            num_idx,
+            num_dest,
+            "IndexIsMajor=false dim=1",
+        )
+
+        # --- VecSize=4 path: 3-D contiguous, dim=0, sliceSize divisible by 4 ---
+        _run_and_check(
+            (100, 8, 16),
+            0,
+            num_idx,
+            100,
+            "3D vec4 sliceSize=128",
+        )
 
     @onlyNativeDeviceTypes
     @expectedFailureMPS  # See https://github.com/pytorch/pytorch/issues/161029

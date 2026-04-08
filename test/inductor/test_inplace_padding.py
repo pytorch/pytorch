@@ -9,11 +9,11 @@ from torch._dynamo.utils import same
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import serialTest
+from torch.testing._internal.common_utils import serialTest, skipIfXpu
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
-    requires_cuda_with_enough_memory,
+    requires_gpu_with_enough_memory,
 )
 
 
@@ -112,6 +112,7 @@ class InplacePaddingTest(TestCase):
         self.assertEqual(num_inplace_padding(), 1)
 
     @inductor_config.patch(cpp_wrapper=True)
+    @inductor_config.patch("triton.autotune_at_compile_time", True)
     def test_pad_non_zero_cpp_wrapper(self):
         def f(x):
             x = x + 1
@@ -210,7 +211,7 @@ class InplacePaddingTest(TestCase):
 
         self.assertEqual(num_inplace_padding(), 0)
 
-    @requires_cuda_with_enough_memory(2e10)
+    @requires_gpu_with_enough_memory(2e10)
     @inductor_config.patch(force_shape_pad=True)
     @serialTest()
     def test_linear_and_cel(self):
@@ -241,7 +242,8 @@ class InplacePaddingTest(TestCase):
 
         expect = (f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
         actual = (opt_f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
-        assert same(expect, actual, tol=1e-2), f"ref:\n{expect}\nact:\n{actual}"
+        if not same(expect, actual, tol=1e-2):
+            raise AssertionError(f"ref:\n{expect}\nact:\n{actual}")
 
         # We may disable inplace_padding via env-var to test perf.
         self.assertEqual(num_inplace_padding(), int(inductor_config.inplace_padding))
@@ -254,7 +256,10 @@ class InplacePaddingTest(TestCase):
 
     # Enable Max-Autotune to repro this test failure:
     #   https://github.com/pytorch/pytorch/pull/140249#issuecomment-2556079406
+    @requires_gpu_with_enough_memory(2e10)
     @inductor_config.patch(max_autotune=True)
+    @serialTest()
+    @skipIfXpu(msg="AssertionError: torch-xpu-ops: #2997")
     def test_linear_and_cel_max_autotune(self):
         self.test_linear_and_cel()
 

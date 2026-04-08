@@ -19,7 +19,6 @@ New operators:
 
 import functools
 from collections.abc import Sequence
-from typing import Optional
 
 import torch
 from torch import _C
@@ -108,13 +107,13 @@ def stft(
     g: jit_utils.GraphContext,
     input: _C.Value,
     n_fft: int,
-    hop_length: Optional[int] = None,
-    win_length: Optional[int] = None,
-    window: Optional[_C.Value] = None,
+    hop_length: int | None = None,
+    win_length: int | None = None,
+    window: _C.Value | None = None,
     normalized: bool = False,
-    onesided: Optional[bool] = True,
-    return_complex: Optional[bool] = False,
-    align_to_window: Optional[bool] = None,
+    onesided: bool | None = True,
+    return_complex: bool | None = False,
+    align_to_window: bool | None = None,
 ) -> _C.Value:
     """Associates `torch.stft` with the `STFT` ONNX operator.
     Note that torch.stft calls _VF.stft, without centering or padding options.
@@ -180,10 +179,11 @@ def stft(
     n_win = symbolic_helper._get_tensor_dim_size(window, dim=0)
     if n_win is not None:
         win_length_default = win_length if win_length else n_fft
-        assert n_win == win_length_default, (
-            "Analysis window size must equal `win_length` or `n_fft`. "
-            f"Please, set `win_length` or `n_fft` to match `window` size ({n_win})",
-        )
+        if n_win != win_length_default:
+            raise AssertionError(
+                "Analysis window size must equal `win_length` or `n_fft`. "
+                f"Please, set `win_length` or `n_fft` to match `window` size ({n_win})"
+            )
 
         # Center window around zeros if needed (required by ONNX's STFT)
         if n_win < n_fft:
@@ -211,7 +211,10 @@ def stft(
         else:
             # Rectangle window
             torch_window = torch.ones(n_fft)
-        assert torch_window.shape[0] == n_fft
+        if torch_window.shape[0] != n_fft:
+            raise AssertionError(
+                f"torch_window.shape[0]={torch_window.shape[0]} != n_fft={n_fft}"
+            )
         window = g.op("Constant", value_t=torch_window)
     window = g.op(
         "Cast",

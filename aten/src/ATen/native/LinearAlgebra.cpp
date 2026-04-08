@@ -112,6 +112,7 @@
 #include <ATen/ops/linalg_tensorsolve_native.h>
 #include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/linalg_vector_norm_native.h>
+#include <ATen/ops/linalg__powsum_native.h>
 #include <ATen/ops/log2.h>
 #include <ATen/ops/logdet_native.h>
 #include <ATen/ops/matmul.h>
@@ -475,7 +476,7 @@ std::tuple<Tensor, Tensor> get_atol_rtol(
            ? at::where(atol_opt.value() > 0, at::zeros({}, options), default_rtol)
            : std::move(default_rtol);
   }
-  return std::make_tuple(atol, rtol);
+  return std::make_tuple(std::move(atol), std::move(rtol));
 }
 
 std::tuple<Tensor, Tensor> get_atol_rtol(
@@ -501,7 +502,7 @@ std::tuple<Tensor, Tensor> get_atol_rtol(
   }
   auto atol_tensor = at::full({}, atol, options);
   auto rtol_tensor = at::full({}, rtol, options);
-  return std::make_tuple(atol_tensor, rtol_tensor);
+  return std::make_tuple(std::move(atol_tensor), std::move(rtol_tensor));
 }
 
 } // anonymous namespace
@@ -2622,6 +2623,7 @@ Tensor compute_T18_scale_square(
   // 3. Multiply remain matrices by 3 times and slice to acc[1:]
   // All processed matrices will be stored in `output_pieces`.
   std::vector<Tensor> output_pieces;
+  output_pieces.reserve(section_numel);
   auto acc = mexp_scaled.index_select(0, sorted_s_inds);
   for (int64_t i = 0; i < section_numel; ++i) {
     for (int64_t j = 0; j < pts[i]; j++) {
@@ -2879,6 +2881,87 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
 
   auto iter = make_reduction("vector_norm", const_cast<Tensor&>(result), self_, dim, keepdim, result.scalar_type());
   norm_stub(iter.device_type(), iter, ord);
+}
+
+// linalg__powsum: computes sum(|x|^ord) - the "power sum" without the final root
+// This is useful for distributed computing where we want to reduce partial
+// power sums across shards before taking the final root.
+Tensor linalg__powsum(
+    const Tensor& self,
+    const Scalar& scalar_ord,
+    OptionalIntArrayRef opt_dim,
+    bool keepdim,
+    std::optional<ScalarType> opt_dtype) {
+  auto ord = scalar_ord.toDouble();
+  auto dim = opt_dim.value_or(IntArrayRef{});
+  auto size = self.sizes();
+  auto ndim = self.dim();
+
+  auto opt_dim_ = dim.vec();
+  maybe_wrap_dims(opt_dim_, ndim);
+
+  using Int = IntArrayRef::value_type;
+  std::vector<Int> all_dim(ndim);
+  std::iota(all_dim.begin(), all_dim.end(), 0);
+
+  bool is_all_reduce = !opt_dim.has_value() || opt_dim.value().empty();
+  auto reduce_dim = is_all_reduce ? all_dim : opt_dim_;
+
+  // Compute output dtype (same logic as vector_norm)
+  auto compute_dtype = at::native::get_dtype_from_self(self, opt_dtype, /*promote_integers=*/true);
+
+  // Create output tensor with the correct shape
+  auto result = create_reduction_result(self, opt_dim, keepdim, toRealValueType(compute_dtype));
+
+  if (result.numel() == 0) {
+    result.zero_();
+    return result;
+  }
+
+  // Check if reducing over dimensions that all have size 1
+  bool is_reduce_over_1D_vector = true;
+  for (auto i : reduce_dim) {
+    if (size[i] != 1) {
+      is_reduce_over_1D_vector = false;
+      break;
+    }
+  }
+
+  // Handle dtype conversion only when reducing over 1D
+  // (otherwise the kernel handles it via the result dtype)
+  Tensor self_;
+  if (is_reduce_over_1D_vector && opt_dtype.has_value()) {
+    self_ = self.to(*opt_dtype);
+  } else {
+    self_ = self;
+  }
+
+  auto iter = make_reduction("powsum", result, self_, dim, keepdim, result.scalar_type());
+  powsum_stub(iter.device_type(), iter, ord);
+  return result;
+}
+
+// linalg__powsum_slow: fallback implementation for backends without optimized kernels
+// Computes sum(|x|^ord) using basic ops
+Tensor linalg__powsum_slow(
+    const Tensor& self,
+    const Scalar& scalar_ord,
+    OptionalIntArrayRef opt_dim,
+    bool keepdim,
+    std::optional<ScalarType> opt_dtype) {
+  // Handle dtype conversion
+  Tensor self_;
+  if (opt_dtype.has_value()) {
+    self_ = self.to(*opt_dtype);
+  } else {
+    self_ = at::native::get_dtype_from_self(self, opt_dtype, /*promote_integers=*/true) != self.scalar_type()
+        ? self.to(at::native::get_dtype_from_self(self, opt_dtype, /*promote_integers=*/true))
+        : self;
+  }
+
+  // Compute |x|^ord and sum
+  auto abs_pow = at::pow(at::abs(self_), scalar_ord);
+  return at::sum(abs_pow, opt_dim, keepdim, toRealValueType(abs_pow.scalar_type()));
 }
 
 static void _linalg_matrix_norm_checks(const Tensor& A, std::vector<int64_t>& dim, std::optional<ScalarType> opt_dtype, bool low_precision) {
@@ -3620,7 +3703,8 @@ Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) 
   TORCH_CHECK(self.dim() == 2, func_name, ": Expected self to be of dimension 2 but got ", self.dim());
   TORCH_CHECK(mat2.dim() == 2, func_name, ": Expected mat2 to be of dimension 2 but got ", mat2.dim());
   TORCH_CHECK(self.size(1) == mat2.size(0), func_name, ": self.size(1) needs to match mat2.size(0) but got ", self.size(1), " and ", mat2.size(0));
-  TORCH_CHECK(self.dtype() == at::kChar, func_name, ": Expected self dtype to be of type int8 but got ", self.dtype());
+  TORCH_CHECK(self.dtype() == at::kChar || self.dtype() == at::kByte,
+    func_name, ": Expected self dtype to be int8 or uint8 but got ", self.dtype());
   TORCH_CHECK(mat2.dtype() == at::kChar, func_name, ": Expected mat2 dtype to be of type int8 but got ", mat2.dtype());
   TORCH_CHECK(result.dtype() == at::kInt, func_name, ": Expected result dtype to be of type kInt but got ", result.dtype());
   TORCH_CHECK(result.size(0) == self.size(0), func_name, ": Expected result.size(0) to be ", self.size(0), " but got ", result.size(0));
@@ -3628,6 +3712,7 @@ Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) 
   TORCH_CHECK(result.dim() == 2, func_name, ": Expected result to be of dimension 2 but got ", result.dim());
   TORCH_CHECK(result.is_contiguous(), func_name, ": Expected result to be contiguous.");
 
+  // Outer or inner dimension is 0
   if (result.numel() == 0 || self.size(1) == 0) {
     return result.zero_();
   }
@@ -3642,7 +3727,6 @@ Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) 
     }
   }
   if (!dispatched) {
-    auto a = reinterpret_cast<int8_t*>(self.data_ptr());
     auto b = reinterpret_cast<int8_t*>(mat2.data_ptr());
     auto c = reinterpret_cast<int32_t*>(result.data_ptr());
     const int64_t m = result.size(0);
@@ -3653,18 +3737,26 @@ Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) 
     const int64_t ldb_0 = mat2.strides()[0];
     const int64_t ldb_1 = mat2.strides()[1];
     const int64_t ldc = result.strides()[0];
-    parallel_for(0, m * n, 1, [&](int64_t start, int64_t end) {
-      for (const auto i : c10::irange(start, end)) {
-        auto row = i / n;
-        auto col = i % n;
-        c[row * ldc + col] = 0;
-        for (const auto k : c10::irange(k)) {
-          c[row * ldc + col] = c[row * ldc + col] +
-              static_cast<int32_t>(a[row * lda_0 + k * lda_1]) *
-                  static_cast<int32_t>(b[k * ldb_0 + col * ldb_1]);
-        }
-      }
+    #define COMPUTE_WITH_A_TYPE(a_type)                             \
+    auto a = reinterpret_cast<a_type*>(self.data_ptr());            \
+    at::parallel_for(0, m * n, 1, [&](int64_t start, int64_t end) { \
+      for (const auto i : c10::irange(start, end)) {                \
+        auto row = i / n;                                           \
+        auto col = i % n;                                           \
+        c[row * ldc + col] = 0;                                     \
+        for (const auto k : c10::irange(k)) {                       \
+          c[row * ldc + col] = c[row * ldc + col] +                 \
+              static_cast<int32_t>(a[row * lda_0 + k * lda_1]) *    \
+                  static_cast<int32_t>(b[k * ldb_0 + col * ldb_1]); \
+        }                                                           \
+      }                                                             \
     });
+
+    if (self.scalar_type() == at::kByte) {
+      COMPUTE_WITH_A_TYPE(uint8_t);
+    } else {
+      COMPUTE_WITH_A_TYPE(int8_t);
+    }
   }
   return result;
 }

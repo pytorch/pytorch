@@ -99,6 +99,11 @@ def _fa3_register_kernels() -> Library:
         "_flash_attention_forward", _fa3_flash_attention_forward_impl_default, "CUDA"
     )
     lib.impl(
+        "_flash_attention_forward_no_dropout_inplace",
+        _fa3_flash_attention_forward_no_dropout_inplace_impl,
+        "CUDA",
+    )
+    lib.impl(
         "_scaled_dot_product_flash_attention",
         _fa3_scaled_dot_product_flash_attention_forward_impl_default,
         "CUDA",
@@ -249,6 +254,8 @@ def _fa3_run_forward(
     value: torch.Tensor,
     cu_seq_q: torch.Tensor | None,
     cu_seq_k: torch.Tensor | None,
+    max_q: int,
+    max_k: int,
     scale: float | None,
     is_causal: bool,
     window_size_left: int | None,
@@ -258,6 +265,8 @@ def _fa3_run_forward(
     q_descale: torch.Tensor | None = None,
     k_descale: torch.Tensor | None = None,
     v_descale: torch.Tensor | None = None,
+    block_table: torch.Tensor | None = None,
+    num_splits: int | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Run the FA3 forward pass by calling the C++ kernel directly.
@@ -278,6 +287,7 @@ def _fa3_run_forward(
     cu_seqlens_q = _maybe_contiguous(cu_seq_q)
     cu_seqlens_k = _maybe_contiguous(cu_seq_k)
     seqused_k = _maybe_contiguous(seqused_k)
+    block_table = _maybe_contiguous(block_table)
 
     out, softmax_lse, out_accum, softmax_lse_accum = _FA3_CUDA_FWD(
         q,
@@ -292,9 +302,9 @@ def _fa3_run_forward(
         None,  # cu_seqlens_k_new
         None,  # seqused_q
         seqused_k,  # seqused_k
-        None,  # max_seqlen_q
-        None,  # max_seqlen_k
-        None,  # page_table,
+        max_q,  # max_seqlen_q
+        max_k,  # max_seqlen_k
+        block_table,  # block_table,
         None,  # kv_batch_idx,
         None,  # leftpad_k,
         None,  # rotary_cos,
@@ -311,7 +321,8 @@ def _fa3_run_forward(
         0.0,  # softcap,
         True,  # rotary_interleaved,
         None,  # scheduler_metadata,
-        1 if torch.are_deterministic_algorithms_enabled() else 0,  # num_splits,
+        num_splits
+        or (1 if torch.are_deterministic_algorithms_enabled() else 0),  # num_splits,
         None,  # pack_gqa,
         torch._C._get_sm_carveout_experimental() or 0,  # sm_margin,
     )
@@ -398,6 +409,9 @@ def _fa3_flash_attention_forward_impl(
     seqused_k: torch.Tensor | None = None,
     alibi_slopes: torch.Tensor | None = None,
     out: torch.Tensor | None = None,
+    block_table: torch.Tensor | None = None,
+    compute_auxiliary: bool = True,
+    num_splits: int | None = None,
 ):
     error = _fa3_forward_support_error(
         query,
@@ -420,6 +434,8 @@ def _fa3_flash_attention_forward_impl(
         value,
         cum_seq_q,
         cum_seq_k,
+        max_q,
+        max_k,
         scale,
         is_causal,
         window_size_left,
@@ -429,11 +445,66 @@ def _fa3_flash_attention_forward_impl(
         q_descale,
         k_descale,
         v_descale,
+        block_table,
+        num_splits,
     )
-    rng_state = torch.zeros((2,), dtype=torch.uint64, device=query.device)
-    philox_offset = torch.zeros((), dtype=torch.uint64, device=query.device)
-    debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
+    if compute_auxiliary:
+        rng_state = torch.zeros((2,), dtype=torch.uint64, device=query.device)
+        philox_offset = torch.zeros((), dtype=torch.uint64, device=query.device)
+        debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
+    else:
+        rng_state = None
+        philox_offset = None
+        debug_mask = None
     return out, lse, rng_state, philox_offset, debug_mask
+
+
+def _fa3_flash_attention_forward_no_dropout_inplace_impl(
+    out: torch.Tensor,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    cum_seq_q: torch.Tensor | None,
+    cum_seq_k: torch.Tensor | None,
+    max_q: int,
+    max_k: int,
+    dropout_p: float,
+    is_causal: bool,
+    return_debug_mask: bool,
+    *,
+    scale: float | None = None,
+    window_size_left: int = -1,
+    window_size_right: int = -1,
+    seqused_k: torch.Tensor | None = None,
+    alibi_slopes: torch.Tensor | None = None,
+    block_table: torch.Tensor | None = None,
+    num_splits: int | None = None,
+):
+    _, lse, _, _, _ = _fa3_flash_attention_forward_impl(
+        query,
+        key,
+        value,
+        cum_seq_q,
+        cum_seq_k,
+        max_q,
+        max_k,
+        dropout_p,
+        is_causal,
+        return_debug_mask,
+        None,
+        None,
+        None,
+        scale=scale,
+        window_size_left=window_size_left,
+        window_size_right=window_size_right,
+        seqused_k=seqused_k,
+        alibi_slopes=alibi_slopes,
+        out=out,
+        block_table=block_table,
+        compute_auxiliary=False,
+        num_splits=num_splits,
+    )
+    return lse
 
 
 def _fa3_flash_attention_forward_impl_default(
@@ -453,7 +524,9 @@ def _fa3_flash_attention_forward_impl_default(
     window_size_right: int = -1,
     seqused_k: torch.Tensor | None = None,
     alibi_slopes: torch.Tensor | None = None,
+    block_table: torch.Tensor | None = None,
     out: torch.Tensor | None = None,
+    num_splits: int | None = None,
 ):
     return _fa3_flash_attention_forward_impl(
         query,
@@ -475,6 +548,8 @@ def _fa3_flash_attention_forward_impl_default(
         seqused_k=seqused_k,
         alibi_slopes=alibi_slopes,
         out=out,
+        block_table=block_table,
+        num_splits=num_splits,
     )
 
 

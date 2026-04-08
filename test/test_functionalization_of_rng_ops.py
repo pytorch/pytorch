@@ -23,9 +23,11 @@ if IS_WINDOWS and IS_CI:
 
 
 def count_philox_rand(gm, args, freq):
-    assert [node.target for node in gm.graph.nodes].count(
+    count = [node.target for node in gm.graph.nodes].count(
         torch.ops.rngprims.philox_rand.default
-    ) == freq
+    )
+    if count != freq:
+        raise AssertionError(f"expected {freq} philox_rand ops, got {count}")
     return gm
 
 

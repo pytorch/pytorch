@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import functools
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 import torch
 from functorch.dim import dims  # noqa: F401
@@ -67,7 +67,7 @@ def _create_rearrange_callable(
         return lambda tensor: tensor
 
     first_class_dims: tuple[str, ...] = tuple(f"d{i}" for i in range(n_dims))
-    identifier_dim_map: dict[Union[str, AnonymousAxis], tuple[str, ...]] = {}
+    identifier_dim_map: dict[str | AnonymousAxis, tuple[str, ...]] = {}
     anon_axes: list[AnonymousAxis] = []
 
     # map the left-hand side identifiers to strings representing first class dims
@@ -76,7 +76,8 @@ def _create_rearrange_callable(
         if isinstance(dimension, list):
             for identifier in dimension:
                 # non-unitary anon axes are not allowed in rearrange & unitary anon axes are represented as empty lists
-                assert isinstance(identifier, str)
+                if not isinstance(identifier, str):
+                    raise AssertionError(f"Expected str, got {type(identifier)}")
                 identifier_dim_map[identifier] = (first_class_dims[dims_i],)
                 dims_i += 1
             if not dimension:
@@ -96,11 +97,11 @@ def _create_rearrange_callable(
             raise ValueError(f"Unexpected dimension: {dimension}")
 
     def composition_to_dims(
-        composition: Sequence[Union[list[Union[str, AnonymousAxis]], str]],
-    ) -> list[Union[str, tuple[str, ...]]]:
+        composition: Sequence[list[str | AnonymousAxis] | str],
+    ) -> list[str | tuple[str, ...]]:
         """Convert a `ParsedExpression.composition` into a `Tensor.__getitem__` index of strings representing first
         class dims."""
-        dim_composition: list[Union[str, tuple[str, ...]]] = []
+        dim_composition: list[str | tuple[str, ...]] = []
         for dimension in composition:
             if isinstance(dimension, list):
                 dim_composition.append(
@@ -149,7 +150,7 @@ def _create_rearrange_callable(
 
 
 def rearrange(
-    tensor: Union[torch.Tensor, list[torch.Tensor], tuple[torch.Tensor, ...]],
+    tensor: torch.Tensor | list[torch.Tensor] | tuple[torch.Tensor, ...],
     pattern: str,
     **axes_lengths: int,
 ) -> torch.Tensor:

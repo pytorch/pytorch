@@ -6,7 +6,7 @@ from collections import defaultdict
 from collections.abc import Generator
 from contextlib import contextmanager
 from itertools import chain
-from typing import Any, Optional
+from typing import Any
 
 from torch.utils._appending_byte_serializer import (
     AppendingByteSerializer,
@@ -242,7 +242,7 @@ class CacheArtifactManager:
         artifact = CacheArtifactFactory.encode_create(artifact_type, key, content)
         if artifact in cls._seen_artifacts:
             return
-        log.debug("Recording %s", str(artifact))
+        log.debug("Recording %s", artifact)
         cls._new_cache_artifacts[artifact_type].append(artifact)
         cls._seen_artifacts.add(artifact)
 
@@ -254,7 +254,7 @@ class CacheArtifactManager:
         return len(cls._new_cache_artifacts) != 0
 
     @classmethod
-    def serialize(cls) -> Optional[tuple[bytes, CacheInfo]]:
+    def serialize(cls) -> tuple[bytes, CacheInfo] | None:
         """
         Converts the "mega" list into portable format
         """
@@ -280,7 +280,7 @@ class CacheArtifactManager:
         return None
 
     @staticmethod
-    def deserialize(serialized_artifacts: bytes) -> Optional[CacheArtifactsResult]:
+    def deserialize(serialized_artifacts: bytes) -> CacheArtifactsResult | None:
         """
         Converts the portable format back into CacheArtifacts
         """

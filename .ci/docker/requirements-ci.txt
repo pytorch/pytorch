@@ -75,15 +75,15 @@ librosa==0.10.2 ; python_version == "3.12" and platform_machine != "s390x"
 #test that import: test_spectral_ops.py
 #librosa depends on numba; disable it for s390x while numba is disabled too
 
-#mkl #this breaks linux-bionic-rocm4.5-py3.7
+# Only mkl-static and mkl-include are needed; the mkl package contains
+# dynamic libraries that are not discoverable by our build scripts.
+mkl-static==2024.2.0 ; platform_machine != "aarch64" and sys_platform != "darwin"
+mkl-include==2024.2.0 ; platform_machine != "aarch64" and sys_platform != "darwin"
 #Description: Intel oneAPI Math Kernel Library
-#Pinned versions:
+#Pinned versions: 2024.2.0
 #test that import: test_profiler.py, test_public_bindings.py, test_testing.py,
 #test_nn.py, test_mkldnn.py, test_jit.py, test_fx_experimental.py,
 #test_autograd.py
-
-#mkl-devel
-# see mkl
 
 #mock
 #Description: A testing library that allows you to replace parts of your
@@ -141,8 +141,8 @@ numpy==1.26.2; python_version == "3.11" or python_version == "3.12"
 numpy==2.1.2; python_version >= "3.13" and python_version < "3.14"
 numpy==2.3.4; python_version >= "3.14"
 
-pandas==2.0.3; python_version < "3.13"
-pandas==2.2.3; python_version >= "3.13" and python_version < "3.14"
+pandas==2.0.3; python_version < "3.12"
+pandas==2.2.3; python_version >= "3.12" and python_version < "3.14"
 pandas==2.3.3; python_version >= "3.14"
 
 #onnxruntime
@@ -169,12 +169,12 @@ optree==0.17.0 ; python_version >= "3.14"
 #test_pointwise_ops.py, test_dtensor_ops.py, test_torchinductor.py, test_fx.py,
 #test_fake_tensor.py, test_mps.py
 
-pillow==11.0.0
+pillow==12.1.1
 #Description:  Python Imaging Library fork
 #Pinned versions: 11.0.0
 #test that import:
 
-protobuf==6.33.2
+protobuf==6.33.5
 #Description:  Google's data interchange format
 #Pinned versions: 6.33.2
 #test that import: test_tensorboard.py, test/onnx/*
@@ -224,7 +224,7 @@ xdoctest==1.3.0
 #Pinned versions: 1.1.0
 #test that import:
 
-pygments==2.15.0
+pygments==2.20.0
 #Description: support doctest highlighting
 #Pinned versions: 2.12.0
 #test that import: the doctests
@@ -287,9 +287,14 @@ unittest-xml-reporting<=3.2.0,>=2.0.0
 #test that import:
 
 #lintrunner is supported on aarch64-linux only from 0.12.4 version
-lintrunner==0.12.7
+lintrunner==0.12.11
 #Description: all about linters!
-#Pinned versions: 0.12.7
+#Pinned versions: 0.12.11
+#test that import:
+
+spin==0.17
+#Description: developer CLI for common build/lint tasks
+#Pinned versions: 0.17
 #test that import:
 
 redis>=4.0.0
@@ -340,19 +345,19 @@ sympy==1.13.3
 #Pinned versions:
 #test that import:
 
-onnx==1.20.0
-#Description: Required by onnx tests, and mypy and test_public_bindings.py when checking torch.onnx._internal
+onnx==1.21.0
+#Description: Required by the torch.onnx exporter
 #Pinned versions:
 #test that import:
 
-onnxscript==0.5.4
-#Description: Required by mypy and test_public_bindings.py when checking torch.onnx._internal
+onnxscript==0.6.2
+#Description: Required by the torch.onnx exporter
 #Pinned versions:
 #test that import:
 
-onnx-ir==0.1.12
+onnx-ir==0.1.16
 #Description: In-memory IR for ONNX, dependency of onnxscript. Pinned to avoid breaking changes in newer versions.
-#Pinned versions: 0.1.12
+#Pinned versions:
 #test that import:
 
 parameterized==0.8.1
@@ -370,6 +375,7 @@ pwlf==2.2.1
 #test that import: test_sac_estimator.py
 
 # To build PyTorch itself
+pip==26.0.1
 pyyaml==6.0.3
 pyzstd
 setuptools==78.1.1
@@ -411,6 +417,5 @@ tqdm>=4.66.0
 #Description: progress bar library required for dynamo benchmarks
 #test that import: benchmarks/dynamo/*
 
-Jinja2==3.1.6
-aiohttp==3.13.3
+aiohttp==3.13.4
 #Description: required for torch.distributed.debug

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import itertools
 import re
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import torch.fx as fx  # noqa: TC001
 from torch.utils._ordered_set import OrderedSet
@@ -65,9 +65,7 @@ class GraphView:
             self.data.append(data)
             self.unique_nodes.add(data)
 
-    def get_child(
-        self, module_stack: str, klass: Optional[type[Any]] = None
-    ) -> GraphView:
+    def get_child(self, module_stack: str, klass: type[Any] | None = None) -> GraphView:
         if module_stack not in self.children:
             new_stack = GraphView(module_stack, klass or self.klass)
             self.children[module_stack] = new_stack
@@ -112,7 +110,7 @@ def _is_root(stack: str) -> bool:
 def make_graph_view(
     graph: fx.Graph,
     module_stack_fn: Callable[[fx.Node], list[tuple[str, type[Any]]]] | None = None,
-) -> Optional[GraphView]:
+) -> GraphView | None:
     """
     Code from: https://github.com/meta-pytorch/autoparallel/pull/158
 
@@ -209,7 +207,7 @@ def make_graph_view(
 
 
 def get_subgraph_by_path(
-    graph_view: GraphView, paths: Union[str, list[str]]
+    graph_view: GraphView, paths: str | list[str]
 ) -> list[fx.Node]:
     """
     Get subgraph by path(s).

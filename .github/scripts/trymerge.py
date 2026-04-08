@@ -1,14 +1,6 @@
 #!/usr/bin/env python3
 
-# NB: the following functions are used in Meta-internal workflows
-# (github_first_try_merge/my_handler.py) and thus have functionality limitations
-# (no `git` command access, no network access besides the strict allow list):
-#
-# find_matching_merge_rule
-# read_merge_rules
-#
-# Also any signature changes of these functions, as well as changes to the `GitHubPR`
-# class, will likely require corresponding changes for the internal workflows.
+from __future__ import annotations
 
 import base64
 import json
@@ -17,12 +9,11 @@ import re
 import time
 import urllib.parse
 from collections import defaultdict
-from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
 from re import Pattern
-from typing import Any, cast, NamedTuple, Optional
+from typing import Any, cast, NamedTuple, TYPE_CHECKING
 from warnings import warn
 
 import yaml
@@ -54,6 +45,10 @@ from label_utils import (
 from trymerge_explainer import get_revert_message, TryMergeExplainer
 
 
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
+
+
 # labels
 MERGE_IN_PROGRESS_LABEL = "merging"
 MERGE_COMPLETE_LABEL = "merged"
@@ -62,22 +57,22 @@ MERGE_COMPLETE_LABEL = "merged"
 class JobCheckState(NamedTuple):
     name: str
     url: str
-    status: Optional[str]
-    classification: Optional[str]
-    job_id: Optional[int]
-    title: Optional[str]
-    summary: Optional[str]
+    status: str | None
+    classification: str | None
+    job_id: int | None
+    title: str | None
+    summary: str | None
 
 
 JobNameToStateDict = dict[str, JobCheckState]
 
 
 class WorkflowCheckState:
-    def __init__(self, name: str, url: str, run_id: int, status: Optional[str]):
+    def __init__(self, name: str, url: str, run_id: int, status: str | None):
         self.name: str = name
         self.url: str = url
         self.run_id: int = run_id
-        self.status: Optional[str] = status
+        self.status: str | None = status
         self.jobs: JobNameToStateDict = {}
 
 
@@ -489,12 +484,12 @@ def iter_issue_timeline_until_comment(
     )
 
 
-def sha_from_committed_event(ev: dict[str, Any]) -> Optional[str]:
+def sha_from_committed_event(ev: dict[str, Any]) -> str | None:
     """Extract SHA from committed event in timeline"""
     return ev.get("sha")
 
 
-def sha_from_force_push_after(ev: dict[str, Any]) -> Optional[str]:
+def sha_from_force_push_after(ev: dict[str, Any]) -> str | None:
     """Extract SHA from force push event in timeline"""
     # The current GitHub API format
     commit_id = ev.get("commit_id")
@@ -542,7 +537,7 @@ def get_check_run_name_prefix(workflow_run: Any) -> str:
         return f"{workflow_run['workflow']['name']} / "
 
 
-def is_passing_status(status: Optional[str]) -> bool:
+def is_passing_status(status: str | None) -> bool:
     return status is not None and status.upper() in ["SUCCESS", "SKIPPED", "NEUTRAL"]
 
 
@@ -664,7 +659,7 @@ def parse_args() -> Any:
     return parser.parse_args()
 
 
-def can_skip_internal_checks(pr: "GitHubPR", comment_id: Optional[int] = None) -> bool:
+def can_skip_internal_checks(pr: GitHubPR, comment_id: int | None = None) -> bool:
     if comment_id is None:
         return False
     comment = pr.get_comment_by_id(comment_id)
@@ -675,10 +670,10 @@ def can_skip_internal_checks(pr: "GitHubPR", comment_id: Optional[int] = None) -
 
 def _revlist_to_prs(
     repo: GitRepo,
-    pr: "GitHubPR",
+    pr: GitHubPR,
     rev_list: Iterable[str],
-    should_skip: Optional[Callable[[int, "GitHubPR"], bool]] = None,
-) -> list[tuple["GitHubPR", str]]:
+    should_skip: Callable[[int, GitHubPR], bool] | None = None,
+) -> list[tuple[GitHubPR, str]]:
     rc: list[tuple[GitHubPR, str]] = []
     for idx, rev in enumerate(rev_list):
         msg = repo.commit_message(rev)
@@ -706,8 +701,8 @@ def _revlist_to_prs(
 
 
 def get_ghstack_prs(
-    repo: GitRepo, pr: "GitHubPR", open_only: bool = True
-) -> list[tuple["GitHubPR", str]]:
+    repo: GitRepo, pr: GitHubPR, open_only: bool = True
+) -> list[tuple[GitHubPR, str]]:
     """
     Get the PRs in the stack that are below this PR (inclusive).  Throws error if any of the open PRs are out of sync.
     @:param open_only: Only return open PRs
@@ -716,7 +711,7 @@ def get_ghstack_prs(
     orig_ref = f"{repo.remote}/{pr.get_ghstack_orig_ref()}"
     rev_list = repo.revlist(f"{pr.default_branch()}..{orig_ref}")
 
-    def skip_func(idx: int, candidate: "GitHubPR") -> bool:
+    def skip_func(idx: int, candidate: GitHubPR) -> bool:
         if not open_only or not candidate.is_closed():
             return False
         print(
@@ -761,14 +756,14 @@ class GitHubPR:
         self.project = project
         self.pr_num = pr_num
         self.info = gh_get_pr_info(org, project, pr_num)
-        self.changed_files: Optional[list[str]] = None
-        self.labels: Optional[list[str]] = None
-        self.conclusions: Optional[JobNameToStateDict] = None
-        self.comments: Optional[list[GitHubComment]] = None
-        self._authors: Optional[list[tuple[str, str]]] = None
-        self._reviews: Optional[list[tuple[str, str]]] = None
-        self.merge_base: Optional[str] = None
-        self.submodules: Optional[list[str]] = None
+        self.changed_files: list[str] | None = None
+        self.labels: list[str] | None = None
+        self.conclusions: JobNameToStateDict | None = None
+        self.comments: list[GitHubComment] | None = None
+        self._authors: list[tuple[str, str]] | None = None
+        self._reviews: list[tuple[str, str]] | None = None
+        self.merge_base: str | None = None
+        self.submodules: list[str] | None = None
 
     def is_closed(self) -> bool:
         return bool(self.info["closed"])
@@ -804,7 +799,7 @@ class GitHubPR:
     def last_commit(self) -> Any:
         return self.info["commits"]["nodes"][-1]["commit"]
 
-    def last_commit_sha(self, default: Optional[str] = None) -> str:
+    def last_commit_sha(self, default: str | None = None) -> str:
         # for commits, the oid is the sha
 
         if default is None:
@@ -910,7 +905,7 @@ class GitHubPR:
     def get_commit_count(self) -> int:
         return int(self.info["commits_with_authors"]["totalCount"])
 
-    def get_commit_sha_at_comment(self, comment_id: int) -> Optional[str]:
+    def get_commit_sha_at_comment(self, comment_id: int) -> str | None:
         """
         Get the PR head commit SHA that was present when a specific comment was posted.
         This ensures we only merge the state of the PR at the time the merge command was issued,
@@ -1057,11 +1052,10 @@ class GitHubPR:
                     summary=None,
                 )
 
-        # Making an exception for Apply lint auggestions/autoformat because the
-        # bot adds a merged label -> triggers workflow -> sometimes needs
-        # approval -> is read as failure, which results in a blocked merge, but
-        # this workflow doesn't provide mergability info
-        self.conclusions.pop("Apply lint suggestions", None)
+        # Same issue for Claude Code: triggered by comment events, uses a
+        # protected environment (bedrock), resulting in ACTION_REQUIRED
+        # check suite conclusions that block merges
+        self.conclusions.pop("Claude Code", None)
 
         return self.conclusions
 
@@ -1089,7 +1083,7 @@ class GitHubPR:
     def get_body(self) -> str:
         return cast(str, self.info["body"])
 
-    def get_merge_commit(self) -> Optional[str]:
+    def get_merge_commit(self) -> str | None:
         mc = self.info["mergeCommit"]
         return mc["oid"] if mc is not None else None
 
@@ -1158,7 +1152,7 @@ class GitHubPR:
 
         raise RuntimeError(f"Comment with id {database_id} not found")
 
-    def get_diff_revision(self) -> Optional[str]:
+    def get_diff_revision(self) -> str | None:
         rc = RE_DIFF_REV.search(self.get_body())
         return rc.group(1) if rc is not None else None
 
@@ -1182,9 +1176,9 @@ class GitHubPR:
         self,
         repo: GitRepo,
         skip_mandatory_checks: bool,
-        comment_id: Optional[int] = None,
+        comment_id: int | None = None,
         skip_all_rule_checks: bool = False,
-    ) -> list["GitHubPR"]:
+    ) -> list[GitHubPR]:
         if not self.is_ghstack_pr():
             raise AssertionError(
                 f"merge_ghstack_into called on non-ghstack PR #{self.pr_num}"
@@ -1217,7 +1211,7 @@ class GitHubPR:
     def gen_commit_message(
         self,
         filter_ghstack: bool = False,
-        ghstack_deps: Optional[list["GitHubPR"]] = None,
+        ghstack_deps: list[GitHubPR] | None = None,
     ) -> str:
         """Fetches title and body from PR description
         adds reviewed by, pull request resolved and optionally
@@ -1269,7 +1263,7 @@ class GitHubPR:
         skip_mandatory_checks: bool = False,
         dry_run: bool = False,
         comment_id: int,
-        ignore_current_checks: Optional[list[str]] = None,
+        ignore_current_checks: list[str] | None = None,
     ) -> None:
         # Raises exception if matching rule is not found
         (
@@ -1338,10 +1332,10 @@ class GitHubPR:
         self,
         repo: GitRepo,
         skip_mandatory_checks: bool = False,
-        comment_id: Optional[int] = None,
-        branch: Optional[str] = None,
+        comment_id: int | None = None,
+        branch: str | None = None,
         skip_all_rule_checks: bool = False,
-    ) -> list["GitHubPR"]:
+    ) -> list[GitHubPR]:
         """
         :param skip_all_rule_checks: If true, skips all rule checks on ghstack PRs, useful for dry-running merge locally
         """
@@ -1403,7 +1397,7 @@ class GitHubPR:
 
 
 class MergeRuleFailedError(RuntimeError):
-    def __init__(self, message: str, rule: Optional["MergeRule"] = None) -> None:
+    def __init__(self, message: str, rule: MergeRule | None = None) -> None:
         super().__init__(message)
         self.rule = rule
 
@@ -1421,7 +1415,7 @@ class MergeRule:
     name: str
     patterns: list[str]
     approved_by: list[str]
-    mandatory_checks_name: Optional[list[str]]
+    mandatory_checks_name: list[str] | None
     ignore_flaky_failures: bool = True
 
 
@@ -1436,9 +1430,7 @@ def gen_new_issue_link(
     )
 
 
-def read_merge_rules(
-    repo: Optional[GitRepo], org: str, project: str
-) -> list[MergeRule]:
+def read_merge_rules(repo: GitRepo | None, org: str, project: str) -> list[MergeRule]:
     """Returns the list of all merge rules for the repo or project.
 
     NB: this function is used in Meta-internal workflows, see the comment
@@ -1465,14 +1457,14 @@ def read_merge_rules(
 
 def find_matching_merge_rule(
     pr: GitHubPR,
-    repo: Optional[GitRepo] = None,
+    repo: GitRepo | None = None,
     skip_mandatory_checks: bool = False,
     skip_internal_checks: bool = False,
-    ignore_current_checks: Optional[list[str]] = None,
+    ignore_current_checks: list[str] | None = None,
 ) -> tuple[
     MergeRule,
-    list[tuple[str, Optional[str], Optional[int]]],
-    list[tuple[str, Optional[str], Optional[int]]],
+    list[tuple[str, str | None, int | None]],
+    list[tuple[str, str | None, int | None]],
     dict[str, list[Any]],
 ]:
     """
@@ -1660,12 +1652,12 @@ def find_matching_merge_rule(
     raise MergeRuleFailedError(reject_reason, rule)
 
 
-def checks_to_str(checks: list[tuple[str, Optional[str]]]) -> str:
+def checks_to_str(checks: list[tuple[str, str | None]]) -> str:
     return ", ".join(f"[{c[0]}]({c[1]})" if c[1] is not None else c[0] for c in checks)
 
 
 def checks_to_markdown_bullets(
-    checks: list[tuple[str, Optional[str], Optional[int]]],
+    checks: list[tuple[str, str | None, int | None]],
 ) -> list[str]:
     return [
         f"- [{c[0]}]({c[1]})" if c[1] is not None else f"- {c[0]}" for c in checks[:5]
@@ -1677,9 +1669,7 @@ def post_starting_merge_comment(
     pr: GitHubPR,
     explainer: TryMergeExplainer,
     dry_run: bool,
-    ignore_current_checks_info: Optional[
-        list[tuple[str, Optional[str], Optional[int]]]
-    ] = None,
+    ignore_current_checks_info: list[tuple[str, str | None, int | None]] | None = None,
 ) -> None:
     """Post the initial merge starting message on the PR. Also post a short
     message on all PRs in the stack."""
@@ -1737,12 +1727,12 @@ def save_merge_record(
     owner: str,
     project: str,
     author: str,
-    pending_checks: list[tuple[str, Optional[str], Optional[int]]],
-    failed_checks: list[tuple[str, Optional[str], Optional[int]]],
-    ignore_current_checks: list[tuple[str, Optional[str], Optional[int]]],
-    broken_trunk_checks: list[tuple[str, Optional[str], Optional[int]]],
-    flaky_checks: list[tuple[str, Optional[str], Optional[int]]],
-    unstable_checks: list[tuple[str, Optional[str], Optional[int]]],
+    pending_checks: list[tuple[str, str | None, int | None]],
+    failed_checks: list[tuple[str, str | None, int | None]],
+    ignore_current_checks: list[tuple[str, str | None, int | None]],
+    broken_trunk_checks: list[tuple[str, str | None, int | None]],
+    flaky_checks: list[tuple[str, str | None, int | None]],
+    unstable_checks: list[tuple[str, str | None, int | None]],
     last_commit_sha: str,
     merge_base_sha: str,
     merge_commit_sha: str = "",
@@ -1875,7 +1865,7 @@ def is_flaky(
 
 def is_invalid_cancel(
     name: str,
-    conclusion: Optional[str],
+    conclusion: str | None,
     drci_classifications: Any,
 ) -> bool:
     """
@@ -1902,7 +1892,7 @@ def get_classifications(
     pr_num: int,
     project: str,
     checks: dict[str, JobCheckState],
-    ignore_current_checks: Optional[list[str]],
+    ignore_current_checks: list[str] | None,
 ) -> dict[str, JobCheckState]:
     # Get the failure classification from Dr.CI, which is the source of truth
     # going forward. It's preferable to try calling Dr.CI API directly first
@@ -2011,7 +2001,7 @@ def get_classifications(
 
 
 def filter_checks_with_lambda(
-    checks: JobNameToStateDict, status_filter: Callable[[Optional[str]], bool]
+    checks: JobNameToStateDict, status_filter: Callable[[str | None], bool]
 ) -> list[JobCheckState]:
     return [check for check in checks.values() if status_filter(check.status)]
 
@@ -2027,7 +2017,7 @@ def get_pr_commit_sha(repo: GitRepo, pr: GitHubPR) -> str:
 
 
 def validate_revert(
-    repo: GitRepo, pr: GitHubPR, *, comment_id: Optional[int] = None
+    repo: GitRepo, pr: GitHubPR, *, comment_id: int | None = None
 ) -> tuple[str, str]:
     comment = (
         pr.get_last_comment()
@@ -2044,9 +2034,13 @@ def validate_revert(
     # For some reason, one can not be a member of private repo, only CONTRIBUTOR
     if pr.is_base_repo_private():
         allowed_reverters.append("CONTRIBUTOR")
-    # Special case the pytorch-auto-revert app, whose does not have association
-    # But should be able to issue revert command
-    if comment.author_url == "https://github.com/apps/pytorch-auto-revert":
+    # Special case GitHub Apps that don't have a repo association
+    # but should be able to issue revert commands
+    allowed_apps = {
+        "https://github.com/apps/pytorch-auto-revert",
+        "https://github.com/apps/facebook-github-tools",
+    }
+    if comment.author_url in allowed_apps:
         allowed_reverters.append("NONE")
 
     if author_association not in allowed_reverters:
@@ -2158,8 +2152,8 @@ def try_revert(
     pr: GitHubPR,
     *,
     dry_run: bool = False,
-    comment_id: Optional[int] = None,
-    reason: Optional[str] = None,
+    comment_id: int | None = None,
+    reason: str | None = None,
 ) -> None:
     try:
         author_login, commit_sha = validate_revert(repo, pr, comment_id=comment_id)
@@ -2183,6 +2177,13 @@ def try_revert(
             print(
                 f"Failed to fetch dependent PRs: {str(e)}, fall over to single revert"
             )
+
+    if not shas_and_prs:
+        raise RuntimeError(
+            f"No revertable PRs found in ghstack for #{pr.pr_num}. "
+            f"This typically means the PR is still open (not merged) or "
+            f"its GitHub state is inconsistent. Only closed/merged PRs can be reverted."
+        )
 
     do_revert_prs(
         repo,
@@ -2228,10 +2229,10 @@ def has_label(labels: list[str], pattern: Pattern[str] = CIFLOW_LABEL) -> bool:
 def categorize_checks(
     check_runs: JobNameToStateDict,
     required_checks: list[str],
-    ok_failed_checks_threshold: Optional[int] = None,
+    ok_failed_checks_threshold: int | None = None,
 ) -> tuple[
-    list[tuple[str, Optional[str], Optional[int]]],
-    list[tuple[str, Optional[str], Optional[int]]],
+    list[tuple[str, str | None, int | None]],
+    list[tuple[str, str | None, int | None]],
     dict[str, list[Any]],
 ]:
     """
@@ -2239,8 +2240,8 @@ def categorize_checks(
     failures and broken trunk are ignored by defaults when ok_failed_checks_threshold
     is not set (unlimited)
     """
-    pending_checks: list[tuple[str, Optional[str], Optional[int]]] = []
-    failed_checks: list[tuple[str, Optional[str], Optional[int]]] = []
+    pending_checks: list[tuple[str, str | None, int | None]] = []
+    failed_checks: list[tuple[str, str | None, int | None]] = []
 
     # failed_checks_categorization is used to keep track of all ignorable failures when saving the merge record on s3
     failed_checks_categorization: dict[str, list[Any]] = defaultdict(list)

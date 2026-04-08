@@ -71,15 +71,15 @@ def read_bool(section, field, default, required = True):
     else:
         fail("`{}:{}`: no value set".format(section, field))
 
-def _is_build_mode_dev():
-    if is_production_build_android():
-        # Android Prod builds
-        return False
+def _select_if_build_mode_dev(dev_value, default = []):
     if is_production_build_ios() or is_profile_build_ios():
-        # iOS Prod builds
-        return False
+        return default
 
-    return True
+    return select({
+        "DEFAULT": default,
+        "ovr_config//build_mode:optimization[dev]": dev_value,
+    })
+
 
 def _get_enable_lightweight_dispatch():
     return read_bool("pt", "enable_lightweight_dispatch", False)
@@ -93,10 +93,24 @@ def get_enable_mobile_dispatch_keys_trimming():
 def get_disable_per_op_profiling():
     return read_bool("pt", "disable_per_op_profiling", True)
 
-def get_strip_error_messages():
+def strip_error_messages_select(value, default = []):
     if IS_OSS:
-        return True  # always strip in OSS CI to expose potential issues
-    return read_bool("pt", "strip_error_messages", not _is_build_mode_dev())
+        return value  # always strip in OSS CI to expose potential issues
+    strip_error = read_bool("pt", "strip_error_messages", default = None, required = False)
+
+    if strip_error == None:
+
+        if is_production_build_ios() or is_profile_build_ios():
+            return value
+
+        return select({
+            "DEFAULT": default,
+            "ovr_config//build_mode:optimization[opt]": value,
+        })
+
+    if strip_error:
+        return value
+    return default
 
 def get_disable_warn():
     return read_bool("pt", "disable_warn", False)
@@ -249,9 +263,7 @@ _COMMON_PREPROCESSOR_FLAGS = [
     "-DNO_EXPORT",
 ] + (
     ["-DC10_MOBILE_TRIM_DISPATCH_KEYS"] if get_enable_mobile_dispatch_keys_trimming() else []
-) + (
-    ["-DSTRIP_ERROR_MESSAGES"] if get_strip_error_messages() else []
-) + (
+) + strip_error_messages_select(["-DSTRIP_ERROR_MESSAGES"]) + (
     ["-DDISABLE_WARN"] if get_disable_warn() else []
 )
 
@@ -282,9 +294,9 @@ def get_aten_preprocessor_flags():
         "-DUSE_RUY_QMATMUL",
     ]
     if get_disable_per_op_profiling():
-        ATEN_PREPROCESSOR_FLAGS.append("-DPYTORCH_DISABLE_PER_OP_PROFILING")
+        ATEN_PREPROCESSOR_FLAGS += ["-DPYTORCH_DISABLE_PER_OP_PROFILING"]
     if _get_enable_record_kernel_dtype():
-        ATEN_PREPROCESSOR_FLAGS.append("-DENABLE_RECORD_KERNEL_FUNCTION_DTYPE")
+        ATEN_PREPROCESSOR_FLAGS += ["-DENABLE_RECORD_KERNEL_FUNCTION_DTYPE"]
     return ATEN_PREPROCESSOR_FLAGS
 
 def get_pt_preprocessor_flags():
@@ -295,8 +307,7 @@ def get_pt_preprocessor_flags():
         "-DNO_CUDNN_DESTROY_HANDLE",
     ]
 
-    if _is_build_mode_dev():
-        PT_PREPROCESSOR_FLAGS.append("-DENABLE_PYTORCH_NON_PRODUCTION_BUILDS")
+    PT_PREPROCESSOR_FLAGS += _select_if_build_mode_dev(["-DENABLE_PYTORCH_NON_PRODUCTION_BUILDS"])
     return PT_PREPROCESSOR_FLAGS
 
 # This needs to be kept in sync with https://github.com/pytorch/pytorch/blob/release/1.9/torchgen/gen.py#L892  @lint-ignore
@@ -534,7 +545,7 @@ def copy_template_registration_files(name, apple_sdks = None):
     #
     for (path_prefix, file_paths) in template_source_dict.items():
         cmd.append("mkdir -p $OUT/{}".format(path_prefix))
-        cmd_exe.append("md $OUT/{}".format(path_prefix))
+        cmd_exe.append("if not exist $OUT\\{0} md $OUT\\{0}".format(path_prefix.replace("/", "\\")))
 
         # Adding *.cpp is a workaround to prevent cp from thrown an error when it
         # encounters a directory (since -r was not specified). If files with an
@@ -542,32 +553,37 @@ def copy_template_registration_files(name, apple_sdks = None):
         # will not work and will need to be updated.
         #
         cmd.append("cp -f $(location {0}:templated_selective_build_srcs)/{1}/*.cpp $OUT/{1}/".format(ROOT, path_prefix))
-        cmd_exe.append("robocopy /E $(location {0}:templated_selective_build_srcs)/{1} $OUT/{1}".format(ROOT, path_prefix))
+        cmd_exe.append("robocopy /E $(location {0}:templated_selective_build_srcs)/{1} $OUT\\{2}".format(ROOT, path_prefix, path_prefix.replace("/", "\\")))
 
     if NOT_OSS:
         for file_path in TEMPLATE_MASKRCNN_SOURCE_LIST:
             maskrcnn_file = "$(location //xplat/caffe2/fb/custom_ops/maskrcnn:templated_selective_build_srcs)/" + file_path
             cmd.append("cp -f " + maskrcnn_file + " $OUT")
-            cmd_exe.append("copy " + maskrcnn_file + " $OUT")
+            maskrcnn_file_win = "$(location //xplat/caffe2/fb/custom_ops/maskrcnn:templated_selective_build_srcs)\\" + file_path.replace("/", "\\")
+            cmd_exe.append("copy " + maskrcnn_file_win + " $OUT")
 
     cmd.append("mkdir -p $OUT/aten/src/ATen")
-    cmd_exe.append("md $OUT/aten/src/ATen")
+    cmd_exe.append("if not exist $OUT\\aten\\src\\ATen md $OUT\\aten\\src\\ATen")
 
     # NB: CUDA is skipped here because this is selective build and CUDA is not
     # supported for selective build
     for ufunc_file in aten_ufunc_generated_all_cpu_sources("$(location " + ROOT + ":gen_aten[{}])"):
         cmd.append("cp -f " + ufunc_file + " $OUT/aten/src/ATen")
-        cmd_exe.append("copy " + ufunc_file + " $OUT/aten/src/ATen")
+        cmd_exe.append("copy " + ufunc_file + " $OUT\\aten\\src\\ATen")
 
     if NOT_OSS:
         pvd_batch_box_cox_file = "$(location //xplat/caffe2/fb/custom_ops/batch_box_cox:templated_selective_build_srcs)/register_batch_box_cox_ops.cpp"
         cmd.append("cp -f " + pvd_batch_box_cox_file + " $OUT")
-        cmd_exe.append("copy " + pvd_batch_box_cox_file + " $OUT")
+        pvd_batch_box_cox_file_win = "$(location //xplat/caffe2/fb/custom_ops/batch_box_cox:templated_selective_build_srcs)\\register_batch_box_cox_ops.cpp"
+        cmd_exe.append("copy " + pvd_batch_box_cox_file_win + " $OUT")
 
+    # For Windows, use newlines to separate commands into different lines in the batch file.
+    # This avoids Windows command line length limits. Each line in a .bat file is treated as a separate
+    # command with its own length limit.
     fb_xplat_genrule(
         name = name,
         cmd = " && ".join(cmd),
-        cmd_exe = "@powershell -Command " + ("; ".join(cmd_exe)),
+        cmd_exe = "\n".join(cmd_exe),
         outs = get_template_registration_files_outs(IS_OSS),
         default_outs = ["."],
         apple_sdks = apple_sdks,
@@ -900,6 +916,7 @@ def define_buck_targets(
             ("aten/src", "ATen/ops/*.h"),
             # ATen Base
             ("aten/src", "ATen/*.h"),
+            ("aten/src", "ATen/accelerator/*.h"),
             ("aten/src", "ATen/cpu/**/*.h"),
             ("aten/src", "ATen/detail/*.h"),
             ("aten/src", "ATen/functorch/**/*.h"),
@@ -1514,7 +1531,12 @@ def define_buck_targets(
         srcs = [
             "torch/csrc/api/src/data/samplers/random.cpp",
             "torch/csrc/api/src/data/samplers/sequential.cpp",
+            "torch/csrc/api/src/optim/adagrad.cpp",
+            "torch/csrc/api/src/optim/adam.cpp",
+            "torch/csrc/api/src/optim/adamw.cpp",
+            "torch/csrc/api/src/optim/lbfgs.cpp",
             "torch/csrc/api/src/optim/optimizer.cpp",
+            "torch/csrc/api/src/optim/rmsprop.cpp",
             "torch/csrc/api/src/optim/serialize.cpp",
             "torch/csrc/api/src/optim/sgd.cpp",
             "torch/csrc/api/src/serialize/input-archive.cpp",

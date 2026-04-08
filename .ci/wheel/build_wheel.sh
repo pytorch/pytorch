@@ -39,7 +39,8 @@ else
 fi
 
 echo "Building for Python: $desired_python Version: $build_version Build: $build_number"
-python_nodot="$(echo $desired_python | tr -d m.u)"
+python_tag="cp$(echo $desired_python | tr -d m.ut)"
+abi_tag="cp$(echo $desired_python | tr -d .)"
 
 # Version: setup.py uses $PYTORCH_BUILD_VERSION.post$PYTORCH_BUILD_NUMBER if
 # PYTORCH_BUILD_NUMBER > 1
@@ -96,11 +97,11 @@ fi
 whl_tmp_dir="${MAC_PACKAGE_WORK_DIR}/dist"
 mkdir -p "$whl_tmp_dir"
 
-mac_version='macosx-11_0-arm64'
+mac_version='macosx-14.0-arm64'
 libtorch_arch='arm64'
 
 # Create a consistent wheel package name to rename the wheel to
-wheel_filename_new="${TORCH_PACKAGE_NAME}-${build_version}${build_number_prefix}-cp${python_nodot}-none-${mac_version//[-,]/_}.whl"
+wheel_filename_new="${TORCH_PACKAGE_NAME}-${build_version}${build_number_prefix}-${python_tag}-${abi_tag}-${mac_version//[-,.]/_}.whl"
 
 ###########################################################
 
@@ -124,32 +125,19 @@ popd
 
 export TH_BINARY_BUILD=1
 export INSTALL_TEST=0 # dont install test binaries into site-packages
-export MACOSX_DEPLOYMENT_TARGET=11.0
+export MACOSX_DEPLOYMENT_TARGET=14.0
 
 EXTRA_CONDA_INSTALL_FLAGS=""
 CONDA_ENV_CREATE_FLAGS=""
-RENAME_WHEEL=true
+RENAME_WHEEL=false
+VERIFY_WHEELNAME=true
 case $desired_python in
-    3.14t)
-        echo "Using 3.14 deps"
-        mac_version='macosx-11.0-arm64'
-        NUMPY_PINNED_VERSION="==2.1.0"
-        RENAME_WHEEL=false
+    3.14*)
+        echo "Using ${desired_python} deps"
+        NUMPY_PINNED_VERSION="==2.3.4"
         ;;
-    3.14)
-        echo "Using 3.14t deps"
-        mac_version='macosx-11.0-arm64'
-        NUMPY_PINNED_VERSION="==2.1.0"
-        RENAME_WHEEL=false
-        ;;
-    3.13t)
-        echo "Using 3.13t deps"
-        mac_version='macosx-11.0-arm64'
-        NUMPY_PINNED_VERSION="==2.1.0"
-        RENAME_WHEEL=false
-        ;;
-    3.13)
-        echo "Using 3.13 deps"
+    3.13*)
+        echo "Using ${desired_python} deps"
         NUMPY_PINNED_VERSION="==2.1.0"
         ;;
     3.12)
@@ -176,7 +164,16 @@ PINNED_PACKAGES=(
 python -mvenv ~/${desired_python}-build
 source ~/${desired_python}-build/bin/activate
 retry pip install "${PINNED_PACKAGES[@]}" -r "${pytorch_rootdir}/requirements.txt"
-retry brew install libomp
+
+# Use openmp from conda which supports 11.0. Otherwise we'll end up with
+# whatever version comes with homebrew which only supports the build machine's
+# OS version or higher
+if [[ -d "/opt/llvm-openmp" ]]; then
+  export OMP_PREFIX=/opt/llvm-openmp
+else
+  echo "libomp not found, installing via brew"
+  retry brew install libomp
+fi
 
 # For USE_DISTRIBUTED=1 on macOS, need libuv, which is build as part of tensorpipe submodule
 export USE_DISTRIBUTED=1
@@ -213,9 +210,13 @@ if [[ -z "$BUILD_PYTHONLESS" && $RENAME_WHEEL == true  ]]; then
     # Copy the whl to a final destination before tests are run
     echo "Renaming Wheel file: $wheel_filename_gen to $wheel_filename_new"
     cp "$whl_tmp_dir/$wheel_filename_gen" "$PYTORCH_FINAL_PACKAGE_DIR/$wheel_filename_new"
-elif [[ $RENAME_WHEEL == false ]]; then
+elif [[ -z "$BUILD_PYTHONLESS" && $RENAME_WHEEL == false ]]; then
     echo "Copying Wheel file: $wheel_filename_gen to $PYTORCH_FINAL_PACKAGE_DIR"
     cp "$whl_tmp_dir/$wheel_filename_gen" "$PYTORCH_FINAL_PACKAGE_DIR/$wheel_filename_gen"
+    if [[ "$VERIFY_WHEELNAME" == "true" && "$wheel_filename_gen" != "$wheel_filename_new" ]]; then
+        echo "Got wheelname: $wheel_filename_gen. Expected: $wheel_filename_new"
+        exit 1
+    fi
 else
     pushd "$pytorch_rootdir"
 

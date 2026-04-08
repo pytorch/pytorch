@@ -71,10 +71,11 @@ from torch._functorch.aot_autograd import (
     aot_export_joint_with_descriptors,
 )
 from torch._guards import detect_fake_mode, tracing, TracingContext
-from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
+from torch._library.opaque_object import is_opaque_type
 from torch._logging import dtrace_structured
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch._utils_internal import log_export_usage
+from torch._utils_internal import compile_time_strobelight_meta, log_export_usage
 from torch.export._leakage_detection_utils import find_legit_leaks_from_referrers
 from torch.export._unlift import _check_input_constraints_pre_hook
 from torch.export.dynamic_shapes import (
@@ -1629,9 +1630,12 @@ def _strict_export(
                     raise AssertionError(
                         "Cannot find dynamo_fake_mode. This could be due to the exported graph module have no placeholders."
                     )
-                node.meta["val"] = dynamo_fake_mode.from_tensor(
-                    attr, static_shapes=True
-                )
+                if is_opaque_type(type(attr)):
+                    node.meta["val"] = maybe_to_fake_obj(dynamo_fake_mode, attr)
+                else:
+                    node.meta["val"] = dynamo_fake_mode.from_tensor(
+                        attr, static_shapes=True
+                    )
 
     # Fix the graph output signature to be tuple if scalar
     wrap_tuple = False
@@ -1964,9 +1968,12 @@ def _export_to_aten_ir_make_fx(
         sig = GraphSignature(
             parameters=list(named_parameters),
             buffers=list(named_buffers),
+            # pyrefly: ignore[bad-argument-type]
             user_inputs=input_names[params_len:],
             user_outputs=output_names,
+            # pyrefly: ignore[no-matching-overload]
             inputs_to_parameters=dict(zip(input_names[0:param_len], named_parameters)),
+            # pyrefly: ignore[no-matching-overload]
             inputs_to_buffers=dict(
                 zip(input_names[param_len : param_len + buffer_len], named_buffers)
             ),
@@ -2424,6 +2431,7 @@ def _export_for_training(
 
 @_log_export_wrapper
 @_disable_prexisiting_fake_mode
+@compile_time_strobelight_meta(phase_name="export")
 def _export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],

@@ -31,7 +31,7 @@ class QuantizationTracer(Tracer):
         # We can change this if there is a use case that configures
         # qconfig using top level module type
         self.scope = Scope("", None)
-        self.record_stack_traces = True
+        self.record_stack_traces = not torch.fx.config.do_not_emit_stack_traces
 
     def is_leaf_module(self, m: torch.nn.Module, module_qualified_name: str) -> bool:
         return (

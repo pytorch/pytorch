@@ -41,8 +41,17 @@ project-excludes = [
   "torch/overrides.py",
   "*/__pycache__/**",
   "*/.*",
+  "torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**",
+  "torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py",
 ]
 ignore-missing-imports = [
+    # XPU memory symbols not present for builds without XPU support
+    "torch._C._xpu_beginAllocateCurrentThreadToPool",
+    "torch._C._xpu_endAllocateToPool",
+    "torch._C._xpu_releasePool",
+    "torch._C._xpu_XPUAllocator",
+    "torch._C._XPUMemPool",
+    "torch._C._StaticXpuLauncher",
     "torch._C._jit_tree_views.*",
     "torch.for_onnx.onnx.*",
     "torch.ao.quantization.experimental.apot_utils.*",
@@ -88,6 +97,7 @@ ignore-missing-imports = [
     "boto3.*",
     "dill.*",
     "usort.*",
+    "cutlass.*",
     "cutlass_library.*",
     "cutlass_api.*",
     "deeplearning.*",
@@ -117,7 +127,7 @@ errors.implicit-import = false
 errors.deprecated = false # re-enable after we've fix import formatting
 
 permissive-ignores = true
-replace-imports-with-any = ["!sympy.printing.*", "sympy.*", "onnxscript.onnx_opset.*"]
+replace-imports-with-any = ["!sympy.printing.*", "sympy.*", "onnxscript.onnx_opset.*", "networkx.*"]
 search-path = ["tools/experimental"]
 
 # Dynamo sub-config - note, we experiment with stricter typing here
@@ -137,7 +147,6 @@ matches = "torch/_dispatch/**"
 implicit-import = false
 implicit-any = true
 
-
 [[sub-config]]
 matches = "torch/_subclasses/**"
 [sub-config.errors]
@@ -145,7 +154,7 @@ implicit-import = false
 implicit-any = true
 
 [[sub-config]]
-matches = "torch/_functorch/_aot_autograd/schemas.py"
+matches = "torch/_functorch/**"
 [sub-config.errors]
 implicit-import = false
 implicit-any = true

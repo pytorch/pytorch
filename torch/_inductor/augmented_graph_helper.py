@@ -1,9 +1,13 @@
+import logging
 from collections import defaultdict
-from typing import Optional
 
 import torch
 import torch.fx as fx
+from torch._logging import trace_structured
 from torch.utils._ordered_set import OrderedSet
+
+
+log = logging.getLogger(__name__)
 
 
 class AugmentedGraphHelper:
@@ -18,7 +22,7 @@ class AugmentedGraphHelper:
     def __init__(
         self,
         graph: fx.Graph,
-        node_ancestors: Optional[dict[fx.Node, OrderedSet[fx.Node]]] = None,
+        node_ancestors: dict[fx.Node, OrderedSet[fx.Node]] | None = None,
     ):
         # Each node starts in its own singleton set
         self.graph = graph
@@ -90,8 +94,22 @@ class AugmentedGraphHelper:
         return deps
 
     def has_cycle(self) -> bool:
-        merged_deps = {n: self.get_merged_deps(n) for n in self.graph.nodes}
-        return torch._dynamo.graph_deduplication._has_cycle(self.graph, merged_deps)
+        return torch._dynamo.graph_deduplication._has_cycle(
+            self.graph, self.get_all_extra_deps()
+        )
+
+    def _get_all_ancestors(self, node: fx.Node) -> OrderedSet[fx.Node]:
+        """Transitive ancestors through both data deps and extra deps."""
+        ancestors: OrderedSet[fx.Node] = OrderedSet()
+        stack: list[fx.Node] = list(node.all_input_nodes)
+        stack.extend(self.extra_deps.get(node, ()))
+        while stack:
+            n = stack.pop()
+            if n not in ancestors:
+                ancestors.add(n)
+                stack.extend(n.all_input_nodes)
+                stack.extend(self.extra_deps.get(n, ()))
+        return ancestors
 
     def has_path(self, source: fx.Node, target: fx.Node) -> bool:
         """Check if there's a path from source to target."""
@@ -138,6 +156,10 @@ class AugmentedGraphHelper:
         """
         Transfer all extra dependencies from erased nodes to their replacements, handling
         cross-dependencies between erased nodes correctly.
+
+        Skips deps where both endpoints resolve to replacement nodes from the
+        same erasure batch — these are intra-bucket deps that would create
+        cycles (e.g. new_start <-> new_wait within the same bucket).
         """
         erased_merge_sets: dict[fx.Node, fx.Node | None] = {}
 
@@ -162,6 +184,11 @@ class AugmentedGraphHelper:
                 for extra_dep in self.extra_deps[old_node]:
                     updated_dep = erased_merge_sets.get(extra_dep, extra_dep)
                     if updated_dep is not None and updated_dep != new_node:
+                        # Skip if reverse dep already exists (extra or data)
+                        if new_node in self.extra_deps.get(
+                            updated_dep, ()
+                        ) or new_node in OrderedSet(updated_dep.all_input_nodes):
+                            continue
                         self.extra_deps[new_node].add(updated_dep)
                         self.extra_uses[updated_dep].discard(old_node)
                         self.extra_uses[updated_dep].add(new_node)
@@ -170,6 +197,11 @@ class AugmentedGraphHelper:
                 for extra_use in self.extra_uses[old_node]:
                     updated_use = erased_merge_sets.get(extra_use, extra_use)
                     if updated_use is not None and updated_use != new_node:
+                        # Skip if reverse dep already exists (extra or data)
+                        if updated_use in self.extra_deps.get(
+                            new_node, ()
+                        ) or updated_use in OrderedSet(new_node.all_input_nodes):
+                            continue
                         self.extra_deps[updated_use].discard(old_node)
                         self.extra_deps[updated_use].add(new_node)
                         self.extra_uses[new_node].add(updated_use)
@@ -179,6 +211,58 @@ class AugmentedGraphHelper:
             self.extra_deps[old_node].clear()
             self.extra_uses[old_node].clear()
             del self.merge_sets[old_node]
+
+    def remove_erased_extra_deps(self) -> None:
+        """Remove extra deps referencing erased nodes."""
+        for node in list(self.extra_deps):
+            if node._erased:
+                for dep in list(self.extra_deps[node]):
+                    self.remove_extra_dep(n=node, dep=dep)
+                continue
+            for dep in list(self.extra_deps[node]):
+                if dep._erased:
+                    self.remove_extra_dep(n=node, dep=dep)
+
+    def check_and_maybe_autofix_cyclic_extra_deps(
+        self, *, autofix: bool = False
+    ) -> None:
+        """Check for and optionally remove extra deps that create cycles.
+
+        Args:
+            autofix: If True, silently remove cyclic deps.  If False (default),
+                raise an error so the root cause gets investigated.
+        """
+        if not self.has_cycle():
+            return
+        removed = []
+        for node in list(self.extra_deps):
+            for dep in list(self.extra_deps[node]):
+                ancestors = self._get_all_ancestors(dep)
+                if node in ancestors:
+                    removed.append((node.name, dep.name))
+                    self.remove_extra_dep(n=node, dep=dep)
+        if not removed:
+            return
+        msg = (
+            f"Overlap scheduling: detected {len(removed)} cyclic extra "
+            f"dep(s): {removed}. Please report this to the overlap "
+            f"scheduling developers."
+        )
+        log.warning(msg)
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_overlap_cyclic_extra_deps",
+                "encoding": "string",
+            },
+            payload_fn=lambda: msg,
+        )
+        if not autofix:
+            raise RuntimeError(
+                f"{msg}\nTo unblock, set "
+                f"torch._inductor.config.aten_distributed_optimizations"
+                f".overlap_scheduling_autofix_cycles = True"
+            )
 
     def get_all_extra_deps(self) -> dict[fx.Node, OrderedSet[fx.Node]]:
         """

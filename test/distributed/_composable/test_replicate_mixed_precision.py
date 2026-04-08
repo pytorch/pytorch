@@ -3,7 +3,6 @@
 import copy
 import dataclasses
 import functools
-from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -21,7 +20,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
-    FSDPTest,
+    FSDPTestContinuous,
     FSDPTestMultiThread,
     get_devtype,
     MLP,
@@ -38,15 +37,13 @@ from torch.testing._internal.common_utils import (
 device_type = torch.device(get_devtype())
 
 
-class TestReplicateMixedPrecisionTraining(FSDPTest):
-    @property
-    def world_size(self) -> int:
-        return min(2, torch.get_device_module(device_type).device_count())
+class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
+    world_size = 2
 
     def _init_models_and_optims(
         self,
-        param_dtype: Optional[torch.dtype],
-        reduce_dtype: Optional[torch.dtype],
+        param_dtype: torch.dtype | None,
+        reduce_dtype: torch.dtype | None,
     ):
         torch.manual_seed(42)
         model = nn.Sequential(*[MLP(16, torch.device("cpu")) for _ in range(3)])

@@ -18,7 +18,7 @@ import traceback
 import warnings
 from collections.abc import Callable
 from functools import lru_cache
-from typing import Any, cast, NewType, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, NewType, Optional, TYPE_CHECKING
 
 import torch
 import torch._C
@@ -52,7 +52,9 @@ _queued_calls: list[
 _is_in_bad_fork = getattr(torch._C, "_cuda_isInBadFork", lambda: False)
 
 _HAS_PYNVML = False
+_HAS_AMDSMI = False
 _PYNVML_ERR = None
+_AMDSMI_ERR = None
 try:
     from torch import version as _version
 
@@ -104,8 +106,13 @@ try:
                 def __exit__(self, type: Any, value: Any, traceback: Any) -> None:
                     ctypes.CDLL = self.original_CDLL  # type: ignore[misc]
 
-            with _amdsmi_cdll_hook():
-                import amdsmi  # type: ignore[import]
+            try:
+                with _amdsmi_cdll_hook():
+                    import amdsmi  # type: ignore[import]
+                _HAS_AMDSMI = True
+            except ModuleNotFoundError as err:
+                _AMDSMI_ERR = err
+                raise
 
         _HAS_PYNVML = True
     except ModuleNotFoundError:
@@ -193,10 +200,7 @@ def is_bf16_supported(including_emulation: bool = True):
 
     device = torch.cuda.current_device()
 
-    # Check for CUDA version and device compute capability.
-    # This is a fast way to check for it.
-    cuda_version = torch.version.cuda
-    if cuda_version is not None and torch.cuda.get_device_properties(device).major >= 8:
+    if torch.cuda.get_device_properties(device).major >= 8:
         return True
 
     if not including_emulation:
@@ -248,7 +252,7 @@ class _CompatInterval:
     also allows excluding specific versions from the range.
     """
 
-    def __init__(self, start, exclude: Optional[set[int]] = None):
+    def __init__(self, start, exclude: set[int] | None = None):
         self.major, self.minor = start // 10, start % 10
         self.exclude = set() if exclude is None else exclude
 
@@ -291,7 +295,7 @@ class _CompatSet:
 # - The keys in dict correspond to known sm versions but the values
 #   are merely rules based on sm compatibility guarantees for NVIDIA
 #   devices while accounting for incompatibility of iGPU and dGPU.
-DEVICE_REQUIREMENT: dict[int, Union[_CompatSet, _CompatInterval]] = {
+DEVICE_REQUIREMENT: dict[int, _CompatSet | _CompatInterval] = {
     50: _CompatInterval(start=50, exclude={53}),
     52: _CompatInterval(start=52, exclude={53}),
     53: _CompatSet({53}),
@@ -364,7 +368,11 @@ def _check_capability():
     if torch.version.cuda is None:  # on ROCm we don't want this check
         return
 
-    code_ccs = [_extract_arch_version(cc) for cc in get_arch_list()]
+    arch_list = get_arch_list()
+    if len(arch_list) == 0:
+        return
+
+    code_ccs = [_extract_arch_version(cc) for cc in arch_list]
     for d in range(device_count()):
         major, minor = get_device_capability(d)
         device_cc = 10 * major + minor
@@ -882,7 +890,7 @@ def _parse_visible_devices() -> list[int] | list[str]:
 
 
 def _raw_device_count_amdsmi() -> int:
-    if not _HAS_PYNVML:  # If amdsmi is not available
+    if not _HAS_AMDSMI:
         return -1
     try:
         amdsmi.amdsmi_init()
@@ -916,7 +924,7 @@ def _raw_device_count_nvml() -> int:
 def _raw_device_uuid_amdsmi() -> list[str] | None:
     from ctypes import byref, c_int, c_void_p, CDLL, create_string_buffer
 
-    if not _HAS_PYNVML:  # If amdsmi is not available
+    if not _HAS_AMDSMI:
         return None
     try:
         amdsmi.amdsmi_init()
@@ -1111,9 +1119,15 @@ def device_count() -> int:
         return 0
     if _cached_device_count is not None:
         return _cached_device_count
-    # bypass _device_count_nvml() if rocm (not supported)
-    nvml_count = _device_count_amdsmi() if torch.version.hip else _device_count_nvml()
-    r = torch._C._cuda_getDeviceCount() if nvml_count < 0 else nvml_count
+    if _initialized or hasattr(_tls, "is_initializing"):
+        r = torch._C._cuda_getDeviceCount()
+    else:
+        # bypass _device_count_nvml() if rocm (not supported)
+        if torch.version.hip:
+            nvml_count = _device_count_amdsmi()
+        else:
+            nvml_count = _device_count_nvml()
+        r = torch._C._cuda_getDeviceCount() if nvml_count < 0 else nvml_count
     # NB: Do not cache the device count prior to CUDA initialization, because
     # the number of devices can change due to changes to CUDA_VISIBLE_DEVICES
     # setting prior to CUDA initialization.
@@ -1299,11 +1313,10 @@ def _get_pynvml_handler(device: Device = None):
 
 
 def _get_amdsmi_handler(device: Device = None):
-    if not _HAS_PYNVML:
+    if not _HAS_AMDSMI:
         raise ModuleNotFoundError(
             "amdsmi does not seem to be installed or it can't be imported."
-            # pyrefly: ignore [invalid-inheritance]
-        ) from _PYNVML_ERR
+        ) from _AMDSMI_ERR
     try:
         amdsmi.amdsmi_init()
     except amdsmi.AmdSmiException as e:
@@ -1315,11 +1328,49 @@ def _get_amdsmi_handler(device: Device = None):
     return handle
 
 
+_cached_hip_to_amdsmi: dict[int, int] | None = None
+
+
+def _get_amdsmi_device_index_from_hip_index(device: int) -> int:
+    r"""Return amdsmi index from HIP device index. They are not always the same.
+
+    Assume amdsmi_init() already completes successfully."""
+    global _cached_hip_to_amdsmi
+    if _cached_hip_to_amdsmi is None:
+        amdsmi_handles = amdsmi.amdsmi_get_processor_handles()
+
+        def gen():
+            for amdsmi_idx, handle in enumerate(amdsmi_handles):
+                info = amdsmi.amdsmi_get_gpu_enumeration_info(handle)
+                if "hip_id" in info:
+                    yield info["hip_id"], amdsmi_idx
+
+        _cached_hip_to_amdsmi = dict(gen())
+        if not _cached_hip_to_amdsmi and len(amdsmi_handles) > 1:
+            warnings.warn(
+                "Cannot translate HIP ID to AMD SMI ID due to"
+                " lack of translation information prior to ROCm 6.4."
+                " Functions that rely on amdsmi"
+                " (e.g. temperature()) may operate on wrong devices."
+            )
+    if device not in _cached_hip_to_amdsmi:
+        warnings.warn(
+            f"Cannot translate HIP ID {device} to AMD SMI ID due to"
+            " undetected HIP ID from amdsmi."
+            " amdsmi_get_gpu_enumeration_info() only report these HIP IDs"
+            f" {list(_cached_hip_to_amdsmi.keys())}."
+            " Functions that rely on amdsmi"
+            " (e.g. temperature()) may operate on wrong devices."
+        )
+    return _cached_hip_to_amdsmi.get(device, device)
+
+
 def _get_amdsmi_device_index(device: Device) -> int:
     r"""Return the amdsmi index of the device, taking visible_devices into account."""
     idx = _get_device_index(device, optional=True)
     visible_devices = _parse_visible_devices()
-    if type(visible_devices[0]) is str:
+    visible_device_is_str = type(visible_devices[0]) is str
+    if visible_device_is_str:
         uuids = _raw_device_uuid_amdsmi()
         if uuids is None:
             raise RuntimeError("Can't get device UUIDs")
@@ -1332,7 +1383,10 @@ def _get_amdsmi_device_index(device: Device) -> int:
         raise RuntimeError(
             f"device {idx} is not visible (HIP_VISIBLE_DEVICES={visible_devices})"
         )
-    return idx_map[idx]
+    if visible_device_is_str:
+        return idx_map[idx]
+    else:
+        return _get_amdsmi_device_index_from_hip_index(idx_map[idx])
 
 
 def _get_amdsmi_device_memory_used(device: Device = None) -> int:
@@ -1888,26 +1942,36 @@ _POOL_HANDLE = NewType("_POOL_HANDLE", tuple[int, int])
 __all__ = [
     # Typed storage and tensors
     "BFloat16Storage",
+    # pyrefly: ignore [bad-dunder-all]
     "BFloat16Tensor",
     "BoolStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "BoolTensor",
     "ByteStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "ByteTensor",
     "CharStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "CharTensor",
     "ComplexDoubleStorage",
     "ComplexFloatStorage",
     "DoubleStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "DoubleTensor",
     "FloatStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "FloatTensor",
     "HalfStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "HalfTensor",
     "IntStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "IntTensor",
     "LongStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "LongTensor",
     "ShortStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "ShortTensor",
     "CUDAGraph",
     "CudaError",
@@ -1920,6 +1984,7 @@ __all__ = [
     "amp",
     "caching_allocator_alloc",
     "caching_allocator_delete",
+    "caching_allocator_disabled",
     "caching_allocator_enable",
     "can_device_access_peer",
     "check_error",

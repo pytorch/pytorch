@@ -23,7 +23,6 @@
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
-#include <torch/csrc/utils/six.h>
 #ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/rpc/py_rref.h>
 #include <torch/csrc/distributed/rpc/rref_impl.h>
@@ -370,6 +369,13 @@ using InferredType = c10::InferredType;
 
 InferredType tryToInferContainerType(py::handle input, bool primitiveTypeOnly);
 
+namespace detail {
+
+// Additional implementations for tryToInferType().
+std::optional<InferredType> _tryToInferTypeImpl(py::handle input);
+
+} // namespace detail
+
 // Try to infer the type of a Python object
 // The type cannot be inferred if:
 //   input is an empty container (list, dict)
@@ -420,6 +426,14 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(IntType::get());
   } else if (THPLayout_Check(input.ptr())) {
     return InferredType(IntType::get());
+  }
+
+  // Check for types registered in _tryToInferTypeImpl (e.g. ProcessGroup)
+  // before falling through to the expensive inspect.isclass / JIT compilation
+  // path below.
+  auto ty = detail::_tryToInferTypeImpl(input);
+  if (ty.has_value()) {
+    return ty.value();
   }
 
   auto enum_type = py::module::import("enum").attr("Enum");
@@ -542,7 +556,7 @@ inline InferredType tryToInferPrimitiveType(py::handle input) {
 inline InferredType tryToInferContainerType(
     py::handle input,
     bool primitiveTypeOnly = false) {
-  if (six::isTuple(input)) {
+  if (PyTuple_Check(input.ptr())) {
     py::tuple tuple = py::cast<py::tuple>(input);
     std::vector<TypePtr> element_types;
     element_types.reserve(tuple.size());

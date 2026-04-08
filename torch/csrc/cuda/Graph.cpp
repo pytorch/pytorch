@@ -112,5 +112,19 @@ void THCPGraph_init(PyObject* module) {
             // compile error.
             return reinterpret_cast<uintptr_t>(graph_exec);
           },
-          py::call_guard<py::gil_scoped_release>());
+          py::call_guard<py::gil_scoped_release>())
+      .def_static(
+          "get_currently_capturing_graph",
+          torch::wrap_pybind_function_no_gil(
+              &::at::cuda::CUDAGraph::get_currently_capturing_graph),
+          py::return_value_policy::reference)
+      .def(
+          "begin_capture_to_if_node",
+          torch::wrap_pybind_function_no_gil(
+              &::at::cuda::CUDAGraph::begin_capture_to_if_node),
+          py::arg("scalar_cuda_pred_tensor"))
+      .def(
+          "end_capture_to_conditional_node",
+          torch::wrap_pybind_function_no_gil(
+              &::at::cuda::CUDAGraph::end_capture_to_conditional_node));
 }

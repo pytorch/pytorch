@@ -53,6 +53,9 @@ if(INTERN_BUILD_ATEN_OPS)
 
   # Add source, includes, and libs to lists
   list(APPEND Caffe2_CPU_SRCS ${ATen_CPU_SRCS})
+  if(USE_MTIA)
+    list(APPEND Caffe2_CPU_SRCS ${ATen_MTIA_SRCS})
+  endif()
   list(APPEND Caffe2_GPU_SRCS ${ATen_CUDA_CPP_SRCS})
   list(APPEND Caffe2_XPU_SRCS ${ATen_XPU_SRCS})
   list(APPEND Caffe2_XPU_INCLUDE ${ATen_XPU_INCLUDE})
@@ -556,13 +559,6 @@ if(USE_CUDA OR USE_ROCM)
   append_filelist("libtorch_cuda_core_sources" Caffe2_GPU_HIP_JIT_FUSERS_SRCS)
 endif()
 
-# NativeRT is disabled
-# if(USE_CUDA)
-#   append_filelist("libtorch_nativert_cuda_sources" Caffe2_GPU_SRCS)
-# endif()
-# if(USE_ROCM)
-#   append_filelist("libtorch_nativert_cuda_sources" Caffe2_HIP_SRCS)
-# endif()
 
 if(USE_CUDA)
   list(APPEND Caffe2_GPU_CU_SRCS ${Caffe2_GPU_HIP_JIT_FUSERS_SRCS})
@@ -594,6 +590,7 @@ if(USE_CUDA)
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_extension.cu
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/ops/nccl_reduce_scatter_offset.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/cuda_mem_pool.cpp
         PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
       )
@@ -604,7 +601,7 @@ if(USE_CUDA)
     if(CMAKE_COMPILER_IS_GNUCXX)
       set_source_files_properties(${ASYNC_MM_FILE} PROPERTIES COMPILE_FLAGS "-Wno-unused-but-set-variable")
     endif()
-    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0 AND CUDA_NVCC_FLAGS MATCHES ".*compute_90.*")
+    if(CUDA_NVCC_FLAGS MATCHES ".*compute_90.*")
       set_source_files_properties(${ASYNC_MM_FILE} PROPERTIES COMPILE_FLAGS "-gencode arch=compute_90a,code=sm_90a")
     endif()
   endif()
@@ -826,7 +823,7 @@ if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_IOS AND NOT USE_COREML
   endif()
   get_target_property(TORCH_CPU_SOURCES torch_cpu SOURCES)
   foreach(generated_file IN LISTS GENERATED_CXX_TORCH)
-    set_source_files_properties(${generated_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
+    set_source_files_properties(${generated_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes;-mllvm;-openmp-opt-disable")
   endforeach()
   foreach(source_file IN LISTS TORCH_CPU_SOURCES)
     get_filename_component(source_file "${source_file}" REALPATH)
@@ -943,7 +940,7 @@ if(USE_ROCM)
   set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
   list(APPEND Caffe2_HIP_SRCS ${GENERATED_CXX_TORCH_CUDA})
   hip_add_library(torch_hip ${Caffe2_HIP_SRCS})
-  if(USE_FLASH_ATTENTION)
+  if(USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION)
     target_link_libraries(torch_hip PRIVATE __caffe2_aotriton)
   endif()
   set(CUDA_LINK_LIBRARIES_KEYWORD)
@@ -952,6 +949,12 @@ if(USE_ROCM)
   if(USE_NCCL)
     target_link_libraries(torch_hip PRIVATE __caffe2_nccl)
     target_compile_definitions(torch_hip PRIVATE USE_NCCL)
+  endif()
+
+  # IntraNodeComm loads libamd_smi at runtime via dlopen (avoids linking amd_smi
+  # which would cause bus errors if Python amdsmi loads a different copy).
+  if(USE_DISTRIBUTED)
+    target_link_libraries(torch_hip PRIVATE ${CMAKE_DL_LIBS})
   endif()
 
   if(USE_PRECOMPILED_HEADERS)
@@ -1042,7 +1045,7 @@ elseif(USE_CUDA)
     add_library(torch_nvshmem SHARED
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/utils.cpp"
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nvshmem_extension.cu"
-        "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cu"
+        "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cpp"
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp"
     )
     # Add torch_cpu as a dependency to ensure ATen headers are available
@@ -1363,8 +1366,7 @@ if(BUILD_TEST)
   else()
     add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
     add_subdirectory(${TORCH_ROOT}/test/cpp/lazy ${CMAKE_BINARY_DIR}/test_lazy)
-    # NativeRT is disabled
-    # add_subdirectory(${TORCH_ROOT}/test/cpp/nativert ${CMAKE_BINARY_DIR}/test_nativert)
+    add_subdirectory(${TORCH_ROOT}/test/cpp/profiler ${CMAKE_BINARY_DIR}/test_profiler)
     add_subdirectory(${TORCH_ROOT}/test/inductor ${CMAKE_BINARY_DIR}/test_inductor)
     add_subdirectory(${TORCH_ROOT}/test/cpp/aoti_abi_check ${CMAKE_BINARY_DIR}/test_aoti_abi_check)
     if(BUILD_AOT_INDUCTOR_TEST)
@@ -1564,8 +1566,10 @@ target_include_directories(torch_cpu SYSTEM PRIVATE "${Caffe2_DEPENDENCY_INCLUDE
 target_compile_definitions(torch_cpu PRIVATE CAFFE2_BUILD_MAIN_LIB)
 if(USE_CUDA)
   target_compile_definitions(torch_cuda PRIVATE TORCH_CUDA_BUILD_MAIN_LIB)
-elseif(USE_ROCM)
-  target_compile_definitions(torch_hip PRIVATE TORCH_HIP_BUILD_MAIN_LIB)
+endif()
+
+if(USE_ROCM)
+  target_compile_definitions(torch_hip PRIVATE TORCH_CUDA_BUILD_MAIN_LIB)
 endif()
 
 if(USE_XPU)
@@ -1786,14 +1790,18 @@ if(USE_ROCM)
   target_link_libraries(torch_hip PUBLIC torch_cpu_library ${Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS})
   target_link_libraries(torch_hip PRIVATE ${Caffe2_HIP_DEPENDENCY_LIBS})
 
+  if(USE_ROCM_CK_SDPA)
+    target_link_libraries(torch_hip PRIVATE ck_sdpa)
+  endif()
+
   if(USE_MSLK)
     if(USE_ROCM)
       target_link_libraries(torch_hip PRIVATE mslk)
     endif()
   endif()
   # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
-  # ROCM_INCLUDE_DIRS is defined in LoadHIP.cmake
-  target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE} ${ROCM_INCLUDE_DIRS})
+  # ROCM_INCLUDE_DIRS is defined in LoadHIP.cmake and added as SYSTEM includes in cmake/Dependencies.cmake
+  target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE})
   target_include_directories(torch_hip INTERFACE $<INSTALL_INTERFACE:include>)
 endif()
 
@@ -1980,7 +1988,7 @@ if(BUILD_TEST)
     set(BASE_HIPCC_FLAGS ${HIP_HIPCC_FLAGS})
     foreach(test_src ${Caffe2_HIP_TEST_SRCS})
       get_filename_component(test_name ${test_src} NAME_WE)
-      if(WIN32 AND test_src MATCHES "^.*\.hip$")
+      if(test_src MATCHES "^.*\.hip$")
         # Solves bug with hip_add_executable propagating flags from the previous tests
         set(HIP_HIPCC_FLAGS ${BASE_HIPCC_FLAGS})
         set_source_files_properties(${test_src} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)

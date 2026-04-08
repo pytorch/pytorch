@@ -281,7 +281,8 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                 x = torch.randn(3)
                 expected = x.sin()
                 torch.ops.mylib.foo(x)
-                assert torch.allclose(x, expected)
+                if not torch.allclose(x, expected):
+                    raise AssertionError
 
                 @torch.compile(backend="aot_eager_decomp_partition", fullgraph=True)
                 def f(x):
@@ -475,6 +476,35 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
             graph = "\n".join(log_stream.getvalue().strip().split("\n")[3:]).strip()
 
         return [compiled_args, result, graph]
+
+    def test_cumulative_out_preserves_out_dtype_under_compile(self):
+        test_cases = [
+            (torch.cumsum, torch.tensor([0.9201, 0.1166], dtype=torch.float32)),
+            (torch.cumprod, torch.tensor([2.0, 0.6], dtype=torch.float32)),
+        ]
+
+        for op, x in test_cases:
+            with self.subTest(op=op.__name__):
+
+                def f(out, x):
+                    return op(x, 0, out=out)
+
+                eager_out = torch.tensor([0, 0], dtype=torch.int32)
+                aot_eager_out = eager_out.clone()
+                inductor_out = eager_out.clone()
+
+                eager_ret = f(eager_out, x)
+                aot_eager_ret = torch.compile(f, backend="aot_eager", fullgraph=True)(
+                    aot_eager_out, x
+                )
+                inductor_ret = torch.compile(f, backend="inductor", fullgraph=True)(
+                    inductor_out, x
+                )
+
+                self.assertEqual(aot_eager_out, eager_out)
+                self.assertEqual(inductor_out, eager_out)
+                self.assertEqual(aot_eager_ret, eager_ret)
+                self.assertEqual(inductor_ret, eager_ret)
 
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_auto_functionalize_with_returns_v2(self):
@@ -1750,15 +1780,15 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
 
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_scheduling_with_multiple_mutates(self):
-        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+        with torch.library._scoped_library("mylib_scheduling", "FRAGMENT") as lib:
             torch.library.define(
-                "mylib::foo",
+                "mylib_scheduling::foo",
                 "(Tensor! x, Tensor! y, Tensor z) -> ()",
                 tags=torch.Tag.pt2_compliant_tag,
                 lib=lib,
             )
 
-            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch.library.impl("mylib_scheduling::foo", "cpu", lib=lib)
             @torch._dynamo.disable
             def foo(x, y, z):
                 pass
@@ -1766,9 +1796,9 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
             def func(x, w):
                 a = torch.empty_like(x)  # buf0
                 b = torch.empty_like(x)  # buf1
-                torch.ops.mylib.foo(a, b, x)  # buf2, buf3, buf4
+                torch.ops.mylib_scheduling.foo(a, b, x)  # buf2, buf3, buf4
                 c = torch.mm(a, w)  # buf5
-                torch.ops.mylib.foo(c, b, x)  # buf6, buf7, buf8
+                torch.ops.mylib_scheduling.foo(c, b, x)  # buf6, buf7, buf8
                 return c
 
             input = torch.rand(2, 2)
