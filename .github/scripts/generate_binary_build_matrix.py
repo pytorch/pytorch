@@ -16,7 +16,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import warnings
 from pathlib import Path
 
 
@@ -234,25 +233,6 @@ def validate_cudnn_version_consistency(arch_version: str) -> None:
             f"Linux has {linux_ver} (.ci/docker/common/install_cuda.sh) "
             f"but Windows has {windows_ver} (.ci/pytorch/windows/internal/cuda_install.bat)"
         )
-
-
-def warn_cublas_not_pinned(arch_version: str) -> None:
-    """Emit a runtime warning that cublas uses a version range."""
-    if arch_version not in ("12.8", "13.0"):
-        return
-    reqs = PYTORCH_EXTRA_INSTALL_REQUIREMENTS.get(arch_version, "")
-    for segment in reqs.split("|"):
-        if "nvidia-cublas" not in segment:
-            continue
-        pkg_spec = segment.split(";")[0]
-        if "==" not in pkg_spec:
-            warnings.warn(
-                f"CUDA {arch_version}: nvidia-cublas is pinned to a version "
-                f"range, not an exact version. A broken cublas release within "
-                f"that range could be silently installed.",
-                stacklevel=2,
-            )
-        break
 
 
 def arch_type(arch_version: str) -> str:
@@ -521,7 +501,6 @@ arch_version = ""
 for arch_version in CUDA_ARCHES:
     validate_nccl_dep_consistency(arch_version)
     validate_cudnn_version_consistency(arch_version)
-    warn_cublas_not_pinned(arch_version)
 del arch_version
 
 
