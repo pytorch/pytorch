@@ -816,8 +816,10 @@ class FunctionEvent(FormattedTimesMixin):
         self.event_metadata: EventMetadata | None = (
             _build_metadata(extra_meta) if extra_meta else None
         )
-        self.structured_input_shapes = structured_input_shapes
-        self.structured_input_strides = structured_input_strides
+        # pyrefly: ignore [bad-assignment]
+        self.structured_input_shapes: list = structured_input_shapes
+        # pyrefly: ignore [bad-assignment]
+        self.structured_input_strides: list = structured_input_strides
         # pyrefly: ignore [bad-assignment]
         self.input_dtypes: list[str] = input_dtypes
         self.python_id: int = python_id
