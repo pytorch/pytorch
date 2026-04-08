@@ -207,19 +207,19 @@ def debug_insert_nops(
 
         debug_checks(frame.f_code)
         code, _ = transform_code_object(frame.f_code, insert_nops)
-        from .compile_options import DynamoCompileOptions
-
         graph = OutputGraph(
             code_options={},
             compiler_fn=None,
             root_tx=None,  # type: ignore[arg-type]
-            compile_options=DynamoCompileOptions(),
+            export=False,
+            export_constraints=[],
             frame_state={"_id": 0},
             # TODO: shouldn't this be f_locals/f_globals from frame?
             local_scope=locals(),
             global_scope=globals(),
             f_code=frame.f_code,
             torch_function_mode_stack=[],
+            package=None,
         )
 
         return wrap_guarded_code(

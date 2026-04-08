@@ -201,7 +201,6 @@ if TYPE_CHECKING:
 
     from torch._subclasses.fake_tensor import FakeTensorMode
 
-    from .compile_options import DynamoCompileOptions
     from .package import CompilePackage
 
 log = logging.getLogger(__name__)
@@ -4772,11 +4771,14 @@ class InstructionTranslator(InstructionTranslatorBase):
         torch_function_mode_stack: Any,
         code_options: dict[str, Any],
         compiler_fn: Any,
-        compile_options: DynamoCompileOptions,
+        one_graph: bool,
+        export: bool,
+        export_constraints: Any,
         frame_state: Any,
         speculation_log: SpeculationLog,
         exn_vt_stack: ExceptionStack,
         distributed_state: DistributedState | None,
+        package: CompilePackage | None,
     ) -> None:
         _step_logger()(
             logging.INFO,
@@ -4787,12 +4789,15 @@ class InstructionTranslator(InstructionTranslatorBase):
                 code_options,
                 compiler_fn,
                 self,
-                compile_options,
+                export,
+                export_constraints,
                 frame_state,
                 local_scope=f_locals,
                 global_scope=f_globals,
                 f_code=f_code,
                 torch_function_mode_stack=torch_function_mode_stack,
+                one_graph=one_graph,
+                package=package,
             ),
             instructions=instructions,
             f_locals=f_locals,
@@ -4806,12 +4811,12 @@ class InstructionTranslator(InstructionTranslatorBase):
             symbolic_torch_function_state=None,  # type: ignore[arg-type] # set below
             symbolic_stream_state=None,  # type: ignore[arg-type] # set below
             f_code=f_code,
-            export=compile_options.export,
+            export=export,
             inline_depth=0,
             speculation_log=speculation_log,
             exn_vt_stack=exn_vt_stack,
             distributed_state=distributed_state,
-            package=compile_options.package,
+            package=package,
         )
 
         self._throw_if_in_functorch()
@@ -4819,8 +4824,8 @@ class InstructionTranslator(InstructionTranslatorBase):
         # as soon as we create the tracing context we should keep it active, so any calls
         # into dynamo apis can rely on finding it
         with tracing(self.output.tracing_context), self.set_current_tx():
-            self.one_graph: bool = compile_options.one_graph
-            self.export = compile_options.export
+            self.one_graph: bool = one_graph
+            self.export = export
             if self.export:
                 assert self.one_graph, (
                     "Export without one graph - something has gone wrong."
@@ -4913,7 +4918,7 @@ class InstructionTranslator(InstructionTranslatorBase):
 
             self.symbolic_stream_state = SymbolicStreamState()
 
-            if compile_options.export:
+            if export:
                 # export gets confused if we never realize unused inputs
                 # in export mode just eagerly realize everything
                 self.symbolic_locals = variables.LazyVariableTracker.realize_all(
