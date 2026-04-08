@@ -561,21 +561,11 @@ class ShardingPropagator:
                 if isinstance(spec, DTensorSpec):
                     output_tensor_meta_i = output_tensor_meta[i]
                     if not isinstance(output_tensor_meta_i, TensorMeta):
-                        # NOTE: aten.convolution_backward.default is an exception and it
-                        # needs extra handling because any Tensor in the output tuple
-                        # can be `None` depending on the output_mask parameter. This can
-                        # occur during double backpropagation or when certain gradients
-                        # are not needed (e.g., grad_input when input has requires_grad=False,
-                        # grad_weight/grad_bias when weight/bias have requires_grad=False,
-                        # or grad_bias when bias is None). We explicitly allow the
-                        # corresponding TensorMeta to be `None`.
-                        if (
-                            op == aten.convolution_backward.default
-                            and i in (0, 1, 2)
-                            and output_tensor_meta_i is None
-                        ):
-                            if not isinstance(output_specs, list):
-                                raise AssertionError
+                        # Some ops (e.g. convolution_backward, native_layer_norm_backward,
+                        # _fused_rms_norm_backward) have an output_mask parameter that
+                        # controls which outputs are computed. When output_mask[i] is
+                        # False, the output at position i is None and has no TensorMeta.
+                        if output_tensor_meta_i is None:
                             new_specs.append(None)
                             continue
                         else:
