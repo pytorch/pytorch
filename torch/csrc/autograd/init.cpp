@@ -251,10 +251,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def(
           "correlation_id",
           [](const KinetoEvent& e) { return e.correlationId(); })
-      // shapes of input tensors (flat list[list[int]], backward-compatible)
+      // shapes of input tensors
       .def("shapes", [](const KinetoEvent& e) { return e.shapes().vec(); })
-      // Structured shapes/strides distinguish plain tensors (list[int])
-      // from TensorList inputs (list[list[int]]).
+      // Like shapes/strides, but also contains TensorList input shapes.
       .def(
           "structured_input_shapes",
           [](const KinetoEvent& e) {
