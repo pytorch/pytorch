@@ -1,13 +1,19 @@
 # Owner(s): ["module: dynamo"]
 
 import os
+import tempfile
 from unittest.mock import patch
 
 import torch
 import torch._dynamo
 import torch._dynamo.config
 from torch._dynamo import debug_utils
-from torch._dynamo.debug_utils import aot_graph_input_parser, generate_env_vars_string
+from torch._dynamo.debug_utils import (
+    aot_graph_input_parser,
+    generate_env_vars_string,
+    InputReader,
+    InputWriter,
+)
 from torch._dynamo.test_case import TestCase
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -97,6 +103,24 @@ def forward(self, x_1):
 """,
             env_strings,
         )
+
+    def test_generator_serialization_cpu(self):
+        """InputWriter/InputReader should properly serialize CPU generators."""
+        gen = torch.Generator(device="cpu")
+
+        with tempfile.TemporaryDirectory() as d:
+            writer = InputWriter(d, stable_hash=True)
+            writer.generator("rng_state", gen)
+            lines = "\n".join(writer._lines)
+            self.assertIn("reader.generator('cpu')", lines)
+            self.assertIn("# rng_state", lines)
+
+            reader = InputReader(d)
+            env = {"reader": reader, "torch": torch}
+            exec(lines, env)
+            restored_gen = reader.args[0]
+            self.assertIsInstance(restored_gen, torch._C.Generator)
+            self.assertEqual(str(restored_gen.device), "cpu")
 
 
 class TestDebugUtilsDevice(TestCase):
@@ -207,6 +231,24 @@ class TestDebugUtilsDevice(TestCase):
 
         self.assertEqual(list(kwargs["primals_4"].shape), [5])
         self.assertEqual(kwargs["primals_5"], 5)
+
+    def test_generator_serialization(self, device):
+        """InputWriter/InputReader should properly serialize generators for device."""
+        gen = torch.Generator(device=device)
+
+        with tempfile.TemporaryDirectory() as d:
+            writer = InputWriter(d, stable_hash=True)
+            writer.generator("rng_state", gen)
+            lines = "\n".join(writer._lines)
+            self.assertIn(f"reader.generator('{device}')", lines)
+            self.assertIn("# rng_state", lines)
+
+            reader = InputReader(d)
+            env = {"reader": reader, "torch": torch}
+            exec(lines, env)
+            restored_gen = reader.args[0]
+            self.assertIsInstance(restored_gen, torch._C.Generator)
+            self.assertEqual(str(restored_gen.device), device)
 
 
 instantiate_device_type_tests(TestDebugUtils, globals())

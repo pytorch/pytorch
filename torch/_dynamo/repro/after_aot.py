@@ -694,6 +694,8 @@ if "__compile_source__" in globals():
             writer.const(placeholder)
         elif isinstance(arg, FakeScriptObject):
             writer.opaque(placeholder, arg.script_class_name)
+        elif isinstance(arg, torch._C.Generator):
+            writer.generator(placeholder, arg)
         else:
             writer.unsupported(placeholder, arg)
 
@@ -1028,6 +1030,53 @@ backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
+def _get_shape_env_from_graph(gm: torch.fx.GraphModule):
+    """Extract ShapeEnv from a GraphModule traced by make_fx."""
+    # Check graph nodes for FakeTensors that have a shape_env
+    # The metadata key can be "val" or "example_value" depending on the tracing path
+    for node in gm.graph.nodes:
+        for key in ("val", "example_value"):
+            if key in node.meta:
+                example = node.meta[key]
+                if hasattr(example, "fake_mode") and example.fake_mode is not None:
+                    return example.fake_mode.shape_env
+                # Handle tuple/list of tensors
+                if isinstance(example, (tuple, list)):
+                    for item in example:
+                        if hasattr(item, "fake_mode") and item.fake_mode is not None:
+                            return item.fake_mode.shape_env
+    return None
+
+
+def _capture_backed_symbols_for_repro(gm: torch.fx.GraphModule):
+    """Capture backed SIZE symbols from ShapeEnv and store in graph metadata.
+
+    During make_fx tracing, new SIZE symbols may be created that have backed
+    concrete values (stored in backed_var_to_val) but don't correspond to any
+    input tensor dimension. Inductor's codegen_input_symbol_assignment() only
+    extracts symbols from input tensor sizes/strides, so these symbols would
+    be undefined in the generated wrapper code.
+
+    This function captures all backed SIZE symbols and stores them in graph
+    metadata so Inductor can emit proper definitions
+    """
+    from torch.fx.experimental.symbolic_shapes import SymT, symbol_is_type
+
+    shape_env = _get_shape_env_from_graph(gm)
+    if shape_env is None:
+        return
+
+    backed_symbols = {}
+    for sym, val in shape_env.var_to_val.items():
+        if symbol_is_type(sym, SymT.SIZE):
+            backed_symbols[str(sym)] = int(val)
+
+    if backed_symbols:
+        if not hasattr(gm, "meta"):
+            gm.meta = {}
+        gm.meta["repro_backed_symbols"] = backed_symbols
+
+
 def repro_common(
     options: Any, mod: nn.Module, load_args: Any
 ) -> tuple[torch.fx.GraphModule, Sequence[Any]]:
@@ -1067,6 +1116,12 @@ def repro_common(
     # Turn mod into a GraphModule the slow way
     # TODO: speed this up
     mod = make_fx(mod, tracing_mode=options.tracing_mode)(*args)
+
+    # Capture backed symbols from ShapeEnv for Inductor codegen.
+    # During make_fx tracing, new SIZE symbols may be created that have backed
+    # concrete values but don't correspond to input tensor dimensions. Store
+    # these in graph metadata so Inductor can emit proper definitions.
+    _capture_backed_symbols_for_repro(mod)
 
     # pyrefly: ignore [bad-assignment]
     torch._inductor.config.generate_intermediate_hooks = True

@@ -16,7 +16,7 @@ from torch._dynamo.repro.after_aot import (
 )
 from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_utils import IS_FBCODE
+from torch.testing._internal.common_utils import IS_FBCODE, requires_cuda
 from torch.utils._traceback import report_compile_source_on_error
 from torch.utils._triton import has_triton
 
@@ -149,6 +149,48 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
 
         result = _extract_distributed_info(gm)
         self.assertEqual(result, {})
+
+
+    @requires_cuda
+    def test_backed_symbols_with_symint_input(self):
+        """Test that backed symbols from symint inputs are properly defined.
+
+        When make_fx re-traces with tracing_mode="symbolic", symint inputs
+        create symbols that don't correspond to input tensor dimensions.
+        These symbols need explicit definitions in Inductor's wrapper code.
+        """
+        from torch._dynamo.repro.after_aot import _capture_backed_symbols_for_repro
+        from torch._inductor.compile_fx import compile_fx_inner
+
+        device = torch.device("cuda")
+
+        class Repro(torch.nn.Module):
+            def forward(self, output_size, data, repeats):
+                repeated = torch.ops.aten.repeat_interleave.Tensor(
+                    repeats, output_size=output_size
+                )
+                result = torch.ops.aten.index.Tensor(data, [repeated % data.shape[0]])
+                return (torch.ops.aten.sum.default(result),)
+
+        # symint must be DIFFERENT from tensor dimensions to avoid unification
+        output_size = 512
+        data = torch.randn(1024, 128, device=device)
+        repeats = torch.tensor(
+            [2] * (output_size // 2), dtype=torch.int64, device=device
+        )
+
+        model = Repro()
+        args = [output_size, data, repeats]
+
+        gm = make_fx(model, tracing_mode="symbolic")(*args)
+
+        # Capture backed symbols - this is the fix being tested
+        _capture_backed_symbols_for_repro(gm)
+
+        # This would raise NameError without the fix
+        compiled = compile_fx_inner(gm, args)
+        result = compiled(list(args))
+        self.assertIsNotNone(result)
 
 
 if __name__ == "__main__":

@@ -2315,6 +2315,20 @@ class PythonWrapperCodegen(CodeGen):
         for name, value in inputs:
             self.codegen_input_symbol_assignment(name, value, bound_vars)
 
+        # Emit backed symbols from repro metadata (if present).
+        # During make_fx re-tracing in fx_graph_runnable repro, new SIZE symbols
+        # may be created that have backed values but don't correspond to input
+        # tensor dimensions. These are captured in graph metadata by after_aot.py.
+        repro_backed_symbols = getattr(V.graph.orig_gm, "meta", {}).get(
+            "repro_backed_symbols", {}
+        )
+        for sym_name, val in repro_backed_symbols.items():
+            sym = sympy.Symbol(sym_name)
+            if sym not in bound_vars:
+                self.writeline(f"{sym_name} = {val}")
+                bound_vars.add(sym)
+                self.computed_sizes.add(sym)
+
         def _verify_input_symbol_assignment(
             value: ir.TensorBox,
             bound_vars: OrderedSet[sympy.Symbol],

@@ -588,6 +588,9 @@ class NopInputReader:
     def unsupported(self, name: str) -> None:
         pass
 
+    def generator(self, device: str) -> None:
+        self.total += 1
+
     def opaque(self, script_class_name: str) -> None:
         self.total += 1
 
@@ -679,6 +682,11 @@ class InputReader:
 
     def unsupported(self, name: str) -> None:
         self.args.append(None)
+
+    def generator(self, device: str) -> torch._C.Generator:
+        gen = torch.Generator(device=device)
+        self.args.append(gen)
+        return gen
 
     def opaque(self, script_class_name: str) -> None:
         self.args.append(None)
@@ -820,6 +828,10 @@ class InputWriter:
         if isinstance(val, torch.SymInt):
             val = val.node.hint
         self._lines.append(f"reader.symint({val!r})  # {name}")
+
+    def generator(self, name: str, gen: torch._C.Generator) -> None:
+        device = str(gen.device)
+        self._lines.append(f"reader.generator({device!r})  # {name}")
 
     def opaque(self, name: str, script_class_name: str) -> None:
         self._lines.append(f"reader.opaque({script_class_name!r})  # {name}")
