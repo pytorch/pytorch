@@ -1223,6 +1223,81 @@ backward() with non-leaf tensor
 
         self.assertTrue(ref is act)
 
+    def test_autograd_grad_lost_grad_fn_in_closure(self):
+        def f(x):
+            return (x**2).sum()
+
+        x = torch.randn(4, requires_grad=True)
+        _, vjp_fn = torch.func.vjp(f, x)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "_autograd_grad with lost grad_fn linkage",
+        ):
+            torch.compile(vjp_fn, backend="eager", fullgraph=True)(torch.ones(()))
+
+    def test_autograd_grad_transform_closure_compiled_separately(self):
+        def f(x):
+            return (x**2).sum()
+
+        x = torch.randn(4, requires_grad=True)
+        _, vjp_fn = torch.func.vjp(f, x)
+        v = torch.ones(())
+
+        eager_grad = vjp_fn(v)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_grad = torch.compile(vjp_fn, backend=cnt)(v)
+
+        self.assertEqual(compiled_grad, eager_grad)
+        self.assertEqual(cnt.frame_count, 0)
+
+    @skipIfCrossRef
+    def test_autograd_grad_transform_compiled_end_to_end(self):
+        def f(x):
+            return (x**2).sum()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            _, vjp_fn = torch.func.vjp(f, x)
+            return vjp_fn(torch.ones(()))
+
+        x = torch.randn(4, requires_grad=True)
+        result = fn(x)
+        expected = torch.func.vjp(f, x)[1](torch.ones(()))
+        self.assertEqual(result, expected)
+
+    def test_autograd_grad_multi_output_transform_closure(self):
+        def f(x):
+            return x * 2, x * 3
+
+        x = torch.randn(4, requires_grad=True)
+        _, vjp_fn = torch.func.vjp(f, x)
+        v = (torch.ones(4), torch.ones(4))
+
+        eager_grad = vjp_fn(v)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_grad = torch.compile(vjp_fn, backend=cnt)(v)
+        self.assertEqual(compiled_grad, eager_grad)
+
+    @skipIfCrossRef
+    def test_autograd_grad_inline_computation_no_graph_break(self):
+        def f(x):
+            return (x * 2).sum()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            y, vjp_fn = torch.func.vjp(f, x)
+            return y, vjp_fn(torch.ones(()))
+
+        x = torch.randn(4, requires_grad=True)
+        compiled_y, compiled_grad = fn(x)
+        eager_y, eager_vjp_fn = torch.func.vjp(f, x)
+        eager_grad = eager_vjp_fn(torch.ones(()))
+        self.assertEqual(compiled_y, eager_y)
+        self.assertEqual(compiled_grad, eager_grad)
+
 
 if __name__ == "__main__":
     run_tests()
