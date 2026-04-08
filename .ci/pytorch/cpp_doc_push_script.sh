@@ -104,6 +104,7 @@ cp -r "${pt_checkout}"/docs/cpp/build/html/* .
 # Copy back _config.yml
 rm -rf _config.yml
 mv /tmp/cppdocs-sync/* .
+touch .nojekyll
 
 # Make a new commit
 git add . || true
