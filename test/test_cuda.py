@@ -7090,13 +7090,14 @@ class TestMemPool(TestCase):
         )
 
         class AllocState:
-            def __init__(self):
+            def __init__(self, test_instance):
                 self.first_stream = None
                 self.second_stream = None
                 self.allocated_addrs = []
                 self.buffer_size = 1 * 1024 * 1024 * 1024  # 1GB
+                self.base_ptr = -1
                 err, base_ptr = runtime.cudaMalloc(self.buffer_size)
-                self.assertEqual(
+                test_instance.assertEqual(
                     err,
                     runtime.cudaError_t.cudaSuccess,
                     "init allocation for test_nccl_mem_alloc_addresses_in_random_order should be successful",
@@ -7106,9 +7107,10 @@ class TestMemPool(TestCase):
                 self.tail = base_ptr + self.buffer_size
 
             def __del__(self):
-                runtime.cudaFree(self.base_ptr)
+                if self.base_ptr > 0:
+                    runtime.cudaFree(self.base_ptr)
 
-        state = AllocState()
+        state = AllocState(self)
 
         def my_alloc(size, device, stream, _runtime=runtime):
             nonlocal state
