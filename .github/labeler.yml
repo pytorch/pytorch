@@ -190,6 +190,8 @@
 - test/distributed/**/*mem*/**
 
 "ciflow/torchtitan":
+# torchtitan commit pin updates
+- .github/ci_commit_pins/torchtitan.txt
 # torch.distributed (FSDP, DTensor, etc.)
 - torch/distributed/**
 # torch.compile
