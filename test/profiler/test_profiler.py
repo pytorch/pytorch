@@ -3975,11 +3975,16 @@ class TestProfilerEventsParity(TestCase):
             )
             self.assertIsNotNone(json_add)
             args = json_add["args"]
-            self.assertEqual(fe_add.input_shapes, args["Input Dims"])
-            self.assertEqual(fe_add.input_strides, args["Input Strides"])
+            self.assertEqual(
+                fe_add.structured_input_shapes, args["Input Dims"]
+            )
+            self.assertEqual(
+                fe_add.structured_input_strides, args["Input Strides"]
+            )
             self.assertEqual(fe_add.input_dtypes, args["Input type"])
 
-            # Test a case with TensorList inputs -- input_shapes should handle this
+            # Test a case with TensorList inputs -- structured_input_shapes
+            # should handle TensorList nesting correctly.
             json_cat = next(
                 (
                     e
@@ -3990,8 +3995,12 @@ class TestProfilerEventsParity(TestCase):
             )
             self.assertIsNotNone(json_cat)
             args_cat = json_cat["args"]
-            self.assertEqual(fe_cat.input_shapes, args_cat["Input Dims"])
-            self.assertEqual(fe_cat.input_strides, args_cat["Input Strides"])
+            self.assertEqual(
+                fe_cat.structured_input_shapes, args_cat["Input Dims"]
+            )
+            self.assertEqual(
+                fe_cat.structured_input_strides, args_cat["Input Strides"]
+            )
             self.assertEqual(fe_cat.input_dtypes, args_cat["Input type"])
 
     def test_profiler_external_id_parity(self):

@@ -31,8 +31,11 @@ struct TORCH_API KinetoEvent {
   uint8_t activityType() const;
   uint64_t fwdThreadId() const;
   bool hasShapes() const;
-  const c10::ArrayRef<torch::profiler::impl::shape> shapes() const;
-  const c10::ArrayRef<torch::profiler::impl::shape> strides() const;
+  const c10::ArrayRef<std::vector<int64_t>> shapes() const;
+  const c10::ArrayRef<torch::profiler::impl::shape> structuredInputShapes()
+      const;
+  const c10::ArrayRef<torch::profiler::impl::shape> structuredInputStrides()
+      const;
   bool hasTypes() const;
   const c10::ArrayRef<std::string> dtypes() const;
   bool hasConcreteInputs() const;
@@ -83,8 +86,9 @@ struct TORCH_API KinetoEvent {
   std::vector<std::string> python_stack_;
 
   // Copy fields from result so we can return ArrayRefs.
-  std::vector<torch::profiler::impl::shape> shapes_;
-  std::vector<torch::profiler::impl::shape> strides_;
+  std::vector<std::vector<int64_t>> shapes_;
+  std::vector<torch::profiler::impl::shape> structured_input_shapes_;
+  std::vector<torch::profiler::impl::shape> structured_input_strides_;
   std::vector<std::string> dtypes_;
   std::vector<c10::IValue> concrete_inputs_;
   std::unordered_map<std::string, c10::IValue> kwinputs_;

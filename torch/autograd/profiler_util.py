@@ -721,6 +721,8 @@ class FunctionEvent(FormattedTimesMixin):
         overload_name=None,
         fwd_thread=None,
         input_shapes=None,
+        structured_input_shapes=None,
+        structured_input_strides=None,
         input_strides=None,
         input_dtypes=None,
         stack=None,
@@ -770,6 +772,10 @@ class FunctionEvent(FormattedTimesMixin):
         self.cpu_parent: FunctionEvent | None = None
         # pyrefly: ignore [bad-assignment]
         self.input_shapes: tuple[int, ...] = input_shapes
+        # pyrefly: ignore [bad-assignment]
+        self.structured_input_shapes = structured_input_shapes
+        # pyrefly: ignore [bad-assignment]
+        self.structured_input_strides = structured_input_strides
         # pyrefly: ignore [bad-assignment]
         self.input_strides: tuple[int, ...] = input_strides
         # pyrefly: ignore [bad-assignment]

@@ -946,14 +946,9 @@ KinetoEvent::KinetoEvent(
 
   result->visit_if_base<ExtraFields<EventType::TorchOp>>([&](const auto& op) {
     auto arg_data = parseArgData(op.inputs_, op.concrete_inputs_);
-    if (get_record_concrete_inputs_enabled()) {
-      shapes_ = std::move(arg_data.shapes);
-    } else {
-      for (auto& s : arg_data.shapesForKinetoEvent) {
-        shapes_.push_back(std::move(s));
-      }
-    }
-    strides_ = std::move(arg_data.strides);
+    shapes_ = std::move(arg_data.shapesForKinetoEvent);
+    structured_input_shapes_ = std::move(arg_data.shapes);
+    structured_input_strides_ = std::move(arg_data.strides);
     dtypes_ = std::move(arg_data.dtypes);
     concrete_inputs_ = std::move(arg_data.concreteInputs);
     kwinputs_ = std::move(op.kwinputs_);
@@ -1009,12 +1004,18 @@ bool KinetoEvent::hasShapes() const {
   return !shapes_.empty();
 }
 
-const c10::ArrayRef<torch::profiler::impl::shape> KinetoEvent::shapes() const {
+const c10::ArrayRef<std::vector<int64_t>> KinetoEvent::shapes() const {
   return shapes_;
 }
 
-const c10::ArrayRef<torch::profiler::impl::shape> KinetoEvent::strides() const {
-  return strides_;
+const c10::ArrayRef<torch::profiler::impl::shape>
+KinetoEvent::structuredInputShapes() const {
+  return structured_input_shapes_;
+}
+
+const c10::ArrayRef<torch::profiler::impl::shape>
+KinetoEvent::structuredInputStrides() const {
+  return structured_input_strides_;
 }
 
 bool KinetoEvent::hasTypes() const {
