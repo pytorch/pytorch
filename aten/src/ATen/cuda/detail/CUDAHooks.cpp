@@ -277,7 +277,11 @@ bool CUDAHooks::compiledWithMIOpen() const {
 }
 
 bool CUDAHooks::compiledWithHipDNN() const {
-  return AT_HIPDNN_ENABLED();
+#ifdef USE_HIPDNN
+  return true;
+#else
+  return false;
+#endif
 }
 
 bool CUDAHooks::supportsDilatedConvolutionWithCuDNN() const {
