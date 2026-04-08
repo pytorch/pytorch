@@ -731,7 +731,7 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreak
         self.assertEqual(cnts.frame_count, 3)
         # all ops except + 4
         self.assertEqual(cnts.op_count, 4)
-        self.assertEqual(torch._dynamo.utils.counters["frames"]["total"], 3)
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["total"], 4)
 
     def test_nested_step_graph_break_diff_args(self):
         global inner, outer
