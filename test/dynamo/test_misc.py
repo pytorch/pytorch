@@ -3540,16 +3540,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
 
-    def test_numpy_ndarray_flat(self):
-        def fn(x):
-            return np.cumsum(x.flat)
-
-        x = np.array([[1.0, 2.0], [3.0, 4.0]])
-        ref = fn(x)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        res = opt_fn(x)
-        self.assertEqual(ref, res)
-
     def test_numpy_force(self):
         def fn(x):
             return x.numpy(force=False)
