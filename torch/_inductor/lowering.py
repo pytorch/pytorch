@@ -7300,6 +7300,9 @@ def sort_stable(x, *, stable=None, dim=-1, descending=False):
     dim_size = shape[dim] if len(shape) else 1
     if not V.graph.sizevars.statically_known_lt(dim_size, torch.iinfo(torch.int16).max):
         return sort_fallback(x, stable=stable, dim=dim, descending=descending)
+    # ir.Sort.create only supports persistent Triton kernels (sort dim <= 512).
+    if not V.graph.sizevars.statically_known_leq(dim_size, 512):
+        return sort_fallback(x, stable=stable, dim=dim, descending=descending)
 
     indices = iota(
         dim_size, start=0, step=1, dtype=torch.int16, device=device, requires_grad=False
@@ -8261,7 +8264,6 @@ from .comm_lowering import register_comm_lowerings, register_symm_mem_lowerings
 register_comm_lowerings()
 register_symm_mem_lowerings()
 
-
 @register_lowering(inductor_prims.prepare_softmax_online, type_promotion_kind=None)
 def prepare_softmax_online(x, dim):
     """
@@ -8287,18 +8289,12 @@ def prepare_softmax_online(x, dim):
         )
         return max_tensor, sum_tensor
     else:
-        # Note: [Split online_softmax_reduce]
-        # We don't split reduction for online_softmax_reduce for now.
-        # On one hand, supporting split reduction makes things complex since
-        # the split out reuctions requires 2 inputs rather than one.
-        # On the other hand, during training the online_softmax_reduce should
-        # usually don't requires a split due to large batch size
-        # (more specifically batch size times sequence length).
-        # We should support split reduction if we find legit use cases to
-        # motivate the work.
-        #
-        # TODO: does inference need split online_softmax_reduce?
-
+        # When the reduction dimension is too large to fuse into a single kernel,
+        # Inductor decides to split it. Splitting online_softmax_reduce is not
+        # supported because it requires two inputs for the split-out reduction
+        # rather than one. Fall back to separate amax and sum reductions using
+        # Triton split kernels; the resulting softmax values remain within
+        # acceptable floating-point tolerance of eager.
         log.debug(
             "Online softmax is disabled on the fly since Inductor decides to split the reduction."
         )

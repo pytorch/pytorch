@@ -163,13 +163,10 @@ class TestOnlineSoftmax(TestCase):
 
     def test_split_reduction(self):
         """
-        We don't split online_softmax_reduce for now. Check
-        'Split online_softmax_reduce' note in the code.
-
-        When a split is promsing, we fallback for now.
-
-        This is just a manual example rather than something we
-        see in practice.
+        When the reduction dimension is too large to fuse, online_softmax_reduce
+        is disabled and Inductor falls back to separate Triton split reductions
+        for amax and sum. The resulting softmax values remain within tolerance
+        of eager.
         """
         # tensor shape to trigger split reduction
         x = torch.randn(1, 2**20, dtype=torch.bfloat16, device=GPU_TYPE)
