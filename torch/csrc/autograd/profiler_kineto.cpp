@@ -1008,13 +1008,13 @@ const c10::ArrayRef<std::vector<int64_t>> KinetoEvent::shapes() const {
   return shapes_;
 }
 
-const c10::ArrayRef<torch::profiler::impl::shape>
-KinetoEvent::structuredInputShapes() const {
+const c10::ArrayRef<torch::profiler::impl::shape> KinetoEvent::
+    structuredInputShapes() const {
   return structured_input_shapes_;
 }
 
-const c10::ArrayRef<torch::profiler::impl::shape>
-KinetoEvent::structuredInputStrides() const {
+const c10::ArrayRef<torch::profiler::impl::shape> KinetoEvent::
+    structuredInputStrides() const {
   return structured_input_strides_;
 }
 
