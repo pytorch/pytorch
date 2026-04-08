@@ -674,7 +674,17 @@ class FunctionEvent(FormattedTimesMixin):
         count (int): Number of times this event was called (usually 1).
         cpu_children (List[FunctionEvent]): Direct CPU child operations.
         cpu_parent (FunctionEvent): Direct CPU parent operation.
-        input_shapes (Tuple[int, ...]): Shapes of input tensors (requires record_shapes=true).
+        input_shapes (List[List[int]]): Shapes of input tensors (requires record_shapes=True).
+            For plain tensor inputs, each entry is a list of dimensions (e.g. ``[16, 16]``).
+            TensorList inputs are represented as an empty list ``[]``; use
+            ``structured_input_shapes`` to get per-element shapes for TensorList inputs.
+        structured_input_shapes (List[List[int] | List[List[int]]]): Like ``input_shapes``
+            but distinguishes TensorList inputs.  Plain tensor inputs are ``List[int]``;
+            TensorList inputs are ``List[List[int]]`` containing one shape per tensor in the list.
+            Matches the ``"Input Dims"`` field in the Chrome trace JSON.
+        structured_input_strides (List[List[int] | List[List[int]]]): Strides of input
+            tensors in the same format as ``structured_input_shapes`` (requires
+            record_shapes=True).
         concrete_inputs (List[Any]): Concrete input values (requires record_shapes=true).
         kwinputs (Dict[str, Any]): Keyword arguments (requires record_shapes=true).
         stack (List[str]): Python stack trace where the operation was called (requires with_stack=true).
@@ -723,7 +733,6 @@ class FunctionEvent(FormattedTimesMixin):
         input_shapes=None,
         structured_input_shapes=None,
         structured_input_strides=None,
-        input_strides=None,
         input_dtypes=None,
         stack=None,
         scope=0,
@@ -776,8 +785,6 @@ class FunctionEvent(FormattedTimesMixin):
         self.structured_input_shapes = structured_input_shapes
         # pyrefly: ignore [bad-assignment]
         self.structured_input_strides = structured_input_strides
-        # pyrefly: ignore [bad-assignment]
-        self.input_strides: tuple[int, ...] = input_strides
         # pyrefly: ignore [bad-assignment]
         self.input_dtypes: list[str] = input_dtypes
         # pyrefly: ignore [bad-assignment]
