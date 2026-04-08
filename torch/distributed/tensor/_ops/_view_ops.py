@@ -681,12 +681,13 @@ class _ViewShardingPropagator:
                         )
                     input_to_output_tensor_dims[in_dim.input_dim] = [output_dim]
             elif len(in_dims) > 0:
-                # InputDim (identity) or Split(split_id=0).
-                in_dim = in_dims[0]
-                if in_dim.input_dim not in input_to_output_tensor_dims:
-                    input_to_output_tensor_dims[in_dim.input_dim] = [output_dim]
-                else:
-                    input_to_output_tensor_dims[in_dim.input_dim].append(output_dim)
+                # InputDim (identity), Split(split_id=0), or
+                # Split(Flatten(...), split_id=0) which returns multiple dims.
+                for in_dim in in_dims:
+                    if in_dim.input_dim not in input_to_output_tensor_dims:
+                        input_to_output_tensor_dims[in_dim.input_dim] = [output_dim]
+                    else:
+                        input_to_output_tensor_dims[in_dim.input_dim].append(output_dim)
             elif isinstance(cmd, Split):
                 # Split(split_id>0): _analyze_split returned [], so chase the
                 # root input dim and append this output dim to its existing entry.
@@ -694,20 +695,29 @@ class _ViewShardingPropagator:
                 # Flatten+Split example: view([2, 3], [3, 2])
                 #   rule = (Split(Flatten(InputDim(0), InputDim(1)), (3,2), 0),
                 #           Split(Flatten(InputDim(0), InputDim(1)), (3,2), 1))
-                #   output_dim=0 (split_id=0): same as Split example above.
-                #     Result: {0: [0]}
-                #   output_dim=1 (split_id=1): same as Split example, but
-                #     the chase unwraps the inner Flatten to find InputDim(0).
-                #     Result: {0: [0, 1]}
+                #   output_dim=0 (split_id=0): _analyze_split returns all
+                #     sharded InputDims from the inner Flatten.  If only
+                #     InputDim(0) is sharded: {0: [0]}.  If both are sharded:
+                #     {0: [0], 1: [0]}.
+                #   output_dim=1 (split_id=1): chases the root input dim
+                #     used as key by split_id=0 and appends output_dim 1.
+                #     E.g. {0: [0, 1]} (or {0: [0, 1], 1: [0]} if both sharded).
                 root_spec = cmd.input_dim
                 while isinstance(root_spec, (Flatten, Split)):
                     if isinstance(root_spec, Flatten):
-                        # _analyze_flatten always returns input_dims[0] as
-                        # the first element (either as the only shardable dim
-                        # in non-strict mode, or as the fallback when nothing
-                        # is sharded), so split_id=0 uses it as the key in
-                        # input_to_output_tensor_dims. Use [0] here to match.
-                        root_spec = root_spec.input_dims[0]
+                        # Find whichever input dim was used as the key by
+                        # split_id=0.  input_dims[0] is not always the key
+                        # because strict-mode _analyze_flatten may return a
+                        # non-first sharded dim (e.g. InputDim(1)).
+                        root_spec = next(
+                            (
+                                fd
+                                for fd in root_spec.input_dims
+                                if isinstance(fd, InputDim)
+                                and fd.input_dim in input_to_output_tensor_dims
+                            ),
+                            root_spec.input_dims[0],
+                        )
                     else:
                         root_spec = root_spec.input_dim
                 root = root_spec if isinstance(root_spec, InputDim) else None
@@ -945,10 +955,12 @@ class _ViewShardingPropagator:
                     guard_or_false(out_size % self.mesh_sizes[shard_mesh_dim] == 0)
                     or is_last_split_dim
                 )
-        # Only split_id==0 returns the input dim for input_to_output_tensor_dims.
+        # Only split_id==0 returns input dims for input_to_output_tensor_dims.
         # Later split_ids refine shard_allowed above but return [] — their
         # output dims are linked via the root-input-dim chase in analyze().
-        return [in_dim] if cmd.split_id == 0 else []
+        # Return all in_dims (not just the first) so that Split(Flatten(...))
+        # populates input_to_output_tensor_dims for every flattened input dim.
+        return in_dims if cmd.split_id == 0 else []
 
     def _analyze_dim(self, cmd: DimSpec) -> list[InputDim]:
         """Dispatch one DimSpec: update self.shard_allowed, return input dim(s) to shard on."""
@@ -1064,6 +1076,109 @@ class _ViewShardingPropagator:
                     return candidate_dim
         return None
 
+    def _rewrite_split_flatten_shard(
+        self,
+        cmd: Split,
+        p: Shard,
+        mesh_dim: int,
+        tgt_shard_dim: int,
+        local_tensor_shapes: list[int],
+    ) -> tuple[Placement, list[int]]:
+        """Rewrite Shard through a Split(Flatten(...)) rule.
+
+        The sharded input dim lives inside a flatten group that is then split
+        into ``cmd.group_shape``.  Sharding the first flatten dim maps directly
+        to Shard on the split_id=0 output dim.  Sharding a later dim produces
+        a strided pattern whose period determines which output dim carries it.
+        """
+        flatten = cmd.input_dim
+        if not isinstance(flatten, Flatten):
+            raise AssertionError(f"Expected Flatten, got {type(flatten)}")
+        first_dim = flatten.input_dims[0]
+        if not isinstance(first_dim, InputDim):
+            raise AssertionError(f"Expected InputDim, got {type(first_dim)}")
+        input_start = first_dim.input_dim
+        new_shapes = list(local_tensor_shapes)
+        new_shapes[p.dim] //= self.mesh_sizes[mesh_dim]
+
+        # First flatten dim: sharding maps 1:1 to the split_id=0 output dim.
+        if p.dim == input_start:
+            return Shard(tgt_shard_dim), new_shapes
+
+        # Non-first flatten dim: compute the stride period, then find which
+        # output dim of the split can carry that stride.
+        #
+        # Example: input (4, 4, 4) → flatten → (64,) → split → (8, 8)
+        # Shard(dim=1) on mesh (2,):
+        #   sf_flat = prod(shape[0:1]) = 4  (stride groups in the flatten)
+        #   total  = prod((8, 8))     = 64
+        #   period = 64 / 4           = 16  (elements per stride group)
+        #
+        #   d=0: trailing=8, chunk=16/8=2, 2>=2 and 2%2==0 → match
+        #   sf_output = 8/2 = 4 → _StridedShard(dim=0, split_factor=4)
+        sf_flat = math.prod(local_tensor_shapes[input_start : p.dim])
+        total = math.prod(cmd.group_shape)
+        if sf_flat == 0 or total % sf_flat != 0:
+            raise AssertionError(
+                f"Flatten stride {sf_flat} does not evenly divide "
+                f"split total {total} for Shard(dim={p.dim})"
+            )
+        period = total // sf_flat
+        mesh_size = self.mesh_sizes[mesh_dim]
+
+        # Walk output dims outermost-first; find the first whose size can
+        # accommodate mesh_size sharding within one stride period.
+        target_split_id = None
+        sf_output = None
+        for d in range(len(cmd.group_shape)):
+            trailing = math.prod(cmd.group_shape[d + 1 :])
+            if trailing == 0 or period % trailing != 0:
+                continue
+            chunk = period // trailing
+            if (
+                chunk <= cmd.group_shape[d]
+                and cmd.group_shape[d] % chunk == 0
+                and chunk >= mesh_size
+                and chunk % mesh_size == 0
+            ):
+                target_split_id = d
+                sf_output = cmd.group_shape[d] // chunk
+                break
+
+        if target_split_id is None or sf_output is None:
+            raise RuntimeError(
+                f"Cannot propagate Shard(dim={p.dim}) through "
+                f"Split(Flatten(...), {cmd.group_shape}): no valid "
+                f"output dimension for the strided pattern."
+            )
+
+        # Map target_split_id back to the actual output tensor dim.
+        if target_split_id == cmd.split_id:
+            output_dim = tgt_shard_dim
+        else:
+            output_dim = next(
+                (
+                    od
+                    for od, r in enumerate(self.rule)
+                    if isinstance(r, Split)
+                    and r.input_dim is flatten
+                    and r.split_id == target_split_id
+                ),
+                None,
+            )
+            if output_dim is None:
+                raise AssertionError(
+                    f"No Split with split_id={target_split_id} found "
+                    f"in rule for the same Flatten group."
+                )
+
+        placement: Placement = (
+            Shard(output_dim)
+            if sf_output <= 1
+            else _StridedShard(output_dim, split_factor=sf_output)
+        )
+        return placement, new_shapes
+
     def _rewrite_plain_shard(
         self,
         p: Shard,
@@ -1118,12 +1233,9 @@ class _ViewShardingPropagator:
                 )
         cmd = self.rule[tgt_shard_dim]
         if isinstance(cmd, Split) and isinstance(cmd.input_dim, Flatten):
-            first_dim = cmd.input_dim.input_dims[0]
-            if isinstance(first_dim, InputDim) and p.dim != first_dim.input_dim:
-                raise RuntimeError(
-                    f"Shard(dim={p.dim}) through Split(Flatten(...), {cmd.group_shape}) "
-                    f"is not supported yet for non-first flatten dims."
-                )
+            return self._rewrite_split_flatten_shard(
+                cmd, p, mesh_dim, tgt_shard_dim, local_tensor_shapes
+            )
         if isinstance(cmd, (Split, InputDim)):
             # Split/InputDim: 1:1 dim mapping, sharding transfers directly.
             # Flatten needs stride computation below (multiple dims merge).

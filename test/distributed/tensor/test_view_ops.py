@@ -746,7 +746,7 @@ class TestViewOps(DTensorContinuousTestBase):
         except RuntimeError as e:
             self.assertRegex(
                 str(e),
-                r"is not supported yet"
+                r"no valid output dimension for the strided pattern"
                 r"|is not evenly divisible by mesh dimension",
             )
             return
