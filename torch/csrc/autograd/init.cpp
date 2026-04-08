@@ -251,9 +251,44 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def(
           "correlation_id",
           [](const KinetoEvent& e) { return e.correlationId(); })
-      // shapes of input tensors
+      // shapes of input tensors (flat list[list[int]], backward-compatible)
       .def("shapes", [](const KinetoEvent& e) { return e.shapes().vec(); })
+      // Structured shapes/strides distinguish plain tensors (list[int])
+      // from TensorList inputs (list[list[int]]).
+      .def(
+          "structured_input_shapes",
+          [](const KinetoEvent& e) {
+            py::list result;
+            for (const auto& s : e.structuredInputShapes()) {
+              if (std::holds_alternative<std::vector<int64_t>>(s)) {
+                result.append(std::get<std::vector<int64_t>>(s));
+              } else {
+                result.append(std::get<std::vector<std::vector<int64_t>>>(s));
+              }
+            }
+            return result;
+          })
+      .def(
+          "structured_input_strides",
+          [](const KinetoEvent& e) {
+            py::list result;
+            for (const auto& s : e.structuredInputStrides()) {
+              if (std::holds_alternative<std::vector<int64_t>>(s)) {
+                result.append(std::get<std::vector<int64_t>>(s));
+              } else {
+                result.append(std::get<std::vector<std::vector<int64_t>>>(s));
+              }
+            }
+            return result;
+          })
       .def("dtypes", [](const KinetoEvent& e) { return e.dtypes().vec(); })
+      .def("python_id", [](const KinetoEvent& e) { return e.pythonId(); })
+      .def(
+          "python_parent_id",
+          [](const KinetoEvent& e) { return e.pythonParentId(); })
+      .def(
+          "python_module_id",
+          [](const KinetoEvent& e) { return e.pythonModuleId(); })
       .def(
           "concrete_inputs",
           [](const KinetoEvent& e) {
