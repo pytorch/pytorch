@@ -9,7 +9,8 @@ hierarchy strings without parsing the unstructured stack_trace string.
 import torch
 import torch._dynamo.config
 import torch.nn as nn
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch._dynamo.test_case import run_tests
+from torch.testing._internal.common_utils import TestCase
 
 
 def forward(x):
@@ -70,6 +71,7 @@ class PureFunctional(nn.Module):
 
 class ModelCallingForwardFunc(nn.Module):
     """Calls a standalone function named 'forward'."""
+
     def __init__(self):
         super().__init__()
         self.linear = nn.Linear(4, 4)

@@ -79,6 +79,7 @@ from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
+
 # Cached prefix for filtering torch-internal frames in call_hierarchy.
 _TORCH_FILE_PREFIX: str = os.path.dirname(torch.__file__) + os.sep
 
@@ -3830,10 +3831,7 @@ class SubgraphTracer(fx.Tracer):
             msgs = traceback.StackSummary.from_list(filtered_frame_summaries).format()
             rv.node.stack_trace = "".join(msgs)
 
-        if (
-            config.record_call_hierarchy
-            and "call_hierarchy" not in rv.node.meta
-        ):
+        if config.record_call_hierarchy and "call_hierarchy" not in rv.node.meta:
             # Build a unified call hierarchy from the tx chain.
             # Collect frames first (inner→outer), then iterate outer→inner
             # to detect module entries by diffing nn_module_stack keys.
@@ -3860,26 +3858,18 @@ class SubgraphTracer(fx.Tracer):
                         path, cls = nn_stack[key]
                         # Strip the Dynamo-internal L['self']. prefix.
                         if path.startswith("L['self']."):
-                            path = path[len("L['self']."):]
+                            path = path[len("L['self'].") :]
                         elif path == "L['self']":
                             path = ""
                         cls_name = (
-                            cls.__name__
-                            if hasattr(cls, "__name__")
-                            else str(cls)
+                            cls.__name__ if hasattr(cls, "__name__") else str(cls)
                         )
-                        attr = (
-                            path.rsplit(".", 1)[-1] if "." in path else path
-                        )
+                        attr = path.rsplit(".", 1)[-1] if "." in path else path
                         # nn_module_stack keys use an @N suffix for the Nth
                         # invocation of a shared module instance (see
                         # record_nn_module_stack in variables/nn_module.py).
                         key_str = str(key)
-                        call_count = (
-                            int(key_str.split("@")[1])
-                            if "@" in key_str
-                            else 0
-                        )
+                        call_count = int(key_str.split("@")[1]) if "@" in key_str else 0
                         hierarchy.append(
                             {
                                 "type": "module",
