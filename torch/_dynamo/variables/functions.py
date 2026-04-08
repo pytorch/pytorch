@@ -2141,7 +2141,14 @@ class SkipFunctionVariable(VariableTracker):
 
             guard_on_source.make_guard(GuardBuilder.CLOSURE_MATCH)
         elif inspect.isbuiltin(value):
-            install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
+            # Bound builtin methods (e.g. obj.__reduce_ex__) are created fresh
+            # on every attribute access, so their id() is unstable.  Skip the
+            # id-based BUILTIN_MATCH guard for them — the type guard on
+            # the owner object is sufficient.
+            if not hasattr(value, "__self__") or isinstance(
+                value.__self__, types.ModuleType
+            ):
+                install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
         elif not is_wrapper_or_member_descriptor(value):
             # These descriptors are not guaranteed to return the same object on
             # attribute lookup. They are unlikely to be changed, so we can skip
@@ -2155,6 +2162,29 @@ class SkipFunctionVariable(VariableTracker):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        # object.__reduce_ex__ is a C builtin that copy.deepcopy calls
+        # via `reductor = getattr(x, "__reduce_ex__"); rv = reductor(4)`.
+        # Intercept bound __reduce_ex__ calls and delegate to the polyfill.
+        if (
+            getattr(self.value, "__name__", None) == "__reduce_ex__"
+            and hasattr(self.value, "__self__")
+            and len(args) == 1
+            and not kwargs
+        ):
+            from ..polyfills import reduce_ex_user_defined_object
+            from .user_defined import UserDefinedObjectVariable
+
+            obj = self.value.__self__
+            obj_vt = tx.output.side_effects.id_to_variable.get(id(obj))
+            if obj_vt is None:
+                obj_vt = VariableTracker.build(tx, obj)
+            if isinstance(obj_vt, UserDefinedObjectVariable):
+                return tx.inline_user_function_return(
+                    VariableTracker.build(tx, reduce_ex_user_defined_object),
+                    [obj_vt, args[0]],
+                    {},
+                )
+
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             msg = inspect.getattr_static(self.value, "_torchdynamo_disable_msg", None)
             unimplemented(
