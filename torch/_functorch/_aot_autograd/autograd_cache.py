@@ -758,12 +758,17 @@ def autograd_cache_key(
             pickler = AOTAutogradCachePickler(gm)
             # The prefix distinguishes among the other kinds of objects we cache
             key = "a" + pickler.get_hash(details)
-            debug_lines = pickler.debug_lines(details)
-            log.debug(
-                "Autograd graph cache hash details for key %s:\n%s",
-                key,
-                LazyString(lambda: "\n".join(debug_lines)),
-            )
+            # debug_lines re-hashes every attribute individually and is
+            # expensive. Only compute when debug logging is enabled.
+            if log.isEnabledFor(logging.DEBUG):
+                debug_lines = pickler.debug_lines(details)
+                log.debug(
+                    "Autograd graph cache hash details for key %s:\n%s",
+                    key,
+                    LazyString(lambda: "\n".join(debug_lines)),
+                )
+            else:
+                debug_lines: list[str] = []
             return key, debug_lines
         except Exception:
             # If enable_aot_compile is set, we're in AOT precompile mode where we always
