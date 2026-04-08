@@ -600,6 +600,9 @@ test_inductor_shard() {
     --include inductor/test_torchinductor inductor/test_torchinductor_opinfo inductor/test_aot_inductor \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
+
+  TORCHINDUCTOR_CUDAGRAPH_FIRST_WARMUP_IN_EAGER=1 python test/run_test.py \
+    --include inductor/test_cudagraph_trees
 }
 
 test_inductor_aoti_cpp() {

@@ -1673,6 +1673,12 @@ class triton:
     # skip warmup for cudagraph trees
     skip_cudagraph_warmup = False
 
+    # Run the first cudagraph warmup in the eager (default) memory pool so
+    # lazily-initialized persistent state isn't allocated in the private pool.
+    cudagraph_first_warmup_in_eager = (
+        os.environ.get("TORCHINDUCTOR_CUDAGRAPH_FIRST_WARMUP_IN_EAGER", "0") == "1"
+    )
+
     # Synchronize before and after every compiled graph.
     debug_sync_graph = False
 

@@ -212,7 +212,14 @@ if HAS_CUDA_AND_TRITON:
             )
 
         @staticmethod
+        def prime(fn, *args, **kwargs):
+            """Run fn once to complete the eager-pool warmup when enabled."""
+            if config.triton.cudagraph_first_warmup_in_eager:
+                fn(*args, **kwargs)
+
+        @staticmethod
         def run_twc(fn, *args, **kwargs):
+            CudaGraphTreeTests.prime(fn, *args, **kwargs)
             fn(*args, **kwargs)
             return fn(*args, **kwargs)
 
@@ -276,8 +283,10 @@ if HAS_CUDA_AND_TRITON:
             log_stream, ctx = logs_to_string(
                 "torch._inductor.cudagraph_utils", "cudagraphs"
             )
+            compiled = torch.compile(model.forward, mode="reduce-overhead")
             with ctx():
-                opt = torch.compile(model.forward, mode="reduce-overhead")(x, y, z)
+                self.prime(compiled, x, y, z)
+                opt = compiled(x, y, z)
 
             FileCheck().check(
                 "skipping cudagraphs due to mutated inputs (1 instances). Found from"
@@ -360,6 +369,7 @@ if HAS_CUDA_AND_TRITON:
             def inp():
                 return torch.ones([10], device="cuda")
 
+            self.prime(foo, inp())
             log_stream, ctx = logs_to_string(
                 "torch._inductor.cudagraph_utils", "cudagraphs"
             )
@@ -449,6 +459,13 @@ if HAS_CUDA_AND_TRITON:
 
             mut = get_compile_fn(backend)(mut)
             foo = get_compile_fn(backend)(foo)
+
+            if config.triton.cudagraph_first_warmup_in_eager:
+                # Prime past the first eager warmup
+                torch.compiler.cudagraph_mark_step_begin()
+                _tmp = foo(torch.rand([4], device="cuda"))
+                mut(_tmp)
+                del _tmp
 
             log_stream, ctx = logs_to_string(
                 "torch._inductor.cudagraph_utils", "cudagraphs"
@@ -797,6 +814,7 @@ if HAS_CUDA_AND_TRITON:
 
             inp.add_(1)
             out_eager = foo(inp)
+            self.prime(foo_opt, inp)
             out_warmup = foo_opt(inp)
             self.assertEqual(out_warmup, out_eager)
             # warmup should be have storage deallocator hooked on
@@ -1578,6 +1596,14 @@ if HAS_CUDA_AND_TRITON:
                 return x[2:]
 
             param_c = cdata(m.weight)
+            if config.triton.cudagraph_first_warmup_in_eager:
+                x = torch.rand([10, 10], device="cuda", requires_grad=True)
+                torch.compiler.cudagraph_mark_step_begin()
+                out1, _, _ = foo(m, x)
+                foo2(out1).sum().backward()
+                m.weight.grad = None
+                m.bias.grad = None
+
             for _ in range(3):
                 x = torch.rand([10, 10], device="cuda", requires_grad=True)
                 torch.compiler.cudagraph_mark_step_begin()
@@ -1650,6 +1676,10 @@ if HAS_CUDA_AND_TRITON:
             def foo2(x):
                 return x[0], x @ x
 
+            if config.triton.cudagraph_first_warmup_in_eager:
+                out = foo(inp())
+                _, _ = foo2(out)
+
             for i in range(2):
                 out = foo(inp())
 
@@ -1682,6 +1712,8 @@ if HAS_CUDA_AND_TRITON:
                 return (x[0],)
 
             foo_cg = self.cudagraphify_impl(foo, [inp], (0,))
+            if config.triton.cudagraph_first_warmup_in_eager:
+                foo_cg([inp])
 
             for _ in range(3):
                 out = foo_cg([inp])[0]
@@ -1859,6 +1891,8 @@ if HAS_CUDA_AND_TRITON:
                 return (x, x[0])
 
             foo_cg = self.cudagraphify_impl(foo, [inp], ())
+            if config.triton.cudagraph_first_warmup_in_eager:
+                foo_cg([inp])
 
             for _ in range(3):
                 out_1, out_2 = foo_cg([inp])
@@ -1878,6 +1912,7 @@ if HAS_CUDA_AND_TRITON:
                 )
 
             inp = torch.rand([4], device="cuda")
+            self.prime(foo, inp)
             for _ in range(3):
                 out = foo(inp)
                 node = self.curr_node()
@@ -1888,6 +1923,7 @@ if HAS_CUDA_AND_TRITON:
                 return (x + x + x), torch.rand([4], device="cuda") + 10
 
             inp = torch.rand([0], device="cuda")
+            self.prime(foo, inp)
             for _ in range(3):
                 out = foo(inp)
                 node = self.curr_node()
@@ -1949,6 +1985,7 @@ if HAS_CUDA_AND_TRITON:
                     return x @ x
 
                 inps = [torch.rand([400, 400], device="cuda") for _ in range(2)]
+                self.prime(foo, *inps)
 
                 thrown = False
                 try:
@@ -1977,15 +2014,19 @@ if HAS_CUDA_AND_TRITON:
             finally:
                 torch._C._cuda_clearCublasWorkspaces()
                 torch._inductor.cudagraph_trees.clear_cublas_manager = prev
-                torch._inductor.cudagraph_trees.get_container(
+                container = torch._inductor.cudagraph_trees.get_container(
                     self.device_idx
-                ).tree_manager = None
+                )
+                if container.tree_manager is not None:
+                    container.tree_manager.shutdown()
+                container.tree_manager = None
 
         def test_peristed_output_livenes(self):
             @torch.compile
             def foo(x):
                 return x + x
 
+            self.prime(foo, torch.rand([2, 2], device="cuda"))
             for _ in range(3):
                 foo(torch.rand([2, 2], device="cuda"))
 
@@ -2263,6 +2304,7 @@ if HAS_CUDA_AND_TRITON:
                 return x * x * x
 
             inp = torch.rand([4], device="cuda")
+            self.prime(foo, inp)
             out = foo(inp)
             out2 = foo(inp)
 
@@ -2280,6 +2322,7 @@ if HAS_CUDA_AND_TRITON:
                 return x * x * x
 
             inp = torch.rand([4], device="cuda")
+            self.prime(foo, inp)
             out = foo(inp).detach()
             out2 = foo(inp).detach()
 
@@ -2312,6 +2355,7 @@ if HAS_CUDA_AND_TRITON:
                     return x * x * x
 
                 inp = torch.rand([4], device="cuda")
+                self.prime(foo, inp)
                 out = foo(inp).detach()
                 out2 = foo(inp).detach()
 
@@ -2427,13 +2471,15 @@ if HAS_CUDA_AND_TRITON:
                 COUNTER += 1
                 return x * 2
 
+            extra = 1 if config.triton.cudagraph_first_warmup_in_eager else 0
+
             x = torch.randn(2, device="cuda")
             inp_list = [2, x]
             foo_cg = self.cudagraphify_impl(f, inp_list, ())
             foo_cg(inp_list)  # warmup
             foo_cg([2, x])  # record
             foo_cg([2, x])  # replay
-            self.assertEqual(COUNTER, 2)
+            self.assertEqual(COUNTER, 2 + extra)
 
             # Switching the size will require a warmup again
             x = torch.randn(3, device="cuda")
@@ -2441,7 +2487,7 @@ if HAS_CUDA_AND_TRITON:
             foo_cg(inp_list)  # warmup
             foo_cg([3, x])  # record
             foo_cg([3, x])  # replay
-            self.assertEqual(COUNTER, 4)
+            self.assertEqual(COUNTER, 4 + 2 * extra)
 
         def test_forward_generation(self):
             def foo(x):
@@ -2453,6 +2499,10 @@ if HAS_CUDA_AND_TRITON:
             foo_opt = torch.compile(foo)
             foo2_opt = torch.compile(foo2)
             ones = torch.ones([4, 4], device="cuda", requires_grad=True)
+
+            if config.triton.cudagraph_first_warmup_in_eager:
+                foo2_opt(foo_opt(ones)).sum().backward()
+                ones.grad = None
 
             out = foo_opt(ones)
             out2 = foo2_opt(out)
@@ -2479,6 +2529,8 @@ if HAS_CUDA_AND_TRITON:
             def foo(x):
                 return x * x * x
 
+            self.prime(foo, torch.rand([4, 4], device="cuda", requires_grad=True))
+
             out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
             out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
 
@@ -2498,6 +2550,8 @@ if HAS_CUDA_AND_TRITON:
             @torch.compile
             def foo(x):
                 return x * x * x
+
+            self.prime(foo, torch.rand([4, 4], device="cuda", requires_grad=True))
 
             torch.compiler.cudagraph_mark_step_begin()
             out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
@@ -3022,7 +3076,8 @@ if HAS_CUDA_AND_TRITON:
 
             inp = torch.randn(4, 4, device="cuda")
             compiled = torch.compile(model, mode="reduce-overhead")
-            # Warmup + record
+            # Prime + warmup + record
+            self.prime(compiled, inp)
             out = compiled(inp)
             out = compiled(inp)
 
@@ -3050,6 +3105,7 @@ if HAS_CUDA_AND_TRITON:
 
             inp = torch.randn(4, 4, device="cuda")
             compiled = torch.compile(model, mode="reduce-overhead")
+            self.prime(compiled, inp)
             out = compiled(inp)
             out = compiled(inp)
 
@@ -3098,6 +3154,7 @@ if HAS_CUDA_AND_TRITON:
 
             inp = torch.randn(4, 4, device="cuda")
             compiled = torch.compile(model, mode="reduce-overhead")
+            self.prime(compiled, inp)
             out = compiled(inp)
             out = compiled(inp)
 
@@ -4923,12 +4980,12 @@ if HAS_CUDA_AND_TRITON:
             def foo(x, y):
                 # partition 1
                 output1 = torch.empty_like(x)
-                add_kernel[(4,)](x, y, output1, n_elements=128, BLOCK_SIZE=16)
+                add_kernel[(8,)](x, y, output1, n_elements=128, BLOCK_SIZE=16)
                 output1_cpu = output1.cpu() + 1
                 # partition 2 should reuse the user-defined kernel
                 x2 = output1_cpu.to("cuda")
                 output2 = torch.empty_like(x)
-                add_kernel[(4,)](x2, y, output2, n_elements=128, BLOCK_SIZE=16)
+                add_kernel[(8,)](x2, y, output2, n_elements=128, BLOCK_SIZE=16)
                 return output1, output2
 
             compiled_foo = torch.compile(foo)
@@ -5042,6 +5099,7 @@ if HAS_CUDA_AND_TRITON:
 
             f = torch.compile(f, mode="reduce-overhead")
 
+            self.prime(f, torch.tensor(1, device="cuda"))
             with self.assertRaises(RuntimeError):
                 f(torch.tensor(1, device="cuda"))
 
@@ -5099,6 +5157,33 @@ if HAS_CUDA_AND_TRITON:
             run(20)
             run(10)
             run(25)
+
+        @torch._inductor.config.patch("triton.cudagraph_first_warmup_in_eager", True)
+        def test_lazy_init_persistent_state_survives_generation_change(self):
+            """Lazily-initialised persistent state (e.g. KV cache) allocated during
+            warmup must survive generation changes.  Without the eager-pool first
+            warmup, the cache lives in the private cudagraph pool and gets poisoned
+            when dealloc_current_path_weakrefs runs on a new generation."""
+
+            class LazyBuffer(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.buf = None
+
+                def forward(self, x):
+                    if self.buf is None:
+                        # Lazy init: allocated on first forward call
+                        self.buf = torch.zeros(x.shape, device=x.device)
+                    return x + self.buf
+
+            model = LazyBuffer().cuda()
+            compiled = torch.compile(model, mode="reduce-overhead")
+            inp = torch.randn(4, 4, device="cuda")
+
+            # Progress through: eager warmup -> warmup -> record -> replay
+            for _ in range(4):
+                torch.compiler.cudagraph_mark_step_begin()
+                compiled(inp)
 
     class TestSAC(TestCase):
         def _make_observer_mode(self):

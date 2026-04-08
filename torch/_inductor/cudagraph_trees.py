@@ -2009,6 +2009,7 @@ class CUDAGraphTreeManager:
         self.ids_to_stack_traces: dict[FunctionID, StackTraces | None] = {}
 
         self.warmed_up_functions: OrderedSet[FunctionID] = OrderedSet()
+        self.eager_warmed_functions: OrderedSet[FunctionID] = OrderedSet()
         # if we fail to increment generation, and are stuck warming up,
         # only warn on each function once
         self.warned_functions: OrderedSet[FunctionID] = OrderedSet()
@@ -2169,6 +2170,19 @@ class CUDAGraphTreeManager:
         return False
 
     def _run(self, new_inputs: list[InputType], function_id: FunctionID) -> OutputType:
+        # Bypass the manager entirely on the first call when
+        # cudagraph_first_warmup_in_eager is enabled.  This runs the model in
+        # the default memory pool so lazily-initialised persistent state
+        # (KV caches etc.) isn't allocated in the cudagraph private pool.
+        if (
+            function_id not in self.warmed_up_functions
+            and function_id not in self.eager_warmed_functions
+            and config.triton.cudagraph_first_warmup_in_eager
+            and not config.triton.skip_cudagraph_warmup
+        ):
+            self.eager_warmed_functions.add(function_id)
+            return self.ids_to_funcs[function_id].model(new_inputs)
+
         # we will try to end the current execution lazily, since
         # we dont want to do unnecessary checking of the existing outputs
         # on the hot path, but both recording and warmup only happen once
@@ -2306,6 +2320,9 @@ class CUDAGraphTreeManager:
         might reference a backward which invokes a CUDA Graph Node, we have to manually clear them on shutdown
         to avoid a reference cycle.
         """
+        if self.roots is None:
+            return
+
         nodes = []
         for roots in self.roots.values():
             nodes.extend(roots)
