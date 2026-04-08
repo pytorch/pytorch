@@ -3574,6 +3574,30 @@ def iota(
     )
 
 
+@register_lowering(aten.arange.start_step, type_promotion_kind=None)
+def arange_start_step(
+    start,
+    end,
+    step=1,
+    *,
+    dtype=None,
+    device=None,
+    layout=None,
+    pin_memory=None,
+    requires_grad=False,
+):
+    assert dtype is not None
+    length = ceildiv(end - start, step)
+    return iota(
+        length,
+        start=start,
+        step=step,
+        dtype=dtype,
+        device=device if device is not None else "cpu",
+        requires_grad=requires_grad,
+    )
+
+
 @register_lowering(aten.select_scatter, type_promotion_kind=None)
 def select_scatter(x, src, dim: int, index: int):
     src = to_dtype(src, x.get_dtype())
