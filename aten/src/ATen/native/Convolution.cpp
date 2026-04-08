@@ -906,16 +906,6 @@ at::Tensor complex_convolution(
     bool transposed,
     SymIntArrayRef output_padding,
     const c10::SymInt& groups) {
-  if (transposed && input.ndimension() == 5 &&
-      input.scalar_type() == at::kComplexHalf) {
-    auto bias_cf64 = bias.defined() ? bias.to(at::kComplexDouble) : bias;
-    return complex_convolution(
-        input.to(at::kComplexDouble),
-        weight.to(at::kComplexDouble),
-        bias_cf64,
-        stride, padding, dilation, transposed, output_padding, groups)
-        .to(at::kComplexHalf);
-  }
   check_input_same_type_as_parameters(input, weight, bias);
   auto [i_r, i_i] = complex_to_real(input.resolve_conj());
   auto [w_r, w_i] = complex_to_real(weight.resolve_conj());
@@ -1219,7 +1209,15 @@ at::Tensor conv_transpose3d_symint(
 
   auto [input, is_batched] = batchify(input_, /*num_spatial_dims=*/ 3, "conv_transpose3d");
   Tensor output;
-  if (at::isComplexType(input_.scalar_type())) {
+  if (input_.scalar_type() == at::kComplexHalf) {
+    auto bias_cf64 = bias.defined() ? bias.to(at::kComplexDouble) : bias;
+    output = complex_convolution(
+        input.to(at::kComplexDouble),
+        weight.to(at::kComplexDouble),
+        bias_cf64,
+        stride, padding, dilation, true, output_padding, groups)
+        .to(at::kComplexHalf);
+  } else if (at::isComplexType(input_.scalar_type())) {
     output = complex_convolution(
       input, weight, bias, stride, padding, dilation, true, output_padding, groups);
   } else {
