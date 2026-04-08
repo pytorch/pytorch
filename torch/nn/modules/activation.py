@@ -1326,9 +1326,12 @@ class MultiheadAttention(Module):
             raise AssertionError("embed_dim must be divisible by num_heads")
 
         if use_rotary:
+            rotary_pos_emb = RotaryPositionalEmbeddings(self.head_dim)
+            if device is not None:
+                rotary_pos_emb = rotary_pos_emb.to(device=device)
             self.rotary_pos_emb = cast(
                 Callable[[Tensor], Tensor],
-                RotaryPositionalEmbeddings(self.head_dim),
+                rotary_pos_emb,
             )
 
         if not self._qkv_same_embed_dim:

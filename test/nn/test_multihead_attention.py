@@ -805,6 +805,26 @@ class TestMultiheadAttentionNN(NNTestCase):
 
 
 class TestMultiheadAttentionNNDeviceType(NNTestCase):
+    @onlyOn("cuda")
+    def test_multihead_attention_rotary_respects_constructor_device(self, device):
+        embed_dim = 16
+        num_heads = 4
+        seq_len = 6
+        batch_size = 2
+
+        mha = torch.nn.MultiheadAttention(
+            embed_dim, num_heads, dropout=0.0, use_rotary=True, device=device
+        )
+        self.assertIsNotNone(mha.rotary_pos_emb)
+
+        query = torch.randn(seq_len, batch_size, embed_dim, device=device)
+        key = torch.randn(seq_len, batch_size, embed_dim, device=device)
+        value = torch.randn(seq_len, batch_size, embed_dim, device=device)
+
+        out, _ = mha(query, key, value, need_weights=False)
+
+        self.assertEqual(out.device, query.device)
+
     def test_multihead_self_attn_two_masks_fast_path(self, device):
         """
         Multihead self-attention should give the same result on the fast path (BetterTransformer) as on the slow path
