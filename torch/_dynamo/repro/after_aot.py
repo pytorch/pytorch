@@ -694,6 +694,8 @@ if "__compile_source__" in globals():
             writer.const(placeholder)
         elif isinstance(arg, FakeScriptObject):
             writer.opaque(placeholder, arg.script_class_name)
+        elif isinstance(arg, torch._C.Generator):
+            writer.generator(placeholder, arg)
         else:
             writer.unsupported(placeholder, arg)
 
