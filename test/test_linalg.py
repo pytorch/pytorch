@@ -39,8 +39,8 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex_and, floating_and_complex_types, integral_types,
     floating_and_complex_types_and, floating_types_and, complex_types,
 )
-from torch.testing._internal.common_cuda import CDNA2OrLater, SM80OrLater, SM90OrLater, tf32_on_and_off, _get_magma_version, \
-    _get_torch_cuda_version, TEST_MULTIGPU
+from torch.testing._internal.common_cuda import CDNA2OrLater, IS_SM70, IS_SM75, SM80OrLater, SM90OrLater, \
+    tf32_on_and_off, _get_magma_version, _get_torch_cuda_version, TEST_MULTIGPU
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
     _group_quantize_tensor_symmetric
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
@@ -7924,15 +7924,12 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
         # NOTE: We're just exercising terrible failures here.
         version = _get_torch_cuda_version()
-        SM80OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0)
-        SM70 = torch.cuda.is_available() and torch.cuda.get_device_capability() == (7, 0)
-        SM75 = torch.cuda.is_available() and torch.cuda.get_device_capability() == (7, 5)
 
         if TEST_WITH_ROCM:
             _test(17, k, n, use_transpose_a, use_transpose_b, True)
         else:
             if not use_transpose_a and use_transpose_b:
-                if SM80OrLater or (version >= (12, 3) and (SM70 or SM75)):
+                if SM80OrLater or (version >= (12, 3) and (IS_SM70 or IS_SM75)):
                     _test(17, k, n, use_transpose_a, use_transpose_b, version > (11, 7))
                 else:
                     with self.assertRaisesRegex(RuntimeError,
@@ -7950,7 +7947,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                     _test(17, k, n, use_transpose_a, use_transpose_b)
 
             if not use_transpose_a and not use_transpose_b:
-                if SM80OrLater or (version >= (12, 3) and (SM70 or SM75)):
+                if SM80OrLater or (version >= (12, 3) and (IS_SM70 or IS_SM75)):
                     _test(17, k, n, use_transpose_a, use_transpose_b)
                 else:
                     with self.assertRaisesRegex(RuntimeError,
