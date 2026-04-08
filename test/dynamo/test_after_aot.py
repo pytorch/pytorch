@@ -16,6 +16,7 @@ from torch._dynamo.repro.after_aot import (
 )
 from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch._prims.rng_prims import OpaqueGenerator
 from torch.testing._internal.common_utils import IS_FBCODE, TEST_CUDA
 from torch.utils._traceback import report_compile_source_on_error
 from torch.utils._triton import has_triton
@@ -146,7 +147,7 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         reader = InputReader(None)
         env = {"reader": reader, "torch": torch}
         exec("\n".join(writer._lines), env)
-        self.assertIsInstance(reader.args[0], torch._C.Generator)
+        self.assertIsInstance(reader.args[0], OpaqueGenerator)
         self.assertEqual(reader.args[0].device, torch.device("cuda", 0))
 
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
