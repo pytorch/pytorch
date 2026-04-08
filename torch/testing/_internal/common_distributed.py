@@ -976,17 +976,42 @@ class MultiProcessTestCase(TestCase):
                 test_name,
                 se,
             )
-            sys.exit(TEST_SKIPS["generic"].exit_code)
+            # Use os._exit() to preserve non-zero status even when atexit hooks
+            # in the child process would otherwise override sys.exit().
+            os._exit(TEST_SKIPS["generic"].exit_code)
+        except SystemExit as se:
+            # Some tests intentionally call sys.exit() with non-zero codes.
+            # Preserve those exact codes with os._exit() so parent-side checks
+            # can reliably observe them.
+            if se.code is None:
+                exit_code = 0
+            elif isinstance(se.code, int):
+                exit_code = se.code
+            else:
+                logger.error(
+                    "Process %s got non-int SystemExit code in %s: %s",
+                    self.rank,
+                    test_name,
+                    se.code,
+                )
+                exit_code = 1
+            os._exit(exit_code)
         except Exception:
+            tb = traceback.format_exc()
             logger.error(
                 "Caught exception: \n%s exiting process %s with exit code: %s",
-                traceback.format_exc(),
+                tb,
                 self.rank,
                 MultiProcessTestCase.TEST_ERROR_EXIT_CODE,
             )
             # Send error to parent process.
-            parent_pipe.send(traceback.format_exc())
-            sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
+            try:
+                parent_pipe.send(tb)
+            except Exception:
+                pass
+            # Use os._exit() to preserve non-zero status even when atexit hooks
+            # in the child process would otherwise override sys.exit().
+            os._exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
         finally:
             if signal_send_pipe is not None:
                 signal_send_pipe.send(None)
@@ -1101,7 +1126,6 @@ class MultiProcessTestCase(TestCase):
             )
             return
 
-        first_process = self.processes[0]
         # first, we check if there are errors in actual processes
         # (via TEST_ERROR_EXIT CODE), and raise an exception for those.
         # the reason we do this is to attempt to raise a more helpful error
@@ -1116,8 +1140,14 @@ class MultiProcessTestCase(TestCase):
         if errored_processes:
             error = ""
             for i, process in errored_processes:
-                # Get error from pipe.
-                error_message = self.pid_to_pipe[process.pid].recv()
+                # Best effort: child may fail before writing traceback to pipe.
+                if self.pid_to_pipe[process.pid].poll(1):
+                    error_message = self.pid_to_pipe[process.pid].recv()
+                else:
+                    error_message = (
+                        "No traceback received from subprocess; "
+                        "worker exited before sending details."
+                    )
                 error += (
                     f"Process {i} exited with error code {MultiProcessTestCase.TEST_ERROR_EXIT_CODE} "
                     f"and exception:\n{error_message}\n"
@@ -1136,21 +1166,32 @@ class MultiProcessTestCase(TestCase):
         if fn in self.skip_return_code_checks:
             return
 
-        for skip in TEST_SKIPS.values():
-            if first_process.exitcode == skip.exit_code:
-                if IS_SANDCASTLE:
-                    # Don't use unittest.skip to skip the test on sandcastle
-                    # since it creates tasks for skipped tests assuming there
-                    # is some follow-up needed. Instead just "pass" the test
-                    # with an appropriate message.
-                    logger.info(
-                        "Skipping %s on sandcastle for the following reason: %s",
-                        self.id(),
-                        skip.message,
-                    )
-                    return
-                else:
-                    raise unittest.SkipTest(skip.message)
+        exitcodes = [p.exitcode for p in self.processes]
+        exit_summary = ", ".join(
+            f"rank {i} pid {p.pid}: {p.exitcode}" for i, p in enumerate(self.processes)
+        )
+        skip_by_code = {skip.exit_code: skip for skip in TEST_SKIPS.values()}
+
+        # Treat as skip only when all ranks report the same recognized skip code.
+        if all(code in skip_by_code for code in exitcodes):
+            if len(set(exitcodes)) != 1:
+                raise RuntimeError(
+                    f"Inconsistent subprocess skip exit codes: {exit_summary}"
+                )
+            skip = skip_by_code[exitcodes[0]]
+            if IS_SANDCASTLE:
+                # Don't use unittest.skip to skip the test on sandcastle
+                # since it creates tasks for skipped tests assuming there
+                # is some follow-up needed. Instead just "pass" the test
+                # with an appropriate message.
+                logger.info(
+                    "Skipping %s on sandcastle for the following reason: %s",
+                    self.id(),
+                    skip.message,
+                )
+                return
+            else:
+                raise unittest.SkipTest(skip.message)
 
         # In most cases, we expect test to return exit code 0, standing for success.
         expected_return_code = 0
@@ -1159,10 +1200,12 @@ class MultiProcessTestCase(TestCase):
         if fn in self.special_return_code_checks:
             expected_return_code = self.special_return_code_checks[fn]
 
-        self.assertEqual(
-            first_process.exitcode,
-            expected_return_code,
-            msg=f"Expected exit code {expected_return_code} but got {first_process.exitcode} for pid: {first_process.pid}",
+        self.assertTrue(
+            all(code == expected_return_code for code in exitcodes),
+            msg=(
+                f"Expected all subprocesses to exit with code {expected_return_code}, "
+                f"got: {exit_summary}"
+            ),
         )
 
     @property
@@ -1939,6 +1982,14 @@ class MultiProcContinuousTest(TestCase):
         Note: Process spawning is deferred to setUp to support instantiate_device_type_tests,
         which calls setUpClass during class creation before any tests run.
         """
+        # Ensure each concrete test class starts with clean process state even
+        # when inheriting from another MultiProcContinuousTest subclass.
+        cls.poison_pill = False
+        cls._processes_spawned = False
+        cls.processes = []
+        cls.task_queues = []
+        cls.completion_queues = []
+        cls.rdvz_file = None
         super().setUpClass()
 
     @classmethod
@@ -2015,6 +2066,15 @@ class MultiProcContinuousTest(TestCase):
             os.remove(cls.rdvz_file)
         except OSError:
             pass
+        finally:
+            cls.rdvz_file = None
+
+        # Reset class state so derived classes do not inherit stale worker refs.
+        cls._processes_spawned = False
+        cls.poison_pill = False
+        cls.processes = []
+        cls.task_queues = []
+        cls.completion_queues = []
 
         logger.info(f"Class {cls.__name__} finished")  # noqa: G004
         super().tearDownClass()
@@ -2047,18 +2107,17 @@ class MultiProcContinuousTest(TestCase):
                 logger.debug(f"Waiting for workers to finish {self.id()}")  # noqa: G004
                 # Drain all completion queues before raising any exception,
                 # so stale results don't desync subsequent tests.
-                deferred_exception = None
+                deferred_skip_exception = None
+                deferred_failure_exception = None
                 for i, (p, completion_queue) in enumerate(
                     zip(self.processes, self.completion_queues)
                 ):
                     rv = retrieve_result_from_completion_queue(
                         p, completion_queue, timeout=get_timeout(self.id())
                     )
-                    if deferred_exception is not None:
-                        # Already captured an exception; just drain
-                        continue
                     if isinstance(rv, unittest.SkipTest):
-                        deferred_exception = rv
+                        if deferred_skip_exception is None:
+                            deferred_skip_exception = rv
                         continue
                     if isinstance(rv, BaseException):
                         logger.warning(
@@ -2066,7 +2125,8 @@ class MultiProcContinuousTest(TestCase):
                             f"skipping rest of tests in Test class: {self.__class__.__name__}"  # noqa: G004
                         )
                         self.__class__.poison_pill = True
-                        deferred_exception = rv
+                        if deferred_failure_exception is None:
+                            deferred_failure_exception = rv
                         continue
 
                     # Success
@@ -2078,8 +2138,10 @@ class MultiProcContinuousTest(TestCase):
                         f"Main proc detected rank {i} finished {self.id()}"  # noqa: G004
                     )
 
-                if deferred_exception is not None:
-                    raise deferred_exception
+                if deferred_failure_exception is not None:
+                    raise deferred_failure_exception
+                if deferred_skip_exception is not None:
+                    raise deferred_skip_exception
             else:
                 # Worker just runs the test
                 fn()
