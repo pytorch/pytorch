@@ -27,6 +27,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
     SM120OrLater,
     xfailIfSM120OrLater,
+    xfailIfSM12X,
     xfailIfSM90,
 )
 from torch.testing._internal.common_device_type import (
@@ -803,6 +804,7 @@ GQA_MQA_BLOCK_MASK_CASES = [
 @unittest.skipIf(
     not ensure_flash_available(), "Flash attention (CUTE) library is not available"
 )
+@xfailIfSM12X
 class TestFlexFlash(InductorTestCase):
     # `FlashAttentionForwardSm120` does not have `apply_score_mod`.
     @xfailIfSM120OrLater
