@@ -1074,7 +1074,7 @@ def index_single_dim_strategy(
 
 
 @register_single_dim_strategy(
-    [aten.index_put.default, aten._index_put_impl_.default],
+    [aten.index_put.default, aten.index_put_.default, aten._index_put_impl_.default],
     schema_info=RuntimeSchemaInfo(needs_pytree=True),
 )
 def index_put_single_dim_strategy(
@@ -1097,9 +1097,10 @@ def index_put_single_dim_strategy(
       serves as an indexing coordinate into self. Each coordinate selects a
       tensor element, or a slice (if non-indexed dims exist).
 
-      values is a tensor that's broadcastable to (*broadcasted_shape, *non_indexed_dim_sizes).
-      Each position in broadcasted_shape selects a slice of values,
-      and writes it into the corresponding slice of self.
+      values is a tensor broadcastable to the indexing output shape.
+      When indexed dims are consecutive starting at dim k, this shape is
+      (*self[:k], *broadcast_shape, *self[k+n_indexed:]). When indexed
+      dims are non-consecutive, it is (*broadcast_shape, *non_indexed_dims).
 
     Sharding rules (possibly conservative and incomplete):
       - Index tensors: always Replicate (every rank needs all coordinates).
@@ -1108,10 +1109,6 @@ def index_put_single_dim_strategy(
         The exception is broadcasted value dimensions (size 1) - we require Replicate, but can shard self.
       - Additionally, we allow the full Partial rule on non-indexing tensors.
 
-    TODO(pianpwk): support non-contiguous indexed dims (None gaps in indices tuple,
-    e.g. (idx, None, idx)). Currently blocked by a single_dim_strategy infra bug:
-    _get_num_tensor_inputs counts None TupleStrategy children but args_strategy
-    drops them, causing a length mismatch in expand_to_full_mesh_op_strategy.
     """
     self_meta = cast(TensorMeta, args[0])
     indices_meta = cast(tuple[TensorMeta | None, ...], args[1])
@@ -1124,7 +1121,6 @@ def index_put_single_dim_strategy(
     values_ndim = len(values_meta.shape)
 
     # Explicitly compute the broadcast shape of the index tensors.
-    # We could probably derive it in a smarter way, but this is more explicit.
     index_shapes = [idx.shape for idx in indices_meta if idx is not None]
     broadcast_ndim = len(torch.broadcast_shapes(*index_shapes)) if index_shapes else 0
 
