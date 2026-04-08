@@ -307,6 +307,7 @@ class GuardManager:
         user_stack: traceback.StackSummary | None,
         ptype: Any,
         dispatch_keys: Any,
+        fake_warmup_mode: bool = False,
     ) -> None: ...
     def add_dynamic_indices_guard(
         self,

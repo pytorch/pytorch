@@ -3399,6 +3399,7 @@ class GuardBuilder(GuardBuilderBase):
                     user_stack,
                     pytype,
                     dispatch_keys,
+                    torch.compiler._fake_warmup_mode,
                 )
 
                 # We consider TENSOR_MATCH guard to be important enough to be

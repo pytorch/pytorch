@@ -69,7 +69,8 @@ class TensorCheck {
       const at::Tensor& v,
       c10::DispatchKeySet dispatch_key_set,
       std::vector<std::optional<c10::SymInt>> dynamic_dims_sizes,
-      std::vector<std::optional<c10::SymInt>> dynamic_dims_strides);
+      std::vector<std::optional<c10::SymInt>> dynamic_dims_strides,
+      bool fake_warmup_mode = false);
 
   TensorCheck(
       const LocalState& state,
@@ -79,7 +80,8 @@ class TensorCheck {
       at::DeviceIndex device_index,
       bool requires_grad,
       std::vector<std::optional<c10::SymInt>> dynamic_dims_sizes,
-      std::vector<std::optional<c10::SymInt>> dynamic_dims_strides);
+      std::vector<std::optional<c10::SymInt>> dynamic_dims_strides,
+      bool fake_warmup_mode = false);
 
   bool check(const LocalState& state, const at::Tensor& v);
   bool check(

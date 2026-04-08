@@ -38,6 +38,7 @@ __all__ = [
     "skip_guard_on_globals_unsafe",
     "skip_all_guards_unsafe",
     "nested_compile_region",
+    "fake_warmup",
 ]
 
 
@@ -342,6 +343,196 @@ def set_stance(
 
 # forbid in graph
 set_stance._dynamo_forbidden = True  # type: ignore[attr-defined]
+
+# FakeTensor warmup mode: when True, guards will strip Meta dispatch key so
+# real tensors pass guards created during warmup. Set by warmup() below.
+_fake_warmup_mode = False
+
+
+def fake_warmup(
+    fn: Callable[..., Any],
+    args: tuple[Any, ...] = (),
+    kwargs: dict[str, Any] | None = None,
+) -> None:
+    """
+    Warmup compilation by running the function with FakeTensors.
+
+    This pre-populates the compilation cache by converting real tensor inputs
+    to FakeTensors with symbolic dimensions (respecting ``torch._dynamo.mark_dynamic``
+    hints), then calling the function. The compilation happens with symbolic shapes,
+    so subsequent calls with different concrete sizes will hit the cache.
+
+    **IMPORTANT**: This requires your model to be **FakeTensor-traceable**:
+
+    1. All operations must support FakeTensor execution (shape propagation without
+       real data). Most standard PyTorch ops support this.
+
+    2. Control flow cannot depend on tensor *values* (only shapes are available
+       during fake tensor tracing).
+
+    3. Custom CUDA kernels or C++ extensions must have proper FakeTensor/Meta
+       dispatch implementations.
+
+    **REQUIREMENT**: For fake warmup to work correctly, both compiled regions
+    AND eager code must be:
+
+    1. **FakeTensor traceable** - no operations requiring real data
+    2. **Data-Dependent Error (DDE) free** - no branching on unbacked SymInts
+
+    If any code (compiled or eager) produces unbacked SymInts (from data-dependent
+    operations like ``.nonzero()``, ``.item()``, etc.), subsequent tracing will
+    propagate FakeTensors with unbacked symbols. This causes downstream compiled
+    graphs to have unbacked inputs instead of backed ones, which is not ideal.
+
+    If your model is not FakeTensor-traceable, this will error during warmup.
+
+    Args:
+        fn: The function to warmup. Should contain ``@torch.compile`` decorated
+            functions or be decorated with ``@torch.compile`` itself.
+        args: Tuple of arguments to pass to the function. Tensor arguments will
+            be converted to FakeTensors. Use ``torch._dynamo.mark_dynamic(tensor, dim)``
+            on tensors before passing to specify which dimensions should be dynamic.
+        kwargs: Optional keyword arguments to pass to the function.
+
+    Example::
+
+        @torch.compile(dynamic=True)
+        def model(x):
+            return x.sum(dim=0) + x.mean()
+
+
+        # Mark dimension 0 as dynamic
+        x = torch.randn(32, 10, device="cuda")
+        torch._dynamo.mark_dynamic(x, 0)
+
+        # Warmup - compiles with symbolic batch dimension
+        torch.compiler.warmup(model, args=(x,))
+
+        # Real calls use cached compilation - no recompile for different batch sizes
+        model(torch.randn(64, 10, device="cuda"))  # Cache hit
+        model(torch.randn(128, 10, device="cuda"))  # Cache hit
+    """
+    from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch.fx.experimental.symbolic_shapes import (
+        DimDynamic,
+        ShapeEnv,
+        StatelessSymbolicContext,
+    )
+
+    if kwargs is None:
+        kwargs = {}
+
+    shape_env = ShapeEnv()
+
+    def _convert_to_fake(
+        arg: Any, shape_env: ShapeEnv, fake_mode: FakeTensorMode | None
+    ) -> Any:
+        """Convert a tensor to FakeTensor, respecting mark_dynamic hints."""
+        if not isinstance(arg, torch.Tensor):
+            return arg
+
+        # Check for mark_dynamic hints on the tensor
+        # These are stored by torch._dynamo.mark_dynamic()
+        dynamic_indices = getattr(arg, "_dynamo_dynamic_indices", set())
+
+        # Build dynamic_sizes list
+        dynamic_sizes = []
+        for dim in range(arg.ndim):
+            if dim in dynamic_indices:
+                dynamic_sizes.append(DimDynamic.DYNAMIC)
+            else:
+                dynamic_sizes.append(DimDynamic.STATIC)
+
+        # Create symbolic sizes and strides
+        from torch._dynamo.source import ConstantSource
+
+        source = ConstantSource(f"warmup_input_{id(arg)}")
+
+        sym_sizes, sym_strides, _ = (
+            shape_env.create_symbolic_sizes_strides_storage_offset(
+                arg,
+                source=source,
+                symbolic_context=StatelessSymbolicContext(dynamic_sizes=dynamic_sizes),
+            )
+        )
+
+        # Create fake tensor with symbolic shape on the same device
+        return torch.empty_strided(
+            sym_sizes,
+            sym_strides,
+            dtype=arg.dtype,
+            device=arg.device,
+        )
+
+    with FakeTensorMode(shape_env=shape_env):
+        # Convert args to fake tensors
+        fake_args = tuple(_convert_to_fake(arg, shape_env, None) for arg in args)
+        fake_kwargs = {
+            k: _convert_to_fake(v, shape_env, None) for k, v in kwargs.items()
+        }
+
+        # Set warmup mode flag so guards strip Meta dispatch key
+        global _fake_warmup_mode
+        _fake_warmup_mode = True
+        try:
+            # Call the function with fake tensors to trigger compilation
+            # The result is discarded - we only care about populating the cache
+            from torch._subclasses.fake_tensor import UnsupportedFakeTensorException
+            from torch.fx.experimental.symbolic_shapes import (
+                GuardOnDataDependentSymNode,
+            )
+
+            try:
+                fn(*fake_args, **fake_kwargs)
+            except GuardOnDataDependentSymNode as e:
+                # Check if error came from inside Dynamo tracing (compiled region)
+                # vs direct FakeTensor operations (eager region)
+                is_from_compiled_region = False
+                tb = e.__traceback__
+                while tb is not None:
+                    filename = tb.tb_frame.f_code.co_filename
+                    if (
+                        "_dynamo/convert_frame" in filename
+                        or "_dynamo/symbolic_convert" in filename
+                    ):
+                        is_from_compiled_region = True
+                        break
+                    tb = tb.tb_next
+
+                if is_from_compiled_region:
+                    # Let Dynamo's error propagate as-is
+                    raise
+                else:
+                    # Error from eager code running with FakeTensors
+                    raise RuntimeError(
+                        "fake_warmup: branching on data-dependent operations results in "
+                        "errors even in eager (non-compiled) regions. Operations like "
+                        ".item(), .nonzero(), or tensor comparisons used in control flow "
+                        "cannot be executed with FakeTensors.\n\n"
+                        f"Original error: {e}"
+                    ) from e
+            except UnsupportedFakeTensorException as e:
+                raise RuntimeError(
+                    "fake_warmup requires all ops to have a FakeTensor (meta) implementation. "
+                    "An operation was encountered that does not support FakeTensor tracing.\n\n"
+                    f"Original error: {e}"
+                ) from e
+            except RuntimeError as e:
+                # Catch missing fake impl errors from custom ops
+                err_msg = str(e)
+                if "no fake impl registered" in err_msg.lower():
+                    raise RuntimeError(
+                        "fake_warmup requires all ops to have a FakeTensor (meta) implementation. "
+                        "An operation was encountered that does not support FakeTensor tracing.\n\n"
+                        f"Original error: {e}"
+                    ) from e
+                raise
+        finally:
+            _fake_warmup_mode = False
+
+
+# forbid in graph
+fake_warmup._dynamo_forbidden = True  # type: ignore[attr-defined]
 
 
 def set_enable_guard_collectives(enabled: bool):

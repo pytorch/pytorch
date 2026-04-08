@@ -146,17 +146,29 @@ TensorCheck::TensorCheck(
     const at::Tensor& v,
     c10::DispatchKeySet dispatch_key_set,
     std::vector<std::optional<c10::SymInt>> dynamic_dims_sizes,
-    std::vector<std::optional<c10::SymInt>> dynamic_dims_strides)
+    std::vector<std::optional<c10::SymInt>> dynamic_dims_strides,
+    bool fake_warmup_mode)
     : pytype(pt),
-      dispatch_key_(state.apply(dispatch_key_set).raw_repr()),
       dtype_(v.dtype().toScalarType()),
       device_index_(v.device().index()),
       requires_grad_(v.requires_grad()),
       sizes_(std::move(dynamic_dims_sizes)),
       strides_(std::move(dynamic_dims_strides)),
       dim_(static_cast<int64_t>(sizes_.size())) {
-  // TODO(voz): In cases where sizes_ and strides_ are fully dynamic, should
-  // we just treat this as optional?
+  c10::DispatchKeySet ks = state.apply(dispatch_key_set);
+  // FakeTensor warmup: strip Meta and add real backend key
+  if (fake_warmup_mode && ks.has(c10::DispatchKey::Meta)) {
+    ks = ks.remove(c10::DispatchKey::Meta);
+    if (v.device().is_cuda()) {
+      ks = ks.add(c10::DispatchKey::CUDA);
+    } else if (v.device().is_cpu()) {
+      ks = ks.add(c10::DispatchKey::CPU);
+    } else {
+      TORCH_CHECK(
+          false, "fake_warmup: unsupported device type ", v.device().type());
+    }
+  }
+  dispatch_key_ = ks.raw_repr();
 }
 
 TensorCheck::TensorCheck(
@@ -167,15 +179,30 @@ TensorCheck::TensorCheck(
     at::DeviceIndex device_index,
     bool requires_grad,
     std::vector<std::optional<c10::SymInt>> dynamic_dims_sizes,
-    std::vector<std::optional<c10::SymInt>> dynamic_dims_strides)
+    std::vector<std::optional<c10::SymInt>> dynamic_dims_strides,
+    bool fake_warmup_mode)
     : pytype(pt),
-      dispatch_key_(state.apply(dispatch_key_set).raw_repr()),
       dtype_(dtype),
       device_index_(device_index),
       requires_grad_(requires_grad),
       sizes_(std::move(dynamic_dims_sizes)),
       strides_(std::move(dynamic_dims_strides)),
-      dim_(static_cast<int64_t>(sizes_.size())) {}
+      dim_(static_cast<int64_t>(sizes_.size())) {
+  c10::DispatchKeySet ks = state.apply(dispatch_key_set);
+  // FakeTensor warmup: strip Meta and add real backend key
+  if (fake_warmup_mode && ks.has(c10::DispatchKey::Meta)) {
+    ks = ks.remove(c10::DispatchKey::Meta);
+    if (device_index >= 0) {
+      ks = ks.add(c10::DispatchKey::CUDA);
+    } else if (device_index == -1) {
+      ks = ks.add(c10::DispatchKey::CPU);
+    } else {
+      TORCH_CHECK(
+          false, "fake_warmup: unsupported device_index ", device_index);
+    }
+  }
+  dispatch_key_ = ks.raw_repr();
+}
 
 // See note in guards.py [Note - On Export Tensor Guards]
 // Logic parallel to here must be maintained in python
@@ -207,8 +234,11 @@ bool TensorCheck::check(
     const c10::SymIntArrayRef& sym_sizes,
     const c10::SymIntArrayRef& sym_strides,
     const bool& requires_grad) {
-  if (dispatch_key_ != state.apply(dispatch_key_set).raw_repr() ||
-      dtype_ != dtype || device_index_ != device.index() ||
+  if (dispatch_key_ != state.apply(dispatch_key_set).raw_repr()) {
+    return false;
+  }
+
+  if (dtype_ != dtype || device_index_ != device.index() ||
       requires_grad_ != requires_grad) {
     return false;
   }
@@ -243,14 +273,15 @@ std::string TensorCheck::check_verbose(
     const std::string& tensor_name) {
   std::stringstream fail_reason;
   fail_reason << "tensor '" << tensor_name << "' ";
+
   if (dispatch_key_ != state.apply(v.key_set()).raw_repr()) {
-    // return fmt::format("tensor dispatch key mismatch. expected {}, actual
-    // {}", dispatch_key_, state.apply(v.key_set()).raw_repr());
     fail_reason << "dispatch key set mismatch. expected "
                 << c10::DispatchKeySet(c10::DispatchKeySet::RAW, dispatch_key_)
                 << ", actual " << state.apply(v.key_set());
     return fail_reason.str();
-  } else if (dtype_ != v.dtype().toScalarType()) {
+  }
+
+  if (dtype_ != v.dtype().toScalarType()) {
     // return fmt::format("tensor dtype mismatch. expected {}, actual {}",
     // dtype_, v.dtype().toScalarType());
     fail_reason << "dtype mismatch. expected " << dtype_ << ", actual "
@@ -468,7 +499,9 @@ PyObject* TensorGuards_check(
   for (auto i : c10::irange(len)) {
     PyObject* item = PyTuple_GET_ITEM(args, i);
 
-    if (Py_TYPE(item) != checks[i].pytype) {
+    // FakeTensor warmup support: relax exact type check to allow FakeTensor
+    // where torch.Tensor was expected. Both are valid tensor types.
+    if (!THPVariable_Check(item)) {
       Py_RETURN_FALSE;
     }
     auto insertion = unique_tensors.insert({item, nullptr});
@@ -536,7 +569,9 @@ PyObject* TensorGuards_check_verbose(
   ska::flat_hash_map<PyObject*, std::nullptr_t> unique_tensors;
   for (auto i : c10::irange(len)) {
     PyObject* item = PyTuple_GET_ITEM(args, i);
-    if (Py_TYPE(item) != checks[i].pytype) {
+    // FakeTensor warmup support: relax exact type check to allow FakeTensor
+    // where torch.Tensor was expected. Both are valid tensor types.
+    if (!THPVariable_Check(item)) {
       std::stringstream fail_reason;
       PyObject* type_str =
           PyObject_Str(reinterpret_cast<PyObject*>(Py_TYPE(item)));
@@ -962,6 +997,14 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
     return nullptr;
   }
   at::Tensor tensor = THPVariable_Unpack(item);
+
+  // FakeTensor warmup support: skip size/stride checks for tensors with
+  // symbolic sizes/strides (e.g., FakeTensors). These tensors are used to
+  // pre-populate the compilation cache with dynamic shapes.
+  if (tensor.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
+    Py_RETURN_TRUE;
+  }
+
   int64_t ndim = tensor.ndimension();
   if (PyTuple_GET_SIZE(size) != ndim || PyTuple_GET_SIZE(stride) != ndim) {
     std::stringstream msg;
@@ -4683,7 +4726,8 @@ class TENSOR_MATCH : public LeafGuard {
       py::object verbose_code_parts,
       py::object user_stack,
       py::object pytype,
-      py::object dispatch_keys)
+      py::object dispatch_keys,
+      bool fake_warmup_mode = false)
       : LeafGuard(
             root_guard_manager,
             std::move(verbose_code_parts),
@@ -4712,6 +4756,7 @@ class TENSOR_MATCH : public LeafGuard {
     tensor_dims_stride = tensor_dims_stride.empty()
         ? wrapIntegersInOptional(tensor.sym_strides())
         : tensor_dims_stride;
+
     LocalState state;
     _tensor_check = std::make_unique<TensorCheck>(
         state,
@@ -4719,11 +4764,14 @@ class TENSOR_MATCH : public LeafGuard {
         std::move(tensor),
         dispatch_keys.cast<c10::DispatchKeySet>(),
         std::move(tensor_dims_size),
-        std::move(tensor_dims_stride));
+        std::move(tensor_dims_stride),
+        fake_warmup_mode);
   }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    if (Py_TYPE(value) != _tensor_check->pytype) {
+    // FakeTensor warmup support: relax exact type check to allow FakeTensor
+    // where torch.Tensor was expected. Both are valid tensor types.
+    if (!THPVariable_Check(value)) {
       return false;
     }
     return _tensor_check->check(
@@ -7218,7 +7266,8 @@ PyObject* torch_c_dynamo_guards_init() {
            py::list,
            py::object,
            py::type,
-           py::object>())
+           py::object,
+           bool>())
       .def("__call__", &TENSOR_MATCH::check);
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<RelationalGuard, LeafGuard, std::shared_ptr<RelationalGuard>>(
@@ -7722,7 +7771,8 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object verbose_code_parts,
              py::object user_stack,
              py::object pytype,
-             py::object dispatch_keys) -> void {
+             py::object dispatch_keys,
+             bool fake_warmup_mode) -> void {
             SKIP_IF_GUARD_ALREADY_PRESENT("TENSOR_MATCH");
             self.add_leaf_guard(std::make_shared<TENSOR_MATCH>(
                 self.get_root(),
@@ -7733,8 +7783,18 @@ PyObject* torch_c_dynamo_guards_init() {
                 std::move(verbose_code_parts),
                 std::move(user_stack),
                 std::move(pytype),
-                std::move(dispatch_keys)));
-          })
+                std::move(dispatch_keys),
+                fake_warmup_mode));
+          },
+          py::arg("value"),
+          py::arg("sizes"),
+          py::arg("strides"),
+          py::arg("tensor_name"),
+          py::arg("verbose_code_parts"),
+          py::arg("user_stack"),
+          py::arg("pytype"),
+          py::arg("dispatch_keys"),
+          py::arg("fake_warmup_mode") = false)
 
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
@@ -8324,3 +8384,4 @@ PyObject* torch_c_dynamo_guards_init() {
 }
 
 } // namespace torch::dynamo
+    
