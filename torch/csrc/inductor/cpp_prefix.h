@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <limits>
 #include <map>
+#include <type_traits>
 #include <memory>
 #include <optional>
 
@@ -777,8 +778,19 @@ Welford<scalar_t> welford_vec_reduce_all(
 #endif
 
 template <typename T, typename U>
-inline typename std::common_type_t<T, U> mod(T a, U b) {
-  return a % b;
+inline std::common_type_t<T, U> mod(T a, U b) {
+  using C = std::common_type_t<T, U>;
+  static_assert(
+      std::is_integral_v<C>,
+      "inductor mod(T a, U b) is only for integral types; use the float/double specializations "
+      "for floating-point operands.");
+  TORCH_CHECK(b != 0, "ZeroDivisionError");
+  const C a_c = static_cast<C>(a);
+  const C b_c = static_cast<C>(b);
+  if (a_c == std::numeric_limits<C>::min() && b_c == C(-1)) {
+    return C(0);
+  }
+  return a_c % b_c;
 }
 template <>
 inline float mod(float a, float b) {
