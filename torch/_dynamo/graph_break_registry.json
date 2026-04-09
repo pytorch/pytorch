@@ -699,6 +699,18 @@
       ]
     }
   ],
+  "GB7299": [
+    {
+      "Gb_type": "_autograd_grad with lost grad_fn linkage",
+      "Context": "outputs lost autograd linkage during tracing",
+      "Explanation": "_autograd_grad() received tensors whose grad_fn was lost during tracing - this silently produces zero gradients.",
+      "Hints": [
+        "Compile the full transform instead of the returned ",
+        "closure: torch.compile(lambda x: torch.func.vjp(f, x))",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0058": [
     {
       "Gb_type": "Failed to set tensor attribute",
@@ -4197,6 +4209,16 @@
       "Explanation": "associative_scan() operator doesn't support zero-sized tensors during tracing.",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB1140": [
+    {
+      "Gb_type": "_autograd_grad with unsupported argument type",
+      "Context": "got {type(var).__name__}",
+      "Explanation": "_autograd_grad() received an argument of type {type(var).__name__} which is not supported. Expected tensor or sequence of tensors.",
+      "Hints": [
+        "Ensure outputs and inputs arguments are tensors or sequences of tensors."
       ]
     }
   ],

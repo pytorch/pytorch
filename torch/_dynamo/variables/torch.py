@@ -376,6 +376,43 @@ def _collect_tensors_with_sources(
     return results
 
 
+def _collect_placeholder_nodes(var: "VariableTracker") -> list[torch.fx.Node]:
+    """Recursively collect FX placeholder nodes from a VariableTracker.
+
+    The returned placeholder nodes carry grapharg.example (real tensor) and
+    example_value (FakeTensor) metadata — comparing these reveals lost
+    autograd linkage (e.g., grad_fn dropped during tracing).
+    See NOTE [Detecting lost autograd linkage in closure-captured tensors].
+    """
+    from .lazy import LazyVariableTracker
+    from .lists import BaseListVariable
+    from .tensor import TensorVariable
+
+    result: list[torch.fx.Node] = []
+    if isinstance(var, TensorVariable):
+        node = var.as_proxy().node
+        if node.op == "placeholder":
+            result.append(node)
+    elif isinstance(var, LazyVariableTracker):
+        result.extend(_collect_placeholder_nodes(var.realize()))
+    elif isinstance(var, BaseListVariable):
+        for item in var.items:
+            result.extend(_collect_placeholder_nodes(item))
+    else:
+        unimplemented(
+            gb_type="_autograd_grad with unsupported argument type",
+            context=f"got {type(var).__name__}",
+            explanation=(
+                f"_autograd_grad() received an argument of type {type(var).__name__} "
+                "which is not supported. Expected tensor or sequence of tensors."
+            ),
+            hints=[
+                "Ensure outputs and inputs arguments are tensors or sequences of tensors.",
+            ],
+        )
+    return result
+
+
 @functools.cache
 def get_overridable_functions() -> set[Callable[..., Any]]:
     from itertools import chain
@@ -2411,6 +2448,68 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     *proxy_args_kwargs(args, kwargs),
                 )
             return wrap_fx_proxy(tx=tx, proxy=proxy)
+
+        @register(torch._functorch.eager_transforms._autograd_grad)
+        def handle_functorch_autograd_grad(
+            self,
+            tx: "InstructionTranslator",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            """Graph-break when closure-captured tensors lose their grad_fn.
+
+            NOTE [Detecting lost autograd linkage in closure-captured tensors]
+
+            Functorch transforms (vjp, grad, jacrev) return closures that capture
+            tensors with grad_fn. When such a closure is compiled separately, those
+            tensors become graph placeholders whose FakeTensors lose grad_fn,
+            causing _autograd_grad to silently return zeros.
+
+            _collect_placeholder_nodes gathers placeholder nodes from the
+            outputs/inputs args. For each, we compare grapharg.example (the real
+            tensor, retains grad_fn) against example_value (FakeTensor, grad_fn
+            is None). A mismatch means autograd linkage was lost, so we
+            graph-break.
+
+            This is a pre-check only: kwargs (retain_graph, create_graph,
+            grad_outputs) don't affect linkage detection and are handled by
+            the default proxy path when this returns None.
+            """
+            outputs_var = args[0] if len(args) >= 1 else None
+            inputs_var = args[1] if len(args) >= 2 else None
+
+            if outputs_var is None or inputs_var is None:
+                return None
+
+            output_placeholder_nodes = _collect_placeholder_nodes(outputs_var)
+            input_placeholder_nodes = _collect_placeholder_nodes(inputs_var)
+
+            if output_placeholder_nodes and input_placeholder_nodes:
+                for node in output_placeholder_nodes:
+                    fake = node.meta.get("example_value")
+                    grapharg = node.meta.get("grapharg")
+                    if (
+                        grapharg is not None
+                        and isinstance(fake, torch.Tensor)
+                        and fake.grad_fn is None
+                    ):
+                        real = grapharg.example
+                        if isinstance(real, torch.Tensor) and real.grad_fn is not None:
+                            unimplemented(
+                                gb_type="_autograd_grad with lost grad_fn linkage",
+                                context="outputs lost autograd linkage during tracing",
+                                explanation=(
+                                    "_autograd_grad() received tensors whose grad_fn "
+                                    "was lost during tracing - this silently produces "
+                                    "zero gradients."
+                                ),
+                                hints=[
+                                    "Compile the full transform instead of the returned "
+                                    "closure: torch.compile(lambda x: torch.func.vjp(f, x))",
+                                    *graph_break_hints.SUPPORTABLE,
+                                ],
+                            )
+            return None
 
         return handlers
 
