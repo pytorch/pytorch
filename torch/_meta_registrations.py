@@ -3,7 +3,7 @@ import math
 from collections.abc import Callable, Sequence
 from enum import Enum
 from functools import wraps
-from typing import Optional, TypeVar
+from typing import TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -2525,7 +2525,7 @@ def meta_mm(a, b, out_dtype: torch.dtype | None = None):
 @register_meta(aten.addmm)
 @out_wrapper(exact_dtype=True)
 def meta_addmm(
-    self, mat1, mat2, out_dtype: Optional[torch.dtype] = None, *, alpha=1, beta=1
+    self, mat1, mat2, out_dtype: torch.dtype | None = None, *, alpha=1, beta=1
 ):
     torch._check(mat1.dim() == 2, lambda: "mat1 must be 2D")
     torch._check(mat2.dim() == 2, lambda: "mat2 must be 2D")
