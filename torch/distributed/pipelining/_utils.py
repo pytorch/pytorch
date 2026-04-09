@@ -503,42 +503,6 @@ def flatten_args_detach(args):
     return flatten_args(args, detach=True)
 
 
-# Legacy validation functions (kept for backward compatibility with existing stage.py)
-# These will be removed in the next commit when stage.py is updated.
-class PipeliningShapeError(RuntimeError):
-    """Shape mismatch between configured and runtime values."""
-
-
-def validate_tensor_metadata(desc, expected, given):
-    if not expected.shape == given.shape:
-        raise PipeliningShapeError(
-            f"{desc} has a shape mismatch: expected {expected.shape} actual {given.shape}"
-        )
-    if not expected.dtype == given.dtype:
-        raise PipeliningShapeError(
-            f"{desc} has a dtype mismatch: expected {expected.dtype} actual {given.dtype}"
-        )
-    if not expected.stride() == given.stride():
-        raise PipeliningShapeError(
-            f"{desc} has a stride mismatch: expected {expected.stride()} actual {given.stride()}"
-        )
-
-
-def validate_tensors_metadata(
-    desc,
-    expected_tensors: list[torch.Tensor] | tuple[torch.Tensor, ...],
-    actual_tensors: list[torch.Tensor] | tuple[torch.Tensor, ...],
-):
-    if len(expected_tensors) != len(actual_tensors):
-        raise PipeliningShapeError(
-            f"{desc}: Number of values ({len(actual_tensors)}) does not match expected number ({len(expected_tensors)})"
-        )
-    for i in range(len(expected_tensors)):
-        validate_tensor_metadata(
-            f"{desc}: value {i}", expected_tensors[i], actual_tensors[i]
-        )
-
-
 def generate_stage_to_rank_mapping(
     pp_size: int, num_stages: int, style: str = "loop"
 ) -> dict[int, int]:
@@ -844,6 +808,63 @@ def validate_metadata(
             )
 
     return diffs
+
+
+def validate_tensors_metadata(
+    desc: str,
+    expected: tuple[TensorMeta | None, ...],
+    actual: tuple[torch.Tensor | TensorMeta | None, ...],
+    *,
+    raise_on_mismatch: bool = True,
+    warn_on_mismatch: bool = False,
+) -> list[str]:
+    """Validate metadata for a tuple of tensors element-wise.
+
+    Args:
+        desc: Description prefix for error/warning messages.
+        expected: Tuple of expected metadata (may include ``None`` for grads).
+        actual: Tuple of actual tensors or metadata to compare against.
+        raise_on_mismatch: If ``True``, raise on the first mismatch.
+        warn_on_mismatch: If ``True``, issue warnings for mismatches.
+
+    Returns:
+        Aggregated list of difference strings.
+
+    Raises:
+        PipeliningMetadataError: If lengths differ or on mismatch.
+    """
+    if len(expected) != len(actual):
+        msg = f"{desc}: expected {len(expected)} tensors, got {len(actual)}"
+        if raise_on_mismatch:
+            raise PipeliningMetadataError(msg)
+        if warn_on_mismatch:
+            warnings.warn(msg, UserWarning, stacklevel=2)
+        return [msg]
+
+    all_diffs: list[str] = []
+    for i, (exp, act) in enumerate(zip(expected, actual, strict=True)):
+        if exp is None and act is None:
+            continue
+        if exp is None or act is None:
+            msg = (
+                f"{desc}[{i}]: expected {'None' if exp is None else 'metadata'}, "
+                f"got {'None' if act is None else 'metadata'}"
+            )
+            if raise_on_mismatch:
+                raise PipeliningMetadataError(msg)
+            if warn_on_mismatch:
+                warnings.warn(msg, UserWarning, stacklevel=2)
+            all_diffs.append(msg)
+            continue
+        diffs = validate_metadata(
+            f"{desc}[{i}]",
+            exp,
+            act,
+            raise_on_mismatch=raise_on_mismatch,
+            warn_on_mismatch=warn_on_mismatch,
+        )
+        all_diffs.extend(diffs)
+    return all_diffs
 
 
 def validate_static_arg_grad_correspondence(
