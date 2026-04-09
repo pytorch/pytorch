@@ -24,7 +24,6 @@ import copy
 import dataclasses
 import enum
 import functools
-import importlib.machinery
 import inspect
 import itertools
 import logging
@@ -4331,9 +4330,7 @@ class SourcelessBuilder:
                     )
         elif isinstance(value, torch.fx.graph_module.GraphModule):
             return SourcelessGraphModuleVariable(value)
-        elif isinstance(
-            value, (importlib.machinery.ModuleSpec, torch.utils._pytree.TreeSpec)
-        ):
+        elif isinstance(value, torch.utils._pytree.TreeSpec):
             return UserDefinedObjectVariable(value)
         elif isinstance(value, re.Pattern):
             return ConstantLikeVariable(value)
