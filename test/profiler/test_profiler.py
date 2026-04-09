@@ -2839,11 +2839,26 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
             self.assertGreater(
                 len(kernel_events), 0, "Error: No kernel events in trace"
             )
+            has_kernel_launch_metadata = False
             for ke in kernel_events:
                 args = ke.get("args", {})
                 name = ke.get("name", "<unknown>")
-                for key in ["device", "stream", "correlation", "grid", "block"]:
+                for key in ["device", "stream", "correlation"]:
                     self.assertIn(key, args, f"kernel '{name}' missing '{key}'")
+                # Some kernel events on ROCm (__amd_rocclr...) do not have grid/block metadata
+                # so we just validate that it shows up for at least one event
+                has_grid = "grid" in args
+                has_block = "block" in args
+                self.assertEqual(
+                    has_grid,
+                    has_block,
+                    f"kernel '{name}' should provide grid and block together",
+                )
+                has_kernel_launch_metadata |= has_grid
+            self.assertTrue(
+                has_kernel_launch_metadata,
+                "Error: No kernel events in trace contained grid/block metadata",
+            )
 
 
 class SimpleNet(nn.Module):
