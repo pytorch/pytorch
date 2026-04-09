@@ -442,9 +442,6 @@ use_lamba_guard_for_object_aliasing = True
 
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
-# Whether to apply torch._dynamo.disable() to FSDP2 hooks.
-# Defaults to True. If Traceable FSDP2 is used, set this to False.
-skip_fsdp_hooks = True
 
 # Make dynamo skip guarding on hooks on nn modules
 # Note: unsafe: if your model actually has hooks and you remove them, or doesn't and  you add them,
