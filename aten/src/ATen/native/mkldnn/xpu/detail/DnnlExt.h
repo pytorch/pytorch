@@ -28,43 +28,6 @@ using namespace dnnl;
 
 namespace at::native::onednn {
 
-enum class usm_access_kind_t {
-  read_only,
-  read_write,
-  allocate,
-};
-
-struct typed_exec_arg_t {
-  int arg;
-  void* handle;
-  usm_access_kind_t kind;
-
-  typed_exec_arg_t(int arg, ReadOnlyUSM usm)
-      : arg(arg), handle(usm.raw()), kind(usm_access_kind_t::read_only) {}
-
-  typed_exec_arg_t(int arg, ReadWriteUSM usm)
-      : arg(arg), handle(usm.raw()), kind(usm_access_kind_t::read_write) {}
-
-  typed_exec_arg_t(int arg, AllocUSM usm)
-      : arg(arg), handle(usm.raw()), kind(usm_access_kind_t::allocate) {}
-
-  std::pair<int, void*> raw_exec_arg() const {
-    return {arg, handle};
-  }
-};
-
-inline typed_exec_arg_t make_exec_arg(int arg, ReadOnlyUSM handle) {
-  return typed_exec_arg_t(arg, handle);
-}
-
-inline typed_exec_arg_t make_exec_arg(int arg, ReadWriteUSM handle) {
-  return typed_exec_arg_t(arg, handle);
-}
-
-inline typed_exec_arg_t make_exec_arg(int arg, AllocUSM handle) {
-  return typed_exec_arg_t(arg, handle);
-}
-
 class primitive_ext : public primitive {
   static constexpr int max_args = 12;
 
@@ -332,19 +295,6 @@ class primitive_ext : public primitive {
             this->get(), astream.get(), off, c_args, &deps, &return_event),
         "could not execute a primitive");
     return return_event;
-  }
-
-  sycl::event execute(
-      const stream& astream,
-      const engine& aengine,
-      std::vector<typed_exec_arg_t>&& handles,
-      int slot_off = 2) {
-    std::vector<std::pair<int, void*>> raw_handles;
-    raw_handles.reserve(handles.size());
-    for (const auto& handle : handles) {
-      raw_handles.emplace_back(handle.raw_exec_arg());
-    }
-    return execute(astream, aengine, std::move(raw_handles), slot_off);
   }
 
  private:

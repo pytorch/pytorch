@@ -275,27 +275,29 @@ void woq_matmul_int4_impl_cache(
       usm_ro(zp),
       [&]() {
         int num_groups = k / group_size;
-        auto zp_md = memory::desc(
-            {num_groups, n}, memory::data_type::s8, memory::dims{n, 1});
-        return make_onednn_memory(zp_md, engine, usm_ro(zp));
+        memory zp_usr_m(
+            {{num_groups, n}, memory::data_type::s8, {n, 1}},
+            engine,
+            zp.data_ptr());
+        return zp_usr_m;
       });
 
   // set general args
-  std::vector<typed_exec_arg_t> arg_handles;
+  std::vector<std::pair<int, void*>> arg_handles;
   arg_handles.reserve(8);
 
-  arg_handles.emplace_back(make_exec_arg(DNNL_ARG_SRC, usm_ro(mat1)));
-  arg_handles.emplace_back(make_exec_arg(DNNL_ARG_WEIGHTS, usm_ro(mat2)));
-  arg_handles.emplace_back(make_exec_arg(DNNL_ARG_DST, usm_rw(result)));
+  arg_handles.emplace_back(DNNL_ARG_SRC, mat1.data_ptr());
+  arg_handles.emplace_back(DNNL_ARG_WEIGHTS, mat2.data_ptr());
+  arg_handles.emplace_back(DNNL_ARG_DST, result.data_ptr());
 
   int scratchpad_size = matmul_ext.get_scratchpad_size();
   Tensor scratchpad_tensor = at::empty(
       {scratchpad_size}, mat1.options().dtype(at::kByte), std::nullopt);
-  arg_handles.emplace_back(
-      make_exec_arg(DNNL_ARG_SCRATCHPAD, usm_rw(scratchpad_tensor)));
+  arg_handles.emplace_back(DNNL_ARG_SCRATCHPAD, scratchpad_tensor.data_ptr());
 
   auto& strm = GpuStreamManager::Instance().get_stream();
-  matmul_ext.execute(strm, engine, std::move(arg_handles), arg_off);
+  auto qint4_matmul_event =
+      matmul_ext.execute(strm, engine, std::move(arg_handles), arg_off);
 }
 
 void woq_matmul_int4(
