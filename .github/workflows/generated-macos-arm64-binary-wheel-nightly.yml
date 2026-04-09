@@ -33,7 +33,7 @@ concurrency:
 jobs:
   wheel-py3_10-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-14-xlarge
+    runs-on: macos-26-xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
@@ -144,7 +144,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_11-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-14-xlarge
+    runs-on: macos-26-xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
@@ -255,7 +255,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_12-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-14-xlarge
+    runs-on: macos-26-xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
@@ -366,7 +366,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_13-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-14-xlarge
+    runs-on: macos-26-xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
@@ -477,7 +477,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_13t-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-14-xlarge
+    runs-on: macos-26-xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
@@ -588,7 +588,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_14-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-14-xlarge
+    runs-on: macos-26-xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
@@ -699,7 +699,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_14t-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-14-xlarge
+    runs-on: macos-26-xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
@@ -811,7 +811,7 @@ jobs:
   libtorch-cpu-shared-with-deps-release-extract:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_10-cpu-build
-    runs-on: macos-14-xlarge
+    runs-on: macos-26-xlarge
     timeout-minutes: 60
     env:
       DESIRED_CUDA: cpu

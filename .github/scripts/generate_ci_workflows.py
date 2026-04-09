@@ -211,7 +211,7 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
         os=OperatingSystem.MACOS_ARM64,
         package_type="wheel",
         build_configs=_MACOS_ARM64_WHEEL_CONFIGS,
-        macos_runner="macos-14-xlarge",
+        macos_runner="macos-26-xlarge",
         ciflow_config=CIFlowConfig(
             labels={
                 LABEL_CIFLOW_BINARIES,
