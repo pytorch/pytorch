@@ -39,6 +39,8 @@ inline bool is_contiguous_strides_for_shape(
 template <typename T>
 class ArrayRefTensor {
  public:
+  using value_type = T;
+
   ArrayRefTensor() = default;
 
   explicit ArrayRefTensor(
