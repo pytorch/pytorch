@@ -236,7 +236,9 @@ struct Block {
     registration_counter = ++registration_counter_global;
   }
 
-  // constructor for search key, set registration_counter to -1 since blocks are sorted with registration_counter
+  // constructor for search key
+  // Set registration_counter to -1 due to changes in the blocks' sorting
+  // function, which now involves registration_counter.
   Block(c10::DeviceIndex device, cudaStream_t stream, size_t size)
       : device(device), stream(stream), size(size), requested_size(0) {
     registration_counter = -1;
