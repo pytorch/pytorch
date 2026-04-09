@@ -1,4 +1,5 @@
 #include <ATen/native/mps/kernels/GridSampler.h>
+#include <ATen/native/mps/kernels/SamplingHelpers.h>
 #include <c10/metal/utils.h>
 #include <metal_array>
 #include <metal_stdlib>
@@ -147,36 +148,6 @@ struct PadReflection {
     return clip_coordinates(coord, size);
   }
 };
-
-// Cubic convolution helper 1: for |x| < 1
-template <typename T>
-static T cubic_convolution1(T x, T A) {
-  return ((A + 2) * x - (A + 3)) * x * x + 1;
-}
-
-// Cubic convolution helper 2: for 1 <= |x| < 2
-template <typename T>
-static T cubic_convolution2(T x, T A) {
-  return ((A * x - 5 * A) * x + 8 * A) * x - 4 * A;
-}
-
-// Get cubic upsampling coefficients (Catmull-Rom spline with A=-0.75)
-template <typename T>
-static void get_cubic_coefficients(T coeffs[4], T t) {
-  T A = static_cast<T>(-0.75);
-  coeffs[0] = cubic_convolution2(t + 1, A);
-  coeffs[1] = cubic_convolution1(t, A);
-  coeffs[2] = cubic_convolution1(1 - t, A);
-  coeffs[3] = cubic_convolution2(2 - t, A);
-}
-
-// 1D cubic interpolation
-template <typename T>
-static T cubic_interp1d(T x0, T x1, T x2, T x3, T t) {
-  T coeffs[4];
-  get_cubic_coefficients(coeffs, t);
-  return x0 * coeffs[0] + x1 * coeffs[1] + x2 * coeffs[2] + x3 * coeffs[3];
-}
 
 // 2D Bilinear interpolation
 template <typename Pad, typename T>
