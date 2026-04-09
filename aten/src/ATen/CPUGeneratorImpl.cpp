@@ -5,7 +5,7 @@
 #include <algorithm>
 
 #if AT_MKL_ENABLED()
-#include <ATen/mklrng/MKLGeneratorImpl.h>
+#include <ATen/mkl/MKLGeneratorImpl.h>
 #endif
 
 namespace at {
