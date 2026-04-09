@@ -6353,7 +6353,11 @@ class FusedUserDefinedTritonKernel(TritonKernel):
             )
             return result_var
         else:
-            return super().load(name, index)
+            # The scheduler should prevent this.
+            raise AssertionError(
+                f"Epilogue attempted to load from '{name}'. "
+                "Inductor indexing variables are not defined in user kernel scope. "
+            )
 
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
