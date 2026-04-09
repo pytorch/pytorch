@@ -272,6 +272,19 @@ class TensorVariable(VariableTracker):
     def is_tensor(self) -> bool:
         return True
 
+    def bool_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        # THPVariable_bool calls at::Tensor::is_nonzero(), i.e. .item() != 0.
+        from .constant import ConstantVariable
+
+        item = self.call_method(tx, "item", [], {})
+        if isinstance(item, SymNodeVariable) and isinstance(
+            item.sym_num, torch.SymBool
+        ):
+            return item
+        if isinstance(item, ConstantVariable):
+            return VariableTracker.build(tx, bool(item.value))
+        return SymNodeVariable.create(tx, item.as_proxy() != 0)
+
     @staticmethod
     def specialize(value: torch.Tensor) -> dict[str, Any]:
         props: dict[str, Any] = {
@@ -2108,6 +2121,18 @@ class SymNodeVariable(VariableTracker):
 
     def as_proxy(self) -> Any:
         return self.proxy
+
+    def bool_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+    ) -> VariableTracker:
+        # long_bool / float_bool: non-zero check. SymBool is already boolean.
+        # https://github.com/python/cpython/blob/c09ccd9c429/Objects/longobject.c#L5200
+        # https://github.com/python/cpython/blob/c09ccd9c429/Objects/floatobject.c#L853
+        if isinstance(self.sym_num, torch.SymBool):
+            return self
+        assert isinstance(self.sym_num, (torch.SymInt, torch.SymFloat))
+        return SymNodeVariable.create(tx, self.as_proxy() != 0)
 
     def as_tensor(self, tx: "InstructionTranslatorBase", dtype: Any) -> TensorVariable:
         if self._tensor_var is None:

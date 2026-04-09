@@ -310,6 +310,19 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 return base.__dict__[name]
         return NO_SUCH_SUBOBJ
 
+    def bool_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> "VariableTracker":
+        from .constant import CONSTANT_VARIABLE_TRUE
+
+        # bool() on a class consults the metaclass __bool__.
+        # If the metaclass is the default `type`, all classes are truthy.
+        metaclass = type(self.value)
+        if hasattr(metaclass, "__bool__") and metaclass is not type:
+            return self.call_method(tx, "__bool__", [], {})
+        return CONSTANT_VARIABLE_TRUE
+
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         source = AttrSource(self.source, name) if self.source is not None else None
 
@@ -1400,6 +1413,27 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return self.value
         return super().guard_as_python_constant()
 
+    def bool_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> "VariableTracker | None":
+        # Mirrors slot_nb_bool:
+        # https://github.com/python/cpython/blob/c09ccd9c429/Objects/typeobject.c#L9408-L9458
+        if self._maybe_get_baseclass_method("__bool__"):
+            result = self.call_method(tx, "__bool__", [], {})
+            if result.is_python_constant():
+                result_value = result.as_python_constant()
+                if not isinstance(result_value, bool):
+                    raise_observed_exception(
+                        TypeError,
+                        tx,
+                        args=[
+                            f"__bool__ should return bool, returned {type(result_value).__name__}"
+                        ],
+                    )
+            return result
+        return None
+
     def nb_index_impl(
         self,
         tx: "InstructionTranslator",
@@ -1411,7 +1445,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return super().nb_index_impl(tx)
         method_var = self.resolve_type_attr(tx, "__index__", type_attr, source=None)
         result = method_var.call_function(tx, [], {})
-        # CPython validates that __index__ returns an int (abstract.c:1433-1438).
+        # CPython validates that __index__ returns an int.
+        # https://github.com/python/cpython/blob/c09ccd9c429/Objects/abstract.c#L1433-L1438
         if result.is_python_constant() and not isinstance(
             result.as_python_constant(), int
         ):
