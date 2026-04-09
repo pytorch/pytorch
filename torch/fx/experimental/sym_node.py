@@ -652,6 +652,27 @@ class DynamicInt(_DynamicScalar, int):
     def __rfloordiv__(self, other):
         return DynamicInt(other // self.real)
 
+    def __pow__(self, other, modulo=None):
+        if modulo is not None:
+            result = pow(self.real, other, modulo)
+        else:
+            result = self.real**other
+        # Only create DynamicInt if result is int, otherwise return plain value
+        # (e.g., negative exponent produces float)
+        if isinstance(result, int):
+            return DynamicInt(result)
+        return result
+
+    def __rpow__(self, other, modulo=None):
+        if modulo is not None:
+            result = pow(other, self.real, modulo)
+        else:
+            result = other**self.real
+        # Only create DynamicInt if result is int, otherwise return plain value
+        if isinstance(result, int):
+            return DynamicInt(result)
+        return result
+
 
 # TODO: this probably needs the sizes-strides eval functions
 METHOD_TO_OPERATOR = {

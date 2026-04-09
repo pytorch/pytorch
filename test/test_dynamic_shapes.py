@@ -2046,6 +2046,13 @@ class TestSymNumberMagicMethods(TestCase):
         with self.assertRaises(ZeroDivisionError):
             y % x
 
+        # test pow operations preserve DynamicInt type
+        check(w**2, 1)  # DynamicInt ** int
+        check(2**z, 4)  # int ** DynamicInt
+        check(y**x, 1)  # DynamicInt ** DynamicInt
+        check(pow(z, 2), 4)  # pow(DynamicInt, int)
+        self.assertTrue(isinstance(pow(y, 3, 5), DynamicInt))  # pow with modulo
+
         # math, numpy
         self.assertEqual(math.cos(x), y)
         self.assertEqual(math.prod([z, z], start=z), 8)
