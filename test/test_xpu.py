@@ -3095,6 +3095,41 @@ class TestMemPool(TestCase):
         self.assertTrue(after_pool_release < peak_reserved)
         self.assertTrue(after_pool_release > 0)
 
+    def test_onednn_matmul_primitive_cache_repeated_mm(self):
+        for dtype in (torch.float32, torch.bfloat16):
+            m, n, k = 32, 48, 64
+            a = torch.randn(m, k, device="xpu", dtype=dtype)
+            b = torch.randn(k, n, device="xpu", dtype=dtype)
+            ref = torch.mm(a.cpu(), b.cpu())
+            for _ in range(30):
+                out = torch.mm(a, b)
+                self.assertEqual(out.cpu(), ref)
+
+    def test_onednn_matmul_primitive_cache_bmm_addmm(self):
+        dtype = torch.bfloat16
+        batch, m, n, k = 4, 16, 24, 32
+        a = torch.randn(batch, m, k, device="xpu", dtype=dtype)
+        b = torch.randn(batch, k, n, device="xpu", dtype=dtype)
+        ref_bmm = torch.bmm(a.cpu(), b.cpu())
+        for _ in range(15):
+            self.assertEqual(torch.bmm(a, b).cpu(), ref_bmm)
+        x = torch.randn(m, k, device="xpu", dtype=dtype)
+        y = torch.randn(k, n, device="xpu", dtype=dtype)
+        bias = torch.randn(n, device="xpu", dtype=dtype)
+        ref_addmm = torch.addmm(bias.cpu(), x.cpu(), y.cpu())
+        for _ in range(15):
+            self.assertEqual(torch.addmm(bias, x, y).cpu(), ref_addmm)
+
+    def test_onednn_matmul_primitive_cache_addmm_beta_zero(self):
+        x = torch.randn(10, 30, device="xpu", dtype=torch.float32)
+        y = torch.randn(30, 20, device="xpu", dtype=torch.float32)
+        z = torch.randn(10, 20, device="xpu", dtype=torch.float32)
+        ref_cpu = torch.addmm(z.cpu(), x.cpu(), y.cpu(), beta=0.0, alpha=1.0)
+        for _ in range(20):
+            self.assertEqual(
+                torch.addmm(z, x, y, beta=0.0, alpha=1.0).cpu(), ref_cpu
+            )
+
 
 instantiate_parametrized_tests(TestXpu)
 instantiate_parametrized_tests(TestCachingHostAllocatorXpuGraph)

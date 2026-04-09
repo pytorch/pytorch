@@ -1,6 +1,8 @@
 #pragma once
 
 #include <ATen/ATen.h>
+
+#include <cstring>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
 #include <oneapi/dnnl/dnnl.hpp>
@@ -357,6 +359,59 @@ class Attr {
             {DNNL_ARG_ATTR_MULTIPLE_POST_OP(i) | DNNL_ARG_SRC_1, binary_m});
       }
     }
+  }
+
+  dnnl::memory::dims matmul_primitive_cache_key_extra() const {
+    dnnl::memory::dims key;
+    auto push_f32 = [&](float f) {
+      uint32_t u = 0;
+      static_assert(sizeof(float) == sizeof(uint32_t));
+      std::memcpy(&u, &f, sizeof(float));
+      key.push_back(static_cast<dnnl::memory::dim>(u));
+    };
+    key.push_back(static_cast<dnnl::memory::dim>(ops_params_.size()));
+    push_f32(q_scale_);
+    key.push_back(static_cast<dnnl::memory::dim>(q_zero_point_));
+    for (const auto& op : ops_params_) {
+      key.push_back(static_cast<dnnl::memory::dim>(op.kind_));
+      const kind_t post_kind = op.kind_;
+      if (post_kind == kind_t::eltwise) {
+        push_f32(op.scale_);
+        push_f32(op.alpha_);
+        push_f32(op.beta_);
+        key.push_back(static_cast<dnnl::memory::dim>(static_cast<int>(op.algo_)));
+      } else if (post_kind == kind_t::sum) {
+        push_f32(op.scale_);
+        key.push_back(static_cast<dnnl::memory::dim>(op.zero_point_));
+      } else if (post_kind == kind_t::binary) {
+        push_f32(op.scale_);
+        key.push_back(static_cast<dnnl::memory::dim>(static_cast<int>(op.algo_)));
+        if (op.binary_.defined()) {
+          key.push_back(static_cast<dnnl::memory::dim>(op.binary_.dim()));
+          for (int64_t i = 0; i < op.binary_.dim(); ++i) {
+            key.push_back(op.binary_.size(i));
+            key.push_back(op.binary_.stride(i));
+          }
+          key.push_back(static_cast<dnnl::memory::dim>(
+              static_cast<int>(c10::toUnderlying(op.binary_.scalar_type()))));
+        } else {
+          key.push_back(-1);
+        }
+        const auto md_dims = op.meta_.get_dims();
+        if (!md_dims.empty()) {
+          key.insert(key.end(), md_dims.begin(), md_dims.end());
+          key.push_back(static_cast<dnnl::memory::dim>(
+              static_cast<int>(op.meta_.get_data_type())));
+          const auto md_strides = op.meta_.get_strides();
+          key.insert(key.end(), md_strides.begin(), md_strides.end());
+        }
+      } else if (post_kind == kind_t::prelu) {
+        key.push_back(static_cast<dnnl::memory::dim>(op.mask_));
+      } else {
+        key.push_back(-999);
+      }
+    }
+    return key;
   }
 
   float q_scale_ = 1.0; // the scale used to quantize the fused result from fp32
