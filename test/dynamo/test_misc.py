@@ -12498,6 +12498,54 @@ def ___make_guard_fn():
         self.assertEqual(eager_result[0], compiled_result[0])
         self.assertEqual(eager_result[1:], compiled_result[1:])
 
+    def test_fstring_user_defined_list_variable(self):
+        class Holder:
+            def __init__(self, items):
+                self.items = items
+
+            def __repr__(self):
+                return f"Holder({self.items})"
+
+        def fn(x, h):
+            y = x + 1
+            s1 = f"{h.items}"
+            h.items.append(99)
+            s2 = f"{h.items}"
+            return y, s1, s2
+
+        x = torch.randn(4)
+        eager_result = fn(x, Holder([1, 2]))
+        compiled_result = torch.compile(fn, backend="eager")(x, Holder([1, 2]))
+        self.assertEqual(eager_result[0], compiled_result[0])
+        self.assertEqual(eager_result[1:], compiled_result[1:])
+
+    def test_fstring_str_on_container(self):
+        def fn(x):
+            lst = [1, 2, 3]
+            y = x + 1
+            s = f"{str(lst)}"
+            lst.append(4)
+            s2 = f"{str(lst)}"
+            return y, s, s2
+
+        x = torch.randn(4)
+        eager_result = fn(x)
+        compiled_result = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(eager_result[0], compiled_result[0])
+        self.assertEqual(eager_result[1:], compiled_result[1:])
+
+    def test_fstring_unspecialized_python_variable(self):
+        def fn(x, n):
+            y = x + 1
+            s = f"count={n}"
+            return y, s
+
+        x = torch.randn(4)
+        eager_result = fn(x, 42)
+        compiled_result = torch.compile(fn, backend="eager")(x, 42)
+        self.assertEqual(eager_result[0], compiled_result[0])
+        self.assertEqual(eager_result[1], compiled_result[1])
+
     def test_frozen_dataclass_treespec_method_and_fields(self):
         from torch.utils._pytree import tree_flatten
 
