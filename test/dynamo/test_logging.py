@@ -1473,9 +1473,19 @@ fn(torch.randn(5))
                 z = y * x
                 return z
 
-            return bar(), bar
+            # force top-level trace of bar
+            try:
+                return bar(), bar
+            finally:
+                pass
 
         foo()
+
+        @torch.compile
+        def baz(x):
+            return x + 1
+
+        baz(torch.ones(3))
 
         # `_log_traced_frames` is registered as an atexit callback, so we invoke
         # it explicitly for testing.
@@ -1491,6 +1501,7 @@ fn(torch.randn(5))
 TorchDynamo attempted to trace the following frames: [
   * foo test_logging.py:N
   * bar test_logging.py:N
+  * baz test_logging.py:N
 ]""",
         )
 
