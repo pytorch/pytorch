@@ -7,9 +7,9 @@
 #include <cstdlib>
 #include <limits>
 #include <map>
-#include <type_traits>
 #include <memory>
 #include <optional>
+#include <type_traits>
 
 // WARNING: be extra careful when including more ATen/c10 header files here!
 // Because AOTInductor generated code will copy-paste this cpp_prefix.h for
@@ -782,7 +782,7 @@ inline std::common_type_t<T, U> mod(T a, U b) {
   using C = std::common_type_t<T, U>;
   static_assert(
       std::is_integral_v<C>,
-      "inductor mod(T a, U b) is only for integral types; use the float/double specializations "
+      "inductor template mod(T a, U b) is only for integral types; use the float/double specializations "
       "for floating-point operands.");
   TORCH_CHECK(b != 0, "ZeroDivisionError");
   const C a_c = static_cast<C>(a);
@@ -800,6 +800,58 @@ template <>
 inline double mod(double a, double b) {
   return std::fmod(a, b);
 }
+
+template <typename T>
+inline T remainder_integral(T a, T b) {
+  static_assert(
+      std::is_integral_v<T>, "remainder_integral expects integral scalar T");
+  TORCH_CHECK(b != 0, "ZeroDivisionError");
+  if (a == std::numeric_limits<T>::min() && b == T(-1)) {
+    return T(0);
+  }
+  T r = a % b;
+  if ((r != 0) && (c10::is_negative(r) != c10::is_negative(b))) {
+    r += b;
+  }
+  return r;
+}
+
+#if INDUCTOR_USE_VECTOR_TYPES()
+template <typename T>
+inline at::vec::Vectorized<T> remainder_integral(
+    const at::vec::Vectorized<T>& a,
+    const at::vec::Vectorized<T>& b) {
+  static_assert(
+      std::is_integral_v<T>,
+      "remainder_integral expects integral underlying type");
+  // Some Vectorized<T> (e.g. Vectorized8<int8_t>) deletes operator[];
+  // use store/load like
+  using Vec = at::vec::Vectorized<T>;
+  constexpr int kLen = Vec::size();
+  alignas(alignof(Vec)) T out_buf[kLen];
+  alignas(alignof(Vec)) T b_buf[kLen];
+  a.store(out_buf);
+  b.store(b_buf);
+  for (int i = 0; i < kLen; ++i) {
+    out_buf[i] = remainder_integral(out_buf[i], b_buf[i]);
+  }
+  return Vec::loadu(out_buf);
+}
+
+template <typename T, int N>
+inline at::vec::VectorizedN<T, N> remainder_integral(
+    const at::vec::VectorizedN<T, N>& a,
+    const at::vec::VectorizedN<T, N>& b) {
+  static_assert(
+      std::is_integral_v<T>,
+      "remainder_integral expects integral underlying type");
+  at::vec::VectorizedN<T, N> out;
+  for (int i = 0; i < N; ++i) {
+    out[i] = remainder_integral(a[i], b[i]);
+  }
+  return out;
+}
+#endif
 
 template <typename scalar_t>
 inline scalar_t max_propagate_nan(scalar_t a, scalar_t b) {
