@@ -75,7 +75,8 @@ bool check_head_dim_alignment(sdp::sdp_params const& params, bool debug) {
   }
 
   // Stride must be 16-byte-aligned: min elements = 16 / element_size
-  auto check_stride_alignment = [&](const at::Tensor& t, const char* name) -> bool {
+  auto check_stride_alignment = [&](const at::Tensor& t,
+                                    const char* name) -> bool {
     constexpr int64_t alignment_in_byte = 16;
     const int64_t min_alignment = alignment_in_byte / t.element_size();
     const auto last_dim = t.sym_size(-1);
@@ -84,9 +85,14 @@ bool check_head_dim_alignment(sdp::sdp_params const& params, bool debug) {
         TORCH_WARN(
             "OneDNN attention requires last dimension * element_size to be "
             "16-byte aligned. ",
-            name, " has last_dim=", last_dim,
-            ", element_size=", t.element_size(),
-            ", requires divisibility by ", min_alignment, ".");
+            name,
+            " has last_dim=",
+            last_dim,
+            ", element_size=",
+            t.element_size(),
+            ", requires divisibility by ",
+            min_alignment,
+            ".");
       }
       return false;
     }
