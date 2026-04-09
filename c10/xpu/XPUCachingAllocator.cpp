@@ -2101,6 +2101,10 @@ void recordHistory(
       skip_actions);
 }
 
+void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) {
+  native_allocator.attachAllocatorTraceTracker(tracker);
+}
+
 SnapshotInfo snapshot(MempoolId_t mempool_id) {
   return native_allocator.snapshot(mempool_id);
 }
