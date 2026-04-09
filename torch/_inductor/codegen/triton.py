@@ -2993,6 +2993,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         override_mask=None,
         block_ptr=False,
         tma_compatibility_checker: TMACompatibilityChecker | None = None,
+        mask_constant_index=False,
     ):
         """
         Compute the index and mask to pass to tl.load() or tl.store()
@@ -3368,7 +3369,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 expand_shape = tuple([1] * len(self.dense_size_list()))
 
             index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
-            if self.fixed_config or self.is_combo_kernel:
+            if self.fixed_config or self.is_combo_kernel or mask_constant_index:
                 mask_vars = OrderedSet(
                     f"{tree.prefix}mask"
                     for tree in self.range_trees
@@ -3951,6 +3952,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             dense_indexing=True,
             block_ptr=mode is None,
             tma_compatibility_checker=tma_compatibility_checker,
+            mask_constant_index=mode == "atomic_add",
         )
 
         if isinstance(indexing, IndexingOptions) and self._has_stride1_on_rdim(
