@@ -805,12 +805,6 @@ from user code:
             """\
 Data-dependent branching
   Explanation: Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). Dynamo does not support tracing dynamic control flow.
-
-      The branch condition involves a tensor computed as follows:
-        # File "test_error_messages.py", line N, in fn, code: if x.sum() > 0:
-        gt = gt(sum_1, 0)
-
-  Hint: The branch condition uses a scalar integer tensor. Consider rewriting the computation to use plain Python ints (e.g. use int attributes instead of tensor buffers) so the condition becomes a shape guard instead of data-dependent branching.
   Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
   Hint: Use `torch.cond` to express dynamic control flow.
 
@@ -883,12 +877,6 @@ from user code:
 Graph break in user code at test_error_messages.py:N
 Graph Break Reason: Data-dependent branching
   Explanation: Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). Dynamo does not support tracing dynamic control flow.
-
-      The branch condition involves a tensor computed as follows:
-        # File "test_error_messages.py", line N, in fn, code: if x.sum() > 0:
-        gt = gt(sum_1, 0)
-
-  Hint: The branch condition uses a scalar integer tensor. Consider rewriting the computation to use plain Python ints (e.g. use int attributes instead of tensor buffers) so the condition becomes a shape guard instead of data-dependent branching.
   Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
   Hint: Use `torch.cond` to express dynamic control flow.
 
@@ -1104,12 +1092,6 @@ Graph Break Reason: Failed to handle graph break gracefully. Skipping the functi
 
 Data-dependent branching
   Explanation: Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). Dynamo does not support tracing dynamic control flow.
-
-      The branch condition involves a tensor computed as follows:
-        # File "test_error_messages.py", line N, in gn, code: if x.sum() > 0:
-        gt = gt(sum_1, 0)
-
-  Hint: The branch condition uses a scalar integer tensor. Consider rewriting the computation to use plain Python ints (e.g. use int attributes instead of tensor buffers) so the condition becomes a shape guard instead of data-dependent branching.
   Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
   Hint: Use `torch.cond` to express dynamic control flow.
 
@@ -1154,12 +1136,6 @@ Graph Break Reason: Failed to handle graph break gracefully. Skipping the functi
 
 Data-dependent branching
   Explanation: Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). Dynamo does not support tracing dynamic control flow.
-
-      The branch condition involves a tensor computed as follows:
-        # File "test_error_messages.py", line N, in fn, code: if x.sum() > 0:
-        gt = gt(sum_1, 0)
-
-  Hint: The branch condition uses a scalar integer tensor. Consider rewriting the computation to use plain Python ints (e.g. use int attributes instead of tensor buffers) so the condition becomes a shape guard instead of data-dependent branching.
   Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
   Hint: Use `torch.cond` to express dynamic control flow.
 
@@ -2289,12 +2265,6 @@ Graph Break Reason: Encountered graph break that we cannot resume from. Compilin
 
 Data-dependent branching
   Explanation: Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). Dynamo does not support tracing dynamic control flow.
-
-      The branch condition involves a tensor computed as follows:
-        # File "test_error_messages.py", line N, in f1, code: if x.sum() > 0:
-        gt = gt(sum_1, 0)
-
-  Hint: The branch condition uses a scalar integer tensor. Consider rewriting the computation to use plain Python ints (e.g. use int attributes instead of tensor buffers) so the condition becomes a shape guard instead of data-dependent branching.
   Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
   Hint: Use `torch.cond` to express dynamic control flow.
 

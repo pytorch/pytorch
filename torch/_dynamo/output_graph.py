@@ -3812,9 +3812,7 @@ class SubgraphTracer(fx.Tracer):
                         )
                     ]
 
-        # fx.Node base class pre-sets stack_trace to "", so check for
-        # both missing and empty to ensure we populate the real trace.
-        if not rv.node.meta.get("stack_trace", ""):
+        if "stack_trace" not in rv.node.meta:
             frame_summaries: list[traceback.FrameSummary] = []
             while tx:
                 # Avoid frame summaries from inside the torch/nn/modules. This ensures that we keep the stack trace of

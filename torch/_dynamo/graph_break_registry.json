@@ -2162,12 +2162,6 @@
     {
       "Gb_type": "Data-dependent branching",
       "Context": "attempted to jump with {value}",
-      "Explanation": "\"Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). \"             \"Dynamo does not support tracing dynamic control flow.\" + trace_info",
-      "Hints": []
-    },
-    {
-      "Gb_type": "Data-dependent branching",
-      "Context": "attempted to jump with {value}",
       "Explanation": "Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). Dynamo does not support tracing dynamic control flow.",
       "Hints": [
         "Use `torch.cond` to express dynamic control flow.",

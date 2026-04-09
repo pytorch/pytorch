@@ -589,128 +589,19 @@ explain = False
 #   3. Any compile_subgraph call should be preceded immediately by a log in the form of "... triggered compile".
 
 
-def get_node_source_info(n: torch.fx.Node) -> str:
-    """Extract the innermost user source location from an FX node's stack trace."""
-    st = n.meta.get("stack_trace", "") or getattr(n, "stack_trace", "")
-    if not st:
-        return ""
-    trace_lines = st.strip().split("\n")
-    last_file_idx = -1
-    for i, line in enumerate(trace_lines):
-        if line.strip().startswith("File "):
-            last_file_idx = i
-    if last_file_idx < 0:
-        return ""
-    file_line = trace_lines[last_file_idx].strip()
-    code = ""
-    if last_file_idx + 1 < len(trace_lines):
-        code = trace_lines[last_file_idx + 1].strip()
-    return f"{file_line}" + (f", code: {code}" if code else "")
-
-
-def format_tensor_computation_trace(value: VariableTracker, max_lines: int = 20) -> str:
-    """Walk the FX graph backwards from a TensorVariable to show how it was
-    computed, with user source locations. Graph inputs (placeholders) are always
-    shown first, followed by operations in dataflow order ending at the branch
-    condition."""
-    if not isinstance(value, TensorVariable):
-        return ""
-    try:
-        node = value.proxy.node
-
-        # Collect operations and placeholders separately so placeholders (root
-        # cause) always appear first regardless of traversal order.
-        op_blocks: list[list[str]] = []
-        placeholder_blocks: list[list[str]] = []
-        visited: set[str] = set()
-
-        def fmt_arg(a: object) -> str:
-            return a.name if isinstance(a, torch.fx.Node) else repr(a)
-
-        def walk(n: torch.fx.Node) -> None:
-            if n.name in visited:
-                return
-            visited.add(n.name)
-            source = get_node_source_info(n)
-
-            if n.op == "placeholder":
-                block = []
-                if source:
-                    block.append(f"# {source}")
-                block.append(f"{n.name}: graph input ({n.target})")
-                placeholder_blocks.append(block)
-                return
-
-            if n.op == "call_function" and len(op_blocks) < max_lines:
-                target_name = getattr(n.target, "__name__", str(n.target))
-                args_str = ", ".join(fmt_arg(a) for a in n.args)
-                block = []
-                if source:
-                    block.append(f"# {source}")
-                block.append(f"{n.name} = {target_name}({args_str})")
-                op_blocks.append(block)
-
-                for a in n.args:
-                    if isinstance(a, torch.fx.Node):
-                        walk(a)
-
-        walk(node)
-
-        if not op_blocks and not placeholder_blocks:
-            return ""
-
-        # Placeholders first (root cause), then ops in dataflow order (reversed
-        # from the DFS collection order) ending at the branch condition.
-        all_lines: list[str] = []
-        for block in placeholder_blocks + list(reversed(op_blocks)):
-            all_lines.extend(block)
-            all_lines.append("")
-
-        return (
-            "\n\n  The branch condition involves a tensor computed as follows:\n"
-            + "\n".join(f"    {line}" for line in all_lines)
-        )
-    except Exception:
-        log.debug("format_tensor_computation_trace failed", exc_info=True)
-        return ""
-
-
 def generic_jump(
     truth_fn: Callable[[object], bool], push: bool
 ) -> Callable[[InstructionTranslatorBase, Instruction], None]:
     def raise_jump_graph_break(value: VariableTracker) -> NoReturn:
-        trace_info = format_tensor_computation_trace(value)
-        hints: list[str] = []
-        if isinstance(value, TensorVariable):
-            try:
-                example = value.proxy.node.meta.get("example_value")
-                if (
-                    example is not None
-                    and example.dim() == 0
-                    and example.dtype
-                    in (
-                        torch.bool,
-                        torch.int32,
-                        torch.int64,
-                    )
-                ):
-                    hints.append(
-                        "The branch condition uses a scalar integer tensor. "
-                        "Consider rewriting the computation to use plain Python "
-                        "ints (e.g. use int attributes instead of tensor buffers) "
-                        "so the condition becomes a shape guard instead of "
-                        "data-dependent branching."
-                    )
-            except Exception:
-                pass
-        hints.extend(graph_break_hints.FUNDAMENTAL)
-        hints.append("Use `torch.cond` to express dynamic control flow.")
         unimplemented(
             gb_type="Data-dependent branching",
             context=f"attempted to jump with {value}",
             explanation="Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). "
-            "Dynamo does not support tracing dynamic control flow." + trace_info,
-            hints=hints,
+            "Dynamo does not support tracing dynamic control flow.",
+            hints=[
+                *graph_break_hints.FUNDAMENTAL,
+                "Use `torch.cond` to express dynamic control flow.",
+            ],
         )
 
     def jump_graph_break(
