@@ -51,8 +51,7 @@ class GraphRegionTrackerTests(TestCase):
                 torch.rand(10, 10),
                 torch.ones(10, 20),
             ),
-            """[[['x0', 'y0', 'sum_1', 'sum_2', 'z'], ['x0_1', 'y0_1', 'sum_3', 'sum_4', 'z_1'],\
- ['x0_2', 'y0_2', 'sum_5', 'sum_6', 'z_2']]]""",
+            """[[['add', 'add_3', 'sum_1', 'sum_4', 'add_6'], ['add_1', 'add_5', 'sum_2', 'sum_6', 'add_8'], ['add_2', 'add_4', 'sum_3', 'sum_5', 'add_7']]]""",
         )
 
     def test_get_regions_multiple_region_groups(self):
@@ -85,8 +84,7 @@ class GraphRegionTrackerTests(TestCase):
                 torch.rand(10, 10),
                 torch.ones(10, 20),
             ),
-            """[[['x1', 'y1', 'sum_2', 'sum_3', 'z'], ['x1_1', 'y1_1', 'sum_4', 'sum_5', 'z_1'],\
- ['x1_2', 'y1_2', 'sum_7', 'sum_8', 'z_2']], [['a', 'b', 'cos_1', 'sum_1', 'c'], ['a_1', 'b_1', 'cos_2', 'sum_6', 'c_1']]]""",
+            """[[['iadd', 'iadd_2', 'cos_1', 'sum_7', 'mul'], ['iadd_1', 'iadd_3', 'cos_2', 'sum_8', 'mul_1']], [['add', 'add_3', 'sum_1', 'sum_4', 'add_6'], ['add_1', 'add_5', 'sum_2', 'sum_6', 'add_8'], ['add_2', 'add_4', 'sum_3', 'sum_5', 'add_7']]]""",
         )
 
     def test_no_single_node_regions(self):
@@ -131,8 +129,7 @@ class GraphRegionTrackerTests(TestCase):
                 torch.rand(10, 10),
                 torch.ones(10, 20),
             ),
-            """[[['y1_1', 'sum_5'], ['y1_2', 'sum_8']], [['x1', 'sum_2', 'z'], ['x1_1', 'sum_4', 'z_1'], \
-['x1_2', 'sum_7', 'z_2']], [['b', 'cos_1', 'sum_1'], ['b_1', 'cos_2', 'sum_6']]]""",
+            """[[['iadd_1', 'cos_1', 'sum_6'], ['iadd_2', 'cos_2', 'sum_7']], [['add', 'sum_1', 'add_8'], ['add_1', 'sum_2', 'add_6'], ['add_2', 'sum_3', 'add_5']], [['add_4', 'sum_5'], ['add_3', 'sum_4']]]""",
         )
 
     def test_mismatched_dtypes(self):
@@ -158,8 +155,7 @@ class GraphRegionTrackerTests(TestCase):
                 torch.rand(10, 10),
                 torch.ones(10, 20),
             ),
-            """[[['x1', 'y1', 'sum_1', 'o0'], ['x1_1', 'y1_1', 'sum_2', 'o2'], \
-['x1_2', 'y1_2', 'sum_3', 'o4'], ['x1_3', 'y1_3', 'sum_4', 'o5']]]""",
+            """[[['mul', 'add', 'sum_1', 'add_4'], ['mul_1', 'add_1', 'sum_2', 'add_5'], ['mul_2', 'add_2', 'sum_3', 'add_6'], ['mul_3', 'add_3', 'sum_4', 'add_7']]]""",
         )
 
     def test_nested_args(self):
@@ -189,9 +185,7 @@ class GraphRegionTrackerTests(TestCase):
                 torch.rand(10, 20),
                 torch.ones(10, 20),
             ),
-            """[[['_foreach_add', 'getitem', 'getitem_1', 'sum_1', 'o0'], ['_foreach_add_1', \
-'getitem_2', 'getitem_3', 'sum_2', 'o2'], ['_foreach_add_2', 'getitem_4', 'getitem_5', 'sum_3', \
-'o4'], ['_foreach_add_3', 'getitem_6', 'getitem_7', 'sum_4', 'o5']]]""",
+            """[[['_foreach_add', 'getitem', 'getitem_1', 'sum_1', 'add'], ['_foreach_add_1', 'getitem_2', 'getitem_3', 'sum_2', 'add_1'], ['_foreach_add_2', 'getitem_4', 'getitem_5', 'sum_3', 'add_2'], ['_foreach_add_3', 'getitem_6', 'getitem_7', 'sum_4', 'add_3']]]""",
         )
 
     def test_mismatched_global_state(self):
@@ -255,8 +249,7 @@ class GraphRegionTrackerTests(TestCase):
         ]:
             self.assertExpectedInline(
                 self.get_result(fn, torch.rand(10, 10), torch.ones(10, 20), ctx),
-                """[[['x1_2', 'y1_2', 'sum_3', 'o0'], ['x1_3', 'y1_3', 'sum_4', 'o2']], \
-[['x1', 'y1', 'sum_1', 'o4'], ['x1_1', 'y1_1', 'sum_2', 'o5']]]""",
+                """[[['mul_2', 'add_4', 'sum_3', 'add_6'], ['mul_3', 'add_5', 'sum_4', 'add_7']], [['mul', 'add', 'sum_1', 'add_2'], ['mul_1', 'add_1', 'sum_2', 'add_3']]]""",
             )
 
     def test_mutation_tracking_simple(self):
@@ -306,7 +299,7 @@ class GraphRegionTrackerTests(TestCase):
                 torch.rand(20, 10),
                 torch.rand(20, 10),
             ),
-            """{o0: OrderedSet([0]), sin_: OrderedSet([0])}""",
+            """{fn_mut: OrderedSet([0]), sin_: OrderedSet([0])}""",
         )
 
     def test_non_tensor_arg_hashing(self):
@@ -327,7 +320,7 @@ class GraphRegionTrackerTests(TestCase):
                 torch.rand(32, 256, 56, 56),
                 torch.nn.Parameter(torch.rand(512, 256, 1, 1)),
             ),
-            """[[['y', 'o1'], ['y_1', 'o2'], ['y_2', 'o3']]]""",
+            """[[['add', 'conv2d'], ['add_1', 'conv2d_1'], ['add_2', 'conv2d_2']]]""",
         )
 
     def test_region_sorting(self):
@@ -358,11 +351,7 @@ class GraphRegionTrackerTests(TestCase):
         )
         self.assertExpectedInline(
             tracker.node_to_duplicates,
-            """{l_x_: [l_x_], x0: [x0, x0_1, x0_2], l_y_: [l_y_], y0: [y0, y0_1, y0_2], sum_1: \
-[sum_1, sum_3, sum_5], sum_2: [sum_2, sum_4, sum_6], z: [z, z_1, z_2], o1: [o1], x0_1: [x0, x0_1, x0_2], y0_1: [y0, y0_1, y0_2], \
-sum_3: [sum_1, sum_3, sum_5], sum_4: [sum_2, sum_4, sum_6], \
-z_1: [z, z_1, z_2], x0_2: [x0, x0_1, x0_2], y0_2: [y0, y0_1, y0_2], sum_5: [sum_1, sum_3, sum_5], sum_6: [sum_2, sum_4, sum_6], \
-z_2: [z, z_1, z_2], o4: [o4], mul_1: [mul_1], add_9: [add_9]}""",
+            """{l_x_: [l_x_], add: [add, add_1, add_2], l_y_: [l_y_], add_3: [add_3, add_5, add_4], sum_1: [sum_1, sum_2, sum_3], sum_4: [sum_4, sum_6, sum_5], add_6: [add_6, add_8, add_7], sin: [sin], add_1: [add, add_1, add_2], add_5: [add_3, add_5, add_4], sum_2: [sum_1, sum_2, sum_3], sum_6: [sum_4, sum_6, sum_5], add_8: [add_6, add_8, add_7], add_2: [add, add_1, add_2], add_4: [add_3, add_5, add_4], sum_3: [sum_1, sum_2, sum_3], sum_5: [sum_4, sum_6, sum_5], add_7: [add_6, add_8, add_7], mul: [mul], mul_1: [mul_1], add_9: [add_9]}""",
         )
         key = next(iter(tracker.node_to_duplicates.keys()))
         tracker.track_node(None, key)  # this will fail if the node is added again

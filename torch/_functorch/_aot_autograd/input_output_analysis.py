@@ -241,10 +241,14 @@ def create_synthetic_base_metadata(
                 else synthetic_base_info[o.base_idx][0]  # type: ignore[index]
             )
         )
-        # If base_idx is changed for OutputType.is_input, we need to update the output type to reflect the change
+        # If the original input was merged into a synthetic base, then an
+        # output that was literally that input is now a view of the base.
+        input_merged = o.base_idx is not None and isinstance(
+            synthetic_base_info[o.base_idx], tuple
+        )
         new_output_type = (
             OutputType.alias_of_input
-            if o.output_type == OutputType.is_input and o.base_idx != new_base_idx
+            if o.output_type == OutputType.is_input and input_merged
             else o.output_type
         )
         existing_output_infos.append(

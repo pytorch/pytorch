@@ -93,7 +93,7 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
 ('get_attr', 'wrap_body_0', {'ac_sin': 0})
 [('placeholder', 'l_x_', {'ac_sin': 0}), ('call_function', 'sin', {'ac_sin': 0}), ('output', 'output', {'ac_sin': 0})]
 ('call_function', 'tag_activation_checkpoint', {'ac_sin': 0})
-('call_function', 'ac', {'ac_sin': 0})""",  # noqa: B950
+('call_function', 'getitem', {'ac_sin': 0})""",  # noqa: B950
         )
         self.assertExpectedInline(
             str(fw_metadata),
@@ -318,15 +318,15 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(
             str(dynamo_metadata),
             """\
-('placeholder', 's77', {'moo': 0})
 ('placeholder', 'l_x_', {'moo': 0})
+('placeholder', 's77', {'moo': 0})
 ('placeholder', 'l_y_', {'moo': 0})
-('call_function', 'x', {'moo': 0})
+('call_function', 'cat', {'moo': 0})
+('call_function', 'mul', {'moo': 0})
 ('call_method', 'item', {'moo': 0})
 ('call_function', 'mul_1', {'moo': 0})
 ('call_function', 'ge', {'moo': 0})
-('call_function', '_check', {'moo': 0})
-('call_function', 'mul', {'moo': 0})""",  # noqa: B950
+('call_function', '_check', {'moo': 0})""",  # noqa: B950
         )
 
 

@@ -1328,8 +1328,8 @@ class outer_fn(torch.nn.Module):
     class repeated_subgraph0(torch.nn.Module):
         def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3, 3]", arg2_1: "f32[3, 3]"):
             add: "f32[3, 3]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1)
-            add_1: "f32[3, 3]" = torch.ops.aten.add.Tensor(add, arg2_1);  add = None
             mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+            add_1: "f32[3, 3]" = torch.ops.aten.add.Tensor(add, arg2_1);  add = None
             mul_1: "f32[3, 3]" = torch.ops.aten.mul.Tensor(mul, arg2_1);  mul = arg2_1 = None
             return (add_1, mul_1)
 """,  # noqa: B950

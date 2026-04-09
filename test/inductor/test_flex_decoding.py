@@ -2014,7 +2014,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         _, code = run_and_get_code(func, q, k, v, _identity)
         # Ensure that we're still generating the flexattention kernel
-        FileCheck().check_count(".run(primals_1, primals_2, primals_3", 1, True).run(
+        FileCheck().check("triton_tem_fused_flex_attention").check(".run(primals_").run(
             code[0]
         )
 

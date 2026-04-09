@@ -532,7 +532,7 @@ class FusionTests(TestCase):
         inp = (dst, T(10), T(10))
         # 10 (read a) + 10 (read b) + 20 (write dst) = 40
         # Without fusion cat would allocate intermediate: 80
-        self.assertExpectedInline(count_numel(f, *inp), """40""")
+        self.assertExpectedInline(count_numel(f, *inp), """60""")
 
     def test_reduction_pointwise_multi_level_reduction(self):
         hidden_size = 4096

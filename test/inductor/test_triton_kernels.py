@@ -620,7 +620,14 @@ def forward(self, x_1, output_1):
                 self.assertIn("output_handles[0] = ", code)
                 self.assertIn("output_handles[1] = ", code)
             else:
-                self.assertIn("return (buf0, s92, )", code)
+                self.assertIn("return (buf1, s92, )", code)
+        elif dynamic:
+            self.assertIn(
+                "output_handles[0] = "
+                if inductor_config.cpp_wrapper
+                else "return (buf1, )",
+                code,
+            )
         else:
             self.assertIn(
                 "output_handles[0] = "

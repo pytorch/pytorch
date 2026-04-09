@@ -24,6 +24,7 @@ import contextlib
 import copy
 import dataclasses
 import functools
+import heapq
 import inspect
 import itertools
 import logging
@@ -489,6 +490,161 @@ class ExportMetaData:
         str,
         dict[str, torch.utils._pytree.TreeSpec | torch.utils._pytree.LeafSpec],
     ] = dc_field(default_factory=dict)
+
+
+def _is_safe_to_reorder(node: fx.Node) -> bool:
+    """Check if a node is safe to reorder during graph canonicalization.
+
+    Builds on Node.is_impure() (used by DCE) with two additional checks for
+    cases it doesn't cover: in-place call_method nodes and non-OpOverload
+    state-changing functions detected by a no-node-arguments heuristic.
+    """
+    if node.op == "call_method":
+        # Node.is_impure() returns False for all call_method nodes, but
+        # in-place methods (e.g. .requires_grad_(), .copy_()) mutate state.
+        return not node.target.endswith("_")  # pyrefly: ignore[missing-attribute]
+    if node.op != "call_function":
+        return True
+    # Node.is_impure() covers: mutable OpOverload schemas, effects system,
+    # _side_effectful_functions, and random ops.
+    if node.is_impure():
+        return False
+    # Non-OpOverload call_function targets need three checks:
+    # 1. In-place functions (name ending with '_') mutate their inputs.
+    # 2. out= kwarg with a Node value indicates mutation (e.g. torch.add(y, 1, out=x)).
+    # 3. Targets with no FX Node arguments are likely state-changing operations
+    #    (e.g., _vmap_increment_nesting, _set_fwd_grad_enabled).
+    if not isinstance(node.target, torch._ops.OpOverload):
+        name = getattr(node.target, "__name__", "")
+        if name.endswith("_"):
+            return False
+        if isinstance(node.kwargs.get("out"), fx.Node):
+            return False
+        return bool(node.all_input_nodes)
+    return True
+
+
+def _canonicalize_graph(graph: fx.Graph) -> fx.Graph:
+    """
+    Reorder graph nodes into a canonical topological order that is deterministic
+    regardless of the order in which nodes were originally traced, and rename
+    them to canonical names.
+
+    This ensures that structurally equivalent graphs (e.g., same model traced with
+    different dict iteration orders across distributed ranks) produce identical node
+    names and ordering, which is required for cross-rank synchronization in the AOT
+    partitioner.
+
+    Uses Kahn's algorithm with a canonical tiebreaker:
+    - Placeholders sorted by grapharg source name
+    - get_attr nodes sorted by target
+    - Computation nodes sorted by canonical indices of their inputs
+
+    Nodes that aren't provably pure act as barriers — they are chained in
+    original order, and pure nodes are confined to their barrier segment.
+
+    Operates in-place on the graph to preserve node object identity (required
+    by GraphRegionTracker and other infrastructure that holds node references).
+    """
+    indeg: dict[fx.Node, int] = dict.fromkeys(graph.nodes, 0)
+
+    # Build standard data-dependency edges
+    for node in graph.nodes:
+        for user in node.users:
+            indeg[user] += 1
+
+    # Nodes that aren't provably pure act as barriers. We partition the graph
+    # into segments separated by barrier nodes and add synthetic edges:
+    #   prev_barrier → reorderable_nodes_in_segment → next_barrier
+    # This prevents reorderable nodes from crossing barrier boundaries while
+    # still allowing canonical reordering within each segment.
+    extra_users: dict[fx.Node, list[fx.Node]] = collections.defaultdict(list)
+    prev_barrier: fx.Node | None = None
+    segment_reorderable: list[fx.Node] = []
+    for node in graph.nodes:
+        if node.op in ("placeholder", "get_attr", "output"):
+            continue
+        if not _is_safe_to_reorder(node):
+            if prev_barrier is not None:
+                extra_users[prev_barrier].append(node)
+                indeg[node] += 1
+            for reorderable in segment_reorderable:
+                extra_users[reorderable].append(node)
+                indeg[node] += 1
+            segment_reorderable = []
+            prev_barrier = node
+        else:
+            if prev_barrier is not None:
+                extra_users[prev_barrier].append(node)
+                indeg[node] += 1
+            segment_reorderable.append(node)
+
+    canonical_idx: dict[fx.Node, int] = {}
+    counter = 0
+
+    def _canonical_key(node: fx.Node) -> tuple[Any, ...]:
+        if node.op == "placeholder":
+            grapharg = node.meta.get("grapharg")
+            if grapharg is not None and grapharg.source is not None:
+                source_name = grapharg.source.name
+            else:
+                source_name = ""
+            return (0, source_name)
+        elif node.op == "get_attr":
+            return (1, str(node.target))
+        elif node.op == "output":
+            return (3,)
+        else:
+            input_indices = tuple(canonical_idx[n] for n in node.all_input_nodes)
+            return (2, input_indices)
+
+    # Seed the heap with nodes that have no dependencies
+    ready: list[tuple[tuple[Any, ...], int, fx.Node]] = []
+    for node in graph.nodes:
+        if indeg[node] == 0:
+            heapq.heappush(ready, (_canonical_key(node), counter, node))
+            counter += 1
+
+    canonical_order: list[fx.Node] = []
+
+    while ready:
+        _, _, cur = heapq.heappop(ready)
+        canonical_order.append(cur)
+        canonical_idx[cur] = len(canonical_idx)
+
+        for user in itertools.chain(cur.users, extra_users.get(cur, ())):
+            indeg[user] -= 1
+            if indeg[user] == 0:
+                heapq.heappush(ready, (_canonical_key(user), counter, user))
+                counter += 1
+
+    if len(canonical_order) != len(list(graph.nodes)):
+        remaining = [n for n in indeg if indeg[n] != 0]
+        raise RuntimeError(
+            f"Canonicalization failed: processed {len(canonical_order)} of "
+            f"{len(list(graph.nodes))} nodes. Remaining: {remaining}"
+        )
+
+    # Reorder nodes in-place: move each node after the previously placed one.
+    # graph._root is the sentinel; inserting after it places at the front.
+    cursor = graph._root  # type: ignore[attr-defined]
+    for node in canonical_order:
+        cursor.append(node)
+        cursor = node
+
+    # Rename nodes to canonical names based on target (same naming scheme that
+    # FX Graph.create_node uses for auto-generated names).
+    from torch.fx.graph import _Namespace
+
+    ns = _Namespace()
+    for node in graph.nodes:
+        candidate = graph._target_to_str(node.target)
+        new_name = ns.create_name(candidate, node)
+        node.name = new_name
+    # Replace the graph's namespace so future node creation stays consistent
+    graph._graph_namespace = ns
+
+    return graph
 
 
 def get_builtins_dict(global_scope: Scope) -> dict[str, Any]:
@@ -2609,6 +2765,13 @@ class OutputGraph(OutputGraphCommon):
 
             # free a bit of memory
             self.real_value_cache.clear()
+
+            if (
+                not self.export
+                and not torch.compiler.is_exporting()
+                and not torch._dynamo.compiled_autograd.in_compiled_autograd_region
+            ):
+                _canonicalize_graph(self.graph)
 
             gm = _make_graph_module(root, self.graph)
 

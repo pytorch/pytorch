@@ -273,22 +273,22 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(
             str(backend.graphs[0].code).strip(),
             """\
-def forward(self, L_self_buffers_buffer_ : torch.distributed.tensor.DTensor, L_x_ : torch.Tensor, L_mesh_ : torch.distributed.device_mesh.DeviceMesh):
+def forward(self, L_mesh_ : torch.distributed.device_mesh.DeviceMesh, L_self_buffers_buffer_ : torch.distributed.tensor.DTensor, L_x_ : torch.Tensor):
+    l_mesh_ = L_mesh_
     l_self_buffers_buffer_ = L_self_buffers_buffer_
     l_x_ = L_x_
-    l_mesh_ = L_mesh_
     from_local = torch.distributed.tensor._api.from_local(l_x_, l_mesh_, [torch.distributed.tensor.placement_types.Shard(dim=0)], run_check = False);  l_x_ = l_mesh_ = None
-    inter = l_self_buffers_buffer_ + from_local;  l_self_buffers_buffer_ = from_local = None
-    to_local = inter.to_local();  inter = None
+    add = l_self_buffers_buffer_ + from_local;  l_self_buffers_buffer_ = from_local = None
+    to_local = add.to_local();  add = None
     return (to_local,)""",  # noqa: B950
         )
         self.assertExpectedInline(
             str(backend.fw_graphs[0].code).strip(),
-            f"""\
+            """\
 def forward(self, arg0_1, arg1_1, arg2_1):
-    _to_copy = torch.ops.aten._to_copy.default(arg1_1, dtype = torch.float64, layout = torch.strided, device = device(type='{self.device_type}', index=0));  arg1_1 = None
+    _to_copy = torch.ops.aten._to_copy.default(arg2_1, dtype = torch.float64, layout = torch.strided, device = device(type='cuda', index=0));  arg2_1 = None
     view = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
-    add = torch.ops.aten.add.Tensor(arg0_1, view);  arg0_1 = view = None
+    add = torch.ops.aten.add.Tensor(arg1_1, view);  arg1_1 = view = None
     view_1 = torch.ops.aten.view.default(add, [4, 4]);  add = None
     return (view_1,)""",  # noqa: B950
         )
@@ -323,13 +323,13 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             """\
 def forward(self, args_0):
     _fn_args = (args_0, )
-    L_self_buffers_buffer_ , L_x_ , L_mesh_ , = self._dynamo_bytecode_flatten(*_fn_args)
+    L_mesh_ , L_self_buffers_buffer_ , L_x_ , = self._dynamo_bytecode_flatten(*_fn_args)
+    l_mesh_ = L_mesh_
     l_self_buffers_buffer_ = L_self_buffers_buffer_
     l_x_ = L_x_
-    l_mesh_ = L_mesh_
     from_local = torch.distributed.tensor._api.from_local(l_x_, l_mesh_, [torch.distributed.tensor.placement_types.Shard(dim=0)], run_check = False);  l_x_ = l_mesh_ = None
-    inter = l_self_buffers_buffer_ + from_local;  l_self_buffers_buffer_ = from_local = None
-    to_local = inter.to_local();  inter = None
+    add = l_self_buffers_buffer_ + from_local;  l_self_buffers_buffer_ = from_local = None
+    to_local = add.to_local();  add = None
     return self._dynamo_bytecode_unflatten((to_local,), _fn_args)""",  # noqa: B950
         )
 
@@ -1329,11 +1329,11 @@ def forward(self, arg0_1, arg1_1):
         self.assertExpectedInline(
             str(backend.graphs[0].code).strip(),
             """\
-def forward(self, L_x_ : torch.Tensor, L_mesh_ : torch.distributed.device_mesh.DeviceMesh):
-    l_x_ = L_x_
+def forward(self, L_mesh_ : torch.distributed.device_mesh.DeviceMesh, L_x_ : torch.Tensor):
     l_mesh_ = L_mesh_
-    dt = torch.distributed.tensor._api.from_local(l_x_, l_mesh_, [torch.distributed.tensor.placement_types.Shard(dim=0)], run_check = False);  l_x_ = None
-    redistribute = dt.redistribute(l_mesh_, [torch.distributed.tensor.placement_types.Replicate()]);  dt = l_mesh_ = None
+    l_x_ = L_x_
+    from_local = torch.distributed.tensor._api.from_local(l_x_, l_mesh_, [torch.distributed.tensor.placement_types.Shard(dim=0)], run_check = False);  l_x_ = None
+    redistribute = from_local.redistribute(l_mesh_, [torch.distributed.tensor.placement_types.Replicate()]);  from_local = l_mesh_ = None
     to_local = redistribute.to_local();  redistribute = None
     add = to_local + 2;  to_local = None
     return (add,)""",  # noqa: B950
@@ -1360,11 +1360,11 @@ def forward(self, L_x_ : torch.Tensor, L_mesh_ : torch.distributed.device_mesh.D
         self.assertExpectedInline(
             str(backend.graphs[0].code).strip(),
             """\
-def forward(self, L_x_ : torch.Tensor, L_mesh_ : torch.distributed.device_mesh.DeviceMesh):
-    l_x_ = L_x_
+def forward(self, L_mesh_ : torch.distributed.device_mesh.DeviceMesh, L_x_ : torch.Tensor):
     l_mesh_ = L_mesh_
-    dt = torch.distributed.tensor._api.from_local(l_x_, l_mesh_, [torch.distributed.tensor.placement_types.Shard(dim=0)], run_check = False);  l_x_ = None
-    redistribute = dt.redistribute(device_mesh = l_mesh_, placements = [torch.distributed.tensor.placement_types.Replicate()]);  dt = l_mesh_ = None
+    l_x_ = L_x_
+    from_local = torch.distributed.tensor._api.from_local(l_x_, l_mesh_, [torch.distributed.tensor.placement_types.Shard(dim=0)], run_check = False);  l_x_ = None
+    redistribute = from_local.redistribute(device_mesh = l_mesh_, placements = [torch.distributed.tensor.placement_types.Replicate()]);  from_local = l_mesh_ = None
     to_local = redistribute.to_local();  redistribute = None
     add = to_local + 2;  to_local = None
     return (add,)""",  # noqa: B950

@@ -414,15 +414,15 @@ class <lambda>(torch.nn.Module):
         # Annotation: {'stream': 2}
         add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg1_1, arg1_1)
 
-        # Annotation: {'stream': 2}
-        add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_1, arg1_1);  arg1_1 = None
-
         # Annotation: {'stream': 0}
-        add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_1, 2);  add_1 = None
+        add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_1, 2)
+
+        # Annotation: {'stream': 2}
+        add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_1, arg1_1);  add_1 = arg1_1 = None
 
         # Annotation: {'stream': 0}
         copy_: "f32[2, 2]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = copy_ = None
-        return (add_2, add_3)
+        return (add_3, add_2)
 """,
         )
 
@@ -472,11 +472,11 @@ class GraphModule(torch.nn.Module):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, tangents_1: "f32[2, 2]", tangents_2: "f32[2, 2]"):
-        # Annotation: {'stream': 0}
-        mul_2: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_2, 2)
-
         #
-        add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(tangents_2, tangents_1);  tangents_2 = None
+        add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(tangents_2, tangents_1)
+
+        # Annotation: {'stream': 0}
+        mul_2: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_2, 2);  tangents_2 = None
 
         # Annotation: {'stream': 1}
         mul_3: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_1, 2);  tangents_1 = None
@@ -536,11 +536,11 @@ class GraphModule(torch.nn.Module):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, mul: "f32[2, 2]", add: "f32[2, 2]", add_1: "f32[2, 2]", tangents_1: "f32[2, 2]", tangents_2: "f32[2, 2]"):
-        # Annotation: {'stream': 0}
-        mul_2: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_2, 2)
-
         #
-        add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(tangents_2, tangents_1);  tangents_2 = None
+        add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(tangents_2, tangents_1)
+
+        # Annotation: {'stream': 0}
+        mul_2: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_2, 2);  tangents_2 = None
 
         # Annotation: {'stream': 1}
         mul_3: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_1, 2);  tangents_1 = None

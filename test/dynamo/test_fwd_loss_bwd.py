@@ -79,20 +79,20 @@ class TestForwardLossBackward(TestCase):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_mod_parameters_weight_: "f32[4, 4]", L_mod_parameters_bias_: "f32[4]", L_x_: "f32[2, 4]"):
-        l_mod_parameters_weight_ = L_mod_parameters_weight_
+    def forward(self, L_mod_parameters_bias_: "f32[4]", L_mod_parameters_weight_: "f32[4, 4]", L_x_: "f32[2, 4]"):
         l_mod_parameters_bias_ = L_mod_parameters_bias_
+        l_mod_parameters_weight_ = L_mod_parameters_weight_
         l_x_ = L_x_
 
-        res: "f32[2, 4]" = torch._C._nn.linear(l_x_, l_mod_parameters_weight_, l_mod_parameters_bias_);  l_x_ = None
+        linear: "f32[2, 4]" = torch._C._nn.linear(l_x_, l_mod_parameters_weight_, l_mod_parameters_bias_);  l_x_ = None
 
-        loss: "f32[]" = res.sum();  res = None
+        sum_1: "f32[]" = linear.sum();  linear = None
 
-        grad = torch.autograd.grad(loss, (l_mod_parameters_weight_, l_mod_parameters_bias_));  l_mod_parameters_weight_ = l_mod_parameters_bias_ = None
+        detach: "f32[]" = sum_1.detach()
+
+        grad = torch.autograd.grad(sum_1, (l_mod_parameters_weight_, l_mod_parameters_bias_));  sum_1 = l_mod_parameters_weight_ = l_mod_parameters_bias_ = None
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
-
-        detach: "f32[]" = loss.detach();  loss = None
         return (detach, getitem, getitem_1)
 """,  # noqa: B950
         )
@@ -105,13 +105,15 @@ class GraphModule(torch.nn.Module):
             fw_actual,
             """\
 class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: "f32[4, 4]", arg1_1: "f32[4]", arg2_1: "f32[2, 4]"):
-        t: "f32[4, 4]" = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
-        addmm: "f32[2, 4]" = torch.ops.aten.addmm.default(arg1_1, arg2_1, t);  arg1_1 = t = None
+    def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4, 4]", arg2_1: "f32[2, 4]"):
+        t: "f32[4, 4]" = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
+        addmm: "f32[2, 4]" = torch.ops.aten.addmm.default(arg0_1, arg2_1, t);  arg0_1 = t = None
 
         sum_1: "f32[]" = torch.ops.aten.sum.default(addmm);  addmm = None
 
-        ones_like: "f32[]" = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format)
+        detach: "f32[]" = torch.ops.aten.detach.default(sum_1)
+
+        ones_like: "f32[]" = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
         expand: "f32[2, 4]" = torch.ops.aten.expand.default(ones_like, [2, 4]);  ones_like = None
         t_1: "f32[4, 2]" = torch.ops.aten.t.default(expand)
         mm: "f32[4, 4]" = torch.ops.aten.mm.default(t_1, arg2_1);  t_1 = arg2_1 = None
@@ -119,8 +121,6 @@ class <lambda>(torch.nn.Module):
         sum_2: "f32[1, 4]" = torch.ops.aten.sum.dim_IntList(expand, [0], True);  expand = None
         view: "f32[4]" = torch.ops.aten.view.default(sum_2, [4]);  sum_2 = None
         t_3: "f32[4, 4]" = torch.ops.aten.t.default(t_2);  t_2 = None
-
-        detach: "f32[]" = torch.ops.aten.detach.default(sum_1);  sum_1 = None
         return (detach, t_3, view)
 """,  # noqa: B950
         )
@@ -156,18 +156,18 @@ class <lambda>(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_mod_parameters_weight_: "f32[4, 4]", L_mod_parameters_bias_: "f32[4]", L_x_: "f32[2, 4]"):
-        l_mod_parameters_weight_ = L_mod_parameters_weight_
+    def forward(self, L_mod_parameters_bias_: "f32[4]", L_mod_parameters_weight_: "f32[4, 4]", L_x_: "f32[2, 4]"):
         l_mod_parameters_bias_ = L_mod_parameters_bias_
+        l_mod_parameters_weight_ = L_mod_parameters_weight_
         l_x_ = L_x_
 
-        res: "f32[2, 4]" = torch._C._nn.linear(l_x_, l_mod_parameters_weight_, l_mod_parameters_bias_);  l_x_ = None
+        linear: "f32[2, 4]" = torch._C._nn.linear(l_x_, l_mod_parameters_weight_, l_mod_parameters_bias_);  l_x_ = None
 
-        loss: "f32[]" = res.sum();  res = None
+        sum_1: "f32[]" = linear.sum();  linear = None
 
-        grad = torch.autograd.grad(outputs = loss, inputs = (l_mod_parameters_weight_, l_mod_parameters_bias_), retain_graph = False, create_graph = False);  l_mod_parameters_weight_ = l_mod_parameters_bias_ = grad = None
+        detach: "f32[]" = sum_1.detach()
 
-        detach: "f32[]" = loss.detach();  loss = None
+        grad = torch.autograd.grad(outputs = sum_1, inputs = (l_mod_parameters_weight_, l_mod_parameters_bias_), retain_graph = False, create_graph = False);  sum_1 = l_mod_parameters_weight_ = l_mod_parameters_bias_ = grad = None
         return (detach,)
 """,  # noqa: B950
         )
@@ -180,9 +180,9 @@ class GraphModule(torch.nn.Module):
             fw_actual,
             """\
 class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: "f32[4, 4]", arg1_1: "f32[4]", arg2_1: "f32[2, 4]"):
-        t: "f32[4, 4]" = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
-        addmm: "f32[2, 4]" = torch.ops.aten.addmm.default(arg1_1, arg2_1, t);  arg1_1 = arg2_1 = t = None
+    def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4, 4]", arg2_1: "f32[2, 4]"):
+        t: "f32[4, 4]" = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
+        addmm: "f32[2, 4]" = torch.ops.aten.addmm.default(arg0_1, arg2_1, t);  arg0_1 = arg2_1 = t = None
 
         sum_1: "f32[]" = torch.ops.aten.sum.default(addmm);  addmm = None
 
@@ -217,19 +217,19 @@ class <lambda>(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_mod_parameters_weight_: "f32[4, 4]", L_mod_parameters_bias_: "f32[4]", L_x_: "f32[2, 4]"):
-        l_mod_parameters_weight_ = L_mod_parameters_weight_
+    def forward(self, L_mod_parameters_bias_: "f32[4]", L_mod_parameters_weight_: "f32[4, 4]", L_x_: "f32[2, 4]"):
         l_mod_parameters_bias_ = L_mod_parameters_bias_
+        l_mod_parameters_weight_ = L_mod_parameters_weight_
         l_x_ = L_x_
 
-        res: "f32[2, 4]" = torch._C._nn.linear(l_x_, l_mod_parameters_weight_, l_mod_parameters_bias_);  l_x_ = l_mod_parameters_bias_ = None
+        linear: "f32[2, 4]" = torch._C._nn.linear(l_x_, l_mod_parameters_weight_, l_mod_parameters_bias_);  l_x_ = l_mod_parameters_bias_ = None
 
-        loss: "f32[]" = res.sum();  res = None
+        sum_1: "f32[]" = linear.sum();  linear = None
 
-        grad = torch.autograd.grad(loss, l_mod_parameters_weight_);  l_mod_parameters_weight_ = None
+        detach: "f32[]" = sum_1.detach()
+
+        grad = torch.autograd.grad(sum_1, l_mod_parameters_weight_);  sum_1 = l_mod_parameters_weight_ = None
         getitem: "f32[4, 4]" = grad[0];  grad = None
-
-        detach: "f32[]" = loss.detach();  loss = None
         return (detach, getitem)
 """,  # noqa: B950
         )
@@ -242,20 +242,20 @@ class GraphModule(torch.nn.Module):
             fw_actual,
             """\
 class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: "f32[4, 4]", arg1_1: "f32[4]", arg2_1: "f32[2, 4]"):
-        t: "f32[4, 4]" = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
-        addmm: "f32[2, 4]" = torch.ops.aten.addmm.default(arg1_1, arg2_1, t);  arg1_1 = t = None
+    def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4, 4]", arg2_1: "f32[2, 4]"):
+        t: "f32[4, 4]" = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
+        addmm: "f32[2, 4]" = torch.ops.aten.addmm.default(arg0_1, arg2_1, t);  arg0_1 = t = None
 
         sum_1: "f32[]" = torch.ops.aten.sum.default(addmm);  addmm = None
 
-        ones_like: "f32[]" = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format)
+        detach: "f32[]" = torch.ops.aten.detach.default(sum_1)
+
+        ones_like: "f32[]" = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
         expand: "f32[2, 4]" = torch.ops.aten.expand.default(ones_like, [2, 4]);  ones_like = None
         t_1: "f32[4, 2]" = torch.ops.aten.t.default(expand);  expand = None
         mm: "f32[4, 4]" = torch.ops.aten.mm.default(t_1, arg2_1);  t_1 = arg2_1 = None
         t_2: "f32[4, 4]" = torch.ops.aten.t.default(mm);  mm = None
         t_3: "f32[4, 4]" = torch.ops.aten.t.default(t_2);  t_2 = None
-
-        detach: "f32[]" = torch.ops.aten.detach.default(sum_1);  sum_1 = None
         return (detach, t_3)
 """,  # noqa: B950
         )
@@ -435,25 +435,26 @@ autograd.grad with external grad_fn
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_mod_parameters_weight_: "f32[4, 4]", L_mod_parameters_bias_: "f32[4]", L_x_: "f32[2, 4]"):
-        l_mod_parameters_weight_ = L_mod_parameters_weight_
+    def forward(self, L_mod_parameters_bias_: "f32[4]", L_mod_parameters_weight_: "f32[4, 4]", L_x_: "f32[2, 4]"):
         l_mod_parameters_bias_ = L_mod_parameters_bias_
+        l_mod_parameters_weight_ = L_mod_parameters_weight_
         l_x_ = L_x_
 
-        res: "f32[2, 4]" = torch._C._nn.linear(l_x_, l_mod_parameters_weight_, l_mod_parameters_bias_)
+        sin: "f32[2, 4]" = l_x_.sin()
 
-        loss: "f32[]" = res.sum();  res = None
+        linear: "f32[2, 4]" = torch._C._nn.linear(l_x_, l_mod_parameters_weight_, l_mod_parameters_bias_);  l_x_ = None
 
-        grad = torch.autograd.grad(loss, (l_mod_parameters_weight_, l_mod_parameters_bias_), materialize_grads = False, allow_unused = True);  loss = l_mod_parameters_weight_ = l_mod_parameters_bias_ = None
-        weight_grad: "f32[4, 4]" = grad[0]
-        bias_grad: "f32[4]" = grad[1];  grad = None
+        sum_1: "f32[]" = linear.sum();  linear = None
 
-        sum_2: "f32[]" = weight_grad.sum();  weight_grad = None
-        sum_3: "f32[]" = bias_grad.sum();  bias_grad = None
-        grad_norm: "f32[]" = sum_2 + sum_3;  sum_2 = sum_3 = None
+        grad = torch.autograd.grad(sum_1, (l_mod_parameters_weight_, l_mod_parameters_bias_), materialize_grads = False, allow_unused = True);  sum_1 = l_mod_parameters_weight_ = l_mod_parameters_bias_ = None
+        getitem: "f32[4, 4]" = grad[0]
+        getitem_1: "f32[4]" = grad[1];  grad = None
 
-        detach: "f32[]" = grad_norm.detach();  grad_norm = None
-        sin: "f32[2, 4]" = l_x_.sin();  l_x_ = None
+        sum_2: "f32[]" = getitem.sum();  getitem = None
+        sum_3: "f32[]" = getitem_1.sum();  getitem_1 = None
+        add: "f32[]" = sum_2 + sum_3;  sum_2 = sum_3 = None
+
+        detach: "f32[]" = add.detach();  add = None
         return (detach, sin)
 """,  # noqa: B950
         )
@@ -466,9 +467,11 @@ class GraphModule(torch.nn.Module):
             fw_actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "f32[4, 4]", primals_2: "f32[4]", primals_3: "f32[2, 4]"):
-        t: "f32[4, 4]" = torch.ops.aten.t.default(primals_1);  primals_1 = None
-        addmm: "f32[2, 4]" = torch.ops.aten.addmm.default(primals_2, primals_3, t);  primals_2 = t = None
+    def forward(self, primals_1: "f32[4]", primals_2: "f32[4, 4]", primals_3: "f32[2, 4]"):
+        sin: "f32[2, 4]" = torch.ops.aten.sin.default(primals_3)
+
+        t: "f32[4, 4]" = torch.ops.aten.t.default(primals_2);  primals_2 = None
+        addmm: "f32[2, 4]" = torch.ops.aten.addmm.default(primals_1, primals_3, t);  primals_1 = t = None
 
         sum_1: "f32[]" = torch.ops.aten.sum.default(addmm);  addmm = None
 
@@ -486,7 +489,6 @@ class GraphModule(torch.nn.Module):
         add: "f32[]" = torch.ops.aten.add.Tensor(sum_3, sum_4);  sum_3 = sum_4 = None
 
         detach: "f32[]" = torch.ops.aten.detach.default(add);  add = None
-        sin: "f32[2, 4]" = torch.ops.aten.sin.default(primals_3)
         return (detach, sin, primals_3)
 """,  # noqa: B950
         )
@@ -857,30 +859,30 @@ autograd.grad with external GradientEdge
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_mod_parameters_weight_: "f32[4, 4]", L_mod_parameters_bias_: "f32[4]", L_x_: "f32[2, 4]"):
-        l_mod_parameters_weight_ = L_mod_parameters_weight_
+    def forward(self, L_mod_parameters_bias_: "f32[4]", L_mod_parameters_weight_: "f32[4, 4]", L_x_: "f32[2, 4]"):
         l_mod_parameters_bias_ = L_mod_parameters_bias_
+        l_mod_parameters_weight_ = L_mod_parameters_weight_
         l_x_ = L_x_
 
-        res: "f32[2, 4]" = torch._C._nn.linear(l_x_, l_mod_parameters_weight_, l_mod_parameters_bias_);  l_x_ = None
+        linear: "f32[2, 4]" = torch._C._nn.linear(l_x_, l_mod_parameters_weight_, l_mod_parameters_bias_);  l_x_ = None
 
-        loss: "f32[]" = res.sum();  res = None
+        sum_1: "f32[]" = linear.sum();  linear = None
 
-        grad = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = False)
+        grad = torch.autograd.grad(sum_1, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = False)
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
 
         _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
-        new_grad_strided: "f32[4, 4]" = torch.empty_like(l_mod_parameters_weight_);  l_mod_parameters_weight_ = None
-        copy_: "f32[4, 4]" = new_grad_strided.copy_(getitem);  getitem = copy_ = None
-        new_grad_strided_1: "f32[4]" = torch.empty_like(l_mod_parameters_bias_);  l_mod_parameters_bias_ = None
-        copy__1: "f32[4]" = new_grad_strided_1.copy_(getitem_1);  getitem_1 = copy__1 = None
+        empty_like: "f32[4, 4]" = torch.empty_like(l_mod_parameters_weight_);  l_mod_parameters_weight_ = None
+        copy_: "f32[4, 4]" = empty_like.copy_(getitem);  getitem = copy_ = None
+        empty_like_1: "f32[4]" = torch.empty_like(l_mod_parameters_bias_);  l_mod_parameters_bias_ = None
+        copy__1: "f32[4]" = empty_like_1.copy_(getitem_1);  getitem_1 = copy__1 = None
 
         _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
 
-        detach: "f32[]" = loss.detach();  loss = None
-        return (detach, new_grad_strided, new_grad_strided_1)
+        detach: "f32[]" = sum_1.detach();  sum_1 = None
+        return (detach, empty_like, empty_like_1)
 """,  # noqa: B950
         )
 
@@ -900,30 +902,30 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_mod_parameters_weight_: "f32[4, 4]", L_mod_parameters_bias_: "f32[4]", L_x_: "f32[2, 4]"):
-        l_mod_parameters_weight_ = L_mod_parameters_weight_
+    def forward(self, L_mod_parameters_bias_: "f32[4]", L_mod_parameters_weight_: "f32[4, 4]", L_x_: "f32[2, 4]"):
         l_mod_parameters_bias_ = L_mod_parameters_bias_
+        l_mod_parameters_weight_ = L_mod_parameters_weight_
         l_x_ = L_x_
 
-        res: "f32[2, 4]" = torch._C._nn.linear(l_x_, l_mod_parameters_weight_, l_mod_parameters_bias_);  l_x_ = None
+        linear: "f32[2, 4]" = torch._C._nn.linear(l_x_, l_mod_parameters_weight_, l_mod_parameters_bias_);  l_x_ = None
 
-        loss: "f32[]" = res.sum();  res = None
+        sum_1: "f32[]" = linear.sum();  linear = None
 
-        grad = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = True)
+        grad = torch.autograd.grad(sum_1, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = True)
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
 
         _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
-        new_grad_strided: "f32[4, 4]" = torch.empty_like(l_mod_parameters_weight_);  l_mod_parameters_weight_ = None
-        copy_: "f32[4, 4]" = new_grad_strided.copy_(getitem);  getitem = copy_ = None
-        new_grad_strided_1: "f32[4]" = torch.empty_like(l_mod_parameters_bias_);  l_mod_parameters_bias_ = None
-        copy__1: "f32[4]" = new_grad_strided_1.copy_(getitem_1);  getitem_1 = copy__1 = None
+        empty_like: "f32[4, 4]" = torch.empty_like(l_mod_parameters_weight_);  l_mod_parameters_weight_ = None
+        copy_: "f32[4, 4]" = empty_like.copy_(getitem);  getitem = copy_ = None
+        empty_like_1: "f32[4]" = torch.empty_like(l_mod_parameters_bias_);  l_mod_parameters_bias_ = None
+        copy__1: "f32[4]" = empty_like_1.copy_(getitem_1);  getitem_1 = copy__1 = None
 
         _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
 
-        detach: "f32[]" = loss.detach();  loss = None
-        return (detach, new_grad_strided, new_grad_strided_1)
+        detach: "f32[]" = sum_1.detach();  sum_1 = None
+        return (detach, empty_like, empty_like_1)
 """,
         )
 
@@ -945,31 +947,31 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_mod_parameters_weight_: "f32[4, 4]", L_mod_parameters_bias_: "f32[4]", L_x_: "f32[2, 4]"):
-        l_mod_parameters_weight_ = L_mod_parameters_weight_
+    def forward(self, L_mod_parameters_bias_: "f32[4]", L_mod_parameters_weight_: "f32[4, 4]", L_x_: "f32[2, 4]"):
         l_mod_parameters_bias_ = L_mod_parameters_bias_
+        l_mod_parameters_weight_ = L_mod_parameters_weight_
         l_x_ = L_x_
 
-        res: "f32[2, 4]" = torch._C._nn.linear(l_x_, l_mod_parameters_weight_, l_mod_parameters_bias_);  l_x_ = None
+        linear: "f32[2, 4]" = torch._C._nn.linear(l_x_, l_mod_parameters_weight_, l_mod_parameters_bias_);  l_x_ = None
 
-        gradient: "f32[2, 4]" = torch.ones_like(res)
+        ones_like: "f32[2, 4]" = torch.ones_like(linear)
 
-        grad = torch.autograd.grad(res, [l_mod_parameters_weight_, l_mod_parameters_bias_], gradient, allow_unused = False);  gradient = None
+        grad = torch.autograd.grad(linear, [l_mod_parameters_weight_, l_mod_parameters_bias_], ones_like, allow_unused = False);  ones_like = None
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
 
         _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
-        new_grad_strided: "f32[4, 4]" = torch.empty_like(l_mod_parameters_weight_);  l_mod_parameters_weight_ = None
-        copy_: "f32[4, 4]" = new_grad_strided.copy_(getitem);  getitem = copy_ = None
-        new_grad_strided_1: "f32[4]" = torch.empty_like(l_mod_parameters_bias_);  l_mod_parameters_bias_ = None
-        copy__1: "f32[4]" = new_grad_strided_1.copy_(getitem_1);  getitem_1 = copy__1 = None
+        empty_like: "f32[4, 4]" = torch.empty_like(l_mod_parameters_weight_);  l_mod_parameters_weight_ = None
+        copy_: "f32[4, 4]" = empty_like.copy_(getitem);  getitem = copy_ = None
+        empty_like_1: "f32[4]" = torch.empty_like(l_mod_parameters_bias_);  l_mod_parameters_bias_ = None
+        copy__1: "f32[4]" = empty_like_1.copy_(getitem_1);  getitem_1 = copy__1 = None
 
         _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
 
-        detach: "f32[2, 4]" = res.detach();  res = None
+        detach: "f32[2, 4]" = linear.detach();  linear = None
         sum_1: "f32[]" = detach.sum();  detach = None
-        return (sum_1, new_grad_strided, new_grad_strided_1)
+        return (sum_1, empty_like, empty_like_1)
 """,  # noqa: B950
         )
 
@@ -992,45 +994,45 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_mod_parameters_weight_: "f32[4, 4]", L_mod_parameters_bias_: "f32[4]", L_x_: "f32[2, 4]"):
-        l_mod_parameters_weight_ = L_mod_parameters_weight_
+    def forward(self, L_mod_parameters_bias_: "f32[4]", L_mod_parameters_weight_: "f32[4, 4]", L_x_: "f32[2, 4]"):
         l_mod_parameters_bias_ = L_mod_parameters_bias_
+        l_mod_parameters_weight_ = L_mod_parameters_weight_
         l_x_ = L_x_
 
-        res: "f32[2, 4]" = torch._C._nn.linear(l_x_, l_mod_parameters_weight_, l_mod_parameters_bias_);  l_x_ = None
+        linear: "f32[2, 4]" = torch._C._nn.linear(l_x_, l_mod_parameters_weight_, l_mod_parameters_bias_);  l_x_ = None
 
-        loss: "f32[]" = res.sum();  res = None
+        sum_1: "f32[]" = linear.sum();  linear = None
 
-        grad = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = False, retain_graph = True)
+        grad = torch.autograd.grad(sum_1, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = False, retain_graph = True)
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
 
         _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
-        new_grad_strided: "f32[4, 4]" = torch.empty_like(l_mod_parameters_weight_)
-        copy_: "f32[4, 4]" = new_grad_strided.copy_(getitem);  getitem = copy_ = None
-        new_grad_strided_1: "f32[4]" = torch.empty_like(l_mod_parameters_bias_)
-        copy__1: "f32[4]" = new_grad_strided_1.copy_(getitem_1);  getitem_1 = copy__1 = None
+        empty_like: "f32[4, 4]" = torch.empty_like(l_mod_parameters_weight_)
+        copy_: "f32[4, 4]" = empty_like.copy_(getitem);  getitem = copy_ = None
+        empty_like_1: "f32[4]" = torch.empty_like(l_mod_parameters_bias_)
+        copy__1: "f32[4]" = empty_like_1.copy_(getitem_1);  getitem_1 = copy__1 = None
 
         _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
 
-        grad_1 = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = False)
+        grad_1 = torch.autograd.grad(sum_1, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = False)
         getitem_2: "f32[4, 4]" = grad_1[0]
         getitem_3: "f32[4]" = grad_1[1];  grad_1 = None
 
         _set_grad_enabled_2 = torch._C._set_grad_enabled(False);  _set_grad_enabled_2 = None
 
-        new_grad_strided_2: "f32[4, 4]" = torch.empty_like(l_mod_parameters_weight_);  l_mod_parameters_weight_ = None
-        copy__2: "f32[4, 4]" = new_grad_strided_2.copy_(getitem_2);  getitem_2 = copy__2 = None
-        add_: "f32[4, 4]" = new_grad_strided.add_(new_grad_strided_2);  new_grad_strided_2 = add_ = None
-        new_grad_strided_3: "f32[4]" = torch.empty_like(l_mod_parameters_bias_);  l_mod_parameters_bias_ = None
-        copy__3: "f32[4]" = new_grad_strided_3.copy_(getitem_3);  getitem_3 = copy__3 = None
-        add__1: "f32[4]" = new_grad_strided_1.add_(new_grad_strided_3);  new_grad_strided_3 = add__1 = None
+        empty_like_2: "f32[4, 4]" = torch.empty_like(l_mod_parameters_weight_);  l_mod_parameters_weight_ = None
+        copy__2: "f32[4, 4]" = empty_like_2.copy_(getitem_2);  getitem_2 = copy__2 = None
+        add_: "f32[4, 4]" = empty_like.add_(empty_like_2);  empty_like_2 = add_ = None
+        empty_like_3: "f32[4]" = torch.empty_like(l_mod_parameters_bias_);  l_mod_parameters_bias_ = None
+        copy__3: "f32[4]" = empty_like_3.copy_(getitem_3);  getitem_3 = copy__3 = None
+        add__1: "f32[4]" = empty_like_1.add_(empty_like_3);  empty_like_3 = add__1 = None
 
         _set_grad_enabled_3 = torch._C._set_grad_enabled(True);  _set_grad_enabled_3 = None
 
-        detach: "f32[]" = loss.detach();  loss = None
-        return (detach, new_grad_strided, new_grad_strided_1)
+        detach: "f32[]" = sum_1.detach();  sum_1 = None
+        return (detach, empty_like, empty_like_1)
 """,  # noqa: B950
         )
 
@@ -1093,20 +1095,20 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, SYNTHETIC_LOCAL_tmp_0_: "f32[4, 4]", L_x_: "f32[2, 4]"):
-        synthetic_local_tmp_0_ = SYNTHETIC_LOCAL_tmp_0_
+    def forward(self, L_x_: "f32[2, 4]", SYNTHETIC_LOCAL_tmp_0_: "f32[4, 4]"):
         l_x_ = L_x_
+        synthetic_local_tmp_0_ = SYNTHETIC_LOCAL_tmp_0_
 
         ones: "f32[4, 4]" = torch.ones(4, 4)
-        w: "f32[4, 4]" = torch__dynamo_create_parameter_op_tracable_create_parameter(ones, synthetic_local_tmp_0_);  ones = synthetic_local_tmp_0_ = None
+        tracable_create_parameter: "f32[4, 4]" = torch__dynamo_create_parameter_op_tracable_create_parameter(ones, synthetic_local_tmp_0_);  ones = synthetic_local_tmp_0_ = None
 
-        y: "f32[2, 4]" = l_x_ @ w;  l_x_ = None
+        matmul: "f32[2, 4]" = l_x_ @ tracable_create_parameter;  l_x_ = None
 
-        loss: "f32[]" = y.sum();  y = None
+        sum_1: "f32[]" = matmul.sum();  matmul = None
 
-        grad = torch.autograd.grad(loss, [w]);  loss = w = None
-        grad_1: "f32[4, 4]" = grad[0];  grad = None
-        return (grad_1,)
+        grad = torch.autograd.grad(sum_1, [tracable_create_parameter]);  sum_1 = tracable_create_parameter = None
+        getitem: "f32[4, 4]" = grad[0];  grad = None
+        return (getitem,)
 """,  # noqa: B950
         )
 

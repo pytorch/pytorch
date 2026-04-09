@@ -1566,6 +1566,154 @@ class DictTests(torch._dynamo.test_case.TestCase):
             "not CustomBoolDict(False) should evaluate to True in boolean context",
         )
 
+    def _get_graph_node_names(self, model, inp):
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        torch.compile(model, backend=backend)(inp)
+        return [n.name for n in backend.graphs[0].graph.nodes]
+
+    def test_dict_order_canonical_graph(self):
+        # Different dict key orders should produce identical canonical graphs.
+        # Before the canonicalization fix, this test fails because node names
+        # follow dict iteration order.
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.deep = torch.nn.Sequential(
+                    torch.nn.Linear(8, 16),
+                    torch.nn.ReLU(),
+                    torch.nn.Linear(16, 16),
+                )
+                self.shallow = torch.nn.Linear(8, 16)
+
+            def forward(self, d):
+                results = []
+                for key, val in d.items():
+                    if key == "a":
+                        results.append(self.deep(val))
+                    else:
+                        results.append(self.shallow(val))
+                return torch.cat(results, dim=-1).sum()
+
+        model = Model()
+        d1 = {"a": torch.randn(4, 8), "b": torch.randn(4, 8)}
+        d2 = {"b": torch.randn(4, 8), "a": torch.randn(4, 8)}
+
+        names1 = self._get_graph_node_names(model, d1)
+        torch._dynamo.reset()
+        names2 = self._get_graph_node_names(model, d2)
+        self.assertEqual(names1, names2)
+
+    def test_dict_order_canonical_graph_correctness(self):
+        # Verify numerical correctness is preserved after canonicalization.
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear_a = torch.nn.Linear(8, 16)
+                self.linear_b = torch.nn.Linear(8, 16)
+
+            def forward(self, d):
+                return self.linear_a(d["a"]) + self.linear_b(d["b"])
+
+        model = Model()
+
+        d1 = {"a": torch.randn(4, 8), "b": torch.randn(4, 8)}
+        d2 = {"b": d1["b"], "a": d1["a"]}
+
+        eager_result = model(d1)
+        compiled_result1 = torch.compile(model, backend="eager")(d1)
+        torch._dynamo.reset()
+        compiled_result2 = torch.compile(model, backend="eager")(d2)
+
+        self.assertEqual(eager_result, compiled_result1)
+        self.assertEqual(eager_result, compiled_result2)
+
+    def test_dict_order_canonical_graph_aot_eager(self):
+        # Verify canonicalized graphs produce identical node names through
+        # AOTAutograd with backward, and that numerical results match.
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj_a = torch.nn.Linear(8, 16)
+                self.proj_b = torch.nn.Linear(8, 16)
+
+            def forward(self, d):
+                results = []
+                for key, val in d.items():
+                    if key == "a":
+                        results.append(self.proj_a(val))
+                    else:
+                        results.append(self.proj_b(val))
+                return torch.cat(results, dim=-1).sum()
+
+        model = Model()
+        d1 = {"a": torch.randn(4, 8), "b": torch.randn(4, 8)}
+        d2 = {"b": d1["b"], "a": d1["a"]}
+
+        backend1 = torch._dynamo.testing.AotEagerAndRecordGraphs()
+        loss1 = torch.compile(model, backend=backend1)(d1)
+        loss1.backward()
+
+        torch._dynamo.reset()
+        model.zero_grad()
+
+        backend2 = torch._dynamo.testing.AotEagerAndRecordGraphs()
+        loss2 = torch.compile(model, backend=backend2)(d2)
+        loss2.backward()
+
+        self.assertEqual(loss1, loss2)
+
+        # Forward and backward graphs should have identical node names
+        fw_names1 = [n.name for n in backend1.fw_graphs[0].graph.nodes]
+        fw_names2 = [n.name for n in backend2.fw_graphs[0].graph.nodes]
+        self.assertEqual(fw_names1, fw_names2)
+        bw_names1 = [n.name for n in backend1.bw_graphs[0].graph.nodes]
+        bw_names2 = [n.name for n in backend2.bw_graphs[0].graph.nodes]
+        self.assertEqual(bw_names1, bw_names2)
+
+    def test_dict_order_canonical_graph_idempotent(self):
+        # Canonicalizing an already-canonical graph produces identical names.
+        from torch._dynamo.output_graph import _canonicalize_graph
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(8, 16)
+
+            def forward(self, d):
+                return self.linear(d["a"]) + self.linear(d["b"])
+
+        model = Model()
+        d = {"a": torch.randn(4, 8), "b": torch.randn(4, 8)}
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        torch.compile(model, backend=backend)(d)
+        graph = backend.graphs[0].graph
+
+        names_once = [n.name for n in graph.nodes]
+        graph2 = _canonicalize_graph(graph)
+        names_twice = [n.name for n in graph2.nodes]
+        self.assertEqual(names_once, names_twice)
+
+    def test_canonical_graph_overlapping_unsqueeze_with_mutation(self):
+        # Placeholder reordering must not break synthetic base handling:
+        # when overlapping views are merged into a synthetic base, an output
+        # that was is_input must become alias_of_input so the view shape is
+        # reconstructed correctly.
+        def f(x, y):
+            x.add_(1)
+            y.add_(1)
+            return x
+
+        base = torch.ones(10)
+        inputs = [base.unsqueeze(0), base.unsqueeze(0)]
+        out_eager = f(*inputs)
+
+        optf = torch.compile(backend="aot_eager", dynamic=True)(f)
+        base = torch.ones(10)
+        inputs = [base.unsqueeze(0), base.unsqueeze(0)]
+        out_compiled = optf(*inputs)
+
+        self.assertEqual(out_eager, out_compiled)
+
 
 instantiate_parametrized_tests(DictTests)
 

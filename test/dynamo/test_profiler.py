@@ -304,15 +304,15 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
     _record_function_enter_new = torch.ops.profiler._record_function_enter_new('my_net1', None)
-    a = l_x_.sin();  l_x_ = None
+    sin = l_x_.sin();  l_x_ = None
     _record_function_exit__record_function = torch.ops.profiler._record_function_exit._RecordFunction(_record_function_enter_new);  _record_function_enter_new = _record_function_exit__record_function = None
     _record_function_enter_new_1 = torch.ops.profiler._record_function_enter_new('my_cos', None)
-    b = a.cos();  a = None
+    cos = sin.cos();  sin = None
     _record_function_exit__record_function_1 = torch.ops.profiler._record_function_exit._RecordFunction(_record_function_enter_new_1);  _record_function_enter_new_1 = _record_function_exit__record_function_1 = None
     _record_function_enter_new_2 = torch.ops.profiler._record_function_enter_new('my_net2', None)
-    c = b + 2;  b = None
+    add = cos + 2;  cos = None
     _record_function_exit__record_function_2 = torch.ops.profiler._record_function_exit._RecordFunction(_record_function_enter_new_2);  _record_function_enter_new_2 = _record_function_exit__record_function_2 = None
-    return (c,)""",  # noqa: B950
+    return (add,)""",  # noqa: B950
         )
         self.assertExpectedInline(
             backend.fw_graphs[0].code.strip(),

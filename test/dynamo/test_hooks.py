@@ -362,13 +362,13 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             """\
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
-    y = l_x_ * 2;  l_x_ = None
-    fwd_body_0 = self.fwd_body_0
     bwd_body_0 = self.bwd_body_0
-    autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, y, non_differentiable_idx = [], saved_for_backward_idx = []);  fwd_body_0 = bwd_body_0 = y = None
+    fwd_body_0 = self.fwd_body_0
+    mul = l_x_ * 2;  l_x_ = None
+    autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, mul, non_differentiable_idx = [], saved_for_backward_idx = []);  fwd_body_0 = bwd_body_0 = mul = None
     getitem = autograd_function_apply[0];  autograd_function_apply = None
-    a = getitem * 3
-    add = a + getitem;  a = None
+    mul_1 = getitem * 3
+    add = mul_1 + getitem;  mul_1 = None
     sum_1 = add.sum();  add = None
     return (sum_1, getitem)""",  # noqa: B950
         )
@@ -510,18 +510,18 @@ def forward(self, L_x_ : torch.Tensor):
             """\
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
-    split = l_x_.split(2);  l_x_ = None
-    y = split[0]
-    fwd_body_0 = self.fwd_body_0
     bwd_body_0 = self.bwd_body_0
-    autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, y, non_differentiable_idx = [], saved_for_backward_idx = []);  fwd_body_0 = bwd_body_0 = y = None
-    getitem_3 = autograd_function_apply[0];  autograd_function_apply = None
+    fwd_body_0 = self.fwd_body_0
+    split = l_x_.split(2);  l_x_ = None
+    getitem = split[0]
+    autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, getitem, non_differentiable_idx = [], saved_for_backward_idx = []);  fwd_body_0 = bwd_body_0 = getitem = None
     getitem_1 = split[1]
     getitem_2 = split[2];  split = None
-    result = torch.cat((getitem_3, getitem_1, getitem_2));  getitem_1 = getitem_2 = None
-    sum_1 = result.sum();  result = None
-    sum_2 = getitem_3.sum();  getitem_3 = None
-    add = sum_1 + sum_2;  sum_1 = sum_2 = None
+    getitem_3 = autograd_function_apply[0];  autograd_function_apply = None
+    sum_1 = getitem_3.sum()
+    cat = torch.cat((getitem_3, getitem_1, getitem_2));  getitem_3 = getitem_1 = getitem_2 = None
+    sum_2 = cat.sum();  cat = None
+    add = sum_2 + sum_1;  sum_2 = sum_1 = None
     return (add,)""",  # noqa: B950
         )
 

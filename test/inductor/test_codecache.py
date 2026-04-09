@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import functools
 import logging
+import operator
 import os
 import pickle
 import shutil
@@ -2210,7 +2211,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
         x = torch.ones(3)
         torch._dynamo.mark_dynamic(x, 0)
         with fresh_cache():
-            # captured graph is lambda s0, x: x * s0
+            # captured graph is lambda x, s0: x * s0
             gm, args, kwargs = self.capture(f)(x)
             if kwargs:
                 raise AssertionError
@@ -2219,7 +2220,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             gm, args, dynamic_shapes="from_graph", aot=is_aot
         )
         x = torch.ones(4)
-        (result,) = compiled_artifact(4, x)
+        (result,) = compiled_artifact(x, 4)
         self.assertEqual(result, x * 4)
 
     @config.patch({"fx_graph_cache": True})
@@ -2228,53 +2229,30 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
     @functorch_config.patch({"autograd_cache_normalize_inputs": True})
     @parametrize("is_aot", (False, True))
     def test_split_module(self, is_aot):
-        class Mod(torch.nn.Module):
-            def forward(self, x, a0, a1, b0, b1, c0, c1):
-                x = x + (a0**2) + (a1 / 2)
-                x = x + (b0**2) + (b1 / 2)
-                x = x + (c0**2) + (c1 / 2)
-                return x
-
-        seen = 0
-        splits = [4, 8]
-
-        def split(n):
-            nonlocal seen
-            if seen < splits[0]:
-                seen += 1
-                return 0
-            elif seen < splits[1]:
-                seen += 1
-                return 1
-            else:
-                seen += 1
-                return 2
+        # Three structurally identical graphs: x = x + (p0**2) + (p1 / 2)
+        # This verifies standalone_compile achieves cache hits across
+        # identical graph structures.
+        def make_submod():
+            graph = torch.fx.Graph()
+            p0 = graph.placeholder("p0")
+            x = graph.placeholder("x")
+            p1 = graph.placeholder("p1")
+            pow_node = graph.call_function(operator.pow, (p0, 2))
+            div_node = graph.call_function(operator.truediv, (p1, 2))
+            add1 = graph.call_function(operator.add, (x, pow_node))
+            add2 = graph.call_function(operator.add, (add1, div_node))
+            graph.output(add2)
+            return torch.fx.GraphModule(torch.nn.Module(), graph)
 
         def t():
             return torch.randn([])
 
         x = t()
-        a0 = t()
-        a1 = t()
-        b0 = t()
-        b1 = t()
-        c0 = t()
-        c1 = t()
+        a0, a1, b0, b1, c0, c1 = (t() for _ in range(6))
 
-        example_inputs = (x, a0, a1, b0, b1, c0, c1)
-        gm, inps, _ = self.capture(Mod())(*example_inputs)
-        split = torch.fx.passes.split_module.split_module(gm, gm, split)
-
-        # Each of the split graphs only has one output.
-        ca0 = torch._inductor.standalone_compile(
-            split.submod_0, (a0, x, a1), aot=is_aot
-        )
-        ca1 = torch._inductor.standalone_compile(
-            split.submod_1, (b0, x, b1), aot=is_aot
-        )
-        ca2 = torch._inductor.standalone_compile(
-            split.submod_2, (c0, x, c1), aot=is_aot
-        )
+        ca0 = torch._inductor.standalone_compile(make_submod(), (a0, x, a1), aot=is_aot)
+        ca1 = torch._inductor.standalone_compile(make_submod(), (b0, x, b1), aot=is_aot)
+        ca2 = torch._inductor.standalone_compile(make_submod(), (c0, x, c1), aot=is_aot)
 
         y = ca0(a0, x, a1)
         y = ca1(b0, y, b1)
@@ -2284,13 +2262,13 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
-        # TODO: split_module causes ca1 and ca2 to have different type annotations
-        # for the parameter x, so we can only AOTAutogradCache cache hit once instead of twice
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 2)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
-        expected = Mod()(*example_inputs)
+        expected = x + (a0**2) + (a1 / 2)
+        expected = expected + (b0**2) + (b1 / 2)
+        expected = expected + (c0**2) + (c1 / 2)
         self.assertEqual(y, expected)
 
     @config.patch({"fx_graph_cache": True})
@@ -2305,7 +2283,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
         x = torch.ones(3)
         torch._dynamo.mark_dynamic(x, 0)
         with fresh_cache():
-            # captured graph is lambda s0, x: x * s0
+            # captured graph is lambda x, s0: x * s0
             gm, args, kwargs = self.capture(f)(x)
             if kwargs:
                 raise AssertionError
@@ -2318,20 +2296,20 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
         # specialized on example inputs
         compiled_artifact = torch._inductor.standalone_compile(
             gm,
-            (5, torch.ones(4)),
+            (torch.ones(4), 5),
             dynamic_shapes="from_example_inputs",
             options={"config_patches": config_patches},
             aot=is_aot,
         )
         x = torch.ones(4)
-        (result,) = compiled_artifact(3, x)
+        (result,) = compiled_artifact(x, 3)
         # int 5 was baked in!
         self.assertEqual(result, x * 5)
 
         # size 4 was baked in
         with self.assertRaisesRegex(AssertionError, "expected size 5==4"):
             x = torch.randn(5)
-            (result,) = compiled_artifact(4, x)
+            (result,) = compiled_artifact(x, 4)
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -2375,7 +2353,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
                 gm, args, dynamic_shapes=dynamic_shapes, aot=is_aot
             )
             y = torch.randn(4)
-            (result,) = compiled_artifact(4, y)
+            (result,) = compiled_artifact(y, 4)
             self.assertEqual(result, y * 4)
             return compiled_artifact
 
@@ -2395,17 +2373,17 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
 
         def backend(gm, args, **kwargs):
             compiled_artifact = torch._inductor.standalone_compile(
-                gm, [5, torch.ones(4)], dynamic_shapes="from_example_inputs", aot=is_aot
+                gm, [torch.ones(4), 5], dynamic_shapes="from_example_inputs", aot=is_aot
             )
             y = torch.ones(4)
-            (result,) = compiled_artifact(4, y)
+            (result,) = compiled_artifact(y, 4)
             # 5 was baked in
             self.assertEqual(result, y * 5)
 
             # shape of y was baked in
             with self.assertRaisesRegex(AssertionError, "expected size 5==4"):
                 y = torch.ones(5)
-                (result,) = compiled_artifact(4, y)
+                (result,) = compiled_artifact(y, 4)
 
             return compiled_artifact
 
