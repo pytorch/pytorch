@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 from torch.utils._sympy.functions import (
     FloorDiv,
+    Identity,
     Mod,
     ModularIndexing,
     PythonMod,
@@ -676,6 +677,25 @@ class TestOptimizationHintZeroDivision(InductorTestCase):
         expr = ModularIndexing(u0 + 1, u1, 4)
         hint = sizevars.optimization_hint(expr, fallback=8192)
         self.assertEqual(hint, 1)
+
+
+class TestOptimizationHintIdentityExpansion(InductorTestCase):
+    """Test that optimization_hint expands Identity wrappers after _sub_unbacked_exprs."""
+
+    def test_identity_wrapped_expr_resolves_to_int(self):
+        """An expression containing Identity-wrapped constants and an unbacked
+        symbol should resolve to a concrete int after substitution."""
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+
+        # Mirrors the real bug: -u0 * (-Identity(1) + Identity(0))
+        # simplifies to -u0 * (0 - 1) = u0.
+        # Without expand(identity=True) after _sub_unbacked_exprs,
+        # subs({u0: fallback}) leaves -Identity(1) + Identity(0) unexpanded,
+        # causing RuntimeError("Failed to realize expression to int").
+        expr = -u0 * (-Identity(sympy.Integer(1)) + Identity(sympy.Integer(0)))
+        hint = sizevars.optimization_hint(expr, fallback=42)
+        self.assertEqual(hint, 42)
 
 
 if __name__ == "__main__":
