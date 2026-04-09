@@ -1,4 +1,5 @@
 #include <ATen/Context.h>
+#include <ATen/native/mkldnn/xpu/detail/Utils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/transformers/sdp_utils.h>
@@ -51,6 +52,55 @@ bool check_no_grad(sdp::sdp_params const& params, bool debug) {
   return !any_inputs_require_grad || !gradmode_enabled;
 }
 
+bool check_head_dim_alignment(sdp::sdp_params const& params, bool debug) {
+  // OneDNN uses Block 2D Copy which has Alignment Restrictions:
+  // 1.Buffer base address must be 64-byte-aligned
+  // 2.Stride must be 16-byte-aligned
+  auto check_aligned = [&](const at::Tensor& t, const char* name) -> bool {
+    if (!at::native::onednn::is_64_bytes_aligned(t)) {
+      if (debug) {
+        TORCH_WARN(
+            "OneDNN attention requires 64-byte aligned tensor data pointer. ",
+            name,
+            " tensor is not aligned.");
+      }
+      return false;
+    }
+    return true;
+  };
+  if (!check_aligned(params.query, "Query") ||
+      !check_aligned(params.key, "Key") ||
+      !check_aligned(params.value, "Value")) {
+    return false;
+  }
+
+  // Stride must be 16-byte-aligned: min elements = 16 / element_size
+  auto check_stride_alignment = [&](const at::Tensor& t, const char* name) -> bool {
+    constexpr int64_t alignment_in_byte = 16;
+    const int64_t min_alignment = alignment_in_byte / t.element_size();
+    const auto last_dim = t.sym_size(-1);
+    if (last_dim % min_alignment != 0) {
+      if (debug) {
+        TORCH_WARN(
+            "OneDNN attention requires last dimension * element_size to be "
+            "16-byte aligned. ",
+            name, " has last_dim=", last_dim,
+            ", element_size=", t.element_size(),
+            ", requires divisibility by ", min_alignment, ".");
+      }
+      return false;
+    }
+    return true;
+  };
+  if (!check_stride_alignment(params.query, "Query") ||
+      !check_stride_alignment(params.key, "Key") ||
+      !check_stride_alignment(params.value, "Value")) {
+    return false;
+  }
+
+  return true;
+}
+
 bool can_use_overrideable_attention(sdp::sdp_params const& params, bool debug) {
   constexpr auto supported_dtypes = c10::array_of<at::ScalarType>(
       at::kFloat, at::kBFloat16, at::kHalf); // double is not supported
@@ -66,6 +116,7 @@ bool can_use_overrideable_attention(sdp::sdp_params const& params, bool debug) {
       sdp::check_nonzero_sequence_lengths_dense,
       sdp::check_last_dim_stride_equals_1_dense<false /*ignore_singleton_dim*/>,
       check_head_dim_size_xpu,
+      check_head_dim_alignment,
       check_no_grad);
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
