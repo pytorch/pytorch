@@ -10,35 +10,12 @@ namespace at::native::onednn {
 dnnl::memory make_onednn_memory(
     dnnl::memory::desc md,
     dnnl::engine& engine,
-    ReadWriteUSM mem) {
+    void* ptr) {
   return dnnl::sycl_interop::make_memory(
       md,
       engine,
       dnnl::sycl_interop::memory_kind::usm,
-      mem.ptr ? mem.ptr : DNNL_MEMORY_ALLOCATE);
-}
-
-dnnl::memory make_onednn_memory(
-    dnnl::memory::desc md,
-    dnnl::engine& engine,
-    ReadOnlyUSM mem) {
-  return dnnl::sycl_interop::make_memory(
-      md,
-      engine,
-      dnnl::sycl_interop::memory_kind::usm,
-      const_cast<void*>(mem.ptr));
-}
-
-dnnl::memory make_onednn_memory(
-    dnnl::memory::desc md,
-    dnnl::engine& engine,
-    AllocUSM) {
-
-  return dnnl::sycl_interop::make_memory(
-      md,
-      engine,
-      dnnl::sycl_interop::memory_kind::usm,
-      DNNL_MEMORY_ALLOCATE);
+      ptr == nullptr ? DNNL_MEMORY_ALLOCATE : ptr);
 }
 
 dnnl::memory::format_tag get_dnnl_default_format(
@@ -326,7 +303,7 @@ bool is_onednn_matmul_strides(const at::Tensor& tensor) {
   if (tensor.storage_offset() > 0) {
     // currently onednn asks 64 byte alignment
     constexpr int alignment_byte = 64;
-    if (reinterpret_cast<uintptr_t>(tensor.const_data_ptr()) % alignment_byte > 0)
+    if (reinterpret_cast<uintptr_t>(tensor.data_ptr()) % alignment_byte > 0)
       return false;
   }
 

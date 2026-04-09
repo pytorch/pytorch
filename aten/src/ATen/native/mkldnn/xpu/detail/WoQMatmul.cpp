@@ -65,9 +65,9 @@ void woq_matmul_int4_impl(
   dst_usr_md = dnnl::memory::desc(dst_usr_dims, dst_usr_dt, dst_usr_strides);
 
   // create usr memory
-  auto dst_usr_m = make_onednn_memory(dst_usr_md, engine, usm_rw(dst));
-  auto scale_usr_m = make_onednn_memory(scale_usr_md, engine, usm_ro(scale));
-  auto zp_usr_m = make_onednn_memory(zp_usr_md, engine, usm_ro(zp));
+  auto dst_usr_m = make_onednn_memory(dst_usr_md, engine, dst.data_ptr());
+  auto scale_usr_m = make_onednn_memory(scale_usr_md, engine, scale.data_ptr());
+  auto zp_usr_m = make_onednn_memory(zp_usr_md, engine, zp.data_ptr());
 
   // Construct md for primitive creation
   // The xxx_md describes what kinds of matmul the oneDNN does.
@@ -109,8 +109,8 @@ void woq_matmul_int4_impl(
   dnnl::matmul matmul_p;
   dnnl::matmul::primitive_desc matmul_pd;
 
-  auto m1_usr_m = make_onednn_memory(m1_usr_md, engine, usm_ro(m1));
-  auto m2_usr_m = make_onednn_memory(m2_usr_md, engine, usm_ro(m2));
+  auto m1_usr_m = make_onednn_memory(m1_usr_md, engine, m1.data_ptr());
+  auto m2_usr_m = make_onednn_memory(m2_usr_md, engine, m2.data_ptr());
 
   void* handle_b = m2_usr_m.get_data_handle();
   // reinterpret m2_usr_memory as u4
@@ -158,7 +158,7 @@ void woq_matmul_int4_impl(
   Tensor scratchpad_tensor =
       at::empty({scratchpad_size}, m1.options().dtype(at::kByte), std::nullopt);
   auto scratchpad_memory = make_onednn_memory(
-      matmul_pd.scratchpad_desc(), engine, usm_rw(scratchpad_tensor));
+      matmul_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_memory});
 
   args.insert({DNNL_ARG_SRC, m1_m});
@@ -262,17 +262,17 @@ void woq_matmul_int4_impl_cache(
   matmul_ext.set_attribute(
       arg_off++,
       DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS,
-      usm_ro(scale),
+      scale.data_ptr(),
       [&]() {
         return make_onednn_memory(
-            get_onednn_md(scale), engine, usm_ro(scale));
+            get_onednn_md(scale), engine, scale.data_ptr());
       });
 
   // set zp_md for asymmetric quantization
   matmul_ext.set_attribute(
       arg_off++,
       DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS,
-      usm_ro(zp),
+      zp.data_ptr(),
       [&]() {
         int num_groups = k / group_size;
         memory zp_usr_m(

@@ -13,66 +13,10 @@
 
 namespace at::native::onednn {
 
-struct ReadOnlyUSM {
-  const void* ptr;
-
-  void* raw() const noexcept {
-    return const_cast<void*>(ptr);
-  }
-
-private:
-  explicit ReadOnlyUSM(const void* p) : ptr(p) {
-    TORCH_CHECK(p, "ReadOnlyUSM: null ptr");
-  }
-
-  friend ReadOnlyUSM usm_ro(const at::Tensor&);
-};
-
-struct ReadWriteUSM {
-  void* ptr;
-
-  void* raw() const noexcept {
-    return ptr;
-  }
-
-private:
-  explicit ReadWriteUSM(void* p) : ptr(p) {}
-
-  friend ReadWriteUSM usm_rw(const at::Tensor&);
-};
-
-struct AllocUSM {
-  void* raw() const noexcept {
-    return nullptr;
-  }
-};
-
-inline ReadOnlyUSM usm_ro(const at::Tensor& t) {
-  return ReadOnlyUSM(t.const_data_ptr());
-}
-
-inline ReadWriteUSM usm_rw(const at::Tensor& t) {
-  return ReadWriteUSM(t.mutable_data_ptr());
-}
-
-inline AllocUSM usm_alloc() {
-  return {};
-}
-
 TORCH_XPU_API dnnl::memory make_onednn_memory(
     dnnl::memory::desc md,
     dnnl::engine& engine,
-    ReadWriteUSM mem);
-
-TORCH_XPU_API dnnl::memory make_onednn_memory(
-    dnnl::memory::desc md,
-    dnnl::engine& engine,
-    ReadOnlyUSM mem);
-
-TORCH_XPU_API dnnl::memory make_onednn_memory(
-    dnnl::memory::desc md,
-    dnnl::engine& engine,
-    AllocUSM mem);
+    void* ptr);
 
 // Keep non-static and non-inline
 bool set_onednn_verbose(int level);
