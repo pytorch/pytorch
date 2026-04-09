@@ -2232,7 +2232,7 @@ class NumpyNdarrayVariable(TensorVariable):
                 ),
             )
 
-        if name in ["T", "real", "imag"]:
+        if name in ["T", "real", "imag", "flat"]:
             proxy = tx.output.create_proxy(
                 "call_function",
                 numpy_attr_wrapper,
