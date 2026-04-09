@@ -5984,6 +5984,34 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             self.assertEqual(len(compile_nodes), 0)
             self.assertEqual(len(export_nodes), 0)
 
+    def test_multiheadattention_tracing_slowpath_matches_fastpath_layout(self):
+        class MHAWithView(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.hidden_dim = 64
+                self.attention = nn.MultiheadAttention(
+                    self.hidden_dim, 8, batch_first=True
+                )
+
+            def forward(self, x):
+                attn_output, _ = self.attention(x, x, x)
+                return attn_output.view(-1, self.hidden_dim)
+
+        with torch.no_grad():
+            model = MHAWithView().eval()
+            x = torch.randn(4, 32, model.hidden_dim)
+            eager = model(x)
+
+            backend = EagerAndRecordGraphs()
+            compiled_model = torch.compile(model, backend=backend, fullgraph=True)
+            compiled = compiled_model(x)
+
+            compile_nodes = backend.graphs[0].graph.find_nodes(
+                op="call_function", target=torch._native_multi_head_attention
+            )
+            self.assertEqual(compiled, eager)
+            self.assertEqual(len(compile_nodes), 0)
+
     def test_negative_floor_div_solve(self):
         class CompiledClass(nn.Module):
             def __init__(self) -> None:
