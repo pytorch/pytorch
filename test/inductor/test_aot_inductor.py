@@ -53,6 +53,7 @@ from torch.testing._internal.common_cuda import (
     requires_triton_ptxas_compat,
     SM80OrLater,
     SM90OrLater,
+    TEST_CUDNN,
     tf32_on_and_off,
 )
 from torch.testing._internal.common_device_type import (
@@ -4811,6 +4812,7 @@ class AOTInductorTestsTemplate:
         self.check_model(M(), example_args)
 
     @requires_gpu
+    @skipCUDAIf(not TEST_CUDNN, "CUDNN not available")
     @skipIfRocm(msg="cudnn_grid_sampler not supported on ROCm")
     def test_cudnn_grid_sampler(self):
         class M(torch.nn.Module):
