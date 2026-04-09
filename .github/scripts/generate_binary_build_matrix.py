@@ -51,6 +51,9 @@ CUDA_AARCH64_ARCHES = [
 ]
 
 
+# WARNING: For CUDA 13.0, cublas is pinned to a version range rather
+# than an exact version. A broken cublas release within that range will be
+# silently pulled in.
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "12.6": (
         "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | "  # noqa: B950
@@ -61,7 +64,8 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
     ),
     "13.0": (
-        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | "  # noqa: B950
+        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | "  # noqa: B950
+        "nvidia-cublas>=13.1.0.3,<=13.1.1.3; platform_system == 'Linux' | "
         "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | "
         "nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
