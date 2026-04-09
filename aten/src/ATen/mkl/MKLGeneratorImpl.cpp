@@ -1,4 +1,4 @@
-#include <ATen/mklrng/MKLGeneratorImpl.h>
+#include <ATen/mkl/MKLGeneratorImpl.h>
 #include <ATen/Utils.h>
 #include <cstdint>
 
