@@ -128,7 +128,6 @@
 
 #ifdef USE_XPU
 #include <ATen/native/transformers/xpu/sdp_utils.h>
-#include <c10/xpu/XPUStream.h>
 #ifndef _WIN32
 #include <torch/csrc/inductor/static_launcher/xpu.h>
 #endif
@@ -784,18 +783,13 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
       int32_t device_id,
       void** out_stream) {
     try {
-#ifdef USE_CUDA
-      if (device_type == kDLCUDA || device_type == kDLROCM) {
-        *out_stream = at::cuda::getCurrentCUDAStream(device_id).stream();
-        return 0;
-      }
+#if defined(USE_CUDA) || defined(USE_XPU)
+    if (at::accelerator::getAccelerator() && (device_type == kDLCUDA || device_type == kDLROCM || device_type == kDLOneAPI)) {
+      *out_stream = at::accelerator::getCurrentStream(device_id).native_handle();
+      return 0;
+    }
 #endif
-#ifdef USE_XPU
-      if (device_type == kDLOneAPI) {
-        *out_stream = &c10::xpu::getCurrentXPUStream(device_id).queue();
-        return 0;
-      }
-#endif
+
       // For CPU and other devices, return NULL (no stream concept)
       *out_stream = nullptr;
       return 0;
