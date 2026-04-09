@@ -2953,6 +2953,16 @@
       ]
     }
   ],
+  "GB6025": [
+    {
+      "Gb_type": "Failed to trace list()",
+      "Context": "list({arg_types})",
+      "Explanation": "Dynamo does not know how to construct a list from argument types {arg_types}",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0236": [
     {
       "Gb_type": "Invalid input type for nonstrict_trace-ed function",
