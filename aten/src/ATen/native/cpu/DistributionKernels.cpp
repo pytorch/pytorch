@@ -20,7 +20,7 @@
 
 #if AT_MKL_ENABLED()
 #include <mkl.h>
-#include <ATen/mklrng/MKLGeneratorImpl.h>
+#include <ATen/mkl/MKLGeneratorImpl.h>
 #include <cpuinfo.h>
 #endif
 
