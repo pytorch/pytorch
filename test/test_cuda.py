@@ -7178,6 +7178,13 @@ class TestMemPool(TestCase):
         second_round_tensor_ptrs = [t.data_ptr() for t in second_round_tensors]
         del second_round_tensors
 
+        mem_snapshot = pool.snapshot()
+        self.assertEqual(
+            len(mem_snapshot),
+            len(tensor_ptrs),
+            f"expected to have {len(tensor_ptrs)} segments, but actually got {len(mem_snapshot)}",
+        )
+
         for idx, first_addr in enumerate(tensor_ptrs):
             second_addr = second_round_tensor_ptrs[idx]
             self.assertEqual(
