@@ -4311,23 +4311,20 @@ class SourcelessBuilder:
             return UserDefinedClassVariable(value)
         elif isinstance(value, types.MethodWrapperType):
             return MethodWrapperVariable(value)
-        elif isinstance(value, types.MethodType):
-            if isinstance(value.__self__, (type, abc.ABCMeta)):
-                # value is a classmethod
-                assert getattr(value.__self__, value.__func__.__name__) == value
-                cls_obj_vt = SourcelessBuilder.create(tx, value.__self__)
-                try:
-                    # pyrefly: ignore[bad-argument-type]
-                    return cls_obj_vt.var_getattr(tx, value.__func__.__name__)
-                except NotImplementedError:
-                    pass  # failthrough to unimplemented branch
-            else:
-                # Instance method — look up the VT for __self__ via side effects
-                obj_vt = tx.output.side_effects.id_to_variable.get(id(value.__self__))
-                if obj_vt is not None:
-                    return torch._dynamo.variables.UserMethodVariable(
-                        value.__func__, obj_vt
-                    )
+        elif (
+            isinstance(value, types.MethodType)
+            # We only want to support sourceless class objects here
+            # An instance variable is not allowed and it should have source
+            and isinstance(value.__self__, (type, abc.ABCMeta))
+        ):
+            # value is a classmethod
+            assert getattr(value.__self__, value.__func__.__name__) == value
+            cls_obj_vt = SourcelessBuilder.create(tx, value.__self__)
+            try:
+                # pyrefly: ignore[bad-argument-type]
+                return cls_obj_vt.var_getattr(tx, value.__func__.__name__)
+            except NotImplementedError:
+                pass  # failthrough to unimplemented branch
         elif isinstance(value, torch.fx.graph_module.GraphModule):
             return SourcelessGraphModuleVariable(value)
         elif isinstance(value, torch.utils._pytree.TreeSpec):

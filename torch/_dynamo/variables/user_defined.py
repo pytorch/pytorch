@@ -2092,15 +2092,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 cls_source = source
             return VariableTracker.build(tx, type(self.value), cls_source)
 
-        # object.__reduce_ex__ is a C builtin that Dynamo cannot trace.
-        # Return a bound polyfill so copy.deepcopy can call reductor(4).
-        if name == "__reduce_ex__":
-            from .. import polyfills
-
-            return variables.UserMethodVariable(
-                polyfills.reduce_ex_user_defined_object, self
-            )
-
         from ..mutation_guard import unpatched_nn_module_init
 
         # ---- CPython attribute lookup algorithm ----
