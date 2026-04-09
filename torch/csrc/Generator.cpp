@@ -24,16 +24,14 @@ PyObject* THPGenerator_initDefaultGenerator(const at::Generator& cdata) {
   auto type = reinterpret_cast<PyTypeObject*>(THPGeneratorClass);
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   if (!self)
-    throw python_error(); // @allow-raw-throw
+    throw python_error();
   auto self_ = reinterpret_cast<THPGenerator*>(self.get());
   self_->cdata = cdata;
-  self_->weakreflist = nullptr;
   return self.release();
 }
 
 static void THPGenerator_dealloc(PyObject* _self) {
   auto self = reinterpret_cast<THPGenerator*>(_self);
-  PyObject_ClearWeakRefs(_self);
   if (self->cdata.defined()) {
     self->cdata.set_pyobj(nullptr);
     self->cdata.~Generator();
@@ -118,7 +116,7 @@ static uint64_t unpack_uint64(PyObject* pyobj) {
       unsigned_obj = *(reinterpret_cast<uint64_t*>(&obj));
     } else {
       // If any other type of exception happened, rethrow it
-      throw; // @allow-raw-throw
+      throw;
     }
   }
   return unsigned_obj;
@@ -237,7 +235,7 @@ static PyObject* THPGenerator_reduce(PyObject* _self, PyObject* noargs) {
 
   auto ret = THPObjectPtr{PyTuple_New(3)};
   if (!ret)
-    throw python_error(); // @allow-raw-throw
+    throw python_error();
 
   py::object torch_module = py::module::import("torch");
   py::object torch_generator = torch_module.attr("Generator");
@@ -245,14 +243,14 @@ static PyObject* THPGenerator_reduce(PyObject* _self, PyObject* noargs) {
 
   auto args = THPObjectPtr{PyTuple_New(1)};
   if (!args)
-    throw python_error(); // @allow-raw-throw
+    throw python_error();
 
   PyTuple_SET_ITEM(args.get(), 0, THPGenerator_get_device(self, nullptr));
   PyTuple_SET_ITEM(ret.get(), 1, args.release());
 
   auto state = THPObjectPtr{PyTuple_New(3)};
   if (!state)
-    throw python_error(); // @allow-raw-throw
+    throw python_error();
 
   c10::DeviceType device_type = gen.device().type();
   PyTuple_SET_ITEM(state.get(), 0, THPGenerator_initialSeed(_self, nullptr));
@@ -339,7 +337,7 @@ static PyTypeObject THPGeneratorType = {
     nullptr, /* tp_traverse */
     nullptr, /* tp_clear */
     nullptr, /* tp_richcompare */
-    offsetof(THPGenerator, weakreflist), /* tp_weaklistoffset */
+    0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
     THPGenerator_methods, /* tp_methods */
@@ -356,27 +354,8 @@ static PyTypeObject THPGeneratorType = {
 };
 
 bool THPGenerator_init(PyObject* module) {
-  // Set OpaqueBaseMeta as the metaclass so Generator can be registered as an
-  // opaque type for FX tracing (same pattern as ProcessGroup).
-  auto opaque_module =
-      THPObjectPtr(PyImport_ImportModule("torch._opaque_base"));
-  TORCH_CHECK(opaque_module, "Failed to import torch._opaque_base");
-  auto opaque_base_meta =
-      THPObjectPtr(PyObject_GetAttrString(opaque_module, "OpaqueBaseMeta"));
-  TORCH_CHECK(opaque_base_meta, "Failed to get OpaqueBaseMeta");
-  Py_SET_TYPE(&THPGeneratorType, (PyTypeObject*)opaque_base_meta.release());
-
   THPGeneratorClass = reinterpret_cast<PyObject*>(&THPGeneratorType);
   if (PyType_Ready(&THPGeneratorType) < 0)
-    return false;
-  // PyType_Ready inherits __module__ from the metaclass (OpaqueBaseMeta lives
-  // in torch._opaque_base). Override it so pickle can find the class at
-  // torch._C.Generator.
-  auto module_name = THPObjectPtr(PyUnicode_FromString("torch._C"));
-  if (!module_name)
-    return false;
-  if (PyDict_SetItemString(
-          THPGeneratorType.tp_dict, "__module__", module_name) < 0)
     return false;
   Py_INCREF(&THPGeneratorType);
   PyModule_AddObject(

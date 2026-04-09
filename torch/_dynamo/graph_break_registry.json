@@ -3967,16 +3967,6 @@
       ]
     }
   ],
-  "GB5526": [
-    {
-      "Gb_type": "Generator",
-      "Context": "Generator objects as inputs",
-      "Explanation": "torch.Generator is not supported in dynamo.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
   "GB2078": [
     {
       "Gb_type": "Attempted to access unregistered member on an OpaqueObject",

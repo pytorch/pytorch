@@ -241,7 +241,7 @@ static PyObject* THPModule_initExtension(
 
   auto module = THPObjectPtr(PyImport_ImportModule("torch"));
   if (!module)
-    throw python_error(); // @allow-raw-throw
+    throw python_error();
 
   THPStorage_postInit(module);
   THPAutograd_initFunctions();
@@ -473,7 +473,7 @@ static PyObject* THPModule_addDocStr(PyObject* _unused, PyObject* args) {
           m->d_getset->name);
     }
     m->d_getset->doc = doc_str;
-  } else if (PyType_Check(obj)) {
+  } else if (Py_TYPE(obj) == &PyType_Type) {
     PyTypeObject* t = reinterpret_cast<PyTypeObject*>(obj);
     if (t->tp_doc) {
       return PyErr_Format(
@@ -682,7 +682,7 @@ static PyObject* THPModule_torchDeviceToDLDevice(
 
   auto tuple = PyTuple_New(2);
   if (!tuple) {
-    throw python_error(); // @allow-raw-throw
+    throw python_error();
   }
 
   PyTuple_SET_ITEM(tuple, 0, THPUtils_packInt64(dl_device.device_type));
