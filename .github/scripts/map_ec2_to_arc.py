@@ -25,12 +25,19 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "matrix",
+        nargs="?",
+        default=None,
         help="GitHub Actions test matrix string to transform",
     )
     parser.add_argument(
         "--prefix",
         default="",
         help="Runner prefix to strip from labels (e.g. 'mt-')",
+    )
+    parser.add_argument(
+        "--build-runner",
+        default=None,
+        help="Map a single EC2 runner label for the build job's runs-on",
     )
     return parser.parse_args()
 
@@ -59,6 +66,20 @@ def main() -> None:
     args = parse_args()
     arc_yaml = Path(__file__).resolve().parent.parent / "arc.yaml"
     mapping = load_mapping(arc_yaml)
+
+    # Single build runner mapping mode
+    if args.build_runner:
+        clean = strip_prefix(args.build_runner.strip(), args.prefix)
+        if clean.startswith("l-"):
+            # Already an ARC label, pass through
+            mapped = args.prefix + clean
+        elif clean in mapping:
+            mapped = args.prefix + mapping[clean]
+        else:
+            print(f"error: no ARC runner found for '{clean}'", file=sys.stderr)
+            sys.exit(1)
+        set_output("runner", mapped)
+        return
 
     matrix = yaml.safe_load(args.matrix)
     if not matrix:

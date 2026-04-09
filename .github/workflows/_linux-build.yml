@@ -464,14 +464,35 @@ jobs:
           docker stop -a || true
           docker kill -a || true
 
+  resolve-arc-runner:
+    permissions:
+      contents: read
+    # Don't run on forked repos
+    if: github.repository_owner == 'pytorch' && inputs.use-arc
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      runner: ${{ steps.resolve.outputs.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve build runner
+        id: resolve
+        env:
+          BUILD_RUNNER: ${{ inputs.runner }}
+          RUNNER_PREFIX: ${{ inputs.runner_prefix }}
+        run: |
+          pip3 install -q pyyaml 2>/dev/null || pip3 install -q --break-system-packages pyyaml
+          python3 .github/scripts/map_ec2_to_arc.py --build-runner "${BUILD_RUNNER}" --prefix "${RUNNER_PREFIX}"
+
   build-osdc:
+    needs: [resolve-arc-runner]
     permissions:
       id-token: write
       contents: read
       actions: read
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch' && inputs.use-arc
-    runs-on: ${{ inputs.runner_prefix }}${{ startsWith(inputs.runner, 'l-') && inputs.runner || 'l-x86iavx512-8-64' }}
+    runs-on: ${{ needs.resolve-arc-runner.outputs.runner }}
     container:
       image: ghcr.io/pytorch/${{ inputs.docker-image-name }}
     timeout-minutes: 480

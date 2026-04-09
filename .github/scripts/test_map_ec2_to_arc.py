@@ -28,6 +28,22 @@ def run(
     return subprocess.run(cmd, capture_output=True, text=True, env=env)
 
 
+def run_build_runner(
+    runner: str, prefix: str = "", github_output: str | None = None
+) -> subprocess.CompletedProcess:
+    cmd = [sys.executable, str(SCRIPT), "--build-runner", runner]
+    if prefix:
+        cmd += ["--prefix", prefix]
+
+    env = os.environ.copy()
+    if github_output is not None:
+        env["GITHUB_OUTPUT"] = github_output
+    else:
+        env.pop("GITHUB_OUTPUT", None)
+
+    return subprocess.run(cmd, capture_output=True, text=True, env=env)
+
+
 def parse_output(stdout: str) -> dict:
     """Extract the JSON matrix from the 'Setting test-matrix=...' line."""
     prefix = "Setting test-matrix="
@@ -35,6 +51,15 @@ def parse_output(stdout: str) -> dict:
         if line.startswith(prefix):
             return json.loads(line[len(prefix) :])
     raise ValueError(f"no test-matrix output found in: {stdout}")
+
+
+def parse_runner_output(stdout: str) -> str:
+    """Extract the runner label from the 'Setting runner=...' line."""
+    prefix = "Setting runner="
+    for line in stdout.splitlines():
+        if line.startswith(prefix):
+            return line[len(prefix) :]
+    raise ValueError(f"no runner output found in: {stdout}")
 
 
 def check(condition: bool, msg: str = "") -> None:
@@ -168,6 +193,75 @@ def test_github_output_file():
         )
         written = json.loads(contents[len("test-matrix=") :].strip())
         check(written["include"][0]["runner"] == "l-x86iavx512-8-64")
+    finally:
+        os.unlink(tmp_path)
+
+
+def test_build_runner_ec2_to_arc():
+    """--build-runner maps an EC2 label to its ARC equivalent."""
+    result = run_build_runner("linux.4xlarge")
+    check(result.returncode == 0, result.stderr)
+    runner = parse_runner_output(result.stdout)
+    check(runner == "l-x86iavx512-16-128", f"got {runner}")
+
+
+def test_build_runner_arm64():
+    """--build-runner correctly maps ARM64 EC2 labels (the actual bug scenario)."""
+    result = run_build_runner("linux.arm64.m8g.4xlarge")
+    check(result.returncode == 0, result.stderr)
+    runner = parse_runner_output(result.stdout)
+    check(runner == "l-arm64g4-16-62", f"got {runner}")
+
+
+def test_build_runner_arc_passthrough():
+    """--build-runner passes through labels already in ARC format."""
+    result = run_build_runner("l-x86iavx512-8-64")
+    check(result.returncode == 0, result.stderr)
+    runner = parse_runner_output(result.stdout)
+    check(runner == "l-x86iavx512-8-64", f"got {runner}")
+
+
+def test_build_runner_with_prefix():
+    """--build-runner handles prefix correctly."""
+    result = run_build_runner("mt-linux.arm64.m8g.4xlarge", prefix="mt-")
+    check(result.returncode == 0, result.stderr)
+    runner = parse_runner_output(result.stdout)
+    check(runner == "mt-l-arm64g4-16-62", f"got {runner}")
+
+
+def test_build_runner_arc_passthrough_with_prefix():
+    """--build-runner with prefix correctly handles already-ARC labels."""
+    result = run_build_runner("mt-l-x86iavx512-8-64", prefix="mt-")
+    check(result.returncode == 0, result.stderr)
+    runner = parse_runner_output(result.stdout)
+    check(runner == "mt-l-x86iavx512-8-64", f"got {runner}")
+
+
+def test_build_runner_unknown_fails():
+    """--build-runner fails for unknown labels."""
+    result = run_build_runner("bogus.runner")
+    check(result.returncode == 1)
+    check("no ARC runner found for 'bogus.runner'" in result.stderr)
+
+
+def test_build_runner_github_output():
+    """--build-runner writes to GITHUB_OUTPUT when set."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+        tmp_path = f.name
+
+    try:
+        result = run_build_runner(
+            "linux.arm64.2xlarge", github_output=tmp_path
+        )
+        check(result.returncode == 0, result.stderr)
+
+        contents = Path(tmp_path).read_text()
+        check(
+            contents.startswith("runner="),
+            f"unexpected file contents: {contents}",
+        )
+        written = contents[len("runner=") :].strip()
+        check(written == "l-arm64g2-6-32", f"got {written}")
     finally:
         os.unlink(tmp_path)
 
