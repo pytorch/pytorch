@@ -471,7 +471,7 @@ jobs:
       actions: read
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch' && inputs.use-arc
-    runs-on: ${{ inputs.runner_prefix }}${{ startsWith(inputs.runner, 'l-') && inputs.runner || 'l-x86iavx512-8-64' }}
+    runs-on: ${{ inputs.runner_prefix }}${{ startsWith(inputs.runner, 'l-') && inputs.runner || contains(inputs.runner, 'arm64') && 'l-arm64g4-16-62' || 'l-x86iavx512-8-64' }}
     container:
       image: ghcr.io/pytorch/${{ inputs.docker-image-name }}
     timeout-minutes: 480
