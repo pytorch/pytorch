@@ -142,6 +142,7 @@ if torch.backends.mps.is_available():
             "nn.functional.triplet_margin_with_distance_loss",
             "nn.functional.unfold",
             "nonzero",
+            "nonzero_static",
             "norm",
             "normfro",
             "norminf",
