@@ -47,12 +47,6 @@ RUN bash ./install_gcc.sh && rm install_gcc.sh
 COPY ./common/install_lcov.sh install_lcov.sh
 RUN  bash ./install_lcov.sh && rm install_lcov.sh
 
-COPY ./common/install_openssl.sh install_openssl.sh
-RUN bash ./install_openssl.sh
-ENV OPENSSL_ROOT_DIR /opt/openssl
-ENV OPENSSL_DIR /opt/openssl
-RUN rm install_openssl.sh
-
 ARG INDUCTOR_BENCHMARKS
 ARG ANACONDA_PYTHON_VERSION
 ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION

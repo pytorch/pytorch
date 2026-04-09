@@ -25,10 +25,6 @@ RUN yum install -y python3-pip && \
     ln -s /usr/local/bin/cmake /usr/bin/cmake3
 RUN rm -rf /usr/local/cuda-*
 
-FROM base as openssl
-ADD ./common/install_openssl.sh install_openssl.sh
-RUN bash ./install_openssl.sh && rm install_openssl.sh
-
 FROM base as patchelf
 # Install patchelf
 ADD ./common/install_patchelf.sh install_patchelf.sh
@@ -110,7 +106,6 @@ COPY --from=cuda13.2  /usr/local/cuda-13.2 /usr/local/cuda-13.2
 # Final step
 FROM ${BASE_TARGET} as final
 ARG DEVTOOLSET_VERSION=13
-COPY --from=openssl            /opt/openssl           /opt/openssl
 COPY --from=patchelf           /patchelf              /usr/local/bin/patchelf
 COPY --from=conda              /opt/conda             /opt/conda
 
