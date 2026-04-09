@@ -3627,8 +3627,23 @@ def min_cut_rematerialization_partition(
     # pyrefly: ignore [unbound-name]
     if config._sync_decision_cross_ranks:
         saved_values = _sync_decision_cross_ranks(joint_graph, saved_values)
+
     # save_for_backward on tensors and stashes symints in autograd .ctx
-    saved_sym_nodes = list(filter(is_sym_node, saved_values))
+    # Skip SymBool nodes whose only consumers are _assert_scalar calls.
+    # These are runtime assertion intermediates and are not needed in backward
+    # for any real computation.
+    def _is_assert_only_symbool(n: fx.Node) -> bool:
+        return (
+            isinstance(n.meta.get("val"), torch.SymBool)
+            and len(n.users) > 0
+            and all(u.target is torch.ops.aten._assert_scalar.default for u in n.users)
+        )
+
+    saved_sym_nodes = list(
+        filter(
+            lambda n: is_sym_node(n) and not _is_assert_only_symbool(n), saved_values
+        )
+    )
     saved_opaque_nodes = list(filter(is_opaque_node, saved_values))
     saved_values = list(
         filter(lambda n: not is_sym_node(n) and not is_opaque_node(n), saved_values)

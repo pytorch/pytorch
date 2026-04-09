@@ -1820,6 +1820,60 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         # Should only compile once regardless of batch size changes
         self.assertEqual(cnt.frame_count, 1)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    @patch.object(torch._dynamo.config, "capture_dynamic_output_shape_ops", True)
+    def test_partitioner_filters_symbool_saved_for_bw(self):
+        """When cross-rank sync injects SymBool nodes (whose only consumers are
+        _assert_scalar) into saved_values, the partitioner must filter them out
+        so they don't become backward graph inputs that Inductor can't lower.
+
+        In multi-GPU MoE training, different EP ranks can produce different
+        min-cut partitioner decisions due to data-dependent shapes. The
+        cross-rank sync (_sync_decision_cross_ranks) picks one rank's decision
+        for all, which may include SymBool assertion nodes that weren't in
+        another rank's saved set. We simulate this by patching
+        _sync_decision_cross_ranks to inject all SymBool nodes.
+
+        Regression test for https://github.com/pytorch/pytorch/pull/179315
+        """
+        import torch._functorch.config as functorch_config
+        import torch._functorch.partitioners as P
+
+        # Simulate cross-rank sync picking a rank that saved SymBool nodes
+        def inject_symbool_nodes(joint_graph, saved_values):
+            for node in joint_graph.nodes:
+                val = node.meta.get("val")
+                if isinstance(val, torch.SymBool) and node not in saved_values:
+                    saved_values = saved_values + [node]
+            return saved_values
+
+        def fn(x, splits_tensor, mask):
+            splits = splits_tensor.tolist()
+            indices = torch.nonzero(mask).squeeze(-1)
+            y = x[indices]
+            # split verifies sum(splits) == y.shape[0], creating an
+            # Equality SymBool node consumed only by _assert_scalar
+            chunks = torch.split(y, splits, dim=0)
+            return torch.cat([c * 2.0 for c in chunks], dim=0).sum()
+
+        x = torch.randn(20, 16, requires_grad=True, device="cuda")
+        splits_tensor = torch.tensor([3, 5], device="cuda")
+        mask = torch.zeros(20, dtype=torch.bool, device="cuda")
+        mask[:8] = True
+
+        with (
+            patch.object(P, "_sync_decision_cross_ranks", inject_symbool_nodes),
+            patch.object(functorch_config, "_sync_decision_cross_ranks", True),
+        ):
+            compiled_fn = torch.compile(fn)
+            loss = compiled_fn(x, splits_tensor, mask)
+            # Without the fix, this raises:
+            # InductorError: Unsupported inductor graph input type:
+            #   <class 'sympy.core.relational.GreaterThan'>
+            loss.backward()
+        self.assertIsNotNone(x.grad)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
