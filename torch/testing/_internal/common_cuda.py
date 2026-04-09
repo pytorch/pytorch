@@ -134,6 +134,14 @@ def evaluate_platform_supports_bf16():
     return False
 
 
+def evaluate_platform_supports_bf16_matmul():
+    if torch.version.cuda:
+        return SM53OrLater
+    elif torch.version.hip:
+        return True
+    return False
+
+
 def evaluate_platform_supports_bf16_atomics():
     if torch.version.cuda:
         return SM80OrLater
@@ -149,6 +157,7 @@ def evaluate_platform_supports_half_atomics():
 
 
 PLATFORM_SUPPORTS_BF16: bool = LazyVal(lambda: evaluate_platform_supports_bf16())
+PLATFORM_SUPPORTS_BF16_MATMUL: bool = LazyVal(lambda: evaluate_platform_supports_bf16_matmul())
 PLATFORM_SUPPORTS_BF16_ATOMICS: bool = LazyVal(lambda: evaluate_platform_supports_bf16_atomics())
 PLATFORM_SUPPORTS_HALF_ATOMICS: bool = LazyVal(lambda: evaluate_platform_supports_half_atomics())
 

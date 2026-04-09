@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import torch
 import torch.cuda
+from torch.testing._internal.common_cuda import evaluate_platform_supports_bf16_matmul
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -152,6 +153,40 @@ class TestCheckCapability(TestCase):
                 "install a PyTorch release that supports one of these CUDA versions",
                 msg,
             )
+
+
+class TestCommonCudaFeatureQueries(TestCase):
+    @patch("torch.testing._internal.common_cuda.SM53OrLater", True)
+    def test_bf16_matmul_supports_cuda_sm53_or_later(self, *args):
+        with (
+            patch("torch.version.cuda", "12.6"),
+            patch("torch.version.hip", None),
+        ):
+            self.assertTrue(evaluate_platform_supports_bf16_matmul())
+
+    @patch("torch.testing._internal.common_cuda.SM53OrLater", False)
+    def test_bf16_matmul_rejects_cuda_before_sm53(self, *args):
+        with (
+            patch("torch.version.cuda", "12.6"),
+            patch("torch.version.hip", None),
+        ):
+            self.assertFalse(evaluate_platform_supports_bf16_matmul())
+
+    @patch("torch.testing._internal.common_cuda.SM53OrLater", False)
+    def test_bf16_matmul_supports_rocm_without_cuda_capability_query(self, *args):
+        with (
+            patch("torch.version.cuda", None),
+            patch("torch.version.hip", "6.4.0"),
+        ):
+            self.assertTrue(evaluate_platform_supports_bf16_matmul())
+
+    @patch("torch.testing._internal.common_cuda.SM53OrLater", False)
+    def test_bf16_matmul_requires_supported_accelerator(self, *args):
+        with (
+            patch("torch.version.cuda", None),
+            patch("torch.version.hip", None),
+        ):
+            self.assertFalse(evaluate_platform_supports_bf16_matmul())
 
 
 if __name__ == "__main__":
