@@ -86,7 +86,7 @@ class ThreadPool {
     ++waiting_;
     cv_.wait(lock, [this] { return exiting_ || !work_.empty(); });
     --waiting_;
-    if (work_.empty()) {
+    if (exiting_ && work_.empty()) {
       return nullptr;
     }
     std::function<void()> closure(std::move(work_.front()));
