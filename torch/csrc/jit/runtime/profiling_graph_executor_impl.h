@@ -7,6 +7,7 @@ TORCH_DECLARE_bool(torch_jit_static_then_dynamic);
 
 TORCH_DECLARE_bool(torch_jit_always_dynamic);
 
+C10_DECLARE_bool(torch_jit_input_independent_optimization);
 C10_DECLARE_bool(torch_jit_release_profiling_graph_after_optimization);
 C10_DECLARE_int32(torch_jit_release_profiling_graph_delay_in_seconds);
 C10_DECLARE_int64(torch_jit_num_profiled_runs);
@@ -24,6 +25,7 @@ struct TORCH_API ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   const ExecutionPlan& getPlanFor(
       Stack& stack,
       std::optional<size_t> remaining_bailout_depth) override;
+  const ExecutionPlan& getInputIndependentPlan() override;
   GraphExecutorState getDebugState() override;
   ~ProfilingGraphExecutorImpl() override = default;
 
@@ -37,6 +39,8 @@ struct TORCH_API ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   const ExecutionPlan& getOptimizedPlanFor(
       Stack& stack,
       std::optional<size_t> remaining_bailout_depth);
+  // Input-independent optimization, assumes compile_mutex is held.
+  const ExecutionPlan& getInputIndependentPlanImpl();
   void runProfilingInsensitiveOptimizations(std::shared_ptr<Graph>& graph);
   void runProfilingOptimizations(
       std::shared_ptr<Graph>& graph,
