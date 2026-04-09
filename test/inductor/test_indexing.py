@@ -368,6 +368,29 @@ class ExprPrinterTests(InductorTestCase):
             texpr(expr), """libdevice.llrint((1/2)*x).to(tl.int64)"""
         )
 
+    def test_print_nan(self):
+        expr = sympy.nan
+        self.assertExpectedInline(pexpr(expr), """math.nan""")
+        self.assertExpectedInline(
+            cexpr(expr), """std::numeric_limits<double>::quiet_NaN()"""
+        )
+
+    def test_print_infinity(self):
+        expr = sympy.oo
+        self.assertExpectedInline(pexpr(expr), """math.inf""")
+        self.assertExpectedInline(
+            cexpr(expr),
+            """std::numeric_limits<double>::infinity()""",
+        )
+
+    def test_print_negative_infinity(self):
+        expr = -sympy.oo
+        self.assertExpectedInline(pexpr(expr), """-math.inf""")
+        self.assertExpectedInline(
+            cexpr(expr),
+            """-std::numeric_limits<double>::infinity()""",
+        )
+
     def test_print_integer(self):
         expr = sympy.S((-1) << 63)
         self.assertExpectedInline(cexpr(expr), f"""(-1{LONG_SUFFIX} << 63)""")
