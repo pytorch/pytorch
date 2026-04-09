@@ -95,7 +95,6 @@ bool is_coalesced_sparse(const SparseTensor& self) {
 
 bool is_coalesced_default(const Tensor& self) {
   TORCH_CHECK(false, "is_coalesced expected sparse coordinate tensor layout but got ", self.layout());
-  return false;
 }
 
 int64_t _nnz_sparse(const SparseTensor& self) {

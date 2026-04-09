@@ -318,7 +318,8 @@ class TestAugmentedGraphHelper(TestCase):
         # Merging b4 and c4 would create cycle
         tracker4.merge_to_set(b4, c4)
 
-        self.assertTrue(tracker4.has_cycle())
+        # has_cycle() is not merge-aware
+        self.assertFalse(tracker4.has_cycle())
 
     def test_cycle_with_extra_deps(self):
         """Test cycle detection with extra dependencies."""

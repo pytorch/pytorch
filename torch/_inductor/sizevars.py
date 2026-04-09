@@ -22,7 +22,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SymNode,
 )
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import FloorDiv, Mod, ModularIndexing
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import IntInfinity, ValueRanges
 
@@ -404,6 +404,54 @@ class SizeVarAllocator:
         expr = left > right
         return self.statically_known_true(expr)
 
+    def _is_multiple_of(self, numerator: Expr, denominator: int) -> bool:
+        """
+        Structural divisibility check: returns True only if numerator is
+        provably a multiple of denominator.  Recurses over sympy expression
+        structure before falling back to statically_known_true.
+        """
+        # Rule 1 — concrete value
+        if isinstance(numerator, (int, sympy.Integer)):
+            return int(numerator) % denominator == 0
+
+        # Rule 2 — product: any factor divisible → product divisible
+        if isinstance(numerator, sympy.Mul):
+            for factor in numerator.args:
+                if self._is_multiple_of(factor, denominator):
+                    return True
+            # Also check if combined constant factors are divisible
+            const = 1
+            for factor in numerator.args:
+                if isinstance(factor, (int, sympy.Integer)):
+                    const *= int(factor)
+            if const != 1 and const % denominator == 0:
+                return True
+
+        # Rule 3 — sum: all terms divisible → sum divisible
+        if isinstance(numerator, sympy.Add):
+            if all(self._is_multiple_of(term, denominator) for term in numerator.args):
+                return True
+
+        # Rule 4 — FloorDiv(a, b): if a is multiple of b*n
+        if isinstance(numerator, FloorDiv):
+            a, b = numerator.args
+            if isinstance(b, (int, sympy.Integer)):
+                if self._is_multiple_of(a, int(b) * denominator):
+                    return True
+
+        # Rule 5 — Mod(a, b): Mod(a,b) = a - b*floor(a/b), so if both a and b
+        # are multiples of n, then Mod(a,b) is too.
+        if isinstance(numerator, (Mod, sympy.Mod)):
+            a, b = numerator.args
+            if self._is_multiple_of(a, denominator) and self._is_multiple_of(
+                b, denominator
+            ):
+                return True
+
+        # Rule 6 — axiom fallback: ask ShapeEnv
+        expr = sympy.Eq(Mod(numerator, denominator), 0)
+        return self.statically_known_true(expr)
+
     def statically_known_multiple_of(
         self, numerator: Expr, denominator: Expr | int
     ) -> bool:
@@ -416,7 +464,11 @@ class SizeVarAllocator:
         if len(free_symbols(numerator)) > 20:
             return False
 
-        expr = sympy.Eq(numerator % denominator, 0)
+        if isinstance(denominator, (int, sympy.Integer)):
+            return self._is_multiple_of(numerator, int(denominator))
+
+        # For symbolic denominators, fall back to direct sympy check
+        expr = sympy.Eq(Mod(numerator, denominator), 0)
         return self.statically_known_true(expr)  # type: ignore[arg-type]
 
     def statically_known_power_of_2(self, expr: Expr) -> bool:
@@ -549,6 +601,20 @@ class SizeVarAllocator:
         if right == gcd:
             return right
 
+        # Min/Max fallback: we can prove Min(a, b) <= c when any arg <= c, but
+        # sympy doesn't simplify this yet. So, evaluate it here. Same for Max.
+        for lhs, rhs in [(left, right), (right, left)]:
+
+            def le_rhs(a: Expr) -> bool:
+                return self.guard_or_false(sympy.Le(a, rhs))
+
+            # Min(Min(a, b), c) ==> Min(a, b) if (a <= c) or (b <= c).
+            if isinstance(lhs, sympy.Min) and any(le_rhs(a) for a in lhs.args):
+                return lhs
+            # Min(Max(a, b), c) ==> Max(a, b) if (a <= c) and (b <= c).
+            if isinstance(lhs, sympy.Max) and all(le_rhs(a) for a in lhs.args):
+                return lhs
+
         raise TypeError(
             f"evaluate_min({left}, {right}) with unbacked symints"
         ) from None
@@ -674,7 +740,7 @@ class SizeVarAllocator:
                 "Use expr.expr to extract the sympy expression from a SymNode."
             )
         return _guarding_hint_or_throw_base(
-            self.shape_env, expr, self.precomputed_replacements
+            self.shape_env, expr, self.inv_precomputed_replacements
         )
 
     def optimization_hint(self, expr: Expr | int, fallback: int | None = None) -> int:
@@ -695,7 +761,7 @@ class SizeVarAllocator:
         - NaN (sympy.nan): returns the fallback value.
         """
         return _optimization_hint_base(
-            self.shape_env, expr, self.precomputed_replacements, fallback
+            self.shape_env, expr, self.inv_precomputed_replacements, fallback
         )
 
     def optimization_hints(
@@ -938,7 +1004,7 @@ class SizeVarAllocator:
             if not _check_args(x2, div2, mod2, False):
                 return index
 
-            if mod2 % mod != 0:
+            if Mod(mod2, mod) != 0:
                 return index
 
             return ModularIndexing(x2, 1, mod)

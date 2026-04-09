@@ -3,6 +3,7 @@
 #include <ATen/cuda/AsmUtils.cuh>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/DeviceUtils.cuh>
+#include <type_traits>
 
 namespace at::native {
 
@@ -215,10 +216,17 @@ __device__ void countRadixUsingMask(
   }
 
   // Now, for each warp, sum values
+  // Note: uint64_t on Linux is unsigned long, but CUDA atomicAdd expects
+  // unsigned long long. We use reinterpret_cast for compatibility.
   if (at::cuda::getLaneId() == 0) {
 #pragma unroll
     for (uint32_t i = 0; i < RadixSize; ++i) {
-      gpuAtomicAddNoReturn(&smem[i], counts[i]);
+      if constexpr (std::is_same_v<CountType, uint64_t>) {
+        atomicAdd(reinterpret_cast<unsigned long long*>(smem) + i,
+                  static_cast<unsigned long long>(counts[i]));
+      } else {
+        atomicAdd(&smem[i], counts[i]);
+      }
     }
   }
 
@@ -466,13 +474,13 @@ __device__ __forceinline__ void countRadixAggregateCounts(
   // Maximum number of warps per workgroup. HIP workgroups have at most 1024 threads.
   // Warp size is at least 32 (can be 64 on some architectures), so we use 32 for safety.
   // This sizes shared memory buffers to accommodate all possible warps: 1024/32 = 32.
-  constexpr uint MAX_WARPS = 1024/32;
+  constexpr uint MAX_WARPS = 1024/C10_WARP_SIZE_LOWER_BOUND;
   const int buffer_offset = buffer_index * MAX_WARPS * RadixSize; // offset of the buffer in smem.
-  const uint WARP_BITS = __builtin_ctz(warpSize);
+  const uint WARP_BITS = __builtin_ctz(C10_WARP_SIZE);
 
   const uint num_warps = blockDim.x >> WARP_BITS;  // Actual number of warps in this block
-  const uint warp_id = threadIdx.x >> WARP_BITS; // = threadIdx.x / warpSize
-  const int lane_id = at::cuda::getLaneId(); // = threadIdx.x % warpSize
+  const uint warp_id = threadIdx.x >> WARP_BITS; // = threadIdx.x / C10_WARP_SIZE
+  const int lane_id = at::cuda::getLaneId(); // = threadIdx.x % C10_WARP_SIZE
 
   // Stage 1: Each warp's lane 0 stores its counts in smem.
   // Layout after Stage 1: [warp0: all radix bins], [warp1: all radix bins], ...
@@ -565,7 +573,7 @@ __device__ void countRadixUsingMaskDataSmem(
   // current warp.
   if (dataSmemSize >
       0) { // if shared memory is filled, use dataSmem as the input data.
-    countRadixLoop<scalar_t, bitwise_t, index_t, int, RadixSize, RadixBits, /*prefetch =*/ false>(
+    countRadixLoop<scalar_t, bitwise_t, index_t, CountType, RadixSize, RadixBits, /*prefetch =*/ false>(
         counts,
         desired,
         desiredMask,
@@ -573,7 +581,7 @@ __device__ void countRadixUsingMaskDataSmem(
         dataSmemSize,
         [&](index_t i) -> scalar_t { return dataSmem[i]; });
   } else { // if shared memory is not filled, fall back to global memory.
-    countRadixLoop<scalar_t, bitwise_t, index_t, int, RadixSize, RadixBits, /*prefetch =*/ true>(
+    countRadixLoop<scalar_t, bitwise_t, index_t, CountType, RadixSize, RadixBits, /*prefetch =*/ true>(
         counts,
         desired,
         desiredMask,
@@ -682,6 +690,15 @@ __device__ scalar_t findPatternDataSmem(
                      // element is relevant if ((val & desiredMask) == desired).
     const scalar_t* dataSmem, // input data stored in shared memory.
     index_t dataSmemSize) { // input data size stored in shared memory.
+
+  // Ensure all threads have finished reading from smem before overwriting it.
+  // countRadixAggregateCounts Stage 3 reads from smem[buffer_offset + i];
+  // when buffer_offset == 0, those locations overlap with smem[0]/smem[1]
+  // written below. Warp 0 (which writes smem[0]/smem[1]) may get ahead of
+  // lagging warps still in Stage 3. Syncing here (rather than at the end of
+  // Stage 3) is cheaper because findPatternDataSmem is called at most once per
+  // radixSelect invocation, only when a unique element is found (count == 1).
+  __syncthreads();
 
   // initialize smem to 0.
   // smem[0] is a flag to indicate if a value has been found.
@@ -863,11 +880,13 @@ __device__ void radixSelect(
     bool largest,
     index_t sliceSize,
     index_t withinSliceStride,
-    int* smem,
+    index_t* smem,
     scalar_t* topK) {
   // Per-thread buckets into which we accumulate digit counts in our
   // radix
-  int counts[RADIX_SIZE];
+  //
+  // counts must be index_t to safely handle sliceSize > INT_MAX.
+  index_t counts[RADIX_SIZE];
 
 #ifdef USE_ROCM
 
@@ -918,7 +937,7 @@ __device__ void radixSelect(
   // We are looking for the top kToFind-th element when iterating over
   // digits; this count gets reduced by elimination when counting
   // successive digits
-  int kToFind = k;
+  index_t kToFind = k;
 
   // We start at the most significant digit in our radix, scanning
   // through to the least significant digit
@@ -948,7 +967,7 @@ __device__ void radixSelect(
         scalar_t,
         bitwise_t,
         index_t,
-        int,
+        index_t,
         RADIX_SIZE,
         RADIX_BITS>(
         counts,
@@ -970,7 +989,7 @@ __device__ void radixSelect(
         scalar_t,
         bitwise_t,
         index_t,
-        int,
+        index_t,
         RADIX_SIZE,
         RADIX_BITS>(
         counts,
@@ -983,7 +1002,7 @@ __device__ void radixSelect(
         data);
 
 #endif
-    auto found_unique = [&](int i, int count) -> bool {
+    auto found_unique = [&](int i, index_t count) -> bool {
       /* All threads have the same value in counts here, so all */
       /* threads will return from the function. */
       if (count == 1 && kToFind == 1) {
@@ -1025,7 +1044,7 @@ __device__ void radixSelect(
       }
       return false;
     };
-    auto found_non_unique = [&](int i, int count) -> bool {
+    auto found_non_unique = [&](int i, index_t count) -> bool {
       if (count >= kToFind) {
         desired = at::cuda::Bitfield<bitwise_t>::setBitfield(
             desired, i, digitPos, RADIX_BITS);
@@ -1061,7 +1080,7 @@ __device__ void radixSelect(
       // Process in descending order
 #pragma unroll
       for (int i = RADIX_SIZE - 1; i >= 0; --i) {
-        int count = counts[i];
+        index_t count = counts[i];
         if (found_unique(i, count)) {
           return;
         }
@@ -1073,7 +1092,7 @@ __device__ void radixSelect(
       // Process in ascending order
 #pragma unroll
       for (int i = 0; i < RADIX_SIZE; ++i) {
-        int count = counts[i];
+        index_t count = counts[i];
         if (found_unique(i, count)) {
           return;
         }

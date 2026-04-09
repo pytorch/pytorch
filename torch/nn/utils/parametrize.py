@@ -9,6 +9,8 @@ from copy import deepcopy
 import torch
 from torch import Tensor
 from torch.__future__ import get_swap_module_params_on_conversion
+from torch._library.opaque_object import is_opaque_reference_type
+from torch._opaque_base import OpaqueBase
 from torch.nn.modules.container import Module, ModuleDict, ModuleList
 from torch.nn.parameter import Parameter
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -204,20 +206,29 @@ class ParametrizationList(ModuleList):
             _register_parameter_or_buffer(self, "original", original)
         else:
             for i, originali in enumerate(new):
-                if not isinstance(originali, Tensor):
-                    raise ValueError(
-                        "'right_inverse' must return a Tensor or a Sequence of tensors "
-                        "(list, tuple...). "
-                        f"Got element {i} of the sequence with type {type(originali).__name__}."
-                    )
-
-                # If the original tensor was a Parameter that required grad, we expect the user to
-                # add the new parameters to the optimizer after registering the parametrization
-                # (this is documented)
-                if isinstance(original, Parameter):
-                    originali = Parameter(originali, original.requires_grad)
-                originali.requires_grad_(original.requires_grad)
-                _register_parameter_or_buffer(self, f"original{i}", originali)
+                match originali:
+                    case OpaqueBase():
+                        if not is_opaque_reference_type(type(originali)):
+                            raise ValueError(
+                                f"'right_inverse' must return a Tensor or a reference-type "
+                                f"opaque. Got element {i} of the sequence with type "
+                                f"{type(originali).__name__}."
+                            )
+                        setattr(self, f"original{i}", originali)
+                    case Tensor():
+                        # If the original tensor was a Parameter that required grad, we expect the user to
+                        # add the new parameters to the optimizer after registering the parametrization
+                        # (this is documented)
+                        if isinstance(original, Parameter):
+                            originali = Parameter(originali, original.requires_grad)
+                        originali.requires_grad_(original.requires_grad)
+                        _register_parameter_or_buffer(self, f"original{i}", originali)
+                    case _:
+                        raise ValueError(
+                            "'right_inverse' must return a Tensor or a Sequence of tensors "
+                            "(list, tuple...). "
+                            f"Got element {i} of the sequence with type {type(originali).__name__}."
+                        )
 
         if not self.unsafe:
             # Consistency checks:
@@ -292,17 +303,25 @@ class ParametrizationList(ModuleList):
                     )
                 for i, tensor in enumerate(value):
                     original_i = getattr(self, f"original{i}")
-                    if not isinstance(tensor, Tensor):
-                        raise ValueError(
-                            f"`right_inverse` must return a sequence of tensors. "
-                            f"Got element {i} of type {type(tensor).__name__}"
-                        )
-                    if original_i.dtype != tensor.dtype:
-                        raise ValueError(
-                            f"Tensor {i} returned by `right_inverse` has dtype {tensor.dtype} "
-                            f"while `original{i}` has dtype {original_i.dtype}"
-                        )
-                    _maybe_set(original_i, tensor)
+                    match tensor:
+                        case OpaqueBase():
+                            if is_opaque_reference_type(type(tensor)):
+                                setattr(self, f"original{i}", tensor)
+                                continue
+                            # Fall-through
+                        case Tensor():
+                            if original_i.dtype != tensor.dtype:
+                                raise ValueError(
+                                    f"Tensor {i} returned by `right_inverse` has dtype {tensor.dtype} "
+                                    f"while `original{i}` has dtype {original_i.dtype}"
+                                )
+                            _maybe_set(original_i, tensor)
+                            continue
+                    raise ValueError(
+                        f"'right_inverse' must return a sequence of tensors "
+                        f"or reference-type opaques. Got element {i} of type "
+                        f"{type(tensor).__name__}."
+                    )
 
     def forward(self) -> Tensor:
         if torch.jit.is_scripting():

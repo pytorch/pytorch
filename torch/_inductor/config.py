@@ -208,7 +208,12 @@ fx_wrapper: bool = os.environ.get("TORCHINDUCTOR_FX_WRAPPER", "0") == "1"
 # Controls automatic precompiling of common include files for codecache.CppCodeCache
 # (i.e. for cpp_wrapper mode and for cpp kernels on CPU).  AOTI header precompiling is
 # controlled by a separate flag.
-cpp_cache_precompile_headers: bool = not is_fbcode()
+cpp_cache_precompile_headers: bool = (
+    os.environ.get(
+        "TORCHINDUCTOR_CPP_CACHE_PRECOMPILE_HEADERS", "0" if is_fbcode() else "1"
+    )
+    == "1"
+)
 
 online_softmax = os.environ.get("TORCHINDUCTOR_ONLINE_SOFTMAX", "1") == "1"
 
@@ -300,7 +305,7 @@ joint_custom_post_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = 
 # Registers a custom pregrad pass. Note that the pre-grad IR is 1.
 # non-functional, 2. non-normalized, and 3. prone to change. Ideally we should
 # use post-grad passes.
-pre_grad_custom_pass: Callable[[torch.fx.graph.Graph], None] | None = None
+pre_grad_custom_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = None
 
 # Registers a custom pass to be run right before fusion in Inductor scheduler.
 # WARNING: Inductor scheduler IR is at prototype stage and subject to change,
@@ -373,6 +378,11 @@ dynamic_scale_rblock = os.environ.get("TORCHINDUCTOR_DYNAMIC_SCALE_RBLOCK", "1")
 # but the mul gets fused with other pointwise ops instead.
 force_fuse_int_mm_with_mul = False
 
+# Prevent unfusing addmm into mm+add for bf16/fp16 to avoid precision loss
+# from extra truncation at the mm output. Set to False to allow unfusing
+# (may improve perf at the cost of accuracy for some models).
+keep_addmm_fused_for_half_dtypes = True
+
 # DEPRECATED. This setting is ignored.
 use_mixed_mm = True
 
@@ -434,9 +444,18 @@ bucket_all_gathers_fx: Literal["none", "all", "only_fsdp"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
 bucket_all_gathers_fx_bucket_size_determinator: Callable[[int], int] | None = None
 
+bucket_all_gathers_bucket_mode: Literal[
+    "default", "custom_ops", "custom_ops_multidtype"
+] = "default"
+
 bucket_reduce_scatters_fx: Literal["none", "all"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
 bucket_reduce_scatters_fx_bucket_size_determinator: Callable[[int], int] | None = None
+
+bucket_reduce_scatters_bucket_mode: Literal[
+    "default", "custom_ops", "custom_ops_multidtype"
+] = "default"
+
 
 bucket_all_reduces_fx: Literal["none", "all"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
@@ -646,6 +665,15 @@ use_dce: bool = True
 
 # Use fx graph passes
 use_pre_grad_passes: bool = True
+
+# "early": pre-grad passes run before cache lookup (every compile).
+# "late": pre-grad passes run after cache lookup (only on cache miss);
+#   requires custom passes to implement uuid() for the cache key.
+# "default": resolves to "late" when possible (no custom pass, or custom pass
+#   with uuid), falls back to "early" otherwise.
+pre_grad_pass_timing: Literal["early", "late", "default"] = "default"
+
+
 use_joint_graph_passes: bool = True
 use_post_grad_passes: bool = True
 
@@ -740,6 +768,13 @@ layout_optimization = (
 
 force_layout_optimization = os.environ.get("TORCHINDUCTOR_FORCE_LAYOUT_OPT", "0") == "1"
 
+# Cache SDPA constraint results keyed by (tensor identity, stride_order) to avoid
+# creating duplicate buffers when the same tensor feeds multiple SDPA positions
+# (e.g., key=value in simplified PMA attention).
+cache_sdpa_constraint = (
+    os.environ.get("TORCHINDUCTOR_CACHE_SDPA_CONSTRAINT", "0") == "1"
+)
+
 
 # Whether to keep the output strides the same as eager after layout optimization.
 keep_output_stride = os.environ.get("TORCHINDUCTOR_KEEP_OUTPUT_STRIDE", "1") == "1"
@@ -762,8 +797,21 @@ realize_acc_reads_size_threshold: int | None = (
     None  # TODO(xuanzh): harden this to make it non optional
 )
 
+# Defer early realization of cheap output nodes (0 buffer reads, small opcount)
+# to prevent cascade materialization in fullgraph compilation.
+# Shared constants/indices saved for backward get eagerly materialized because
+# they are graph outputs with multiple users, which inflates downstream read
+# counts and can trigger suboptimal Triton block size heuristics.
+delay_realize_cheap_outputs: bool = Config(
+    env_name_force="TORCHINDUCTOR_DELAY_REALIZE_CHEAP_OUTPUTS",
+    default=True,
+)
+
 # fallback to eager for random/dropout, this is slow but useful for debugging
 fallback_random = False
+
+# align random/dropout as eager mode(aten) behavior, maintaining fused possibility and faster gpu kernel
+align_random_eager = False
 
 # fallback embedding_bag_byte_unpack to eager
 fallback_embedding_bag_byte_unpack = False
@@ -774,7 +822,17 @@ assume_unaligned_fallback_output = (
     os.environ.get("TORCHINDUCTOR_ASSUME_UNALIGNED_FALLBACK_OUTPUT") == "1"
 )
 
-# Custom InductorChoices callable to use (can be a class or functools.partial with kwargs)
+# Factory callable that returns a custom InductorChoices instance.
+# A callable (rather than a class) is used to defer imports and avoid circular
+# dependencies between config and the choices module. Example:
+#
+#     def _custom_choices_factory():
+#         from my_package.choices import MyInductorChoices
+#         return MyInductorChoices()
+#
+#     config.inductor_choices_class = _custom_choices_factory
+#
+# The returned instance must implement uuid() for cache key serialization.
 inductor_choices_class: Callable[[], "InductorChoices"] | None = None
 
 # fuse even in cases without common reads
@@ -880,6 +938,9 @@ always_keep_tensor_constants = False
 
 # assert that indirect indexing does not read / write out of bounds
 assert_indirect_indexing = True
+
+# skip emitting runtime assertions for unbacked symbols in generated code
+do_not_emit_runtime_assertions = False
 
 # compute CSE bounds on variables that do not appear in the FX graph
 compute_all_bounds = False
@@ -1083,6 +1144,24 @@ class aten_distributed_optimizations:
     # Prioritize bucketing during overlap scheduling by grouping candidates by bucket key
     prioritize_bucketing_during_scheduling: bool = True
 
+    # Verify FX graphs are identical across ranks before overlap scheduling.
+    # Detects non-SPMD graphs that would cause NCCL collective ordering
+    # mismatches and hangs.
+    spmd_check: bool = True
+
+    # Action on SPMD graph mismatch: "warn" logs a warning, "error" raises
+    # RuntimeError. "error" fails fast instead of risking silent NCCL hang.
+    # TODO(ivankobzarev): change default to "error" after real-world testing.
+    spmd_mismatch: Literal["warn", "error"] = "warn"
+
+    # Bucket mode for collective bucketing in overlap scheduling
+    bucket_mode: Literal["default", "custom_ops", "custom_ops_multidtype"] | None = None
+
+    # When True, automatically remove extra deps that create cycles instead of
+    # raising an error.  Set this to True as a workaround if overlap scheduling
+    # fails with a cycle error, and file a bug so the root cause can be fixed.
+    overlap_scheduling_autofix_cycles: bool = False
+
 
 def parallel_compile_enabled_internally() -> bool:
     """
@@ -1122,11 +1201,7 @@ def decide_compile_threads() -> int:
         compile_threads = 1
         log.info("compile_threads set to 1 in fbcode")
     else:
-        cpu_count = (
-            len(os.sched_getaffinity(0))
-            if hasattr(os, "sched_getaffinity")
-            else os.cpu_count()
-        )
+        cpu_count = torch._utils.cpu_count()
         assert cpu_count
         compile_threads = min(32, cpu_count)
         log.info("compile_threads set to %d", compile_threads)
@@ -1542,6 +1617,13 @@ class triton:
     # Default to None, which means we capture cudagraphs for all shapes.
     cudagraph_capture_sizes: tuple[int | tuple[int, ...]] | None = None
 
+    # Minimum number of nodes (kernels) required for a cudagraph partition.
+    # If a partition has fewer nodes than this threshold, it won't be cudagraphed.
+    # This helps avoid overhead for very small partitions where cudagraph
+    # recording/replay cost outweighs the benefits.
+    # Set to 0 to disable this check.
+    cudagraph_min_partition_size = 0
+
     # assertions not on the fast path, steady state
     slow_path_cudagraph_asserts = True
 
@@ -1694,6 +1776,15 @@ class triton:
         os.environ.get("TORCHINDUCTOR_PERSISTENT_REDUCTIONS", "1") == "1"
     )
 
+    # Decompose sort-based ops (sort, mode, median) to generate Triton
+    # kernels instead of falling back to ATen eager.  When enabled, sort
+    # removes the default 512-element dimension limit and uses int32
+    # indices (up to 2^31-1 elements), and mode/median decompose into
+    # sort + reduction / pointwise ops that Inductor can lower to Triton.
+    decompose_sort_ops: bool = (
+        os.environ.get("TORCHINDUCTOR_DECOMPOSE_SORT_OPS", "0") == "1"
+    )
+
     # For small output size reductions uses cross thread-block synchronization to gain more parallelism
     cooperative_reductions = (
         os.environ.get("TORCHINDUCTOR_COOPERATIVE_REDUCTIONS", "0") == "1"
@@ -1763,8 +1854,9 @@ class triton:
     # Whether to upcast float16 / bfloat16 to float32 in triton codegen (Experimental)
     codegen_upcast_to_fp32 = True
 
-    # Whether persistent matmul kernels should be enabled this flag only has effect when on h100
-    # with a version of triton new enough to support TMA
+    # Whether persistent matmul kernels should be enabled. On NVIDIA H100+ with TMA support,
+    # this enables TMA persistent kernels. On AMD GPUs without TMA, this enables
+    # non-TMA persistent kernels as a fallback.
     enable_persistent_tma_matmul = (
         os.environ.get("ENABLE_PERSISTENT_TMA_MATMUL", "0") == "1"
     )
@@ -1819,10 +1911,6 @@ class triton:
         os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION_ALLOW_MULTI_STAGES") == "1"
     )
 
-    enable_tlx_templates: bool = (
-        os.environ.get("TORCHINDUCTOR_ENABLE_TLX_TEMPLATES", "0") == "1"
-    )
-
     # Map for storing the amount of kernel runs with dumped input tensors
     # Based on hash of Triton source code to avoid bloating the folder
     debug_dump_kernel_inputs: dict[str, int] = {}
@@ -1869,6 +1957,11 @@ class aot_inductor:
 
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
     debug_symbols = os.environ.get("AOT_INDUCTOR_DEBUG_SYMBOLS", "0") == "1"
+
+    # Enable frame pointers for profiling tools (e.g. strobelight)
+    enable_frame_pointer = (
+        os.environ.get("AOT_INDUCTOR_ENABLE_FRAME_POINTER", "0") == "1"
+    )
 
     # Annotate generated main wrapper function, i.e. AOTInductorModel::run_impl,
     # to use which cpp compiler optimization level, default to O1
@@ -2214,6 +2307,11 @@ class xpu(cutlass):
     # e.g. "20250201".
     version: str | None = None
 
+    # Path to Intel OneAPI.
+    oneapi_root: str | None = None
+
+    cutlass_dir = os.path.realpath(os.environ.get("TORCHINDUCTOR_CUTLASS_DIR", ""))
+
 
 class rocm:
     # Offload arch list for device code compilation, e.g. ["gfx90a", "gfx942"].
@@ -2442,15 +2540,24 @@ _cache_config_ignore_prefix: list[str] = [
     "post_grad_custom_pre_pass",
     "joint_custom_pre_pass",
     "joint_custom_post_pass",
+    "pre_grad_custom_pass",
     "_fuse_ddp_communication_passes",
     "_pre_fusion_custom_pass",
     # tests assume that changes here don't invalidate cache
     "always_complex_memory_overlap_TESTING_ONLY",
+    # timing affects cache structure, not cache content
+    "pre_grad_pass_timing",
     # cache related options are not relevant to cache results
     "fx_graph_cache",
     "fx_graph_remote_cache",
     "autotune_local_cache",
     "autotune_remote_cache",
+]
+
+# Config keys whose values are callable factories. save_config_portable will
+# instantiate the factory and use .uuid() for serialization.
+_cache_config_factory_keys: list[str] = [
+    "inductor_choices_class",
 ]
 
 # External callable for matmul tuning candidates

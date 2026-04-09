@@ -23,7 +23,7 @@ from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
     HAS_GPU_AND_TRITON,
-    requires_cuda_with_enough_memory,
+    requires_gpu_with_enough_memory,
 )
 
 
@@ -129,11 +129,9 @@ class TestTritonHeuristics(TestCase):
         ]
         self.assertEqual(forward(*args), foo_c(*args))
 
-    # @skipIfXpu
     def test_artificial_zgrid(self):
         self._test_artificial_zgrid()
 
-    # @skipIfXpu
     @config.patch("cpp_wrapper", True)
     def test_artificial_grid_cpp_wrapper(self):
         self._test_artificial_zgrid()
@@ -179,7 +177,6 @@ class TestTritonHeuristics(TestCase):
             "inductor_meta": inductor_meta,
         }
 
-    # @skipIfXpu
     def test_pre_hook_assert(self):
         # assert if any of the configs passed to the CachingAutotuner have pre-hooks
         args = self._get_cos_kernel_caching_autotuner_args()
@@ -273,7 +270,9 @@ class TestTritonHeuristics(TestCase):
         res = torch.compile(fn)(x)
         self.assertEqual(ref, res)
 
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/2331")
+    @skipIfXpu(
+        msg="lack _get_exceeding_shared_memory_checker support - torch-xpu-ops: 2331"
+    )
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     @parametrize("do_pruning", [False, True])
     def test_prune_configs_over_shared_memory_limit(self, do_pruning):
@@ -336,7 +335,7 @@ class TestArgumentCloneAndRestore(TestCase):
         old_storage_offset = gpu_tensor.storage_offset()
         gpu_tensor_clone = clone_preserve_strides(gpu_tensor)
 
-        peak_mem_before = torch.cuda.max_memory_allocated()
+        peak_mem_before = torch.get_device_module(GPU_TYPE).max_memory_allocated()
         cpu_copies = autotuner.copy_args_to_cpu_if_needed(gpu_tensor)
         self.assertTrue(len(cpu_copies) == 1)
 
@@ -363,21 +362,21 @@ class TestArgumentCloneAndRestore(TestCase):
         # Avoid OOM in CI
         self.assertTrue(peak_mem_after < 1e10)
 
-    @requires_cuda_with_enough_memory(1e10)
+    @requires_gpu_with_enough_memory(1e10)
     def test_clone_contiguous_args(self):
         arg = self._create_tensor(pad=0)
         self.assertTrue(arg.is_contiguous())
         self.assertTrue(arg.storage_offset() == 0)
         self._do_test(arg)
 
-    @requires_cuda_with_enough_memory(1e10)
+    @requires_gpu_with_enough_memory(1e10)
     def test_clone_non_contiguous_args(self):
         arg = self._create_tensor(pad=1)
         self.assertFalse(arg.is_contiguous())
         self.assertTrue(arg.storage_offset() == 0)
         self._do_test(arg)
 
-    @requires_cuda_with_enough_memory(1e10)
+    @requires_gpu_with_enough_memory(1e10)
     def test_clone_args_with_non_zero_offset(self):
         arg = self._create_tensor(pad=1, with_offset=True)
         self.assertFalse(arg.is_contiguous())
@@ -692,6 +691,72 @@ class TestHIPInvalidConfigHandling(TestCase):
 
         expected = x * 2.0
         torch.testing.assert_close(y, expected)
+
+
+class TestGridExprMaximum(TestCase):
+    def test_maximum_cpp_mode_casts_int_constants_to_long(self):
+        from torch._inductor.runtime.triton_heuristics import Grid1D
+
+        grid = Grid1D(inductor_meta={}, mode="cpp")
+        # Mixed str/int: int constants must be cast to (long) for std::max
+        result = grid.maximum(["ynumel_0", "ynumel_1", 4480])
+        self.assertIn("(long)4480", result)
+        self.assertIn("std::max", result)
+        # All strings: no cast needed
+        result = grid.maximum(["xnumel", "ynumel"])
+        self.assertNotIn("(long)", result)
+        # All ints: constant-folds
+        self.assertEqual(grid.maximum([10, 20, 5]), 20)
+
+
+class TestGrid2DWithYZOverflowZeroYnumel(TestCase):
+    """Regression test for https://github.com/pytorch/pytorch/issues/178530"""
+
+    def test_grid2d_yz_overflow_zero_ynumel_python(self):
+        from torch._inductor.runtime.triton_heuristics import Grid2DWithYZOverflow
+
+        grid = Grid2DWithYZOverflow(inductor_meta={}, mode="python")
+        grid.generate({"XBLOCK": 128, "YBLOCK": 128})
+        # ynumel=0 must not raise ZeroDivisionError
+        x, y, z = grid.eval_slow(
+            {"xnumel": 256, "ynumel": 0, "XBLOCK": 128, "YBLOCK": 128}
+        )
+        self.assertEqual(y, 0)
+        self.assertEqual(z, 0)
+
+    def test_grid2d_yz_overflow_zero_ynumel_cpp(self):
+        from torch._inductor.runtime.triton_heuristics import Grid2DWithYZOverflow
+
+        grid = Grid2DWithYZOverflow(inductor_meta={}, mode="cpp")
+        grid.generate({"XBLOCK": 128, "YBLOCK": 128})
+        # cpp mode: the generated expression should contain a zero-guard
+        self.assertIn("== 0", str(grid.y_grid))
+
+    def test_grid2d_yz_overflow_nonzero_ynumel_unchanged(self):
+        from torch._inductor.runtime.triton_heuristics import Grid2DWithYZOverflow
+
+        grid = Grid2DWithYZOverflow(inductor_meta={}, mode="python")
+        grid.generate({"XBLOCK": 128, "YBLOCK": 128})
+        # Normal case: ynumel > 0 still works correctly
+        x, y, z = grid.eval_slow(
+            {"xnumel": 256, "ynumel": 256, "XBLOCK": 128, "YBLOCK": 128}
+        )
+        self.assertEqual(x, 2)
+        self.assertEqual(y, 2)
+        self.assertEqual(z, 1)
+
+    def test_grid2d_yz_overflow_large_ynumel(self):
+        from torch._inductor.runtime.triton_heuristics import Grid2DWithYZOverflow
+
+        grid = Grid2DWithYZOverflow(inductor_meta={}, mode="python")
+        grid.generate({"XBLOCK": 128, "YBLOCK": 128})
+        # Large ynumel that requires overflow splitting across y and z
+        x, y, z = grid.eval_slow(
+            {"xnumel": 128, "ynumel": 128 * 131070, "XBLOCK": 128, "YBLOCK": 128}
+        )
+        self.assertEqual(x, 1)
+        # y * z must cover all y blocks
+        self.assertGreaterEqual(y * z, 131070)
 
 
 if __name__ == "__main__":

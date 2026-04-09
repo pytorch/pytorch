@@ -6,7 +6,15 @@ from torch.cuda.amp import autocast
 import sys
 import unittest
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import parse_cmd_line_args, run_tests, skipIfTorchDynamo
+from torch.testing._internal.common_utils import (
+    IS_ARM64,
+    IS_LINUX,
+    IS_CPU_EXT_SVE_SUPPORTED,
+    parse_cmd_line_args,
+    run_tests,
+    skipIfTorchDynamo,
+    xfailIf,
+)
 from torch.testing import FileCheck
 from jit.test_models import MnistNet
 
@@ -808,6 +816,8 @@ class TestJitTraceAutocast(JitTestCase):
         for i in range(self.models.__len__()):
             test_generate_autocast_jit_trace_model(self.models[i], self.inputs[i])
 
+    @xfailIf(IS_ARM64 and IS_LINUX and not IS_CPU_EXT_SVE_SUPPORTED)
+    # see https://github.com/pytorch/pytorch/issues/177247
     def test_nchw_autocast_jit_trace_model(self):
         def test_nchw_autocast_jit_trace_model(model, x):
             model.eval()
@@ -822,6 +832,8 @@ class TestJitTraceAutocast(JitTestCase):
         for i in range(self.models.__len__()):
             test_nchw_autocast_jit_trace_model(self.models[i], self.inputs[i])
 
+    @xfailIf(IS_ARM64 and IS_LINUX and not IS_CPU_EXT_SVE_SUPPORTED)
+    # see https://github.com/pytorch/pytorch/issues/177247
     def test_nhwc_autocast_jit_trace_model(self):
         def test_nhwc_autocast_jit_trace_model(model, x):
             model = model.to(memory_format=torch.channels_last)

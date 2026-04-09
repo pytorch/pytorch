@@ -37,6 +37,7 @@ from torch.fx.experimental.symbolic_shapes import (
     StatelessSymbolicContext,
     statically_known_false,
     statically_known_true,
+    SYMPY_INTERP,
 )
 from torch.testing._internal.common_dtype import all_types_and
 from torch.testing._internal.common_utils import (
@@ -917,6 +918,46 @@ def forward(self, x_1):
                 )
             )
         )
+
+    def test_sympy_interp_is_non_overlapping_and_dense_flat_args(self):
+        # SYMPY_INTERP is used as the eval() namespace for guard code strings.
+        # Guard code prints IsNonOverlappingAndDenseIndicator(s0, s1, ..., st0, st1, ...)
+        # with flat args, so the SYMPY_INTERP function must accept flat args.
+        interp_fn = SYMPY_INTERP["IsNonOverlappingAndDenseIndicator"]
+
+        # 1D contiguous: sizes=(5,), strides=(1,)
+        self.assertEqual(interp_fn(5, 1), 1)
+        # 1D non-contiguous: sizes=(5,), strides=(2,)
+        self.assertEqual(interp_fn(5, 2), 0)
+        # 1D single element: sizes=(1,), strides=(42,)
+        self.assertEqual(interp_fn(1, 42), 1)
+
+        # 2D contiguous: sizes=(3, 4), strides=(4, 1)
+        self.assertEqual(interp_fn(3, 4, 4, 1), 1)
+        # 2D non-contiguous: sizes=(3, 4), strides=(5, 1) -- gap in memory
+        self.assertEqual(interp_fn(3, 4, 5, 1), 0)
+        # 2D transposed but still dense: sizes=(4, 3), strides=(1, 4)
+        self.assertEqual(interp_fn(4, 3, 1, 4), 1)
+
+        # 4D contiguous (the exact scenario from the MAST job failure):
+        # sizes=(2, 3, 4, 5), strides=(60, 20, 5, 1)
+        self.assertEqual(interp_fn(2, 3, 4, 5, 60, 20, 5, 1), 1)
+        # 4D non-contiguous:
+        self.assertEqual(interp_fn(2, 3, 4, 5, 100, 20, 5, 1), 0)
+
+    def test_sympy_interp_guard_eval_simulation(self):
+        # Simulate the actual guard eval() path: guard code strings use
+        # IsNonOverlappingAndDenseIndicator as a function name, and SYMPY_INTERP
+        # provides the binding in the eval namespace.
+        guard_code = "IsNonOverlappingAndDenseIndicator(2, 3, 4, 5, 60, 20, 5, 1) == 1"
+        result = eval(guard_code, SYMPY_INTERP)  # noqa: P204
+        self.assertTrue(result)
+
+        guard_code_false = (
+            "IsNonOverlappingAndDenseIndicator(2, 3, 4, 5, 100, 20, 5, 1) == 1"
+        )
+        result_false = eval(guard_code_false, SYMPY_INTERP)  # noqa: P204
+        self.assertFalse(result_false)
 
     def test_prims_is_non_overlapping_and_dense_or_false(self):
         shape_env = ShapeEnv()
@@ -3725,6 +3766,39 @@ class TestUnbacked(TestCase):
 
             meta_copy_(self_tensor, src_tensor)
 
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_symbool_propagate_real_tensors(self):
+        """
+        Test that propagate_real_tensors properly handles SymBool from boolean .item() calls.
+
+        When tracing with propagate_real_tensors=True, if a boolean .item() returns False
+        during tracing, a runtime assertion should be generated that throws when the
+        boolean becomes True at runtime.
+
+        This is a regression test for a bug where int(real_t) was used instead of real_t,
+        causing boolean values to be incorrectly converted to integers and losing the
+        proper runtime assertion.
+        """
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            if x.eq(0.1).any().item():
+                return x
+            return x + 1
+
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            # First call with 0.2 - item() returns False, traces the x + 1 branch
+            result1 = f(torch.ones(2) * 0.2)
+            torch.testing.assert_close(result1, torch.ones(2) * 1.2)
+
+            # Second call with 0.1 - item() returns True, should throw runtime assertion
+            # because the traced graph assumed False
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"Runtime assertion failed for expression Ne\(u0, 1\)",
+            ):
+                f(torch.ones(2) * 0.1)
+
 
 class TestUbackedOps(TestCase):
     @fresh_cache()
@@ -5038,12 +5112,12 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         self.assertEqual(counter.frame_count, 2)
 
     @skipIfTorchDynamo("mark_unbacked is not traceable")
-    def test_shape_id_no_recompile_without_dynamic_indices(self):
+    def test_shape_id_no_recompile_without_unbacked_indices(self):
         """
-        Test that passing a tensor without _dynamo_dynamic_indices after
+        Test that passing a tensor without _dynamo_unbacked_indices after
         compiling with shape_ids does NOT trigger recompilation.
         The guard on shape_ids only applies when the runtime tensor
-        also has _dynamo_dynamic_indices.
+        also has _dynamo_unbacked_indices.
         """
         counter = CompileCounter()
 
@@ -5052,14 +5126,14 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
 
         compiled_func = torch.compile(func, backend=counter)
 
-        # First call with shape_id (has _dynamo_dynamic_indices)
+        # First call with shape_id (has _dynamo_unbacked_indices)
         x1 = torch.rand(4, 3)
         torch._dynamo.decorators.mark_unbacked(x1, 0, shape_id="batch")
         compiled_func(x1)
         self.assertEqual(counter.frame_count, 1)
 
-        # Second call with regular tensor (no _dynamo_dynamic_indices)
-        # Should NOT recompile - guard passes when no _dynamo_dynamic_indices
+        # Second call with regular tensor (no _dynamo_unbacked_indices)
+        # Should NOT recompile - guard passes when no _dynamo_unbacked_indices
         x2 = torch.rand(4, 3)
         compiled_func(x2)
         self.assertEqual(counter.frame_count, 1)
@@ -5087,6 +5161,133 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         x2 = torch.rand(4, 3)
         torch._dynamo.decorators.mark_unbacked(x2, 0, shape_id="other")
         compiled_func(x2)
+        self.assertEqual(counter.frame_count, 2)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_unbacked_bounds_recompilation(self):
+        """
+        Test that changing _dynamo_unbacked_bounds triggers recompilation.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with min/max bounds
+        x1 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x1, 0, min=1, max=100)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with same bounds - no recompilation
+        x2 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x2, 0, min=1, max=100)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Third call without bounds - should recompile
+        x3 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x3, 0)
+        compiled_func(x3)
+        self.assertEqual(counter.frame_count, 2)
+
+        # Fourth call with different bounds - should recompile
+        x4 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x4, 0, min=1, max=200)
+        compiled_func(x4)
+        self.assertEqual(counter.frame_count, 3)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_unbacked_bounds_no_recompile_without_unbacked_indices(self):
+        """
+        Test that passing a tensor without _dynamo_unbacked_indices after
+        compiling with bounds does NOT trigger recompilation.
+        The guard on bounds only applies when the runtime tensor
+        also has _dynamo_unbacked_indices.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with bounds (has _dynamo_unbacked_indices)
+        x1 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x1, 0, min=1, max=100)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with regular tensor (no _dynamo_unbacked_indices)
+        # Should NOT recompile - guard passes when no _dynamo_unbacked_indices
+        x2 = torch.rand(4, 3)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 1)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_unbacked_no_bounds_then_bounds(self):
+        """
+        Test that compiling without bounds then calling with bounds
+        triggers recompilation.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with mark_unbacked but no bounds
+        x1 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x1, 0)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with same (no bounds) - no recompilation
+        x2 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x2, 0)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Third call with min=1, max=100 - should recompile
+        # (compiled without bounds, now calling with bounds)
+        x3 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x3, 0, min=1, max=100)
+        compiled_func(x3)
+        self.assertEqual(counter.frame_count, 2)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_unbacked_no_shape_id_then_shape_id(self):
+        """
+        Test that compiling without shape_id then calling with shape_id
+        triggers recompilation.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with mark_unbacked but no shape_id
+        x1 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x1, 0)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with same (no shape_id) - no recompilation
+        x2 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x2, 0)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Third call with shape_id="batch" - should recompile
+        # (compiled without shape_id, now calling with shape_id)
+        x3 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x3, 0, shape_id="batch")
+        compiled_func(x3)
         self.assertEqual(counter.frame_count, 2)
 
     @skipIfTorchDynamo("mark_unbacked is not traceable")

@@ -867,7 +867,7 @@ static PyObject * THPVariable_is_contiguous(PyObject* self_, PyObject* args, PyO
   auto r = parser.parse(self_, args, kwargs, parsed_args);
 
   if(r.has_torch_function()){
-    return handle_torch_function(r, self_, args, kwargs, PyObject_Type(self_), "torch.Tensor");
+    return handle_torch_function(r, self_, args, kwargs, reinterpret_cast<PyObject*>(Py_TYPE(self_)), "torch.Tensor");
   }
 
   auto memory_format = r.memoryformat(0);

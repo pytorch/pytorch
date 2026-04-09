@@ -25,6 +25,7 @@ from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedte
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.fake_profile import MissingOpProfile
 from torch._logging import dtrace_structured
+from torch._opaque_base import OpaqueBase
 from torch._prims_common import suggest_memory_format
 from torch._subclasses.meta_utils import (
     assert_eq,
@@ -33,7 +34,7 @@ from torch._subclasses.meta_utils import (
     is_sparse_compressed,
     MetaConverter,
 )
-from torch._utils import render_call
+from torch._utils import _is_privateuse1_backend_available, render_call
 from torch.fx.immutable_collections import immutable_dict
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -56,7 +57,6 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from torch._guards import Source
-    from torch._library.opaque_object import OpaqueType
     from torch._ops import OpOverload
     from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
 
@@ -182,8 +182,8 @@ def disable_fake_tensor_cache(fake_mode: FakeTensorMode) -> Generator[None, None
 
 
 def get_plain_tensors(
-    subclass: Tensor, *, out: list[Tensor | int | SymInt | OpaqueType]
-) -> list[Tensor | int | SymInt | OpaqueType]:
+    subclass: Tensor, *, out: list[Tensor | int | SymInt | OpaqueBase]
+) -> list[Tensor | int | SymInt | OpaqueBase]:
     # This function is used in Runtime, do not add redundant asserts
     todo = [subclass]
     while todo:
@@ -205,12 +205,22 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
         return True
     if is_traceable_wrapper_subclass(x):
         attrs, _ = type(x).__tensor_flatten__(x)
-        flattened_tensors = [getattr(x, attr) for attr in attrs]
-        all_fake = all(is_fake(x) for x in flattened_tensors)
-        any_fake = any(is_fake(x) for x in flattened_tensors)
-        if all_fake != any_fake:
-            raise AssertionError("got mixed fake and real tensors!")
-        return all_fake
+        got_fake: bool | None = None
+        for attr in attrs:
+            match getattr(x, attr):
+                case Tensor() as v:
+                    fake = is_fake(v)
+                    if got_fake is None:
+                        got_fake = fake
+                    elif got_fake != fake:
+                        raise AssertionError("got mixed fake and real tensors!")
+                case OpaqueBase():
+                    pass
+                case unexpected:
+                    raise AssertionError(
+                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                    )
+        return got_fake or False
     elif isinstance(x, FunctionalTensor):
         return is_fake(x.elem)
     elif isinstance(x, Tensor) and torch._is_functional_tensor(x):
@@ -230,13 +240,22 @@ def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
         return t.fake_mode
     if is_traceable_wrapper_subclass(t):
         inner_tensor_names, _ = t.__tensor_flatten__()
-        modes = [
-            maybe_get_fake_mode(getattr(t, t_name)) for t_name in inner_tensor_names
-        ]
-        m = modes[0]
-        if not all(m is x for x in modes):
-            raise AssertionError("All fake tensor modes must be the same")
-        return m
+        mode: FakeTensorMode | None = None
+        for t_name in inner_tensor_names:
+            match getattr(t, t_name):
+                case Tensor() as v:
+                    m = maybe_get_fake_mode(v)
+                    if mode is None:
+                        mode = m
+                    elif mode is not m:
+                        raise AssertionError("All fake tensor modes must be the same")
+                case OpaqueBase():
+                    pass
+                case unexpected:
+                    raise AssertionError(
+                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                    )
+        return mode
     elif isinstance(t, FunctionalTensor):
         return maybe_get_fake_mode(t.elem)
     elif isinstance(t, Tensor) and torch._is_functional_tensor(t):
@@ -945,16 +964,25 @@ class FakeTensor(Tensor):
             aten._foreach_copy.default,
         )
 
+        # These in-place ops keep the destination tensor's device even if the
+        # rhs was explicitly constructed on meta.
+        meta_rhs_mixed_device_fns = ordered_set(
+            aten.add_.Tensor,
+        )
+
         # list of ops not using zero dim cpu tensor logic to align with the eager mode.
         bypass_zero_dim_cpu_tensor_check_ops = ordered_set(
             aten.nextafter.default,
         )
 
-        def check_cpu_device(device: torch.device) -> bool:
+        def is_device_cpu(device: torch.device) -> bool:
             return device.type == "cpu"
 
+        def is_device_meta(device: torch.device) -> bool:
+            return device.type == "meta"
+
         def cpu_zero_dim(t: Tensor) -> bool:
-            return check_cpu_device(t.device) and t.dim() == 0
+            return is_device_cpu(t.device) and t.dim() == 0
 
         def merge_devices(t: object) -> None:
             nonlocal common_device
@@ -993,7 +1021,11 @@ class FakeTensor(Tensor):
             # device must be cpu in this case we will return from here without
             # throwing an error
             if func in mixed_device_fns:
-                if any(map(check_cpu_device, (common_device, t.device))):
+                if any(map(is_device_cpu, (common_device, t.device))):
+                    return
+
+            if func in meta_rhs_mixed_device_fns:
+                if any(map(is_device_meta, (common_device, t.device))):
                     return
 
             # if prefer_device_type is set, prefer that device type over others
@@ -1404,6 +1436,7 @@ class FakeTensorMode(TorchDispatchMode):
         return not (
             torch.cuda.is_available()
             or (hasattr(torch, "hpu") and torch.hpu.is_available())
+            or _is_privateuse1_backend_available()
         )
 
     @property
@@ -2708,9 +2741,7 @@ class FakeTensorMode(TorchDispatchMode):
                                 "self.shape_env must not be None for symbolic Eq"
                             )
 
-                        self.shape_env.set_real_tensor_prop_unbacked_vals(
-                            s, int(real_t)
-                        )
+                        self.shape_env.set_real_tensor_prop_unbacked_vals(s, real_t)
 
             if real_out is not nil:
                 # cross check fake/real outputs, and optionally override fake kernel mismatches
@@ -2871,8 +2902,10 @@ class FakeTensorMode(TorchDispatchMode):
         # and then afterwards wrapping them to a FakeTensor
         for run_impl_check, op_impl in op_implementations_checks:
             if run_impl_check(func):
+                # pyrefly: ignore [bad-argument-count]
                 op_impl_out = op_impl(self, func, *args, **kwargs)
                 if op_impl_out is not NotImplemented:
+                    # pyrefly: ignore [bad-return]
                     return maybe_propagate_real_tensors(op_impl_out)
 
         def maybe_run_unsafe_fallback(
@@ -2973,7 +3006,9 @@ class FakeTensorMode(TorchDispatchMode):
                 )
                 if not allow_non_fake_inputs:
                     if isinstance(x, FakeTensor) and x.fake_mode is not self:
-                        raise AssertionError("Mixing fake modes NYI")
+                        raise AssertionError(
+                            f"Mixing fake modes NYI x.fake_mode={x.fake_mode} vs self={self}"
+                        )
                     args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
                     raise AssertionError(
                         f"Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode "

@@ -2,6 +2,7 @@
 #include <fmt/core.h>
 #include <sys/types.h>
 #include <torch/csrc/python_headers.h>
+#include <torch/csrc/utils/pythoncapi_compat.h>
 #include <csignal>
 #include <optional>
 
@@ -19,7 +20,6 @@
 
 #include <ATen/Parallel.h>
 #include <ATen/Utils.h>
-#include <ATen/core/Vitals.h>
 #include <ATen/dlpack.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/ForeachUtils.h>
@@ -76,7 +76,6 @@
 #include <torch/csrc/export/pybind.h>
 #include <torch/csrc/functionalization/Module.h>
 #include <torch/csrc/functorch/init.h>
-#include <torch/csrc/fx/graph.h>
 #include <torch/csrc/fx/node.h>
 #include <torch/csrc/inductor/aoti_package/pybind.h>
 #include <torch/csrc/inductor/aoti_runner/pybind.h>
@@ -1780,7 +1779,56 @@ static PyObject* THCPModule_ensureCUDADeviceGuardSet(
   END_HANDLE_TH_ERRORS
 }
 
+struct TorchModuleState {
+  PyObject* log_api_usage_seen; // dict used by _log_api_usage_once
+};
+
+static int torchmodule_traverse(PyObject* mod, visitproc visit, void* arg) {
+  auto* state = static_cast<TorchModuleState*>(PyModule_GetState(mod));
+  Py_VISIT(state->log_api_usage_seen);
+  return 0;
+}
+
+static int torchmodule_clear(PyObject* mod) {
+  auto* state = static_cast<TorchModuleState*>(PyModule_GetState(mod));
+  Py_CLEAR(state->log_api_usage_seen);
+  return 0;
+}
+
+static void torchmodule_free(void* mod) {
+  torchmodule_clear((PyObject*)mod);
+}
+
+// Thread-safe in free-threaded Python.
+static PyObject* LogAPIUsageOnceFromPython(PyObject* self, PyObject* event) {
+  auto* state = static_cast<TorchModuleState*>(PyModule_GetState(self));
+  PyObject* api_usage_seen = state->log_api_usage_seen;
+
+  int found = PyDict_Contains(api_usage_seen, event);
+  if (found < 0) {
+    return nullptr;
+  } else if (found != 0) {
+    Py_RETURN_NONE;
+  }
+
+  const char* event_str = PyUnicode_AsUTF8(event);
+  if (!event_str) {
+    return nullptr;
+  }
+
+  // Returns 0 if we inserted, 1 if already present, -1 on error.
+  int rc = PyDict_SetDefaultRef(api_usage_seen, event, Py_None, nullptr);
+  if (rc < 0) {
+    return nullptr;
+  }
+  if (rc == 0) {
+    c10::LogAPIUsage(event_str);
+  }
+  Py_RETURN_NONE;
+}
+
 static std::initializer_list<PyMethodDef> TorchMethods = {
+    {"_log_api_usage_once", LogAPIUsageOnceFromPython, METH_O, nullptr},
     {"_initExtension", THPModule_initExtension, METH_O, nullptr},
     {"_autograd_init", THPAutograd_initExtension, METH_NOARGS, nullptr},
     {"_add_docstr", THPModule_addDocStr, METH_VARARGS, nullptr},
@@ -2122,16 +2170,6 @@ void initModule(PyObject* module);
 
 static std::vector<PyMethodDef> methods;
 
-// In Python we can't use the trick of C10_LOG_API_USAGE_ONCE
-// Guaranteed to be invoked from Python under GIL, no locking on map needed
-static void LogAPIUsageOnceFromPython(const std::string& event) {
-  static std::unordered_set<std::string> seen;
-  if (!seen.count(event)) {
-    seen.insert(event);
-    c10::LogAPIUsage(event);
-  }
-}
-
 static void LogAPIUsageMetadataFromPython(
     const std::string& event,
     const std::map<std::string, std::string>& metadata_map) {
@@ -2250,9 +2288,22 @@ PyObject* initModule() {
 #endif
 
   static struct PyModuleDef torchmodule = {
-      PyModuleDef_HEAD_INIT, "torch._C", nullptr, -1, methods.data()};
+      PyModuleDef_HEAD_INIT,
+      "torch._C",
+      nullptr,
+      sizeof(TorchModuleState),
+      methods.data(),
+      nullptr, // m_slots
+      torchmodule_traverse,
+      torchmodule_clear,
+      torchmodule_free};
   module = PyModule_Create(&torchmodule);
   ASSERT_TRUE(module);
+
+  auto* mod_state = static_cast<TorchModuleState*>(PyModule_GetState(module));
+  mod_state->log_api_usage_seen = PyDict_New();
+  ASSERT_TRUE(mod_state->log_api_usage_seen);
+
 #ifdef Py_GIL_DISABLED
   PyUnstable_Module_SetGIL(module, Py_MOD_GIL_NOT_USED);
 #endif
@@ -2270,7 +2321,6 @@ PyObject* initModule() {
   THPEvent_init(module);
   NodeBase_init(module);
   NodeIter_init(module);
-  Namespace_init(module);
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));
@@ -2369,7 +2419,7 @@ PyObject* initModule() {
 #endif
   ASSERT_TRUE(set_module_attr("_has_cudnn", has_cudnn));
 
-#if defined(USE_CUSPARSELT)
+#if defined(USE_CUSPARSELT) || defined(USE_ROCM)
   PyObject* has_cusparselt = Py_True;
 #else
   PyObject* has_cusparselt = Py_False;
@@ -2401,19 +2451,7 @@ PyObject* initModule() {
   auto py_module = py::reinterpret_borrow<py::module>(module);
   py_module.def("_initCrashHandler", &_initCrashHandler);
   py_module.def("_demangle", &c10::demangle);
-  py_module.def("_log_api_usage_once", &LogAPIUsageOnceFromPython);
   py_module.def("_log_api_usage_metadata", &LogAPIUsageMetadataFromPython);
-
-  py_module.def("vitals_enabled", &at::vitals::torchVitalEnabled);
-  py_module.def(
-      "set_vital",
-      [](const std::string& vital,
-         const std::string& attr,
-         const std::string& value) {
-        return at::vitals::VitalsAPI.setVital(vital, attr, value);
-      });
-  py_module.def(
-      "read_vitals", []() { return at::vitals::VitalsAPI.readVitals(); });
 
   py_module.def(
       "init_num_threads",
@@ -2788,6 +2826,7 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def(
       "_stash_obj_in_tls", [](const std::string& key, py::handle arg) {
+        Py_INCREF(arg.ptr());
         at::impl::ThreadLocalPythonObjects::get_state().set(
             key,
             std::make_shared<c10::SafePyObject>(arg.ptr(), getPyInterpreter()));

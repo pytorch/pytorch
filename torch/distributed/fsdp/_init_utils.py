@@ -12,6 +12,7 @@ import torch.distributed.fsdp._exec_order_utils as exec_order_utils
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.distributed.fsdp.fully_sharded_data_parallel as fsdp_file
 import torch.nn as nn
+from torch._opaque_base import OpaqueBase
 from torch.distributed.algorithms._comm_hooks import default_hooks
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.distributed_c10d import _get_default_group
@@ -616,13 +617,26 @@ def _init_param_handle_from_module(
     managed_params = list(_get_orig_params(fully_sharded_module, state._ignored_params))
     _verify_managed_params(fully_sharded_module, managed_params)
     if sync_module_states:
-        _sync_module_params_and_buffers(
-            fully_sharded_module, managed_params, state.process_group
-        )
         if state.sharding_strategy in HYBRID_SHARDING_STRATEGIES:
+            # Broadcast inter-node first, then intra-node. The inter-node
+            # broadcast propagates rank 0's states to each node's local
+            # rank 0, so the subsequent intra-node broadcast has the
+            # correct source values on every node. Reversing this order
+            # causes local rank 0 on non-source nodes to broadcast
+            # uninitialized states (e.g. from meta-device materialization).
             _sync_module_params_and_buffers(
                 fully_sharded_module, managed_params, state._inter_node_pg
             )
+            # _sync_module_params_and_buffers marks each buffer with
+            # FSDP_SYNCED=True to avoid redundant syncs in nested
+            # wrapping. Reset the flag here so the intra-node broadcast
+            # below also includes buffers.
+            for buffer in fully_sharded_module.buffers():
+                if hasattr(buffer, FSDP_SYNCED):
+                    setattr(buffer, FSDP_SYNCED, False)
+        _sync_module_params_and_buffers(
+            fully_sharded_module, managed_params, state.process_group
+        )
     _init_param_handle_from_params(state, managed_params, fully_sharded_module)
     return state
 
@@ -1114,8 +1128,16 @@ def _sync_module_params_and_buffers(
                 # NOTE: Here we assume no nested subclasses, at most one level of subclass
                 # in both model's buffers and params
                 attrs, _ = detached_buffer.__tensor_flatten__()  # type: ignore[attr-defined]
-                inner_buffers = [getattr(detached_buffer, attr) for attr in attrs]
-                module_states.extend(inner_buffers)
+                for attr in attrs:
+                    match getattr(detached_buffer, attr):
+                        case torch.Tensor() as v:
+                            module_states.append(v)
+                        case OpaqueBase():
+                            pass
+                        case unexpected:
+                            raise AssertionError(
+                                f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                            )
             else:
                 module_states.append(detached_buffer)
 
@@ -1123,8 +1145,16 @@ def _sync_module_params_and_buffers(
         detached_param = param.detach()
         if is_traceable_wrapper_subclass(detached_param):
             attrs, _ = detached_param.__tensor_flatten__()  # type: ignore[attr-defined]
-            inner_params = [getattr(detached_param, attr) for attr in attrs]
-            module_states.extend(inner_params)
+            for attr in attrs:
+                match getattr(detached_param, attr):
+                    case torch.Tensor() as v:
+                        module_states.append(v)
+                    case OpaqueBase():
+                        pass
+                    case unexpected:
+                        raise AssertionError(
+                            f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        )
         else:
             module_states.append(detached_param)
 

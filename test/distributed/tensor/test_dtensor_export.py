@@ -128,9 +128,7 @@ def strict_export_and_aot_export_joint_with_descriptors(model, args, kwargs=None
     torch.utils._pytree.register_constant(DTensorSpec)
     try:
         # install_free_tensors is required for dynamo to work
-        with torch._dynamo.config.patch(
-            install_free_tensors=True, inline_inbuilt_nn_modules=True
-        ):
+        with torch._dynamo.config.patch(install_free_tensors=True):
             with torch._export.utils._disable_aten_to_metadata_assertions():
                 ep = torch.export.export(model, args, kwargs, strict=True)
 
@@ -288,42 +286,46 @@ class DTensorExportTest(TestCase):
             ]
 
             marked_nodes_bw = [
+                "view_13",
                 "mm_8",
                 "t_17",
                 "view_1",
                 "mm_9",
                 "t_18",
                 "sum_5",
-                "view_11",
+                "view_14",
                 "t_19",
                 "detach",
                 "detach_3",
                 "threshold_backward_1",
+                "view_15",
                 "t_20",
                 "mm_10",
                 "t_21",
                 "sum_6",
-                "view_12",
+                "view_16",
                 "t_22",
             ]
             unmarked_nodes_bw = [
+                "view_7",
                 "mm_1",
                 "t_7",
                 "view_5",
                 "mm_3",
                 "t_8",
                 "sum_2",
-                "view_8",
+                "view_9",
                 "t_9",
                 "detach_1",
                 "detach_2",
                 "threshold_backward",
+                "view_10",
                 "mm_5",
                 "t_13",
                 "mm_7",
                 "t_14",
                 "sum_4",
-                "view_10",
+                "view_12",
                 "t_15",
                 "all_reduce_2",
                 "wait_tensor_2",
@@ -543,18 +545,7 @@ graph():
     %item : [num_users=2] = call_method[target=item](args = (%clamp,), kwargs = {})
     %ge_1 : [num_users=1] = call_function[target=operator.ge](args = (%item, 1), kwargs = {})
     %_assert_scalar_default : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%ge_1, Runtime assertion failed for expression u0 >= 1 on node 'ge_1'), kwargs = {})
-    %getitem : [num_users=3] = call_function[target=operator.getitem](args = (%l_x_, slice(None, item, None)), kwargs = {})
-    %getattr_1 : [num_users=1] = call_function[target=builtins.getattr](args = (%getitem, _local_tensor), kwargs = {})
-    %sym_size_int : [num_users=2] = call_function[target=torch.ops.aten.sym_size.int](args = (%getattr_1, 0), kwargs = {})
-    %sym_size_int_1 : [num_users=2] = call_function[target=torch.ops.aten.sym_size.int](args = (%getitem, 0), kwargs = {})
-    %ge_2 : [num_users=1] = call_function[target=operator.ge](args = (%sym_size_int, 0), kwargs = {})
-    %_assert_scalar_default_1 : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%ge_2, Runtime assertion failed for expression u2 >= 0 on node 'ge_2'), kwargs = {})
-    %le : [num_users=1] = call_function[target=operator.le](args = (%sym_size_int, 4), kwargs = {})
-    %_assert_scalar_default_2 : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%le, Runtime assertion failed for expression u2 <= 4 on node 'le'), kwargs = {})
-    %ge_3 : [num_users=1] = call_function[target=operator.ge](args = (%sym_size_int_1, 0), kwargs = {})
-    %_assert_scalar_default_3 : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%ge_3, Runtime assertion failed for expression u1 >= 0 on node 'ge_3'), kwargs = {})
-    %le_1 : [num_users=1] = call_function[target=operator.le](args = (%sym_size_int_1, 4), kwargs = {})
-    %_assert_scalar_default_4 : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%le_1, Runtime assertion failed for expression u1 <= 4 on node 'le_1'), kwargs = {})
+    %getitem : [num_users=1] = call_function[target=operator.getitem](args = (%l_x_, slice(None, item, None)), kwargs = {})
     return (getitem,)""",  # noqa: B950
         )
 

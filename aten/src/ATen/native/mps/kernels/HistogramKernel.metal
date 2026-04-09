@@ -42,7 +42,7 @@ kernel void histogramdd(
     constant uint8_t& algorithm [[buffer(10)]],
     constant int64_t& weight_stride [[buffer(11)]],
     uint tid [[thread_position_in_grid]]) {
-  constexpr T eps = 4e-6;
+  constexpr auto eps = T(4e-6);
   bool skip_element = false;
   int64_t hist_index = 0;
   int64_t bin_seq_offset = 0;
@@ -113,6 +113,7 @@ kernel void histogramdd(
 
 REGISTER_HISTOGRAMDD_OP(float);
 REGISTER_HISTOGRAMDD_OP(half);
+REGISTER_HISTOGRAMDD_OP(bfloat);
 
 kernel void kernel_index_offset(
     constant uint* strides [[buffer(0)]],

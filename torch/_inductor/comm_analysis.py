@@ -26,6 +26,7 @@ class NCCL_COLL(IntEnum):
     REDUCE_SCATTER = 2
     ALL_TO_ALL = 3
     UNSUPPORTED = 4
+    P2P = 5
 
 
 class NVIDIA_GPU_TYPE(IntEnum):
@@ -61,6 +62,8 @@ def get_collective_type_from_kernel_name(kernel_name: str) -> NCCL_COLL:
         return NCCL_COLL.REDUCE_SCATTER
     elif any(comm in kernel_name for comm in ("all_to_all", "alltoall")):
         return NCCL_COLL.ALL_TO_ALL
+    elif any(comm in kernel_name for comm in ("isend", "irecv", "batch_p2p")):
+        return NCCL_COLL.P2P
     else:
         return NCCL_COLL.UNSUPPORTED
 
@@ -253,6 +256,9 @@ def estimate_nccl_collective_runtime_impl(
     if nRanks <= 1:
         return 0
 
+    if coll == NCCL_COLL.UNSUPPORTED:
+        return 0
+
     # Assumes ring algorithm
     nccl_algo = NCCL_ALGO.RING
     nccl_proto = NCCL_PROTO.LL
@@ -291,6 +297,9 @@ def estimate_nccl_collective_runtime_impl(
         nsteps = 2 * (nRanks - 1)
     elif coll in (NCCL_COLL.REDUCE_SCATTER, NCCL_COLL.ALL_GATHER):
         nsteps = nRanks - 1
+    elif coll == NCCL_COLL.P2P:
+        # assume 1 hop per pair
+        nsteps = 1
 
     # Convert bus BW to algorithm BW (tensor bytes / algoBW = actual execution time)
     ratio = (1.0 * nRanks) / nsteps  # type: ignore[possibly-undefined]
@@ -308,6 +317,9 @@ def estimate_nccl_collective_runtime_impl(
             nInterSteps = 0
     elif coll in (NCCL_COLL.REDUCE_SCATTER, NCCL_COLL.ALL_GATHER, NCCL_COLL.ALL_TO_ALL):
         nInterSteps = nNodes - 1
+    elif coll == NCCL_COLL.P2P:
+        # p2p may cross node bdry
+        nInterSteps = 1 if nNodes > 1 else 0
 
     # First compute latency in us; then at the end, convert it to ns
     latency = baseLat[nccl_algo][nccl_proto]
@@ -455,19 +467,18 @@ def estimate_nccl_collective_runtime_from_fx_node(
 
     def _nccl_estimate() -> float | None:
         # TODO: Refactor with estimate_nccl_collective_runtime_nccl_estimator
-        from torch.distributed.distributed_c10d import (
-            _get_pg_default_device,
-            _resolve_process_group,
-            Backend,
-        )
+        from torch.distributed.distributed_c10d import _resolve_process_group, Backend
 
         pg = _resolve_process_group(group_name)
         if torch.distributed.distributed_c10d.get_backend(pg) == Backend.FAKE:
             # nccl estimator requires real process group
             return None
 
-        device = _get_pg_default_device(pg)
-        backend = pg._get_backend(device)
+        device = torch.device("cuda")
+        try:
+            backend = pg._get_backend(device)
+        except RuntimeError:
+            return None
         if not backend.supports_time_estimate:
             return None
 
@@ -492,7 +503,9 @@ def estimate_nccl_collective_runtime_from_fx_node(
 
         fn = fx_node.target
         assert isinstance(fn, torch._ops.OpOverload)
-        with torch.distributed._time_estimator(group=pg) as time_estimator:
+        with torch.distributed._time_estimator(
+            group=pg, device=device
+        ) as time_estimator:
             w = fn(*real_args, **real_kwargs)
             torch.ops._c10d_functional.wait_tensor.default(w)
         est_time_us = time_estimator.estimated_time

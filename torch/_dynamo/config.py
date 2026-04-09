@@ -62,6 +62,17 @@ debug_inductor_config_override: str = os.environ.get(
     "TORCH_COMPILE_OVERRIDE_INDUCTOR_CONFIGS", ""
 )
 
+# Override dynamo config for specific graphs (for debugging/bisecting).
+# Format: "filter1:config1;filter2:config2;..." where filter uses same syntax as
+# debug_backend_override, and config is "key=value" or "key=value,key2=value2".
+# Examples:
+#   "0-5:specialize_float=True"  - Specialize floats for graphs 0-5
+#   ">10:automatic_dynamic_shapes=False"  - Disable dynamic shapes for graphs > 10
+# [@compile_ignored: debug]
+debug_dynamo_config_override: str = os.environ.get(
+    "TORCH_COMPILE_OVERRIDE_DYNAMO_CONFIGS", ""
+)
+
 # Validate that fake_fn and real_fn in @leaf_function decorators produce outputs
 # with matching shapes and dtypes in eager mode. Helps catch mismatches early.
 # Disabled by default to avoid runtime overhead.
@@ -168,6 +179,26 @@ automatic_dynamic_shapes = (
 
 # Valid options: "dynamic", "unbacked"
 automatic_dynamic_shapes_mark_as: Literal["dynamic", "unbacked"] = "dynamic"
+
+# When True, adds exclusion guards for tensor dims and scalars that transition
+# from static to dynamic via automatic_dynamic_shapes.
+#
+# Invariant: when enabled, automatic_dynamic recompilation preserves graph
+# selection — inputs that matched a previous static cache entry will continue
+# to use that entry, not be intercepted by a newer dynamic entry. This holds
+# as long as recompilations are caused solely by the same variable being
+# observed with different static values (progressive dynamism). A recompilation
+# triggered by a different reason (e.g., a guard failure unrelated to shape
+# transitions) will clear the exclusion state for that entry.
+#
+# Mechanism: the exclusion guard rejects inputs matching the prior static
+# graph's sizes, so those inputs fall through to the more specialized static
+# graph instead of being captured by the newer dynamic graph.
+#
+# Scope: applies only to graph-input-level dimension and scalar transitions.
+# Does NOT handle data-dependent branching (if x.size(0) > k), graph breaks,
+# or other recompilation triggers where no dimension actually transitions.
+automatic_dynamic_exclusion_guard = False
 
 # log graph in/out metadata
 # This is only turned on for export today since we
@@ -431,7 +462,7 @@ skip_no_tensor_aliasing_guards_on_parameters = True
 skip_tensor_guards_with_matching_dict_tags = True
 
 # Skips guards on func.__defaults__ if the element to be guarded is a constant
-skip_guards_on_constant_func_defaults = True
+skip_guards_on_constant_func_defaults = False
 
 
 # The recursive-dict-tag guard relies on the class/function identity staying
@@ -533,6 +564,8 @@ enable_faithful_generator_behavior = True
 inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
     default=True,
     justknob="pytorch/compiler:inline_inbuilt_nn_modules",
+    deprecated=True,
+    deprecation_message="does not do anything, inline_inbuilt_nn_modules is always True",
 )
 
 # Resume tracing in nested frames if a nested graph break occurs
@@ -784,6 +817,11 @@ Example::
 # invariant is inviolated, you will likely deadlock NCCL and encounter a
 # NCCL timeout.
 enable_compiler_collectives = os.environ.get("TORCH_COMPILER_COLLECTIVES", "0") == "1"
+
+# Allow for experimental support of compiled p2p ops
+enable_p2p_compilation = (
+    os.environ.get("TORCHDYNAMO_ENABLE_P2P_COMPILATION", "0") == "1"
+)
 
 # Enables a local, filesystem "profile" which can be used for automatic
 # dynamic decisions, analogous to profile-guided optimization.  This config

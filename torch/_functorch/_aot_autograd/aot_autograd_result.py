@@ -39,6 +39,7 @@ from torch._logging import getArtifactLogger
 
 from .runtime_wrappers import (
     AOTDispatchAutograd,
+    AOTDispatchAutogradCompileSpec,
     AOTDispatchSubclassWrapper,
     CachedAutogradLazyBackwardCompileInfo,
     CompilerWrapper,
@@ -124,6 +125,9 @@ class BundledOutputCodeLoadable(InductorOutput[TOutputCode], Generic[TOutputCode
                 payload_fn=lambda: json.dumps(cache_info),
             )
             result = graph  # type: ignore[assignment]
+            result.compile_region_name = (  # pyrefly: ignore[missing-attribute]
+                fx_config.get("compile_region_name")
+            )
 
         # Run normal post compile
         result.post_compile(self.example_inputs, constants, fx_config)
@@ -218,6 +222,9 @@ class FxGraphCacheLoadable(InductorOutput[CompiledFxGraph]):
         """
         Called after FXGraphCacheLoadable.load, mutates fx_config
         """
+        result.compile_region_name = fx_config.get(  # pyrefly: ignore[bad-assignment]
+            "compile_region_name"
+        )
         result.post_compile(self.example_inputs, self.constants, fx_config)
         return result
 
@@ -538,19 +545,20 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
             # 1. the bw is already compiled
             # 2. we don't need to save to the cache again
             # so those corresponding arguments are set to None.
-            compiled_function = AOTDispatchAutograd.post_compile(
-                compiled_fw_func,
-                compiled_bw_func,
-                self.maybe_subclass_meta,
-                self.compiled_bw.num_symints_saved_for_bw_,
-                self.compiled_bw.backward_state_indices,
-                disable_amp,
-                self.indices_of_inps_to_detach,
-                cached_lazy_backward,
-                aot_config,
+            compile_spec = AOTDispatchAutogradCompileSpec(
+                compiled_fw_func=compiled_fw_func,
+                compiled_bw_func=compiled_bw_func,
+                maybe_subclass_meta=self.maybe_subclass_meta,
+                num_symints_saved_for_bw=self.compiled_bw.num_symints_saved_for_bw_,
+                backward_state_indices=self.compiled_bw.backward_state_indices,
+                disable_amp=disable_amp,
+                indices_of_inps_to_detach=self.indices_of_inps_to_detach,
+                lazy_backward_info=cached_lazy_backward,
+                aot_config=aot_config,
                 fw_metadata=self.runtime_metadata,
                 try_save_cache_entry=None,
             )
+            compiled_function = AOTDispatchAutograd.post_compile(compile_spec)
 
         else:
             compiled_function = RuntimeWrapper(
