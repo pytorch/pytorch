@@ -51,7 +51,7 @@ CUDA_AARCH64_ARCHES = [
 ]
 
 
-# WARNING: For CUDA 12.8 and 13.0, cublas is pinned to a version range rather
+# WARNING: For CUDA 13.0, cublas is pinned to a version range rather
 # than an exact version. A broken cublas release within that range will be
 # silently pulled in.
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
