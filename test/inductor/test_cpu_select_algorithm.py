@@ -833,7 +833,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
         vec_amx = VecAMX()
-        assert False, "------------- this is to test if amx test is enabled --------------"
+        assert False, "------------- this is to test if amx test is enabled 1 --------------"
         # Currently brgemm config is only added for half
         if dtype == torch.half and not vec_amx.is_amx_fp16_supported():
             self._check_brgemm_counter(vec_amx)
@@ -1560,6 +1560,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         ref_quantized_mod = torch.export.export(
             ref_quantized_mod, (v,), strict=True
         ).module()
+        assert False, "------------- this is to test if amx test is enabled 2--------------"
         atol, rtol = 1e-2, 1e-2
         with patch.object(select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)):
             self.common(ref_quantized_mod, (v,), atol=atol, rtol=rtol)
@@ -1847,6 +1848,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         if dynamic:
             torch._dynamo.mark_dynamic(a, 0)
             torch._dynamo.mark_static(a, 1)
+        assert False, "------------- this is to test if amx test is enabled 3 --------------"
         self.common(
             mod,
             (a,),
@@ -1959,6 +1961,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M1(in_features, out_features, group_size).eval()
         mod2 = M2(mod)
         # Skip VERIFY during torch.compile and don't use self.common. See explanation above.
+        assert False, "------------- this is to test if amx test is enabled 4--------------"
         with patch.object(select_algorithm, "VERIFY", None):
             m = torch.compile(mod)
             y_ref = mod2(x)
@@ -2009,6 +2012,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         seq_len = 1
         x = torch.rand((batch_size, seq_len, in_features), dtype=dtype)
         mod = M1(in_features, out_features, group_size).eval()
+        assert False, "------------- this is to test if amx test is enabled 5 --------------"
         with patch.object(select_algorithm, "VERIFY", None):
             m = torch.compile(mod)
             _, code = run_and_get_cpp_code(m, x)
@@ -2076,6 +2080,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M1(in_features, out_features, group_size).eval()
         mod2 = M2(mod)
         # Skip VERIFY during torch.compile and don't use self.common. See explanation above.
+        assert False, "------------- this is to test if amx test is enabled 6 --------------"
         with patch.object(select_algorithm, "VERIFY", None):
             m = torch.compile(mod)
             y_ref = mod2(x)
@@ -2164,6 +2169,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         x = torch.rand((batch_size, seq_len, in_features), dtype=dtype)
         mod = M1(in_features, out_features, group_size).eval()
         mod2 = M2(mod)
+        assert False, "------------- this is to test if amx test is enabled 7 --------------"
         # Skip VERIFY during torch.compile and don't use self.common. See explanation above.
         with patch.object(select_algorithm, "VERIFY", None):
             y_ref = mod2(x)
@@ -3110,6 +3116,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
         x = torch.randn(batch_size, in_features).to(dtype=dtype)
         mod = M().to(dtype=dtype).eval()
+        assert False, "------------- this is to test if amx test is enabled 8 --------------"
         with verify(dtype) as (atol, rtol):
             ref_res = mod(x)
             m = torch.compile(mod)
