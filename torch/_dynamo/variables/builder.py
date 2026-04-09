@@ -1544,6 +1544,21 @@ class VariableBuilder:
                 value,
                 source=self.source,
             )
+        elif type(value) is torch._C.Generator:
+            # Generator is registered as an opaque reference type for make_fx
+            # tracing (graphsafe_run_with_rng_state). It can flow through
+            # TorchScriptObjectVariable/FakeScriptObject, but:
+            # 1. Ops like torch.randn pass the generator directly to C++
+            #    without going through proxy dispatch, so the FakeScriptObject
+            #    (not a real Generator) causes "GeneratorImpl with nullptr".
+            # 2. Inductor's placeholder handler only supports Generator inputs
+            #    connected to graphsafe_run_with_rng_state.
+            unimplemented(
+                gb_type="Generator",
+                context="Generator objects as inputs",
+                explanation="torch.Generator is not supported in dynamo.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         elif TorchScriptObjectVariable.is_matching_cls(type(value)):
             from ..source import (
                 FlattenScriptObjectSource,
