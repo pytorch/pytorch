@@ -732,7 +732,8 @@ def view_as_real_impl(self: ComplexTensor) -> torch.Tensor:
             " tensor so you can view it as real, use self.resolve_conj(); however, be warned that "
             "the resulting tensor will NOT alias the original."
         )
-    out = aten.alias(self._data)
+    # NOTE: Doesn't take into account view semantics, but is needed for backprop to work.
+    out = torch.stack([self._re, self._im], dim=-1)
     if self.is_neg():
         out = torch._neg_view(out)
     return out
@@ -809,14 +810,14 @@ def conj_physical_impl(self: ComplexTensor) -> ComplexTensor:
 @register_complex(aten._conj)
 def _conj_impl(self: ComplexTensor) -> ComplexTensor:
     return ComplexTensor(
-        aten.alias(self._data), neg_flag=self.is_neg(), conj_flag=not self.is_conj()
+        aten.alias(self._re), aten.alias(self._im), neg_flag=self.is_neg(), conj_flag=not self.is_conj()
     )
 
 
 @register_complex(aten._neg_view)
-def _neg_impl(self: ComplexTensor) -> ComplexTensor:
+def _neg_view_impl(self: ComplexTensor) -> ComplexTensor:
     return ComplexTensor(
-        aten.alias(self._data), neg_flag=not self.is_neg(), conj_flag=self.is_conj()
+        aten.alias(self._re), aten.alias(self._im), neg_flag=not self.is_neg(), conj_flag=self.is_conj()
     )
 
 
@@ -825,7 +826,7 @@ def resolve_conj_impl(self: ComplexTensor) -> ComplexTensor:
     if not self.is_conj():
         return self
     return ComplexTensor(
-        self._data[..., 0], -self._data[..., 1], neg_flag=self.is_neg()
+        aten.alias(self._re), -self._im, neg_flag=self.is_neg()
     )
 
 
@@ -834,7 +835,7 @@ def resolve_neg_impl(self: ComplexTensor) -> ComplexTensor:
     if not self.is_neg():
         return self
     return ComplexTensor(
-        -self._data[..., 0], -self._data[..., 1], conj_flag=self.is_conj()
+        -self._re, -self._im, conj_flag=self.is_conj()
     )
 
 
