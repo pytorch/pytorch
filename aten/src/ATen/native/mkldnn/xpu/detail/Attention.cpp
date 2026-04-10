@@ -780,6 +780,20 @@ partition& find_or_create_backward_graph_partition(
 } // namespace
 
 namespace at::native::onednn {
+
+// Ensure tensor satisfies OneDNN Block 2D Copy 64-byte base address alignment
+// requirement.
+static at::Tensor ensure_alignment_for_sdpa(const at::Tensor& t) {
+  if (is_64_bytes_aligned(t)) {
+    return t;
+  }
+  at::Tensor out = t.contiguous();
+  if (!is_64_bytes_aligned(out)) {
+    out = out.clone();
+  }
+  return out;
+}
+
 void sdpa(
     int batch_size,
     int seq_len_q,
@@ -800,8 +814,15 @@ void sdpa(
   auto& eng = GpuEngineManager::Instance().get_engine();
   auto& strm = GpuStreamManager::Instance().get_stream();
 
+  // Ensure query, key, value satisfy OneDNN Block 2D Copy alignment
+  // requirements (64-byte base address). Attention and logsumexp are
+  // guaranteed to be aligned because they are newly allocated.
+  const Tensor query_aligned = ensure_alignment_for_sdpa(query);
+  const Tensor key_aligned = ensure_alignment_for_sdpa(key);
+  const Tensor value_aligned = ensure_alignment_for_sdpa(value);
+
   const auto get_tril_mask = [&]() {
-    auto opts = query.options();
+    auto opts = query_aligned.options();
     auto bool_tril =
         at::ones_symint({seq_len_q, seq_len_kv}, opts.dtype(at::kBool)).tril();
     return at::where(
@@ -814,7 +835,7 @@ void sdpa(
   // and the reference implementation is worse than aten math + explicit causal
   // mask. Fall back to explicit causal mask until OneDNN v3.9 which has fp32
   // ukernel for implicit causal mask.
-  if (is_causal && query.dtype() == at::kFloat) {
+  if (is_causal && query_aligned.dtype() == at::kFloat) {
     attn_mask = get_tril_mask();
     is_causal = false;
   }
@@ -823,9 +844,9 @@ void sdpa(
   std::optional<dnnl::graph::compiled_partition> compiled_partition;
 
   const sdpa_forward::SDPALogicalParams logical_params(
-      query,
-      key,
-      value,
+      query_aligned,
+      key_aligned,
+      value_aligned,
       attn_mask,
       attention,
       logsumexp,
@@ -858,8 +879,8 @@ void sdpa(
 #define ADD_INPUT(variable) \
   inputs.emplace_back(l_inputs[i++], eng, variable.data_ptr())
 
-  ADD_INPUT(query);
-  ADD_INPUT(key);
+  ADD_INPUT(query_aligned);
+  ADD_INPUT(key_aligned);
   inputs.emplace_back(
       dnnl::graph::tensor::make_scalar_tensor(l_inputs[i++], &softmax_scale));
   if (is_causal) {
@@ -870,7 +891,7 @@ void sdpa(
   if (attn_mask.has_value()) {
     ADD_INPUT((*attn_mask));
   }
-  ADD_INPUT(value);
+  ADD_INPUT(value_aligned);
 #undef ADD_INPUT
 
   compiled_partition->execute(strm, inputs, outputs);
@@ -899,8 +920,20 @@ void sdpa_backward(
   auto& eng = GpuEngineManager::Instance().get_engine();
   auto& strm = GpuStreamManager::Instance().get_stream();
 
+  // Ensure grad_out, query, key, value satisfy OneDNN Block 2D Copy alignment
+  // requirements (64-byte base address). Attention, logsumexp, grad_query,
+  // grad_key, grad_value are guaranteed to be aligned because they are newly
+  // allocated.
+  const Tensor grad_out_aligned = ensure_alignment_for_sdpa(grad_out);
+  const Tensor query_aligned = ensure_alignment_for_sdpa(query);
+  const Tensor key_aligned = ensure_alignment_for_sdpa(key);
+  const Tensor value_aligned = ensure_alignment_for_sdpa(value);
+  if (attn_mask.has_value()) {
+    attn_mask = ensure_alignment_for_sdpa(*attn_mask);
+  }
+
   const auto get_tril_mask = [&]() {
-    auto opts = query.options();
+    auto opts = query_aligned.options();
     auto bool_tril =
         at::ones_symint({seq_len_q, seq_len_kv}, opts.dtype(at::kBool)).tril();
     return at::where(
@@ -913,7 +946,7 @@ void sdpa_backward(
   // and the reference implementation is worse than aten math + explicit causal
   // mask. Fall back to explicit causal mask until OneDNN v3.9 which has fp32
   // ukernel for implicit causal mask.
-  if (is_causal && query.dtype() == at::kFloat) {
+  if (is_causal && query_aligned.dtype() == at::kFloat) {
     attn_mask = get_tril_mask();
     is_causal = false;
   }
@@ -922,10 +955,10 @@ void sdpa_backward(
   std::optional<dnnl::graph::compiled_partition> compiled_partition;
 
   const sdpa_backward::SDPABackwardLogicalParams logical_params(
-      grad_out,
-      query,
-      key,
-      value,
+      grad_out_aligned,
+      query_aligned,
+      key_aligned,
+      value_aligned,
       out,
       logsumexp,
       attn_mask,
@@ -959,10 +992,10 @@ void sdpa_backward(
 #define ADD_INPUT(variable) \
   inputs.emplace_back(l_inputs[i++], eng, variable.data_ptr())
 
-  ADD_INPUT(grad_out);
-  ADD_INPUT(query);
-  ADD_INPUT(key);
-  ADD_INPUT(value);
+  ADD_INPUT(grad_out_aligned);
+  ADD_INPUT(query_aligned);
+  ADD_INPUT(key_aligned);
+  ADD_INPUT(value_aligned);
   ADD_INPUT(out);
   ADD_INPUT(logsumexp);
   inputs.emplace_back(
