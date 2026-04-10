@@ -144,9 +144,6 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   export USE_XCCL=1
   export USE_MPI=0
   export TORCH_XPU_ARCH_LIST=pvc
-  if [[ "$BUILD_ENVIRONMENT" == *client* ]]; then
-    export TORCH_XPU_ARCH_LIST=bmg
-  fi
   export USE_STATIC_MKL=1
 fi
 
