@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import torch
 import torch.cuda
+from torch.testing._internal.common_cuda import evaluate_platform_supports_pdl
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -152,6 +153,40 @@ class TestCheckCapability(TestCase):
                 "install a PyTorch release that supports one of these CUDA versions",
                 msg,
             )
+
+
+class TestCommonCudaFeatureQueries(TestCase):
+    @patch("torch.testing._internal.common_cuda.SM90OrLater", True)
+    def test_pdl_supports_cuda_sm90_or_later(self, *args):
+        with (
+            patch("torch.version.cuda", "12.6"),
+            patch("torch.version.hip", None),
+        ):
+            self.assertTrue(evaluate_platform_supports_pdl())
+
+    @patch("torch.testing._internal.common_cuda.SM90OrLater", False)
+    def test_pdl_rejects_cuda_before_sm90(self, *args):
+        with (
+            patch("torch.version.cuda", "12.6"),
+            patch("torch.version.hip", None),
+        ):
+            self.assertFalse(evaluate_platform_supports_pdl())
+
+    @patch("torch.testing._internal.common_cuda.SM90OrLater", True)
+    def test_pdl_rejects_rocm(self, *args):
+        with (
+            patch("torch.version.cuda", None),
+            patch("torch.version.hip", "6.4.0"),
+        ):
+            self.assertFalse(evaluate_platform_supports_pdl())
+
+    @patch("torch.testing._internal.common_cuda.SM90OrLater", True)
+    def test_pdl_requires_supported_accelerator(self, *args):
+        with (
+            patch("torch.version.cuda", None),
+            patch("torch.version.hip", None),
+        ):
+            self.assertFalse(evaluate_platform_supports_pdl())
 
 
 if __name__ == "__main__":

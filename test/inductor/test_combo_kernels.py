@@ -12,7 +12,7 @@ import torch
 import torch._inductor
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import SM90OrLater
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_PDL, SM90OrLater
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1098,8 +1098,7 @@ class ComboKernelPDLTests(TestCase):
         super().tearDown()
 
     @requires_gpu_and_triton
-    @skipIfRocm
-    @unittest.skipIf(not SM90OrLater, "PDL requires SM90 or later (Hopper+)")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_PDL, "PDL requires NVIDIA sm90+")
     def test_pdl_codegen_in_combo_kernel(self):
         """Test that PDL flag and gdc calls are generated in combo kernels."""
 
@@ -1138,8 +1137,7 @@ class ComboKernelPDLTests(TestCase):
         )
 
     @requires_gpu_and_triton
-    @skipIfRocm
-    @unittest.skipIf(not SM90OrLater, "PDL requires SM90 or later (Hopper+)")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_PDL, "PDL requires NVIDIA sm90+")
     def test_pdl_combo_kernel_pointwise(self):
         """Test that pointwise combo kernels produce correct results with PDL."""
 
@@ -1181,8 +1179,7 @@ class ComboKernelPDLTests(TestCase):
         )
 
     @requires_gpu_and_triton
-    @skipIfRocm
-    @unittest.skipIf(not SM90OrLater, "PDL requires SM90 or later (Hopper+)")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_PDL, "PDL requires NVIDIA sm90+")
     def test_pdl_combo_kernel_reduction(self):
         """Test that reduction combo kernels produce correct results with PDL."""
 

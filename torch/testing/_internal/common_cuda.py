@@ -112,6 +112,13 @@ def evaluate_platform_supports_green_context():
         return False
     return int(driver_version.split('.')[0]) >= 570
 
+
+def evaluate_platform_supports_pdl():
+    if torch.version.cuda:
+        return SM90OrLater
+    return False
+
+
 PLATFORM_SUPPORTS_FLASH_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_flash_attention())
 PLATFORM_SUPPORTS_MEM_EFF_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_efficient_attention())
 PLATFORM_SUPPORTS_CUDNN_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_cudnn_attention())
@@ -123,6 +130,7 @@ PLATFORM_SUPPORTS_FUSED_ATTENTION: bool = LazyVal(lambda: PLATFORM_SUPPORTS_FLAS
 PLATFORM_SUPPORTS_FUSED_SDPA: bool = TEST_CUDA and not TEST_WITH_ROCM
 
 PLATFORM_SUPPORTS_CK_SDPA: bool = LazyVal(lambda: evaluate_platform_supports_ck_sdpa())
+PLATFORM_SUPPORTS_PDL: bool = LazyVal(lambda: evaluate_platform_supports_pdl())
 
 
 def evaluate_platform_supports_bf16():
