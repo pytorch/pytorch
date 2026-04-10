@@ -352,7 +352,7 @@ test_tsan() {
   $TSAN_PYTHON -c "import sysconfig; assert sysconfig.get_config_var('Py_GIL_DISABLED')"
 
   # Install the TSan-instrumented wheel into the TSan CPython
-  $TSAN_PYTHON -m pip install $(echo dist/*.whl)[opt-einsum]
+  $TSAN_PYTHON -m pip install "$(echo dist/*.whl)[opt-einsum]"
 
   $TSAN_PYTHON -c "import torch; print(torch.__version__)"
 
