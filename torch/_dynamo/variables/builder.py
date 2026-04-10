@@ -1985,7 +1985,9 @@ class VariableBuilder:
         self.install_guards(GuardBuilder.RANGE_ITERATOR_MATCH)
         # Get all the values from the range iterator; no need to install guards
         # on items since `RANGE_ITERATOR_MATCH` guarantees the same items.
-        items = [ConstantVariable.create(v) for v in copy.deepcopy(value)]
+        items: list[VariableTracker] = [
+            ConstantVariable.create(v) for v in copy.deepcopy(value)
+        ]
         result = ListIteratorVariable(items, source=self.source)
         return self.tx.output.side_effects.track_mutable(value, result)
 
