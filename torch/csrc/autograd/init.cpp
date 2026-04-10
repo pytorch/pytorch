@@ -329,7 +329,41 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
             return libkineto::toString(
                 static_cast<libkineto::ActivityType>(e.activityType()));
           })
-      .def("extra_meta", [](const KinetoEvent& e) { return e.extraMeta(); });
+      .def("extra_meta", [](const KinetoEvent& e) { return e.extraMeta(); })
+      // Like shapes/strides, but also contains TensorList input shapes.
+      .def(
+          "structured_input_shapes",
+          [](const KinetoEvent& e) {
+            py::list result;
+            for (const auto& s : e.structuredInputShapes()) {
+              if (std::holds_alternative<std::vector<int64_t>>(s)) {
+                result.append(std::get<std::vector<int64_t>>(s));
+              } else {
+                result.append(std::get<std::vector<std::vector<int64_t>>>(s));
+              }
+            }
+            return result;
+          })
+      .def(
+          "structured_input_strides",
+          [](const KinetoEvent& e) {
+            py::list result;
+            for (const auto& s : e.structuredInputStrides()) {
+              if (std::holds_alternative<std::vector<int64_t>>(s)) {
+                result.append(std::get<std::vector<int64_t>>(s));
+              } else {
+                result.append(std::get<std::vector<std::vector<int64_t>>>(s));
+              }
+            }
+            return result;
+          })
+      .def("python_id", [](const KinetoEvent& e) { return e.pythonId(); })
+      .def(
+          "python_parent_id",
+          [](const KinetoEvent& e) { return e.pythonParentId(); })
+      .def("python_module_id", [](const KinetoEvent& e) {
+        return e.pythonModuleId();
+      });
 
   m.def("_soft_assert_raises", &setSoftAssertRaises);
   m.def("_get_sequence_nr", &at::sequence_number::peek);

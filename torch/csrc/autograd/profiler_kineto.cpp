@@ -953,6 +953,8 @@ KinetoEvent::KinetoEvent(
   result->visit_if_base<ExtraFields<EventType::TorchOp>>([&](const auto& op) {
     auto arg_data = parseArgData(op.inputs_, op.concrete_inputs_);
     shapes_ = std::move(arg_data.shapesForKinetoEvent);
+    structured_input_shapes_ = std::move(arg_data.shapes);
+    structured_input_strides_ = std::move(arg_data.strides);
     dtypes_ = std::move(arg_data.dtypes);
     concrete_inputs_ = std::move(arg_data.concreteInputs);
     kwinputs_ = std::move(op.kwinputs_);
@@ -965,12 +967,61 @@ bool KinetoEvent::isPythonFunction() const {
   return out;
 }
 
+int64_t KinetoEvent::pythonId() const {
+  int64_t out{-1};
+  result_->visit_if_base<PyExtraFieldsBase>(
+      [&](const auto& i) { out = static_cast<int64_t>(i.id_); });
+  return out;
+}
+
+int64_t KinetoEvent::pythonParentId() const {
+  int64_t out{-1};
+  // Walk the python parent pointers up to find the next event of type
+  // PyExtraFieldsBase
+  result_->visit_if_base<PyExtraFieldsBase>([&](const auto&) {
+    auto parent = result_->parent_.lock();
+    while (parent) {
+      parent->visit_if_base<PyExtraFieldsBase>(
+          [&](const auto& j) { out = static_cast<int64_t>(j.id_); });
+      if (out >= 0) {
+        break;
+      }
+      parent = parent->parent_.lock();
+    }
+  });
+  return out;
+}
+
+int64_t KinetoEvent::pythonModuleId() const {
+  int64_t out{-1};
+  // Returns the module id for PyCall events (python function calls to
+  // nn.Module)
+  result_->visit(c10::overloaded(
+      [&](const ExtraFields<EventType::PyCall>& py_call) {
+        if (py_call.module_.has_value()) {
+          out = static_cast<int64_t>(py_call.module_->id_);
+        }
+      },
+      [](const auto&) {}));
+  return out;
+}
+
 bool KinetoEvent::hasShapes() const {
   return !shapes_.empty();
 }
 
 const c10::ArrayRef<std::vector<int64_t>> KinetoEvent::shapes() const {
   return shapes_;
+}
+
+const c10::ArrayRef<torch::profiler::impl::shape> KinetoEvent::
+    structuredInputShapes() const {
+  return structured_input_shapes_;
+}
+
+const c10::ArrayRef<torch::profiler::impl::shape> KinetoEvent::
+    structuredInputStrides() const {
+  return structured_input_strides_;
 }
 
 bool KinetoEvent::hasTypes() const {
