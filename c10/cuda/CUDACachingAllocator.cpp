@@ -237,12 +237,11 @@ struct Block {
   }
 
   // constructor for search key
-  // Set registration_counter to -1 due to changes in the blocks' sorting
-  // function, which now involves registration_counter.
+  // Use the default value for registration_counter and not modify
+  // registration_counter_global, because the search key is just a
+  // dummy placeholder.
   Block(c10::DeviceIndex device, cudaStream_t stream, size_t size)
-      : device(device), stream(stream), size(size), requested_size(0) {
-    registration_counter = -1;
-  }
+      : device(device), stream(stream), size(size), requested_size(0) {}
 
   size_t gc_count() {
     TORCH_INTERNAL_ASSERT(pool);
