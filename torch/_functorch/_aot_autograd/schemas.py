@@ -399,6 +399,92 @@ class SubclassCreationMeta:
             )
 
 
+@dataclass(frozen=True)
+class _OutputAliasLayout:
+    aliased_out_indices: list[int]
+    unsafe_view_out_indices: list[int]
+    num_outputs_non_aliased: int
+    num_outputs_aliased_to_inputs: int
+    num_outputs_aliased_to_intermediates: int
+    dynamic_outputs: bool
+
+
+@dataclass(frozen=True)
+class PartitionedMeta:
+    num_symints_saved_for_bw: int
+    num_tensors_saved_with_no_vc_check: int
+    num_opaque_objects_saved_for_bw: int
+
+
+@dataclass(frozen=True)
+class _SavedTensorLayout:
+    tensors_saved_for_backwards_with_vc_check_slice: slice
+    tensors_saved_for_backwards_no_vc_check_slice: slice
+    opaque_objects_saved_for_backwards_slice: slice
+    symints_saved_for_backwards_slice: slice
+
+    @classmethod
+    def from_partitioned_meta(
+        cls, *, num_forward: int, partitioned_meta: PartitionedMeta
+    ) -> _SavedTensorLayout:
+        num_no_vc_check = partitioned_meta.num_tensors_saved_with_no_vc_check
+        num_opaque = partitioned_meta.num_opaque_objects_saved_for_bw
+        num_symints = partitioned_meta.num_symints_saved_for_bw
+
+        vc_trailing = num_no_vc_check + num_opaque + num_symints
+        if vc_trailing > 0:
+            tensors_saved_for_backwards_with_vc_check_slice = slice(
+                num_forward, -vc_trailing
+            )
+        else:
+            tensors_saved_for_backwards_with_vc_check_slice = slice(num_forward, None)
+
+        if num_no_vc_check > 0:
+            no_vc_trailing = num_opaque + num_symints
+            no_vc_stop = -no_vc_trailing if no_vc_trailing > 0 else None
+            tensors_saved_for_backwards_no_vc_check_slice = slice(
+                -num_no_vc_check - num_opaque - num_symints,
+                no_vc_stop,
+            )
+        else:
+            tensors_saved_for_backwards_no_vc_check_slice = slice(0, 0)
+
+        if num_opaque > 0:
+            opaque_stop = -num_symints if num_symints > 0 else None
+            opaque_objects_saved_for_backwards_slice = slice(
+                -num_opaque - num_symints,
+                opaque_stop,
+            )
+        else:
+            opaque_objects_saved_for_backwards_slice = slice(0, 0)
+
+        if num_symints > 0:
+            symints_saved_for_backwards_slice = slice(-num_symints, None)
+        else:
+            symints_saved_for_backwards_slice = slice(0, 0)
+
+        return cls(
+            tensors_saved_for_backwards_with_vc_check_slice=(
+                tensors_saved_for_backwards_with_vc_check_slice
+            ),
+            tensors_saved_for_backwards_no_vc_check_slice=(
+                tensors_saved_for_backwards_no_vc_check_slice
+            ),
+            opaque_objects_saved_for_backwards_slice=(
+                opaque_objects_saved_for_backwards_slice
+            ),
+            symints_saved_for_backwards_slice=symints_saved_for_backwards_slice,
+        )
+
+    @property
+    def tensors_saved_for_backwards_slice(self) -> slice:
+        vc_slice = self.tensors_saved_for_backwards_with_vc_check_slice
+        no_vc_slice = self.tensors_saved_for_backwards_no_vc_check_slice
+        if no_vc_slice.start == 0 and no_vc_slice.stop == 0:
+            return vc_slice
+        return slice(vc_slice.start, no_vc_slice.stop)
+
+
 # This class encapsulates all aliasing + mutation info we need about the forward graph
 # See a more detailed overview of the edge case handling at
 # https://docs.google.com/document/d/19UoIh_SVrMy_b2Sx5ZaeOJttm6P0Qmyss2rdBuyfoic/edit
@@ -537,6 +623,11 @@ class ViewAndMutationMeta:
     # help users identify where to add .detach() in their code
     tangent_source_stack_traces: list[str | None] | None = None
 
+    partitioned_meta: PartitionedMeta | None = field(
+        default=None, init=False, repr=False
+    )
+    _num_mutated_inp_runtime_indices: int = field(init=False, repr=False)
+
     def __post_init__(self) -> None:
         # pre-compute the indices of the inputs that are mutated.
         # When keep_input_mutations is set, we don't need to worry about our epilogue
@@ -553,7 +644,6 @@ class ViewAndMutationMeta:
             if m.mutation_type == MutationType.MUTATED_IN_GRAPH
         ]
         self.mutated_graph_handled_indices = mutated_graph_handled_indices
-        self.num_mutated_graph_handled_indices = len(self.mutated_graph_handled_indices)
 
         mutated_graph_handled_indices_seen_by_autograd = [
             i
@@ -564,82 +654,12 @@ class ViewAndMutationMeta:
         self.mutated_graph_handled_indices_seen_by_autograd = (
             mutated_graph_handled_indices_seen_by_autograd
         )
-        self.num_mutated_graph_handled_indices_seen_by_autograd = len(
-            self.mutated_graph_handled_indices_seen_by_autograd
-        )
-
-        aliased_out_indices = [
-            i
-            for i, m in enumerate(self.output_info)
-            if m.output_type
-            not in [
-                OutputType.non_alias,
-                OutputType.unsafe_view_alias,
-                OutputType.custom_function_view,
-            ]
-        ]
-        unsafe_view_out_indices = [
-            i
-            for i, m in enumerate(self.output_info)
-            if m.output_type is OutputType.unsafe_view_alias
-        ]
 
         # This is pre-computed in post_init for perf.
         # It contains the index of every element
         # of input_info that corresponds to a mutation (data or metadata or both)
         self.mutated_inp_runtime_indices = mutated_inp_runtime_indices
         self.num_mutated_inp_runtime_indices = len(self.mutated_inp_runtime_indices)
-
-        # This is pre-computed for perf.
-        # It contains the index of every element
-        # of output_info that corresponds to an alias (either of an input or intermediate)
-        self.aliased_out_indices = aliased_out_indices
-        self.unsafe_view_out_indices = unsafe_view_out_indices
-        self.num_outputs = len(self.output_info)
-        self.num_outputs_non_aliased = len(
-            [
-                x
-                for x in self.output_info
-                if x.output_type
-                in [
-                    OutputType.non_alias,
-                    OutputType.unsafe_view_alias,
-                    OutputType.custom_function_view,
-                ]
-            ]
-        )
-        self.num_outputs_aliased_to_inputs = len(
-            [
-                x
-                for x in self.output_info
-                if x.output_type
-                in [
-                    OutputType.alias_of_input,
-                    OutputType.is_input,
-                ]
-            ]
-        )
-        self.num_unsafe_view_outputs = len(self.unsafe_view_out_indices)
-        self.num_outputs_aliased_to_intermediates = len(
-            [
-                x
-                for x in self.output_info
-                if x.output_type
-                in [
-                    OutputType.alias_of_intermediate,
-                    OutputType.alias_of_intermediate_save_as_output,
-                    OutputType.alias_of_intermediate_base_is_user_output,
-                ]
-            ]
-        )
-        self.num_outputs_aliased = (
-            self.num_outputs_aliased_to_inputs
-            + self.num_outputs_aliased_to_intermediates
-        )
-
-        # Record dynamic outputs of the Dynamo traced forward graph
-        # Mark them as dynamic at the end of the runtime wrapper
-        self.dynamic_outputs = any(o.dynamic_dims for o in self.output_info)
 
         # Record the indices of dynamic outputs in the partitioned forward graph
         # Mark them as dynamic in the runtime wrapper
@@ -656,6 +676,157 @@ class ViewAndMutationMeta:
         ]
 
         self.is_rng_op_functionalized = config.functionalize_rng_ops
+
+    @functools.cached_property
+    def _output_alias_layout(self) -> _OutputAliasLayout:
+        aliased_out_indices = []
+        unsafe_view_out_indices = []
+        num_outputs_non_aliased = 0
+        num_outputs_aliased_to_inputs = 0
+        num_outputs_aliased_to_intermediates = 0
+        dynamic_outputs = False
+
+        for i, output_info in enumerate(self.output_info):
+            output_type = output_info.output_type
+            if output_type in [
+                OutputType.non_alias,
+                OutputType.unsafe_view_alias,
+                OutputType.custom_function_view,
+            ]:
+                num_outputs_non_aliased += 1
+            else:
+                aliased_out_indices.append(i)
+
+            if output_type is OutputType.unsafe_view_alias:
+                unsafe_view_out_indices.append(i)
+            elif output_type in [OutputType.alias_of_input, OutputType.is_input]:
+                num_outputs_aliased_to_inputs += 1
+            elif output_type in [
+                OutputType.alias_of_intermediate,
+                OutputType.alias_of_intermediate_save_as_output,
+                OutputType.alias_of_intermediate_base_is_user_output,
+            ]:
+                num_outputs_aliased_to_intermediates += 1
+
+            if output_info.dynamic_dims:
+                dynamic_outputs = True
+
+        return _OutputAliasLayout(
+            aliased_out_indices=aliased_out_indices,
+            unsafe_view_out_indices=unsafe_view_out_indices,
+            num_outputs_non_aliased=num_outputs_non_aliased,
+            num_outputs_aliased_to_inputs=num_outputs_aliased_to_inputs,
+            num_outputs_aliased_to_intermediates=num_outputs_aliased_to_intermediates,
+            dynamic_outputs=dynamic_outputs,
+        )
+
+    def set_partitioned_meta(
+        self,
+        *,
+        num_symints_saved_for_bw: int,
+        num_tensors_saved_with_no_vc_check: int,
+        num_opaque_objects_saved_for_bw: int,
+    ) -> None:
+        self.num_symints_saved_for_bw = num_symints_saved_for_bw
+        self.num_tensors_saved_with_no_vc_check = num_tensors_saved_with_no_vc_check
+        self.num_opaque_objects_saved_for_bw = num_opaque_objects_saved_for_bw
+        self.partitioned_meta = PartitionedMeta(
+            num_symints_saved_for_bw=num_symints_saved_for_bw,
+            num_tensors_saved_with_no_vc_check=(num_tensors_saved_with_no_vc_check),
+            num_opaque_objects_saved_for_bw=num_opaque_objects_saved_for_bw,
+        )
+        self.__dict__.pop("_saved_tensor_layout", None)
+
+    def _require_partitioned_meta(self) -> PartitionedMeta:
+        if self.partitioned_meta is not None:
+            return self.partitioned_meta
+        if self.num_symints_saved_for_bw is None:
+            raise AssertionError(
+                "partitioned_meta must be initialized before accessing saved tensor layout"
+            )
+        if self.num_tensors_saved_with_no_vc_check is None:
+            raise AssertionError(
+                "partitioned_meta must be initialized before accessing saved tensor layout"
+            )
+        partitioned_meta = PartitionedMeta(
+            num_symints_saved_for_bw=self.num_symints_saved_for_bw,
+            num_tensors_saved_with_no_vc_check=(
+                self.num_tensors_saved_with_no_vc_check
+            ),
+            num_opaque_objects_saved_for_bw=(self.num_opaque_objects_saved_for_bw or 0),
+        )
+        self.partitioned_meta = partitioned_meta
+        return partitioned_meta
+
+    @functools.cached_property
+    def _saved_tensor_layout(self) -> _SavedTensorLayout:
+        return _SavedTensorLayout.from_partitioned_meta(
+            num_forward=self.num_forward,
+            partitioned_meta=self._require_partitioned_meta(),
+        )
+
+    @property
+    def num_mutated_inp_runtime_indices(self) -> int:
+        return self._num_mutated_inp_runtime_indices
+
+    @num_mutated_inp_runtime_indices.setter
+    def num_mutated_inp_runtime_indices(self, value: int) -> None:
+        # Export-specific metadata rewrites can update this count after
+        # partitioned metadata has already been populated.
+        self._num_mutated_inp_runtime_indices = value
+        self.__dict__.pop("_saved_tensor_layout", None)
+
+    @property
+    def num_mutated_graph_handled_indices(self) -> int:
+        return len(self.mutated_graph_handled_indices)
+
+    @property
+    def num_mutated_graph_handled_indices_seen_by_autograd(self) -> int:
+        return len(self.mutated_graph_handled_indices_seen_by_autograd)
+
+    @property
+    def aliased_out_indices(self) -> list[int]:
+        return self._output_alias_layout.aliased_out_indices
+
+    @property
+    def unsafe_view_out_indices(self) -> list[int]:
+        return self._output_alias_layout.unsafe_view_out_indices
+
+    @property
+    def num_outputs(self) -> int:
+        return len(self.output_info)
+
+    @property
+    def num_outputs_non_aliased(self) -> int:
+        return self._output_alias_layout.num_outputs_non_aliased
+
+    @property
+    def num_outputs_aliased_to_inputs(self) -> int:
+        return self._output_alias_layout.num_outputs_aliased_to_inputs
+
+    @property
+    def num_unsafe_view_outputs(self) -> int:
+        return len(self.unsafe_view_out_indices)
+
+    @property
+    def num_outputs_aliased_to_intermediates(self) -> int:
+        return self._output_alias_layout.num_outputs_aliased_to_intermediates
+
+    @property
+    def num_outputs_aliased(self) -> int:
+        return (
+            self.num_outputs_aliased_to_inputs
+            + self.num_outputs_aliased_to_intermediates
+        )
+
+    @property
+    def dynamic_outputs(self) -> bool:
+        # Record dynamic outputs of the Dynamo traced forward graph
+        # Mark them as dynamic at the end of the runtime wrapper
+        return self._output_alias_layout.dynamic_outputs
+
+    @property
+    def num_outputs_rng_offset(self) -> int:
         # All of the above metadata is collected by tracing the fw function.
         # However, extra outputs for rng offsets behave differently. Both fwd
         # and bwd graphs have their own outputs for the total consumed offsets.
@@ -663,22 +834,29 @@ class ViewAndMutationMeta:
         # set of tensors between fwd and bwd. Fwd and bwd offsets are
         # independent and simpler to handle. Therefore, we track them
         # separately.
-        self.num_outputs_rng_offset = 1 if self.is_rng_op_functionalized else 0
+        return 1 if self.is_rng_op_functionalized else 0
 
-        # Our forward() returns both (tokens, mutated_inputs, outputs, output_intermediate_bases, saved_tensors, saved_symints)
-        # Tokens will be split out before mutations/view handling and we do not count them here.
-        self.num_forward_returns = (
+    @property
+    def num_forward_returns(self) -> int:
+        # Our forward() returns both (tokens, mutated_inputs, outputs,
+        # output_intermediate_bases, saved_tensors, saved_symints). Tokens will
+        # be split out before mutations/view handling and we do not count them
+        # here.
+        return (
             self.num_mutated_inp_runtime_indices
             + self.num_outputs
             + self.num_intermediate_bases
         )
+
+    @property
+    def num_forward(self) -> int:
         # In case of functionalization of rng ops, the fw_module returns one
         # additional output for rng offset. This rng offset is used right
         # away to advance the rng state, and is not passed on to the raw
         # outputs. However, we need to know the exact boundary to identify
-        # which tensors to be saved for the bwd graph.  num_forward captures
+        # which tensors to be saved for the bwd graph. num_forward captures
         # this information.
-        self.num_forward = self.num_forward_returns + self.num_outputs_rng_offset
+        return self.num_forward_returns + self.num_outputs_rng_offset
 
     def make_runtime_safe(self) -> None:
         """
@@ -731,23 +909,7 @@ class ViewAndMutationMeta:
 
     @property
     def tensors_saved_for_backwards_slice(self) -> slice:
-        if self.num_symints_saved_for_bw is None:
-            raise AssertionError("num_symints_saved_for_bw must not be None")
-        if self.num_tensors_saved_with_no_vc_check is None:
-            raise AssertionError("num_tensors_saved_with_no_vc_check must not be None")
-        # Fast-path: if no tensors without VC check, just return the VC check slice
-        if self.num_tensors_saved_with_no_vc_check == 0:
-            return self.tensors_saved_for_backwards_with_vc_check_slice
-        # Invariant: total tensors activations = (acts_with_vc_check, acts_no_vc_check)
-        vc_slice = self.tensors_saved_for_backwards_with_vc_check_slice
-        no_vc_slice = self.tensors_saved_for_backwards_no_vc_check_slice
-        # Start should be the same (self.num_forward)
-        if vc_slice.start != self.num_forward:
-            raise AssertionError(
-                f"vc_slice.start ({vc_slice.start}) != self.num_forward ({self.num_forward})"
-            )
-        # End is the end of the no_vc_check slice
-        return slice(vc_slice.start, no_vc_slice.stop)
+        return self._saved_tensor_layout.tensors_saved_for_backwards_slice
 
     @property
     def tensors_saved_for_backwards_with_vc_check_slice(self) -> slice:
@@ -755,20 +917,7 @@ class ViewAndMutationMeta:
         Slice of forward outputs that are tensors saved for backward that
         require version counter checks (i.e., were saved via save_for_backward).
         """
-        # See Note [Activations with no version counter checks in eager]
-        if self.num_symints_saved_for_bw is None:
-            raise AssertionError("num_symints_saved_for_bw must not be None")
-        if self.num_tensors_saved_with_no_vc_check is None:
-            raise AssertionError("num_tensors_saved_with_no_vc_check must not be None")
-        # The tensors with VC check come first, followed by tensors without VC check
-        num_no_vc_check = self.num_tensors_saved_with_no_vc_check
-        num_opaque = self.num_opaque_objects_saved_for_bw or 0
-        num_symints = self.num_symints_saved_for_bw
-        num_trailing = num_no_vc_check + num_opaque + num_symints
-        if num_trailing > 0:
-            return slice(self.num_forward, -num_trailing if num_trailing != 0 else None)
-        else:
-            return slice(self.num_forward, None)
+        return self._saved_tensor_layout.tensors_saved_for_backwards_with_vc_check_slice
 
     @property
     def tensors_saved_for_backwards_no_vc_check_slice(self) -> slice:
@@ -777,41 +926,15 @@ class ViewAndMutationMeta:
         do NOT require version counter checks (i.e., were stashed on ctx
         rather than via save_for_backward in an autograd.Function).
         """
-        if self.num_symints_saved_for_bw is None:
-            raise AssertionError("num_symints_saved_for_bw must not be None")
-        if self.num_tensors_saved_with_no_vc_check is None:
-            raise AssertionError("num_tensors_saved_with_no_vc_check must not be None")
-        num_no_vc_check = self.num_tensors_saved_with_no_vc_check
-        num_opaque = self.num_opaque_objects_saved_for_bw or 0
-        num_symints = self.num_symints_saved_for_bw
-        if num_no_vc_check == 0:
-            return slice(0, 0)  # empty slice
-        num_trailing = num_opaque + num_symints
-        if num_trailing > 0:
-            return slice(-num_no_vc_check - num_trailing, -num_trailing)
-        else:
-            return slice(-num_no_vc_check, None)
+        return self._saved_tensor_layout.tensors_saved_for_backwards_no_vc_check_slice
 
     @property
     def opaque_objects_saved_for_backwards_slice(self) -> slice:
-        num_opaque = self.num_opaque_objects_saved_for_bw or 0
-        num_symints = self.num_symints_saved_for_bw or 0
-        if num_opaque > 0:
-            if num_symints > 0:
-                return slice(-num_opaque - num_symints, -num_symints)
-            else:
-                return slice(-num_opaque, None)
-        else:
-            return slice(0, 0)  # empty slice
+        return self._saved_tensor_layout.opaque_objects_saved_for_backwards_slice
 
     @property
     def symints_saved_for_backwards_slice(self) -> slice:
-        if self.num_symints_saved_for_bw is None:
-            raise AssertionError("num_symints_saved_for_bw must not be None")
-        if self.num_symints_saved_for_bw > 0:
-            return slice(-self.num_symints_saved_for_bw, None)
-        else:
-            return slice(0, 0)  # empty slice
+        return self._saved_tensor_layout.symints_saved_for_backwards_slice
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, ViewAndMutationMeta):

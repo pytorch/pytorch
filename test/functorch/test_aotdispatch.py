@@ -6937,6 +6937,93 @@ def forward(self, primals_1, tangents_1):
         finally:
             handle.destroy()
 
+    def test_view_and_mutation_meta_saved_tensor_layout_slices(self):
+        from torch._functorch._aot_autograd.schemas import (
+            OutputAliasInfo,
+            OutputType,
+            ViewAndMutationMeta,
+        )
+
+        meta = ViewAndMutationMeta(
+            input_info=[],
+            output_info=[
+                OutputAliasInfo(
+                    output_type=OutputType.non_alias,
+                    raw_type=torch.Tensor,
+                    base_idx=None,
+                    dynamic_dims=None,
+                    requires_grad=False,
+                    requires_grad_for_backward=False,
+                )
+            ],
+            num_intermediate_bases=0,
+            keep_input_mutations=False,
+            traced_tangents=[],
+            subclass_inp_meta=[],
+            subclass_fw_graph_out_meta=[],
+            subclass_tangent_meta=[],
+            traced_tangents_descs=[],
+        )
+        meta.is_rng_op_functionalized = False
+        meta.set_partitioned_meta(
+            num_symints_saved_for_bw=2,
+            num_tensors_saved_with_no_vc_check=3,
+            num_opaque_objects_saved_for_bw=1,
+        )
+
+        self.assertEqual(meta.num_forward, 1)
+        self.assertEqual(
+            meta.tensors_saved_for_backwards_with_vc_check_slice,
+            slice(1, -6),
+        )
+        self.assertEqual(
+            meta.tensors_saved_for_backwards_no_vc_check_slice,
+            slice(-6, -3),
+        )
+        self.assertEqual(
+            meta.tensors_saved_for_backwards_slice,
+            slice(1, -3),
+        )
+        self.assertEqual(
+            meta.opaque_objects_saved_for_backwards_slice,
+            slice(-3, -2),
+        )
+        self.assertEqual(
+            meta.symints_saved_for_backwards_slice,
+            slice(-2, None),
+        )
+
+    def test_view_and_mutation_meta_num_forward_tracks_mutated_input_count(self):
+        from torch._functorch._aot_autograd.schemas import ViewAndMutationMeta
+
+        meta = ViewAndMutationMeta(
+            input_info=[],
+            output_info=[],
+            num_intermediate_bases=0,
+            keep_input_mutations=False,
+            traced_tangents=[],
+            subclass_inp_meta=[],
+            subclass_fw_graph_out_meta=[],
+            subclass_tangent_meta=[],
+            traced_tangents_descs=[],
+        )
+        meta.is_rng_op_functionalized = False
+        meta.set_partitioned_meta(
+            num_symints_saved_for_bw=0,
+            num_tensors_saved_with_no_vc_check=0,
+            num_opaque_objects_saved_for_bw=0,
+        )
+
+        self.assertEqual(meta.num_forward_returns, 0)
+        self.assertEqual(meta.num_forward, 0)
+        self.assertEqual(meta.tensors_saved_for_backwards_slice, slice(0, None))
+
+        meta.num_mutated_inp_runtime_indices += 2
+
+        self.assertEqual(meta.num_forward_returns, 2)
+        self.assertEqual(meta.num_forward, 2)
+        self.assertEqual(meta.tensors_saved_for_backwards_slice, slice(2, None))
+
     def test_collect_metadata_subclass_fw_outs_follow_input_mutation_type(self):
         from torch._functorch._aot_autograd.collect_metadata_analysis import (
             run_functionalized_fw_and_collect_metadata,

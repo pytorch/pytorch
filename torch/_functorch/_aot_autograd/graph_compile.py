@@ -1272,27 +1272,34 @@ def maybe_inline_graph_saved_tensors_hooks(
 
     if mode == "donated":
         # collect_bw_donated_buffer_idxs requires inner_meta to have num_symints_saved_for_bw
-        inner_meta.num_symints_saved_for_bw = len(
-            [n for n in fw_outs_saved_for_bw if is_sym_node(n)]  # type: ignore[arg-type]
-        )
-        # Count tensors with no version counter check (used in tensors_saved_for_backwards_slice)
-        inner_meta.num_tensors_saved_with_no_vc_check = len(
-            [
-                n
-                # pyrefly: ignore [not-iterable]
-                for n in fw_outs_saved_for_bw
-                if isinstance(n, torch.fx.Node)
-                and n.meta.get("saved_tensor_with_no_vc_check", False)
-            ]
+        inner_meta.set_partitioned_meta(
+            num_symints_saved_for_bw=len(
+                [n for n in fw_outs_saved_for_bw if is_sym_node(n)]  # type: ignore[arg-type]
+            ),
+            # Count tensors with no version counter check
+            # (used in tensors_saved_for_backwards_slice).
+            num_tensors_saved_with_no_vc_check=len(
+                [
+                    n
+                    # pyrefly: ignore [not-iterable]
+                    for n in fw_outs_saved_for_bw
+                    if isinstance(n, torch.fx.Node)
+                    and n.meta.get("saved_tensor_with_no_vc_check", False)
+                ]
+            ),
+            # Donated-buffer filtering runs before partitioning materializes any
+            # opaque backward state objects into the forward outputs.
+            num_opaque_objects_saved_for_bw=0,
         )
         bw_donated_idxs = collect_bw_donated_buffer_idxs(
             fw_module,
             bw_module,
             inner_meta,
         )
-        fw_donated_idxs = [
-            i - inner_meta.num_symints_saved_for_bw for i in bw_donated_idxs
-        ]
+        num_symints_saved_for_bw = inner_meta.num_symints_saved_for_bw
+        if num_symints_saved_for_bw is None:
+            raise AssertionError("inner_meta.num_symints_saved_for_bw must not be None")
+        fw_donated_idxs = [i - num_symints_saved_for_bw for i in bw_donated_idxs]
         allow_set = {fw_outs_saved_for_bw[i].name for i in fw_donated_idxs}  # type: ignore[union-attr]
     elif mode == "no_static":
         fw_g_inputs = fw_g.find_nodes(op="placeholder")
@@ -1850,12 +1857,6 @@ def _aot_stage2a_partition(
 
             num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
             num_opaque_objects_saved_for_bw = len(opaque_outs_saved_for_bw)
-            fw_metadata.num_symints_saved_for_bw = num_symints_saved_for_bw
-            fw_metadata.num_opaque_objects_saved_for_bw = (
-                num_opaque_objects_saved_for_bw
-            )
-            inner_meta.num_symints_saved_for_bw = num_symints_saved_for_bw
-            inner_meta.num_opaque_objects_saved_for_bw = num_opaque_objects_saved_for_bw
 
             # See Note [Activations with no version counter checks in eager]
             # Count tensors saved with no version counter check.
@@ -1868,11 +1869,15 @@ def _aot_stage2a_partition(
                     "saved_tensor_with_no_vc_check", False
                 ):
                     num_tensors_saved_with_no_vc_check += 1
-            fw_metadata.num_tensors_saved_with_no_vc_check = (
-                num_tensors_saved_with_no_vc_check
+            fw_metadata.set_partitioned_meta(
+                num_symints_saved_for_bw=num_symints_saved_for_bw,
+                num_tensors_saved_with_no_vc_check=(num_tensors_saved_with_no_vc_check),
+                num_opaque_objects_saved_for_bw=num_opaque_objects_saved_for_bw,
             )
-            inner_meta.num_tensors_saved_with_no_vc_check = (
-                num_tensors_saved_with_no_vc_check
+            inner_meta.set_partitioned_meta(
+                num_symints_saved_for_bw=num_symints_saved_for_bw,
+                num_tensors_saved_with_no_vc_check=(num_tensors_saved_with_no_vc_check),
+                num_opaque_objects_saved_for_bw=num_opaque_objects_saved_for_bw,
             )
 
             if torch._functorch.config.donated_buffer:
