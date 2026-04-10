@@ -125,7 +125,7 @@ def initialize_lazy_module(
             the C++ backend rejects SymInts. This patches torch.empty to auto-convert
             SymInts to concrete ints during initialization.
             """
-            from torch.fx.experimental.symbolic_shapes import size_hint
+            from torch.fx.experimental.symbolic_shapes import optimization_hint
 
             original_empty = torch.empty
 
@@ -134,7 +134,7 @@ def initialize_lazy_module(
 
                 def _convert(val: Any) -> Any:
                     if isinstance(val, torch.SymInt):
-                        return size_hint(val)
+                        return optimization_hint(val)
                     elif isinstance(val, (tuple, list)):
                         return type(val)(_convert(v) for v in val)
                     return val
