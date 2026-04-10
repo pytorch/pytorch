@@ -619,10 +619,17 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
     int32_t kTiles) {
   constexpr int32_t kMTileSize = 16;
 #if defined(USE_ROCM)
+  // Workaround for ROCm compiler bug where __builtin_amdgcn_is_invocable
+  // incorrectly reports mfma_f32_16x16x16bf16_1k as available on gfx908
+#if defined(__gfx908__)
+  printf("__builtin_amdgcn_mfma_f32_16x16x16bf16_1k is not supported on gfx908\n");
+  return;
+#else
   if (!__builtin_amdgcn_is_invocable(__builtin_amdgcn_mfma_f32_16x16x16bf16_1k)) {
     printf("__builtin_amdgcn_mfma_f32_16x16x16bf16_1k is only supported on AMD gpu arch greater than or equal to CDNA2\n");
     return;
   }
+#endif
   constexpr int32_t kNTileSize = 16;
 #else
   constexpr int32_t kNTileSize = 8;
@@ -736,12 +743,14 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
 
 #pragma unroll
         for (int k = 0; k < 2; ++k) {
-#if defined(USE_ROCM)
-          cTmp[k] = __builtin_amdgcn_mfma_f32_16x16x16bf16_1k(
-              a[i * kInnerKTiles + j * 2 + k].val,
-              b[i][(j * 2 + k) / 2].val[((j * 2 + k) % 2)],
-              cTmp[k], 0, 0, 0);
-#else
+#if defined(USE_ROCM) && !defined(__gfx908__)
+          if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_mfma_f32_16x16x16bf16_1k)) {
+            cTmp[k] = __builtin_amdgcn_mfma_f32_16x16x16bf16_1k(
+                a[i * kInnerKTiles + j * 2 + k].val,
+                b[i][(j * 2 + k) / 2].val[((j * 2 + k) % 2)],
+                cTmp[k], 0, 0, 0);
+          }
+#elif !defined(USE_ROCM)
           asm volatile(
               "mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32 "
               "{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%10,%11,%12,%13};"
@@ -834,12 +843,14 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
 
 #pragma unroll
       for (int k = 0; k < 2; ++k) {
-#if defined(USE_ROCM)
-        cTmp[k] = __builtin_amdgcn_mfma_f32_16x16x16bf16_1k(
-          a[j * 2 + k].val,
-          b[0][(j * 2 + k) / 2].val[((j * 2 + k) % 2)],
-          cTmp[k], 0, 0, 0);
-#else
+#if defined(USE_ROCM) && !defined(__gfx908__)
+        if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_mfma_f32_16x16x16bf16_1k)) {
+          cTmp[k] = __builtin_amdgcn_mfma_f32_16x16x16bf16_1k(
+            a[j * 2 + k].val,
+            b[0][(j * 2 + k) / 2].val[((j * 2 + k) % 2)],
+            cTmp[k], 0, 0, 0);
+        }
+#elif !defined(USE_ROCM)
         asm volatile(
             "mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32 "
             "{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%10,%11,%12,%13};"
