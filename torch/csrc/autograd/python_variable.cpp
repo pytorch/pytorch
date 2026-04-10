@@ -1214,9 +1214,30 @@ struct hash<NativeOpSchema> {
 // Helper to check if dtensor debug logging is enabled and log cache hits.
 // We cache the logger and debug-enabled check to avoid repeated Python calls.
 // Pattern follows torch/csrc/jit/passes/onnx/onnx_log.cpp
+//
+// IMPORTANT: thread-local py::object variables require a GIL-safe destructor.
+// When threads exit, C++ destroys thread-locals, but the GIL may not be held.
+// py::object's destructor calls dec_ref() which requires the GIL, so bare
+// thread_local py::object causes SIGABRT on thread teardown. We wrap them in
+// a struct that acquires the GIL before releasing the Python reference.
 namespace {
-thread_local py::object dtensor_dispatch_logger;
-thread_local py::object logging_DEBUG;
+struct GILSafePyObject {
+  py::object obj;
+  GILSafePyObject() = default;
+  GILSafePyObject(const GILSafePyObject&) = delete;
+  GILSafePyObject& operator=(const GILSafePyObject&) = delete;
+  GILSafePyObject(GILSafePyObject&&) = default;
+  GILSafePyObject& operator=(GILSafePyObject&&) = default;
+  ~GILSafePyObject() {
+    if (obj.ptr() && Py_IsInitialized()) {
+      py::gil_scoped_acquire gil;
+      obj.release().dec_ref();
+    }
+  }
+};
+
+thread_local GILSafePyObject dtensor_dispatch_logger;
+thread_local GILSafePyObject logging_DEBUG;
 thread_local bool dtensor_dispatch_logger_initialized = false;
 thread_local bool dtensor_debug_logging_enabled = false;
 
@@ -1225,14 +1246,14 @@ void init_dtensor_dispatch_logger() {
     dtensor_dispatch_logger_initialized = true;
     try {
       auto logging = py::module_::import("logging");
-      logging_DEBUG = logging.attr("DEBUG");
-      dtensor_dispatch_logger =
+      logging_DEBUG.obj = logging.attr("DEBUG");
+      dtensor_dispatch_logger.obj =
           logging.attr("getLogger")("torch.distributed.tensor._dispatch");
       dtensor_debug_logging_enabled =
-          dtensor_dispatch_logger.attr("isEnabledFor")(logging_DEBUG)
+          dtensor_dispatch_logger.obj.attr("isEnabledFor")(logging_DEBUG.obj)
               .cast<bool>();
     } catch (...) {
-      dtensor_dispatch_logger = py::none();
+      dtensor_dispatch_logger.obj = py::none();
       dtensor_debug_logging_enabled = false;
     }
   }
@@ -1252,7 +1273,7 @@ void log_sharding_prop_cache_hit(
   if (!output_spec.is_none()) {
     ss << " -> " << py::str(output_spec).cast<std::string>();
   }
-  dtensor_dispatch_logger.attr("debug")(ss.str());
+  dtensor_dispatch_logger.obj.attr("debug")(ss.str());
 }
 } // namespace
 
