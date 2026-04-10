@@ -338,7 +338,10 @@ class BaseBuiltinVariable(VariableTracker):
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         source = self.source and AttrSource(self.source, name)
-        return variables.GetAttrVariable(self, name, source=source)
+        attr = getattr(self._fn, name, None)
+        return variables.GetAttrVariable(
+            self, name, py_type=type(attr) if attr is not None else None, source=source
+        )
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
@@ -2450,7 +2453,10 @@ class BuiltinVariable(BaseBuiltinVariable):
                 raise_observed_exception(AttributeError, tx)
             if not callable(value):
                 return VariableTracker.build(tx, value, source)
-        return variables.GetAttrVariable(self, name, source=source)
+        attr = getattr(self.fn, name, None)
+        return variables.GetAttrVariable(
+            self, name, py_type=type(attr) if attr is not None else None, source=source
+        )
 
     def call_getattr(
         self,
@@ -2598,7 +2604,9 @@ class BuiltinVariable(BaseBuiltinVariable):
             ) and torch._dynamo.trace_rules.is_aten_op_or_tensor_method(member):
                 return variables.TorchInGraphFunctionVariable(member, source=source)
             elif name in cmp_name_to_op_mapping:
-                return variables.GetAttrVariable(obj, name, source=source)
+                return variables.GetAttrVariable(
+                    obj, name, py_type=type(member), source=source
+                )
             else:
                 return None
         elif isinstance(obj, DummyModule):

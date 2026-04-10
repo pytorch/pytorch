@@ -149,7 +149,12 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # which will directly inline
         if name in ("_init_group"):
             assert self.source
-            return GetAttrVariable(self, name, source=AttrSource(self.source, name))
+            return GetAttrVariable(
+                self,
+                name,
+                py_type=type(getattr(self.value, name)),
+                source=AttrSource(self.source, name),
+            )
 
         if name == "param_groups":
             from ..decorators import mark_static_address

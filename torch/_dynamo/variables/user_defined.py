@@ -388,7 +388,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # can't trace).  GetAttrVariable defers the access and lets
         # call_method handle it.
         if meta_attr is not NO_SUCH_SUBOBJ:
-            return variables.GetAttrVariable(self, name, None, source=source)
+            return variables.GetAttrVariable(self, name, type(meta_attr), source=source)
 
         # __getattr__ on metaclass (not part of type_getattro proper —
         # CPython handles this via slot_tp_getattr_hook).
@@ -435,7 +435,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         if ConstantVariable.is_literal(resolved):
             return VariableTracker.build(tx, resolved)
-        return variables.GetAttrVariable(self, name, None, source=source)
+        return variables.GetAttrVariable(self, name, type(resolved), source=source)
 
     def resolve_cls_descriptor(
         self,
@@ -470,7 +470,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if name in cmp_name_to_op_mapping and not isinstance(
             cls_attr, types.FunctionType
         ):
-            return variables.GetAttrVariable(self, name, None, source=source)
+            return variables.GetAttrVariable(
+                self, name, py_type=type(cls_attr), source=source
+            )
 
         # User-defined descriptor with Python __get__.
         # For torch-internal classes or attributes in the class's own __dict__,
@@ -504,7 +506,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 )
             ):
                 return VariableTracker.build(tx, cls_attr, source)
-            return variables.GetAttrVariable(self, name, None, source=source)
+            return variables.GetAttrVariable(self, name, type(cls_attr), source=source)
 
         # Everything else: FunctionType, etc.
         return VariableTracker.build(tx, cls_attr, source)
@@ -522,7 +524,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ):
             return super().var_getattr(tx, name)
         if self.value is collections.OrderedDict:
-            return variables.GetAttrVariable(self, name)
+            return variables.GetAttrVariable(self, name, py_type=type(cls_attr))
         return VariableTracker.build(tx, cls_attr, source)
 
     def invoke_cls_descriptor_get(
@@ -2325,7 +2327,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             or torch._C._dynamo.utils.is_instancemethod(type_attr)  # type: ignore[attr-defined]
             or is_cython_function(type_attr)
         ):
-            return variables.GetAttrVariable(self, name, None, source=source)
+            return variables.GetAttrVariable(self, name, type(type_attr), source=source)
 
         # Plain class variable (or MethodType, C-level non-data descriptor
         # without __get__, etc.).

@@ -583,7 +583,9 @@ class OrderedSetClassVariable(VariableTracker):
                 attr_source = AttrSource(self.source, name)
             else:
                 attr_source = None
-            return GetAttrVariable(self, name, source=attr_source)
+            return GetAttrVariable(
+                self, name, py_type=type(getattr(OrderedSet, name)), source=attr_source
+            )
         else:
             return super().var_getattr(tx, name)
 

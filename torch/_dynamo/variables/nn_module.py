@@ -477,7 +477,7 @@ class NNModuleVariable(VariableTracker):
                     ],
                 )
 
-        return variables.GetAttrVariable(self, name, source=source)
+        return super().var_getattr(tx, name)
 
     def call_function(
         self,
