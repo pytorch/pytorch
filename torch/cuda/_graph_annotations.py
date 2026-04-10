@@ -160,6 +160,9 @@ _pending_scopes: list[tuple[Any, int, int]] = []
 # Graph handle saved during capture for post-capture resolution.
 _capture_graph: Any = None
 
+# Capture graph ID saved by resolve_pending_annotations for remap_to_exec_graph.
+_last_capture_graph_id: int | None = None
+
 
 @contextmanager  # type: ignore[arg-type]
 def mark_kernels(annotation: str | dict[str, Any]):
@@ -242,6 +245,13 @@ def resolve_pending_annotations() -> None:
                 graph, numNodes=num
             )
         )
+
+        # Save capture graph ID for remap_to_exec_graph.
+        global _last_capture_graph_id
+        if num > 0:
+            first_tid = _get_tools_id(nodes[0])
+            _last_capture_graph_id = (first_tid >> 32) if first_tid else None
+
         annotatable = _get_annotatable_types()
 
         # Sort by (start, -end, -append_index). The append index encodes
@@ -337,8 +347,17 @@ def remap_to_exec_graph(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
         )
     )
 
+    # Only remap annotations from the most recent capture graph.
+    # Previously remapped annotations (from earlier captures) keep their
+    # correct exec graph IDs.
+    capture_graph_id = _last_capture_graph_id
     remapped: dict[int, list[Any]] = {}
     for tools_id, ann_list in _kernel_annotations.items():
+        graph_id = tools_id >> 32
+        if capture_graph_id is not None and graph_id != capture_graph_id:
+            # Belongs to a different graph — keep as-is.
+            remapped[tools_id] = ann_list
+            continue
         node_id = tools_id & 0xFFFFFFFF
         new_tools_id = (exec_graph_id << 32) | node_id
         if new_tools_id in remapped:
