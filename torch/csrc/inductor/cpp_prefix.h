@@ -777,6 +777,22 @@ Welford<scalar_t> welford_vec_reduce_all(
 }
 #endif
 
+inline std::atomic<int>* inductor_cpu_integer_div_error_flag = nullptr;
+
+inline void inductor_cpu_note_integer_div_by_zero() {
+  if (inductor_cpu_integer_div_error_flag != nullptr) {
+    inductor_cpu_integer_div_error_flag->store(1, std::memory_order_relaxed);
+  } else {
+    TORCH_CHECK(false, "ZeroDivisionError");
+  }
+}
+
+inline void inductor_cpu_throw_if_integer_div_error(std::atomic<int>& err) {
+  if (err.load(std::memory_order_acquire)) {
+    TORCH_CHECK(false, "ZeroDivisionError");
+  }
+}
+
 template <typename T, typename U>
 inline std::common_type_t<T, U> mod(T a, U b) {
   using C = std::common_type_t<T, U>;
@@ -784,7 +800,10 @@ inline std::common_type_t<T, U> mod(T a, U b) {
       std::is_integral_v<C>,
       "inductor template mod(T a, U b) is only for integral types; use the float/double specializations "
       "for floating-point operands.");
-  TORCH_CHECK(b != 0, "ZeroDivisionError");
+  if (C10_UNLIKELY_OR_CONST(b == 0)) {
+    inductor_cpu_note_integer_div_by_zero();
+    return C(0);
+  }
   const C a_c = static_cast<C>(a);
   const C b_c = static_cast<C>(b);
   if (a_c == std::numeric_limits<C>::min() && b_c == C(-1)) {
@@ -805,7 +824,10 @@ template <typename T>
 inline T remainder_integral(T a, T b) {
   static_assert(
       std::is_integral_v<T>, "remainder_integral expects integral scalar T");
-  TORCH_CHECK(b != 0, "ZeroDivisionError");
+  if (C10_UNLIKELY_OR_CONST(b == 0)) {
+    inductor_cpu_note_integer_div_by_zero();
+    return T(0);
+  }
   if (a == std::numeric_limits<T>::min() && b == T(-1)) {
     return T(0);
   }
