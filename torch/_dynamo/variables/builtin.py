@@ -3406,7 +3406,6 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
                 and config.enable_trace_unittest
                 and name
                 in (
-                    "assertRaisesRegex",
                     "assertNotWarns",
                     "assertWarnsRegex",
                     "assertWarns",

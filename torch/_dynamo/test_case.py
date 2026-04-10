@@ -163,7 +163,7 @@ class CPythonTestCase(TestCase):
     # pyrefly: ignore [bad-override]
     assertRaises = unittest.TestCase.assertRaises
     # pyrefly: ignore [bad-override]
-    assertRaisesRegex = unittest.TestCase.assertRaisesRegex
+    assertRaisesRegex = polyfills.assert_raises_regex
     assertWarns = unittest.TestCase.assertWarns
     assertWarnsRegex = unittest.TestCase.assertWarnsRegex
     assertLogs = unittest.TestCase.assertLogs

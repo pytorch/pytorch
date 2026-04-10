@@ -6,6 +6,7 @@ Python polyfills for common builtins.
 #       2. While adding a new polyfill module, also add it to POLYFILLED_MODULE_NAMES in loader.py.
 #          Add it in the TYPE_CHECKING block below as well.
 
+import re
 import types
 from collections import OrderedDict
 from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, Sequence
@@ -698,3 +699,50 @@ def group_tensors_by_device_and_dtype(
             indices.append(idx)
 
     return result
+
+
+class _AssertRaisesRegexContext:
+    def __init__(
+        self,
+        test_case: Any,
+        expected_exception: type[BaseException],
+        expected_regex: str | re.Pattern[str],
+    ) -> None:
+        self.expected_regex = expected_regex
+        self.inner = test_case.assertRaises(expected_exception)
+
+    def __enter__(self) -> Any:
+        return self.inner.__enter__()
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: types.TracebackType | None,
+    ) -> bool | None:
+        result = self.inner.__exit__(exc_type, exc_val, exc_tb)
+        if result and exc_val is not None:
+            # re.search runs here at eager runtime (after the traced region),
+            # so the _sre C-extension is never hit during Dynamo tracing.
+            if not re.search(self.expected_regex, str(exc_val)):
+                raise AssertionError(
+                    f"{self.expected_regex!r} not found in {str(exc_val)!r}"
+                )
+        return result
+
+
+# Polyfill for unittest.TestCase.assertRaisesRegex.
+# The regex validation in __exit__ uses re.search at eager runtime,
+# which is safe because __exit__ is never traced by Dynamo.
+def assert_raises_regex(
+    self_: Any,
+    expected_exception: type[BaseException],
+    expected_regex: str | re.Pattern[str],
+    *args: Any,
+    **kwargs: Any,
+) -> "_AssertRaisesRegexContext | None":
+    if args:
+        with _AssertRaisesRegexContext(self_, expected_exception, expected_regex):
+            args[0](*args[1:], **kwargs)
+        return None
+    return _AssertRaisesRegexContext(self_, expected_exception, expected_regex)
