@@ -149,8 +149,8 @@ from ..utils import (
     clone_input,
     common_constant_types,
     dict_keys,
+    enumerate_items_with_dict_position,
     get_fake_value,
-    get_items_from_dict,
     get_locals_to_steal,
     get_static_address_type,
     is_frozen_dataclass,
@@ -874,13 +874,9 @@ class VariableBuilder:
 
                 return key, res_value
 
-            # Ensure that we call dict.keys and not value.keys (which can call
-            # overridden keys method). In the C++ guards, we relied on
-            # PyDict_Next to traverse the dictionary, which uses the internal
-            # data structure and does not call the overridden keys method.
             result = dict(
                 build_key_value(i, k, v)
-                for i, (k, v) in enumerate(get_items_from_dict(value))
+                for i, k, v in enumerate_items_with_dict_position(value)
             )
 
             if istype(value, collections.defaultdict):
@@ -1679,13 +1675,9 @@ class VariableBuilder:
 
                 return key, res_value
 
-            # Ensure that we call dict.keys and not value.keys (which can call
-            # overridden keys method). In the C++ guards, we relied on
-            # PyDict_Next to traverse the dictionary, which uses the internal
-            # data structure and does not call the overridden keys method.
             result = dict(
                 build_key_value(i, k, v)
-                for i, (k, v) in enumerate(get_items_from_dict(value))
+                for i, k, v in enumerate_items_with_dict_position(value)
             )
 
             dict_vt = ConstDictVariable(
