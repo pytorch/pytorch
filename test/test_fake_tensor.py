@@ -68,6 +68,7 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     skipIfXpu,
     TemporaryFileName,
+    TEST_ACCELERATOR,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xfailIfTorchDynamo,
@@ -1310,6 +1311,72 @@ for t in threads:
             0,
             msg=f"subprocess failed:\n{result.stderr.decode()}",
         )
+
+    @unittest.skipIf(
+        TEST_ACCELERATOR, "Only execute when an accelerator is not present"
+    )
+    def test_avoid_device_init_without_backends(self):
+        fake_mode = FakeTensorMode()
+
+        self.assertTrue(
+            fake_mode.avoid_device_init,
+            "Expected avoid_device_init to return True when no backends are registered",
+        )
+
+    @parametrize("is_available", [False, True])
+    @skipIfTorchDynamo(
+        "TorchDynamo exposes https://github.com/pytorch/pytorch/issues/166696"
+    )
+    @unittest.skipIf(
+        TEST_ACCELERATOR, "Only execute when an accelerator is not present"
+    )
+    def test_avoid_device_init_with_privateuse1_backend(self, is_available):
+        class _DummyPrivateUse1Module:
+            @staticmethod
+            def is_available() -> bool:
+                return is_available
+
+        backend_name = "privateuseone"
+
+        try:
+            torch._register_device_module(backend_name, _DummyPrivateUse1Module)
+
+            fake_mode = FakeTensorMode()
+
+            self.assertEqual(fake_mode.avoid_device_init, not is_available)
+        finally:
+            delattr(torch, backend_name)
+            del sys.modules[f"torch.{backend_name}"]
+
+    def test_unique_output_dtype(self):
+        shape_env = ShapeEnv()
+        for input_dtype in [torch.float32, torch.float16, torch.bfloat16]:
+            x_real = torch.randn(10, dtype=input_dtype)
+            real_unique, real_inverse, real_counts = torch.unique(
+                x_real, return_inverse=True, return_counts=True
+            )
+            with FakeTensorMode(shape_env=shape_env):
+                x = torch.randn(10, dtype=input_dtype)
+                fake_unique, fake_inverse, fake_counts = torch.unique(
+                    x, return_inverse=True, return_counts=True
+                )
+                self.assertEqual(fake_unique.dtype, real_unique.dtype)
+                self.assertEqual(fake_inverse.dtype, real_inverse.dtype)
+                self.assertEqual(fake_counts.dtype, real_counts.dtype)
+
+        # Also test with dim argument
+        x_real = torch.randn(3, 4, dtype=torch.float32)
+        real_unique, real_inverse, real_counts = torch.unique(
+            x_real, dim=0, return_inverse=True, return_counts=True
+        )
+        with FakeTensorMode(shape_env=shape_env):
+            x = torch.randn(3, 4, dtype=torch.float32)
+            fake_unique, fake_inverse, fake_counts = torch.unique(
+                x, dim=0, return_inverse=True, return_counts=True
+            )
+            self.assertEqual(fake_unique.dtype, real_unique.dtype)
+            self.assertEqual(fake_inverse.dtype, real_inverse.dtype)
+            self.assertEqual(fake_counts.dtype, real_counts.dtype)
 
 
 instantiate_parametrized_tests(FakeTensorTest)

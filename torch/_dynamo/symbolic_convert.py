@@ -151,7 +151,7 @@ from .variables.ctx_manager import (
     WithEnterFunctionVariable,
     WithExitFunctionVariable,
 )
-from .variables.dicts import ConstDictVariable, SetVariable
+from .variables.dicts import ConstDictVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
     LocalGeneratorFunctionVariable,
@@ -181,6 +181,7 @@ from .variables.misc import (
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
+from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
 from .variables.torch_function import (
@@ -746,9 +747,7 @@ def generic_jump(
             # ConstDictVariable is optimized to be very lazy about insertion of
             # guards, so we have to manually insert a SEQUENCE_LENGTH guard
             # here.
-            if isinstance(value, BaseListVariable):
-                value._install_list_length_guard()
-            elif isinstance(value, ConstDictVariable) and value.source:
+            if isinstance(value, ConstDictVariable) and value.source:
                 install_guard(value.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
             if truth_fn(value.as_python_constant()):
                 if push:
@@ -1739,6 +1738,9 @@ class InstructionTranslatorBase(
                         exc=e,
                     )
 
+                if not isinstance(e, exc.RestartAnalysis):
+                    self.output.side_effects.log_side_effects_summary()
+
                 if hasattr(e, "msg") and "Data-dependent" in e.msg:
                     readable_graph = torch.fx.GraphModule(
                         self.output.nn_modules, self.output.graph
@@ -1752,6 +1754,8 @@ class InstructionTranslatorBase(
             except Exception as e:
                 if self.exec_recorder:
                     e.exec_record = self.exec_recorder.get_record()  # type: ignore[attr-defined]
+                if not isinstance(e, exc.RestartAnalysis):
+                    self.output.side_effects.log_side_effects_summary()
 
                 raise
             finally:
@@ -4322,7 +4326,8 @@ class InstructionTranslatorBase(
         self.push(fn)
 
     def CONVERT_VALUE(self, inst: Instruction) -> None:
-        self.push(self._convert_value(self.pop(), inst.argval))
+        assert inst.arg is not None
+        self.push(self._convert_value(self.pop(), inst.arg))
 
     def FORMAT_SIMPLE(self, inst: Instruction) -> None:
         self._format_value(VariableTracker.build(self, ""), 0)

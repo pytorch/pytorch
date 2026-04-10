@@ -60,7 +60,7 @@ jobs:
       contents: read
     steps:
       - name: Setup Linux
-        uses: ./.github/actions/setup-linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@main
 
       - name: Checkout flash-attention as a secondary repository
         uses: actions/checkout@v4

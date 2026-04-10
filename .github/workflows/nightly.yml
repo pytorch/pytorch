@@ -50,7 +50,7 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.10-gcc11
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang18
     secrets: inherit
 
   docs-push:

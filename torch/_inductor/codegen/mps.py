@@ -19,7 +19,7 @@ from torch.utils._sympy.printers import CppPrinter, ExprPrinter as ExprPrinter_
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from ..utils import ceildiv, get_bounds_index_expr, get_kernel_metadata
-from ..virtualized import ops, OpsWrapper, V
+from ..virtualized import NullHandler, ops, OpsWrapper, V
 from .common import (
     CSEVariable,
     DeferredLine,
@@ -253,6 +253,7 @@ class MetalOverrides(OpOverrides):
         return var
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def where(a: OpVarT, b: OpVarT, c: OpVarT) -> str:
         return f"{a} ? {b} : static_cast<decltype({b})>({value_to_metal(c)})"
 
@@ -261,50 +262,61 @@ class MetalOverrides(OpOverrides):
         return f"c10::metal::remainder({a}, {b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def maximum(a: CSEVariable, b: CSEVariable) -> str:
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
         return f"c10::metal::max({typecast_a}, {typecast_b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def minimum(a: CSEVariable, b: CSEVariable) -> str:
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
         return f"c10::metal::min({typecast_a}, {typecast_b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def logical_or(a: CSEVariable, b: CSEVariable) -> str:
         return f"{a} || {b}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def logical_and(a: CSEVariable, b: CSEVariable) -> str:
         return f"{a} && {b}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def isnan(x: CSEVariable) -> str:
         return f"metal::isnan({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def isinf(x: CSEVariable) -> str:
         return f"metal::isinf({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def log(x: CSEVariable) -> str:
         return f"metal::precise::log({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def exp(x: CSEVariable) -> str:
         return f"metal::precise::exp({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def abs(x: CSEVariable) -> str:
         return f"metal::abs({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def signbit(x: CSEVariable) -> str:
         return f"metal::signbit({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def sin(x: CSEVariable) -> str:
         return f"metal::precise::sin({x})"
 
@@ -313,30 +325,37 @@ class MetalOverrides(OpOverrides):
         return f"c10::metal::sinc({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def cos(x: CSEVariable) -> str:
         return f"metal::precise::cos({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def tan(x: CSEVariable) -> str:
         return f"metal::precise::tan({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def asin(x: CSEVariable) -> str:
         return f"metal::precise::asin({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def acos(x: CSEVariable) -> str:
         return f"metal::precise::acos({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def atan(x: CSEVariable) -> str:
         return f"metal::precise::atan({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def atan2(x: CSEVariable, y: CSEVariable) -> str:
         return f"::metal::precise::atan2({x}, {y})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def sqrt(x: CSEVariable) -> str:
         return f"metal::precise::sqrt({x})"
 
@@ -347,14 +366,17 @@ class MetalOverrides(OpOverrides):
         return f"static_cast<decltype({x})>(-{x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def rsqrt(x: CSEVariable) -> str:
         return f"metal::precise::rsqrt({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def tanh(x: CSEVariable) -> str:
         return f"metal::precise::tanh({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def atanh(x: CSEVariable) -> str:
         return f"metal::precise::atanh({x})"
 
@@ -364,24 +386,29 @@ class MetalOverrides(OpOverrides):
         return f"c10::metal::floor_divide({a}, {b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def floor(x: CSEVariable) -> str:
         return f"metal::floor({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def sign(x: CSEVariable) -> str:
         return f"metal::sign({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def fmod(a: CSEVariable, b: CSEVariable) -> str:
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
         return f"metal::fmod({typecast_a}, {typecast_b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def trunc(x: CSEVariable) -> str:
         return f"metal::trunc({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def truncdiv(a: CSEVariable, b: CSEVariable) -> str:
         quot = f"{a} / {b}"
         if (a.dtype is not None and a.dtype.is_floating_point) or (
@@ -391,6 +418,7 @@ class MetalOverrides(OpOverrides):
         return quot
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def ceil(x: CSEVariable) -> str:
         return f"metal::ceil({x})"
 
@@ -412,6 +440,7 @@ class MetalOverrides(OpOverrides):
         return f"c10::metal::randint64({seed}, {offset}, {low}, {high})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def round(x: CSEVariable) -> str:
         return f"metal::rint({x})"
 
@@ -1154,6 +1183,8 @@ class MetalScheduling(SIMDScheduling):
 
     def __init__(self, scheduler: Scheduler | None) -> None:
         super().__init__(scheduler)
+        if isinstance(V.graph, NullHandler):
+            return
         wrapper = V.graph.wrapper_code
         if wrapper is not None:
             if not V.graph.cpp_wrapper:

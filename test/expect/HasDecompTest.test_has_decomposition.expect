@@ -393,6 +393,7 @@ aten::_fw_primal_copy
 aten::_fw_primal_copy.out
 aten::_grid_sampler_2d_cpu_fallback
 aten::_grid_sampler_2d_cpu_fallback.out
+aten::_grid_sampler_2d_cpu_fallback_backward
 aten::_grouped_mm
 aten::_has_same_storage_numel
 aten::_histogramdd_bin_edges
@@ -509,6 +510,14 @@ aten::_pdist_backward
 aten::_pdist_backward.out
 aten::_pdist_forward
 aten::_pdist_forward.out
+aten::_philox_key_fold_in
+aten::_philox_key_split
+aten::_philox_normal
+aten::_philox_normal.out
+aten::_philox_normal_
+aten::_philox_uniform
+aten::_philox_uniform.out
+aten::_philox_uniform_
 aten::_pin_memory
 aten::_pin_memory.out
 aten::_reshape_alias_copy

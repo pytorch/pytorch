@@ -974,6 +974,17 @@ class TestMPS(TestCaseMPS):
         helper(0, [1024], torch.float32)
         helper(0.2, [2, 3], torch.float32)
         helper(0.2 + 0.5j, [2, 3], torch.complex64)
+        helper(2**63 + 100, [3], torch.uint64)
+
+    def test_fill_strided(self):
+        # Regression test: strided fill_ must convert byte strides to element strides
+        for dtype in [torch.cfloat, torch.float32, torch.int32, torch.uint16, torch.uint8]:
+            x_mps = torch.zeros(4, 4, device='mps', dtype=dtype)
+            x_cpu = x_mps.cpu()
+            # Every other row — non-contiguous view
+            for t in (x_mps, x_cpu):
+                t[::2].fill_(1)
+            self.assertEqual(x_mps, x_cpu)
 
     def test_fill_storage_offset(self):
         shape = [2, 10]
@@ -13374,6 +13385,21 @@ class TestMetalLibrary(TestCaseMPS):
         self.assertRaises(ValueError, lambda: lib.full(mps_tensor, group_size=max_thread_group_size + 5))
         self.assertRaises(ValueError, lambda: lib.full(mps_tensor, threads=(3, max_thread_group_size),
                                                        group_size=(3, max_thread_group_size)))
+
+    def test_metal_randn(self):
+        lib = torch.mps.compile_shader("""
+            #include <c10/metal/random.h>
+            kernel void randn(device float* out, constant long2& seed_offset,
+                              uint idx [[thread_position_in_grid]]) {
+              out[idx] = c10::metal::randn(seed_offset.x, seed_offset.y + idx);
+            }
+        """)
+        N = 100_000
+        out = torch.empty(N, device="mps")
+        seed_offset = torch.tensor([42, 0], dtype=torch.long, device="mps")
+        lib.randn(out, seed_offset)
+        self.assertEqual(out.mean(), torch.tensor(0.0, device="mps"), atol=0.01, rtol=0)
+        self.assertEqual(out.std(), torch.tensor(1.0, device="mps"), atol=0.02, rtol=0)
 
     def test_metal_include(self):
         # Checks that includes embedding works

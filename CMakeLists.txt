@@ -27,6 +27,17 @@ endif()
 # ---[ Project and semantic versioning.
 project(Torch CXX C)
 
+# When built via scikit-build-core, Python_EXECUTABLE is already set.
+# For standalone cmake invocations, find it via find_package.
+find_package(Python COMPONENTS Interpreter REQUIRED)
+
+# Forward environment variables to CMake variables, replicating the behavior
+# previously handled by setup.py / tools/setup_helpers/cmake.py.
+# When built via setup.py, these are already set as -D flags; the module
+# skips variables that are already defined, so it is safe to include
+# unconditionally.
+include(cmake/EnvVarForwarding.cmake)
+
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   set(LINUX TRUE)
 else()
@@ -292,7 +303,7 @@ option(USE_NNPACK "Use NNPACK" ON)
 cmake_dependent_option(USE_NUMA "Use NUMA. Only available on Linux." ON "LINUX"
                        OFF)
 cmake_dependent_option(USE_NVRTC "Use NVRTC. Only available if USE_CUDA is on."
-                       OFF "USE_CUDA" OFF)
+                       ON "USE_CUDA" OFF)
 option(USE_NUMPY "Use NumPy" ON)
 option(USE_OBSERVERS "Use observers module." OFF)
 option(USE_OPENCL "Use OpenCL" OFF)
@@ -1236,10 +1247,11 @@ if(USE_CPP_CODE_COVERAGE)
   if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
     string(APPEND CMAKE_C_FLAGS " --coverage -fprofile-abs-path")
     string(APPEND CMAKE_CXX_FLAGS " --coverage -fprofile-abs-path")
+    string(APPEND CMAKE_OBJCXX_FLAGS " --coverage -fprofile-abs-path")
   elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
     string(APPEND CMAKE_C_FLAGS " -fprofile-instr-generate -fcoverage-mapping")
-    string(APPEND CMAKE_CXX_FLAGS
-           " -fprofile-instr-generate -fcoverage-mapping")
+    string(APPEND CMAKE_CXX_FLAGS " -fprofile-instr-generate -fcoverage-mapping")
+    string(APPEND CMAKE_OBJCXX_FLAGS " -fprofile-instr-generate -fcoverage-mapping")
   else()
     message(
       ERROR

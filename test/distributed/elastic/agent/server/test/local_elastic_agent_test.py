@@ -1705,52 +1705,6 @@ class LocalElasticAgentTest(unittest.TestCase):
             else:
                 os.environ[healthcheck_port_env_name] = original_value
 
-    def test_pre_invoke_run_calls_setup_healthcheck(self):
-        """Test _pre_invoke_run calls _setup_healthcheck when JK is enabled."""
-        node_conf = Conf(entrypoint=_happy_function, local_world_size=1)
-        self._backend = "c10d"
-        self._endpoint = f"localhost:{acquire_available_port()}"
-        spec = self.get_worker_spec(node_conf)
-        agent = self.get_agent(spec, node_config=node_conf)
-
-        with (
-            patch(
-                "torch.distributed.elastic.agent.server.local_elastic_agent.justknobs_check",
-                return_value=True,
-            ),
-            patch.object(agent, "_setup_healthcheck") as mock_setup,
-        ):
-            agent._pre_invoke_run()
-        mock_setup.assert_called_once()
-
-    def test_pre_invoke_run_skips_healthcheck_without_jk(self):
-        """Test _pre_invoke_run does NOT call _setup_healthcheck when JK is disabled."""
-        node_conf = Conf(entrypoint=_happy_function, local_world_size=1)
-
-        # Use a mocked rendezvous handler to avoid blocking on real connections
-        rdzv_handler = Mock()
-        rdzv_handler.get_backend.return_value = "c10d"
-        spec = WorkerSpec(
-            role=node_conf.role,
-            local_world_size=node_conf.local_world_size,
-            entrypoint=node_conf.entrypoint,
-            args=node_conf.args,
-            rdzv_handler=rdzv_handler,
-            max_restarts=0,
-            monitor_interval=0.01,
-        )
-        agent = self.get_agent(spec, node_config=node_conf)
-
-        with (
-            patch(
-                "torch.distributed.elastic.agent.server.local_elastic_agent.justknobs_check",
-                return_value=False,
-            ),
-            patch.object(agent, "_setup_healthcheck") as mock_setup,
-        ):
-            agent._pre_invoke_run()
-        mock_setup.assert_not_called()
-
     def test_healthcheck_with_watchdog_enabled(self):
         """Test healthcheck works with watchdog enabled during agent run."""
         # Set the env for watchdog and healthcheck

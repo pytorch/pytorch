@@ -364,6 +364,10 @@ print(t.is_pinned())
                 torch.cuda.caching_allocator_delete(mem)
                 self.assertEqual(torch.cuda.memory_allocated(), prev)
 
+    def test_caching_allocator_alloc_negative_size(self):
+        with self.assertRaisesRegex(ValueError, "Invalid memory size"):
+            torch.cuda.memory.caching_allocator_alloc(-1024)
+
     def test_memory_stats(self):
         gc.collect()
         torch.cuda.empty_cache()
@@ -2283,6 +2287,96 @@ torch.cuda.synchronize()
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    def test_graph_rng_after_failed_capture(self):
+        """Test that a stream can be captured again for RNG after a failed capture."""
+        stream = torch.cuda.Stream()
+        graph = torch.cuda.CUDAGraph()
+        x = torch.ones(1, device="cuda")
+
+        with torch.cuda.stream(stream):
+            graph.capture_begin()
+            with self.assertRaises(RuntimeError):
+                (x + 1).item()
+            with self.assertRaises(RuntimeError):
+                graph.capture_end()
+
+        torch.cuda.current_stream().wait_stream(stream)
+
+        result = torch.randn(4, device="cuda")
+        self.assertEqual(result.shape, (4,))
+
+        new_graph = torch.cuda.CUDAGraph()
+        buf = torch.empty(4, device="cuda")
+        with torch.cuda.stream(stream):
+            new_graph.capture_begin()
+            buf.copy_(torch.randn_like(buf))
+            new_graph.capture_end()
+        torch.cuda.current_stream().wait_stream(stream)
+        buf.zero_()
+        new_graph.replay()
+        torch.cuda.synchronize()
+        self.assertFalse(torch.allclose(buf, torch.zeros_like(buf)))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_rng_concurrent_replay_on_different_streams(self):
+        """Concurrent replay of two graphs sharing a generator on different streams.
+
+        With per-generator state (old code), this would race on the shared
+        rng_state_offset_extragraph_ tensor. With per-(generator, capture_id)
+        state, each graph has its own tensors.
+        """
+        seed = 1234
+        shape = (64,)
+
+        torch.manual_seed(seed)
+        ref0 = torch.randn(shape, device="cuda")
+        ref1 = torch.randn(shape, device="cuda")
+
+        torch.manual_seed(seed)
+        g0 = torch.cuda.CUDAGraph()
+        g1 = torch.cuda.CUDAGraph()
+        s_cap = torch.cuda.Stream()
+        buf0 = torch.empty(shape, device="cuda")
+        buf1 = torch.empty(shape, device="cuda")
+
+        with torch.cuda.stream(s_cap):
+            g0.capture_begin()
+            buf0.copy_(torch.randn_like(buf0))
+            g0.capture_end()
+
+        torch.cuda.current_stream().wait_stream(s_cap)
+
+        with torch.cuda.stream(s_cap):
+            g1.capture_begin()
+            buf1.copy_(torch.randn_like(buf1))
+            g1.capture_end()
+
+        torch.cuda.current_stream().wait_stream(s_cap)
+
+        s0 = torch.cuda.Stream()
+        s1 = torch.cuda.Stream()
+
+        buf0.zero_()
+        buf1.zero_()
+
+        s0.wait_stream(torch.cuda.current_stream())
+        s1.wait_stream(torch.cuda.current_stream())
+
+        with torch.cuda.stream(s0):
+            g0.replay()
+        with torch.cuda.stream(s1):
+            g1.replay()
+
+        torch.cuda.synchronize()
+
+        self.assertEqual(buf0, ref0)
+        self.assertEqual(buf1, ref1)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     def test_memory_stats_of_multiple_generators_and_graphs(self):
         # Function to clear CUDA cache and collect garbage
         def clear_cuda_cache():
@@ -2290,14 +2384,16 @@ torch.cuda.synchronize()
             torch.cuda.empty_cache()
 
         # Executes a simple graph task which includes capturing and executing a random number generation within a CUDA graph.
-        def simple_graph_task(graph):
+        def simple_graph_task(graph, default_generator, generator_states):
             s = torch.cuda.Stream()
             with torch.cuda.stream(s):
                 graph.capture_begin()
-                torch.rand(1, device="cuda")
+                for generator_state in generator_states:
+                    default_generator.graphsafe_set_state(generator_state)
+                    torch.rand(1, device="cuda")
                 graph.capture_end()
             torch.cuda.current_stream().wait_stream(s)
-            graph.replay()  # Replays the captured operations
+            graph.replay()
 
         def get_memory_stats():
             stats = torch.cuda.memory_stats()
@@ -2314,22 +2410,22 @@ torch.cuda.synchronize()
 
             # Allocate and manage generator states
             default_generator = torch.cuda.default_generators[0]
-            generators = [default_generator.graphsafe_get_state()]
+            generator_states = [default_generator.graphsafe_get_state()]
 
-            # Starts from 1 as one state is already added
             for _ in range(1, num_generators):
-                generators.append(default_generator.clone_state())
+                generator_states.append(default_generator.clone_state())
 
             for graph in graphs:
-                for generator_state in generators:
+                for generator_state in generator_states:
                     graph.register_generator_state(generator_state)
-                simple_graph_task(graph)
+                simple_graph_task(graph, default_generator, generator_states)
 
             # Assert conditions after graph tasks
             num_blocks, total_size = get_memory_stats()
-            # The allocated blocks should only be proportional to the number of generators
-            expected_blocks_diff = 2 * num_generators
-            expected_size_diff = 2 * 512 * num_generators  # Each block's size is 512
+            # Each (generator, graph) pair gets 2 tensors (seed + offset)
+            expected_captured_states = num_generators * num_graphs
+            expected_blocks_diff = 2 * expected_captured_states
+            expected_size_diff = 2 * 512 * expected_captured_states
 
             self.assertEqual(
                 (num_blocks - baseline_num_blocks),
@@ -3002,9 +3098,12 @@ exit(2)
         elem = 4
 
         # this was annoying to write but stresses the expectations pretty rigorously
+        # For small_pool cases, delta_cudaMallocs and delta_cudaMalloc_bytes include
+        # an extra kSmallBuffer segment for the per-capture RNG state tensors, which
+        # are allocated on the default stream (separate from stream s).
         cases = (
-            (512 // elem, 1, kSmallBuffer, kSmallBuffer, "small_pool"),
-            (kSmallSize // elem, 2, 2 * kSmallBuffer, kSmallBuffer, "small_pool"),
+            (512 // elem, 2, 2 * kSmallBuffer, kSmallBuffer, "small_pool"),
+            (kSmallSize // elem, 3, 3 * kSmallBuffer, kSmallBuffer, "small_pool"),
             ((kSmallSize + 512) // elem, 1, kLargeBuffer, kLargeBuffer, "large_pool"),
             (
                 (kMinLargeAlloc - 512) // elem,
@@ -3052,9 +3151,9 @@ exit(2)
             g = torch.cuda.CUDAGraph()
             s.wait_stream(torch.cuda.current_stream())
             with torch.cuda.stream(s):
-                # Allocation stat estimates assume input is created on the same stream as capture_begin()
-                # (in other words, the same stream silo as the rng offset holder, which is not allocated from the
-                # capture's private pool).
+                # Per-capture RNG state tensors are allocated on the default stream
+                # (not the capture stream), so they occupy a separate segment from
+                # user tensors created here on stream s.
                 a = torch.ones((numel,), device="cuda")
 
                 precapture_stats = torch.cuda.memory_stats()
@@ -4882,6 +4981,51 @@ class TestCudaAllocator(TestCase):
         with self.assertRaises(ValueError):
             torch._C._accelerator_setAllocatorSettings(
                 "pinned_num_register_threads:1024"
+            )
+
+        # Test throw_on_cudamalloc_oom config parsing - valid formats
+        torch.cuda.memory._set_allocator_settings("throw_on_cudamalloc_oom:True")
+        torch.cuda.memory._set_allocator_settings("throw_on_cudamalloc_oom:False")
+
+        # Test throw_on_cudamalloc_oom config parsing - invalid formats
+        with self.assertRaises(ValueError):
+            torch._C._accelerator_setAllocatorSettings("throw_on_cudamalloc_oom:maybe")
+
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "throw_on_cudamalloc_oom not supported")
+    @serialTest()
+    def test_throw_on_cudamalloc_oom(self):
+        """Test that throw_on_cudamalloc_oom + per_process_memory_fraction works correctly."""
+        torch.cuda.empty_cache()
+        device = torch._C._cuda_getDevice()
+        torch._C._cuda_resetAccumulatedMemoryStats(device)
+
+        try:
+            # Test 1: With rejection disabled (default), allocations should succeed
+            torch._C._accelerator_setAllocatorSettings("throw_on_cudamalloc_oom:False")
+            x = torch.empty(10 * 1024 * 1024, dtype=torch.int8, device="cuda")
+            del x
+            torch.cuda.empty_cache()
+
+            # Test 2: With throw_on_cudamalloc_oom enabled and a tight memory
+            # fraction, allocations that exceed the fraction limit should be
+            # preemptively rejected with OutOfMemoryError.
+            # Both settings must go through _accelerator_setAllocatorSettings so
+            # they are read from CUDAAllocatorConfig.
+            torch._C._accelerator_setAllocatorSettings(
+                "throw_on_cudamalloc_oom:True,per_process_memory_fraction:0.01"
+            )
+
+            with self.assertRaises(torch.cuda.OutOfMemoryError):
+                torch.empty(1024 * 1024 * 1024, dtype=torch.int8, device="cuda")
+
+            # Check that rejection counter was incremented
+            stats = torch.cuda.memory_stats()
+            self.assertGreater(stats["num_oom_rejections"], 0)
+
+        finally:
+            torch.cuda.empty_cache()
+            torch._C._accelerator_setAllocatorSettings(
+                "throw_on_cudamalloc_oom:False,per_process_memory_fraction:1.0"
             )
 
     def test_allocator_backend(self):

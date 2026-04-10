@@ -297,6 +297,11 @@ PyObject* THCPModule_cudaCachingAllocator_raw_alloc(
     return nullptr;
   }
   auto size = PyLong_AsSsize_t(size_o);
+  TORCH_CHECK_VALUE(
+      size >= 0,
+      "Invalid memory size: ",
+      size,
+      ". caching_allocator_alloc requires a non-negative size.");
   cudaStream_t stream = static_cast<cudaStream_t>(PyLong_AsVoidPtr(stream_o));
   void* mem = nullptr;
   {
@@ -451,6 +456,14 @@ PyObject* THCPModule_cudaCachingAllocator_enable(
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THCPModule_cudaCachingAllocator_is_enabled(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return PyBool_FromLong(c10::cuda::CUDACachingAllocator::isEnabled());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THCPModule_getAllocatorBackend(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
   return THPUtils_packString(c10::cuda::CUDACachingAllocator::name());
@@ -592,6 +605,7 @@ PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
   result["num_sync_all_streams"] = stats.num_sync_all_streams;
   result["num_device_alloc"] = stats.num_device_alloc;
   result["num_device_free"] = stats.num_device_free;
+  result["num_oom_rejections"] = stats.num_oom_rejections;
   result["allocation"] = statArrayToDict(stats.allocation);
   result["segment"] = statArrayToDict(stats.segment);
   result["active"] = statArrayToDict(stats.active);
@@ -2110,6 +2124,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
     {"_cuda_cudaCachingAllocator_enable",
      THCPModule_cudaCachingAllocator_enable,
      METH_O,
+     nullptr},
+    {"_cuda_cudaCachingAllocator_is_enabled",
+     THCPModule_cudaCachingAllocator_is_enabled,
+     METH_NOARGS,
      nullptr},
     {"_cuda_getAllocatorBackend",
      THCPModule_getAllocatorBackend,

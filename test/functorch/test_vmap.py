@@ -4828,6 +4828,60 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         check_vmap_fallback(self, test, Tensor.fill_)
 
+    @parametrize(
+        "op,msg,extra_positional_args,extra_kwargs",
+        [
+            subtest(
+                (
+                    Tensor.scatter_add_,
+                    "out-of-place operators instead of scatter_add_",
+                    (),
+                    {},
+                ),
+                name="scatter_add",
+            ),
+            subtest(
+                (
+                    Tensor.scatter_reduce_,
+                    "out-of-place operators instead of scatter_reduce_",
+                    ("sum",),
+                    {"include_self": True},
+                ),
+                name="scatter_reduce",
+            ),
+        ],
+    )
+    def test_scatter_inplace_self_not_batched(
+        self, device, op, msg, extra_positional_args, extra_kwargs
+    ):
+        x = torch.zeros(5, device=device)
+
+        def call_op(self, dim, index, src):
+            return op(
+                self,
+                dim,
+                index,
+                src,
+                *extra_positional_args,
+                **extra_kwargs,
+            )
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(call_op, in_dims=(None, None, None, 0))(
+                x,
+                0,
+                torch.tensor([0, 1], device=device),
+                torch.randn(2, 2, device=device),
+            )
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(call_op, in_dims=(None, None, 0, None))(
+                x,
+                0,
+                torch.tensor([[0, 1], [2, 3]], device=device),
+                torch.randn(2, device=device),
+            )
+
     @tf32_on_and_off(0.005)
     def test_conv_double_backward(self, device):
         images = torch.randn(2, 1, 5, 5, device=device)

@@ -5845,6 +5845,15 @@ class Scheduler:
                 why("node1 is extern but node2.node.data is not Pointwise")
                 return False
 
+            assert len(node1.node.mutation_outputs) == 1
+            written_buffer_name = node1.node.mutation_outputs[0].name
+
+            # The epilogue can only read from the output buffer.
+            # Any other tensor/s would require additional load expressions.
+            if any(dep.name != written_buffer_name for dep in node2.read_writes.reads):
+                why("epilogue reads from buffers other than the mutated output")
+                return False
+
             # the epilogue depends on expressions which may not available in the user triton kernel
             # (e.g. indexing exprs used not in a load)
             node2_inner_fn_free_symbols = node2.node.data.inner_fn_free_symbols()
@@ -5858,9 +5867,6 @@ class Scheduler:
             if node1.node.mutable_args[0].layout != node2.node.layout:
                 why("node1 and node2 uses different buf layouts")
                 return False
-
-            assert len(node1.node.mutation_outputs) == 1
-            written_buffer_name = node1.node.mutation_outputs[0].name
 
             def _is_other_node_that_references_mutation_buffer(
                 other_node: BaseSchedulerNode,
@@ -7506,6 +7512,10 @@ class Scheduler:
         if self.default_device_context and config.triton.autotune_at_compile_time:
             V.graph.wrapper_code.write_get_raw_stream_header()
 
+        # Register non-mutated inputs that need alignment checks.
+        # Deferred to just before the first kernel that reads each input.
+        V.graph.wrapper_code.register_alignment_check_inputs()
+
         for node in nodes:
             if log.isEnabledFor(logging.DEBUG):
                 try:
@@ -7568,6 +7578,15 @@ class Scheduler:
             if self._has_multi_stream_nodes() and self.current_device is not None:
                 self.generate_stream_ctx_switching(node)
 
+            # Emit deferred alignment copies for inputs first used by this
+            # node.  This runs *after* stream context switching so the copy
+            # executes on the same stream as the consuming kernel.
+            # TODO: inputs read on multiple streams should be copied in the
+            # prologue instead, to avoid cross-stream races.
+            V.graph.wrapper_code.codegen_deferred_alignment_copies(
+                dep.name for dep in node.read_writes.reads
+            )
+
             self.current_node = node
             self.buffer_names_to_free.update(node.last_usage)
 
@@ -7587,8 +7606,12 @@ class Scheduler:
                 backend_ = self.get_backend(device)
                 from .codegen.cuda_combined_scheduling import CUDACombinedScheduling
                 from .codegen.simd import SIMDScheduling
+                from .codegen.xpu.xpu_combined_scheduling import XPUCombinedScheduling
 
-                if isinstance(backend_, (SIMDScheduling, CUDACombinedScheduling)):
+                if isinstance(
+                    backend_,
+                    (SIMDScheduling, CUDACombinedScheduling, XPUCombinedScheduling),
+                ):
                     backend = backend_
                 else:
                     raise AssertionError(f"{type(self)=}")

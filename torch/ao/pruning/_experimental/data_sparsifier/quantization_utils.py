@@ -92,6 +92,7 @@ def post_training_sparse_quantize(
 
         # quantize
         for _, emb_module in embedding_modules:
+            # pyrefly: ignore [bad-argument-type]
             emb_module.qconfig = torch.ao.quantization.float_qparams_weight_only_qconfig
 
         torch.ao.quantization.prepare(model, inplace=True)
@@ -100,6 +101,7 @@ def post_training_sparse_quantize(
     else:
         # quantize
         for _, emb_module in embedding_modules:
+            # pyrefly: ignore [bad-argument-type]
             emb_module.qconfig = torch.ao.quantization.float_qparams_weight_only_qconfig
 
         torch.ao.quantization.prepare(model, inplace=True)

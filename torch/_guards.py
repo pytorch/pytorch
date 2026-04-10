@@ -844,6 +844,11 @@ class InvokeSubgraphCache(HopSubgraphCache):
             CodeType,
             list[tuple[InvokeSubgraphReuseCondition, InvokeSubgraphReuseEntry]],
         ] = defaultdict(list)
+        # fn_code → {hash_key → cache_entry}. Used by user-provided
+        # reuse_hash_fn for O(1) subgraph reuse lookup.
+        self.subgraph_reuse_key_cache: dict[
+            CodeType, dict[int, InvokeSubgraphReuseEntry]
+        ] = defaultdict(dict)
 
     def add_dynamo_installed_submodule(
         self, fn_code: CodeType, identifier: str
@@ -936,6 +941,28 @@ class InvokeSubgraphCache(HopSubgraphCache):
                     entries.insert(0, entries.pop(i))
                 return entry
         return None
+
+    def find_reuse_entry_by_key(
+        self, fn_code: CodeType, hash_key: int
+    ) -> InvokeSubgraphReuseEntry | None:
+        return self.subgraph_reuse_key_cache.get(fn_code, {}).get(hash_key)
+
+    def add_reuse_entry_by_key(
+        self,
+        fn_code: CodeType,
+        hash_key: int,
+        entry: InvokeSubgraphReuseEntry,
+        max_reuse_entries: int = 8,
+    ) -> None:
+        key_cache = self.subgraph_reuse_key_cache[fn_code]
+        if len(key_cache) >= max_reuse_entries and hash_key not in key_cache:
+            raise RuntimeError(
+                f"invoke_subgraph: exceeded maximum reuse entries "
+                f"({max_reuse_entries}) for function code {fn_code} (hash-key path). "
+                f"Increase the limit via the max_reuse_entries argument to "
+                f"nested_compile_region()."
+            )
+        key_cache[hash_key] = entry
 
 
 class HopDispatchSetCache:
@@ -1290,7 +1317,7 @@ def dataclass_with_cached_hash(
             # The _hash is a cached value that can be nondeterministically computed
             # (e.g., based on id() of objects), so it should not affect pickling.
             fields = dataclasses.fields(self)
-            field_values = tuple(getattr(self, f.name) for f in fields)
+            field_values = tuple(getattr(self, f.name) for f in fields if f.init)
             return (self.__class__, field_values)
 
         new_cls.__hash__ = __hash__

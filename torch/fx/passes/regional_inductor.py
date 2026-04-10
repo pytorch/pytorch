@@ -23,36 +23,6 @@ def _dummy_wrapper(fn):
     return inner
 
 
-def _merge_connected_partitions(
-    partitions: list[dict[torch.fx.Node, int | None]],
-) -> list[dict[torch.fx.Node, int | None]]:
-    """Merge adjacent partitions with the same annotation connected by data dependencies."""
-    if len(partitions) <= 1:
-        return partitions
-
-    def _depends_on(part, prev_nodes):
-        for node in part:
-            for inp in node.all_input_nodes:
-                if inp in prev_nodes:
-                    return True
-        return False
-
-    def _get_partition_annotation(part):
-        node = next(iter(part))
-        return node.meta["custom"]["compile_with_inductor"]
-
-    merged = [partitions[0]]
-    for part in partitions[1:]:
-        current_annotation = _get_partition_annotation(part)
-        prev_annotation = _get_partition_annotation(merged[-1])
-        prev_nodes = set(merged[-1].keys())
-        if current_annotation == prev_annotation and _depends_on(part, prev_nodes):
-            merged[-1].update(part)
-        else:
-            merged.append(part)
-    return merged
-
-
 def _compile_submod(gm, prefix):
     from torch._inductor.standalone_compile import AOTCompiledArtifact
 
@@ -145,31 +115,51 @@ class _RegionScooper:
 
     @staticmethod
     def scoop_regions(gm):
+        from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
+        from torch.fx.passes.operator_support import create_op_support
         from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
 
-        # Collect contiguous runs of marked nodes (no horizontal fusion).
-        # Each partition maps nodes to None (no partition-id needed).
-        partitions: list[dict[torch.fx.Node, int | None]] = []
-        current_run: dict[torch.fx.Node, int | None] = {}
+        # Group tagged nodes by region ID.  The region ID comes from the
+        # optional "inductor_region" key inside the compile_with_inductor
+        # annotation. When absent, all tagged nodes share a single default region
+        _DEFAULT_REGION = object()
+        regions: dict[object, set[torch.fx.Node]] = {}
         for node in gm.graph.nodes:
             if _needs_inductor_compile(node):
-                current_run[node] = None
-            else:
-                if current_run:
-                    partitions.append(current_run)
-                    current_run = {}
-        if current_run:
-            partitions.append(current_run)
+                compile_value = node.meta["custom"]["compile_with_inductor"]
+                if (
+                    isinstance(compile_value, dict)
+                    and "inductor_region" in compile_value
+                ):
+                    rid = compile_value["inductor_region"]
+                else:
+                    rid = _DEFAULT_REGION
+                regions.setdefault(rid, set()).add(node)
 
-        if not partitions:
+        if not regions:
             logger.info("No inductor marked nodes found")
             return gm
 
-        partitions = _merge_connected_partitions(partitions)
+        # Run CapabilityBasedPartitioner per region to get cycle-safe partitions
+        # without merging across region boundaries.
+        def _is_in_region(region_nodes):
+            def is_node_supported(_submodules, node):
+                return node in region_nodes
+
+            return is_node_supported
+
+        all_partitions: list[dict[torch.fx.Node, int | None]] = []
+        for region_nodes in regions.values():
+            support = create_op_support(_is_in_region(region_nodes))
+            partitioner = CapabilityBasedPartitioner(
+                gm, support, allows_single_node_partition=True
+            )
+            for partition in partitioner.propose_partitions():
+                all_partitions.append(partition.nodes)
 
         return fuse_by_partitions(
             gm,
-            partitions,
+            all_partitions,
             prefix="__marked_inductor_submod",
             always_return_tuple=True,
         )
@@ -254,15 +244,19 @@ def regional_inductor(gm, *example_args):
     """
     Scoops out inductor marked regions and compiles them with inductor.
 
-    Inductor options should be provided via the annotation API:
-    with fx_traceback.annotate({
-        "compile_with_inductor": {
-            "inductor_configs": {
-                "max_autotune": True,
-                "triton.cudagraphs": False
+    Inductor options should be provided via the annotation API::
+
+        with fx_traceback.annotate(
+            {
+                "compile_with_inductor": {
+                    "inductor_configs": {
+                        "max_autotune": True,
+                        "triton.cudagraphs": False,
+                    }
+                }
             }
-        }
-    }):
+        ):
+            ...
     """
 
     # fuser utils create new nodes using create_proxy which retains the seq_nr

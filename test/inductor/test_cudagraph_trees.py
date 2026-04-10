@@ -65,6 +65,16 @@ requires_multigpu = functools.partial(
 )
 from io import StringIO
 
+from torch._library.opaque_object import OpaqueBase, register_opaque_type
+
+
+class _CudagraphTestScaleFactor(OpaqueBase):
+    def __init__(self, factor):
+        self.factor = factor
+
+
+register_opaque_type(_CudagraphTestScaleFactor, typ="reference")
+
 
 def get_compile_fn(backend):
     if backend == "cudagraphs":
@@ -746,8 +756,7 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(foo_opt(ones), foo(ones))
             # paths
             children = self.get_root_children()
-            # one root with two children
-            self.assertEqual(children, [2])
+            self.assertEqual(children, [1])
 
         def test_end_recording_early(self):
             def foo(x):
@@ -2640,9 +2649,9 @@ if HAS_CUDA_AND_TRITON:
                 t = torch.rand([32], device="cuda")
                 self.assertEqual(foo(t), foo_c(t))
 
-            FileCheck().check("skipping cudagraphs due to cpp wrapper enabled").run(
-                log_stream.getvalue()
-            )
+            FileCheck().check(
+                "skipping cudagraphs due to cpp-wrapper does not support graph partition yet"
+            ).run(log_stream.getvalue())
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
         def test_storage_access_error(self):
@@ -5099,6 +5108,30 @@ if HAS_CUDA_AND_TRITON:
             run(20)
             run(10)
             run(25)
+
+        @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
+        def test_opaque_value_input_cudagraph(self):
+            """Opaque reference-type objects (e.g. DeviceMesh, ProcessGroup)
+            passed alongside tensors must be marked "static" so they are
+            excluded from the tensor-copy path (non_static_input_idx).
+            "Static" here just means "don't copy as a tensor", not that
+            the object is semantically immutable."""
+
+            sf = _CudagraphTestScaleFactor(3.0)
+
+            def foo(args):
+                obj = args[0]
+                x = args[1]
+                args.clear()
+                return (x * obj.factor,)
+
+            inp = torch.rand([4], device="cuda")
+            foo_cg = self.cudagraphify_impl(foo, [sf, inp], ())
+            result = foo_cg([sf, inp])
+            self.assertEqual(result[0], inp * 3.0)
+
+            result2 = foo_cg([sf, inp])
+            self.assertEqual(result2[0], inp * 3.0)
 
     class TestSAC(TestCase):
         def _make_observer_mode(self):

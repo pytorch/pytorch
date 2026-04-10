@@ -1,0 +1,36 @@
+# Cross Repo CI Relay (CRCR) Allowlist
+#
+# This document defines which downstream repositories can receive PyTorch
+# PR events or feedback through CRCR. Each repository is assigned a level
+# (L1-L4), which determines the depth to which downstream repositories can
+# participate.
+#
+# Trust Levels:
+#
+#   L1 – Onboarding
+#     Events are forwarded to downstream, but upstream receives no feedback.
+#
+#   L2 – Observation
+#     Downstream CI results are displayed on the HUD page, but not on PRs.
+#
+#   L3 – Stable
+#     Adds a non-blocking check run on PRs when ciflow/oot/<name> label is applied.
+#
+#   L4 – Mature
+#     Adds a blocking check run on every PR; reserved for critical accelerators.
+#
+# For more information, see the RFC: https://github.com/pytorch/rfcs/pull/90
+
+# Example:
+#
+# L1:
+#     - org1/downstream-repo1
+#
+# L2:
+#     - org2/downstream-repo2
+#
+# L3:
+#     - org3/downstream-repo3: @oncall1,oncall2
+#
+# L4:
+#     - org4/downstream-repo4: @oncall1,oncall2

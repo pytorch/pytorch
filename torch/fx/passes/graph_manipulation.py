@@ -26,8 +26,10 @@ def replace_target_nodes_with(
     new_op: str,
     new_target: Target,
 ):
-    """Modifies all nodes in fx_module.graph.nodes which match the specified op code and target,
-    and updates them to match the new op code and target"""
+    """
+    Modifies all nodes in fx_module.graph.nodes which match the specified op code
+    and target, and updates them to match the new op code and target.
+    """
     new_graph = Graph()
     val_map: dict[Node, Node] = {}
     for node in fx_module.graph.nodes:

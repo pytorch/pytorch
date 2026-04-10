@@ -4386,6 +4386,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         o = torch.compile(foo, fullgraph=True, backend="eager")(x, y)
         self.assertEqual(o, x * y)
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_module_deepcopy(self):
         m1 = torch.nn.Sequential(
             torch.nn.Linear(10, 10),
@@ -6300,42 +6301,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         res2 = opt_f2()
         self.assertTrue(same(res1, res2))
 
-    def test_list_append_does_not_recompile_on_existing_contents(self):
-        items = []
-        cnts = CompileCounter()
-
-        def fn():
-            items.append(torch.ones(8))
-
-        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
-
-        opt_fn()
-        opt_fn()
-        opt_fn()
-
-        self.assertEqual(len(items), 3)
-        self.assertEqual(cnts.frame_count, 1)
-
-    def test_list_clear_does_not_recompile_on_existing_contents(self):
-        items = [torch.randn(8)]
-        cnts = CompileCounter()
-
-        def fn():
-            items.clear()
-            return torch.ones(8)
-
-        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
-
-        out1 = opt_fn()
-        self.assertEqual(len(items), 0)
-
-        items.extend([torch.randn(8), torch.randn(8)])
-        out2 = opt_fn()
-
-        self.assertEqual(len(items), 0)
-        self.assertTrue(same(out1, out2))
-        self.assertEqual(cnts.frame_count, 1)
-
     def test_inline_dict_mutation(self):
         def f1(d):
             d["c"] = d["a"] + d.pop("b")
@@ -7554,7 +7519,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         @torch.compile(backend="eager")
         def f1(a, b):
-            f2(a, b)
+            try:
+                f2(a, b)
+            finally:
+                pass
 
         def f2(a, b):
             c = a + b
@@ -7563,7 +7531,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         @torch.compile(backend="eager")
         def g1(a, b):
-            g2(a, b)
+            try:
+                g2(a, b)
+            finally:
+                pass
 
         def g2(a, b):
             c = a + b
@@ -8933,6 +8904,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertTrue(same(ref, res))
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_cast_no_recompile_after_graph_break(self):
         # In FSDP, cast(nn.Module, self) can be called after a
         # graph break. Without the polyfill + skip_code fix, PEP 523 compiles
@@ -15208,6 +15180,76 @@ def forward(self, L_x_ : torch.Tensor):
         ret1 = fn()
         ret2 = compilefn()
         self.assertEqual(ret1, ret2)
+
+    def test_constant_subclass_guard_recompiles(self):
+        class MyInt(int):
+            def __eq__(self, other):
+                raise RuntimeError("should not be called during guard check")
+
+        class MyFloat(float):
+            def __eq__(self, other):
+                raise RuntimeError("should not be called during guard check")
+
+        class MyStr(str):
+            def __eq__(self, other):
+                raise RuntimeError("should not be called during guard check")
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        # int subclass
+        @torch.compile(backend=cnt)
+        def f(x, y):
+            return x + y
+
+        r1 = f(torch.tensor(1), MyInt(5))
+        self.assertEqual(r1.item(), 6)
+        self.assertEqual(cnt.frame_count, 1)
+
+        r2 = f(torch.tensor(1), MyInt(10))
+        self.assertEqual(r2.item(), 11)
+        self.assertEqual(cnt.frame_count, 2)
+
+        r3 = f(torch.tensor(1), MyInt(5))
+        self.assertEqual(r3.item(), 6)
+        self.assertEqual(cnt.frame_count, 2)
+
+        # float subclass
+        cnt.clear()
+
+        @torch.compile(backend=cnt)
+        def g(x, y):
+            return x + y
+
+        r4 = g(torch.tensor(1.0), MyFloat(2.5))
+        self.assertEqual(r4.item(), 3.5)
+        self.assertEqual(cnt.frame_count, 1)
+
+        r5 = g(torch.tensor(1.0), MyFloat(3.5))
+        self.assertEqual(r5.item(), 4.5)
+        self.assertEqual(cnt.frame_count, 2)
+
+        r6 = g(torch.tensor(1.0), MyFloat(2.5))
+        self.assertEqual(r6.item(), 3.5)
+        self.assertEqual(cnt.frame_count, 2)
+
+        # str subclass
+        cnt.clear()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def h(x, s):
+            return x + len(s)
+
+        r7 = h(torch.tensor(1), MyStr("abc"))
+        self.assertEqual(r7.item(), 4)
+        self.assertEqual(cnt.frame_count, 1)
+
+        r8 = h(torch.tensor(1), MyStr("abcde"))
+        self.assertEqual(r8.item(), 6)
+        self.assertEqual(cnt.frame_count, 2)
+
+        r9 = h(torch.tensor(1), MyStr("abc"))
+        self.assertEqual(r9.item(), 4)
+        self.assertEqual(cnt.frame_count, 2)
 
 
 class MiscTestsPyTree(torch._inductor.test_case.TestCase):

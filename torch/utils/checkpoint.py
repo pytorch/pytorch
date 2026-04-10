@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import itertools
 import platform
 import uuid
 import warnings
@@ -138,10 +139,11 @@ class DefaultDeviceType:
 def _infer_device_type(*args):
     device_types = []
 
-    def add_device_types(arg) -> None:
+    def add_device_types(arg):
         nonlocal device_types
         if isinstance(arg, torch.Tensor) and arg.device.type != "cpu":
             device_types.append(arg.device.type)
+        return arg
     tree_map(add_device_types, args)
 
     device_types_set = set(device_types)
@@ -174,10 +176,11 @@ def get_device_states(*args) -> Tuple[List[int], List[torch.Tensor]]:
     # the conditionals short-circuit.
     fwd_device_ids = []
 
-    def add_device_ids(arg) -> None:
+    def add_device_ids(arg):
         nonlocal fwd_device_ids
         if isinstance(arg, torch.Tensor) and arg.device.type not in {"cpu", "meta"}:
             fwd_device_ids.append(arg.get_device())
+        return arg
     tree_map(add_device_ids, args)
 
     fwd_device_states = []
@@ -1199,8 +1202,10 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
 
 
 def _is_compiling(func, args, kwargs):
-    # Check if we are under AOTAutograd tracing
-    # Checking that a functional mode is active should always do what we want
+    # Check if we are under AOTAutograd tracing or export tracing
+    # Checking that a proxy mode is active should always do what we want
+    if torch.compiler._is_non_strict_tracing():
+        return False
     return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY) is not None
 
 
@@ -1261,8 +1266,9 @@ class SelectiveCheckpointContext:
         >>>     context_fn=context_fn,
         >>> )
     """
-    def __init__(self, *, is_recompute) -> None:
+    def __init__(self, *, is_recompute, op_output=None) -> None:
         self.is_recompute = is_recompute
+        self.op_output = op_output
 
 
 class CheckpointPolicy(enum.Enum):
@@ -1325,21 +1331,23 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         self.ac_graph_id = ac_graph_id
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        if func in SAC_IGNORED_OPS:
-            return func(*args, **kwargs)
-
         kwargs = {} if kwargs is None else kwargs
-        policy = self.policy_fn(SelectiveCheckpointContext(is_recompute=False),
-                                func, *args, **kwargs)
-        if isinstance(policy, bool):
-            policy = _policy_from_bool(policy)
-
         is_compiling = _is_compiling(func, args, kwargs)
 
         if is_compiling:
-            # Overwrite each node's "recompute" tag to add in the user annotation.
-            fx_traceback.current_meta["recompute"] = policy
             fx_traceback.current_meta["ac_graph_id"] = self.ac_graph_id
+            fx_traceback.current_meta["recompute"] = CheckpointPolicy.PREFER_RECOMPUTE
+
+        if func in SAC_IGNORED_OPS:
+            return func(*args, **kwargs)
+
+        proxy_mode = None
+        graph_len_before = 0
+        if is_compiling:
+            from torch.fx.experimental.proxy_tensor import get_proxy_mode
+            proxy_mode = get_proxy_mode()
+            if proxy_mode is not None:
+                graph_len_before = len(proxy_mode.tracer.graph.nodes)
 
         out = func(*args, **kwargs)
 
@@ -1350,6 +1358,18 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
             any_ret_has_alias_info = False
         else:
             any_ret_has_alias_info = any(ret.alias_info is not None for ret in func._schema.returns)
+
+        policy = self.policy_fn(SelectiveCheckpointContext(is_recompute=False, op_output=out),
+                                func, *args, **kwargs)
+        if isinstance(policy, bool):
+            policy = _policy_from_bool(policy)
+
+        if is_compiling:
+            if proxy_mode is not None:
+                graph = proxy_mode.tracer.graph
+                num_new = len(graph.nodes) - graph_len_before
+                for node in itertools.islice(reversed(graph.nodes), num_new):
+                    node.meta["recompute"] = policy
 
         if policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE) or is_compiling:
             self.storage[func].append(tree_map(lambda x: _VersionWrapper(_maybe_detach(x, any_ret_has_alias_info)), out))
@@ -1577,6 +1597,8 @@ def _checkpoint_without_reentrant_generator(
         ),
         contextlib.nullcontext(),
     )
+    error_on_nested_fx_trace = torch._dynamo.config.error_on_nested_fx_trace
+    is_non_strict_tracing = torch.compiler._is_non_strict_tracing()
 
     def recompute_fn(*args) -> None:
         # This will be called later during recomputation. This wrapping enables
@@ -1595,7 +1617,20 @@ def _checkpoint_without_reentrant_generator(
             device_autocast_ctx = torch.amp.autocast(
                 device_type=device_type, **device_autocast_kwargs
             ) if torch.amp.is_autocast_available(device_type) else contextlib.nullcontext()
-            with device_autocast_ctx, torch.amp.autocast("cpu", **cpu_autocast_kwargs), recompute_context, device_ctx:  # type: ignore[attr-defined]
+            nested_fx_trace_ctx = (
+                torch._dynamo.config.patch(
+                    error_on_nested_fx_trace=error_on_nested_fx_trace
+                )
+                if is_non_strict_tracing
+                else contextlib.nullcontext()
+            )
+            with (
+                device_autocast_ctx,
+                torch.amp.autocast("cpu", **cpu_autocast_kwargs),
+                recompute_context,
+                device_ctx,
+                nested_fx_trace_ctx,
+            ):  # type: ignore[attr-defined]
                 fn(*args, **kwargs)
 
     new_frame = _CheckpointFrame(

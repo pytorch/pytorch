@@ -48,6 +48,10 @@ docutils==0.20
 #Description: This is used to generate PyTorch C++ docs
 #Pinned versions: 0.20
 
+coverxygen==1.8.1
+#Description: This is used to measure C++ API doc coverage from Doxygen XML
+#Pinned versions: 1.8.1
+
 bs4==0.0.1
 #Description: This is used to generate PyTorch C++ docs
 #Pinned versions: 0.0.1

@@ -1199,8 +1199,10 @@ def identify_triton_stores(source_code: str) -> TritonStores:
 
     tl.store signature: store(pointer, value, mask=None, boundary_check=(), ...)
     """
+    return identify_triton_stores_from_ast(ast.parse(source_code))
 
-    tree = ast.parse(source_code)
+
+def identify_triton_stores_from_ast(tree: ast.Module) -> TritonStores:
     stores = []
 
     def _extract_arg(node, arg_name, positional_index):

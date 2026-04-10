@@ -63,7 +63,13 @@ from ..create_parameter_op import (
     tracable_create_parameter,
 )
 from ..device_interface import get_registered_device_interfaces
-from ..exc import raise_observed_exception, unimplemented, UserError, UserErrorType
+from ..exc import (
+    raise_observed_exception,
+    raise_type_error,
+    unimplemented,
+    UserError,
+    UserErrorType,
+)
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
@@ -82,7 +88,7 @@ from ..utils import (
     proxy_args_kwargs,
     unwrap_if_wrapper,
 )
-from .base import raise_type_error_exc, typestr, VariableTracker
+from .base import typestr, VariableTracker
 from .ctx_manager import (
     AutocastModeVariable,
     ProfilerContextVariable,
@@ -91,7 +97,7 @@ from .ctx_manager import (
 )
 from .distributed import DistributedVariable
 from .functions import bind_args_cached, NestedUserFunctionVariable
-from .lists import ListVariable, NamedTupleVariable, TupleVariable
+from .lists import ListVariable, TupleVariable
 from .script_object import TorchScriptObjectVariable
 from .torch_function import (
     can_dispatch_torch_function,
@@ -99,6 +105,7 @@ from .torch_function import (
     TensorWithTFOverrideVariable,
     TorchFunctionModeStackVariable,
 )
+from .user_defined import UserDefinedTupleVariable
 
 
 try:
@@ -252,7 +259,7 @@ def _check_for_gradient_edge(var: VariableTracker, arg_name: str) -> None:
     """
     from .lists import BaseListVariable
 
-    if isinstance(var, NamedTupleVariable) and var.tuple_cls is GradientEdge:
+    if isinstance(var, UserDefinedTupleVariable) and type(var.value) is GradientEdge:
         # Try to get source info for context
         source_info = var.source.name if var.source else None
         context = f"GradientEdge in {arg_name}"
@@ -367,6 +374,43 @@ def _collect_tensors_with_sources(
             ],
         )
     return results
+
+
+def _collect_placeholder_nodes(var: "VariableTracker") -> list[torch.fx.Node]:
+    """Recursively collect FX placeholder nodes from a VariableTracker.
+
+    The returned placeholder nodes carry grapharg.example (real tensor) and
+    example_value (FakeTensor) metadata — comparing these reveals lost
+    autograd linkage (e.g., grad_fn dropped during tracing).
+    See NOTE [Detecting lost autograd linkage in closure-captured tensors].
+    """
+    from .lazy import LazyVariableTracker
+    from .lists import BaseListVariable
+    from .tensor import TensorVariable
+
+    result: list[torch.fx.Node] = []
+    if isinstance(var, TensorVariable):
+        node = var.as_proxy().node
+        if node.op == "placeholder":
+            result.append(node)
+    elif isinstance(var, LazyVariableTracker):
+        result.extend(_collect_placeholder_nodes(var.realize()))
+    elif isinstance(var, BaseListVariable):
+        for item in var.items:
+            result.extend(_collect_placeholder_nodes(item))
+    else:
+        unimplemented(
+            gb_type="_autograd_grad with unsupported argument type",
+            context=f"got {type(var).__name__}",
+            explanation=(
+                f"_autograd_grad() received an argument of type {type(var).__name__} "
+                "which is not supported. Expected tensor or sequence of tensors."
+            ),
+            hints=[
+                "Ensure outputs and inputs arguments are tensors or sequences of tensors.",
+            ],
+        )
+    return result
 
 
 @functools.cache
@@ -679,6 +723,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
     def _get_handlers() -> dict[Callable[..., Any], Callable[..., Any]]:
         """Build a dict from function -> method to handle it so that we are O(1)
         in terms of the number of function with special handling."""
+        # pyrefly: ignore [implicit-any]
         handlers = {}
 
         def register(
@@ -1786,7 +1831,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             **kwargs: VariableTracker,
         ) -> VariableTracker:
             if len(args) != 1 or kwargs:
-                raise_type_error_exc(
+                raise_type_error(
                     tx,
                     f"push_torch_function takes exactly one argument ({len(args)} given)",
                 )
@@ -1803,7 +1848,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             **kwargs: VariableTracker,
         ) -> VariableTracker:
             if args or kwargs:
-                raise_type_error_exc(tx, "len_torch_function_stack takes no arguments")
+                raise_type_error(tx, "len_torch_function_stack takes no arguments")
             return VariableTracker.build(
                 tx, len(tx.symbolic_torch_function_state.mode_stack)
             )
@@ -1816,7 +1861,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             **kwargs: VariableTracker,
         ) -> TorchFunctionModeVariable:
             if len(args) != 1 or kwargs:
-                raise_type_error_exc(
+                raise_type_error(
                     tx,
                     f"get_function_stack_at takes exactly one argument ({len(args)} given)",
                 )
@@ -1983,6 +2028,39 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             return CONSTANT_VARIABLE_NONE
 
+        from torch._prims_common import elementwise_dtypes
+
+        @register(elementwise_dtypes)
+        def handle_elementwise_dtypes(
+            self,
+            tx: "InstructionTranslator",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker:
+            from .builder import SourcelessBuilder
+
+            type_promotion_kind = kwargs["type_promotion_kind"].as_python_constant()
+            real_args = []
+            for arg in args:
+                if isinstance(arg, TensorVariable):
+                    real_args.append(arg.as_proxy().node.meta["example_value"])
+                elif arg.is_python_constant():
+                    real_args.append(arg.as_python_constant())
+                else:
+                    unimplemented(
+                        gb_type="elementwise_dtypes unsupported arg type",
+                        context=str(arg),
+                        explanation=(
+                            "elementwise_dtypes requires tensor or constant arguments, "
+                            f"got {type(arg).__name__}"
+                        ),
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+            result = elementwise_dtypes(
+                *real_args, type_promotion_kind=type_promotion_kind
+            )
+            return SourcelessBuilder.create(tx, result)
+
         @register(torch._check)
         def handle_check(
             self,
@@ -2075,7 +2153,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             fn: Callable[[int], int | None],
         ) -> VariableTracker:
             if len(args) != 1 or kwargs:
-                raise_type_error_exc(
+                raise_type_error(
                     tx,
                     f"{fn.__name__} takes exactly one argument ({len(args)} given)",
                 )
@@ -2360,14 +2438,78 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     )
                 tx.output.autograd_grad_consumed_grad_fns.update(non_leaf_consumed)
 
-            return wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
+            with (
+                torch.fx.traceback.preserve_node_meta(),
+                torch.fx.traceback.annotate({"autograd_backward": True}),
+            ):
+                proxy = tx.output.create_proxy(
                     "call_function",
                     torch.autograd.grad,
                     *proxy_args_kwargs(args, kwargs),
-                ),
-            )
+                )
+            return wrap_fx_proxy(tx=tx, proxy=proxy)
+
+        @register(torch._functorch.eager_transforms._autograd_grad)
+        def handle_functorch_autograd_grad(
+            self,
+            tx: "InstructionTranslator",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            """Graph-break when closure-captured tensors lose their grad_fn.
+
+            NOTE [Detecting lost autograd linkage in closure-captured tensors]
+
+            Functorch transforms (vjp, grad, jacrev) return closures that capture
+            tensors with grad_fn. When such a closure is compiled separately, those
+            tensors become graph placeholders whose FakeTensors lose grad_fn,
+            causing _autograd_grad to silently return zeros.
+
+            _collect_placeholder_nodes gathers placeholder nodes from the
+            outputs/inputs args. For each, we compare grapharg.example (the real
+            tensor, retains grad_fn) against example_value (FakeTensor, grad_fn
+            is None). A mismatch means autograd linkage was lost, so we
+            graph-break.
+
+            This is a pre-check only: kwargs (retain_graph, create_graph,
+            grad_outputs) don't affect linkage detection and are handled by
+            the default proxy path when this returns None.
+            """
+            outputs_var = args[0] if len(args) >= 1 else None
+            inputs_var = args[1] if len(args) >= 2 else None
+
+            if outputs_var is None or inputs_var is None:
+                return None
+
+            output_placeholder_nodes = _collect_placeholder_nodes(outputs_var)
+            input_placeholder_nodes = _collect_placeholder_nodes(inputs_var)
+
+            if output_placeholder_nodes and input_placeholder_nodes:
+                for node in output_placeholder_nodes:
+                    fake = node.meta.get("example_value")
+                    grapharg = node.meta.get("grapharg")
+                    if (
+                        grapharg is not None
+                        and isinstance(fake, torch.Tensor)
+                        and fake.grad_fn is None
+                    ):
+                        real = grapharg.example
+                        if isinstance(real, torch.Tensor) and real.grad_fn is not None:
+                            unimplemented(
+                                gb_type="_autograd_grad with lost grad_fn linkage",
+                                context="outputs lost autograd linkage during tracing",
+                                explanation=(
+                                    "_autograd_grad() received tensors whose grad_fn "
+                                    "was lost during tracing - this silently produces "
+                                    "zero gradients."
+                                ),
+                                hints=[
+                                    "Compile the full transform instead of the returned "
+                                    "closure: torch.compile(lambda x: torch.func.vjp(f, x))",
+                                    *graph_break_hints.SUPPORTABLE,
+                                ],
+                            )
+            return None
 
         return handlers
 

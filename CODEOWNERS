@@ -173,9 +173,9 @@ caffe2/utils/hip @jeffdaily @jithunnair-amd
 /torch/_export/serde/schema.py @SherlockNoMad @zhxchen17
 
 # Dynamic Shapes
-/torch/fx/experimental/symbolic_shapes.py @bobrenjc93 @laithsakka
-/torch/fx/experimental/sym_node.py @bobrenjc93 @laithsakka
-/torch/fx/experimental/recording.py @bobrenjc93 @laithsakka
+/torch/fx/experimental/symbolic_shapes.py @laithsakka
+/torch/fx/experimental/sym_node.py @laithsakka
+/torch/fx/experimental/recording.py @laithsakka
 
 # ProxyTorchDispatchMode
 torch/fx/experimental/proxy_tensor.py @aorenste

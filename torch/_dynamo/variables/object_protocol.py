@@ -2,23 +2,32 @@
 Dynamo implementations of CPython's PyObject_* default slot algorithms.
 
 Analogous to CPython's Objects/object.c, this module holds the general
-comparison dispatch machinery that is independent of any specific type.
-Per-type richcompare_impl hooks live in their respective VT files.
+dispatch machinery that is independent of any specific type.
+Per-type hook implementations (bool_impl, richcompare_impl, etc.)
+live in their respective VT files.
 """
 
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
-from torch._C._dynamo import get_type_slots, has_slot, PyMappingSlots, PySequenceSlots
+from torch._C._dynamo import (
+    get_type_slots,
+    has_slot,
+    PyMappingSlots,
+    PyNumberSlots,
+    PySequenceSlots,
+)
 
 from .. import graph_break_hints
-from ..exc import unimplemented
+from ..exc import (
+    handle_observed_exception,
+    ObservedTypeError,
+    raise_type_error,
+    unimplemented,
+)
 from ..utils import istype
-from .base import NO_SUCH_SUBOBJ, raise_type_error_exc, VariableTracker
+from .base import NO_SUCH_SUBOBJ, VariableTracker
 from .constant import CONSTANT_VARIABLE_FALSE, CONSTANT_VARIABLE_TRUE
-
-
-type_error = raise_type_error_exc
 
 
 if TYPE_CHECKING:
@@ -55,8 +64,9 @@ def vt_identity_compare(
     # Mutable containers created during tracing: VT identity = Python identity.
     from .dicts import ConstDictVariable
     from .lists import ListVariable
+    from .sets import SetVariable
 
-    if isinstance(left, (ConstDictVariable, ListVariable)):
+    if isinstance(left, (ConstDictVariable, ListVariable, SetVariable)):
         return CONSTANT_VARIABLE_FALSE
 
     # Different Python types can never be the same object.
@@ -97,6 +107,12 @@ def type_implements_mp_length(obj_type: type) -> bool:
     return has_slot(map_slots, PyMappingSlots.MP_LENGTH)
 
 
+def type_implements_nb_bool(obj_type: type) -> bool:
+    """Check whether obj_type implements the nb_bool slot (i.e. has __bool__ or __len__)."""
+    _, _, number_slots, _ = _get_cached_slots(obj_type)
+    return has_slot(number_slots, PyNumberSlots.NB_BOOL)
+
+
 def maybe_get_python_type(obj: VariableTracker) -> type:
     try:
         return obj.python_type()
@@ -121,9 +137,9 @@ def vt_mapping_size(
         return obj.mp_length(tx)
 
     if type_implements_sq_length(T):
-        type_error(tx, f"{obj.python_type_name()} is not a mapping")
+        raise_type_error(tx, f"{obj.python_type_name()} is not a mapping")
 
-    type_error(tx, f"object of type {obj.python_type_name()} has no len()")
+    raise_type_error(tx, f"object of type {obj.python_type_name()} has no len()")
 
 
 def generic_len(
@@ -139,3 +155,35 @@ def generic_len(
     if type_implements_sq_length(T):
         return obj.sq_length(tx)
     return vt_mapping_size(tx, obj)
+
+
+def generic_bool(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTracker:
+    """Mirrors PyObject_IsTrue.
+
+    https://github.com/python/cpython/blob/c09ccd9c429/Objects/object.c#L2135-L2158
+
+    Resolution order: constants → nb_bool → mp_length/sq_length → truthy.
+    """
+    from .constant import ConstantVariable
+
+    if obj.is_python_constant():
+        return ConstantVariable.create(bool(obj.as_python_constant()))
+
+    obj_type = maybe_get_python_type(obj)
+
+    if type_implements_nb_bool(obj_type):
+        result = obj.bool_impl(tx)
+        if result is not None:
+            return result
+
+    try:
+        length = generic_len(tx, obj)
+        from .tensor import SymNodeVariable
+
+        if isinstance(length, SymNodeVariable):
+            return SymNodeVariable.create(tx, length.as_proxy() > 0)
+        return ConstantVariable.create(length.as_python_constant() > 0)
+    except ObservedTypeError:
+        handle_observed_exception(tx)
+
+    return CONSTANT_VARIABLE_TRUE

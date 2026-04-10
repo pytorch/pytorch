@@ -50,6 +50,7 @@ from torch._inductor.utils import (
     output_node,
     set_tracing_context_output_strides,
 )
+from torch._opaque_base import OpaqueBase
 from torch.fx._graph_pickler import _node_metadata_key_filter_safe, _ops_filter_safe
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_in_torch_dispatch_mode
@@ -373,14 +374,28 @@ def maybe_realign_inputs(
     we didn't end up running cudagraphs. Mutates
     `compiled_graph.current_callable` if cudagraphs
     was run. Otherwise, does nothing.
+
+    Non-mutated inputs are handled by deferred alignment copies
+    in the generated code. Only mutated inputs need the wrapper
+    for writeback.
     """
     if not ran_cudagraphs:
-        assert compiled_graph.current_callable is not None
-        new_callable = align_inputs_from_check_idxs(
-            compiled_graph.current_callable, inputs_to_check, mutated_inputs_idxs
-        )
-        if new_callable is not compiled_graph.current_callable:
-            compiled_graph.current_callable = new_callable
+        check_idxs = inputs_to_check
+        if compiled_graph._defers_input_alignment:
+            # Non-mutated inputs are handled by deferred alignment copies
+            # in the generated Python code. Only mutated inputs need the wrapper
+            # for writeback. Backends that don't emit deferred copies (cpp_wrapper,
+            # FXIR) need the full wrapper.
+            check_idxs = [i for i in inputs_to_check if i in mutated_inputs_idxs]
+        if check_idxs:
+            assert compiled_graph.current_callable is not None
+            new_callable = align_inputs_from_check_idxs(
+                compiled_graph.current_callable,
+                check_idxs,
+                mutated_inputs_idxs,
+            )
+            if new_callable is not compiled_graph.current_callable:
+                compiled_graph.current_callable = new_callable
 
 
 class CompiledFxGraphConstants:
@@ -468,12 +483,14 @@ class CompiledFxGraph(OutputCode):
 
     cudagraph_info: CudagraphCachedInfo | None
     partition_maps: list[GraphPartitionMap] | None
+    compile_region_name: str | None
     fx_kwargs: _CompileFxKwargs
     inputs_to_check: Sequence[int]
 
     _boxed_call: bool | None = None
     _triton_bundle: TritonBundle | None = None
     _wrap_compiled_regions: bool = False
+    _defers_input_alignment: bool = False
     # Metadata-stripped copy of the FX graph for fake tensor propagation.
     # Running this graph under FakeTensorMode re-derives output shapes
     # (including aliasing) from the input shapes.
@@ -491,6 +508,7 @@ class CompiledFxGraph(OutputCode):
         cudagraphs: BoxedBool,
         example_inputs: Sequence[InputType],
         static_input_idxs: Sequence[int],
+        compile_region_name: str | None,
         fx_kwargs: _CompileFxKwargs,
         inputs_to_check: Sequence[int],
         runnable_graph_str: str,
@@ -550,6 +568,7 @@ class CompiledFxGraph(OutputCode):
         self.extern_libs_key = None
         self.cudagraph_info = None
         self.partition_maps = graph.partition_maps
+        self._defers_input_alignment = getattr(graph, "_defers_input_alignment", False)
         self.fx_kwargs = {}
         self.inputs_to_check = ()
 
@@ -598,7 +617,15 @@ class CompiledFxGraph(OutputCode):
                     (not complex_memory_overlap_inputs, "complex memory overlap"),
                     (
                         all(
-                            isinstance(t, (torch.Tensor, torch.SymInt, torch.Generator))
+                            isinstance(
+                                t,
+                                (
+                                    torch.Tensor,
+                                    torch.SymInt,
+                                    torch.Generator,
+                                    OpaqueBase,
+                                ),
+                            )
                             for t in example_inputs
                         ),
                         "non-Tensor inputs",
@@ -621,6 +648,7 @@ class CompiledFxGraph(OutputCode):
                 )
 
         self.cudagraph_info = cudagraph_info
+        self.compile_region_name = compile_region_name
         self.inputs_to_check = inputs_to_check
         self.fx_kwargs = fx_kwargs
 
@@ -782,12 +810,19 @@ class CompiledFxGraph(OutputCode):
             original_callable = self.current_callable
 
             inductor_callable = InductorCompiledCallable(
-                original_callable, self._original_gm
+                original_callable,
+                self._original_gm,
+                compile_region_name=self.compile_region_name,
             )
 
             def wrapped_callable(inputs):
                 if is_in_torch_dispatch_mode():
-                    return inductor_compiled_code(inductor_callable, inputs)
+                    kwargs = (
+                        {"name": self.compile_region_name}
+                        if self.compile_region_name is not None
+                        else {}
+                    )
+                    return inductor_compiled_code(inductor_callable, inputs, **kwargs)
                 else:
                     return original_callable(inputs)
 

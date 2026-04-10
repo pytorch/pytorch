@@ -144,7 +144,7 @@ def _with_callable_args(cls_or_self, **kwargs):
     return r.with_callable_args(**kwargs)
 
 
-ABC: Any = ABCMeta("ABC", (object,), {})  # compatible with Python 2 *and* 3:
+ABC: Any = ABCMeta("ABC", (object,), {})
 
 
 class ObserverBase(ABC, nn.Module):
