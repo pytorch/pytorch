@@ -22,7 +22,6 @@ from itertools import product
 from random import randint
 from unittest.mock import patch
 
-import psutil
 
 import torch
 import torch.cuda
@@ -37,7 +36,6 @@ from torch.cuda._memory_viz import (
 from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestAutocast
 from torch.testing._internal.common_cuda import (
     _create_scaling_case,
-    _get_torch_cuda_version,
     blas_library_context,
     PLATFORM_SUPPORTS_GREEN_CONTEXT,
     PLATFORM_SUPPORTS_WORKQUEUE_CONFIG,
@@ -89,7 +87,6 @@ from torch.testing._internal.common_utils import (
     skipIfRocmArch,
     slowTest,
     subtest,
-    TemporaryFileName,
     TEST_CUDA,
     TEST_CUDA_GRAPH,
     TEST_CUDA_PYTHON_BINDINGS,
@@ -4521,20 +4518,6 @@ print(f"{{r1}}, {{r2}}")
         x = torch.cuda.device_count()
         self.assertEqual(f"{x}, 1", r)
 
-    @unittest.skipUnless("CI" in os.environ, "Only run on CI")
-    @unittest.skipIf(
-        _get_torch_cuda_version() >= (13, 1),
-        "This test does not fail on CUDA 13.1 or newer",
-    )
-    def test_gds_fails_in_ci(self):
-        if IS_WINDOWS or TEST_WITH_ROCM:
-            error_msg = "is not supported on this platform"
-        else:
-            error_msg = "cuFileHandleRegister failed"
-        with TemporaryFileName() as f:
-            with self.assertRaisesRegex(RuntimeError, error_msg):
-                torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
-
     @unittest.skipIf(
         IS_WINDOWS, "test relies on fork; Windows multiprocessing uses spawn"
     )
@@ -8045,41 +8028,6 @@ class TestCudaOptims(TestCase):
             scaler.update()
             self.assertEqual(scaler._scale, scale)
             self.assertEqual(scaler._growth_tracker, growth_tracker)
-
-
-@unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
-class TestGDS(TestCase):
-    def _get_tmp_dir_fs_type(self):
-        my_path = os.path.realpath(tempfile.gettempdir())
-        root_type = ""
-        for part in psutil.disk_partitions():
-            if part.mountpoint == "/":
-                root_type = part.fstype
-                continue
-            if part.mountpoint == my_path:
-                return part.fstype
-        return root_type
-
-    @unittest.skip("Disabling as USE_CUFILE=0 by default in builds")
-    def test_gds_read_write_tensors(self):
-        if self._get_tmp_dir_fs_type() not in ("ext4", "xfs"):
-            self.skipTest("GPUDirect Storage requires ext4/xfs for local filesystem")
-        src1 = torch.randn(1024, device="cuda")
-        src2 = torch.randn(2, 1024, device="cuda")
-        torch.cuda.gds.gds_register_buffer(src1.untyped_storage())
-        torch.cuda.gds.gds_register_buffer(src2.untyped_storage())
-        dest1 = torch.empty(1024, device="cuda")
-        dest2 = torch.empty(2, 1024, device="cuda")
-        with TemporaryFileName() as f:
-            file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
-            file.save_storage(src1.untyped_storage(), offset=0)
-            file.save_storage(src2.untyped_storage(), offset=src1.nbytes)
-            file.load_storage(dest1.untyped_storage(), offset=0)
-            file.load_storage(dest2.untyped_storage(), offset=src1.nbytes)
-        self.assertEqual(src1, dest1)
-        self.assertEqual(src2, dest2)
-        torch.cuda.gds.gds_deregister_buffer(src1.untyped_storage())
-        torch.cuda.gds.gds_deregister_buffer(src2.untyped_storage())
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")

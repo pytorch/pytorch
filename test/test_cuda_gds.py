@@ -6,13 +6,20 @@ import sys
 import tempfile
 import unittest
 
+import psutil
+
 import torch
 from torch.serialization import StorageIO
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_cuda import (
+    _get_torch_cuda_version,
+    TEST_CUDA,
+)
 from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
     NoTest,
     run_tests,
     TemporaryFileName,
+    TEST_WITH_ROCM,
     TestCase,
 )
 
@@ -58,8 +65,58 @@ def _gds_works_on_test_dir() -> bool:
         return False
 
 
+@unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
+class TestGdsBasic(TestCase):
+    @unittest.skipUnless("CI" in os.environ, "Only run on CI")
+    @unittest.skipIf(
+        _get_torch_cuda_version() >= (13, 1),
+        "This test does not fail on CUDA 13.1 or newer",
+    )
+    def test_gds_fails_in_ci(self):
+        if IS_WINDOWS or TEST_WITH_ROCM:
+            error_msg = "is not supported on this platform"
+        else:
+            error_msg = "cuFileHandleRegister failed"
+        with TemporaryFileName() as f:
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+
+
 @unittest.skipIf(not _gds_works_on_test_dir(), "GDS not functional on test filesystem")
 class TestCudaGds(TestCase):
+    @staticmethod
+    def _get_tmp_dir_fs_type():
+        my_path = os.path.realpath(tempfile.gettempdir())
+        root_type = ""
+        for part in psutil.disk_partitions():
+            if part.mountpoint == "/":
+                root_type = part.fstype
+                continue
+            if part.mountpoint == my_path:
+                return part.fstype
+        return root_type
+
+    @unittest.skip("Disabling as USE_CUFILE=0 by default in builds")
+    def test_gds_read_write_tensors(self):
+        if self._get_tmp_dir_fs_type() not in ("ext4", "xfs"):
+            self.skipTest("GPUDirect Storage requires ext4/xfs for local filesystem")
+        src1 = torch.randn(1024, device="cuda")
+        src2 = torch.randn(2, 1024, device="cuda")
+        torch.cuda.gds.gds_register_buffer(src1.untyped_storage())
+        torch.cuda.gds.gds_register_buffer(src2.untyped_storage())
+        dest1 = torch.empty(1024, device="cuda")
+        dest2 = torch.empty(2, 1024, device="cuda")
+        with TemporaryFileName() as f:
+            file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+            file.save_storage(src1.untyped_storage(), offset=0)
+            file.save_storage(src2.untyped_storage(), offset=src1.nbytes)
+            file.load_storage(dest1.untyped_storage(), offset=0)
+            file.load_storage(dest2.untyped_storage(), offset=src1.nbytes)
+        self.assertEqual(src1, dest1)
+        self.assertEqual(src2, dest2)
+        torch.cuda.gds.gds_deregister_buffer(src1.untyped_storage())
+        torch.cuda.gds.gds_deregister_buffer(src2.untyped_storage())
+
     def _roundtrip(self, sd):
         with tempfile.TemporaryDirectory(prefix="test_gds_", dir=_GDS_TEST_DIR) as d:
             path = os.path.join(d, "data.pt")
