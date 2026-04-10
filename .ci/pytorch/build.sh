@@ -191,6 +191,9 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *-tsan* ]]; then
   export USE_TSAN=1
   export USE_CUDA=0
+  export USE_XNNPACK=0
+  export USE_FBGEMM=0
+  export USE_DISTRIBUTED=0
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *no-ops* ]]; then
