@@ -152,6 +152,12 @@ class LoadEndianness(Enum):
 class StorageIO(str, Enum):
     """Storage I/O backend for :func:`torch.save` and :func:`torch.load`.
 
+    .. attribute:: POSIX
+
+        Standard POSIX I/O. Tensor data is staged through CPU memory using
+        regular ``read``/``write`` system calls. This is the default behaviour
+        when no backend is specified.
+
     .. attribute:: GDS
 
         Use GPUDirect Storage to transfer CUDA tensor data directly between
@@ -160,6 +166,7 @@ class StorageIO(str, Enum):
         See :func:`torch.cuda.gds.is_available`.
     """
 
+    POSIX = "posix"
     GDS = "gds"
 
 
@@ -982,9 +989,11 @@ def _try_gds_save(
 ) -> bool:
     """Attempt GDS save. Returns True if handled, False to fall back.
 
-    When explicit=True (user passed storage_io=StorageIO.GDS), raises on
-    incompatible args. When explicit=False (from config), returns False to
-    fall back silently.
+    Raises on incompatible args (e.g. non-path file, custom pickle_module)
+    when explicit=True (user passed storage_io=StorageIO.GDS). When
+    explicit=False (from config), returns False silently.
+
+    Runtime cuFile failures are always caught and fall back with a warning.
     """
     _can_handle = (
         _is_path(f) and _use_new_zipfile_serialization and pickle_module is pickle
@@ -1002,13 +1011,18 @@ def _try_gds_save(
 
     if not _gds.is_available():
         if explicit:
-            raise RuntimeError(
-                "GDS is not available. Check that CUDA and cuFile driver are installed."
+            warnings.warn(
+                "StorageIO.GDS was requested but GDS is not available "
+                "(CUDA or cuFile driver not found), falling back to POSIX IO."
             )
         return False
 
-    _gds.save(obj, f, pickle_protocol=pickle_protocol)
-    return True
+    try:
+        _gds.save(obj, f, pickle_protocol=pickle_protocol)
+        return True
+    except RuntimeError as e:
+        warnings.warn(f"StorageIO.GDS save failed, falling back to POSIX IO: {e}")
+        return False
 
 
 def save(
@@ -1422,9 +1436,11 @@ def _try_gds_load(
 ) -> Any | None:
     """Attempt GDS load. Returns loaded object, or None to fall back to normal load.
 
-    When explicit=True (user passed storage_io=StorageIO.GDS), raises on
-    incompatible args. When explicit=False (from config), silently returns
-    None to fall back.
+    Raises on incompatible args (e.g. mmap, non-path file, custom pickle_module)
+    when explicit=True (user passed storage_io=StorageIO.GDS). When
+    explicit=False (from config), silently returns None.
+
+    Runtime cuFile failures are always caught and fall back with a warning.
     Extra kwargs (e.g. weights_only, pickle_load_args) are forwarded to gds.load.
     """
     _can_handle = (
@@ -1443,11 +1459,16 @@ def _try_gds_load(
 
     if not _gds.is_available():
         if explicit:
-            raise RuntimeError(
-                "GDS is not available. Check that CUDA and cuFile driver are installed."
+            warnings.warn(
+                "StorageIO.GDS was requested but GDS is not available "
+                "(CUDA or cuFile driver not found), falling back to POSIX IO."
             )
         return None
-    return _gds.load(f, map_location=map_location, **kwargs)
+    try:
+        return _gds.load(f, map_location=map_location, **kwargs)
+    except RuntimeError as e:
+        warnings.warn(f"StorageIO.GDS load failed, falling back to POSIX IO: {e}")
+        return None
 
 
 def load(
