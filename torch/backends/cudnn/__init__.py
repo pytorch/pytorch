@@ -160,12 +160,19 @@ def set_flags(
     _fp32_precision="none",
     _depthwise_kernel=None,
 ):
+    try:
+        _allow_tf32_saved = torch._C._get_cudnn_allow_tf32()
+    except RuntimeError:
+        # conv and RNN have different TF32 flags (mixed legacy/new API usage);
+        # save None so the restore step skips the legacy setter and lets the
+        # new-API _fp32_precision restore handle the TF32 state instead.
+        _allow_tf32_saved = None
     orig_flags = (
         torch._C._get_cudnn_enabled(),
         torch._C._get_cudnn_benchmark(),
         None if not is_available() else torch._C._cuda_get_cudnn_benchmark_limit(),
         torch._C._get_cudnn_deterministic(),
-        torch._C._get_cudnn_allow_tf32(),
+        _allow_tf32_saved,
         torch._C._get_fp32_precision_getter("cuda", "all"),
         torch._C._get_cudnn_depthwise_kernel(),
     )
