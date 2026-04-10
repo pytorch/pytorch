@@ -225,11 +225,19 @@ def evaluate_platform_supports_fp8_sparse():
             )
     return False
 
+
+def evaluate_platform_supports_scaled_mm_float8():
+    if torch.version.cuda:
+        return SM89OrLater
+    return False
+
+
 PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mx_gemm())
 PLATFORM_SUPPORTS_FP8: bool = LazyVal(lambda: evaluate_platform_supports_fp8())
 PLATFORM_SUPPORTS_FP8_SPARSE: bool = LazyVal(lambda: evaluate_platform_supports_fp8_sparse())
 PLATFORM_SUPPORTS_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_fp8_grouped_gemm())
 PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mxfp8_grouped_gemm())
+PLATFORM_SUPPORTS_SCALED_MM_FLOAT8: bool = LazyVal(lambda: evaluate_platform_supports_scaled_mm_float8())
 
 if TEST_NUMBA:
     try:
