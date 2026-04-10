@@ -34,6 +34,7 @@
 #include <c10/util/Exception.h>
 #include <cuda_runtime_api.h>
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -140,7 +141,7 @@ namespace Native {
  */
 
 // counter to track order for Mempool Registration
-thread_local int32_t registration_counter_global = -1;
+std::atomic<int32_t> registration_counter_global{-1};
 
 static char SHAREABLE_HANDLE_VERSION = 2;
 enum ShareableHandleType : char {
