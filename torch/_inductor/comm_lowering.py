@@ -187,9 +187,7 @@ def register_comm_lowerings():
     """
     Register lowerings for the comm subsystem.
     """
-    try:
-        torch.ops._c10d_functional.all_reduce
-    except AttributeError:
+    if not hasattr(torch.ops._c10d_functional, "all_reduce"):
         log.info(
             "Inductor support for distributed collectives depends on building "
             "torch.distributed"
@@ -472,14 +470,12 @@ def register_symm_mem_lowerings():
     """
     Register lowerings for symmetric memory (symm_mem) operations.
     """
-    try:
-        symm_mem = torch.ops.symm_mem
-        # Check for an actual operation, not just the namespace.
-        # torch.ops.symm_mem is a lazy namespace that always exists,
-        # but the operations may not exist on non-CUDA platforms or
-        # when USE_DISTRIBUTED is disabled.
-        symm_mem.one_shot_all_reduce
-    except AttributeError:
+    symm_mem = torch.ops.symm_mem
+    # Check for an actual operation, not just the namespace.
+    # torch.ops.symm_mem is a lazy namespace that always exists,
+    # but the operations may not exist on non-CUDA platforms or
+    # when USE_DISTRIBUTED is disabled.
+    if not hasattr(symm_mem, "one_shot_all_reduce"):
         log.info("symm_mem ops not available, skipping symm_mem lowerings")
         return
 

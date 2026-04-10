@@ -2345,7 +2345,7 @@ def _find_names(obj):
 
     frame = inspect.currentframe()
     while frame is not None:
-        frame.f_locals
+        frame.f_locals  # noqa: B018
         frame = frame.f_back
     obj_names = []
     for referrer in gc.get_referrers(obj):

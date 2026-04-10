@@ -167,7 +167,7 @@ def _nvshmem_init_hook(*args, **kwargs) -> None:  # type: ignore[no-untyped-def]
         kernel_cache = jit_function.device_caches[device][0]
         kernel = kernel_cache.get(key, None)
         if kernel is not None:
-            kernel.run
+            kernel.run  # noqa: B018
             # Initialize NVSHMEM for the CU module
             _nvshmemx_cumodule_init(kernel.module)
         else:

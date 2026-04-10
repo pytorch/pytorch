@@ -21,15 +21,9 @@ def _reify(t, s):
     # return (reify(arg, s) for arg in t)
 
 
-_reify
-
-
 @dispatch(tuple, dict)  # type: ignore[no-redef]
 def _reify(t, s):
     return tuple(reify(iter(t), s))
-
-
-_reify
 
 
 @dispatch(list, dict)  # type: ignore[no-redef]
@@ -37,15 +31,9 @@ def _reify(t, s):
     return list(reify(iter(t), s))
 
 
-_reify
-
-
 @dispatch(dict, dict)  # type: ignore[no-redef]
 def _reify(d, s):
     return {k: reify(v, s) for k, v in d.items()}
-
-
-_reify
 
 
 @dispatch(object, dict)  # type: ignore[no-redef]
@@ -131,9 +119,6 @@ def unify(u, v, s):  # no check at the moment
     if isvar(v):
         return assoc(s, v, u)
     return _unify(u, v, s)
-
-
-unify
 
 
 @dispatch(object, object)  # type: ignore[no-redef]

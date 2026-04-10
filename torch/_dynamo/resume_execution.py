@@ -105,7 +105,7 @@ def _try_except_tf_mode_template(dummy: Any, stack_var_name: Any) -> None:
     # pyrefly: ignore [unknown-name]
     global __import_torch_dot__dynamo_dot_utils
     try:
-        dummy
+        dummy  # noqa: B018
     except:  # noqa: E722, B001
         __import_torch_dot__dynamo_dot_utils.set_torch_function_mode_stack(  # type: ignore[name-defined]
             stack_var_name
@@ -179,7 +179,7 @@ class ReenterWith:
         def _template(ctx: AbstractContextManager[Any], dummy: Any) -> None:
             ctx.__enter__()
             try:
-                dummy
+                dummy  # noqa: B018
             finally:
                 ctx.__exit__(None, None, None)
 
@@ -216,7 +216,7 @@ class ReenterWith:
 
         def _template(ctx: AbstractContextManager[Any], dummy: Any) -> None:
             with ctx:
-                dummy
+                dummy  # noqa: B018
 
         setup_with, epilogue = _bytecode_from_template_with_split(
             _template, self.stack_index

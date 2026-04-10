@@ -157,7 +157,6 @@ external = [
 ignore = [
     # these ignores are from flake8-bugbear; please fix!
     "B007", "B008", "B017",
-    "B018", # Useless expression
     "B023",
     "B028", # No explicit `stacklevel` keyword argument found
     "E402",
@@ -340,6 +339,9 @@ select = [
 "tools/linter/**" = [
     "LOG015" # please fix
 ]
+
+# test/ folders still needing B018 migration
+"test/**" = ["B018"]
 
 # torch/ folders still needing S101 migration
 "torch/_dynamo/**" = ["S101"]
