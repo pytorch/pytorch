@@ -58,6 +58,7 @@ def _varlen_attn(
     seqused_k: torch.Tensor | None = None,
     block_table: torch.Tensor | None = None,
     num_splits: int | None = None,
+    dropout_p: float = 0.0,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Private custom op for variable-length attention.
@@ -71,6 +72,11 @@ def _varlen_attn(
     if use_cudnn:
         log.info("Using cuDNN backend for varlen_attn")
 
+        if dropout_p != 0.0:
+            raise RuntimeError(
+                "dropout_p is not yet supported with the cuDNN backend. "
+                "Use Flash Attention backend instead."
+            )
         if enable_gqa:
             # TODO: check this
             raise RuntimeError("GQA is not supported with the cuDNN backend.")
@@ -98,13 +104,14 @@ def _varlen_attn(
             max_q,
             max_k,
             True,  # compute_log_sumexp
-            0.0,  # dropout_p hardcoded to 0.0
+            0.0,  # dropout_p
             is_causal,
             False,  # return_debug_mask
             scale=scale,
         )
         # cuDNN returns: (output, logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, philox_seed, philox_offset, debug_attn_mask)
-        output, softmax_lse, rng_state = result[0], result[1], result[6]
+        output, softmax_lse = result[0], result[1]
+        rng_state = torch.zeros((2,), dtype=torch.uint64, device=query.device)
     else:
         log.info("Using Flash Attention backend for varlen_attn")
         output, softmax_lse, rng_state, _, _ = torch.ops.aten._flash_attention_forward(
@@ -115,7 +122,7 @@ def _varlen_attn(
             cu_seq_k,
             max_q,
             max_k,
-            0.0,  # dropout_p hardcoded to 0.0
+            dropout_p,
             is_causal,
             return_debug_mask=False,
             scale=scale,
@@ -126,10 +133,7 @@ def _varlen_attn(
             num_splits=num_splits,
         )
 
-    rng_state_ = torch.zeros(
-        (2,), dtype=torch.uint64, device=query.device
-    )  # hardcoded since dropout is hardcoded to 0
-    return output, softmax_lse, rng_state_
+    return output, softmax_lse, rng_state
 
 
 @_varlen_attn.register_fake
@@ -148,6 +152,7 @@ def _varlen_attn_fake(
     seqused_k: torch.Tensor | None = None,
     block_table: torch.Tensor | None = None,
     num_splits: int | None = None,
+    dropout_p: float = 0.0,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.
@@ -191,6 +196,7 @@ def varlen_attn(
     max_q: int,
     max_k: int,
     *,
+    dropout_p: float = 0.0,
     return_aux: AuxRequest | None = None,
     scale: float | None = None,
     window_size: tuple[int, int] = (-1, -1),
@@ -214,6 +220,8 @@ def varlen_attn(
         cu_seq_k (Tensor): Cumulative sequence positions for keys/values; shape :math:`(N+1,)`
         max_q (int): Maximum query sequence length in the batch.
         max_k (int): Maximum key/value sequence length in the batch.
+        dropout_p (float, optional): Dropout probability applied to attention weights during training.
+            Should be set to 0.0 during evaluation. Default: 0.0.
         return_aux (Optional[AuxRequest]): If not None and ``return_aux.lse`` is True, also returns the logsumexp tensor.
         scale (float, optional): Scaling factor for attention scores
         window_size (tuple[int, int], optional): Window size for sliding window attention as (left, right).
@@ -329,6 +337,7 @@ def varlen_attn(
         seqused_k,
         block_table,
         num_splits,
+        dropout_p,
     )
     if return_aux is not None and return_aux.lse:
         return out, lse
@@ -504,6 +513,7 @@ def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
         seqused_k,
         block_table,
         num_splits,
+        dropout_p,
     ) = inputs
     out, lse, rng_state = output
 
@@ -519,6 +529,7 @@ def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
     ctx.is_causal = is_causal
     ctx.scale = scale
     ctx.window_size = window_size
+    ctx.dropout_p = dropout_p
 
 
 @torch.library.custom_op("torch_attn::_varlen_attn_backward", mutates_args={})
@@ -537,6 +548,7 @@ def _varlen_attn_backward(
     rng_state: torch.Tensor,
     scale: float | None = None,
     window_size: list[int] | None = None,
+    dropout_p: float = 0.0,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     window_size = _normalize_window_size(window_size)
 
@@ -560,7 +572,7 @@ def _varlen_attn_backward(
             cu_seq_k,
             max_q,
             max_k,
-            0.0,
+            dropout_p,
             is_causal,
             rng_state,
             unused,
@@ -579,7 +591,7 @@ def _varlen_attn_backward(
             cu_seq_k,
             max_q,
             max_k,
-            0.0,
+            dropout_p,
             is_causal,
             rng_state,
             unused,
@@ -606,6 +618,7 @@ def _varlen_attn_backward_fake(
     rng_state: torch.Tensor,
     scale: float | None = None,
     window_size: list[int] | None = None,
+    dropout_p: float = 0.0,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.
@@ -629,6 +642,7 @@ def _backward(
     is_causal = ctx.is_causal
     scale = ctx.scale
     window_size = ctx.window_size
+    dropout_p = ctx.dropout_p
 
     dq, dk, dv = torch.ops.torch_attn._varlen_attn_backward(
         grad_out,
@@ -645,10 +659,11 @@ def _backward(
         rng_state,
         scale,
         window_size,
+        dropout_p,
     )
     # cu_seq_q, cu_seq_k, max_q, max_k, is_causal, scale, window_size, \
-    # enable_gqa, seqused_k, block_table, num_splits
-    num_params = 11
+    # enable_gqa, seqused_k, block_table, num_splits, dropout_p
+    num_params = 12
     return (dq, dk, dv, *((None,) * num_params))
 
 

@@ -1159,6 +1159,95 @@ class TestVarlenAttention(NNTestCase):
             )
             self.assertEqual(out_buf, out)
 
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize("backend", ["fa2"] + (["fa3"] if IS_SM90 else []))
+    def test_dropout_changes_output(self, device, dtype, backend, sdpa_backend=None):
+        """Dropout with p > 0 should produce different outputs than p=0 during training."""
+        torch.manual_seed(42)
+
+        total_tokens, num_heads, head_dim = 256, 8, 64
+        q = torch.randn(
+            total_tokens, num_heads, head_dim, device=device, dtype=dtype
+        )
+        k = torch.randn_like(q)
+        v = torch.randn_like(q)
+        cu_seq = torch.tensor([0, 128, 256], device=device, dtype=torch.int32)
+        max_len = 128
+
+        with _use_backend(backend):
+            out_no_dropout = varlen_attn(q, k, v, cu_seq, cu_seq, max_len, max_len)
+            out_with_dropout = varlen_attn(
+                q, k, v, cu_seq, cu_seq, max_len, max_len, dropout_p=0.3
+            )
+
+        self.assertFalse(torch.allclose(out_no_dropout, out_with_dropout))
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize("backend", ["fa2"] + (["fa3"] if IS_SM90 else []))
+    def test_dropout_zero_is_deterministic(self, device, dtype, backend, sdpa_backend=None):
+        """dropout_p=0.0 should produce identical results to not specifying dropout."""
+        torch.manual_seed(42)
+
+        total_tokens, num_heads, head_dim = 256, 8, 64
+        q = torch.randn(
+            total_tokens, num_heads, head_dim, device=device, dtype=dtype
+        )
+        k = torch.randn_like(q)
+        v = torch.randn_like(q)
+        cu_seq = torch.tensor([0, 128, 256], device=device, dtype=torch.int32)
+        max_len = 128
+
+        with _use_backend(backend):
+            out_default = varlen_attn(q, k, v, cu_seq, cu_seq, max_len, max_len)
+            out_explicit_zero = varlen_attn(
+                q, k, v, cu_seq, cu_seq, max_len, max_len, dropout_p=0.0
+            )
+
+        self.assertEqual(out_default, out_explicit_zero)
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize("backend", ["fa2"] + (["fa3"] if IS_SM90 else []))
+    def test_dropout_backward(self, device, dtype, backend, sdpa_backend=None):
+        """Gradients should flow through when dropout_p > 0."""
+        torch.manual_seed(42)
+
+        total_tokens, num_heads, head_dim = 128, 4, 64
+        q = torch.randn(
+            total_tokens, num_heads, head_dim, device=device, dtype=dtype,
+            requires_grad=True
+        )
+        k = torch.randn(
+            total_tokens, num_heads, head_dim, device=device, dtype=dtype,
+            requires_grad=True
+        )
+        v = torch.randn(
+            total_tokens, num_heads, head_dim, device=device, dtype=dtype,
+            requires_grad=True
+        )
+        cu_seq = torch.tensor([0, 64, 128], device=device, dtype=torch.int32)
+        max_len = 64
+
+        with _use_backend(backend):
+            out = varlen_attn(q, k, v, cu_seq, cu_seq, max_len, max_len, dropout_p=0.1)
+            loss = out.sum()
+            loss.backward()
+
+        self.assertIsNotNone(q.grad)
+        self.assertIsNotNone(k.grad)
+        self.assertIsNotNone(v.grad)
+        self.assertFalse(q.grad.isnan().any())
+        self.assertFalse(k.grad.isnan().any())
+        self.assertFalse(v.grad.isnan().any())
+
 
 device_types = ("cuda",)
 
