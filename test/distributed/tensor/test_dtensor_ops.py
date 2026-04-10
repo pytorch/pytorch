@@ -1038,7 +1038,11 @@ class TestSingleDimStrategies(DTensorOpTestBase):
         },
     )
     def test_single_dim_strategy(self, dtype, op):
-        torch.manual_seed(42)
+        with torch.random.fork_rng():
+            torch.manual_seed(42)
+            self._run_single_dim_strategy(dtype, op)
+
+    def _run_single_dim_strategy(self, dtype, op):
         mesh = init_device_mesh(DEVICE_TYPE, (self.world_size,))
         sharding_prop = DTensor._op_dispatcher.sharding_propagator
 
