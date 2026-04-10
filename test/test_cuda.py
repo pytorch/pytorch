@@ -7065,6 +7065,7 @@ class TestMemPool(TestCase):
             "Allocated memory should be same with or without traces",
         )
 
+    @unittest.skipIf(TEST_WITH_ROCM, "not enabled by default on rocm")
     @serialTest()
     def test_multi_threads_alloc_in_same_order(self):
         def alloc_tensors(stream: torch.cuda.Stream, sizes: [int], device:str, alloc_results: [],lock, thread_id=0):
@@ -7100,6 +7101,7 @@ class TestMemPool(TestCase):
         ptrs_round_2 = torch.tensor([ ptr for ptr, _, _ in tensor_ptrs_round_2])
         self.assertTrue((ptrs_round_1  == ptrs_round_2).all().item())
 
+    @unittest.skipIf(TEST_WITH_ROCM, "not enabled by default on rocm")
     @serialTest()
     def test_nccl_mem_alloc_addresses_in_random_order(self):
         """
