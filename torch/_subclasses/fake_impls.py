@@ -1100,22 +1100,22 @@ def assert_tensor_metadata(
     fake_mode: FakeTensorMode,
     func: OpOverload,
     t: FakeTensor,
-    sizes: torch.Size | None = None,
-    strides: tuple[int, ...] | None = None,
+    size: list[int] | None = None,
+    stride: list[int] | None = None,
     dtype: torch.dtype | None = None,
     *,
     device: torch.device | None = None,
     layout: torch.layout | None = None,
 ) -> None:
-    if sizes is not None:
-        if t.size() != sizes:
+    if size is not None:
+        if t.size() != tuple(size):
             raise AssertionError(
-                f"Tensor sizes mismatch! Expected: {sizes}, Got: {t.size()}"
+                f"Tensor size mismatch! Expected: {size}, Got: {t.size()}"
             )
-    if strides is not None:
-        if t.stride() != strides:
+    if stride is not None:
+        if t.stride() != tuple(stride):
             raise AssertionError(
-                f"Tensor strides mismatch! Expected: {strides}, Got: {t.stride()}"
+                f"Tensor stride mismatch! Expected: {stride}, Got: {t.stride()}"
             )
     if dtype is not None:
         if t.dtype != dtype:
