@@ -975,17 +975,17 @@ def argument_type_str_pyi(t: Type) -> str:
         if str(t.elem) == "int":
             ret = "_int | _size" if t.size is not None else "_size"
         elif t.is_tensor_like():
-            # Tensor?[] translates to tuple[Tensor | None, ...] | list[Tensor | None] | None
-            # Tensor[] translates to tuple[Tensor, ...] | list[Tensor]
+            # Tensor?[] translates to Sequence[Tensor | None] | None
+            # Tensor[] translates to Sequence[Tensor]
             if isinstance(t.elem, OptionalType):
                 add_optional = True
                 elem_str = "Tensor | None"
             else:
                 elem_str = "Tensor"
             ret = (
-                f"Tensor | tuple[{elem_str}, ...] | list[{elem_str}]"
+                f"Tensor | Sequence[{elem_str}]"
                 if t.size is not None
-                else f"tuple[{elem_str}, ...] | list[{elem_str}]"
+                else f"Sequence[{elem_str}]"
             )
         elif str(t.elem) == "float":
             ret = "Sequence[_float]"
