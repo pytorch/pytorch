@@ -6833,6 +6833,54 @@ class GraphModule(torch.nn.Module):
         actual = opt(x)
         self.assertEqual(expected, actual)
 
+    def test_vjp_returning_fullgraph_errors(self):
+        def fn(x):
+            return x.sin().sum()
+
+        def wrapper_fn(x):
+            out, vjpfunc = torch.func.vjp(fn, x)
+            return vjpfunc
+
+        x = torch.randn(3, 3)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            r"vjp.*closure.*TensorWrapper",
+        ):
+            torch.compile(wrapper_fn, backend="eager", fullgraph=True)(x)
+
+    def test_vjp_returning_graph_break(self):
+        def fn(x):
+            return x.sin().sum()
+
+        def wrapper_fn(x):
+            a = x.cos() * 2
+            out, vjpfunc = torch.func.vjp(fn, a)
+            return vjpfunc
+
+        x = torch.randn(3, 3)
+
+        backend = EagerAndRecordGraphs()
+        result = torch.compile(wrapper_fn, backend=backend, fullgraph=False)(x)
+        ref = wrapper_fn(x)
+
+        grad_result = result(torch.ones([]))
+        ref_grad = ref(torch.ones([]))
+        self.assertEqual(grad_result[0], ref_grad[0])
+
+        # Ops before vjp should be captured in a compiled graph
+        self.assertGreaterEqual(len(backend.graphs), 1)
+        if torch._dynamo.config.assume_static_by_default:
+            self.assertExpectedInline(
+                backend.graphs[0].code.strip(),
+                """\
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    cos = l_x_.cos();  l_x_ = None
+    a = cos * 2;  cos = None
+    return (a,)""",
+            )
+
 
 class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
     def _validate(self, fn, backend, *args, skip_check=False, fullgraph=True):

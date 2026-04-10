@@ -3262,6 +3262,22 @@ class FunctorchHigherOrderVariable(UserFunctionVariable):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if tx.speculation_log.graph_break_on_vjp_wrapped_output:
+            unimplemented(
+                gb_type="vjp wrapped tensor leaked as output",
+                context=f"vjp call: {self.fn.__name__}",
+                explanation=(
+                    "vjp returns a closure (vjpfunc) that captures tensors "
+                    "still wrapped at a functorch level (TensorWrapper). "
+                    "Returning vjpfunc from a compiled region is not "
+                    "supported. Graph breaking here to preserve partial "
+                    "acceleration."
+                ),
+                hints=[
+                    "Consume the vjp result inside the compiled function "
+                    "instead of returning it.",
+                ],
+            )
         return super().call_function(tx, args, kwargs)
 
     def should_allow_nested_graph_breaks(self) -> bool:

@@ -291,6 +291,10 @@ class SpeculationLog:
     # instead of tracing it. Set when we detect that such an intermediate
     # leaks as a graph output with requires_grad=True.
     graph_break_on_requires_grad_: bool = False
+    # If True, graph break at vjp instead of inlining it. Set when we detect
+    # that vjp's deferred backward closure leaks TensorWrapper tensors as
+    # graph outputs.
+    graph_break_on_vjp_wrapped_output: bool = False
 
     def restart(self) -> None:
         self.index = 0

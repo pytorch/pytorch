@@ -2541,6 +2541,55 @@ class OutputGraph(OutputGraphCommon):
                         restart_reason="source-less requires_grad_() intermediate leaked as output"
                     )
 
+    def _validate_no_vjp_wrapped_outputs(
+        self, rv: list["VariableTracker"], tx: "InstructionTranslatorBase"
+    ) -> None:
+        """Detect graph outputs that are still functorch-wrapped (TensorWrapper).
+
+        When vjpfunc or tensors derived from it leak as graph outputs, 
+        AOTAutograd cannot access TensorWrapper storage.
+        """
+        from .variables.tensor import TensorVariable
+
+        wrapped_outputs: list[str] = []
+        for i, var in enumerate(rv):
+            if not isinstance(var, TensorVariable):
+                continue
+            example_value = var.proxy.node.meta.get("example_value")
+            if example_value is None:
+                continue
+            if torch._C._functorch.is_functorch_wrapped_tensor(example_value):
+                wrapped_outputs.append(var.proxy.node.name)
+
+        if not wrapped_outputs:
+            return
+
+        node_names = ", ".join(wrapped_outputs)
+
+        if tx.one_graph:
+            unimplemented(
+                gb_type="returning vjp wrapped tensor",
+                context=node_names,
+                explanation=(
+                    "vjp returns a closure (vjpfunc) that captures tensors "
+                    "still wrapped at a functorch level (TensorWrapper). "
+                    "Returning vjpfunc from a compiled region is not "
+                    "supported."
+                ),
+                hints=[
+                    "Consume the vjp result inside the compiled function "
+                    "instead of returning it.",
+                ],
+            )
+        else:
+            tx.speculation_log.graph_break_on_vjp_wrapped_output = True
+            raise exc.VjpWrappedOutputRestartAnalysis(
+                restart_reason=(
+                    "vjp deferred backward closure leaked wrapped tensors "
+                    f"as graph outputs: {node_names}"
+                )
+            )
+
     def compile_and_call_fx_graph(
         self,
         tx: "InstructionTranslatorBase",
@@ -2576,6 +2625,8 @@ class OutputGraph(OutputGraphCommon):
             # Check if autograd.grad is used with outputs that require grad
             # This would cause double backward issues in aot_autograd
             self._validate_outputs_safe_for_autograd_nodes(rv, tx)
+
+            self._validate_no_vjp_wrapped_outputs(rv, tx)
 
             output_node = self.create_node(
                 "output",

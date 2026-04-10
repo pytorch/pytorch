@@ -132,6 +132,13 @@ class TensorifyScalarRestartAnalysis(RestartAnalysis):
     pass
 
 
+class VjpWrappedOutputRestartAnalysis(RestartAnalysis):
+    """Raised when vjp's deferred backward closure leaks wrapped tensors as output.
+
+    On restart, the vjp call will graph break instead of being inlined.
+    """
+
+
 # Used (primarily for backends) to skip tracing the current frame
 # and all future invocations of it.
 # NOTE: this does NOT cause a graph break, and thus no graph break messages

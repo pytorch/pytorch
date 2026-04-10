@@ -2084,6 +2084,28 @@
       ]
     }
   ],
+  "GB8770": [
+    {
+      "Gb_type": "returning functorch wrapped tensor",
+      "Context": "node_names",
+      "Explanation": "The result of a functorch transform (vjp/jvp/grad) cannot be returned from a compiled region.",
+      "Hints": [
+        "Consume the functorch transform result inside the compiled ",
+        "function instead of returning it."
+      ]
+    }
+  ],
+  "GB5378": [
+    {
+      "Gb_type": "functorch wrapped tensor leaked as output",
+      "Context": "transform: {self.fn.__name__}",
+      "Explanation": "This functorch transform produces tensors that are still wrapped at a functorch level (TensorWrapper). These cannot be included as compiled graph outputs because aot_autograd cannot access the storage of TensorWrapper tensors.",
+      "Hints": [
+        "Consume the functorch transform result inside the compiled ",
+        "function instead of returning it."
+      ]
+    }
+  ],
   "GB0164": [
     {
       "Gb_type": "Unsupported tensor subclass overridden attribute access",
