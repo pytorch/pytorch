@@ -7833,6 +7833,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn(64), torch.randn(64)))
 
+    @skip_if_halide  # cpp-only RuntimeError contract
+    @skip_if_pallas  # cpp-only RuntimeError contract
+    @skip_if_triton_cpu  # cpp-only RuntimeError contract
     def test_fmod_uint8_zero_divisor_cpu_inductor_raises_error(self):
         if self.device != "cpu":
             raise unittest.SkipTest(
@@ -7849,6 +7852,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
             opt(inp, divisor)
 
+    @skip_if_halide  # cpp-only RuntimeError contract
+    @skip_if_pallas  # cpp-only RuntimeError contract
+    @skip_if_triton_cpu  # cpp-only RuntimeError contract
     def test_remainder_uint8_zero_divisor_cpu_inductor_raises_error(self):
         if self.device != "cpu":
             raise unittest.SkipTest(
