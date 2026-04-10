@@ -2480,6 +2480,9 @@ class UntypedStorageVariable(VariableTracker):
         # Example_value will always have device="meta"
         self.example_value = example_value
 
+    def python_type(self) -> type:
+        return torch.UntypedStorage
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -2539,6 +2542,9 @@ class DataPtrVariable(VariableTracker):
     ) -> None:
         super().__init__(**kwargs)
         self.from_tensor = from_tensor
+
+    def python_type(self) -> type:
+        return int
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.from_tensor)

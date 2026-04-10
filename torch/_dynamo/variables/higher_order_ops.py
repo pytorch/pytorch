@@ -4524,6 +4524,9 @@ class AutogradFunctionApplyVariable(VariableTracker):
         self.bwd_fn = bwd_fn
         self.parent_source = parent_source
 
+    def python_type(self) -> type:
+        return types.BuiltinMethodType
+
     def call_function(
         self,
         tx: "InstructionTranslator",

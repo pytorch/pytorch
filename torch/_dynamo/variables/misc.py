@@ -15,6 +15,7 @@ Key classes include:
 - DebuggingVariable: Handles print and logging
 """
 
+import builtins
 import dataclasses
 import enum
 import functools
@@ -101,6 +102,9 @@ class SuperVariable(VariableTracker):
         # to the current function where super() is called from (self for regular method,
         # cls for a classmethod)
         self.objvar = objvar
+
+    def python_type(self) -> type:
+        return builtins.super
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(lambda: codegen(variables.BuiltinVariable(super)))
@@ -823,6 +827,9 @@ class CellVariable(VariableTracker):
         super().__init__(**kwargs)
         self.pre_existing_contents = pre_existing_contents
 
+    def python_type(self) -> type:
+        return types.CellType
+
 
 class NewGlobalVariable(VariableTracker):
     def __init__(self, **kwargs: Any) -> None:
@@ -849,6 +856,9 @@ class AutogradFunctionVariable(VariableTracker):
     def __init__(self, fn_cls: Any, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.fn_cls = fn_cls
+
+    def python_type(self) -> type:
+        return type
 
     def call_apply(
         self,
@@ -1263,6 +1273,9 @@ class LambdaVariable(VariableTracker):
     def __init__(self, fn: Callable[..., VariableTracker], **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.fn = fn
+
+    def python_type(self) -> type:
+        return types.FunctionType
 
     def call_function(
         self,
@@ -1877,6 +1890,9 @@ class StringFormatVariable(VariableTracker):
 
     _nonvar_fields = {"format_string", *VariableTracker._nonvar_fields}
 
+    def python_type(self) -> type:
+        return str
+
     @classmethod
     def create(
         cls,
@@ -1976,6 +1992,9 @@ class DebuggingVariable(VariableTracker):
         super().__init__(**kwargs)
         self.value = value
 
+    def python_type(self) -> type:
+        return type(self.value)
+
     @staticmethod
     def is_reorderable_logging_function(
         obj: Any,
@@ -2044,6 +2063,9 @@ class IgnoredFunctionVariable(VariableTracker):
         super().__init__(**kwargs)
         self.value = value
 
+    def python_type(self) -> type:
+        return type(self.value)
+
     def get_real_python_backed_value(self) -> Any:
         return self.value
 
@@ -2064,6 +2086,9 @@ class LoggingLoggerVariable(VariableTracker):
     def __init__(self, value: logging.Logger, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
+
+    def python_type(self) -> type:
+        return type(self.value)
 
     def get_real_python_backed_value(self) -> logging.Logger:
         return self.value
@@ -2215,6 +2240,9 @@ class RandomClassVariable(VariableTracker):
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
+
+    def python_type(self) -> type:
+        return type
 
     def call_function(
         self,
@@ -2387,6 +2415,9 @@ class RandomVariable(VariableTracker):
 
 
 class WeakRefVariable(VariableTracker):
+    def python_type(self) -> type:
+        return weakref.ref
+
     @staticmethod
     # pyrefly: ignore [bad-override, bad-param-name-override]
     def build(

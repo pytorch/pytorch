@@ -18,8 +18,10 @@ consistency between eager execution and compiled graph behavior by capturing and
 restoring state changes.
 """
 
+import contextlib
 import inspect
 import logging
+import types
 import warnings
 from collections.abc import Callable, Sequence, Sized
 from contextlib import AbstractContextManager, ExitStack
@@ -412,6 +414,9 @@ class SetFwdGradEnabledContextManager(ContextWrappingVariable):
         )
         return variables.CONSTANT_VARIABLE_NONE
 
+    def python_type(self) -> type:
+        return torch.autograd.forward_ad._set_fwd_grad_enabled
+
 
 class DualLevelContextManager(ContextWrappingVariable):
     """Represents torch.autograd.forward_ad.dual_level ctx manager"""
@@ -451,6 +456,9 @@ class DualLevelContextManager(ContextWrappingVariable):
             {},
         )
         return variables.CONSTANT_VARIABLE_NONE
+
+    def python_type(self) -> type:
+        return torch.autograd.forward_ad.dual_level
 
 
 class GradIncrementNestingCtxManagerVariable(ContextWrappingVariable):
@@ -537,6 +545,9 @@ class CatchWarningsCtxManagerVariable(ContextWrappingVariable):
         codegen.foreach(self.catch_warnings_args.values())
         keys = tuple(self.catch_warnings_args.keys())
         codegen.extend_output(codegen.create_call_function_kw(len(keys), keys, False))
+
+    def python_type(self) -> type:
+        return warnings.catch_warnings
 
 
 class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
@@ -663,6 +674,9 @@ class GradModeVariable(ContextWrappingVariable):
     def fn_name(self) -> str:
         return "set_grad_enabled"
 
+    def python_type(self) -> type:
+        return torch.set_grad_enabled
+
 
 class InferenceModeVariable(ContextWrappingVariable):
     @staticmethod
@@ -735,6 +749,9 @@ class InferenceModeVariable(ContextWrappingVariable):
     def fn_name(self) -> str:
         return "inference_mode"
 
+    def python_type(self) -> type:
+        return torch.inference_mode
+
 
 class CUDADeviceVariable(ContextWrappingVariable):
     """represents torch.cuda.device"""
@@ -788,6 +805,9 @@ class CUDADeviceVariable(ContextWrappingVariable):
 
     def fn_name(self) -> str:
         return "device"
+
+    def python_type(self) -> type:
+        return torch.cuda.device
 
 
 class TorchFunctionDisableVariable(ContextWrappingVariable):
@@ -863,6 +883,11 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
             return "DisableTorchFunctionSubclass"
         return "DisableTorchFunction"
 
+    def python_type(self) -> type:
+        if self.only_subclass:
+            return torch._C.DisableTorchFunctionSubclass  # pyrefly: ignore[bad-return]
+        return torch._C.DisableTorchFunction  # pyrefly: ignore[bad-return]
+
 
 class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
     """represents torch.autograd.graph.disable_saved_tensors_hook."""
@@ -923,6 +948,9 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
 
     def fn_name(self) -> str:
         return "disable_saved_tensors_hooks"
+
+    def python_type(self) -> type:
+        return contextlib._GeneratorContextManager
 
 
 class AutocastModeVariable(ContextWrappingVariable):
@@ -996,6 +1024,9 @@ class AutocastModeVariable(ContextWrappingVariable):
     def fn_name(self) -> str:
         return "autocast"
 
+    def python_type(self) -> type:
+        return torch.amp.autocast_mode.autocast
+
 
 class NullContextVariable(ContextWrappingVariable):
     """
@@ -1020,6 +1051,9 @@ class NullContextVariable(ContextWrappingVariable):
     def fn_name(self) -> str:
         return "nullcontext"
 
+    def python_type(self) -> type:
+        return contextlib.nullcontext
+
 
 class ProfilerContextVariable(ContextWrappingVariable):
     """
@@ -1032,6 +1066,9 @@ class ProfilerContextVariable(ContextWrappingVariable):
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(target_values=None, **kwargs)
+
+    def python_type(self) -> type:
+        return torch.profiler.profile
 
     def enter(self, tx: "InstructionTranslator") -> VariableTracker:
         return self
@@ -1115,6 +1152,9 @@ class ProfilerRecordFunctionContextVariable(ContextWrappingVariable):
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
+
+    def python_type(self) -> type:
+        return torch.autograd.profiler.record_function
 
     def enter(self, tx: "InstructionTranslator") -> VariableTracker:
         if config.capture_profiler_record_function:
@@ -1219,6 +1259,9 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
             self.tensors = variables.TupleVariable([self.tensors])
         if self.prev_versions.is_symnode_like():
             self.prev_versions = variables.TupleVariable([self.prev_versions])
+
+    def python_type(self) -> type:
+        return torch.autograd.grad_mode._unsafe_preserve_version_counter
 
     def enter(self, tx: "InstructionTranslator") -> VariableTracker:
         return variables.CONSTANT_VARIABLE_NONE
@@ -1411,6 +1454,9 @@ class SDPAKernelVariable(ContextWrappingVariable):
     def fn_name(self) -> str:
         return "_sdpa_kernel_variadic"
 
+    def python_type(self) -> type:
+        return contextlib._GeneratorContextManager
+
 
 class FxTracebackAnnotateVariable(ContextWrappingVariable):
     """
@@ -1446,6 +1492,9 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
 
     def fn_name(self) -> str:
         return "annotate"
+
+    def python_type(self) -> type:
+        return contextlib._GeneratorContextManager
 
     def reconstruct_type(self, codegen: "PyCodegen") -> None:
         unimplemented(
@@ -1491,6 +1540,11 @@ class DynamoConfigPatchVariable(ContextWrappingVariable):
     def fn_name(self) -> str:
         return "patch_dynamo_config"
 
+    def python_type(self) -> type:
+        from torch._dynamo.decorators import DynamoConfigPatchProxy
+
+        return DynamoConfigPatchProxy
+
 
 class ErrorOnGraphBreakVariable(ContextWrappingVariable):
     """represents torch._dynamo.error_on_graph_break"""
@@ -1511,6 +1565,11 @@ class ErrorOnGraphBreakVariable(ContextWrappingVariable):
 
     def fn_name(self) -> str:
         return "error_on_graph_break"
+
+    def python_type(self) -> type:
+        from torch._dynamo.decorators import ErrorOnGraphBreakDecoratorContextManager
+
+        return ErrorOnGraphBreakDecoratorContextManager
 
 
 class CudagraphOverrideVariable(ContextWrappingVariable):
@@ -1552,6 +1611,11 @@ class CudagraphOverrideVariable(ContextWrappingVariable):
     def fn_name(self) -> str:
         return "override_cudagraphs"
 
+    def python_type(self) -> type:
+        from torch._dynamo.decorators import CudagraphOverrideContextManager
+
+        return CudagraphOverrideContextManager
+
     def exit_on_graph_break(self) -> bool:
         # Annotation persists until graph is compiled; each resume function
         # will reconstruct the context manager and call enter() again
@@ -1574,6 +1638,9 @@ class WithEnterFunctionVariable(VariableTracker):
     ) -> None:
         super().__init__(**kwargs)
         self.ctx = ctx
+
+    def python_type(self) -> type:
+        return types.MethodType
 
     def call_function(
         self,
@@ -1625,6 +1692,9 @@ class WithExitFunctionVariable(VariableTracker):
         )
         self.ctx = ctx
         self.target = target
+
+    def python_type(self) -> type:
+        return types.MethodType
 
     def call_function(
         self,

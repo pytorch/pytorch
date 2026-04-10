@@ -2999,8 +2999,14 @@ class BuiltinVariable(BaseBuiltinVariable):
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
 
-        # This is seen in inspect signature where we check if the value is a default value
-        if isinstance(right, variables.UserDefinedClassVariable):
+        # SymNodes are numeric (int/float/bool). The non-SymNode operand
+        # must be a type that can participate in a traced numeric comparison.
+        # Anything else (classes, DataPtrVariable, etc.) is a different type
+        # entirely — the comparison result is known at compile time.
+        non_symnode = right if isinstance(left, SymNodeVariable) else left
+        if not isinstance(
+            non_symnode, (SymNodeVariable, ConstantVariable, TensorVariable)
+        ):
             # pyrefly: ignore [bad-argument-type]
             return VariableTracker.build(tx, op(object(), None))
 
