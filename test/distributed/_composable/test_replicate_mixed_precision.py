@@ -547,7 +547,7 @@ class TestReplicateMixedPrecisionCasts(FSDPTestMultiThread):
             torch.bfloat16, torch.bfloat16, torch.bfloat16, True
         )
         model = Model()
-        inp = Input(torch.randn(2, 10).cuda())
+        inp = Input(torch.randn(2, 10).to(device_type))
 
         replicate(model, mp_policy=mp_policy)
         loss = model(inp).sum()
