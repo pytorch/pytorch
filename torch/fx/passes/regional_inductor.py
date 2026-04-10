@@ -244,15 +244,19 @@ def regional_inductor(gm, *example_args):
     """
     Scoops out inductor marked regions and compiles them with inductor.
 
-    Inductor options should be provided via the annotation API:
-    with fx_traceback.annotate({
-        "compile_with_inductor": {
-            "inductor_configs": {
-                "max_autotune": True,
-                "triton.cudagraphs": False
+    Inductor options should be provided via the annotation API::
+
+        with fx_traceback.annotate(
+            {
+                "compile_with_inductor": {
+                    "inductor_configs": {
+                        "max_autotune": True,
+                        "triton.cudagraphs": False,
+                    }
+                }
             }
-        }
-    }):
+        ):
+            ...
     """
 
     # fuser utils create new nodes using create_proxy which retains the seq_nr
