@@ -4082,7 +4082,52 @@ class TestProfilerEventsParity(TestCase):
                 )
 
     def test_structured_metadata_matches_chrome_trace(self):
+        # Compare metadata fields between events() and Chrome trace JSON to make sure they stay in parity
+        # 1. Run a dummy workload with profiling enabled and collect the json/events() outputs
+        # 2. Parse each event instance in the json and events() to create a key->value mapping
+        #      - The key is a tuple of metadata fields that should be unique for each event
+        #      - The value is a dict of metadata fields for that event
+        # 3. Ensure that the keys and values match between the json and events() outputs
+
         from torch.autograd.profiler_util import _EVENT_METADATA_KEYS
+
+        target_cats = ("cuda_runtime", "gpu_memcpy", "kernel")
+        allowed_non_structured_trace_keys = {
+            "External id",
+            "correlation",
+            "cbid",
+            "cid",
+            "device",
+            "kind",
+            "kernel",
+            "ptr",
+            "src",
+            "dst",
+        }
+        supported_trace_keys = set(_EVENT_METADATA_KEYS).union(
+            allowed_non_structured_trace_keys
+        )
+
+        def metadata_dict_from_trace_args(args):
+            out = {}
+            for kineto_key, (field_name, convert) in _EVENT_METADATA_KEYS.items():
+                if kineto_key in args:
+                    raw_value = args[kineto_key]
+                    out[field_name] = (
+                        convert(raw_value) if isinstance(raw_value, str) else raw_value
+                    )
+            return out
+
+        def metadata_dict_from_function_event(fe):
+            if fe.event_metadata is None:
+                return {}
+
+            out = {}
+            for field_name, _ in _EVENT_METADATA_KEYS.values():
+                val = getattr(fe.event_metadata, field_name)
+                if val is not None:
+                    out[field_name] = val
+            return out
 
         with profile(
             activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
@@ -4095,47 +4140,74 @@ class TestProfilerEventsParity(TestCase):
             z = x + y
             z.cpu()
 
-        # Build lookup from External id -> FunctionEvent
-        fe_by_ext_id = {}
+        event_records = {}
         for fe in prof.events():
-            if fe.external_id != 0:
-                fe_by_ext_id[fe.external_id] = fe
+            if fe.external_id == 0 or fe.id == 0 or fe.activity_type not in target_cats:
+                continue
+            # Using just one of these keys could result in collisions, so try to uniquely identify the event with all of them
+            key = (fe.name, fe.activity_type, fe.external_id, fe.id)
+            self.assertNotIn(
+                key,
+                event_records,
+                f"Duplicate FunctionEvent record key encountered: {key}",
+            )
+            event_records[key] = metadata_dict_from_function_event(fe)
 
         with TemporaryFileName(mode="w+") as fname:
             prof.export_chrome_trace(fname)
             with open(fname) as f:
                 trace = json.load(f)
 
-            checked_kernel = 0
-            checked_memcpy = 0
-            for te in trace["traceEvents"]:
-                cat = te.get("cat", "")
-                args = te.get("args", {})
-                ext_id = args.get("External id")
-                if ext_id is None or ext_id not in fe_by_ext_id:
-                    continue
-                fe = fe_by_ext_id[ext_id]
+        json_records = {}
+        for te in trace["traceEvents"]:
+            cat = te.get("cat", "")
+            args = te.get("args", {})
+            ext_id = args.get("External id")
+            correlation = args.get("correlation")
 
-                if cat in ("kernel", "gpu_memcpy") and fe.event_metadata is not None:
-                    em = fe.event_metadata
-                    for kineto_key, (field_name, _) in _EVENT_METADATA_KEYS.items():
-                        if kineto_key in args:
-                            val = getattr(em, field_name)
-                            self.assertIsNotNone(
-                                val,
-                                f"'{fe.name}': {field_name} is None "
-                                f"but JSON has '{kineto_key}': {args[kineto_key]}",
-                            )
-                    if cat == "kernel":
-                        self.assertIsInstance(em.registers_per_thread, int)
-                        self.assertGreater(em.registers_per_thread, 0)
-                        checked_kernel += 1
-                    elif cat == "gpu_memcpy":
-                        if em.bytes is not None:
-                            self.assertGreater(em.bytes, 0)
-                        checked_memcpy += 1
+            if ext_id is None or correlation is None:
+                continue
+            if cat not in target_cats:
+                continue
 
-            self.assertGreater(checked_kernel, 0, "No kernel events were cross-checked")
+            unexpected_trace_keys = set(args) - supported_trace_keys
+
+            failure_msg = """
+            IMPORTANT: Are you bumping the Kineto submodule hash and seeing this message?
+            If so, please check the schema for EventMetadata (torch/autograd/profiler_util.py).
+            It is currently missing these keys, which were found in the JSON metadata args.
+            """
+            self.assertEqual(
+                unexpected_trace_keys,
+                set(),
+                f"{failure_msg}\nEvent: {(te['name'], cat, ext_id, correlation)}\n"
+                f"Unexpected keys: {sorted(unexpected_trace_keys)}",
+            )
+
+            # Build the same key from JSON to try to match with a FunctionEvent
+            key = (te["name"], te["cat"], ext_id, correlation)
+            self.assertNotIn(
+                key,
+                json_records,
+                f"Duplicate Chrome trace record key encountered: {key}",
+            )
+            json_records[key] = metadata_dict_from_trace_args(args)
+
+        self.assertGreater(len(json_records), 0, "No device-side records were compared")
+        self.assertEqual(
+            set(event_records),
+            set(json_records),
+            "Device event identities differ between events() and Chrome trace JSON",
+        )
+
+        for key in json_records:
+            expected_meta = json_records[key]
+            actual_meta = event_records[key]
+            self.assertEqual(
+                actual_meta,
+                expected_meta,
+                f"{key}: structured metadata differs between events() and Chrome trace JSON",
+            )
 
 
 if __name__ == "__main__":
