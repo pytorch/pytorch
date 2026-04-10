@@ -1377,6 +1377,10 @@ class PythonWrapperCodegen(CodeGen):
         elif torch._inductor.config.test_configs.track_memory_lifecycle:
             inductor_debug_utils = "from torch._inductor.runtime.debug_utils import tracked_empty_strided\n"
 
+        cudagraph_annotation_import = ""
+        if config.triton.cudagraph_kernel_annotations:
+            cudagraph_annotation_import = "from torch.cuda._graph_annotations import mark_kernels as _mark_kernels"
+
         self.imports.splice(
             f"""
                 {aot_config_comment}
@@ -1395,6 +1399,7 @@ class PythonWrapperCodegen(CodeGen):
                 from {async_compile.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
                 {inductor_debug_utils}
+                {cudagraph_annotation_import}
             """,
             strip=True,
         )
@@ -4200,6 +4205,15 @@ class PythonWrapperCodegen(CodeGen):
         Mark the end of kernel context guard
         """
         return
+
+    def write_cudagraph_annotation_begin(
+        self, annotation: dict[str, str]
+    ) -> None:
+        self.writeline(f"_annotation_ctx = _mark_kernels({annotation!r})")
+        self.writeline("_annotation_ctx.__enter__()")
+
+    def write_cudagraph_annotation_end(self) -> None:
+        self.writeline("_annotation_ctx.__exit__(None, None, None)")
 
 
 class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):

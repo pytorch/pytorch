@@ -3075,6 +3075,63 @@ def template_fusion_pw_node(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
     return node2 if is_epilogue_fusion(node1, node2) else node1
 
 
+def _get_kernel_annotation(node: BaseSchedulerNode) -> dict[str, str]:
+    """Build a CUDA graph annotation dict for a scheduler node.
+
+    Returns a dict with ``name`` (FX node names), and optionally ``module``
+    (innermost nn.Module path from ``nn_module_stack``) and ``component``
+    (user-supplied label from ``torch.fx.traceback.annotate``).
+
+    Uses ``origin_node`` (the direct FX node) rather than ``origins`` (which
+    includes transitive unrealized inputs) to avoid misleading annotations.
+    Falls back to ``origins`` when ``origin_node`` is not set.
+    """
+    names: list[str] = []
+    modules: list[str] = []
+    components: list[str] = []
+
+    for snode in node.get_nodes():
+        if snode.node is None:
+            continue
+        origin = snode.node.get_origin_node()
+        fx_nodes = (
+            [origin]
+            if origin is not None
+            else [
+                o
+                for o in snode.node.get_origins()
+                if o.op == "call_function"
+            ]
+        )
+        for fx_node in fx_nodes:
+            if fx_node.name not in names:
+                names.append(fx_node.name)
+
+            # Extract innermost module path from nn_module_stack
+            stack = fx_node.meta.get("nn_module_stack")
+            if stack:
+                # stack is OrderedDict: key -> (fqn, module_class)
+                fqn = list(stack.values())[-1][0]
+                if fqn and fqn not in modules:
+                    modules.append(fqn)
+
+            # Extract user-supplied component label
+            custom = fx_node.meta.get("custom")
+            if custom:
+                comp = custom.get("component", "")
+                if comp and comp not in components:
+                    components.append(comp)
+
+    ann: dict[str, str] = {}
+    if names:
+        ann["name"] = ", ".join(names)
+    if components:
+        ann["component"] = ", ".join(components)
+    elif modules:
+        ann["module"] = ", ".join(modules)
+    return ann
+
+
 class Scheduler:
     """
     A Scheduler is a graph of BaseSchedulerNodes. It is responsible for
@@ -7584,6 +7641,17 @@ class Scheduler:
             self.current_node = node
             self.buffer_names_to_free.update(node.last_usage)
 
+            kernel_annotation: dict[str, str] = {}
+            if (
+                config.triton.cudagraph_kernel_annotations
+                and not isinstance(node, NopKernelSchedulerNode)
+            ):
+                kernel_annotation = _get_kernel_annotation(node)
+                if kernel_annotation:
+                    V.graph.wrapper_code.write_cudagraph_annotation_begin(
+                        kernel_annotation
+                    )
+
             if node.is_template():
                 prologue, template_node, epilogue = node.get_prologue_template_epilogue(
                     list(node.get_nodes())
@@ -7615,6 +7683,9 @@ class Scheduler:
             else:
                 assert isinstance(node, NopKernelSchedulerNode)
                 node.mark_run()
+
+            if kernel_annotation:
+                V.graph.wrapper_code.write_cudagraph_annotation_end()
 
             # pyrefly: ignore [unbound-name]
             if config.triton.debug_sync_kernel:

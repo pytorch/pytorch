@@ -1673,6 +1673,12 @@ class triton:
     # skip warmup for cudagraph trees
     skip_cudagraph_warmup = False
 
+    # Enable kernel annotation recording during CUDA graph capture.
+    # When enabled, mark_kernels() scopes within captured code will attach
+    # metadata to kernel graph nodes for matching to profiler traces.
+    # Requires cuda.bindings package and a compatible driver (cuda-compat >= 13.1).
+    cudagraph_kernel_annotations = False
+
     # Synchronize before and after every compiled graph.
     debug_sync_graph = False
 

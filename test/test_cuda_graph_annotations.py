@@ -394,5 +394,289 @@ class TestMarkKernels(TestCase):
         self.assertEqual(len(get_kernel_annotations()), 0)
 
 
+@unittest.skipUnless(TEST_CUDA, "CUDA not available")
+class TestInductorAnnotationCodegen(TestCase):
+    """Tests that inductor emits mark_kernels calls in generated code."""
+
+    def _get_compiled_code(self, model, example_input, annotations_enabled):
+        import torch._inductor.config as inductor_config
+        from torch._inductor.utils import run_and_get_code
+
+        with inductor_config.patch(
+            {
+                "triton.cudagraph_kernel_annotations": annotations_enabled,
+            }
+        ):
+            compiled = torch.compile(model)
+            _, codes = run_and_get_code(compiled, example_input)
+        return codes
+
+    def test_annotation_codegen_enabled(self):
+        """When config is enabled, generated code should contain _mark_kernels calls."""
+
+        class SimpleModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.relu(x @ torch.ones(64, 64, device="cuda")) + 1
+
+        model = SimpleModel().cuda()
+        x = torch.randn(32, 64, device="cuda")
+        codes = self._get_compiled_code(model, x, annotations_enabled=True)
+
+        code = codes[0]
+        self.assertIn("_mark_kernels", code)
+        self.assertIn("_annotation_ctx", code)
+        self.assertIn("__enter__", code)
+        self.assertIn("__exit__", code)
+
+    def test_annotation_codegen_disabled(self):
+        """When config is disabled, generated code should NOT contain _mark_kernels."""
+
+        class SimpleModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.relu(x @ torch.ones(64, 64, device="cuda")) + 1
+
+        model = SimpleModel().cuda()
+        x = torch.randn(32, 64, device="cuda")
+        codes = self._get_compiled_code(model, x, annotations_enabled=False)
+
+        code = codes[0]
+        self.assertNotIn("_mark_kernels", code)
+        self.assertNotIn("_annotation_ctx", code)
+
+    def test_annotation_contains_fx_node_names(self):
+        """Generated annotation should reference FX node names."""
+
+        class SimpleModel(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        model = SimpleModel().cuda()
+        x = torch.randn(32, 64, device="cuda")
+        codes = self._get_compiled_code(model, x, annotations_enabled=True)
+
+        code = codes[0]
+        # The add op should show up as an FX node name in the annotation
+        self.assertIn("_mark_kernels", code)
+        self.assertIn("add", code)
+
+    def test_annotation_includes_module_path(self):
+        """Annotation should include module path from nn_module_stack."""
+
+        class SimpleModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(64, 64)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        model = SimpleModel().cuda()
+        x = torch.randn(32, 64, device="cuda")
+        codes = self._get_compiled_code(model, x, annotations_enabled=True)
+
+        code = codes[0]
+        self.assertIn("module", code)
+        self.assertIn("linear", code)
+
+    def test_annotation_includes_custom_component(self):
+        """Annotation should include component from torch.fx.traceback.annotate."""
+        from torch.fx.traceback import annotate
+
+        class SimpleModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(64, 64)
+
+            def forward(self, x):
+                with annotate({"component": "my_layer"}):
+                    return self.linear(x)
+
+        model = SimpleModel().cuda()
+        x = torch.randn(32, 64, device="cuda")
+        codes = self._get_compiled_code(model, x, annotations_enabled=True)
+
+        code = codes[0]
+        self.assertIn("component", code)
+        self.assertIn("my_layer", code)
+
+
+class TestAnnotateTrace(TestCase):
+    """Tests for the trace post-processing functions (no GPU required)."""
+
+    def _make_kernel_event(
+        self, name: str, tid: int, ts: float, dur: float, graph_node_id: int = 0
+    ) -> dict:
+        return {
+            "cat": "kernel",
+            "name": name,
+            "tid": tid,
+            "ts": ts,
+            "dur": dur,
+            "args": {"graph node id": graph_node_id},
+        }
+
+    def test_annotate_dict_annotation(self):
+        from torch.cuda._annotate_cuda_graph_trace import annotate_trace
+
+        trace = {
+            "traceEvents": [
+                self._make_kernel_event("kern_a", 1, 100, 10, graph_node_id=42),
+                self._make_kernel_event("kern_b", 1, 200, 10, graph_node_id=0),
+            ]
+        }
+        annotations = {42: [{"name": "all_gather", "dtype": "bf16"}]}
+        count = annotate_trace(trace, annotations, default_stream=7)
+
+        self.assertEqual(count, 1)
+        args = trace["traceEvents"][0]["args"]
+        self.assertEqual(args["name"], "all_gather")
+        self.assertEqual(args["dtype"], "bf16")
+        # Graphed event should be moved to default stream
+        self.assertEqual(trace["traceEvents"][0]["tid"], 7)
+
+    def test_annotate_string_annotation(self):
+        from torch.cuda._annotate_cuda_graph_trace import annotate_trace
+
+        trace = {
+            "traceEvents": [
+                self._make_kernel_event("kern", 1, 100, 10, graph_node_id=99),
+            ]
+        }
+        annotations = {99: ["phase_a"]}
+        count = annotate_trace(trace, annotations, default_stream=7)
+
+        self.assertEqual(count, 1)
+        self.assertEqual(trace["traceEvents"][0]["args"]["annotation"], "phase_a")
+
+    def test_annotate_unannotated_graphed_events_get_default_stream(self):
+        from torch.cuda._annotate_cuda_graph_trace import annotate_trace
+
+        trace = {
+            "traceEvents": [
+                self._make_kernel_event("kern", 5, 100, 10, graph_node_id=50),
+            ]
+        }
+        # No annotation for graph_node_id=50
+        count = annotate_trace(trace, {}, default_stream=7)
+
+        self.assertEqual(count, 0)
+        self.assertEqual(trace["traceEvents"][0]["tid"], 7)
+
+    def test_annotate_non_graphed_events_untouched(self):
+        from torch.cuda._annotate_cuda_graph_trace import annotate_trace
+
+        event = self._make_kernel_event("kern", 3, 100, 10, graph_node_id=0)
+        trace = {"traceEvents": [event]}
+        annotate_trace(trace, {}, default_stream=7)
+
+        # graph_node_id=0 means not graphed, tid should be unchanged
+        self.assertEqual(trace["traceEvents"][0]["tid"], 3)
+
+    def test_annotate_stream_from_annotation(self):
+        from torch.cuda._annotate_cuda_graph_trace import annotate_trace
+
+        trace = {
+            "traceEvents": [
+                self._make_kernel_event("kern", 1, 100, 10, graph_node_id=42),
+            ]
+        }
+        annotations = {42: [{"name": "rs", "stream": 62}]}
+        annotate_trace(trace, annotations, default_stream=7)
+
+        self.assertEqual(trace["traceEvents"][0]["tid"], 62)
+
+    def test_move_overlapping_to_stream(self):
+        from torch.cuda._annotate_cuda_graph_trace import _move_overlapping_to_stream
+
+        trace = {
+            "traceEvents": [
+                self._make_kernel_event("a", 7, 100, 20, graph_node_id=1),
+                # Overlaps: starts at 110 < 120 (end of a)
+                self._make_kernel_event("b", 7, 110, 15, graph_node_id=2),
+                # No overlap: starts at 130 >= 125 (end of b on stream 8)
+                self._make_kernel_event("c", 7, 130, 10, graph_node_id=3),
+            ]
+        }
+        moved = _move_overlapping_to_stream(trace, default_stream=7, overlap_stream=8)
+
+        self.assertEqual(moved, 1)
+        self.assertEqual(trace["traceEvents"][0]["tid"], 7)
+        self.assertEqual(trace["traceEvents"][1]["tid"], 8)
+        self.assertEqual(trace["traceEvents"][2]["tid"], 7)
+
+    def test_fix_overlapping_timestamps(self):
+        from torch.cuda._annotate_cuda_graph_trace import _fix_overlapping_timestamps
+
+        trace = {
+            "traceEvents": [
+                self._make_kernel_event("a", 7, 100, 10, graph_node_id=1),
+                # Overlaps by 0.5us (within threshold)
+                self._make_kernel_event("b", 7, 109.5, 10, graph_node_id=2),
+            ]
+        }
+        adjusted = _fix_overlapping_timestamps(trace, max_adjust_us=1.0)
+
+        self.assertEqual(adjusted, 1)
+        self.assertEqual(trace["traceEvents"][1]["ts"], 110)
+
+    def test_fix_overlapping_timestamps_large_overlap_skipped(self):
+        from torch.cuda._annotate_cuda_graph_trace import _fix_overlapping_timestamps
+
+        trace = {
+            "traceEvents": [
+                self._make_kernel_event("a", 7, 100, 10, graph_node_id=1),
+                # Overlaps by 5us (exceeds threshold)
+                self._make_kernel_event("b", 7, 105, 10, graph_node_id=2),
+            ]
+        }
+        adjusted = _fix_overlapping_timestamps(trace, max_adjust_us=1.0)
+
+        self.assertEqual(adjusted, 0)
+        # Should be unchanged
+        self.assertEqual(trace["traceEvents"][1]["ts"], 105)
+
+    def test_noise_removal(self):
+        from torch.cuda._annotate_cuda_graph_trace import annotate_trace
+
+        trace = {
+            "traceEvents": [
+                self._make_kernel_event("kern", 7, 100, 10, graph_node_id=1),
+                # Noise: gpu_user_annotation on stream 99 with no work
+                {
+                    "cat": "gpu_user_annotation",
+                    "tid": 99,
+                    "ts": 100,
+                    "dur": 10,
+                },
+                # ac2g flow finish on stream 99 (no work there)
+                {"cat": "ac2g", "ph": "f", "tid": 99, "ts": 100},
+            ]
+        }
+        annotate_trace(trace, {}, default_stream=7)
+
+        # Noise events on stream 99 should be removed
+        cats = [e.get("cat") for e in trace["traceEvents"]]
+        self.assertNotIn("gpu_user_annotation", cats)
+        tids = [e.get("tid") for e in trace["traceEvents"] if e.get("cat") == "ac2g"]
+        for tid in tids:
+            self.assertNotEqual(tid, 99)
+
+    def test_ac2g_flow_events_follow_kernel(self):
+        from torch.cuda._annotate_cuda_graph_trace import annotate_trace
+
+        trace = {
+            "traceEvents": [
+                self._make_kernel_event("kern", 5, 100, 10, graph_node_id=42),
+                {"cat": "ac2g", "ph": "f", "tid": 5, "ts": 100},
+            ]
+        }
+        annotations = {42: [{"name": "ag", "stream": 62}]}
+        annotate_trace(trace, annotations, default_stream=7)
+
+        # Both kernel and ac2g should be moved to stream 62
+        self.assertEqual(trace["traceEvents"][0]["tid"], 62)
+        self.assertEqual(trace["traceEvents"][1]["tid"], 62)
+
+
 if __name__ == "__main__":
     run_tests()

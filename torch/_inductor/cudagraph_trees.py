@@ -84,6 +84,12 @@ from torch._inductor.cudagraph_utils import (
     PlaceholderInfo,
     WrappedFunction,
 )
+from torch.cuda._graph_annotations import (
+    clear_kernel_annotations,
+    enable_annotations,
+    remap_to_exec_graph,
+    resolve_pending_annotations,
+)
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.storage import UntypedStorage
 from torch.utils import _pytree as pytree
@@ -1303,6 +1309,9 @@ class CUDAGraphNode:
             ]
             check_memory_pool(self.device, self.cuda_graphs_pool, memory)
 
+        if config.triton.cudagraph_kernel_annotations:
+            clear_kernel_annotations()
+
         with (
             preserve_rng_state(),
             torch.cuda.device(self.device),
@@ -1317,6 +1326,11 @@ class CUDAGraphNode:
             get_history_recording(),
         ):
             static_outputs = model(inputs)
+            if config.triton.cudagraph_kernel_annotations:
+                resolve_pending_annotations()
+
+        if config.triton.cudagraph_kernel_annotations:
+            remap_to_exec_graph(self.graph)
 
         # running model should reclaim memory
         assert len(inputs) == 0
@@ -2042,6 +2056,9 @@ class CUDAGraphTreeManager:
                 ),
             ):
                 pass
+
+        if config.triton.cudagraph_kernel_annotations:
+            enable_annotations()
 
         self.graph_counter = itertools.count(0)
         self.func_counter = itertools.count(0)
