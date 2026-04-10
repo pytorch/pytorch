@@ -65,6 +65,16 @@ requires_multigpu = functools.partial(
 )
 from io import StringIO
 
+from torch._library.opaque_object import OpaqueBase, register_opaque_type
+
+
+class _CudagraphTestScaleFactor(OpaqueBase):
+    def __init__(self, factor):
+        self.factor = factor
+
+
+register_opaque_type(_CudagraphTestScaleFactor, typ="reference")
+
 
 def get_compile_fn(backend):
     if backend == "cudagraphs":
@@ -5099,6 +5109,30 @@ if HAS_CUDA_AND_TRITON:
             run(20)
             run(10)
             run(25)
+
+        @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
+        def test_opaque_value_input_cudagraph(self):
+            """Opaque reference-type objects (e.g. DeviceMesh, ProcessGroup)
+            passed alongside tensors must be marked "static" so they are
+            excluded from the tensor-copy path (non_static_input_idx).
+            "Static" here just means "don't copy as a tensor", not that
+            the object is semantically immutable."""
+
+            sf = _CudagraphTestScaleFactor(3.0)
+
+            def foo(args):
+                obj = args[0]
+                x = args[1]
+                args.clear()
+                return (x * obj.factor,)
+
+            inp = torch.rand([4], device="cuda")
+            foo_cg = self.cudagraphify_impl(foo, [sf, inp], ())
+            result = foo_cg([sf, inp])
+            self.assertEqual(result[0], inp * 3.0)
+
+            result2 = foo_cg([sf, inp])
+            self.assertEqual(result2[0], inp * 3.0)
 
     class TestSAC(TestCase):
         def _make_observer_mode(self):
