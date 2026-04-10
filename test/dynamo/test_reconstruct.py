@@ -57,36 +57,37 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
 
+    def _compile_and_capture_side_effects(self, fn, *args):
+        """Compile fn and return side-effect metadata from bytecode hooks."""
+        captured = {}
+
+        def rewrite_hook(code, out_code):
+            return out_code.replace(co_name=f"{out_code.co_name}_hooked")
+
+        def inspect_hook(code, out_code):
+            captured["refs"] = (
+                torch._dynamo.convert_frame.get_compiled_code_side_effects(out_code)
+            )
+            captured["has_side_effects"] = (
+                torch._dynamo.convert_frame.compiled_code_has_side_effects(out_code)
+            )
+
+        torch._dynamo.reset()
+        rewrite_handle = torch._dynamo.convert_frame.register_bytecode_hook(
+            rewrite_hook
+        )
+        inspect_handle = torch._dynamo.convert_frame.register_bytecode_hook(
+            inspect_hook
+        )
+        try:
+            torch.compile(fn, backend="eager", fullgraph=True)(*args)
+        finally:
+            inspect_handle.remove()
+            rewrite_handle.remove()
+
+        return captured
+
     def test_bytecode_hook_exposes_side_effect_refs(self):
-        def compile_and_capture(fn, *args):
-            captured = {}
-
-            def rewrite_hook(code, out_code):
-                return out_code.replace(co_name=f"{out_code.co_name}_hooked")
-
-            def inspect_hook(code, out_code):
-                captured["refs"] = (
-                    torch._dynamo.convert_frame.get_compiled_code_side_effects(out_code)
-                )
-                captured["has_side_effects"] = (
-                    torch._dynamo.convert_frame.compiled_code_has_side_effects(out_code)
-                )
-
-            torch._dynamo.reset()
-            rewrite_handle = torch._dynamo.convert_frame.register_bytecode_hook(
-                rewrite_hook
-            )
-            inspect_handle = torch._dynamo.convert_frame.register_bytecode_hook(
-                inspect_hook
-            )
-            try:
-                torch.compile(fn, backend="eager", fullgraph=True)(*args)
-            finally:
-                inspect_handle.remove()
-                rewrite_handle.remove()
-
-            return captured
-
         def mutating_fn(x, lst):
             lst.append(x + 1)
             return x * 2
@@ -96,13 +97,48 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(3)
 
-        mutated = compile_and_capture(mutating_fn, x, [])
+        mutated = self._compile_and_capture_side_effects(mutating_fn, x, [])
         self.assertEqual(mutated["refs"], ("L['lst']",))
         self.assertTrue(mutated["has_side_effects"])
 
-        pure = compile_and_capture(pure_fn, x)
+        pure = self._compile_and_capture_side_effects(pure_fn, x)
         self.assertEqual(pure["refs"], ())
         self.assertFalse(pure["has_side_effects"])
+
+    def test_side_effect_refs_dict_mutation(self):
+        def fn(x, d):
+            d["result"] = x + 1
+            return x * 2
+
+        result = self._compile_and_capture_side_effects(fn, torch.randn(3), {})
+        self.assertEqual(result["refs"], ("L['d']",))
+        self.assertTrue(result["has_side_effects"])
+
+    def test_side_effect_refs_tensor_in_container(self):
+        # Relevant to cudagraphs: a compiled function computes tensors and
+        # stores them into an external container as a side effect.
+        def fn(x, outputs):
+            y = x * 2
+            z = x + 3
+            outputs.append(y)
+            outputs.append(z)
+            return x
+
+        result = self._compile_and_capture_side_effects(fn, torch.randn(4), [])
+        self.assertEqual(result["refs"], ("L['outputs']",))
+        self.assertTrue(result["has_side_effects"])
+
+    def test_side_effect_refs_multiple_containers(self):
+        def fn(x, lst, d):
+            lst.append(x + 1)
+            d["out"] = x * 2
+            return x
+
+        result = self._compile_and_capture_side_effects(fn, torch.randn(3), [], {})
+        self.assertEqual(len(result["refs"]), 2)
+        self.assertIn("L['lst']", result["refs"])
+        self.assertIn("L['d']", result["refs"])
+        self.assertTrue(result["has_side_effects"])
 
     def test_ConstDict_pop_reconstruct(self):
         """
