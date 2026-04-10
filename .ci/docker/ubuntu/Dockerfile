@@ -151,9 +151,12 @@ RUN rm install_onnx.sh common_utils.sh
 
 # Build TSan-instrumented CPython for thread sanitizer testing
 ARG TSAN
-COPY ./common/install_cpython_tsan.sh install_cpython_tsan.sh
-RUN if [ -n "${TSAN}" ]; then bash ./install_cpython_tsan.sh; fi
-RUN rm install_cpython_tsan.sh
+COPY ./common/install_cpython.sh install_cpython.sh
+RUN if [ -n "${TSAN}" ]; then \
+      WITH_OPENSSL=/opt/openssl CC=clang-18 CXX=clang++-18 \
+      CPYTHON_VERSIONS="3.14.4t+tsan" bash ./install_cpython.sh; \
+    fi
+RUN rm -f install_cpython.sh
 
 # (optional) Build ACL
 ARG ACL

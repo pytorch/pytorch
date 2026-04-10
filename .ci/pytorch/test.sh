@@ -346,7 +346,7 @@ elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
 fi
 
 test_tsan() {
-  TSAN_PYTHON=/opt/cpython-tsan/bin/python
+  TSAN_PYTHON=/opt/python/cp314-cp314t+tsan/bin/python
 
   $TSAN_PYTHON --version
   $TSAN_PYTHON -c "import sysconfig; assert sysconfig.get_config_var('Py_GIL_DISABLED')"
