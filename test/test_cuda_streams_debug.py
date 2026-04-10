@@ -9,7 +9,6 @@ import warnings
 import torch
 import torch.nn.functional as F
 from torch.autograd import Function
-from torch.cuda import warn_on_null_stream_use
 from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -19,6 +18,7 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TestCase,
 )
+from torch.utils._cuda_debug import warn_on_null_stream_use
 
 
 if not TEST_CUDA:

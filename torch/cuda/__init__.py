@@ -26,7 +26,6 @@ from torch._utils import _dummy_type, _LazySeedTracker, classproperty
 from torch.types import Device
 
 from . import _device_limits, gds
-from ._debug_streams import warn_on_null_stream_use
 from ._utils import _get_device_index
 from .graphs import (
     CUDAGraph,
@@ -2069,5 +2068,4 @@ __all__ = [
     "synchronize",
     "tunable",
     "utilization",
-    "warn_on_null_stream_use",
 ]
