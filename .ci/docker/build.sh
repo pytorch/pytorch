@@ -152,6 +152,12 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.14
     CLANG_VERSION=18
     ;;
+  pytorch-linux-jammy-py3.14t-clang18-tsan)
+    ANACONDA_PYTHON_VERSION=3.14
+    PYTHON_FREETHREADED=1
+    CLANG_VERSION=18
+    TSAN=yes
+    ;;
   pytorch-linux-jammy-rocm-n-py3 | pytorch-linux-jammy-rocm-n-py3-benchmarks | pytorch-linux-noble-rocm-n-py3)
     if [[ $tag =~ "jammy" ]]; then
       ANACONDA_PYTHON_VERSION=3.10
@@ -343,6 +349,7 @@ docker buildx build \
        --build-arg "HALIDE=${HALIDE}" \
        --build-arg "PALLAS=${PALLAS}" \
        --build-arg "TPU=${TPU}" \
+       --build-arg "TSAN=${TSAN}" \
        --build-arg "XPU_VERSION=${XPU_VERSION}" \
        --build-arg "XPU_DRIVER_TYPE=${XPU_DRIVER_TYPE}" \
        --build-arg "ACL=${ACL:-}" \

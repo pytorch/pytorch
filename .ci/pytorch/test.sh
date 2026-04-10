@@ -345,6 +345,25 @@ elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
   export ATEN_CPU_CAPABILITY=avx2
 fi
 
+test_tsan() {
+  TSAN_PYTHON=/opt/cpython-tsan/bin/python
+
+  $TSAN_PYTHON --version
+  $TSAN_PYTHON -c "import sysconfig; assert sysconfig.get_config_var('Py_GIL_DISABLED')"
+
+  # Install the TSan-instrumented wheel into the TSan CPython
+  $TSAN_PYTHON -m pip install $(echo dist/*.whl)[opt-einsum]
+
+  $TSAN_PYTHON -c "import torch; print(torch.__version__)"
+
+  export TSAN_OPTIONS="halt_on_error=1:history_size=7"
+  export PYTORCH_TEST_WITH_TSAN=1
+
+  $TSAN_PYTHON test/test_tsan.py -v
+
+  assert_git_not_dirty
+}
+
 test_python_legacy_jit() {
   time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose
   assert_git_not_dirty
@@ -2396,6 +2415,8 @@ elif [[ "${TEST_CONFIG}" == h100_cutlass_backend ]]; then
   test_h100_cutlass_backend
 elif [[ "${TEST_CONFIG}" == openreg ]]; then
   test_openreg
+elif [[ "${TEST_CONFIG}" == "tsan" ]]; then
+  test_tsan
 else
   install_torchvision
   install_monkeytype

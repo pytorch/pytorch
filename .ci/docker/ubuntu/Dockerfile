@@ -149,6 +149,12 @@ COPY ./common/install_onnx.sh ./common/common_utils.sh ./
 RUN if [ -n "${ONNX}" ]; then bash ./install_onnx.sh; fi
 RUN rm install_onnx.sh common_utils.sh
 
+# Build TSan-instrumented CPython for thread sanitizer testing
+ARG TSAN
+COPY ./common/install_cpython_tsan.sh install_cpython_tsan.sh
+RUN if [ -n "${TSAN}" ]; then bash ./install_cpython_tsan.sh; fi
+RUN rm install_cpython_tsan.sh
+
 # (optional) Build ACL
 ARG ACL
 COPY ./common/install_acl.sh install_acl.sh

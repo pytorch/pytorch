@@ -188,6 +188,11 @@ if [[ "$BUILD_ENVIRONMENT" == *-clang*-asan* ]]; then
   export UBSAN_FLAGS="-fno-sanitize-recover=all"
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *-tsan* ]]; then
+  export USE_TSAN=1
+  export USE_CUDA=0
+fi
+
 if [[ "${BUILD_ENVIRONMENT}" == *no-ops* ]]; then
   export USE_PER_OPERATOR_HEADERS=0
 fi
