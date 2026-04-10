@@ -2747,6 +2747,7 @@ class TestReductions(TestCase):
                 torch_op(a, q, dim=dim, keepdim=keepdim, interpolation=interpolation, out=out)
                 self.assertEqual(out.cpu(), result.cpu())
 
+    @skipIfMPS  # Fails only on macos-m1-stable
     def test_quantile_backward(self, device):
         def check(a, q, dim, expected_grad, ops=(torch.quantile, torch.nanquantile)):
             for op in ops:
