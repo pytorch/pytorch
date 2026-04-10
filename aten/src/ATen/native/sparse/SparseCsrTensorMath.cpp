@@ -8,7 +8,6 @@
 #include <ATen/core/grad_mode.h>
 #include <ATen/mkl/Sparse.h>
 #include <ATen/native/BinaryOps.h>
-#include <ATen/native/CPUBlas.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/SparseTensorUtils.h>
 #include <ATen/native/TensorConversions.h>
@@ -560,24 +559,38 @@ static void addmm_out_sparse_csr_native_cpu(
         int64_t r_stride0 = r.stride(0);
         int64_t r_stride1 = r.stride(1);
 
+        const int64_t nnz = values.size(0);
+        int64_t avg_nnz_per_row = 1;
+        if (dim_i != 0 && nnz != 0) {
+          avg_nnz_per_row = (nnz - 1) / dim_i + 1;
+        }
+        const int64_t work_per_row = avg_nnz_per_row * dim_k;
+        const int64_t grain = std::max<int64_t>(
+            1, internal::GRAIN_SIZE / std::max<int64_t>(1, work_per_row));
+        const bool contiguous_inner_loop = dense_stride1 == 1 && r_stride1 == 1;
+
         at::parallel_for(
             0,
             dim_i,
-            internal::GRAIN_SIZE,
+            grain,
             [&](int64_t irow_start, int64_t irow_end) {
               for (index_t h = irow_start; h < irow_end; ++h) {
                 index_t i_start = csr_accessor[h];
                 index_t i_end = csr_accessor[h + 1];
+                scalar_t* r_row = r_ptr + h * r_stride0;
                 for (index_t i = i_start; i < i_end; i++) {
-                  scalar_t val = values_accessor[i];
+                  scalar_t val = cast_alpha * values_accessor[i];
                   index_t col = col_indices_accessor[i];
-                  at::native::cpublas::axpy<scalar_t>(
-                      dim_k,
-                      cast_alpha * val,
-                      dense_ptr + col * dense_stride0,
-                      dense_stride1,
-                      r_ptr + h * r_stride0,
-                      r_stride1);
+                  const scalar_t* dense_row = dense_ptr + col * dense_stride0;
+                  if (contiguous_inner_loop) {
+                    for (int64_t j = 0; j < dim_k; j++) {
+                      r_row[j] += val * dense_row[j];
+                    }
+                  } else {
+                    for (int64_t j = 0; j < dim_k; j++) {
+                      r_row[j * r_stride1] += val * dense_row[j * dense_stride1];
+                    }
+                  }
                 }
               }
             });

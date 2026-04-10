@@ -1990,6 +1990,25 @@ class TestSparseCSR(TestCase):
             test_shape(7, 8, 9, 20, False, index_dtype, (1, 1))
             test_shape(7, 8, 9, 20, True, index_dtype, (1, 1))
 
+    @onlyCPU
+    @dtypes(torch.float, torch.double)
+    def test_sparse_addmm_csr_strided_dense_and_out(self, device, dtype):
+        crow_indices = torch.tensor([0, 2, 2, 5, 6], device=device, dtype=torch.int64)
+        col_indices = torch.tensor([0, 3, 1, 2, 4, 3], device=device, dtype=torch.int64)
+        values = torch.arange(1, 7, device=device, dtype=dtype)
+        sparse = torch.sparse_csr_tensor(
+            crow_indices, col_indices, values, (4, 5), device=device
+        )
+        dense = torch.randn(7, 5, device=device, dtype=dtype).t()
+        bias = torch.randn(7, 4, device=device, dtype=dtype).t()
+        out = torch.empty(7, 4, device=device, dtype=dtype).t()
+
+        result = torch.addmm(bias, sparse, dense, beta=0.7, alpha=1.3, out=out)
+        expected = torch.addmm(bias, sparse.to_dense(), dense, beta=0.7, alpha=1.3)
+
+        self.assertIs(result, out)
+        self.assertEqual(out, expected)
+
     @skipCPUIfNoMklSparse
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
