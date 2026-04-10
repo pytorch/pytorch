@@ -4192,7 +4192,7 @@ class TestProfilerEventsParity(TestCase):
             json_records[key] = metadata_dict_from_trace_args(args)
 
         failure_msg = """
-        IMPORTANT: Are you bumping the Kineto submodule hash and seeing this message?
+        IMPORTANT: Are you making a kineto change or bumping the hash and seeing this message?
         If so, please check the schema for EventMetadata (torch/autograd/profiler_util.py).
         It is currently missing these keys, which were found in the JSON metadata args.
         """
