@@ -4136,6 +4136,12 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
         self.assertEqual(gt_key, api_key)
         self.assertEqual(gt_key, cfx_key)
 
+    @requires_triton()
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+    )
     def test_cache_key_for_multiple_outputs(self):
         """autograd_cache_key matches compilation for multiple outputs."""
 
