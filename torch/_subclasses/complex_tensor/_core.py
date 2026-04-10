@@ -17,12 +17,13 @@ if TYPE_CHECKING:
 class ComplexTensor(Tensor):
     """A class that decomposes all ops on complex Tensors into their real and imaginary parts."""
 
-    _data: Tensor
+    _re: Tensor
+    _im: Tensor
 
     def __new__(
         cls,
         real: Tensor,
-        imag: Tensor | None = None,
+        imag: Tensor,
         /,
         *,
         neg_flag: bool = False,
@@ -33,29 +34,18 @@ class ComplexTensor(Tensor):
 
         # TODO (hameerabbasi): `torch.compile` sometimes fails here without making these
         # contiguous. Why?
-        if imag is None:
-            if real.is_neg():
-                neg_flag = not neg_flag
-                real = torch._neg_view(real)
-            if real.dtype.is_complex:
-                if real.is_conj():
-                    conj_flag = not conj_flag
-                    real = torch._conj(real)
-                data = torch.view_as_real(real)
-            else:
-                if real.shape[-1] != 2:
-                    raise RuntimeError(
-                        f"Expected `real.shape[-1] == 2`, got `{real.shape=}`."
-                    )
-                data = real
+        real = real.contiguous()
+        imag = imag.contiguous()
 
-        else:
-            data = torch.stack([real.detach(), imag.detach()], dim=-1)
+        if real.is_neg():
+            neg_flag = not neg_flag
+            conj_flag = not conj_flag
+            real = torch._neg_view(real)
 
-        real = data[..., 0]
-        imag = data[..., 1]
-        shape = real.shape
-        device = real.device
+        if imag.is_neg():
+            conj_flag = not conj_flag
+            imag = torch._neg_view(imag)
+
 
         # TODO (hameerabbasi):
         # What should we do with dtype?
@@ -83,21 +73,21 @@ class ComplexTensor(Tensor):
         layout = real.layout
         pin_memory = real.is_pinned()
 
-        if shape != imag.shape:
-            raise AssertionError(f"Expected imag shape {shape}, got {imag.shape}")
-        if device != imag.device:
-            raise AssertionError(f"Expected imag device {device}, got {imag.device}")
+        if real.shape != imag.shape:
+            raise AssertionError(f"Expected imag shape {real.shape}, got {imag.shape}")
+        if real.device != imag.device:
+            raise AssertionError(f"Expected imag device {real.device}, got {imag.device}")
         if real.dtype != imag.dtype:
             raise AssertionError(f"Expected imag dtype {real.dtype}, got {imag.dtype}")
-        if pin_memory != imag.is_pinned():
+        if real.is_pinned() != imag.is_pinned():
             raise AssertionError(
-                f"Expected imag pinning {pin_memory}, got {imag.is_pinned()}"
+                f"Expected imag pinning {real.is_pinned()}, got {imag.is_pinned()}"
             )
 
         res = Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls,
-            shape,
-            device=device,
+            real.shape,
+            device=real.device,
             dtype=dtype,
             storage_offset=storage_offset,
             strides=strides,
@@ -105,7 +95,8 @@ class ComplexTensor(Tensor):
             layout=layout,
             requires_grad=False,
         )
-        res._data = data.detach()
+        res._re = real.detach()
+        res._im = imag.detach()
         torch._C._set_conj(res, conj_flag)
         torch._C._set_neg(res, neg_flag)
 
@@ -117,7 +108,7 @@ class ComplexTensor(Tensor):
     @property
     def re(self) -> Tensor:
         negate = self.is_neg()
-        real = self._data[..., 0]
+        real = self._re
         if negate:
             real = torch._neg_view(real)
         return real
@@ -125,7 +116,7 @@ class ComplexTensor(Tensor):
     @property
     def im(self) -> Tensor:
         negate = self.is_neg() != self.is_conj()
-        imag = self._data[..., 1]
+        imag = self._im
         if negate:
             imag = torch._neg_view(imag)
         return imag
@@ -167,15 +158,12 @@ class ComplexTensor(Tensor):
 
     @staticmethod
     def from_interleaved(t: Tensor) -> ComplexTensor:
-        return Complex.apply(t)
+        re = torch.real(t)
+        im = torch.imag(t) if t.dtype.is_complex else torch.zeros_like(t)
+        return Complex.apply(re, im)
 
     def as_interleaved(self) -> Tensor:
-        out = torch.view_as_complex(self._data)
-        if self.is_conj():
-            out = torch._conj(out)
-        if self.is_neg():
-            out = torch._neg_view(out)
-        return out
+        return torch.complex(self.re, self.im)
 
     @staticmethod
     def __tensor_unflatten__(
@@ -184,25 +172,25 @@ class ComplexTensor(Tensor):
         outer_size: tuple[int, ...],
         outer_stride: tuple[int, ...],
     ) -> ComplexTensor:
-        data = inner_tensors["_data"]
+        re, im = inner_tensors["_re"], inner_tensors["_im"]
         return ComplexTensor(
-            data, neg_flag=meta["neg_flag"], conj_flag=meta["conj_flag"]
+            re, im, neg_flag=meta["neg_flag"], conj_flag=meta["conj_flag"]
         )
 
     def __tensor_flatten__(self) -> tuple[list[str], Any]:
-        return ["_data"], {"neg_flag": self.is_neg(), "conj_flag": self.is_conj()}
+        return ["_re", "_im"], {"neg_flag": self.is_neg(), "conj_flag": self.is_conj()}
 
     def __repr__(self, *, tensor_contents: object | None = None) -> str:
-        return f"ComplexTensor({self._data!r}, conj_flag={self.is_conj()!r}, neg_flag={self.is_neg()!r})"
+        return f"ComplexTensor({self._re!r}, {self._im!r}, conj_flag={self.is_conj()!r}, neg_flag={self.is_neg()!r})"
 
     def is_pinned(self, device: DeviceLikeType | None = None) -> bool:
-        return self._data.is_pinned(device)
+        return self._re.is_pinned(device)
 
 
 class Complex(Function):
     @staticmethod
     def forward(  # type: ignore[bad-override]
-        ctx: FunctionCtx, real: Tensor, imag: Tensor | None = None
+        ctx: FunctionCtx, real: Tensor, imag: Tensor
     ) -> ComplexTensor:
         return ComplexTensor(real, imag)
 
