@@ -7066,6 +7066,41 @@ class TestMemPool(TestCase):
         )
 
     @serialTest()
+    def test_multi_threads_alloc_in_same_order(self):
+        def alloc_tensors(stream: torch.cuda.Stream, sizes: [int], device:str, alloc_results: [],lock, thread_id=0):
+            while len(sizes) > 0:
+                with lock:
+                    if len(sizes) == 0:
+                        return
+                    sz = sizes.pop()
+                    alloc_results.append((torch.empty(sz, dtype=torch.int8, device=device), thread_id, sz))
+
+        def alloc_with_threads(thread_num: int, stream: torch.cuda.Stream, mem_sizes: [int], device: str):
+            tensors_list = []
+            threads = []
+            mem_sizes = mem_sizes[:]
+            lock = threading.Lock()
+            for i in range(thread_num):
+                t = threading.Thread(
+                    target=alloc_tensors,
+                    args=(stream, mem_sizes, 'cuda', tensors_list, lock,i)
+                )
+                t.start()
+                threads.append(t)
+            for t in threads:
+                t.join()
+            tensors_ptrs = [(t.data_ptr(), thread_id, sz) for (t, thread_id, sz) in tensors_list]
+            return tensors_ptrs
+        stream = torch.cuda.current_stream()
+        thread_count = 4
+        mem_sizes = [ s * 2 * 1024 * 1024 for s in range(1, 5) for _ in range(thread_count)]
+        tensor_ptrs_round_1 = alloc_with_threads(thread_count, stream, mem_sizes, 'cuda')
+        tensor_ptrs_round_2 = alloc_with_threads(thread_count, stream, mem_sizes, 'cuda')
+        ptrs_round_1 = torch.tensor([ ptr for ptr, _, _ in tensor_ptrs_round_1])
+        ptrs_round_2 = torch.tensor([ ptr for ptr, _, _ in tensor_ptrs_round_2])
+        self.assertTrue((ptrs_round_1  == ptrs_round_2).all().item())
+
+    @serialTest()
     def test_nccl_mem_alloc_addresses_in_random_order(self):
         """
         Test NCCL mem allocator with non-increasing allocation addresses.
