@@ -153,6 +153,8 @@ _TORCH_TO_SERIALIZE_DTYPE = {
     torch.float8_e4m3fnuz: ScalarType.FLOAT8E4M3FNUZ,
     torch.float8_e5m2fnuz: ScalarType.FLOAT8E5M2FNUZ,
     torch.float8_e8m0fnu: ScalarType.FLOAT8E8M0FNU,
+    torch.uint32: ScalarType.UINT32,
+    torch.uint64: ScalarType.UINT64,
 }
 
 

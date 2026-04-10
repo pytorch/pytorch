@@ -1953,11 +1953,13 @@ def forward(self, x):
         roundtrip_ep = deserialize(serialize(ep))
         self.assertTrue(torch.allclose(ep.module()(), roundtrip_ep.module()()))
 
-    def test_serialize_float8(self):
+    def test_serialize_dtypes(self):
         for dtype in [
             torch.float8_e5m2,
             torch.float8_e4m3fn,
             torch.float8_e8m0fnu,
+            torch.uint32,
+            torch.uint64,
         ]:
 
             class MyModule(torch.nn.Module):
