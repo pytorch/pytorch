@@ -57,7 +57,7 @@ def register_binary_linear(op: OpType) -> Callable[..., Any]:
 
 
 def register_binary_linear_inplace(
-    op: OpType, out_of_place_impl: Callable
+    op: OpType, out_of_place_impl: Callable[..., Any]
 ) -> Callable[..., Any]:
     def impl(
         lhs: ComplexTensor, rhs: ComplexTensor, *args: Any, **kwargs: Any
@@ -810,14 +810,20 @@ def conj_physical_impl(self: ComplexTensor) -> ComplexTensor:
 @register_complex(aten._conj)
 def _conj_impl(self: ComplexTensor) -> ComplexTensor:
     return ComplexTensor(
-        aten.alias(self._re), aten.alias(self._im), neg_flag=self.is_neg(), conj_flag=not self.is_conj()
+        aten.alias(self._re),
+        aten.alias(self._im),
+        neg_flag=self.is_neg(),
+        conj_flag=not self.is_conj(),
     )
 
 
 @register_complex(aten._neg_view)
 def _neg_view_impl(self: ComplexTensor) -> ComplexTensor:
     return ComplexTensor(
-        aten.alias(self._re), aten.alias(self._im), neg_flag=not self.is_neg(), conj_flag=self.is_conj()
+        aten.alias(self._re),
+        aten.alias(self._im),
+        neg_flag=not self.is_neg(),
+        conj_flag=self.is_conj(),
     )
 
 
@@ -825,18 +831,14 @@ def _neg_view_impl(self: ComplexTensor) -> ComplexTensor:
 def resolve_conj_impl(self: ComplexTensor) -> ComplexTensor:
     if not self.is_conj():
         return self
-    return ComplexTensor(
-        aten.alias(self._re), -self._im, neg_flag=self.is_neg()
-    )
+    return ComplexTensor(aten.alias(self._re), -self._im, neg_flag=self.is_neg())
 
 
 @register_complex(aten.resolve_neg)
 def resolve_neg_impl(self: ComplexTensor) -> ComplexTensor:
     if not self.is_neg():
         return self
-    return ComplexTensor(
-        -self._re, -self._im, conj_flag=self.is_conj()
-    )
+    return ComplexTensor(-self._re, -self._im, conj_flag=self.is_conj())
 
 
 @register_complex(aten.index_add)

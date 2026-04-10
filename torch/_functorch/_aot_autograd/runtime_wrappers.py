@@ -18,7 +18,7 @@ from collections.abc import Callable, Generator, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import torch.fx as fx
@@ -1474,7 +1474,6 @@ class ComplexWrapper(CompilerWrapper):
                 flat_args_descs=wrapped_args_descs,
                 static_input_indices=aot_config.static_input_indices,
                 keep_input_mutations=fw_metadata.keep_input_mutations,
-                is_train=fw_metadata.is_train,
             )(*wrapped_args)
             self.did_wrap = True
             return (wrapped_flat_fn, wrapped_args, wrapped_args_descs, updated_metadata)
@@ -1482,11 +1481,11 @@ class ComplexWrapper(CompilerWrapper):
 
     def post_compile(
         self,
-        compiled_fn,
-        _aot_config: AOTConfig,
+        compiled_fn: Callable[..., Any],
+        aot_config: AOTConfig,
         *,
         runtime_metadata: ViewAndMutationMeta,
-    ):
+    ) -> Callable[..., Any]:
         if not self.did_wrap:
             return compiled_fn
 
