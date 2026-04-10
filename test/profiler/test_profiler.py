@@ -4140,6 +4140,7 @@ class TestProfilerEventsParity(TestCase):
             z = x + y
             z.cpu()
 
+        # Build a mapping from key to events() FunctionEvent metadata
         event_records = {}
         for fe in prof.events():
             if fe.external_id == 0 or fe.id == 0 or fe.activity_type not in target_cats:
@@ -4159,6 +4160,9 @@ class TestProfilerEventsParity(TestCase):
                 trace = json.load(f)
 
         json_records = {}
+        unexpected_trace_key_failures = []
+
+        # Loop through the trace events to perform a comparison
         for te in trace["traceEvents"]:
             cat = te.get("cat", "")
             args = te.get("args", {})
@@ -4170,19 +4174,13 @@ class TestProfilerEventsParity(TestCase):
             if cat not in target_cats:
                 continue
 
+            # Any metadata keys that show up in JSON should show up in events()
             unexpected_trace_keys = set(args) - supported_trace_keys
-
-            failure_msg = """
-            IMPORTANT: Are you bumping the Kineto submodule hash and seeing this message?
-            If so, please check the schema for EventMetadata (torch/autograd/profiler_util.py).
-            It is currently missing these keys, which were found in the JSON metadata args.
-            """
-            self.assertEqual(
-                unexpected_trace_keys,
-                set(),
-                f"{failure_msg}\nEvent: {(te['name'], cat, ext_id, correlation)}\n"
-                f"Unexpected keys: {sorted(unexpected_trace_keys)}",
-            )
+            if unexpected_trace_keys:
+                unexpected_trace_key_failures.append(
+                    f"Event: {(te['name'], cat, ext_id, correlation)}\n"
+                    f"Unexpected keys: {sorted(unexpected_trace_keys)}"
+                )
 
             # Build the same key from JSON to try to match with a FunctionEvent
             key = (te["name"], te["cat"], ext_id, correlation)
@@ -4193,6 +4191,15 @@ class TestProfilerEventsParity(TestCase):
             )
             json_records[key] = metadata_dict_from_trace_args(args)
 
+        failure_msg = """
+        IMPORTANT: Are you bumping the Kineto submodule hash and seeing this message?
+        If so, please check the schema for EventMetadata (torch/autograd/profiler_util.py).
+        It is currently missing these keys, which were found in the JSON metadata args.
+        """
+        self.assertFalse(
+            unexpected_trace_key_failures,
+            f"{failure_msg}\n" + "\n\n".join(unexpected_trace_key_failures),
+        )
         self.assertGreater(len(json_records), 0, "No device-side records were compared")
         self.assertEqual(
             set(event_records),
