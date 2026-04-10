@@ -10,6 +10,9 @@ from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager, nullcontext
 from typing import Any, Literal, TYPE_CHECKING
 
+
+DynamicShapesType = Literal["from_example_inputs", "from_tracing_context", "from_graph"]
+
 import torch.fx
 from torch._dynamo.aot_compile_types import BundledAOTAutogradSerializableCallable
 from torch._dynamo.utils import dynamo_timed
@@ -372,13 +375,15 @@ class AOTCompiledArtifact(CompiledArtifact):
             return AOTCompiledArtifact.deserialize(artifact)
 
 
-def _resolve_ignore_shape_env(dynamic_shapes: Any):
+def _resolve_ignore_shape_env(dynamic_shapes: DynamicShapesType):
     # tells compile_fx to ignore the shape_envs on the ambient context
     # and the graph_module.
     return dynamic_shapes == "from_example_inputs"
 
 
-def _resolve_fake_mode(gm: GraphModule, dynamic_shapes: Any) -> FakeTensorMode:
+def _resolve_fake_mode(
+    gm: GraphModule, dynamic_shapes: DynamicShapesType
+) -> FakeTensorMode:
     if dynamic_shapes == "from_example_inputs":
         return FakeTensorMode(shape_env=ShapeEnv())
     elif dynamic_shapes == "from_tracing_context":
@@ -421,7 +426,7 @@ def _resolve_fake_mode(gm: GraphModule, dynamic_shapes: Any) -> FakeTensorMode:
 
 
 @contextlib.contextmanager
-def _standalone_context(gm: GraphModule, dynamic_shapes: Any, aot: bool):
+def _standalone_context(gm: GraphModule, dynamic_shapes: DynamicShapesType, aot: bool):
     from torch.compiler._cache import CacheArtifactManager
 
     fake_mode = _resolve_fake_mode(gm, dynamic_shapes)
@@ -439,7 +444,7 @@ def standalone_compile(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
     *,
-    dynamic_shapes: Any,
+    dynamic_shapes: DynamicShapesType,
     options: Any,
     aot: bool = False,  # AOT mode, which uses BundledAOTAutogradCache
     donate_graph_module: bool = False,
@@ -477,7 +482,7 @@ def standalone_compile(
 def autograd_cache_key(
     graph,
     example_inputs,
-    dynamic_shapes: Any,
+    dynamic_shapes: DynamicShapesType,
     aot: bool = False,  # AOT mode, which uses BundledAOTAutogradCache
 ):
     from . import compile_fx
