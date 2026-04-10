@@ -373,7 +373,7 @@ def _init_api_maps():
 
 
 _last_warned_correlation_id = -1
-_cpp_traceback_enabled = False
+_verbosity = 0
 _swap_stream_enabled = True
 
 
@@ -382,11 +382,11 @@ def _is_null_stream_ptr(stream_ptr):
 
 
 def _warn_null_stream(func_name, mode):
-    stack = "".join(traceback.format_stack()[:-1])
-    msg = f"{mode}::{func_name} launched on NULL stream\nTraceback:\n{stack}"
-    if _cpp_traceback_enabled:
-        cpp_bt = torch._C._get_cpp_backtrace(0, 64)
-        msg += f"\nC++ Traceback:\n{cpp_bt}"
+    msg = f"{mode}::{func_name} launched on NULL stream"
+    if _verbosity >= 1:
+        msg += f"\nTraceback:\n{''.join(traceback.format_stack()[:-1])}"
+    if _verbosity >= 2:
+        msg += f"\nC++ Traceback:\n{torch._C._get_cpp_backtrace(0, 64)}"
     warnings.warn(msg, UserWarning, stacklevel=2)
 
 
@@ -514,7 +514,7 @@ class _NULLStreamUseWarningMode(TorchDispatchMode):
         cls._subscriber = None
 
 
-def warn_on_null_stream_use(cpp_traceback: bool = False, swap_stream: bool = True):
+def warn_on_null_stream_use(verbosity: int = 0, swap_stream: bool = True):
     """Context manager to warn when operations are launched on the NULL CUDA stream.
 
     The NULL stream (stream 0) in CUDA causes implicit synchronization with all
@@ -523,9 +523,10 @@ def warn_on_null_stream_use(cpp_traceback: bool = False, swap_stream: bool = Tru
     paths that accidentally use the NULL stream.
 
     Args:
-        cpp_traceback: Include C++ stack frames in warnings via
-            ``torch._C._get_cpp_backtrace``. Useful for tracing into custom
-            CUDA kernels launched from C++ extensions.
+        verbosity: Controls how much detail is included in warnings.
+            ``0`` — API name only (e.g. ``Runtime::cudaLaunchKernel launched on NULL stream``).
+            ``1`` — adds a Python traceback.
+            ``2`` — adds both Python and C++ tracebacks.
         swap_stream: When ``True`` (default), automatically swap the default
             (NULL) stream to a new non-default stream on entry.  Set to
             ``False`` to leave the current stream in PyTorch unchanged.
@@ -546,7 +547,7 @@ def warn_on_null_stream_use(cpp_traceback: bool = False, swap_stream: bool = Tru
         cannot be used simultaneously with profilers like nsys or the
         PyTorch profiler.
     """
-    global _cpp_traceback_enabled, _swap_stream_enabled
-    _cpp_traceback_enabled = cpp_traceback
+    global _verbosity, _swap_stream_enabled
+    _verbosity = verbosity
     _swap_stream_enabled = swap_stream
     return _NULLStreamUseWarningMode()
