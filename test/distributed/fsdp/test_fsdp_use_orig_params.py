@@ -1396,7 +1396,7 @@ class TestFSDPUseOrigParamsPrefetchWriteback(FSDPTest):
                 out = self.linear(x)
                 compute_done.fill_(0)
                 # Stall compute stream so prefetch writeback overlaps
-                torch.cuda._sleep(int(1e8))
+                torch.get_device_module(device_type)._sleep(int(1e8))
                 compute_done.fill_(1)
                 return out
 
@@ -1438,7 +1438,7 @@ class TestFSDPUseOrigParamsPrefetchWriteback(FSDPTest):
         finally:
             FlatParamHandle.pre_unshard = orig_pre_unshard
 
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
         for i, val in enumerate(writeback_reads):
             self.assertEqual(
                 val.item(),
@@ -1484,7 +1484,7 @@ class TestMultiTensorApply(TestCase):
         # Check that this does not segfault
         torch._foreach_mul_(size0_tensors, 0.1)
 
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "no cuda and no xpu")
+    @unittest.skipIf(not torch.accelerator.is_available(), "no accelerator")
     def test_multi_tensor_apply_size0_tensors_cuda(self):
         size0_tensors = [
             torch.empty(0, device=device_type) for _ in range(NUM_SIZE0_TENSORS)

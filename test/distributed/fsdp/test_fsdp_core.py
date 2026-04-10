@@ -23,6 +23,7 @@ from torch.distributed.utils import _p_assert
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
+    FSDP_DEVICES,
     AlwaysWrapNestedWrappedModule,
     DEVICEInitMode,
     DummyDDP,
@@ -516,7 +517,7 @@ class TestAutograd(FSDPTest):
             FlatParamHandle._use_unsharded_views = orig_use_unsharded_views
 
 
-devices = ("cuda", "hpu", "xpu")
+devices = FSDP_DEVICES
 instantiate_device_type_tests(TestHooks, globals(), only_for=devices, allow_xpu=True)
 instantiate_device_type_tests(
     TestParityWithDDP, globals(), only_for=devices, allow_xpu=True
