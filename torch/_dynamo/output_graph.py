@@ -2546,7 +2546,7 @@ class OutputGraph(OutputGraphCommon):
     ) -> None:
         """Detect graph outputs that are still functorch-wrapped (TensorWrapper).
 
-        When vjpfunc or tensors derived from it leak as graph outputs, 
+        When vjpfunc or tensors derived from it leak as graph outputs,
         AOTAutograd cannot access TensorWrapper storage.
         """
         from .variables.tensor import TensorVariable
@@ -2558,7 +2558,7 @@ class OutputGraph(OutputGraphCommon):
             example_value = var.proxy.node.meta.get("example_value")
             if example_value is None:
                 continue
-            if torch._C._functorch.is_functorch_wrapped_tensor(example_value):
+            if torch._C._functorch.is_gradtrackingtensor(example_value):
                 wrapped_outputs.append(var.proxy.node.name)
 
         if not wrapped_outputs:

@@ -3262,7 +3262,10 @@ class FunctorchHigherOrderVariable(UserFunctionVariable):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if tx.speculation_log.graph_break_on_vjp_wrapped_output:
+        if (
+            tx.speculation_log.graph_break_on_vjp_wrapped_output
+            and self.fn is torch._functorch.eager_transforms.vjp
+        ):
             unimplemented(
                 gb_type="vjp wrapped tensor leaked as output",
                 context=f"vjp call: {self.fn.__name__}",

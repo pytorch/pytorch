@@ -1887,6 +1887,28 @@
       ]
     }
   ],
+  "GB4083": [
+    {
+      "Gb_type": "returning vjp wrapped tensor",
+      "Context": "node_names",
+      "Explanation": "vjp returns a closure (vjpfunc) that captures tensors still wrapped at a functorch level (TensorWrapper). Returning vjpfunc from a compiled region is not supported.",
+      "Hints": [
+        "Consume the vjp result inside the compiled function ",
+        "instead of returning it."
+      ]
+    }
+  ],
+  "GB5756": [
+    {
+      "Gb_type": "vjp wrapped tensor leaked as output",
+      "Context": "vjp call: {self.fn.__name__}",
+      "Explanation": "vjp returns a closure (vjpfunc) that captures tensors still wrapped at a functorch level (TensorWrapper). Returning vjpfunc from a compiled region is not supported. Graph breaking here to preserve partial acceleration.",
+      "Hints": [
+        "Consume the vjp result inside the compiled function ",
+        "instead of returning it."
+      ]
+    }
+  ],
   "GB0151": [
     {
       "Gb_type": "Unsupported inspect call",
@@ -2081,28 +2103,6 @@
       "Hints": [
         "Avoid accessing {name} of tensor subclass in torch.compile region",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
-  "GB8770": [
-    {
-      "Gb_type": "returning functorch wrapped tensor",
-      "Context": "node_names",
-      "Explanation": "The result of a functorch transform (vjp/jvp/grad) cannot be returned from a compiled region.",
-      "Hints": [
-        "Consume the functorch transform result inside the compiled ",
-        "function instead of returning it."
-      ]
-    }
-  ],
-  "GB5378": [
-    {
-      "Gb_type": "functorch wrapped tensor leaked as output",
-      "Context": "transform: {self.fn.__name__}",
-      "Explanation": "This functorch transform produces tensors that are still wrapped at a functorch level (TensorWrapper). These cannot be included as compiled graph outputs because aot_autograd cannot access the storage of TensorWrapper tensors.",
-      "Hints": [
-        "Consume the functorch transform result inside the compiled ",
-        "function instead of returning it."
       ]
     }
   ],
