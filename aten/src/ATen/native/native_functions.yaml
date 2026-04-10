@@ -9174,6 +9174,12 @@
     MPS: triu_indices_mps
   autogen: triu_indices.out
 
+- func: triu_values(Tensor self, int diagonal=0) -> Tensor
+  variants: function, method
+
+- func: tril_values(Tensor self, int diagonal=0) -> Tensor
+  variants: function, method
+
 - func: trace(Tensor self) -> Tensor
   variants: method, function
   dispatch:

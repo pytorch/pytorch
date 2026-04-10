@@ -17,6 +17,11 @@
 #include <ATen/ops/trace_backward_native.h>
 #include <ATen/ops/tril_native.h>
 #include <ATen/ops/triu_native.h>
+#include <ATen/ops/triu_values_native.h>
+#include <ATen/ops/tril_values_native.h>
+#include <ATen/ops/triu_indices.h>
+#include <ATen/ops/tril_indices.h>
+#include <ATen/ops/index.h>
 #include <ATen/ops/zeros.h>
 #endif
 
@@ -197,6 +202,26 @@ Tensor trace_backward_symint(const Tensor& grad, c10::SymIntArrayRef sizes) {
     grad_input.index_fill_(0, indices, grad);
   }
   return grad_input.view_symint(sizes);
+}
+
+Tensor triu_values(const Tensor& self, int64_t diagonal) {
+  auto sizes = self.sizes();
+  TORCH_CHECK(sizes.size() >= 2, "triu_values requires a tensor with at least 2 dimensions, but got ", sizes.size());
+  auto M = sizes[sizes.size() - 2];
+  auto N = sizes[sizes.size() - 1];
+
+  auto indices = at::triu_indices(M, N, diagonal, self.options().dtype(at::kLong));
+  return self.index({at::indexing::Ellipsis, indices[0], indices[1]});
+}
+
+Tensor tril_values(const Tensor& self, int64_t diagonal) {
+  auto sizes = self.sizes();
+  TORCH_CHECK(sizes.size() >= 2, "tril_values requires a tensor with at least 2 dimensions, but got ", sizes.size());
+  auto M = sizes[sizes.size() - 2];
+  auto N = sizes[sizes.size() - 1];
+
+  auto indices = at::tril_indices(M, N, diagonal, self.options().dtype(at::kLong));
+  return self.index({at::indexing::Ellipsis, indices[0], indices[1]});
 }
 
 }  // namespace at::native
