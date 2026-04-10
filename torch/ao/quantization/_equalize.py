@@ -212,14 +212,14 @@ def equalize(model, paired_modules_list, threshold=1e-4, inplace=True):
 
     Args:
         model: a model (nn.Module) that equalization is to be applied on
-            paired_modules_list (List(List[nn.module || str])): a list of lists
+        paired_modules_list (List(List[nn.module | str])): a list of lists
             where each sublist is a pair of two submodules found in the model,
             for each pair the two modules have to be adjacent in the model,
             with only piece-wise-linear functions like a (P)ReLU or LeakyReLU in between
             to get expected results.
             The list can contain either modules, or names of modules in the model.
             If you pass multiple modules in the same list, they will all be equalized together.
-            threshold (float): a number used by the converged function to determine what degree
+        threshold (float): a number used by the converged function to determine what degree
             of similarity between models is necessary for them to be called equivalent
         inplace (bool): determines if function is inplace or not
     """
