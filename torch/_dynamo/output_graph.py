@@ -2552,7 +2552,7 @@ class OutputGraph(OutputGraphCommon):
         from .variables.tensor import TensorVariable
 
         wrapped_outputs: list[str] = []
-        for i, var in enumerate(rv):
+        for var in rv:
             if not isinstance(var, TensorVariable):
                 continue
             example_value = var.proxy.node.meta.get("example_value")
