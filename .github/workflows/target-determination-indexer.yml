@@ -31,7 +31,7 @@ jobs:
           path: pytorch
 
       - name: Setup Linux
-        uses: ./pytorch/.github/actions/setup-linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@main
 
       - name: Login to ECR
         uses: ./pytorch/.github/actions/ecr-login
