@@ -324,6 +324,28 @@ class OpDispatcher:
             # run local op computation with potentially modified args/kwargs
             local_tensor_args = cast(tuple[object, ...], local_tensor_args)
             if op_call in self._random_ops:
+                # Check that the local tensor device matches the mesh.
+                # The DTensor RNG tracker is device-specific (e.g., CUDA)
+                # and does not advance state for tensors on a different
+                # device (e.g., CPU), causing random ops to silently
+                # produce identical values on every call. This makes
+                # rejection-sampling loops like trunc_normal_ infinite.
+                first_local = cast(torch.Tensor, local_tensor_args[0])
+                if (
+                    first_local.device.type != mesh.device_type
+                    and not first_local.is_meta
+                ):
+                    raise RuntimeError(
+                        f"DTensor random op {op_call}: local tensor is on "
+                        f"{first_local.device} but the device mesh expects "
+                        f"'{mesh.device_type}'. The DTensor RNG tracker "
+                        f"cannot advance state across different device types, "
+                        f"which causes random ops to produce identical values "
+                        f"on every call. Use a device mesh matching the tensor "
+                        f"device (e.g., cpu mesh with gloo backend for CPU "
+                        f"tensors)."
+                    )
+
                 if not random._rng_tracker and is_rng_supported_mesh(mesh):
                     # Default to `OffsetBasedRNGTracker` if the parallelism API did not already construct one
                     # Skip RNG state sync during tracing to avoid lazily initializing real RNG state under fake mode.

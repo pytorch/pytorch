@@ -956,6 +956,21 @@ class DTensorTest(DTensorTestBase):
         self.assertEqual(dt_scalar.full_tensor(), 42.0)
         self.assertEqual(dt_scalar.to_local(), 42.0)
 
+    @with_comms
+    def test_dtensor_random_op_device_mismatch_error(self):
+        # Random ops on a DTensor whose local tensor device doesn't
+        # match the mesh should error. Without this, the RNG tracker
+        # doesn't advance state for CPU tensors on a CUDA mesh,
+        # causing trunc_normal_ to loop forever.
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        with torch.device("meta"):
+            t = torch.empty(4, 4)
+        dt = DTensor.from_local(t, mesh, [Shard(0)])
+        dt = torch.empty_like(dt, device="cpu")
+
+        with self.assertRaisesRegex(RuntimeError, "random op"):
+            dt.normal_(0, 1)
+
 
 DTensorTestWithLocalTensor = create_local_tensor_test_class(
     DTensorTest,
