@@ -46,7 +46,6 @@ class ComplexTensor(Tensor):
             conj_flag = not conj_flag
             imag = torch._neg_view(imag)
 
-
         # TODO (hameerabbasi):
         # What should we do with dtype?
         # We could convert to the complex type (float32 -> complex64), but we
@@ -76,7 +75,9 @@ class ComplexTensor(Tensor):
         if real.shape != imag.shape:
             raise AssertionError(f"Expected imag shape {real.shape}, got {imag.shape}")
         if real.device != imag.device:
-            raise AssertionError(f"Expected imag device {real.device}, got {imag.device}")
+            raise AssertionError(
+                f"Expected imag device {real.device}, got {imag.device}"
+            )
         if real.dtype != imag.dtype:
             raise AssertionError(f"Expected imag dtype {real.dtype}, got {imag.dtype}")
         if real.is_pinned() != imag.is_pinned():

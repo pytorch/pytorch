@@ -304,8 +304,8 @@ class WrapComplexMode(TorchDispatchMode):
     def __torch_dispatch__(
         self,
         func: OpOverload,
-        types: tuple[type],
-        args: tuple = (),
+        types: tuple[type, ...],
+        args: tuple[Any, ...] = (),
         kwargs: dict[str, Any] | None = None,
     ) -> Any:
         if kwargs is None:
