@@ -61,6 +61,15 @@ at::DynamicLibrary& getZELibrary() {
     return fn(a1, a2, a3, a4, a5);                                            \
   }
 
+#define _STUB_6(LIB, NAME, RETTYPE, ARG1, ARG2, ARG3, ARG4, ARG5, ARG6)       \
+  RETTYPE NAME(ARG1 a1, ARG2 a2, ARG3 a3, ARG4 a4, ARG5 a5, ARG6 a6) {       \
+    auto fn =                                                                 \
+        reinterpret_cast<decltype(&NAME)>(get##LIB##Library().sym(__func__)); \
+    TORCH_CHECK(fn, "Can't get symbol " C10_STRINGIZE(NAME));                 \
+    lazyLevelZero.NAME = fn;                                                  \
+    return fn(a1, a2, a3, a4, a5, a6);                                        \
+  }
+
 #define ZE_STUB1(NAME, A1) _STUB_1(ZE, NAME, ze_result_t ZE_APICALL, A1)
 #define ZE_STUB2(NAME, A1, A2) _STUB_2(ZE, NAME, ze_result_t ZE_APICALL, A1, A2)
 #define ZE_STUB3(NAME, A1, A2, A3) \
@@ -69,6 +78,8 @@ at::DynamicLibrary& getZELibrary() {
   _STUB_4(ZE, NAME, ze_result_t ZE_APICALL, A1, A2, A3, A4)
 #define ZE_STUB5(NAME, A1, A2, A3, A4, A5) \
   _STUB_5(ZE, NAME, ze_result_t ZE_APICALL, A1, A2, A3, A4, A5)
+#define ZE_STUB6(NAME, A1, A2, A3, A4, A5, A6) \
+  _STUB_6(ZE, NAME, ze_result_t ZE_APICALL, A1, A2, A3, A4, A5, A6)
 
 // Intel level zero is not defaultly available on Windows.
 #ifndef _WIN32
@@ -97,6 +108,15 @@ ZE_STUB3(
     size_t*,
     char*)
 ZE_STUB1(zeModuleBuildLogDestroy, ze_module_build_log_handle_t)
+ZE_STUB6(
+    zeMemAllocDevice,
+    ze_context_handle_t,
+    const ze_device_mem_alloc_desc_t*,
+    size_t,
+    size_t,
+    ze_device_handle_t,
+    void**)
+ZE_STUB2(zeMemFree, ze_context_handle_t, void*)
 
 #endif
 

@@ -9,12 +9,65 @@
 #include <ATen/xpu/level_zero_stub/ATenLevelZero.h>
 #include <c10/util/Logging.h>
 #include <c10/xpu/XPUCachingAllocator.h>
+#include <c10/xpu/XPUFunctions.h>
 
 namespace at::xpu::detail {
+
+// Use Level Zero zeMemAllocDevice instead of sycl::aligned_alloc_device.
+// The SYCL path triggers DMA-buf host memory shadowing on discrete Intel GPUs
+// (Xe2 and later), where the xe kernel driver creates a 1:1 host-side mirror
+// for every device allocation. The Level Zero path avoids this.
+#ifndef _WIN32
+namespace {
+
+void* levelZeroAllocDevice(
+    size_t size,
+    size_t alignment,
+    sycl::device& device,
+    sycl::context& context) {
+  auto ze_ctx =
+      sycl::get_native<sycl::backend::ext_oneapi_level_zero>(context);
+  auto ze_dev =
+      sycl::get_native<sycl::backend::ext_oneapi_level_zero>(device);
+  ze_device_mem_alloc_desc_t alloc_desc = {
+      ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC, nullptr, 0, 0};
+  void* ptr = nullptr;
+  ze_result_t r = at::xpu::detail::lazyLevelZero.zeMemAllocDevice(
+      ze_ctx, &alloc_desc, size, alignment, ze_dev, &ptr);
+  if (r != ZE_RESULT_SUCCESS || !ptr) {
+    return nullptr;
+  }
+  return ptr;
+}
+
+void levelZeroFreeDevice(void* ptr, sycl::context& context) {
+  if (!ptr)
+    return;
+  auto ze_ctx =
+      sycl::get_native<sycl::backend::ext_oneapi_level_zero>(context);
+  at::xpu::detail::lazyLevelZero.zeMemFree(ze_ctx, ptr);
+}
+
+bool shouldUseLevelZeroAlloc() {
+  const char* env = std::getenv("PYTORCH_XPU_ALLOC_LEVEL_ZERO");
+  if (env) {
+    return std::string(env) != "0";
+  }
+  return true;
+}
+
+} // namespace
+#endif // _WIN32
 
 void XPUHooks::init() const {
   C10_LOG_API_USAGE_ONCE("aten.init.xpu");
   const auto device_count = c10::xpu::device_count_ensure_non_zero();
+#ifndef _WIN32
+  if (shouldUseLevelZeroAlloc()) {
+    c10::xpu::XPUCachingAllocator::setRawDeviceAllocFns(
+        levelZeroAllocDevice, levelZeroFreeDevice);
+  }
+#endif
   c10::xpu::XPUCachingAllocator::init(device_count);
   at::xpu::detail::init_p2p_access_cache(device_count);
 }

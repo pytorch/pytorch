@@ -15,6 +15,18 @@ using namespace c10::CachingDeviceAllocator;
 // newly allocated memory with 512-byte alignment.
 constexpr size_t kDeviceAlignment = 512;
 
+// Optional overrides for raw device allocation, registered at init time.
+// See XPUHooks::init() for the Level Zero implementation.
+static std::atomic<RawDeviceAllocFn> g_raw_alloc_fn{nullptr};
+static std::atomic<RawDeviceFreeFn> g_raw_free_fn{nullptr};
+
+void setRawDeviceAllocFns(
+    RawDeviceAllocFn alloc_fn,
+    RawDeviceFreeFn free_fn) {
+  g_raw_alloc_fn.store(alloc_fn, std::memory_order_release);
+  g_raw_free_fn.store(free_fn, std::memory_order_release);
+}
+
 namespace {
 using stream_set = ska::flat_hash_set<xpu::XPUStream>;
 
@@ -410,11 +422,20 @@ void allocPrimitive(void** ptr, size_t size, AllocParams& p) {
   if (p.pool->owner_PrivatePool && p.pool->owner_PrivatePool->allocator()) {
     *ptr = p.pool->owner_PrivatePool->allocator()->raw_alloc(size);
   } else {
-    *ptr = sycl::aligned_alloc_device(
-        kDeviceAlignment,
-        size,
-        xpu::get_raw_device(p.device()),
-        xpu::get_device_context());
+    auto alloc_fn = g_raw_alloc_fn.load(std::memory_order_acquire);
+    if (alloc_fn) {
+      *ptr = alloc_fn(
+          size,
+          kDeviceAlignment,
+          xpu::get_raw_device(p.device()),
+          xpu::get_device_context());
+    } else {
+      *ptr = sycl::aligned_alloc_device(
+          kDeviceAlignment,
+          size,
+          xpu::get_raw_device(p.device()),
+          xpu::get_device_context());
+    }
   }
 }
 
@@ -422,7 +443,12 @@ void deletePrimitive(void* ptr, BlockPool* pool) {
   if (pool->owner_PrivatePool && pool->owner_PrivatePool->allocator()) {
     pool->owner_PrivatePool->allocator()->raw_delete(ptr);
   } else {
-    sycl::free(ptr, xpu::get_device_context());
+    auto free_fn = g_raw_free_fn.load(std::memory_order_acquire);
+    if (free_fn) {
+      free_fn(ptr, xpu::get_device_context());
+    } else {
+      sycl::free(ptr, xpu::get_device_context());
+    }
   }
 }
 

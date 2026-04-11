@@ -15,6 +15,19 @@ class XPUAllocator : public DeviceAllocator {
 
 C10_XPU_API extern std::atomic<XPUAllocator*> allocator;
 
+// Optional overrides for raw device memory allocation. When set, these replace
+// sycl::aligned_alloc_device / sycl::free in the caching allocator.
+using RawDeviceAllocFn = void* (*)(
+    size_t size,
+    size_t alignment,
+    sycl::device& device,
+    sycl::context& context);
+using RawDeviceFreeFn = void (*)(void* ptr, sycl::context& context);
+
+C10_XPU_API void setRawDeviceAllocFns(
+    RawDeviceAllocFn alloc_fn,
+    RawDeviceFreeFn free_fn);
+
 struct AllocatorConfigInfo {
   bool expandable_segments;
   std::string last_allocator_settings;

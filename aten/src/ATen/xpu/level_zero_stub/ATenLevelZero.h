@@ -39,7 +39,9 @@ namespace at::xpu {
   _(zeKernelGetProperties)     \
   _(zeMemGetAllocProperties)   \
   _(zeModuleBuildLogGetString) \
-  _(zeModuleBuildLogDestroy)
+  _(zeModuleBuildLogDestroy)   \
+  _(zeMemAllocDevice)          \
+  _(zeMemFree)
 
 extern "C" typedef struct LevelZero {
 // Intel level zero is not defaultly available on Windows.
