@@ -234,7 +234,7 @@ def derived_types(
 
     def derived_seq_types(typ: type | typing._SpecialForm):
         return (
-            typing.Sequence[typ],  # type: ignore[valid-type]  # noqa: UP006
+            typing.Sequence[typ],  # type: ignore[valid-type]
             typing.List[typ],  # type: ignore[valid-type]  # noqa: UP006
             GenericAlias(collections.abc.Sequence, (typ,)),
             GenericAlias(list, (typ,)),

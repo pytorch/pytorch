@@ -78,7 +78,7 @@ def philox_rand_offset(
 
 def register_philox_rand():
     name = "philox_rand"
-    schema = "(SymInt[] size, Tensor seed, Tensor offset, int[]? stride, Device? device=None, ScalarType? dtype=None) -> (Tensor, Tensor)"  # noqa: B950
+    schema = "(SymInt[] size, Tensor seed, Tensor offset, int[]? stride, Device? device=None, ScalarType? dtype=None) -> (Tensor, Tensor)"
 
     def _philox_rand_meta(
         shape: torch.Size,

@@ -1880,7 +1880,7 @@ def check_memory_pool(
     live_storages_ptrs: list[StorageWeakRefWrapper],
 ) -> None:
     """Validate cudagraph pool allocations against tracked live storages and surface leaks."""
-    assert all(isinstance(elem, StorageWeakRefWrapper) for elem in live_storages_ptrs)  # noqa: C419
+    assert all(isinstance(elem, StorageWeakRefWrapper) for elem in live_storages_ptrs)
     unique_storages = {stor.data_ptr() for stor in live_storages_ptrs if stor()}  # noqa: set_linter
 
     # check if there is a divergence first, then do the expensive snapshot call after

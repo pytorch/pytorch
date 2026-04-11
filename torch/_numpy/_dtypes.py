@@ -447,6 +447,6 @@ def issubdtype(arg1, arg2):
 
 
 __all__ = ["dtype", "DType", "typecodes", "issubdtype", "set_default_dtype", "sctypes"]
-__all__ += list(_names.keys())  # noqa: PLE0605
-__all__ += list(_name_aliases.keys())  # noqa: PLE0605
+__all__ += list(_names.keys())
+__all__ += list(_name_aliases.keys())
 __all__ += _abstract_dtypes  # noqa: PLE0605

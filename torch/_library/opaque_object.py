@@ -44,7 +44,7 @@ from typing_extensions import TypeIs
 from weakref import WeakKeyDictionary
 
 import torch
-from torch._opaque_base import OpaqueBase, OpaqueBaseMeta  # noqa: F401
+from torch._opaque_base import OpaqueBase, OpaqueBaseMeta
 
 
 if TYPE_CHECKING:

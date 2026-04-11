@@ -1012,7 +1012,7 @@ class ComboKernel(Kernel):
                     size = V.graph.sizevars.optimization_hints(buf.get_size())
                     stride = V.graph.sizevars.optimization_hints(buf.get_stride())
                     result.writeline(
-                        f"{var_name} = rand_strided({size}, {stride}, device='{buf.get_device()}', dtype={buf.get_dtype()})"  # noqa: B950 line too long
+                        f"{var_name} = rand_strided({size}, {stride}, device='{buf.get_device()}', dtype={buf.get_dtype()})"
                     )
                 elif arg_name in V.graph.constants:
                     # note that random seed is put in V.graph.constants
@@ -1020,7 +1020,7 @@ class ComboKernel(Kernel):
                     size = V.graph.sizevars.optimization_hints(const_tensor.size())
                     stride = V.graph.sizevars.optimization_hints(const_tensor.stride())
                     result.writeline(
-                        f"{var_name} = rand_strided({size}, {stride}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]  # noqa: B950 line too long
+                        f"{var_name} = rand_strided({size}, {stride}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]
                     )
                 elif isinstance(arg_sig, SizeArg):
                     symval_hint = V.graph.sizevars.optimization_hint(arg_sig.expr)

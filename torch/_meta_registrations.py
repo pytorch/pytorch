@@ -8424,17 +8424,17 @@ def _meta_grouped_mm_common(
             fp8_dtype = torch.float8_e4m3fnuz
         torch._check(
             mat_a.dtype == fp8_dtype and mat_b.dtype == fp8_dtype,
-            lambda: f"Expected inputs of E4M3 FP8 type but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",  # noqa: B950
+            lambda: f"Expected inputs of E4M3 FP8 type but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
         )
     else:
         torch._check(
             mat_a.dtype == torch.bfloat16 and mat_b.dtype == torch.bfloat16,
-            lambda: f"Expected inputs of BF16 type but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",  # noqa: B950
+            lambda: f"Expected inputs of BF16 type but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
         )
 
     torch._check(
         mat_a.dim() in [2, 3] and mat_b.dim() in [2, 3],
-        lambda: f"Multiplicands must be 2D or 3D but got mat_a.dim()={mat_a.dim()} and mat_b.dim()={mat_b.dim()}",  # noqa: B950
+        lambda: f"Multiplicands must be 2D or 3D but got mat_a.dim()={mat_a.dim()} and mat_b.dim()={mat_b.dim()}",
     )
 
     mat_a_is_2d = mat_a.dim() == 2
@@ -8458,11 +8458,11 @@ def _meta_grouped_mm_common(
 
         torch._check(
             is_row_major(mat_a),
-            lambda: f"Expected mat_a tensor to be row major in the last two dimensions, got strides {mat_a.stride()[-2:]}",  # noqa: B950
+            lambda: f"Expected mat_a tensor to be row major in the last two dimensions, got strides {mat_a.stride()[-2:]}",
         )
         torch._check(
             is_col_major(mat_b),
-            lambda: f"Expected mat_b tensor to be column major in the last two dimensions, got strides {mat_b.stride()[-2:]}",  # noqa: B950
+            lambda: f"Expected mat_b tensor to be column major in the last two dimensions, got strides {mat_b.stride()[-2:]}",
         )
 
     def check_valid_strides(mat_name, mat):
@@ -8474,19 +8474,19 @@ def _meta_grouped_mm_common(
         ):
             torch._check(
                 mat_stride[end_dim] % alignment == 0,
-                lambda: f"Expected {mat_name} stride along {end_dim} dim to be multiple of 16 bytes, got {mat_stride[end_dim]}.",  # noqa: B950
+                lambda: f"Expected {mat_name} stride along {end_dim} dim to be multiple of 16 bytes, got {mat_stride[end_dim]}.",
             )
         elif mat_stride[end_dim] == 1 and mat_stride[end_dim - 1] >= max(
             1, mat.shape[end_dim]
         ):
             torch._check(
                 mat_stride[end_dim - 1] % alignment == 0,
-                lambda: f"Expected {mat_name} stride along {end_dim - 1} dim to be multiple of 16 bytes, got {mat_stride[end_dim - 1]}.",  # noqa: B950
+                lambda: f"Expected {mat_name} stride along {end_dim - 1} dim to be multiple of 16 bytes, got {mat_stride[end_dim - 1]}.",
             )
         else:
             torch._check(
                 False,
-                lambda: f"Invalid strides/sizes, got {mat_stride} for strides and {mat.shape} for sizes.",  # noqa: B950
+                lambda: f"Invalid strides/sizes, got {mat_stride} for strides and {mat.shape} for sizes.",
             )
 
     check_valid_strides("mat_a", mat_a)
@@ -8499,7 +8499,7 @@ def _meta_grouped_mm_common(
                 scale_a.dtype == torch.float8_e8m0fnu
                 and scale_b.dtype == torch.float8_e8m0fnu
             ),
-            lambda: f"For FP8 scales must both be float32, or for MXFP8 both scales must be float8_e8m0fnu. Got scale_a.dtype={scale_a.dtype} and scale_b.dtype={scale_b.dtype}.",  # noqa: B950
+            lambda: f"For FP8 scales must both be float32, or for MXFP8 both scales must be float8_e8m0fnu. Got scale_a.dtype={scale_a.dtype} and scale_b.dtype={scale_b.dtype}.",
         )
         is_mxfp8 = (
             scale_a.dtype == torch.float8_e8m0fnu
@@ -8519,7 +8519,7 @@ def _meta_grouped_mm_common(
                 if is_mxfp8:
                     torch._check(
                         scale.dim() == mat.dim(),
-                        lambda: f"For MXFP8, scale must have same number of dimensions as target tensor, but {scale_name} has mat.ndim={mat.ndim} and scale.ndim={scale.ndim}",  # noqa: B950
+                        lambda: f"For MXFP8, scale must have same number of dimensions as target tensor, but {scale_name} has mat.ndim={mat.ndim} and scale.ndim={scale.ndim}",
                     )
                 else:
                     torch._check(
@@ -8528,7 +8528,7 @@ def _meta_grouped_mm_common(
                     )
                     torch._check(
                         scale.shape[0] == mat.shape[scaled_dim] * scale_multiplier,
-                        lambda: f"Expected {scale_name} to have {mat.shape[scaled_dim] * scale_multiplier} elements, got {scale.shape[0]} elements.",  # noqa: B950
+                        lambda: f"Expected {scale_name} to have {mat.shape[scaled_dim] * scale_multiplier} elements, got {scale.shape[0]} elements.",
                     )
             else:
                 torch._check(
@@ -8544,7 +8544,7 @@ def _meta_grouped_mm_common(
                 if is_mxfp8:
                     torch._check(
                         scale.ndim == mat.ndim - 1,
-                        lambda: f"For MXFP8, 3d tensor should have 2d scales, but {scale_name} has mat.ndim={mat.ndim} and scale.ndim={scale.ndim}",  # noqa: B950
+                        lambda: f"For MXFP8, 3d tensor should have 2d scales, but {scale_name} has mat.ndim={mat.ndim} and scale.ndim={scale.ndim}",
                     )
                     # TODO: This logic only holds for RHS tensor in 2d-3d case.
                     # We'll need to update it to handle LHS 3d tensor in 3d-2d and 3d-3d cases.
@@ -8554,7 +8554,7 @@ def _meta_grouped_mm_common(
                     blocked_N = round_up(N, 128)
                     torch._check(
                         scale.shape[0] == G and scale.shape[1] == blocked_K * blocked_N,
-                        lambda: f"For MXFP8, expected mat.shape={mat.shape} to have scale shape of ({G},{blocked_K * blocked_N}), but got {scale.shape}",  # noqa: B950
+                        lambda: f"For MXFP8, expected mat.shape={mat.shape} to have scale shape of ({G},{blocked_K * blocked_N}), but got {scale.shape}",
                     )
                 else:
                     torch._check(
@@ -8563,7 +8563,7 @@ def _meta_grouped_mm_common(
                     )
                     torch._check(
                         scale.shape[1] == mat.shape[1 + scaled_dim],
-                        lambda: f"Expected {scale_name} non-batch dimension to be {mat.shape[1 + scaled_dim]}, got {scale.shape[1]}.",  # noqa: B950
+                        lambda: f"Expected {scale_name} non-batch dimension to be {mat.shape[1 + scaled_dim]}, got {scale.shape[1]}.",
                     )
 
         scale_multiplier = (
@@ -9029,11 +9029,11 @@ def activate_meta():
             in {
                 "aten::empty_strided",  # causing infinite recursion, test_meta.py
                 "aten::clone",  # causing infinite recursion
-                "aten::_to_copy",  # causing infinite recursion, test_serialization.py -k test_tensor_subclass_getstate_overwrite  # noqa: B950
-                "aten::copy_",  # Exception not raised, test_torch.py -k test_storage_meta_errors_cpu_int64  # noqa: B950
-                "aten::constant_pad_nd",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_amp_istft_cuda_float32  # noqa: B950
-                "aten::rot90",  # requires_grad mismatch! test_ops.py -k test_fake_crossref_backward_amp_rot90_cuda_float32  # noqa: B950
-                "aten::as_strided_scatter",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_no_amp_as_strided_scatter_cuda_float32  # noqa: B950
+                "aten::_to_copy",  # causing infinite recursion, test_serialization.py -k test_tensor_subclass_getstate_overwrite
+                "aten::copy_",  # Exception not raised, test_torch.py -k test_storage_meta_errors_cpu_int64
+                "aten::constant_pad_nd",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_amp_istft_cuda_float32
+                "aten::rot90",  # requires_grad mismatch! test_ops.py -k test_fake_crossref_backward_amp_rot90_cuda_float32
+                "aten::as_strided_scatter",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_no_amp_as_strided_scatter_cuda_float32
             }
         ):
             pass
