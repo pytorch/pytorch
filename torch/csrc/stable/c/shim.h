@@ -220,8 +220,37 @@ AOTI_TORCH_EXPORT AOTITorchError torch_library_def_with_tags(
     const char* schema,
     const int32_t* tags,
     int32_t num_tags);
-
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+
+// !!! TODO: THis must be 2.13, but it's test scaffolding is missing atm.
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
+
+/// Retrieve a pointer to the string that holds the most recent exception's
+/// message and backtrace that occurred in the calling thread. This pointer is a
+/// borrowed pointer and is invalidated when the next exception occurs. This may
+/// be the same as the less detailed
+/// torch_exception_get_what_without_backtrace() in case more information is not
+/// available.
+AOTI_TORCH_EXPORT const char* torch_exception_get_what();
+
+/// Retrieve a pointer to the string that holds the most recent exception's
+/// message that occurred in the calling thread. This pointer is a borrowed
+/// pointer and is invalidated when the next exception occurs.
+AOTI_TORCH_EXPORT const char* torch_exception_get_what_without_backtrace();
+
+/// Configures whether the exception and its backtrace should be printed.
+/// This sets the flag only for the calling thread, printing in other threads is
+/// unmodified.
+/// The function returns the previously stored boolean value.
+AOTI_TORCH_EXPORT bool torch_exception_set_exception_printing(
+    bool should_print);
+
+/// Retrieves whether exception printing is enabled for the calling thread,
+/// without modifying it.
+AOTI_TORCH_EXPORT bool torch_exception_get_exception_printing();
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 
 /**
  * The beginning of all shims added in 2.13.0 onwards.
