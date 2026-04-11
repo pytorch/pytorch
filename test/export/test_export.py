@@ -16652,8 +16652,15 @@ def forward(self, x):
                 x, _ = self.self_attention(input1, input1, input1, need_weights=False)
                 return x
 
+        model = Foo().eval()
         inps = (torch.randn(1, 224, 768, device="cpu"),)
-        export(Foo(), inps)
+        ep = export(model, inps).run_decompositions()
+
+        self.assertEqual(ep.module()(*inps), model(*inps))
+
+        if torch.cuda.is_available():
+            cuda_inps = tuple(inp.cuda() for inp in inps)
+            self.assertEqual(ep.module().cuda()(*cuda_inps), model.cuda()(*cuda_inps))
 
     def test_dim_dynamic(self):
         dynamic = Dim.DYNAMIC

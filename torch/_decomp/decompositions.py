@@ -302,39 +302,6 @@ def silu_backward(grad_output: Tensor, self: Tensor) -> Tensor:
     return grad_output * sigmoid * (1 + self * (1 - sigmoid))
 
 
-@register_decomposition(aten.celu)
-@out_wrapper()
-@pw_cast_for_opmath
-def celu(self: Tensor, alpha: float = 1.0) -> Tensor:
-    torch._check(
-        alpha != 0,
-        lambda: "ZeroDivisionError: alpha cannot be 0 for CELU",
-    )
-    inv_alpha = 1.0 / alpha
-    return torch.where(
-        self > 0,
-        self,
-        alpha * (torch.exp(self / alpha) - 1),
-    )
-
-
-@register_decomposition(aten.celu_)
-@out_wrapper()
-@pw_cast_for_opmath
-def celu_(self: Tensor, alpha: float = 1.0) -> Tensor:
-    torch._check(
-        alpha != 0,
-        lambda: "ZeroDivisionError: alpha cannot be 0 for CELU",
-    )
-    inv_alpha = 1.0 / alpha
-    result = torch.where(
-        self > 0,
-        self,
-        alpha * (torch.exp(self / alpha) - 1),
-    )
-    return self.copy_(result)
-
-
 @register_decomposition(aten._prelu_kernel)
 def _prelu_kernel(self: Tensor, weight: Tensor) -> Tensor:
     return torch.where(self > 0, self, weight * self)
@@ -5288,7 +5255,7 @@ def multilabel_margin_loss_forward(
 # size and stride" because the permute creates a non-contiguous tensor.
 # See: https://github.com/pytorch/pytorch/issues/179287
 @register_decomposition(aten.scaled_dot_product_attention)
-@out_wrapper("output", "attn_weights")
+@out_wrapper()
 def scaled_dot_product_attention(
     query: Tensor,
     key: Tensor,
@@ -5298,9 +5265,8 @@ def scaled_dot_product_attention(
     is_causal: bool = False,
     scale: float | None = None,
     enable_gqa: bool = False,
-) -> tuple[Tensor, Tensor | None]:
-    # Use the math implementation
-    output, attn = aten._scaled_dot_product_attention_math.default(
+) -> Tensor:
+    output, _ = aten._scaled_dot_product_attention_math.default(
         query,
         key,
         value,
@@ -5311,13 +5277,14 @@ def scaled_dot_product_attention(
         scale=scale,
         enable_gqa=enable_gqa,
     )
-    # Ensure output is in a format compatible with permute->view
-    # The output is [batch, num_heads, seq_len, head_dim]
-    # MultiheadAttention expects to permute to [seq_len, batch, num_heads, head_dim]
-    # and then view to [seq_len * batch, num_heads * head_dim]
-    # This requires the tensor to be contiguous after permute
-    output = output.contiguous(memory_format=torch.contiguous_format)
-    return output, attn
+    # Match the flash-attention output layout so the downstream permute->view
+    # in MultiheadAttention remains valid after decomposition.
+    output = (
+        output.permute(2, 0, 1, 3)
+        .contiguous(memory_format=torch.contiguous_format)
+        .permute(1, 2, 0, 3)
+    )
+    return output
 
 
 @register_decomposition(aten._scaled_dot_product_flash_attention_for_cpu.default)
