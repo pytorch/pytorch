@@ -2013,7 +2013,7 @@ def gradcheck(
     check_backward_ad: bool = True,
     fast_mode: bool = False,
     masked: bool | None = None,
-) -> bool:  # noqa: D400,D205
+) -> bool:
     r"""Check gradients computed via small finite differences against analytical
     gradients wrt tensors in :attr:`inputs` that are of floating point or complex type
     and with ``requires_grad=True``.
@@ -2182,7 +2182,7 @@ def gradgradcheck(
     check_rev_over_rev: bool = True,
     fast_mode: bool = False,
     masked: bool = False,
-) -> bool:  # noqa: D400,D205
+) -> bool:
     r"""Check gradients of gradients computed via small finite differences
     against analytical gradients wrt tensors in :attr:`inputs` and
     :attr:`grad_outputs` that are of floating point or complex type and with
