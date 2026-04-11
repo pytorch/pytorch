@@ -2315,6 +2315,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # MethodDescriptorType: e.g. list.append (PyMethodDef)
         # WrapperDescriptorType: e.g. list.__add__ (slot wrappers)
         # MethodWrapperType: e.g. [].__add__ (bound slot wrappers)
+        #
+        # Exception: if the descriptor has a registered polyfill, return the
+        # polyfill as a bound method so Dynamo can trace through it.
         if (
             isinstance(
                 type_attr,
@@ -2327,6 +2330,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             or torch._C._dynamo.utils.is_instancemethod(type_attr)  # type: ignore[attr-defined]
             or is_cython_function(type_attr)
         ):
+            from .. import trace_rules
+
+            if trace_rules.is_polyfilled_callable(type_attr):  # type: ignore[arg-type]
+                from .functions import PolyfilledFunctionVariable
+
+                polyfill_handlers = PolyfilledFunctionVariable._get_polyfill_handlers()
+                wrapped: Any = polyfill_handlers.get(type_attr)  # type: ignore[arg-type]
+                if wrapped is not None:
+                    traceable_fn = wrapped.__torch_dynamo_polyfill__
+                    return variables.UserMethodVariable(traceable_fn, self)
             return variables.GetAttrVariable(self, name, type(type_attr), source=source)
 
         # Plain class variable (or MethodType, C-level non-data descriptor
