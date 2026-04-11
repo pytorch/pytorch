@@ -472,6 +472,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         for device in V.graph.device_types:
             if device != "meta":
                 self.add_device_include(device)
+        self.header.splice("#include <vector>")
+        self.header.splice("#include <cstdint>")
+        self.header.splice("#include <torch/csrc/inductor/runtime/interface.h>")
 
         if V.graph.aot_mode:
             if config.aot_inductor.dynamic_linkage:
