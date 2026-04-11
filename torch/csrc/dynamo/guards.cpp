@@ -3015,6 +3015,7 @@ class GuardManager {
       if (PyCapsule_IsValid(e.cap, "GuardManager*")) {
         PyCapsule_SetName(e.cap, "DeadGuardManager");
       }
+      Py_DECREF(e.cap);
       Py_CLEAR(e.wr); // kills weakref (may remove callback)
     }
     _tag_safe_entries.clear();
@@ -3455,6 +3456,7 @@ class GuardManager {
       return false;
     }
     // These will be decrefed in destructor
+    Py_INCREF(capsule);
     _tag_safe_entries.push_back({wr, capsule});
     return true;
   }
