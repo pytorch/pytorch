@@ -3214,6 +3214,10 @@ class Scheduler:
             ):
                 self.create_combo_kernel_nodes(num_ck_nodes=None)
 
+        # torch.cond can contain arbitrary subgraphs, which can contain collectives
+        # reordering these can cause a nccl hang
+        self._enforce_conditional_ordering()
+
         # Peak memory pass and overlap pass must run last, otherwise
         # other reordering passes could undo their effects.
         if config.reorder_for_peak_memory:
@@ -3896,6 +3900,17 @@ class Scheduler:
         for node in nodes:
             visit(node)
         return result
+
+    def _enforce_conditional_ordering(self) -> None:
+        conditional_nodes = [
+            n for n in self.nodes if isinstance(n.node, ir.Conditional)
+        ]
+        for i in range(1, len(conditional_nodes)):
+            mutating_buf = next(iter(conditional_nodes[i].get_buffer_names()))
+            prev_buf = next(iter(conditional_nodes[i - 1].get_buffer_names()))
+            conditional_nodes[i].add_fake_dep(
+                WeakDep(prev_buf, mutating_buf=mutating_buf, is_fake=True)
+            )
 
     def _get_unmet_dep_nodes(self, snode: BaseSchedulerNode) -> list[BaseSchedulerNode]:
         unmet_deps: OrderedSet[str] = OrderedSet()
