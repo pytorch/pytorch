@@ -541,7 +541,8 @@ _scaled_grouped_mm_cuda_v2(
           const std::optional<Tensor>& bias,
           const std::optional<c10::ScalarType> out_dtype,
           IntArrayRef contraction_dim,
-          bool use_fast_accum) {
+          bool use_fast_accum,
+          const std::optional<Tensor>& out) {
   bool allowed_device = _scaled_mm_allowed_device(/*sm90_only*/true, /*sm100_only*/true);
   TORCH_CHECK_VALUE(allowed_device, "torch._scaled_grouped_mm is only supported on CUDA devices with compute capability = [9.0, 10.0], or ROCm MI300+");
 
@@ -551,6 +552,7 @@ _scaled_grouped_mm_cuda_v2(
   TORCH_CHECK_VALUE(mat_b.dim() == 2 || mat_b.dim() == 3, "mat_b has to be 2 or 3d");
   const bool a_is_2d = mat_a.dim() == 2;
   const bool b_is_2d = mat_b.dim() == 2;
+  const bool b_is_3d = mat_b.dim() == 3;
 
   // NOTE(slayton): For sub-1B formats want contraction_dim argument?
   if (!a_is_2d || !b_is_2d) {
@@ -591,7 +593,25 @@ _scaled_grouped_mm_cuda_v2(
   const auto out_dtype_ = out_dtype.value_or(kBFloat16);
   TORCH_CHECK_VALUE(out_dtype_ == kBFloat16, "Only bf16 high precision output types are supported for grouped gemm");
 
-  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
+  Tensor output;
+  if (out.has_value()) {
+    output = out.value();
+    TORCH_CHECK_VALUE(output.dim() == 2 || output.dim() == 3, "Output tensor has to be 2 or 3d");
+    if (a_is_2d && b_is_2d) {
+      TORCH_CHECK_VALUE(output.dim() == 3, "Output tensor has to be 3d when both inputs are 2d");
+      TORCH_CHECK_VALUE(output.size(0) == offs->size(0), "out.shape[0] must match number of groups (offs.shape[0])");
+      TORCH_CHECK_VALUE(output.size(1) == mat_a.size(0), "out.shape[1] must match mat_a.shape[0]");
+      TORCH_CHECK_VALUE(output.size(2) == mat_b.size(1), "out.shape[2] must match mat_b.shape[1]");
+    } else if (a_is_2d && b_is_3d) {
+      TORCH_CHECK_VALUE(output.dim() == 2, "Output tensor has to be 2d when mat_a is 2d and mat_b is 3d");
+      TORCH_CHECK_VALUE(output.size(0) == mat_a.size(0), "out.shape[0] must match mat_a.shape[0]");
+      TORCH_CHECK_VALUE(output.size(1) == mat_b.size(2), "out.shape[1] must match mat_b.shape[2]");
+    } else {
+      TORCH_CHECK_NOT_IMPLEMENTED(false, "Only 2d-2d and 2d-3d input combinations are supported currently");
+    }
+  } else {
+    output = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
+  }
 
   // Conversion of implicitly-defined enums to explicit
   auto scale_recipe_a_enum = convert_int_to_enum<ScalingType>(scale_recipe_a);
@@ -633,7 +653,7 @@ _scaled_grouped_mm_cuda_v2(
           offs,
           bias,
           use_fast_accum,
-          out);
+          output);
     }
     case ScaledGemmImplementation::MXFP8_MXFP8: {
       // scale shape checks
@@ -649,7 +669,7 @@ _scaled_grouped_mm_cuda_v2(
           scale_b[0],
           swizzle_b_enum[0],
           offs.value(),
-          out);
+          output);
     }
     case ScaledGemmImplementation::MXFP4_MXFP4: {
       // scale shape checks
@@ -664,7 +684,7 @@ _scaled_grouped_mm_cuda_v2(
           std::nullopt, /* global-scale B */
           offs.value(),
           std::nullopt, /* bias */
-          out);
+          output);
     }
     case ScaledGemmImplementation::NVFP4_NVFP4: {
       // scale shape checks
@@ -679,7 +699,7 @@ _scaled_grouped_mm_cuda_v2(
           scale_b[1], /* global-scale B */
           offs.value(),
           std::nullopt, /* bias */
-          out);
+          output);
     }
     default:
       TORCH_CHECK_NOT_IMPLEMENTED(false,

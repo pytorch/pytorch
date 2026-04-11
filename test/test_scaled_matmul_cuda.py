@@ -267,6 +267,7 @@ def scaled_grouped_mm_wrap(
     offs=None,
     bias=None,
     wrap_v2=True,
+    out=None,
 ):
     if not wrap_v2:
         return torch._scaled_grouped_mm(
@@ -291,7 +292,9 @@ def scaled_grouped_mm_wrap(
             offs=offs,
             bias=bias,
             output_dtype=out_dtype,
-            use_fast_accum=use_fast_accum)
+            use_fast_accum=use_fast_accum,
+            out=out,
+        )
 
 
 
@@ -953,6 +956,76 @@ class TestFP8Matmul(TestCase):
 
         # Assert outputs are close.
         torch.testing.assert_close(y_lp, y_bf16, atol=8.0e-2, rtol=8.0e-2)
+
+
+    @onlyOn(["cuda"])
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
+    def test_mxfp8_2d_2d_grouped_mm_out_argument(self, device) -> None:
+        if not _device_supports_scaled_mm_fp8(device):
+            raise unittest.SkipTest(f8_msg)
+        size = (256, 256)
+        x = torch.full(size, .5, device=device, dtype=e4m3_type)
+        y = torch.full(size, .5, device=device, dtype=e4m3_type).t()
+        offs = torch.tensor([128, 256], device=device, dtype=torch.int32)
+
+        prealloc_out = torch.empty((2, 256, 256), device=device, dtype=torch.bfloat16)
+        scale_x = torch.full((256, 8), 1.0, dtype=torch.float8_e8m0fnu, device=device)
+        scale_y = torch.full((256, 8), 1.0, dtype=torch.float8_e8m0fnu, device=device)
+
+        # only supported on v2 api
+        returned_out = scaled_grouped_mm_wrap(
+            x,
+            y,
+            scale_a=scale_x,
+            scale_b=scale_y,
+            scale_recipe_a=ScalingType.BlockWise1x32,
+            scale_recipe_b=ScalingType.BlockWise1x32,
+            swizzle_a=SwizzleType.SWIZZLE_32_4_4,
+            swizzle_b=SwizzleType.SWIZZLE_32_4_4,
+            offs=offs,
+            out=prealloc_out,
+            wrap_v2=True
+        )
+
+        if returned_out.data_ptr() != prealloc_out.data_ptr():
+            raise AssertionError("returned_out and prealloc_out must have the same data pointers")
+
+    @onlyOn(["cuda"])
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
+    def test_mxfp8_2d_3d_grouped_mm_out_argument(self, device) -> None:
+        if not _device_supports_scaled_mm_fp8(device):
+            raise unittest.SkipTest(f8_msg)
+
+        G, M, N, K = 2, 256, 128, 128
+
+        x = torch.full((M, K), .5, device=device, dtype=e4m3_type)
+        w = torch.full((G, N, K), .5, device=device, dtype=e4m3_type)
+        offs = torch.tensor([M // G, M], device=device, dtype=torch.int32)
+
+        prealloc_out = torch.empty((M, N), device=device, dtype=torch.bfloat16)
+
+        # scales for mxfp8
+        scale_x = torch.full((M, K // 32), 1.0, dtype=torch.float8_e8m0fnu, device=device)
+        scale_y = torch.full((G, N * K // 32), 1.0, dtype=torch.float8_e8m0fnu, device=device)
+
+        # only supported on v2 api
+        returned_out = scaled_grouped_mm_wrap(
+            x,
+            w.transpose(-2, -1),
+            scale_a=scale_x,
+            scale_b=scale_y,
+            scale_recipe_a=ScalingType.BlockWise1x32,
+            scale_recipe_b=ScalingType.BlockWise1x32,
+            swizzle_a=SwizzleType.SWIZZLE_32_4_4,
+            swizzle_b=SwizzleType.SWIZZLE_32_4_4,
+            offs=offs,
+            out=prealloc_out,
+            wrap_v2=True
+        )
+
+        if returned_out.data_ptr() != prealloc_out.data_ptr():
+            raise AssertionError("returned_out and prealloc_out must have the same data pointers")
+
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("base_dtype", [torch.float16, torch.bfloat16, torch.float32])
