@@ -9959,7 +9959,7 @@ class foreach_norm_sample_func(foreach_inputs_sample_func):
         for ord in (0, 1, 2, -1, -2, float('inf'), float('-inf')):
             input = sample_inputs_foreach(None, device, dtype, NUM_SIZE0_TENSORS, zero_size=True, **_foreach_inputs_kwargs)
             disable_fastpath = True
-            if ord in (1, 2, float('inf')) and dtype in floating_types_and(torch.half, torch.bfloat16):
+            if ord in (0, 1, 2, float('inf')) and dtype in floating_types_and(torch.half, torch.bfloat16):
                 disable_fastpath = False
             yield ForeachSampleInput(input, ord=ord, disable_fastpath=disable_fastpath)
 
@@ -9985,7 +9985,7 @@ class foreach_norm_sample_func(foreach_inputs_sample_func):
             _foreach_inputs_kwargs["intersperse_empty_tensors"] = intersperse_empty_tensors
             input = sample_inputs_foreach(None, device, dtype, num_tensors, zero_size=False, **_foreach_inputs_kwargs)
             disable_fastpath = True
-            if ord in (1, 2, float('inf')) and dtype in floating_types_and(torch.half, torch.bfloat16):
+            if ord in (0, 1, 2, float('inf')) and dtype in floating_types_and(torch.half, torch.bfloat16):
                 disable_fastpath = False
             yield ForeachSampleInput(input, ord=ord, disable_fastpath=disable_fastpath, dtype=out_dtype)
 
@@ -10002,7 +10002,7 @@ class foreach_norm_sample_func(foreach_inputs_sample_func):
             for input in nan_inputs:
                 x = torch.tensor(input, device=device)
                 disable_fastpath = True
-                if ord in (1, 2, float('inf')) and dtype in floating_types_and(torch.half, torch.bfloat16):
+                if ord in (0, 1, 2, float('inf')) and dtype in floating_types_and(torch.half, torch.bfloat16):
                     disable_fastpath = False
                 yield ForeachSampleInput([x], ord=ord, disable_fastpath=disable_fastpath)
 
