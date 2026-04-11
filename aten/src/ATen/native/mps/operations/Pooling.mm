@@ -1206,30 +1206,23 @@ TORCH_IMPL_FUNC(avg_pool2d_out_mps)
  bool count_include_pad,
  std::optional<int64_t> divisor_override,
  const Tensor& output) {
-  if (ceil_mode) {
-    mps::avg_pool_out_mps_template(output,
-                                   input,
-                                   {kH, kW},
-                                   {dH, dW},
-                                   {padH, padW},
-                                   ceil_mode,
-                                   count_include_pad,
-                                   divisor_override,
-                                   /*pooling_dims=*/2,
-                                   "avg_pool3d");
-  } else {
-    mps::avg_pool2d_template(input,
-                             output,
-                             std::nullopt,
-                             {kH, kW},
-                             {dH, dW},
-                             {padH, padW},
-                             {1, 1},
-                             ceil_mode,
-                             count_include_pad,
-                             divisor_override,
-                             "avg_pool2d");
-  }
+  // Always use the custom Metal shader instead of MPSGraph.
+  // MPSGraph's avgPooling2D internally uses a prefix-sum accumulator that
+  // causes float32 precision loss for large inputs: after accumulating many
+  // large values, the residual error propagates into subsequent windows,
+  // producing incorrect (even negative) results for all-zero regions.
+  // The custom Metal shader computes each output window independently,
+  // avoiding cross-window error propagation. See #179608.
+  mps::avg_pool_out_mps_template(output,
+                                 input,
+                                 {kH, kW},
+                                 {dH, dW},
+                                 {padH, padW},
+                                 ceil_mode,
+                                 count_include_pad,
+                                 divisor_override,
+                                 /*pooling_dims=*/2,
+                                 "avg_pool2d");
 }
 
 TORCH_IMPL_FUNC(avg_pool2d_backward_out_mps)
@@ -1242,17 +1235,19 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_mps)
  bool count_include_pad,
  std::optional<int64_t> divisor_override,
  const Tensor& gradInput) {
-  mps::avg_pool2d_template(input,
-                           gradInput,
-                           gradOutput,
-                           kernel_size,
-                           stride,
-                           padding,
-                           {1, 1},
-                           ceil_mode,
-                           count_include_pad,
-                           divisor_override,
-                           "avg_pool2d_backward");
+  // Use the custom Metal shader for backward too, matching the forward pass
+  // change (see #179608).
+  mps::avg_pool_backward_out_mps_template(gradInput,
+                                          input,
+                                          gradOutput,
+                                          kernel_size,
+                                          stride,
+                                          padding,
+                                          ceil_mode,
+                                          count_include_pad,
+                                          divisor_override,
+                                          /*pooling_dims=*/2,
+                                          "avg_pool2d_backward");
 }
 
 TORCH_IMPL_FUNC(avg_pool3d_out_mps)

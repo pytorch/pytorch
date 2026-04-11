@@ -17,6 +17,7 @@ from torch import inf, nan
 from torch.autograd import gradcheck, gradgradcheck
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_utils import TEST_MPS
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
@@ -142,6 +143,32 @@ class TestAvgPool(TestCase):
                 stride=2,
             )
             self.assertTrue(not torch.isnan(y).any())
+
+    @unittest.skipUnless(TEST_MPS, "MPS not available")
+    def test_avg_pool1d_large_input_precision_mps(self):
+        # Regression test for gh-179608
+        # avg_pool1d on MPS produced negative values from non-negative input
+        # when zeros followed a long sequence of large positive floats due to
+        # float32 precision loss in MPSGraph's prefix-sum accumulator.
+        torch.manual_seed(0)
+        large = torch.rand(1, 1, 18_000) * 3_400_000
+        zeros = torch.zeros(1, 1, 60)
+        x = torch.cat([large, zeros], dim=-1)  # all values >= 0
+
+        kernel_size = 30
+        cpu_out = F.avg_pool1d(x, kernel_size, stride=1)
+        mps_out = F.avg_pool1d(x.to("mps"), kernel_size, stride=1).cpu()
+
+        # The last 31 output elements correspond to windows containing only
+        # zeros — they must be non-negative.
+        mps_zero_region = mps_out[..., -31:]
+        self.assertTrue(
+            (mps_zero_region >= 0).all(),
+            f"MPS avg_pool1d produced negative values in zero region: "
+            f"min={mps_zero_region.min().item():.4f}",
+        )
+        # Also check overall closeness to CPU
+        self.assertEqual(cpu_out, mps_out, atol=1e-1, rtol=1e-3)
 
     def test_avg_pool2d_ceil_mode(self):
         # Regression test for gh-36977
