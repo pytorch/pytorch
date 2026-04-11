@@ -67,8 +67,6 @@ Usually, PyTorch is used either as:
 - A replacement for NumPy to use the power of GPUs.
 - A deep learning research platform that provides maximum flexibility and speed.
 
-Elaborating Further:
-
 ### A GPU-Ready Tensor Library
 
 If you use NumPy, then you have used Tensors (a.k.a. ndarray).
@@ -86,9 +84,9 @@ And they are fast!
 
 PyTorch has a unique way of building neural networks: using and replaying a tape recorder.
 
-Most frameworks such as TensorFlow, Theano, Caffe, and CNTK have a static view of the world.
-One has to build a neural network and reuse the same structure again and again.
-Changing the way the network behaves means that one has to start from scratch.
+Earlier frameworks such as Theano, Caffe, and the original TensorFlow used a static graph model
+where the network structure had to be defined before execution.
+Changing the way the network behaves meant that one had to start from scratch.
 
 With PyTorch, we use a technique called reverse-mode auto-differentiation, which allows you to
 change the way your network behaves arbitrarily with zero lag or overhead. Our inspiration comes
@@ -108,7 +106,7 @@ PyTorch is not a Python binding into a monolithic C++ framework.
 It is built to be deeply integrated into Python.
 You can use it naturally like you would use [NumPy](https://www.numpy.org/) / [SciPy](https://www.scipy.org/) / [scikit-learn](https://scikit-learn.org) etc.
 You can write your new neural network layers in Python itself, using your favorite libraries
-and use packages such as [Cython](https://cython.org/) and [Numba](http://numba.pydata.org/).
+and use packages such as [Cython](https://cython.org/) and [Numba](https://numba.pydata.org/).
 Our goal is to not reinvent the wheel where appropriate.
 
 ### Imperative Experiences
@@ -122,7 +120,7 @@ We hope you never spend hours debugging your code because of bad stack traces or
 ### Fast and Lean
 
 PyTorch has minimal framework overhead. We integrate acceleration libraries
-such as [Intel MKL](https://software.intel.com/mkl) and NVIDIA ([cuDNN](https://developer.nvidia.com/cudnn), [NCCL](https://developer.nvidia.com/nccl)) to maximize speed.
+such as [Intel MKL](https://software.intel.com/mkl) and NVIDIA ([CUDA](https://developer.nvidia.com/cuda-toolkit), [cuDNN](https://developer.nvidia.com/cudnn), [NCCL](https://developer.nvidia.com/nccl)) to maximize speed.
 At the core, its CPU and GPU Tensor and neural network backends
 are mature and have been tested for years.
 
@@ -209,7 +207,7 @@ Other potentially useful environment variables may be found in `setup.py`.  If
 CUDA is installed in a non-standard location, set PATH so that the nvcc you
 want to use can be found (e.g., `export PATH=/usr/local/cuda-12.8/bin:$PATH`).
 
-If you are building for NVIDIA's Jetson platforms (Jetson Nano, TX1, TX2, AGX Xavier), Instructions to install PyTorch for Jetson Nano are [available here](https://devtalk.nvidia.com/default/topic/1049071/jetson-nano/pytorch-for-jetson-nano/)
+If you are building for NVIDIA's Jetson platforms (Jetson Nano, TX1, TX2, AGX Xavier), please refer to the [NVIDIA Jetson Platforms](#nvidia-jetson-platforms) section above.
 
 ##### AMD ROCm Support
 If you want to compile with ROCm support, install
@@ -322,7 +320,7 @@ In this mode PyTorch computations will leverage your GPU via CUDA for faster num
 NVTX is a part of CUDA distributive, where it is called "Nsight Compute". To install it onto an already installed CUDA run CUDA installation once again and check the corresponding checkbox.
 Make sure that CUDA with Nsight Compute is installed after Visual Studio.
 
-Currently, VS 2017 / 2019, and Ninja are supported as the generator of CMake. If `ninja.exe` is detected in `PATH`, then Ninja will be used as the default generator, otherwise, it will use VS 2017 / 2019.
+Currently, VS 2019 / 2022, and Ninja are supported as the generator of CMake. If `ninja.exe` is detected in `PATH`, then Ninja will be used as the default generator, otherwise, it will use VS 2019 / 2022.
 <br/> If Ninja is selected as the generator, the latest MSVC will get selected as the underlying toolchain.
 
 Additional libraries such as
@@ -377,7 +375,7 @@ python -m pip install --no-build-isolation -v -e .
 ##### Adjust Build Options (Optional)
 
 You can adjust the configuration of cmake variables optionally (without building first), by doing
-the following. For example, adjusting the pre-detected directories for CuDNN or BLAS can be done
+the following. For example, adjusting the pre-detected directories for cuDNN or BLAS can be done
 with such a step.
 
 On Linux
@@ -567,14 +565,14 @@ Pointers to get you started:
 * [Intro to Deep Learning with PyTorch from Udacity](https://www.udacity.com/course/deep-learning-pytorch--ud188)
 * [Intro to Machine Learning with PyTorch from Udacity](https://www.udacity.com/course/intro-to-machine-learning-nanodegree--nd229)
 * [Deep Neural Networks with PyTorch from Coursera](https://www.coursera.org/learn/deep-neural-networks-with-pytorch)
-* [PyTorch Twitter](https://twitter.com/PyTorch)
+* [PyTorch on X](https://x.com/PyTorch)
 * [PyTorch Blog](https://pytorch.org/blog/)
 * [PyTorch YouTube](https://www.youtube.com/channel/UCWXI5YeOsh03QvJ59PMaXFw)
 
 ## Communication
 * Forums: Discuss implementations, research, etc. https://discuss.pytorch.org
 * GitHub Issues: Bug reports, feature requests, install issues, RFCs, thoughts, etc.
-* Slack: The [PyTorch Slack](https://pytorch.slack.com/) hosts a primary audience of moderate to experienced PyTorch users and developers for general chat, online discussions, collaboration, etc. If you are a beginner looking for help, the primary medium is [PyTorch Forums](https://discuss.pytorch.org). If you need a slack invite, please fill this form: https://goo.gl/forms/PP1AGvNHpSaJP8to1
+* Slack: The [PyTorch Slack](https://pytorch.slack.com/) hosts a primary audience of moderate to experienced PyTorch users and developers for general chat, online discussions, collaboration, etc. If you are a beginner looking for help, the primary medium is [PyTorch Forums](https://discuss.pytorch.org). If you would like a Slack invite, please fill out [this form](https://docs.google.com/forms/d/e/1FAIpQLSeADnUNW36fjKjYzyHDOzEB_abKQE9b6gqqW9NXse6O0MWh0A/viewform) to help us determine your level of engagement with PyTorch — invites are sent to qualified applicants.
 * Newsletter: No-noise, a one-way email newsletter with important announcements about PyTorch. You can sign-up here: https://eepurl.com/cbG0rv
 * Facebook Page: Important announcements about PyTorch. https://www.facebook.com/pytorch
 * For brand guidelines, please visit our website at [pytorch.org](https://pytorch.org/)
