@@ -4178,7 +4178,7 @@ class TestProfilerEventsParity(TestCase):
             unexpected_trace_keys = set(args) - supported_trace_keys
             if unexpected_trace_keys:
                 unexpected_trace_key_failures.append(
-                    f"Event: {(te['name'], cat, ext_id, correlation)}\n"
+                    f"Event: {(te['name'][:100], cat, ext_id, correlation)}\n"
                     f"Unexpected keys: {sorted(unexpected_trace_keys)}"
                 )
 
@@ -4192,14 +4192,17 @@ class TestProfilerEventsParity(TestCase):
             json_records[key] = metadata_dict_from_trace_args(args)
 
         failure_msg = """
+        ====================================================================================
         IMPORTANT: Are you making a kineto change or bumping the hash and seeing this message?
         If so, please check the schema for EventMetadata (torch/autograd/profiler_util.py).
         It is currently missing these keys, which were found in the JSON metadata args.
+        =====================================================================================
         """
-        self.assertFalse(
-            unexpected_trace_key_failures,
-            f"{failure_msg}\n" + "\n\n".join(unexpected_trace_key_failures),
-        )
+        if unexpected_trace_key_failures:
+            raise AssertionError(
+                f"\n{failure_msg}\n" + "\n\n".join(unexpected_trace_key_failures)
+            )
+
         self.assertGreater(len(json_records), 0, "No device-side records were compared")
         self.assertEqual(
             set(event_records),
