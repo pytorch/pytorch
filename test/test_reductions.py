@@ -2300,6 +2300,25 @@ class TestReductions(TestCase):
             ):
                 torch.nanmean(t)
 
+    @onlyCPU
+    @dtypes(torch.float, torch.double)
+    def test_nanmean_opt_dtype_validation(self, device, dtype):
+        t = make_tensor((3,), dtype=dtype, device=device)
+        t_empty = make_tensor((0,), dtype=dtype, device=device)
+
+        for bad_dtype in [torch.int64, torch.int32, torch.bool]:
+            for tensor in [t, t_empty]:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"nanmean\(\): Optional dtype must be either a floating point or complex dtype",
+                ):
+                    torch.nanmean(tensor, dtype=bad_dtype)
+
+        # Valid floating dtypes should still work
+        for good_dtype in [torch.float32, torch.float64]:
+            result = torch.nanmean(t, dtype=good_dtype)
+            self.assertEqual(result.dtype, good_dtype)
+
     @precisionOverride({torch.float16: 1e-2, torch.bfloat16: 1e-2})
     @dtypes(*set(all_types_and(torch.half, torch.bfloat16)) - {torch.uint8})
     @parametrize("fn_name", [
