@@ -2558,7 +2558,10 @@ class OutputGraph(OutputGraphCommon):
             example_value = var.proxy.node.meta.get("example_value")
             if example_value is None:
                 continue
-            if torch._C._functorch.is_gradtrackingtensor(example_value):
+            if (
+                torch._C._functorch.is_gradtrackingtensor(example_value)
+                and torch._C._functorch.maybe_get_level(example_value) == -2
+            ):
                 wrapped_outputs.append(var.proxy.node.name)
 
         if not wrapped_outputs:
