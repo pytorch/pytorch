@@ -70,6 +70,8 @@ extensions = [
     "sphinxcontrib.mermaid",
     "sphinx_sitemap",
     "sphinx_reredirects",
+    "pytorch_sphinx_theme2",
+    "sphinx_tippy",
 ]
 
 myst_enable_extensions = [
@@ -77,6 +79,17 @@ myst_enable_extensions = [
     "deflist",
     "html_image",
 ]
+
+# sphinx-tippy configuration
+tippy_props = {
+    "placement": "auto-start",
+    "maxWidth": 500,
+    "interactive": True,  # Allow clicking links inside tooltips
+    "theme": "material",
+}
+
+# Skip all URLs except glossary term links (glossary.html#term-*)
+tippy_skip_urls = (r"^(?!.*_glossary(\.html)?#term-).*$",)
 
 html_baseurl = "https://docs.pytorch.org/docs/stable/"  # needed for sphinx-sitemap
 sitemap_locales = [None]
@@ -2246,8 +2259,8 @@ coverage_ignore_classes = [
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
 #
-# source_suffix = ['.rst', '.md']
-source_suffix = ".rst"
+source_suffix = [".rst", ".md"]
+# source_suffix = ".rst"
 
 # The master toctree document.
 master_doc = "index"
@@ -2502,6 +2515,7 @@ def setup(app):
     app.connect("autodoc-process-docstring", process_docstring)
     app.connect("html-page-context", hide_edit_button_for_pages)
     app.config.add_last_updated = True
+
     return {"version": "0.1", "parallel_read_safe": True}
 
 
