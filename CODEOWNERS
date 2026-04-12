@@ -48,6 +48,17 @@ nn/qat/ @jerryzh168
 # c10d backend APIs
 /torch/csrc/distributed/c10d/Backend.* @kwen2501
 /torch/csrc/distributed/c10d/Ops.* @kwen2501
+# FSDP, DDP
+/torch/distributed/_composable/fsdp/ @weifengpy
+/torch/distributed/_composable/replicate.py @weifengpy
+/torch/distributed/_composable/replicate_with_fsdp.py @weifengpy
+/torch/distributed/fsdp/ @weifengpy
+/torch/distributed/optim/ @weifengpy
+/torch/nn/parallel/ @weifengpy
+# DTensor view, matmul, _StridedShard
+/torch/distributed/tensor/placement_types.py @weifengpy
+/torch/distributed/tensor/_ops/_view_ops.py @weifengpy
+/torch/distributed/tensor/_ops/_matrix_ops.py @weifengpy
 
 # ONNX Export
 /torch/_dynamo/backends/onnxrt.py @titaiwangms @xadupre @justinchuby
