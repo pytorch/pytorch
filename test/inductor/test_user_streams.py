@@ -1029,6 +1029,25 @@ class TestUserStreamCompile(InductorTestCase):
             f"Expected copy_misaligned on s2 (consumer stream), got: {s2_ops}",
         )
 
+    def test_stream_synchronize_not_dropped(self):
+        """stream.synchronize() must survive compilation and appear in wrapper code."""
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x):
+            s = torch.cuda.Stream()
+            with torch.cuda.stream(s):
+                a = x + 1
+            s.synchronize()
+            b = a * 2
+            return b
+
+        x = torch.randn(1024, device="cuda")
+        expected = fn(x)
+        compiled_fn = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled_fn, x)
+        self.assertEqual(result, expected)
+        self.assertIn("synchronize_stream", code)
+
     def test_codegen_structure_single_stream(self):
         """Verify wrapper structure for pointwise ops with one side stream."""
         from torch._inductor.utils import run_and_get_code
@@ -1055,17 +1074,17 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[1024]"):
         l_x_ = L_x_
 
-        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(0)
+        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(0);  get_external_object_by_index = None
 
         a: "f32[1024]" = l_x_ * 2
 
         b: "f32[1024]" = l_x_ * 3;  l_x_ = None
 
-        synchronize = get_external_object_by_index.synchronize();  get_external_object_by_index = synchronize = None
+        synchronize_stream = torch.ops.streams.synchronize_stream(0);  synchronize_stream = None
 
         add: "f32[1024]" = a + b;  a = b = None
         return (add,)
-""",
+""",  # noqa: B950
         )
 
         wrapper_body = _extract_wrapper_body(code)
@@ -1084,10 +1103,11 @@ with torch.cuda._DeviceGuard(0):
         raw_stream = get_raw_stream(0)
         triton_kernel.run(arg0_1, buf0, 1024, stream=raw_stream)
     with torch.cuda.stream(default_stream):
-        buf1 = buf0; del buf0
+        buf3 = empty_strided_cuda((1024, ), (1, ), torch.float32)
         stream0 = get_raw_stream(0)
-        triton_kernel.run(buf1, arg0_1, 1024, stream=stream0)
-    return (buf1, )""",
+        triton_kernel.run(arg0_1, buf0, buf3, 1024, stream=stream0)
+        torch.ops.streams.synchronize_stream.default(0)
+    return (buf3, )""",
         )
 
     def test_codegen_structure_pipeline(self):
@@ -1123,7 +1143,7 @@ class GraphModule(torch.nn.Module):
         l_w1_ = L_w1_
         l_w2_ = L_w2_
 
-        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(0)
+        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(0);  get_external_object_by_index = None
 
         get_external_object_by_index_1 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index_1 = None
 
@@ -1136,7 +1156,7 @@ class GraphModule(torch.nn.Module):
 
         b: "f32[32, 32]" = a @ l_w2_;  a = l_w2_ = None
 
-        synchronize = get_external_object_by_index.synchronize();  get_external_object_by_index = synchronize = None
+        synchronize_stream = torch.ops.streams.synchronize_stream(0);  synchronize_stream = None
         return (b,)
 """,  # noqa: B950
         )
@@ -1151,7 +1171,9 @@ class GraphModule(torch.nn.Module):
 # CHECK: with torch.cuda.stream(stream1):
 # CHECK: wait_event
 # CHECK: copy_misaligned
-# CHECK: extern_kernels.mm(""",
+# CHECK: extern_kernels.mm(
+# CHECK: with torch.cuda.stream(default_stream):
+# CHECK: synchronize_stream""",
             wrapper_body,
         )
 
@@ -1200,11 +1222,11 @@ class GraphModule(torch.nn.Module):
         l_w2_ = L_w2_
         l_w3_ = L_w3_
 
-        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(0)
+        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(0);  get_external_object_by_index = None
 
-        get_external_object_by_index_1 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1)
+        get_external_object_by_index_1 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index_1 = None
 
-        get_external_object_by_index_2 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(2)
+        get_external_object_by_index_2 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(2);  get_external_object_by_index_2 = None
 
         get_external_object_by_index_3 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(3);  get_external_object_by_index_3 = None
 
@@ -1224,11 +1246,11 @@ class GraphModule(torch.nn.Module):
 
         c: "f32[32, 32]" = b @ l_w3_;  b = l_w3_ = None
 
-        synchronize = get_external_object_by_index.synchronize();  get_external_object_by_index = synchronize = None
+        synchronize_stream = torch.ops.streams.synchronize_stream(0);  synchronize_stream = None
 
-        synchronize_1 = get_external_object_by_index_1.synchronize();  get_external_object_by_index_1 = synchronize_1 = None
+        synchronize_stream_1 = torch.ops.streams.synchronize_stream(1);  synchronize_stream_1 = None
 
-        synchronize_2 = get_external_object_by_index_2.synchronize();  get_external_object_by_index_2 = synchronize_2 = None
+        synchronize_stream_2 = torch.ops.streams.synchronize_stream(2);  synchronize_stream_2 = None
         return (c,)
 """,  # noqa: B950
         )
@@ -1248,7 +1270,11 @@ class GraphModule(torch.nn.Module):
 # CHECK: with torch.cuda.stream(stream3):
 # CHECK: wait_event
 # CHECK: copy_misaligned
-# CHECK: extern_kernels.mm(""",
+# CHECK: extern_kernels.mm(
+# CHECK: with torch.cuda.stream(default_stream):
+# CHECK: synchronize_stream
+# CHECK: synchronize_stream
+# CHECK: synchronize_stream""",
             wrapper_body,
         )
 
@@ -1292,9 +1318,9 @@ class GraphModule(torch.nn.Module):
         l_w1_ = L_w1_
         l_w2_ = L_w2_
 
-        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(0)
+        get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(0);  get_external_object_by_index = None
 
-        get_external_object_by_index_1 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1)
+        get_external_object_by_index_1 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index_1 = None
 
         get_external_object_by_index_2 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(2);  get_external_object_by_index_2 = None
 
@@ -1315,9 +1341,9 @@ class GraphModule(torch.nn.Module):
 
         c: "f32[32, 32]" = a + b;  a = b = None
 
-        synchronize = get_external_object_by_index.synchronize();  get_external_object_by_index = synchronize = None
+        synchronize_stream = torch.ops.streams.synchronize_stream(0);  synchronize_stream = None
 
-        synchronize_1 = get_external_object_by_index_1.synchronize();  get_external_object_by_index_1 = synchronize_1 = None
+        synchronize_stream_1 = torch.ops.streams.synchronize_stream(1);  synchronize_stream_1 = None
         return (c,)
 """,  # noqa: B950
         )
@@ -1335,7 +1361,9 @@ class GraphModule(torch.nn.Module):
 # CHECK: record_event
 # CHECK: with torch.cuda.stream(default_stream):
 # CHECK: wait_event
-# CHECK: triton_kernel.run(""",
+# CHECK: triton_kernel.run(
+# CHECK: synchronize_stream
+# CHECK: synchronize_stream""",
             wrapper_body,
         )
 
