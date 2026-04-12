@@ -17,11 +17,9 @@ build:no-tty --show_progress_rate_limit 10
 build --define=cuda=true
 # rules_cuda configuration
 build --@rules_cuda//cuda:enable_cuda
-build --@rules_cuda//cuda:cuda_targets=sm_75
+build --@rules_cuda//cuda:cuda_targets=sm_52
 build --@rules_cuda//cuda:compiler=nvcc
 build --repo_env=CUDA_PATH=/usr/local/cuda
-common --repo_env=PIP_INDEX_URL=https://pypi.org/simple/
-common --repo_env=PIP_TRUSTED_HOST=pypi.org
 
 # Configuration to build without GPU support
 build:cpu-only --define=cuda=false
