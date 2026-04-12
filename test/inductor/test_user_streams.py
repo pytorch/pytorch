@@ -1029,6 +1029,34 @@ class TestUserStreamCompile(InductorTestCase):
             f"Expected copy_misaligned on s2 (consumer stream), got: {s2_ops}",
         )
 
+    def test_no_buffer_reuse_across_streams(self):
+        """Buffer produced on one stream must not be reused in-place on another."""
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x):
+            s1 = torch.cuda.Stream()
+            s2 = torch.cuda.Stream()
+            with torch.cuda.stream(s1):
+                a = x + 1
+            e = s1.record_event()
+            s2.wait_event(e)
+            with torch.cuda.stream(s2):
+                b = a + 2
+            s2.synchronize()
+            return b
+
+        x = torch.randn(1024, device="cuda")
+        expected = fn(x)
+        compiled_fn = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled_fn, x)
+        self.assertEqual(result, expected)
+        # The second kernel should allocate a fresh buffer, not reuse
+        # the one produced on the other stream
+        wrapper = _extract_wrapper_body(code)
+        self.assertIn("record_event", wrapper)
+        self.assertIn("wait_event", wrapper)
+        self.assertNotIn("buf0; del buf0", wrapper)
+
     def test_stream_record_wait_event_not_dropped(self):
         """stream.record_event() and stream.wait_event() must survive compilation."""
         from torch._inductor.utils import run_and_get_code
