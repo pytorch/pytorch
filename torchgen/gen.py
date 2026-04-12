@@ -2294,6 +2294,23 @@ def gen_source_files(
                         DispatchKey.CompositeExplicitAutogradNonFunctional,
                     ):
                         is_registered = True
+                    # Unstructured inplace ops get auto-generated meta kernels
+                    # (see gen_unstructured in register_dispatch_key.py), so
+                    # their dispatch headers need to be included too.
+                    elif dispatch_key == DispatchKey.Meta:
+                        fns = (
+                            g.functions()
+                            if isinstance(g, NativeFunctionsGroup)
+                            else [g]
+                        )
+                        if any(
+                            f.func.kind() is SchemaKind.inplace
+                            and not backend_index.has_kernel(f)
+                            and not f.has_composite_kernel
+                            and len(f.func.returns) == 1
+                            for f in fns
+                        ):
+                            is_registered = True
                     if not is_registered:
                         continue
 
