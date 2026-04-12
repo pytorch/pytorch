@@ -249,7 +249,7 @@ class GenericCompiledBackward(InductorOutput[TOut]):
 @dataclass
 class CompiledBackward(GenericCompiledBackward[CompiledFxGraph], FxGraphCacheLoadable):
     """
-    Cacheable entry for a forward function
+    Cacheable entry for a backward function
     """
 
     def _is_backward(self) -> bool:
