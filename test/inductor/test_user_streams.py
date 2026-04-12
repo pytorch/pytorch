@@ -909,6 +909,70 @@ class TestUserStreamCompile(InductorTestCase):
         # Must be 2 separate kernels on 2 streams, not fused into 1
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
+    @torch._inductor.config.patch(combo_kernels=True)
+    def test_no_combo_kernel_fusion_across_streams(self):
+        """Combo kernels must not group nodes on different streams."""
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x, y, z, w):
+            s = torch.cuda.Stream()
+            event = torch.cuda.Event()
+
+            # Independent pointwise ops on different streams at the same
+            # topological level — combo kernels must not merge them.
+            a = x + y
+            event.record()
+            with torch.cuda.stream(s):
+                event.wait()
+                b = z + w
+            s.synchronize()
+            return a, b
+
+        x = torch.randn(1024, device="cuda")
+        y = torch.randn(1024, device="cuda")
+        z = torch.randn(1024, device="cuda")
+        w = torch.randn(1024, device="cuda")
+
+        expected = fn(x, y, z, w)
+        compiled_fn = torch.compile(fn)
+        torch._inductor.metrics.reset()
+        result, (code,) = run_and_get_code(compiled_fn, x, y, z, w)
+
+        self.assertEqual(result, expected)
+        # 2 kernels: one per stream. Without the stream-aware fix, combo
+        # kernels would merge them into 1.
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+    @torch._inductor.config.patch(combo_kernels=True)
+    def test_combo_kernel_fusion_within_same_stream(self):
+        """Combo kernels should still group independent nodes on the same stream."""
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x, y):
+            s = torch.cuda.Stream()
+
+            with torch.cuda.stream(s):
+                # Two independent pointwise ops on the same stream — eligible
+                # for combo kernel fusion.
+                a = x * 2
+                b = y * 3
+
+            s.synchronize()
+            return a + b
+
+        x = torch.randn(1024, device="cuda")
+        y = torch.randn(1024, device="cuda")
+
+        expected = fn(x, y)
+        compiled_fn = torch.compile(fn)
+        torch._inductor.metrics.reset()
+        result, (code,) = run_and_get_code(compiled_fn, x, y)
+
+        self.assertEqual(result, expected)
+        # With combo kernels, the two independent ops on the same stream
+        # should be combined, yielding fewer kernels than without.
+        self.assertLessEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
     def test_cross_stream_stride_copy(self):
         """A contiguous copy forced by a non-contiguous slice across streams
         must run on the consumer's stream, not the producer's."""
