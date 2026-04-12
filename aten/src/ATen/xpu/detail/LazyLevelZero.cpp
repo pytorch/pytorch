@@ -62,7 +62,7 @@ at::DynamicLibrary& getZELibrary() {
   }
 
 #define _STUB_6(LIB, NAME, RETTYPE, ARG1, ARG2, ARG3, ARG4, ARG5, ARG6)       \
-  RETTYPE NAME(ARG1 a1, ARG2 a2, ARG3 a3, ARG4 a4, ARG5 a5, ARG6 a6) {       \
+  RETTYPE NAME(ARG1 a1, ARG2 a2, ARG3 a3, ARG4 a4, ARG5 a5, ARG6 a6) {        \
     auto fn =                                                                 \
         reinterpret_cast<decltype(&NAME)>(get##LIB##Library().sym(__func__)); \
     TORCH_CHECK(fn, "Can't get symbol " C10_STRINGIZE(NAME));                 \

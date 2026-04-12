@@ -20,9 +20,7 @@ constexpr size_t kDeviceAlignment = 512;
 static std::atomic<RawDeviceAllocFn> g_raw_alloc_fn{nullptr};
 static std::atomic<RawDeviceFreeFn> g_raw_free_fn{nullptr};
 
-void setRawDeviceAllocFns(
-    RawDeviceAllocFn alloc_fn,
-    RawDeviceFreeFn free_fn) {
+void setRawDeviceAllocFns(RawDeviceAllocFn alloc_fn, RawDeviceFreeFn free_fn) {
   g_raw_alloc_fn.store(alloc_fn, std::memory_order_release);
   g_raw_free_fn.store(free_fn, std::memory_order_release);
 }

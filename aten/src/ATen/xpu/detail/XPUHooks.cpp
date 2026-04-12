@@ -25,10 +25,8 @@ void* levelZeroAllocDevice(
     size_t alignment,
     sycl::device& device,
     sycl::context& context) {
-  auto ze_ctx =
-      sycl::get_native<sycl::backend::ext_oneapi_level_zero>(context);
-  auto ze_dev =
-      sycl::get_native<sycl::backend::ext_oneapi_level_zero>(device);
+  auto ze_ctx = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(context);
+  auto ze_dev = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(device);
   ze_device_mem_alloc_desc_t alloc_desc = {
       ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC, nullptr, 0, 0};
   void* ptr = nullptr;
@@ -43,8 +41,7 @@ void* levelZeroAllocDevice(
 void levelZeroFreeDevice(void* ptr, sycl::context& context) {
   if (!ptr)
     return;
-  auto ze_ctx =
-      sycl::get_native<sycl::backend::ext_oneapi_level_zero>(context);
+  auto ze_ctx = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(context);
   at::xpu::detail::lazyLevelZero.zeMemFree(ze_ctx, ptr);
 }
 
