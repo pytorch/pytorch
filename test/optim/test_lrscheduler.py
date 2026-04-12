@@ -2680,6 +2680,37 @@ class TestLRScheduler(TestCase):
             optim.param_groups[0]["lr"],
         )
 
+    def test_onecycle_lr_degenerate_phase(self):
+        # A two step schedule with pct_start=0.5 leaves the first phase with no width.
+        # Right now that reaches the phase math and crashes with ZeroDivisionError.
+        with self.assertRaises(ZeroDivisionError):
+            scheduler = OneCycleLR(
+                self.opt,
+                max_lr=1e-3,
+                total_steps=2,
+                pct_start=0.5,
+            )
+
+    def test_onecycle_lr_degenerate_single_step_phase(self):
+        # A single step schedule with pct_start=1.0 runs into the same degenerate case.
+        with self.assertRaises(ZeroDivisionError):
+            scheduler = OneCycleLR(
+                self.opt,
+                max_lr=1e-3,
+                total_steps=1,
+                pct_start=1.0,
+            )
+
+    def test_onecycle_lr_degenerate_three_phase(self):
+        # Switching to three phases does not avoid the issue for this tiny schedule.
+        with self.assertRaises(ZeroDivisionError):
+            scheduler = OneCycleLR(
+                self.opt,
+                max_lr=1e-3,
+                total_steps=2,
+                pct_start=0.5,
+                three_phase=True,
+            )
 
 instantiate_parametrized_tests(TestLRScheduler)
 
