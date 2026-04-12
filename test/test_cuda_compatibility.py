@@ -5,6 +5,9 @@ from unittest.mock import patch
 
 import torch
 import torch.cuda
+from torch.testing._internal.common_cuda import (
+    evaluate_platform_supports_mem_eff_attention_large_shapes,
+)
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -152,6 +155,23 @@ class TestCheckCapability(TestCase):
                 "install a PyTorch release that supports one of these CUDA versions",
                 msg,
             )
+
+
+class TestCommonCudaFeatureQueries(TestCase):
+    @patch("torch.testing._internal.common_cuda.SM80OrLater", True)
+    def test_mem_eff_attention_large_shapes_supports_cuda_sm80_or_later(self, *args):
+        with patch("torch.testing._internal.common_cuda.TEST_WITH_ROCM", False):
+            self.assertTrue(evaluate_platform_supports_mem_eff_attention_large_shapes())
+
+    @patch("torch.testing._internal.common_cuda.SM80OrLater", False)
+    def test_mem_eff_attention_large_shapes_rejects_cuda_before_sm80(self, *args):
+        with patch("torch.testing._internal.common_cuda.TEST_WITH_ROCM", False):
+            self.assertFalse(evaluate_platform_supports_mem_eff_attention_large_shapes())
+
+    @patch("torch.testing._internal.common_cuda.SM80OrLater", False)
+    def test_mem_eff_attention_large_shapes_supports_rocm(self, *args):
+        with patch("torch.testing._internal.common_cuda.TEST_WITH_ROCM", True):
+            self.assertTrue(evaluate_platform_supports_mem_eff_attention_large_shapes())
 
 
 if __name__ == "__main__":
