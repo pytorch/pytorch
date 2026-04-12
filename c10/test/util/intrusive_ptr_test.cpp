@@ -3524,6 +3524,9 @@ TEST(
   EXPECT_TRUE(wasDestructed);
 }
 
+#ifdef NDEBUG
+// with LTO and GCC this test will not compile
+#else
 TEST(WeakIntrusivePtrTest, givenStackObject_whenReclaimed_thenCrashes) {
   // This would cause very weird bugs on destruction.
   // Better to crash early on creation.
@@ -3536,6 +3539,7 @@ TEST(WeakIntrusivePtrTest, givenStackObject_whenReclaimed_thenCrashes) {
   EXPECT_ANY_THROW(ptr = weak_intrusive_ptr<SomeClass>::reclaim(&obj));
 #endif
 }
+#endif
 
 TEST(
     WeakIntrusivePtrTest,
