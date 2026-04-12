@@ -86,8 +86,8 @@ def query_changed_files() -> list[str]:
     if proc.returncode != 0:
         raise RuntimeError("Unable to get changed files")
 
-    lines = proc.stdout.decode().strip().split("\n")
-    lines = [line.strip() for line in lines]
+    lines = proc.stdout.decode().splitlines()
+    lines = [line.strip() for line in lines if line.strip()]
     print(f"Changed files: {lines}")
     return lines
 
@@ -101,13 +101,11 @@ def is_docs_only_change(changed_files: list[str]) -> bool:
     Returns True if all changed files are documentation-only files
     (e.g., .rst, .md files) that don't require running tests.
     """
+    changed_files = [f for f in changed_files if f]
     if not changed_files:
         return False
 
     for f in changed_files:
-        # Skip empty strings that might come from git diff output
-        if not f:
-            continue
         # Check if the file extension is in the docs-only set
         ext = os.path.splitext(f)[1].lower()
         if ext not in DOCS_ONLY_EXTENSIONS:

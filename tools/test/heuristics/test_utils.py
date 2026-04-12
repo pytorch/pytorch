@@ -4,6 +4,7 @@ import sys
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -52,6 +53,16 @@ class TestHeuristicsUtils(unittest.TestCase):
                 TestRun("test3"): 0.2,
             },
         )
+
+    def test_query_changed_files_filters_empty_diff_output(self) -> None:
+        with mock.patch.object(utils, "get_merge_base", return_value="base"), mock.patch(
+            "tools.testing.target_determination.heuristics.utils.subprocess.run"
+        ) as run:
+            run.return_value = mock.Mock(returncode=0, stdout=b"")
+            self.assertEqual(utils.query_changed_files(), [])
+
+    def test_is_docs_only_change_ignores_empty_entries(self) -> None:
+        self.assertFalse(utils.is_docs_only_change([""]))
 
 
 if __name__ == "__main__":
