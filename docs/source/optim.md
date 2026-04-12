@@ -149,18 +149,6 @@ for input, target in dataset:
     Optimizer.zero_grad
 ```
 
-## Module-level hooks
-
-```{eval-rst}
-.. currentmodule:: torch.optim.optimizer
-
-.. autofunction:: register_optimizer_step_post_hook
-
-.. autofunction:: register_optimizer_step_pre_hook
-
-.. currentmodule:: torch.optim
-```
-
 ## Algorithms
 
 ```{eval-rst}

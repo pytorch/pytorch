@@ -253,18 +253,31 @@ autosummary_filename_map = {
 coverage_ignore_functions = [
     "main",  # utility script
     "run",  # utility script
+    # torch.distributions.constraints
+    "is_dependent",
     # torch.hub
     "import_module",
+    # torch.jit
+    "export_opnames",
     # torch.jit.unsupported_tensor_ops
     "execWrapper",
+    # torch.onnx
+    "unregister_custom_op_symbolic",
+    # torch.ao.quantization
+    "default_eval_fn",
     # torch.backends
     "disable_global_flags",
     "flags_frozen",
+    # torch.distributed.algorithms.ddp_comm_hooks
+    "register_ddp_comm_hook",
     # torch.nn.parallel
     "DistributedDataParallelCPU",
     # torch.utils
+    "set_module",
     "burn_in_info",
     "get_info_and_burn_skeleton",
+    "get_inline_skeleton",
+    "get_model_info",
     "get_storage_info",
     "hierarchical_pickle",
     # torch.amp.autocast_mode
@@ -599,33 +612,70 @@ coverage_ignore_functions = [
     "make_sharded_output_tensor",
     # torch.fx.passes.annotate_getitem_nodes
     "annotate_getitem_nodes",
+    # torch.fx.passes.backends.cudagraphs
+    "partition_cudagraphs",
     # torch.fx.passes.dialect.common.cse_pass
     "get_CSE_banned_ops",
     # torch.fx.passes.graph_manipulation
     "get_size_of_all_nodes",
     "get_size_of_node",
     "get_tensor_meta",
+    "replace_target_nodes_with",
+    # torch.fx.passes.infra.pass_manager
+    "pass_result_wrapper",
+    "this_before_that_pass_constraint",
+    # torch.fx.passes.operator_support
+    "any_chain",
+    "chain",
+    "create_op_support",
+    # torch.fx.passes.param_fetch
+    "default_matching",
+    "extract_attrs_for_lowering",
+    "lift_lowering_attrs_to_nodes",
+    # torch.fx.passes.pass_manager
+    "inplace_wrapper",
+    "log_hook",
+    "loop_pass",
+    "these_before_those_pass_constraint",
+    "this_before_that_pass_constraint",
+    # torch.fx.passes.regional_inductor
+    "regional_inductor",
+    # torch.fx.passes.reinplace
+    "reinplace",
     # torch.fx.passes.split_module
     "split_module",
     # torch.fx.passes.split_utils
     "getattr_recursive",
+    "setattr_recursive",
     "split_by_tags",
     # torch.fx.passes.splitter_base
     "generate_inputs_for_submodules",
     # torch.fx.passes.tools_common
     "get_acc_ops_name",
     "get_node_target",
+    "is_node_output_tensor",
     "legalize_graph",
     # torch.fx.passes.utils.common
+    "compare_graphs",
     "lift_subgraph_as_module",
     # torch.fx.passes.utils.fuser_utils
+    "erase_nodes",
     "fuse_as_graphmodule",
     "fuse_by_partitions",
     "insert_subgm",
+    "topo_sort",
+    "validate_partition",
     # torch.fx.passes.utils.source_matcher_utils
+    "check_subgraphs_connected",
     "get_source_partitions",
     # torch.fx.proxy
     "assert_fn",
+    # torch.fx.subgraph_rewriter
+    "replace_pattern",
+    "replace_pattern_with_filters",
+    # torch.fx.tensor_type
+    "is_consistent",
+    "is_more_precise",
     # torch.fx.traceback
     "format_stack",
     "get_current_meta",
@@ -633,9 +683,9 @@ coverage_ignore_functions = [
     "preserve_node_meta",
     "reset_grad_fn_seq_nr",
     "set_current_meta",
-    "set_current_replay_node",
     "set_grad_fn_seq_nr",
     "set_stack_trace",
+    "set_current_replay_node",
     "get_current_replay_node",
     # torch.jit.annotations
     "ann_to_type",
@@ -676,6 +726,13 @@ coverage_ignore_functions = [
     "quantize_linear_modules",
     "quantize_rnn_cell_modules",
     "quantize_rnn_modules",
+    # torch.library
+    "define",
+    "get_ctx",
+    "impl",
+    "impl_abstract",
+    # torch.masked.maskedtensor.core
+    "is_masked_tensor",
     # torch.masked.maskedtensor.creation
     "as_masked_tensor",
     "masked_tensor",
@@ -961,8 +1018,19 @@ coverage_ignore_functions = [
     "check_export_model_diff",
     "verify",
     "verify_aten_graph",
+    # torch.optim.optimizer
+    "register_optimizer_step_post_hook",
+    "register_optimizer_step_pre_hook",
     # torch.overrides
     "enable_reentrant_dispatch",
+    # torch.package.analyze.find_first_use_of_broken_modules
+    "find_first_use_of_broken_modules",
+    # torch.package.analyze.is_from_package
+    "is_from_package",
+    # torch.package.analyze.trace_dependencies
+    "trace_dependencies",
+    # torch.profiler.itt
+    "range",
     # torch.profiler.profiler
     "schedule",
     "supported_activities",
@@ -970,6 +1038,8 @@ coverage_ignore_functions = [
     # torch.return_types
     "pytree_register_structseq",
     # torch.serialization
+    "check_module_version_greater_or_equal",
+    "default_restore_location",
     "load",
     "location_tag",
     "mkdtemp",
@@ -990,6 +1060,8 @@ coverage_ignore_functions = [
     "hann",
     "kaiser",
     "nuttall",
+    # torch.sparse.semi_structured
+    "to_sparse_semi_structured",
     # torch.utils.backend_registration
     "generate_methods_for_privateuse1_backend",
     "rename_privateuse1_backend",

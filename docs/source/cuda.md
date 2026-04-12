@@ -308,19 +308,7 @@ See the docs for {class}`~torch.cuda.green_contexts.GreenContext` for an example
 ```
 
 ```{eval-rst}
-.. automodule:: torch.cuda.nvtx
-```
-
-```{eval-rst}
-.. currentmodule:: torch.cuda.nvtx
-```
-
-```{eval-rst}
-.. autofunction:: range_start
-```
-
-```{eval-rst}
-.. autofunction:: range_end
+.. py:module:: torch.cuda.nvtx
 ```
 
 ```{eval-rst}

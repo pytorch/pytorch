@@ -2,7 +2,6 @@
 
 ```{eval-rst}
 .. automodule:: torch.accelerator
-   :no-members:
 ```
 
 ```{eval-rst}
