@@ -99,6 +99,9 @@ def evaluate_platform_supports_efficient_attention():
         return True
     return False
 
+def evaluate_platform_supports_grouped_gemm_compile():
+    return SM90OrLater and not TEST_WITH_ROCM
+
 def evaluate_platform_supports_cudnn_attention():
     return (not TEST_WITH_ROCM) and SM80OrLater and (TEST_CUDNN_VERSION >= 90000)
 
@@ -114,6 +117,9 @@ def evaluate_platform_supports_green_context():
 
 PLATFORM_SUPPORTS_FLASH_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_flash_attention())
 PLATFORM_SUPPORTS_MEM_EFF_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_efficient_attention())
+PLATFORM_SUPPORTS_GROUPED_GEMM_COMPILE: bool = LazyVal(
+    lambda: evaluate_platform_supports_grouped_gemm_compile()
+)
 PLATFORM_SUPPORTS_CUDNN_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_cudnn_attention())
 # This condition always evaluates to PLATFORM_SUPPORTS_MEM_EFF_ATTENTION but for logical clarity we keep it separate
 PLATFORM_SUPPORTS_FUSED_ATTENTION: bool = LazyVal(lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION or

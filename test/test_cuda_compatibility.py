@@ -5,6 +5,9 @@ from unittest.mock import patch
 
 import torch
 import torch.cuda
+from torch.testing._internal.common_cuda import (
+    evaluate_platform_supports_grouped_gemm_compile,
+)
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -152,6 +155,23 @@ class TestCheckCapability(TestCase):
                 "install a PyTorch release that supports one of these CUDA versions",
                 msg,
             )
+
+
+class TestCommonCudaFeatureQueries(TestCase):
+    @patch("torch.testing._internal.common_cuda.SM90OrLater", True)
+    def test_grouped_gemm_compile_supports_cuda_sm90_or_later(self, *args):
+        with patch("torch.testing._internal.common_cuda.TEST_WITH_ROCM", False):
+            self.assertTrue(evaluate_platform_supports_grouped_gemm_compile())
+
+    @patch("torch.testing._internal.common_cuda.SM90OrLater", False)
+    def test_grouped_gemm_compile_rejects_cuda_before_sm90(self, *args):
+        with patch("torch.testing._internal.common_cuda.TEST_WITH_ROCM", False):
+            self.assertFalse(evaluate_platform_supports_grouped_gemm_compile())
+
+    @patch("torch.testing._internal.common_cuda.SM90OrLater", True)
+    def test_grouped_gemm_compile_rejects_rocm(self, *args):
+        with patch("torch.testing._internal.common_cuda.TEST_WITH_ROCM", True):
+            self.assertFalse(evaluate_platform_supports_grouped_gemm_compile())
 
 
 if __name__ == "__main__":

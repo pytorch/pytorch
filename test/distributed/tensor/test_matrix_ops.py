@@ -27,14 +27,16 @@ from torch.distributed.tensor._ops.single_dim_strategy import (
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_GROUPED_GEMM_COMPILE,
+)
 from torch.testing._internal.common_device_type import E4M3_MAX_POS, e4m3_type
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    TEST_WITH_ROCM,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -1004,8 +1006,10 @@ class DistMatrixOpsTest(DTensorTestBase):
             dist_result_full = dist_result.full_tensor()
             self.assertEqual(local_result, dist_result_full)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_GROUPED_GEMM_COMPILE,
+        "Grouped gemm requires CUDA SM90+",
+    )
     @with_comms
     @skip_unless_torch_gpu
     @parametrize(
@@ -1109,23 +1113,23 @@ class DistMatrixOpsTest(DTensorTestBase):
         pad = [1, 1]  # pad last dim only
         expected = torch.nn.functional.pad(t, pad, value=0.0)
 
-        # Shard on non-padded dim (dim 0) — should work directly
+        # Shard on non-padded dim (dim 0) - should work directly
         dt = distribute_tensor(t, device_mesh, [Shard(0)])
         result = torch.nn.functional.pad(dt, pad, value=0.0)
         self.assertEqual(result.full_tensor(), expected)
 
-        # Shard on padded dim (dim 1) — forces redistribute to Replicate
+        # Shard on padded dim (dim 1) - forces redistribute to Replicate
         dt = distribute_tensor(t, device_mesh, [Shard(1)])
         result = torch.nn.functional.pad(dt, pad, value=0.0)
         self.assertEqual(result.full_tensor(), expected)
 
-        # Partial input with value=0 — Partial passes through
+        # Partial input with value=0 - Partial passes through
         dt = distribute_tensor(t, device_mesh, [Partial()])
         result = torch.nn.functional.pad(dt, pad, value=0.0)
         self.assertEqual(result.placements, (Partial(),))
         self.assertEqual(result.full_tensor(), expected)
 
-        # Partial input with value!=0 — forces redistribute to Replicate
+        # Partial input with value!=0 - forces redistribute to Replicate
         expected_nz = torch.nn.functional.pad(t, pad, value=1.0)
         dt = distribute_tensor(t, device_mesh, [Partial()])
         result = torch.nn.functional.pad(dt, pad, value=1.0)

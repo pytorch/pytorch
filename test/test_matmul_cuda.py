@@ -20,6 +20,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     blas_library_context,
     PLATFORM_SUPPORTS_BF16,
+    PLATFORM_SUPPORTS_GROUPED_GEMM_COMPILE,
     SM80OrLater,
     SM90OrLater,
     SM100OrLater,
@@ -591,9 +592,11 @@ class TestMatmulCuda(InductorTestCase):
                 start = offs_cpu[i]
             self.grouped_mm_helper(a, blist, gOlist, agradlist, bgradlist, outlist)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     # TODO(future PR): enable compile for torch.nn.functional.grouped_mm fallback path
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm with compile supported on SM90")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_GROUPED_GEMM_COMPILE,
+        "Grouped gemm with compile requires CUDA SM90+",
+    )
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
