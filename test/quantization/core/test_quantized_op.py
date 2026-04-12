@@ -3508,6 +3508,13 @@ class TestDynamicQuantizedOps(TestCase):
                          msg="torch.ops.quantized.fbgemm_linear_dynamic results are off")
 
     @skipIfNoFBGEMM
+    @unittest.skipIf(not TEST_CUDA, "No CUDA")
+    def test_fbgemm_linear_quantize_weight_cuda_error(self):
+        w = torch.zeros((3, 3), dtype=torch.float32, device="cuda")
+        with self.assertRaisesRegex(RuntimeError, "only supports CPU tensors"):
+            torch.fbgemm_linear_quantize_weight(w)
+
+    @skipIfNoFBGEMM
     @given(
         input_channels=st.integers(16, 32),
         output_channels=st.integers(4, 8),
