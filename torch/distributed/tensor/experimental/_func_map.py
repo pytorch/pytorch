@@ -7,6 +7,7 @@ import torch
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.tensor import DeviceMesh, DTensor
 from torch.distributed.tensor.placement_types import Placement
+from torch.utils._exposed_in import exposed_in
 
 
 try:
@@ -22,6 +23,7 @@ InputPlacements = tuple[PlacementType, ...] | None
 OutputPlacements = PlacementType | tuple[PlacementType, ...]
 
 
+@exposed_in("torch.distributed.tensor.experimental")
 def local_map(
     func: Callable | None = None,
     out_placements: OutputPlacements = None,

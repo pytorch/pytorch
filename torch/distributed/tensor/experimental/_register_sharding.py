@@ -6,6 +6,7 @@ from functools import partial
 import torch
 from torch._ops import OpOverload
 from torch.distributed.tensor import DTensor
+from torch.utils._exposed_in import exposed_in
 from torch.distributed.tensor._op_schema import (
     OpSchema,
     OpStrategy,
@@ -20,6 +21,7 @@ from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
 __all__ = ["register_sharding"]
 
 
+@exposed_in("torch.distributed.tensor.experimental")
 def register_sharding(op: OpOverload | list[OpOverload]):
     """
     :meth:`register_sharding` is an experimental API that allows users to register sharding
