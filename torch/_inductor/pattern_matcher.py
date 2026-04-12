@@ -1222,7 +1222,8 @@ class ReplacementPatternEntry(PatternEntry):
                     )
                     # This function copy-pastes the replacement graph into
                     # the graph. If the replacement graph had any eager_input_vals,
-                    # or val/tensor_meta, we propagate those over.
+                    # we propagate those over (val/tensor_meta are handled by
+                    # _transfer_meta above).
                     if "eager_input_vals" in node.meta:
                         result.meta["eager_input_vals"] = node.meta["eager_input_vals"]
                     return result
