@@ -226,57 +226,41 @@ Tensor amaxamin_jvp(
   return at::where(mask, dx, 0.).sum(dim, keepdim) / mask.sum(dim, keepdim);
 }
 
-// Converts the optional single-dim from aminmax to the IntArrayRef form
-// expected by restore_reduced_dims / scale_grad_by_count.
-static std::vector<int64_t> _aminmax_dims(
-    const Tensor& self,
-    std::optional<int64_t> dim_opt) {
-  std::vector<int64_t> dims;
-  if (dim_opt.has_value()) {
-    dims = {at::maybe_wrap_dim(dim_opt.value(), self.dim())};
-  } else {
-    dims.resize(self.dim());
-    std::iota(dims.begin(), dims.end(), 0);
-  }
-  return dims;
-}
-
 Tensor aminmax_backward(
+    const Tensor& self,
+    std::optional<int64_t> dim,
+    bool keepdim,
     const Tensor& grad_min,
     const Tensor& grad_max,
-    const Tensor& self,
-    std::optional<int64_t> dim_opt,
-    bool keepdim,
     const Tensor& min,
     const Tensor& max) {
-  auto dims_vec = _aminmax_dims(self, dim_opt);
-  IntArrayRef dims(dims_vec);
-  Tensor grad = at::zeros_like(self);
-  if (grad_min.defined()) {
-    grad = grad +
-        scale_grad_by_count(
-               restore_reduced_dims(grad_min, dims, keepdim),
-               restore_reduced_dims(min, dims, keepdim) == self,
-               dims);
-  }
-  if (grad_max.defined()) {
-    grad = grad +
-        scale_grad_by_count(
-               restore_reduced_dims(grad_max, dims, keepdim),
-               restore_reduced_dims(max, dims, keepdim) == self,
-               dims);
-  }
-  return grad;
-}
+  auto dims = dim.has_value() ? IntArrayRef{*dim} : IntArrayRef{};
+  Tensor result;
 
-Tensor aminmax_jvp(
-    const Tensor& self_p,
-    const Tensor& self_t,
-    const Tensor& result,
-    std::optional<int64_t> dim_opt,
-    bool keepdim) {
-  auto dims_vec = _aminmax_dims(self_p, dim_opt);
-  return amaxamin_jvp(self_p, self_t, result, IntArrayRef(dims_vec), keepdim);
+  if (grad_min.defined()) {
+    auto grad_min_expanded = restore_reduced_dims(grad_min, dims, keepdim);
+    auto min_mask = (self == restore_reduced_dims(min, dims, keepdim));
+    result = scale_grad_by_count(grad_min_expanded, min_mask, dims);
+  }
+
+  if (grad_max.defined()) {
+    auto grad_max_expanded = restore_reduced_dims(grad_max, dims, keepdim);
+    auto max_mask = (self == restore_reduced_dims(max, dims, keepdim));
+    auto grad_max_result =
+        scale_grad_by_count(grad_max_expanded, max_mask, dims);
+
+    if (result.defined()) {
+      if (!areAnyTensorSubclassLike({result, grad_max_result})) {
+        result.add_(grad_max_result);
+      } else {
+        result = result + grad_max_result;
+      }
+    } else {
+      result = grad_max_result;
+    }
+  }
+
+  return result;
 }
 
 std::tuple<Tensor, Tensor> _euclidean_dist_backward(

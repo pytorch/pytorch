@@ -841,19 +841,13 @@ Tensor amaxamin_jvp(
     IntArrayRef dim,
     bool keepdim);
 Tensor aminmax_backward(
-    const Tensor& grad_min,
-    const Tensor& grad_max,
-    const Tensor& self,
+    const at::Tensor& self,
     std::optional<int64_t> dim,
     bool keepdim,
-    const Tensor& min,
-    const Tensor& max);
-Tensor aminmax_jvp(
-    const Tensor& self_p,
-    const Tensor& self_t,
-    const Tensor& result,
-    std::optional<int64_t> dim,
-    bool keepdim);
+    const at::Tensor& grad_min,
+    const at::Tensor& grad_max,
+    const at::Tensor& min,
+    const at::Tensor& max);
 std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     const Tensor& input,
     const std::optional<Tensor>& gamma,
