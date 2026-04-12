@@ -751,7 +751,7 @@ def conv_bwd_input_layout(
     output_padding: tuple[int, ...],
     groups: int,
 ) -> ir.Layout:
-    example_output, *_ = ir.TensorBox.process_kernel(
+    example_output, *_ = ir.ExternKernel.process_kernel(
         torch.ops.aten.convolution_backward,
         grad_out,
         input,
@@ -788,7 +788,7 @@ def conv_bwd_weight_layout(
     output_padding: tuple[int, ...],
     groups: int,
 ) -> ir.Layout:
-    example_output, *_ = ir.TensorBox.process_kernel(
+    example_output, *_ = ir.ExternKernel.process_kernel(
         torch.ops.aten.convolution_backward,
         grad_out,
         input,
