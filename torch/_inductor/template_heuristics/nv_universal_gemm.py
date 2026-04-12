@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeAlias
 
 import torch
 from torch._inductor.utils import ensure_nvmatmul_heuristics_available
@@ -26,7 +26,7 @@ autotuning_log = getArtifactLogger(__name__, "autotuning")
 # Currently matches on (tile_m, tile_n, cluster_m, cluster_n).
 # tile_k excluded because nvMatmulHeuristics and cutlass_api use it to mean different things.
 # TODO(nikhilap): Extend config key for stages/split_k https://github.com/pytorch/pytorch/issues/177578
-ConfigKey = tuple[int, int, int, int]
+ConfigKey: TypeAlias = tuple[int, int, int, int]
 
 
 @dataclass

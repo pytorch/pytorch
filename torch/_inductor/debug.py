@@ -15,7 +15,7 @@ import shutil
 import tempfile
 import traceback
 from collections.abc import Callable, Iterator, Sequence
-from typing import Any, IO
+from typing import Any, IO, TypeAlias
 from unittest.mock import patch
 
 import torch
@@ -55,7 +55,7 @@ GRAPH_COMPILE_IDS: dict[int, str | None] | None = None
 
 ir_pre_fusion_log = getArtifactLogger(__name__, "ir_pre_fusion")
 ir_post_fusion_log = getArtifactLogger(__name__, "ir_post_fusion")
-SchedulerNodeList = list[Any]
+SchedulerNodeList: TypeAlias = list[Any]
 BufMeta = collections.namedtuple("BufMeta", ["name", "n_origin"])
 GRAPHVIZ_COMMAND_SCALABLE = ["dot", "-Gnslimit=2", "-Gnslimit1=2", "-Gmaxiter=5000"]
 

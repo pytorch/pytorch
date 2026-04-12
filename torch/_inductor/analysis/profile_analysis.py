@@ -4,7 +4,7 @@ import math
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Optional, TypeAlias
 
 import torch
 from torch._inductor.analysis.device_info import DeviceInfo, lookup_device_info
@@ -31,8 +31,8 @@ class ProfileEvent:
 
 
 # adapters convert the json trace into a format that works with flops_counter
-ArgsType = tuple[tuple[Any, ...], dict[Any, Any]]
-AdapterType = Callable[[tuple[Any, ...], tuple[Any, ...]], ArgsType]
+ArgsType: TypeAlias = tuple[tuple[Any, ...], dict[Any, Any]]
+AdapterType: TypeAlias = Callable[[tuple[Any, ...], tuple[Any, ...]], ArgsType]
 adapters_map: dict[str, AdapterType] = {}
 
 
@@ -378,7 +378,7 @@ class KernelStats:
     achieved_bandwidth: float
 
 
-KernelNameMap = defaultdict[str, OrderedSet[KernelStats]]
+KernelNameMap: TypeAlias = defaultdict[str, OrderedSet[KernelStats]]
 
 
 @dataclass(frozen=False)
@@ -392,8 +392,8 @@ class Device:
         return f"Device({self.name}, {self.index}): {self.info}"
 
 
-DeviceMap = dict[int, Device]
-Table = tuple[list[str], dict[str, list[str]]]
+DeviceMap: TypeAlias = dict[int, Device]
+Table: TypeAlias = tuple[list[str], dict[str, list[str]]]
 
 
 class JsonProfile:

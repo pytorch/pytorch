@@ -20,7 +20,7 @@ import warnings
 from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from ctypes import byref, c_size_t, c_void_p, CDLL
-from typing import Any, IO, TYPE_CHECKING
+from typing import Any, IO, TYPE_CHECKING, TypeAlias
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
@@ -373,7 +373,7 @@ class TuningProcessPool:
         return results
 
 
-LayoutOrBuffer = ir.Layout | ir.Buffer
+LayoutOrBuffer: TypeAlias = ir.Layout | ir.Buffer
 
 
 @dataclasses.dataclass

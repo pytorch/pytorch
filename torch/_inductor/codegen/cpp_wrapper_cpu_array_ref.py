@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from collections.abc import Callable, Sequence
-from typing import Any
+from typing import Any, TypeAlias
 
 import sympy
 
@@ -23,7 +23,7 @@ from .wrapper import (
 )
 
 
-BufferName = str
+BufferName: TypeAlias = str
 
 # Default thread stack sizes vary by platform:
 # - Linux: 8 MB

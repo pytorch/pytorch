@@ -20,7 +20,7 @@ from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
 from pathlib import Path
 from types import ModuleType
-from typing import Any, cast, NamedTuple, Optional, TYPE_CHECKING
+from typing import Any, cast, NamedTuple, Optional, TYPE_CHECKING, TypeAlias
 from typing_extensions import Self
 from unittest.mock import patch
 
@@ -474,7 +474,7 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
 
 
 # Function name, followed by args and kwargs.
-RecordedEventsType = list[tuple[str, list[Any], dict[str, Any]]]
+RecordedEventsType: TypeAlias = list[tuple[str, list[Any], dict[str, Any]]]
 
 
 class TritonTemplateKernel(TritonKernel):
@@ -3526,7 +3526,7 @@ def create_precompile_key(
 # choices: list of choices
 # profiled time: Callable that returns a dict mapping from choices to the profiled time
 # precompile_times: mapping from choices to their precompilation time in seconds
-FeedbackFunction = Callable[
+FeedbackFunction: TypeAlias = Callable[
     [
         dict[ChoiceCaller, float],
         str,
@@ -3541,7 +3541,7 @@ FeedbackFunction = Callable[
 # Args to PreprocessingFunctions
 # choices: list of ChoiceCaller objects to preprocess
 # Returns: modified list of ChoiceCaller objects
-PreprocessingFunction = Callable[[list[ChoiceCaller]], list[ChoiceCaller]]
+PreprocessingFunction: TypeAlias = Callable[[list[ChoiceCaller]], list[ChoiceCaller]]
 
 
 def filter_choices_by_name_regex(choices: list[ChoiceCaller]) -> list[ChoiceCaller]:

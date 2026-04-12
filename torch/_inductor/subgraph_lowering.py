@@ -5,8 +5,8 @@ import operator
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, TypeVar
-from typing_extensions import ParamSpec
+from typing import Any, TypeAlias
+from typing_extensions import ParamSpec, TypeVar
 
 import torch
 from torch.utils._ordered_set import OrderedSet
@@ -21,9 +21,9 @@ from .virtualized import ops, V, WrapperHandler
 T = TypeVar("T")
 _P = ParamSpec("_P")
 
-OpOverload = torch._ops.OpOverload
-LoweringDict = dict[OpOverload | str, Callable[..., Any]]
-TargetType = Callable[..., Any] | str
+OpOverload: TypeAlias = torch._ops.OpOverload
+LoweringDict: TypeAlias = dict[OpOverload | str, Callable[..., Any]]
+TargetType: TypeAlias = Callable[..., Any] | str
 
 
 class PointwiseSubgraphLowering(torch.fx.Interpreter):

@@ -6,7 +6,8 @@ import itertools
 import re
 import warnings
 from io import StringIO
-from typing import Any, Generic, Literal, NamedTuple, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, Literal, NamedTuple, TYPE_CHECKING, TypeAlias
+from typing_extensions import TypeVar
 from unittest.mock import patch
 
 import sympy
@@ -23,7 +24,7 @@ if TYPE_CHECKING:
 
 
 T = TypeVar("T")
-AtomicMode = Literal[
+AtomicMode: TypeAlias = Literal[
     "atomic_add",
     "atomic_max",
     "atomic_min",
@@ -33,8 +34,8 @@ AtomicMode = Literal[
     "atomic_cas",
     "atomic_xchg",
 ]
-StoreMode = AtomicMode | Literal["tma"] | None
-ReductionType = Literal[
+StoreMode: TypeAlias = AtomicMode | Literal["tma"] | None
+ReductionType: TypeAlias = Literal[
     "argmax",
     "argmin",
     "welford_reduce",

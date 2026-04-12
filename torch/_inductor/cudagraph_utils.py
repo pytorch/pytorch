@@ -4,7 +4,7 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, TypeAlias
 
 import torch
 from torch._dynamo.utils import counters, get_metrics_context
@@ -25,8 +25,8 @@ static_inputs_log = torch._logging.getArtifactLogger(
 )
 
 
-OutputType = list[int | torch.Tensor | None]
-ModelType = Callable[[list[InputType]], OutputType]
+OutputType: TypeAlias = list[int | torch.Tensor | None]
+ModelType: TypeAlias = Callable[[list[InputType]], OutputType]
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

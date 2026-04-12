@@ -51,7 +51,8 @@ import weakref
 from collections import defaultdict
 from contextlib import AbstractContextManager
 from enum import auto, Enum
-from typing import Any, cast, TYPE_CHECKING, TypeVar
+from typing import Any, cast, TYPE_CHECKING, TypeAlias
+from typing_extensions import TypeVar
 
 import torch.fx
 from torch import Tensor
@@ -101,9 +102,9 @@ if TYPE_CHECKING:
     from torch.cuda import _POOL_HANDLE
     from torch.types import _bool
 
-StorageWeakRefPointer = int
-StorageDataPtr = int
-NBytes = int
+StorageWeakRefPointer: TypeAlias = int
+StorageDataPtr: TypeAlias = int
+NBytes: TypeAlias = int
 S = TypeVar("S", bound="StorageWeakRefWrapper")
 
 
@@ -642,12 +643,12 @@ def map_to_ref(t: Tensor | None) -> StorageWeakRefWrapper | None:
 
 # A path index of (depth, offset) indices into a graph that is `depth`` number of nodes from the root
 # at graph output offset
-PathOutputIndex = tuple[int, int]
+PathOutputIndex: TypeAlias = tuple[int, int]
 
 # For each node in the path, for each output, is the output alive
-PathLiveness = list[list[bool]]
+PathLiveness: TypeAlias = list[list[bool]]
 
-StackTraces = list[str | None]
+StackTraces: TypeAlias = list[str | None]
 
 
 class CUDAWarmupNode:

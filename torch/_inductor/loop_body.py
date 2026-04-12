@@ -6,7 +6,8 @@ import functools
 import itertools
 import re
 from enum import auto, Enum
-from typing import Any, NamedTuple, TYPE_CHECKING, TypeVar
+from typing import Any, NamedTuple, TYPE_CHECKING
+from typing_extensions import TypeVar
 
 import sympy
 

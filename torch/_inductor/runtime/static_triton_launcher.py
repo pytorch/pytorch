@@ -248,6 +248,7 @@ class StaticallyLaunchedTritonKernel:
         # Get rid of constants before passing to cubin launcher
 
         arg_tys = self.arg_tys
+        kernel_args: tuple[object, ...] = args
 
         if is_rocm():
             # ROCm/HIP kernel ABI: The Triton HIP backend ALWAYS includes both
@@ -276,15 +277,15 @@ class StaticallyLaunchedTritonKernel:
             # Not passing both parameters causes segmentation faults because the kernel
             # expects them at specific positions in the argument array.
             arg_tys = arg_tys + "OO"
-            args = (*args, None, None)
+            kernel_args = (*kernel_args, None, None)
 
         else:
             for has_scratch in [self.has_global_scratch, self.has_profile_scratch]:
                 if has_scratch:
                     arg_tys = arg_tys + "O"
-                    args = (*args, None)
+                    kernel_args = (*kernel_args, None)
         # pyrefly: ignore [bad-argument-type]
-        assert len(args) == len(arg_tys)
+        assert len(kernel_args) == len(arg_tys)
 
         # TODO: can handle grid functions here or in C++, so
         # that we don't need the grid handler above.
@@ -296,7 +297,7 @@ class StaticallyLaunchedTritonKernel:
             self.num_warps,
             self.shared,
             arg_tys,
-            args,
+            kernel_args,
             stream,
         )
 

@@ -51,8 +51,8 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Callable, Collection, Generator, Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, NoReturn, Protocol, TypeVar
-from typing_extensions import Self, TypeIs
+from typing import Any, NoReturn, Protocol, TypeAlias
+from typing_extensions import Self, TypeIs, TypeVar
 
 import torch
 import torch._guards
@@ -84,8 +84,8 @@ log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
 
-Constant = Any
-NodeOrConstant = Constant | torch.fx.Node
+Constant: TypeAlias = Any
+NodeOrConstant: TypeAlias = Constant | torch.fx.Node
 
 backend = os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_BACKEND", "inductor")
 
@@ -139,7 +139,7 @@ class TraceFn(Protocol):
 T = TypeVar("T")
 
 # What's a better name for this?
-FnsType = torch.fx.node.Target | str
+FnsType: TypeAlias = torch.fx.node.Target | str
 
 
 class Multiple:
@@ -417,7 +417,7 @@ class FailedMatch(RuntimeError):
         return False
 
 
-MatchResult = Match | FailedMatch
+MatchResult: TypeAlias = Match | FailedMatch
 
 
 def is_match(m: MatchResult) -> TypeIs[Match]:
@@ -658,7 +658,7 @@ class _TargetExpr(PatternExpr):
         )
 
 
-_SimpleSpec = tuple[Any, ...]
+_SimpleSpec: TypeAlias = tuple[Any, ...]
 
 
 class _TargetArgsExpr(_TargetExpr):

@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, TypeAlias
 
 from ..scheduler import (
     BaseSchedulerNode,
@@ -19,7 +19,6 @@ from .triton import TritonScheduling
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from typing import TypeAlias
 
     from sympy import Expr
 

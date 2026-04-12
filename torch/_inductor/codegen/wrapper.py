@@ -15,7 +15,7 @@ import re
 import tempfile
 from collections.abc import Callable
 from itertools import chain, count
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, TypeAlias
 
 import sympy
 from sympy import Expr
@@ -93,10 +93,12 @@ log = logging.getLogger(__name__)
 pexpr = PythonPrinter().doprint
 
 
-ReuseKey = tuple[torch.device, torch.dtype, str, bool]
-CommBufferReuseKey = tuple[torch.device, torch.dtype, str, "ir.CommBufferType", str]
-BufferLike = ir.Buffer | WorkspaceArg
-FxConversionFunc = Callable[["WrapperLine"], None]
+ReuseKey: TypeAlias = tuple[torch.device, torch.dtype, str, bool]
+CommBufferReuseKey: TypeAlias = tuple[
+    torch.device, torch.dtype, str, "ir.CommBufferType", str
+]
+BufferLike: TypeAlias = ir.Buffer | WorkspaceArg
+FxConversionFunc: TypeAlias = Callable[["WrapperLine"], None]
 
 
 def buffer_reuse_key(node: BufferLike) -> ReuseKey:
@@ -193,8 +195,8 @@ def codegen_reinterpret_view_helper(data):
 
 
 # TODO: Move to a well known place
-TritonMetaParams = dict[str, int]
-TritonGrid = (
+TritonMetaParams: TypeAlias = dict[str, int]
+TritonGrid: TypeAlias = (
     tuple[int | sympy.Expr, ...] | Callable[[TritonMetaParams], tuple[int, ...]]
 )
 
@@ -1233,8 +1235,8 @@ class AssertSizeStrideLine(WrapperLine):
         return converter._generate_assert_size_stride
 
 
-BufferName = str
-Line = MemoryPlanningLine | LineContext
+BufferName: TypeAlias = str
+Line: TypeAlias = MemoryPlanningLine | LineContext
 
 
 class PythonWrapperCodegen(CodeGen):

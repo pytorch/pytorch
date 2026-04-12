@@ -5,7 +5,7 @@ import dataclasses
 import functools
 import itertools
 import typing
-from typing import Any
+from typing import Any, TypeAlias
 
 import sympy
 
@@ -39,7 +39,7 @@ class NodeScheduleMarker:
         return False
 
 
-NodeScheduleEntry = SchedulerNode | type[NodeScheduleMarker]
+NodeScheduleEntry: TypeAlias = SchedulerNode | type[NodeScheduleMarker]
 
 
 class DisableReduction(NodeScheduleMarker):

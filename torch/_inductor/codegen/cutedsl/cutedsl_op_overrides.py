@@ -7,6 +7,7 @@ template kernels, particularly for flex attention modifications.
 """
 
 import math
+from typing import TypeAlias
 
 import sympy
 
@@ -16,7 +17,7 @@ from torch._inductor.virtualized import OpsValue, V
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
-CuteDSLArg = CSEVariable | str | bool | float | int
+CuteDSLArg: TypeAlias = CSEVariable | str | bool | float | int
 
 
 def upcast_compute_type(dtype: torch.dtype) -> torch.dtype:

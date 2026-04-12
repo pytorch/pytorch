@@ -5,7 +5,7 @@ import logging
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Literal, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING, TypeAlias
 
 from sympy import Expr, symbols
 
@@ -58,8 +58,8 @@ def _normalize_idx(index: int, total_length: int) -> int:
     return index if index >= 0 else index + total_length
 
 
-ValidLayoutSymbols = Literal["M", "N", "K", "B", "lda", "ldb", "ldc", "ldd"]
-ValidLayoutAttrs = Literal["size", "stride"]
+ValidLayoutSymbols: TypeAlias = Literal["M", "N", "K", "B", "lda", "ldb", "ldc", "ldd"]
+ValidLayoutAttrs: TypeAlias = Literal["size", "stride"]
 
 
 @dataclass(frozen=True)

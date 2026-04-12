@@ -11,7 +11,8 @@ from collections.abc import Callable, KeysView, Sequence
 from enum import Enum
 from functools import partial, wraps
 from types import FrameType
-from typing import Any, get_args, get_origin, Literal, TypeVar, Union
+from typing import Any, get_args, get_origin, Literal, TypeAlias, Union
+from typing_extensions import TypeVar
 
 import torch
 from functorch.compile import min_cut_rematerialization_partition
@@ -184,7 +185,7 @@ TYPE_OVERRIDES: dict[str, list[Any]] = {
     "traceable_tensor_subclasses": [OrderedSet()],
     "nontraceable_tensor_subclasses": [OrderedSet()],
 }
-SamplingType = Callable[[str, type[Any], Any], Any]
+SamplingType: TypeAlias = Callable[[str, type[Any], Any], Any]
 
 
 class SamplingMethod(Enum):
@@ -402,7 +403,7 @@ class Default:
 DEFAULT = Default()
 
 # The combination of config settings being set (based on their strings)
-ComboType = tuple[str, ...]
+ComboType: TypeAlias = tuple[str, ...]
 
 
 class ResultType:
@@ -444,11 +445,11 @@ class ResultType:
 
 
 # Type that maps config strings to their default value
-ConfigType = dict[str, Any]
+ConfigType: TypeAlias = dict[str, Any]
 # Callable that returns a bool
-FactoryOutputType = Callable[[], bool]
+FactoryOutputType: TypeAlias = Callable[[], bool]
 # input function factory
-FactoryType = Callable[[], FactoryOutputType]
+FactoryType: TypeAlias = Callable[[], FactoryOutputType]
 
 # Why are some configs disabled by default? Because if we don't the fuzzer produces uninteresting results.
 # It will always hone-in on these failures, even with the most basic model, making it useless for

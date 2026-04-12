@@ -39,7 +39,7 @@ from .utils import generate_assert
 from .virtualized import V
 
 
-_ExprType = sympy.Expr | float | int | bool
+_ExprType: TypeAlias = sympy.Expr | float | int | bool
 
 
 def _is_constant(val: _ExprType):

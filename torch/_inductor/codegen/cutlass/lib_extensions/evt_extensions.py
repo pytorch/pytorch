@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import Any
+from typing import Any, TypeAlias
 
 from sympy import Expr
 
@@ -13,11 +13,15 @@ from torch.utils._ordered_set import OrderedSet
 from ..utils import torch_dtype_to_cutlass_type, try_import_cutlass
 
 
-EpilogueFunctor = Any  # EpilogueFunctor local class defined in _trace
-Buffer = ComputedBuffer | InputBuffer
-CutlassTupleType = Any  # cutlass.backend.c_types.tuple_factory_.<locals>.TupleType
-CutlassVisitorType = Any  # cutlass.backend.c_types.visitor_factory.<locals>.VisitorType
-CutlassArgType = (
+EpilogueFunctor: TypeAlias = Any  # EpilogueFunctor local class defined in _trace
+Buffer: TypeAlias = ComputedBuffer | InputBuffer
+CutlassTupleType: TypeAlias = (
+    Any  # cutlass.backend.c_types.tuple_factory_.<locals>.TupleType
+)
+CutlassVisitorType: TypeAlias = (
+    Any  # cutlass.backend.c_types.visitor_factory.<locals>.VisitorType
+)
+CutlassArgType: TypeAlias = (
     Any  # Can be a CutlassTupleType, CutlassVisitorType, EmptyByte, or ctype.c_void_p
 )
 

@@ -2,7 +2,8 @@ import dataclasses
 import itertools
 from collections import Counter, defaultdict
 from collections.abc import Callable
-from typing import Literal, overload, TYPE_CHECKING, TypeVar, Union
+from typing import Literal, overload, TYPE_CHECKING, TypeAlias, Union
+from typing_extensions import TypeVar
 
 import sympy
 
@@ -21,8 +22,8 @@ T = TypeVar("T")
 U = TypeVar("U")
 
 
-Split = tuple[sympy.Expr, ...]
-VarsAndRanges = tuple[list[sympy.Symbol], list[sympy.Expr]]
+Split: TypeAlias = tuple[sympy.Expr, ...]
+VarsAndRanges: TypeAlias = tuple[list[sympy.Symbol], list[sympy.Expr]]
 
 
 loop_tiling_log = torch._logging.getArtifactLogger(__name__, "loop_tiling")

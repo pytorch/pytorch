@@ -1,13 +1,13 @@
 import functools
 from collections.abc import Callable
-from typing import Any
+from typing import Any, TypeAlias
 
 import torch
 
 
-Feedback = float
-Choice = str
-Value = Any
+Feedback: TypeAlias = float
+Choice: TypeAlias = str
+Value: TypeAlias = Any
 
 CHOICE_COL = "choice"
 FEEDBACK_COL = "feedback"

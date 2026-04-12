@@ -5,7 +5,7 @@ import operator
 import textwrap
 from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any
+from typing import Any, TypeAlias
 
 import sympy
 
@@ -100,7 +100,7 @@ class SymbolBuffer(CodegenSymbol):
         return sym_int
 
 
-CodegenBuffer = BufferLike | SymbolBuffer
+CodegenBuffer: TypeAlias = BufferLike | SymbolBuffer
 
 
 @dataclasses.dataclass

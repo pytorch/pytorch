@@ -1,6 +1,6 @@
 import functools
 from collections.abc import Callable, Sequence
-from typing import Protocol
+from typing import Protocol, TypeAlias
 
 import sympy
 
@@ -9,7 +9,7 @@ import torch
 from .virtualized import OpsValue, V
 
 
-BlockShapeType = Sequence[int | str] | None
+BlockShapeType: TypeAlias = Sequence[int | str] | None
 
 
 class ShapeVar(Protocol):
@@ -17,7 +17,7 @@ class ShapeVar(Protocol):
     def shape(self) -> BlockShapeType: ...
 
 
-ShapeArg = ShapeVar | torch.types.Number | str | OpsValue | torch.dtype
+ShapeArg: TypeAlias = ShapeVar | torch.types.Number | str | OpsValue | torch.dtype
 
 # Inputs need to be cacheable (e.g., not a CSEVar) in order for the cache to be effective
 # So first decompose CSEVars -> tuple before calling this

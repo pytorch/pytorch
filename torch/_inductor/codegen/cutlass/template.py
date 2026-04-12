@@ -3,7 +3,7 @@ import functools
 import hashlib
 import itertools
 from dataclasses import dataclass
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, TypeAlias
 from unittest.mock import patch
 
 import sympy
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 else:
     BaseSchedulerNode = Any
 
-GemmOperation = Any
+GemmOperation: TypeAlias = Any
 
 autotuning_log = getArtifactLogger(__name__, "autotuning")
 

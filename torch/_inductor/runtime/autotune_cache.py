@@ -31,7 +31,7 @@ import logging
 import os
 import os.path
 import re
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, TypeAlias
 from typing_extensions import override
 
 import torch
@@ -59,7 +59,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-_InductorMetaTy = dict[str, object]
+_InductorMetaTy: TypeAlias = dict[str, object]
 
 
 def inductor_meta_from_config() -> _InductorMetaTy:
