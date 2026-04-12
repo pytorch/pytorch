@@ -88,6 +88,13 @@ class TestAutograd(TestCase):
         self.assertIsNotNone(z.grad_fn)
         self.assertTrue(z.requires_grad)
 
+        with self.assertRaises(RuntimeError):
+            y.requires_grad_(True)
+
+        with self.assertRaises(RuntimeError):
+            w = x * y
+            w.backward(torch.ones_like(w))
+
     def test_autograd_detach(self):
         """Test tensor detach"""
         x = torch.randn(2, 3, device="openreg", requires_grad=True)
@@ -146,16 +153,24 @@ class TestAutograd(TestCase):
 
         m = MyModule()
         hook_called_on_device = []
+        hook_called_grads = []
         m.register_full_backward_hook(
-            lambda _module, _grad_in, grad_out: hook_called_on_device.append(
-                grad_out[0].device.type
+            lambda _module, _grad_in, grad_out: (
+                hook_called_on_device.append(grad_out[0].device.type),
+                hook_called_grads.append(grad_out[0].clone()),
             )
         )
         result = m(x=a, y=b)
-        result.backward()
         self.assertEqual(result, a * b)
         self.assertEqual(result.device.type, "openreg")
+
+        result.backward()
+
         self.assertEqual(hook_called_on_device, ["openreg"])
+        self.assertEqual(len(hook_called_grads), 1)
+        self.assertEqual(hook_called_grads[0], torch.ones(1, device="openreg"))
+        self.assertEqual(a.grad, b.detach())
+        self.assertEqual(b.grad, a.detach())
 
         # test tensor hook
         hook_called_on_device = []
@@ -164,6 +179,7 @@ class TestAutograd(TestCase):
         z.register_hook(lambda grad: hook_called_on_device.append(grad.device.type))
         z.backward(torch.ones_like(z))
         self.assertEqual(hook_called_on_device, ["openreg"])
+        self.assertEqual(x.grad, 2 * x.detach())
 
 
 if __name__ == "__main__":
