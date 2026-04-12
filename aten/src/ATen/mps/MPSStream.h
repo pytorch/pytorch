@@ -29,6 +29,7 @@ typedef id<MTLComputeCommandEncoder> MTLComputeCommandEncoder_t;
 typedef id<MTLSharedEvent> MTLSharedEvent_t;
 typedef id<MTLDevice> MTLDevice_t;
 typedef id<MTLBuffer> MTLBuffer_t;
+@class MPSRecordingEncoder;
 #else
 #include <dispatch/dispatch.h>
 typedef void* MPSCommandBuffer_t;
@@ -122,13 +123,27 @@ class TORCH_API MPSStream {
     return _capturedSteps.size();
   }
 
-  // Metal kernel capture recording API.
-  // Call sequence: beginRecordMetalKernel -> recordMetalBuffer/recordMetalBytes (N times) -> endRecordMetalKernel
-  void beginRecordMetalKernel(void* pso); // id<MTLComputePipelineState>
-  void recordMetalBuffer(void* buffer, size_t offset, unsigned index); // id<MTLBuffer>
-  void recordMetalBytes(const void* data, size_t size, unsigned index);
-  void endRecordMetalKernel(uint64_t gridX, uint64_t gridY, uint64_t gridZ,
-                            uint64_t tgX, uint64_t tgY, uint64_t tgZ);
+  struct CapturedMetalKernel {
+    void* pso = nullptr; // id<MTLComputePipelineState>, retained
+    struct BufferBinding {
+      void* buffer; // id<MTLBuffer>
+      size_t offset;
+      unsigned index;
+      size_t bufferLength; // recorded buffer length for replay validation
+    };
+    struct BytesBinding {
+      std::vector<uint8_t> data;
+      unsigned index;
+    };
+    std::vector<BufferBinding> buffers;
+    std::vector<BytesBinding> bytes;
+    uint64_t gridX = 0, gridY = 0, gridZ = 0;
+    uint64_t tgX = 0, tgY = 0, tgZ = 0;
+    bool useThreadgroups = false; // true = dispatchThreadgroups, false = dispatchThreads
+  };
+
+  // Called by MPSRecordingEncoder to push a finalized Metal kernel recording.
+  void pushCapturedMetalKernel(std::unique_ptr<CapturedMetalKernel> kernel);
 
   /// Get the MPS device index that this stream is associated with.
   c10::DeviceIndex device_index() const {
@@ -173,23 +188,6 @@ class TORCH_API MPSStream {
   // On replay the same buffers are re-bound — callers must update input
   // data in-place (via .copy_()) between replay calls to supply new batches.
 
-  struct CapturedMetalKernel {
-    void* pso = nullptr; // id<MTLComputePipelineState>, retained
-    struct BufferBinding {
-      void* buffer; // id<MTLBuffer>
-      size_t offset;
-      unsigned index;
-    };
-    struct BytesBinding {
-      std::vector<uint8_t> data;
-      unsigned index;
-    };
-    std::vector<BufferBinding> buffers;
-    std::vector<BytesBinding> bytes;
-    uint64_t gridX = 0, gridY = 0, gridZ = 0;
-    uint64_t tgX = 0, tgY = 0, tgZ = 0;
-  };
-
   struct CapturedStep {
     enum class Kind { MPSGraph, MetalKernel };
     Kind kind = Kind::MPSGraph;
@@ -207,7 +205,11 @@ class TORCH_API MPSStream {
   };
   std::atomic<bool> _captureMode{false};
   std::vector<CapturedStep> _capturedSteps;
-  std::unique_ptr<CapturedMetalKernel> _pendingMetalKernel;
+#ifdef __OBJC__
+  MPSRecordingEncoder* _recordingEncoder = nil;
+#else
+  void* _recordingEncoder = nullptr;
+#endif
 
   // use synchronize() to access any of these commit functions outside MPSStream
   void commit();

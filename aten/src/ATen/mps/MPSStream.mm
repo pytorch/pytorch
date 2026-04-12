@@ -3,6 +3,7 @@
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/mps/MPSStream.h>
+#import <ATen/mps/MPSRecordingEncoder.h>
 #include <c10/metal/error.h>
 
 @interface MPSGraphExecutionDescriptor ()
@@ -72,7 +73,13 @@ id<MTLComputeCommandEncoder> MPSStream::commandEncoder() {
   if (!_commandEncoder) {
     _commandEncoder = [commandBuffer() computeCommandEncoder].retain;
   }
-
+  if (_captureMode.load(std::memory_order_acquire)) {
+    if (!_recordingEncoder) {
+      _recordingEncoder = [[MPSRecordingEncoder alloc] initWithEncoder:_commandEncoder
+                                                               stream:this];
+    }
+    return (id<MTLComputeCommandEncoder>)_recordingEncoder;
+  }
   return _commandEncoder;
 }
 
@@ -139,6 +146,9 @@ void MPSStream::endKernelCoalescing() {
     [_commandEncoder endEncoding];
     [_commandEncoder release];
     _commandEncoder = nil;
+    // Recording encoder wraps the now-stale inner encoder; release it.
+    [_recordingEncoder release];
+    _recordingEncoder = nil;
   }
 }
 
@@ -332,7 +342,8 @@ void MPSStream::captureBegin() {
       }
     }
     _capturedSteps.clear();
-    _pendingMetalKernel.reset();
+    [_recordingEncoder release];
+    _recordingEncoder = nil;
     _captureMode.store(true, std::memory_order_release);
   });
 }
@@ -341,6 +352,8 @@ void MPSStream::captureEnd() {
   TORCH_CHECK(_captureMode, "captureEnd() called without a matching captureBegin()");
   dispatch_sync_with_rethrow(_serialQueue, ^() {
     _captureMode.store(false, std::memory_order_release);
+    [_recordingEncoder release];
+    _recordingEncoder = nil;
   });
 }
 
@@ -356,49 +369,18 @@ void MPSStream::captureReset() {
       }
     }
     _capturedSteps.clear();
-    _pendingMetalKernel.reset();
+    [_recordingEncoder release];
+    _recordingEncoder = nil;
   });
 }
 
-// Metal kernel capture recording API.
-// These are called from inside dispatch_sync on _serialQueue (from exec_unary/binary_kernel).
-
-void MPSStream::beginRecordMetalKernel(void* pso) {
-  _pendingMetalKernel = std::make_unique<CapturedMetalKernel>();
-  _pendingMetalKernel->pso = pso;
-  [(__bridge id<MTLComputePipelineState>)pso retain];
-}
-
-void MPSStream::recordMetalBuffer(void* buffer, size_t offset, unsigned index) {
-  if (_pendingMetalKernel) {
-    _pendingMetalKernel->buffers.push_back({buffer, offset, index});
-  }
-}
-
-void MPSStream::recordMetalBytes(const void* data, size_t size, unsigned index) {
-  if (_pendingMetalKernel) {
-    CapturedMetalKernel::BytesBinding binding;
-    binding.data.assign(static_cast<const uint8_t*>(data),
-                        static_cast<const uint8_t*>(data) + size);
-    binding.index = index;
-    _pendingMetalKernel->bytes.push_back(std::move(binding));
-  }
-}
-
-void MPSStream::endRecordMetalKernel(uint64_t gridX, uint64_t gridY, uint64_t gridZ,
-                                      uint64_t tgX, uint64_t tgY, uint64_t tgZ) {
-  if (_pendingMetalKernel) {
-    _pendingMetalKernel->gridX = gridX;
-    _pendingMetalKernel->gridY = gridY;
-    _pendingMetalKernel->gridZ = gridZ;
-    _pendingMetalKernel->tgX = tgX;
-    _pendingMetalKernel->tgY = tgY;
-    _pendingMetalKernel->tgZ = tgZ;
-    CapturedStep step;
-    step.kind = CapturedStep::Kind::MetalKernel;
-    step.metalKernel = std::move(_pendingMetalKernel);
-    _capturedSteps.push_back(std::move(step));
-  }
+void MPSStream::pushCapturedMetalKernel(std::unique_ptr<CapturedMetalKernel> kernel) {
+  TORCH_INTERNAL_ASSERT(_captureMode.load(std::memory_order_acquire),
+                        "pushCapturedMetalKernel called outside capture mode");
+  CapturedStep step;
+  step.kind = CapturedStep::Kind::MetalKernel;
+  step.metalKernel = std::move(kernel);
+  _capturedSteps.push_back(std::move(step));
 }
 
 void MPSStream::replay() {
@@ -425,14 +407,25 @@ void MPSStream::replay() {
         id<MTLComputePipelineState> pso = (__bridge id<MTLComputePipelineState>)mk.pso;
         [enc setComputePipelineState:pso];
         for (auto& b : mk.buffers) {
-          [enc setBuffer:(__bridge id<MTLBuffer>)b.buffer offset:b.offset atIndex:b.index];
+          auto mtlBuf = (__bridge id<MTLBuffer>)b.buffer;
+          TORCH_CHECK(
+            mtlBuf.length == b.bufferLength,
+            "Graph replay: buffer at index ", b.index,
+            " changed size from ", b.bufferLength, " to ", mtlBuf.length,
+            ". Tensor storage was reallocated between capture and replay. "
+            "Use .copy_() to update tensor data in-place.");
+          [enc setBuffer:mtlBuf offset:b.offset atIndex:b.index];
         }
         for (auto& b : mk.bytes) {
           [enc setBytes:b.data.data() length:b.data.size() atIndex:b.index];
         }
         auto gridSize = MTLSizeMake(mk.gridX, mk.gridY, mk.gridZ);
         auto tgSize = MTLSizeMake(mk.tgX, mk.tgY, mk.tgZ);
-        [enc dispatchThreads:gridSize threadsPerThreadgroup:tgSize];
+        if (mk.useThreadgroups) {
+          [enc dispatchThreadgroups:gridSize threadsPerThreadgroup:tgSize];
+        } else {
+          [enc dispatchThreads:gridSize threadsPerThreadgroup:tgSize];
+        }
       }
     }
     synchronize(SyncType::COMMIT_ADAPTIVE);

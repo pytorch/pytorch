@@ -759,22 +759,6 @@ void MetalShaderLibrary::exec_unary_kernel_with_params(TensorIteratorBase& iter,
       }
 
       getMPSProfiler().endProfileKernel(cplState);
-
-      // Record this Metal kernel dispatch for capture/replay
-      if (mpsStream->captureMode()) {
-        mpsStream->beginRecordMetalKernel((__bridge void*)cplState);
-        for (auto idx : c10::irange(iter.ntensors())) {
-          auto& t = iter.tensor_base(idx);
-          if (C10_UNLIKELY(t.device().type() == c10::kCPU)) continue;
-          auto offs = iter_tensor_offset(iter, idx);
-          mpsStream->recordMetalBuffer((__bridge void*)getMTLBufferStorage(t), offs, idx);
-        }
-        unsigned paramsIdx = iter.is_contiguous() ? 2 : 6;
-        mpsStream->recordMetalBytes(&params, sizeof(params), paramsIdx);
-        const auto maxTg = [cplState maxTotalThreadsPerThreadgroup];
-        auto tg = std::min(maxTg, (NSUInteger)length);
-        mpsStream->endRecordMetalKernel(length, 1, 1, tg, 1, 1);
-      }
     });
   }
 }
@@ -866,22 +850,6 @@ void MetalShaderLibrary::exec_binary_kernel_with_params(TensorIteratorBase& iter
       }
       mtl_dispatch1DJob(computeEncoder, binaryPSO, iter.numel());
       getMPSProfiler().endProfileKernel(binaryPSO);
-
-      // Record this Metal kernel dispatch for capture/replay
-      if (mpsStream->captureMode()) {
-        mpsStream->beginRecordMetalKernel((__bridge void*)binaryPSO);
-        for (auto idx : c10::irange(iter.ntensors())) {
-          auto& t = iter.tensor_base(idx);
-          if (C10_UNLIKELY(t.device().type() == c10::kCPU)) continue;
-          auto offs = iter_tensor_offset(iter, idx);
-          mpsStream->recordMetalBuffer((__bridge void*)getMTLBufferStorage(t), offs, idx);
-        }
-        mpsStream->recordMetalBytes(&params, sizeof(params), 3);
-        const auto maxTg = [binaryPSO maxTotalThreadsPerThreadgroup];
-        auto numel = (NSUInteger)iter.numel();
-        auto tg = std::min(maxTg, numel);
-        mpsStream->endRecordMetalKernel(numel, 1, 1, tg, 1, 1);
-      }
     }
   });
 }
