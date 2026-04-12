@@ -2289,6 +2289,10 @@ torch.cuda.synchronize()
     )
     def test_graph_rng_after_failed_capture(self):
         """Test that a stream can be captured again for RNG after a failed capture."""
+        if TEST_WITH_ROCM and self.expandable_segments:
+            self.skipTest(
+                "ROCm expandable segments has known issue with graph capture recovery - #179911"
+            )
         stream = torch.cuda.Stream()
         graph = torch.cuda.CUDAGraph()
         x = torch.ones(1, device="cuda")
