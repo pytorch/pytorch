@@ -461,6 +461,44 @@ class TestScatterGather(TestCase):
         helper([50, 8, 7], 100)
         helper([50, 3, 4, 5], 100)
 
+    @dtypes(torch.float32, torch.float64)
+    def test_slice_scatter_broadcast_gradient(self, device, dtype):
+        """
+        Ensures slice_scatter produces correct gradients when input 'self' 
+        is a broadcast tensor (stride=0). See gh-180164.
+        """
+        # Create a broadcast tensor (stride[1] == 0)
+        base = torch.randn(4, 33, dtype=dtype, device=device)
+        x_broadcast = base.unsqueeze(1).expand(4, 13, 33)
+        self.assertEqual(x_broadcast.stride()[1], 0)
+        
+        y = torch.randn(4, 6, 33, dtype=dtype, device=device, requires_grad=True)
+        g = torch.randn(4, 13, 33, dtype=dtype, device=device)
+        
+        # 1. Verify mathematical structure in Eager mode
+        x_temp = torch.randn(4, 13, 33, dtype=dtype, device=device, requires_grad=True)
+        out_eager = torch.slice_scatter(x_temp, y, dim=1, start=0, end=6)
+        out_eager.backward(g)
+        
+        expected_grad = torch.zeros_like(x_temp)
+        expected_grad[:, 6:, :] = g[:, 6:, :]
+        self.assertEqual(x_temp.grad, expected_grad)
+
+        # 2. Verify Fix for Inductor (The core of issue #180164)
+        # We use a helper function to test torch.compile
+        def func(x_in, y_in):
+            return torch.slice_scatter(x_in, y_in, dim=1, start=0, end=6).sum()
+
+        x_comp = x_broadcast.clone().detach().requires_grad_(True)
+        y_comp = y.clone().detach().requires_grad_(True)
+
+        compiled_func = torch.compile(func)
+        out_comp = compiled_func(x_comp, y_comp)
+        out_comp.backward()
+
+        # If the fix works, gradient won't be zero.
+        self.assertNotEqual(x_comp.grad.sum().item(), 0, "Gradient collapsed to zero in compiled mode!")
+        
 # Generic Device Test Framework instantiation, see
 #   https://github.com/pytorch/pytorch/wiki/Running-and-writing-tests
 #   for details.

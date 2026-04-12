@@ -5726,7 +5726,9 @@ def meta_select_scatter(self, src, dim, index):
 
 @register_meta(aten.slice_scatter.default)
 def meta_slice_scatter(self, src, dim=0, start=None, end=None, step=1):
-    return utils.clone_preserve_strides(self)
+    # Must use contiguous strides to prevent inductor from collapsing 
+    # the iteration space on broadcast inputs. See gh-180164.
+    return torch.empty_like(self, memory_format=torch.contiguous_format)
 
 
 # TODO: Deduplicate this with canonicalize_dim
