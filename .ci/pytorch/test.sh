@@ -1962,7 +1962,10 @@ test_bazel() {
     tools/bazel test --config=cpu-only --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA \
       --no//c10:use_gflags --no//c10:use_glog //c10/...
 
-    tools/bazel test --config=cpu-only --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
+    # rnn_test uses a convergence-based training loop (test_RNN_xor) whose
+    # runtime varies across CPU microarchitectures.  On OSDC AVX-512 runners
+    # it can exceed 480s, so give extra headroom.
+    tools/bazel test --config=cpu-only --test_timeout=900 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
   else
     # Increase the test timeout to 480 like CPU tests because modules_test frequently timeout
     tools/bazel test --test_timeout=480 --test_output=errors \
