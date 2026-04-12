@@ -226,6 +226,19 @@ Tensor amaxamin_jvp(
   return at::where(mask, dx, 0.).sum(dim, keepdim) / mask.sum(dim, keepdim);
 }
 
+// Builds the dims vector for aminmax: all dims when dim is nullopt,
+// or the single wrapped dim otherwise.
+static std::vector<int64_t> _aminmax_dims(
+    const Tensor& self,
+    std::optional<int64_t> dim_opt) {
+  if (dim_opt.has_value()) {
+    return {at::maybe_wrap_dim(*dim_opt, self.dim())};
+  }
+  std::vector<int64_t> dims(self.dim());
+  std::iota(dims.begin(), dims.end(), 0);
+  return dims;
+}
+
 Tensor aminmax_backward(
     const Tensor& self,
     std::optional<int64_t> dim,
@@ -234,7 +247,8 @@ Tensor aminmax_backward(
     const Tensor& grad_max,
     const Tensor& min,
     const Tensor& max) {
-  auto dims = dim.has_value() ? IntArrayRef{*dim} : IntArrayRef{};
+  auto dims_vec = _aminmax_dims(self, dim);
+  IntArrayRef dims(dims_vec);
   Tensor result;
 
   if (grad_min.defined()) {
@@ -261,6 +275,16 @@ Tensor aminmax_backward(
   }
 
   return result;
+}
+
+Tensor aminmax_jvp(
+    const Tensor& self_p,
+    const Tensor& self_t,
+    const Tensor& result,
+    std::optional<int64_t> dim,
+    bool keepdim) {
+  auto dims_vec = _aminmax_dims(self_p, dim);
+  return amaxamin_jvp(self_p, self_t, result, IntArrayRef(dims_vec), keepdim);
 }
 
 std::tuple<Tensor, Tensor> _euclidean_dist_backward(
