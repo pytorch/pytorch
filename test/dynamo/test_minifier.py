@@ -24,13 +24,19 @@ inner(torch.randn(20, 20, device="{device}"))
         self._run_full_test(run_code, "dynamo", expected_error, isolate=False)
 
     def test_after_dynamo_compile_error(self, device):
-        self._test_after_dynamo(device, "relu_compile_error_TESTING_ONLY", "ReluCompileError")
+        self._test_after_dynamo(
+            device, "relu_compile_error_TESTING_ONLY", "ReluCompileError"
+        )
 
     def test_after_dynamo_runtime_error(self, device):
-        self._test_after_dynamo(device, "relu_runtime_error_TESTING_ONLY", "ReluRuntimeError")
+        self._test_after_dynamo(
+            device, "relu_runtime_error_TESTING_ONLY", "ReluRuntimeError"
+        )
 
     def test_after_dynamo_accuracy_error(self, device):
-        self._test_after_dynamo(device, "relu_accuracy_error_TESTING_ONLY", "AccuracyError")
+        self._test_after_dynamo(
+            device, "relu_accuracy_error_TESTING_ONLY", "AccuracyError"
+        )
 
     def test_after_dynamo_non_leaf_compile_error(self, device):
         run_code = f"""\
@@ -57,13 +63,19 @@ inner(torch.randn(20, 20, requires_grad=True, device="{device}") + 1)
         inner(torch.randn(20, 20, device=device))
 
     def test_after_dynamo_compile_backend_passes(self, device):
-        self._test_after_dynamo_backend_passes(device, "relu_compile_error_TESTING_ONLY")
+        self._test_after_dynamo_backend_passes(
+            device, "relu_compile_error_TESTING_ONLY"
+        )
 
     def test_after_dynamo_runtime_backend_passes(self, device):
-        self._test_after_dynamo_backend_passes(device, "relu_runtime_error_TESTING_ONLY")
+        self._test_after_dynamo_backend_passes(
+            device, "relu_runtime_error_TESTING_ONLY"
+        )
 
     def test_after_dynamo_accuracy_backend_passes(self, device):
-        self._test_after_dynamo_backend_passes(device, "relu_accuracy_error_TESTING_ONLY")
+        self._test_after_dynamo_backend_passes(
+            device, "relu_accuracy_error_TESTING_ONLY"
+        )
 
     # Test that a module with mixed cpu/gpu parts with an error after dynamo can be repro'd
     @skipIfNNModuleInlined()
