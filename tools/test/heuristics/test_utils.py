@@ -55,9 +55,12 @@ class TestHeuristicsUtils(unittest.TestCase):
         )
 
     def test_query_changed_files_filters_empty_diff_output(self) -> None:
-        with mock.patch.object(utils, "get_merge_base", return_value="base"), mock.patch(
-            "tools.testing.target_determination.heuristics.utils.subprocess.run"
-        ) as run:
+        with (
+            mock.patch.object(utils, "get_merge_base", return_value="base"),
+            mock.patch(
+                "tools.testing.target_determination.heuristics.utils.subprocess.run"
+            ) as run,
+        ):
             run.return_value = mock.Mock(returncode=0, stdout=b"")
             self.assertEqual(utils.query_changed_files(), [])
 
