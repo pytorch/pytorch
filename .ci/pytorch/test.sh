@@ -326,6 +326,18 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *-tsan* ]]; then
+    # Switch to TSan-instrumented CPython so that all subsequent python
+    # invocations (including the pre-test sanity checks below) use an
+    # interpreter that has the TSan runtime.
+    export PATH=/opt/python/cp314-cp314t+tsan/bin:$PATH
+    python -m pip install "$(echo dist/*.whl)[opt-einsum]"
+    TSAN_LOG_DIR=$(pwd)/test/test-reports/tsan
+    mkdir -p "$TSAN_LOG_DIR"
+    export TSAN_OPTIONS="log_path=$TSAN_LOG_DIR/tsan"
+    export PYTORCH_TEST_WITH_TSAN=1
+fi
+
 # The torch._C._crash_if_debug_asserts_fail() function should only fail if both of the following are true:
 # 1. The build is in debug mode
 # 2. The value 424242 is passed in
@@ -346,20 +358,19 @@ elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
 fi
 
 test_tsan() {
-  TSAN_PYTHON=/opt/python/cp314-cp314t+tsan/bin/python
+  # PATH, TSAN_OPTIONS, and wheel install are set up earlier in this
+  # script when BUILD_ENVIRONMENT matches *-tsan*.
+  python test/test_tsan.py -v
 
-  $TSAN_PYTHON --version
-  $TSAN_PYTHON -c "import sysconfig; assert sysconfig.get_config_var('Py_GIL_DISABLED')"
-
-  # Install the TSan-instrumented wheel into the TSan CPython
-  $TSAN_PYTHON -m pip install "$(echo dist/*.whl)[opt-einsum]"
-
-  $TSAN_PYTHON -c "import torch; print(torch.__version__)"
-
-  export TSAN_OPTIONS="halt_on_error=1:history_size=7"
-  export PYTORCH_TEST_WITH_TSAN=1
-
-  $TSAN_PYTHON test/test_tsan.py -v
+  # Display and check TSan logs. TSan appends .<pid> to log_path.
+  TSAN_LOG_DIR=$(pwd)/test/test-reports/tsan
+  if ls "$TSAN_LOG_DIR"/tsan.* 1>/dev/null 2>&1; then
+    echo "=== TSan reports ==="
+    cat "$TSAN_LOG_DIR"/tsan.*
+    echo "=== End TSan reports ==="
+    echo "TSan detected data races (see above)"
+    exit 1
+  fi
 
   assert_git_not_dirty
 }
