@@ -173,6 +173,10 @@ manual_torch_name_rule_map: dict[
     "torch.distributed.get_world_size": TorchInGraphFunctionVariable,
     "torch.distributed.tensor._api.DTensor#from_local": TorchInGraphFunctionVariable,
     "torch.distributed.device_mesh.DeviceMesh#__init__": SkipFunctionVariable,
+    # _create_sub_mesh constructs an opaque DeviceMesh which always graph
+    # breaks.  Skip it as a top-level frame so the STORE_ATTR after the
+    # constructor runs at runtime instead of in a resume frame.
+    "torch/distributed/device_mesh.py#_create_sub_mesh": SkipFunctionVariable,
     "torch.distributed.distributed_c10d._get_group_size_by_name": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d._resolve_group_name_by_ranks_and_tag": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d._get_group_tag": TorchInGraphFunctionVariable,
