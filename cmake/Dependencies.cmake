@@ -820,6 +820,21 @@ include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
 
 
 if(BUILD_PYTHON)
+  # On Windows venvs, the Python import library (pythonXX.lib) lives in the
+  # base installation's libs/ directory, not in the venv.  Help FindPython
+  # locate it by adding sys.base_prefix/libs to the library search path.
+  if(WIN32 AND Python_EXECUTABLE)
+    execute_process(
+      COMMAND "${Python_EXECUTABLE}" -c "import sys; print(sys.base_prefix)"
+      OUTPUT_VARIABLE _py_base_prefix
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_QUIET
+    )
+    if(_py_base_prefix AND IS_DIRECTORY "${_py_base_prefix}/libs")
+      list(APPEND CMAKE_LIBRARY_PATH "${_py_base_prefix}/libs")
+    endif()
+  endif()
+
   set(PYTHON_COMPONENTS Development.Module)
   if(USE_NUMPY)
     list(APPEND PYTHON_COMPONENTS NumPy)

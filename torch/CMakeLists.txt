@@ -109,7 +109,16 @@ set(TORCH_PYTHON_LINK_FLAGS "")
 
 if(MSVC)
     string(APPEND TORCH_PYTHON_LINK_FLAGS " /NODEFAULTLIB:LIBCMT.LIB")
-    list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${PYTHON_LIBRARIES} onnx_library)
+    # Python headers use #pragma comment(lib, "pythonXX") which makes MSVC search
+    # for the library by bare name.  Add the directory so the linker can find it.
+    foreach(_pylib IN LISTS Python_LIBRARIES)
+      if(_pylib MATCHES "python[0-9].*\\.lib$")
+        get_filename_component(_pylib_dir "${_pylib}" DIRECTORY)
+        string(APPEND TORCH_PYTHON_LINK_FLAGS " /LIBPATH:\"${_pylib_dir}\"")
+        break()
+      endif()
+    endforeach()
+    list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${Python_LIBRARIES} onnx_library)
     if(NOT CMAKE_BUILD_TYPE MATCHES "Release")
       string(APPEND TORCH_PYTHON_LINK_FLAGS " /DEBUG:FULL")
     endif()
@@ -461,10 +470,33 @@ if(${CMAKE_BUILD_TYPE} STREQUAL "RelWithAssert")
 endif()
 
 if(NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
-    set_target_properties(torch_python PROPERTIES LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS})
+    set_target_properties(torch_python PROPERTIES LINK_FLAGS "${TORCH_PYTHON_LINK_FLAGS}")
 endif()
 
 install(TARGETS torch_python DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+
+# Build the torch._C Python extension module from the thin stub that
+# forwards to torch_python.  This was historically built by setuptools;
+# building it here lets both setuptools and scikit-build-core use the
+# same code path.
+if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
+  Python_add_library(_C MODULE "${TORCH_SRC_DIR}/csrc/stub.c")
+  target_link_libraries(_C PRIVATE torch_python)
+  set_target_properties(_C PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/torch"
+    # libtorch_python.so is installed to lib/ relative to _C, so use
+    # $ORIGIN/lib as the install RPATH (the global default is just $ORIGIN).
+    INSTALL_RPATH "${_rpath_portable_origin}/lib"
+  )
+  if(NOT WIN32)
+    set_target_properties(_C PROPERTIES
+      C_VISIBILITY_PRESET "default"
+    )
+  endif()
+  # Install at the install prefix root, which maps to torch/ in the wheel
+  # via wheel.install-dir = "torch"
+  install(TARGETS _C DESTINATION ".")
+endif()
 
 # Generate torch/version.py from the appropriate CMake cache variables.
 if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
@@ -491,6 +523,9 @@ add_custom_target(
   WORKING_DIRECTORY ${TORCH_ROOT}
 )
 add_dependencies(torch_python gen_torch_version)
+# version.py is gitignored (generated), so scikit-build-core won't include it
+# via Python package collection. Install it explicitly via cmake instead.
+install(FILES "${TORCH_SRC_DIR}/version.py" DESTINATION ".")
 
 # Skip building this library under MacOS, since it is currently failing to build on Mac
 # Github issue #61930
@@ -507,6 +542,9 @@ if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
     target_link_libraries(nnapi_backend PRIVATE torch)
   endif()
   target_link_libraries(nnapi_backend PRIVATE torch_python pybind::pybind11 fmt::fmt-header-only)
+  if(MSVC AND TORCH_PYTHON_LINK_FLAGS)
+    set_target_properties(nnapi_backend PROPERTIES LINK_FLAGS "${TORCH_PYTHON_LINK_FLAGS}")
+  endif()
 endif()
 
 set(TORCH_PYTHON_COMPILE_OPTIONS ${TORCH_PYTHON_COMPILE_OPTIONS} PARENT_SCOPE)
