@@ -46,14 +46,9 @@ FpMatmulLruCache& get_fpmatmul_primitive_cache(int device_id) {
 // same pack to both so arity/type mismatches fail at compile time.
 dnnl::memory::dims build_fpmatmul_primitive_cache_key(
     int device_id,
-    int64_t rank,
-    int64_t m,
-    int64_t n,
-    int64_t k,
-    int64_t mb,
-    [[maybe_unused]] const dnnl::memory::dims& m1_dims,
-    [[maybe_unused]] const dnnl::memory::dims& m2_dims,
-    [[maybe_unused]] const dnnl::memory::dims& dst_dims,
+    const dnnl::memory::dims& m1_dims,
+    const dnnl::memory::dims& m2_dims,
+    const dnnl::memory::dims& dst_dims,
     const dnnl::memory::dims& m1_strides,
     const dnnl::memory::dims& m2_strides,
     const dnnl::memory::dims& dst_strides,
@@ -80,11 +75,9 @@ dnnl::memory::dims build_fpmatmul_primitive_cache_key(
 
   key.push_back(kFpMatmulPrimitiveCacheKeyVersion);
   key.push_back(static_cast<dim_t>(device_id));
-  key.push_back(rank);
-  key.push_back(m);
-  key.push_back(n);
-  key.push_back(k);
-  key.push_back(mb);
+  append_dims(m1_dims);
+  append_dims(m2_dims);
+  append_dims(dst_dims);
   append_dims(m1_strides);
   append_dims(m2_strides);
   append_dims(dst_strides);
@@ -109,11 +102,6 @@ dnnl::memory::dims build_fpmatmul_primitive_cache_key(
 
 FpMatmulCacheValue make_fpmatmul_cached_primitive(
     [[maybe_unused]] int device_id,
-    [[maybe_unused]] int64_t rank,
-    [[maybe_unused]] int64_t m,
-    [[maybe_unused]] int64_t n,
-    [[maybe_unused]] int64_t k,
-    [[maybe_unused]] int64_t mb,
     const dnnl::memory::dims& m1_dims,
     const dnnl::memory::dims& m2_dims,
     const dnnl::memory::dims& dst_dims,
@@ -368,11 +356,6 @@ sycl::event matmul(
   FpMatmulCacheValue entry = lookup_or_build_fpmatmul_cached_primitive(
       primitive_cache,
       device_id,
-      dims,
-      m,
-      n,
-      k,
-      mb,
       m1_dims,
       m2_dims,
       dst_dims,
