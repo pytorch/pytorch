@@ -318,14 +318,6 @@ See the docs for {class}`~torch.cuda.green_contexts.GreenContext` for an example
 ```
 
 ```{eval-rst}
-.. autofunction:: range_start
-```
-
-```{eval-rst}
-.. autofunction:: range_end
-```
-
-```{eval-rst}
 .. py:module:: torch.cuda.profiler
 ```
 
