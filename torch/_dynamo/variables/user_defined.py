@@ -317,14 +317,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
         self,
         tx: "InstructionTranslator",
     ) -> "VariableTracker":
-        from .constant import CONSTANT_VARIABLE_TRUE
+        from .constant import ConstantVariable
 
         # bool() on a class consults the metaclass __bool__.
         # If the metaclass is the default `type`, all classes are truthy.
         metaclass = type(self.value)
         if hasattr(metaclass, "__bool__") and metaclass is not type:
             return self.call_method(tx, "__bool__", [], {})
-        return CONSTANT_VARIABLE_TRUE
+        return ConstantVariable.create(True)
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         source = AttrSource(self.source, name) if self.source is not None else None
@@ -535,7 +535,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         source: Source | None,
     ) -> VariableTracker:
         """Trace a class-MRO descriptor's __get__(None, cls) call."""
-        from . import CONSTANT_VARIABLE_NONE
+        from .constant import ConstantVariable
 
         descriptor_source = None
         descriptor_get_source = None
@@ -546,7 +546,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         else:
             descriptor_var = UserDefinedObjectVariable(descriptor)
 
-        none_var = CONSTANT_VARIABLE_NONE
+        none_var = ConstantVariable.create(None)
         return variables.UserMethodVariable(
             descriptor.__get__.__func__,  # type: ignore[union-attr]
             descriptor_var,
@@ -583,13 +583,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         non functional loss call: input, target, optional_output
         """
-        from . import CONSTANT_VARIABLE_NONE, ConstantVariable
+        from . import ConstantVariable
 
         def normalize_args(
-            weight: VariableTracker = CONSTANT_VARIABLE_NONE,
-            size_average: VariableTracker = CONSTANT_VARIABLE_NONE,
+            weight: VariableTracker = ConstantVariable.create(None),
+            size_average: VariableTracker = ConstantVariable.create(None),
             ignore_index: VariableTracker = ConstantVariable.create(-100),
-            reduce: VariableTracker = CONSTANT_VARIABLE_NONE,
+            reduce: VariableTracker = ConstantVariable.create(None),
             reduction: VariableTracker = ConstantVariable.create("mean"),
             label_smoothing: VariableTracker = ConstantVariable.create(0.0),
         ) -> tuple[VariableTracker, ...]:
@@ -800,7 +800,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif self.value is collections.defaultdict:
             if len(args) == 0:
-                default_factory = variables.CONSTANT_VARIABLE_NONE
+                default_factory = variables.ConstantVariable.create(None)
             elif len(args) == 1:
                 # In the case the argument is a builtin, then we can take the callable as the factory method.
                 # Otherwise, it must be a ConstantVariable holding None.
@@ -834,7 +834,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 tx, dict, *args, **kwargs
             )
         elif self.value is collections.deque:
-            maxlen = variables.CONSTANT_VARIABLE_NONE
+            maxlen = variables.ConstantVariable.create(None)
 
             def deque_signature(
                 iterable: Iterable[Any] | None = None, maxlen: int | None = None
@@ -897,7 +897,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             if len(args) > 1:
                 callback = args[1]
             else:
-                callback = variables.CONSTANT_VARIABLE_NONE
+                callback = variables.ConstantVariable.create(None)
             return variables.WeakRefVariable(args[0], callback)
         elif self.value is functools.partial:
             if not args:
@@ -1537,12 +1537,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         kwargs: dict[str, Any],
     ) -> VariableTracker:
         from .. import trace_rules
-        from . import CONSTANT_VARIABLE_NONE, UserMethodVariable
+        from . import UserMethodVariable
+        from .constant import ConstantVariable
 
         method = self._maybe_get_baseclass_method(name)
         if method is not None:
             if method is object.__init__:
-                return CONSTANT_VARIABLE_NONE
+                return ConstantVariable.create(None)
 
             if is_standard_setattr(method) or isinstance(self.value, threading.local):
                 return self.method_setattr_standard(tx, *args, **kwargs)
@@ -1763,7 +1764,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 raise_observed_exception(AttributeError, tx, args=[error_msg])
 
         tx.output.side_effects.store_attr(self, name_str, value)
-        return variables.CONSTANT_VARIABLE_NONE
+        return variables.ConstantVariable.create(None)
 
     def needs_slow_setattr(self) -> bool:
         return not is_standard_setattr(
@@ -2431,7 +2432,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
         except ObservedAttributeError:
             handle_observed_exception(tx)
-            return variables.CONSTANT_VARIABLE_FALSE
+            return variables.ConstantVariable.create(False)
 
     def is_python_hashable(self) -> bool:
         raise_on_overridden_hash(self.value, self)
@@ -2771,7 +2772,7 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             and inspect.ismethoddescriptor(method)
             and len(kwargs) == 0
         ):
-            return variables.CONSTANT_VARIABLE_NONE
+            return variables.ConstantVariable.create(None)
         elif (
             name == "__setattr__"
             and len(args) == 2
@@ -2944,7 +2945,7 @@ class RemovableHandleVariable(VariableTracker):
                 assert self.idx is not None
                 tx.output.side_effects.remove_hook(self.idx)
                 self.idx = self.REMOVED
-            return variables.CONSTANT_VARIABLE_NONE
+            return variables.ConstantVariable.create(None)
         return super().call_method(tx, name, args, kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
