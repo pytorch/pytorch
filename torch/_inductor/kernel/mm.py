@@ -694,7 +694,10 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         ):
             templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
         elif use_triton_tma_template(mat1, mat2, output_layout=layout, add_guards=True):
-            templates_to_use.append(persistent_tma_mm_template)
+            if torch.version.hip is None:
+                templates_to_use.append(persistent_tma_mm_template)
+            else:
+                templates_to_use.append(persistent_mm_template)
 
         templates_to_use.append(addmm_contiguous_subgraph_template)
 
