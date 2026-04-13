@@ -33,8 +33,8 @@ from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     FSDPInitMode,
     FSDPTest,
-    TransformerWithSharedParams,
     get_devtype,
+    TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -1906,7 +1906,9 @@ class TestFSDPOptimState(FSDPTest):
                         continue
                     self.assertTrue(isinstance(s, ShardedTensor))
                     if s._local_shards[0]:
-                        self.assertEqual(s._local_shards[0].tensor.device.type, device_type)
+                        self.assertEqual(
+                            s._local_shards[0].tensor.device.type, device_type
+                        )
 
         # Test full state_dict with rank0_only
         with FSDP.state_dict_type(
@@ -1932,7 +1934,9 @@ class TestFSDPOptimState(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_state_dict_with_none_tensor_state(self):
         def _run_test(use_orig_params, optimizer_has_tensor_state):
-            model = FSDP(TestDummyModel().to(device_type), use_orig_params=use_orig_params)
+            model = FSDP(
+                TestDummyModel().to(device_type), use_orig_params=use_orig_params
+            )
             optimizer_cls = (
                 torch.optim.Adam if optimizer_has_tensor_state else torch.optim.SGD
             )

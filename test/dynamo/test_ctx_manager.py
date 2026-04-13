@@ -27,6 +27,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
 
+
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
@@ -352,7 +353,6 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     def test_gpu_stream_compared_with_constant(self):
-
         def fn(x):
             x = torch.mul(x, 1)
             x = torch.add(x, 2)

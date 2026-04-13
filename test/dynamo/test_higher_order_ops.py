@@ -43,7 +43,6 @@ from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.triton_utils import (
-    requires_cuda_and_triton,
     requires_gpu_and_triton,
 )
 device_type = (
@@ -7293,7 +7292,9 @@ class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCaseWithNestedGraphBr
             self.assertEqual(eager_out, compiled_out)
 
 
-instantiate_device_type_tests(TestHigherOrderOpsOpInfo, globals(), only_for=("cuda", "xpu"), allow_xpu=True)
+instantiate_device_type_tests(
+    TestHigherOrderOpsOpInfo, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
