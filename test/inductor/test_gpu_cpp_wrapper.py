@@ -224,6 +224,30 @@ class TestGpuWrapper(InductorTestCase):
             res = comp(x, s)
             self.assertEqual(res, expected)
 
+    def test_many_args_fold_expression_nesting(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        num_params = 130
+        params = [torch.randn(64, device=self.device) for _ in range(num_params)]
+        grads = [torch.randn_like(p) for p in params]
+        expected = [p.clone() + (-0.1) * g for p, g in zip(params, grads)]
+
+        @torch.compile(
+            options={
+                "cpp_wrapper": True,
+                "combo_kernels": True,
+                "combo_kernel_max_num_args": 1000,
+            }
+        )
+        def fn(params, grads):
+            torch._foreach_add_(params, grads, alpha=-0.1)
+
+        fn(params, grads)
+
+        for p, e in zip(params, expected):
+            self.assertEqual(p, e)
+
 
 instantiate_parametrized_tests(TestGpuWrapper)
 
