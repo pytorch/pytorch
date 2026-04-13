@@ -509,6 +509,7 @@ MODULE_DEFAULTS: dict[str, ConfigType] = {
         "pre_grad_custom_pass": DEFAULT,  # Typing
         "custom_partitioner_fn": DEFAULT,  # Typing
         "inductor_choices_class": DEFAULT,  # Typing
+        "cudagraph_policy": DEFAULT,  # Typing
     },
     "torch._dynamo.config": {
         "traceable_tensor_subclasses": DEFAULT,  # Typing

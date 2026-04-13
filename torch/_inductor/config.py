@@ -16,6 +16,7 @@ from torch.utils._config_module import (
 
 if TYPE_CHECKING:
     from torch._inductor.choices import InductorChoices
+    from torch._inductor.cudagraph_utils import CUDAGraphPolicy
 
 inplace_padding = os.environ.get("TORCHINDUCTOR_INPLACE_PADDING", "1") == "1"
 can_inplace_pad_graph_input = False  # ease testing
@@ -554,6 +555,15 @@ graph_partition: bool = (
     os.environ.get("TORCHINDUCTOR_GRAPH_PARTITION", "1" if not is_fbcode() else "0")
     == "1"
 )
+
+# Pluggable CUDAGraph wrapping policy.  When set to a ``CUDAGraphPolicy``
+# instance, ``post_compile`` delegates cudagraph wrapping to the policy
+# instead of the built-in ``cudagraphify`` pipeline.  This allows custom
+# cudagraph implementations, selective inner-vs-outer wrapping for
+# regional compilation, and shared memory pool management.
+#
+# See ``torch._inductor.cudagraph_utils.CUDAGraphPolicy`` for the base class.
+cudagraph_policy: "CUDAGraphPolicy | None" = None
 
 # register ops upon which inductor should partition the graph. name format should be
 # "namespace::kernel_name" (e.g., aten::mm) for op overload packet, or
@@ -2530,6 +2540,9 @@ _save_config_ignore: list[str] = [
     "post_grad_custom_post_pass",
     "_fuse_ddp_communication_passes",
     "_pre_fusion_custom_pass",
+    # CUDAGraphPolicy objects are not picklable and only affect
+    # post_compile wrapping, not compiled code itself.
+    "cudagraph_policy",
 ]
 
 _cache_config_ignore_prefix: list[str] = [
@@ -2550,6 +2563,8 @@ _cache_config_ignore_prefix: list[str] = [
     "pre_grad_custom_pass",
     "_fuse_ddp_communication_passes",
     "_pre_fusion_custom_pass",
+    # CUDAGraphPolicy only affects post_compile, not compiled output
+    "cudagraph_policy",
     # tests assume that changes here don't invalidate cache
     "always_complex_memory_overlap_TESTING_ONLY",
     # timing affects cache structure, not cache content

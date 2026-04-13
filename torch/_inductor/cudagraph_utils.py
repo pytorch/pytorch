@@ -4,7 +4,7 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, TypeVar
 
 import torch
 from torch._dynamo.utils import counters, get_metrics_context
@@ -18,6 +18,10 @@ from .utils import is_using_cudagraph_partition
 if TYPE_CHECKING:
     from collections.abc import Sequence, Set as AbstractSet
 
+    from torch._inductor.output_code import OutputCode
+
+_OC = TypeVar("_OC", bound="OutputCode")
+
 
 cudagraphs_log = torch._logging.getArtifactLogger(__name__, "cudagraphs")
 static_inputs_log = torch._logging.getArtifactLogger(
@@ -27,6 +31,93 @@ static_inputs_log = torch._logging.getArtifactLogger(
 
 OutputType = list[int | torch.Tensor | None]
 ModelType = Callable[[list[InputType]], OutputType]
+
+
+class CUDAGraphPolicy:
+    """Pluggable policy controlling CUDA graph wrapping in Inductor's post_compile.
+
+    Override methods to customize:
+      - HOW compiled functions are cudagraph-wrapped (cudagraphify)
+      - WHETHER inner CompiledFxGraphs should be wrapped (should_wrap)
+      - OUTER wrapping of compound outputs like RegionalOutputCode (wrap_output)
+
+    Set via ``torch._inductor.config.cudagraph_policy``.  When ``None``
+    (the default), the existing built-in behaviour is used unchanged.
+
+    Example usage::
+
+        class MyCUDAGraphPolicy(CUDAGraphPolicy):
+            def cudagraphify(self, model, example_inputs, static_input_idxs, **kwargs):
+                return my_custom_wrapper(model, example_inputs, static_input_idxs)
+
+
+        with torch._inductor.config.patch("cudagraph_policy", MyCUDAGraphPolicy()):
+            compiled_fn = deserialize_artifacts(...)
+    """
+
+    def cudagraphify(
+        self,
+        model: Callable[..., Any],
+        example_inputs: Sequence[InputType],
+        static_input_idxs: Sequence[int],
+        *,
+        device_index: int,
+        is_backward: bool,
+        is_inference: bool,
+        **kwargs: Any,
+    ) -> Callable[..., Any]:
+        """Wrap a single compiled callable with CUDA graph capture/replay.
+
+        Called by ``cudagraph_post_compile`` for each ``CompiledFxGraph``.
+        The default delegates to ``compile_fx.cudagraphify`` (cudagraph_trees).
+
+        ``example_inputs`` are the example inputs at post_compile time.
+        The default implementation does not forward them because
+        ``compile_fx.cudagraphify`` defers graph recording to the first
+        real call via an inner closure.  Subclasses that need the
+        example inputs for warmup or static-input detection may use them.
+
+        When ``config.graph_partition=True``, setting a CUDAGraphPolicy
+        bypasses ``cudagraph_partition_post_compile`` (which wraps each
+        partition individually) and routes through ``cudagraph_post_compile``
+        instead, so this method wraps the *entire* callable, not individual
+        partitions.  Subclasses that need per-partition control should
+        handle partitioning internally.
+        """
+        from torch._inductor.compile_fx import cudagraphify
+
+        return cudagraphify(
+            model,
+            static_input_idxs,
+            device_index=device_index,
+            is_backward=is_backward,
+            is_inference=is_inference,
+            **kwargs,
+        )
+
+    def should_wrap(self, compiled_graph: OutputCode) -> bool:
+        """Whether to apply cudagraph wrapping to this CompiledFxGraph.
+
+        Called for each inner ``CompiledFxGraph`` during ``post_compile``.
+        Return ``False`` to skip wrapping (e.g. when wrapping at the outer
+        level via ``wrap_output`` instead).
+
+        Default: ``True`` (wrap everything, same as current behaviour).
+        """
+        return True
+
+    def wrap_output(self, output_code: _OC) -> _OC:
+        """Optional outer-level wrapping after inner post_compile completes.
+
+        Called by ``_compile_fx_inner``, ``BundledOutputCodeLoadable.post_compile``,
+        and ``FxGraphCacheLoadable.post_compile`` on the ``OutputCode`` returned
+        from ``post_compile``.  Subclasses that only want to wrap specific
+        output types should check ``isinstance`` and return the input
+        unchanged for types they don't handle.
+
+        Default: identity (no outer wrapping).
+        """
+        return output_code
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

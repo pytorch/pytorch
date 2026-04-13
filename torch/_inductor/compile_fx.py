@@ -1145,6 +1145,10 @@ def _compile_fx_inner(
             )
         compiled_graph.post_compile(example_inputs, constants, graph_kwargs)
 
+        policy = config.cudagraph_policy
+        if policy is not None:
+            compiled_graph = policy.wrap_output(compiled_graph)
+
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
     # This message is for printing overview information of inductor mm counts, shapes,etc after lowering
