@@ -43,22 +43,21 @@ def log_hook(fn: Callable, level=logging.INFO) -> Callable:
     """
     Logs callable output.
 
-    This is useful for logging output of passes. Note inplace_wrapper replaces
+    This is useful for logging output of passes. Note ``inplace_wrapper`` replaces
     the pass output with the modified object. If we want to log the original
-    output, apply this wrapper before inplace_wrapper.
+    output, apply this wrapper before ``inplace_wrapper``.
+
+    Example::
+
+        def my_pass(d: Dict) -> bool:
+            changed = False
+            if "foo" in d:
+                d["foo"] = "bar"
+                changed = True
+            return changed
 
 
-    ```
-    def my_pass(d: Dict) -> bool:
-        changed = False
-        if "foo" in d:
-            d["foo"] = "bar"
-            changed = True
-        return changed
-
-
-    pm = PassManager(passes=[inplace_wrapper(log_hook(my_pass))])
-    ```
+        pm = PassManager(passes=[inplace_wrapper(log_hook(my_pass))])
 
     Args:
         fn (Callable[Type1, Type2])
@@ -147,25 +146,24 @@ def this_before_that_pass_constraint(this: Callable, that: Callable):
 
 def these_before_those_pass_constraint(these: Callable, those: Callable):
     """
-    Defines a partial order ('depends on' function) where `these` must occur
-    before `those`. Where the inputs are 'unwrapped' before comparison.
+    Defines a partial order ('depends on' function) where ``these`` must occur
+    before ``those``. Where the inputs are 'unwrapped' before comparison.
 
-    For example, the following pass list and constraint list would be invalid.
-    ```
-    passes = [
-        loop_pass(pass_b, 3),
-        loop_pass(pass_a, 5),
-    ]
+    For example, the following pass list and constraint list would be invalid::
 
-    constraints = [these_before_those_pass_constraint(pass_a, pass_b)]
-    ```
+        passes = [
+            loop_pass(pass_b, 3),
+            loop_pass(pass_a, 5),
+        ]
+
+        constraints = [these_before_those_pass_constraint(pass_a, pass_b)]
 
     Args:
         these (Callable): pass which should occur first
         those (Callable): pass which should occur later
 
     Returns:
-        depends_on (Callable[[Object, Object], bool]
+        depends_on (Callable[[Object, Object], bool])
     """
 
     def depends_on(a: Callable, b: Callable):

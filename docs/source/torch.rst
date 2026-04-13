@@ -257,6 +257,14 @@ Serialization
     save
     load
 
+.. currentmodule:: torch.serialization
+
+.. autofunction:: check_module_version_greater_or_equal
+
+.. autofunction:: default_restore_location
+
+.. currentmodule:: torch
+
 Parallelism
 ----------------------------------
 .. autosummary::
@@ -810,6 +818,9 @@ Operator Tags
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes
 .. py:module:: torch.utils.model_dump
+
+.. currentmodule:: torch.utils.model_dump
+
 .. py:module:: torch.utils.viz
 .. py:module:: torch.quasirandom
 .. py:module:: torch.return_types
