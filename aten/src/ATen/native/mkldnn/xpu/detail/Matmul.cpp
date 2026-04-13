@@ -31,6 +31,39 @@ struct FpMatmulCachedPrimitive {
 using FpMatmulCacheValue = std::shared_ptr<FpMatmulCachedPrimitive>;
 using FpMatmulLruCache = lru_cache<dnnl::memory::dims, FpMatmulCacheValue>;
 
+// Single bundle for cache key and primitive build so new fields require one
+// initializer site and both code paths see the same data at compile time.
+struct FpMatmulPrimitiveCacheParams {
+  int device_id;
+  int64_t rank;
+  int64_t m;
+  int64_t n;
+  int64_t k;
+  int64_t mb;
+  dnnl::memory::dims m1_dims;
+  dnnl::memory::dims m2_dims;
+  dnnl::memory::dims dst_dims;
+  dnnl::memory::dims m1_strides;
+  dnnl::memory::dims m2_strides;
+  dnnl::memory::dims dst_strides;
+  dnnl::memory::data_type m1_usr_dt;
+  dnnl::memory::data_type m2_usr_dt;
+  dnnl::memory::data_type dst_usr_dt;
+  dnnl::memory::data_type m1_dt;
+  dnnl::memory::data_type m2_dt;
+  dnnl::memory::data_type dst_dt;
+  bool m2_trans;
+  bool with_bias;
+  dnnl::memory::dims bias_dims;
+  dnnl::memory::data_type bias_dt;
+  dnnl::memory::dims bias_strides;
+  bool deterministic;
+  bool allow_tf32_oneapi;
+  Attr& attr;
+  dnnl::engine& engine;
+  const at::Tensor& dst;
+};
+
 FpMatmulLruCache& get_fpmatmul_primitive_cache(int device_id) {
   static thread_local std::unordered_map<int, FpMatmulLruCache> caches;
   auto [it, _] = caches.try_emplace(device_id, FpMatmulLruCache());
@@ -42,61 +75,98 @@ FpMatmulLruCache& get_fpmatmul_primitive_cache(int device_id) {
 }
 
 dnnl::memory::dims build_fpmatmul_primitive_cache_key(
-    int device_id,
-    int64_t rank,
-    int64_t m,
-    int64_t n,
-    int64_t k,
-    int64_t mb,
-    const dnnl::memory::dims& m1_strides,
-    const dnnl::memory::dims& m2_strides,
-    const dnnl::memory::dims& dst_strides,
-    dnnl::memory::data_type m1_usr_dt,
-    dnnl::memory::data_type m2_usr_dt,
-    dnnl::memory::data_type dst_usr_dt,
-    dnnl::memory::data_type m1_dt,
-    dnnl::memory::data_type m2_dt,
-    dnnl::memory::data_type dst_dt,
-    bool m2_trans,
-    bool with_bias,
-    const dnnl::memory::dims& bias_dims,
-    dnnl::memory::data_type bias_dt,
-    const dnnl::memory::dims& bias_strides,
-    bool deterministic,
-    bool allow_tf32_oneapi,
-    const Attr& attr) {
+    const FpMatmulPrimitiveCacheParams& p) {
   dnnl::memory::dims key;
   auto append_dims = [&](const dnnl::memory::dims& d) {
     key.insert(key.end(), d.begin(), d.end());
   };
 
   key.push_back(kFpMatmulPrimitiveCacheKeyVersion);
-  key.push_back(static_cast<dim_t>(device_id));
-  key.push_back(rank);
-  key.push_back(m);
-  key.push_back(n);
-  key.push_back(k);
-  key.push_back(mb);
-  append_dims(m1_strides);
-  append_dims(m2_strides);
-  append_dims(dst_strides);
-  key.push_back(static_cast<dim_t>(static_cast<int>(m1_usr_dt)));
-  key.push_back(static_cast<dim_t>(static_cast<int>(m2_usr_dt)));
-  key.push_back(static_cast<dim_t>(static_cast<int>(dst_usr_dt)));
-  key.push_back(static_cast<dim_t>(static_cast<int>(m1_dt)));
-  key.push_back(static_cast<dim_t>(static_cast<int>(m2_dt)));
-  key.push_back(static_cast<dim_t>(static_cast<int>(dst_dt)));
-  key.push_back(m2_trans ? 1 : 0);
-  key.push_back(with_bias ? 1 : 0);
-  if (with_bias) {
-    append_dims(bias_dims);
-    key.push_back(static_cast<dim_t>(static_cast<int>(bias_dt)));
-    append_dims(bias_strides);
+  key.push_back(static_cast<dim_t>(p.device_id));
+  key.push_back(p.rank);
+  key.push_back(p.m);
+  key.push_back(p.n);
+  key.push_back(p.k);
+  key.push_back(p.mb);
+  append_dims(p.m1_strides);
+  append_dims(p.m2_strides);
+  append_dims(p.dst_strides);
+  key.push_back(static_cast<dim_t>(static_cast<int>(p.m1_usr_dt)));
+  key.push_back(static_cast<dim_t>(static_cast<int>(p.m2_usr_dt)));
+  key.push_back(static_cast<dim_t>(static_cast<int>(p.dst_usr_dt)));
+  key.push_back(static_cast<dim_t>(static_cast<int>(p.m1_dt)));
+  key.push_back(static_cast<dim_t>(static_cast<int>(p.m2_dt)));
+  key.push_back(static_cast<dim_t>(static_cast<int>(p.dst_dt)));
+  key.push_back(p.m2_trans ? 1 : 0);
+  key.push_back(p.with_bias ? 1 : 0);
+  if (p.with_bias) {
+    append_dims(p.bias_dims);
+    key.push_back(static_cast<dim_t>(static_cast<int>(p.bias_dt)));
+    append_dims(p.bias_strides);
   }
-  key.push_back(deterministic ? 1 : 0);
-  key.push_back(allow_tf32_oneapi ? 1 : 0);
-  append_dims(attr.matmul_primitive_cache_key_extra());
+  key.push_back(p.deterministic ? 1 : 0);
+  key.push_back(p.allow_tf32_oneapi ? 1 : 0);
+  append_dims(p.attr.matmul_primitive_cache_key_extra());
   return key;
+}
+
+FpMatmulCacheValue make_fpmatmul_cached_primitive(
+    FpMatmulPrimitiveCacheParams& p) {
+  dnnl::post_ops po = p.attr.extract_post_ops(p.dst);
+
+  // STEP1: create memory desc
+  dnnl::memory::desc m1_md(p.m1_dims, p.m1_dt, p.m1_strides);
+  dnnl::memory::desc m2_md(p.m2_dims, p.m2_dt, p.m2_strides);
+  dnnl::memory::desc dst_md(p.dst_dims, p.dst_dt, p.dst_strides);
+
+  // STEP2: creat attribute
+  dnnl::primitive_attr pattr;
+  pattr.set_post_ops(po);
+
+#if ONEDNN_SUPPORT_DETERMINISTIC
+  if (p.deterministic) {
+    pattr.set_deterministic(true);
+  }
+#endif
+
+  // scratchpad
+  pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
+
+  if (p.m1_dt == dnnl::memory::data_type::f32) {
+    if (p.allow_tf32_oneapi) {
+      pattr.set_fpmath_mode(dnnl::fpmath_mode::tf32);
+    } else {
+      pattr.set_fpmath_mode(dnnl::fpmath_mode::strict);
+    }
+  }
+
+  // STEP3: create primitive
+  dnnl::matmul::primitive_desc matmul_pd =
+      p.with_bias ? dnnl::matmul::primitive_desc(
+                        p.engine,
+                        m1_md,
+                        m2_md,
+                        dnnl::memory::desc(
+                            p.bias_dims, p.bias_dt, p.bias_strides),
+                        dst_md,
+                        pattr)
+                  : dnnl::matmul::primitive_desc(
+                        p.engine, m1_md, m2_md, dst_md, pattr);
+
+  return std::make_shared<FpMatmulCachedPrimitive>(std::move(matmul_pd));
+}
+
+FpMatmulCacheValue lookup_or_build_fpmatmul_cached_primitive(
+    FpMatmulLruCache& primitive_cache,
+    FpMatmulPrimitiveCacheParams& params) {
+  dnnl::memory::dims cache_key = build_fpmatmul_primitive_cache_key(params);
+  auto cache_it = primitive_cache.find(cache_key);
+  if (cache_it != primitive_cache.end()) {
+    return cache_it->second;
+  }
+  FpMatmulCacheValue entry = make_fpmatmul_cached_primitive(params);
+  primitive_cache.insert({std::move(cache_key), entry});
+  return entry;
 }
 
 } // namespace
@@ -266,14 +336,16 @@ sycl::event matmul(
       m1_dt == dnnl::memory::data_type::f32 &&
       at::globalContext().allowTF32OneDNN();
 
-  const int device_id = c10::xpu::current_device();
-  dnnl::memory::dims cache_key = build_fpmatmul_primitive_cache_key(
-      device_id,
+  FpMatmulPrimitiveCacheParams cache_params{
+      c10::xpu::current_device(),
       dims,
       m,
       n,
       k,
       mb,
+      m1_dims,
+      m2_dims,
+      dst_dims,
       m1_strides,
       m2_strides,
       dst_strides,
@@ -290,58 +362,15 @@ sycl::event matmul(
       bias_strides,
       deterministic,
       allow_tf32_oneapi,
-      attr);
+      attr,
+      engine,
+      dst,
+  };
 
-  auto& primitive_cache = get_fpmatmul_primitive_cache(device_id);
-  auto cache_it = primitive_cache.find(cache_key);
-  FpMatmulCacheValue entry;
-  if (cache_it != primitive_cache.end()) {
-    entry = cache_it->second;
-  } else {
-    dnnl::post_ops po = attr.extract_post_ops(dst);
-
-    // STEP1: create memory desc
-    dnnl::memory::desc m1_md(m1_dims, m1_dt, m1_strides);
-    dnnl::memory::desc m2_md(m2_dims, m2_dt, m2_strides);
-    dnnl::memory::desc dst_md(dst_dims, dst_dt, dst_strides);
-
-    // STEP2: creat attribute
-    dnnl::primitive_attr pattr;
-    pattr.set_post_ops(po);
-
-#if ONEDNN_SUPPORT_DETERMINISTIC
-    if (deterministic) {
-      pattr.set_deterministic(true);
-    }
-#endif
-
-    // scratchpad
-    pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
-
-    if (m1_dt == dnnl::memory::data_type::f32) {
-      if (allow_tf32_oneapi) {
-        pattr.set_fpmath_mode(dnnl::fpmath_mode::tf32);
-      } else {
-        pattr.set_fpmath_mode(dnnl::fpmath_mode::strict);
-      }
-    }
-
-    // STEP3: create primitive
-    dnnl::matmul::primitive_desc matmul_pd =
-        with_bias
-        ? dnnl::matmul::primitive_desc(
-              engine,
-              m1_md,
-              m2_md,
-              dnnl::memory::desc(bias_dims, bias_dt, bias_strides),
-              dst_md,
-              pattr)
-        : dnnl::matmul::primitive_desc(
-              engine, m1_md, m2_md, dst_md, pattr);
-
-    entry = std::make_shared<FpMatmulCachedPrimitive>(std::move(matmul_pd));
-    primitive_cache.insert({cache_key, entry});
-  }
+  auto& primitive_cache =
+      get_fpmatmul_primitive_cache(cache_params.device_id);
+  FpMatmulCacheValue entry = lookup_or_build_fpmatmul_cached_primitive(
+      primitive_cache, cache_params);
 
   // STEP4: create memory
   dnnl::memory::desc m1_usr_md(m1_dims, m1_usr_dt, m1_strides);
