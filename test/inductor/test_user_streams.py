@@ -1029,6 +1029,31 @@ class TestUserStreamCompile(InductorTestCase):
             f"Expected 1 kernel on s2, got: {stream_kernels}",
         )
 
+    def test_stream_record_wait_event_not_dropped(self):
+        """stream.record_event() and stream.wait_event() must survive compilation."""
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x):
+            s1 = torch.cuda.Stream()
+            s2 = torch.cuda.Stream()
+            with torch.cuda.stream(s1):
+                a = x + 1
+            e = s1.record_event()
+            s2.wait_event(e)
+            with torch.cuda.stream(s2):
+                b = a * 2
+            s2.synchronize()
+            return b
+
+        x = torch.randn(1024, device="cuda")
+        expected = fn(x)
+        compiled_fn = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled_fn, x)
+        self.assertEqual(result, expected)
+        self.assertIn("record_event", code)
+        self.assertIn("wait_event", code)
+        self.assertIn("synchronize_stream", code)
+
     def test_stream_synchronize_not_dropped(self):
         """stream.synchronize() must survive compilation and appear in wrapper code."""
         from torch._inductor.utils import run_and_get_code

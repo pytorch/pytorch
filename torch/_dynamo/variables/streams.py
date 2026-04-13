@@ -391,9 +391,24 @@ class StreamVariable(StreamContextVariable):
         from ..utils import cmp_name_to_op_mapping, proxy_args_kwargs
         from .builder import wrap_fx_proxy_cls
 
-        if name in ("wait_stream", "wait_event"):
+        if name == "wait_event":
+            event_arg = args[0]
+            assert isinstance(event_arg, EventVariable)
             tx.output.create_proxy(
-                "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+                "call_function",
+                torch.ops.streams.wait_event,
+                (event_arg.user_object_index, self.user_object_index),
+                {},
+            )
+            return CONSTANT_VARIABLE_NONE
+        elif name == "wait_stream":
+            other_stream = args[0]
+            assert isinstance(other_stream, StreamVariable)
+            tx.output.create_proxy(
+                "call_function",
+                torch.ops.streams.wait_stream,
+                (self.user_object_index, other_stream.user_object_index),
+                {},
             )
             return CONSTANT_VARIABLE_NONE
         elif name == "synchronize":
@@ -413,12 +428,34 @@ class StreamVariable(StreamContextVariable):
                 ),
             )
         elif name == "record_event":
+            from .builder import wrap_fx_proxy
+
             tx.output.check_event_record_after_input_mutation(id(self.value))
-            return wrap_fx_proxy_cls(
-                target_cls=EventVariable,
+            if args and isinstance(args[0], EventVariable):
+                event_var = args[0]
+                event = event_var.value
+                event_index = event_var.user_object_index
+            else:
+                event = self.value.record_event()
+                event_index = register_graph_created_object(
+                    event,
+                    EventVariable.make_construct_in_graph_event_fn(
+                        TupleVariable([]), ConstDictVariable({})
+                    ),
+                )
+            tx.output.create_proxy(
+                "call_function",
+                torch.ops.streams.record_event,
+                (event_index, self.user_object_index),
+                {},
+            )
+            return wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
-                    "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+                    "call_function",
+                    get_external_object_by_index,
+                    (event_index,),
+                    {},
                 ),
             )
         elif name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
