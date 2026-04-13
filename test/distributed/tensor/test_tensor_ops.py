@@ -1764,5 +1764,122 @@ DistNewShardingOpsTestWithLocalTensor = create_local_tensor_test_class(
 )
 
 
+class DistTensorTagOnOpsTest(DTensorTestBase):
+    """Tests for ops added in the 'tag on ops' commit, validating that
+    their sharding rules produce correct results."""
+
+    @property
+    def world_size(self):
+        return 4
+
+    @with_comms
+    def test_bernoulli_tensor_prob(self):
+        mesh = self.build_device_mesh()
+        t = torch.rand(8, 4, device=self.device_type)
+        p = torch.full((8, 4), 0.5, device=self.device_type)
+        dt = distribute_tensor(t, mesh, [Shard(0)])
+        dp = distribute_tensor(p, mesh, [Shard(0)])
+
+        # bernoulli_.Tensor: in-place with tensor probability
+        result = dt.clone().bernoulli_(dp)
+        self.assertEqual(result.placements, (Shard(0),))
+        local = result.full_tensor()
+        self.assertTrue(((local == 0) | (local == 1)).all())
+
+        # bernoulli.Tensor: out-of-place with tensor probability
+        result = torch.ops.aten.bernoulli.Tensor(dt, dp)
+        self.assertEqual(result.placements, (Shard(0),))
+        local = result.full_tensor()
+        self.assertTrue(((local == 0) | (local == 1)).all())
+
+    @with_comms
+    def test_bernoulli_p_float(self):
+        mesh = self.build_device_mesh()
+        t = torch.rand(8, 4, device=self.device_type)
+        dt = distribute_tensor(t, mesh, [Shard(0)])
+        result = torch.bernoulli(dt, p=0.5)
+        self.assertEqual(result.placements, (Shard(0),))
+        local = result.full_tensor()
+        self.assertTrue(((local == 0) | (local == 1)).all())
+
+    @with_comms
+    def test_randint_like_generator(self):
+        mesh = self.build_device_mesh()
+        t = torch.zeros(8, 4, device=self.device_type)
+        dt = distribute_tensor(t, mesh, [Shard(0)])
+
+        # randint_like.generator variant
+        result = torch.ops.aten.randint_like.generator(dt, 10, generator=None)
+        self.assertEqual(result.placements, (Shard(0),))
+        local = result.full_tensor()
+        self.assertTrue((local >= 0).all() and (local < 10).all())
+
+        # randint_like.low_generator_dtype variant
+        result = torch.ops.aten.randint_like.low_generator_dtype(
+            dt, 2, 10, generator=None
+        )
+        self.assertEqual(result.placements, (Shard(0),))
+        local = result.full_tensor()
+        self.assertTrue((local >= 2).all() and (local < 10).all())
+
+    @with_comms
+    def test_to_other(self):
+        mesh = self.build_device_mesh()
+        t = torch.randn(8, 4, device=self.device_type)
+        other = torch.zeros(8, 4, dtype=torch.float16, device=self.device_type)
+        dt = distribute_tensor(t, mesh, [Shard(0)])
+        dother = distribute_tensor(other, mesh, [Shard(0)])
+
+        result = torch.ops.aten.to.other(dt, dother)
+        self.assertEqual(result.dtype, torch.float16)
+        self.assertEqual(result.placements, (Shard(0),))
+        expected = t.to(torch.float16)
+        self.assertEqual(result.full_tensor(), expected)
+
+    @with_comms
+    def test_fill_tensor(self):
+        mesh = self.build_device_mesh()
+        t = torch.randn(8, 4, device=self.device_type)
+        dt = distribute_tensor(t.clone(), mesh, [Shard(0)])
+
+        val = torch.tensor(3.14, device=self.device_type)
+        dval = distribute_tensor(val, mesh, [Replicate()])
+        result = torch.ops.aten.fill_.Tensor(dt, dval)
+        expected = torch.full((8, 4), 3.14, device=self.device_type)
+        self.assertEqual(result.full_tensor(), expected)
+
+    @with_comms
+    def test_masked_fill_tensor(self):
+        mesh = self.build_device_mesh()
+        t = torch.randn(8, 4, device=self.device_type)
+        mask = torch.tensor([[True, False, True, False]] * 8, device=self.device_type)
+        val = torch.tensor(99.0, device=self.device_type)
+        dt = distribute_tensor(t.clone(), mesh, [Shard(0)])
+        dmask = distribute_tensor(mask, mesh, [Shard(0)])
+        dval = distribute_tensor(val, mesh, [Replicate()])
+
+        # masked_fill.Tensor (out-of-place)
+        result = torch.ops.aten.masked_fill.Tensor(dt, dmask, dval)
+        expected = torch.where(mask, 99.0, t)
+        self.assertEqual(result.full_tensor(), expected)
+
+        # masked_fill_.Tensor (in-place)
+        dt2 = distribute_tensor(t.clone(), mesh, [Shard(0)])
+        torch.ops.aten.masked_fill_.Tensor(dt2, dmask, dval)
+        self.assertEqual(dt2.full_tensor(), expected)
+
+    @with_comms
+    def test_copy_tensor(self):
+        mesh = self.build_device_mesh()
+        src = torch.randn(8, 4, device=self.device_type)
+        dst = torch.zeros(8, 4, device=self.device_type)
+        dsrc = distribute_tensor(src, mesh, [Shard(0)])
+        ddst = distribute_tensor(dst, mesh, [Shard(0)])
+
+        # copy_.Tensor is an alias for copy_.default; verify it works
+        torch.ops.aten.copy_.Tensor(ddst, dsrc)
+        self.assertEqual(ddst.full_tensor(), src)
+
+
 if __name__ == "__main__":
     run_tests()

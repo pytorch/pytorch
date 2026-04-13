@@ -595,7 +595,13 @@ def _get_norm_reduction_op(norm_type: int | float | str) -> ReductionOpType:
 
 
 @register_op_strategy(
-    [aten.linalg_vector_norm.default, aten.norm.Scalar],
+    [
+        aten.linalg_vector_norm.default,
+        aten.norm.Scalar,
+        aten.norm.ScalarOpt_dim,
+        aten.norm.ScalarOpt_dim_dtype,
+        aten.norm.ScalarOpt_dtype,
+    ],
     schema_info=RuntimeSchemaInfo(1),
 )
 def vector_norm_strategy(op_schema: OpSchema) -> OpStrategy:
@@ -1657,16 +1663,23 @@ def linalg_tensorsolve_strategy(
 @register_single_dim_strategy(
     [
         aten.upsample_nearest1d.default,
+        aten.upsample_nearest1d.vec,
         aten.upsample_nearest2d.default,
+        aten.upsample_nearest2d.vec,
         aten.upsample_nearest3d.default,
+        aten.upsample_nearest3d.vec,
         aten._upsample_nearest_exact1d.default,
         aten._upsample_nearest_exact2d.default,
         aten._upsample_nearest_exact3d.default,
         aten._upsample_bilinear2d_aa.default,
         aten.upsample_bicubic2d.default,
+        aten.upsample_bicubic2d.vec,
         aten.upsample_bilinear2d.default,
+        aten.upsample_bilinear2d.vec,
         aten.upsample_linear1d.default,
+        aten.upsample_linear1d.vec,
         aten.upsample_trilinear3d.default,
+        aten.upsample_trilinear3d.vec,
     ],
     schema_info=RuntimeSchemaInfo(1),
 )
