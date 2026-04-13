@@ -8641,7 +8641,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         ]
 
         torch.compile(foo, backend="aot_eager_decomp_partition")
-        with torch.get_device_module(device_type).amp.autocast(enabled=True):
+        with torch.amp.autocast(device_type=device_type, enabled=True):
             ref = foo(*args)[0]
             res = foo(*args)[0]
             self.assertEqual(ref.dtype, res.dtype)
