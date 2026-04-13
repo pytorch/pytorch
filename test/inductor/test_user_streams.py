@@ -938,6 +938,97 @@ class TestUserStreamCompile(InductorTestCase):
         # All pointwise ops on same stream should fuse into 1 kernel
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
+    def test_no_fusion_simple_dependency_across_streams(self):
+        """Regression: a single pointwise consumed across a stream boundary must not fuse."""
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x):
+            s1 = torch.cuda.Stream()
+            s2 = torch.cuda.Stream()
+
+            with torch.cuda.stream(s1):
+                a = x + 1
+            e = s1.record_event()
+            s2.wait_event(e)
+            with torch.cuda.stream(s2):
+                b = a * 2
+            s1.synchronize()
+            s2.synchronize()
+            return b
+
+        x = torch.randn(1024, device="cuda")
+
+        expected = fn(x)
+        compiled_fn = torch.compile(fn)
+        torch._inductor.metrics.reset()
+        result, (code,) = run_and_get_code(compiled_fn, x)
+
+        self.assertEqual(result, expected)
+
+        # Must be 2 separate kernels on 2 streams, not fused into 1
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+    def test_cross_stream_stride_copy(self):
+        """A contiguous copy forced by a non-contiguous slice across streams
+        must run on the consumer's stream, not the producer's."""
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x):
+            s1 = torch.cuda.Stream()
+            s2 = torch.cuda.Stream()
+
+            with torch.cuda.stream(s1):
+                a = x + 1
+                b = a[:, ::2]  # non-contiguous slice
+            e = s1.record_event()
+            s2.wait_event(e)
+            with torch.cuda.stream(s2):
+                c = b.contiguous()
+                d = c + 1
+            s2.synchronize()
+            return d
+
+        x = torch.randn(64, 64, device="cuda")
+
+        expected = fn(x)
+        compiled_fn = torch.compile(fn)
+        torch._inductor.metrics.reset()
+        result, (code,) = run_and_get_code(compiled_fn, x)
+
+        self.assertEqual(result, expected)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+        # Verify: s1 gets the pointwise (x+1), s2 gets the fused copy + add.
+        # The contiguous copy is fused into the s2 triton kernel (which reads
+        # from the s1 output buffer with strided indexing).  If the copy were
+        # incorrectly placed on s1, we'd see 2 kernels on s1 instead of 1.
+        wrapper = _extract_wrapper_body(code)
+        lines = wrapper.split("\n")
+        current_stream = None
+        stream_kernels: dict[str | None, list[str]] = {}
+        for line in lines:
+            stripped = line.strip()
+            if "with torch.cuda.stream(" in stripped:
+                if "stream1" in stripped:
+                    current_stream = "s1"
+                elif "stream2" in stripped:
+                    current_stream = "s2"
+                elif "default_stream" in stripped:
+                    current_stream = "default"
+            elif ".run(" in stripped:
+                stream_kernels.setdefault(current_stream, []).append(stripped)
+
+        self.assertEqual(
+            len(stream_kernels.get("s1", [])),
+            1,
+            f"Expected 1 kernel on s1, got: {stream_kernels}",
+        )
+        self.assertEqual(
+            len(stream_kernels.get("s2", [])),
+            1,
+            f"Expected 1 kernel on s2, got: {stream_kernels}",
+        )
+
     def test_codegen_structure_single_stream(self):
         """Verify wrapper structure for pointwise ops with one side stream."""
         from torch._inductor.utils import run_and_get_code
@@ -990,9 +1081,12 @@ with torch.cuda._DeviceGuard(0):
     with torch.cuda.stream(stream1):
         arg0_1 = copy_misaligned(arg0_1)
         buf0 = empty_strided_cuda((1024, ), (1, ), torch.float32)
-        buf1 = buf0; del buf0
         raw_stream = get_raw_stream(0)
-        triton_kernel.run(buf1, arg0_1, 1024, stream=raw_stream)
+        triton_kernel.run(arg0_1, buf0, 1024, stream=raw_stream)
+    with torch.cuda.stream(default_stream):
+        buf1 = buf0; del buf0
+        stream0 = get_raw_stream(0)
+        triton_kernel.run(buf1, arg0_1, 1024, stream=stream0)
     return (buf1, )""",
         )
 
