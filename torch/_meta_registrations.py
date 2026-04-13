@@ -2938,12 +2938,6 @@ if torch._C._has_mkldnn:
         "quantized", "IMPL", "Meta"
     )
 
-    @register_meta(aten.quantize_per_tensor)
-    def meta_quantize_per_tensor(
-        input: torch.Tensor, scale: float, zero_point: int, dtype: torch.dtype
-    ) -> torch.Tensor:
-        return torch.empty_like(input)
-
     @register_meta(torch.ops.quantized.max_pool2d)
     def meta_quantized_max_pool2d(
         input,
@@ -3002,6 +2996,13 @@ def check_dim_size(tensor, dim, dim_size, size):
         lambda: f"Expected a tensor of dimension {dim} and tensor.size[{dim_size}] == {size}, "
         + f"but got : dimension {tensor.dim()} and tensor.size[{dim_size}] = {tensor.shape[dim_size]}",
     )
+
+
+@register_meta(aten.quantize_per_tensor)
+def meta_quantize_per_tensor(
+    input: torch.Tensor, scale: float, zero_point: int, dtype: torch.dtype
+) -> torch.Tensor:
+    return torch.empty_like(input)
 
 
 @register_meta(aten.avg_pool2d.default)
