@@ -4160,7 +4160,8 @@ class TestProfilerEventsParity(TestCase):
                 trace = json.load(f)
 
         json_records = {}
-        unexpected_trace_key_failures = []
+        # Track unexpected (event_name, cat, key) combos, deduplicated
+        unexpected_combos: set[tuple[str, str, str]] = set()
 
         # Loop through the trace events to perform a comparison
         for te in trace["traceEvents"]:
@@ -4175,12 +4176,8 @@ class TestProfilerEventsParity(TestCase):
                 continue
 
             # Any metadata keys that show up in JSON should show up in events()
-            unexpected_trace_keys = set(args) - supported_trace_keys
-            if unexpected_trace_keys:
-                unexpected_trace_key_failures.append(
-                    f"Event: {(te['name'][:100], cat, ext_id, correlation)}\n"
-                    f"Unexpected keys: {sorted(unexpected_trace_keys)}"
-                )
+            for k in set(args) - supported_trace_keys:
+                unexpected_combos.add((te["name"][:100], cat, k))
 
             # Build the same key from JSON to try to match with a FunctionEvent
             key = (te["name"], te["cat"], ext_id, correlation)
@@ -4211,10 +4208,12 @@ to the events() property. The steps are:
 
 For a model PR to follow, see: https://github.com/pytorch/pytorch/pull/180100
 ===================================================================================="""
-        if unexpected_trace_key_failures:
-            raise AssertionError(
-                f"\n{failure_msg}\n" + "\n\n".join(unexpected_trace_key_failures)
+        if unexpected_combos:
+            summary = "\n".join(
+                f"  {name} ({cat}): {key!r}"
+                for name, cat, key in sorted(unexpected_combos)
             )
+            raise AssertionError(f"\n{failure_msg}\n\nUnmapped keys:\n{summary}")
 
         self.assertGreater(len(json_records), 0, "No device-side records were compared")
         self.assertEqual(
