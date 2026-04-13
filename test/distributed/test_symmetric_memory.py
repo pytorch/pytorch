@@ -1746,6 +1746,46 @@ class LoweringTest(MultiProcContinuousTest):
             msg="Compiled and eager do not match",
         )
 
+    @skip_if_rocm_multiprocess
+    @skip_if_lt_x_gpu(2)
+    @fresh_inductor_cache()
+    def test_custom_op_symm_mem_realization(self):
+        """Test that torch.compile allocates symm_mem for custom ops with registered symm_mem_args."""
+        self._init_process()
+
+        from torch.library import Library  # noqa: TOR901
+
+        group_name = dist.group.WORLD.group_name
+
+        lib = Library("test_symm_realize", "DEF")
+        lib.define(
+            "my_collective(Tensor input, str reduce_op, str group_name) -> Tensor"
+        )
+        lib.register_symm_mem_args("my_collective", ["input"])
+
+        @torch.library.impl(lib, "my_collective", "Meta")
+        def meta_impl(input, reduce_op, group_name):
+            return torch.empty_like(input)
+
+        @torch.library.impl(lib, "my_collective", "CUDA")
+        def cuda_impl(input, reduce_op, group_name):
+            return input.clone()
+
+        def func(x):
+            x = x + 1
+            return torch.ops.test_symm_realize.my_collective(x, "sum", group_name)
+
+        compiled = torch.compile(func, fullgraph=True)
+        x = torch.rand(4, 4, device=self.device)
+        code = run_and_get_triton_code(compiled, x)
+
+        self.assertIn(
+            "empty_strided_p2p",
+            code,
+            "torch.compile did not allocate symmetric memory for custom op "
+            "with registered symm_mem_args",
+        )
+
 
 class SymmMemSingleProcTest(TestCase):
     @requires_cuda

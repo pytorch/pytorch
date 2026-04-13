@@ -9,6 +9,7 @@ operators to declare which arguments require symmetric memory allocation.
 """
 
 import unittest
+from unittest.mock import patch
 
 import torch
 from torch._library.simple_registry import singleton, SymmMemArgsHolder
@@ -489,6 +490,40 @@ class TestFunctionalOpCompile(TestCase):
 
         # No group_name argument → should return early without error
         FallbackKernel._maybe_realize_symm_mem_args(op, torch.randn(4, 4))
+
+    def test_realize_called_for_tensorbox_with_registered_args(self):
+        """Test that _maybe_realize_symm_mem_args calls realize_as_comm_buffer for TensorBox args."""
+        from unittest.mock import MagicMock
+
+        from torch._inductor.ir import FallbackKernel, TensorBox
+
+        lib = Library("test_realize_call", "DEF")
+        lib.define("my_op(Tensor input, str group_name) -> Tensor")
+        lib.register_symm_mem_args("my_op", ["input"])
+
+        op = torch.ops.test_realize_call.my_op.default
+        mock_tbox = MagicMock(spec=TensorBox)
+
+        realize_log = []
+
+        def mock_realize(t, comm_type, group_name):
+            realize_log.append((str(comm_type), group_name))
+
+        with (
+            patch(
+                "torch._inductor.comm_lowering.can_realize_as_comm_buffer",
+                return_value=True,
+            ),
+            patch(
+                "torch._inductor.comm_lowering.realize_as_comm_buffer",
+                side_effect=mock_realize,
+            ),
+        ):
+            FallbackKernel._maybe_realize_symm_mem_args(op, mock_tbox, "test_group")
+
+        self.assertEqual(len(realize_log), 1)
+        self.assertIn("SYMM_MEM", realize_log[0][0])
+        self.assertEqual(realize_log[0][1], "test_group")
 
 
 if __name__ == "__main__":
