@@ -38,9 +38,9 @@ __all__ = [
     "CosineAnnealingWarmRestarts",
     "OneCycleLR",
     "PolynomialLR",
+    "WarmupCosineDecayLR",
     "LRScheduler",
 ]
-
 EPOCH_DEPRECATION_WARNING = (
     "The epoch parameter in `scheduler.step()` was not necessary and is being "
     "deprecated where possible. Please use `scheduler.step()` to step the "
@@ -2596,3 +2596,144 @@ class OneCycleLR(LRScheduler):
                     group["momentum"] = computed_momentum  # type: ignore[possibly-undefined]
 
         return lrs
+
+
+class WarmupCosineDecayLR(LRScheduler):
+    r"""Linear warmup followed by cosine decay of the learning rate.
+
+    During the warmup phase (steps ``0`` → ``warmup_steps``), the learning
+    rate rises linearly from ``eta_min`` to each param group's base ``lr``.
+    After warmup, the learning rate follows a cosine curve from ``lr`` down
+    to ``eta_min`` over the remaining ``T_max - warmup_steps`` steps.
+
+    .. math::
+        \eta_t =
+        \begin{cases}
+        \eta_{\min} + \dfrac{t}{\text{warmup\_steps}}
+            (\eta_{\max} - \eta_{\min})
+            & \text{if } t \le \text{warmup\_steps} \\[8pt]
+        \eta_{\min} + \dfrac{1}{2}(\eta_{\max} - \eta_{\min})
+        \!\left(1 + \cos\!\left(\pi \cdot
+            \dfrac{t - \text{warmup\_steps}}
+                 {T_{\max} - \text{warmup\_steps}}
+        \right)\right)
+            & \text{otherwise}
+        \end{cases}
+
+    Unlike composing :class:`SequentialLR` with :class:`LinearLR` and
+    :class:`CosineAnnealingLR`, this scheduler provides a correct
+    :meth:`_get_closed_form_lr` implementation, which guarantees exact
+    learning-rate restoration when resuming training from a checkpoint via
+    :meth:`~LRScheduler.state_dict` / :meth:`~LRScheduler.load_state_dict`.
+
+    Args:
+        optimizer (Optimizer): Wrapped optimizer.
+        T_max (int): Total number of scheduler steps (warmup + cosine decay
+            combined).
+        warmup_steps (int): Number of linear warmup steps.  Must satisfy
+            ``0 <= warmup_steps < T_max``.  When ``0`` the schedule is
+            identical to :class:`CosineAnnealingLR`.  Default: ``0``.
+        eta_min (float): Minimum learning rate used both as the starting
+            point of linear warmup and the floor of cosine decay.
+            Default: ``0``.
+        last_epoch (int): The index of the last epoch. Default: ``-1``.
+
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> # 500-step linear warmup, then cosine decay over remaining 9500 steps
+        >>> scheduler = WarmupCosineDecayLR(optimizer, T_max=10_000, warmup_steps=500)
+        >>> for step in range(10_000):
+        ...     train(...)
+        ...     scheduler.step()
+
+    """
+
+    def __init__(
+        self,
+        optimizer: Optimizer,
+        T_max: int,
+        warmup_steps: int = 0,
+        eta_min: float = 0.0,
+        last_epoch: int = -1,
+    ) -> None:  # noqa: D107
+        if T_max <= 0:
+            raise ValueError(f"T_max must be a positive integer, got {T_max}")
+        if not (0 <= warmup_steps < T_max):
+            raise ValueError(
+                f"warmup_steps must satisfy 0 <= warmup_steps < T_max, "
+                f"got warmup_steps={warmup_steps}, T_max={T_max}"
+            )
+        if not isinstance(eta_min, (int, float)):
+            raise TypeError(
+                f"eta_min must be a numeric type (int or float), got {type(eta_min)}"
+            )
+        self.T_max = T_max
+        self.warmup_steps = warmup_steps
+        self.eta_min = eta_min
+        super().__init__(optimizer, last_epoch)
+
+    @override
+    def get_lr(self) -> list[float | Tensor]:
+        r"""Compute the learning rate for the current step.
+
+        Returns:
+            list[float | Tensor]: A list of learning rates, one per param group.
+
+        .. note::
+            To inspect the most recently applied learning rate, use
+            :meth:`get_last_lr` rather than calling this method directly.
+
+        .. note::
+            The returned :class:`~torch.Tensor`\s are copies and never alias
+            the optimizer's ``group["lr"]`` values.
+        """
+        _warn_get_lr_called_within_step(self)
+
+        if self._is_initial:
+            return _param_groups_val_list(self.optimizer, "lr")
+
+        t = self.last_epoch
+
+        if self.warmup_steps > 0 and t <= self.warmup_steps:
+            # Linear warmup — closed-form is exact, use it directly.
+            warmup_pct = t / self.warmup_steps
+            return [
+                self.eta_min + (base_lr - self.eta_min) * warmup_pct
+                for base_lr in self.base_lrs
+            ]
+
+        # Cosine decay phase.
+        decay_steps = self.T_max - self.warmup_steps
+        t_decay = t - self.warmup_steps
+        cos_factor = (1 + math.cos(math.pi * t_decay / decay_steps)) / 2
+        return [
+            self.eta_min + (base_lr - self.eta_min) * cos_factor
+            for base_lr in self.base_lrs
+        ]
+
+    def _get_closed_form_lr(self) -> list[float | Tensor]:
+        r"""Compute learning rates using the closed-form formula.
+
+        This is called by :meth:`~LRScheduler.step` when ``last_epoch`` is
+        passed explicitly (e.g., when resuming from a checkpoint), guaranteeing
+        that the restored learning rate is bit-exact regardless of the step.
+
+        Returns:
+            list[float | Tensor]: A list of learning rates, one per param group.
+        """
+        t = self.last_epoch
+
+        if self.warmup_steps > 0 and t <= self.warmup_steps:
+            warmup_pct = t / self.warmup_steps
+            return [
+                self.eta_min + (base_lr - self.eta_min) * warmup_pct
+                for base_lr in self.base_lrs
+            ]
+
+        decay_steps = self.T_max - self.warmup_steps
+        t_decay = t - self.warmup_steps
+        cos_factor = (1 + math.cos(math.pi * t_decay / decay_steps)) / 2
+        return [
+            self.eta_min + (base_lr - self.eta_min) * cos_factor
+            for base_lr in self.base_lrs
+        ]
