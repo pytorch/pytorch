@@ -472,7 +472,7 @@ if(INTERN_BUILD_ATEN_OPS)
 endif()
 
 function(append_filelist name outputvar)
-  set(_rootdir "${Torch_SOURCE_DIR}/")
+  set(_rootdir "${CMAKE_SOURCE_DIR}/")
   # configure_file adds its input to the list of CMAKE_RERUN dependencies
   configure_file(
       ${PROJECT_SOURCE_DIR}/build_variables.bzl

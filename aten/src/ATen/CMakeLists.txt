@@ -607,7 +607,7 @@ if(USE_ROCM)
     # a ck/config.h. We just do that part here. Without this, the ck.h from the
     # ROCM SDK may get accidentally used instead.
     rocm_generate_ck_conf(
-      "${Torch_SOURCE_DIR}/third_party/composable_kernel/include/ck/config.h.in"
+      "${CMAKE_SOURCE_DIR}/third_party/composable_kernel/include/ck/config.h.in"
       "${CMAKE_CURRENT_BINARY_DIR}/composable_kernel/ck/config.h"
     )
   endif()
@@ -958,7 +958,7 @@ endif()
 # https://stackoverflow.com/questions/11096471/how-can-i-install-a-hierarchy-of-files-using-cmake
 foreach(HEADER  ${INSTALL_HEADERS})
   string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/" "ATen/" HEADER_SUB ${HEADER})
-  string(REPLACE "${Torch_SOURCE_DIR}/" "" HEADER_SUB ${HEADER_SUB})
+  string(REPLACE "${CMAKE_SOURCE_DIR}/" "" HEADER_SUB ${HEADER_SUB})
   get_filename_component(DIR ${HEADER_SUB} DIRECTORY)
   install(FILES ${HEADER} DESTINATION "${AT_INSTALL_INCLUDE_DIR}/${DIR}")
 endforeach()

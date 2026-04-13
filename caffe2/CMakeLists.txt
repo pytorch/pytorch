@@ -885,7 +885,7 @@ if(USE_PRECOMPILED_HEADERS)
   # Exclude some files from using PCH
   set_source_files_properties(
       # Not built with OpenMP, so PCH is invalid
-      ${Torch_SOURCE_DIR}/aten/src/ATen/MapAllocator.cpp
+      ${CMAKE_SOURCE_DIR}/aten/src/ATen/MapAllocator.cpp
       # Builds with incompatible compiler flags
       ${Caffe2_CPU_SRCS_AVX2}
       ${Caffe2_CPU_SRCS_AVX512}

@@ -239,12 +239,6 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
     tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" //...
   fi
 else
-  # check that setup.py would fail with bad arguments
-  echo "The next three invocations are expected to fail with invalid command error messages."
-  ( ! get_exit_code python setup.py bad_argument )
-  ( ! get_exit_code python setup.py clean] )
-  ( ! get_exit_code python setup.py clean bad_argument )
-
   if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
     # rocm builds fail when WERROR=1
     # XLA test build fails when WERROR=1
@@ -258,11 +252,8 @@ else
         python -mpip install numpy==2.0.2
       fi
 
-      WERROR=1 python setup.py clean
-
       WERROR=1 python -m build --wheel --no-isolation
     else
-      python setup.py clean
       if [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
         source .ci/pytorch/install_cache_xla.sh
       fi

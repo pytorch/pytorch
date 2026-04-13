@@ -409,6 +409,7 @@ cuda-bindings>=12.0,<13.0 ; platform_machine != "s390x" and platform_system != "
 
 setuptools-git-versioning==2.1.0
 scikit-build==0.18.1
+scikit-build-core==0.11.6
 pyre-extensions==0.0.32
 tabulate==0.9.0
 #Description: These package are needed to build FBGEMM and torchrec on PyTorch CI

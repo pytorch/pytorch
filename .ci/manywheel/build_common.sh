@@ -56,7 +56,7 @@ fi
 echo "Platform set to: $PLATFORM"
 
 # We use the package name to test the package by passing this to 'pip install'
-# This is the env variable that setup.py uses to name the package. Note that
+# The TORCH_PACKAGE_NAME env variable names the package. Note that
 # pip 'normalizes' the name first by changing all - to _
 if [[ -z "$TORCH_PACKAGE_NAME" ]]; then
     TORCH_PACKAGE_NAME='torch'
@@ -70,7 +70,7 @@ TORCH_PACKAGE_NAME="$(echo $TORCH_PACKAGE_NAME | tr '-' '_')"
 TORCH_NO_PYTHON_PACKAGE_NAME="$(echo $TORCH_NO_PYTHON_PACKAGE_NAME | tr '-' '_')"
 echo "Expecting the built wheels to all be called '$TORCH_PACKAGE_NAME' or '$TORCH_NO_PYTHON_PACKAGE_NAME'"
 
-# Version: setup.py uses $PYTORCH_BUILD_VERSION.post$PYTORCH_BUILD_NUMBER if
+# Version: uses $PYTORCH_BUILD_VERSION.post$PYTORCH_BUILD_NUMBER if
 # PYTORCH_BUILD_NUMBER > 1
 build_version="$PYTORCH_BUILD_VERSION"
 build_number="$PYTORCH_BUILD_NUMBER"
@@ -110,7 +110,7 @@ if [[ -z "$PYTORCH_ROOT" ]]; then
 fi
 pushd "$PYTORCH_ROOT"
 retry pip install -qUr requirements-build.txt
-python setup.py clean
+python -m spin clean
 retry pip install -qr requirements.txt
 case ${DESIRED_PYTHON} in
   cp314*)
@@ -151,20 +151,20 @@ else
     USE_KINETO=1
 fi
 
-echo "Calling setup.py bdist at $(date)"
+echo "Building wheel at $(date)"
 
 time CMAKE_ARGS=${CMAKE_ARGS[@]} \
     EXTRA_CAFFE2_CMAKE_FLAGS=${EXTRA_CAFFE2_CMAKE_FLAGS[@]} \
     BUILD_LIBTORCH_CPU_WITH_DEBUG=$BUILD_DEBUG_INFO \
     USE_NCCL=${USE_NCCL} USE_RCCL=${USE_RCCL} USE_KINETO=${USE_KINETO} \
     python -m build --wheel --no-isolation --outdir /tmp/$WHEELHOUSE_DIR
-echo "Finished setup.py bdist at $(date)"
+echo "Finished building wheel at $(date)"
 
 # Build libtorch packages
 if [[ -n "$BUILD_PYTHONLESS" ]]; then
     # Now build pythonless libtorch
     # Note - just use whichever python we happen to be on
-    python setup.py clean
+    python -m spin clean
 
     if [[ $LIBTORCH_VARIANT = *"static"* ]]; then
         STATIC_CMAKE_FLAG="-DTORCH_STATIC=1"
