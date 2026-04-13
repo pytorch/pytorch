@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING
 
+import torch
 from torch._inductor import config as inductor_config
 
 from ..kernel.bmm import aten_baddbmm, aten_bmm, aten_bmm_dtype
@@ -86,9 +87,11 @@ class ATenBiasAddMMConfigHeuristics(
         nodes = kernel_inputs.nodes()
         # for addmm, bias is the first input
         bias = nodes[0]
-        assert (
-            len(bias.get_size()) == 2
-            and bias.get_stride()[0] == 0
-            and inductor_config.triton.autotune_cublasLt
-        )
+        # Conditions should be checked in tuned_addmm before adding this template.
+        # On ROCm, tuned_addmm passes the original 1D bias input so hipBLASLt
+        # fused-bias kernels can see the native bias form. In that case the bias
+        # no longer has the expanded stride-0 layout used on the non-ROCm path.
+        is_rocm_1d_bias = torch.version.hip and len(bias.get_size()) == 1
+        valid_bias_input = is_rocm_1d_bias or bias.get_stride()[0] == 0
+        assert valid_bias_input and inductor_config.triton.autotune_cublasLt
         yield from super()._get_template_configs_impl(kernel_inputs, op_name)

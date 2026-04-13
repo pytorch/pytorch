@@ -669,18 +669,22 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
     if use_aten_gemm_kernels():
         aten_templates: list[ExternKernelChoice | KernelTemplate] = [aten_addmm]
+        # For ROCm, check original inp since kernel_inputs_aten uses inp (not inp_expanded)
+        bias_to_check = inp if torch.version.hip else inp_expanded
         if (
-            inp.get_stride()[0] == 0
-            and len(inp.get_size()) == 2
+            bias_to_check.get_stride()[0] == 0
             and inductor_config.triton.autotune_cublasLt
             and not V.graph.cpp_wrapper  # bias_addmm only has a Python implementation
         ):
             aten_templates.append(aten_bias_addmm)
 
         # On ROCm, ATen choices use original bias input; non-ROCm keeps unified inputs.
-        choices.extend(
-            V.choices.get_template_configs(kernel_inputs_aten, aten_templates, name)
-        )
+        if torch.version.hip:
+            choices.extend(
+                V.choices.get_template_configs(kernel_inputs_aten, aten_templates, name)
+            )
+        else:
+            templates_to_use.extend(aten_templates)
 
     if is_nonzero and use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(mm_template)
