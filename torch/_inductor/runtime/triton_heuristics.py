@@ -1351,10 +1351,9 @@ class CachingAutotuner(KernelInterface):
             for ci, cfg in enumerate(cfgs):
                 trial_kwargs = dict(current_kwargs)
                 for idx in member_indices:
-                    for key, value in cfg.kwargs.items():
-                        if skip_rblock and key.startswith("R") and "BLOCK" in key:
-                            continue
-                        trial_kwargs[f"{key}_{idx}"] = value
+                    _update_combo_kernel_kwargs(
+                        trial_kwargs, cfg.kwargs, idx, skip_rblock
+                    )
 
                 if trial_kwargs == current_kwargs:
                     log.debug("    cfg[%d] skip (same as current)", ci)
@@ -2924,6 +2923,27 @@ def _combo_tiling_signature(
     )
 
 
+_COMBO_KERNEL_HIP_COMPILE_OPTION_KEYS = frozenset(
+    ("matrix_instr_nonkdim", "waves_per_eu", "kpack")
+)
+
+
+def _update_combo_kernel_kwargs(
+    kwargs: dict[str, Any],
+    cfg_kwargs: dict[str, Any],
+    subkernel_idx: int,
+    skip_rblock: bool,
+) -> None:
+    for key, value in cfg_kwargs.items():
+        # These are Triton backend compile options, not per-subkernel constexpr args.
+        if key in _COMBO_KERNEL_HIP_COMPILE_OPTION_KEYS:
+            kwargs[key] = value
+            continue
+        if skip_rblock and key.startswith("R") and "BLOCK" in key:
+            continue
+        kwargs[f"{key}_{subkernel_idx}"] = value
+
+
 def _handle_combo_kernel_per_subkernel_blocks(
     size_hints: dict[str, int],
     inductor_meta: dict[str, Any],
@@ -3012,20 +3032,20 @@ def _handle_combo_kernel_per_subkernel_blocks(
 
         group_coordesc_fields: OrderedSet[str] = OrderedSet()
         cfg = cfgs[0]
-        for key, value in cfg.kwargs.items():
+        _update_combo_kernel_kwargs(combined_kwargs, cfg.kwargs, i, skip_rblock)
+        for key in cfg.kwargs:
             if skip_rblock and key.startswith("R") and "BLOCK" in key:
                 continue
-
+            if not key.endswith("BLOCK"):
+                continue
             combined_key = f"{key}_{i}"
-            combined_kwargs[combined_key] = value
-            if key.endswith("BLOCK"):
-                group_coordesc_fields.add(combined_key)
-                prefix = key.removesuffix("BLOCK").lower()
-                if prefix in size_hints_i:
-                    combo_coordesc_field_limits[combined_key] = min(
-                        TRITON_MAX_BLOCK[prefix.upper()],
-                        size_hints_i[prefix],
-                    )
+            group_coordesc_fields.add(combined_key)
+            prefix = key.removesuffix("BLOCK").lower()
+            if prefix in size_hints_i:
+                combo_coordesc_field_limits[combined_key] = min(
+                    TRITON_MAX_BLOCK[prefix.upper()],
+                    size_hints_i[prefix],
+                )
 
         all_num_warps.append(cfg.num_warps)
         all_num_stages.append(cfg.num_stages)
