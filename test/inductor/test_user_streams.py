@@ -218,9 +218,9 @@ class TestUserStreamCompile(InductorTestCase):
         # Verify correctness
         self.assertEqual(result, expected)
 
-        # Verify generated code contains stream handling
-        # Streams are acquired from a pool, so check for pool usage or context manager
+        # Verify generated code contains stream handling and synchronize survives
         self.assertIn("torch.cuda.stream", code)
+        self.assertIn("synchronize_stream", code)
 
     def test_compile_preserves_stream_semantics(self):
         """Test that compiled code preserves stream execution semantics."""
@@ -244,8 +244,9 @@ class TestUserStreamCompile(InductorTestCase):
 
         self.assertEqual(result, expected)
 
-        # Verify stream context is present in generated code
+        # Verify stream context and synchronize survive
         self.assertIn("torch.cuda.stream", code)
+        self.assertIn("synchronize_stream", code)
 
     def test_multiple_stream_contexts(self):
         """Test compilation with multiple stream context switches."""
@@ -275,12 +276,9 @@ class TestUserStreamCompile(InductorTestCase):
 
         self.assertEqual(result, expected)
 
-        # Verify multiple stream contexts in generated code
-        # The scheduler may optimize stream usage; check for at least 1 stream context
-        self.assertTrue(
-            code.count("torch.cuda.stream") >= 1 or "stream" in code.lower(),
-            "Expected stream context in generated code",
-        )
+        # Verify stream contexts and synchronization survive
+        self.assertGreaterEqual(code.count("torch.cuda.stream"), 1)
+        self.assertIn("synchronize_stream", code)
 
     def test_nested_stream_contexts(self):
         """Test compilation with nested stream contexts."""
@@ -308,12 +306,9 @@ class TestUserStreamCompile(InductorTestCase):
 
         self.assertEqual(result, expected)
 
-        # Verify nested stream contexts
-        # The scheduler may optimize stream usage; check for at least 1 stream context
-        self.assertTrue(
-            code.count("torch.cuda.stream") >= 1 or "stream" in code.lower(),
-            "Expected stream context in generated code",
-        )
+        # Verify nested stream contexts and synchronization survive
+        self.assertGreaterEqual(code.count("torch.cuda.stream"), 1)
+        self.assertIn("synchronize_stream", code)
 
     def test_stream_context_with_data_dependency(self):
         """Test stream contexts with data flowing between streams."""
@@ -340,8 +335,9 @@ class TestUserStreamCompile(InductorTestCase):
 
         self.assertEqual(result, expected)
 
-        # Verify stream context is present
+        # Verify stream context and synchronize survive
         self.assertIn("torch.cuda.stream", code)
+        self.assertIn("synchronize_stream", code)
 
     def test_event_record_and_wait(self):
         """Test compilation with explicit event record and wait."""
@@ -372,17 +368,9 @@ class TestUserStreamCompile(InductorTestCase):
 
         self.assertEqual(result, expected)
 
-        # Verify event operations in generated code
-        # Events may be generated as custom ops (torch.ops.streams.record_event/wait_event)
-        # or as internal event methods (.record_event()/.wait())
-        self.assertTrue(
-            "record_event" in code or ".record(" in code,
-            "Expected record_event or .record( in generated code",
-        )
-        self.assertTrue(
-            "wait_event" in code or ".wait(" in code,
-            "Expected wait_event or .wait( in generated code",
-        )
+        # Verify event operations survive compilation as custom ops
+        self.assertIn("record_event", code)
+        self.assertIn("wait_event", code)
 
     def test_event_record_on_stream(self):
         """Test event recording on a specific stream."""
@@ -415,16 +403,9 @@ class TestUserStreamCompile(InductorTestCase):
 
         self.assertEqual(result, expected)
 
-        # Verify event record/wait with explicit stream args
-        # Events may be generated as custom ops or internal event methods
-        self.assertTrue(
-            "record_event" in code or ".record(" in code,
-            "Expected record_event or .record( in generated code",
-        )
-        self.assertTrue(
-            "wait_event" in code or ".wait(" in code,
-            "Expected wait_event or .wait( in generated code",
-        )
+        # Verify event operations survive compilation as custom ops
+        self.assertIn("record_event", code)
+        self.assertIn("wait_event", code)
 
     def test_multiple_events_multiple_streams(self):
         """Test multiple events synchronizing multiple streams."""
@@ -463,12 +444,9 @@ class TestUserStreamCompile(InductorTestCase):
 
         self.assertEqual(result, expected)
 
-        # Verify multiple events and streams
-        # Events may be internally managed, not explicitly constructed
-        record_count = code.count("record_event") + code.count(".record(")
-        wait_count = code.count("wait_event") + code.count(".wait(")
-        self.assertGreaterEqual(record_count, 2)
-        self.assertGreaterEqual(wait_count, 2)
+        # Verify multiple events and streams survive as custom ops
+        self.assertGreaterEqual(code.count("record_event"), 2)
+        self.assertGreaterEqual(code.count("wait_event"), 2)
 
     def test_event_wait_without_record(self):
         """Test that waiting on unrecorded event works (no-op)."""
@@ -497,15 +475,9 @@ class TestUserStreamCompile(InductorTestCase):
 
         self.assertEqual(result, expected)
 
-        # Verify event operations (may appear as custom ops or methods)
-        self.assertTrue(
-            "record_event" in code or ".record(" in code,
-            "Expected record_event or .record( in generated code",
-        )
-        self.assertTrue(
-            "wait_event" in code or ".wait(" in code,
-            "Expected wait_event or .wait( in generated code",
-        )
+        # Verify event operations survive compilation as custom ops
+        self.assertIn("record_event", code)
+        self.assertIn("wait_event", code)
 
     def test_stream_wait_event(self):
         """Test stream.wait_event() method."""
@@ -534,11 +506,8 @@ class TestUserStreamCompile(InductorTestCase):
 
         self.assertEqual(result, expected)
 
-        # Verify stream.wait_event is present (may appear as custom ops or methods)
-        self.assertTrue(
-            "wait_event" in code or ".wait(" in code,
-            "Expected wait_event or .wait( in generated code",
-        )
+        # Verify stream.wait_event survives compilation as custom op
+        self.assertIn("wait_event", code)
 
     def test_bidirectional_stream_sync(self):
         """Test bidirectional synchronization between streams."""
@@ -578,13 +547,9 @@ class TestUserStreamCompile(InductorTestCase):
 
         self.assertEqual(result, expected)
 
-        # Verify bidirectional sync - multiple records and waits
-        # These may appear as custom ops (torch.ops.streams.record_event/wait_event)
-        # or as internal event methods (.record_event()/.wait())
-        record_count = code.count("record_event") + code.count(".record(")
-        wait_count = code.count("wait_event") + code.count(".wait(")
-        self.assertGreaterEqual(record_count, 2)
-        self.assertGreaterEqual(wait_count, 2)
+        # Verify bidirectional sync - multiple records and waits as custom ops
+        self.assertGreaterEqual(code.count("record_event"), 2)
+        self.assertGreaterEqual(code.count("wait_event"), 2)
 
     def test_three_streams_pipeline(self):
         """Test pipeline pattern with three streams."""
@@ -627,13 +592,9 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertEqual(result, expected)
 
         # Verify three-stage pipeline with 3 streams
-        # Streams may be managed via pool, check for stream usage pattern
-        self.assertTrue(
-            code.count("torch.cuda.stream") >= 3 or "stream" in code.lower(),
-            "Expected stream context in generated code",
-        )
-        record_count = code.count("record_event") + code.count(".record(")
-        self.assertGreaterEqual(record_count, 2)
+        self.assertGreaterEqual(code.count("torch.cuda.stream"), 3)
+        self.assertGreaterEqual(code.count("record_event"), 2)
+        self.assertGreaterEqual(code.count("wait_event"), 2)
 
     def test_parallel_streams_join(self):
         """Test parallel work on multiple streams joining at the end."""
@@ -680,15 +641,9 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertEqual(result, expected)
 
         # Verify parallel streams joining
-        # Streams may be managed via pool, check for stream usage pattern
-        self.assertTrue(
-            code.count("torch.cuda.stream") >= 3 or "stream" in code.lower(),
-            "Expected stream context in generated code",
-        )
-        record_count = code.count("record_event") + code.count(".record(")
-        wait_count = code.count("wait_event") + code.count(".wait(")
-        self.assertGreaterEqual(record_count, 3)
-        self.assertGreaterEqual(wait_count, 3)
+        self.assertGreaterEqual(code.count("torch.cuda.stream"), 3)
+        self.assertGreaterEqual(code.count("record_event"), 3)
+        self.assertGreaterEqual(code.count("wait_event"), 3)
 
     def test_fan_out_fan_in(self):
         """Test fan-out from one stream to multiple, then fan-in."""
@@ -734,10 +689,8 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertEqual(result, expected)
 
         # Verify fan-out/fan-in pattern
-        record_count = code.count("record_event") + code.count(".record(")
-        wait_count = code.count("wait_event") + code.count(".wait(")
-        self.assertGreaterEqual(record_count, 3)
-        self.assertGreaterEqual(wait_count, 4)
+        self.assertGreaterEqual(code.count("record_event"), 3)
+        self.assertGreaterEqual(code.count("wait_event"), 4)
 
     def test_four_streams_diamond(self):
         """Test diamond pattern: one start, two parallel, one end."""
@@ -786,15 +739,9 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertEqual(result, expected)
 
         # Verify diamond pattern
-        # Streams may be managed via pool, check for stream usage pattern
-        self.assertTrue(
-            code.count("torch.cuda.stream") >= 3 or "stream" in code.lower(),
-            "Expected stream context in generated code",
-        )
-        record_count = code.count("record_event") + code.count(".record(")
-        wait_count = code.count("wait_event") + code.count(".wait(")
-        self.assertGreaterEqual(record_count, 3)
-        self.assertGreaterEqual(wait_count, 4)
+        self.assertGreaterEqual(code.count("torch.cuda.stream"), 3)
+        self.assertGreaterEqual(code.count("record_event"), 3)
+        self.assertGreaterEqual(code.count("wait_event"), 4)
 
     def test_stream_reuse_across_iterations(self):
         """Test that streams can be reused across loop iterations."""
@@ -822,16 +769,10 @@ class TestUserStreamCompile(InductorTestCase):
 
         self.assertEqual(result, expected)
 
-        # Verify stream reuse in loop
+        # Verify stream reuse in loop — events survive compilation
         self.assertIn("torch.cuda.stream", code)
-        self.assertTrue(
-            "record_event" in code or ".record(" in code,
-            "Expected record_event or .record( in generated code",
-        )
-        self.assertTrue(
-            "wait_event" in code or ".wait(" in code,
-            "Expected wait_event or .wait( in generated code",
-        )
+        self.assertIn("record_event", code)
+        self.assertIn("wait_event", code)
 
     def test_no_fusion_across_streams(self):
         """Test that operations on different streams are not fused together."""
@@ -1099,6 +1040,29 @@ class TestUserStreamCompile(InductorTestCase):
         compiled_fn = torch.compile(fn)
         result, (code,) = run_and_get_code(compiled_fn, x)
         self.assertEqual(result, expected)
+        self.assertIn("synchronize_stream", code)
+
+    def test_stream_wait_stream_not_dropped(self):
+        """stream.wait_stream() must survive compilation and appear in wrapper code."""
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x):
+            s1 = torch.cuda.Stream()
+            s2 = torch.cuda.Stream()
+            with torch.cuda.stream(s1):
+                a = x + 1
+            s2.wait_stream(s1)
+            with torch.cuda.stream(s2):
+                b = a * 2
+            s2.synchronize()
+            return b
+
+        x = torch.randn(1024, device="cuda")
+        expected = fn(x)
+        compiled_fn = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled_fn, x)
+        self.assertEqual(result, expected)
+        self.assertIn("wait_stream", code)
         self.assertIn("synchronize_stream", code)
 
     def test_codegen_structure_single_stream(self):
@@ -1437,8 +1401,8 @@ class TestStreamOrderingStress(InductorTestCase):
         for _ in range(self.ITERS):
             expected = fn(*args)
             actual = compiled_fn(*args)
-            # Compiled code may not codegen stream.synchronize() yet, so
-            # synchronize the device to ensure all stream work is visible.
+            # Full device sync as a safety net to ensure all stream work
+            # is visible before comparing results.
             torch.cuda.synchronize()
             if not isinstance(expected, (tuple, list)):
                 expected, actual = [expected], [actual]
@@ -1772,11 +1736,8 @@ class TestGenericStreamCompile(InductorTestCase):
 
         self.assertEqual(result, expected)
 
-        # Verify event operations
-        self.assertTrue(
-            "record_event" in code or ".record(" in code,
-            "Expected record_event or .record( in generated code",
-        )
+        # Verify event operations survive compilation as custom ops
+        self.assertIn("record_event", code)
 
     def test_generic_stream_multiple(self):
         """Test compilation with multiple torch.Stream instances."""
@@ -1818,11 +1779,10 @@ class TestGenericStreamCompile(InductorTestCase):
 
         self.assertEqual(result, expected)
 
-        # Verify stream handling
-        self.assertTrue(
-            "torch.cuda.stream" in code or "stream" in code.lower(),
-            "Expected stream context in generated code",
-        )
+        # Verify stream handling and event ops survive
+        self.assertIn("torch.cuda.stream", code)
+        self.assertIn("record_event", code)
+        self.assertIn("wait_event", code)
 
     def test_generic_event_record_on_stream(self):
         """Test torch.Event.record() with explicit stream argument."""
@@ -1857,11 +1817,8 @@ class TestGenericStreamCompile(InductorTestCase):
 
         self.assertEqual(result, expected)
 
-        # Verify event operations
-        self.assertTrue(
-            "record_event" in code or ".record(" in code,
-            "Expected record_event or .record( in generated code",
-        )
+        # Verify event operations survive compilation as custom ops
+        self.assertIn("record_event", code)
 
 
 @unittest.skipUnless(TEST_CUDA, "requires CUDA")
