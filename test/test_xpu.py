@@ -1266,8 +1266,10 @@ if __name__ == "__main__":
         with torch.xpu.stream(s):
             g = torch.xpu.XPUGraph()
             self.assertFalse(torch.xpu.is_current_stream_capturing())
+            self.assertFalse(s.is_capturing())
             g.capture_begin()
             self.assertTrue(torch.xpu.is_current_stream_capturing())
+            self.assertTrue(s.is_capturing())
             g.capture_end()
 
     def test_graph_capture_simple(self):

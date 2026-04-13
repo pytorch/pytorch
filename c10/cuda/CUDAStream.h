@@ -116,6 +116,13 @@ class C10_CUDA_API CUDAStream {
 
   void synchronize() const;
 
+  bool is_capturing() const {
+    DeviceGuard guard{stream_.device()};
+    cudaStreamCaptureStatus status{cudaStreamCaptureStatusNone};
+    C10_CUDA_CHECK(cudaStreamIsCapturing(stream(), &status));
+    return status != cudaStreamCaptureStatusNone;
+  }
+
   int priority() const {
     DeviceGuard guard{stream_.device()};
     int priority = 0;
