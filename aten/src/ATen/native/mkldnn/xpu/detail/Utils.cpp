@@ -137,8 +137,12 @@ bool onednn_strides_check(const Tensor& src) {
   auto strides_info = get_onednn_strides(src);
   auto strides = strides_info.empty() ? nullptr : &strides_info[0];
 
-  dnnl_memory_desc_t md;
-  dnnl_memory_desc_create_with_strides(&md, ndims, dims, data_type, strides);
+  dnnl_memory_desc_t md{};
+  dnnl_status_t create_status = dnnl_memory_desc_create_with_strides(
+      &md, ndims, dims, data_type, strides);
+  if (create_status != dnnl_success || md == nullptr) {
+    return false;
+  }
   dnnl_format_kind_t md_fmt_kind;
   int md_ndims = 0;
   int md_inner_nblks = 0;
@@ -147,29 +151,39 @@ bool onednn_strides_check(const Tensor& src) {
   dnnl_memory_desc_query(md, dnnl_query_inner_nblks_s32, &md_inner_nblks);
   dnnl_memory_desc_query(md, dnnl_query_format_kind, &md_fmt_kind);
   dnnl_memory_desc_query(md, dnnl_query_ndims_s32, &md_ndims);
-  dnnl_memory_desc_query(md, dnnl_query_padded_dims, &md_padded_dims);
+  dnnl_status_t status =
+      dnnl_memory_desc_query(md, dnnl_query_padded_dims, &md_padded_dims);
+  if (status != dnnl_success || md_padded_dims == nullptr) {
+    dnnl_memory_desc_destroy(md);
+    return false;
+  }
   auto block_size = 1;
   // const auto& blk = md->format_desc.blocking;
   dnnl_dims_t md_inner_blks;
   dnnl_dims_t md_blk_inner_idxs;
   dnnl_memory_desc_query(md, dnnl_query_inner_idxs, &md_blk_inner_idxs);
   dnnl_memory_desc_query(md, dnnl_query_inner_blks, &md_inner_blks);
-  dnnl_memory_desc_destroy(md);
 
   if (strides == nullptr || md_ndims == 0 ||
-      md_fmt_kind != dnnl_format_kind_t::dnnl_blocked)
+      md_fmt_kind != dnnl_format_kind_t::dnnl_blocked) {
+    dnnl_memory_desc_destroy(md);
     return true;
+  }
 
   dnnl_dims_t blocks = {0};
   std::array<int, DNNL_MAX_NDIMS> perm = {0};
   for (int d = 0; d < md_ndims; ++d) {
     // no strides check needed for empty tensor
-    if ((*md_padded_dims)[d] == 0)
+    if ((*md_padded_dims)[d] == 0) {
+      dnnl_memory_desc_destroy(md);
       return true;
+    }
 
     // no strides verification for runtime dims
-    if (strides[d] == DNNL_RUNTIME_DIM_VAL)
+    if (strides[d] == DNNL_RUNTIME_DIM_VAL) {
+      dnnl_memory_desc_destroy(md);
       return true;
+    }
 
     perm[d] = d;
     blocks[d] = 1;
@@ -200,14 +214,17 @@ bool onednn_strides_check(const Tensor& src) {
     // Note: owing to being sorted, these are the initial strides
     if (strides[d] == 0)
       continue;
-    else if (strides[d] < min_stride)
+    else if (strides[d] < min_stride) {
+      dnnl_memory_desc_destroy(md);
       return false;
+    }
 
     // update min_stride for next iteration
     const auto padded_dim = (*md_padded_dims)[d];
     min_stride = block_size * strides[d] * (padded_dim / blocks[d]);
   }
 
+  dnnl_memory_desc_destroy(md);
   return true;
 }
 
