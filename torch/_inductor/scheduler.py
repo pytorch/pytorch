@@ -16,8 +16,8 @@ import traceback
 import typing
 from collections import Counter, defaultdict
 from concurrent.futures import as_completed, Future
-from typing import Any, Generic, TYPE_CHECKING, TypeAlias, TypeVar
-from typing_extensions import ParamSpec
+from typing import Any, Generic, TYPE_CHECKING, TypeAlias
+from typing_extensions import ParamSpec, TypeVar
 
 from torch.utils._ordered_set import OrderedSet
 

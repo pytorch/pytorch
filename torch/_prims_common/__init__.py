@@ -17,10 +17,9 @@ from typing import (
     TYPE_CHECKING,
     TypeAlias,
     TypeGuard,
-    TypeVar,
     Union,
 )
-from typing_extensions import deprecated
+from typing_extensions import deprecated, TypeVar
 
 import torch
 from torch import sym_float, sym_int, sym_max, sym_min

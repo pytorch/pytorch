@@ -5,8 +5,8 @@ import types
 import typing
 import warnings
 from collections.abc import Callable
-from typing import cast, TypeAlias, TypeVar
-from typing_extensions import deprecated, ParamSpec
+from typing import cast, TypeAlias
+from typing_extensions import deprecated, ParamSpec, TypeVar
 
 import torch
 from torch import Tensor

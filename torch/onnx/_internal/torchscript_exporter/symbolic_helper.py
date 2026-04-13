@@ -103,14 +103,12 @@ import math
 import sys
 import typing
 import warnings
-from typing import (
-    Any,
-    Concatenate as _Concatenate,
-    Literal,
-    NoReturn,
+from typing import Any, Concatenate as _Concatenate, Literal, NoReturn
+from typing_extensions import (
+    ParamSpec as _ParamSpec,
+    TypeIs as _TypeIs,
     TypeVar as _TypeVar,
 )
-from typing_extensions import ParamSpec as _ParamSpec, TypeIs as _TypeIs
 
 import torch
 import torch._C._onnx as _C_onnx

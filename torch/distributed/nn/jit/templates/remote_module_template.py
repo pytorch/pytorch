@@ -17,7 +17,7 @@ import torch.distributed.rpc as rpc
 from torch import Tensor
 from torch._jit_internal import Future
 from torch.distributed.rpc import RRef
-from typing import Tuple  # pyre-ignore: unused import
+from typing import Tuple # pyre-ignore: unused import
 
 
 {assign_module_interface_cls}

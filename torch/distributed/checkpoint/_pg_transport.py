@@ -5,7 +5,8 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import cast, TypeVar
+from typing import cast
+from typing_extensions import TypeVar
 
 import torch
 from torch.distributed import ProcessGroup, Work

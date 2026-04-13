@@ -8,8 +8,8 @@ import logging
 import math
 import operator
 from collections.abc import Callable
-from typing import Generic, overload, SupportsFloat, TYPE_CHECKING, TypeGuard, TypeVar
-from typing_extensions import TypeIs
+from typing import Generic, overload, SupportsFloat, TYPE_CHECKING, TypeGuard
+from typing_extensions import TypeIs, TypeVar
 
 import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom

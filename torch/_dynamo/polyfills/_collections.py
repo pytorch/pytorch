@@ -1,9 +1,11 @@
+from typing_extensions import TypeVar
+
+
 """
 Python polyfills for builtins
 """
 
 from collections.abc import Iterable, MutableMapping
-from typing import TypeVar
 
 from ..decorators import substitute_in_graph
 

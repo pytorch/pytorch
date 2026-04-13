@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 from collections import defaultdict
 from collections.abc import Callable, Iterator, Sized
-from typing import Any, NoReturn, TypeVar
+from typing import Any, NoReturn
+from typing_extensions import TypeVar
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import DataChunk, IterDataPipe

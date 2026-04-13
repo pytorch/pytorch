@@ -45,9 +45,8 @@ from typing import (
     TYPE_CHECKING,
     TypeAlias,
     TypeGuard,
-    TypeVar,
 )
-from typing_extensions import deprecated, ParamSpec
+from typing_extensions import deprecated, ParamSpec, TypeVar
 
 import torch
 import torch.fx

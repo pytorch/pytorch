@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 
 from collections.abc import Callable, Iterator
-from typing import TypeVar
-from typing_extensions import Self
+from typing_extensions import Self, TypeVar
 
 
 # Copyright (c) Facebook, Inc. and its affiliates.

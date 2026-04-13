@@ -8,22 +8,22 @@ import functools
 import inspect
 import operator
 import types
-import typing
+from typing_extensions import TypeVar
 
 import torch
 
 from . import _dtypes, _dtypes_impl, _util
 
 
-ArrayLike = typing.TypeVar("ArrayLike")
+ArrayLike = TypeVar("ArrayLike")
 Scalar = int | float | complex | bool
 ArrayLikeOrScalar = ArrayLike | Scalar
 
-DTypeLike = typing.TypeVar("DTypeLike")
-AxisLike = typing.TypeVar("AxisLike")
-NDArray = typing.TypeVar("NDArray")
-CastingModes = typing.TypeVar("CastingModes")
-KeepDims = typing.TypeVar("KeepDims")
+DTypeLike = TypeVar("DTypeLike")
+AxisLike = TypeVar("AxisLike")
+NDArray = TypeVar("NDArray")
+CastingModes = TypeVar("CastingModes")
+KeepDims = TypeVar("KeepDims")
 
 # OutArray is to annotate the out= array argument.
 #
@@ -36,11 +36,9 @@ KeepDims = typing.TypeVar("KeepDims")
 # as a positional arg, it can be anywhere in the signature.
 # To handle all this, we define a special `OutArray` annotation and dispatch on it.
 #
-OutArray = typing.TypeVar("OutArray")
+OutArray = TypeVar("OutArray")
 
-NotImplementedType = typing.TypeVar(
-    "NotImplementedType", bound=types.NotImplementedType
-)
+NotImplementedType = TypeVar("NotImplementedType", bound=types.NotImplementedType)
 
 
 def normalize_array_like(x, parm=None):  # codespell:ignore

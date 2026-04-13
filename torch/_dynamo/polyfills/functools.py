@@ -1,10 +1,12 @@
+from typing_extensions import TypeVar
+
+
 """
 Python polyfills for functools
 """
 
 import functools
 from collections.abc import Callable, Iterable
-from typing import TypeVar
 
 from ..decorators import substitute_in_graph
 

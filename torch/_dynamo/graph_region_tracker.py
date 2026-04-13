@@ -23,7 +23,8 @@ import operator
 import pickle
 from collections import defaultdict, deque
 from dataclasses import fields
-from typing import Any, TYPE_CHECKING, TypeVar
+from typing import Any, TYPE_CHECKING
+from typing_extensions import TypeVar
 
 import torch._logging
 import torch.fx

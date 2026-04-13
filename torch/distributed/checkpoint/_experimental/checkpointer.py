@@ -1,7 +1,8 @@
 import abc
 import logging
 from concurrent.futures import Future
-from typing import Any, TypeVar
+from typing import Any
+from typing_extensions import TypeVar
 
 from .checkpoint_process import CheckpointProcess
 from .checkpoint_reader import CheckpointReader

@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import TypeVar
+from typing_extensions import TypeVar
 
 
 F = TypeVar("F")

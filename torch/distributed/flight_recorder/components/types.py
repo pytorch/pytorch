@@ -12,8 +12,8 @@ from typing import (
     Any,
     Generic,
     NamedTuple,
-    TypeVar,
 )
+from typing_extensions import TypeVar
 
 from torch.distributed.flight_recorder.components.fr_logger import FlightRecorderLogger
 

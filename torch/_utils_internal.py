@@ -6,8 +6,8 @@ import sys
 import tempfile
 import typing_extensions
 from collections.abc import Callable
-from typing import Any, TypeVar
-from typing_extensions import ParamSpec
+from typing import Any
+from typing_extensions import ParamSpec, TypeVar
 
 import torch
 from torch._strobelight.compile_time_profiler import StrobelightCompileTimeProfiler

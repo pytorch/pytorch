@@ -50,7 +50,8 @@ from ast import Call
 from collections import defaultdict
 from collections.abc import Callable, Generator, Sequence
 from types import TracebackType
-from typing import Any, Optional, ParamSpec, TypeVar, Union
+from typing import Any, Optional, ParamSpec, Union
+from typing_extensions import TypeVar
 
 
 try:

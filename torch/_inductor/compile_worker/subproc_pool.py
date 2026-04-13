@@ -15,8 +15,8 @@ from collections.abc import Callable
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from enum import Enum, IntEnum
-from typing import Any, IO, TypeVar
-from typing_extensions import Never, ParamSpec
+from typing import Any, IO
+from typing_extensions import Never, ParamSpec, TypeVar
 
 # _thread_safe_fork is needed because the subprocesses in the pool can read
 # justknobs, e.g., in the Triton compiler. For internal, the import installs

@@ -9,7 +9,8 @@ import logging
 import types
 import typing
 from collections.abc import Sequence
-from typing import Any, Optional, TypeVar, Union
+from typing import Any, Optional, Union
+from typing_extensions import TypeVar
 
 from torch.onnx._internal._lazy_import import onnx_ir as ir, onnxscript
 

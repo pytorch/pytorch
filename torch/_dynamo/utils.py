@@ -59,9 +59,8 @@ from typing import (
     overload,
     TypeAlias,
     TypeGuard,
-    TypeVar,
 )
-from typing_extensions import ParamSpec, TypeIs
+from typing_extensions import ParamSpec, TypeIs, TypeVar
 
 import torch
 import torch._functorch.config

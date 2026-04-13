@@ -4,7 +4,8 @@ import functools
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
-from typing import Any, overload, TypeVar
+from typing import Any, overload
+from typing_extensions import TypeVar
 
 import torch
 import torch.fx.traceback as fx_traceback

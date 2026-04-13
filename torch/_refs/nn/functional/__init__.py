@@ -3,8 +3,8 @@
 import math
 from collections.abc import Callable
 from functools import wraps
-from typing import Concatenate, Optional, TypeVar, Union
-from typing_extensions import ParamSpec
+from typing import Concatenate, Optional, Union
+from typing_extensions import ParamSpec, TypeVar
 
 import torch
 import torch._prims as prims

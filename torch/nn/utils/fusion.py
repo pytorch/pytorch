@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import copy
-from typing import TypeVar
+from typing_extensions import TypeVar
 
 import torch
 

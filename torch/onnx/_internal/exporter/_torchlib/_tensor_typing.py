@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TypeVar, Union
+from typing import Union
+from typing_extensions import TypeVar
 
 from onnxscript import (
     BFLOAT16,

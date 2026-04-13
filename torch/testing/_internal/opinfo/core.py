@@ -13,7 +13,8 @@ from dataclasses import asdict, dataclass, field
 from enum import Enum
 from functools import partial
 from itertools import product
-from typing import Any, TypeVar
+from typing import Any
+from typing_extensions import TypeVar
 
 import torch
 from torch.testing import make_tensor

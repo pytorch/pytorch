@@ -13,7 +13,8 @@ import unittest
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from functools import partial, wraps
-from typing import Any, cast, TypeVar
+from typing import Any, cast
+from typing_extensions import TypeVar
 
 import torch
 import torch.distributed as dist

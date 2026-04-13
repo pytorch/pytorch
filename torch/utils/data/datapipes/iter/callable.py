@@ -2,7 +2,8 @@
 import functools
 from collections import namedtuple
 from collections.abc import Callable, Iterator, Sized
-from typing import Any, TypeVar
+from typing import Any
+from typing_extensions import TypeVar
 
 import torch
 from torch.utils.data._utils.collate import default_collate

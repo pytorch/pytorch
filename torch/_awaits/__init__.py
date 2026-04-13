@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Generic, TypeVar
+from typing import Generic
+from typing_extensions import TypeVar
 
 import torch
 

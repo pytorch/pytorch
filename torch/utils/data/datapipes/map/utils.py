@@ -1,7 +1,8 @@
 import copy
 import warnings
 from collections.abc import Mapping, Sequence
-from typing import Any, TypeVar
+from typing import Any
+from typing_extensions import TypeVar
 
 from torch.utils.data.datapipes.datapipe import MapDataPipe
 

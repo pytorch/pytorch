@@ -24,8 +24,8 @@ import sys
 import types
 import unittest
 from collections.abc import Callable, Generator, Sequence
-from typing import Any, overload, TypeVar
-from typing_extensions import ParamSpec
+from typing import Any, overload
+from typing_extensions import ParamSpec, TypeVar
 from unittest.mock import patch
 
 import torch

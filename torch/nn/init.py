@@ -3,8 +3,8 @@
 import math
 import warnings
 from collections.abc import Callable
-from typing import Literal, TypeVar
-from typing_extensions import ParamSpec
+from typing import Literal
+from typing_extensions import ParamSpec, TypeVar
 
 import torch
 from torch import Tensor

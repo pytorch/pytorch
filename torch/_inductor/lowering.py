@@ -13,8 +13,8 @@ import sys
 import warnings
 from collections import defaultdict
 from collections.abc import Callable, Collection, Iterable, Sequence
-from typing import Any, cast, TYPE_CHECKING, TypeGuard, TypeVar
-from typing_extensions import ParamSpec
+from typing import Any, cast, TYPE_CHECKING, TypeGuard
+from typing_extensions import ParamSpec, TypeVar
 from unittest.mock import patch
 
 import sympy

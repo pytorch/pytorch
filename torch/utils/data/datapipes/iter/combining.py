@@ -4,7 +4,8 @@ import warnings
 from abc import ABC, abstractmethod
 from collections import deque
 from collections.abc import Callable, Iterator, Sized
-from typing import Any, Literal, TypeVar
+from typing import Any, Literal
+from typing_extensions import TypeVar
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes._hook_iterator import _SnapshotState

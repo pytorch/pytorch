@@ -19,8 +19,8 @@ import sys
 import warnings
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, TypeVar
-from typing_extensions import ParamSpec
+from typing import Any
+from typing_extensions import ParamSpec, TypeVar
 
 import torch
 from torch._jit_internal import (

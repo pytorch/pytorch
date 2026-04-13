@@ -23,8 +23,8 @@ import functools
 import inspect
 import types
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, TYPE_CHECKING, TypeVar
-from typing_extensions import ParamSpec
+from typing import Any, TYPE_CHECKING
+from typing_extensions import ParamSpec, TypeVar
 
 import torch
 import torch.utils._pytree as pytree

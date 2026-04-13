@@ -4,7 +4,8 @@ import functools
 import itertools
 import operator
 from collections.abc import Callable, Iterable, Sequence
-from typing import TypeAlias, TypeVar
+from typing import TypeAlias
+from typing_extensions import TypeVar
 
 import torch
 from torch._prims_common import DimsSequenceType, DimsType

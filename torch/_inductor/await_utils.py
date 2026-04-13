@@ -5,7 +5,8 @@ from asyncio import AbstractEventLoop, Future
 from collections.abc import Awaitable, Callable, Coroutine, Generator, Iterator
 from contextlib import contextmanager, ExitStack
 from contextvars import Context
-from typing import Any, Protocol, TypeVar
+from typing import Any, Protocol
+from typing_extensions import TypeVar
 
 from torch.utils._ordered_set import OrderedSet
 

@@ -8,7 +8,8 @@
 
 import math
 from collections.abc import Iterator, Sized
-from typing import cast, TypeVar
+from typing import cast
+from typing_extensions import TypeVar
 
 import torch
 from torch.utils.data import Dataset

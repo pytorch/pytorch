@@ -16,8 +16,8 @@ import pickle
 import sys
 import warnings
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from typing import Any, TypeVar
-from typing_extensions import deprecated, Self
+from typing import Any
+from typing_extensions import deprecated, Self, TypeVar
 
 import torch
 import torch._jit_internal as _jit_internal

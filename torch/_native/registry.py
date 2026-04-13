@@ -1,7 +1,8 @@
 import logging
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import Concatenate, ParamSpec, TypeVar
+from typing import Concatenate, ParamSpec
+from typing_extensions import TypeVar
 
 import torch.library
 

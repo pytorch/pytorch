@@ -3,8 +3,8 @@ import functools
 import logging
 import time
 from collections.abc import Callable
-from typing import Any, TypeVar
-from typing_extensions import ParamSpec
+from typing import Any
+from typing_extensions import ParamSpec, TypeVar
 from uuid import uuid4
 
 import torch.distributed.c10d_logger as c10d_logger

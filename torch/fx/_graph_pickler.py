@@ -7,8 +7,8 @@ import pickle
 import weakref
 from abc import abstractmethod
 from collections.abc import Callable, Generator
-from typing import Any, NewType, TypeVar
-from typing_extensions import override, Self
+from typing import Any, NewType
+from typing_extensions import override, Self, TypeVar
 
 from torch.utils._import_utils import import_dill
 

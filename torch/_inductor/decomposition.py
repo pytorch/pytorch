@@ -5,8 +5,8 @@ import math
 import operator
 import sys
 from collections.abc import Callable
-from typing import Any, TypeAlias, TypeVar
-from typing_extensions import ParamSpec
+from typing import Any, TypeAlias
+from typing_extensions import ParamSpec, TypeVar
 
 import torch
 import torch._decomp as decomp

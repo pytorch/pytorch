@@ -4,10 +4,10 @@ import logging
 import torch
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from .module_tracker import ModuleTracker
-from typing import Any, TypeVar
+from typing import Any
 from collections.abc import Callable
 from collections.abc import Iterator
-from typing_extensions import ParamSpec
+from typing_extensions import ParamSpec, TypeVar
 from collections import defaultdict
 from torch.utils._python_dispatch import TorchDispatchMode
 from math import prod

@@ -12,8 +12,8 @@ from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass
 from types import FunctionType, ModuleType
-from typing import Any, Generic, NoReturn, Optional, TYPE_CHECKING, TypeVar
-from typing_extensions import deprecated
+from typing import Any, Generic, NoReturn, Optional, TYPE_CHECKING
+from typing_extensions import deprecated, TypeVar
 
 from torch._utils_internal import justknobs_check
 

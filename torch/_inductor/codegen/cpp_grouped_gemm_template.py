@@ -2,7 +2,8 @@ import contextlib
 import logging
 import os
 from collections.abc import Callable
-from typing import Any, cast, TypeVar
+from typing import Any, cast
+from typing_extensions import TypeVar
 from unittest.mock import patch
 
 import torch

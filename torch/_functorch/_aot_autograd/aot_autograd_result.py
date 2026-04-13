@@ -24,7 +24,8 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from copy import copy
 from dataclasses import dataclass
-from typing import Any, Generic, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, TYPE_CHECKING
+from typing_extensions import TypeVar
 
 import torch
 from torch._dynamo.precompile_context import BackendCacheArtifact

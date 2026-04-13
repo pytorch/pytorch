@@ -15,7 +15,8 @@ import warnings
 from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import Any
+from typing_extensions import TypeVar
 from unittest.mock import patch
 
 import torch

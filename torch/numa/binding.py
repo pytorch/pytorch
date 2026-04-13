@@ -27,7 +27,8 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 from functools import wraps
 from logging import getLogger
-from typing import ParamSpec, TypeVar
+from typing import ParamSpec
+from typing_extensions import TypeVar
 
 import torch
 from torch._utils_internal import signpost_event

@@ -3,7 +3,8 @@ import operator
 import warnings
 from collections.abc import Sequence
 from itertools import chain
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic
+from typing_extensions import TypeVar
 
 import torch
 from torch._utils import (

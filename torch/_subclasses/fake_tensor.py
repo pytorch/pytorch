@@ -14,8 +14,8 @@ import typing
 import weakref
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, cast, Literal, TYPE_CHECKING, TypeGuard, TypeVar, Union
-from typing_extensions import Self
+from typing import Any, cast, Literal, TYPE_CHECKING, TypeGuard, Union
+from typing_extensions import Self, TypeVar
 from weakref import ReferenceType
 
 import torch

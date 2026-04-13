@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, TYPE_CHECKING, TypeVar
+from typing import Any, TYPE_CHECKING
+from typing_extensions import TypeVar
 
 import optree
 import optree._C

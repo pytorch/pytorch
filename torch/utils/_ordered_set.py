@@ -8,7 +8,8 @@ from collections.abc import (
     Reversible,
     Set as AbstractSet,
 )
-from typing import Any, cast, TypeVar
+from typing import Any, cast
+from typing_extensions import TypeVar
 
 
 T = TypeVar("T", bound=Hashable)

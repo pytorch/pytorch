@@ -6,7 +6,8 @@ import itertools
 import re
 import warnings
 from io import StringIO
-from typing import Any, Generic, Literal, NamedTuple, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, Literal, NamedTuple, TYPE_CHECKING
+from typing_extensions import TypeVar
 from unittest.mock import patch
 
 import sympy

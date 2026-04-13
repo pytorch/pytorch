@@ -23,10 +23,17 @@ from typing import (
     SupportsInt,
     TYPE_CHECKING,
     TypeAlias,
-    TypeVar,
     Union,
 )
-from typing_extensions import assert_never, Never, override, ParamSpec, Self, TypeIs
+from typing_extensions import (
+    assert_never,
+    Never,
+    override,
+    ParamSpec,
+    Self,
+    TypeIs,
+    TypeVar,
+)
 from unittest.mock import patch
 
 import sympy

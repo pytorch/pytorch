@@ -1,7 +1,7 @@
 from collections import namedtuple
 from collections.abc import Callable
-from typing import Any, TypeVar
-from typing_extensions import NamedTuple
+from typing import Any
+from typing_extensions import NamedTuple, TypeVar
 
 import torch.return_types
 from torch.utils._pytree import PyTree, tree_flatten, TreeSpec

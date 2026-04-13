@@ -49,8 +49,8 @@ from pathlib import Path
 from statistics import mean
 from typing import (
     Any,
-    TypeVar,
 )
+from typing_extensions import TypeVar
 from collections.abc import Callable
 from collections.abc import Iterable, Iterator
 from unittest.mock import MagicMock

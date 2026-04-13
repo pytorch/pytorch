@@ -7,7 +7,8 @@ import functools
 import inspect
 import logging
 import threading
-from typing import Any, Generic, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, TYPE_CHECKING
+from typing_extensions import TypeVar
 
 import torch
 from torch._C._distributed_rpc import (

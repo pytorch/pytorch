@@ -3,7 +3,8 @@
 import functools
 import logging
 from collections.abc import Callable, Sequence
-from typing import Any, Generic, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, TYPE_CHECKING
+from typing_extensions import TypeVar
 
 import torch
 import torch.nn as nn

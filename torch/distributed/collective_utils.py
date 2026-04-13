@@ -13,7 +13,8 @@ import importlib
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, cast, Generic, TYPE_CHECKING, TypeVar
+from typing import Any, cast, Generic, TYPE_CHECKING
+from typing_extensions import TypeVar
 
 
 if TYPE_CHECKING:

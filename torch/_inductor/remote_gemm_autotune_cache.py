@@ -1,5 +1,5 @@
 import asyncio
-from typing import TypeVar
+from typing_extensions import TypeVar
 
 import torch._inductor.config as config
 from torch._inductor import ir

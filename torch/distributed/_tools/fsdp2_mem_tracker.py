@@ -2,8 +2,8 @@ from collections.abc import Callable
 from copy import deepcopy
 from enum import auto, Enum
 from functools import partial, wraps
-from typing import Any, NamedTuple, TYPE_CHECKING, TypeVar
-from typing_extensions import ParamSpec, TypeVarTuple, Unpack
+from typing import Any, NamedTuple, TYPE_CHECKING
+from typing_extensions import ParamSpec, TypeVar, TypeVarTuple, Unpack
 
 import torch
 import torch.distributed._tools.fake_collectives

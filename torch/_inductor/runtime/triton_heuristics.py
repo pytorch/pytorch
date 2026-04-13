@@ -19,7 +19,8 @@ import sys
 import threading
 import time
 from collections import namedtuple
-from typing import Any, Generic, Literal, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, Literal, TYPE_CHECKING
+from typing_extensions import TypeVar
 
 import torch
 from torch._dynamo.utils import counters, set_feature_use

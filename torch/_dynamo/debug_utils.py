@@ -34,7 +34,8 @@ import tempfile
 import textwrap
 from collections import Counter
 from importlib import import_module
-from typing import Any, TYPE_CHECKING, TypeVar
+from typing import Any, TYPE_CHECKING
+from typing_extensions import TypeVar
 
 import torch
 import torch._prims_common as utils

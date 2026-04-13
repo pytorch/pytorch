@@ -24,9 +24,9 @@ from typing import (
     ForwardRef,
     Generic,
     get_type_hints,
-    TypeVar,
     Union,
 )
+from typing_extensions import TypeVar
 
 from torch.utils.data.datapipes._hook_iterator import _SnapshotState, hook_iterator
 

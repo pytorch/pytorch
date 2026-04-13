@@ -12,7 +12,8 @@ import traceback
 from collections import OrderedDict
 from collections.abc import Callable, Iterator
 from dataclasses import fields, is_dataclass
-from typing import Any, TypeVar
+from typing import Any
+from typing_extensions import TypeVar
 
 import torch
 import torch.fx.traceback as fx_traceback

@@ -7,8 +7,8 @@ __all__ = ["onnx_impl", "get_torchlib_ops"]
 
 import logging
 from collections.abc import Callable, Sequence
-from typing import Any, TypeVar
-from typing_extensions import ParamSpec
+from typing import Any
+from typing_extensions import ParamSpec, TypeVar
 
 import onnxscript
 

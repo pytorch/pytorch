@@ -5,8 +5,7 @@ import collections
 import functools
 from collections import OrderedDict
 from collections.abc import Callable
-from typing import TypeVar
-from typing_extensions import ParamSpec
+from typing_extensions import ParamSpec, TypeVar
 
 
 simple_call_counter: OrderedDict[str, int] = collections.OrderedDict()

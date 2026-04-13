@@ -1,7 +1,8 @@
 import base64
 import zlib
 from collections.abc import Callable, Iterable
-from typing import Generic, TypeVar
+from typing import Generic
+from typing_extensions import TypeVar
 
 
 T = TypeVar("T")

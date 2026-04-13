@@ -18,7 +18,8 @@ Classes:
 import abc
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import Any
+from typing_extensions import TypeVar
 
 import torch
 from torch.distributed.checkpoint._state_dict_stager import StateDictStager

@@ -51,7 +51,8 @@ import weakref
 from collections import defaultdict
 from contextlib import AbstractContextManager
 from enum import auto, Enum
-from typing import Any, cast, TYPE_CHECKING, TypeVar
+from typing import Any, cast, TYPE_CHECKING
+from typing_extensions import TypeVar
 
 import torch.fx
 from torch import Tensor

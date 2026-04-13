@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # mypy: allow-untyped-defs
-from typing import Any, TypeVar, NamedTuple
+from typing import Any, NamedTuple
+from typing_extensions import TypeVar
 from collections.abc import Callable, Sequence
 import textwrap
 import torch

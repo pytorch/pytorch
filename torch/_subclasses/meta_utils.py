@@ -9,17 +9,8 @@ import weakref
 from abc import abstractmethod
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
-from typing import (
-    Any,
-    ClassVar,
-    Generic,
-    NewType,
-    Protocol,
-    TYPE_CHECKING,
-    TypeGuard,
-    TypeVar,
-)
-from typing_extensions import override, TypedDict, TypeIs, Unpack
+from typing import Any, ClassVar, Generic, NewType, Protocol, TYPE_CHECKING, TypeGuard
+from typing_extensions import override, TypedDict, TypeIs, TypeVar, Unpack
 
 import torch
 from torch._C._autograd import CreationMeta

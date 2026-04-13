@@ -11,8 +11,8 @@ from collections import OrderedDict
 from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, Sequence
 from itertools import repeat as _repeat
 from operator import eq, ne
-from typing import Any, TYPE_CHECKING, TypeGuard, TypeVar
-from typing_extensions import TypeIs
+from typing import Any, TYPE_CHECKING, TypeGuard
+from typing_extensions import TypeIs, TypeVar
 
 import torch
 

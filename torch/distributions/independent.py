@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
-from typing import Generic, TypeVar
+from typing import Generic
+from typing_extensions import TypeVar
 
 import torch
 from torch import Size, Tensor

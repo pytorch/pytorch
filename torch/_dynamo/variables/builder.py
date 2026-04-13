@@ -38,6 +38,7 @@ import weakref
 from collections.abc import Callable, MutableMapping
 from types import ModuleType
 from typing import Any, NamedTuple, NoReturn, overload, TYPE_CHECKING, Union
+from typing_extensions import TypeVar
 
 import sympy
 
@@ -327,7 +328,6 @@ log = logging.getLogger(__name__)
 static_inputs_log = torch._logging.getArtifactLogger(
     __name__, "cudagraph_static_inputs"
 )
-from typing import TypeVar
 
 
 # Placeholder for a VariableTracker to be used in proxy

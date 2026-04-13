@@ -4,7 +4,8 @@
 import functools
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import cast, TypeGuard, TypeVar
+from typing import cast, TypeGuard
+from typing_extensions import TypeVar
 
 import torch
 import torch._C

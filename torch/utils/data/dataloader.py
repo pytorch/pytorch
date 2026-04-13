@@ -18,8 +18,8 @@ import queue
 import threading
 import warnings
 from collections.abc import Callable
-from typing import Any, Generic, NoReturn, TYPE_CHECKING, TypeVar
-from typing_extensions import Self
+from typing import Any, Generic, NoReturn, TYPE_CHECKING
+from typing_extensions import Self, TypeVar
 
 import torch
 import torch.distributed as dist

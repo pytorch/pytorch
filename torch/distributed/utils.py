@@ -3,7 +3,8 @@ import dataclasses
 import traceback
 from collections import OrderedDict
 from collections.abc import Callable, Container
-from typing import Any, Optional, overload, TypeVar
+from typing import Any, Optional, overload
+from typing_extensions import TypeVar
 
 import torch
 import torch.distributed as dist

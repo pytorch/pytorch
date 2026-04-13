@@ -4,8 +4,8 @@ from collections import defaultdict
 from collections.abc import Callable, Sequence
 from functools import lru_cache, partial, wraps
 from itertools import chain
-from typing import Optional, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import ParamSpec
+from typing import Optional, TYPE_CHECKING, Union
+from typing_extensions import ParamSpec, TypeVar
 
 
 if TYPE_CHECKING:

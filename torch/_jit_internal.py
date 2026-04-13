@@ -33,10 +33,9 @@ from typing import (  # noqa: UP035, F401  # (Dict, List, Tuple) imported by tor
     Optional,
     Protocol,
     Tuple,
-    TypeVar,
     Union,
 )
-from typing_extensions import ParamSpec
+from typing_extensions import ParamSpec, TypeVar
 
 import torch
 

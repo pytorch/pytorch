@@ -18,8 +18,8 @@ import functools
 import sys
 import types
 from collections.abc import Callable, Iterable, Mapping
-from typing import Any, overload, TypeAlias, TypeVar
-from typing_extensions import deprecated, Self, TypeIs
+from typing import Any, overload, TypeAlias
+from typing_extensions import deprecated, Self, TypeIs, TypeVar
 
 import torch.utils._pytree as python_pytree
 from torch.torch_version import TorchVersion as _TorchVersion

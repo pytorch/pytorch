@@ -16,8 +16,8 @@ import warnings
 from collections.abc import Callable
 from contextlib import closing, contextmanager
 from enum import Enum
-from typing import Any, cast, Generic, IO, TypeAlias, TypeVar
-from typing_extensions import TypeIs
+from typing import Any, cast, Generic, IO, TypeAlias
+from typing_extensions import TypeIs, TypeVar
 
 import torch
 import torch._weights_only_unpickler as _weights_only_unpickler

@@ -11,7 +11,8 @@ from collections.abc import Callable, KeysView, Sequence
 from enum import Enum
 from functools import partial, wraps
 from types import FrameType
-from typing import Any, get_args, get_origin, Literal, TypeVar, Union
+from typing import Any, get_args, get_origin, Literal, Union
+from typing_extensions import TypeVar
 
 import torch
 from functorch.compile import min_cut_rematerialization_partition

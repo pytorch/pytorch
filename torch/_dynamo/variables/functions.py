@@ -33,8 +33,8 @@ import types
 from collections import namedtuple
 from collections.abc import Callable, Sequence
 from types import CellType, FunctionType
-from typing import Any, cast, Literal, Optional, TYPE_CHECKING, TypeVar
-from typing_extensions import Never
+from typing import Any, cast, Literal, Optional, TYPE_CHECKING
+from typing_extensions import Never, TypeVar
 from weakref import WeakKeyDictionary
 
 import torch

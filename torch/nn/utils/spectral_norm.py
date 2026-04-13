@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 """Spectral Normalization from https://arxiv.org/abs/1802.05957."""
 
-from typing import Any, TypeVar
+from typing import Any
+from typing_extensions import TypeVar
 
 import torch
 import torch.nn.functional as F

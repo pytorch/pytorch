@@ -9,7 +9,8 @@ from collections.abc import Callable, Sequence
 from contextlib import contextmanager
 from functools import wraps
 from pstats import Stats
-from typing import Any, cast, TypeVar
+from typing import Any, cast
+from typing_extensions import TypeVar
 
 import torch
 import torch.distributed as dist

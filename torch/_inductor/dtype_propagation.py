@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import functools
 from collections.abc import Callable, Sequence
-from typing import Any, Optional, Protocol, TYPE_CHECKING, TypeVar
+from typing import Any, Optional, Protocol, TYPE_CHECKING
+from typing_extensions import TypeVar
 
 import sympy
 
