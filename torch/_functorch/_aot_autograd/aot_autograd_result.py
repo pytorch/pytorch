@@ -245,6 +245,18 @@ class GenericCompiledBackward(InductorOutput[TOut]):
     backward_state_indices: list[int]
     num_symints_saved_for_bw_: int
 
+    def post_compile(self, result: TOut, fx_config: _CompileFxKwargs) -> TOut:
+        # The concrete post_compile comes from the loadable mixin in each subclass MRO.
+        compiled_bw = super().post_compile(  # pyrefly: ignore[missing-attribute]
+            result, fx_config
+        )
+        # See note [Wrapping bw_compiler in disable]
+        # This is done by _wrapped_bw_compiler in torch/_dynamo/backends/common.py
+        # But since on cache hit we do not call the bw_compiler, we need to reapply the disable
+        return torch._dynamo.disable(  # type: ignore[return-value]
+            compiled_bw, reason="do not trace generated backwards pass"
+        )
+
 
 @dataclass
 class CompiledBackward(GenericCompiledBackward[CompiledFxGraph], FxGraphCacheLoadable):
@@ -254,17 +266,6 @@ class CompiledBackward(GenericCompiledBackward[CompiledFxGraph], FxGraphCacheLoa
 
     def _is_backward(self) -> bool:
         return True
-
-    def post_compile(
-        self, result: CompiledFxGraph, fx_config: _CompileFxKwargs
-    ) -> CompiledFxGraph:
-        compiled_bw = super().post_compile(result, fx_config)
-        # See note [Wrapping bw_compiler in disable]
-        # This is done by _wrapped_bw_compiler in torch/_dynamo/backends/common.py
-        # But since on cache hit we do not call the bw_compiler, we need to reapply the disable
-        return torch._dynamo.disable(  # type: ignore[return-value]
-            compiled_bw, reason="do not trace generated backwards pass"
-        )
 
 
 # Generic bundled forward/backward classes that work with any OutputCode type
@@ -288,17 +289,6 @@ class BundledCompiledBackward(
     Generic backward function for bundled compilation.
     Works with any OutputCode type (CompiledFxGraph, RegionalOutputCode, etc.)
     """
-
-    def post_compile(
-        self, result: TOutputCode, fx_config: _CompileFxKwargs
-    ) -> TOutputCode:
-        compiled_bw = super().post_compile(result, fx_config)
-        # See note [Wrapping bw_compiler in disable]
-        # This is done by _wrapped_bw_compiler in torch/_dynamo/backends/common.py
-        # But since on cache hit we do not call the bw_compiler, we need to reapply the disable
-        return torch._dynamo.disable(  # type: ignore[return-value]
-            compiled_bw, reason="do not trace generated backwards pass"
-        )
 
 
 @dataclass
