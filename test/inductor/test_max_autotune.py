@@ -416,6 +416,59 @@ class TestMaxAutotune(TestCase):
 
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @parametrize("a_transposed", (False, True))
+    @parametrize("b_transposed", (False, True))
+    @parametrize("dynamic", (False, True))
+    def test_max_autotune_regular_addmm_persistent(
+        self,
+        a_transposed: bool,
+        b_transposed: bool,
+        dynamic: bool,
+    ):
+        def addmm(x, a, b):
+            x = x.repeat(8)
+            a = a.repeat(8, 8)
+            b = b.repeat(8, 8)
+
+            if a_transposed:
+                a = a.T
+            if b_transposed:
+                b = b.T
+
+            return torch.addmm(x, a, b)
+
+        M, N, K = 21, 31, 11
+        a = (
+            torch.randn(*((K, M) if a_transposed else (M, K)))
+            .to(torch.float16)
+            .to(GPU_TYPE)
+        )
+        b = (
+            torch.randn(*((N, K) if b_transposed else (K, N)))
+            .to(torch.float16)
+            .to(GPU_TYPE)
+        )
+        x = torch.randn(N).to(torch.float16).to(GPU_TYPE)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "triton.enable_persistent_tma_matmul": "1",
+                "triton.native_matmul": False,
+                "test_configs.autotune_choice_name_regex": "mm_persistent",
+            }
+        ):
+            c_actual, code = run_and_get_code(
+                torch.compile(addmm, dynamic=dynamic), x, a, b
+            )
+            c_expected = addmm(x, a, b)
+
+        # Verify that we are using the non-TMA persistent implementation
+        FileCheck().check("triton_tem_fused_addmm").check("NUM_SMS").run(code[0])
+
+        torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
+
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
