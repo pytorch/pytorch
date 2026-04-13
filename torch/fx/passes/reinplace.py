@@ -1,8 +1,6 @@
-# mypy: allow-untyped-defs
 import _operator
 import itertools
 from collections import defaultdict
-from collections.abc import Callable
 from enum import Enum
 from typing import Any
 
@@ -24,7 +22,7 @@ class _ViewType(Enum):
     MultiOutputView = 2
 
 
-def _is_view_op(tgt):
+def _is_view_op(tgt: object) -> bool | None:
     if tgt is not None and isinstance(tgt, torch._ops.OpOverload):
         schema = tgt._schema
         if len(schema.arguments) > 0:
@@ -35,7 +33,7 @@ def _is_view_op(tgt):
             )
 
 
-def _get_view_type(tgt) -> _ViewType:
+def _get_view_type(tgt: object) -> _ViewType:
     if tgt is not None and isinstance(tgt, torch._ops.OpOverload):
         schema = tgt._schema
         if len(schema.arguments) > 0:
@@ -61,7 +59,7 @@ def _get_view_type(tgt) -> _ViewType:
 #   to sanity check that our aliasing information is correct.
 @compatibility(is_backward_compatible=False)
 class _FunctionalizationMetadataProp(torch.fx.Interpreter):
-    def run_node(self, node: Node):
+    def run_node(self, node: Node) -> Any:
         self.node_counter += 1
         result = super().run_node(node)
         node.meta["fake_result"] = result
@@ -122,7 +120,7 @@ class _FunctionalizationMetadataProp(torch.fx.Interpreter):
                 raise AssertionError("view_storage != base_storage")
         return result
 
-    def propagate(self, *args):
+    def propagate(self, *args: object) -> object:
         self.multi_output_view_nodes = {}
         self.node_counter = -1
 
@@ -133,7 +131,9 @@ class _FunctionalizationMetadataProp(torch.fx.Interpreter):
             return super().run(*fake_args)
 
 
-def _schemas_match(functional_schema, inplace_schema):
+def _schemas_match(
+    functional_schema: torch._C.FunctionSchema, inplace_schema: torch._C.FunctionSchema
+) -> bool:
     names_match = (
         inplace_schema.name.endswith("_")
         and inplace_schema.name[:-1] == functional_schema.name
@@ -160,7 +160,7 @@ def _schemas_match(functional_schema, inplace_schema):
 # - mutating ops (e.g. _fused_moving_avg_obs_fq_helper)
 # - out= ops (e.g. angle -> angle.out)
 # TODO: we should also figure this info out using torchgen.
-def _maybe_get_inplace_op(op):
+def _maybe_get_inplace_op(op: object) -> torch._ops.OpOverload | None:
     # __module__ seems broken; it returns torch._ops.aten which doesn't exist
     if not isinstance(op, torch._ops.OpOverload):
         return None
@@ -202,7 +202,7 @@ def _maybe_get_inplace_op(op):
     return inplace_op
 
 
-_VIEW_INVERSE_MAP: dict[Callable[..., Any], Callable[..., Any]] = {
+_VIEW_INVERSE_MAP: dict[torch._ops.OpOverload, torch._ops.OpOverload] = {
     torch.ops.aten.diagonal_scatter.default: torch.ops.aten.diagonal.default,
     torch.ops.aten.select_scatter.default: torch.ops.aten.select.int,
     torch.ops.aten.slice_scatter.default: torch.ops.aten.slice.Tensor,
@@ -213,8 +213,8 @@ _VIEW_INVERSE_MAP: dict[Callable[..., Any], Callable[..., Any]] = {
 # This function, given a set of set of (aliased) tensor nodes,
 # Returns any nodes in the graph that *use* any of the aliases, that occur *after* op_index
 # in the node ordering.
-def _get_all_later_node_usages(tensor_aliases: set[Node], op_index: int):
-    def _add_if_tensor(x, set_):
+def _get_all_later_node_usages(tensor_aliases: set[Node], op_index: int) -> set[Node]:
+    def _add_if_tensor(x: object, set_: set[StorageWeakRef]) -> None:
         if isinstance(x, FakeTensor):
             set_.add(StorageWeakRef(x._typed_storage()))
 
@@ -249,7 +249,7 @@ def _get_all_later_node_usages(tensor_aliases: set[Node], op_index: int):
 def _get_view_inverse_node_usages(
     later_node_usages: set[Node], self_aliases: set[Node]
 ) -> set[Node]:
-    def matching_view_metadata(a, b):
+    def matching_view_metadata(a: FakeTensor, b: FakeTensor) -> bool:
         return (
             a.size() == b.size()
             and a.stride() == b.stride()
@@ -308,7 +308,9 @@ def _get_view_inverse_node_usages(
 
 
 @compatibility(is_backward_compatible=True)
-def reinplace(gm, *sample_args):
+def reinplace(
+    gm, *sample_args
+):  # pyrefly: ignore[unannotated-parameter, unannotated-return]
     r"""
     Given an fx.GraphModule, modifies it to perform "reinplacing",
     mutating the nodes of the graph.
@@ -563,7 +565,7 @@ def reinplace(gm, *sample_args):
     for n in gm.graph.nodes:
         if "fake_result" in n.meta:
             # Tree-mapping because some ops can return lists of tensors.
-            def _add_to_map(x):
+            def _add_to_map(x: object) -> None:
                 if isinstance(x, FakeTensor):
                     storage_to_nodes[StorageWeakRef(x._typed_storage())].add(n)
 
@@ -721,12 +723,14 @@ def reinplace(gm, *sample_args):
             # We need to replace any later usages of "b" with "a"
             for old in itertools.chain([node], later_view_inverse_node_usages):
                 new = old.args[0]
+                if not isinstance(new, Node):
+                    raise AssertionError(f"Expected Node, got {type(new)}")
                 nodes_to_update = [
                     n for n in old.users if n.meta["node_idx"] > node.meta["node_idx"]
                 ]
                 for node_to_update in nodes_to_update:
 
-                    def replace_arg(a):
+                    def replace_arg(a: Node) -> Node:
                         if a == old:
                             return new
                         return a

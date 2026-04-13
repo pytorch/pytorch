@@ -1,5 +1,3 @@
-# mypy: allow-untyped-defs
-
 import hashlib
 from itertools import chain
 from types import ModuleType
@@ -85,7 +83,7 @@ if HAS_PYDOT:
             parse_stack_trace: bool = False,
             dot_graph_shape: str | None = None,
             normalize_args: bool = False,
-        ):
+        ) -> None:
             self._name = name
             self.dot_graph_shape = (
                 dot_graph_shape if dot_graph_shape is not None else "record"
@@ -122,7 +120,7 @@ if HAS_PYDOT:
                     parse_stack_trace,
                 )
 
-        def get_dot_graph(self, submod_name=None) -> pydot.Dot:
+        def get_dot_graph(self, submod_name: str | None = None) -> pydot.Dot:
             """
             Visualize a torch.fx.Graph with graphviz
             Example:
@@ -154,7 +152,7 @@ if HAS_PYDOT:
         def get_main_dot_graph(self) -> pydot.Dot:
             return self._dot_graphs[self._name]
 
-        def get_submod_dot_graph(self, submod_name) -> pydot.Dot:
+        def get_submod_dot_graph(self, submod_name: str) -> pydot.Dot:
             return self._dot_graphs[f"{self._name}_{submod_name}"]
 
         def get_all_dot_graphs(self) -> dict[str, pydot.Dot]:
@@ -198,7 +196,7 @@ if HAS_PYDOT:
                 py_obj = getattr(py_obj, atom)
             return py_obj
 
-        def _typename(self, target: Any) -> str:
+        def _typename(self, target: torch.fx.node.Target | torch.nn.Module) -> str:
             if isinstance(target, torch.nn.Module):
                 ret = torch.typename(target)
             elif isinstance(target, str):
@@ -218,7 +216,7 @@ if HAS_PYDOT:
             self,
             full_file_name: str,
             truncate_to_last_n: int = 2,
-        ):
+        ) -> str:
             splits = full_file_name.split("/")
             if len(splits) >= truncate_to_last_n:
                 return "/".join(splits[-truncate_to_last_n:])
@@ -231,7 +229,7 @@ if HAS_PYDOT:
             skip_node_names_in_args: bool,
             parse_stack_trace: bool,
         ) -> str:
-            def _get_str_for_args_kwargs(arg):
+            def _get_str_for_args_kwargs(arg: tuple[Any, ...] | dict[str, Any]) -> str:
                 if isinstance(arg, tuple):
                     prefix, suffix = r"|args=(\l", r",\n)\l"
                     arg_strs_list = [_format_arg(a, max_list_len=8) for a in arg]
@@ -311,7 +309,7 @@ if HAS_PYDOT:
 
             return label + "}"
 
-        def _tensor_meta_to_label(self, tm) -> str:
+        def _tensor_meta_to_label(self, tm: object) -> str:
             if tm is None:
                 return ""
             elif isinstance(tm, TensorMetadata):
@@ -414,7 +412,7 @@ if HAS_PYDOT:
             # "TB" means top-to-bottom rank direction in layout
             dot_graph = pydot.Dot(name, rankdir="TB")
 
-            buf_name_to_subgraph = {}
+            buf_name_to_subgraph: dict[str, pydot.Cluster] = {}
 
             for node in graph_module.graph.nodes:
                 if ignore_getattr and node.op == "get_attr":
@@ -443,7 +441,7 @@ if HAS_PYDOT:
                 # pyrefly: ignore [missing-attribute]
                 current_graph.add_node(dot_node)
 
-                def get_module_params_or_buffers():
+                def get_module_params_or_buffers() -> None:
                     for pname, ptensor in chain(
                         leaf_module.named_parameters(),
                         # pyrefly: ignore [bad-argument-type]
