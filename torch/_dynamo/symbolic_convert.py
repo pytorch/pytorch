@@ -767,7 +767,12 @@ def generic_jump(
             self.output.add_output_instructions([create_instruction("TO_BOOL")])
 
         jump_inst = create_instruction(inst.opname, target=if_jump[0])
-        jump_inst.copy_positions(inst)
+        # For inlined frames, use the root frame's current instruction
+        # positions so the output code maps to the correct source line.
+        positions_inst = (
+            self.output.root_tx.current_instruction if self.parent is not None else inst
+        )
+        jump_inst.copy_positions(positions_inst)
         self.output.add_output_instructions([jump_inst] + if_next + if_jump)
 
     def inner(self: InstructionTranslatorBase, inst: Instruction) -> None:
@@ -1089,6 +1094,16 @@ def break_graph_if_unsupported(
             self.output.add_output_instructions(cg.get_instructions())
             del cg
 
+            # For inlined frames, use the root frame's current instruction
+            # positions so the output code maps to the correct source line.
+            # The output code is always for the root function, so line numbers
+            # from inlined child frames would be wrong.
+            positions_inst = (
+                self.output.root_tx.current_instruction
+                if self.parent is not None
+                else inst
+            )
+
             if sys.version_info >= (3, 11) and inst.opname == "CALL":
                 kw_names = (
                     self.kw_names.as_python_constant()
@@ -1103,13 +1118,14 @@ def break_graph_if_unsupported(
                     )
                 assert inst.arg is not None
                 call_insts = create_call_function(inst.arg, False)
-                call_insts[-1].copy_positions(inst)
+                call_insts[-1].copy_positions(positions_inst)
                 self.output.add_output_instructions(call_insts)
             else:
                 # copy instruction, but without exception table data
                 assert inst.target is None
                 inst_copy = copy.copy(inst)
                 inst_copy.exn_tab_entry = None
+                inst_copy.copy_positions(positions_inst)
                 self.output.add_output_instructions([inst_copy])
 
             self.output.add_output_instructions(cleanup)

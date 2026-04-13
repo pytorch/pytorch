@@ -1338,9 +1338,6 @@ TRACE CALL 0 [NullVariable, LazyVariableTracker(unrealized: <class 'function'>)]
         self.assertEqual((len(matches) <= 20), True)
         self.assertIn("Most recent bytecode instructions traced (max 20):", s)
 
-    # TODO this test is broken with nested_graph_breaks because we need to update
-    # the resume collapse function for nested graph breaks
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @torch._dynamo.config.patch(verbose=True)
     @make_logging_test(graph_breaks=True)
     def test_graph_break_traceback_above_dynamo_shows_user_code(self, records):
@@ -1394,7 +1391,7 @@ TRACE CALL 0 [NullVariable, LazyVariableTracker(unrealized: <class 'function'>)]
             post_munge(munge_exc(records[-1].getMessage(), skip=0)),
             """\
 Graph break in user code at test_error_messages.py:N
-Graph Break Reason: Encountered graph break when attempting to trace STORE_ATTR: storing an object's attribute, e.g. x.attr = y:
+Graph Break Reason: Encountered graph break when attempting to trace CALL: a function call, e.g. f(x, y):
 
 Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
@@ -1418,6 +1415,71 @@ User code traceback:
     Foo().attr = x
   File "test_error_messages.py", line N, in __setattr__
     torch._dynamo.graph_break()
+
+NOTE: the most recent `torch.compile` tracing attempt might not be where you applied `torch.compile`! This is due to how graph breaks are implemented - the optimized code object returned by Dynamo will call another Dynamo-generated resume function and tracing is re-enabled by calling the resume function as a normal Python function, which Dynamo intercepts as a top-level frame.
+
+Most recent bytecode instructions traced (max 20):
+""",
+        )
+
+    @torch._dynamo.config.patch(verbose=True)
+    @make_logging_test(graph_breaks=True)
+    def test_graph_break_traceback_inlined_data_dependent_branch(self, records):
+        # Tests that data-dependent branches in inlined functions show correct
+        # source lines in the verbose traceback (from the call site, not the
+        # inlined function's source).
+        def helper(x):
+            if x.sum() > 0:  # 0
+                x = x + 1
+            if x.sum() > 0:  # 1
+                x = x + 1
+            return x
+
+        @torch.compile(backend="eager")
+        def f(x):
+            return helper(x) + 1  # call site
+
+        f(torch.ones(3))
+
+        def post_munge(s):
+            s = re.sub(
+                r"torch_dynamo_resume_in_(\w+)_at_(\d+)",
+                r"torch_dynamo_resume_in_\1_at_N",
+                s,
+            )
+            return re.sub(r"TRACE.*$", "", s, flags=re.DOTALL)
+
+        self.assertExpectedInline(
+            post_munge(munge_exc(records[-1].getMessage(), skip=0)),
+            """\
+Graph break in user code at test_error_messages.py:N
+Graph Break Reason: Data-dependent branching
+  Explanation: Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). Dynamo does not support tracing dynamic control flow.
+
+      The branch condition involves a tensor computed as follows:
+        # File "test_error_messages.py", line N, in torch_dynamo_resume_in_helper_at_N, code: if x.sum() > 0:  # 1
+        gt = gt(sum_1, 0)
+
+  Hint: The branch condition uses a scalar integer tensor. Consider rewriting the computation to use plain Python ints (e.g. use int attributes instead of tensor buffers) so the condition becomes a shape guard instead of data-dependent branching.
+  Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
+  Hint: Use `torch.cond` to express dynamic control flow.
+
+  Developer debug context: attempted to jump with TensorVariable()
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0170.html
+
+User code traceback:
+  File "test_error_messages.py", line N, in test_graph_break_traceback_inlined_data_dependent_branch
+    f(torch.ones(3))
+  File "test_error_messages.py", line N, in f
+    return helper(x) + 1  # call site
+
+========== most recent `torch.compile` tracing attempt started here ==========
+
+  File "test_error_messages.py", line N, in torch_dynamo_resume_in_f_at_N
+    return helper(x) + 1  # call site
+  File "test_error_messages.py", line N, in torch_dynamo_resume_in_helper_at_N
+    if x.sum() > 0:  # 1
 
 NOTE: the most recent `torch.compile` tracing attempt might not be where you applied `torch.compile`! This is due to how graph breaks are implemented - the optimized code object returned by Dynamo will call another Dynamo-generated resume function and tracing is re-enabled by calling the resume function as a normal Python function, which Dynamo intercepts as a top-level frame.
 
