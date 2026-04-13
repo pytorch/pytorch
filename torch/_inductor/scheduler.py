@@ -2639,20 +2639,14 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                     continue
                 device_groups[device].append(node)
 
-            # Sub-group by stream to avoid mixing nodes across stream
-            # boundaries.  When multi-stream scheduling is inactive every
-            # node maps to DEFAULT_STREAM_IDX so this is a no-op.
+            # Chunk each device group separately
             for device_nodes in device_groups.values():
-                stream_groups: dict[int, list[BaseSchedulerNode]] = defaultdict(list)
-                for node in device_nodes:
-                    stream_groups[scheduler.node_to_stream.get(node, 0)].append(node)
-                for stream_nodes in stream_groups.values():
-                    grouped_nodes.extend(
-                        [
-                            stream_nodes[i : i + max_num_nodes]
-                            for i in range(0, len(stream_nodes), max_num_nodes)
-                        ]
-                    )
+                grouped_nodes.extend(
+                    [
+                        device_nodes[i : i + max_num_nodes]
+                        for i in range(0, len(device_nodes), max_num_nodes)
+                    ]
+                )
         return grouped_nodes
 
     group_algorithm_for_combo_kernels: Callable[
@@ -5073,11 +5067,6 @@ class Scheduler:
             self.name_to_fused_node.update(
                 {n.get_name(): group_snode for n in group_snode.get_nodes()}
             )
-            # Propagate stream assignment so codegen can place the combo
-            # kernel in the correct stream context.
-            stream = self.node_to_stream.get(node_list[0])
-            if stream is not None:
-                self.node_to_stream[group_snode] = stream
         self.nodes = sorted(fused_nodes, key=lambda x: x.min_order)
         self.nodes = self.topological_sort_schedule(self.nodes)
         log.info(
