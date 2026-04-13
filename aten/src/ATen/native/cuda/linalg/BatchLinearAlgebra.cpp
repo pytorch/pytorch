@@ -946,8 +946,9 @@ TORCH_CHECK(false, "triangular_solve: MAGMA library not found in "
   // magmaTriangularSolve is calling cuBLAS and it prints
   // ** On entry to DTRSM  parameter number 9 had an illegal value
   // so let's use proper lda parameter here
-  magma_int_t lda = std::max<magma_int_t>(1, A.size(-2));
-  magma_int_t ldb = std::max<magma_int_t>(1, b.size(-2));
+  // NOTE: column-major input
+  auto lda = static_cast<magma_int_t>(leadingDim(A));
+  auto ldb = static_cast<magma_int_t>(leadingDim(b));
   magma_int_t batch_size = magma_int_cast(batchCount(A), "batch_size");
 
   auto A_mat_stride = matrixStride(A);

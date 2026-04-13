@@ -18924,8 +18924,6 @@ op_db: list[OpInfo] = [
                             'TestConsistency', 'test_output_grad_match', device_type='mps'),
            ],
            skips=(
-               # AssertionError: Scalars are not equal!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                # Gradcheck fails
                DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_fn_fwgrad_bwgrad',
                             dtypes=floating_and_complex_types()),

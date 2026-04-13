@@ -2304,8 +2304,8 @@ static void triangular_solve_out_impl(
   }
 
   // 'result' and 'clone_input' must be in batched column major order (Fortran contiguous)
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.mT().is_contiguous());
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(clone_input.mT().is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(isColMajorLike(result));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(isColMajorLike(clone_input));
 
   // triangular_solve_stub performs calculations in-place
   // 'result' must be a copy of 'other'
@@ -2321,8 +2321,7 @@ static void triangular_solve_out_impl(
 TORCH_IMPL_FUNC(triangular_solve_out)(const Tensor& self, const Tensor& A, bool upper, bool transpose, bool unitriangular, const Tensor& result, const Tensor& clone_A) {
   auto [self_broadcast, A_broadcast] = _linalg_broadcast_batch_dims(self, A, "triangular_solve");
 
-  bool copy_needed = !result.transpose(-2, -1).is_contiguous();
-  copy_needed |= !clone_A.transpose(-2, -1).is_contiguous();
+  const bool copy_needed = !(isColMajorLike(result) && isColMajorLike(clone_A));
 
   if (copy_needed) {
     Tensor result_tmp = at::empty({0}, self.options());
