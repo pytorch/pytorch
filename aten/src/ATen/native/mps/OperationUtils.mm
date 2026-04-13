@@ -442,8 +442,6 @@ MPSNDArray* getStridedMPSNDArray(const TensorBase& src, MPSNDArray* srcNDArray) 
   auto sizes = src.sizes();
   auto nStrides = strides.size();
   auto nonZeroStrides = src.strides();
-  int64_t crtNonZeroStride = 1;
-  bool hasZeroStrides = false;
   auto sortedStridesIndices = getSortedStrides(nonZeroStrides);
 
   NSMutableArray<NSNumber*>* sortedStridesShape = [NSMutableArray arrayWithCapacity:nStrides];
