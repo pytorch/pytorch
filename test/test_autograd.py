@@ -7728,7 +7728,7 @@ for shape in [(1,), ()]:
 
     @unittest.skipIf(
         not TEST_GPU or not torch.get_device_module(device_type).is_bf16_supported(),
-		"Test requires GPU bf16 support",
+        "Test requires GPU bf16 support",
     )
     def test_checkpointing_non_reentrant_autocast_gpu(self):
         """
@@ -11601,10 +11601,7 @@ for shape in [(1,), ()]:
         # with grad
         a = torch.ones(1, requires_grad=True, device=device_type)
         y = f(a)
-        memory_with_grad = (
         memory_with_grad = torch.accelerator.memory_allocated()
-        )
-
         del a
         del y
 
@@ -11612,12 +11609,8 @@ for shape in [(1,), ()]:
         a = torch.ones(1, requires_grad=True, device=device_type)
         with torch.no_grad():
             y = f(a)
-        memory_without_grad = (
         memory_without_grad = torch.accelerator.memory_allocated()
-        )
-
         self.assertGreater(memory_with_grad, memory_without_grad)
-
         del a
         del y
 
@@ -11625,11 +11618,7 @@ for shape in [(1,), ()]:
         with torch.autograd.graph.save_on_cpu():
             a = torch.ones(1, requires_grad=True, device=device_type)
             y = f(a)
-            memory_with_hooks = (
             memory_with_hooks = torch.device(device_type).memory_allocated()
-                if TEST_CUDA
-                else torch.xpu.memory_allocated()
-            )
             self.assertEqual(memory_with_hooks, memory_without_grad)
 
     @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
