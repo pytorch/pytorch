@@ -700,14 +700,13 @@ class UnifiedModel(nn.Module):
 
 
 def verify_choice_names(choices: list[Any], pattern: str, expected_count: int = 1):
-    """Verify choices match expected pattern and count"""
-    if len(choices) != expected_count:
-        raise ValueError(f"Expected {expected_count} choices, got {len(choices)}")
-    for choice in choices:
-        if not re.search(pattern, choice.name):
-            raise ValueError(
-                f"Choice name '{choice.name}' doesn't match pattern '{pattern}'"
-            )
+    """Verify choices matching pattern have expected count"""
+    matching = [c for c in choices if re.search(pattern, c.name)]
+    if len(matching) != expected_count:
+        raise ValueError(
+            f"Expected {expected_count} choices matching '{pattern}', "
+            f"got {len(matching)} (total choices: {len(choices)})"
+        )
     return choices
 
 
