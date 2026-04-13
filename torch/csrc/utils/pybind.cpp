@@ -162,4 +162,27 @@ py::handle type_caster<c10::Scalar>::cast(
     TORCH_INTERNAL_ASSERT(0, "unrecognized scalar type ", scalar.type());
   }
 }
+py::handle type_caster<c10::Layout>::cast(
+    c10::Layout layout,
+    return_value_policy /*unused*/,
+    handle /*parent*/) {
+  PyObject* layout_obj =
+      reinterpret_cast<PyObject*>(torch::getTHPLayout(layout));
+  TORCH_CHECK(layout_obj, "Invalid layout: ", static_cast<int>(layout));
+  return handle(layout_obj).inc_ref(); // Increment ref count to ensure the
+                                       // object isn't deallocated
+}
+
+bool type_caster<c10::Layout>::load(handle src, bool /*convert*/) {
+  if (!src) {
+    return false;
+  }
+  if (!THPLayout_Check(src.ptr())) {
+    return false;
+  }
+  const auto layout = reinterpret_cast<THPLayout*>(src.ptr());
+  value = layout->layout;
+  return true;
+}
+
 } // namespace pybind11::detail
