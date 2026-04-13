@@ -475,6 +475,8 @@ def dim_tile(ndim: int, dims: tuple[int, ...]) -> DimMap:
 
 
 def dim_transpose(ndim: int, dim1: int, dim2: int) -> DimMap:
+    if ndim == 0:
+        return ()
     dim1 = normalize_dim(dim1, ndim)
     dim2 = normalize_dim(dim2, ndim)
     if not dim1 < ndim:

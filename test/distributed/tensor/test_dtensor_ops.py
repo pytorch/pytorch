@@ -127,13 +127,24 @@ def repurpose_ops(op_db, base_test_name, derived_test_name):
 # check_dtensor_func(self, test, op, dry_run=True), then run sth
 # like python test/distributed/tensor/test_dtensor_ops.py > failed.expect
 dtensor_fails = {
-    # view/reshape ops: rejects flatten/split of sharded dims without redistribution
+    # -- view/reshape: _unsafe_view rejects flatten/split of sharded dims --
+    # Fix: add redistribution support in propagate_shape_and_sharding() for
+    # Flatten/Split DimSpec types, or register direct strategies that avoid
+    # the view decomposition path.
+    xfail("flatten"),
+    xfail("ravel"),
     xfail("repeat_interleave"),
     xfail("reshape"),
+    xfail("reshape_as"),
     xfail("unbind"),
     xfail("unflatten"),
     xfail("view"),
-    # factory/creation ops: test harness can't convert non-tensor args to DTensor
+    xfail("view_as"),
+    # -- factory/creation: DTensorConverter can't convert non-tensor args --
+    # These ops take shape/size as non-tensor args (ints, lists). The test
+    # harness (DTensorConverter) only converts Tensor args to DTensor.
+    # Fix: extend DTensorConverter to handle factory ops, or write dedicated
+    # factory op tests that construct DTensors directly.
     xfail("arange"),
     xfail("broadcast_shapes"),
     xfail("eye"),
@@ -154,12 +165,24 @@ dtensor_fails = {
     xfail("signal.windows.kaiser"),
     xfail("signal.windows.nuttall"),
     xfail("zeros"),
-    # random/stochastic ops: different RNG states between DTensor and reference
+    xfail("empty"),
+    xfail("empty_strided"),
+    xfail("empty_like"),
+    xfail("empty_permuted"),
+    xfail("new_empty"),
+    xfail("new_empty_strided"),
+    # -- random/stochastic: RNG state mismatch between shards --
+    # Each shard generates different random values so cross-ref check fails.
+    # Fix: use DTensor's RNG tracker (OffsetBasedRNGTracker) to sync RNG state
+    # across shards, or skip numeric comparison for stochastic ops.
     xfail("bernoulli"),
     xfail("cauchy"),
+    skip("multinomial"),  # flaky: sometimes RNG matches, sometimes not
     xfail("exponential"),
+    xfail("geometric"),
     xfail("nn.functional.alpha_dropout"),
     xfail("nn.functional.dropout"),
+    xfail("nn.functional.rrelu"),
     xfail("normal"),
     xfail("normal", "in_place"),
     xfail("normal", "number_mean"),
@@ -169,34 +192,56 @@ dtensor_fails = {
     xfail("randn"),
     xfail("randn_like"),
     xfail("uniform"),
-    # mixed Tensor/DTensor inputs: op creates plain Tensors mixed with DTensor args
+    # -- mixed Tensor/DTensor: op internally creates plain Tensors --
+    # Decomposition creates plain tensors (e.g. indices, masks) that get mixed
+    # with DTensor inputs, triggering "mixed torch.Tensor and DTensor" error.
+    # Fix: wrap the plain tensor creation in the decomposition to produce DTensors,
+    # or register a direct strategy that avoids the decomposition.
     xfail("__getitem__"),
     xfail("nn.functional.fractional_max_pool2d"),
     xfail("nn.functional.fractional_max_pool3d"),
+    xfail("nn.functional.scaled_dot_product_attention"),
+    xfail("nn.functional.embedding_bag"),
     xfail("pca_lowrank"),
-    xfail("quantile"),
     xfail("svd_lowrank"),
-    # dynamic output shape: output shape depends on data values
+    xfail("masked.mean"),  # decomp creates plain count tensor for div
+    xfail("masked.var"),  # decomp creates plain count tensor for div
+    xfail("masked.std"),  # decomp creates plain count tensor for div
+    xfail("linalg.matrix_power"),  # copy_ with mixed tensor/DTensor for n<0
+    xfail("nanquantile"),  # decomp hits quantile -> masked_fill with plain tensor
+    xfail("quantile"),  # decomp hits masked_fill with plain tensor
+    # -- dynamic output shape: data-dependent output size --
+    # Fix: not possible without eager execution (output size depends on values).
+    xfail("argwhere"),  # decomposes to nonzero (dynamic shape)
     xfail("combinations"),
     xfail("linalg.lstsq"),
     xfail("linalg.lstsq", "grad_oriented"),
     xfail("masked_select"),
     xfail("nn.functional.ctc_loss"),
-    # 0-dim tensor edge cases: strategies don't handle scalar tensors
-    xfail("logsumexp"),
-    xfail("masked.logsumexp"),
-    xfail("transpose"),
-    # conv stride+padding: TP convolution rejects stride != 1 with padding
+    # -- conv stride+padding: tp_convolution rejects stride != 1 with padding --
+    # Fix: relax the stride/padding check in tp_convolution kernel, or add
+    # padding-aware sharding that accounts for halo exchange.
     xfail("nn.functional.conv1d"),
     xfail("nn.functional.conv2d"),
     xfail("nn.functional.conv3d"),
     xfail("nn.functional.conv_transpose1d"),
     xfail("nn.functional.conv_transpose2d"),
     xfail("nn.functional.conv_transpose3d"),
-    # "cannot resize variables that require grad" from test harness
+    # -- CIA decomp produces in-place placement change --
+    # cosine_similarity decomposes to norm -> div -> clamp_min_, and clamp_min_
+    # gets _NormPartial input that needs redistribution (breaks in-place semantics).
+    # Fix: replace clamp_min_ with clamp_min in the decomposition, or register
+    # a direct strategy + custom local implementation that avoids in-place ops.
+    xfail("nn.functional.cosine_similarity"),
+    # -- autograd constraint: cannot resize variables that require grad --
+    # The test creates inputs with requires_grad=True, but resize_ is forbidden
+    # on grad tensors by autograd.
+    # Fix: test with requires_grad=False, or skip these in the grad-enabled path.
     xfail("resize_"),
     xfail("resize_as_"),
-    # DTensorConverter can't convert sparse tensor inputs
+    # -- sparse inputs: DTensorConverter can't handle sparse tensor layout --
+    # Fix: extend DTensorConverter to convert sparse tensors to DTensor,
+    # or add sparse tensor support to DTensor core.
     xfail("sparse.sampled_addmm"),
     xfail("sparse.mm", "reduce"),
     xfail("to_sparse"),
@@ -206,45 +251,57 @@ dtensor_fails = {
     xfail("nn.functional.group_norm"),
     # instance_norm decomposes to group_norm → same limitation
     xfail("nn.functional.instance_norm"),
-    # meta tensor data not allocated yet during tensor_split
+    # -- meta tensor not allocated: tensor_split fake prop issue --
+    # Fix: fix fake tensor propagation for tensor_split to allocate meta data.
     xfail("tensor_split"),
-    # output_specs count mismatch in unsafe_split strategy
-    xfail("unsafe_split"),
-    # /TODO(whc) debug/triage
-    # ops inside this might even fail without dtensor
-    # tests, as we rescale op db common test size factor (i.e. L, M, S)
-    # which triggered the original function run failures with input
-    # generation becomes wrong, we skip them for now but should enable later.
-    # TODO: need to clean this list and remove all cases
-    skip("argwhere"),
-    skip("cumprod"),
-    skip("__rmatmul__"),
-    skip("meshgrid", "list_of_tensors"),
-    skip("meshgrid", "variadic_tensors"),
-    skip("nn.functional.scaled_dot_product_attention"),
-    skip("nn.functional.softmin"),
-    skip("nn.functional.embedding"),
-    skip("nn.functional.embedding_bag"),
-    skip("nn.functional.feature_alpha_dropout", "with_train"),
-    skip("nn.functional.feature_alpha_dropout", "without_train"),
+    # -- decomp chain hits as_strided (deliberately unsupported in DTensor) --
+    # These ops have CIA decompositions that eventually call as_strided.
+    # Fix: register direct strategies with custom local implementations that
+    # avoid as_strided, or implement as_strided support in DTensor.
+    xfail("as_strided_copy"),
+    xfail("as_strided_scatter"),
+    xfail("stft"),  # decomp: reflection_pad1d -> fft internals -> as_strided
+    # -- replicate-only strategies: test tries sharded placements that break --
+    # These ops have replicate-only strategies registered. They work correctly
+    # with Replicate placement, but the test harness (DTensorConverter) also
+    # tries Shard placements. With sharded inputs, the CIA decomposition runs
+    # sub-ops that hit view/reshape redistribution errors.
+    # Fix: write proper sharded strategies (e.g. batch-dim sharding) instead of
+    # replicate-only, or make the test only try placements the strategy allows.
+    xfail("cartesian_prod"),  # decomp hits _unsafe_view flatten on sharded
+    xfail("histogram"),  # weight shape mismatch when sharded
+    xfail("histogramdd"),  # tensor meta count mismatch in _histogramdd_bin_edges
+    xfail("kron"),  # decomp hits _unsafe_view flatten on sharded
+    xfail("linalg.tensorsolve"),  # decomp hits _unsafe_view flatten on sharded
+    xfail("repeat_interleave"),  # decomp hits _unsafe_view flatten on sharded
+    xfail("searchsorted"),  # boundary/sorter size mismatch when sharded
+    xfail("take_along_dim"),  # decomp hits _unsafe_view flatten on sharded
+    xfail("to_sparse"),  # sparse output layout incompatible with DTensor
+    xfail("log_normal"),  # RNG-like: each shard gets different values
+    # -- squeeze dim=None: dim_squeeze FIXME in _view_ops.py --
+    # When dim=None and a dimension equals mesh size, sharding makes local size 1,
+    # causing incorrect squeeze. See FIXME in dim_squeeze().
+    # Fix: make dim_squeeze aware of the DTensor vs local shape distinction.
+    xfail("squeeze"),
+    xfail("squeeze", "multiple"),
+    xfail("squeeze_copy"),
+    # -- decomp hits flatten redistribution on batched matmul --
+    # matmul(tensor[B, M, K], tensor[K]) decomposes via _unsafe_view to flatten
+    # batch dims, which fails when batch dim is sharded.
+    # Fix: register a direct matmul strategy for the (batched, 1D) case, or
+    # support redistribution in the view/flatten path.
+    xfail("matmul"),
+    xfail("__rmatmul__"),
+    # -- narrow on 0-size or sharded tensors --
+    # cumprod/prod: sample inputs include 0-size tensors, and narrow(start=4, len=1)
+    # exceeds dimension size (4) after sharding across 4 ranks.
+    # Fix: filter out 0-size tensor samples, or handle 0-size tensors in DTensor.
+    xfail("cumprod"),
+    xfail("prod"),
+    # -- skipped ops: crash or hang in multi-threaded test --
     skip("nn.functional.hinge_embedding_loss"),
     skip("nn.functional.cosine_embedding_loss"),
-    skip("fft.hfft"),
-    skip("fft.hfft2"),
-    skip("fft.hfft2"),
-    skip("fft.hfftn"),
-    skip("fft.ifftn"),
-    skip("fft.irfft"),
-    skip("frexp"),
     skip("istft"),
-    skip("isclose"),
-    skip("isreal"),
-    skip("matmul"),
-    skip("masked.mean"),
-    skip("masked.var"),
-    skip("masked.std"),
-    skip("masked.normalize"),
-    skip("prod"),
     skip("_segment_reduce", "lengths"),
     skip("_segment_reduce", "offsets"),
     # TODO: fix the following ops
@@ -257,8 +314,13 @@ dtensor_fails = {
 }
 
 dtensor_multi_threaded_fails = {
-    xfail("index_fill"),
+    # flaky in multi-threaded mode (pass individually, fail in full suite)
+    skip("baddbmm"),
+    skip("clamp"),
     xfail("full_like"),
+    # threshold: numeric mismatch on sharded inputs (passes in Local mode)
+    xfail("nn.functional.threshold"),
+    skip("nn.functional.feature_alpha_dropout", "with_train"),
     xfail("nn.functional.dropout2d"),
     xfail("nn.functional.dropout3d"),
     xfail("nn.functional.huber_loss"),
@@ -397,63 +459,15 @@ dtensor_numeric_only_fails = {
 # Ops in dtensor_fails that have no sharding strategy (NotImplementedError).
 # These will error during sharding propagation and affect unbacked tests too.
 dtensor_fails_no_strategy = {
-    xfail("_chunk_cat"),
-    xfail("_unsafe_masked_index"),
-    xfail("_unsafe_masked_index_put_accumulate"),
-    xfail("addbmm"),
     xfail("as_strided"),
     xfail("as_strided", "partial_views"),
-    xfail("as_strided_copy"),
-    xfail("as_strided_scatter"),
-    xfail("block_diag"),
-    xfail("cdist"),
-    xfail("complex"),
-    xfail("diagonal_scatter"),
-    xfail("fft.ihfft2"),
-    xfail("fft.ihfftn"),
-    xfail("geometric"),
-    xfail("histogram"),
-    xfail("histogramdd"),
-    xfail("index_add"),
-    xfail("index_copy"),
-    xfail("index_fill"),
-    xfail("index_reduce", "amax"),
-    xfail("index_reduce", "amin"),
-    xfail("index_reduce", "mean"),
-    xfail("index_reduce", "prod"),
-    xfail("isin"),
-    xfail("linalg.matrix_power"),
-    xfail("linspace", "tensor_overload"),
-    xfail("log_normal"),
-    xfail("logspace", "tensor_overload"),
-    xfail("multinomial"),
-    xfail("nanquantile"),
-    xfail("nn.functional.bilinear"),
-    xfail("nn.functional.hardshrink"),
-    xfail("nn.functional.multi_margin_loss"),
-    xfail("nn.functional.multilabel_margin_loss"),
-    xfail("nn.functional.pad", "reflect"),
-    xfail("nn.functional.pad", "replicate"),
-    xfail("nn.functional.pad", "replicate_negative"),
-    xfail("nn.functional.pdist"),
-    xfail("nn.functional.rrelu"),
-    xfail("nn.functional.unfold"),
+    # dynamic output shape: output shape depends on data values, no decomp
     xfail("nonzero"),
-    xfail("polar"),
-    xfail("renorm"),
-    xfail("scatter_reduce", "amax"),
-    xfail("scatter_reduce", "amin"),
-    xfail("scatter_reduce", "mean"),
-    xfail("scatter_reduce", "prod"),
-    xfail("scatter_reduce", "sum"),
-    xfail("searchsorted"),
-    xfail("select_scatter"),
-    xfail("squeeze_copy"),
-    xfail("stft"),
-    xfail("unfold"),
-    xfail("unfold_copy"),
     xfail("unique"),
     xfail("unique_consecutive"),
+    # factory ops with tensor overloads: no decomp
+    xfail("linspace", "tensor_overload"),
+    xfail("logspace", "tensor_overload"),
 }
 
 # Add a list of ops that are currently failing BW pass
@@ -761,7 +775,12 @@ class TestLocalDTensorOps(TestDTensorOps):
         _op_db,
         "TestLocalDTensorOps",
         "test_dtensor_op_db",
-        dtensor_fails | dtensor_fails_no_strategy,
+        dtensor_fails
+        | dtensor_fails_no_strategy
+        | {
+            # LocalIntNode guard issue only in fake PG mode
+            xfail("nn.functional.embedding"),
+        },
     )
     def test_dtensor_op_db(self, dtype, op):
         self.run_opinfo_test(dtype, op)

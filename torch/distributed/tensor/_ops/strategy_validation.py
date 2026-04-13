@@ -555,6 +555,7 @@ def validate_combination(
     world_size: int = 2,
     mesh: DeviceMesh | None = None,
     mask_shift: int = 0,
+    inference_mode: bool = False,
 ) -> tuple[bool | None, str]:
     """
     Validate a single placement combination against ground truth.
@@ -617,7 +618,11 @@ def validate_combination(
         local_args = pytree.tree_map(_replace_with_local, sample_input.args)
         local_kwargs = pytree.tree_map(_replace_with_local, sample_input.kwargs)
 
-        local_output = op(local_input, *local_args, **local_kwargs)
+        if inference_mode:
+            with torch.inference_mode():
+                local_output = op(local_input, *local_args, **local_kwargs)
+        else:
+            local_output = op(local_input, *local_args, **local_kwargs)
 
         return _compare_outputs(
             local_output, ground_truth, combination[1], mesh, world_size
@@ -755,8 +760,15 @@ def create_fully_negated_sample(sample: SampleInput) -> SampleInput:
     return SampleInput(new_input, args=new_args, kwargs=new_kwargs)
 
 
-def _run_op_on_sample(op: Callable[..., Any], sample: SampleInput) -> Any:
+def _run_op_on_sample(
+    op: Callable[..., Any], sample: SampleInput, inference_mode: bool = False
+) -> Any:
     """Run an operator on a SampleInput, handling both tensor and tuple inputs."""
+    if inference_mode:
+        with torch.inference_mode():
+            if isinstance(sample.input, torch.Tensor):
+                return op(sample.input, *sample.args, **sample.kwargs)
+            return op(*sample.input, *sample.args, **sample.kwargs)
     if isinstance(sample.input, torch.Tensor):
         return op(sample.input, *sample.args, **sample.kwargs)
     return op(*sample.input, *sample.args, **sample.kwargs)
@@ -1024,6 +1036,7 @@ def _prepare_false_positive_mitigations(
     op: Callable[..., Any],
     sample: SampleInput,
     tensors: list[tuple[str, torch.Tensor]],
+    inference_mode: bool = False,
 ) -> _FalsePositiveMitigations:
     """Create negated and non-rounded sample variants for false positive detection."""
     m = _FalsePositiveMitigations()
@@ -1031,7 +1044,7 @@ def _prepare_false_positive_mitigations(
     try:
         m.negated_sample = create_fully_negated_sample(sample)
         m.negated_tensors = negate_all_tensors(tensors)
-        result = _run_op_on_sample(op, m.negated_sample)
+        result = _run_op_on_sample(op, m.negated_sample, inference_mode)
         if _is_tensor_output(result):
             m.negated_ground_truth = _to_ground_truth(result)
         else:
@@ -1050,7 +1063,7 @@ def _prepare_false_positive_mitigations(
         m.non_rounded_sample = SampleInput(
             sample.input, args=sample.args, kwargs=non_rounded_kwargs
         )
-        result = _run_op_on_sample(op, m.non_rounded_sample)
+        result = _run_op_on_sample(op, m.non_rounded_sample, inference_mode)
         if not _is_tensor_output(result):
             m.non_rounded_sample = None
         else:
@@ -1059,7 +1072,9 @@ def _prepare_false_positive_mitigations(
                 m.non_rounded_sample
             )
             m.non_rounded_negated_tensors = negate_all_tensors(tensors)
-            nr_neg_result = _run_op_on_sample(op, m.non_rounded_negated_sample)
+            nr_neg_result = _run_op_on_sample(
+                op, m.non_rounded_negated_sample, inference_mode
+            )
             if _is_tensor_output(nr_neg_result):
                 m.non_rounded_negated_ground_truth = _to_ground_truth(nr_neg_result)
             else:
@@ -1212,6 +1227,7 @@ def _validate_with_mitigations(
     world_size: int,
     mesh: DeviceMesh,
     mitigations: _FalsePositiveMitigations,
+    inference_mode: bool = False,
 ) -> bool | None:
     """Validate a combination, including false positive mitigation re-checks.
 
@@ -1219,7 +1235,14 @@ def _validate_with_mitigations(
     """
     combo: PlacementCombination = (input_placements, output_placements)
     is_valid, _ = validate_combination(
-        op, sample, tensors, combo, ground_truth, world_size, mesh
+        op,
+        sample,
+        tensors,
+        combo,
+        ground_truth,
+        world_size,
+        mesh,
+        inference_mode=inference_mode,
     )
     if is_valid is None:
         return None
@@ -1240,6 +1263,7 @@ def _validate_with_mitigations(
             world_size,
             mesh,
             mask_shift=1,
+            inference_mode=inference_mode,
         )
 
     if (
@@ -1259,6 +1283,7 @@ def _validate_with_mitigations(
             mitigations.negated_ground_truth,
             world_size,
             mesh,
+            inference_mode=inference_mode,
         )
 
     if (
@@ -1276,6 +1301,7 @@ def _validate_with_mitigations(
             mitigations.non_rounded_ground_truth,
             world_size,
             mesh,
+            inference_mode=inference_mode,
         )
 
     if (
@@ -1295,6 +1321,7 @@ def _validate_with_mitigations(
             mitigations.non_rounded_negated_ground_truth,
             world_size,
             mesh,
+            inference_mode=inference_mode,
         )
 
     return is_valid
@@ -1816,6 +1843,7 @@ def compare_operator(
     verbose: bool = False,
     incorrect_only: bool = False,
     allow_composite: bool = False,
+    inference_mode: bool = False,
 ) -> ComparisonStats:
     """
     Compare DTensor's sharding rules against ground truth for an operator.
@@ -2126,6 +2154,11 @@ if __name__ == "__main__":
         help="Show N sample repros per rule (default 1 if flag given, -1 for all)",
     )
     parser.add_argument(
+        "--inference-mode",
+        action="store_true",
+        help="Wrap op execution in torch.inference_mode() to bypass CIA decompositions",
+    )
+    parser.add_argument(
         "--report",
         action="store_true",
         help="Show registration statistics (op counts per registration method)",
@@ -2172,6 +2205,8 @@ if __name__ == "__main__":
             )
         if args.incorrect_only:
             print("Mode: incorrect-only (fast)")
+        if args.inference_mode:
+            print("Mode: inference-mode (bypasses CIA decompositions)")
         print(f"Device: {args.device}, Dtype: {dtype}, World size: {args.world_size}")
 
         op_results: list[tuple[str, ComparisonStats, float]] = []
@@ -2197,6 +2232,7 @@ if __name__ == "__main__":
                     verbose=True,
                     incorrect_only=args.incorrect_only,
                     allow_composite=args.allow_composite,
+                    inference_mode=args.inference_mode,
                 )
                 elapsed = time.time() - op_start
 
