@@ -8,7 +8,6 @@ import subprocess
 from pathlib import Path
 
 from packaging.version import Version
-from setuptools import distutils  # type: ignore[import,attr-defined]
 
 
 UNKNOWN = "Unknown"
@@ -111,6 +110,22 @@ def get_torch_version(sha: str | None = None) -> str:
     return version
 
 
+def strtobool(val: str) -> bool:
+    """Convert a string representation of truth to true (1) or false (0).
+
+    True values are 'y', 'yes', 't', 'true', 'on', and '1'; false values
+    are 'n', 'no', 'f', 'false', 'off', and '0'.  Raises ValueError if
+    'val' is anything else.
+    """
+    val = val.lower()
+    if val in ("y", "yes", "t", "true", "on", "1"):
+        return True
+    elif val in ("n", "no", "f", "false", "off", "0"):
+        return False
+    else:
+        raise ValueError(f"invalid truth value {val!r}")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Generate torch/version.py from build and environment metadata."
@@ -118,7 +133,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--is-debug",
         "--is_debug",
-        type=distutils.util.strtobool,
+        type=strtobool,
         help="Whether this build is debug mode or not.",
     )
     parser.add_argument("--cuda-version", "--cuda_version", type=str)
