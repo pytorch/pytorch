@@ -7071,6 +7071,203 @@ class TestMemPool(TestCase):
             "Allocated memory should be same with or without traces",
         )
 
+    @unittest.skipIf(TEST_WITH_ROCM, "not enabled by default on rocm")
+    @serialTest()
+    def test_multi_threads_alloc_in_same_order(self):
+        def alloc_tensors(
+            stream: torch.cuda.Stream,
+            sizes: [int],
+            device: str,
+            alloc_results: [],
+            lock,
+            thread_id=0,
+        ):
+            while len(sizes) > 0:
+                with lock:
+                    if len(sizes) == 0:
+                        return
+                    sz = sizes.pop()
+                    alloc_results.append(
+                        (
+                            torch.empty(sz, dtype=torch.int8, device=device),
+                            thread_id,
+                            sz,
+                        )
+                    )
+
+        def alloc_with_threads(
+            thread_count: int, stream: torch.cuda.Stream, mem_sizes: [int], device: str
+        ):
+            tensors_list = []
+            threads = []
+            mem_sizes = mem_sizes[:]
+            lock = threading.Lock()
+            for i in range(thread_count):
+                t = threading.Thread(
+                    target=alloc_tensors,
+                    args=(stream, mem_sizes, "cuda", tensors_list, lock, i),
+                )
+                t.start()
+                threads.append(t)
+            for t in threads:
+                t.join()
+            tensors_ptrs = [
+                (t.data_ptr(), thread_id, sz) for (t, thread_id, sz) in tensors_list
+            ]
+            return tensors_ptrs
+
+        stream = torch.cuda.current_stream()
+        thread_count = 4
+        mem_sizes = [
+            s * 2 * 1024 * 1024 for s in range(1, 5) for _ in range(thread_count)
+        ]
+        tensor_ptrs_round_1 = alloc_with_threads(
+            thread_count, stream, mem_sizes, "cuda"
+        )
+        tensor_ptrs_round_2 = alloc_with_threads(
+            thread_count, stream, mem_sizes, "cuda"
+        )
+        ptrs_round_1 = torch.tensor([ptr for ptr, _, _ in tensor_ptrs_round_1])
+        ptrs_round_2 = torch.tensor([ptr for ptr, _, _ in tensor_ptrs_round_2])
+        self.assertTrue((ptrs_round_1 == ptrs_round_2).all().item())
+
+    @unittest.skipIf(TEST_WITH_ROCM, "not enabled by default on rocm")
+    @serialTest()
+    def test_nccl_mem_alloc_addresses_in_random_order(self):
+        """
+        Test NCCL mem allocator with non-increasing allocation addresses.
+
+        This test uses a custom allocator to simulate ncclMemAlloc scenario where
+        allocated memory addresses may not be monotonically increasing across
+        different ranks due to fragmentation, OS allocation policies, or prior
+        allocations.
+
+        The registration counter-based comparator ensures consistent block ordering
+        regardless of actual memory addresses, which is critical for NCCL
+        symmetric memory alignment.
+        """
+
+        from cuda.bindings import runtime
+
+        ALLOC_FN = ctypes.CFUNCTYPE(
+            ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
+        )
+        FREE_FN = ctypes.CFUNCTYPE(
+            None, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
+        )
+
+        class AllocState:
+            def __init__(self, test_instance):
+                self.first_stream = None
+                self.second_stream = None
+                self.allocated_addrs = []
+                self.buffer_size = 1 * 1024 * 1024 * 1024  # 1GB
+                self.base_ptr = -1
+                err, base_ptr = runtime.cudaMalloc(self.buffer_size)
+                test_instance.assertEqual(
+                    err,
+                    runtime.cudaError_t.cudaSuccess,
+                    "init allocation for test_nccl_mem_alloc_addresses_in_random_order should be successful",
+                )
+                self.base_ptr = base_ptr
+                self.head = base_ptr
+                self.tail = base_ptr + self.buffer_size
+
+            def __del__(self):
+                if self.base_ptr > 0:
+                    runtime.cudaFree(self.base_ptr)
+
+        state = AllocState(self)
+
+        def my_alloc(size, device, stream, _runtime=runtime):
+            nonlocal state
+            if state.first_stream is None:
+                state.first_stream = stream
+            elif state.second_stream is None:
+                state.second_stream = stream
+
+            if state.first_stream == stream:
+                ptr = state.head
+                state.head += size
+            else:
+                state.tail -= size
+                ptr = state.tail
+            state.allocated_addrs.append(ptr)
+            return ptr
+
+        def my_free(ptr, size, device, stream, _runtime=runtime):
+            pass
+
+        # Must keep these alive for the lifetime of the allocator
+        c_alloc = ALLOC_FN(my_alloc)
+        c_free = FREE_FN(my_free)
+        alloc_ptr = ctypes.cast(c_alloc, ctypes.c_void_p).value
+        free_ptr = ctypes.cast(c_free, ctypes.c_void_p).value
+        allocator = torch._C._cuda_customAllocator(alloc_ptr, free_ptr)
+        pool = torch.cuda.MemPool(allocator)
+
+        first_stream = torch.cuda.Stream()
+        second_stream = torch.cuda.Stream()
+
+        tensor_sizes = [24 * 1024 * 1024, 32 * 1024 * 1024]
+        alloc_cases = []
+        case_no = 0
+        for idx in range(3):
+            for stream_idx, stream in enumerate([first_stream, second_stream]):
+                # for second stream in reverse order
+                reverse_order = stream_idx % 2 == 1
+                tensor_sizes.sort(reverse=reverse_order)
+                for size in tensor_sizes:
+                    alloc_cases.append(
+                        {"stream": stream, "size": size, "case_no": case_no}
+                    )
+                    case_no += 1
+
+        # Test allocation and deallocation patterns
+        def alloc_tensors():
+            all_tensors = []
+            for case in alloc_cases:
+                with torch.cuda.stream(case["stream"]):
+                    all_tensors.append(
+                        torch.empty(case["size"], dtype=torch.uint8, device="cuda")
+                    )
+            return all_tensors
+
+        with torch.cuda.use_mem_pool(pool):
+            first_round_tensors = alloc_tensors()
+        tensor_ptrs = [t.data_ptr() for t in first_round_tensors]
+        # for t in first_round_tensors:
+        #    del t
+        del first_round_tensors
+
+        with torch.cuda.use_mem_pool(pool):
+            second_round_tensors = alloc_tensors()
+        second_round_tensor_ptrs = [t.data_ptr() for t in second_round_tensors]
+        del second_round_tensors
+
+        mem_snapshot = pool.snapshot()
+        self.assertEqual(
+            len(mem_snapshot),
+            len(tensor_ptrs),
+            f"expected to have {len(tensor_ptrs)} segments, but actually got {len(mem_snapshot)}",
+        )
+
+        for idx, first_addr in enumerate(tensor_ptrs):
+            second_addr = second_round_tensor_ptrs[idx]
+            self.assertEqual(
+                second_addr,
+                first_addr,
+                "mem addr allocated for second round should be same with first round",
+            )
+            self.assertEqual(
+                second_addr,
+                state.allocated_addrs[idx],
+                f"{second_round_tensor_ptrs[idx]=} != {state.allocated_addrs[idx]=}",
+            )
+        del pool
+        del state
+        torch.cuda.empty_cache()
+
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
