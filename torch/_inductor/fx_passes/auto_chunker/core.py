@@ -119,20 +119,33 @@ def find_amplifier_node(graph: Graph) -> Node | None:
     Find the 'amplifier' node which is a node that generates large
     output with small/medium input.
 
-    If there are multiple amplifier nodes, return the one with the largest
-    amplification ratio.
+    If a node is explicitly annotated with auto_chunk (via
+    torch.fx.traceback.annotate), it is returned immediately and bypasses
+    size/ratio thresholds. Otherwise falls back to heuristic detection.
+
+    Raises CantChunk if auto_chunk annotations exist but none are on
+    eligible amplifier ops (mm/addmm).
     """
+    from .common import CantChunk
 
     amplifier_nodes_ratio = []
+    annotated_ineligible_nodes: list[Node] = []
 
     for node in graph.nodes:
         if use_tangent(node):
             # enter backward part of the graph
             break
 
-        # Only trigger chunking for a small set of nodes like matmul for now
+        is_annotated = bool(node.meta.get("custom", {}).get("auto_chunk"))
+
         if node.op != "call_function" or node.target not in eligible_amplifier_node:
+            if is_annotated:
+                annotated_ineligible_nodes.append(node)
             continue
+
+        # Annotated nodes bypass size/ratio thresholds
+        if is_annotated:
+            return node
 
         input_size = compute_tensor_size(node.args, node.kwargs)
         output_size = compute_tensor_size(node)
@@ -146,6 +159,15 @@ def find_amplifier_node(graph: Graph) -> Node | None:
             and ratio > config.auto_chunker.amplify_ratio_threshold
         ):
             amplifier_nodes_ratio.append((node, ratio))
+
+    if annotated_ineligible_nodes:
+        nodes_str = ", ".join(str(n.format_node()) for n in annotated_ineligible_nodes)
+        raise CantChunk(
+            f"auto_chunk() annotation found but no eligible amplifier op "
+            f"(mm/addmm) was annotated. The following annotated nodes are "
+            f"not eligible: {nodes_str}. Wrap the context manager around a "
+            f"matmul or linear operation."
+        )
 
     amplifier_nodes_ratio = sorted(
         amplifier_nodes_ratio, key=lambda x: x[1], reverse=True

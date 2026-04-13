@@ -2,9 +2,11 @@
 import os
 
 import torch
+import torch.fx.traceback as fx_traceback
 from torch import nn
 from torch._dynamo.utils import same
 from torch._inductor import config, metrics
+from torch._inductor.auto_chunk import auto_chunk
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
@@ -371,6 +373,158 @@ class AutoChunkerTest(TestCase):
         w.grad = None
         opt_f = torch.compile(f)
         actual = (opt_f(x, w, targets), x.grad, w.grad)
+
+        self.assertTrue(same(expect, actual, tol=1e-3))
+        self.assertEqual(metrics.num_auto_chunking, 1)
+
+    @config.patch("auto_chunker.num_chunk", 2)
+    def test_annotated_linear_with_bias(self):
+        """Annotation works with nn.Linear (decomposes to addmm with bias)."""
+        M, K, N = 32, 4, 32
+        linear = nn.Linear(K, N, device=GPU_TYPE)
+
+        def f(x):
+            with auto_chunk():
+                out = linear(x)
+            out = out.softmax(dim=-1)
+            loss = out.sum()
+            loss.backward()
+            return loss
+
+        x = torch.randn(M, K, device=GPU_TYPE, requires_grad=True)
+        expect = (f(x), x.grad, linear.weight.grad, linear.bias.grad)
+        x.grad = None
+        linear.weight.grad = None
+        linear.bias.grad = None
+        opt_f = torch.compile(f)
+        actual = (opt_f(x), x.grad, linear.weight.grad, linear.bias.grad)
+
+        self.assertTrue(same(expect, actual, tol=1e-3))
+        self.assertEqual(metrics.num_auto_chunking, 1)
+
+    @config.patch("auto_chunker.num_chunk", 2)
+    def test_annotated_matmul_softmax(self):
+        """Annotation-driven chunking works even with small tensors that
+        would not trigger heuristic detection."""
+        M, K, N = 32, 4, 32
+        x = torch.randn(M, K, device=GPU_TYPE, requires_grad=True)
+        w = torch.randn(K, N, device=GPU_TYPE, requires_grad=True)
+
+        def f(x, w):
+            with auto_chunk():
+                out = (x * 2) @ w
+            out = out.softmax(dim=-1)
+            loss = out.sum()
+            loss.backward()
+            return loss
+
+        expect = (f(x, w), x.grad, w.grad)
+        x.grad = None
+        w.grad = None
+        opt_f = torch.compile(f)
+        actual = (opt_f(x, w), x.grad, w.grad)
+
+        self.assertTrue(same(expect, actual, tol=1e-3))
+        self.assertEqual(metrics.num_auto_chunking, 1)
+
+    @config.patch("auto_chunker.num_chunk", 2)
+    def test_annotated_manual_cross_entropy(self):
+        """Annotation-driven chunking with the manual cross entropy pattern."""
+        M, K, N = 32, 4, 32
+        x = torch.randn(M, K, device=GPU_TYPE, requires_grad=True)
+        w = torch.randn(K, N, device=GPU_TYPE, requires_grad=True)
+        targets = torch.randint(0, N, (M,), device=GPU_TYPE)
+
+        def f(x, w, targets):
+            with auto_chunk():
+                logits = (x * 2) @ w
+            max_logits = logits.amax(dim=-1)
+            shifted = logits - max_logits.unsqueeze(-1)
+            exp_shifted = shifted.exp()
+            sum_exp = exp_shifted.sum(dim=-1)
+            log_probs = shifted - sum_exp.log().unsqueeze(-1)
+            target_log_probs = log_probs.gather(1, targets.unsqueeze(1))
+            loss = -target_log_probs.squeeze(1).sum() / M
+            loss.backward()
+            return loss
+
+        expect = (f(x, w, targets), x.grad, w.grad)
+        x.grad = None
+        w.grad = None
+        opt_f = torch.compile(f)
+        actual = (opt_f(x, w, targets), x.grad, w.grad)
+
+        self.assertTrue(same(expect, actual, tol=1e-3))
+        self.assertEqual(metrics.num_auto_chunking, 1)
+
+    @config.patch("auto_chunker.num_chunk", 2)
+    def test_annotated_with_fx_traceback(self):
+        """Using fx_traceback.annotate directly also works."""
+        M, K, N = 32, 4, 32
+        x = torch.randn(M, K, device=GPU_TYPE, requires_grad=True)
+        w = torch.randn(K, N, device=GPU_TYPE, requires_grad=True)
+
+        def f(x, w):
+            with fx_traceback.annotate({"auto_chunk": True}):
+                out = (x * 2) @ w
+            out = out.softmax(dim=-1)
+            loss = out.sum()
+            loss.backward()
+            return loss
+
+        expect = (f(x, w), x.grad, w.grad)
+        x.grad = None
+        w.grad = None
+        opt_f = torch.compile(f)
+        actual = (opt_f(x, w), x.grad, w.grad)
+
+        self.assertTrue(same(expect, actual, tol=1e-3))
+        self.assertEqual(metrics.num_auto_chunking, 1)
+
+    @config.patch("auto_chunker.num_chunk", 2)
+    def test_annotated_on_invalid_op(self):
+        """Annotating non-amplifier ops raises a clear error."""
+        M, K, N = 32, 4, 32
+        x = torch.randn(M, K, device=GPU_TYPE, requires_grad=True)
+        w = torch.randn(K, N, device=GPU_TYPE, requires_grad=True)
+
+        def f(x, w):
+            out = (x * 2) @ w
+            with auto_chunk():
+                out = out.softmax(dim=-1)
+            loss = out.sum()
+            loss.backward()
+            return loss
+
+        _ = f(x.clone().requires_grad_(True), w.clone().requires_grad_(True))
+        x.grad = None
+        w.grad = None
+        opt_f = torch.compile(f)
+        # Should still compile (CantChunk is caught), but no chunking happens
+        opt_f(x, w)
+        self.assertEqual(metrics.num_auto_chunking, 0)
+
+    @config.patch("auto_chunker.enable", False)
+    @config.patch("auto_chunker.num_chunk", 2)
+    def test_annotated_without_config_enable(self):
+        """Annotation alone enables auto-chunking without config.auto_chunker.enable."""
+        M, K, N = 32, 4, 32
+        x = torch.randn(M, K, device=GPU_TYPE, requires_grad=True)
+        w = torch.randn(K, N, device=GPU_TYPE, requires_grad=True)
+
+        def f(x, w):
+            with auto_chunk():
+                out = (x * 2) @ w
+            out = out.softmax(dim=-1)
+            loss = out.sum()
+            loss.backward()
+            return loss
+
+        expect = (f(x, w), x.grad, w.grad)
+        x.grad = None
+        w.grad = None
+        opt_f = torch.compile(f)
+        actual = (opt_f(x, w), x.grad, w.grad)
 
         self.assertTrue(same(expect, actual, tol=1e-3))
         self.assertEqual(metrics.num_auto_chunking, 1)

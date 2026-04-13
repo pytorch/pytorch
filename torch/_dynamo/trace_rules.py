@@ -3461,6 +3461,7 @@ MOD_INLINELIST = [
     "torch._functorch.functional_call",
     "torch._functorch.pyfunctorch",
     "torch._functorch.vmap",
+    "torch._inductor.auto_chunk",
     "torch._inductor.test_operators",
     "torch._library.autograd",
     "torch._library.custom_ops",

@@ -1485,6 +1485,11 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
         stack.enter_context(torch.fx.traceback.annotate(self.target_values))
         stack.enter_context(torch.fx.traceback.preserve_node_meta())
         self.set_cleanup_hook(tx, lambda: stack.close())
+
+        # Enable auto-chunker pass when auto_chunk annotation is present
+        if self.target_values.get("auto_chunk"):
+            torch._inductor.config.auto_chunker.enable = True
+
         return variables.CONSTANT_VARIABLE_NONE
 
     def module_name(self) -> str:
