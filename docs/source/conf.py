@@ -78,6 +78,12 @@ myst_enable_extensions = [
     "html_image",
 ]
 
+# Don't execute notebooks during the docs build. Notebook correctness is
+# verified by the separate docs_test CI job; re-executing them here just
+# adds ~3 minutes to the build for no benefit.
+nb_execution_mode = "off"
+suppress_warnings = ["myst-nb.lexer"]
+
 html_baseurl = "https://docs.pytorch.org/docs/stable/"  # needed for sphinx-sitemap
 sitemap_locales = [None]
 sitemap_excludes = [
@@ -2430,7 +2436,121 @@ def setup(app):
     app.connect("autodoc-process-docstring", process_docstring)
     app.connect("html-page-context", hide_edit_button_for_pages)
     app.config.add_last_updated = True
+
+    # Force serial reads to avoid pipe congestion from large env pickles.
+    # Sphinx's parallel read sends the entire environment (100s of MB for
+    # PyTorch) through a 64KB OS pipe per worker, which causes extreme
+    # slowdowns with many workers. Serial reads avoid this overhead while
+    # parallel writes (which send trivial payloads) remain enabled.
+    from sphinx.builders import Builder
+
+    _orig_read_serial = Builder._read_serial
+
+    def _serial_read_ignoring_nproc(self, docnames, nproc=1):
+        return _orig_read_serial(self, docnames)
+
+    Builder._read_parallel = _serial_read_ignoring_nproc
+
+    # Skip pickling doctrees to disk for the HTML builder. This is only used
+    # for incremental rebuilds which don't apply in CI clean builds. Saves
+    # ~2 minutes by avoiding serializing large autodoc-generated doctrees.
+    # Other builders (doctest, coverage) may need doctrees on disk.
+    from sphinx.builders.html import StandaloneHTMLBuilder
+
+    def _write_doctree_no_disk(self, docname, doctree, *, _cache=True):
+        # Still do the cleanup and in-memory caching, just skip the disk I/O
+        doctree.reporter = None
+        doctree.transformer = None
+        doctree.settings = doctree.settings.copy()
+        doctree.settings.warning_stream = None
+        doctree.settings.env = None
+        from docutils.utils import DependencyList
+
+        doctree.settings.record_dependencies = DependencyList()
+        if _cache:
+            self.env._write_doc_doctree_cache[docname] = doctree
+
+    StandaloneHTMLBuilder.write_doctree = _write_doctree_no_disk
+
+    _skip_git_dates_on_ci(app)
+    _fix_katex_server_race(app)
+
     return {"version": "0.1", "parallel_read_safe": True}
+
+
+def _fix_katex_server_race(app):
+    """Retry on ConnectionRefusedError when connecting to the KaTeX server.
+
+    sphinxcontrib-katex 0.9.x starts a Node.js server and connects via Unix
+    socket. There's a race: Python sees the socket file (created by bind())
+    and calls connect() before Node.js has called listen(). On slow CI
+    machines this causes ConnectionRefusedError. Fix by retrying connect().
+    """
+    try:
+        from sphinxcontrib.katex import KaTeXServer
+    except ImportError:
+        return
+
+    import socket as _socket
+    import time as _time
+
+    @classmethod
+    def _start_with_retry(cls, rundir, timeout):
+        from subprocess import PIPE, Popen
+
+        from sphinxcontrib.katex import ONE_MILLISECOND
+
+        socket_path = rundir / "katex.sock"
+        cmd = cls.build_command(socket=socket_path)
+        process = Popen(cmd, stdin=PIPE, stdout=PIPE, cwd=rundir)
+
+        startup_start = _time.monotonic()
+        while not socket_path.is_socket():
+            _time.sleep(ONE_MILLISECOND)
+            if _time.monotonic() - startup_start > timeout:
+                raise cls.timeout_error(timeout)
+
+        # Retry connect() — bind() creates the socket file but listen()
+        # is async in Node.js and may not be ready yet.
+        while True:
+            remaining = startup_start + timeout - _time.monotonic()
+            if remaining <= 0:
+                raise cls.timeout_error(timeout)
+            try:
+                sock = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+                sock.settimeout(remaining)
+                sock.connect(str(socket_path))
+                break
+            except ConnectionRefusedError:
+                sock.close()
+                _time.sleep(ONE_MILLISECOND)
+            except TimeoutError:
+                sock.close()
+                raise cls.timeout_error(timeout)  # noqa: B904
+
+        return process, sock
+
+    KaTeXServer.start_server_process = _start_with_retry
+
+
+def _skip_git_dates_on_ci(app):
+    """Skip git date lookups on non-release CI builds.
+
+    The pytorch theme runs 2 git subprocess calls per page to display
+    "Created/Updated" dates. On CI preview builds this is wasteful (dates
+    aren't needed) and problematic (treeless clones make git log slow).
+    Release builds (WITH_PUSH=true) keep the original behavior so dates
+    appear in published docs.
+    """
+    if not os.environ.get("CI") or os.environ.get("WITH_PUSH") == "true":
+        return
+
+    try:
+        import pytorch_sphinx_theme2
+    except ImportError:
+        return
+
+    pytorch_sphinx_theme2.get_git_dates = lambda path: ("Unknown", "Unknown")
 
 
 def hide_edit_button_for_pages(app, pagename, templatename, context, doctree):
