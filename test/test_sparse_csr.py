@@ -2022,6 +2022,61 @@ class TestSparseCSR(TestCase):
             m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
             _test_addmm_addmv(self, torch.addmm, M, m1, m2, transpose_out=t4, layout=layout, mode="all_sparse")
 
+    @skipCPUIfNoMklSparse
+    @parametrize("sparse_layout", ("CSR", "BSR"))
+    @dtypes(*floating_and_complex_types())
+    @dtypesIfCUDA(*floating_types_and(torch.complex64,
+                                      *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16_ATOMICS else [],
+                                      *[torch.half] if PLATFORM_SUPPORTS_HALF_ATOMICS else [],
+                                      *[torch.complex128]
+                                      if CUSPARSE_SPMM_COMPLEX128_SUPPORTED or HIPSPARSE_SPMM_COMPLEX128_SUPPORTED
+                                      else []))
+    def test_addmm_dense_args_layouts(self, device, dtype, sparse_layout):
+        m, k, n = 4, 10, 6
+
+        def strided_to_sparse(t, sparse_layout):
+            if sparse_layout == "CSR":
+                return t.to_sparse_csr()
+            elif sparse_layout == "BSR":
+                return t.to_sparse_bsr((2, 2))
+            else:
+                return t.to_sparse_csr()
+
+        def gen_matrix_layouts(m, n):
+            buffer = torch.randn(4 * m * n, device=device, dtype=dtype)
+
+            # Layouts for which clone is unlikely:
+            # Col-major-like is very likely to never trigger a clone.
+            # Row-major-like -- implementation-dependent.
+            layouts_likely_no_clone = (
+                buffer.as_strided((m, n), (n, 1)),  # row-major
+                buffer.as_strided((m, n), (2 * n, 1)),  # row-major with a stride
+                buffer.as_strided((m, n), (1, m)),  # col-major
+                buffer.as_strided((m, n), (1, 2 * m)),  # col-major with a stride
+            )
+            yield from layouts_likely_no_clone
+
+            # These layouts do not have a contiguous dim,
+            # so these should always trigger a clone.
+            # NOTE: these layouts do NOT have memory overlaps
+            layouts_with_clone = (
+                buffer.as_strided((m, n), (2 * n, 2)),
+                buffer.as_strided((m, n), (4 * n, 2)),
+                buffer.as_strided((m, n), (2, 2 * m)),
+                buffer.as_strided((m, n), (2, 4 * m)),
+            )
+            yield from layouts_with_clone
+
+        M = torch.randn(m, n, device=device, dtype=dtype)
+        m1 = strided_to_sparse(torch.randn(m, k, device=device, dtype=dtype), sparse_layout)
+        for m2, out in itertools.product(gen_matrix_layouts(k, n), gen_matrix_layouts(m, n)):
+            # FIXME: no exception raised if out has memory overlaps.
+            actual_out = torch.addmm(M, m1, m2, out=out)
+            expected = torch.addmm(M, m1, m2.contiguous())
+            actual = torch.addmm(M, m1, m2)
+            self.assertEqual(actual, expected)
+            self.assertEqual(actual_out, expected)
+
     @onlyCPU
     @skipCPUIfNoMklSparse
     @dtypes(*floating_and_complex_types())

@@ -29,40 +29,6 @@ namespace at::native::sparse::impl::mkl {
 namespace {
 
 #if AT_USE_MKL_SPARSE()
-c10::MaybeOwned<Tensor> prepare_dense_matrix_for_mkl(
-    const Tensor& tensor) {
-  if (tensor.is_non_overlapping_and_dense() ||
-      is_blas_compatible_row_major_order(tensor) ||
-      is_blas_compatible_column_major_order(tensor)) {
-    return at::native::expect_resolved_conj(tensor);
-  } else {
-    return c10::MaybeOwned<Tensor>::owned(
-        tensor.clone(at::MemoryFormat::Contiguous));
-  }
-}
-
-/*
-  Get row-major or column-major matrix.
-
-  Args:
-  * `tensor` - 2D strided Tensor.
-  * `row_major` - controls the memory layout.
-*/
-c10::MaybeOwned<Tensor> prepare_dense_matrix_for_mkl(
-    const Tensor& tensor,
-    bool row_major) {
-  if (is_blas_compatible_row_major_order(tensor) && row_major) {
-    return at::native::expect_resolved_conj(tensor);
-  } else {
-    if (row_major) {
-      return c10::MaybeOwned<Tensor>::owned(
-          tensor.clone(at::MemoryFormat::Contiguous));
-    } else {
-      return c10::MaybeOwned<Tensor>::owned(cloneBatchedColumnMajor(tensor));
-    }
-  }
-}
-
 c10::MaybeOwned<Tensor> inline prepare_dense_vector_for_mkl(
     const Tensor& tensor) {
   if (tensor.is_non_overlapping_and_dense()) {
@@ -176,22 +142,18 @@ void addmm_dense_result(
       "Calling addmm on a sparse CPU tensor requires Linux platform. ",
       "Please use PyTorch built with MKL on Linux.");
 #else
-  c10::MaybeOwned<Tensor> C_ = prepare_dense_matrix_for_mkl(C);
-  IntArrayRef C_strides = C_->strides();
-  auto ndim = C_->dim();
-  bool is_C_row_major = (C_strides[ndim - 1] == 1);
+  const auto is_C_row_major = at::native::isRowMajorLike(C);
+  c10::MaybeOwned<Tensor> C_ = at::native::maybePrepareBatchedMatrices(C, /*make_col_major_like=*/!is_C_row_major);
 
   // MKL requires same storage layout of matrices
-  c10::MaybeOwned<Tensor> B_ = prepare_dense_matrix_for_mkl(B, is_C_row_major);
-  IntArrayRef B_strides = B_->strides();
-  bool is_B_row_major = (B_strides[ndim - 1] == 1);
+  c10::MaybeOwned<Tensor> B_ = at::native::maybePrepareBatchedMatrices(B, /*make_col_major_like=*/!is_C_row_major);
 
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!(is_C_row_major ^ is_B_row_major));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(is_C_row_major == at::native::isRowMajorLike(*B_));
 
   auto order =
       is_C_row_major ? SPARSE_LAYOUT_ROW_MAJOR : SPARSE_LAYOUT_COLUMN_MAJOR;
-  auto ldc = is_C_row_major ? C_strides[ndim - 2] : C_strides[ndim - 1];
-  auto ldb = is_B_row_major ? B_strides[ndim - 2] : B_strides[ndim - 1];
+  auto ldc = C_->stride(is_C_row_major ? -2 : -1);
+  auto ldb = B_->stride(is_C_row_major ? -2 : -1);
   auto columns_C = mkl_int_cast(C.size(-1), "columns_C");
 
   matrix_descr descrA{};
@@ -656,13 +618,13 @@ void triangular_solve_out_sparse_csr(
   // the comments within.
   const auto A = unitriangular ? materialize_diagonal_indices(A_) : A_;
 
-  c10::MaybeOwned<Tensor> X_ = prepare_dense_matrix_for_mkl(X);
-  IntArrayRef X_strides = X_->strides();
-  auto ndim = X_->dim();
-  bool is_X_row_major = (ndim > 1) ? (X_strides[ndim - 1] == 1) : true;
+  const auto is_X_row_major = (X.dim() > 1) ? at::native::isRowMajorLike(X) : true;
+  c10::MaybeOwned<Tensor> X_ = (X.dim() > 1)
+    ? at::native::maybePrepareBatchedMatrices(X, /*make_col_major_like=*/!is_X_row_major)
+    : prepare_dense_vector_for_mkl(X);
 
   // MKL requires same storage layout of matrices
-  c10::MaybeOwned<Tensor> B_ = prepare_dense_matrix_for_mkl(B, is_X_row_major);
+  c10::MaybeOwned<Tensor> B_ = at::native::maybePrepareBatchedMatrices(B, /*make_col_major_like=*/!is_X_row_major);
 
   sparse_operation_t opA = transpose ? SPARSE_OPERATION_TRANSPOSE : SPARSE_OPERATION_NON_TRANSPOSE;
   matrix_descr descrA{};
@@ -690,14 +652,12 @@ void triangular_solve_out_sparse_csr(
             X_->fill_(-std::numeric_limits<scalar_t>::quiet_NaN());
           }
         } else {
-          IntArrayRef B_strides = B_->strides();
-          bool is_B_row_major = (B_strides[ndim - 1] == 1);
-          TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!(is_X_row_major ^ is_B_row_major));
+          TORCH_INTERNAL_ASSERT_DEBUG_ONLY(is_X_row_major == at::native::isRowMajorLike(*B_));
 
           auto order = is_X_row_major ? SPARSE_LAYOUT_ROW_MAJOR : SPARSE_LAYOUT_COLUMN_MAJOR;
           auto nrhs = mkl_int_cast(B.size(-1), "nrhs");
-          auto ldx = is_X_row_major ? X_strides[ndim - 2] : X_strides[ndim - 1];
-          auto ldb = is_B_row_major ? B_strides[ndim - 2] : B_strides[ndim - 1];
+          auto ldx = X_->stride(is_X_row_major ? -2 : -1);
+          auto ldb = B_->stride(is_X_row_major ? -2 : -1);
           sparse_status_t status = at::mkl::sparse::trsm<scalar_t>(
               opA,
               alpha,

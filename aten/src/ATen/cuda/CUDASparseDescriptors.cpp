@@ -61,17 +61,16 @@ cusparseDnMatDescr_t createRawDnMatDescriptor(const Tensor& input, int64_t batch
   auto rows = input_sizes[ndim - 2];
   auto cols = input_sizes[ndim - 1];
 
-  bool is_column_major =
-      at::native::is_blas_compatible_column_major_order(input);
-  bool is_row_major = at::native::is_blas_compatible_row_major_order(input);
+  bool is_column_major_like = at::native::isColMajorLike(input);
+  bool is_row_major_like = at::native::isRowMajorLike(input);
   TORCH_INTERNAL_ASSERT(
-      is_column_major || is_row_major,
-      "Expected either row or column major contiguous input.");
+      is_column_major_like || is_row_major_like,
+      "Expected either row or column major input with a uniform matrix stride across batch dims.");
 
   auto leading_dimension =
-      is_row_major ? input_strides[ndim - 2] : input_strides[ndim - 1];
+      is_row_major_like ? input_strides[ndim - 2] : input_strides[ndim - 1];
 
-  auto order = is_row_major ? CUSPARSE_ORDER_ROW : CUSPARSE_ORDER_COL;
+  auto order = is_row_major_like ? CUSPARSE_ORDER_ROW : CUSPARSE_ORDER_COL;
 
   auto batch_stride = ndim > 2 && batch_offset >= 0 ? input_strides[ndim - 3] : 0;
   // NOLINTNEXTLINE(*const-cast)
