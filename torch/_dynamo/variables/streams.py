@@ -184,6 +184,20 @@ def _(device_type: str, device_index: int) -> None:
 has_side_effect(torch.ops.streams.synchronize_device.default)
 
 
+@custom_op("streams::synchronize_stream", mutates_args=())
+def synchronize_stream(stream_index: int) -> None:
+    stream = _get_stream_by_index(stream_index)
+    stream.synchronize()
+
+
+@synchronize_stream.register_fake
+def _(stream_index: int) -> None:
+    pass
+
+
+has_side_effect(torch.ops.streams.synchronize_stream.default)
+
+
 @custom_op("streams::wait_stream", mutates_args=())
 def wait_stream(waiting_stream_index: int, waited_on_stream_index: int) -> None:
     waiting = _get_stream_by_index(waiting_stream_index)
@@ -377,9 +391,17 @@ class StreamVariable(StreamContextVariable):
         from ..utils import cmp_name_to_op_mapping, proxy_args_kwargs
         from .builder import wrap_fx_proxy_cls
 
-        if name in ("wait_stream", "synchronize", "wait_event"):
+        if name in ("wait_stream", "wait_event"):
             tx.output.create_proxy(
                 "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+            )
+            return CONSTANT_VARIABLE_NONE
+        elif name == "synchronize":
+            tx.output.create_proxy(
+                "call_function",
+                torch.ops.streams.synchronize_stream,
+                (self.user_object_index,),
+                {},
             )
             return CONSTANT_VARIABLE_NONE
         elif name == "query":
