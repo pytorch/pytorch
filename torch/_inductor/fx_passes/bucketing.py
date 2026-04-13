@@ -29,6 +29,12 @@ overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
 BucketMode: TypeAlias = Literal["default", "custom_ops", "custom_ops_multidtype"]
 
 
+def _default_bucket_mode() -> BucketMode:
+    from torch._inductor import config
+
+    return config.aten_distributed_optimizations.bucket_mode or "default"
+
+
 # Helper functions moved to top for better organization
 def _ag_group_key(node: torch.fx.Node) -> tuple[str, torch.dtype]:  # type: ignore[name-defined]
     _, group_size, group_name = node.args
@@ -195,8 +201,9 @@ def bucket_cap_mb_by_bucket_idx_default(bucket_id: int) -> float:
 def bucket_all_gather(
     gm: torch.fx.GraphModule,
     bucket_cap_mb_by_bucket_idx: Callable[[int], float] | None = None,
-    mode: BucketMode = "default",
+    mode: BucketMode | None = None,
 ) -> None:
+    mode = mode or _default_bucket_mode()
     if bucket_cap_mb_by_bucket_idx is None:
         from torch._inductor.fx_passes.bucketing import (
             bucket_cap_mb_by_bucket_idx_default,  # pyrefly: ignore [missing-module-attribute]
@@ -212,8 +219,9 @@ def bucket_all_gather(
 def bucket_reduce_scatter(
     gm: torch.fx.GraphModule,
     bucket_cap_mb_by_bucket_idx: Callable[[int], float] | None = None,
-    mode: BucketMode = "default",
+    mode: BucketMode | None = None,
 ) -> None:
+    mode = mode or _default_bucket_mode()
     if bucket_cap_mb_by_bucket_idx is None:
         from torch._inductor.fx_passes.bucketing import (
             bucket_cap_mb_by_bucket_idx_default,  # pyrefly: ignore [missing-module-attribute]
@@ -453,7 +461,7 @@ def bucket_all_gather_by_mb(
     gm: torch.fx.GraphModule,
     bucket_cap_mb_by_bucket_idx: Callable[[int], float],
     filter_wait_node: Callable[[torch.fx.Node], bool] | None = None,
-    mode: BucketMode = "default",
+    mode: BucketMode | None = None,
 ) -> list[list[torch.fx.Node]]:
     """
     Identifies all all_gather nodes and groups them into buckets,
@@ -472,6 +480,7 @@ def bucket_all_gather_by_mb(
     Returns:
         list[list[torch.fx.Node]]: List of buckets, where each bucket is a list of all_gather nodes.
     """
+    mode = mode or _default_bucket_mode()
 
     group_key_fn = (
         _ag_group_key_multidtype if mode and "multidtype" in mode else _ag_group_key
@@ -490,7 +499,7 @@ def bucket_reduce_scatter_by_mb(
     gm: torch.fx.GraphModule,
     bucket_cap_mb_by_bucket_idx: Callable[[int], float],
     filter_wait_node: Callable[[torch.fx.Node], bool] | None = None,
-    mode: BucketMode = "default",
+    mode: BucketMode | None = None,
 ) -> list[list[torch.fx.Node]]:
     """
     Identifies all reduce_scatter nodes and groups them into buckets,
@@ -507,8 +516,9 @@ def bucket_reduce_scatter_by_mb(
     Returns:
         list[list[torch.fx.Node]]: List of buckets, where each bucket is a list of reduce_scatter nodes.
     """
+    mode = mode or _default_bucket_mode()
 
-    assert "multidtype" not in mode, (
+    assert mode is None or "multidtype" not in mode, (
         "reduce scatter bucketing does not support multidtype"
     )
 
@@ -1068,10 +1078,11 @@ def process_collective_bucket(
 def merge_reduce_scatter_bucket(
     g: torch.fx.Graph,
     rs_nodes: list[torch.fx.Node],
-    mode: BucketMode = "default",
+    mode: BucketMode | None = None,
     insert_before: torch.fx.Node | None = None,
     wait_insertion_point: torch.fx.Node | None = None,
 ) -> tuple[list[torch.fx.Node], dict[torch.fx.Node, torch.fx.Node]]:
+    mode = mode or _default_bucket_mode()
     # Validate bucket consistency
     rs0 = rs_nodes[0]
     rs0_val = rs0.meta["val"]
@@ -1161,10 +1172,11 @@ def merge_all_reduce_bucket(
 def merge_all_gather_bucket(
     g: torch.fx.Graph,
     ag_nodes: list[torch.fx.Node],
-    mode: BucketMode = "default",
+    mode: BucketMode | None = None,
     insert_before: torch.fx.Node | None = None,
     wait_insertion_point: torch.fx.Node | None = None,
 ) -> tuple[list[torch.fx.Node], dict[torch.fx.Node, torch.fx.Node]]:
+    mode = mode or _default_bucket_mode()
     from torch.distributed.distributed_c10d import _resolve_process_group
 
     ag0 = ag_nodes[0]
@@ -1180,7 +1192,7 @@ def merge_all_gather_bucket(
 
     # Choose merge function based on mode
     ag_merge_fn = all_gather_merge_fn_to_trace
-    if mode is not None and "custom_ops" in mode:
+    if mode and "custom_ops" in mode:
         ag_merge_fn = all_gather_merge_fn_to_trace_custom_ops  # type: ignore[assignment]
 
     # Process bucket with lazy input collection
@@ -1209,11 +1221,12 @@ def merge_all_gather_bucket(
 def merge_reduce_scatter(
     gm: torch.fx.GraphModule,
     rs_buckets: list[list[torch.fx.Node]],
-    mode: BucketMode = "default",
+    mode: BucketMode | None = None,
 ) -> None:
     """
     Merges specified buckets of reduce_scatter to joint reduce_scatter.
     """
+    mode = mode or _default_bucket_mode()
     with dynamo_timed("fx.bucketing.merge_reduce_scatter", log_pt2_compile_event=True):
         trace_structured(
             "artifact",
@@ -1233,11 +1246,12 @@ def merge_reduce_scatter(
 def merge_all_gather(
     gm: torch.fx.GraphModule,
     ag_buckets: list[list[torch.fx.Node]],
-    mode: BucketMode = "default",
+    mode: BucketMode | None = None,
 ) -> None:
     """
     Merges specified buckets of all_gather to joint all_gather.
     """
+    mode = mode or _default_bucket_mode()
     with dynamo_timed("fx.bucketing.merge_all_gather", log_pt2_compile_event=True):
         trace_structured(
             "artifact",
