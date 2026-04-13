@@ -47,6 +47,26 @@ on:
         description: prefix for runner label
         type: string
         default: ""
+      use-arc:
+        required: false
+        type: boolean
+        default: false
+        description: If true, use ARC (OSDC) runner path instead of EC2.
+      python-version:
+        required: false
+        type: string
+        default: ""
+        description: Python version to use for the OSDC build.
+      compiler:
+        required: false
+        type: string
+        default: ""
+        description: Compiler to use for the OSDC build.
+      cuda-version:
+        required: false
+        type: string
+        default: ""
+        description: CUDA version to use for the OSDC build.
     secrets:
       GH_PYTORCHBOT_TOKEN:
         required: false
@@ -55,7 +75,7 @@ on:
 jobs:
   build-docs:
     # Don't run on forked repos.
-    if: github.repository_owner == 'pytorch'
+    if: github.repository_owner == 'pytorch' && !inputs.use-arc
     runs-on: ${{ matrix.runner }}
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'pytorchbot-env' || '' }}
     strategy:
@@ -245,6 +265,148 @@ jobs:
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()
+
+  build-docs-osdc:
+    if: github.repository_owner == 'pytorch' && inputs.use-arc
+    permissions:
+      id-token: write
+      contents: read
+      actions: read
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: ${{ inputs.docker-image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - docs_type: cpp
+            runner: ${{ inputs.runner_prefix }}l-x86iavx512-48-384
+            timeout-minutes: 360
+          - docs_type: python
+            runner: ${{ inputs.runner_prefix }}l-x86iavx512-16-128
+            timeout-minutes: 30
+    name: build-docs-${{ matrix.docs_type }}-${{ inputs.push }}
+    steps:
+      - name: Setup Linux
+        id: setup-linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        with:
+          use-arc: true
+          python-version: ${{ inputs.python-version }}
+          compiler: ${{ inputs.compiler }}
+          cuda-version: ${{ inputs.cuda-version }}
+          submodules: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure AWS credentials
+        id: aws-creds
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/arc
+          aws-region: us-east-1
+          role-duration-seconds: 18000
+
+      - name: Download build artifacts
+        uses: pytorch/pytorch/.github/actions/download-build-artifacts@main
+        with:
+          name: ${{ inputs.build-environment }}
+          s3-bucket: ${{ inputs.s3-bucket }}
+          use-gha: ${{ steps.aws-creds.outcome != 'success' }}
+
+      - name: Generate netrc (only for docs-push)
+        if: inputs.push
+        env:
+          GITHUB_PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+        run: |
+          rm -rf "${HOME}/.netrc"
+          echo "machine github.com" > "${HOME}/.netrc"
+          echo "login pytorchbot" >> "${HOME}/.netrc"
+          echo "password ${GITHUB_PYTORCHBOT_TOKEN}" >> "${HOME}/.netrc"
+
+      - name: Build ${{ matrix.docs_type }} docs
+        timeout-minutes: ${{ matrix.timeout-minutes }}
+        id: build-docs
+        env:
+          WITH_PUSH: ${{ inputs.push }}
+          DOCS_TYPE: ${{ matrix.docs_type }}
+          RUN_DOXYGEN: ${{ inputs.run-doxygen }}
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+          SHA1: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -ex
+          if [[ "${GITHUB_REF}" =~ ^refs/tags/v([0-9]+\.[0-9]+)\.* ]]; then
+            target="${BASH_REMATCH[1]}"
+          else
+            target="main"
+          fi
+          export DOCS_VERSION="${target}"
+          pip install $(echo dist/*.whl)[opt-einsum]
+          ./.ci/pytorch/${DOCS_TYPE}_doc_push_script.sh
+
+      - name: Upload Python Docs Preview
+        uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
+        if: ${{ steps.aws-creds.outcome == 'success' && github.event_name == 'pull_request' && matrix.docs_type == 'python' && steps.build-docs.outcome == 'success' }}
+        with:
+          retention-days: 14
+          s3-bucket: doc-previews
+          if-no-files-found: error
+          path: pytorch_docs/main/
+          s3-prefix: pytorch/pytorch/${{ github.event.pull_request.number }}
+
+      - name: Upload C++ Docs Preview
+        uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
+        if: ${{ steps.aws-creds.outcome == 'success' && github.event_name == 'pull_request' && matrix.docs_type == 'cpp' && steps.build-docs.outcome == 'success' }}
+        with:
+          retention-days: 14
+          if-no-files-found: error
+          s3-bucket: doc-previews
+          path: cppdocs/
+          s3-prefix: pytorch/pytorch/${{ github.event.pull_request.number }}/cppdocs
+
+      - name: Post C++ Docs Coverage Comment
+        if: ${{ steps.aws-creds.outcome == 'success' && github.event_name == 'pull_request' && matrix.docs_type == 'cpp' && steps.build-docs.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUM="${{ github.event.pull_request.number }}"
+          MARKER="<!-- cpp-docs-coverage -->"
+
+          # Only post if the PR touches docs/cpp
+          if ! gh pr diff "$PR_NUM" --name-only | grep -q '^docs/cpp/'; then
+            echo "No changes to docs/cpp/, skipping coverage comment."
+            exit 0
+          fi
+
+          # Skip if we already posted
+          if gh pr view "$PR_NUM" --json comments --jq '.comments[].body' | grep -q "$MARKER"; then
+            echo "Coverage comment already posted, skipping."
+            exit 0
+          fi
+
+          body="${MARKER}
+          ## C++ Docs
+
+          - [Doc Preview](https://docs-preview.pytorch.org/pytorch/pytorch/${PR_NUM}/cppdocs/index.html)
+          - [API Coverage Report](https://docs-preview.pytorch.org/pytorch/pytorch/${PR_NUM}/cppdocs/_coverage/cpp_coverage.txt)
+          - [HTML Issues Report](https://docs-preview.pytorch.org/pytorch/pytorch/${PR_NUM}/cppdocs/_coverage/cpp_html_issues.txt)"
+
+          if [ -f cppdocs/_coverage/index.html ]; then
+            body="${body}
+          - [Coverxygen Report (interactive)](https://docs-preview.pytorch.org/pytorch/pytorch/${PR_NUM}/cppdocs/_coverage/index.html)"
+          fi
+
+          gh pr comment "$PR_NUM" --body "$body"
+
+      - name: Upload C++ Docs Preview (nightly dry-run)
+        if: ${{ steps.aws-creds.outcome == 'success' && !inputs.push && github.event_name != 'pull_request' && matrix.docs_type == 'cpp' && steps.build-docs.outcome == 'success' }}
+        run: |
+          # Unlike EC2 runners, the OSDC container doesn't have aws CLI pre-installed
+          pip install awscli==1.29.40
+          aws s3 cp cppdocs/ s3://doc-previews/pytorch/pytorch/nightly-${{ github.sha }}/cppdocs --recursive --quiet
+          echo "C++ docs preview available at:"
+          echo "https://docs-preview.pytorch.org/pytorch/pytorch/nightly-${{ github.sha }}/cppdocs/index.html"
 
   memory-viz-tests:
     # Tests for torch memory visualizer

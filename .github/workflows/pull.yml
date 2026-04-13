@@ -218,11 +218,11 @@ jobs:
     secrets: inherit
 
   # ╠══════════════════════════════════════════════════════════════════════╣
-  # ║ linux-docs (TODO (huydhn): EC2-only)                                 ║
+  # ║ linux-docs                                                           ║
   # ╠══════════════════════════════════════════════════════════════════════╣
 
   linux-docs:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-docs ')) && needs.get-label-type.outputs.use-arc != 'true' }}
+    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-docs ') }}
     name: linux-docs
     uses: ./.github/workflows/_docs.yml
     needs:
@@ -233,6 +233,10 @@ jobs:
       build-environment: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.docker-image }}
       run-doxygen: true
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      python-version: "3.10"
+      compiler: gcc11
     secrets: inherit
 
   # ╠══════════════════════════════════════════════════════════════════════╣
