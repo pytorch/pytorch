@@ -421,6 +421,21 @@ def generate_wheels_matrix(
                     }
                 )
             else:
+                # Determine pytorch_extra_install_requirements:
+                # - XPU builds get XPU deps
+                # - Windows/macOS CPU builds get stable CUDA deps
+                #   (with platform_system == 'Linux' markers)
+                # - Everything else gets empty string
+                if gpu_arch_type == "xpu":
+                    extra_reqs = PYTORCH_EXTRA_INSTALL_REQUIREMENTS["xpu"]
+                elif (
+                    gpu_arch_type == "cpu"
+                    and os in ("windows", "windows-arm64", "macos-arm64")
+                ):
+                    extra_reqs = PYTORCH_EXTRA_INSTALL_REQUIREMENTS[CUDA_STABLE]
+                else:
+                    extra_reqs = ""
+
                 ret.append(
                     {
                         "python_version": python_version,
@@ -439,11 +454,7 @@ def generate_wheels_matrix(
                         "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
                             ".", "_"
                         ),
-                        "pytorch_extra_install_requirements": (
-                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS["xpu"]
-                            if gpu_arch_type == "xpu"
-                            else ""
-                        ),
+                        "pytorch_extra_install_requirements": extra_reqs,
                     }
                 )
 
