@@ -22,7 +22,7 @@ from torch._inductor.test_case import TestCase
 from torch._logging._internal import TorchLogsFormatter
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_utils import find_free_port
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
 if torch.distributed.is_available():
@@ -32,6 +32,10 @@ HAS_TLPARSE = shutil.which("tlparse") is not None
 requires_tlparse = unittest.skipUnless(HAS_TLPARSE, "requires tlparse")
 requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"
+)
+
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
 
 
@@ -60,7 +64,7 @@ def inductor_error_fn(a):
 
 
 def inductor_schedule_fn(a):
-    output = a.add(torch.ones(1000, 1000, device="cuda"))
+    output = a.add(torch.ones(1000, 1000, device=device_type))
     return output
 
 
@@ -319,10 +323,12 @@ class StructuredTraceTest(TestCase):
             with self.assertRaises(ValueError):
                 torch._guards.CompileId.from_string(bad_cid)
 
-    @requires_cuda_and_triton
     def test_schedule(self):
+        if not (torch.accelerator.is_available() and HAS_TRITON):
+            self.skipTest("requires accelerator with triton")
+
         fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
-        fn_opt(torch.ones(1000, 1000, device="cuda"))
+        fn_opt(torch.ones(1000, 1000, device=device_type))
         self.assertExpectedInline(
             self.buffer.getvalue(),
             """\
@@ -353,10 +359,12 @@ class StructuredTraceTest(TestCase):
 
         self.assertParses()
 
-    @requires_cuda_and_triton
     def test_cudagraphs(self):
+        if not (torch.accelerator.is_available() and HAS_TRITON):
+            self.skipTest("requires accelerator with triton")
+
         fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)
-        fn_opt(torch.ones(1000, 1000, device="cuda"))
+        fn_opt(torch.ones(1000, 1000, device=device_type))
         self.assertExpectedInline(
             self.buffer.getvalue(),
             """\
@@ -622,9 +630,10 @@ class StructuredTraceTest(TestCase):
         self.assertParses()
 
     @requires_distributed()
-    @requires_cuda_and_triton
     @unittest.skip("https://github.com/pytorch/pytorch/issues/176188")
     def test_ddp_graphs(self):
+        if not (torch.accelerator.is_available() and HAS_TRITON):
+            self.skipTest("requires accelerator with triton")
         import torch._dynamo.convert_frame as convert_frame
 
         convert_frame.FRAME_COUNTER = 0
@@ -646,10 +655,10 @@ class StructuredTraceTest(TestCase):
         os.environ["MASTER_PORT"] = str(find_free_port())
         dist.init_process_group("gloo", rank=0, world_size=1)
 
-        model = DDP(ToyModel().to("cuda:0"), device_ids=[0], bucket_cap_mb=4)
+        model = DDP(ToyModel().to(f"{device_type}:0"), device_ids=[0], bucket_cap_mb=4)
         ddp_model = torch.compile(model, backend="inductor")
 
-        ddp_model(torch.randn(1024, 1024, device="cuda:0"))
+        ddp_model(torch.randn(1024, 1024, device=f"{device_type}:0"))
 
         dist.destroy_process_group()
 
@@ -1259,10 +1268,12 @@ def forward(self, x_1: "f32[2][1]cpu"):
 
     @requires_tlparse
     @requires_distributed()
-    @requires_cuda_and_triton
     @torch._inductor.config.patch("fx_graph_cache", False)
     @torch._inductor.config.patch("log_tlparse", True)
     def test_runtime_estimates_simple(self):
+        if not (torch.accelerator.is_available() and HAS_TRITON):
+            self.skipTest("requires accelerator with triton")
+
         """Test runtime estimates logging with simple compute and collective ops."""
         import torch.distributed as dist
 
@@ -1286,9 +1297,9 @@ def forward(self, x_1: "f32[2][1]cpu"):
             with self._setup_runtime_estimates_capture() as payload_buffer:
                 torch._dynamo.reset()
 
-                mod = SimpleModule().cuda()
+                mod = SimpleModule().to(device_type)
                 compiled = torch.compile(mod, backend="inductor")
-                compiled(torch.randn(4, 4, device="cuda"))
+                compiled(torch.randn(4, 4, device=device_type))
 
                 # Verify runtime + tensor meta artifact was logged
                 self.assertIn(
@@ -1318,10 +1329,12 @@ def forward(self, x_1: "f32[2][1]cpu"):
 
     @requires_tlparse
     @requires_distributed()
-    @requires_cuda_and_triton
     @torch._inductor.config.patch("fx_graph_cache", False)
     @torch._inductor.config.patch("log_tlparse", True)
     def test_runtime_estimates_mixed(self):
+        if not (torch.accelerator.is_available() and HAS_TRITON):
+            self.skipTest("requires accelerator with triton")
+
         """Test runtime estimates logging with mixed compute and collective sequence."""
         import torch.distributed as dist
 
@@ -1353,9 +1366,9 @@ def forward(self, x_1: "f32[2][1]cpu"):
             with self._setup_runtime_estimates_capture() as payload_buffer:
                 torch._dynamo.reset()
 
-                mod = MixedModule().cuda()
+                mod = MixedModule().to(device_type)
                 compiled = torch.compile(mod, backend="inductor")
-                compiled(torch.randn(4, 4, device="cuda"))
+                compiled(torch.randn(4, 4, device=device_type))
 
                 # Verify artifact was logged
                 self.assertIn(
@@ -1384,10 +1397,12 @@ def forward(self, x_1: "f32[2][1]cpu"):
 
     @requires_tlparse
     @requires_distributed()
-    @requires_cuda_and_triton
     @torch._inductor.config.patch("fx_graph_cache", False)
     @torch._inductor.config.patch("log_tlparse", True)
     def test_tensor_metadata_logging_multiple_ops(self):
+        if not (torch.accelerator.is_available() and HAS_TRITON):
+            self.skipTest("requires accelerator with triton")
+
         import torch.distributed as dist
 
         store = FakeStore()
@@ -1407,9 +1422,9 @@ def forward(self, x_1: "f32[2][1]cpu"):
         try:
             with self._setup_runtime_estimates_capture() as payload_buffer:
                 torch._dynamo.reset()
-                mod = Mixed().cuda()
+                mod = Mixed().to(device_type)
                 compiled = torch.compile(mod, backend="inductor")
-                compiled(torch.randn(4, 4, device="cuda"))
+                compiled(torch.randn(4, 4, device=device_type))
                 payload = payload_buffer.getvalue().strip()
                 if payload:
                     data = json.loads(payload)
