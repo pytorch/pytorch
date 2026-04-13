@@ -6,6 +6,8 @@ performance can be achieved, by running work on the metal GPU(s).
 See https://developer.apple.com/documentation/metalperformanceshaders for more details.
 """
 
+from typing import Any
+
 import torch
 from torch import Tensor
 
@@ -27,7 +29,7 @@ def device_count() -> int:
     return int(torch._C._has_mps and torch._C._mps_is_available())
 
 
-def synchronize() -> None:
+def synchronize(device: torch.device | None = None) -> None:
     r"""Waits for all kernels in all streams on a MPS device to complete."""
     return torch._C._mps_deviceSynchronize()
 
@@ -167,24 +169,54 @@ def is_available() -> bool:
     return device_count() > 0
 
 
+def get_device_name(device: torch.device | None = None) -> str:
+    return "mps"
+
+
+def device_type() -> str:
+    return "mps"
+
+
+def current_device_index() -> int:
+    return 0
+
+
+def reset_peak_memory_stats() -> None:
+    pass
+
+
+def get_device_properties(device: torch.device | None = None) -> Any | None:
+    return None
+
+
+def is_initialized() -> bool:
+    return is_available()
+
+
 from . import profiler
 from .event import Event
 
 
 __all__ = [
-    "compile_shader",
-    "device_count",
-    "get_rng_state",
-    "manual_seed",
-    "seed",
-    "set_rng_state",
-    "synchronize",
-    "empty_cache",
-    "set_per_process_memory_fraction",
-    "current_allocated_memory",
-    "driver_allocated_memory",
     "Event",
+    "compile_shader",
+    "current_allocated_memory",
+    "current_device_index",
+    "device_count",
+    "device_type",
+    "driver_allocated_memory",
+    "empty_cache",
+    "get_device_name",
+    "get_device_properties",
+    "get_rng_state",
+    "is_available",
+    "is_initialized",
+    "manual_seed",
     "profiler",
     "recommended_max_memory",
-    "is_available",
+    "reset_peak_memory_stats",
+    "seed",
+    "set_per_process_memory_fraction",
+    "set_rng_state",
+    "synchronize",
 ]
