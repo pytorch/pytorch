@@ -252,7 +252,7 @@ class TimmRunner(BenchmarkRunner):
         batch_size_divisors = self._batch_size["divisors"]
         if model_name in batch_size_divisors:
             recorded_batch_size = max(
-                int(recorded_batch_size / batch_size_divisors[model_name]), 1
+                int(recorded_batch_size / int(batch_size_divisors[model_name])), 1
             )
         batch_size = batch_size or recorded_batch_size
 
