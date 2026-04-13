@@ -121,6 +121,7 @@ from .virtualized import ops, OpsValue, V
 if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import SympyBoolean
     from torch.fx.node import Argument
+    from torch.types import IntLikeType
 
     from .codegen.cutlass.template import CUTLASSTemplate
     from .codegen.wrapper import PythonWrapperCodegen
@@ -6431,7 +6432,11 @@ class ExternKernel(InputsKernel):
         tensor_args: list[IRNode] = []
         non_tensor_args: list[object] = []
         real_non_tensor_args: list[
-            FakeScriptObject | torch._C.Generator | torch._C.ScriptObject | torch.Tensor
+            FakeScriptObject
+            | torch._C.Generator
+            | torch._C.ScriptObject
+            | torch.Tensor
+            | IntLikeType
         ] = []
         for arg in args_flat:
             match arg:
