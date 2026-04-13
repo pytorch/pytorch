@@ -231,17 +231,17 @@ def torch_dtype_to_jax_runtime(dtype: torch.dtype) -> Any:
 
     dtype_map = {
         torch.float32: jnp.float32,
-        torch.float64: jnp.float64,
+        torch.float64: jnp.float32,
         torch.float16: jnp.float16,
         torch.bfloat16: jnp.bfloat16,
         torch.int32: jnp.int32,
-        torch.int64: jnp.int64,
+        torch.int64: jnp.int32,
         torch.int16: jnp.int16,
         torch.int8: jnp.int8,
         torch.uint8: jnp.uint8,
         torch.bool: jnp.bool_,
         torch.complex64: jnp.complex64,
-        torch.complex128: jnp.complex128,
+        torch.complex128: jnp.complex64,
     }
     if dtype not in dtype_map:
         raise ValueError(f"Unsupported dtype for JAX conversion: {dtype}")
