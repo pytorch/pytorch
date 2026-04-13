@@ -272,7 +272,6 @@ if sys.version_info < python_min_version:
 
 import importlib
 import itertools
-import json
 import shutil
 import subprocess
 import sysconfig
@@ -908,60 +907,6 @@ def check_pydep(importname: str, module: str) -> None:
 
 
 class build_ext(setuptools.command.build_ext.build_ext):
-    def _wrap_headers_with_macro(self, include_dir: Path) -> None:
-        """Wrap all header files with #if !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION).
-
-        Excludes:
-        - torch/headeronly/*
-        - torch/csrc/stable/*
-        - torch/csrc/inductor/aoti_torch/c/ (only shim headers)
-        - torch/csrc/inductor/aoti_torch/generated/
-
-        This method is idempotent - it will not wrap headers that are already wrapped.
-        """
-        header_extensions = (".h", ".hpp", ".cuh")
-        header_files = [
-            f for ext in header_extensions for f in include_dir.rglob(f"*{ext}")
-        ]
-
-        # Paths to exclude from wrapping (relative to include_dir)
-        exclude_dir_patterns = [
-            "torch/headeronly/",
-            "torch/csrc/stable/",
-            "torch/csrc/inductor/aoti_torch/c/",
-            "torch/csrc/inductor/aoti_torch/generated/",
-        ]
-
-        # Marker to detect if a header is already wrapped
-        wrap_start_marker = (
-            "#if !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION)\n"
-        )
-
-        for header_file in header_files:
-            rel_path = header_file.relative_to(include_dir).as_posix()
-
-            if any(rel_path.startswith(pattern) for pattern in exclude_dir_patterns):
-                report(f"Skipping header: {rel_path}")
-                continue
-
-            original_content = header_file.read_text(encoding="utf-8")
-
-            # Check if already wrapped (idempotency check)
-            if original_content.startswith(wrap_start_marker):
-                report(f"Already wrapped, skipping: {rel_path}")
-                continue
-
-            wrapped_content = (
-                wrap_start_marker
-                + f"{original_content}"
-                + "\n#else\n"
-                + '#error "This file should not be included when either TORCH_STABLE_ONLY or TORCH_TARGET_VERSION is defined."\n'
-                + "#endif  // !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION)\n"
-            )
-
-            header_file.write_text(wrapped_content, encoding="utf-8")
-            report(f"Wrapped header: {rel_path}")
-
     def _embed_libomp(self) -> None:
         # Copy libiomp5.dylib/libomp.dylib inside the wheel package on MacOS
         build_lib = Path(self.build_lib)
@@ -1135,15 +1080,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
 
         super().run()
 
-        # Wrap headers with TORCH_STABLE_ONLY and TORCH_TARGET_VERSION guards
-        build_lib = Path(self.build_lib)
-        build_torch_include_dir = build_lib / "torch" / "include"
-        if build_torch_include_dir.exists():
-            report(
-                "-- Wrapping header files with if !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION)"
-            )
-            self._wrap_headers_with_macro(build_torch_include_dir)
-
         if IS_DARWIN:
             self._embed_libomp()
 
@@ -1164,44 +1100,11 @@ class build_ext(setuptools.command.build_ext.build_ext):
             target_dir.mkdir(parents=True, exist_ok=True)
             self.copy_file(export_lib, target_lib)
 
-    def build_extensions(self) -> None:
-        self.create_compile_commands()
-
-        super().build_extensions()
-
     def get_outputs(self) -> list[str]:
         outputs = super().get_outputs()
         outputs.append(os.path.join(self.build_lib, "caffe2"))
         report(f"setup.py::get_outputs returning {outputs}")
         return outputs
-
-    def create_compile_commands(self) -> None:
-        def load(file: Path) -> list[dict[str, Any]]:
-            return json.loads(file.read_text(encoding="utf-8"))
-
-        ninja_files = (CWD / BUILD_DIR).glob("*compile_commands.json")
-        cmake_files = (CWD / "torch" / "lib" / "build").glob("*/compile_commands.json")
-        all_commands = [
-            entry
-            for f in itertools.chain(ninja_files, cmake_files)
-            for entry in load(f)
-        ]
-
-        # cquery does not like c++ compiles that start with gcc.
-        # It forgets to include the c++ header directories.
-        # We can work around this by replacing the gcc calls that python
-        # setup.py generates with g++ calls instead
-        for command in all_commands:
-            if command["command"].startswith("gcc "):
-                command["command"] = "g++ " + command["command"][4:]
-
-        new_contents = json.dumps(all_commands, indent=2)
-        contents = ""
-        compile_commands_json = CWD / "compile_commands.json"
-        if compile_commands_json.exists():
-            contents = compile_commands_json.read_text(encoding="utf-8")
-        if contents != new_contents:
-            compile_commands_json.write_text(new_contents, encoding="utf-8")
 
 
 class concat_license_files:
