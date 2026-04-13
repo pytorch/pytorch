@@ -846,9 +846,9 @@ def call_aten_dw(
     )
 
     torch.ops.aten.convolution_backward.out(
-        out1=None,  # grad_input (not needed)
-        out2=out,   # grad_weight (output we want)
-        out3=None,  # grad_bias (not needed)
+        out1=None,
+        out2=out,
+        out3=None,
         grad_output=go_t,
         input=x_t,
         weight=dummy_weight,
@@ -890,9 +890,9 @@ def call_aten_dx(
     )
 
     torch.ops.aten.convolution_backward.out(
-        out1=out,   # grad_input (output we want)
-        out2=None,  # grad_weight (not needed)
-        out3=None,  # grad_bias (not needed)
+        out1=out,
+        out2=None,
+        out3=None,
         grad_output=go_t,
         input=dummy_input,
         weight=w_t,
@@ -1010,13 +1010,16 @@ def convolution_backward_lowering(
     dw = None
     choices_dw = []
     args_w = []
+    layout_dw = None
     if output_mask[1]:
+        # Similar to constrain_conv_bwd_to_fx_strides - check if optimizing to nhwc,
+        # or check the output node's stride (no need to dry run for stride order)
         if V.graph.layout_opt and ndim == 2:
             V.graph.num_channels_last_conv += 1
             input = ir.ExternKernel.require_channels_last(input)  # type: ignore[assignment]
             grad_out = ir.ExternKernel.require_channels_last(grad_out)  # type: ignore[assignment]
         else:
-            # Reuse existing stride constraint mechanism
+            # Check output node's stride instead of dry running conv_bwd_weight_layout
             stride_order = ir.get_stride_order(
                 V.current_node.meta["val"][1].stride(), V.graph.sizevars.shape_env
             )
@@ -1024,6 +1027,7 @@ def convolution_backward_lowering(
             grad_out = ir.ExternKernel.require_stride_order(grad_out, stride_order)  # type: ignore[assignment]
 
         args_w = [input, grad_out]
+        # Compute layout after inputs are adjusted to correct stride order
         layout_dw = conv_bwd_weight_layout(grad_out, input, weight, **kwargs)
 
         if (
@@ -1065,13 +1069,16 @@ def convolution_backward_lowering(
     dx = None
     choices_dx = []
     args_x = []
+    layout_dx = None
     if output_mask[0]:
+        # Similar to constrain_conv_bwd_to_fx_strides - check if optimizing to nhwc,
+        # or check the output node's stride (no need to dry run for stride order)
         if V.graph.layout_opt and ndim == 2:
             V.graph.num_channels_last_conv += 1
             grad_out = ir.ExternKernel.require_channels_last(grad_out)  # type: ignore[assignment]
             weight = ir.ExternKernel.require_channels_last(weight)  # type: ignore[assignment]
         else:
-            # Reuse existing stride constraint mechanism
+            # Check output node's stride instead of dry running conv_bwd_input_layout
             stride_order = ir.get_stride_order(
                 V.current_node.meta["val"][0].stride(), V.graph.sizevars.shape_env
             )
@@ -1079,6 +1086,7 @@ def convolution_backward_lowering(
             weight = ir.ExternKernel.require_stride_order(weight, stride_order)  # type: ignore[assignment]
 
         args_x = [grad_out, weight]
+        # Compute layout after inputs are adjusted to correct stride order
         layout_dx = conv_bwd_input_layout(grad_out, input, weight, **kwargs)
 
         if (
