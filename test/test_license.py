@@ -45,13 +45,31 @@ class TestLicense(TestCase):
                 'Found too many "torch-*dist-info" directories '
                 f'in "{site_packages}, expected only one'
             )
+        licenses_dir = os.path.join(distinfo[0], "licenses")
         # setuptools renamed *dist-info/LICENSE to *dist-info/licenses/LICENSE since 77.0
-        license_file = os.path.join(distinfo[0], "licenses", "LICENSE")
+        license_file = os.path.join(licenses_dir, "LICENSE")
         if not os.path.exists(license_file):
             license_file = os.path.join(distinfo[0], "LICENSE")
         with open(license_file) as fid:
             txt = fid.read()
-            self.assertTrue(starting_txt in txt)
+        if starting_txt in txt:
+            # Combined license file (old setup.py behavior).
+            return
+        # Check for LICENSES_BUNDLED.txt included separately.
+        bundled = os.path.join(licenses_dir, "third_party", "LICENSES_BUNDLED.txt")
+        if os.path.exists(bundled):
+            with open(bundled) as fid:
+                self.assertIn(starting_txt, fid.read())
+            return
+        # Check for individual third-party license files included separately.
+        third_party_licenses = glob.glob(
+            os.path.join(licenses_dir, "third_party", "**"),
+            recursive=True,
+        )
+        self.assertTrue(
+            any(os.path.isfile(f) for f in third_party_licenses),
+            "No third-party license files found in dist-info",
+        )
 
 
 if __name__ == "__main__":
