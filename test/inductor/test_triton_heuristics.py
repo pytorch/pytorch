@@ -45,6 +45,7 @@ from torch._inductor.runtime.hints import (
 )
 from torch._inductor.runtime.triton_helpers import math as tl_math
 from torch._inductor.runtime.triton_heuristics import (
+    _update_combo_kernel_kwargs,
     autotune_hints_to_configs,
     CachingAutotuner,
     template,
@@ -91,6 +92,50 @@ class TestTritonHeuristics(TestCase):
             if key not in cfg.kwargs:
                 continue
             self.assertTrue(cfg.kwargs[key] <= TRITON_MAX_BLOCK[label])
+
+    def test_combo_kernel_amd_special_config_args_are_kernel_wide(self):
+        combo_kwargs = {}
+        _update_combo_kernel_kwargs(
+            combo_kwargs,
+            {
+                "XBLOCK": 128,
+                "R0_BLOCK": 64,
+                "waves_per_eu": 2,
+                "matrix_instr_nonkdim": 16,
+                "kpack": 2,
+            },
+            subkernel_idx=1,
+            skip_rblock=False,
+        )
+        self.assertEqual(
+            combo_kwargs,
+            {
+                "XBLOCK_1": 128,
+                "R0_BLOCK_1": 64,
+                "waves_per_eu": 2,
+                "matrix_instr_nonkdim": 16,
+                "kpack": 2,
+            },
+        )
+
+        combo_kwargs = {}
+        _update_combo_kernel_kwargs(
+            combo_kwargs,
+            {
+                "XBLOCK": 128,
+                "R0_BLOCK": 64,
+                "waves_per_eu": 2,
+            },
+            subkernel_idx=0,
+            skip_rblock=True,
+        )
+        self.assertEqual(
+            combo_kwargs,
+            {
+                "XBLOCK_0": 128,
+                "waves_per_eu": 2,
+            },
+        )
 
     def _test_artificial_zgrid(self):
         def forward(primals_1, primals_2, primals_5):
