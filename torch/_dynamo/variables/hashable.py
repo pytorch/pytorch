@@ -69,6 +69,8 @@ class HashableTracker:
         vt = specialize_symnode(vt)
 
         # If Dynamo does not know the hashability of the vt, it will raise unsupported here
+        # TODO(follow-up): check tp_hash via C-level slot detection — unhashable keys
+        # (e.g. list) should raise TypeError, not graph break via is_python_hashable/unimplemented.
         if not is_hashable(vt):
             raise_unhashable(vt)
         self.vt = vt

@@ -4062,6 +4062,7 @@ class InstructionTranslatorBase(
     BINARY_REMAINDER = stack_op(operator.mod)
     BINARY_ADD = stack_op(operator.add)
     BINARY_SUBTRACT = stack_op(operator.sub)
+
     BINARY_SUBSCR = break_graph_if_unsupported(
         push=True,
         msg_prefix="Encountered graph break when attempting to trace BINARY_SUBSCR: a binary subscript, e.g. x[attr]",

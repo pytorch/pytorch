@@ -588,6 +588,21 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             args=[f"object of type '{self.python_type_name()}' has no len()"],
         )
 
+    def mp_subscript_impl(
+        self,
+        tx: InstructionTranslator,
+        key: VariableTracker,
+    ) -> VariableTracker:
+        # PyObject_GetItem: https://github.com/python/cpython/blob/62a6e898e01/Objects/abstract.c#L155-L206
+        # TODO: raise TypeError for non-subscriptable objects (blocked on
+        # branch 3 __class_getitem__ support for type objects).
+        unimplemented(
+            gb_type="missing_mp_subscript",
+            context=f"mp_subscript_impl not defined for {type(self).__name__}",
+            explanation=f"Dynamo does not yet support subscripting '{self.python_type_name()}'.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
     def call_method(
         self,
         tx: Any,
@@ -595,7 +610,18 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "__len__" and not (args or kwargs):
+        if name == "__getitem__":
+            if len(args) == 1 and not kwargs:
+                return self.mp_subscript_impl(tx, args[0])
+            from ..utils import raise_args_mismatch
+
+            raise_args_mismatch(
+                tx,
+                name,
+                "1 args and 0 kwargs",
+                f"{len(args)} args and {len(kwargs)} kwargs",
+            )
+        elif name == "__len__" and not (args or kwargs):
             from .object_protocol import generic_len
 
             return generic_len(tx, self)
