@@ -752,11 +752,16 @@ def conv_bwd_input_layout(
     output_padding: tuple[int, ...],
     groups: int,
 ) -> ir.Layout:
+    # Create temporary shallow copies to avoid realize_input side effects
+    grad_out_copy = ir.TensorBox(grad_out.data)
+    input_copy = ir.TensorBox(input.data)
+    weight_copy = ir.TensorBox(weight.data)
+
     example_output, *_ = ir.ExternKernel.process_kernel(
-        torch.ops.aten.convolution_backward,
-        grad_out,
-        input,
-        weight,
+        torch.ops.aten.convolution_backward.default,
+        grad_out_copy,
+        input_copy,
+        weight_copy,
         None,  # bias_sizes
         stride,
         padding,
@@ -789,11 +794,16 @@ def conv_bwd_weight_layout(
     output_padding: tuple[int, ...],
     groups: int,
 ) -> ir.Layout:
+    # Create temporary shallow copies to avoid realize_input side effects
+    grad_out_copy = ir.TensorBox(grad_out.data)
+    input_copy = ir.TensorBox(input.data)
+    weight_copy = ir.TensorBox(weight.data)
+
     example_output, *_ = ir.ExternKernel.process_kernel(
-        torch.ops.aten.convolution_backward,
-        grad_out,
-        input,
-        weight,
+        torch.ops.aten.convolution_backward.default,
+        grad_out_copy,
+        input_copy,
+        weight_copy,
         None,  # bias_sizes
         stride,
         padding,
@@ -837,21 +847,22 @@ def call_aten_dw(
         w_shape, dtype=out.dtype, device=x_t.device, memory_format=memory_fmt
     )
 
-    tmp = torch.ops.aten.convolution_backward(
-        go_t,
-        x_t,
-        dummy_weight,
-        None,
-        stride,
-        padding,
-        dilation,
-        transposed,
-        output_padding,
-        groups,
-        (False, True, False),
-    )[1]
-
-    out.copy_(tmp.to(out.dtype))
+    torch.ops.aten.convolution_backward.out(
+        out1=None,  # grad_input (not needed)
+        out2=out,   # grad_weight (output we want)
+        out3=None,  # grad_bias (not needed)
+        grad_output=go_t,
+        input=x_t,
+        weight=dummy_weight,
+        bias_sizes=None,
+        stride=stride,
+        padding=padding,
+        dilation=dilation,
+        transposed=transposed,
+        output_padding=output_padding,
+        groups=groups,
+        output_mask=(False, True, False),
+    )
     return out
 
 
@@ -880,21 +891,22 @@ def call_aten_dx(
         x_shape, dtype=out.dtype, device=go_t.device, memory_format=memory_fmt
     )
 
-    tmp = torch.ops.aten.convolution_backward(
-        go_t,
-        dummy_input,
-        w_t,
-        None,
-        stride,
-        padding,
-        dilation,
-        transposed,
-        output_padding,
-        groups,
-        (True, False, False),
-    )[0]
-
-    out.copy_(tmp.to(out.dtype))
+    torch.ops.aten.convolution_backward.out(
+        out1=out,   # grad_input (output we want)
+        out2=None,  # grad_weight (not needed)
+        out3=None,  # grad_bias (not needed)
+        grad_output=go_t,
+        input=dummy_input,
+        weight=w_t,
+        bias_sizes=None,
+        stride=stride,
+        padding=padding,
+        dilation=dilation,
+        transposed=transposed,
+        output_padding=output_padding,
+        groups=groups,
+        output_mask=(True, False, False),
+    )
     return out
 
 
@@ -1000,20 +1012,21 @@ def convolution_backward_lowering(
     dw = None
     choices_dw = []
     args_w = []
-    layout_dw = conv_bwd_weight_layout(grad_out, input, weight, **kwargs)
     if output_mask[1]:
         if V.graph.layout_opt and ndim == 2:
             V.graph.num_channels_last_conv += 1
             input = ir.ExternKernel.require_channels_last(input)  # type: ignore[assignment]
             grad_out = ir.ExternKernel.require_channels_last(grad_out)  # type: ignore[assignment]
-            layout_dw = conv_bwd_weight_layout(grad_out, input, weight, **kwargs)
         else:
-            guard = V.graph.sizevars.guard_int_seq
-            req_order = ir.get_stride_order(guard(layout_dw.stride))
-            input = ir.ExternKernel.require_stride_order(input, req_order)  # type: ignore[assignment]
-            grad_out = ir.ExternKernel.require_stride_order(grad_out, req_order)  # type: ignore[assignment]
+            # Reuse existing stride constraint mechanism
+            stride_order = ir.get_stride_order(
+                V.current_node.meta["val"][1].stride(), V.graph.sizevars.shape_env
+            )
+            input = ir.ExternKernel.require_stride_order(input, stride_order)  # type: ignore[assignment]
+            grad_out = ir.ExternKernel.require_stride_order(grad_out, stride_order)  # type: ignore[assignment]
 
         args_w = [input, grad_out]
+        layout_dw = conv_bwd_weight_layout(grad_out, input, weight, **kwargs)
 
         if (
             torch._inductor.utils._use_conv_bwd_weight_autotune_backend("TRITON")
@@ -1054,20 +1067,21 @@ def convolution_backward_lowering(
     dx = None
     choices_dx = []
     args_x = []
-    layout_dx = conv_bwd_input_layout(grad_out, input, weight, **kwargs)
     if output_mask[0]:
         if V.graph.layout_opt and ndim == 2:
             V.graph.num_channels_last_conv += 1
             grad_out = ir.ExternKernel.require_channels_last(grad_out)  # type: ignore[assignment]
             weight = ir.ExternKernel.require_channels_last(weight)  # type: ignore[assignment]
-            layout_dx = conv_bwd_input_layout(grad_out, input, weight, **kwargs)
         else:
-            guard = V.graph.sizevars.guard_int_seq
-            req_order = ir.get_stride_order(guard(layout_dx.stride))
-            grad_out = ir.ExternKernel.require_stride_order(grad_out, req_order)  # type: ignore[assignment]
-            weight = ir.ExternKernel.require_stride_order(weight, req_order)  # type: ignore[assignment]
+            # Reuse existing stride constraint mechanism
+            stride_order = ir.get_stride_order(
+                V.current_node.meta["val"][0].stride(), V.graph.sizevars.shape_env
+            )
+            grad_out = ir.ExternKernel.require_stride_order(grad_out, stride_order)  # type: ignore[assignment]
+            weight = ir.ExternKernel.require_stride_order(weight, stride_order)  # type: ignore[assignment]
 
         args_x = [grad_out, weight]
+        layout_dx = conv_bwd_input_layout(grad_out, input, weight, **kwargs)
 
         if (
             torch._inductor.utils._use_conv_bwd_input_autotune_backend("TRITON")
