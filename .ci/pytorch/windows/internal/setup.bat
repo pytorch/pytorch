@@ -39,6 +39,7 @@ sccache --zero-stats
 if "%BUILD_PYTHONLESS%" == "" goto pytorch else goto libtorch
 
 :libtorch
+set BUILD_TEST=0
 set VARIANT=shared-with-deps
 
 mkdir libtorch
@@ -86,6 +87,8 @@ copy /Y "%LIBTORCH_PREFIX%-%PYTORCH_BUILD_VERSION%.zip" "%PYTORCH_FINAL_PACKAGE_
 goto build_end
 
 :pytorch
+set BUILD_TEST=0
+if not "%DEBUG%" == "1" set CMAKE_BUILD_TYPE=Release
 %PYTHON_EXEC% -m build --wheel --no-isolation --outdir "%PYTORCH_FINAL_PACKAGE_DIR%"
 
 :build_end
