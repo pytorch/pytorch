@@ -325,6 +325,83 @@ python test/test_mps.py -k test_output_match_my_op
 python test/test_mps.py
 ```
 
+## Debugging Metal Kernels with `torch.mps.compile_shader`
+
+Use `torch.mps.compile_shader` to JIT-compile and test individual Metal kernels in isolation. This is invaluable for debugging multi-kernel pipelines where you need to verify each stage independently.
+
+### Basic Usage
+
+```python
+import torch
+
+source = '''
+#include <metal_stdlib>
+using namespace metal;
+
+kernel void my_kernel(
+    const device float* input [[buffer(0)]],
+    device float* output [[buffer(1)]],
+    uint tid [[thread_position_in_grid]]) {
+  output[tid] = input[tid] * 2.0;
+}
+'''
+
+lib = torch.mps.compile_shader(source)
+
+inp = torch.tensor([1.0, 2.0, 3.0], device='mps')
+out = torch.zeros(3, device='mps')
+lib.my_kernel(inp, out, threads=[3, 1, 1], group_size=[3, 1, 1])
+torch.mps.synchronize()
+print(out)  # tensor([2., 4., 6.], device='mps:0')
+```
+
+### Dispatch Semantics
+
+`compile_shader` uses **`dispatchThreads`** semantics (same as `mtl_dispatch1DJob` in PyTorch):
+- `threads=[N, 1, 1]` — total number of threads (NOT threadgroups)
+- `group_size=[G, 1, 1]` — threads per threadgroup
+
+This differs from the `dispatchThreadgroups` API used by some host-side code. To match `dispatchThreadgroups:MTLSizeMake(num_tgs, num_slices, 1) threadsPerThreadgroup:MTLSizeMake(TG_SIZE, 1, 1)`:
+
+```python
+# Equivalent compile_shader call:
+lib.kernel(args...,
+    threads=[num_tgs * TG_SIZE, num_slices, 1],
+    group_size=[TG_SIZE, 1, 1])
+```
+
+### Constant Buffer Parameters
+
+Pass scalar constants as single-element tensors:
+
+```python
+slice_size = torch.tensor([1024], dtype=torch.int32, device='mps')
+lib.my_kernel(data, output, slice_size, threads=[1024, 1, 1], group_size=[256, 1, 1])
+```
+
+### Debugging Strategy for Multi-Kernel Pipelines
+
+When a pipeline of kernels (e.g., histogram → prefix_sum → scatter) produces wrong results, test each kernel individually and verify its output against a Python/NumPy reference:
+
+```python
+# 1. Run GPU kernel
+lib.histogram(keys, hist, ..., threads=[N, 1, 1], group_size=[256, 1, 1])
+torch.mps.synchronize()
+
+# 2. Compute reference in Python
+ref_hist = compute_histogram_cpu(keys.cpu().numpy(), ...)
+
+# 3. Compare
+assert np.array_equal(hist.cpu().numpy(), ref_hist), "Histogram mismatch!"
+```
+
+This isolates which kernel in the pipeline is broken, rather than debugging the entire pipeline at once.
+
+### Common Pitfalls
+
+- **Wrong `threads` count** — `threads` is total threads, not threadgroups. For 5 threadgroups of 256, use `threads=[1280, 1, 1]`.
+- **Threadgroup memory** — `compile_shader` doesn't support `[[threadgroup(N)]]` parameters directly. If your kernel needs threadgroup memory, restructure to use `threadgroup` arrays declared inside the kernel body instead.
+
 ## Checklist
 
 - [ ] Added MPS dispatch to `native_functions.yaml`

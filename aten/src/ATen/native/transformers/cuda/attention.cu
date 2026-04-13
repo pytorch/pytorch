@@ -86,6 +86,7 @@
 #include <ATen/native/transformers/cuda/mem_eff_attention/pytorch_utils.h>
 #else
 // MemoryEfficient Attention Specific Imports for ROCM
+#include <ATen/native/transformers/hip/gemm_kernel_utils.h>
 #ifndef DISABLE_AOTRITON
 #include <ATen/native/transformers/hip/aotriton_adapter.h>
 #include <aotriton/flash.h>
@@ -95,7 +96,7 @@
 #endif
 #endif
 
-#if defined(USE_ROCM) && (defined(USE_FLASH_ATTENTION) || defined(USE_MEM_EFF_ATTENTION))
+#if defined(USE_ROCM) && defined(USE_FLASH_ATTENTION)
 namespace pytorch_flash
 {
 std::tuple<
@@ -466,6 +467,138 @@ Tensor collapse_dims_1_and_2(const Tensor& sizes) {
   return (sizes_dim1 * sizes_dim2).contiguous();
 }
 
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>
+_flash_attention_forward_impl(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const std::optional<Tensor>& cumulative_sequence_length_q,
+    const std::optional<Tensor>& cumulative_sequence_length_k,
+    int64_t max_seqlen_batch_q,
+    int64_t max_seqlen_batch_k,
+    double dropout_p,
+    bool is_causal,
+    bool return_debug_mask,
+    std::optional<double> scale,
+    std::optional<int64_t> window_size_left,
+    std::optional<int64_t> window_size_right,
+    const std::optional<Tensor>& _seqused_k,
+    const std::optional<Tensor>& _alibi_slopes,
+    const std::optional<Tensor>& _block_table,
+    std::optional<Tensor> out,
+    std::optional<int64_t> num_splits
+    ) {
+#if defined(USE_FLASH_ATTENTION)
+  TORCH_CHECK(
+      !num_splits.has_value(),
+      "num_splits requires FA3. Register FA3 with `register_flash_attention_fa3()` to set num_splits.");
+  const auto softmax_scale =
+      sdp::calculate_scale(query, scale).expect_float();
+
+  std::optional<Tensor> seqused_k = _seqused_k;
+  std::optional<at::Tensor> block_table = _block_table;
+  std::optional<Tensor> alibi_slopes = _alibi_slopes;
+  const float softcap = 0.0;
+
+#ifdef USE_ROCM  // ROCM backend accepts std::optional for window_size_left/right directly.
+#ifdef DISABLE_AOTRITON  // CK backend, Passing window_size as it is
+  const auto window_left = window_size_left;
+  const auto window_right = window_size_right;
+#else  // AOTriton implements "generalized" SWA and negative size means negative shifting.
+  // aotriton_adapter::parse_window_size tries to match the behavior of CUTLASS backend
+  using sdp::aotriton_adapter::parse_window_size;
+  const auto [window_left, window_right] = parse_window_size(window_size_left,
+                                                             window_size_right);
+#endif
+#else  // USE_ROCM
+  const int window_left = window_size_left.value_or(-1);
+  const int window_right = window_size_right.value_or(-1);
+#endif  // USE_ROCM
+
+  // We are going to have two paths:
+  // 1. The standard MHA path for dense tensors
+  // 2. The Varseqlen path
+  TORCH_CHECK(
+      cumulative_sequence_length_q.has_value() ==
+          cumulative_sequence_length_k.has_value(),
+      "cumulative_sequence_length_q and cumulative_sequence_length_k must be both set or both not set");
+  Tensor output, q_padded, k_padded, v_padded, logsumexp, output_shape,
+      philox_seed, philox_offset, debug_attn_mask;
+  if (cumulative_sequence_length_q.has_value()) {
+    std::tie(
+        output,
+        q_padded,
+        k_padded,
+        v_padded,
+        logsumexp,
+        philox_seed,
+        philox_offset,
+        debug_attn_mask) =
+        FLASH_NAMESPACE::mha_varlen_fwd(
+            query,
+            key,
+            value,
+            out,
+            cumulative_sequence_length_q.value(),
+            cumulative_sequence_length_k.value(),
+            seqused_k, /*seqused_k*/
+            block_table, /*block_table*/
+            alibi_slopes, /*alibi_slopes*/
+            max_seqlen_batch_q,
+            max_seqlen_batch_k,
+            dropout_p,
+            softmax_scale,
+            false /*zero_tensors*/,
+            is_causal,
+            window_left,
+            window_right,
+            softcap,
+            return_debug_mask,
+            std::nullopt /*gen_*/);
+  } else {
+    std::tie(
+        output,
+        q_padded,
+        k_padded,
+        v_padded,
+        logsumexp,
+        philox_seed,
+        philox_offset,
+        debug_attn_mask) =
+        FLASH_NAMESPACE::mha_fwd(
+            query,
+            key,
+            value,
+            out,
+            alibi_slopes,
+            dropout_p,
+            softmax_scale,
+            is_causal,
+            window_left,
+            window_right,
+            softcap,
+            return_debug_mask, /*return_softmax (this is used for testing)*/
+            std::nullopt);
+  }
+  debug_attn_mask =
+      return_debug_mask ? debug_attn_mask : at::empty({0}, query.options());
+  return std::make_tuple(
+      std::move(output),
+      std::move(logsumexp),
+      std::move(philox_seed),
+      std::move(philox_offset),
+      std::move(debug_attn_mask));
+
+#endif
+  TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
+  return std::make_tuple(
+      Tensor(),
+      Tensor(),
+      Tensor(),
+      Tensor(),
+      Tensor());
+}
+
 } // namespace
 // compute q = (q + q_bias) / sqrt(dim_per_head), k = k + k_bias, v = v + v_bias
 __host__ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cuda(
@@ -568,7 +701,7 @@ __host__ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cuda(
 #undef CALL_KERNEL
   auto q_k_v_s =
       at::native::split(q_k_v.view({3 * B, num_head, T, dim_per_head}), B, 0);
-  return std::make_tuple(q_k_v_s[0], q_k_v_s[1], q_k_v_s[2]);
+  return std::make_tuple(std::move(q_k_v_s[0]), std::move(q_k_v_s[1]), std::move(q_k_v_s[2]));
 }
 
 std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
@@ -646,7 +779,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
 
 #endif
   const auto dim_per_head = D / num_head;
-  if ((query.is_same(key) && key.is_same(value)) && dim_per_head % 8 == 0 && !need_weights) {
+  if ((query.is_same(key) && key.is_same(value)) && !need_weights) {
 
     // We have not done linear projection yet but the input for SDP
     // Is expected to be 4 dimensional. We "cheaply" create view tensors
@@ -824,7 +957,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   // Reshape output to convert nnz to batch_size and seq_len
   Tensor attention = output.transpose(1,2);
 
-  return std::make_tuple(attention, logsumexp, Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_k, philox_seed, philox_offset, debug_attn_mask);
+  return std::make_tuple(std::move(attention), std::move(logsumexp), Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_k, std::move(philox_seed), std::move(philox_offset), std::move(debug_attn_mask));
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Tensor, Tensor> _scaled_dot_product_flash_attention_cuda_quantized(
@@ -1174,115 +1307,52 @@ _flash_attention_forward(
     std::optional<int64_t> window_size_left,
     std::optional<int64_t> window_size_right,
     const std::optional<Tensor>& _seqused_k,
-    const std::optional<Tensor>& _alibi_slopes
+    const std::optional<Tensor>& _alibi_slopes,
+    const std::optional<Tensor>& _block_table,
+    std::optional<int64_t> num_splits
     ) {
-#if defined(USE_FLASH_ATTENTION)
-  const auto softmax_scale =
-      sdp::calculate_scale(query, scale).expect_float();
-  std::optional<Tensor> out = std::nullopt;
+  return _flash_attention_forward_impl(
+      query, key, value,
+      cumulative_sequence_length_q, cumulative_sequence_length_k,
+      max_seqlen_batch_q, max_seqlen_batch_k,
+      dropout_p, is_causal, return_debug_mask,
+      scale, window_size_left, window_size_right,
+      _seqused_k, _alibi_slopes, _block_table,
+      /*out=*/std::nullopt, num_splits);
+}
 
-  std::optional<Tensor> seqused_k = _seqused_k;
-  std::optional<at::Tensor> block_table = std::nullopt;  // we are not using the block table yet
-  std::optional<Tensor> alibi_slopes = _alibi_slopes;
-  const float softcap = 0.0;
-
-#ifdef USE_ROCM  // ROCM backend accepts std::optional for window_size_left/right directly.
-#ifdef DISABLE_AOTRITON  // CK backend, Passing window_size as it is
-  const auto window_left = window_size_left;
-  const auto window_right = window_size_right;
-#else  // AOTriton implements "generalized" SWA and negative size means negative shifting.
-  // aotriton_adapter::parse_window_size tries to match the behavior of CUTLASS backend
-  using sdp::aotriton_adapter::parse_window_size;
-  const auto [window_left, window_right] = parse_window_size(window_size_left,
-                                                             window_size_right);
-#endif
-#else  // USE_ROCM
-  const int window_left = window_size_left.value_or(-1);
-  const int window_right = window_size_right.value_or(-1);
-#endif  // USE_ROCM
-
-  // We are going to have two paths:
-  // 1. The standard MHA path for dense tensors
-  // 2. The Varseqlen path
-  TORCH_CHECK(
-      cumulative_sequence_length_q.has_value() ==
-          cumulative_sequence_length_k.has_value(),
-      "cumulative_sequence_length_q and cumulative_sequence_length_k must be both set or both not set");
-  Tensor output, q_padded, k_padded, v_padded, logsumexp, output_shape,
-      philox_seed, philox_offset, debug_attn_mask;
-  if (cumulative_sequence_length_q.has_value()) {
-    std::tie(
-        output,
-        q_padded,
-        k_padded,
-        v_padded,
-        logsumexp,
-        philox_seed,
-        philox_offset,
-        debug_attn_mask) =
-        FLASH_NAMESPACE::mha_varlen_fwd(
-            query,
-            key,
-            value,
-            out,
-            cumulative_sequence_length_q.value(),
-            cumulative_sequence_length_k.value(),
-            seqused_k, /*seqused_k*/
-            block_table, /*block_table*/
-            alibi_slopes, /*alibi_slopes*/
-            max_seqlen_batch_q,
-            max_seqlen_batch_k,
-            dropout_p,
-            softmax_scale,
-            false /*zero_tensors*/,
-            is_causal,
-            window_left,
-            window_right,
-            softcap,
-            return_debug_mask,
-            std::nullopt /*gen_*/);
-  } else {
-    std::tie(
-        output,
-        q_padded,
-        k_padded,
-        v_padded,
-        logsumexp,
-        philox_seed,
-        philox_offset,
-        debug_attn_mask) =
-        FLASH_NAMESPACE::mha_fwd(
-            query,
-            key,
-            value,
-            out,
-            alibi_slopes,
-            dropout_p,
-            softmax_scale,
-            is_causal,
-            window_left,
-            window_right,
-            softcap,
-            return_debug_mask, /*return_softmax (this is used for testing)*/
-            std::nullopt);
-  }
-  debug_attn_mask =
-      return_debug_mask ? debug_attn_mask : at::empty({0}, query.options());
-  return std::make_tuple(
-      std::move(output),
-      std::move(logsumexp),
-      std::move(philox_seed),
-      std::move(philox_offset),
-      std::move(debug_attn_mask));
-
-#endif
-  TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
-  return std::make_tuple(
-      Tensor(),
-      Tensor(),
-      Tensor(),
-      Tensor(),
-      Tensor());
+Tensor
+_flash_attention_forward_no_dropout_inplace(
+    Tensor& out,
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const std::optional<Tensor>& cumulative_sequence_length_q,
+    const std::optional<Tensor>& cumulative_sequence_length_k,
+    int64_t max_seqlen_batch_q,
+    int64_t max_seqlen_batch_k,
+    double dropout_p,
+    bool is_causal,
+    bool return_debug_mask,
+    std::optional<double> scale,
+    std::optional<int64_t> window_size_left,
+    std::optional<int64_t> window_size_right,
+    const std::optional<Tensor>& _seqused_k,
+    const std::optional<Tensor>& _alibi_slopes,
+    const std::optional<Tensor>& _block_table,
+    std::optional<int64_t> num_splits
+    ) {
+  TORCH_CHECK(dropout_p == 0.0);
+  auto [output, logsumexp, philox_seed, philox_offset, debug_attn_mask] =
+      _flash_attention_forward_impl(
+          query, key, value,
+          cumulative_sequence_length_q, cumulative_sequence_length_k,
+          max_seqlen_batch_q, max_seqlen_batch_k,
+          dropout_p, is_causal, return_debug_mask,
+          scale, window_size_left, window_size_right,
+          _seqused_k, _alibi_slopes, _block_table,
+          /*out=*/std::make_optional(out), num_splits);
+  return logsumexp;
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>

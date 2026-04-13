@@ -165,6 +165,7 @@
     :toctree: generated
     :nosignatures:
 
+    caching_allocator_disabled
     caching_allocator_enable
 ```
 

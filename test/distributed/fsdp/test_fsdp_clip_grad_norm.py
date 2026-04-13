@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 import itertools
 import sys
-from typing import Union
 
 import torch
 import torch.nn as nn
@@ -94,9 +93,9 @@ class TestClipGradNorm(FSDPTestContinuous):
     def _test_ddp_parity(
         self,
         device,
-        max_norm: Union[float, int],
-        norm_type: Union[float, int],
-        sharding_strategy: Union[ShardingStrategy, str],
+        max_norm: float | int,
+        norm_type: float | int,
+        sharding_strategy: ShardingStrategy | str,
         use_orig_params: bool,
         offload_params: bool,
     ):
@@ -263,8 +262,8 @@ class TestClipGradNorm(FSDPTestContinuous):
     def _test_low_precision_grads(
         self,
         device,
-        max_norm: Union[float, int],
-        norm_type: Union[float, int],
+        max_norm: float | int,
+        norm_type: float | int,
         sharding_strategy: ShardingStrategy,
         use_orig_params: bool,
     ):

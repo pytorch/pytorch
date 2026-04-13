@@ -37,10 +37,10 @@ class Foo(torch.nn.Module):
 
     def __init__(self):
         super().__init__()
-        self.w1 = torch.nn.Parameter(torch.ones(1, 10))
-        self.w2 = torch.nn.Parameter(torch.ones(1, 1))
+        self.w1 = torch.nn.Parameter(torch.ones(2, 10))
+        self.w2 = torch.nn.Parameter(torch.ones(2, 2))
         self.w3 = torch.nn.Parameter(torch.ones(10, 1))
-        self.w4 = torch.nn.Parameter(torch.ones(1, 10))
+        self.w4 = torch.nn.Parameter(torch.ones(2, 10))
 
     def forward(self, x):
         t1 = torch.matmul(x, self.w1)
@@ -61,7 +61,7 @@ class TestOperatorReorderForPeakMemory(TestCase):
 
         self.model = Foo().to(GPU_TYPE)
         M = 4096 if torch.version.hip is not None else 2048
-        self.inputs = torch.ones((M, 1), device=GPU_TYPE)
+        self.inputs = torch.ones((M, 2), device=GPU_TYPE)
         self.orig_reorder_method = memory.reorder_for_peak_memory
 
     @mock.patch.object(config, "reorder_for_peak_memory", True)
@@ -454,6 +454,104 @@ class TestOperatorReorderForPeakMemory(TestCase):
         ):
             code = run_and_get_triton_code(foo, inp, inp2)
             FileCheck().check("allocated=['buf0']").run(code)
+
+    @unittest.skipUnless(TRITON_AVAILABLE, "Triton is not available")
+    def test_torch_cond_ordering_consistency(self):
+        small_sz, large_sz = 256, 1024
+
+        class MultiCondModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("large_buffer", torch.zeros(large_sz))
+                self.register_buffer("small_buffer1", torch.zeros(small_sz))
+                self.register_buffer("small_buffer2", torch.zeros(small_sz))
+                self.register_buffer("counter", torch.tensor(0, dtype=torch.long))
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                condition = self.counter % 2 == 0
+
+                def true_fn_large(buf):
+                    return buf.clone() * 2.0
+
+                def false_fn_large(buf):
+                    return buf.clone()
+
+                def true_fn_small(buf):
+                    return buf.clone() * 2.0
+
+                def false_fn_small(buf):
+                    return buf.clone()
+
+                result_large = torch.cond(
+                    condition,
+                    lambda: true_fn_large(self.large_buffer),
+                    lambda: false_fn_large(self.large_buffer),
+                )
+                result_small1 = torch.cond(
+                    condition,
+                    lambda: true_fn_small(self.small_buffer1),
+                    lambda: false_fn_small(self.small_buffer1),
+                )
+                result_small2 = torch.cond(
+                    condition,
+                    lambda: true_fn_small(self.small_buffer2),
+                    lambda: false_fn_small(self.small_buffer2),
+                )
+                return (
+                    x + result_large.sum() + result_small1.sum() + result_small2.sum()
+                )
+
+        def extract_cond_order(code: str) -> list[tuple[str, int]]:
+            """
+            Extract the order of torch.cond operations from generated code.
+            Returns list of (cond_name, buffer_size) tuples in execution order.
+            """
+            import re
+
+            cond_order = []
+            # Look for patterns like "cond" or "cond_1" in the generated code
+            # along with their buffer sizes
+            lines = code.split("\n")
+            for i, line in enumerate(lines):
+                # Match true_graph buffer allocations which indicate cond execution
+                match = re.search(r"true_graph_(\d+)_buf0\s*=.*\((\d+),", line)
+                if match:
+                    cond_idx = int(match.group(1))
+                    buf_size = int(match.group(2))
+                    cond_order.append((f"cond_{cond_idx}", buf_size))
+            return cond_order
+
+        model = MultiCondModel().to(GPU_TYPE)
+        x = torch.randn(10, device=GPU_TYPE)
+
+        # Compile with base settings (no reordering)
+        torch._dynamo.reset()
+        with config.patch({"reorder_for_peak_memory": False}):
+            compiled_base = torch.compile(model)
+            code_base = run_and_get_triton_code(compiled_base, x)
+
+        base_order = extract_cond_order(code_base)
+
+        # Compile with reorder_for_peak_memory=True
+        torch._dynamo.reset()
+        with config.patch({"reorder_for_peak_memory": True}):
+            compiled_peak_mem = torch.compile(model)
+            code_peak_mem = run_and_get_triton_code(compiled_peak_mem, x)
+
+        peak_mem_order = extract_cond_order(code_peak_mem)
+
+        if base_order and peak_mem_order:
+            self.assertEqual(
+                base_order,
+                peak_mem_order,
+                msg=(
+                    f"torch.cond operations were reordered by reorder_for_peak_memory!\n"
+                    f"Base order: {base_order}\n"
+                    f"Peak memory order: {peak_mem_order}\n"
+                    f"This can cause NCCL hangs when torch.cond contains collective operations "
+                    f"because different ranks may execute collectives in different orders."
+                ),
+            )
 
 
 if __name__ == "__main__":

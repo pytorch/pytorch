@@ -33,7 +33,7 @@ concurrency:
 jobs:
   wheel-py3_10-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-14-xlarge
+    runs-on: macos-26-xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
@@ -75,7 +75,7 @@ jobs:
           git clean -fxd
       - name: Populate binary env
         run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
+          "${PYTORCH_ROOT}/.ci/pytorch/binary_populate_env.sh"
       - name: Build PyTorch binary
         run: |
           set -eux -o pipefail
@@ -144,7 +144,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_11-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-14-xlarge
+    runs-on: macos-26-xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
@@ -186,7 +186,7 @@ jobs:
           git clean -fxd
       - name: Populate binary env
         run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
+          "${PYTORCH_ROOT}/.ci/pytorch/binary_populate_env.sh"
       - name: Build PyTorch binary
         run: |
           set -eux -o pipefail
@@ -255,7 +255,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_12-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-14-xlarge
+    runs-on: macos-26-xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
@@ -297,7 +297,7 @@ jobs:
           git clean -fxd
       - name: Populate binary env
         run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
+          "${PYTORCH_ROOT}/.ci/pytorch/binary_populate_env.sh"
       - name: Build PyTorch binary
         run: |
           set -eux -o pipefail
@@ -366,7 +366,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_13-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-14-xlarge
+    runs-on: macos-26-xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
@@ -408,7 +408,7 @@ jobs:
           git clean -fxd
       - name: Populate binary env
         run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
+          "${PYTORCH_ROOT}/.ci/pytorch/binary_populate_env.sh"
       - name: Build PyTorch binary
         run: |
           set -eux -o pipefail
@@ -477,7 +477,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_13t-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-14-xlarge
+    runs-on: macos-26-xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
@@ -519,7 +519,7 @@ jobs:
           git clean -fxd
       - name: Populate binary env
         run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
+          "${PYTORCH_ROOT}/.ci/pytorch/binary_populate_env.sh"
       - name: Build PyTorch binary
         run: |
           set -eux -o pipefail
@@ -588,7 +588,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_14-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-14-xlarge
+    runs-on: macos-26-xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
@@ -630,7 +630,7 @@ jobs:
           git clean -fxd
       - name: Populate binary env
         run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
+          "${PYTORCH_ROOT}/.ci/pytorch/binary_populate_env.sh"
       - name: Build PyTorch binary
         run: |
           set -eux -o pipefail
@@ -699,7 +699,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_14t-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-14-xlarge
+    runs-on: macos-26-xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
@@ -741,7 +741,7 @@ jobs:
           git clean -fxd
       - name: Populate binary env
         run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
+          "${PYTORCH_ROOT}/.ci/pytorch/binary_populate_env.sh"
       - name: Build PyTorch binary
         run: |
           set -eux -o pipefail
@@ -811,7 +811,7 @@ jobs:
   libtorch-cpu-shared-with-deps-release-extract:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_10-cpu-build
-    runs-on: macos-14-xlarge
+    runs-on: macos-26-xlarge
     timeout-minutes: 60
     env:
       DESIRED_CUDA: cpu

@@ -37,7 +37,7 @@ from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.operator_schemas import get_signature_for_torch_op
 from copy import deepcopy
 from collections import namedtuple
-from typing import Any, NamedTuple, Optional, Union
+from typing import Any, NamedTuple
 from collections.abc import Callable
 
 import torch
@@ -71,9 +71,12 @@ from torch.testing._internal.common_utils import (
     find_library_location,
     IS_FBCODE,
     IS_MACOS,
+    IS_ARM64,
+    IS_LINUX,
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
+    xfailIf,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -452,11 +455,11 @@ class TestFX(JitTestCase):
             def create_node(
                 self,
                 kind: str,
-                target: Union[str, Callable],
+                target: str | Callable,
                 args: tuple[Argument, ...],
                 kwargs: dict[str, Any],
-                name: Optional[str] = None,
-                type_expr: Optional[Any] = None,
+                name: str | None = None,
+                type_expr: Any | None = None,
             ) -> Node:
                 name = target if isinstance(target, str) else torch.typename(target)
                 if name[-1] == "_":
@@ -915,7 +918,7 @@ class TestFX(JitTestCase):
 
             target_to_name = {operator.add: "add", operator.mul: "mul"}
 
-            output_node: Optional[Node] = None
+            output_node: Node | None = None
             # For each instruction, create a triple
             # (instruction_name : str, inputs : List[str], output : str)
             # to feed into the C++ interpreter
@@ -1077,11 +1080,11 @@ class TestFX(JitTestCase):
             def create_node(
                 self,
                 kind: str,
-                target: Union[str, Callable],
+                target: str | Callable,
                 args: tuple[Argument, ...],
                 kwargs: dict[str, Any],
-                name: Optional[str] = None,
-                type_expr: Optional[Any] = None,
+                name: str | None = None,
+                type_expr: Any | None = None,
             ) -> Node:
                 n = super().create_node(kind, target, args, kwargs, name)
                 n.tag = "foo"
@@ -1957,8 +1960,8 @@ class TestFX(JitTestCase):
 
         # Make sure we're testing all opcodes
         opcodes = set()
-        output_shape: Optional[torch.Shape] = None
-        output_stride: Optional[tuple[int]] = None
+        output_shape: torch.Shape | None = None
+        output_stride: tuple[int] | None = None
         for node in tc_traced.graph.nodes:
             opcodes.add(node.op)
             if node.op == "output":
@@ -2054,6 +2057,7 @@ class TestFX(JitTestCase):
                         f"got {tensor_meta[1].shape}"
                     )
 
+    @xfailIf(IS_ARM64 and IS_LINUX) # RuntimeError: label is too far
     def test_shape_prop_layout_3d(self):
         class ConvTest3d(torch.nn.Module):
             def __init__(self) -> None:
@@ -4194,11 +4198,11 @@ class TestFX(JitTestCase):
             def create_node(
                 self,
                 kind: str,
-                target: Union[str, Callable],
+                target: str | Callable,
                 args: tuple[Argument, ...],
                 kwargs: dict[str, Any],
-                name: Optional[str] = None,
-                type_expr: Optional[Any] = None,
+                name: str | None = None,
+                type_expr: Any | None = None,
             ) -> Node:
                 n = super().create_node(kind, target, args, kwargs, name)
                 n.tag = "foo"
@@ -4427,6 +4431,7 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         # recorver mutable checking flag
         torch.fx.proxy.TracerBase.check_mutable_operations = orig_tracer_mutable_flag
 
+    # This only fails on navi31
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
     @blas_library_context("cublaslt")

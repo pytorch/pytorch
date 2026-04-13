@@ -8,8 +8,7 @@
 
 ## PyTorch
 
-.coverage
-coverage.xml
+agent_space/
 .dmypy.json
 .gradle
 .hypothesis
@@ -40,7 +39,6 @@ docs/build/
 docs/cpp/src
 docs/src/**/*
 docs/cpp/build
-docs/cpp/source/api
 docs/cpp/source/html/
 docs/cpp/source/latex/
 docs/source/compile/generated/
@@ -52,7 +50,6 @@ usage_log*
 test-reports/
 test/*.bak
 test/**/*.bak
-test/.coverage
 test/.hypothesis/
 test/cpp/api/mnist
 test/custom_operator/model.pt
@@ -127,7 +124,8 @@ torch/test/
 torch/utils/benchmark/utils/valgrind_wrapper/callgrind.h
 torch/utils/benchmark/utils/valgrind_wrapper/valgrind.h
 torch/version.py
-torch/_inductor/kernel/vendored_templates/*
+torch/_inductor/kernel/vendored_templates/cutedsl/kernels/*
+torch/_inductor/kernel/vendored_templates/cutedsl_grouped_gemm.py
 test/inductor/test_tlx*
 minifier_launcher.py
 aten/src/ATen/native/transformers/hip/flash_attn/ck/fav_v3/asm_fmha_v3_bwd_configs.hpp
@@ -247,8 +245,8 @@ docs/source/scripts/lr_scheduler_images/
 
 # build, distribute, and bins (+ python proto bindings)
 build/
-# Allow tools/build/ for build support.
-!tools/build/
+# Allow tools/build/bazel for build support.
+!tools/build/bazel
 build_host_protoc
 build_android
 build_ios
@@ -366,7 +364,13 @@ xla/
 pr.diff
 
 # coverage files
-*/**/.coverage.*
+.coverage.*
+.coverage
+coverage.xml
+*.profdata
+*.profraw
+coverage-html
+coverage.lcov
 
 # buck generated files
 .buckd/

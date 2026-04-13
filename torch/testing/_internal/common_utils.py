@@ -82,17 +82,19 @@ from torch.onnx import (
 )
 from torch.testing import make_tensor
 from torch.testing._comparison import (
+    _unwrap_dtensor_for_comparison,
     BooleanPair,
     NonePair,
+    not_close_error_metas,
     NumberPair,
     Pair,
     TensorLikePair,
 )
-from torch.testing._comparison import not_close_error_metas
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.utils._import_utils import _check_module_exists
 import torch.utils._pytree as pytree
 from torch.utils import cpp_extension
+from torch._utils import _is_privateuse1_backend_available
 try:
     import pytest  # type: ignore[import-not-found]
     has_pytest = True
@@ -1408,15 +1410,9 @@ IS_PPC = platform.machine() == "ppc64le"
 IS_X86 = platform.machine() in ('x86_64', 'i386')
 IS_ARM64 = platform.machine() in ('arm64', 'aarch64')
 IS_S390X = platform.machine() == "s390x"
-
-def is_avx512_vnni_supported():
-    if sys.platform != 'linux':
-        return False
-    with open("/proc/cpuinfo", encoding="ascii") as f:
-        lines = f.read()
-    return "vnni" in lines
-
-IS_AVX512_VNNI_SUPPORTED = is_avx512_vnni_supported()
+IS_AVX512_VNNI_SUPPORTED = torch.cpu.get_capabilities().get("avx512_vnni", False)
+IS_CPU_EXT_SVE_SUPPORTED = torch.cpu.get_capabilities().get("sve", False)
+IS_CPU_CAPABILITY_SVE256 = torch._C._get_cpu_capability() == "SVE256"
 
 if IS_WINDOWS:
     @contextmanager
@@ -1456,12 +1452,6 @@ else:
     def TemporaryDirectoryName(suffix=None):
         with tempfile.TemporaryDirectory(suffix=suffix) as d:
             yield d
-
-
-def is_privateuse1_backend_available():
-    privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
-    privateuse1_backend_module = getattr(torch, privateuse1_backend_name, None)
-    return (is_available := getattr(privateuse1_backend_module, "is_available", None)) and is_available()
 
 
 def make_lazy_class(cls):
@@ -1517,7 +1507,7 @@ TEST_CUDA = torch.cuda.is_available()
 TEST_ACCELERATOR = LazyVal(lambda: torch.accelerator.is_available())  # type: ignore[call-arg]
 TEST_MULTIACCELERATOR = LazyVal(lambda: torch.accelerator.device_count() > 1)  # type: ignore[call-arg]
 custom_device_mod = getattr(torch, torch._C._get_privateuse1_backend_name(), None)
-TEST_PRIVATEUSE1 = is_privateuse1_backend_available()
+TEST_PRIVATEUSE1 = _is_privateuse1_backend_available()
 TEST_PRIVATEUSE1_DEVICE_TYPE = torch._C._get_privateuse1_backend_name()
 TEST_NUMBA = _check_module_exists('numba')
 TEST_TRANSFORMERS = _check_module_exists('transformers')
@@ -1529,12 +1519,78 @@ TEST_OPT_EINSUM = _check_module_exists('opt_einsum')
 
 TEST_Z3 = _check_module_exists('z3')
 
+# DSL availability (lazy evaluation to avoid import overhead)
+class LazyDSLCheck:
+    """Lazy DSL availability checker to avoid import-time overhead"""
+    def __init__(self):
+        self._registry = None
+        self._import_attempted = False
+
+    def _get_registry(self):
+        if not self._import_attempted:
+            self._import_attempted = True
+            try:
+                from torch._native.dsl_registry import dsl_registry
+                self._registry = dsl_registry
+            except ImportError:
+                self._registry = None
+        return self._registry
+
+    def is_available(self, dsl_name: str) -> bool:
+        """Check if specific DSL is available"""
+        registry = self._get_registry()
+        return registry.is_dsl_available(dsl_name) if registry is not None else False
+
+    def list_available(self) -> list[str]:
+        """Get list of available DSLs"""
+        registry = self._get_registry()
+        return list(registry.list_available_dsls()) if registry is not None else []
+
+    def list_all(self) -> list[str]:
+        """Get list of all registered DSLs"""
+        registry = self._get_registry()
+        return list(registry.list_all_dsls()) if registry is not None else []
+
+_dsl_checker = LazyDSLCheck()
+
+# Lazy constants to avoid import-time overhead
+TEST_TRITON_DSL = LazyVal(lambda: _dsl_checker.is_available('triton'))
+TEST_CUTEDSL = LazyVal(lambda: _dsl_checker.is_available('cutedsl'))
+
 def split_if_not_empty(x: str):
     return x.split(",") if len(x) != 0 else []
 
 NOTEST_CPU = "cpu" in split_if_not_empty(os.getenv('PYTORCH_TESTING_DEVICE_EXCEPT_FOR', ''))
 
 skipIfNoDill = unittest.skipIf(not TEST_DILL, "no dill")
+
+# DSL skip decorators (following existing pattern)
+skipIfNoTritonDSL = unittest.skipIf(not TEST_TRITON_DSL, "Triton DSL not available")
+skipIfNoCuteDSL = unittest.skipIf(not TEST_CUTEDSL, "CuTeDSL not available")
+
+def skipIfDSLUnavailable(dsl_name: str, reason: str | None = None):
+    """Skip test if specific DSL is not available"""
+    available = _dsl_checker.is_available(dsl_name)
+    msg = reason or f"{dsl_name} DSL not available"
+    return unittest.skipIf(not available, msg)
+
+def skipUnlessDSLAvailable(dsl_name: str, reason: str | None = None):
+    """Skip test unless specific DSL is available"""
+    available = _dsl_checker.is_available(dsl_name)
+    msg = reason or f"{dsl_name} DSL required"
+    return unittest.skipUnless(available, msg)
+
+def get_available_dsls() -> list[str]:
+    """Get list of available DSL names for test parameterization"""
+    return _dsl_checker.list_available()
+
+def is_dsl_available(dsl_name: str) -> bool:
+    """Check if specific DSL is available for conditional testing"""
+    return _dsl_checker.is_available(dsl_name)
+
+def get_all_dsls() -> list[str]:
+    """Get all registered DSL names (available or not) for comprehensive testing"""
+    return _dsl_checker.list_all()
 
 
 NO_MULTIPROCESSING_SPAWN: bool = False
@@ -1557,6 +1613,7 @@ TEST_WITH_UBSAN: bool = TestEnvironment.def_flag(
 TEST_WITH_ROCM: bool = TestEnvironment.def_flag(
     "TEST_WITH_ROCM",
     env_var="PYTORCH_TEST_WITH_ROCM",
+    implied_by_fn=lambda: torch.version.hip is not None,
 )
 TEST_WITH_MTIA: bool = TestEnvironment.def_flag(
     "TEST_WITH_MTIA",
@@ -2008,7 +2065,7 @@ torch_to_numpy_dtype_dict.update({
 
 def skipIfNNModuleInlined(
     msg="test doesn't currently work with nn module inlining",
-    condition=torch._dynamo.config.inline_inbuilt_nn_modules,
+    condition=True,
 ):
     def decorator(fn):
         if not isinstance(fn, type):
@@ -2114,12 +2171,31 @@ def skipIfXpu(func=None, *, msg="test doesn't currently work on the XPU stack"):
     return dec_fn
 
 def skipIfMPS(fn):
+    sig = inspect.signature(fn)
+    has_device_arg = "device" in sig.parameters
+
+    if not has_device_arg:
+        warnings.warn(
+            f"skipIfMPS applied to {fn.__qualname__} which has no 'device' parameter. "
+            "Consider using device-generic tests with instantiate_device_type_tests instead.",
+            stacklevel=2,
+        )
+
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        if TEST_MPS:
+        if has_device_arg:
+            # For device-generic tests, only skip when actually running on MPS
+            slf = args[0] if args else None
+            if slf is not None:
+                device_type = getattr(slf, "device_type", None) or getattr(
+                    slf, "device", None
+                )
+                if isinstance(device_type, str) and device_type == "mps":
+                    raise unittest.SkipTest("test doesn't currently work with MPS")
+        elif TEST_MPS:
             raise unittest.SkipTest("test doesn't currently work with MPS")
-        else:
-            fn(*args, **kwargs)
+        return fn(*args, **kwargs)
+
     return wrapper
 
 
@@ -4321,6 +4397,8 @@ class TestCase(expecttest.TestCase):
         if isinstance(y, torch.Tensor) and y.is_nested and y.layout == torch.strided:
             y = y.unbind()
 
+        x, y = _unwrap_dtensor_for_comparison(x, y)
+
         error_metas = not_close_error_metas(
             x,
             y,
@@ -6048,3 +6126,17 @@ def patch_test_members(updates: dict[str, Any]):
 
         return wrapper
     return decorator
+
+def get_gcc_major_version():
+    """
+    Return GCC major version as int, or None if GCC is not available.
+    """
+    try:
+        out = subprocess.check_output(
+            ["gcc", "-dumpfullversion", "-dumpversion"],
+            stderr=subprocess.STDOUT,
+            text=True,
+        ).strip()
+        return int(out.split(".")[0])
+    except Exception:
+        return None

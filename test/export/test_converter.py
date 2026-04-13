@@ -2,7 +2,7 @@
 
 import unittest
 from collections import OrderedDict
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -37,10 +37,10 @@ class TestConverter(TestCase):
         self,
         M,
         tracing_inputs,
-        option: Optional[list[str]] = None,
+        option: list[str] | None = None,
         check_persistent=False,
         lifted_tensor_constants=None,
-        runtime_inputs: Optional[list[Any]] = None,
+        runtime_inputs: list[Any] | None = None,
     ) -> list[ExportedProgram]:
         # By default, it tests both jit.trace and jit.script.
         if option is None:

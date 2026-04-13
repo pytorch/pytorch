@@ -1,4 +1,6 @@
 # tests/test_run_test_plan.py
+from __future__ import annotations
+
 import importlib
 import json
 from contextlib import nullcontext

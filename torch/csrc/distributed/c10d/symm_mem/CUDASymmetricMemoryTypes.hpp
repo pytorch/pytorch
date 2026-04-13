@@ -2,12 +2,24 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
+#include <utility>
+
+#include <c10/util/hash.h>
 
 #if defined(USE_ROCM)
 #include <hip/hip_runtime_api.h>
 #endif
 
 namespace c10d::symmetric_memory {
+
+// Key type for the symmetric memory map. `void*` for tensor storage ptr,
+// `std::string` for group name.
+using SymmMemKey = std::pair<void*, std::string>;
+// Hash function for the symmetric memory map. c10::hash has a std::pair
+// specialization (line 323-329 of hash.h) that delegates to the tuple hasher
+// which combines hashes of each element.
+using SymmMemKeyHash = c10::hash<SymmMemKey>;
 
 // Covers NVL72
 constexpr int max_cuda_p2p_domain_size = 72;

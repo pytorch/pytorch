@@ -4,7 +4,6 @@ import copy
 import functools
 import io
 from copy import deepcopy
-from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -195,7 +194,7 @@ class TestFullyShard2DTraining(FSDPTestContinuous):
         )
         model = Transformer.parallelize(model, global_mesh["tp"], use_seq_parallel=True)
 
-        def _shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+        def _shard_placement_fn(param: nn.Parameter) -> Shard | None:
             if isinstance(param, DTensor):
                 for placement in param.placements:
                     if isinstance(placement, Shard):

@@ -481,6 +481,8 @@ def call_torch_function(
     types: TupleVariable,
     args: Iterable[Any],
     kwargs: dict[str, Any],
+    *,
+    is_subclass_dispatch: bool = False,
 ) -> Any:
     # This emulates calling __torch_function__, which has a signature
     #   def __torch_function__(cls, func, types, args=(), kwargs=None):
@@ -495,7 +497,20 @@ def call_torch_function(
         VariableTracker.build(tx, tuple(args)),
         VariableTracker.build(tx, kwargs),
     ]
-    return torch_function_var.call_function(tx, tf_args, {})
+    # Mirror the C++ THPModule_disable_torch_function behavior: disable
+    # __torch_function__ subclass dispatch during the call to prevent
+    # re-entrant dispatch on operations inside __torch_function__.
+    # Only do this for subclass dispatch, not mode dispatch. Modes need
+    # subclass dispatch to remain enabled because the mode's
+    # __torch_function__ may re-dispatch to the subclass.
+    tf_state = tx.symbolic_torch_function_state
+    old_subclass_enabled = tf_state.torch_function_subclass_enabled
+    if is_subclass_dispatch and old_subclass_enabled:
+        tf_state.torch_function_subclass_enabled = False
+    try:
+        return torch_function_var.call_function(tx, tf_args, {})
+    finally:
+        tf_state.torch_function_subclass_enabled = old_subclass_enabled
 
 
 def get_torch_function_fn(
@@ -555,6 +570,7 @@ def dispatch_torch_function(
         )
 
         if not res.is_constant_match(NotImplemented):
+            tx.output.torch_function_subclass_inlined = True
             return res
 
     unimplemented(
@@ -721,6 +737,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
             types,
             args,
             kwargs,
+            is_subclass_dispatch=True,
         )
 
     def call_method(

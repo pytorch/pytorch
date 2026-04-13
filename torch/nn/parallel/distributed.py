@@ -654,7 +654,7 @@ class DistributedDataParallel(Module, Joinable):
         If you plan on using this module with a ``nccl`` backend or a ``gloo``
         backend (that uses Infiniband), together with a DataLoader that uses
         multiple workers, please change the multiprocessing start method to
-        ``forkserver`` (Python 3 only) or ``spawn``. Unfortunately
+        ``forkserver`` or ``spawn``. Unfortunately
         Gloo (that uses Infiniband) and NCCL2 are not fork safe, and you will
         likely experience deadlocks if you don't change this setting.
 
@@ -773,6 +773,17 @@ class DistributedDataParallel(Module, Joinable):
                     This requires that unused parameters remain the same across all ranks throughout
                     the entire training process. If this condition is not met, it may cause
                     desynchronization and result in training hang.
+        batched_grad_copy (bool): When set to ``True``, individual per-parameter
+                    gradient-to-bucket copy and division operations are deferred
+                    and flushed as a single ``_foreach_copy_`` plus one flat
+                    ``div_`` when a bucket becomes ready. This reduces per-parameter
+                    kernel launches down to 2 kernels per bucket, which can improve
+                    throughput for models with many small parameters. The
+                    optimization is most effective with
+                    ``optimizer.zero_grad(set_to_none=True)`` (the default), where
+                    ``gradient_as_bucket_view`` alone cannot avoid copies because
+                    the bucket view alias is destroyed every iteration.
+                    (default: ``False``)
 
 
     Attributes:
@@ -808,6 +819,7 @@ class DistributedDataParallel(Module, Joinable):
         device_mesh=None,
         skip_all_reduce_unused_params=False,
         bucket_cap_mb_list: list[int] | None = None,
+        batched_grad_copy=False,
     ):
         super().__init__()
         Joinable.__init__(self)
@@ -936,6 +948,7 @@ class DistributedDataParallel(Module, Joinable):
         self.require_backward_grad_sync = True
         self.require_forward_param_sync = True
         self.gradient_as_bucket_view = gradient_as_bucket_view
+        self.batched_grad_copy = batched_grad_copy
         self.mixed_precision = mixed_precision
         if self.mixed_precision is not None:
             logger.warning("Received mixed precision config %s", self.mixed_precision)
@@ -1390,6 +1403,7 @@ class DistributedDataParallel(Module, Joinable):
             self.skip_all_reduce_unused_params,
             self._use_python_reducer,
             bucket_size_limits_for_rebuilding,
+            self.batched_grad_copy,
         )
 
         self.logger = dist.Logger(self.reducer)
@@ -1623,11 +1637,17 @@ class DistributedDataParallel(Module, Joinable):
     @contextmanager
     @torch._disable_dynamo(recursive=False)
     def _inside_ddp_forward(self):
+        # Save and restore the previous _active_ddp_module to handle nested
+        # DDP correctly (e.g., TorchRec wraps embeddings in an inner DDP inside
+        # an outer DDP).  Without this, the inner DDP's exit would clear the
+        # flag to None, causing DDPOptimizer to miss compiled regions that run
+        # after the inner forward.
+        old = DistributedDataParallel._active_ddp_module
         DistributedDataParallel._active_ddp_module = self
         try:
             yield
         finally:
-            DistributedDataParallel._active_ddp_module = None
+            DistributedDataParallel._active_ddp_module = old
 
     def _run_ddp_forward(self, *inputs, **kwargs):
         if self._use_python_reducer:

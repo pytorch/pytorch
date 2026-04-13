@@ -75,7 +75,7 @@ jobs:
 
       - name: Run Issue Triage
         timeout-minutes: 5
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@v1.0.89
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TRIAGE_HOOK_DEBUG_LOG: /tmp/triage_hooks.log

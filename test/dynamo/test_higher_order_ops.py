@@ -38,6 +38,7 @@ from torch.testing._internal.common_utils import (
     xfailIfTorchDynamo,
 )
 from torch.testing._internal.hop_db import hop_db
+from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.triton_utils import (
     requires_cuda_and_triton,
@@ -135,7 +136,7 @@ def default_args_generator(seed_value):
         yield new_args
 
 
-class HigherOrderOpTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
     def _assert_wrap_fallback(self, func, args, setup=lambda: None):
         counters.clear()
         backend = EagerAndRecordGraphs()
@@ -2582,10 +2583,6 @@ class GraphModule(torch.nn.Module):
         # 3 args - 1 for input, and other 2 for the weight and bias
         self.assertTrue(len(wrap_node.args), 3)
 
-        # Check that the linear bias and weight are getattr in the outer graph
-        if not torch._dynamo.config.inline_inbuilt_nn_modules:
-            self.assertTrue(len(dict(backend.graphs[0].named_parameters())) == 2)
-
         # Check that the inner function has one op and its a linear op
         body_function = getattr(backend.graphs[0], wrap_node.args[0].name)
         self.assertEqual(op_count(body_function), 1)
@@ -2713,10 +2710,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(backend.graphs), 1)
         wrap_node = find_first_node(backend.graphs[0], wrap)
         self.assertTrue(len(wrap_node.args), 3)
-
-        # Check that the linear bias and weight are getattr in the outer graph
-        if not torch._dynamo.config.inline_inbuilt_nn_modules:
-            self.assertTrue(len(dict(backend.graphs[0].named_parameters())) == 2)
 
         # Check that the inner function has one op and its a linear op
         body_function = getattr(backend.graphs[0], wrap_node.args[0].name)
@@ -3392,7 +3385,7 @@ class GraphModule(torch.nn.Module):
         with self.assertRaisesRegex(RuntimeError, msg):
             fn_with_hints(x, y)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_wrap_inductor_compiled_regions_option(self):
         """
         Test that wrap_inductor_compiled_regions option wraps compiled regions
@@ -3414,8 +3407,8 @@ class GraphModule(torch.nn.Module):
         def fn_not_wrapped(x, y):
             return torch.matmul(x, y)
 
-        x = torch.randn(4, 4, device="cuda")
-        y = torch.randn(4, 4, device="cuda")
+        x = torch.randn(4, 4, device=GPU_TYPE)
+        y = torch.randn(4, 4, device=GPU_TYPE)
 
         # Test wrapped version - HOP should be visible in DebugMode
         with DebugMode() as debug_mode_wrapped:
@@ -3436,7 +3429,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(result_wrapped, expected)
         self.assertEqual(result_not_wrapped, expected)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_wrap_inductor_compiled_regions_with_backward(self):
         """
         Test that wrap_inductor_compiled_regions works correctly with autograd.
@@ -3451,8 +3444,8 @@ class GraphModule(torch.nn.Module):
         def fn(x, y):
             return torch.matmul(x, y)
 
-        x = torch.randn(4, 4, device="cuda", requires_grad=True)
-        y = torch.randn(4, 4, device="cuda", requires_grad=True)
+        x = torch.randn(4, 4, device=GPU_TYPE, requires_grad=True)
+        y = torch.randn(4, 4, device=GPU_TYPE, requires_grad=True)
 
         # Clone for eager comparison
         x_eager = x.detach().clone().requires_grad_(True)
@@ -3478,9 +3471,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(y.grad, y_eager.grad)
 
 
-class HigherOrderOpVmapGuardTests(
-    torch._dynamo.test_case.TestCaseWithNestedGraphBreaks, LoggingTestCase
-):
+class HigherOrderOpVmapGuardTests(LoggingTestCase):
     @make_logging_test(recompiles=True)
     def test_vmap_grad_guard_ok(self, records):
         vmap = torch.vmap
@@ -3749,9 +3740,7 @@ class HigherOrderOpVmapGuardTests(
         self.assertGreater(len(records), 0)
 
 
-class FuncTorchHigherOrderOpTests(
-    torch._dynamo.test_case.TestCaseWithNestedGraphBreaks
-):
+class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
     def tearDown(self):
         # Ensure that in the case of a test failure, the next test won't fail
         # because of a previous call to _vmap_increment_nesting that wasn't undone
@@ -3778,7 +3767,7 @@ class FuncTorchHigherOrderOpTests(
 
     def test_teardown_resets_nested_graph_breaks(self):
         expected_nested_state = getattr(
-            self, "prev_nested_graph_breaks", torch._dynamo.config.nested_graph_breaks
+            self, "_prior_nested_graph_breaks", torch._dynamo.config.nested_graph_breaks
         )
 
         def _check_flag():
@@ -4487,7 +4476,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @config.patch(inline_inbuilt_nn_modules=True)
     def test_functional_call(self):
         def wrapper_fn(model, params, inputs, targets):
             prediction = torch.func.functional_call(model, params, (inputs,))
@@ -4504,10 +4492,9 @@ class GraphModule(torch.nn.Module):
             return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        if torch._dynamo.config.inline_inbuilt_nn_modules:
-            self.assertExpectedInline(
-                actual,
-                """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_model_parameters_weight_: "f32[3, 3]", L_model_parameters_bias_: "f32[3]", L_inputs_: "f32[64, 3]", L_targets_: "f32[64, 3]"):
         l_model_parameters_weight_ = L_model_parameters_weight_
@@ -4520,24 +4507,8 @@ class GraphModule(torch.nn.Module):
         mse_loss: "f32[]" = torch.nn.functional.mse_loss(prediction, l_targets_);  prediction = l_targets_ = None
         return (mse_loss,)
 """,
-            )
-        else:
-            self.assertExpectedInline(
-                actual,
-                """\
-class GraphModule(torch.nn.Module):
-    def forward(self, L_inputs_: "f32[64, 3]", L_targets_: "f32[64, 3]"):
-        l_inputs_ = L_inputs_
-        l_targets_ = L_targets_
+        )
 
-        prediction: "f32[64, 3]" = self.model(l_inputs_);  l_inputs_ = None
-
-        mse_loss: "f32[]" = torch.nn.functional.mse_loss(prediction, l_targets_);  prediction = l_targets_ = None
-        return (mse_loss,)
-""",
-            )
-
-    @config.patch(inline_inbuilt_nn_modules=True)
     def test_functional_call_sequential_params_and_buffers(self):
         # copied from test/test_stateless.py
         class MockModule(torch.nn.Module):
@@ -4567,8 +4538,7 @@ class GraphModule(torch.nn.Module):
             return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        if torch._dynamo.config.inline_inbuilt_nn_modules:
-            expected = """\
+        expected = """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_inputs_: "f32[1, 1]", L_model_modules_l1_parameters_weight_: "f32[1, 1]", L_model_modules_l1_parameters_bias_: "f32[1]", L_model_buffers_buffer_: "f32[1]"):
         l_inputs_ = L_inputs_
@@ -4579,49 +4549,11 @@ class GraphModule(torch.nn.Module):
         add: "f32[1, 1]" = linear + l_model_buffers_buffer_;  linear = l_model_buffers_buffer_ = None
         return (add,)
 """
-            # We found Windows/Linux have some empty line difference, empty_line_normalizer will help fix it.
-            self.assertExpectedInline(
-                empty_line_normalizer(actual),
-                empty_line_normalizer(normalize_gm(expected)),
-            )
-        else:
-            self.assertExpectedInline(
-                actual,
-                """\
-class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[1, 1]"):
-        l_x_ = L_x_
-
-        l__self___l1: "f32[1, 1]" = self.L__self___l1(l_x_);  l_x_ = None
-        l__self___buffer: "f32[1]" = self.L__self___buffer
-        add: "f32[1, 1]" = l__self___l1 + l__self___buffer;  l__self___l1 = l__self___buffer = None
-        return (add,)
-""",
-            )
-
-    @config.patch(inline_inbuilt_nn_modules=False)
-    def test_functional_call_disable_inline_nn_module(self):
-        counters.clear()
-
-        def wrapper_fn(model, params, inputs, targets):
-            prediction = torch.func.functional_call(model, params, (inputs,))
-            return torch.nn.functional.mse_loss(prediction, targets)
-
-        model = torch.nn.Linear(3, 3)
-        params = dict(model.named_parameters())
-        inputs = torch.randn(64, 3)
-        targets = torch.randn(64, 3)
-
-        actual = wrapper_fn(model, params, inputs, targets)
-        expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(
-            model, params, inputs, targets
+        # We found Windows/Linux have some empty line difference, empty_line_normalizer will help fix it.
+        self.assertExpectedInline(
+            empty_line_normalizer(actual),
+            empty_line_normalizer(normalize_gm(expected)),
         )
-        self.assertEqual(len(counters["graph_break"]), 1)
-        self.assertIn(
-            "torch.func.functional_call capture is disabled",
-            next(iter(counters["graph_break"].keys())),
-        )
-        self.assertEqual(actual, expected)
 
     def test_grad(self):
         counters.clear()
@@ -6902,9 +6834,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(expected, actual)
 
 
-class ActivationCheckpointingTests(
-    torch._dynamo.test_case.TestCaseWithNestedGraphBreaks
-):
+class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
     def _validate(self, fn, backend, *args, skip_check=False, fullgraph=True):
         cloned_args = []
         for arg in args:
@@ -7291,11 +7221,10 @@ xfail_hops_compile = {
     # inductor
     "while_loop",  # LoweringException: AssertionError
     "flex_attention",  # LoweringException: AssertionError
-    "flex_attention_backward",  # AssertionError: Input shapes should have M >= 16, N >= 16 and K >= 16
 }
 
 
-class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCase):
     @requires_cuda_and_triton
     @parametrize("backend", ("aot_eager", "inductor"))
     @ops(

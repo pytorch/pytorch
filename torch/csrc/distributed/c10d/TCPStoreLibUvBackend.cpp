@@ -1405,20 +1405,10 @@ void LibUVStoreDaemon::clearClientWaitState(
     return;
   }
   keysAwaited_.erase(client);
-  for (auto it = waitingSockets_.begin(); it != waitingSockets_.end();) {
-    for (auto vecIt = it->second.begin(); vecIt != it->second.end();) {
-      if (*vecIt == client) {
-        vecIt = it->second.erase(vecIt);
-      } else {
-        ++vecIt;
-      }
-    }
-    if (it->second.empty()) {
-      it = waitingSockets_.erase(it);
-    } else {
-      ++it;
-    }
-  }
+  std::erase_if(waitingSockets_, [&](auto& entry) {
+    std::erase(entry.second, client);
+    return entry.second.empty();
+  });
 }
 
 void LibUVStoreDaemon::set(

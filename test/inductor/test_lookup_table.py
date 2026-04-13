@@ -2,7 +2,7 @@
 import re
 import unittest
 from functools import partial
-from typing import Any, Optional, Union
+from typing import Any
 from unittest.mock import patch
 
 import torch
@@ -59,7 +59,7 @@ class MockMMKernelInputs(MMKernelInputs):
     def __init__(
         self,
         tensors: list[torch.Tensor],
-        scalars: Optional[dict[str, Union[float, int]]] = None,
+        scalars: dict[str, float | int] | None = None,
         mat1_idx: int = -2,
         mat2_idx: int = -1,
     ):
@@ -81,7 +81,7 @@ class MockMMKernelInputs(MMKernelInputs):
         return self.mnk_symbolic()  # pyre-ignore
 
     @property
-    def device_type(self) -> Optional[str]:
+    def device_type(self) -> str | None:
         return self.tensors[0].device.type
 
 
@@ -105,10 +105,10 @@ class BaseLookupTableTest(TestCase):
 
     def create_mock_mm_kernel_inputs(
         self,
-        shapes: Optional[list[tuple[int, ...]]] = None,
+        shapes: list[tuple[int, ...]] | None = None,
         device: torch.device = torch.device("cuda"),
         dtype: torch.dtype = torch.float32,
-        scalars: Optional[dict[str, Union[float, int]]] = None,
+        scalars: dict[str, float | int] | None = None,
     ) -> MockMMKernelInputs:
         """Create MockMMKernelInputs with real tensors"""
         if shapes is None:

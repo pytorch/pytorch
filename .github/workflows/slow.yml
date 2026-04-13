@@ -21,23 +21,18 @@ concurrency:
 permissions:
   id-token: write
   contents: read
+  actions: read
 
 jobs:
   llm-td:
     if: github.repository_owner == 'pytorch'
     name: before-test
     uses: ./.github/workflows/llm_td_retrieval.yml
-    permissions:
-      id-token: write
-      contents: read
 
   target-determination:
     name: before-test
     uses: ./.github/workflows/target_determination.yml
     needs: llm-td
-    permissions:
-      id-token: write
-      contents: read
 
   get-label-type:
     name: get-label-type
@@ -107,14 +102,14 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm86-build.outputs.test-matrix }}
     secrets: inherit
 
-  linux-jammy-py3_10-clang15-build:
-    name: linux-jammy-py3.10-clang15
+  linux-jammy-py3_10-clang18-build:
+    name: linux-jammy-py3.10-clang18
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3.10-clang15
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang15
+      build-environment: linux-jammy-py3.10-clang18
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang18
       test-matrix: |
         { include: [
           { config: "slow", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
@@ -122,16 +117,16 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-py3_10-clang15-test:
-    name: linux-jammy-py3.10-clang15
+  linux-jammy-py3_10-clang18-test:
+    name: linux-jammy-py3.10-clang18
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-jammy-py3_10-clang15-build
+      - linux-jammy-py3_10-clang18-build
       - target-determination
     with:
-      build-environment: ${{ needs.linux-jammy-py3_10-clang15-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-py3_10-clang15-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3_10-clang15-build.outputs.test-matrix }}
+      build-environment: ${{ needs.linux-jammy-py3_10-clang18-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-py3_10-clang18-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_10-clang18-build.outputs.test-matrix }}
     secrets: inherit
 
   linux-jammy-py3_10-clang18-asan-build:
@@ -142,7 +137,7 @@ jobs:
       runner: linux.c7i.4xlarge
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.10-clang18-asan
-      docker-image-name: ci-image:pytorch-linux-jammy-py3-clang18-asan
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang18
       test-matrix: |
         { include: [
           { config: "slow", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },

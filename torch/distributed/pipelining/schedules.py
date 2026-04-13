@@ -21,9 +21,13 @@ from torch.distributed.fsdp import FSDPModule, UnshardHandle
 from torch.nn.modules.loss import _Loss
 from torch.profiler import record_function
 
-from ._utils import generate_rank_to_stage_mapping, generate_stage_to_rank_mapping
+from ._utils import (
+    generate_rank_to_stage_mapping,
+    generate_stage_to_rank_mapping,
+    InferenceMode,
+)
 from .microbatch import merge_chunks, split_args_kwargs_into_chunks, TensorChunkSpec
-from .stage import _PipelineStageBase
+from .stage import _PipelineStageBase, PipelineStage
 
 
 __all__ = [
@@ -320,6 +324,135 @@ class _PipelineSchedule(ABC):
 
         self._internal_losses.clear()
 
+    def _warmup_p2p(
+        self,
+        stages: list[_PipelineStageBase],
+        has_backward: bool,
+        p2p_done: bool,
+    ) -> None:
+        """Run the P2P warm-up protocol for the given stages.
+
+        For ``PipelineStage`` instances this executes the forward/backward vote
+        protocol (which warms up 2-rank sub-communicators) and sets each
+        stage's ``_inference_mode``.  For other stage types it falls back to
+        the legacy ``_get_init_p2p_neighbors_ops`` + ``_batch_p2p`` path.
+
+        Args:
+            stages: The pipeline stages owned by this rank.
+            has_backward: Whether the schedule includes a backward pass.
+            p2p_done: ``True`` if P2P neighbours have already been initialised
+                (avoids redundant init on eval↔train mode switches).
+        """
+        if all(isinstance(stage, PipelineStage) for stage in stages):
+            acc: torch.Tensor | None = None
+            for stage in cast(list[PipelineStage], stages):
+                acc = stage._warmup_forward_vote(has_backward, received_acc=acc)
+            result: torch.Tensor | None = acc
+            determined_mode: InferenceMode | None = None
+            for stage in reversed(cast(list[PipelineStage], stages)):
+                result = stage._warmup_backward_result(received_result=result)
+                if result is None:
+                    raise RuntimeError("P2P warm-up voting failed")
+                determined_mode = (
+                    InferenceMode.STATIC
+                    if result.item() == 1
+                    else InferenceMode.DYNAMIC
+                )
+                stage._inference_mode = determined_mode
+            logger.debug(
+                "Rank determined inference_mode=%s for %d stage(s)",
+                determined_mode.value if determined_mode else "None",
+                len(stages),
+            )
+        elif not p2p_done:
+            all_ops: list[dist.P2POp] = []
+            for stage in stages:
+                all_ops.extend(stage._get_init_p2p_neighbors_ops())
+            _wait_batch_p2p(_batch_p2p(all_ops))
+
+        # TODO: STATIC mode group communicator warm-up gap
+        # The vote protocol above warms up 2-rank sub-communicators
+        # (used by `_batch_p2p` homogeneous fast-path).  In DYNAMIC mode,
+        # `_send_meta`/`_recv_meta` (called during `_prepare_forward_infra` →
+        # `_forward_metadata_inference`) also warm up the *group* communicator
+        # (used by `_batch_p2p` mixed-op path).  In STATIC mode, metadata
+        # inference is skipped, so the group communicator is NOT warmed up —
+        # it will be lazily created on the first mixed `_batch_p2p` call
+        # (e.g., 1F1B steady-state with both sends and recvs).
+        # Fix: run `_get_init_p2p_neighbors_ops` + `_batch_p2p` after the
+        # vote, gated by `not p2p_done`.
+
+    def _initialize_pp_stages(
+        self,
+        stages: list[_PipelineStageBase],
+        args: tuple[Any, ...] | Any,
+        kwargs: dict[str, Any] | None,
+        target: Any,
+        fwd_initialized: bool,
+        bwd_initialized: bool,
+    ) -> tuple[bool, bool]:
+        """Common stage initialization shared by Single and Multi schedules.
+
+        Handles mode-change detection (eval↔train), P2P warm-up, RNG forking,
+        forward / backward metadata inference, and FSDP cleanup.
+
+        Returns the updated ``(fwd_initialized, bwd_initialized)`` flags.
+        """
+        # Detect eval↔train mode switch: if has_backward changed since last
+        # init, re-initialize both fwd (recv buffers need different
+        # requires_grad) and bwd.  p2p_done avoids redundant P2P warm-up.
+        p2p_done = fwd_initialized
+        if fwd_initialized and (self._has_backward != bwd_initialized):
+            fwd_initialized = False
+            bwd_initialized = False
+
+        needs_fwd = not fwd_initialized
+        needs_bwd = self._has_backward and not bwd_initialized
+
+        if not needs_fwd and not needs_bwd:
+            return fwd_initialized, bwd_initialized
+
+        if needs_fwd:
+            self._warmup_p2p(stages, self._has_backward, p2p_done)
+
+        # Fork RNG so metadata inference doesn't perturb training RNG.
+        devices = list(
+            {
+                torch.device(stage.device)
+                for stage in stages
+                if torch.device(stage.device).type != "cpu"
+            }
+        )
+        with torch.random.fork_rng(devices=devices):
+            if needs_fwd:
+                next_stage_args: Any = None
+                for stage in stages:
+                    stage_args = args if stage.is_first else next_stage_args
+                    next_stage_args = stage._prepare_forward_infra(
+                        self._n_microbatches,
+                        stage_args,
+                        kwargs,
+                        has_backward=self._has_backward,
+                    )
+                fwd_initialized = True
+
+            if needs_bwd:
+                prev_stage_grad_meta: Any = None
+                for stage in reversed(stages):
+                    prev_stage_grad_meta = stage._prepare_backward_infra(
+                        self._n_microbatches,
+                        loss_fn=self._loss_fn,
+                        target=target,
+                        received_grad_meta=prev_stage_grad_meta,
+                    )
+                bwd_initialized = True
+
+        for stage in stages:
+            if isinstance(stage, PipelineStage):
+                stage._post_metadata_inference_cleanup()
+
+        return fwd_initialized, bwd_initialized
+
     @abstractmethod
     def _step_microbatches(
         self,
@@ -459,12 +592,29 @@ class _PipelineSchedule(ABC):
 
 def _batch_p2p(p2p_ops: list[dist.P2POp], desc: str | None = None) -> list[dist.Work]:
     """
-    Simple wrapper over batch_isend_irecv from torch.distributed, which just adds a descriptive logger on top.
+    Wrapper over batch_isend_irecv that avoids coalescing for homogeneous
+    batches (all-send or all-recv).  Coalescing serializes ops on a single
+    CUDA stream, which causes head-of-line blocking when independent P2P ops
+    could otherwise overlap.  Mixed batches still use batch_isend_irecv for
+    deadlock avoidance.
     """
     if len(p2p_ops) == 0:
         return []
     desc_str = f"{desc}, " if desc else ""
     logger.debug("batch_p2p %s%s", desc_str, p2p_ops)
+
+    op_types = {p.op for p in p2p_ops}
+    if op_types == {dist.isend}:
+        return [
+            p.op(p.tensor, group=p.group, tag=p.tag, group_dst=p.group_peer)
+            for p in p2p_ops
+        ]
+    if op_types == {dist.irecv}:
+        return [
+            p.op(p.tensor, group=p.group, tag=p.tag, group_src=p.group_peer)
+            for p in p2p_ops
+        ]
+
     return dist.batch_isend_irecv(p2p_ops)
 
 
@@ -543,21 +693,18 @@ class PipelineScheduleSingle(_PipelineSchedule):
             self._get_pipeline_order()
         )
 
-    def _initialize_stage(self, args, kwargs):
-        if not self._stage_forward_initialized:
-            # Prepare the communication needed for the pipeline schedule execution
-            # This is needed because during execution we always perform a series of batch P2P ops
-            # The first call of the batched P2P needs to involve the global group
-            all_ops: list[dist.P2POp] = []
-            all_ops.extend(self._stage._get_init_p2p_neighbors_ops())
-            _wait_batch_p2p(_batch_p2p(all_ops))
-
-            self._stage._prepare_forward_infra(self._n_microbatches, args, kwargs)
-            self._stage_forward_initialized = True
-
-        if self._has_backward and not self._stage_backward_initialized:
-            self._stage._prepare_backward_infra(self._n_microbatches)
-            self._stage_backward_initialized = True
+    def _initialize_stage(self, args, kwargs, target=None):
+        (
+            self._stage_forward_initialized,
+            self._stage_backward_initialized,
+        ) = self._initialize_pp_stages(
+            [self._stage],
+            args,
+            kwargs,
+            target,
+            self._stage_forward_initialized,
+            self._stage_backward_initialized,
+        )
 
     def step(
         self,
@@ -653,7 +800,8 @@ class _ScheduleForwardOnly(PipelineScheduleSingle):
             )
 
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
-        self._initialize_stage(arg_mbs[0], kwarg_mbs[0])
+        maybe_first_target = target_mbs[0] if target_mbs is not None else None
+        self._initialize_stage(arg_mbs[0], kwarg_mbs[0], maybe_first_target)
 
         # Delay send waits
         fwd_sends_to_wait: list[list[dist.Work]] = []
@@ -704,7 +852,8 @@ class ScheduleGPipe(PipelineScheduleSingle):
             return_outputs: whether to return the outputs from the last stage.
         """
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
-        self._initialize_stage(arg_mbs[0], kwarg_mbs[0])
+        maybe_first_target = target_mbs[0] if target_mbs is not None else None
+        self._initialize_stage(arg_mbs[0], kwarg_mbs[0], maybe_first_target)
 
         # Delay send waits
         fwd_sends_to_wait: list[list[dist.Work]] = []
@@ -848,7 +997,8 @@ or equal to the number of stages ({self._num_stages})."
             return_outputs: whether to return the outputs from the last stage.
         """
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
-        self._initialize_stage(arg_mbs[0], kwarg_mbs[0])
+        maybe_first_target = target_mbs[0] if target_mbs is not None else None
+        self._initialize_stage(arg_mbs[0], kwarg_mbs[0], maybe_first_target)
 
         # Last stage has 1 warmup, second-to-last 2 warmups, ...
         # first stage `num_stages` warmups
@@ -1515,34 +1665,18 @@ class PipelineScheduleMulti(_PipelineSchedule):
                 "Simply stop passing it, and everything should still work fine."
             )
 
-    def _initialize_stages(self, args: tuple[Any, ...], kwargs):
-        if not self._stages_forward_initialized:
-            # Prepare the communication needed for the pipeline schedule execution
-            # This is needed because during execution we always perform a series of batch P2P ops
-            # The first call of the batched P2P needs to involve the global group
-            all_ops: list[dist.P2POp] = []
-            for stage in self._stages:
-                all_ops.extend(stage._get_init_p2p_neighbors_ops())
-            _wait_batch_p2p(_batch_p2p(all_ops))
-
-            # may be 'none' value (if this stage sends its output shapes to the next stage via P2P)
-            # or real value (if this stage and next stage are on the same device)
-            next_stage_args: tuple[Any, ...] = tuple()
-            for stage in self._stages:
-                if stage.is_first:
-                    next_stage_args = stage._prepare_forward_infra(
-                        self._n_microbatches, args, kwargs
-                    )
-                else:
-                    next_stage_args = stage._prepare_forward_infra(
-                        self._n_microbatches, next_stage_args, kwargs
-                    )
-            self._stages_forward_initialized = True
-
-        if self._has_backward and not self._stages_backward_initialized:
-            for stage in self._stages:
-                stage._prepare_backward_infra(self._n_microbatches)
-            self._stages_backward_initialized = True
+    def _initialize_stages(self, args: tuple[Any, ...], kwargs, target=None):
+        (
+            self._stages_forward_initialized,
+            self._stages_backward_initialized,
+        ) = self._initialize_pp_stages(
+            self._stages,
+            args,
+            kwargs,
+            target,
+            self._stages_forward_initialized,
+            self._stages_backward_initialized,
+        )
 
     def _validate_and_set_stage_mapping(
         self, actions: dict[int, list[_Action | None]]
@@ -1657,8 +1791,8 @@ class PipelineScheduleMulti(_PipelineSchedule):
         not support models with skip connections.
         """
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
-
-        self._initialize_stages(arg_mbs[0], kwarg_mbs[0])
+        maybe_first_target = target_mbs[0] if target_mbs is not None else None
+        self._initialize_stages(arg_mbs[0], kwarg_mbs[0], maybe_first_target)
 
         # Based on the plan in Step 1 created in __init__:
         # 2. Perform communication based on the pipeline_order
@@ -1822,7 +1956,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
 at time_step %s when running action %s",
                     self.rank,
                     self.__class__.__name__,
-                    str(e),
+                    e,
                     time_step,
                     action,
                 )
@@ -2043,7 +2177,8 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         not support models with skip connections.
         """
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
-        self._initialize_stages(arg_mbs[0], kwarg_mbs[0])
+        maybe_first_target = target_mbs[0] if target_mbs is not None else None
+        self._initialize_stages(arg_mbs[0], kwarg_mbs[0], maybe_first_target)
 
         # Based on the plan in Step 1 created in __init__:
         # 2. Perform communication based on the pipeline_order

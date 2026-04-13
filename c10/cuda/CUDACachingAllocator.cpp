@@ -5,6 +5,7 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/PeerToPeerAccess.h>
 #include <c10/util/Gauge.h>
 #include <c10/util/Logging.h>
 #include <c10/util/ScopeExit.h>
@@ -21,9 +22,13 @@
 #if defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
 #endif
+#ifndef _WIN32
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <unistd.h>
+#else
+#include <process.h>
+#endif
 #endif
 
 #include <c10/util/Exception.h>
@@ -461,9 +466,7 @@ struct ExpandableSegment {
           prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
 #endif
         } else {
-#ifdef USE_ROCM
-          prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
-#else
+#ifndef USE_ROCM
           prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_FABRIC;
 #endif
         }
@@ -562,7 +565,11 @@ struct ExpandableSegment {
     // thereby ensuring that the handle can be correctly matched in
     // ipcMemHandle_to_devptr.
     ShareHeader header{};
+#ifdef _WIN32
+    header.pid = _getpid();
+#else
     header.pid = getpid();
+#endif
     header.segment_size = segment_size_;
     header.num_handles = end - begin;
 
@@ -624,14 +631,20 @@ struct ExpandableSegment {
         device, std::nullopt, header.segment_size, std::move(peers));
 // older build setups (e.g. multiwheels) do not have this syscall, added 2020
 // but the kernel on the system might still support it.
+#ifndef _WIN32
 #ifndef SYS_pidfd_open
 #define SYS_pidfd_open 434
 #endif
 #ifndef SYS_pidfd_getfd
 #define SYS_pidfd_getfd 438
 #endif
+#endif // !_WIN32
     if (CUDAAllocatorConfig::expandable_segments_handle_type() !=
         Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
+#ifdef _WIN32
+      TORCH_CHECK(
+          false, "IPC expandable segments are not supported on Windows");
+#else
       auto pidfd = syscall(SYS_pidfd_open, header.pid, 0);
       TORCH_CHECK(
           pidfd != -1 || errno != ENOSYS,
@@ -665,24 +678,30 @@ struct ExpandableSegment {
         CUmemGenericAllocationHandle handle = 0;
 #ifdef USE_ROCM
 #if ROCM_VERSION >= 70100
-        void* myfd_ptr = reinterpret_cast<void*>(static_cast<uintptr_t>(myfd));
+        void* myfd_handle =
+            reinterpret_cast<void*>(static_cast<uintptr_t>(myfd));
 #else
-        void* myfd_ptr = (void*)(uintptr_t)&myfd;
+        void* myfd_handle = (void*)(uintptr_t)&myfd;
 #endif
         C10_CUDA_CHECK(hipMemImportFromShareableHandle(
-            &handle, myfd_ptr, hipMemHandleTypePosixFileDescriptor));
+            &handle, myfd_handle, hipMemHandleTypePosixFileDescriptor));
 #else
-        C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemImportFromShareableHandle_(
-            &handle,
-            // NOLINTNEXTLINE(performance-no-int-to-ptr)
-            (void*)(uintptr_t)myfd,
-            CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR));
+        C10_CUDA_DRIVER_CHECK_MSG(
+            DriverAPI::get()->cuMemImportFromShareableHandle_(
+                &handle,
+                // NOLINTNEXTLINE(performance-no-int-to-ptr)
+                (void*)(uintptr_t)myfd,
+                CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR),
+            " fabric_info: {",
+            get_nvml_fabric_info(device),
+            "}");
 #endif
         LOG(INFO) << "use posix fd to import expandable segments.";
         close(static_cast<int>(myfd));
         segment->handles_.emplace_back(Handle{handle, std::nullopt});
       }
       close(static_cast<int>(pidfd));
+#endif // !_WIN32
     } else {
 #ifdef USE_ROCM
       TORCH_INTERNAL_ASSERT(
@@ -694,11 +713,15 @@ struct ExpandableSegment {
         buf.read(
             reinterpret_cast<char*>(&fabric_handle), sizeof(CUmemFabricHandle));
         CUmemGenericAllocationHandle handle = 0;
-        C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemImportFromShareableHandle_(
-            &handle,
-            // NOLINTNEXTLINE(performance-no-int-to-ptr)
-            (void*)&fabric_handle,
-            CU_MEM_HANDLE_TYPE_FABRIC));
+        C10_CUDA_DRIVER_CHECK_MSG(
+            DriverAPI::get()->cuMemImportFromShareableHandle_(
+                &handle,
+                // NOLINTNEXTLINE(performance-no-int-to-ptr)
+                (void*)&fabric_handle,
+                CU_MEM_HANDLE_TYPE_FABRIC),
+            " fabric_info: {",
+            get_nvml_fabric_info(device),
+            "}");
         LOG(INFO) << "use fabric handle to import expandable segments.";
         segment->handles_.emplace_back(Handle{handle, std::nullopt});
       }
@@ -748,20 +771,32 @@ struct ExpandableSegment {
 
  private:
   void setAccess(c10::DeviceIndex device, size_t begin, size_t end) {
-    CUmemAccessDesc desc;
-    desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+#if defined(USE_ROCM) && (ROCM_VERSION >= 70200)
+    constexpr int num_desc = 2;
+    CUmemAccessDesc desc[num_desc];
+    desc[1].location.type = CU_MEM_LOCATION_TYPE_HOST;
+    desc[1].location.id = 0; // ignored
+    desc[1].flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+#else
+    constexpr int num_desc = 1;
+    CUmemAccessDesc desc[num_desc];
+#endif
+    desc[0].location.type = CU_MEM_LOCATION_TYPE_DEVICE;
     // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-    desc.location.id = static_cast<int>(device);
-    desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+    desc[0].location.id = static_cast<int>(device);
+    desc[0].flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
 #ifdef USE_ROCM
     C10_CUDA_CHECK(hipMemSetAccess(
         ptr() + begin * segment_size_,
         (end - begin) * segment_size_,
-        &desc,
-        1));
+        &desc[0],
+        num_desc));
 #else
     C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemSetAccess_(
-        ptr_ + begin * segment_size_, (end - begin) * segment_size_, &desc, 1));
+        ptr_ + begin * segment_size_,
+        (end - begin) * segment_size_,
+        &desc[0],
+        num_desc));
 #endif
   }
 
@@ -769,7 +804,7 @@ struct ExpandableSegment {
     for (auto i : c10::irange(begin, end)) {
 #ifdef USE_ROCM
       C10_CUDA_CHECK(hipMemMap(
-          reinterpret_cast<char*>(ptr_) + i * segment_size_,
+          ptr() + i * segment_size_,
           segment_size_,
           0,
           handles_.at(i).value().handle,
@@ -810,14 +845,15 @@ struct ExpandableSegment {
       Handle h = handles_.at(i).value();
       handles_.at(i) = std::nullopt;
 #ifdef USE_ROCM
-      C10_CUDA_CHECK(hipMemUnmap(
-          reinterpret_cast<char*>(ptr_) + segment_size_ * i, segment_size_));
+      C10_CUDA_CHECK(hipMemUnmap(ptr() + segment_size_ * i, segment_size_));
 #else
       C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemUnmap_(
           ptr_ + segment_size_ * i, segment_size_));
 #endif
       if (h.shareable_handle) {
+#ifndef _WIN32
         close(std::get<int>(*h.shareable_handle));
+#endif
       }
 #ifdef USE_ROCM
       C10_CUDA_CHECK(hipMemRelease(h.handle));
@@ -871,7 +907,11 @@ struct ExpandableSegment {
     std::optional<std::variant<int, CUmemFabricHandle>> shareable_handle;
   };
   struct ShareHeader {
+#ifdef _WIN32
+    int pid;
+#else
     pid_t pid;
+#endif
     size_t segment_size;
     size_t num_handles;
   };
@@ -981,6 +1021,14 @@ bool BlockComparatorAddress(const Block* a, const Block* b) {
   return (uintptr_t)a->ptr < (uintptr_t)b->ptr;
 }
 
+// Info about OOM rejection, used to defer observer callbacks outside of lock
+struct OomRejectionInfo {
+  bool rejected{false};
+  size_t alloc_size{0};
+  size_t total_allocated{0};
+  size_t device_total{0};
+};
+
 struct AllocParams {
   AllocParams(
       c10::DeviceIndex device,
@@ -1011,6 +1059,7 @@ struct AllocParams {
   Block* block{nullptr};
   StatTypes stat_types = {false};
   cudaError_t err{cudaSuccess};
+  OomRejectionInfo oom_rejection_info;
 };
 
 // Note: cudaEventCreate when concurrently invoked from multiple threads can be
@@ -1374,6 +1423,7 @@ class DeviceCachingAllocator {
 
   // XXX - maybe we should generalize and have multiple events
   std::vector<OutOfMemoryObserver> oom_observers_;
+  std::vector<OomRejectionObserver> oom_rejection_observers_;
 
   std::vector<AllocatorTraceTracker> trace_trackers_;
 
@@ -1482,6 +1532,10 @@ class DeviceCachingAllocator {
     oom_observers_.emplace_back(std::move(observer));
   }
 
+  void attachOomRejectionObserver(OomRejectionObserver observer) {
+    oom_rejection_observers_.emplace_back(std::move(observer));
+  }
+
   void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) {
     std::unique_lock<std::recursive_mutex> lock(mutex);
     trace_trackers_.emplace_back(std::move(tracker));
@@ -1562,25 +1616,71 @@ class DeviceCachingAllocator {
       // cudaMalloc. So far this function has not modified allocator state, but
       // keep in mind that any observed allocator state may change across calls
       // to alloc_block since it may release the lock.
-      block_found = alloc_block(params, false, context, lock)
-          // Try to use memory pools that have opted in as overflow before
-          // expensive memory freeing operations.
-          || try_mempool_fallback(
-                        params, size, stream, device_id, alloc_size, stats)
-          // Free enough available cached blocks to satisfy alloc and retry
-          // alloc.
-          || (release_available_cached_blocks(params, context) &&
-              alloc_block(params, false, context, lock))
-          // Free all non-split cached blocks and retry alloc.
-          || (C10_LIKELY(captures_underway.empty()) &&
-              release_cached_blocks(context, {0, 0}) &&
-              alloc_block(params, true, context, lock));
+      block_found = alloc_block(params, false, context, lock);
+
+      // If allocation was rejected by OOM policy, skip retry chain and fail
+      // immediately
+      if (!block_found && params.oom_rejection_info.rejected) {
+        // Skip retry chain - will be handled below in the !block_found path
+      } else if (!block_found) {
+        // Normal retry chain: try various strategies to free memory and retry
+        block_found =
+            // Try to use memory pools that have opted in as overflow before
+            // expensive memory freeing operations.
+            try_mempool_fallback(
+                params, size, stream, device_id, alloc_size, stats)
+            // Free enough available cached blocks to satisfy alloc and retry
+            // alloc.
+            || (release_available_cached_blocks(params, context) &&
+                alloc_block(params, false, context, lock))
+            // Free all non-split cached blocks and retry alloc.
+            || (C10_LIKELY(captures_underway.empty()) &&
+                release_cached_blocks(context, {0, 0}) &&
+                alloc_block(params, true, context, lock));
+      }
     }
 
     if (!block_found) {
       // For any error code other than cudaErrorMemoryAllocation,
       // alloc_block should have thrown an exception already.
       TORCH_INTERNAL_ASSERT(params.err == cudaErrorMemoryAllocation);
+
+      // Handle OOM rejection separately - return nullptr instead of throwing
+      // This allows callers to handle rejection gracefully without crashing
+      if (params.oom_rejection_info.rejected) {
+        if (!oom_rejection_observers_.empty()) {
+          auto observers_local = oom_rejection_observers_;
+          auto rejection_info = params.oom_rejection_info;
+          auto device = device_id;
+
+          // Release lock before dispatching observers
+          lock.unlock();
+
+          // Dispatch observers asynchronously to minimize latency impact on
+          // rejection path
+          std::thread([observers_local = std::move(observers_local),
+                       rejection_info,
+                       device]() {
+            try {
+              for (const auto& observer : observers_local) {
+                observer(
+                    device,
+                    rejection_info.alloc_size,
+                    rejection_info.total_allocated,
+                    rejection_info.device_total);
+              }
+            } catch (const std::exception& e) {
+              LOG(ERROR) << "Exception in OOM rejection observer: " << e.what();
+            } catch (...) {
+              LOG(ERROR) << "Unknown exception in OOM rejection observer";
+            }
+          }).detach();
+        } else {
+          lock.unlock();
+        }
+
+        return nullptr;
+      }
 
       size_t device_free = 0;
       size_t device_total = 0;
@@ -2281,6 +2381,7 @@ class DeviceCachingAllocator {
     stats.num_sync_all_streams = 0;
     stats.num_device_alloc = 0;
     stats.num_device_free = 0;
+    stats.num_oom_rejections = 0;
     stats.oversize_allocations.reset_accumulated();
     stats.oversize_segments.reset_accumulated();
   }
@@ -3439,8 +3540,37 @@ class DeviceCachingAllocator {
         total_allocated_memory + size > allowed_memory_maximum.value()) {
       p.err = cudaErrorMemoryAllocation;
       return false;
-      // Temporarily disable checkpointing & cudagraphs internally
-    } else if (
+    }
+
+    // When throw_on_cudamalloc_oom is enabled, check
+    // per_process_memory_fraction to reject allocations that would exceed the
+    // configured limit. This prevents fatal HSA/driver aborts by throwing
+    // OutOfMemoryError instead.
+    if (CUDAAllocatorConfig::throw_on_cudamalloc_oom()) {
+      size_t device_total = static_cast<size_t>(device_prop.totalGlobalMem);
+      size_t max_allowed = static_cast<size_t>(
+          CUDAAllocatorConfig::per_process_memory_fraction() *
+          static_cast<double>(device_total));
+      if (total_allocated_memory + size > max_allowed) {
+        stats.num_oom_rejections++;
+        p.oom_rejection_info = {
+            true, size, total_allocated_memory, device_total};
+        C10_LOG_EVERY_MS(WARNING, 60000)
+            << "Preemptively rejecting allocation: requested "
+            << format_size(size) << " but total_allocated_memory ("
+            << format_size(total_allocated_memory)
+            << ") + requested size would exceed memory limit ("
+            << format_size(max_allowed) << " = "
+            << CUDAAllocatorConfig::per_process_memory_fraction() * 100
+            << "% of " << format_size(device_total)
+            << "). Set throw_on_cudamalloc_oom:false to disable.";
+        p.err = cudaErrorMemoryAllocation;
+        return false;
+      }
+    }
+
+    if (
+        // Temporarily disable checkpointing & cudagraphs internally
         p.is_expandable_segments_active &&
         !(in_fbcode && p.pool->owner_PrivatePool)) {
       p.block = try_allocate_expandable_block(
@@ -3982,7 +4112,7 @@ class DeviceCachingAllocator {
 
     if (record_history) {
       // Skip if action is in the skip_actions set
-      bool should_skip = skip_actions_list.count(action) > 0;
+      bool should_skip = skip_actions_list.contains(action);
       if (!should_skip) {
         alloc_buffer.insertEntries(te);
       }
@@ -4112,6 +4242,18 @@ class NativeCachingAllocator : public CUDAAllocator {
         device,
         ": did you call init?");
     Block* block = device_allocator[device]->malloc(size, stream);
+    // block can be nullptr if allocation was rejected by
+    // throw_on_cudamalloc_oom
+    // + per_process_memory_fraction policy. Throw OutOfMemoryError so callers
+    // with OOM error handlers can catch it gracefully.
+    if (C10_UNLIKELY(!block)) {
+      TORCH_CHECK_WITH(
+          OutOfMemoryError,
+          false,
+          "CUDA out of memory. Allocation was preemptively rejected because "
+          "it would exceed per_process_memory_fraction limit. Requested size: ",
+          format_size(size));
+    }
     add_allocated_block(block);
     *devPtr = block->ptr;
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
@@ -4260,6 +4402,12 @@ class NativeCachingAllocator : public CUDAAllocator {
   void attachOutOfMemoryObserver(OutOfMemoryObserver observer) override {
     for (auto& allocator : device_allocator) {
       allocator->attachOutOfMemoryObserver(observer);
+    }
+  }
+
+  void attachOomRejectionObserver(OomRejectionObserver observer) override {
+    for (auto& allocator : device_allocator) {
+      allocator->attachOomRejectionObserver(observer);
     }
   }
 
@@ -4809,7 +4957,7 @@ struct BackendStaticInitializer {
 // initialization, and doing so there may introduce static initialization
 // order (SIOF) issues.
 #define HIP_MASQUERADING_AS_CUDA "cuda"
-    at::SetAllocator(c10::Device(HIP_MASQUERADING_AS_CUDA).type(), r, 0);
+    at::SetAllocator(c10::Device(HIP_MASQUERADING_AS_CUDA).type(), r, 1);
     allocator.store(r);
 #undef HIP_MASQUERADING_AS_CUDA
   }

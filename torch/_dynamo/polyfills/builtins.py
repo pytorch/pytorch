@@ -7,6 +7,7 @@ from __future__ import annotations
 import builtins
 import functools
 import operator
+import typing
 from collections.abc import Callable
 from typing import TYPE_CHECKING, TypeVar
 
@@ -20,6 +21,7 @@ if TYPE_CHECKING:
 __all__ = [
     "all",
     "any",
+    "cast",
     "enumerate",
     "sum",
 ]
@@ -120,3 +122,8 @@ def iter_(fn_or_iterable, sentinel=_sentinel_missing, /):  # type: ignore[no-unt
             raise TypeError("iter(v, w): v must be a callable")
 
         return _CallableIterator(fn, sentinel)
+
+
+@substitute_in_graph(typing.cast, can_constant_fold_through=True)
+def cast(typ: type, val: _T) -> _T:  # type: ignore[type-var]
+    return val
