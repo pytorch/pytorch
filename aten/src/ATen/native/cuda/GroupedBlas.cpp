@@ -691,21 +691,32 @@ Tensor _grouped_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
 const std::optional<at::Tensor>& offs,
 const std::optional<at::Tensor>& bias,
 std::optional<c10::ScalarType> out_dtype) {
-  _grouped_mm_validate_inputs(mat_a, mat_b, offs, bias, out_dtype);
+  // Autograd can produce inputs with degenerate (zero) strides, e.g. broadcast
+  // expanded gradients from sum().backward(). Materialize them into tensors
+  // with aligned strides, as required by grouped GEMM kernels.
+  auto fix_strides = [](const Tensor& t) -> Tensor {
+    for (auto s : t.strides()) {
+      if (s == 0) return ensure_aligned_for_grouped_mm(t);
+    }
+    return t;
+  };
+  auto a = fix_strides(mat_a);
+  auto b = fix_strides(mat_b);
+  _grouped_mm_validate_inputs(a, b, offs, bias, out_dtype);
   bool a_b_and_out_are_bf16 = (
-    mat_a.dtype() == at::kBFloat16 &&
-    mat_b.dtype() == at::kBFloat16 &&
+    a.dtype() == at::kBFloat16 &&
+    b.dtype() == at::kBFloat16 &&
     out_dtype.value_or(at::kBFloat16) == at::kBFloat16
   );
 #ifndef USE_ROCM
   bool use_fast_path = _scaled_mm_allowed_device(/*sm90_only*/true, /*sm100_only*/true) && a_b_and_out_are_bf16;
-  const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
-  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
+  const auto out_dtype_ = _resolve_grouped_mm_out_dtype(a, b, out_dtype);
+  Tensor out = create_grouped_gemm_output_tensor(a, b, offs, out_dtype_);
   if (use_fast_path) {
     // fast path, no d2h sync needed
-    at::cuda::detail::bf16bf16_grouped_mm(mat_a, mat_b, offs, bias, out);
+    at::cuda::detail::bf16bf16_grouped_mm(a, b, offs, bias, out);
   } else {
-    _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
+    _grouped_mm_fallback(a, b, offs, bias, out_dtype, out);
   }
 #else
   // On ROCm fast path routes to group_gemm_ck and slow path to _grouped_mm_fallback.
@@ -718,12 +729,12 @@ std::optional<c10::ScalarType> out_dtype) {
     use_fast_path = true;
   }
 #endif //USE_ROCM_CK_GEMM
-  const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
-  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
+  const auto out_dtype_ = _resolve_grouped_mm_out_dtype(a, b, out_dtype);
+  Tensor out = create_grouped_gemm_output_tensor(a, b, offs, out_dtype_);
   if (use_fast_path) {
-    at::hip::detail::group_gemm_ck(mat_a, mat_b, offs, bias, out);
+    at::hip::detail::group_gemm_ck(a, b, offs, bias, out);
   } else {
-    _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
+    _grouped_mm_fallback(a, b, offs, bias, out_dtype, out);
   }
 #endif //ifndef USE_ROCM
   return out;

@@ -8454,6 +8454,8 @@ def _meta_grouped_mm_common(
         )
 
     def check_valid_strides(mat_name, mat):
+        if mat.numel() == 0:
+            return
         end_dim = mat.dim() - 1
         alignment = 16 // mat.element_size()
         mat_stride = mat.stride()

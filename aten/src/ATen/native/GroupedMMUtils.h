@@ -17,7 +17,32 @@
 
 namespace at::native {
 
+// Materialize a tensor with degenerate strides (e.g. from expand/broadcast)
+// into a row-major tensor with 16-byte aligned strides, as required by the
+// grouped GEMM kernels (CUTLASS/CK).
+inline Tensor ensure_aligned_for_grouped_mm(const Tensor& mat) {
+  int alignment = 16 / mat.element_size();
+  auto sizes = mat.sizes();
+  int last_dim = mat.dim() - 1;
+  int64_t padded = (sizes[last_dim] + alignment - 1) / alignment * alignment;
+  c10::SmallVector<int64_t, 3> new_strides;
+  if (mat.dim() == 2) {
+    new_strides = {padded, 1};
+  } else {
+    new_strides = {sizes[1] * padded, padded, 1};
+  }
+  auto out = at::empty_strided(sizes, new_strides, mat.options());
+  out.copy_(mat);
+  return out;
+}
+
 inline bool check_valid_strides_and_return_transposed(const Tensor& mat) {
+  // Empty tensors (with a zero-size dimension) have valid but degenerate
+  // strides that fail the checks below. Return early — the kernel will
+  // produce an empty output and no memory is accessed.
+  if (mat.numel() == 0) {
+    return false;
+  }
   IntArrayRef tensor_strides = mat.strides();
   IntArrayRef tensor_sizes = mat.sizes();
   int end_dim = mat.dim() - 1;
