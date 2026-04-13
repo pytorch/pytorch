@@ -158,6 +158,8 @@ def set_flags(
     _deterministic=None,
     _allow_tf32=None,
     _fp32_precision="none",
+    _conv_fp32_precision=None,
+    _rnn_fp32_precision=None,
     _depthwise_kernel=None,
 ):
     orig_flags = (
@@ -165,8 +167,10 @@ def set_flags(
         torch._C._get_cudnn_benchmark(),
         None if not is_available() else torch._C._cuda_get_cudnn_benchmark_limit(),
         torch._C._get_cudnn_deterministic(),
-        torch._C._get_cudnn_allow_tf32(),
+        None,
         torch._C._get_fp32_precision_getter("cuda", "all"),
+        torch._C._get_fp32_precision_getter("cuda", "conv"),
+        torch._C._get_fp32_precision_getter("cuda", "rnn"),
         torch._C._get_cudnn_depthwise_kernel(),
     )
     if _enabled is not None:
@@ -181,6 +185,10 @@ def set_flags(
         torch._C._set_cudnn_allow_tf32(_allow_tf32)
     if _fp32_precision is not None:
         torch._C._set_fp32_precision_setter("cuda", "all", _fp32_precision)
+    if _conv_fp32_precision is not None:
+        torch._C._set_fp32_precision_setter("cuda", "conv", _conv_fp32_precision)
+    if _rnn_fp32_precision is not None:
+        torch._C._set_fp32_precision_setter("cuda", "rnn", _rnn_fp32_precision)
     if _depthwise_kernel is not None:
         torch._C._set_cudnn_depthwise_kernel(_depthwise_kernel)
     return orig_flags

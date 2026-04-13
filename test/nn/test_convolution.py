@@ -1496,9 +1496,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @onlyAccelerator
     @dtypes(torch.float, torch.double, torch.half)
     @dtypesIfMPS(torch.float, torch.half)
-    @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
-    @torch.backends.miopen.flags(immediate=True)
     @tf32_on_and_off(0.01)
+    @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False, allow_tf32=None)
+    @torch.backends.miopen.flags(immediate=True)
     def test_Conv3d_depthwise_naive_groups(self, device, dtype):
         for depth_multiplier in [1, 2]:
             m = nn.Conv3d(2, 2 * depth_multiplier, kernel_size=3, groups=2).to(
