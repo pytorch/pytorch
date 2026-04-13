@@ -1082,22 +1082,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
         if IS_DARWIN:
             self._embed_libomp()
 
-        # Copy the essential export library to compile C++ extensions.
-        if IS_WINDOWS:
-            build_temp = Path(self.build_temp)
-            build_lib = Path(self.build_lib)
-
-            ext_filename = self.get_ext_filename("_C")
-            lib_filename = ".".join(ext_filename.split(".")[:-1]) + ".lib"
-
-            export_lib = build_temp / "torch" / "csrc" / lib_filename
-            target_lib = build_lib / "torch" / "lib" / "_C.lib"
-
-            # Create "torch/lib" directory if not exists.
-            # (It is not created yet in "develop" mode.)
-            target_dir = target_lib.parent
-            target_dir.mkdir(parents=True, exist_ok=True)
-            self.copy_file(export_lib, target_lib)
 
     def get_outputs(self) -> list[str]:
         outputs = super().get_outputs()
