@@ -2713,10 +2713,25 @@ common_constant_types: set[type] = {
     torch.utils._pytree.GetAttrKey,
 }
 
-if has_triton_package():
-    import triton
+_triton_dtype_added = False
 
-    common_constant_types.add(triton.language.dtype)
+
+def _maybe_add_triton_dtype() -> None:
+    global _triton_dtype_added
+    if _triton_dtype_added:
+        return
+    if has_triton_package():
+        try:
+            import triton
+
+            common_constant_types.add(triton.language.dtype)
+            _triton_dtype_added = True
+        except (ImportError, AttributeError):
+            # triton is partially initialized (circular import), retry later
+            pass
+    else:
+        _triton_dtype_added = True
+
 
 """
     Difference between is_safe_constant and common_constant_types.
@@ -2727,6 +2742,7 @@ if has_triton_package():
 
 
 def is_safe_constant(v: Any) -> bool:
+    _maybe_add_triton_dtype()
     if istype(v, (tuple, frozenset)):
         return all(map(is_safe_constant, v))
     return isinstance(

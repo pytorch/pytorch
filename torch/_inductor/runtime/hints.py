@@ -35,11 +35,20 @@ class TileHint(Enum):
 
 
 # Define `AttrsDescriptorWrapper` function with clear conditional handling
+_triton_attrs_resolved = False
 if has_triton_package():
-    import triton
-    import triton.backends.compiler
-    import triton.compiler.compiler
+    try:
+        import triton
+        import triton.backends.compiler
+        import triton.compiler.compiler
 
+        _triton_attrs_resolved = True
+    except (ImportError, AttributeError):
+        # triton is partially initialized (circular import during backend
+        # discovery). Fall through to the namedtuple fallback below.
+        pass
+
+if _triton_attrs_resolved:
     if hasattr(triton.backends.compiler, "AttrsDescriptor"):
         # Triton 3.2.0 - the second implementation
         from triton.backends.compiler import AttrsDescriptor
