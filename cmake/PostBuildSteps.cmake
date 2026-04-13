@@ -144,3 +144,42 @@ if(WIN32 AND BUILD_PYTHON)
     endif()
   endif()
 endif()
+
+# --- macOS OpenMP embedding ---
+# Copy libomp.dylib / libiomp5.dylib into the wheel and fix rpaths so the
+# wheel is self-contained (replicates setup.py's _embed_libomp).
+if(APPLE AND BUILD_PYTHON AND OPENMP_FOUND)
+  # OpenMP_libomp_LIBRARY is set by our FindOpenMP module to the full path
+  # of the OpenMP shared library (e.g. /path/to/libomp.dylib).
+  if(OpenMP_libomp_LIBRARY AND EXISTS "${OpenMP_libomp_LIBRARY}")
+    get_filename_component(_omp_name "${OpenMP_libomp_LIBRARY}" NAME)
+    install(FILES "${OpenMP_libomp_LIBRARY}"
+            DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+    # Install omp.h so Inductor's C++ backend can find it at runtime.
+    # The header lives at <prefix>/include/omp.h next to <prefix>/lib/libomp.dylib.
+    get_filename_component(_omp_lib_dir "${OpenMP_libomp_LIBRARY}" DIRECTORY)
+    get_filename_component(_omp_prefix "${_omp_lib_dir}" DIRECTORY)
+    if(EXISTS "${_omp_prefix}/include/omp.h")
+      install(FILES "${_omp_prefix}/include/omp.h"
+              DESTINATION "${TORCH_INSTALL_INCLUDE_DIR}")
+    endif()
+    # Fix libtorch_cpu's rpath so it finds the bundled library at load time.
+    install(CODE "
+      set(_lib_dir \"\${CMAKE_INSTALL_PREFIX}/${TORCH_INSTALL_LIB_DIR}\")
+      set(_libtorch_cpu \"\${_lib_dir}/libtorch_cpu.dylib\")
+      if(EXISTS \"\${_libtorch_cpu}\")
+        execute_process(
+          COMMAND install_name_tool -add_rpath @loader_path \"\${_libtorch_cpu}\"
+          ERROR_QUIET
+        )
+        # Point the load command at @rpath so it picks up the bundled copy.
+        execute_process(
+          COMMAND install_name_tool -change
+            \"${OpenMP_libomp_LIBRARY}\" \"@rpath/${_omp_name}\"
+            \"\${_libtorch_cpu}\"
+          ERROR_QUIET
+        )
+      endif()
+    ")
+  endif()
+endif()
