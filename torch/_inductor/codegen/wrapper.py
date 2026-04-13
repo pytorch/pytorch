@@ -3295,9 +3295,7 @@ class PythonWrapperCodegen(CodeGen):
                 self.writeline(self.wrap_kernel_call(kernel_name, call_args))
             elif device.type == "mps":
                 # TODO: Fix me, MPS does not expose streams now
-                self.writeline(
-                    self.wrap_kernel_call(f"{kernel_name}.generated_kernel", call_args)
-                )
+                self.writeline(self.wrap_kernel_call(kernel_name, call_args))
             else:
                 raise RuntimeError(f"device {device.type} nyi")
             return
