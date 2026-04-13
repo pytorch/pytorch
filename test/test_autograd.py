@@ -4468,40 +4468,27 @@ class TestAutograd(TestCase):
         self.assertEqual(type(dvar.grad), type(dvar))
 
     @skipIfXpu(
-        msg="torch.xpu' has no attribute 'FloatTensor', issue https://github.com/intel/torch-xpu-ops/issues/2792"
+        msg="It's a deprecated api, issue closed https://github.com/intel/torch-xpu-ops/issues/2792"
     )
     def test_type_conversions(self):
         x = torch.randn(5, 5)
         self.assertIsInstance(x.float(), torch.FloatTensor)
         self.assertIsInstance(x.int(), torch.IntTensor)
-        if torch.accelerator.is_available():
-            self.assertIsInstance(
-                x.float().to(device_type),
-                torch.get_device_module(device_type).FloatTensor,
-            )
-            self.assertIsInstance(
-                x.int().to(device_type), torch.get_device_module(device_type).IntTensor
-            )
-            self.assertIsInstance(x.int().to(device_type).cpu(), torch.IntTensor)
-            if torch.accelerator.device_count() >= 2:
-                x2 = x.float().to(device_type)(1)
-                self.assertIsInstance(
-                    x2, torch.get_device_module(device_type).FloatTensor
-                )
+        if torch.cuda.is_available():
+            self.assertIsInstance(x.float().cuda(), torch.cuda.FloatTensor)
+            self.assertIsInstance(x.int().cuda(), torch.cuda.IntTensor)
+            self.assertIsInstance(x.int().cuda().cpu(), torch.IntTensor)
+            if torch.cuda.device_count() >= 2:
+                x2 = x.float().cuda(1)
+                self.assertIsInstance(x2, torch.cuda.FloatTensor)
                 self.assertIs(x2.get_device(), 1)
-                x2 = x.float().to(device_type)
-                self.assertIsInstance(
-                    x2, torch.get_device_module(device_type).FloatTensor
-                )
+                x2 = x.float().cuda()
+                self.assertIsInstance(x2, torch.cuda.FloatTensor)
                 self.assertIs(x2.get_device(), 0)
-                x2 = x2.get_device_module(device_type)(1)
-                self.assertIsInstance(
-                    x2, torch.get_device_module(device_type).FloatTensor
-                )
+                x2 = x2.cuda(1)
+                self.assertIsInstance(x2, torch.cuda.FloatTensor)
                 self.assertIs(x2.get_device(), 1)
-                y = Variable(
-                    torch.randn(5).get_device_module(device_type)(1), requires_grad=True
-                )
+                y = Variable(torch.randn(5).cuda(1), requires_grad=True)
                 y.cpu().sum().backward()
                 self.assertIs(y.grad.get_device(), 1)
                 self.assertIs(y.long().get_device(), 1)
@@ -4522,35 +4509,27 @@ class TestAutograd(TestCase):
                 self.assertIsInstance(x.type(t_dtype), t)
                 self.assertIs(t_dtype, x.type(t_dtype).dtype)
                 self.assertEqual(y.data_ptr(), y.type(t).data_ptr())
-                if torch.accelerator.is_available():
-                    for x_acc in (True, False):
-                        for y_acc in (True, False):
-                            x_c = x.to(device_type) if x_acc else x
-                            y_c = y.to(device_type) if y_acc else y
+                if torch.cuda.is_available():
+                    for x_cuda in (True, False):
+                        for y_cuda in (True, False):
+                            x_c = x.cuda() if x_cuda else x
+                            y_c = y.cuda() if y_cuda else y
                             _, y_type = y_c.type().rsplit(".", 1)
-                            y_typestr = (
-                                f"torch.{device_type}." if y_acc else "torch."
-                            ) + y_type
+                            y_typestr = ("torch.cuda." if y_cuda else "torch.") + y_type
                             self.assertEqual(y_c.type(), x_c.type(y_typestr).type())
                             self.assertIs(y_c.dtype, x_c.type(y_c.dtype).dtype)
                             self.assertEqual(
                                 y_c.data_ptr(),
-                                y_c.to(device_type).data_ptr()
-                                if y_acc
-                                else y_c.data_ptr(),
+                                y_c.cuda().data_ptr() if y_cuda else y_c.data_ptr(),
                             )
 
         self._test_type_conversion_backward(lambda x: x)
-        if torch.accelerator.is_available():
-            self._test_type_conversion_backward(lambda x: x.to(device_type))
-            if torch.accelerator.device_count() >= 2:
+        if torch.cuda.is_available():
+            self._test_type_conversion_backward(lambda x: x.cuda())
+            if torch.cuda.device_count() >= 2:
                 # one of these has to be the non-default device
-                self._test_type_conversion_backward(
-                    lambda x: x.get_device_module(device_type)(0)
-                )
-                self._test_type_conversion_backward(
-                    lambda x: x.get_device_module(device_type)(1)
-                )
+                self._test_type_conversion_backward(lambda x: x.cuda(0))
+                self._test_type_conversion_backward(lambda x: x.cuda(1))
 
     def test_isolated_node(self):
         x = torch.randn(5, 5, requires_grad=True)
@@ -11647,7 +11626,7 @@ for shape in [(1,), ()]:
             a = torch.ones(1, requires_grad=True, device=device_type)
             y = f(a)
             memory_with_hooks = (
-            memory_with_hooks = torch.cuda.memory_allocated()
+            memory_with_hooks = torch.device(device_type).memory_allocated()
                 if TEST_CUDA
                 else torch.xpu.memory_allocated()
             )
@@ -14774,7 +14753,7 @@ class TestAutogradStreamSynchronization(TestCase):
     @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
     @skipIfXpu(
-        msg="'torch.xpu' has no attribute 'default_stream', issue https://github.com/intel/torch-xpu-ops/issues/2793"
+        msg="XPU doesn't have an exact counterpart of the default stream, closed issue https://github.com/intel/torch-xpu-ops/issues/2793"
     )
     def test_consumer_to_single_producer_case_2_correctness(self, device):
         if device == "cpu":
@@ -14888,7 +14867,7 @@ class TestAutogradStreamSynchronization(TestCase):
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
     )
     @skipIfXpu(
-        msg="'torch.xpu' has no attribute 'default_stream', issue https://github.com/intel/torch-xpu-ops/issues/2793"
+        msg="XPU doesn't have an exact counterpart of the default stream, closed issue https://github.com/intel/torch-xpu-ops/issues/2793"
     )
     def test_consumer_to_single_producer_case_3_correctness_non_default_ambient_stream(
         self, device
@@ -16629,10 +16608,6 @@ class TestSelectiveActivationCheckpoint(TestCase):
 
 
 class TestAutogradMultipleDispatch(TestCase):
-    @skipIfXpu(
-        msg="Skip the failed test case test_autograd_multiple_dispatch_registrations due to tensor not closed, \
-                    issue https://github.com/intel/torch-xpu-ops/issues/2794"
-    )
     def test_autograd_multiple_dispatch_registrations(self, device):
         t = torch.randn(3, 3, device=device, requires_grad=True)
         # using _test_autograd_multiple_dispatch.fullcoverage which has
