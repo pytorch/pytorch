@@ -361,21 +361,6 @@ struct type_caster<c10::complex<T>> {
 };
 template <>
 struct type_caster<c10::Layout> {
- private:
-  // order must be the same as c10::Layout
-  inline static constexpr auto layout_str = std::to_array(
-      {"strided",
-       "sparse_coo",
-       "sparse_csr",
-       "_mkldnn",
-       "sparse_csc",
-       "sparse_bsr",
-       "sparse_bsc",
-       "jagged"});
-  static_assert(
-      layout_str.size() == static_cast<size_t>(c10::Layout::NumOptions),
-      "layout_str must have the same number of elements as c10::Layout");
-
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PYBIND11_TYPE_CASTER(c10::Layout, _("torch.layout"));
