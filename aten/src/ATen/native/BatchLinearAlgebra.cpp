@@ -3850,179 +3850,236 @@ Tensor& linalg_solve_triangular_out(
   checkInputsSolver(A, B, left, "linalg.solve_triangular");
   auto [B_, A_] = _linalg_broadcast_batch_dims(B, A, /*don't check errors*/nullptr);
 
-  // We'll write F-contig / F-transpose for FORTRAN contiguous / FORTRAN transpose etc
-  // We say that a matrix is F-ready if it's F-contig OR F-transpose
-  // At this point, A, B have been broadcasted but may or may not be F-ready
-
-  // The following algorithm minimises copies and allocations. In pseudocode:
-  // if out is wrong size:
-  //   resize_output(out)
-  // # Invariant: out is the right size
-  // Tensor out_f; # Tensor that we will pass to FORTRAN
-  // if out is F-ready:
-  //   out_f = out;
-  // else:
-  //   Allocate out_f F-ready
-  // if B != out_f:
-  //   copy B into out_f
-  // # Invariant: out_f F-ready and has B copied into it
-  // if out_f is F-transposed:
-  //   transpose equation
-  // if out_f is conj:
-  //   conjugate equation
-  // # Invariant: out_f is not conjugated and F-contig
-  // Tensor A_f; # Tensor that will be sent to FORTRAN
-  // if A is F-ready:
-  //   if A is conj and A is not transposed:
-  //     # We need to clone A in this case. See [Cloning A]
-  //     clone A F-contig into A_f
-  //   else:
-  //     A_f = A;
-  // else:
-  //   clone A F-contig into A_f
-  // # Invariant: out_f is F-contig and A_f is F-ready
-  // # We pass FORTRAN the flags indicating if A_f is transposed and or conjugated
+  // Some definitions:
+  // (A, B) := X denotes the solution to the system in question.
   //
-  // # Here we undo the conjugations / transposes on out_f if needed
+  // Let X be a tensor such that X.is_conj()/.is_neg() == False, then
+  // X* := X.conj().
+  // -X := X._neg_view().
+  // -X* := X.conj()._neg_view() <=> X._neg_view().conj().
   //
-  // if out_f not same out:
-  //   copy out_f into out
-  // return out
+  // Note the following properties:
+  // X = -(-X) = --X.
+  // X = (X*)* = X**.
+  // -X = -(A, B) = (-A, B) = (A, -B).
+  // X* = (A, B)* = (A*, B*).
   //
-  // Note: The logic for the negative bit is the same as that for the conjugate bit
-  //
-  // Note: [Cloning A] If we are careful when allocating B when it needs to be allocated at the
-  // beginning of the algorithm, it is possible to always elide the copy of A here.
-  // Via this trick, the algorithm will copy at most one of A or B (never both) whenever A
-  // and B are F-ready and not A.is_neg() (which happens almost always in practice).
-  // When called as f(A, B, out=B) in most practical cases it'll perform no copies.
+  // We recommend looking at [Main logic] first,
+  // and then at the methods therein.
 
-  const bool avoid_copy_A = A_.transpose(-2, -1).is_contiguous() && A_.is_conj();
-  if (avoid_copy_A) {
-    // See Note: [Cloning A]
-    at::native::resize_output(out, B_.sizes());
-  }
-  else {
-    // poorman's reimplementation of resize_output with result F-contig
-    if (resize_output_check(out, B_.sizes())) {
-      out.resize_(B_.transpose(-2, -1).sizes(), MemoryFormat::Contiguous);
-      out.transpose_(-2, -1);  // make 'out' have Fortran contiguous memory layout
-    }
-  }
-  // Invariant: out has the right size, so we'll be able to copy into it later on
-
-  Tensor out_f; // the out that will go into fortran
-  // We use C10_LIKELY mostly for documentation as it helps following what's the most likely path
-  if C10_LIKELY (is_row_or_column_contiguous(out)) {
-    out_f = out;
-    if C10_LIKELY (!out.is_same(B_)) {
-      out_f.copy_(B_);
-    }
-  } else {
-    if (avoid_copy_A) {
-      // See Note: [Cloning A]
-      out_f = B_.clone(at::MemoryFormat::Contiguous);
-    }
-    else {
-      out_f = cloneBatchedColumnMajor(B_);
-    }
-  }
-  // Invariant: out_f F-ready and has B copied into it
-
-  // out_f is F-transposed
-  bool transpose_A = false;
-  bool transpose_out_f = false;
-  if (out_f.stride(-1) == 1) {
-    left = !left;
-    transpose_A = true;
-    transpose_out_f = true;
-    out_f.transpose_(-2 ,-1);
+  // FIXME: this is inherited from the previous version.
+  // This silently re-strides out if out.shape != B.shape.
+  if (resize_output_check(out, B_.sizes())) {
+    out.resize_(B_.transpose(-2, -1).sizes(), MemoryFormat::Contiguous);
+    out.transpose_(-2, -1);
   }
 
-  // No need to conjugate anything if out_f is conj as AX = conj(B) <=> conj(A)conj(X) = B
-  // and X = B after the algorithm. We just annotate that A is conjugated later on
-  // The solution will be written into out_f, so it'll be conjugated already
-
-  Tensor A_f = std::move(A_);  // The A that will go into fortran
-
-  bool A_is_conj = A_f.is_conj() != out_f.is_conj();
-  bool A_is_neg = A_f.is_neg() != out_f.is_neg();
-  bool A_is_f_contig = (A_f.stride(-1) == 1) == transpose_A;
-  if C10_UNLIKELY (!is_row_or_column_contiguous(A_f)) {
-    // We first annotate with flags on A_f all the conj / transpose / neg coming from out
-    // and then we clone the resulting tensor to resolve all of them in memory
-    if (out_f.is_conj()) {
-      A_f = A_f.conj();
-    }
-    A_is_conj = false;
-
-    if (out_f.is_neg()) {
-      A_f = A_f._neg_view();
-    }
-    A_is_neg = false;
-
-    // This choice is to be consistent with how we flip `upper` later on
-    // Note that this is the same reasoning we apply for neg and conj below
-    // If B has neg or out or transpose, then we need to resolve it in memory
-    A_f = transpose_A ? A_f.clone(at::MemoryFormat::Contiguous)
-                      : cloneBatchedColumnMajor(A_f);
-    A_is_f_contig = true;
-  } else if C10_UNLIKELY (A_is_f_contig && A_is_conj) {
-    if C10_UNLIKELY (A_f.is_neg() || out_f.is_neg()) {
-      // Cases A_is_neg (remember that B.is_neg() iff out_f.is_same(B))
-      // -AX = -B => A(-X) = B. Swap neg of A_f. Nothing to do on X as X.is_same(B).
-      // -AX = B. We resolve the neg in memory
-      // AX = -B => -A -X = B. We resolve the neg in memory for A,
-      //                       Since X.is_same(B), we already have that X.is_neg() == true
-
-      // We do the neg with a view, as this will be resolved in the clone below
-      if (out_f.is_neg()) {
-        A_f = A_f._neg_view();
-      }
-      A_is_neg = false;
-    }
-    // We resolve the transpose if necessary and then leave A_f F-transposed,
-    // as BLAS can handle the case F-transposed and conjugated
-    A_f = at::clone(transpose_A ? A_f.mT() : A_f, at::MemoryFormat::Contiguous);
-    A_is_f_contig = false;
-    if (transpose_A) {
-      upper = !upper;
-    }
-    // As we've already resolved the conj of A in the clone
-    A_is_conj = out_f.is_conj();
-  } else if C10_UNLIKELY (A_is_neg) {
-    // We follow the same logic as above, only that in this case we need to perform the
-    // negation in memory
-    if (out_f.is_neg()) {
-      A_f = -A_f;
+  // Prepare solve output to be BLAS-compliant.
+  auto pOut = [](const Tensor& out) -> c10::MaybeOwned<Tensor> {
+    // Out is borrowed when
+    // - out is empty, or
+    // - out is BLAS-compatible (here: contiguous rows or cols and no memory overlaps across all dims).
+    if ((out.numel() == 0) || (isColMajorLike(out) || isRowMajorLike(out))) {
+      return c10::MaybeOwned<Tensor>::borrowed(out);
     } else {
-      A_f = A_f.resolve_neg();
+      return c10::MaybeOwned<Tensor>::owned(at::empty({0}, out.options()));
     }
-    A_is_neg = false;
-    // As we've already resolved the conj of A in the negationa bove
-    A_is_conj = out_f.is_conj();
+  }(out);
+
+  // Prepare A to be BLAS-compliant.
+  const auto pA = [unitriangular](const auto& A, const auto& B) -> c10::MaybeOwned<Tensor> {
+    // FIXME: batch overlaps are permissible, but the kernel loops over the batch dims,
+    // so the batch dims are being materialized.
+    // This behavior is inherited from the previous implementations.
+    if ((isRowMajorLike(A) || isColMajorLike(A))
+      // A.is_neg and unitriangular triggers a clone because (A, B) is not linear in the first argument, i.e.
+      // (-A + I, B) = -(A - I, B) = -(A + I - 2I, B) != (A + I, B) - (2I, B) = (A + I, B) - 2B.
+      && !(A.is_neg() && unitriangular)
+    ) {
+      return c10::MaybeOwned<Tensor>::borrowed(A);
+    } else {
+      // Here A will be cloned
+      // NOTE: This is the only place A is copied!
+      //
+      // Conj materialization optimizations:
+      // (A.is_conj() != B.is_conj()) might imply materialized conj in memory,
+      // see solve_by_layout_match and solve_with_matching_layout.
+      // So, we make a copy of A such that (A_clone.is_conj() == B.is_conj()).
+      auto A_clone = cloneMatrix(
+        B.is_conj() ? A.conj() : A,
+        // NOTE: preserve memory format for faster clone
+        /*make_col_major_like=*/(A.stride(-1) != 1)
+      );
+      A_clone._set_conj(B.is_conj());
+      return c10::MaybeOwned<Tensor>::owned(std::move(A_clone));
+    }
+  }(A_, *pOut);
+
+  // Empty out with out.shape != B.sizes implies full ownership.
+  // This means we are free to alter its stride structure and conj/neg flags.
+  const bool out_fully_owned = (pOut->numel() == 0) && (pOut->sizes() != B_.sizes());
+
+  // NOTE: modifies B in-place
+  const auto solve_kernel = [&left, &upper, &unitriangular](
+    const Tensor& A,
+    const Tensor& B,
+    TransposeType trans = TransposeType::NoTranspose
+  ) {
+    triangular_solve_stub(
+      A.device().type(), A, B,
+      left,
+      upper,
+      trans,
+      unitriangular
+    );
+  };
+
+  // Run solve_kernel on
+  // (op(A), B) if A is col-major, or
+  // (op(A^T), B^T), otherwise (left and upper are mutated).
+  // *^T is applied to the strides before the kernel call,
+  // op(*) is applied in the kernel.
+  const auto solve = [&left, &upper, &solve_kernel](
+    const Tensor& A,
+    const Tensor& B,
+    TransposeType trans = TransposeType::NoTranspose
+  ) {
+    auto pA = c10::MaybeOwned<Tensor>::borrowed(A);
+    auto pB = c10::MaybeOwned<Tensor>::borrowed(B);
+
+    const auto is_A_col_major = A.stride(-2) == 1;
+    if (!is_A_col_major) {
+      // Transpose the problem
+      left = !left;
+      upper = !upper;
+      pA = c10::MaybeOwned<Tensor>::owned(pA->mT());
+      pB = c10::MaybeOwned<Tensor>::owned(pB->mT());
+    }
+
+    solve_kernel(*pA, *pB, trans);
+  };
+
+  // Solve (A, B) when A and B both have the same memory layout,
+  // i.e. they are both row-major or column-major.
+  // This follows
+  // ([-1]A[*], -B*) = -(A[*], [-1]B*) = -(A[*]*, [-1]B)*
+  //                 = -(A, [-1]B[*]*)([*]*)*
+  // NOTE: this method does not optimize for conj materialization.
+  // NOTE: B is modified in-place.
+  // NOTE: NO COPY of A is done.
+  const auto solve_with_matching_layout = [&solve](
+    const Tensor& A,
+    const Tensor& B,
+    TransposeType trans = TransposeType::NoTranspose
+  ) {
+    const bool neg_physical = A.is_neg();
+    const bool conj_physical = A.is_conj() ^ B.is_conj();
+
+    // Compute [-1]B[*]*
+    // FIXME: can be deterred with `alpha` enabled in triangular_solve kernel,
+    // to be able to solve (A, alpha * B)
+    if (neg_physical) { B.neg_(); }
+    if (conj_physical) { B.conj_physical_(); }
+
+    // Compute (A, [-1]B[*]*)
+    solve(A, B, trans);
+
+    // Compute (A, [-1]B[*]*)[*]*
+    if (conj_physical) { B.conj_physical_(); }
+
+    // B contains -(A, [-1]B[*]*)([*]*)*, if -/* are present in B
+  };
+
+  // Solve (A, B) by trying to match layouts of A and B.
+  // This function is a composition of all other previously defined functions.
+  // Conj materialization optimizations are deployed, when possible,
+  // when (A.is_conj() != B.is_conj()), see solve_with_matching_layout.
+  // NOTE: B is modified in-place.
+  // NOTE: NO COPY of A is done.
+  const auto solve_by_layout_match = [&](
+    const Tensor& A,
+    const Tensor& B
+  ) {
+    const bool is_A_col_major = A.stride(-2) == 1;
+    const bool is_B_col_major = B.stride(-2) == 1;
+
+    if (is_A_col_major == is_B_col_major) {
+      // Here A, B share the same memory layout, i.e.
+      // both are col-major or row-major.
+      solve_with_matching_layout(A, B);
+    } else if (!is_A_col_major) {
+      // Here A is row-major and B is col-major
+      // Match layouts by transposing just A and picking an op
+      //
+      // Optimization for avoiding conj materializations:
+      // (A*, B) -> (A^T^H, B) -> ((A^T)^H, B), op(A) = A^H;
+      // (A, B*) = (A*, B)* -> ((A^T)^H, B)*, op(A) = A^H;
+      // (A, B) and (A*, B*) follow a similar route but with op(A)=A^T
+      upper = !upper;
+      solve_with_matching_layout(
+        A.is_conj() ? A.mH() : A.mT(),
+        B.is_conj() ? B.conj() : B,
+        (A.is_conj() != B.is_conj()) ? TransposeType::ConjTranspose : TransposeType::Transpose
+      );
+    } else {
+      // Here A is col-major and B is row-major
+      // Match layouts by transposing the problem and picking an op
+      //
+      // Optimizations for avoiding conj materializations:
+      // (A*, B) -> (A^H, B^T) = (op(A.conj()), B^T), with op(A)=A^H;
+      // (A, B*) -> (A^T, B*^T) = (A*^T, B^T)* = (A^H, B^T)* = (op(A), B^T)*, with op(A)=A^H;
+      // (A, B) and (A*, B*) follow a similar route but with op(A)=A^T.
+      left = !left;
+      solve_with_matching_layout(
+        A.is_conj() ? A.conj() : A,
+        B.is_conj() ? B.mH() : B.mT(),
+        (A.is_conj() != B.is_conj()) ? TransposeType::ConjTranspose : TransposeType::Transpose
+      );
+    }
+  };
+
+  // [Main logic]
+  // Prepare out, then run solve_by_layout_match
+  if (out_fully_owned) {
+    // Resize out to match layout that of A
+    const auto is_A_col_major = A.stride(-2) == 1;
+    if (is_A_col_major) {
+      // A is col-major -> resize out to be col-major and solve the original problem
+      pOut->resize_(B_.transpose(-2, -1).sizes(), MemoryFormat::Contiguous);
+      pOut->transpose_(-2, -1);
+    } else {
+      // A is row-major -> risize out to be row-major and solve the transposed problem
+      pOut->resize_(B_.sizes(), MemoryFormat::Contiguous);
+    }
+    // Optimization: conj is not materialized in the memory unless
+    // A.is_conj() != B.is_conj() (see solve_by_layout_match)
+    // Since we are in the full control of out, we can modify
+    // its conj flags to avoid materializations
+    //
+    // NOTE:
+    // (A*, B) = (A, B*)* -> copy B.conj() -> set to conj after solve
+    // (A, B*) -> needs no optimization
+    if (pA->is_conj() && !B_.is_conj()) {
+      pOut->copy_(B.conj());
+      // Here pA->conj() is not conjugated, and so is out,
+      // so no conj is done in the physical memory
+      solve_by_layout_match(pA->conj(), *pOut);
+      pOut->_set_conj(true);
+    } else {
+      // Otherwise copy as-is and solve
+      pOut->copy_(B_);
+      solve_by_layout_match(*pA, *pOut);
+    }
+  } else if (pOut->is_same(B_)) {
+    solve_by_layout_match(*pA, *pOut);
+  } else {
+    // Copy B into out and run layout match solver
+    pOut->copy_(B_);
+    solve_by_layout_match(*pA, *pOut);
   }
-  // Invariant: out_f is F-contig and A_f is F-ready
-  // neg has been resolved
 
-  // If we pass the matrix physically F-transposed, we need to change the parity of upper
-  if (A_f.stride(-1) == 1) {
-    upper = !upper;
-  }
-
-  triangular_solve_stub(
-    A_f.device().type(), A_f, out_f,
-    /*left=*/left,
-    /*upper=*/upper,
-    /*transpose*/to_transpose_type(A_is_f_contig, A_is_conj),
-    /*unitriangular=*/unitriangular);
-
-  if (transpose_out_f) {
-    out_f.transpose_(-2, -1);
-  }
-
-  if (!out_f.is_same(out)) {
-    out.copy_(out_f);
+  if (!pOut->is_same(out)) {
+    out.copy_(*pOut);
   }
   return out;
 }

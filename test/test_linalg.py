@@ -4738,7 +4738,7 @@ class TestLinalg(TestCase):
         make_arg = partial(make_tensor, dtype=dtype, device=device)
         make_fullrank = partial(make_fullrank_matrices_with_distinct_singular_values, dtype=dtype, device=device)
         b, n, k = shape
-        for left, uni, expand_a, tr_a, conj_a, expand_b, tr_b, conj_b in product((True, False), repeat=8):
+        for left, uni, expand_a, tr_a, conj_a, neg_a, expand_b, tr_b, conj_b, neg_b in product((True, False), repeat=10):
             # expand means that we generate a batch of matrices with a stride of zero in the batch dimension
             if (conj_a or conj_b) and not dtype.is_complex:
                 continue
@@ -4783,6 +4783,12 @@ class TestLinalg(TestCase):
                 A = A.conj()
             if conj_b:
                 B = B.conj()
+            if neg_a:
+                if uni:
+                    A.diagonal(0, -2, -1).fill_(-1)
+                A = A._neg_view()
+            if neg_b:
+                B = B._neg_view()
             if expand_a:
                 A = A.expand(b, *size_a)
             if expand_b:
@@ -4797,7 +4803,7 @@ class TestLinalg(TestCase):
             self.assertEqual(X @ A, B)
         out = B
         # B may be expanded
-        if not B.is_contiguous() and not B.transpose(-2, -1).is_contiguous():
+        if any(s == 0 for s in B.stride()):
             out = B.clone()
         torch.linalg.solve_triangular(A, B, upper=upper, left=left, unitriangular=uni, out=out)
         self.assertEqual(X, out)
@@ -4816,8 +4822,17 @@ class TestLinalg(TestCase):
 
         gen_inputs = self._gen_shape_inputs_linalg_triangular_solve
         for b, n, k in product(bs, ns, ks):
-            for A, B, left, upper, uni in gen_inputs((b, n, k), dtype, device, well_conditioned=True):
-                self._test_linalg_solve_triangular(A, B, upper, left, uni)
+            for A, B, left, upper, uni in gen_inputs((b + 1, n + 1, k + 1), dtype, device, well_conditioned=True):
+                # Testing dense BLAS-compliant inputs
+                Ad = A[..., :-1, :-1]
+                Bd = B[..., :-1, :-1]
+                self._test_linalg_solve_triangular(Ad, Bd, upper, left, uni)
+
+                # Testing non-dense BLAS-compliant inputs
+                # See https://github.com/pytorch/pytorch/issues/176274
+                And = A[..., 1:, 1:]
+                Bnd = B[..., 1:, 1:]
+                self._test_linalg_solve_triangular(And, Bnd, upper, left, uni)
 
     @slowTest
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Test fails for float64 on GPU (P100, V100) on Meta infra")
