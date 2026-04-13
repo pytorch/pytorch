@@ -474,8 +474,8 @@ class OpDispatcher:
             debug_mode.record_output_placements(output_sharding.output_spec)
 
         if output_sharding.output_spec is None:
-            if op_call == aten.equal.default:
-                # The output of the equal op is a bool, by converting it into a
+            if op_call in (aten.equal.default, aten.allclose.default):
+                # The output of equal/allclose is a bool, by converting it into a
                 # a single value tensor, we can use all-reduce with min reduce op
                 # to simulate logical and.
                 if not (local_results is None or isinstance(local_results, bool)):
@@ -541,7 +541,7 @@ class OpDispatcher:
                 raise AssertionError("out variant should have at least one out arg")
             return tuple(out_dts) if len(out_dts) > 1 else out_dts[0]
         else:
-            if op_call != aten.equal.default:
+            if op_call not in (aten.equal.default, aten.allclose.default):
                 raise AssertionError(op_call)
             ret = self.wrap(local_results, output_sharding.output_spec)  # type: ignore[possibly-undefined]
             if participating and op_call._schema._is_view_op():

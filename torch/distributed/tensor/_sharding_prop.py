@@ -544,8 +544,8 @@ class ShardingPropagator:
         Propagate the tensor metadata, it could either return a TensorMeta
         or a list/tuple of TensorMetas
         """
-        if op_schema.op == aten.equal.default:
-            # data dependent ops can't be used for fake propagation
+        if op_schema.op in (aten.equal.default, aten.allclose.default):
+            # These ops return bool, not Tensor, so skip fake propagation
             return None
 
         # NOTE: We must call the tracing in fake tensor mode so that it avoids

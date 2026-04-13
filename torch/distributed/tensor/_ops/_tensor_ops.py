@@ -188,6 +188,50 @@ def equal_strategy(op_schema: OpSchema) -> StrategyType:
     return equal_strategy
 
 
+@register_op_strategy(
+    [aten.allclose.default],
+    schema_info=RuntimeSchemaInfo(static_argnum=2),
+)
+def allclose_strategy(op_schema: OpSchema) -> StrategyType:
+    # Same logic as equal_strategy: match sharding of both inputs,
+    # the bool return is reduced via all_reduce(MIN) in the dispatch path.
+    mesh = op_schema.get_mesh_from_args()
+    self_strategy = op_schema.args_schema[0]
+    other_strategy = op_schema.args_schema[1]
+    if not isinstance(self_strategy, OpStrategy):
+        raise AssertionError(f"Expected OpStrategy, got {type(self_strategy)}")
+    if not isinstance(other_strategy, OpStrategy):
+        raise AssertionError(f"Expected OpStrategy, got {type(other_strategy)}")
+
+    if self_strategy.ndim == 0 or other_strategy.ndim == 0:
+        replicate_spec = DTensorSpec(
+            mesh=mesh,
+            placements=tuple(Replicate() for _ in range(mesh.ndim)),
+        )
+        return OpStrategy([OpSpec(output_specs=replicate_spec)])
+
+    select_strategy = (
+        self_strategy
+        if self_strategy.max_num_shards() >= other_strategy.max_num_shards()
+        else other_strategy
+    )
+    strategies = OpStrategy([])
+    for arg_strategy in select_strategy.strategies:
+        arg_spec = arg_strategy.output_spec
+        if is_tensor_partial(arg_spec):
+            output_spec = DTensorSpec(
+                mesh=mesh,
+                placements=tuple(
+                    Replicate() if isinstance(p, Partial) else p
+                    for p in arg_spec.placements
+                ),
+            )
+            strategies.strategies.append(OpSpec(output_specs=output_spec))
+        else:
+            strategies.strategies.append(OpSpec(arg_spec))
+    return strategies
+
+
 register_op_strategy(
     aten.empty_like.default, schema_info=RuntimeSchemaInfo(1, ["dtype"])
 )(propagate_single_input_strategy)
@@ -1465,3 +1509,45 @@ def fft_single_dim_strategy(
     raw_dims = cast(list[int], args_schema[1])
     active_dims = {normalize_dim(d, ndim) for d in raw_dims}
     return _shard_inactive_dims(ndim, active_dims) + _pass_through_partials()
+
+
+# Replicate-only ops: no useful sharding possible. These are ops
+# that are native C++ only with no Python decomposition.
+@register_single_dim_strategy(
+    [
+        aten.repeat_interleave.Tensor,
+        aten.masked_scatter.default,
+        aten.put.default,
+        aten.take.default,
+        aten._histogramdd_bin_edges.default,
+        aten.isin.Scalar_Tensor,
+        aten.to_sparse.default,
+        aten.to_sparse.sparse_dim,
+        aten._to_sparse.default,
+        aten.unique_dim.default,
+    ],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def replicate_only_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    return []
+
+
+@register_single_dim_strategy(
+    [aten.isin.Tensor_Tensor],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def isin_tensor_tensor_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    # isin(elements, test_elements) -> bool tensor same shape as elements.
+    # Shard elements on any dim; test_elements must be Replicate.
+    elements_meta = args_schema[0]
+    if not isinstance(elements_meta, TensorMeta):
+        return []
+    ndim = len(elements_meta.shape)
+    return [
+        [_ShardingPlaceholder(d), _ShardingPlaceholder(d), Replicate()]
+        for d in range(ndim)
+    ]
