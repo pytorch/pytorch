@@ -3002,7 +3002,6 @@ def check_dim_size(tensor, dim, dim_size, size):
 def meta_quantize_per_tensor(
     input: torch.Tensor, scale: float, zero_point: int, dtype: torch.dtype
 ) -> torch.Tensor:
-    print(f"meta_quantize_per_tensor: {input.dtype}")
     return torch.empty_like(input)
 
 
