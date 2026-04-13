@@ -117,9 +117,191 @@ inline int64_t batchCount(const Tensor& batched_matrices) {
   return result;
 }
 
-// Computes the number of elements of a matrix in a batched matrix tensor
+/*
+ * Computes the offset between consecutive matrices in a batched tensor.
+ * NOTE: use carefully if the input has memory overlappings in the rows/cols.
+ *
+ * IMPORTANT ASSUMPTIONS:
+ * 1. The input dim >= 2.
+ */
 inline int64_t matrixStride(const Tensor& batched_matrices) {
-  return batched_matrices.size(-1) * batched_matrices.size(-2);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batched_matrices.dim() >= 2);
+  // Note: this works for both col-major-/row-major-like matrices,
+  // i.e. (contiguous cols/rows some stride apart, with potential holes
+  // between cols/rows).
+  const auto m = batched_matrices.size(-2);
+  const auto n = batched_matrices.size(-1);
+
+  // FIXME: seems like
+  // test/test_proxy_tensor.py::TestProxyTensorOpInfoCPU::test_make_fx_exhaustive_geqrf/ormqr_cpu_float32
+  // end up here (clang + asan). Do we not have a short circuit for empty inputs?
+  if (m == 0 || n == 0) {
+    return 0;
+  }
+
+  const int64_t sm = (m != 1) ? batched_matrices.stride(-2) : 1;
+  const int64_t sn = (n != 1) ? batched_matrices.stride(-1) : 1;
+
+  return std::max(m * sm, n * sn);
+}
+
+/*
+ * Check whether the input is a (batched) tensor of matrices
+ * with non-overlapping (arbitrary strided) memory layout.
+ * Only the row and column dimensions are checked!
+ *
+ * IMPORTANT ASSUMPTION: A.dim() >= 2
+ */
+inline bool is_non_overlapping_matrices(const Tensor& A) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.dim() >= 2);
+  const auto m = A.size(-2);
+  const auto n = A.size(-1);
+
+  // FIXME: seems like
+  // test/test_proxy_tensor.py::TestProxyTensorOpInfoCPU::test_make_fx_exhaustive_geqrf/ormqr_cpu_float32
+  // end up here (clang + asan). Do we not have a short circuit for empty inputs?
+  if (m == 0 || n == 0) {
+    return true;
+  }
+
+  const int64_t sm = (m != 1) ? A.stride(-2) : 1;
+  const int64_t sn = (n != 1) ? A.stride(-1) : 1;
+
+  return (
+      // Checks whether the strides are strictly ordered
+      (sn >= std::max<int64_t>(m * sm, 1) || sm >= std::max<int64_t>(n * sn, 1))
+      // Checks whether the strides are that of a full matrix with m * n elements
+      && (std::max(m * sm, n * sn) >= m * n)
+  );
+}
+
+/*
+ * Check whether it is possible to flatten all batch dims in the input.
+ * Or, in other words, whether the input can be viewed as a 3D tensor.
+ * Always true for inputs with nDim < 3.
+ */
+inline bool can_flatten_batch_dims(const Tensor& A) {
+  const auto strides = A.strides();
+  const auto sizes = A.sizes();
+  auto right_stride = matrixStride(A);
+  for (int i = A.dim() - 3; i >= 0; --i) {
+    if (strides[i] != right_stride) {
+      return false;
+    } else {
+      right_stride *= sizes[i];
+    }
+  }
+  // Always true if A.dim() < 3.
+  return true;
+}
+
+/*
+ * Check whether the input is a (batched) tensor of matrices
+ * with a BLAS-compliant memory layout in the batch dims, i.e.
+ * 1. There is no memory overlap in the rows/cols dimensions,
+ *    i.e. all matrix elements have distinct memory addresses.
+ * 2. Batch dimensions could be flattened,
+ *    i.e. all matrices are the same stride apart.
+ *
+ * IMPORTANT ASSUMPTION: A.dim() >= 2
+ */
+inline bool is_blas_compliant_batch_dims(const Tensor& A) {
+  return can_flatten_batch_dims(A) && is_non_overlapping_matrices(A);
+}
+
+/*
+ * Check whether the (batched) matrix input has a BLAS-compliant matrix dimensions, i.e.
+ * 1. stride[non-ld-dim] == 1, and
+ * 2. stride[ld-dim] >= max(sizes[non-ld-dim], 1),
+ * for the input viewed as col-major-like (check_col_major_like == true)
+ * (contiguous cols with a col stride at least the number of rows)
+ * or the input viewed as row-major-like (check_col_major_like == false)
+ * (contiguous rows with a row stride at least the number or cols).
+ *
+ * IMPORTANT ASSUMPTIONS:
+ * 1. A.dim() >= 2.
+ * 2. The cols and rows dimensions should not be overlapping!
+ */
+inline bool is_blas_compliant_matrix_dims(const Tensor& A, bool check_col_major_like = true) {
+  // NOTE: the function body can be potentially simplified to
+  // return is_non_overlapping_matrices(A) && A.stride(non_ld_dim) == 1;
+  // but we keep it verbose just for now, before it is exhaustively tested.
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.dim() >= 2);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(is_non_overlapping_matrices(A));
+  const int64_t ld_dim = check_col_major_like ? -1 : -2;
+  const int64_t non_ld_dim = check_col_major_like ? -2 : -1;
+  return (
+    A.stride(non_ld_dim) == 1
+    && A.stride(ld_dim) >= std::max<int64_t>(A.size(non_ld_dim), 1)
+  );
+}
+
+/*
+ * Clone a matrix which is compliant with being either
+ * a col-major-like (contiguous cols with a stride between them at least the number of rows), or
+ * a row-major-like (contiguous rows with a stride between them at least the number of cols).
+ * The result is dense and non-overlapping.
+ */
+inline Tensor cloneMatrix(const Tensor& m, bool make_col_major_like = true) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(m.dim() >= 2);
+  return make_col_major_like
+    ? m.mT().clone(at::MemoryFormat::Contiguous).transpose_(-2, -1)
+    : m.clone(at::MemoryFormat::Contiguous);
+}
+
+/*
+ * Maybe prepare a matrix to be compliant with being either
+ * a col-major-like (contiguous cols with a stride between them at least the number of rows), or
+ * a row-major-like (contiguous rows with a stride between them at least the number of cols).
+ *
+ * NOTE: for now, a clone is always made if there is cols/rows memory overlaps.
+ */
+inline c10::MaybeOwned<Tensor> maybePrepareMatrix(const Tensor& m, bool make_col_major_like = true) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(m.dim() >= 2);
+  // For now, always make a clone if there is a memory overlap.
+  // Make a clone if the input strides are not compliant with
+  // the requested memory layout.
+  if (!is_non_overlapping_matrices(m) || !is_blas_compliant_matrix_dims(m, make_col_major_like)) {
+    return c10::MaybeOwned<Tensor>::owned(cloneMatrix(m, make_col_major_like));
+  }
+  return expect_resolved_conj(m);
+}
+
+/*
+ * Maybe prepare a batched matrix to be compliant with being either
+ * a col-major-like (contiguous cols with a stride between them at least the number of rows), or
+ * a row-major-like (contiguous rows with a stride between them at least the number of cols).
+ *
+ * If the matrix stride is not uniform across the batch dimensions, i.e. the input cannot be
+ * viewed as a 3D tensor, a clone will be made.
+ *
+ * NOTE: for now, any memory overlap will trigger a clone creation.
+ */
+inline c10::MaybeOwned<Tensor> maybePrepareBatchedMatrices(const Tensor& m, bool make_col_major_like = true) {
+  if (!can_flatten_batch_dims(m)) {
+    return c10::MaybeOwned<Tensor>::owned(cloneMatrix(m, make_col_major_like));
+  }
+  return maybePrepareMatrix(m, make_col_major_like);
+}
+
+/*
+ * Check whether a (batched) matrix is BLAS-compliant with being
+ * a col-major-like, i.e. contiguous cols with a stride between them at least the number of rows,
+ * and whether all the matrices are the same stride apart.
+ */
+inline bool isColMajorLike(const Tensor& t) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(t.dim() >= 2);
+  return is_blas_compliant_batch_dims(t) && is_blas_compliant_matrix_dims(t, /*check_col_major_like*/true);
+}
+
+/*
+ * Check whether a (batched) matrix is BLAS-compliant with being
+ * a row-major-like, i.e. contiguous rows with a stride between them at least the number of cols,
+ * and whether all the matrices are the same stride apart.
+ */
+inline bool isRowMajorLike(const Tensor& t) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(t.dim() >= 2);
+  return is_blas_compliant_batch_dims(t) && is_blas_compliant_matrix_dims(t, /*check_col_major_like*/false);
 }
 
 // Validates input shapes for operations on batches of square matrices (inverse, cholesky, symeig, eig)
