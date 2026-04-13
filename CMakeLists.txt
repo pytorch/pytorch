@@ -38,6 +38,12 @@ find_package(Python COMPONENTS Interpreter REQUIRED)
 # unconditionally.
 include(cmake/EnvVarForwarding.cmake)
 
+# Pre-build steps: submodule init, NCCL checkout.
+# When built via setup.py, these are handled by build_deps() in setup.py;
+# the module checks for existing state, so it is safe to include
+# unconditionally.
+include(cmake/PreBuildSteps.cmake)
+
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   set(LINUX TRUE)
 else()
