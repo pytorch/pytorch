@@ -480,6 +480,8 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
         &alg_id,
         sizeof(alg_id)));
 
+#ifndef USE_ROCM
+    // hipSPARSELt does not support querying SPLIT_K attributes
     TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgGetAttribute(
         &handle,
         &alg_sel,
@@ -493,6 +495,7 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
         CUSPARSELT_MATMUL_SPLIT_K_MODE,
         &splitKMode,
         sizeof(splitKMode)));
+#endif
 
     TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgGetAttribute(
         &handle,
