@@ -2649,9 +2649,11 @@ class OutputGraph(OutputGraphCommon):
                 )
 
             if self.package is not None:
-                gm._backend_id = name
+                gm._backend_id = name  # pyrefly: ignore[bad-argument-type]
 
+            # pyrefly: ignore[bad-argument-type]
             gm.compile_subgraph_reason = self.compile_subgraph_reason
+            # pyrefly: ignore[bad-argument-type]
             gm.meta["dynamo_flat_name_to_original_fqn"] = (
                 self.dynamo_flat_name_to_original_fqn.copy()
             )

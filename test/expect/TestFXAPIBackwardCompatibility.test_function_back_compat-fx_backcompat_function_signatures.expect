@@ -1,4 +1,4 @@
-torch.fx._symbolic_trace.Tracer.__init__(self, autowrap_modules: Tuple[Callable] = (<module math>,), autowrap_functions: Tuple[Callable, ...] = (,), param_shapes_constant: bool = False) -> None
+torch.fx._symbolic_trace.Tracer.__init__(self, autowrap_modules: Tuple[Callable] = (<module math>,), autowrap_functions: Tuple[Callable[..., Any], ...] = (,), param_shapes_constant: bool = False) -> None
 torch.fx._symbolic_trace.Tracer.call_module(self, m: torch.nn.modules.module.Module, forward: Callable[..., Any], args: Tuple[Any, ...], kwargs: Dict[str, Any]) -> Any
 torch.fx._symbolic_trace.Tracer.create_arg(self, a: Any) -> 'Argument'
 torch.fx._symbolic_trace.Tracer.get_fresh_qualname(self, prefix: str) -> str
@@ -6,7 +6,7 @@ torch.fx._symbolic_trace.Tracer.is_leaf_module(self, m: torch.nn.modules.module.
 torch.fx._symbolic_trace.Tracer.path_of_module(self, mod: torch.nn.modules.module.Module) -> str
 torch.fx._symbolic_trace.Tracer.trace(self, root: Union[torch.nn.modules.module.Module, Callable[..., Any]], concrete_args: Optional[Dict[str, Any]] = None) -> torch.fx.graph.Graph
 torch.fx._symbolic_trace.symbolic_trace(root: Union[torch.nn.modules.module.Module, Callable[..., Any]], concrete_args: Optional[Dict[str, Any]] = None) -> torch.fx.graph_module.GraphModule
-torch.fx._symbolic_trace.wrap(fn_or_name: Union[str, Callable])
+torch.fx._symbolic_trace.wrap(fn_or_name: torch.fx.node.Target) -> torch.fx.node.Target
 torch.fx.graph.Graph.__init__(self, owning_module: Optional[GraphModule] = None, tracer_cls: Optional[Type[Tracer]] = None, tracer_extras: Optional[Dict[str, Any]] = None)
 torch.fx.graph.Graph.call_function(self, the_function: Callable[..., Any], args: Optional[Tuple[Argument, ...]] = None, kwargs: Optional[Dict[str, Argument]] = None, type_expr: Optional[Any] = None, name: Optional[str] = None) -> torch.fx.node.Node
 torch.fx.graph.Graph.call_method(self, method_name: str, args: Optional[Tuple[Argument, ...]] = None, kwargs: Optional[Dict[str, Argument]] = None, type_expr: Optional[Any] = None) -> torch.fx.node.Node
@@ -31,20 +31,20 @@ torch.fx.graph_module.GraphModule.delete_submodule(self, target: str) -> bool
 torch.fx.graph_module.GraphModule.recompile(self) -> torch.fx.graph.PythonCode
 torch.fx.graph_module.reduce_graph_module(body: Dict[Any, Any], import_block: str) -> torch.nn.modules.module.Module
 torch.fx.graph_module.reduce_package_graph_module(importer: Callable, body: Dict[Any, Any], generated_module_name: str) -> torch.nn.modules.module.Module
-torch.fx.interpreter.Interpreter.__init__(self, module: torch.nn.modules.module.Module, garbage_collect_values: bool = True, graph: Optional[torch.fx.graph.Graph] = None)
-torch.fx.interpreter.Interpreter.boxed_run(self, args_list)
+torch.fx.interpreter.Interpreter.__init__(self, module: torch.nn.modules.module.Module, garbage_collect_values: bool = True, graph: Optional[torch.fx.graph.Graph] = None) -> None
+torch.fx.interpreter.Interpreter.boxed_run(self, args_list: List[Any]) -> Any
 torch.fx.interpreter.Interpreter.call_function(self, target: 'Target', args: Tuple[torch.fx.node.Argument, ...], kwargs: Dict[str, Any]) -> Any
 torch.fx.interpreter.Interpreter.call_method(self, target: 'Target', args: Tuple[torch.fx.node.Argument, ...], kwargs: Dict[str, Any]) -> Any
 torch.fx.interpreter.Interpreter.call_module(self, target: 'Target', args: Tuple[torch.fx.node.Argument, ...], kwargs: Dict[str, Any]) -> Any
-torch.fx.interpreter.Interpreter.fetch_args_kwargs_from_env(self, n: torch.fx.node.Node) -> Tuple[Tuple, Dict]
-torch.fx.interpreter.Interpreter.fetch_attr(self, target: str)
+torch.fx.interpreter.Interpreter.fetch_args_kwargs_from_env(self, n: torch.fx.node.Node) -> Tuple[Tuple[Any, ...], Dict[str, Any]]
+torch.fx.interpreter.Interpreter.fetch_attr(self, target: str) -> Any
 torch.fx.interpreter.Interpreter.get_attr(self, target: 'Target', args: Tuple[torch.fx.node.Argument, ...], kwargs: Dict[str, Any]) -> Any
 torch.fx.interpreter.Interpreter.map_nodes_to_values(self, args: torch.fx.node.Argument, n: torch.fx.node.Node) -> torch.fx.node.Argument
 torch.fx.interpreter.Interpreter.output(self, target: 'Target', args: Tuple[torch.fx.node.Argument, ...], kwargs: Dict[str, Any]) -> Any
 torch.fx.interpreter.Interpreter.placeholder(self, target: 'Target', args: Tuple[torch.fx.node.Argument, ...], kwargs: Dict[str, Any]) -> Any
-torch.fx.interpreter.Interpreter.run(self, *args, initial_env: Optional[Dict[torch.fx.node.Node, Any]] = None, enable_io_processing: bool = True) -> Any
+torch.fx.interpreter.Interpreter.run(self, *args: Any, initial_env: Optional[Dict[torch.fx.node.Node, Any]] = None, enable_io_processing: bool = True) -> Any
 torch.fx.interpreter.Interpreter.run_node(self, n: torch.fx.node.Node) -> Any
-torch.fx.interpreter.Transformer.__init__(self, module)
+torch.fx.interpreter.Transformer.__init__(self, module: torch.fx.graph_module.GraphModule) -> None
 torch.fx.interpreter.Transformer.call_function(self, target: 'Target', args: Tuple[torch.fx.node.Argument, ...], kwargs: Dict[str, Any]) -> Any
 torch.fx.interpreter.Transformer.call_module(self, target: 'Target', args: Tuple[torch.fx.node.Argument, ...], kwargs: Dict[str, Any]) -> Any
 torch.fx.interpreter.Transformer.get_attr(self, target: 'Target', args: Tuple[torch.fx.node.Argument, ...], kwargs: Dict[str, Any]) -> torch.fx.proxy.Proxy
@@ -64,14 +64,14 @@ torch.fx.node.map_arg(a: torch.fx.node.Argument, fn: Callable[[torch.fx.node.Nod
 torch.fx.passes.reinplace.reinplace(gm, *sample_args)
 torch.fx.passes.runtime_assert.insert_deferred_runtime_asserts(gm: torch.fx.graph_module.GraphModule, shape_env: Any, name: str, export: bool = False) -> None
 torch.fx.passes.split_module.split_module(m: torch.fx.graph_module.GraphModule, root_m: torch.nn.modules.module.Module, split_callback: Callable[[torch.fx.node.Node], int], qualname_map: Optional[Dict[str, str]] = None, keep_original_order: Optional[bool] = False, keep_original_node_name: Optional[bool] = False, keep_original_input_name: bool = True, partition_affix: Optional[str] = None, tuple_return: bool = False)
-torch.fx.proxy.Attribute.__init__(self, root: torch.fx.proxy.Proxy, attr: str)
-torch.fx.proxy.Proxy.__init__(self, node: torch.fx.node.Node, tracer: 'Optional[TracerBase]' = None)
-torch.fx.proxy.Proxy.keys(self)
+torch.fx.proxy.Attribute.__init__(self, root: torch.fx.proxy.Proxy, attr: str) -> None
+torch.fx.proxy.Proxy.__init__(self, node: torch.fx.node.Node, tracer: 'Optional[TracerBase]' = None) -> None
+torch.fx.proxy.Proxy.keys(self) -> 'Proxy'
 torch.fx.proxy.TracerBase.create_arg(self, a: Any) -> torch.fx.node.Argument
 torch.fx.proxy.TracerBase.create_node(self, kind: str, target: torch.fx.node.Target, args: Tuple[torch.fx.node.Argument, ...], kwargs: Dict[str, torch.fx.node.Argument], name: Optional[str] = None, type_expr: Optional[Any] = None) -> torch.fx.node.Node
-torch.fx.proxy.TracerBase.create_proxy(self, kind: str, target: torch.fx.node.Target, args: Tuple[Any, ...], kwargs: Dict[str, Any], name: Optional[str] = None, type_expr: Optional[Any] = None, proxy_factory_fn: Callable[[torch.fx.node.Node], Proxy] = None)
+torch.fx.proxy.TracerBase.create_proxy(self, kind: str, target: torch.fx.node.Target, args: Tuple[Any, ...], kwargs: Dict[str, Any], name: Optional[str] = None, type_expr: Optional[Any] = None, proxy_factory_fn: Optional[Callable[[torch.fx.node.Node], Proxy]] = None) -> 'Proxy'
 torch.fx.proxy.TracerBase.iter(self, obj: 'Proxy') -> Iterator
-torch.fx.proxy.TracerBase.keys(self, obj: 'Proxy') -> Any
+torch.fx.proxy.TracerBase.keys(self, obj: 'Proxy') -> 'Proxy'
 torch.fx.proxy.TracerBase.proxy(self, node: torch.fx.node.Node) -> 'Proxy'
 torch.fx.proxy.TracerBase.to_bool(self, obj: 'Proxy') -> bool
 torch.fx.subgraph_rewriter.replace_pattern(gm: torch.fx.graph_module.GraphModule, pattern: Union[Callable[..., Any], torch.fx.graph_module.GraphModule], replacement: Union[Callable[..., Any], torch.fx.graph_module.GraphModule]) -> List[torch.fx.subgraph_rewriter.Match]

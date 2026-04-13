@@ -1328,7 +1328,13 @@ def proxy_call(
     else:
         constant = None
 
-    track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
+    track_tensor_tree(
+        out,
+        proxy_out,
+        # pyrefly: ignore[bad-argument-type]
+        constant=constant,
+        tracer=tracer,
+    )
     _maybe_record_pointwise_barrier(func, proxy_mode)
     return out
 
