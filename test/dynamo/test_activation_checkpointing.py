@@ -2732,7 +2732,7 @@ def forward(self, arg0_1):
         wrapped = CheckpointedBlock(block_cp)
 
         for _, submod in wrapped.block.named_children():
-            submod.compile(backend="aot_eager", fullgraph=True)
+            submod.compile(backend="aot_eager")
 
         with torch._dynamo.config.patch(recompile_limit=2):
             x_test = x_ref.detach().clone().requires_grad_(True)
