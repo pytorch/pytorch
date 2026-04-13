@@ -752,28 +752,27 @@ def conv_bwd_input_layout(
     output_padding: tuple[int, ...],
     groups: int,
 ) -> ir.Layout:
-    # Create temporary shallow copies to avoid realize_input side effects
-    grad_out_copy = ir.TensorBox(grad_out.data)
-    input_copy = ir.TensorBox(input.data)
-    weight_copy = ir.TensorBox(weight.data)
+    guard = V.graph.sizevars.guard_int_seq
+    with V.graph.fake_mode:
+        go = ir.ir_node_to_tensor(grad_out)
+        x = ir.ir_node_to_tensor(input)
+        w = ir.ir_node_to_tensor(weight)
 
-    example_output, *_ = ir.ExternKernel.process_kernel(
-        torch.ops.aten.convolution_backward.default,
-        grad_out_copy,
-        input_copy,
-        weight_copy,
-        None,  # bias_sizes
-        stride,
-        padding,
-        dilation,
-        transposed,
-        output_padding,
-        groups,
-        [True, False, False],  # output_mask
-    )
-    dx = example_output[0]
-    sizes = ir.convert_shape_to_inductor(dx.size())
-    stride_ = ir.convert_shape_to_inductor(dx.stride())
+        dx, _, _ = torch.ops.aten.convolution_backward(
+            go,
+            x,
+            w,
+            None,  # bias_sizes
+            guard(stride),
+            guard(padding),
+            guard(dilation),
+            transposed,
+            guard(output_padding),
+            groups,
+            (True, False, False),
+        )
+        sizes = ir.convert_shape_to_inductor(dx.size())
+        stride_ = ir.convert_shape_to_inductor(dx.stride())
 
     return ir.FixedLayout(
         input.get_device_or_error(),
@@ -794,28 +793,27 @@ def conv_bwd_weight_layout(
     output_padding: tuple[int, ...],
     groups: int,
 ) -> ir.Layout:
-    # Create temporary shallow copies to avoid realize_input side effects
-    grad_out_copy = ir.TensorBox(grad_out.data)
-    input_copy = ir.TensorBox(input.data)
-    weight_copy = ir.TensorBox(weight.data)
+    guard = V.graph.sizevars.guard_int_seq
+    with V.graph.fake_mode:
+        go = ir.ir_node_to_tensor(grad_out)
+        x = ir.ir_node_to_tensor(input)
+        w = ir.ir_node_to_tensor(weight)
 
-    example_output, *_ = ir.ExternKernel.process_kernel(
-        torch.ops.aten.convolution_backward.default,
-        grad_out_copy,
-        input_copy,
-        weight_copy,
-        None,  # bias_sizes
-        stride,
-        padding,
-        dilation,
-        transposed,
-        output_padding,
-        groups,
-        [False, True, False],  # output_mask
-    )
-    dw = example_output[1]
-    sizes = ir.convert_shape_to_inductor(dw.size())
-    stride_ = ir.convert_shape_to_inductor(dw.stride())
+        _, dw, _ = torch.ops.aten.convolution_backward(
+            go,
+            x,
+            w,
+            None,  # bias_sizes
+            guard(stride),
+            guard(padding),
+            guard(dilation),
+            transposed,
+            guard(output_padding),
+            groups,
+            (False, True, False),
+        )
+        sizes = ir.convert_shape_to_inductor(dw.size())
+        stride_ = ir.convert_shape_to_inductor(dw.stride())
 
     return ir.FixedLayout(
         weight.get_device_or_error(),
