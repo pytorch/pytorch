@@ -36,7 +36,6 @@ from torch._inductor.utils import (
 )
 from torch._library import capture_triton
 from torch._utils_internal import full_aoti_runtime_assert
-from torch.cuda import caching_allocator_disabled
 from torch.export import Dim, export
 from torch.export.pt2_archive._package import load_pt2
 from torch.nn.attention import (
@@ -110,6 +109,19 @@ from torch.utils._triton import (
 
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+, XPU and CPU devices"
+
+
+@contextlib.contextmanager
+def caching_allocator_disabled():
+    if GPU_TYPE == "cuda":
+        from torch.cuda import (
+            caching_allocator_disabled as _cuda_caching_allocator_disabled,
+        )
+
+        with _cuda_caching_allocator_disabled():
+            yield
+    else:
+        yield
 
 
 @contextlib.contextmanager
