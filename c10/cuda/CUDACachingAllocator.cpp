@@ -234,7 +234,8 @@ struct Block {
         requested_size(0),
         pool(pool),
         ptr(ptr) {
-    registration_counter = registration_counter_global.fetch_add(1, std::memory_order_relaxed) + 1;
+    registration_counter =
+        registration_counter_global.fetch_add(1, std::memory_order_relaxed) + 1;
   }
 
   // constructor for search key
