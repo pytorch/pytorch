@@ -267,6 +267,7 @@ def collate_tensor_fn(
             "please provide a custom collate_fn to handle them appropriately."
         )
     worker_info = torch.utils.data.get_worker_info()
+    # Shared memory tensors make sense for multiprocessing only
     if worker_info is not None and worker_info.worker_method == "multiprocessing":
         # If we're in a background process, concatenate directly into a
         # shared memory tensor to avoid an extra copy

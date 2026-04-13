@@ -211,8 +211,8 @@ def _validate_dataloader_args(
 
     if num_workers == 0 and prefetch_factor is not None:
         raise ValueError(
-            "prefetch_factor option could only be specified in multiprocessing. "
-            "let num_workers > 0 to enable multiprocessing, otherwise set prefetch_factor to None."
+            "prefetch_factor option could only be specified in case with multiple workers. "
+            "Let num_workers > 0 to enable multiprocessing, otherwise set prefetch_factor to None."
         )
     if prefetch_factor is not None and prefetch_factor < 0:
         raise ValueError("prefetch_factor option should be non-negative")
@@ -309,7 +309,7 @@ class DataLoader(Generic[_T_co]):
             are returned in a first-in, first-out order. Only applies when ``num_workers > 0``. (default: ``True``)
         worker_method (str, optional): Worker implementation to use, ``"multiprocessing"`` for process-based workers
             or ``"thread"`` for thread-based workers. (default: ``"multiprocessing"``).
-            Note that ``"thread"`` is only support on Linux.
+            Note that ``"thread"`` is only supported on Linux.
 
 
     .. warning:: If the ``spawn`` start method is used, :attr:`worker_init_fn`
@@ -341,7 +341,11 @@ class DataLoader(Generic[_T_co]):
     .. warning:: Setting `in_order` to `False` can harm reproducibility and may lead to a skewed data
                  distribution being fed to the trainer in cases with imbalanced data.
 
-    .. warning:: Using ``"thread"`` with mutable or non-thread-safe datasets will cause data races
+    .. warning:: When using ``worker_method="thread"``, global random state is shared across all worker threads,
+                 leading to data races and non-reproducible results. Instead, use the per-worker RNG
+                 generators available via :class:`WorkerInfo`'s :attr:`rng`. See `torch.thread_safe_generator()`.
+
+                 Using ``"thread"`` workers with mutable or non-thread-safe datasets will cause data races
                  and undefined behavior. Additionally, thread workers only achieve true parallelism when
                  the data loading pipeline releases the GIL (e.g., during I/O, or PyTorch transforms).
                  For CPU-bound pure Python transforms, ``"multiprocessing"`` is recommended.
@@ -934,9 +938,9 @@ class _ParallelDataLoaderIter(_BaseDataLoaderIter):
 
     def _initialize_pin_memory(self):
         """Initialize pin memory thread and related queues.
-        Pin memory thread is only used when pin_memory is True and
-        the worker method is multiprocessing. For threading, pinning
-        is done in the worker processes.
+        Pin memory thread is only used when pin_memory is True and the
+        worker method is multiprocessing. For worker_method=thread, pinning
+        is done inside the worker threads.
         """
         if self._pin_memory:
             self._pin_memory_thread_done_event = threading.Event()
@@ -992,6 +996,7 @@ class _ParallelDataLoaderIter(_BaseDataLoaderIter):
         if not first_iter:
             for idx in range(self._num_workers):
                 self._index_queues[idx].put(
+                    # self._shared_seed is only used along with IterDataPipe
                     _utils.worker._ResumeIteration(self._shared_seed)
                 )
             resume_iteration_cnt = self._num_workers
@@ -1213,38 +1218,43 @@ class _ParallelDataLoaderIter(_BaseDataLoaderIter):
                 "_workers_done_event state does not match shutdown flag"
             )
 
-    def _shutdown_workers(self) -> None:
+    @staticmethod
+    def _is_python_exiting() -> bool:
+        """Check if Python is shutting down.
+
+        During interpreter shutdown, resources may already be freed, so
+        shutdown operations (queue puts, event sets, joins) can hang or error.
+        Both threading and multiprocessing workers are daemonic and will be
+        killed automatically, so we can safely no-op.
+        """
+        return (
+            _utils is None
+            # pyrefly: ignore [unnecessary-comparison]
+            or _utils.python_exit_status is True
+            # pyrefly: ignore [unnecessary-comparison]
+            or _utils.python_exit_status is None
+        )
+
+    def _shutdown_workers_impl(self) -> None:
         """Common shutdown logic for both threading and multiprocessing implementations."""
-        if not self._shutdown:
-            self._shutdown = True
-            # Exit `pin_memory_thread` first because exiting workers may leave
-            # corrupted data in `worker_result_queue` which `pin_memory_thread`
-            # reads from.
-            if hasattr(self, "_pin_memory_thread"):
-                # Use hasattr in case error happens before we set the attribute.
-                self._pin_memory_thread_done_event.set()
-                # Send something to pin_memory_thread in case it is waiting
-                # so that it can wake up and check `pin_memory_thread_done_event`
-                if self._worker_result_queue is None:
-                    raise AssertionError("Worker result queue not initialized")
-                self._worker_result_queue.put((None, None))
-                self._pin_memory_thread.join()
 
-            # Exit workers now.
-            if self._workers_done_event is None:
-                raise AssertionError("Workers done event not initialized")
-            self._workers_done_event.set()
-            for worker_id in range(len(self._workers)):
-                # Get number of workers from `len(self._workers)` instead of
-                # `self._num_workers` in case we error before starting all
-                # workers.
-                # If we are using workers_status with persistent_workers
-                # we have to shut it down because the worker is paused
-                if self._persistent_workers or self._workers_status[worker_id]:
-                    self._mark_worker_as_unavailable(worker_id, shutdown=True)
+        if self._workers_done_event is None:
+            raise AssertionError("Workers done event not initialized")
+        self._workers_done_event.set()
+        for worker_id in range(len(self._workers)):
+            # Get number of workers from `len(self._workers)` instead of
+            # `self._num_workers` in case we error before starting all
+            # workers.
+            # If we are using workers_status with persistent_workers
+            # we have to shut it down because the worker is paused
+            if self._persistent_workers or self._workers_status[worker_id]:
+                self._mark_worker_as_unavailable(worker_id, shutdown=True)
 
-            for w in self._workers:
-                w.join(timeout=_utils.STATUS_CHECK_INTERVAL)
+        for w in self._workers:
+            w.join(timeout=_utils.STATUS_CHECK_INTERVAL)
+
+    def _shutdown_workers(self) -> None:
+        raise NotImplementedError
 
     def __del__(self) -> None:
         self._shutdown_workers()
@@ -1304,8 +1314,19 @@ class _ThreadingDataLoaderIter(_ParallelDataLoaderIter):
         self._reset(loader, first_iter=True)
 
     def _failed_worker_error_msg(self, failed_workers) -> str:
+        # NOTE: Unlike multiprocessing workers, a fatal signal (e.g., SIGSEGV) in a
+        # thread worker terminates the entire process — this method only handles the
+        # case where a thread exits cleanly but unexpectedly. Fatal crashes bypass this
+        # entirely since the main thread dies along with the worker.
         thread_ids_str = ", ".join(str(w.ident) for w in failed_workers)
         return f"DataLoader worker (thread(s) {thread_ids_str}) exited unexpectedly"
+
+    def _shutdown_workers(self) -> None:
+        if _ParallelDataLoaderIter._is_python_exiting():
+            return
+        if not self._shutdown:
+            self._shutdown = True
+            self._shutdown_workers_impl()
 
 
 class _MultiProcessingDataLoaderIter(_ParallelDataLoaderIter):
@@ -1812,35 +1833,31 @@ class _MultiProcessingDataLoaderIter(_ParallelDataLoaderIter):
     # (shell2) ./test_socket.py sock_tmp 1017 send
 
     def _shutdown_workers(self) -> None:
-        # Check for early exit conditions
-        if (
-            _utils is None
-            # pyrefly: ignore [unnecessary-comparison]
-            or _utils.python_exit_status is True
-            # pyrefly: ignore [unnecessary-comparison]
-            or _utils.python_exit_status is None
-        ):
+        if _ParallelDataLoaderIter._is_python_exiting():
             # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details.
             # If Python is shutting down, do no-op.
             return
 
-        # Call parent class shutdown logic (common to both threading and multiprocessing)
-        # Check if already shutdown before calling parent (parent sets _shutdown = True)
-        already_shutdown = self._shutdown
-        try:
-            super()._shutdown_workers()
-        except Exception:
-            pass
-
-        # Only run multiprocessing-specific cleanup if this is the first shutdown call
-        if not already_shutdown:
+        if not self._shutdown:
+            self._shutdown = True
             try:
+                # Exit `pin_memory_thread` first because exiting workers may leave
+                # corrupted data in `worker_result_queue` which `pin_memory_thread`
+                # reads from.
                 if hasattr(self, "_pin_memory_thread"):
+                    # Use hasattr in case error happens before we set the attribute.
+                    self._pin_memory_thread_done_event.set()
+                    # Send something to pin_memory_thread in case it is waiting
+                    # so that it can wake up and check `pin_memory_thread_done_event`
                     if self._worker_result_queue is None:
                         raise AssertionError("Worker result queue not initialized")
-                    # Multiprocessing queues have cancel_join_thread and close methods
+                    self._worker_result_queue.put((None, None))
+                    self._pin_memory_thread.join()
                     self._worker_result_queue.cancel_join_thread()  # type: ignore[attr-defined]
                     self._worker_result_queue.close()  # type: ignore[attr-defined]
+
+                # Exit workers now (common logic in base class).
+                self._shutdown_workers_impl()
 
                 for q in self._index_queues:
                     q.cancel_join_thread()

@@ -4038,7 +4038,7 @@ class TestThreadingDataLoader(TestCase):
             self.assertTrue(torch.equal(targets1, targets2))
 
     @parametrize("multiprocessing_workers", [1, 3, 5])
-    @parametrize("threading_workers", [0, 2, 4])
+    @parametrize("threading_workers", [1, 2, 4])
     def test_threading_shuffle(self, multiprocessing_workers, threading_workers):
         """Test that threading DataLoader with shuffle produces deterministic results when given the same seed."""
 
@@ -4083,7 +4083,8 @@ class TestThreadingDataLoader(TestCase):
                 self.assertTrue(torch.equal(samples1, samples2))
                 self.assertTrue(torch.equal(targets1, targets2))
 
-    def test_threading_with_persistent_workers(self):
+    @parametrize("pin_memory", ["True", "False"])
+    def test_threading_with_persistent_workers(self, pin_memory):
         # Test with persistent_workers=True
         loader = DataLoader(
             self.dataset,
@@ -4091,6 +4092,7 @@ class TestThreadingDataLoader(TestCase):
             num_workers=2,
             worker_method="thread",
             persistent_workers=True,
+            pin_memory=pin_memory,
         )
 
         # Run multiple epochs and check that data is loaded correctly each time
@@ -4555,6 +4557,99 @@ print("SUCCESS")
             result.stdout,
             f"Script did not complete successfully. stdout: {result.stdout}, stderr: {result.stderr}",
         )
+
+    def test_threading_shutdown_gc_triggered(self):
+        """Test that GC-triggered __del__ properly shuts down thread workers."""
+        import gc
+        import time
+
+        loader = DataLoader(
+            self.dataset,
+            batch_size=2,
+            num_workers=2,
+            worker_method="thread",
+        )
+
+        iterator = iter(loader)
+        next(iterator)
+        next(iterator)
+
+        worker_threads = list(iterator._workers)
+
+        # Verify workers are alive
+        for w in worker_threads:
+            self.assertTrue(w.is_alive())
+
+        # Drop all references to trigger __del__ via GC
+        del iterator
+        del loader
+        gc.collect()
+
+        time.sleep(1.0)
+
+        # All workers should be stopped after GC
+        for w in worker_threads:
+            self.assertFalse(
+                w.is_alive(),
+                f"Worker thread {w.name} still alive after GC-triggered shutdown",
+            )
+
+    def test_threading_worker_unexpected_exit(self):
+        """Test that the main thread detects and reports a thread worker that exits unexpectedly."""
+
+        class CrashingDataset(Dataset):
+            """Dataset that raises SystemExit on a specific index.
+
+            SystemExit inherits from BaseException (not Exception), so it
+            bypasses the ExceptionWrapper catch in _base_worker_loop and
+            kills the thread silently — simulating a fatal thread exit.
+            """
+
+            def __len__(self):
+                return 20
+
+            def __getitem__(self, idx):
+                if idx == 5:
+                    raise SystemExit(1)
+                return torch.tensor([idx])
+
+        loader = DataLoader(
+            CrashingDataset(),
+            batch_size=1,
+            num_workers=2,
+            worker_method="thread",
+        )
+
+        with self.assertRaises(RuntimeError) as ctx:
+            list(loader)
+
+        self.assertIn("exited unexpectedly", str(ctx.exception))
+        self.assertIn("thread", str(ctx.exception))
+
+    def test_threading_with_timeout_exceeded(self):
+        """Test that thread workers raise RuntimeError when timeout is exceeded."""
+
+        class SlowDataset(Dataset):
+            def __len__(self):
+                return 10
+
+            def __getitem__(self, idx):
+                if idx == 5:
+                    import time
+
+                    time.sleep(10)  # Deliberately slow
+                return torch.tensor([idx])
+
+        loader = DataLoader(
+            SlowDataset(),
+            batch_size=1,
+            num_workers=1,
+            worker_method="thread",
+            timeout=1,
+        )
+
+        with self.assertRaises(RuntimeError, msg="DataLoader timed out"):
+            list(loader)
 
     def test_thread_worker_method_mobile_build_rejected(self):
         """Test that worker_method='thread' raises ValueError on mobile builds."""

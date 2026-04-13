@@ -101,7 +101,7 @@ class WorkerInfo:
     seed: int
     dataset: Dataset
     rng: _RNG | None = None
-    worker_method: str | None = "multiprocessing"
+    worker_method: str = "multiprocessing"
 
 
 def get_worker_info() -> WorkerInfo | None:
@@ -119,6 +119,7 @@ def get_worker_info() -> WorkerInfo | None:
     * :attr:`dataset`: the copy of the dataset object in **this** process or thread. Note
       that this will be a different object in a different process than the one
       in the main process. For thread, this is the same object as the one in the main process.
+    * :attr:`rng`: Optional RNG state container. None for ``"multiprocessing"``.
     * :attr:`worker_method`: the worker method being used. Either ``"multiprocessing"``
       for process-based workers or ``"thread"`` for thread-based workers.
 
@@ -127,18 +128,16 @@ def get_worker_info() -> WorkerInfo | None:
     .. note::
        When used in a :attr:`worker_init_fn` passed over to
        :class:`~torch.utils.data.DataLoader`, this method can be useful to
-       set up each worker process/thread differently, for instance, using ``worker_id``
+       set up each worker differently, for instance, using ``worker_id``
        to configure the ``dataset`` object to only read a specific fraction of a
        sharded dataset, or use ``seed`` to seed other libraries used in dataset
-       code.
+       code. For thread workers, use thread-local RNGs to avoid race conditions.
     """
-    # There is no global worker_method flag because it is set in worker info,
-    # so try thread-local storage first, fall back to _worker_info.
-    thread_local_worker_info = getattr(_thread_local_worker_info, "worker_info", None)
-    if thread_local_worker_info is not None:
-        return thread_local_worker_info
 
-    return _worker_info
+    if _worker_info is not None:
+        return _worker_info
+
+    return getattr(_thread_local_worker_info, "worker_info", None)
 
 
 @dataclass(frozen=True)
@@ -279,6 +278,9 @@ def _base_worker_loop(
         post_fetch_fn: Optional callback to process data after fetching (e.g., pin_memory for thread workers)
     """
     try:
+        # For both multiprocessing and thread workers, we set the number of intra-op parallelism to 1.
+        # This is to prevent workers from CPU oversubscription, which can cause performance degradation.
+        # For threading workers, this setting is thread-local for both OpenMP (ON by default) and MKL.
         torch.set_num_threads(1)
 
         from torch.utils.data import _DatasetKind
@@ -306,6 +308,12 @@ def _base_worker_loop(
         # sent over to the main process with the ID of this worker, so that the
         # main process won't send more tasks to this worker, and will send
         # `None` to this worker to properly exit it.
+        #
+        # Note that we cannot set `done_event` from a MP worker as it is shared
+        # among all processes. Instead, we set the `iteration_end` flag to
+        # signify that the iterator is exhausted. When either `done_event` or
+        # `iteration_end` is set, we skip all processing step and just wait for
+        # `None`.
         iteration_end = False
 
         # Create watchdog to check if parent is alive
@@ -318,7 +326,7 @@ def _base_worker_loop(
             except queue.Empty:
                 continue
             if isinstance(r, _ResumeIteration):
-                # Acknowledge the main process
+                # Acknowledge the main process data queue
                 data_queue.put((r, None))
                 iteration_end = False
 
