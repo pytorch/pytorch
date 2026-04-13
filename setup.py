@@ -284,7 +284,6 @@ from typing import Any, ClassVar, IO
 
 import setuptools.command.bdist_wheel
 import setuptools.command.build_ext
-import setuptools.command.sdist
 import setuptools.errors
 from setuptools import Command, Extension, find_packages, setup
 from setuptools.dist import Distribution
@@ -1107,52 +1106,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
         return outputs
 
 
-class concat_license_files:
-    """Merge LICENSE and LICENSES_BUNDLED.txt as a context manager
-
-    LICENSE is the main PyTorch license, LICENSES_BUNDLED.txt is auto-generated
-    from all the licenses found in ./third_party/. We concatenate them so there
-    is a single license file in the sdist and wheels with all of the necessary
-    licensing info.
-    """
-
-    def __init__(self, include_files: bool = False) -> None:
-        self.f1 = CWD / "LICENSE"
-        self.f2 = THIRD_PARTY_DIR / "LICENSES_BUNDLED.txt"
-        self.include_files = include_files
-        self.bsd_text = ""
-
-    def __enter__(self) -> None:
-        """Concatenate files"""
-
-        old_path = sys.path
-        sys.path.append(str(THIRD_PARTY_DIR))
-        try:
-            from build_bundled import create_bundled  # type: ignore[import-not-found]
-        finally:
-            sys.path = old_path
-
-        self.bsd_text = self.f1.read_text(encoding="utf-8")
-
-        with self.f1.open(mode="a", encoding="utf-8") as f1:
-            f1.write("\n\n")
-            create_bundled(
-                str(THIRD_PARTY_DIR.resolve()),
-                f1,
-                include_files=self.include_files,
-            )
-
-    def __exit__(self, *exc_info: object) -> None:
-        """Restore content of f1"""
-        self.f1.write_text(self.bsd_text, encoding="utf-8")
-
-
-# Need to create the proper LICENSE.txt for the wheel
 class bdist_wheel(setuptools.command.bdist_wheel.bdist_wheel):
-    def run(self) -> None:
-        with concat_license_files(include_files=True):
-            super().run()
-
     def write_wheelfile(self, *args: Any, **kwargs: Any) -> None:
         super().write_wheelfile(*args, **kwargs)
 
@@ -1185,12 +1139,6 @@ class clean(Command):
     def run(self) -> None:
         _clean()
 
-
-# Need to dump submodule hashes and create the proper LICENSE.txt for the sdist
-class sdist(setuptools.command.sdist.sdist):
-    def run(self) -> None:
-        with concat_license_files():
-            super().run()
 
 
 def get_cmake_cache_vars() -> defaultdict[str, CMakeValue]:
@@ -1348,7 +1296,6 @@ def configure_extension_build() -> tuple[
         "bdist_wheel": bdist_wheel,
         "build_ext": build_ext,
         "clean": clean,
-        "sdist": sdist,
     }
 
     entry_points = {
