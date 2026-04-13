@@ -100,8 +100,10 @@ from torch.testing._internal.common_utils import (
     TEST_HPU,
     TEST_XPU,
     wrapDeterministicFlagAPITest,
+    requires_gpu,
 )
 from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.inductor_utils import GPU_TYPE
 
 
 pytree_modules = {
@@ -244,7 +246,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
         self.assertTrue(same(val4, correct1))
         self.assertEqual(counter.frame_count, 3)
 
-    @unittest.skipIf(not TEST_CUDA, "cuda needed")
+    @requires_gpu
     def test_assume_32_bit_indexing(self):
         @torch.compile(backend="inductor")
         def func(a, b):
@@ -269,8 +271,8 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
             return cumsum.sum()
 
-        a = torch.rand(100, 30, device="cuda")
-        b = torch.rand(100, 30, device="cuda")
+        a = torch.rand(100, 30, device=GPU_TYPE)
+        b = torch.rand(100, 30, device=GPU_TYPE)
 
         torch._dynamo.decorators.mark_unbacked(a, 0)
         torch._dynamo.decorators.mark_unbacked(a, 1)
@@ -16081,22 +16083,22 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
 
 instantiate_parametrized_tests(MiscTestsPyTree)
 
-devices = ("cuda", "hpu", "xpu")
+devices = (GPU_TYPE, "hpu", "xpu")
 instantiate_device_type_tests(
     MiscTestsDevice, globals(), only_for=devices, allow_xpu=True
 )
 
 
 class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
-    @unittest.skipIf(not TEST_CUDA, "This test requires a CUDA device")
+    @requires_gpu
     def test_symbool_tensor_mul(self):
         def symbool_mul_fn(x_bool, sentinel):
             result = x_bool * sentinel
             return result
 
-        x_true = torch.tensor([True], device="cuda")
-        x_false = torch.tensor([False], device="cuda")
-        sentinel = torch.tensor(2.0, requires_grad=True, device="cuda")
+        x_true = torch.tensor([True], device=GPU_TYPE)
+        x_false = torch.tensor([False], device=GPU_TYPE)
+        sentinel = torch.tensor(2.0, requires_grad=True, device=GPU_TYPE)
         eager_result_true = symbool_mul_fn(x_true, sentinel)
         eager_result_false = symbool_mul_fn(x_false, sentinel)
         compiled_fn = torch.compile(
@@ -16109,7 +16111,7 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled_result_true.item(), 2.0)
         self.assertEqual(compiled_result_false.item(), 0.0)
 
-    @unittest.skipIf(not TEST_CUDA, "This test requires a CUDA device")
+    @requires_gpu
     def test_symbool_guard_or_false(self):
         def symbool_guard_fn(a_bool_tensor, b):
             u0 = a_bool_tensor.item()
@@ -16122,9 +16124,9 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
         compiled_guard_fn = torch.compile(
             symbool_guard_fn, backend="eager", dynamic=True
         )
-        a_true = torch.tensor(True, device="cuda")
-        a_false = torch.tensor(False, device="cuda")
-        b = torch.randn(6, device="cuda")
+        a_true = torch.tensor(True, device=GPU_TYPE)
+        a_false = torch.tensor(False, device=GPU_TYPE)
+        b = torch.randn(6, device=GPU_TYPE)
         eager_res_true = symbool_guard_fn(a_true, b)
         compiled_res_true = compiled_guard_fn(a_true, b)
         self.assertEqual(eager_res_true, compiled_res_true)
@@ -16134,7 +16136,7 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled_res_true, b * 10)
         self.assertEqual(compiled_res_false, b * 100)
 
-    @unittest.skipIf(not TEST_CUDA, "This test requires a CUDA device")
+    @requires_gpu
     def test_symbool_tensor_mul_does_not_fail(self):
         def fuzzed_program(arg_0, sentinel):
             var_node_2 = arg_0
@@ -16145,8 +16147,8 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
                 result = result.real
             return result
 
-        sentinel = torch.tensor(1.0, requires_grad=True, device="cuda")
-        arg_0 = torch.tensor([True], dtype=torch.bool, device="cuda")
+        sentinel = torch.tensor(1.0, requires_grad=True, device=GPU_TYPE)
+        arg_0 = torch.tensor([True], dtype=torch.bool, device=GPU_TYPE)
         args = (arg_0,) + (sentinel,)
         try:
             compiled_program = torch.compile(
@@ -16196,7 +16198,7 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(224 <= h <= 256)
         self.assertTrue(224 <= w <= 256)
 
-    @unittest.skipIf(not TEST_CUDA, "This test requires a CUDA device")
+    @requires_gpu
     def test_module_to_with_shared_weights_compile(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -16214,7 +16216,7 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
                 self.mod = Model()
 
             def forward(self, x):
-                if "cuda" in str(x.device):
+                if GPU_TYPE in str(x.device):
                     mod = self.mod.to(x.device)
                     return mod(x)
                 else:
@@ -16225,7 +16227,7 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
         with torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False):
             compiled = torch.compile(container, backend="eager", fullgraph=True)
 
-            inp1 = torch.randn(4, 4, 4, device="cuda")
+            inp1 = torch.randn(4, 4, 4, device=GPU_TYPE)
 
             # First call with CUDA input
             compiled_result1 = compiled(inp1)
@@ -16238,7 +16240,7 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
             eager_result2 = container_eager(inp1)
             same(compiled_result2, eager_result2)
 
-    @unittest.skipIf(not TEST_CUDA, "This test requires a CUDA device")
+    @requires_gpu
     def test_module_to_move_compile(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -16250,13 +16252,13 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
                 self.to("cpu")
                 return x
 
-        mod = Model().cuda()
+        mod = Model().to(GPU_TYPE)
         with torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False):
             fn = torch.compile(mod, backend="aot_eager", fullgraph=True)
-            x = torch.randn(10, 10, device="cuda")
+            x = torch.randn(10, 10, device=GPU_TYPE)
             ref = fn(x)
             self.assertEqual(str(mod.fc.weight.device), "cpu")
-            mod.cuda()
+            mod.to(GPU_TYPE)
             ref = fn(
                 x
             )  # second time compile runs, we should also move the module to cpu device

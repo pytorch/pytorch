@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.inductor_utils import HAS_GPU, GPU_TYPE
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
@@ -4518,7 +4518,7 @@ class GraphModule(torch.nn.Module):
 
         f5()
         new_device = (
-            "cpu" if torch._C._get_accelerator() == torch.device("cuda") else "cuda"
+            "cpu" if torch._C._get_accelerator() == torch.device(GPU_TYPE) else GPU_TYPE
         )
 
         old_get_device_module = torch.get_device_module

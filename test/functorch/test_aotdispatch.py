@@ -97,6 +97,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfail_inherited_tests,
     xfailIfTorchDynamo,
+    requires_gpu,
 )
 from torch.testing._internal.custom_tensor import ConstantExtraMetadataTensor
 from torch.testing._internal.hop_db import hop_db
@@ -107,6 +108,7 @@ from torch.testing._internal.optests import (
 from torch.testing._internal.subclasses import WrapperSubclass
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch.testing._internal.inductor_utils import GPU_TYPE
 
 
 USE_TORCHVISION = False
@@ -3480,14 +3482,14 @@ def forward(self, primals_1, primals_2, primals_3):
     return (as_strided_scatter, add_2, view_2, unsqueeze)""",
         )  # noqa: B950
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @requires_gpu
     def test_synthetic_base_base_attribute_is_none(self):
         def f(a, b):
             a.add_(1)
             return a + b
 
         def inp_callable():
-            base = torch.ones(4, 4, device="cuda")
+            base = torch.ones(4, 4, device=GPU_TYPE)
             # detach() so that none of the inputs have a ._base attribute.
             a = base[0].detach()
             b = base[1].detach()

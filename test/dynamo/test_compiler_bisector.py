@@ -10,8 +10,8 @@ from torch._inductor import config
 from torch._inductor.compiler_bisector import CompilerBisector
 from torch._inductor.test_case import TestCase
 from torch.library import _scoped_library, Library
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
-
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
+from torch.testing._internal.inductor_utils import GPU_TYPE
 
 aten = torch.ops.aten
 
@@ -21,7 +21,7 @@ i64 = torch.int64
 i32 = torch.int32
 
 
-@requires_cuda_and_triton
+@requires_gpu_and_triton
 class TestCompilerBisector(TestCase):
     test_ns = "_test_bisector"
 
@@ -83,7 +83,7 @@ class TestCompilerBisector(TestCase):
             torch._dynamo.reset()
             with patch_exp_decomp():
                 vq_compiled = torch.compile(vq)
-                x = torch.randn(4, 400, 256).cuda()
+                x = torch.randn(4, 400, 256).to(GPU_TYPE)
                 with torch._dynamo.utils.preserve_rng_state():
                     vq(x)
                 out_compiled = vq_compiled(x)
@@ -149,7 +149,7 @@ class TestCompilerBisector(TestCase):
         def test_fn():
             torch._dynamo.reset()
 
-            inp = torch.rand([10], device="cuda")
+            inp = torch.rand([10], device=GPU_TYPE)
 
             out = foo(inp)
             out_c = torch.compile(foo)(inp)
@@ -165,7 +165,7 @@ class TestCompilerBisector(TestCase):
 
     def test_rng(self):
         def foo():
-            return torch.rand([10], device="cuda") + 1
+            return torch.rand([10], device=GPU_TYPE) + 1
 
         def test_fn():
             torch._dynamo.reset()
@@ -239,7 +239,7 @@ class TestCompilerBisector(TestCase):
 
             dtype = torch.bfloat16
             torch.manual_seed(0)
-            inp = torch.randn(16, 16, 768, dtype=dtype, device="cuda")
+            inp = torch.randn(16, 16, 768, dtype=dtype, device=GPU_TYPE)
             eager_scale = calculate_scale(inp)
             compile_scale = torch.compile(calculate_scale)(inp)
 
@@ -257,7 +257,7 @@ class TestCompilerBisector(TestCase):
                 def my_func(x):
                     return ((x * -1) - 0.01).relu()
 
-                inp = torch.rand([100], device="cuda")
+                inp = torch.rand([100], device=GPU_TYPE)
 
                 return torch.allclose(torch.compile(my_func)(inp), my_func(inp))
 
@@ -319,7 +319,7 @@ class TestCompilerBisector(TestCase):
         def test_fn():
             torch._dynamo.reset()
 
-            x = torch.randn(1024, device="cuda")
+            x = torch.randn(1024, device=GPU_TYPE)
             with config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy"):
                 opt_f = torch.compile(f, backend=MyBackend())
                 return torch.allclose(opt_f(x), f(x))
@@ -358,7 +358,7 @@ class TestCompilerBisector(TestCase):
             try:
                 foo_c = torch.compile(foo, mode="reduce-overhead")
                 bar_c = torch.compile(bar, mode="reduce-overhead")
-                x = torch.randn(10, device="cuda")
+                x = torch.randn(10, device=GPU_TYPE)
                 foo_c(x)
                 bar_c(x)
 
