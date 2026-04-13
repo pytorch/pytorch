@@ -751,11 +751,16 @@ def conv_bwd_input_layout(
     output_padding: tuple[int, ...],
     groups: int,
 ) -> ir.Layout:
+    # Create temporary shallow copies to avoid realize_input side effects
+    grad_out_copy = ir.TensorBox(grad_out.data)
+    input_copy = ir.TensorBox(input.data)
+    weight_copy = ir.TensorBox(weight.data)
+
     example_output, *_ = ir.ExternKernel.process_kernel(
         torch.ops.aten.convolution_backward,
-        grad_out,
-        input,
-        weight,
+        grad_out_copy,
+        input_copy,
+        weight_copy,
         None,  # bias_sizes
         stride,
         padding,
@@ -788,11 +793,17 @@ def conv_bwd_weight_layout(
     output_padding: tuple[int, ...],
     groups: int,
 ) -> ir.Layout:
+
+    # Create temporary shallow copies to avoid realize_input side effects
+    grad_out_copy = ir.TensorBox(grad_out.data)
+    input_copy = ir.TensorBox(input.data)
+    weight_copy = ir.TensorBox(weight.data)
+
     example_output, *_ = ir.ExternKernel.process_kernel(
         torch.ops.aten.convolution_backward,
-        grad_out,
-        input,
-        weight,
+        grad_out_copy,
+        input_copy,
+        weight_copy,
         None,  # bias_sizes
         stride,
         padding,
