@@ -45,7 +45,6 @@ FpMatmulLruCache& get_fpmatmul_primitive_cache(int device_id) {
 // build_* and make_* must keep identical parameter lists; lookup forwards the
 // same pack to both so arity/type mismatches fail at compile time.
 dnnl::memory::dims build_fpmatmul_primitive_cache_key(
-    int device_id,
     const dnnl::memory::dims& m1_dims,
     const dnnl::memory::dims& m2_dims,
     const dnnl::memory::dims& dst_dims,
@@ -74,7 +73,6 @@ dnnl::memory::dims build_fpmatmul_primitive_cache_key(
   };
 
   key.push_back(kFpMatmulPrimitiveCacheKeyVersion);
-  key.push_back(static_cast<dim_t>(device_id));
   append_dims(m1_dims);
   append_dims(m2_dims);
   append_dims(dst_dims);
@@ -101,7 +99,6 @@ dnnl::memory::dims build_fpmatmul_primitive_cache_key(
 }
 
 FpMatmulCacheValue make_fpmatmul_cached_primitive(
-    [[maybe_unused]] int device_id,
     const dnnl::memory::dims& m1_dims,
     const dnnl::memory::dims& m2_dims,
     const dnnl::memory::dims& dst_dims,
@@ -355,7 +352,6 @@ sycl::event matmul(
   auto& primitive_cache = get_fpmatmul_primitive_cache(device_id);
   FpMatmulCacheValue entry = lookup_or_build_fpmatmul_cached_primitive(
       primitive_cache,
-      device_id,
       m1_dims,
       m2_dims,
       dst_dims,
