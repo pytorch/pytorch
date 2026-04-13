@@ -704,7 +704,7 @@ def calculate_range(dtype: torch.dtype) -> tuple[float, float]:
     return info.min, info.max
 
 
-def quantize_activation_fw(graph: torch.fx.Graph) -> None:
+def quantize_activation_fw(graph: torch.fx.Graph, num_fwd_outputs: int = 0) -> None:
     output = graph.find_nodes(op="output")[0]
     fwd_outputs = output.args[0]
     quant_type = get_quant_type()
@@ -713,6 +713,14 @@ def quantize_activation_fw(graph: torch.fx.Graph) -> None:
     tensor_scale_nodes: list[fx.Node] = []
     sym_scale_nodes: list[fx.Node] = []
     for position, node in enumerate(fwd_outputs):
+        # Don't quantize user-visible forward outputs. A tensor may appear as
+        # both a user output and a saved-for-backward activation (same FX node
+        # at two positions). Quantizing the user output position would:
+        # 1. Return fp8 to the user instead of the original precision
+        # 2. Create duplicate fp8_quant/fp8_scale backward placeholders that
+        #    shift the stride mapping in _aot_stage2b_bw_compile (T264303372)
+        if position < num_fwd_outputs:
+            continue
         # check if the activation node is the node saved for quantization
         if node.meta.get("saved_for_quantization", False):
             # case: use scaling
@@ -853,6 +861,7 @@ def perform_fp8_activation_quantization(
     fwd_module: fx.GraphModule,
     bwd_module: fx.GraphModule,
     bwd_module_inputs: dict[str, fx.Node],
+    num_fwd_outputs: int = 0,
 ) -> None:
     trace_structured(
         "artifact",
@@ -865,7 +874,7 @@ def perform_fp8_activation_quantization(
         ),
     )
 
-    quantize_activation_fw(fwd_module.graph)
+    quantize_activation_fw(fwd_module.graph, num_fwd_outputs)
 
     trace_structured(
         "artifact",
@@ -944,6 +953,7 @@ def enable_activation_quantization(
     fwd_module: fx.GraphModule,
     bwd_module: fx.GraphModule,
     static_lifetime_input_nodes: OrderedSet[fx.Node] | None = None,
+    num_fwd_outputs: int = 0,
 ) -> None:
     static_input_names: list[str] = (
         [node.name for node in static_lifetime_input_nodes]
@@ -975,7 +985,9 @@ def enable_activation_quantization(
             should_perform_fp8_quant = True
 
     if should_perform_fp8_quant:
-        perform_fp8_activation_quantization(fwd_module, bwd_module, bwd_module_inputs)
+        perform_fp8_activation_quantization(
+            fwd_module, bwd_module, bwd_module_inputs, num_fwd_outputs
+        )
 
 
 def _extract_fwd_bwd_modules(
@@ -1207,7 +1219,11 @@ def _extract_fwd_bwd_modules(
         is not None
     ):
         enable_activation_quantization(
-            saved_values, fwd_module, bwd_module, static_lifetime_input_nodes
+            saved_values,
+            fwd_module,
+            bwd_module,
+            static_lifetime_input_nodes,
+            num_fwd_outputs,
         )
     return fwd_module, bwd_module
 
