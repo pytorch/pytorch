@@ -4191,13 +4191,26 @@ class TestProfilerEventsParity(TestCase):
             )
             json_records[key] = metadata_dict_from_trace_args(args)
 
-        failure_msg = """
-        ====================================================================================
-        IMPORTANT: Are you making a kineto change or bumping the hash and seeing this message?
-        If so, please check the schema for EventMetadata (torch/autograd/profiler_util.py).
-        It is currently missing these keys, which were found in the JSON metadata args.
-        =====================================================================================
-        """
+        failure_msg = """\
+====================================================================================
+IMPORTANT: Are you making a Kineto change or bumping the third_party/kineto
+submodule hash and seeing this message?
+
+New metadata keys (see below) were found in the Chrome trace JSON that are not
+yet exposed through the profiler's events() API (i.e. EventMetadata in
+torch/autograd/profiler_util.py).
+
+To fix this properly, you need to make sure the new Kineto data makes its way
+to the events() property. The steps are:
+
+1. Add the new key(s) to _EVENT_METADATA_KEYS in torch/autograd/profiler_util.py
+   with the appropriate field name and type converter.
+2. Add corresponding field(s) to the EventMetadata dataclass in the same file.
+3. If the key should NOT be mapped (e.g. it duplicates an existing FunctionEvent
+   attribute), add it to allowed_non_structured_trace_keys in this test instead.
+
+For a model PR to follow, see: https://github.com/pytorch/pytorch/pull/180100
+===================================================================================="""
         if unexpected_trace_key_failures:
             raise AssertionError(
                 f"\n{failure_msg}\n" + "\n\n".join(unexpected_trace_key_failures)
