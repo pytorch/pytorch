@@ -1131,6 +1131,108 @@ def _fetch_proxies_and_all_constant_flag(
     return f_flat_args_kwargs, tuple(proxy_flat_args_kwargs), all_constant
 
 
+def _handle_decomposition(
+    proxy_mode: ProxyTorchDispatchMode,
+    func: OpOverload,
+    pre_dispatch: bool,
+    flat_args_kwargs: list[object],
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+) -> object:
+    r = maybe_handle_decomp(proxy_mode, func, args, kwargs)
+    if r is not NotImplemented:
+        _maybe_record_pointwise_barrier(func, proxy_mode)
+        return r
+
+    # For pre-autograd tracing, we do not want to run CompositeImplicit decomps.
+    if (
+        not pre_dispatch
+        and func
+        not in (
+            torch.ops.aten.size.default,
+            torch.ops.aten.stride.default,
+            torch.ops.aten.storage_offset.default,
+        )
+        and autograd_would_have_decomposed(func, flat_args_kwargs)
+    ):
+        with proxy_mode:
+            r = func.decompose(*args, **kwargs)
+            if r is not NotImplemented:
+                return r
+
+    return NotImplemented
+
+
+def _maybe_constant_propagate(
+    func: OpOverload,
+    args: tuple[object, ...],
+    f_flat_args_kwargs: Sequence[object],
+    all_constant: bool,
+    spec: Any,
+    out: Any,
+) -> _NestedTensors | None:
+    # In some circumstances, we will be tracing in a situation where a tensor
+    # is *statically* known to be a constant (currently, this only happens if
+    # you run torch.tensor; deterministic factory functions like torch.arange
+    # don't get this treatment).  When the tensor in question is small, it's
+    # helpful to due constant propagation in case we call item() (in which
+    # case we can return the constant value that is known, rather than give
+    # an error.)  The logic here tests if constant propagation is possible
+    # (because all of the inputs are constant).  If so, we disable fake tensor
+    # mode (if it is on) and do true compute on the constant.
+    #
+    # It's worth highlighting that we're making a policy decision here.
+    # There is a potential that the tensor is actually quite large, and we
+    # don't actually want to run the compute.  The tensor being quite large
+    # is one of the reasons why factory functions don't get this treatment
+    # (since they can be quite large; if a parameter is initialized to a
+    # constant value it will be!)  Similarly, there is also a potential
+    # to run an operator that blows up the size of a small tensor; we don't
+    # protect against this case, but we could force, e.g., only single
+    # element constant computation by testing the numel of the result before
+    # propagating const-ness.  Similarly, we don't require the constant to
+    # live on CPU, but we could.
+    any_constant = any(
+        t.constant is not None
+        for t in f_flat_args_kwargs
+        if isinstance(t, _ProxyTensor)
+    )
+
+    def tensor_numel_in_limit(t: Tensor) -> bool:
+        return t.numel() <= CONSTANT_NUMEL_LIMIT
+
+    # If this is a lift, the input tensor is guaranteed to be a
+    # constant, so we keep a copy of the original argument along so
+    # we can query it if we're asked to item() it at some later point
+    if (
+        func is torch.ops.aten.lift_fresh_copy.default
+        and out.numel() <= CONSTANT_NUMEL_LIMIT
+    ):
+        with unset_fake_temporarily():
+            if not isinstance(args[0], Tensor):
+                raise AssertionError(f"Expected Tensor, got {type(args[0])}")
+            return args[0].clone()
+
+    if (
+        torch.Tag.nondeterministic_seeded not in func.tags
+        and all_constant
+        and any_constant
+        and pytree.tree_all_only(Tensor, tensor_numel_in_limit, out)
+    ):
+        # NB: do NOT include factories as constants
+        with unset_fake_temporarily():
+            const_flat_args_kwargs = [
+                t.constant if isinstance(t, _ProxyTensor) else t
+                for t in f_flat_args_kwargs
+            ]
+            const_args, const_kwargs = pytree.tree_unflatten(
+                const_flat_args_kwargs, spec
+            )
+            return typing.cast(_NestedTensors, func(*const_args, **const_kwargs))
+
+    return None
+
+
 def proxy_call(
     proxy_mode: ProxyTorchDispatchMode,
     func: OpOverload,
@@ -1158,26 +1260,11 @@ def proxy_call(
         )
         return NotImplemented
 
-    r = maybe_handle_decomp(proxy_mode, func, args, kwargs)
+    r = _handle_decomposition(
+        proxy_mode, func, pre_dispatch, flat_args_kwargs, args, kwargs
+    )
     if r is not NotImplemented:
-        _maybe_record_pointwise_barrier(func, proxy_mode)
         return r
-
-    # For pre-autograd tracing, we do not want to run CompositeImplicit decomps.
-    if (
-        not pre_dispatch
-        and func
-        not in [
-            torch.ops.aten.size.default,
-            torch.ops.aten.stride.default,
-            torch.ops.aten.storage_offset.default,
-        ]
-        and autograd_would_have_decomposed(func, flat_args_kwargs)
-    ):
-        with proxy_mode:
-            r = func.decompose(*args, **kwargs)
-            if r is not NotImplemented:
-                return r
 
     if func is torch.ops.aten.is_nonzero.default:
         with proxy_mode:
@@ -1266,67 +1353,9 @@ def proxy_call(
     with _enable_thunkify(proxy_mode.tracer):
         out = func(*args, **kwargs)
 
-    # In some circumstances, we will be tracing in a situation where a tensor
-    # is *statically* known to be a constant (currently, this only happens if
-    # you run torch.tensor; deterministic factory functions like torch.arange
-    # don't get this treatment).  When the tensor in question is small, it's
-    # helpful to due constant propagation in case we call item() (in which
-    # case we can return the constant value that is known, rather than give
-    # an error.)  The logic here tests if constant propagation is possible
-    # (because all of the inputs are constant).  If so, we disable fake tensor
-    # mode (if it is on) and do true compute on the constant.
-    #
-    # It's worth highlighting that we're making a policy decision here.
-    # There is a potential that the tensor is actually quite large, and we
-    # don't actually want to run the compute.  The tensor being quite large
-    # is one of the reasons why factory functions don't get this treatment
-    # (since they can be quite large; if a parameter is initialized to a
-    # constant value it will be!)  Similarly, there is also a potential
-    # to run an operator that blows up the size of a small tensor; we don't
-    # protect against this case, but we could force, e.g., only single
-    # element constant computation by testing the numel of the result before
-    # propagating const-ness.  Similarly, we don't require the constant to
-    # live on CPU, but we could.
-    any_constant = any(
-        t.constant is not None
-        for t in f_flat_args_kwargs
-        if isinstance(t, _ProxyTensor)
+    constant = _maybe_constant_propagate(
+        func, args, f_flat_args_kwargs, all_constant, spec, out
     )
-
-    constant = None
-
-    def tensor_numel_in_limit(t: Tensor) -> bool:
-        return t.numel() <= CONSTANT_NUMEL_LIMIT
-
-    # If this is a lift, the input tensor is guaranteed to be a
-    # constant, so we keep a copy of the original argument along so
-    # we can query it if we're asked to item() it at some later point
-    if (
-        func is torch.ops.aten.lift_fresh_copy.default
-        and out.numel() <= CONSTANT_NUMEL_LIMIT
-    ):
-        with unset_fake_temporarily():
-            if not isinstance(args[0], (Proxy, Tensor)):
-                raise AssertionError(f"Expected Proxy or Tensor, got {type(args[0])}")
-            constant = args[0].clone()
-    elif (
-        torch.Tag.nondeterministic_seeded not in func.tags
-        and all_constant
-        and any_constant
-        and pytree.tree_all_only(Tensor, tensor_numel_in_limit, out)
-    ):
-        # NB: do NOT include factories as constants
-        with unset_fake_temporarily():
-            const_flat_args_kwargs = [
-                t.constant if isinstance(t, _ProxyTensor) else t
-                for t in f_flat_args_kwargs
-            ]
-            const_args, const_kwargs = pytree.tree_unflatten(
-                const_flat_args_kwargs, spec
-            )
-            constant = func(*const_args, **const_kwargs)
-    else:
-        constant = None
 
     track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
     _maybe_record_pointwise_barrier(func, proxy_mode)
