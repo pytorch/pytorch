@@ -60,6 +60,9 @@ nn/qat/ @jerryzh168
 /torch/distributed/tensor/_ops/_view_ops.py @weifengpy
 /torch/distributed/tensor/_ops/_matrix_ops.py @weifengpy
 
+# Dynamo
+/torch/_dynamo/ @lucaskabela
+
 # ONNX Export
 /torch/_dynamo/backends/onnxrt.py @titaiwangms @xadupre @justinchuby
 /torch/csrc/jit/passes/onnx.h @titaiwangms @xadupre
