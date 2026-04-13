@@ -319,14 +319,6 @@ void Context::setImmediateMiopen(bool b) {
   immediate_miopen = b;
 }
 
-bool Context::userEnabledHipdnn() const {
-  return enabled_hipdnn;
-}
-
-void Context::setUserEnabledHipdnn(bool e) {
-  enabled_hipdnn = e;
-}
-
 bool Context::allowTF32CuBLAS() const {
   bool legacy_allow_tf32 = float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
   bool allow_tf32_new = float32Precision(Float32Backend::CUDA, Float32Op::MATMUL) == Float32Precision::TF32;

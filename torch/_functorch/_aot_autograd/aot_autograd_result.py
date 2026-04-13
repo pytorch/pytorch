@@ -125,6 +125,9 @@ class BundledOutputCodeLoadable(InductorOutput[TOutputCode], Generic[TOutputCode
                 payload_fn=lambda: json.dumps(cache_info),
             )
             result = graph  # type: ignore[assignment]
+            result.compile_region_name = (  # pyrefly: ignore[missing-attribute]
+                fx_config.get("compile_region_name")
+            )
 
         # Run normal post compile
         result.post_compile(self.example_inputs, constants, fx_config)
@@ -219,6 +222,9 @@ class FxGraphCacheLoadable(InductorOutput[CompiledFxGraph]):
         """
         Called after FXGraphCacheLoadable.load, mutates fx_config
         """
+        result.compile_region_name = fx_config.get(  # pyrefly: ignore[bad-assignment]
+            "compile_region_name"
+        )
         result.post_compile(self.example_inputs, self.constants, fx_config)
         return result
 
@@ -243,7 +249,7 @@ class GenericCompiledBackward(InductorOutput[TOut]):
 @dataclass
 class CompiledBackward(GenericCompiledBackward[CompiledFxGraph], FxGraphCacheLoadable):
     """
-    Cacheable entry for a forward function
+    Cacheable entry for a backward function
     """
 
     def _is_backward(self) -> bool:

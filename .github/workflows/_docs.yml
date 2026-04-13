@@ -89,12 +89,8 @@ jobs:
             To start Python docs build type:
               cd docs && make html && make coverage
 
-      # [see note: pytorch repo ref]
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
-
       - name: Setup Linux
-        uses: ./.github/actions/setup-linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@main
 
       - name: Login to ECR
         uses: ./.github/actions/ecr-login
@@ -204,6 +200,40 @@ jobs:
           path: cppdocs/
           s3-prefix: pytorch/pytorch/${{ github.event.pull_request.number }}/cppdocs
 
+      - name: Post C++ Docs Coverage Comment
+        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'cpp' && steps.build-docs.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUM="${{ github.event.pull_request.number }}"
+          MARKER="<!-- cpp-docs-coverage -->"
+
+          # Only post if the PR touches docs/cpp
+          if ! gh pr diff "$PR_NUM" --name-only | grep -q '^docs/cpp/'; then
+            echo "No changes to docs/cpp/, skipping coverage comment."
+            exit 0
+          fi
+
+          # Skip if we already posted
+          if gh pr view "$PR_NUM" --json comments --jq '.comments[].body' | grep -q "$MARKER"; then
+            echo "Coverage comment already posted, skipping."
+            exit 0
+          fi
+
+          body="${MARKER}
+          ## C++ Docs
+
+          - [Doc Preview](https://docs-preview.pytorch.org/pytorch/pytorch/${PR_NUM}/cppdocs/index.html)
+          - [API Coverage Report](https://docs-preview.pytorch.org/pytorch/pytorch/${PR_NUM}/cppdocs/_coverage/cpp_coverage.txt)
+          - [HTML Issues Report](https://docs-preview.pytorch.org/pytorch/pytorch/${PR_NUM}/cppdocs/_coverage/cpp_html_issues.txt)"
+
+          if [ -f cppdocs/_coverage/index.html ]; then
+            body="${body}
+          - [Coverxygen Report (interactive)](https://docs-preview.pytorch.org/pytorch/pytorch/${PR_NUM}/cppdocs/_coverage/index.html)"
+          fi
+
+          gh pr comment "$PR_NUM" --body "$body"
+
       - name: Upload C++ Docs Preview (nightly dry-run)
         if: ${{ !inputs.push && github.event_name != 'pull_request' && matrix.docs_type == 'cpp' && steps.build-docs.outcome == 'success' }}
         run: |
@@ -215,3 +245,15 @@ jobs:
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()
+
+  memory-viz-tests:
+    # Tests for torch memory visualizer
+    # tag shangdiy for any issue with this test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Run MemoryViz JS tests (nonretryable)
+        run: node test/profiler/test_memory_viz.js

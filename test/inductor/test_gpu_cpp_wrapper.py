@@ -14,7 +14,11 @@ from torch._inductor.codegen.cpp_wrapper_gpu import DeferredTritonCallWrapper
 from torch._inductor.codegen.cuda.device_op_overrides import CUDADeviceOpOverrides
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import IndentedBuffer
-from torch.testing._internal.common_utils import slowTest
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    slowTest,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, RUN_GPU
 
 
@@ -145,6 +149,83 @@ class TestGpuWrapper(InductorTestCase):
 
         self.assertEqual(wrapper.scratch_spaces, {"global_scratch": 256 * 8})
 
+    @parametrize("per_subkernel_blocks", [False, True])
+    def test_lazy_compile_combo_kernel_default_config(self, per_subkernel_blocks):
+        """Lazy compile should use default_config from combo_grid_meta for XBLOCK."""
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        from unittest.mock import patch
+
+        from torch._inductor.codegen.triton_combo_kernel import (
+            DEFAULT_COMBO_BLOCK_SIZE_1D,
+        )
+        from torch._inductor.runtime import triton_lazy_compile as tlc
+
+        captured = {}
+        original = tlc.run_triton_kernel_with_autotune
+
+        def capture(pending_kernels, kernel_name, stream, args):
+            result = original(pending_kernels, kernel_name, stream, args)
+            if "triton_for_fused" in kernel_name:
+                captured[kernel_name] = result.xblock
+            return result
+
+        with patch.object(tlc, "run_triton_kernel_with_autotune", side_effect=capture):
+            params = [torch.randn(1024, device=self.device) for _ in range(4)]
+            grads = [torch.randn_like(p) for p in params]
+
+            @torch.compile(
+                options={
+                    "cpp_wrapper": True,
+                    "triton.autotune_at_compile_time": False,
+                    "combo_kernels": True,
+                    "combo_kernel_per_subkernel_blocks": per_subkernel_blocks,
+                }
+            )
+            def fn(params, grads):
+                torch._foreach_add_(params, grads, alpha=-0.1)
+
+            fn(params, grads)
+
+        self.assertTrue(len(captured) > 0, "No combo kernels were lazy-compiled")
+        for name, xblock in captured.items():
+            # When per_subkernel_blocks=False, default_config has a single XBLOCK
+            # that must be picked up correctly (not the hardcoded fallback of 128).
+            # When per_subkernel_blocks=True, default_config uses per-subkernel
+            # XBLOCK_N keys instead, so result.xblock is not used for grid
+            # computation; just verify compilation succeeded.
+            if not per_subkernel_blocks:
+                self.assertEqual(
+                    xblock,
+                    DEFAULT_COMBO_BLOCK_SIZE_1D,
+                    f"{name} got XBLOCK={xblock}, expected {DEFAULT_COMBO_BLOCK_SIZE_1D}",
+                )
+
+    def test_cudagraph_no_partition(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        def test_fn(x, s):
+            return (x + s).sum()
+
+        x = torch.randn(4, device=self.device)
+        s = 3
+        expected = test_fn(x, s)
+
+        comp = torch.compile(
+            options={
+                "cpp_wrapper": True,
+                "triton.cudagraphs": True,
+                "graph_partition": False,
+            }
+        )(test_fn)
+        for i in range(3):
+            res = comp(x, s)
+            self.assertEqual(res, expected)
+
+
+instantiate_parametrized_tests(TestGpuWrapper)
 
 # Helper script for test_lazy_compile_kernel_name_collision_across_modules.
 # Run as a subprocess so dlopen truly re-runs .so static initializers.

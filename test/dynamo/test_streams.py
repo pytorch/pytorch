@@ -2084,6 +2084,138 @@ class <lambda>(torch.nn.Module):
             "torch.ops.streams.record_stream.default("
         ).check("return").run(code)
 
+    @requires_cuda
+    def test_del_multi_stream_sync_dealloc(self):
+        def fn(x, y):
+            s = torch.Stream()
+            e = torch.Event()
+            z0 = x + 1
+            with s:
+                z = torch.add(x, y)
+                e.record()
+            e.wait()
+            del x
+            return z0, z
+
+        inp = (torch.ones(2, 2, device="cuda"), torch.ones(2, 2, device="cuda"))
+        expected = fn(*inp)
+        (
+            actual,
+            _,
+            fw_graphs,
+            _,
+        ) = extract_graph(fn, *inp)
+        self.assertEqual(len(fw_graphs), 1)
+        self.assertEqual(expected, actual)
+        graph_str = print_graph(fw_graphs[0])
+        self.assertIn("sync_dealloc", graph_str)
+        self.assertIn("record_event", graph_str)
+
+    @requires_cuda
+    def test_del_same_stream_no_sync_dealloc(self):
+        def fn(x, y):
+            s = torch.Stream()
+            e = torch.Event()
+            with s:
+                z = torch.add(x, y)
+                del x
+                e.record()
+            e.wait()
+            return z
+
+        inp = (torch.ones(2, 2, device="cuda"), torch.ones(2, 2, device="cuda"))
+        expected = fn(*inp)
+        (
+            actual,
+            _,
+            fw_graphs,
+            _,
+        ) = extract_graph(fn, *inp)
+        self.assertEqual(len(fw_graphs), 1)
+        self.assertEqual(expected, actual)
+        graph_str = print_graph(fw_graphs[0])
+        self.assertNotIn("sync_dealloc", graph_str)
+
+    @requires_cuda
+    def test_del_single_stream_no_sync_dealloc(self):
+        def fn(x, y):
+            z = torch.add(x, y)
+            del x
+            return z
+
+        inp = (torch.ones(2, 2, device="cuda"), torch.ones(2, 2, device="cuda"))
+        expected = fn(*inp)
+        (
+            actual,
+            _,
+            fw_graphs,
+            _,
+        ) = extract_graph(fn, *inp)
+        self.assertEqual(len(fw_graphs), 1)
+        self.assertEqual(expected, actual)
+        graph_str = print_graph(fw_graphs[0])
+        self.assertNotIn("sync_dealloc", graph_str)
+
+    @requires_cuda
+    def test_del_attr_multi_stream_sync_dealloc(self):
+        class Holder:
+            pass
+
+        def fn(x, y):
+            s = torch.Stream()
+            e = torch.Event()
+            h = Holder()
+            h.tensor = x
+            z0 = x + 1
+            with s:
+                z = torch.add(h.tensor, y)
+                e.record()
+            e.wait()
+            del h.tensor
+            return z0, z
+
+        inp = (torch.ones(2, 2, device="cuda"), torch.ones(2, 2, device="cuda"))
+        expected = fn(*inp)
+        (
+            actual,
+            _,
+            fw_graphs,
+            _,
+        ) = extract_graph(fn, *inp)
+        self.assertEqual(len(fw_graphs), 1)
+        self.assertEqual(expected, actual)
+        graph_str = print_graph(fw_graphs[0])
+        self.assertIn("sync_dealloc", graph_str)
+        self.assertIn("record_event", graph_str)
+
+    @requires_cuda
+    def test_del_subscr_multi_stream_sync_dealloc(self):
+        def fn(x, y):
+            s = torch.Stream()
+            e = torch.Event()
+            d = {"t": x}
+            z0 = x + 1
+            with s:
+                z = torch.add(d["t"], y)
+                e.record()
+            e.wait()
+            del d["t"]
+            return z0, z
+
+        inp = (torch.ones(2, 2, device="cuda"), torch.ones(2, 2, device="cuda"))
+        expected = fn(*inp)
+        (
+            actual,
+            _,
+            fw_graphs,
+            _,
+        ) = extract_graph(fn, *inp)
+        self.assertEqual(len(fw_graphs), 1)
+        self.assertEqual(expected, actual)
+        graph_str = print_graph(fw_graphs[0])
+        self.assertIn("sync_dealloc", graph_str)
+        self.assertIn("record_event", graph_str)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

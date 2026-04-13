@@ -4,7 +4,7 @@
 import functools
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import cast, TypeVar
+from typing import cast, TypeGuard, TypeVar
 
 import torch
 import torch._C
@@ -62,6 +62,10 @@ class Shard(torch._C._distributed.Shard):
 
     .. warning:: sharding on a tensor dimension where the tensor dimension size is not
         evenly divisible on a DeviceMesh dimension is currently experimental and subject to change.
+
+    .. note:: When checking whether a placement is shard-like, use
+        :func:`_is_shard_like` instead of ``isinstance(p, Shard)`` to also
+        match :class:`_StridedShard`.
     """
 
     def _split_tensor(
@@ -255,7 +259,7 @@ class Shard(torch._C._distributed.Shard):
         num_chunks: int,
         rank: RankType,
     ) -> tuple[int, RankType]:
-        # pyrefly: ignore[bad-argument-type]  # pyrefly bug
+        # pyrefly: ignore [bad-argument-type, bad-return]
         return Shard.local_shard_size_and_offset(curr_local_size, num_chunks, rank)
 
     @staticmethod
@@ -1172,6 +1176,17 @@ class _StridedShard(torch._C._distributed.StridedShard):
             offsets = offsets[0] if len(offsets) > 0 else -1
 
         return local_shard_size, offsets
+
+
+def _is_shard_like(p: "Placement") -> TypeGuard[Shard | _StridedShard]:
+    """Check if a placement is Shard or _StridedShard.
+
+    Use this instead of ``isinstance(p, Shard)`` to avoid silently missing
+    ``_StridedShard``.  When ``_StridedShard`` is unified with ``Shard``
+    (see TODO on the class), this helper can be collapsed to a single
+    ``isinstance`` check.
+    """
+    return isinstance(p, Shard | _StridedShard)
 
 
 class Replicate(torch._C._distributed.Replicate):

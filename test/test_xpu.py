@@ -1266,8 +1266,10 @@ if __name__ == "__main__":
         with torch.xpu.stream(s):
             g = torch.xpu.XPUGraph()
             self.assertFalse(torch.xpu.is_current_stream_capturing())
+            self.assertFalse(s.is_capturing())
             g.capture_begin()
             self.assertTrue(torch.xpu.is_current_stream_capturing())
+            self.assertTrue(s.is_capturing())
             g.capture_end()
 
     def test_graph_capture_simple(self):
@@ -1283,6 +1285,21 @@ if __name__ == "__main__":
                 b = b + 1
             g.capture_end()
         torch.xpu.current_stream().wait_stream(s)
+
+        g.replay()
+
+        self.assertEqual(b.sum().item(), 11000.0)
+
+    def test_accelerator_graph_simple(self):
+        s = torch.Stream()
+        g = torch.accelerator.Graph()
+
+        with s, g:
+            a = torch.full((1000,), 1, device="xpu")
+            b = a
+            for _ in range(10):
+                b = b + 1
+        torch.accelerator.current_stream().wait_stream(s)
 
         g.replay()
 

@@ -1,48 +1,10 @@
+#include <ATen/native/mps/kernels/SamplingHelpers.h>
 #include <ATen/native/mps/kernels/UpSample.h>
 #include <c10/metal/atomic.h>
 #include <metal_stdlib>
 
 using namespace metal;
 using namespace c10::metal;
-
-// Based on
-// https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
-template <typename accscalar_t>
-accscalar_t cubic_convolution1(accscalar_t x, accscalar_t A) {
-  return ((A + 2) * x - (A + 3)) * x * x + 1;
-}
-
-template <typename accscalar_t>
-accscalar_t cubic_convolution2(accscalar_t x, accscalar_t A) {
-  return ((A * x - 5 * A) * x + 8 * A) * x - 4 * A;
-}
-
-template <typename accscalar_t>
-void get_cubic_upsampling_coefficients(accscalar_t coeffs[4], accscalar_t t) {
-  accscalar_t A = -0.75;
-
-  accscalar_t x1 = t;
-  coeffs[0] = cubic_convolution2<accscalar_t>(x1 + 1.0, A);
-  coeffs[1] = cubic_convolution1<accscalar_t>(x1, A);
-
-  // opposite coefficients
-  accscalar_t x2 = 1.0 - t;
-  coeffs[2] = cubic_convolution1<accscalar_t>(x2, A);
-  coeffs[3] = cubic_convolution2<accscalar_t>(x2 + 1.0, A);
-}
-
-template <typename scalar_t, typename accscalar_t>
-accscalar_t cubic_interp1d(
-    scalar_t x0,
-    scalar_t x1,
-    scalar_t x2,
-    scalar_t x3,
-    accscalar_t t) {
-  accscalar_t coeffs[4];
-  get_cubic_upsampling_coefficients<accscalar_t>(coeffs, t);
-
-  return x0 * coeffs[0] + x1 * coeffs[1] + x2 * coeffs[2] + x3 * coeffs[3];
-}
 
 template <typename accscalar_t>
 accscalar_t area_pixel_compute_source_index(
@@ -720,8 +682,8 @@ kernel void upsample_bicubic2d_backward(
   float x_coeffs[4];
   float y_coeffs[4];
 
-  get_cubic_upsampling_coefficients(x_coeffs, t_x);
-  get_cubic_upsampling_coefficients(y_coeffs, t_y);
+  get_cubic_coefficients(x_coeffs, t_x);
+  get_cubic_coefficients(y_coeffs, t_y);
 
   for (int n = 0; n < output_sizes.x; n++) {
     for (int c = 0; c < output_sizes.y; ++c) {

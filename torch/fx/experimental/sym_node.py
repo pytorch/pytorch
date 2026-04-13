@@ -732,6 +732,7 @@ for name in math_op_names:
     setattr(SymNode, sym_name, _get_sym_node_fn(name))
     METHOD_TO_OPERATOR[sym_name] = getattr(torch, priv_sym_name)
     unary_magic_methods.add(sym_name)
+    # pyrefly: ignore [unresolvable-dunder-all]
     __all__.append(sym_name)
 
 
@@ -1541,7 +1542,12 @@ def _make_node_magic(method, func):
                 handle_sym_dispatch,
             )
 
-            out_hint = then_node.hint if pred_node.hint else else_node.hint
+            if pred_node.hint is None:
+                out_hint = None
+            elif pred_node.hint:
+                out_hint = then_node.hint
+            else:
+                out_hint = else_node.hint
             if get_proxy_mode():
                 return to_node(
                     pred_node,

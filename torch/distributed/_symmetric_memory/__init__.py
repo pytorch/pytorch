@@ -2008,7 +2008,9 @@ def is_nvshmem_available() -> bool:
     r"""
     is_nvshmem_available() -> bool
 
-    Check if NVSHMEM is available in current build and on current system.
+    Check if NVSHMEM (CUDA) or rocSHMEM (ROCm) is available in the current
+    build and usable at runtime. On ROCm, rocSHMEM ``VERSION`` must be at
+    least 3.3.0 (see ``rocshmem/rocshmem.hpp``).
     """
     try:
         from torch._C._distributed_c10d import _is_nvshmem_available
@@ -2270,8 +2272,25 @@ def reduce_scatter_offset(
         )
 
 
+def is_symm_mem_tensor(tensor: torch.Tensor) -> bool:
+    r"""
+    is_symm_mem_tensor(tensor) -> bool
+
+    Returns ``True`` if ``tensor`` was allocated via symmetric memory
+    (i.e. via :func:`torch.distributed._symmetric_memory.empty` or
+    :meth:`_SymmetricMemory.empty_strided_p2p`).
+
+    This is a non-collective, O(1) check.
+
+    Args:
+        tensor (:class:`torch.Tensor`): the tensor to check.
+    """
+    return _SymmetricMemory.is_symm_mem_tensor(tensor)
+
+
 __all__ = [
     "empty",
+    "is_symm_mem_tensor",
     "rendezvous",
     "is_nvshmem_available",
     "set_backend",

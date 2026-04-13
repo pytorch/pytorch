@@ -655,7 +655,7 @@ class Node(_NodeBase):
             return f"return {self.args[0]}"
         else:
 
-            def stringify_shape(shape: Iterable) -> str:
+            def stringify_shape(shape: Iterable[Any]) -> str:
                 return f"[{', '.join([str(x) for x in shape])}]"
 
             meta_val = self.meta.get(

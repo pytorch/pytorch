@@ -454,6 +454,48 @@ class CudaReproTests(TestCase):
 
         self._test_split_reduction_impl(x)
 
+    def test_split_with_sizes_reshape_cat_cantsplit_regression(self):
+        class Repro(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embedding = nn.Embedding(num_embeddings=128, embedding_dim=32)
+                self.linear = nn.Linear(32, 96)
+                self.conv = nn.Conv2d(3, 16, 3, padding=1)
+
+            def forward(self, x, indices):
+                embedded = self.embedding(indices)
+                linear_out = self.linear(embedded)
+                conv_out = self.conv(x)
+                batch_size = conv_out.shape[0]
+                conv_flat = conv_out.view(batch_size, -1)
+                seq_out = linear_out[:, -1, :]
+                combined = torch.cat([seq_out, conv_flat], dim=1)
+                chunks = torch.ops.aten.split_with_sizes.default(
+                    combined, split_sizes=[32, 64, combined.size(1) - 96], dim=1
+                )
+                chunk0_reshaped = torch.ops.aten.reshape.default(
+                    chunks[0], (batch_size, 4, 8)
+                )
+                chunk1_reshaped = torch.ops.aten.reshape.default(
+                    chunks[1], (batch_size, 8, 8)
+                )
+                chunk2_reshaped = torch.ops.aten.reshape.default(
+                    chunks[2], (batch_size, -1, 8)
+                )
+                return torch.ops.aten.cat.default(
+                    [chunk0_reshaped, chunk1_reshaped, chunk2_reshaped], dim=1
+                )
+
+        model = Repro().to(device_type)
+        x = torch.randn(2, 3, 32, 32, dtype=torch.float32, device=device_type)
+        indices = torch.randint(0, 128, (2, 10), dtype=torch.long, device=device_type)
+
+        with torch.no_grad():
+            eager_out = model(x, indices)
+            compiled_out = torch.compile(model)(x, indices)
+
+        torch.testing.assert_close(compiled_out, eager_out)
+
     @config.patch({"emulate_precision_casts": True})
     def test_bool_emulate_low_precision(self):
         from torch import device
@@ -2372,6 +2414,25 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         fc.run(bw_code)
 
         self.assertEqual(f(x_ref, y_ref), out)
+
+    @skipCUDAIf(
+        not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"
+    )
+    @unittest.skipIf(
+        config.is_fbcode(),
+        "bfloat16 atomic add is supported in fbcode, so we won't fallback",
+    )
+    def test_index_add_fallback_direct(self):
+        def f(x, idx, src):
+            return torch.index_add(x, 0, idx, src)
+
+        x = torch.randn(16, 256, dtype=torch.bfloat16, device=device_type)
+        idx = torch.randperm(8, device=device_type)
+        src = torch.randn(8, 256, dtype=torch.bfloat16, device=device_type)
+
+        out = f(x, idx, src)
+        compiled_out = torch.compile(f)(x, idx, src)
+        self.assertEqual(out, compiled_out)
 
     @requires_multigpu()
     def test_not_initializing_wrong_device(self):

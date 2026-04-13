@@ -2,13 +2,36 @@
 Dynamo implementations of CPython's PyObject_* default slot algorithms.
 
 Analogous to CPython's Objects/object.c, this module holds the general
-comparison dispatch machinery that is independent of any specific type.
-Per-type richcompare_impl hooks live in their respective VT files.
+dispatch machinery that is independent of any specific type.
+Per-type hook implementations (bool_impl, richcompare_impl, etc.)
+live in their respective VT files.
 """
 
+from functools import lru_cache
+from typing import TYPE_CHECKING
+
+from torch._C._dynamo import (
+    get_type_slots,
+    has_slot,
+    PyMappingSlots,
+    PyNumberSlots,
+    PySequenceSlots,
+)
+
+from .. import graph_break_hints
+from ..exc import (
+    handle_observed_exception,
+    ObservedTypeError,
+    raise_type_error,
+    unimplemented,
+)
 from ..utils import istype
 from .base import NO_SUCH_SUBOBJ, VariableTracker
 from .constant import CONSTANT_VARIABLE_FALSE, CONSTANT_VARIABLE_TRUE
+
+
+if TYPE_CHECKING:
+    from ..symbolic_convert import InstructionTranslator
 
 
 def vt_identity_compare(
@@ -41,8 +64,9 @@ def vt_identity_compare(
     # Mutable containers created during tracing: VT identity = Python identity.
     from .dicts import ConstDictVariable
     from .lists import ListVariable
+    from .sets import SetVariable
 
-    if isinstance(left, (ConstDictVariable, ListVariable)):
+    if isinstance(left, (ConstDictVariable, ListVariable, SetVariable)):
         return CONSTANT_VARIABLE_FALSE
 
     # Different Python types can never be the same object.
@@ -63,3 +87,133 @@ def vt_identity_compare(
         return CONSTANT_VARIABLE_FALSE
 
     return None
+
+
+@lru_cache(maxsize=256)
+def _get_cached_slots(obj_type: type) -> tuple[int, int, int, int]:
+    """Get all type slots for a type (cached)."""
+    return get_type_slots(obj_type)
+
+
+def type_implements_sq_length(obj_type: type) -> bool:
+    """Check whether obj_type implements __len__ as sequence protocol"""
+    seq_slots, _, _, _ = _get_cached_slots(obj_type)
+    return has_slot(seq_slots, PySequenceSlots.SQ_LENGTH)
+
+
+def type_implements_mp_length(obj_type: type) -> bool:
+    """Check whether obj_type implements __len__ as mapping protocol"""
+    _, map_slots, _, _ = _get_cached_slots(obj_type)
+    return has_slot(map_slots, PyMappingSlots.MP_LENGTH)
+
+
+def type_implements_nb_bool(obj_type: type) -> bool:
+    """Check whether obj_type implements the nb_bool slot (i.e. has __bool__ or __len__)."""
+    _, _, number_slots, _ = _get_cached_slots(obj_type)
+    return has_slot(number_slots, PyNumberSlots.NB_BOOL)
+
+
+def maybe_get_python_type(obj: VariableTracker) -> type:
+    try:
+        return obj.python_type()
+    except NotImplementedError:
+        unimplemented(
+            gb_type="Unsupported python_type() call",
+            context=f"{obj} does not implement python_type()",
+            explanation="This VariableTracker does not implement python_type(), "
+            "which is required for object protocol operations.",
+            hints=[
+                *graph_break_hints.DYNAMO_BUG,
+            ],
+        )
+
+
+def vt_mapping_size(
+    tx: "InstructionTranslator", obj: "VariableTracker"
+) -> "VariableTracker":
+    # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/abstract.c#L2308-L2330
+    T = maybe_get_python_type(obj)
+    if type_implements_mp_length(T):
+        return obj.mp_length(tx)
+
+    if type_implements_sq_length(T):
+        raise_type_error(tx, f"{obj.python_type_name()} is not a mapping")
+
+    raise_type_error(tx, f"object of type {obj.python_type_name()} has no len()")
+
+
+def generic_len(
+    tx: "InstructionTranslator", obj: "VariableTracker"
+) -> "VariableTracker":
+    # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/abstract.c#L53-L69
+    """
+    Implements PyObject_Size/PyObject_Length semantics for VariableTracker objects.
+    Dispatches to sq_length (sequences) or mp_length (mappings) depending on the VT type.
+    """
+
+    T = maybe_get_python_type(obj)
+    if type_implements_sq_length(T):
+        return obj.sq_length(tx)
+    return vt_mapping_size(tx, obj)
+
+
+def generic_bool(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTracker:
+    """Mirrors PyObject_IsTrue.
+
+    https://github.com/python/cpython/blob/c09ccd9c429/Objects/object.c#L2135-L2158
+
+    Resolution order: constants → nb_bool → mp_length/sq_length → truthy.
+    """
+    from .constant import ConstantVariable
+
+    if obj.is_python_constant():
+        return ConstantVariable.create(bool(obj.as_python_constant()))
+
+    obj_type = maybe_get_python_type(obj)
+
+    if type_implements_nb_bool(obj_type):
+        result = obj.bool_impl(tx)
+        if result is not None:
+            return result
+
+    try:
+        length = generic_len(tx, obj)
+        from .tensor import SymNodeVariable
+
+        if isinstance(length, SymNodeVariable):
+            return SymNodeVariable.create(tx, length.as_proxy() > 0)
+        return ConstantVariable.create(length.as_python_constant() > 0)
+    except ObservedTypeError:
+        handle_observed_exception(tx)
+
+    return CONSTANT_VARIABLE_TRUE
+
+
+def vt_getitem(
+    tx: "InstructionTranslator",
+    obj: VariableTracker,
+    key: VariableTracker,
+) -> VariableTracker:
+    """CPython's PyObject_GetItem — dispatch to the type's mp_subscript/sq_item.
+
+    PyObject_GetItem: https://github.com/python/cpython/blob/62a6e898e01/Objects/abstract.c#L155-L206
+
+    CPython checks three branches in order:
+      1. tp_as_mapping->mp_subscript  (L161-166)
+      2. tp_as_sequence->sq_item      (L168-181) — only if key passes _PyIndex_Check
+      3. PyType_Check(o)              (L183-203) — type[int] → GenericAlias/__class_getitem__
+
+    Branch 1 is the common path (list, tuple, dict, range all have mp_subscript).
+    TODO(follow-up): use has_slot(map_slots, PyMappingSlots.MP_SUBSCRIPT) to gate
+    Branch 1 and has_slot(seq_slots, PySequenceSlots.SQ_ITEM) to gate Branch 2,
+    matching CPython's dispatch order.
+    TODO(follow-up): Branch 2 (sq_item) for C extension types that only have
+    tp_as_sequence (e.g. deque — Modules/_collectionsmodule.c:1888).
+    Branch 3 is handled by TypingVariable.mp_subscript_impl for typing module types
+    and by BuiltinVariable for builtin types like list[int].
+
+    Types that work via constant fold fallback (no dedicated mp_subscript_impl):
+    TODO(follow-up): str (unicode_subscript, Objects/unicodeobject.c:13809)
+    TODO(follow-up): bytes (bytes_subscript, Objects/bytesobject.c)
+    """
+    return obj.mp_subscript_impl(tx, key)

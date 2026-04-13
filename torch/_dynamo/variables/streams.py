@@ -324,6 +324,9 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
         tx.symbolic_stream_state.exit_stream()
         return super().exit(tx, *args)
 
+    def python_type(self) -> type:
+        return torch.cuda.StreamContext
+
     def supports_graph_breaks(self) -> bool:
         return True
 
@@ -334,6 +337,8 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
 
 class StreamVariable(StreamContextVariable):
     """Represents the device-agnostic torch.Stream class"""
+
+    _cpython_type = torch.Stream
 
     def __init__(
         self,
@@ -474,6 +479,8 @@ class StreamVariable(StreamContextVariable):
 class CudaStreamVariable(StreamVariable):
     """Represents torch.cuda.Stream, preserving device-specific type and attributes."""
 
+    _cpython_type = torch.cuda.Stream
+
     def python_type(self) -> type:
         return torch.cuda.Stream
 
@@ -505,6 +512,9 @@ class EventVariable(VariableTracker):
         self.proxy = proxy
         self.value = value
         self.user_object_index = user_object_index
+
+    def python_type(self) -> type:
+        return torch.Event
 
     def get_real_python_backed_value(self) -> object:
         return self.value

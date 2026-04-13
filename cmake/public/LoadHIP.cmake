@@ -100,6 +100,9 @@ endmacro()
 # MODULE argument is added for clarity that CMake is searching
 # for FindHIP.cmake in Module mode
 find_package_and_print_version(HIP 1.0 MODULE)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  enable_language(HIP)
+endif()
 
 if(HIP_FOUND)
   set(PYTORCH_FOUND_HIP TRUE)
@@ -205,26 +208,7 @@ if(HIP_FOUND)
   find_package_and_print_version(rocthrust REQUIRED)
   find_package_and_print_version(hipsolver REQUIRED)
   find_package_and_print_version(rocsolver REQUIRED)
-  # hipdnn packages export include dirs via target INTERFACE_INCLUDE_DIRECTORIES
-  # rather than the ${PACKAGE_NAME}_INCLUDE_DIR variable that
-  # find_package_and_print_version checks, so we call find_package directly.
-  find_package(hipdnn_frontend CONFIG)
-  if(hipdnn_frontend_FOUND)
-    message(STATUS "hipdnn_frontend VERSION: ${hipdnn_frontend_VERSION}")
-    get_target_property(_hipdnn_fe_includes hipdnn_frontend INTERFACE_INCLUDE_DIRECTORIES)
-    if(_hipdnn_fe_includes)
-      list(APPEND ROCM_INCLUDE_DIRS ${_hipdnn_fe_includes})
-      set(USE_HIPDNN ON)
-      message(STATUS "Found hipDNN, enabling USE_HIPDNN")
-    else()
-      set(USE_HIPDNN OFF)
-      message(STATUS "hipDNN found but missing include directories, disabling USE_HIPDNN")
-    endif()
-  else()
-    set(USE_HIPDNN OFF)
-    message(STATUS "hipDNN not found, disabling USE_HIPDNN")
-  endif()
-
+  find_package_and_print_version(rocshmem)
   # workaround cmake 4 build issue
   if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
     message(WARNING "Work around hiprtc cmake failure for cmake >= 4")

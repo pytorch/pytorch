@@ -36,6 +36,7 @@ from torch._inductor.codecache import (
     ROCmCodeCache,
     StaticAutotunerFuture,
     torch_key,
+    XPUCodeCache,
 )
 from torch._inductor.compile_worker.subproc_pool import (
     AnyPool,
@@ -236,6 +237,7 @@ class AsyncCompile:
     """
 
     _ready_future: Future[Any] | None = None
+    _metal_sources: list[tuple[str, str, list[str]]] | None = None
 
     def __init__(self) -> None:
         pass
@@ -535,18 +537,24 @@ class AsyncCompile:
             )
             return LambdaFuture(get_result)
 
-    def cuda(self, source_code, dst_file_ext, aot_compile=False):
-        kernel_code_log.info("CUDA Kernel:\n%s", source_code)
-
+    def cutlass(self, cache_cls, source_code, dst_file_ext, aot_compile=False):
         def task():
             if aot_compile:
                 # We rely on JITInductor to compile the CUDA code,
                 # so that we can load it into AOTInductor.
-                output_path, *_ = CUDACodeCache.compile(source_code, "o")
-                CUDACodeCache.aot_kernels_o.append(output_path)
-            return CUDACodeCache.load(source_code, dst_file_ext)[0]
+                output_path, *_ = cache_cls.compile(source_code, "o")
+                cache_cls.aot_kernels_o.append(output_path)
+            return cache_cls.load(source_code, dst_file_ext)[0]
 
         return self.submit(task)
+
+    def cuda(self, source_code, dst_file_ext, aot_compile=False):
+        kernel_code_log.info("CUDA Kernel:\n%s", source_code)
+        return self.cutlass(CUDACodeCache, source_code, dst_file_ext, aot_compile)
+
+    def xpu(self, source_code, dst_file_ext, aot_compile=False):
+        kernel_code_log.info("XPU Kernel:\n%s", source_code)
+        return self.cutlass(XPUCodeCache, source_code, dst_file_ext, aot_compile)
 
     def rocm(
         self,
@@ -695,6 +703,12 @@ class AsyncCompile:
             future = self.submit(task)
             return LambdaFuture(lambda: future.result())
 
+    def metal(self, kernel_name: str, source: str, headers: list[str]) -> None:
+        """Register a Metal kernel body; wait() compiles all registered kernels into one library."""
+        if self._metal_sources is None:
+            self._metal_sources = []
+        self._metal_sources.append((kernel_name, source, headers))
+
     def wait(self, scope: dict[str, Any]) -> None:
         if get_compile_threads() > 1:
             with dynamo_timed(
@@ -705,6 +719,12 @@ class AsyncCompile:
                 waitcounter_name_override="compile_triton",
             ):
                 self._wait_futures(scope)
+
+        if self._metal_sources:
+            from torch._inductor.runtime.runtime_utils import compile_mps_shaders
+
+            scope.update(compile_mps_shaders(self._metal_sources))
+            self._metal_sources.clear()
 
         _compile_end()
 

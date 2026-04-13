@@ -671,7 +671,9 @@ use_pre_grad_passes: bool = True
 #   requires custom passes to implement uuid() for the cache key.
 # "default": resolves to "late" when possible (no custom pass, or custom pass
 #   with uuid), falls back to "early" otherwise.
-pre_grad_pass_timing: Literal["early", "late", "default"] = "default"
+pre_grad_pass_timing: Literal["early", "late", "default"] = (
+    "late" if is_fbcode() else "default"
+)
 
 
 use_joint_graph_passes: bool = True
@@ -822,7 +824,17 @@ assume_unaligned_fallback_output = (
     os.environ.get("TORCHINDUCTOR_ASSUME_UNALIGNED_FALLBACK_OUTPUT") == "1"
 )
 
-# Custom InductorChoices callable to use (can be a class or functools.partial with kwargs)
+# Factory callable that returns a custom InductorChoices instance.
+# A callable (rather than a class) is used to defer imports and avoid circular
+# dependencies between config and the choices module. Example:
+#
+#     def _custom_choices_factory():
+#         from my_package.choices import MyInductorChoices
+#         return MyInductorChoices()
+#
+#     config.inductor_choices_class = _custom_choices_factory
+#
+# The returned instance must implement uuid() for cache key serialization.
 inductor_choices_class: Callable[[], "InductorChoices"] | None = None
 
 # fuse even in cases without common reads
@@ -1131,6 +1143,14 @@ class aten_distributed_optimizations:
     # as atomic units with memory-bound runtime estimates.
     enable_fusion_regions: bool | None = None
 
+    # Default bucketing mode for auto and manual overlap scheduling
+    # "default": traced bucketing, fully lowered by inductor during compilation
+    # "custom_ops": temporary bucketing using custom ops to hide parts from inductor
+    # "custom_ops_multidtype": same as custom_ops but buckets multiple dtypes
+    #     (e.g. bf16 and fp32) into one bucket
+    # None means "auto" — the compiler picks the best mode
+    bucket_mode: Literal["default", "custom_ops", "custom_ops_multidtype"] | None = None
+
     # Prioritize bucketing during overlap scheduling by grouping candidates by bucket key
     prioritize_bucketing_during_scheduling: bool = True
 
@@ -1143,9 +1163,6 @@ class aten_distributed_optimizations:
     # RuntimeError. "error" fails fast instead of risking silent NCCL hang.
     # TODO(ivankobzarev): change default to "error" after real-world testing.
     spmd_mismatch: Literal["warn", "error"] = "warn"
-
-    # Bucket mode for collective bucketing in overlap scheduling
-    bucket_mode: Literal["default", "custom_ops", "custom_ops_multidtype"] | None = None
 
     # When True, automatically remove extra deps that create cycles instead of
     # raising an error.  Set this to True as a workaround if overlap scheduling
@@ -1766,6 +1783,15 @@ class triton:
         os.environ.get("TORCHINDUCTOR_PERSISTENT_REDUCTIONS", "1") == "1"
     )
 
+    # Decompose sort-based ops (sort, mode, median) to generate Triton
+    # kernels instead of falling back to ATen eager.  When enabled, sort
+    # removes the default 512-element dimension limit and uses int32
+    # indices (up to 2^31-1 elements), and mode/median decompose into
+    # sort + reduction / pointwise ops that Inductor can lower to Triton.
+    decompose_sort_ops: bool = (
+        os.environ.get("TORCHINDUCTOR_DECOMPOSE_SORT_OPS", "0") == "1"
+    )
+
     # For small output size reductions uses cross thread-block synchronization to gain more parallelism
     cooperative_reductions = (
         os.environ.get("TORCHINDUCTOR_COOPERATIVE_REDUCTIONS", "0") == "1"
@@ -1938,6 +1964,11 @@ class aot_inductor:
 
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
     debug_symbols = os.environ.get("AOT_INDUCTOR_DEBUG_SYMBOLS", "0") == "1"
+
+    # Enable frame pointers for profiling tools (e.g. strobelight)
+    enable_frame_pointer = (
+        os.environ.get("AOT_INDUCTOR_ENABLE_FRAME_POINTER", "0") == "1"
+    )
 
     # Annotate generated main wrapper function, i.e. AOTInductorModel::run_impl,
     # to use which cpp compiler optimization level, default to O1
@@ -2283,6 +2314,11 @@ class xpu(cutlass):
     # e.g. "20250201".
     version: str | None = None
 
+    # Path to Intel OneAPI.
+    oneapi_root: str | None = None
+
+    cutlass_dir = os.path.realpath(os.environ.get("TORCHINDUCTOR_CUTLASS_DIR", ""))
+
 
 class rocm:
     # Offload arch list for device code compilation, e.g. ["gfx90a", "gfx942"].
@@ -2523,6 +2559,12 @@ _cache_config_ignore_prefix: list[str] = [
     "fx_graph_remote_cache",
     "autotune_local_cache",
     "autotune_remote_cache",
+]
+
+# Config keys whose values are callable factories. save_config_portable will
+# instantiate the factory and use .uuid() for serialization.
+_cache_config_factory_keys: list[str] = [
+    "inductor_choices_class",
 ]
 
 # External callable for matmul tuning candidates

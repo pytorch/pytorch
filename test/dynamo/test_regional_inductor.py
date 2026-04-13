@@ -1528,8 +1528,9 @@ class TestRegionalOutputCode(torch._inductor.test_case.TestCase):
 class RegionalInductorPartitionTests(torch._inductor.test_case.TestCase):
     """Tests for _RegionScooper partitioning behavior.
 
-    Ensures that non-contiguous annotated regions are NOT horizontally fused
-    into a single compiled partition.
+    Uses CapabilityBasedPartitioner per region ID. Nodes with the same region ID
+    are merged as aggressively as possible (only cycles prevent merging). Nodes
+    with different region IDs are never merged.
     """
 
     def _make_tag_node(self, g, inp, scalar, tagged):
@@ -1587,11 +1588,9 @@ class RegionalInductorPartitionTests(torch._inductor.test_case.TestCase):
         gm = torch.fx.GraphModule(torch.nn.Module(), g)
         self.assertEqual(self._scoop_and_count(gm), 1)
 
-    def test_parallel_branches_with_gap_not_fused(self):
-        """Two independent tagged nodes separated by an untagged node in
-        topological order must produce 2 partitions, not be horizontally fused.
-
-        The old CapabilityBasedPartitioner would fuse these into 1 partition.
+    def test_parallel_branches_with_gap_same_region(self):
+        """Two independent tagged nodes separated by an untagged node but
+        sharing the same region ID are fused into 1 partition (no cycle).
         """
         g = torch.fx.Graph()
         x = g.placeholder("x")
@@ -1603,7 +1602,74 @@ class RegionalInductorPartitionTests(torch._inductor.test_case.TestCase):
         out.meta["val"] = torch.empty(10)
         g.output(out)
         gm = torch.fx.GraphModule(torch.nn.Module(), g)
+        self.assertEqual(self._scoop_and_count(gm), 1)
+
+    def test_parallel_branches_with_gap_different_regions(self):
+        """Two independent tagged nodes with different region IDs produce
+        2 separate partitions regardless of graph topology.
+        """
+        g = torch.fx.Graph()
+        x = g.placeholder("x")
+        mul_a = self._make_tag_node(g, x, 2.0, tagged=True)
+        mul_a.meta["custom"] = {"compile_with_inductor": {"inductor_region": 0}}
+        sin = g.call_function(torch.ops.aten.sin.default, (x,))
+        sin.meta["val"] = torch.empty(10)
+        mul_b = self._make_tag_node(g, x, 3.0, tagged=True)
+        mul_b.meta["custom"] = {"compile_with_inductor": {"inductor_region": 1}}
+        out = g.call_function(torch.ops.aten.add.Tensor, (mul_a, mul_b))
+        out.meta["val"] = torch.empty(10)
+        g.output(out)
+        gm = torch.fx.GraphModule(torch.nn.Module(), g)
         self.assertEqual(self._scoop_and_count(gm), 2)
+
+    def test_dependent_partitions_merged_across_gap(self):
+        """Two tagged nodes (same region) separated by an untagged node and
+        connected by a data dependency are merged into 1 partition.
+        """
+        g = torch.fx.Graph()
+        x = g.placeholder("x")
+        mul_a = self._make_tag_node(g, x, 2.0, tagged=True)
+        sin = g.call_function(torch.ops.aten.sin.default, (x,))
+        sin.meta["val"] = torch.empty(10)
+        # mul_b consumes mul_a, creating a data dependency across the gap
+        mul_b = self._make_tag_node(g, mul_a, 3.0, tagged=True)
+        g.output(mul_b)
+        gm = torch.fx.GraphModule(torch.nn.Module(), g)
+        self.assertEqual(self._scoop_and_count(gm), 1)
+
+    def test_different_annotations_not_merged(self):
+        """Two tagged nodes with different region IDs are NOT merged,
+        even if connected by a data dependency.
+        """
+        g = torch.fx.Graph()
+        x = g.placeholder("x")
+        mul_a = self._make_tag_node(g, x, 2.0, tagged=True)
+        mul_a.meta["custom"] = {"compile_with_inductor": {"inductor_region": 0}}
+        sin = g.call_function(torch.ops.aten.sin.default, (x,))
+        sin.meta["val"] = torch.empty(10)
+        mul_b = self._make_tag_node(g, mul_a, 3.0, tagged=True)
+        mul_b.meta["custom"] = {"compile_with_inductor": {"inductor_region": 1}}
+        g.output(mul_b)
+        gm = torch.fx.GraphModule(torch.nn.Module(), g)
+        self.assertEqual(self._scoop_and_count(gm), 2)
+
+    def test_chained_merges_across_multiple_gaps(self):
+        """Multiple tagged nodes (same region) with chained data dependencies
+        across untagged gaps are all merged into 1 partition.
+        """
+        g = torch.fx.Graph()
+        x = g.placeholder("x")
+        tagged_a = self._make_tag_node(g, x, 2.0, tagged=True)
+        # Untagged node consuming x (not tagged_a), just occupying a slot
+        filler_1 = g.call_function(torch.ops.aten.sin.default, (x,))
+        filler_1.meta["val"] = torch.empty(10)
+        tagged_b = self._make_tag_node(g, tagged_a, 3.0, tagged=True)
+        filler_2 = g.call_function(torch.ops.aten.sin.default, (x,))
+        filler_2.meta["val"] = torch.empty(10)
+        tagged_c = self._make_tag_node(g, tagged_b, 4.0, tagged=True)
+        g.output(tagged_c)
+        gm = torch.fx.GraphModule(torch.nn.Module(), g)
+        self.assertEqual(self._scoop_and_count(gm), 1)
 
 
 if __name__ == "__main__":

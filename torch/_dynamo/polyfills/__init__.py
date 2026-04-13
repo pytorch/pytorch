@@ -327,7 +327,7 @@ def set_union(
         set_update(union_set, set2)
 
     # frozenset also uses this function
-    # pyrefly: ignore[not-callable]
+    # pyrefly: ignore [bad-argument-count, not-callable]
     return cls(union_set)
 
 
@@ -401,6 +401,11 @@ def getattr_and_trace(*args: Any, **kwargs: Any) -> Any:
     attr_name = args[1]
     fn = getattr(wrapper_obj, attr_name)
     return fn(*args[2:], **kwargs)
+
+
+def getattr_and_trace_no_nested_graph_breaks(*args: Any, **kwargs: Any) -> Any:
+    with torch._dynamo.disable_nested_graph_breaks():
+        return getattr_and_trace(*args, **kwargs)
 
 
 def mapping_get(obj: Mapping[T, U], key: T, value: U | None = None, /) -> U | None:

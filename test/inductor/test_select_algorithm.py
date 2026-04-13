@@ -231,6 +231,23 @@ class TestSelectAlgorithm(TestCase):
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patches
+    def test_bmm_small_m(self):
+        # Verify BMM works when M < BLOCK_M. The triton_bmm template's
+        # tl.max_contiguous/tl.multiple_of hints must be guarded by
+        # M >= BLOCK_M to avoid out-of-bounds vectorized loads (see #179267).
+        @torch.compile
+        def foo(a, b):
+            return torch.bmm(a, b)
+
+        # M=2 is smaller than any BLOCK_M autotuning config (typically >= 16)
+        foo(
+            torch.randn(4, 2, 64, device=GPU_TYPE),
+            torch.randn(4, 64, 32, device=GPU_TYPE),
+        )
+        if not torch.version.hip:
+            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
     def test_mm_not_even_k(self):
         @torch.compile
         def foo(a, b):

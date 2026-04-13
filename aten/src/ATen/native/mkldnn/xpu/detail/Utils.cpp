@@ -287,6 +287,27 @@ void undo_broadcast(at::Tensor& tensor) {
   return;
 }
 
+bool is_64_bytes_aligned(const at::Tensor& tensor) {
+  constexpr uintptr_t alignment_byte = 64;
+  auto data_ptr = reinterpret_cast<uintptr_t>(tensor.const_data_ptr());
+  return (data_ptr % alignment_byte) == 0;
+}
+
+at::Tensor make_contiguous_and_aligned(
+    const at::Tensor& tensor,
+    std::optional<at::MemoryFormat> memory_format) {
+  at::Tensor out = memory_format.has_value() ? tensor.contiguous(*memory_format)
+                                             : tensor.contiguous();
+  if (!is_64_bytes_aligned(out)) {
+    TORCH_WARN(
+        "Tensor is not 64-byte aligned. Cloning to ensure alignment for oneDNN "
+        "operations, which incurs a device-to-device copy.");
+    out = out.clone();
+  }
+
+  return out;
+}
+
 bool is_onednn_matmul_strides(const at::Tensor& tensor) {
   // https://oneapi-src.github.io/oneDNN/dev_guide_matmul.html
   // oneDNN matmul only support 2-dim and 3-dim
@@ -300,11 +321,8 @@ bool is_onednn_matmul_strides(const at::Tensor& tensor) {
   if (tensor.is_contiguous())
     return true;
 
-  if (tensor.storage_offset() > 0) {
-    // currently onednn asks 64 byte alignment
-    constexpr int alignment_byte = 64;
-    if (reinterpret_cast<uintptr_t>(tensor.data_ptr()) % alignment_byte > 0)
-      return false;
+  if (tensor.storage_offset() > 0 && !is_64_bytes_aligned(tensor)) {
+    return false;
   }
 
   // the overlapped cases are not supported

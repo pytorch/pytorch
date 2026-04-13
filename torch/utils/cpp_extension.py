@@ -2261,8 +2261,11 @@ def _jit_compile(name,
                         hipified_sources = set()
                         for source in sources:
                             s_abs = os.path.abspath(source)
-                            hipified_sources.add(hipify_result[s_abs].hipified_path if s_abs in hipify_result else s_abs)
-
+                            if s_abs in hipify_result and hipify_result[s_abs].hipified_path is not None:
+                                hipified_s_abs = hipify_result[s_abs].hipified_path
+                            else:
+                                hipified_s_abs = s_abs
+                            hipified_sources.add(hipified_s_abs)
                         sources = list(hipified_sources)
 
                     _write_ninja_file_and_build_library(

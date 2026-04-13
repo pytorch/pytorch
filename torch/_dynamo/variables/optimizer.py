@@ -44,6 +44,7 @@ from ..utils import GLOBAL_KEY_PREFIX
 from .base import VariableTracker
 from .constant import CONSTANT_VARIABLE_TRUE, ConstantVariable
 from .dicts import ConstDictVariable
+from .hashable import HashableTracker
 from .lists import ListVariable
 from .misc import GetAttrVariable
 from .user_defined import UserDefinedObjectVariable
@@ -148,7 +149,12 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # which will directly inline
         if name in ("_init_group"):
             assert self.source
-            return GetAttrVariable(self, name, source=AttrSource(self.source, name))
+            return GetAttrVariable(
+                self,
+                name,
+                py_type=type(getattr(self.value, name)),
+                source=AttrSource(self.source, name),
+            )
 
         if name == "param_groups":
             from ..decorators import mark_static_address
@@ -207,9 +213,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
             VariableTracker.build(tx, self.value.param_groups, source)
         )
         for param_group_vt in param_groups_vt.items:
-            key = ConstDictVariable._HashableTracker(
-                ConstantVariable.create("capturable")
-            )
+            key = HashableTracker(ConstantVariable.create("capturable"))
             param_group_vt.items[key] = CONSTANT_VARIABLE_TRUE
 
     def get_python_args(
