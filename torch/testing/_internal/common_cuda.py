@@ -260,26 +260,36 @@ def initialize_cuda_context_rng():
 
 @contextlib.contextmanager
 def tf32_off():
-    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
+    old_matmul = torch.backends.cuda.matmul.fp32_precision
+    old_conv = torch._C._get_fp32_precision_getter("cuda", "conv")
+    old_rnn = torch._C._get_fp32_precision_getter("cuda", "rnn")
     try:
-        torch.backends.cuda.matmul.allow_tf32 = False
-        with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False):
-            yield
+        torch.backends.cuda.matmul.fp32_precision = "ieee"
+        torch._C._set_fp32_precision_setter("cuda", "conv", "ieee")
+        torch._C._set_fp32_precision_setter("cuda", "rnn", "ieee")
+        yield
     finally:
-        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
+        torch.backends.cuda.matmul.fp32_precision = old_matmul
+        torch._C._set_fp32_precision_setter("cuda", "conv", old_conv)
+        torch._C._set_fp32_precision_setter("cuda", "rnn", old_rnn)
 
 
 @contextlib.contextmanager
 def tf32_on(self, tf32_precision=1e-5):
-    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
+    old_matmul = torch.backends.cuda.matmul.fp32_precision
+    old_conv = torch._C._get_fp32_precision_getter("cuda", "conv")
+    old_rnn = torch._C._get_fp32_precision_getter("cuda", "rnn")
     old_precision = self.precision
     try:
-        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cuda.matmul.fp32_precision = "tf32"
+        torch._C._set_fp32_precision_setter("cuda", "conv", "tf32")
+        torch._C._set_fp32_precision_setter("cuda", "rnn", "tf32")
         self.precision = tf32_precision
-        with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=True):
-            yield
+        yield
     finally:
-        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
+        torch.backends.cuda.matmul.fp32_precision = old_matmul
+        torch._C._set_fp32_precision_setter("cuda", "conv", old_conv)
+        torch._C._set_fp32_precision_setter("cuda", "rnn", old_rnn)
         self.precision = old_precision
 
 
@@ -289,15 +299,18 @@ def tf32_enabled():
     Context manager to temporarily enable TF32 for CUDA operations.
     Restores the previous TF32 state after exiting the context.
     """
-    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
+    old_matmul = torch.backends.cuda.matmul.fp32_precision
+    old_conv = torch._C._get_fp32_precision_getter("cuda", "conv")
+    old_rnn = torch._C._get_fp32_precision_getter("cuda", "rnn")
     try:
-        torch.backends.cuda.matmul.allow_tf32 = True
-        with torch.backends.cudnn.flags(
-            enabled=None, benchmark=None, deterministic=None, allow_tf32=True
-        ):
-            yield
+        torch.backends.cuda.matmul.fp32_precision = "tf32"
+        torch._C._set_fp32_precision_setter("cuda", "conv", "tf32")
+        torch._C._set_fp32_precision_setter("cuda", "rnn", "tf32")
+        yield
     finally:
-        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
+        torch.backends.cuda.matmul.fp32_precision = old_matmul
+        torch._C._set_fp32_precision_setter("cuda", "conv", old_conv)
+        torch._C._set_fp32_precision_setter("cuda", "rnn", old_rnn)
 
 
 # This is a wrapper that wraps a test to run this test twice, one with
