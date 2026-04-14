@@ -4691,6 +4691,16 @@
       "Hints": []
     }
   ],
+  "GB7286": [
+    {
+      "Gb_type": "nb_float_impl not implemented",
+      "Context": "{type(self).__name__} has nb_float slot but no nb_float_impl override",
+      "Explanation": "The type {self.python_type_name()} has an nb_float C slot but the corresponding VariableTracker doesn't implement nb_float_impl.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0361": [
     {
       "Gb_type": "triton kernel unsupported feature",

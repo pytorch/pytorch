@@ -1489,6 +1489,30 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
         return result
 
+    def nb_float_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        # CPython: slot_nb_float calls __float__(), PyNumber_Float validates the return type.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1647-L1658
+        source = self.source and self.get_source_by_walking_mro(tx, "__float__")
+        method_var = self.resolve_type_attr(
+            tx,
+            "__float__",
+            inspect.getattr_static(type(self.value), "__float__"),
+            source,
+        )
+        result = method_var.call_function(tx, [], {})
+        if not issubclass(result.python_type(), float):
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    f"__float__ returned non-float (type {result.python_type().__name__})"
+                ],
+            )
+        return result
+
     def torch_function_check(self) -> None:
         assert has_torch_function(self), (
             f"calling torch function on object without __torch_function__ {self}"

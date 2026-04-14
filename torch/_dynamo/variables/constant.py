@@ -414,6 +414,15 @@ its type to `common_constant_types`.
         # float defines nb_int (truncates toward zero via PyLong_FromDouble).
         return ConstantVariable.create(int(self.value))
 
+    def nb_float_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        # CPython: float defines nb_float (float_float, returns copy).
+        # int defines nb_float (long_float, converts to float).
+        # bool inherits nb_float from int via slot inheritance.
+        return ConstantVariable.create(float(self.value))
+
 
 CONSTANT_VARIABLE_NONE = ConstantVariable(None)
 CONSTANT_VARIABLE_TRUE = ConstantVariable(True)
