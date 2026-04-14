@@ -36,7 +36,7 @@ static void isin_Tensor_Tensor_out_mps(const Tensor& elements,
   if (elements.numel() == 0) {
     return;
   }
-  
+
   if (test_elements.numel() == 0) {
     if (invert) {
       auto ones = ones_like(out);
@@ -51,12 +51,11 @@ static void isin_Tensor_Tensor_out_mps(const Tensor& elements,
   TORCH_CHECK(elements.is_mps() && test_elements.is_mps());
 
   const auto common_type = at::result_type(elements, test_elements);
-  TORCH_CHECK(
-      common_type == kFloat || common_type == kHalf || common_type == kBFloat16 ||
-          common_type == kInt || common_type == kLong || common_type == kShort ||
-          common_type == kChar || common_type == kByte || common_type == kBool,
-      "isin_mps: unsupported dtype ",
-      common_type);
+  TORCH_CHECK(common_type == kFloat || common_type == kHalf || common_type == kBFloat16 || common_type == kInt ||
+                  common_type == kLong || common_type == kShort || common_type == kChar || common_type == kByte ||
+                  common_type == kBool,
+              "isin_mps: unsupported dtype ",
+              common_type);
   const Tensor elements_c = elements.to(common_type).contiguous();
   const Tensor test_elements_c = test_elements.to(common_type).contiguous();
   Tensor out_c = out.is_contiguous() ? out : at::empty_like(out, at::MemoryFormat::Contiguous);

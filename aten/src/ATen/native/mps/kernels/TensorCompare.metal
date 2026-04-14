@@ -21,13 +21,13 @@ kernel void isin(
   out[tid] = (bool)(found != (bool)invert);
 }
 
-#define REGISTER_ISIN_OP(T)                                              \
-  template [[host_name("isin_" #T)]] kernel void isin<T>(               \
-      constant T* elements [[buffer(0)]],                                \
-      constant T* test_elements [[buffer(1)]],                           \
-      device bool* out [[buffer(2)]],                                    \
-      constant int64_t& numel_test [[buffer(3)]],                        \
-      constant int64_t& invert [[buffer(4)]],                            \
+#define REGISTER_ISIN_OP(T)                               \
+  template [[host_name("isin_" #T)]] kernel void isin<T>( \
+      constant T * elements [[buffer(0)]],                \
+      constant T * test_elements [[buffer(1)]],           \
+      device bool* out [[buffer(2)]],                     \
+      constant int64_t& numel_test [[buffer(3)]],         \
+      constant int64_t& invert [[buffer(4)]],             \
       uint tid [[thread_position_in_grid]]);
 
 REGISTER_ISIN_OP(float);

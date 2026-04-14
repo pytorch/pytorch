@@ -231,7 +231,9 @@ def bench_isin(
         (1_000_000, 4_096),
     ]:
         elements = torch.testing.make_tensor(n_elements, device=device, dtype=dtype)
-        test_elements = torch.testing.make_tensor(n_test_elements, device=device, dtype=dtype)
+        test_elements = torch.testing.make_tensor(
+            n_test_elements, device=device, dtype=dtype
+        )
         r_e, r_c = f(elements, test_elements), f_c(elements, test_elements)
         if not torch.equal(r_e, r_c):
             warnings.warn(
