@@ -238,6 +238,7 @@ class TracerBase:
 
                 if fx_traceback.GRADIENT_ACC_SPECIAL_STACK in stack_trace:
                     node.meta["is_gradient_acc"] = True
+                    node.meta["autograd_backward"] = True
 
             # Explicitly set the stack_trace, nn_module_stack and source_fn on the node.meta
             # If other meta fields are needed, they can be added here
@@ -262,6 +263,9 @@ class TracerBase:
                     node.meta["custom"] = replay_node.meta.get("custom")
                 if "stack_trace" in replay_node.meta:
                     node.stack_trace = replay_node.meta.get("stack_trace")
+
+            if current_meta.get("autograd_backward", False):
+                node.meta["autograd_backward"] = True
 
         elif self.module_stack:
             node.meta["nn_module_stack"] = copy.copy(self.module_stack)

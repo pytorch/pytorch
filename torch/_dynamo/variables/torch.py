@@ -2440,7 +2440,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             with (
                 torch.fx.traceback.preserve_node_meta(),
-                torch.fx.traceback.annotate({"autograd_backward": True}),
+                torch.fx.traceback._set_autograd_backward(),
             ):
                 proxy = tx.output.create_proxy(
                     "call_function",
