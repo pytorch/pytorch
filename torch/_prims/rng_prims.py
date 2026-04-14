@@ -337,6 +337,8 @@ def register_graphsafe_run_with_rng_state_op():
 
     @graphsafe_run_with_rng_state.py_impl(DispatchKey.CUDA)
     def impl_cuda(op, *args, rng_state=None, **kwargs):
+        if isinstance(rng_state, OpaqueGenerator):
+            rng_state = rng_state.generator
         # pyrefly: ignore [missing-attribute]
         device_idx = rng_state.device.index
         generator = torch.cuda.default_generators[device_idx]
@@ -392,6 +394,26 @@ def register_graphsafe_run_with_rng_state_op():
 
 
 graphsafe_run_with_rng_state = register_graphsafe_run_with_rng_state_op()
+
+
+class OpaqueGenerator(torch._opaque_base.OpaqueBase):
+    """Opaque wrapper around torch._C.Generator for FX tracing.
+
+    torch._C.Generator doesn't support weakref or __dict__, so it can't be
+    tracked by FX's proxy infrastructure directly. This wrapper implements the
+    opaque reference type protocol so generators flow through make_fx properly.
+    Generators are stateful objects, so reference semantics are appropriate.
+    """
+
+    def __init__(self, generator: torch.Generator) -> None:
+        self.generator = generator
+
+    @property
+    def device(self) -> torch.device:
+        return self.generator.device
+
+
+torch._library.opaque_object.register_opaque_type(OpaqueGenerator, typ="reference")
 
 
 def register_run_dtensor_rng_op():
