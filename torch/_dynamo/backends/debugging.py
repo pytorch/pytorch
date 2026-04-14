@@ -36,6 +36,7 @@ from torch import _guards
 from torch._dynamo.output_graph import GraphCompileReason
 from torch._functorch import config as functorch_config
 from torch._functorch.compilers import ts_compile
+from torch._inductor.output_code import OutputCode
 
 from .common import aot_autograd
 from .registry import CompiledFn, CompilerFn, register_debug_backend as register_backend
@@ -261,6 +262,54 @@ def invoke_subgraph(
     )(gm, fake_tensor_inputs)
 
 
+@dataclasses.dataclass
+class AOTEagerOutputCode(OutputCode):
+    """
+    An OutputCode that wraps a GraphModule for eager-mode execution.
+
+    This allows non-inductor backends (like aot_eager) to participate in
+    the bundled autograd cache and aot_compile serialization flow.
+    """
+
+    gm: torch.fx.GraphModule | None = None
+    _serialized_gm: bytes | None = dataclasses.field(default=None, init=False)
+
+    def __call__(self, inputs: Any) -> Any:
+        assert self.gm is not None
+        return self.gm.forward(inputs)
+
+    def prepare_for_serialization(self) -> None:
+        from torch.fx._graph_pickler import GraphPickler, Options
+
+        assert self.gm is not None
+        for node in self.gm.graph.nodes:
+            node.meta.pop("nn_module_stack", None)
+            node.meta.pop("source_fn_stack", None)
+            node.meta.pop("example_value", None)
+
+        self._serialized_gm = GraphPickler.dumps(self.gm, Options(ops_filter=None))
+        self.gm = None
+
+    def post_compile(self, *args: Any, **kwargs: Any) -> None:
+        if self.gm is None and self._serialized_gm is not None:
+            from torch._subclasses import FakeTensorMode
+            from torch.fx._graph_pickler import GraphPickler
+            from torch.fx.experimental.symbolic_shapes import ShapeEnv
+            from torch.fx.graph import _BoxedCodeGen
+
+            fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+            gm = GraphPickler.loads(self._serialized_gm, fake_mode)
+            assert isinstance(gm, torch.fx.GraphModule)
+            self.gm = gm
+            assert isinstance(self.gm, torch.fx.GraphModule)
+            self.gm.graph.set_codegen(_BoxedCodeGen())
+            self.gm.recompile()
+            self._serialized_gm = None
+
+    def set_triton_bundle(self, triton_bundle: Any) -> None:
+        pass
+
+
 # used boxed call to discard inputs when they are no longer needed
 def boxed_nop(
     fx_g: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
@@ -270,6 +319,11 @@ def boxed_nop(
     # Set the graph to use boxed codegen
     fx_g.graph.set_codegen(_BoxedCodeGen())
     fx_g.recompile()
+
+    if functorch_config.force_autograd_cache or functorch_config.bundled_autograd_cache:
+        result = AOTEagerOutputCode(gm=fx_g)
+        result._boxed_call = True  # type: ignore[attr-defined]
+        return result
 
     # Wrap the forward method in a function so we can set _boxed_call attribute
     forward_fn = fx_g.forward
