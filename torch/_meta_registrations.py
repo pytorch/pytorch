@@ -5722,11 +5722,22 @@ def meta_zeros(
 
 @register_meta(aten.select_scatter.default)
 def meta_select_scatter(self, src, dim, index):
-    return utils.clone_preserve_strides(self)
+    return _scatter_meta_output(self)
 
 
 @register_meta(aten.slice_scatter.default)
 def meta_slice_scatter(self, src, dim=0, start=None, end=None, step=1):
+    return _scatter_meta_output(self)
+
+
+def _scatter_meta_output(self):
+    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+    # Match clone_preserve_strides() in aten/native/TensorShape.cpp: overlapping
+    # bases cannot preserve their logical strides because the scatter writes would
+    # alias, so eager falls back to clone().
+    if not free_unbacked_symbols(self) and torch._debug_has_internal_overlap(self) == 1:
+        return self.clone()
     return utils.clone_preserve_strides(self)
 
 
