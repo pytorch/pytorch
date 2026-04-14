@@ -133,7 +133,6 @@ ncclRedOpRAII getNcclReduceOp(
           C10_THROW_ERROR(
               TypeError,
               "PreMulSum Data type must be half, float, bfloat16 or double");
-          return ncclRedOp_t{};
       }
 #else
       C10_THROW_ERROR(ValueError, "PreMulSum requires NCCL>=2.11.1");

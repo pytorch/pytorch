@@ -56,7 +56,6 @@ std::string opTypeToString(OpType opType) {
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown op type!");
   }
-  return "UNKNOWN";
 }
 
 bool isP2POp(OpType opType, bool batchP2P /*= false*/) {

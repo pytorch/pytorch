@@ -387,7 +387,6 @@ bool InterpreterState::run(Stack& stack) {
     //    }
     //  }
   }
-  return false;
 }
 
 IValue& InterpreterState::reg(size_t reg) {

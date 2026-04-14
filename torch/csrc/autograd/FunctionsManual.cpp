@@ -2317,7 +2317,6 @@ Tensor error_for_max_pool2d_double_backward() { // This is mps-only.
       "max_pool2d with `return_indices=False` is not infinitely differentiable.",
       " If you want to calculate higher order derivatives, e.g. second order,",
       " set `return_indices=True`.");
-  return Tensor();
 }
 
 Tensor glu_double_backward(
