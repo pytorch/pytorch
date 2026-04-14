@@ -354,7 +354,6 @@ manual_torch_name_rule_map: dict[
     "torch._dynamo.nonstrict_trace": UserFunctionVariable,
     "torch._dynamo.bytecode_debugger.breakpoint": UserFunctionVariable,
     "torch._dynamo.patch_dynamo_config": UserFunctionVariable,
-    "torch._dynamo.disable_nested_graph_breaks": UserFunctionVariable,
     "torch._dynamo.error_on_graph_break": UserFunctionVariable,
     "torch._dynamo.override_cudagraphs": UserFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
