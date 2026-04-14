@@ -814,12 +814,15 @@ void sdpa(
   auto& eng = GpuEngineManager::Instance().get_engine();
   auto& strm = GpuStreamManager::Instance().get_stream();
 
-  // Ensure query, key, value satisfy OneDNN Block 2D Copy alignment
-  // requirements (64-byte base address). Attention and logsumexp are
+  // Ensure query, key, value, and attn_mask satisfy OneDNN Block 2D Copy
+  // alignment requirements (64-byte base address). Attention and logsumexp are
   // guaranteed to be aligned because they are newly allocated.
   const Tensor query_aligned = ensure_alignment_for_sdpa(query);
   const Tensor key_aligned = ensure_alignment_for_sdpa(key);
   const Tensor value_aligned = ensure_alignment_for_sdpa(value);
+  if (attn_mask.has_value()) {
+    attn_mask = ensure_alignment_for_sdpa(*attn_mask);
+  }
 
   const auto get_tril_mask = [&]() {
     auto opts = query_aligned.options();
