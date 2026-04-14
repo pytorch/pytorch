@@ -533,8 +533,6 @@ for batch_ndx, sample in enumerate(loader):
 ```
 
 ```{eval-rst}
-.. automodule:: torch.utils.data.datapipes.iter.streamreader
-
 .. currentmodule:: torch.utils.data.datapipes.iter.streamreader
 
 .. autosummary::
@@ -545,8 +543,6 @@ for batch_ndx, sample in enumerate(loader):
 ```
 
 ```{eval-rst}
-.. automodule:: torch.utils.data.datapipes.utils.common
-
 .. currentmodule:: torch.utils.data.datapipes.utils.common
 
 .. autosummary::

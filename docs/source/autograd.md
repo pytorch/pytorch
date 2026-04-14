@@ -483,8 +483,6 @@ Also see {ref}`saved-tensors-hooks-doc`.
 ```
 
 ```{eval-rst}
-.. automodule:: torch.autograd.variable
-
 .. currentmodule:: torch.autograd.variable
 
 .. autosummary::
