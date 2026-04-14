@@ -827,34 +827,6 @@ class TestMaxAutotune(TestCase):
         with config.patch({"max_autotune": True}):
             torch.compile(mm, dynamic=dynamic)(a, b)
 
-    @fresh_cache()
-    def test_addmm_1d_bias_no_reinterpret_tensor(self):
-        """
-        Verify that aten addmm with 1D bias does not wrap bias in reinterpret_tensor.
-        This ensures cublasLt uses its optimized bias epilogue (requires dim==1).
-        """
-
-        def addmm(x, a, b):
-            return torch.addmm(x, a, b)
-
-        x = torch.randn(100).to(GPU_TYPE)
-        a = torch.randn(100, 10).to(GPU_TYPE)
-        b = torch.randn(10, 100).to(GPU_TYPE)
-
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "ATEN",
-            }
-        ):
-            Y_compiled, code = run_and_get_code(torch.compile(addmm), x, a, b)
-            Y = addmm(x, a, b)
-            torch.testing.assert_close(Y_compiled, Y, atol=1e-2, rtol=1e-2)
-
-            # Verify addmm is called without reinterpret_tensor on bias
-            FileCheck().check("addmm").run(code[0])
-            self.assertNotIn("addmm(reinterpret_tensor", code[0])
-
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
@@ -2765,6 +2737,58 @@ class TestMaxAutotune(TestCase):
                 _ = compiled_fn(bias, x, w)
         finally:
             clear_preprocessing_fns(clear_defaults=False)
+
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "ATEN",
+            "triton.autotune_cublasLt": True,
+            "triton.native_matmul": False,
+        }
+    )
+    def test_rocm_addmm_aten_bias_input_is_1d(self):
+        """
+        ROCm regression test for addmm autotune input wiring.
+        A 1D bias is required for hipBLASLt bias-fused addmm kernels; expanded 2D
+        bias disables that fused path. Exercise the real bias_addmm heuristic
+        so regressions in the runtime path are caught as part of this test.
+        """
+        bias_input_ranks: dict[str, set[int]] = {"addmm": set(), "bias_addmm": set()}
+
+        def capture_bias_input_rank(choices):
+            for choice in choices:
+                if isinstance(choice, ExternKernelCaller) and choice.name in (
+                    "addmm",
+                    "bias_addmm",
+                ):
+                    bias_node = choice.input_nodes[0]
+                    bias_input_ranks[choice.name].add(len(bias_node.get_size()))
+            return choices
+
+        add_preprocessing_fn(capture_bias_input_rank)
+        try:
+            bias = torch.randn(64, device=GPU_TYPE)
+            mat1 = torch.randn(32, 128, device=GPU_TYPE)
+            mat2 = torch.randn(128, 64, device=GPU_TYPE)
+
+            compiled_fn = torch.compile(
+                lambda b, x, w: torch.addmm(b, x, w),
+                dynamic=False,
+            )
+            _ = compiled_fn(bias, mat1, mat2)
+
+            self.assertTrue(
+                bias_input_ranks["addmm"], "Expected ATen addmm choice to be generated"
+            )
+            self.assertTrue(
+                bias_input_ranks["bias_addmm"],
+                "Expected ATen bias_addmm choice to be generated",
+            )
+            self.assertEqual(bias_input_ranks["addmm"], {1})
+            self.assertEqual(bias_input_ranks["bias_addmm"], {1})
+        finally:
+            clear_preprocessing_fns()
 
     @config.patch(
         {"test_configs.max_mm_configs": 4, "max_autotune_gemm_backends": "TRITON"}
