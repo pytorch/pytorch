@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 
+#include <cstdint>
 #include <cstring>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
@@ -130,6 +131,112 @@ struct PostOpParam {
   dnnl::algorithm algo_ = dnnl::algorithm::eltwise_relu;
   kind_t kind_ = kind_t::eltwise;
 };
+
+namespace detail {
+
+struct PostOpsMatmulKeySink {
+  dnnl::memory::dims& key;
+  const PostOpParam* cur_ = nullptr;
+
+  void bind_curr(const PostOpParam& op) {
+    cur_ = &op;
+  }
+
+  void push_op_kind(kind_t kind) {
+    key.push_back(static_cast<dnnl::memory::dim>(kind));
+  }
+
+  static void push_f32(dnnl::memory::dims& d, float f) {
+    uint32_t u = 0;
+    static_assert(sizeof(float) == sizeof(uint32_t));
+    std::memcpy(&u, &f, sizeof(float));
+    d.push_back(static_cast<dnnl::memory::dim>(u));
+  }
+
+  void append_eltwise(
+      dnnl::algorithm aalgorithm, float alpha, float beta) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(cur_ != nullptr);
+    push_f32(key, cur_->scale_);
+    push_f32(key, alpha);
+    push_f32(key, beta);
+    key.push_back(static_cast<dnnl::memory::dim>(static_cast<int>(aalgorithm)));
+  }
+
+  void append_sum(
+      float scale,
+      std::int32_t zero_point,
+      dnnl::memory::data_type data_type =
+          dnnl::memory::data_type::undef) {
+    (void)data_type;
+    push_f32(key, scale);
+    key.push_back(static_cast<dnnl::memory::dim>(zero_point));
+  }
+
+  void append_binary(
+      dnnl::algorithm aalgorithm, const dnnl::memory::desc& src1_desc) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(cur_ != nullptr);
+    (void)aalgorithm;
+    (void)src1_desc;
+    const PostOpParam& op = *cur_;
+    push_f32(key, op.scale_);
+    key.push_back(static_cast<dnnl::memory::dim>(static_cast<int>(op.algo_)));
+    if (op.binary_.defined()) {
+      key.push_back(static_cast<dnnl::memory::dim>(op.binary_.dim()));
+      for (int64_t i = 0; i < op.binary_.dim(); ++i) {
+        key.push_back(op.binary_.size(i));
+        key.push_back(op.binary_.stride(i));
+      }
+      key.push_back(static_cast<dnnl::memory::dim>(
+          static_cast<int>(c10::toUnderlying(op.binary_.scalar_type()))));
+    } else {
+      key.push_back(-1);
+    }
+    const auto md_dims = op.meta_.get_dims();
+    if (!md_dims.empty()) {
+      key.insert(key.end(), md_dims.begin(), md_dims.end());
+      key.push_back(static_cast<dnnl::memory::dim>(
+          static_cast<int>(op.meta_.get_data_type())));
+      const auto md_strides = op.meta_.get_strides();
+      key.insert(key.end(), md_strides.begin(), md_strides.end());
+    }
+  }
+
+  void append_prelu(int mask) {
+    key.push_back(static_cast<dnnl::memory::dim>(mask));
+  }
+
+  void unknown_post_op_kind() {
+    key.push_back(-999);
+  }
+};
+
+} // namespace detail
+
+inline void fp_matmul_post_sink_bind_curr(
+    dnnl::post_ops& /*sink*/,
+    const PostOpParam& /*op*/) noexcept {}
+
+inline void fp_matmul_post_sink_bind_curr(
+    detail::PostOpsMatmulKeySink& sink,
+    const PostOpParam& op) {
+  sink.bind_curr(op);
+}
+
+inline void fp_matmul_post_sink_push_kind(
+    dnnl::post_ops& /*sink*/,
+    kind_t /*kind*/) noexcept {}
+
+inline void fp_matmul_post_sink_push_kind(
+    detail::PostOpsMatmulKeySink& sink,
+    kind_t kind) {
+  sink.push_op_kind(kind);
+}
+
+inline void fp_matmul_post_sink_on_unknown(dnnl::post_ops& /*sink*/) noexcept {}
+
+inline void fp_matmul_post_sink_on_unknown(detail::PostOpsMatmulKeySink& sink) {
+  sink.unknown_post_op_kind();
+}
 
 class Attr {
  public:
@@ -272,44 +379,8 @@ class Attr {
   }
 
   dnnl::post_ops extract_post_ops() {
-    // this function is used to extract post ops params from the ops_params_
-    // and put them into onednn post ops
-    for (size_t i = 0; i < ops_params_.size(); ++i) {
-      kind_t kind = ops_params_[i].kind_;
-      switch (kind) {
-        case kind_t::eltwise: {
-          dnnl::algorithm algo = ops_params_[i].algo_;
-          float alpha = ops_params_[i].alpha_;
-          float beta = ops_params_[i].beta_;
-          dnnl_post_ops_.append_eltwise(algo, alpha, beta);
-          break;
-        }
-        case kind_t::sum: {
-          float scale = ops_params_[i].scale_;
-          int64_t zero_point = ops_params_[i].zero_point_;
-          // TODO [Asymmetric]:
-          // Post-sum zp for gpu is not supported currently
-          dnnl_post_ops_.append_sum(scale, zero_point);
-          break;
-        }
-        case kind_t::binary: {
-          dnnl::algorithm algo = ops_params_[i].algo_;
-          auto expected_md = ops_params_[i].expected_meta_;
-          // In this case user may create src1 memory descriptor with
-          // format_tag::any or set a specific tag. However, in later case if
-          // tags mismatch with dst, it would result in suboptimal performance.
-          // So here we use format_tag::any to make sure the fast can be
-          // selected.
-          // Thus we use expected_md (with format_any) here to create pd instead
-          // of original md
-          dnnl_post_ops_.append_binary(algo, expected_md);
-          break;
-        }
-        default:
-          break;
-      }
-    }
-
+    dnnl_post_ops_ = dnnl::post_ops();
+    emit_post_ops_for_matmul_cache_and_dnnl(dnnl_post_ops_);
     return dnnl_post_ops_;
   }
 
@@ -372,46 +443,36 @@ class Attr {
     key.push_back(static_cast<dnnl::memory::dim>(ops_params_.size()));
     push_f32(q_scale_);
     key.push_back(static_cast<dnnl::memory::dim>(q_zero_point_));
+    detail::PostOpsMatmulKeySink key_sink{key};
+    emit_post_ops_for_matmul_cache_and_dnnl(key_sink);
+    return key;
+  }
+
+ private:
+  template <typename PostOpsSink>
+  void emit_post_ops_for_matmul_cache_and_dnnl(PostOpsSink&& sink) const {
     for (const auto& op : ops_params_) {
-      key.push_back(static_cast<dnnl::memory::dim>(op.kind_));
-      const kind_t post_kind = op.kind_;
-      if (post_kind == kind_t::eltwise) {
-        push_f32(op.scale_);
-        push_f32(op.alpha_);
-        push_f32(op.beta_);
-        key.push_back(static_cast<dnnl::memory::dim>(static_cast<int>(op.algo_)));
-      } else if (post_kind == kind_t::sum) {
-        push_f32(op.scale_);
-        key.push_back(static_cast<dnnl::memory::dim>(op.zero_point_));
-      } else if (post_kind == kind_t::binary) {
-        push_f32(op.scale_);
-        key.push_back(static_cast<dnnl::memory::dim>(static_cast<int>(op.algo_)));
-        if (op.binary_.defined()) {
-          key.push_back(static_cast<dnnl::memory::dim>(op.binary_.dim()));
-          for (int64_t i = 0; i < op.binary_.dim(); ++i) {
-            key.push_back(op.binary_.size(i));
-            key.push_back(op.binary_.stride(i));
-          }
-          key.push_back(static_cast<dnnl::memory::dim>(
-              static_cast<int>(c10::toUnderlying(op.binary_.scalar_type()))));
-        } else {
-          key.push_back(-1);
-        }
-        const auto md_dims = op.meta_.get_dims();
-        if (!md_dims.empty()) {
-          key.insert(key.end(), md_dims.begin(), md_dims.end());
-          key.push_back(static_cast<dnnl::memory::dim>(
-              static_cast<int>(op.meta_.get_data_type())));
-          const auto md_strides = op.meta_.get_strides();
-          key.insert(key.end(), md_strides.begin(), md_strides.end());
-        }
-      } else if (post_kind == kind_t::prelu) {
-        key.push_back(static_cast<dnnl::memory::dim>(op.mask_));
-      } else {
-        key.push_back(-999);
+      fp_matmul_post_sink_bind_curr(sink, op);
+      fp_matmul_post_sink_push_kind(sink, op.kind_);
+      switch (op.kind_) {
+        case kind_t::eltwise:
+          sink.append_eltwise(op.algo_, op.alpha_, op.beta_);
+          break;
+        case kind_t::sum:
+          sink.append_sum(
+              op.scale_, static_cast<std::int32_t>(op.zero_point_));
+          break;
+        case kind_t::binary:
+          sink.append_binary(op.algo_, op.expected_meta_);
+          break;
+        case kind_t::prelu:
+          sink.append_prelu(op.mask_);
+          break;
+        default:
+          fp_matmul_post_sink_on_unknown(sink);
+          break;
       }
     }
-    return key;
   }
 
   float q_scale_ = 1.0; // the scale used to quantize the fused result from fp32
