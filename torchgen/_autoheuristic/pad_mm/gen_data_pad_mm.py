@@ -1,3 +1,4 @@
+import csv
 import random
 import sys
 from collections.abc import Generator
@@ -15,6 +16,9 @@ from benchmark_utils import (  # type: ignore[import-not-found]
     set_precision,
     transpose_tensors,
 )
+from collect_known_mm_shapes import (
+    collect_known_mm_shapes,  # type: ignore[import-not-found]
+)
 
 import torch
 from torch._inductor.fx_passes.pad_mm import (  # type: ignore[import-not-found]
@@ -30,11 +34,89 @@ class BenchmarkRunnerPadMM(BenchmarkRunner):  # type: ignore[misc, no-any-unimpo
 
     def __init__(self) -> None:
         super().__init__("pad_mm")
-        # Initialize the shape generator
+
+        # Add CLI argument for additional shape CSV files
+        self.parser.add_argument(
+            "--additional-shape-csv",
+            nargs="*",
+            default=[],
+            help="List of CSV files containing additional matrix multiplication shapes (M,K,N,dtype format)",
+        )
+
+        # Initialize additional_shape_collections
+        self.additional_shape_collections: list[
+            list[tuple[int, int, int, torch.dtype, torch.dtype]]
+        ] = []
+
+        # Initialize the shape generator (will be set up after parsing args)
+        self.shape_generator = None
+
+    def load_shapes_from_csv(
+        self, csv_file: str
+    ) -> list[tuple[int, int, int, torch.dtype, torch.dtype]]:
+        """Load matrix multiplication shapes from a CSV file in M,K,N,dtype format."""
+        shapes = []
+        dtype_map = {
+            "float16": torch.float16,
+            "bfloat16": torch.bfloat16,
+            "float32": torch.float32,
+        }
+
+        try:
+            with open(csv_file) as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    m = int(row["M"])
+                    k = int(row["K"])
+                    n = int(row["N"])
+                    dtype_str = row["dtype"]
+
+                    if dtype_str in dtype_map:
+                        dtype = dtype_map[dtype_str]
+                        # Store as (m, k, n, dtype1, dtype2) with same dtype for both
+                        shapes.append((m, k, n, dtype, dtype))
+                    else:
+                        print(
+                            f"Warning: Unknown dtype '{dtype_str}' in {csv_file}, skipping row"
+                        )
+
+            print(f"Loaded {len(shapes)} shapes from {csv_file}")
+        except Exception as e:
+            print(f"Error loading shapes from {csv_file}: {e}")
+
+        return shapes
+
+    def setup_shape_collections(self, csv_files: list[str]) -> None:
+        """Setup additional shape collections from CSV files and built-in collection."""
+        self.additional_shape_collections = []
+
+        # Load shapes from provided CSV files first
+        for csv_file in csv_files:
+            shapes = self.load_shapes_from_csv(csv_file)
+            if shapes:
+                self.additional_shape_collections.append(shapes)
+
+        self.additional_shape_collections.append(collect_known_mm_shapes())
         self.shape_generator = self.generate_mm_shapes()
 
     def generate_mm_shapes(self) -> Generator[tuple[int, int, int, Any], None, None]:
-        """Generator that yields (m, k, n, dtype) tuples for matrix multiplication."""
+        """Generator that yields (m, k, n, dtype) tuples for matrix multiplication.
+
+        First exhausts all shapes from additional_shape_collections, then generates random shapes.
+        Only yields unaligned shapes since external CSV shapes may not be pre-filtered.
+        """
+        # Phase 1: Use all shapes from additional shape collections
+        for collection in self.additional_shape_collections:
+            for m, k, n, dtype1, _ in collection:
+                # Filter for unaligned shapes only (external CSVs may not be pre-filtered)
+                align_size = get_alignment_size_dtype(dtype1)
+                if not all(self.is_aligned(dim, align_size) for dim in [m, k, n]):
+                    # Check if it fits in memory
+                    if fits_in_memory(dtype1, m, k, n):
+                        yield (m, k, n, dtype1)
+
+        # Phase 2: Generate infinite random shapes
+
         while True:
             # Generate random dtype
             dtype_choices = [torch.float16, torch.bfloat16, torch.float32]
@@ -150,6 +232,36 @@ class BenchmarkRunnerPadMM(BenchmarkRunner):  # type: ignore[misc, no-any-unimpo
     def prepadded(self, p_prepadded: float = 0.2) -> bool:
         # p_prepadded: probability that a tensor is "prepadded", i.e. pad_mm excludes time it takes to pad from benchmarking
         return random.choices([True, False], [p_prepadded, 1 - p_prepadded])[0]
+
+    def run(self) -> None:
+        """Override run to setup shape collections before running."""
+        import time
+
+        from tqdm import tqdm
+
+        torch.set_default_device("cuda")
+        args = self.parser.parse_args()
+
+        # Setup shape collections based on CLI arguments
+        self.setup_shape_collections(args.additional_shape_csv)
+
+        # Set up torch configuration (copied from parent run method)
+        if args.use_heuristic:
+            torch._inductor.config.autoheuristic_use = self.name
+            torch._inductor.config.autoheuristic_collect = ""
+        else:
+            torch._inductor.config.autoheuristic_use = ""
+            torch._inductor.config.autoheuristic_collect = self.name
+        torch._inductor.config.autoheuristic_log_path = args.o
+        if args.device is not None:
+            torch.cuda.set_device(args.device)
+        random.seed(time.time())
+
+        # Run the main benchmarking loop
+        for _ in tqdm(range(args.num_samples)):
+            input = self.create_input()
+            for _ in range(args.num_reps):
+                self.run_benchmark(*input)
 
 
 if __name__ == "__main__":
