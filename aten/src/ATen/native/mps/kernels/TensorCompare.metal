@@ -5,6 +5,41 @@
 #include <metal_stdlib>
 using namespace metal;
 
+template <typename T>
+kernel void isin(
+    constant T* elements [[buffer(0)]],
+    constant T* test_elements [[buffer(1)]],
+    device bool* out [[buffer(2)]],
+    constant int64_t& numel_test [[buffer(3)]],
+    constant int64_t& invert [[buffer(4)]],
+    uint tid [[thread_position_in_grid]]) {
+  T elem = elements[tid];
+  bool found = false;
+  for (uint32_t j = 0, n = (uint32_t)numel_test; j < n; j++) {
+    found |= (elem == test_elements[j]);
+  }
+  out[tid] = (bool)(found != (bool)invert);
+}
+
+#define REGISTER_ISIN_OP(T)                                              \
+  template [[host_name("isin_" #T)]] kernel void isin<T>(               \
+      constant T* elements [[buffer(0)]],                                \
+      constant T* test_elements [[buffer(1)]],                           \
+      device bool* out [[buffer(2)]],                                    \
+      constant int64_t& numel_test [[buffer(3)]],                        \
+      constant int64_t& invert [[buffer(4)]],                            \
+      uint tid [[thread_position_in_grid]]);
+
+REGISTER_ISIN_OP(float);
+REGISTER_ISIN_OP(half);
+REGISTER_ISIN_OP(bfloat);
+REGISTER_ISIN_OP(int);
+REGISTER_ISIN_OP(long);
+REGISTER_ISIN_OP(short);
+REGISTER_ISIN_OP(char);
+REGISTER_ISIN_OP(uchar);
+REGISTER_ISIN_OP(bool);
+
 struct clamp_functor {
   template <typename T>
   inline T operator()(const T a, const T b_min, const T c_max) {

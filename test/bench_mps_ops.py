@@ -196,6 +196,64 @@ def bench_grid_sampler_2d(
     return rc
 
 
+def bench_isin(
+    device: str = "mps", dtype: torch.dtype = torch.float32
+) -> list[Measurement]:
+    rc: list[Measurement] = []
+    sync_cmd = "torch.mps.synchronize()" if device == "mps" else ""
+    dtype_s = str(dtype)
+
+    def f(elements, test_elements):
+        return torch.isin(elements, test_elements)
+
+    f_c = torch.compile(f, dynamic=False, fullgraph=True)
+
+    for n_elements, n_test_elements in [
+        (1_024, 4),
+        (1_024, 32),
+        (1_024, 256),
+        (1_024, 4_096),
+        (8_192, 4),
+        (8_192, 32),
+        (8_192, 256),
+        (8_192, 4_096),
+        (65_536, 4),
+        (65_536, 32),
+        (65_536, 256),
+        (65_536, 4_096),
+        (500_000, 4),
+        (500_000, 32),
+        (500_000, 256),
+        (500_000, 4_096),
+        (1_000_000, 4),
+        (1_000_000, 32),
+        (1_000_000, 256),
+        (1_000_000, 4_096),
+    ]:
+        elements = torch.testing.make_tensor(n_elements, device=device, dtype=dtype)
+        test_elements = torch.testing.make_tensor(n_test_elements, device=device, dtype=dtype)
+        r_e, r_c = f(elements, test_elements), f_c(elements, test_elements)
+        if not torch.equal(r_e, r_c):
+            warnings.warn(
+                f"Eager and compile isin do not match for {dtype} "
+                f"n_elements={n_elements} n_test_elements={n_test_elements}",
+                stacklevel=2,
+            )
+        sub_label = f"isin-{n_elements}x{n_test_elements} ({dtype_s})"
+        for label, fn in [("eager", f), ("compile", f_c)]:
+            t = Timer(
+                stmt=f"f(elements, test_elements);{sync_cmd}",
+                globals={"f": fn, "elements": elements, "test_elements": test_elements},
+                language="python",
+                timer=timeit.default_timer,
+                sub_label=sub_label,
+                description=label,
+                env=torch.__version__,
+            )
+            rc.append(t.blocked_autorange())
+    return rc
+
+
 def main() -> None:
     dtypes = [torch.float16, torch.float32, torch.bfloat16]
 
@@ -249,6 +307,12 @@ def main() -> None:
             rc.extend(bench_grid_sampler_2d(dtype=dtype))
         Compare(rc).print()
 
+    def bench_isin_ops():
+        rc = []
+        for dtype in dtypes:
+            rc.extend(bench_isin(dtype=dtype))
+        Compare(rc).print()
+
     benchmarks = {
         "index": bench_index_ops,
         "unary": bench_unary_ops,
@@ -257,6 +321,7 @@ def main() -> None:
         "scan_with_indices": bench_scan_with_indices_ops,
         "binary": bench_binary_ops,
         "grid_sampler_2d": bench_grid_sampler_2d_ops,
+        "isin": bench_isin_ops,
     }
 
     selected = sys.argv[1:]

@@ -12,7 +12,6 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/eq.h>
 #include <ATen/ops/isin_native.h>
 #include <ATen/ops/nan_to_num_native.h>
 #include <ATen/ops/ones_like_native.h>
@@ -29,22 +28,15 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 
 namespace mps {
 
-struct CachedGraph : public MPSCachedGraph {
-  CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-  MPSGraphTensor *inputTensor = nil, *outputTensor = nil;
-  MPSGraphTensor *minTensor = nil, *maxTensor = nil;
-};
-
 static void isin_Tensor_Tensor_out_mps(const Tensor& elements,
                                        const Tensor& test_elements,
-                                       bool assume_unique,
+                                       bool /*assume_unique*/,
                                        bool invert,
-                                       const Tensor& out,
-                                       std::string op_name) {
+                                       const Tensor& out) {
   if (elements.numel() == 0) {
     return;
   }
-
+  
   if (test_elements.numel() == 0) {
     if (invert) {
       auto ones = ones_like(out);
@@ -56,42 +48,38 @@ static void isin_Tensor_Tensor_out_mps(const Tensor& elements,
     return;
   }
 
-  const auto common_type = at::result_type(elements, test_elements);
   TORCH_CHECK(elements.is_mps() && test_elements.is_mps());
 
-  @autoreleasepool {
-    std::string key = op_name + getTensorsStringKey({elements, test_elements}) + std::to_string(invert);
+  const auto common_type = at::result_type(elements, test_elements);
+  TORCH_CHECK(
+      common_type == kFloat || common_type == kHalf || common_type == kBFloat16 ||
+          common_type == kInt || common_type == kLong || common_type == kShort ||
+          common_type == kChar || common_type == kByte || common_type == kBool,
+      "isin_mps: unsupported dtype ",
+      common_type);
+  const Tensor elements_c = elements.to(common_type).contiguous();
+  const Tensor test_elements_c = test_elements.to(common_type).contiguous();
+  Tensor out_c = out.is_contiguous() ? out : at::empty_like(out, at::MemoryFormat::Contiguous);
 
-    auto cachedGraph = LookUpOrCreateCachedGraph<MPSBinaryCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      newCachedGraph->inputTensor_ = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(elements.scalar_type()));
-      newCachedGraph->otherTensor_ = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(test_elements.scalar_type()));
+  int64_t numel_test = test_elements_c.numel();
+  int64_t invert_i64 = invert ? 1 : 0;
 
-      // Cast to common type
-      auto inputTensor = castMPSTensor(mpsGraph, newCachedGraph->inputTensor_, common_type);
-      auto otherTensor = castMPSTensor(mpsGraph, newCachedGraph->otherTensor_, common_type);
+  MPSStream* mpsStream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+      const std::string kernel = "isin_" + scalarToMetalTypeString(common_type);
+      id<MTLComputePipelineState> isinPSO = lib.getPipelineStateForFunc(kernel);
+      getMPSProfiler().beginProfileKernel(isinPSO, kernel, {elements_c, test_elements_c, out_c});
+      [computeEncoder setComputePipelineState:isinPSO];
+      mtl_setArgs(computeEncoder, elements_c, test_elements_c, out_c, numel_test, invert_i64);
+      mtl_dispatch1DJob(computeEncoder, isinPSO, elements_c.numel());
+      getMPSProfiler().endProfileKernel(isinPSO);
+    }
+  });
 
-      MPSShape* outputShape = getMPSShape(out);
-
-      MPSGraphTensor* input_flattened = [mpsGraph reshapeTensor:inputTensor withShape:@[ @-1, @1 ] name:nil];
-      MPSGraphTensor* other_flattened = [mpsGraph reshapeTensor:otherTensor withShape:@[ @1, @-1 ] name:nil];
-      MPSGraphTensor* isInTensor = [mpsGraph equalWithPrimaryTensor:input_flattened
-                                                    secondaryTensor:other_flattened
-                                                               name:nil];
-      MPSGraphTensor* output = [mpsGraph reductionOrWithTensor:isInTensor axis:1 name:nil];
-      output = [mpsGraph reshapeTensor:output withShape:outputShape name:nil];
-
-      if (invert) {
-        output = [mpsGraph notWithTensor:output name:nil];
-      }
-      newCachedGraph->outputTensor_ = output;
-    });
-
-    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, elements);
-    auto otherPlaceholder = Placeholder(cachedGraph->otherTensor_, test_elements);
-    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out);
-
-    auto feeds = dictionaryFromPlaceholders(inputPlaceholder, otherPlaceholder);
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
+  if (!out.is_contiguous()) {
+    out.copy_(out_c);
   }
 }
 
@@ -124,13 +112,13 @@ static void is_posneginf_helper(TensorIteratorBase& iter, bool is_neg) {
 
 TORCH_IMPL_FUNC(isin_Tensor_Tensor_out_mps)
 (const Tensor& elements, const Tensor& test_elements, bool assume_unique, bool invert, const Tensor& out) {
-  mps::isin_Tensor_Tensor_out_mps(elements, test_elements, assume_unique, invert, out, __func__);
+  mps::isin_Tensor_Tensor_out_mps(elements, test_elements, assume_unique, invert, out);
 }
 TORCH_IMPL_FUNC(isin_Scalar_Tensor_out_mps)
 (const Scalar& elements, const Tensor& test_elements, bool assume_unique, bool invert, const Tensor& out) {
   at::native::resize_output(out, {});
   mps::isin_Tensor_Tensor_out_mps(
-      mps::wrapped_scalar_tensor_mps(elements, kMPS), test_elements, assume_unique, invert, out, __func__);
+      mps::wrapped_scalar_tensor_mps(elements, kMPS), test_elements, assume_unique, invert, out);
 }
 
 static void where_kernel_mps(TensorIterator& iter) {
