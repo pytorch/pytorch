@@ -845,7 +845,7 @@ class CommonListMethodsVariable(BaseListVariable):
 
             if len(args):
                 idx = args[0].as_python_constant()
-                if idx > len(self.items):
+                if idx >= len(self.items):
                     raise_observed_exception(
                         IndexError, tx, args=["pop index out of range"]
                     )
