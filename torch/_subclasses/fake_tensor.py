@@ -2447,7 +2447,7 @@ class FakeTensorMode(TorchDispatchMode):
 
     def _check_unrecognized_subclass(
         self, flat_args: Sequence[object]
-    ) -> object | None:
+    ) -> types.NotImplementedType | None:
         if not _check_for_subclass(flat_args):
             return None
 
@@ -2500,7 +2500,9 @@ class FakeTensorMode(TorchDispatchMode):
             return None
 
         if not all(t.constant is not None for t in flat_arg_fake_tensors):
-            raise AssertionError(f"{func} should not have fake inputs without constants")
+            raise AssertionError(
+                f"{func} should not have fake inputs without constants"
+            )
 
         const_flat_args = [a.constant if self.is_our_fake(a) else a for a in flat_args]
         const_args, const_kwargs = pytree.tree_unflatten(const_flat_args, args_spec)
@@ -2615,26 +2617,23 @@ class FakeTensorMode(TorchDispatchMode):
         from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
         return any(
-            (
-                isinstance(a, py_sym_types)
-                and (syms := free_unbacked_symbols(a))
-                and self.shape_env is not None
-                and any(
-                    s not in self.shape_env.real_tensor_prop_unbacked_vals
-                    for s in syms
-                )
+            isinstance(a, py_sym_types)
+            and (syms := free_unbacked_symbols(a))
+            and self.shape_env is not None
+            and any(
+                s not in self.shape_env.real_tensor_prop_unbacked_vals for s in syms
             )
             for a in flat_args
         )
 
-    def _maybe_to_real_tensor(
-        self, t: T
-    ) -> T | Tensor | torch._C.ScriptObject | None:
+    def _maybe_to_real_tensor(self, t: T) -> T | Tensor | torch._C.ScriptObject | None:
         if isinstance(t, FakeTensor):
             return t.real_tensor
         if isinstance(t, py_sym_types):
             if self.shape_env is None:
-                raise AssertionError("self.shape_env must not be None for symbolic types")
+                raise AssertionError(
+                    "self.shape_env must not be None for symbolic types"
+                )
             return t.node.pytype(
                 t.node.expr.xreplace(self.shape_env.backed_var_to_val).xreplace(
                     self.shape_env.real_tensor_prop_unbacked_vals
@@ -2714,7 +2713,9 @@ class FakeTensorMode(TorchDispatchMode):
                 id(real_value),
             )
             fake_value.real_tensor = cast(Tensor, real_value)
-            for sym, real_sym in zip(fake_value.size(), cast(Tensor, real_value).size()):
+            for sym, real_sym in zip(
+                fake_value.size(), cast(Tensor, real_value).size()
+            ):
                 self._set_real_tensor_output(sym, real_sym)
             for sym, real_sym in zip(
                 fake_value.stride(), cast(Tensor, real_value).stride()
@@ -2726,13 +2727,14 @@ class FakeTensorMode(TorchDispatchMode):
             return
 
         if isinstance(fake_value, py_sym_types) and free_unbacked_symbols(fake_value):
+            real_sym_value = cast(int | float | Tensor, real_value)
             if isinstance(fake_value.node.expr, sympy.Symbol):
                 if self.shape_env is None:
                     raise AssertionError(
                         "self.shape_env must not be None for symbolic Symbol"
                     )
                 self.shape_env.set_real_tensor_prop_unbacked_vals(
-                    fake_value.node.expr, real_value
+                    fake_value.node.expr, real_sym_value
                 )
             elif (
                 isinstance(expr := fake_value.node.expr, sympy.Eq)
@@ -2743,7 +2745,7 @@ class FakeTensorMode(TorchDispatchMode):
                     raise AssertionError(
                         "self.shape_env must not be None for symbolic Eq"
                     )
-                self.shape_env.set_real_tensor_prop_unbacked_vals(expr, real_value)
+                self.shape_env.set_real_tensor_prop_unbacked_vals(expr, real_sym_value)
 
     def _bind_real_tensor_outputs(self, fake_out: object, real_out: object) -> None:
         if (
@@ -2772,9 +2774,9 @@ class FakeTensorMode(TorchDispatchMode):
     ) -> T:
         from torch.fx.experimental.symbolic_shapes import compute_unbacked_bindings
 
-        log.debug("maybe_propagate_real_tensors %s", func)
         if not real_state.has_real_out:
             return fake_out
+        log.debug("maybe_propagate_real_tensors %s", func)
 
         if real_state.real_args is None or real_state.real_kwargs is None:
             raise AssertionError("real tensor propagation state is missing inputs")
@@ -2936,10 +2938,8 @@ class FakeTensorMode(TorchDispatchMode):
 
         for run_impl_check, op_impl in op_implementations_checks:
             if run_impl_check(func):
-                # pyrefly: ignore [bad-argument-count]
-                op_impl_out = op_impl(self, func, *args, **kwargs)
+                op_impl_out = cast(Any, op_impl)(self, func, *args, **kwargs)
                 if op_impl_out is not NotImplemented:
-                    # pyrefly: ignore [bad-return]
                     return op_impl_out
 
         return _DISPATCH_UNHANDLED
@@ -3004,7 +3004,10 @@ class FakeTensorMode(TorchDispatchMode):
             raise
 
         return self.wrap_meta_outputs_with_default_device_logic(
-            result, func, flat_args, device=kwargs.get("device")
+            result,
+            func,
+            flat_args,
+            device=cast(torch.device | None, kwargs.get("device")),
         )
 
     def _dispatch_to_op_impl(
@@ -3061,7 +3064,7 @@ class FakeTensorMode(TorchDispatchMode):
         types: Sequence[type],
         args: Sequence[object],
         kwargs: Mapping[str, object],
-    ) -> FakeTensor | None:
+    ) -> object:
         flat_args, args_spec = pytree.tree_flatten((args, kwargs))
 
         # DO NOT PUT LOGIC BEFORE UNRECOGNIZED TYPE CHECKING
@@ -3245,7 +3248,7 @@ class FakeTensorMode(TorchDispatchMode):
         r: object,
         func: OpOverload,
         flat_args: Sequence[object],
-        device: torch.device,
+        device: torch.device | None,
     ) -> PyTree:
         converter = self.fake_tensor_converter
 
@@ -3270,7 +3273,9 @@ class FakeTensorMode(TorchDispatchMode):
             if is_our_fake:
                 torch._check(
                     e.device == common_device,
-                    lambda: f"FakeTensor is wrapped to wrong device, found {e.device}, expected {common_device}",
+                    lambda: (
+                        f"FakeTensor is wrapped to wrong device, found {e.device}, expected {common_device}"
+                    ),
                 )
                 return cast(T, e)
             elif converter is not None:
