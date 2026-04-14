@@ -16708,7 +16708,7 @@ class TestAutogradMultipleDispatch(TestCase):
         self.assertEqual(t_view_copy, t_view)
         self.assertEqual(t.grad, t_ref.grad)
         # backward results are per-dispatch-key in derivatives.yaml
-        if device_type in device:
+        if "cuda" in device:
             # gradient registered to AutogradCUDA is grad.reshape_as(self) + 1
             self.assertEqual(t.grad, grad.reshape_as(t) + 1)
         else:
