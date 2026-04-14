@@ -6299,12 +6299,8 @@ def multi_head_attention_forward(
     static_v: Tensor | None = None,
     average_attn_weights: bool = True,
     is_causal: bool = False,
-<<<<<<< feat/rope
     rotary_pos_emb: Optional[Callable[[Tensor], Tensor]] = None,
-) -> tuple[Tensor, Optional[Tensor]]:
-=======
 ) -> tuple[Tensor, Tensor | None]:
->>>>>>> main
     r"""Forward method for MultiHeadAttention.
 
     See :class:`torch.nn.MultiheadAttention` for details.
@@ -6742,14 +6738,6 @@ def multi_head_attention_forward(
                 attn_mask = attn_mask.unsqueeze(0)
             else:
                 attn_mask = attn_mask.view(bsz, num_heads, -1, src_len)
-<<<<<<< feat/rope
-        # pyrefly: ignore [no-matching-overload]
-        q = q.view(bsz, num_heads, tgt_len, -1)
-        # pyrefly: ignore [no-matching-overload]
-        k = k.view(bsz, num_heads, src_len, -1)
-        # pyrefly: ignore [no-matching-overload]
-        v = v.view(bsz, num_heads, src_len, -1)
-=======
 
         # pyrefly: ignore [bad-argument-type]
         q = q.view(bsz, num_heads, tgt_len, head_dim)
@@ -6757,7 +6745,6 @@ def multi_head_attention_forward(
         k = k.view(bsz, num_heads, src_len, head_dim)
         # pyrefly: ignore [bad-argument-type]
         v = v.view(bsz, num_heads, src_len, head_dim)
->>>>>>> main
 
         attn_output = scaled_dot_product_attention(
             q, k, v, attn_mask, dropout_p, is_causal
