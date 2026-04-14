@@ -8910,7 +8910,7 @@ class FallbackKernel(ExternKernelAlloc):
         from torch._library.simple_registry import singleton
 
         qualname = kernel.__qualname__
-        entry = singleton._data.get(qualname)
+        entry = singleton.get(qualname)
         if entry is None or not entry.symm_mem_args.is_registered():
             return
 

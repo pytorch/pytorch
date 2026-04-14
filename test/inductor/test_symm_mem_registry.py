@@ -274,6 +274,9 @@ class TestSymmMemOpsRegistration(TestCase):
             "symm_mem::multimem_one_shot_reduce_out",
             "symm_mem::multimem_all_gather_out",
             "symm_mem::reduce_scatter_out",
+            "symm_mem::nvshmem_broadcast",
+            "symm_mem::nvshmem_all_to_all",
+            "symm_mem::nccl_reduce_scatter_offset",
             "symm_mem::all_to_all_vdev",
             "symm_mem::all_to_all_vdev_2d",
             "symm_mem::all_to_all_vdev_2d_offset",
@@ -310,6 +313,9 @@ class TestSymmMemOpsRegistration(TestCase):
             "symm_mem::two_shot_all_reduce_": {"input"},
             "symm_mem::two_shot_all_reduce_out": {"input"},
             "symm_mem::reduce_scatter_out": {"input"},
+            "symm_mem::nvshmem_broadcast": {"input"},
+            "symm_mem::nvshmem_all_to_all": {"input", "out"},
+            "symm_mem::nccl_reduce_scatter_offset": {"input"},
             "symm_mem::tile_reduce": {"in_tile", "out_tile"},
             "symm_mem::multi_root_tile_reduce": {"in_tiles", "out_tile"},
         }
@@ -333,14 +339,22 @@ class TestSymmMemOpsRegistration(TestCase):
         except ImportError:
             self.skipTest("torch.distributed._symmetric_memory not available")
 
-        # Verify the registry has entries that FallbackKernel can use
-        symm_mem_count = sum(
+        # Verify the registry has entries that FallbackKernel can use.
+        # Count both already-applied entries and pending C++ registrations.
+        applied_count = sum(
             1
             for qualname, entry in singleton._data.items()
             if qualname.startswith("symm_mem::") and entry.symm_mem_args.is_registered()
         )
+        pending_count = sum(
+            1
+            for qualname in singleton._cpp_symm_mem_args
+            if qualname.startswith("symm_mem::")
+        )
         self.assertGreater(
-            symm_mem_count, 0, "Expected at least some symm_mem operations registered"
+            applied_count + pending_count,
+            0,
+            "Expected at least some symm_mem operations registered",
         )
 
     def test_custom_operator_with_symm_mem(self):
@@ -449,7 +463,7 @@ class TestFunctionalOpCompile(TestCase):
         op = torch.ops.aten.abs.default
 
         # Verify the registry has no symm_mem_args for this op
-        entry = singleton._data.get(op.__qualname__)
+        entry = singleton.get(op.__qualname__)
         if entry is not None:
             self.assertFalse(entry.symm_mem_args.is_registered())
 
