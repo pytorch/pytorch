@@ -164,10 +164,9 @@ FpMatmulCacheValue make_fpmatmul_cached_primitive(
 template <typename... Args>
 FpMatmulCacheValue lookup_or_build_fpmatmul_cached_primitive(
     FpMatmulLruCache& primitive_cache,
-    Args&&... args,
     dnnl::engine& engine,
-    const at::Tensor& dst) {
-  // Named args... are lvalues; avoid std::forward twice (moved-from risk).
+    const at::Tensor& dst,
+    Args&&... args) {
   dnnl::memory::dims cache_key =
       build_fpmatmul_primitive_cache_key(args...);
   auto [it, inserted] = primitive_cache.insert(
@@ -352,6 +351,8 @@ sycl::event matmul(
       with_bias, bias_dims, bias_dt, bias_strides};
   FpMatmulCacheValue entry = lookup_or_build_fpmatmul_cached_primitive(
       primitive_cache,
+      engine,
+      dst,
       m1_dims,
       m2_dims,
       dst_dims,
@@ -364,9 +365,7 @@ sycl::event matmul(
       bias_key,
       deterministic,
       allow_tf32_oneapi,
-      attr,
-      engine,
-      dst);
+      attr);
 
   // STEP4: create memory
   dnnl::memory::desc m1_usr_md(m1_dims, m1_usr_dt, m1_strides);
