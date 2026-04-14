@@ -170,14 +170,13 @@ FpMatmulCacheValue lookup_or_build_fpmatmul_cached_primitive(
   // Named args... are lvalues; avoid std::forward twice (moved-from risk).
   dnnl::memory::dims cache_key =
       build_fpmatmul_primitive_cache_key(args...);
-  auto cache_it = primitive_cache.find(cache_key);
-  if (cache_it != primitive_cache.end()) {
-    return cache_it->second;
+  auto [it, inserted] = primitive_cache.insert(
+      FpMatmulLruCache::value_type{std::move(cache_key), {}});
+  if (!inserted) {
+    return it->second;
   }
-  FpMatmulCacheValue entry =
-      make_fpmatmul_cached_primitive(args..., engine, dst);
-  primitive_cache.insert({std::move(cache_key), entry});
-  return entry;
+  it->second = make_fpmatmul_cached_primitive(args..., engine, dst);
+  return it->second;
 }
 
 } // namespace

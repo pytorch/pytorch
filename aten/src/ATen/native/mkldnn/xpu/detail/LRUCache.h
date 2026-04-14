@@ -81,7 +81,24 @@ class lru_cache {
 
     // Insert new at front
     vlist_.emplace_front(value);
-    map_[value.first] = vlist_.begin();
+    map_[vlist_.begin()->first] = vlist_.begin();
+
+    trim();
+
+    return {vlist_.begin(), true};
+  }
+
+  std::pair<list_iter, bool> insert(value_type&& value) {
+    auto it = map_.find(value.first);
+    if (it != map_.end()) {
+      vlist_.splice(vlist_.begin(), vlist_, it->second);
+      return {it->second, false};
+    }
+
+    vlist_.emplace_front(std::move(value));
+    // After std::move(value), value.first must not be used (moved-from); index
+    // the map with the key stored in the new list node instead.
+    map_[vlist_.begin()->first] = vlist_.begin();
 
     trim();
 
