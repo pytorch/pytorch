@@ -1538,15 +1538,13 @@ class TestGuardSerialization(TestGuardSerializationBase):
             def foo(ddp, x):
                 return ddp(x)
 
-            unsupported = frozenset(
-                torch._dynamo.guards.CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
-            )
             x = torch.randn(10)
             package = CompilePackage(foo)
             torch._dynamo.optimize(
                 package=package,
                 guard_filter_fn=lambda gs: [
-                    x.guard_type not in unsupported for x in gs
+                    x.guard_type not in ("CLOSURE_MATCH", "ID_MATCH", "CLASS_MATCH")
+                    for x in gs
                 ],
             )(foo)(ddp_model, x)
             self.assertEqual(len(package._codes[foo.__code__].guarded_codes), 1)

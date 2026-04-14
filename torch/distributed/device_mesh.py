@@ -828,49 +828,41 @@ else:
             layout: _MeshLayout,
             submesh_dim_names: tuple[str, ...],
         ) -> "DeviceMesh":
-            # DeviceMesh() always graph breaks (its __init__ is skipped by
-            # dynamo).  With nested graph breaks the subsequent STORE_ATTR on
-            # the new opaque object ends up in a resume function and triggers a
-            # hard error.  Disable nested graph breaks so the break propagates
-            # to the caller instead.
-            with torch._dynamo.disable_nested_graph_breaks():
-                root_mesh = self._get_root_mesh()
-                slice_dim_group_name = []
-                if len(self._dim_group_names) > 0:
-                    if len(self._dim_group_names) != len(
-                        not_none(self._mesh_dim_names)
-                    ):
-                        raise AssertionError(
-                            "The number of dim_group_names and mesh_dim_names "
-                            "should have the same length if the rank is in the mesh."
+            root_mesh = self._get_root_mesh()
+            slice_dim_group_name = []
+            if len(self._dim_group_names) > 0:
+                if len(self._dim_group_names) != len(not_none(self._mesh_dim_names)):
+                    raise AssertionError(
+                        "The number of dim_group_names and mesh_dim_names "
+                        "should have the same length if the rank is in the mesh."
+                    )
+                for name in submesh_dim_names:
+                    if name in not_none(self._mesh_dim_names):
+                        slice_dim_group_name.append(
+                            self._dim_group_names[
+                                not_none(self._mesh_dim_names).index(name)
+                            ]
                         )
-                    for name in submesh_dim_names:
-                        if name in not_none(self._mesh_dim_names):
-                            slice_dim_group_name.append(
-                                self._dim_group_names[
-                                    not_none(self._mesh_dim_names).index(name)
-                                ]
-                            )
-                        else:
-                            # If device_mesh is not root_mesh, we already throw error in _get_slice_mesh_layout
-                            # Since we will deprecate the slicing of flattened dim_name from root mesh soon,
-                            # we don't want to optimize the code furthermore.
-                            flatten_mesh = self._flatten_mapping[name]
-                            slice_dim_group_name.append(
-                                flatten_mesh._dim_group_names[
-                                    not_none(flatten_mesh._mesh_dim_names).index(name)
-                                ]
-                            )
-                res_submesh = DeviceMesh(
-                    self._device_type,
-                    _layout=layout,
-                    _rank_map=root_mesh._rank_map,
-                    mesh_dim_names=submesh_dim_names,
-                    _root_mesh=root_mesh,
-                    _init_backend=False,
-                )
-                res_submesh._dim_group_names = slice_dim_group_name
-                return res_submesh
+                    else:
+                        # If device_mesh is not root_mesh, we already throw error in _get_slice_mesh_layout
+                        # Since we will deprecate the slicing of flattened dim_name from root mesh soon,
+                        # we don't want to optimize the code furthermore.
+                        flatten_mesh = self._flatten_mapping[name]
+                        slice_dim_group_name.append(
+                            flatten_mesh._dim_group_names[
+                                not_none(flatten_mesh._mesh_dim_names).index(name)
+                            ]
+                        )
+            res_submesh = DeviceMesh(
+                self._device_type,
+                _layout=layout,
+                _rank_map=root_mesh._rank_map,
+                mesh_dim_names=submesh_dim_names,
+                _root_mesh=root_mesh,
+                _init_backend=False,
+            )
+            res_submesh._dim_group_names = slice_dim_group_name
+            return res_submesh
 
         def _create_flatten_mesh(
             self,
