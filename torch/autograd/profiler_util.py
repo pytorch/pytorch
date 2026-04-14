@@ -558,6 +558,7 @@ class EventMetadata(NamedTuple):
     shared_memory: int | None
     grid: list[int] | None
     block: list[int] | None
+    priority: int | None
     blocks_per_sm: float | None
     warps_per_sm: float | None
     occupancy: float | None
@@ -607,6 +608,7 @@ _EVENT_METADATA_KEYS: dict[str, tuple[str, Callable[[str], Any]]] = {
     "shared memory": ("shared_memory", int),
     "grid": ("grid", _to_int_list),
     "block": ("block", _to_int_list),
+    "priority": ("priority", int),
     "blocks per SM": ("blocks_per_sm", float),
     "warps per SM": ("warps_per_sm", float),
     "est. achieved occupancy %": ("occupancy", float),
