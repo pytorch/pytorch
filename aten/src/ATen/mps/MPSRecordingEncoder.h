@@ -1,4 +1,4 @@
-//  Copyright © 2022 Apple Inc.
+//  Copyright © 2026 Apple Inc.
 
 #pragma once
 
