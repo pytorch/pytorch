@@ -759,12 +759,28 @@ class CachingAutotuner(KernelInterface):
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
 
-        cfg_kwargs = cfg.kwargs
+        cfg_kwargs = {**cfg.kwargs}
         if self.device_props.type == "hip":
-            cfg_kwargs = {**cfg_kwargs}
-            for k in ("matrix_instr_nonkdim", "waves_per_eu", "kpack"):
-                if k in cfg_kwargs:
-                    compile_meta[k] = cfg_kwargs.pop(k)
+            # `compile_meta["signature"]` contains the actual Triton kernel argument
+            # names, including constexprs such as XBLOCK_0/XBLOCK_1 for combo kernels.
+            # Any HIP config kwarg that is *not* in that signature is not a kernel
+            # argument at all; it is a backend compile option that should be forwarded
+            # to triton.compile via `options`, not materialized as a constexpr.
+            signature_arg_names = set(compile_meta["signature"])
+            backend_options = {
+                key: value
+                for key, value in cfg_kwargs.items()
+                if key not in signature_arg_names
+            }
+            cfg_kwargs = {
+                key: value
+                for key, value in cfg_kwargs.items()
+                if key in signature_arg_names
+            }
+            if backend_options:
+                # Stash backend-only options separately so they do not get mixed into
+                # `constants`, which are interpreted as signature-bound constexpr args.
+                compile_meta["backend_options"] = backend_options
         compile_meta["constants"].update(cfg_kwargs)
 
         for i in get_constexprs(self.fn):
@@ -832,12 +848,9 @@ class CachingAutotuner(KernelInterface):
                 if v := getattr(cfg, k, None):
                     options[k] = v
         if self.device_props.type == "hip":
-            if "waves_per_eu" in compile_meta:
-                options["waves_per_eu"] = compile_meta["waves_per_eu"]
-            if "matrix_instr_nonkdim" in compile_meta:
-                options["matrix_instr_nonkdim"] = compile_meta["matrix_instr_nonkdim"]
-            if "kpack" in compile_meta:
-                options["kpack"] = compile_meta["kpack"]
+            # HIP backend options are consumed by Triton out-of-band from the kernel
+            # signature. They are intentionally *not* present in `constants`.
+            options.update(compile_meta.get("backend_options", {}))
 
         if self.device_props.type == "xpu" and XPU_KERNEL_FORMAT == "zebin":
             options["generate_native_code"] = True
@@ -1314,6 +1327,7 @@ class CachingAutotuner(KernelInterface):
             assert hasattr(self, "_reload_kernel")
             self.fn = self._reload_kernel().fn
 
+        signature_keys = set(self.triton_meta["signature"])
         best_config = launcher.config
         current_kwargs = dict(best_config.kwargs)
         base_num_warps = best_config.num_warps
@@ -1352,7 +1366,7 @@ class CachingAutotuner(KernelInterface):
                 trial_kwargs = dict(current_kwargs)
                 for idx in member_indices:
                     _update_combo_kernel_kwargs(
-                        trial_kwargs, cfg.kwargs, idx, skip_rblock
+                        trial_kwargs, cfg.kwargs, idx, skip_rblock, signature_keys
                     )
 
                 if trial_kwargs == current_kwargs:
@@ -2923,25 +2937,22 @@ def _combo_tiling_signature(
     )
 
 
-_COMBO_KERNEL_HIP_COMPILE_OPTION_KEYS = frozenset(
-    ("matrix_instr_nonkdim", "waves_per_eu", "kpack")
-)
-
-
 def _update_combo_kernel_kwargs(
     kwargs: dict[str, Any],
     cfg_kwargs: dict[str, Any],
     subkernel_idx: int,
     skip_rblock: bool,
+    signature_keys: set[str],
 ) -> None:
     for key, value in cfg_kwargs.items():
-        # These are Triton backend compile options, not per-subkernel constexpr args.
-        if key in _COMBO_KERNEL_HIP_COMPILE_OPTION_KEYS:
-            kwargs[key] = value
-            continue
         if skip_rblock and key.startswith("R") and "BLOCK" in key:
             continue
-        kwargs[f"{key}_{subkernel_idx}"] = value
+        suffixed_key = f"{key}_{subkernel_idx}"
+        # Only suffix keys that actually exist in the combo kernel signature.
+        # Signature keys are real per-subkernel constexpr args such as XBLOCK_0.
+        # Everything else must stay unsuffixed so HIP-specific compile options like
+        # waves_per_eu continue to flow through the backend-options path above.
+        kwargs[suffixed_key if suffixed_key in signature_keys else key] = value
 
 
 def _handle_combo_kernel_per_subkernel_blocks(
@@ -2982,6 +2993,7 @@ def _handle_combo_kernel_per_subkernel_blocks(
     all_num_stages: list[int] = []
     unique_warp_stage_pairs: OrderedSet[tuple[int, int]] = OrderedSet()
     combo_coordesc_field_limits: dict[str, int] = {}
+    signature_keys = set(triton_meta.get("signature", ()))
 
     # Group sub-kernels with identical config kwargs to skip redundant tuning.
     group_map: dict[tuple[Any, ...], dict[str, Any]] = {}
@@ -3032,7 +3044,9 @@ def _handle_combo_kernel_per_subkernel_blocks(
 
         group_coordesc_fields: OrderedSet[str] = OrderedSet()
         cfg = cfgs[0]
-        _update_combo_kernel_kwargs(combined_kwargs, cfg.kwargs, i, skip_rblock)
+        _update_combo_kernel_kwargs(
+            combined_kwargs, cfg.kwargs, i, skip_rblock, signature_keys
+        )
         for key in cfg.kwargs:
             if skip_rblock and key.startswith("R") and "BLOCK" in key:
                 continue
