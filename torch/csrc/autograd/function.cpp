@@ -46,6 +46,22 @@ auto Node::name() const -> std::string {
   return c10::demangle(typeid(*this).name());
 }
 
+auto Node::forward_op_name() const -> std::string {
+  auto n = name();
+  // Strip "Backward<N>" suffix to get the forward op name.
+  auto pos = n.rfind("Backward");
+  if (pos == std::string::npos) {
+    return n;
+  }
+  // Verify everything after "Backward" is digits (e.g., "Backward0").
+  for (size_t i = pos + 8; i < n.size(); ++i) {
+    if (!std::isdigit(static_cast<unsigned char>(n[i]))) {
+      return n;
+    }
+  }
+  return n.substr(0, pos);
+}
+
 AnomalyMetadata* Node::metadata() noexcept {
   if (!anomaly_metadata_) {
     anomaly_metadata_ = Engine::get_default_engine().make_anomaly_metadata();
