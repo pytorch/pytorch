@@ -1,8 +1,16 @@
-from collections.abc import Sequence
+from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING
 
 from torch.fx.experimental.unification import Var  # type: ignore[attr-defined]
 
 from ._compatibility import compatibility
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from torch.fx.experimental.migrate_gradual_types.constraint import DVar
 
 
 __all__ = ["Dyn", "TensorType", "is_consistent", "is_more_precise"]
@@ -18,7 +26,9 @@ class TensorType:
                 return torch.add(x, y)
     """
 
-    def __init__(self, dim: Sequence[object]) -> None:
+    __args__: Sequence[DVar | int | _DynType]
+
+    def __init__(self, dim: Sequence[Any]) -> None:
         self.__origin__ = TensorType
         self.__args__ = dim
 
@@ -32,7 +42,7 @@ class TensorType:
             return False
 
     @staticmethod
-    def __class_getitem__(*args: object) -> "TensorType":
+    def __class_getitem__(*args: object) -> TensorType:
         if len(args) == 1 and isinstance(args[0], tuple):
             args = args[0]
         return TensorType(tuple(args))
