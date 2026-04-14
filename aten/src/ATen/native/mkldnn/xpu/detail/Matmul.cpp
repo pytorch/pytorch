@@ -78,7 +78,7 @@ inline void append_fp_matmul_cache_key_part(
 
 inline void append_fp_matmul_cache_key_part(dnnl::memory::dims& key, Attr& attr) {
   append_fp_matmul_cache_key_part(
-      key, attr.matmul_primitive_cache_key_extra());
+      key, attr.get_post_ops_key());
 }
 
 void build_fpmatmul_primitive_cache_key_rec(dnnl::memory::dims& /*key*/) {}

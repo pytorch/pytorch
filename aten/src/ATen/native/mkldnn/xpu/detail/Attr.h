@@ -212,6 +212,13 @@ class Attr {
   Attr() : q_scale_(1.f) {}
   Attr(float q_scale, int64_t zp = 0) : q_scale_(q_scale), q_zero_point_(zp) {}
 
+  float q_scale() const noexcept {
+    return q_scale_;
+  }
+  int64_t q_zero_point() const noexcept {
+    return q_zero_point_;
+  }
+
   /***** eltwise *****/
   dnnl::algorithm kind_with_relu = dnnl::algorithm::eltwise_relu;
   dnnl::algorithm kind_with_sigmoid = dnnl::algorithm::eltwise_logistic;
@@ -347,10 +354,15 @@ class Attr {
     return *this;
   }
 
-  dnnl::post_ops extract_post_ops() {
-    dnnl::memory::dims cache_key;
-    detail::PostOpsMatmulKeySink key_sink{cache_key};
+  dnnl::memory::dims get_post_ops_key() const {
+    dnnl::memory::dims key;
+    detail::PostOpsMatmulKeySink key_sink{key};
     emit_post_ops_for_matmul_cache_and_dnnl(key_sink);
+    return key;
+  }
+
+  dnnl::post_ops extract_post_ops() {
+    dnnl::memory::dims cache_key = get_post_ops_key();
     auto& cache = detail::get_extract_post_ops_lru_cache();
     auto pos = cache.find(cache_key);
     if (pos != cache.end()) {
@@ -410,22 +422,6 @@ class Attr {
             {DNNL_ARG_ATTR_MULTIPLE_POST_OP(i) | DNNL_ARG_SRC_1, binary_m});
       }
     }
-  }
-
-  dnnl::memory::dims matmul_primitive_cache_key_extra() const {
-    dnnl::memory::dims key;
-    auto push_f32 = [&](float f) {
-      uint32_t u = 0;
-      static_assert(sizeof(float) == sizeof(uint32_t));
-      std::memcpy(&u, &f, sizeof(float));
-      key.push_back(static_cast<dnnl::memory::dim>(u));
-    };
-    key.push_back(static_cast<dnnl::memory::dim>(ops_params_.size()));
-    push_f32(q_scale_);
-    key.push_back(static_cast<dnnl::memory::dim>(q_zero_point_));
-    detail::PostOpsMatmulKeySink key_sink{key};
-    emit_post_ops_for_matmul_cache_and_dnnl(key_sink);
-    return key;
   }
 
  private:
