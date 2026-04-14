@@ -197,9 +197,6 @@ class Benchmarker:
     inductor generated callables.
     """
 
-    def __init__(self: Self) -> None:
-        self._in_cudagraph_benchmark = False
-
     def infer_device(self, *fn_args: Any, **fn_kwargs: Any) -> torch.device:
         inferred_device: torch.device | None = None
         for arg_or_kwarg in chain(fn_args, fn_kwargs.values()):
@@ -394,12 +391,8 @@ class Benchmarker:
 
         try:
             # grad clearing is captured in the graph, don't pass it through.
-            # Set flag to prevent benchmark_gpu from re-entering this method
-            # when autotune_cudagraph_benchmarking is enabled.
-            self._in_cudagraph_benchmark = True
             return self.benchmark_gpu(cuda_graph.replay, **kwargs)
         finally:
-            self._in_cudagraph_benchmark = False
             del cuda_graph
 
 
@@ -564,6 +557,10 @@ class TritonBenchmarker(Benchmarker):
 
 
 class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
+    def __init__(self: Self) -> None:
+        super().__init__()
+        self._in_cudagraph_benchmark = False
+
     @cached_property
     def L2_cache_size(self: Self) -> int:
         """Get the L2 cache size, in bytes, of the current device."""
@@ -611,6 +608,22 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
                 for start_event, end_event in event_pairs
             ]
         )
+
+    @time_and_count
+    def benchmark_gpu_with_cuda_graph(
+        self: Self,
+        _callable: Callable[[], Any],
+        grad_to_none: list[torch.Tensor] | None = None,
+        **kwargs: Any,
+    ) -> float:
+        # Prevent benchmark_gpu from re-entering this method
+        # when autotune_cudagraph_benchmarking is enabled.
+        self._in_cudagraph_benchmark = True
+        result = super().benchmark_gpu_with_cuda_graph(
+            _callable, grad_to_none=grad_to_none, **kwargs
+        )
+        self._in_cudagraph_benchmark = False
+        return result
 
     @may_distort_benchmarking_result
     @time_and_count
