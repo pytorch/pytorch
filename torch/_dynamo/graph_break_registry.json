@@ -1012,6 +1012,16 @@
       ]
     }
   ],
+  "GB3775": [
+    {
+      "Gb_type": "nb_int_impl not implemented",
+      "Context": "{type(self).__name__} has nb_int slot but no nb_int_impl override",
+      "Explanation": "The type {self.python_type_name()} has an nb_int C slot but the corresponding VariableTracker doesn't implement nb_int_impl.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0079": [
     {
       "Gb_type": "Missing CALL_INTRINSIC_1 handler",
