@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <ATen/native/mkldnn/xpu/detail/DnnlExt.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
 #include <oneapi/dnnl/dnnl.hpp>
@@ -183,6 +184,17 @@ struct PostOpsMatmulKeySink {
   }
 };
 
+constexpr std::size_t kExtractPostOpsLruCapacity = 512;
+
+inline lru_cache<dnnl::memory::dims, dnnl::post_ops>&
+get_extract_post_ops_lru_cache() {
+  static thread_local lru_cache<dnnl::memory::dims, dnnl::post_ops> cache;
+  if (cache.max_size() == 0) {
+    cache.resize(kExtractPostOpsLruCapacity);
+  }
+  return cache;
+}
+
 } // namespace detail
 
 inline void fp_matmul_post_sink_push_kind(
@@ -336,9 +348,20 @@ class Attr {
   }
 
   dnnl::post_ops extract_post_ops() {
+    dnnl::memory::dims cache_key;
+    detail::PostOpsMatmulKeySink key_sink{cache_key};
+    emit_post_ops_for_matmul_cache_and_dnnl(key_sink);
+    auto& cache = detail::get_extract_post_ops_lru_cache();
+    auto pos = cache.find(cache_key);
+    if (pos != cache.end()) {
+      return pos->second;
+    }
     dnnl::post_ops po;
     emit_post_ops_for_matmul_cache_and_dnnl(po);
-    return po;
+    auto [it, inserted] =
+        cache.insert({std::move(cache_key), std::move(po)});
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
+    return it->second;
   }
 
   bool with_sum() {
