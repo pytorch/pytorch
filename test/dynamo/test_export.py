@@ -130,6 +130,15 @@ def forward(self, x, y):
     return pytree.tree_unflatten([x], self._out_spec)""",
         )
 
+    def test_export_empty_graph_no_error(self):
+        def func(x):
+            return len(x)
+
+        exported = torch._dynamo.export(func)(torch.randn(5))
+        out_graph = exported[0]
+        result = out_graph(torch.randn(5))
+        self.assertEqual(result, 5)
+
     def test_no_tensor_computation_2(self):
         inp = torch.randn(3)
         inp2 = 2
