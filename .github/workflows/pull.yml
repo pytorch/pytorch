@@ -222,7 +222,7 @@ jobs:
   # ╠══════════════════════════════════════════════════════════════════════╣
 
   linux-docs:
-    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-docs ')) && needs.get-label-type.outputs.use-arc != 'true' }}
+    if: ${{ (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-docs ')) }}
     name: linux-docs
     uses: ./.github/workflows/_docs.yml
     needs:
