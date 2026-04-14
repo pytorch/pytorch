@@ -586,11 +586,9 @@ class ConstDictVariable(VariableTracker):
             tx.output.side_effects.mutation(self)
             return self.items.pop(Hashable(args[0]))
         elif name == "popitem" and self.is_mutable():
-            if (
-                issubclass(self.user_cls, dict)
-                and not issubclass(self.user_cls, collections.OrderedDict)
-                and len(args)
-            ):
+            # dict.popitem() takes no args. OrderedDict.popitem(last=) is
+            # handled by OrderedDictVariable.call_method.
+            if len(args):
                 raise_args_mismatch(tx, name)
 
             if not self.items:
@@ -602,19 +600,7 @@ class ConstDictVariable(VariableTracker):
                     ],
                 )
 
-            if self.user_cls is collections.OrderedDict and (
-                len(args) == 1 or "last" in kwargs
-            ):
-                if len(args) == 1 and args[0].is_python_constant():
-                    last = args[0].as_python_constant()
-                elif (v := kwargs.get("last")) and v.is_python_constant():
-                    last = v.as_python_constant()
-                else:
-                    raise_args_mismatch(tx, name)
-                k, v = self.items.popitem(last=last)  # type: ignore[possibly-undefined]
-            else:
-                k, v = self.items.popitem()
-
+            k, v = self.items.popitem()
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
 
@@ -709,22 +695,6 @@ class ConstDictVariable(VariableTracker):
                 tx.output.side_effects.mutation(self)
                 self.items[Hashable(args[0])] = x
                 return x
-        elif name == "move_to_end":
-            self.install_dict_keys_match_guard()
-            tx.output.side_effects.mutation(self)
-            if args[0] not in self:
-                raise_observed_exception(KeyError, tx)
-
-            last = True
-            if len(args) == 2 and args[1].is_python_constant():
-                last = args[1].as_python_constant()
-
-            if kwargs and "last" in kwargs and kwargs["last"].is_python_constant():
-                last = kwargs.get("last").as_python_constant()  # type: ignore[union-attr]
-
-            key = Hashable(args[0])
-            self.items.move_to_end(key, last=last)
-            return ConstantVariable.create(None)
         elif name == "__eq__" and istype(
             self, ConstDictVariable
         ):  # don't let Set use this function
@@ -761,12 +731,11 @@ class ConstDictVariable(VariableTracker):
             # defaultdict.
 
             # TODO(guilhermeleobas): this check should be on builtin.py::call_or_
-            if istype(
+            if isinstance(
                 other,
                 (
                     ConstDictVariable,
                     variables.UserDefinedDictVariable,
-                    variables.DefaultDictVariable,
                 ),
             ):
                 # Unwrap UserDefinedDictVariable to its underlying ConstDictVariable
@@ -794,9 +763,10 @@ class ConstDictVariable(VariableTracker):
                 )
 
                 # NB - Guard on all the keys of the other dict to ensure
-                # correctness.
-                args[0].install_dict_keys_match_guard()  # type: ignore[attr-defined]
-                new_dict_vt.items.update(args[0].items)  # type: ignore[attr-defined]
+                # correctness. Use `other` (already unwrapped from
+                # UserDefinedDictVariable to ConstDictVariable above).
+                other.install_dict_keys_match_guard()  # type: ignore[union-attr]
+                new_dict_vt.items.update(other.items)  # type: ignore[union-attr]
                 return new_dict_vt
             else:
                 raise_observed_exception(

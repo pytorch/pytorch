@@ -1642,6 +1642,14 @@ class BuiltinVariable(BaseBuiltinVariable):
             else:
                 value = f"{arg.exc_type.__name__}{const_args!r}"
             return VariableTracker.build(tx, value)
+        if isinstance(arg, variables.UserDefinedDictVariable):
+            assert arg._base_vt is not None
+            try:
+                return VariableTracker.build(
+                    tx, repr(arg._base_vt.as_python_constant())
+                )
+            except Exception:
+                pass
         if isinstance(arg, variables.UserDefinedObjectVariable):
             repr_method = arg.value.__repr__
 
@@ -3221,12 +3229,16 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "__new__":
-            if len(args) == 1 and not kwargs:
+            if args:
+                # dict.__new__ (tp_new) ignores extra args — only the first
+                # arg (the type) matters.  Pass init_args=[] so reconstruction
+                # emits base_cls.__new__(cls) without extras.
+                # https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4735-L4768
                 dict_vt = ConstDictVariable({}, dict, mutation_type=ValueMutationNew())
                 if isinstance(args[0], DictBuiltinVariable):
                     return dict_vt
                 return tx.output.side_effects.track_new_user_defined_object(
-                    self, args[0], args[1:]
+                    self, args[0], []
                 )
 
         if name == "fromkeys":
@@ -3310,25 +3322,40 @@ class DictBuiltinVariable(BaseBuiltinVariable):
             )
 
         arg, value = args
-        DictVariableType = (
-            ConstDictVariable if user_cls is not defaultdict else DefaultDictVariable
-        )
+
+        def _make_result(
+            items: dict[VariableTracker, VariableTracker],
+        ) -> VariableTracker:
+            if user_cls is OrderedDict:
+                from .builder import SourcelessBuilder
+                from .user_defined import OrderedDictVariable
+
+                result = tx.output.side_effects.track_new_user_defined_object(
+                    SourcelessBuilder.create(tx, dict),
+                    SourcelessBuilder.create(tx, OrderedDict),
+                    [],
+                )
+                assert isinstance(result, OrderedDictVariable)
+                result._base_vt = ConstDictVariable(
+                    items,
+                    user_cls=OrderedDict,
+                    mutation_type=ValueMutationNew(),
+                )
+                return result
+            elif user_cls is defaultdict:
+                return DefaultDictVariable(
+                    items, user_cls, mutation_type=ValueMutationNew()
+                )
+            else:
+                return ConstDictVariable(items, mutation_type=ValueMutationNew())
 
         if isinstance(arg, dict):
             arg_list = [VariableTracker.build(tx, k) for k in arg]
-            return DictVariableType(
-                dict.fromkeys(arg_list, value),
-                user_cls,
-                mutation_type=ValueMutationNew(),
-            )
+            return _make_result(dict.fromkeys(arg_list, value))
         elif arg.has_force_unpack_var_sequence(tx):
             keys = arg.force_unpack_var_sequence(tx)
             if all(is_hashable(v) for v in keys):
-                return DictVariableType(
-                    dict.fromkeys(keys, value),
-                    user_cls,
-                    mutation_type=ValueMutationNew(),
-                )
+                return _make_result(dict.fromkeys(keys, value))
 
         unimplemented(
             gb_type="failed to call dict.fromkeys()",
