@@ -1079,8 +1079,8 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
 
-    @torch._dynamo.config.patch(wrap_top_frame=True)
-    def test_wrap_top_frame_with_hooks(self):
+    @torch._dynamo.config.patch(wrap_top_frame=False)
+    def test_root_module_hooks_compile_in_single_frame(self):
         class ToyModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1089,25 +1089,41 @@ def forward(self, L_x_ : torch.Tensor):
             def forward(self, x):
                 return self.net1(x)
 
-        mod = ToyModel()
-        mod.register_forward_pre_hook(lambda mod, input: input[0] + 1)
-
-        # Case 1: torch.compile(mod)
-        cnts = torch._dynamo.testing.CompileCounter()
-        compiled_mod = torch.compile(mod, backend=cnts)
-
         x = torch.rand(18, 18)
-        ref = mod(x)
-        res = compiled_mod(x)
-        self.assertEqual(ref, res)
-        self.assertEqual(cnts.frame_count, 1)
 
-        # Case 2: mod.compile()
-        cnts = torch._dynamo.testing.CompileCounter()
-        mod.compile(backend=cnts)
-        res = mod(x)
-        self.assertEqual(ref, res)
-        self.assertEqual(cnts.frame_count, 1)
+        for hook_type, register_hook in (
+            (
+                "forward_pre_hook",
+                lambda mod: mod.register_forward_pre_hook(
+                    lambda mod, input: input[0] + 1
+                ),
+            ),
+            (
+                "forward_hook",
+                lambda mod: mod.register_forward_hook(
+                    lambda mod, input, output: output + 1
+                ),
+            ),
+        ):
+            with self.subTest(hook_type=hook_type):
+                mod = ToyModel()
+                register_hook(mod)
+
+                # Case 1: torch.compile(mod)
+                cnts = torch._dynamo.testing.CompileCounter()
+                compiled_mod = torch.compile(mod, backend=cnts)
+
+                ref = mod(x)
+                res = compiled_mod(x)
+                self.assertEqual(ref, res)
+                self.assertEqual(cnts.frame_count, 1)
+
+                # Case 2: mod.compile()
+                cnts = torch._dynamo.testing.CompileCounter()
+                mod.compile(backend=cnts)
+                res = mod(x)
+                self.assertEqual(ref, res)
+                self.assertEqual(cnts.frame_count, 1)
 
     def test_global_module_forward_pre_hook(self):
         class Mod(torch.nn.Module):

@@ -442,13 +442,21 @@ class OptimizedModule(torch.nn.Module):
         if isinstance(self.dynamo_ctx, DisableContext):
             # No need to check trace rules
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
-        elif config.wrap_top_frame or (
-            isinstance(self._orig_mod.forward, types.MethodType)
-            and (trace_rules.check(self._orig_mod.forward))
+        elif (
+            config.wrap_top_frame
+            or utils.nnmodule_has_hooks(
+                self._orig_mod, check_forward_hooks=True
+            )
+            or (
+                isinstance(self._orig_mod.forward, types.MethodType)
+                and (trace_rules.check(self._orig_mod.forward))
+            )
         ):
             # This may be a torch.nn.* instance in trace_rules.py which
             # won't trigger a frame evaluation workaround to add an extra
-            # frame we can capture
+            # frame we can capture. We also force the wrapper when the root
+            # module has forward hooks so Dynamo captures the hook and forward
+            # in the same frame.
             self.forward = self.dynamo_ctx(external_utils.wrap_inline(self._orig_mod))
         else:
             # Invoke hooks outside of dynamo then pickup the inner frame
@@ -941,9 +949,16 @@ class _TorchDynamoContext:
             filename = inspect.getsourcefile(fn)
         except TypeError:
             filename = None
+
+        wrap_root_module_call_with_hooks = (
+            isinstance(fn, types.MethodType)
+            and getattr(fn, "__name__", "") in {"_call_impl", "_wrapped_call_impl"}
+            and isinstance(getattr(fn, "__self__", None), torch.nn.Module)
+            and utils.nnmodule_has_hooks(fn.__self__, check_forward_hooks=True)
+        )
         if config.debug_force_nested_calls:
             fn = external_utils.wrap_inline(fn)
-        elif config.wrap_top_frame or (
+        elif config.wrap_top_frame or wrap_root_module_call_with_hooks or (
             (filename is None or trace_rules.check(fn) or top_level_in_graph)
             and (
                 getattr(fn, "__name__", "")
