@@ -28,7 +28,7 @@ from ..exc import (
 )
 from ..utils import istype
 from .base import NO_SUCH_SUBOBJ, VariableTracker
-from .constant import CONSTANT_VARIABLE_FALSE, CONSTANT_VARIABLE_TRUE
+from .constant import ConstantVariable
 
 
 if TYPE_CHECKING:
@@ -45,7 +45,7 @@ def vt_identity_compare(
     Mirrors the logic in BuiltinVariable's handle_is handler.
     """
     if left is right:
-        return CONSTANT_VARIABLE_TRUE
+        return ConstantVariable.create(True)
 
     left_val = left.get_real_python_backed_value()
     right_val = right.get_real_python_backed_value()
@@ -54,13 +54,15 @@ def vt_identity_compare(
 
     if left_known and right_known:
         return (
-            CONSTANT_VARIABLE_TRUE if left_val is right_val else CONSTANT_VARIABLE_FALSE
+            ConstantVariable.create(True)
+            if left_val is right_val
+            else ConstantVariable.create(False)
         )
 
     # One side has a concrete backing object, the other doesn't — they can't
     # be the same object.
     if left_known != right_known:
-        return CONSTANT_VARIABLE_FALSE
+        return ConstantVariable.create(False)
 
     # Mutable containers created during tracing: VT identity = Python identity.
     from .dicts import ConstDictVariable
@@ -68,12 +70,12 @@ def vt_identity_compare(
     from .sets import SetVariable
 
     if isinstance(left, (ConstDictVariable, ListVariable, SetVariable)):
-        return CONSTANT_VARIABLE_FALSE
+        return ConstantVariable.create(False)
 
     # Different Python types can never be the same object.
     try:
         if left.python_type() is not right.python_type():
-            return CONSTANT_VARIABLE_FALSE
+            return ConstantVariable.create(False)
     except NotImplementedError:
         pass
 
@@ -85,7 +87,7 @@ def vt_identity_compare(
         and istype(right, variables.ExceptionVariable)
         and left.exc_type is not right.exc_type  # type: ignore[attr-defined]
     ):
-        return CONSTANT_VARIABLE_FALSE
+        return ConstantVariable.create(False)
 
     return None
 
@@ -199,7 +201,7 @@ def generic_bool(tx: "InstructionTranslator", obj: VariableTracker) -> VariableT
     except ObservedTypeError:
         handle_observed_exception(tx)
 
-    return CONSTANT_VARIABLE_TRUE
+    return ConstantVariable.create(True)
 
 
 def vt_getitem(

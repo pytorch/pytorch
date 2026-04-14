@@ -86,12 +86,7 @@ from .base import (
     ValueMutationNew,
     VariableTracker,
 )
-from .constant import (
-    CONSTANT_VARIABLE_FALSE,
-    CONSTANT_VARIABLE_NONE,
-    CONSTANT_VARIABLE_TRUE,
-    ConstantVariable,
-)
+from .constant import ConstantVariable
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -490,7 +485,7 @@ class BaseUserFunctionVariable(VariableTracker):
             self.get_name() == "patch_track_step_called"
             and self.get_filename().endswith("torch/optim/lr_scheduler.py")
         ):
-            return CONSTANT_VARIABLE_NONE
+            return ConstantVariable.create(None)
         return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)  # type: ignore[attr-defined]
 
     def call_obj_hasattr(
@@ -742,7 +737,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 ) from e
         elif self.fn is torch._dynamo.bytecode_debugger.breakpoint:
             tx.output._emit_debugger_breakpoint = True
-            return variables.CONSTANT_VARIABLE_NONE
+            return variables.ConstantVariable.create(None)
         # Handle a `nonstrict_trace(fn)` call
         elif self.fn is torch._dynamo.nonstrict_trace:
             bound = inspect.signature(self.fn).bind(*args, **kwargs)
@@ -1198,8 +1193,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
         self, tx: "InstructionTranslator", name: str
     ) -> ConstantVariable:
         if name in self.python_type().__dict__:
-            return CONSTANT_VARIABLE_TRUE
-        return CONSTANT_VARIABLE_FALSE
+            return ConstantVariable.create(True)
+        return ConstantVariable.create(False)
 
     def has_unpack_var_sequence(self, tx: "InstructionTranslator") -> bool:
         return False
@@ -1286,7 +1281,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             tracer = self.inline_tracer
             if self._is_generator_just_started() or self._is_generator_exhausted():
                 tracer.generator_exhausted = True
-                return variables.CONSTANT_VARIABLE_NONE
+                return variables.ConstantVariable.create(None)
 
             # Raise GeneratorExit to see if user code catches it. Any other exception
             # is propagated to the parent frame.
@@ -1315,11 +1310,11 @@ class LocalGeneratorObjectVariable(VariableTracker):
                     and tracer.next_instruction.opname == "CALL_INTRINSIC_1"
                 ):
                     tracer.generator_exhausted = True
-                    return variables.CONSTANT_VARIABLE_NONE
+                    return variables.ConstantVariable.create(None)
             except ObservedGeneratorExit:
                 # If it doesn't catch, we just return None, as per the text above
                 tracer.generator_exhausted = True
-                return variables.CONSTANT_VARIABLE_NONE
+                return variables.ConstantVariable.create(None)
 
             try:
                 # Raise RuntimeError if the generator yields any other value
@@ -1327,7 +1322,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
                     raise_observed_exception(RuntimeError, tx)
             except ObservedGeneratorExit:
                 tracer.generator_exhausted = True
-                return variables.CONSTANT_VARIABLE_NONE
+                return variables.ConstantVariable.create(None)
             except ObservedUserStopIteration:
                 # In Python 3.13+, one can capture GeneratorExit and return a value
                 # See test_generator.py::test_close_capture_GeneratorExit_return
@@ -1969,7 +1964,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             return VariableTracker.build(tx, hasattr(self, "defaults"))
         vt = ConstantVariable.create(name)
         if vt in self.get_dict_vt(tx):
-            return CONSTANT_VARIABLE_TRUE
+            return ConstantVariable.create(True)
         return super().call_obj_hasattr(tx, name)
 
     def has_self(self) -> bool:
@@ -3022,9 +3017,9 @@ class SysFunctionVariable(VariableTracker):
             items = [VariableTracker.build(tx, typ), exn, tb]
         else:
             items = [
-                variables.CONSTANT_VARIABLE_NONE,
-                variables.CONSTANT_VARIABLE_NONE,
-                variables.CONSTANT_VARIABLE_NONE,
+                ConstantVariable.create(None),
+                ConstantVariable.create(None),
+                ConstantVariable.create(None),
             ]
         return variables.TupleVariable(items)  # type: ignore[arg-type]
 
@@ -3526,7 +3521,7 @@ class PyTreeTreeIsLeafFunctionVariable(UserFunctionVariable):
             )
 
         # Check if is_leaf parameter is provided
-        is_leaf = kwargs.get("is_leaf", CONSTANT_VARIABLE_NONE)
+        is_leaf = kwargs.get("is_leaf", ConstantVariable.create(None))
         if len(args) == 2:
             is_leaf = args[1]
 
@@ -3660,4 +3655,4 @@ class TritonSetAllocatorVariable(VariableTracker):
 
         emit_noargs_leaf_function_to_graph(tx, real_impl, "set_alloc")
 
-        return CONSTANT_VARIABLE_NONE
+        return ConstantVariable.create(None)
