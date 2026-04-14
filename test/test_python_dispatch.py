@@ -1151,7 +1151,9 @@ $6: f32[1] = torch._ops.aten.add_.Tensor($1, $5)""",
             self.assertIs(type(static_rebuilt), _StaticUnflattenWrapper)
             self.assertEqual(static_rebuilt.elem, static.elem)
 
-            classmethod_attrs, classmethod_meta = classmethod_wrapper.__tensor_flatten__()
+            classmethod_attrs, classmethod_meta = (
+                classmethod_wrapper.__tensor_flatten__()
+            )
             classmethod_rebuilt = type(classmethod_wrapper).__tensor_unflatten__(
                 {
                     attr: getattr(classmethod_wrapper, attr)
