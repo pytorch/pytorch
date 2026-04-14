@@ -766,7 +766,7 @@ class CachingAutotuner(KernelInterface):
             # Any HIP config kwarg that is *not* in that signature is not a kernel
             # argument at all; it is a backend compile option that should be forwarded
             # to triton.compile via `options`, not materialized as a constexpr.
-            signature_arg_names = set(compile_meta["signature"])
+            signature_arg_names = OrderedSet(compile_meta["signature"])
             backend_options = {
                 key: value
                 for key, value in cfg_kwargs.items()
@@ -1327,7 +1327,7 @@ class CachingAutotuner(KernelInterface):
             assert hasattr(self, "_reload_kernel")
             self.fn = self._reload_kernel().fn
 
-        signature_keys = set(self.triton_meta["signature"])
+        signature_keys = OrderedSet(self.triton_meta["signature"])
         best_config = launcher.config
         current_kwargs = dict(best_config.kwargs)
         base_num_warps = best_config.num_warps
@@ -2942,7 +2942,7 @@ def _update_combo_kernel_kwargs(
     cfg_kwargs: dict[str, Any],
     subkernel_idx: int,
     skip_rblock: bool,
-    signature_keys: set[str],
+    signature_keys: OrderedSet[str],
 ) -> None:
     for key, value in cfg_kwargs.items():
         if skip_rblock and key.startswith("R") and "BLOCK" in key:
@@ -2993,7 +2993,7 @@ def _handle_combo_kernel_per_subkernel_blocks(
     all_num_stages: list[int] = []
     unique_warp_stage_pairs: OrderedSet[tuple[int, int]] = OrderedSet()
     combo_coordesc_field_limits: dict[str, int] = {}
-    signature_keys = set(triton_meta.get("signature", ()))
+    signature_keys = OrderedSet(triton_meta.get("signature", ()))
 
     # Group sub-kernels with identical config kwargs to skip redundant tuning.
     group_map: dict[tuple[Any, ...], dict[str, Any]] = {}
