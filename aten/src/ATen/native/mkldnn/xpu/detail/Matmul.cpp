@@ -167,14 +167,15 @@ FpMatmulCacheValue lookup_or_build_fpmatmul_cached_primitive(
     Args&&... args,
     dnnl::engine& engine,
     const at::Tensor& dst) {
-  dnnl::memory::dims cache_key = build_fpmatmul_primitive_cache_key(
-      std::forward<Args>(args)...);
+  // Named args... are lvalues; avoid std::forward twice (moved-from risk).
+  dnnl::memory::dims cache_key =
+      build_fpmatmul_primitive_cache_key(args...);
   auto cache_it = primitive_cache.find(cache_key);
   if (cache_it != primitive_cache.end()) {
     return cache_it->second;
   }
-  FpMatmulCacheValue entry = make_fpmatmul_cached_primitive(
-      std::forward<Args>(args)..., engine, dst);
+  FpMatmulCacheValue entry =
+      make_fpmatmul_cached_primitive(args..., engine, dst);
   primitive_cache.insert({std::move(cache_key), entry});
   return entry;
 }
