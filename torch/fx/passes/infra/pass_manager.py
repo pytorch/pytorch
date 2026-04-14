@@ -1,9 +1,9 @@
+# mypy: allow-untyped-defs
 import inspect
 import logging
 from collections.abc import Callable
 from functools import wraps
 from queue import Queue
-from typing import Any
 
 import torch.nn as nn
 from torch.fx._compatibility import compatibility
@@ -18,7 +18,7 @@ __all__ = ["pass_result_wrapper", "this_before_that_pass_constraint", "PassManag
 
 
 @compatibility(is_backward_compatible=False)
-def pass_result_wrapper(fn: Callable[..., Any]) -> Callable[..., PassResult | None]:
+def pass_result_wrapper(fn: Callable) -> Callable:
     """
     Wrapper for passes which currently do not return a PassResult.
     This wrapper makes them return a PassResult containing the modified object
@@ -35,7 +35,7 @@ def pass_result_wrapper(fn: Callable[..., Any]) -> Callable[..., PassResult | No
         return None
 
     @wraps(fn)
-    def wrapped_fn(gm: nn.Module) -> PassResult | None:
+    def wrapped_fn(gm):
         res = fn(gm)
         if res is None:
             return PassResult(gm, True)
@@ -51,8 +51,7 @@ def pass_result_wrapper(fn: Callable[..., Any]) -> Callable[..., PassResult | No
 
 
 def _validate_pass_schedule_constraint(
-    constraint: Callable[[Callable[..., Any], Callable[..., Any]], bool],
-    passes: list[Callable[..., Any]],
+    constraint: Callable[[Callable, Callable], bool], passes: list[Callable]
 ) -> None:
     for i, a in enumerate(passes):
         for j, b in enumerate(passes[i + 1 :]):
@@ -66,8 +65,8 @@ def _validate_pass_schedule_constraint(
 
 
 def _topological_sort_passes(
-    passes: list[Callable[..., Any]], constraints: list[Callable[..., Any]]
-) -> list[Callable[..., Any]]:
+    passes: list[Callable], constraints: list[Callable]
+) -> list[Callable]:
     """
     Args
         passes: Passes that we are ordering
@@ -81,9 +80,9 @@ def _topological_sort_passes(
         return passes
 
     # Construct a graph mapping nodes to a list of their users
-    graph: dict[Callable[..., Any], list[Callable[..., Any]]] = {p: [] for p in passes}
-    indegree_map: dict[Callable[..., Any], int] = dict.fromkeys(passes, 0)
-    candidates: Queue[Callable[..., Any]] = Queue()
+    graph: dict[Callable, list[Callable]] = {p: [] for p in passes}
+    indegree_map: dict[Callable, int] = dict.fromkeys(passes, 0)
+    candidates: Queue = Queue()
     for a in passes:
         for b in passes:
             if a == b:
@@ -97,8 +96,8 @@ def _topological_sort_passes(
         if indegree_map[a] == 0:
             candidates.put(a)
 
-    visited: dict[Callable[..., Any], bool] = dict.fromkeys(passes, False)
-    sorted_passes: list[Callable[..., Any]] = []
+    visited: dict[Callable, bool] = dict.fromkeys(passes, False)
+    sorted_passes: list[Callable] = []
 
     while not candidates.empty():
         p = candidates.get()
@@ -123,9 +122,7 @@ def _topological_sort_passes(
 
 
 @compatibility(is_backward_compatible=False)
-def this_before_that_pass_constraint(
-    this: Callable[..., Any], that: Callable[..., Any]
-) -> Callable[[Callable[..., Any], Callable[..., Any]], bool]:
+def this_before_that_pass_constraint(this: Callable, that: Callable) -> Callable:
     """
     Defines a partial order ('depends on' function) where ``this`` must occur
     before ``that``.
@@ -144,7 +141,7 @@ def this_before_that_pass_constraint(
         depends_on (Callable[[Object, Object], bool])
     """
 
-    def depends_on(a: Callable[..., Any], b: Callable[..., Any]) -> bool:
+    def depends_on(a: Callable, b: Callable):
         return a != that or b != this
 
     return depends_on
@@ -172,20 +169,19 @@ class PassManager:
             checks
     """
 
-    passes: list[Callable[..., PassResult | None]]
-    constraints: list[Callable[[Callable[..., Any], Callable[..., Any]], bool]]
+    passes: list[Callable[[nn.Module], PassResult]]
+    constraints: list[Callable[[Callable, Callable], bool]]
     _validated: bool = False
     steps: int = 1
 
     def __init__(
         self,
-        passes: list[Callable[..., PassResult | None]] | None = None,
-        constraints: list[Callable[[Callable[..., Any], Callable[..., Any]], bool]]
-        | None = None,
-        steps: int | None = None,
+        passes=None,
+        constraints=None,
+        steps=None,
         run_checks_after_each_pass: bool = False,
         suppress_check_failures: bool = False,
-    ) -> None:
+    ):
         self.passes = passes or []
         self.constraints = constraints or []
         if steps:
@@ -194,23 +190,21 @@ class PassManager:
         self.run_checks_after_each_pass = run_checks_after_each_pass
         self.suppress_check_failures = suppress_check_failures
 
-    def add_pass(self, _pass: Callable[..., PassResult | None]) -> None:
+    def add_pass(self, _pass: Callable):
         """
         Adds a pass into the current list of passes.
         """
         self.passes.append(_pass)
         self._validated = False
 
-    def add_constraint(
-        self, constraint: Callable[[Callable[..., Any], Callable[..., Any]], bool]
-    ) -> None:
+    def add_constraint(self, constraint: Callable):
         """
         Adds a constraint into the current list of constraints.
         """
         self.constraints.append(constraint)
         self._validated = False
 
-    def validate_constraints(self) -> None:
+    def validate_constraints(self):
         """
         Validates that current pass schedule defined by `self.passes` is valid
         according to all constraints in `self.constraints`
@@ -221,7 +215,7 @@ class PassManager:
             _validate_pass_schedule_constraint(constraint, self.passes)
         self._validated = True
 
-    def solve_constraints(self) -> None:
+    def solve_constraints(self):
         """
         Finds a valid traversal order based on the given constraints and orders
         the passes based on this order.
@@ -233,7 +227,7 @@ class PassManager:
         self.passes = _topological_sort_passes(self.passes, self.constraints)
         self._validated = True
 
-    def add_checks(self, check: Callable[[nn.Module], None]) -> None:
+    def add_checks(self, check: Callable) -> None:
         """
         Adds a function which takes runs various checks on a given graph module.
         This function is run before and after each pass if the
@@ -288,9 +282,7 @@ class PassManager:
                             f"The result of the pass {fn_name} should be type PassResult."
                             + "Please wrap it with pass_result_wrapper()"
                         )
-                    # pyrefly: ignore[missing-attribute]
                     module = res.graph_module
-                    # pyrefly: ignore[missing-attribute]
                     modified = modified or res.modified
 
                     if isinstance(module, GraphModule):

@@ -1,13 +1,8 @@
+# mypy: allow-untyped-defs
 import logging
 from collections.abc import Callable
 from functools import wraps
 from inspect import unwrap
-from typing import Any, Concatenate, ParamSpec, TypeVar
-
-
-_P = ParamSpec("_P")
-_R = TypeVar("_R")
-_T = TypeVar("_T")
 
 
 logger = logging.getLogger(__name__)
@@ -24,9 +19,7 @@ __all__ = [
 
 # for callables which modify object inplace and return something other than
 # the object on which they act
-def inplace_wrapper(
-    fn: Callable[Concatenate[_T, _P], Any],
-) -> Callable[Concatenate[_T, _P], _T]:
+def inplace_wrapper(fn: Callable) -> Callable:
     """
     Convenience wrapper for passes which modify an object inplace. This
     wrapper makes them return the modified object instead.
@@ -39,14 +32,14 @@ def inplace_wrapper(
     """
 
     @wraps(fn)
-    def wrapped_fn(gm: _T, *args: _P.args, **kwargs: _P.kwargs) -> _T:
-        fn(gm, *args, **kwargs)
+    def wrapped_fn(gm):
+        fn(gm)
         return gm
 
     return wrapped_fn
 
 
-def log_hook(fn: Callable[_P, _R], level: int = logging.INFO) -> Callable[_P, _R]:
+def log_hook(fn: Callable, level=logging.INFO) -> Callable:
     """
     Logs callable output.
 
@@ -75,8 +68,8 @@ def log_hook(fn: Callable[_P, _R], level: int = logging.INFO) -> Callable[_P, _R
     """
 
     @wraps(fn)
-    def wrapped_fn(*args: _P.args, **kwargs: _P.kwargs) -> _R:
-        val = fn(*args, **kwargs)
+    def wrapped_fn(gm):
+        val = fn(gm)
         logger.log(level, "Ran pass %s\t Return value: %s", fn, val)
         return val
 
@@ -84,10 +77,10 @@ def log_hook(fn: Callable[_P, _R], level: int = logging.INFO) -> Callable[_P, _R
 
 
 def loop_pass(
-    base_pass: Callable[[_T], _T],
+    base_pass: Callable,
     n_iter: int | None = None,
-    predicate: Callable[[_T], bool] | None = None,
-) -> Callable[[_T], _T]:
+    predicate: Callable | None = None,
+):
     """
     Convenience wrapper for passes which need to be applied multiple times.
 
@@ -103,7 +96,7 @@ def loop_pass(
         raise AssertionError("Exactly one of `n_iter`or `predicate` must be specified.")
 
     @wraps(base_pass)
-    def new_pass(source: _T) -> _T:
+    def new_pass(source):
         output = source
         if n_iter is not None and n_iter > 0:
             for _ in range(n_iter):
@@ -126,9 +119,8 @@ def loop_pass(
 # Implemented as 'depends on' operators. A constraint is satisfied iff a list
 # has a valid partial ordering according to this comparison operator.
 def _validate_pass_schedule_constraint(
-    constraint: Callable[[Callable[..., Any], Callable[..., Any]], bool],
-    passes: list[Callable[..., Any]],
-) -> None:
+    constraint: Callable[[Callable, Callable], bool], passes: list[Callable]
+):
     for i, a in enumerate(passes):
         for j, b in enumerate(passes[i + 1 :]):
             if constraint(a, b):
@@ -140,23 +132,19 @@ def _validate_pass_schedule_constraint(
             )
 
 
-def this_before_that_pass_constraint(
-    this: Callable[..., Any], that: Callable[..., Any]
-) -> Callable[[Callable[..., Any], Callable[..., Any]], bool]:
+def this_before_that_pass_constraint(this: Callable, that: Callable):
     """
     Defines a partial order ('depends on' function) where `this` must occur
     before `that`.
     """
 
-    def depends_on(a: Callable[..., Any], b: Callable[..., Any]) -> bool:
+    def depends_on(a: Callable, b: Callable):
         return a != that or b != this
 
     return depends_on
 
 
-def these_before_those_pass_constraint(
-    these: Callable[..., Any], those: Callable[..., Any]
-) -> Callable[[Callable[..., Any], Callable[..., Any]], bool]:
+def these_before_those_pass_constraint(these: Callable, those: Callable):
     """
     Defines a partial order ('depends on' function) where ``these`` must occur
     before ``those``. Where the inputs are 'unwrapped' before comparison.
@@ -178,7 +166,7 @@ def these_before_those_pass_constraint(
         depends_on (Callable[[Object, Object], bool])
     """
 
-    def depends_on(a: Callable[..., Any], b: Callable[..., Any]) -> bool:
+    def depends_on(a: Callable, b: Callable):
         return unwrap(a) != those or unwrap(b) != these
 
     return depends_on
@@ -200,42 +188,40 @@ class PassManager:
             `this_before_that_pass_constraint` for example.
     """
 
-    passes: list[Callable[..., Any]]
-    constraints: list[Callable[..., Any]]
+    passes: list[Callable]
+    constraints: list[Callable]
     _validated: bool = False
 
     def __init__(
         self,
-        passes: list[Callable[..., Any]] | None = None,
-        constraints: list[Callable[..., Any]] | None = None,
-    ) -> None:
+        passes=None,
+        constraints=None,
+    ):
         self.passes = passes or []
         self.constraints = constraints or []
 
     @classmethod
-    def build_from_passlist(cls, passes: list[Callable[..., Any]]) -> "PassManager":
+    def build_from_passlist(cls, passes):
         pm = PassManager(passes)
         # TODO(alexbeloi): add constraint management/validation
         return pm
 
-    def add_pass(self, _pass: Callable[..., Any]) -> None:
+    def add_pass(self, _pass: Callable):
         self.passes.append(_pass)
         self._validated = False
 
-    def add_constraint(self, constraint: Callable[..., Any]) -> None:
+    def add_constraint(self, constraint):
         self.constraints.append(constraint)
         self._validated = False
 
-    def remove_pass(self, _passes: list[str]) -> None:
+    def remove_pass(self, _passes: list[str]):
         if _passes is None:
             return
         passes_left = [ps for ps in self.passes if ps.__name__ not in _passes]
         self.passes = passes_left
         self._validated = False
 
-    def replace_pass(
-        self, _target: Callable[..., Any], _replacement: Callable[..., Any]
-    ) -> None:
+    def replace_pass(self, _target, _replacement):
         passes_left = []
         for ps in self.passes:
             if ps.__name__ == _target.__name__:
@@ -245,7 +231,7 @@ class PassManager:
         self.passes = passes_left
         self._validated = False
 
-    def validate(self) -> None:
+    def validate(self):
         """
         Validates that current pass schedule defined by `self.passes` is valid
         according to all constraints in `self.constraints`
@@ -256,7 +242,7 @@ class PassManager:
             _validate_pass_schedule_constraint(constraint, self.passes)
         self._validated = True
 
-    def __call__(self, source: Any) -> Any:
+    def __call__(self, source):
         self.validate()
         out = source
         for _pass in self.passes:

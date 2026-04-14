@@ -1,11 +1,12 @@
-from typing import NamedTuple
+# mypy: allow-untyped-defs
+from typing import Any, NamedTuple
 
 import torch
 from torch.fx._compatibility import compatibility
 from torch.fx.graph import Graph
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import map_arg, Node, Target
-from torch.fx.passes.shape_prop import ShapeProp, TensorMetadata
+from torch.fx.passes.shape_prop import ShapeProp
 
 
 __all__ = [
@@ -24,7 +25,7 @@ def replace_target_nodes_with(
     old_target: Target,
     new_op: str,
     new_target: Target,
-) -> None:
+):
     """
     Modifies all nodes in fx_module.graph.nodes which match the specified op code
     and target, and updates them to match the new op code and target.
@@ -72,7 +73,7 @@ def get_size_of_all_nodes(
 
 
 @compatibility(is_backward_compatible=False)
-def get_tensor_meta(node: Node) -> TensorMetadata:
+def get_tensor_meta(node: Node) -> Any:
     tensor_meta = node.meta.get("tensor_meta")
 
     if not tensor_meta:

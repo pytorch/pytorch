@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import traceback
 from typing import Any, NamedTuple
 

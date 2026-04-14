@@ -1,8 +1,8 @@
+# mypy: allow-untyped-defs
 import functools
 import logging
 import operator
 import sys
-from collections.abc import Callable
 from typing import Any, Optional, TYPE_CHECKING
 
 
@@ -103,7 +103,6 @@ def insert_deferred_runtime_asserts(
         free_symbols,
         InnerTensorKey,
         resolve_unbacked_bindings,
-        RuntimeAssert,
     )
     from torch.utils._sympy.numbers import int_oo
     from torch.utils._sympy.reference import (
@@ -207,9 +206,7 @@ def insert_deferred_runtime_asserts(
 
     Analysis = PythonReferenceAnalysis if export else OptimizedPythonReferenceAnalysis
 
-    def _sympy_interp(
-        expr_to_proxy: dict[sympy.Expr, fx.Proxy], expr: sympy.Expr
-    ) -> fx.Proxy:
+    def _sympy_interp(expr_to_proxy, expr):
         # sympy_interp() with hash consing
         from sympy import Integer, Number, Symbol
         from sympy.logic.boolalg import BooleanAtom
@@ -242,7 +239,7 @@ def insert_deferred_runtime_asserts(
             isinstance(rhs, sympy.Symbol) and isinstance(lhs, sympy.Number)
         )
 
-    def add_runtime_asserts(ras: list[RuntimeAssert]) -> None:
+    def add_runtime_asserts(ras):
         for ra in ras:
             if (
                 # redundant
@@ -312,7 +309,7 @@ def insert_deferred_runtime_asserts(
                 and (example_value := _get_example_value(node)) is not None
             ):
 
-                def match_symbol(symint: object, cb: Callable[[], fx.Node]) -> None:
+                def match_symbol(symint, cb):
                     if (
                         isinstance(symint, torch.SymInt)
                         and isinstance(symint.node, SymNode)
@@ -393,7 +390,7 @@ def insert_deferred_runtime_asserts(
                 and (sym_expr := _get_sym_val(node)) is not None
             ):
                 # this guards against deleting calls like item() that produce new untracked symbols
-                def has_new_untracked_symbols() -> bool:
+                def has_new_untracked_symbols():
                     # pyrefly: ignore [missing-attribute]
                     for symbol in sym_expr.free_symbols:
                         if symbol not in expr_to_proxy:
@@ -407,7 +404,7 @@ def insert_deferred_runtime_asserts(
                     shape_env, node.meta.get("unbacked_bindings", {})
                 )
 
-                def has_new_unbacked_bindings() -> bool:
+                def has_new_unbacked_bindings():
                     if resolved_unbacked_bindings is None:
                         raise AssertionError("resolved_unbacked_bindings is None")
                     for key in resolved_unbacked_bindings:
@@ -484,7 +481,7 @@ def insert_deferred_runtime_asserts(
 
                     # TODO: some CSE when generating these nodes can probably
                     # help reduce graph size and improve compile time
-                    def go(node: fx.Node, keypath: tuple[object, ...]) -> fx.Node:
+                    def go(node, keypath):
                         if keypath == ():
                             return node
                         if (
@@ -629,7 +626,7 @@ def insert_deferred_runtime_asserts(
                     # assert and also explicitly refine the range
                     # (refinement should not be necessary once runtime
                     # asserts cause refinement, but that's NYI)
-                    def convert(s: Any) -> int | None:
+                    def convert(s):
                         if s in (int_oo, -int_oo):
                             return None
                         try:

@@ -1,8 +1,8 @@
+# mypy: allow-untyped-defs
 from typing import Any
 
 import torch
 from torch.fx import Graph, GraphModule, Node
-from torch.fx.node import Target
 from torch.fx.passes.infra.pass_base import PassBase, PassResult
 from torch.utils._pytree import tree_flatten
 
@@ -43,15 +43,13 @@ inplace_ops = {
 
 
 @torch.fx._compatibility.compatibility(is_backward_compatible=False)
-def get_CSE_banned_ops() -> set[torch._ops.OpOverloadPacket]:
+def get_CSE_banned_ops():
     return rand_ops.union(inplace_ops)
 
 
 @torch.fx._compatibility.compatibility(is_backward_compatible=False)
 class CSEPass(PassBase):
-    def __init__(
-        self, banned_ops: set[torch._ops.OpOverloadPacket] | None = None
-    ) -> None:
+    def __init__(self, banned_ops=None):
         """
         This version of CSE Pass aims to be dialect agnostic, and it's implemented purely based on the connectivity between fx.Node.
 
@@ -85,7 +83,7 @@ class CSEPass(PassBase):
         print(result.graph_module)
         """
 
-        def get_aten_target(node: Node) -> Target:
+        def get_aten_target(node):
             if hasattr(node.target, "overloadpacket"):
                 return node.target.overloadpacket
             return node.target
@@ -96,10 +94,10 @@ class CSEPass(PassBase):
             Node, Node
         ] = {}  # map from node in the old graph to node in the new graph
         hash_env: dict[
-            tuple[Target, int], Node
+            tuple[torch._ops.OpOverload, int], Node
         ] = {}  # map from hash to a node in the new graph
         token_map: dict[
-            tuple[Target, int], dict[str, Any]
+            tuple[torch._ops.OpOverload, int], dict[str, Any]
         ] = {}  # map from hash to token
         for n in graph_module.graph.nodes:
             # The placeholder, output, and get_attr nodes are copied to the new graph without change
@@ -115,7 +113,7 @@ class CSEPass(PassBase):
             else:  # n.op == 'call_function', should never see n.op == 'call_module' or 'call_method'
                 # substitute args and kwargs members to their mapping in env if exists
                 # specs can be used to reconstruct nested list/dictionaries
-                def substitute(arg_list: Any) -> tuple[tuple[Any, ...], Any]:
+                def substitute(arg_list):
                     arg_list, spec = tree_flatten(arg_list)
                     for i in range(len(arg_list)):
                         v = arg_list[i]

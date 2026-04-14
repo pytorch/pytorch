@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+
 import copy
 import logging
 from collections import defaultdict
@@ -16,7 +18,7 @@ __all__ = ["regional_inductor_invoke_subgraph"]
 
 def _compile_submod(
     gm: torch.fx.GraphModule, subgraph: str, subgraph_users: list[torch.fx.Node]
-) -> torch.fx.GraphModule:
+):
     """
     Compiles subgraph submodule in gm. subgraph is used by subgraph_users.
     subgraph_users must all be  torch.ops.higher_order.invoke_subgraph HOP.
@@ -54,7 +56,7 @@ def _compile_submod(
         compile_config,
     )
 
-    def get_compiled_fn() -> AOTCompiledArtifact:
+    def get_compiled_fn():
         context = torch._guards.TracingContext.get()
         if context.fake_mode is None:
             raise AssertionError("context.fake_mode is None")
@@ -94,33 +96,28 @@ def _compile_submod(
     return gm
 
 
-def _needs_inductor_compile(node: torch.fx.Node) -> bool:
+def _needs_inductor_compile(node: torch.fx.Node):
     # TODO: maybe we could change to check
     # node.meta.get("partitioner_tag") != "is_forward"
     # if the tag is relibable
-    return bool(
-        (
-            node.op not in ("placeholder", "output")
-            and hasattr(node, "meta")
-            and node.meta.get("custom", None)
-            and node.meta["custom"].get("nested_region_config", None)
-            and node.meta["custom"]["nested_region_config"].fw_compiler
-            and node.meta.get("partitioner_tag") != "is_backward"
-        )
-        or (
-            node.op not in ("placeholder", "output")
-            and hasattr(node, "meta")
-            and node.meta.get("custom", None)
-            and node.meta["custom"].get("nested_region_config", None)
-            and node.meta["custom"]["nested_region_config"].bw_compiler
-            and node.meta.get("partitioner_tag") == "is_backward"
-        )
+    return (
+        node.op not in ("placeholder", "output")
+        and hasattr(node, "meta")
+        and node.meta.get("custom", None)
+        and node.meta["custom"].get("nested_region_config", None)
+        and node.meta["custom"]["nested_region_config"].fw_compiler
+        and node.meta.get("partitioner_tag") != "is_backward"
+    ) or (
+        node.op not in ("placeholder", "output")
+        and hasattr(node, "meta")
+        and node.meta.get("custom", None)
+        and node.meta["custom"].get("nested_region_config", None)
+        and node.meta["custom"]["nested_region_config"].bw_compiler
+        and node.meta.get("partitioner_tag") == "is_backward"
     )
 
 
-def _compile_invoke_subgraph_nodes_with_inductor(
-    gm: torch.fx.GraphModule,
-) -> torch.fx.GraphModule:
+def _compile_invoke_subgraph_nodes_with_inductor(gm):
     map_subgraph_to_nodes = defaultdict(list)
     subgraphs: set[str] = set()
 
@@ -143,9 +140,7 @@ def _compile_invoke_subgraph_nodes_with_inductor(
     return gm
 
 
-def _recursive_compile_invoke_subgraph_nodes(
-    gm: torch.fx.GraphModule,
-) -> torch.fx.GraphModule:
+def _recursive_compile_invoke_subgraph_nodes(gm):
     for node in gm.graph.find_nodes(op="get_attr"):
         if _needs_inductor_compile(node):
             # If the get_attr itself is marked for compile, the outer graph will
@@ -160,9 +155,7 @@ def _recursive_compile_invoke_subgraph_nodes(
 
 
 @compatibility(is_backward_compatible=False)
-def regional_inductor_invoke_subgraph(
-    gm: torch.fx.GraphModule, *example_args: object
-) -> torch.fx.GraphModule:
+def regional_inductor_invoke_subgraph(gm, *example_args):
     """
     Compile invoke_subgraph nodes if they have custom compiler specified
     in node.meta["nested_region_config"].bw_compiler or fw_compiler
@@ -172,7 +165,6 @@ def regional_inductor_invoke_subgraph(
     with torch.fx.traceback.preserve_node_meta(enable=False):
         compiled_gm = _recursive_compile_invoke_subgraph_nodes(gm)
         # TODO: might not need this boxed_nop after we switch to _RegionCompiler
-        # pyrefly: ignore [bad-return]
         return torch._dynamo.backends.debugging.boxed_nop(
             compiled_gm, example_inputs=[]
         )

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copy
 import logging
 import os
@@ -14,7 +15,7 @@ __all__ = ["SubgraphMatcher", "InternalMatch"]
 
 
 # Set`PYTORCH_MATCHER_LOGLEVEL=INFO` to see debug logs
-def _init_logger() -> logging.Logger:
+def _init_logger():
     logger = logging.getLogger(__name__)
 
     level = os.environ.get("PYTORCH_MATCHER_LOGLEVEL", "WARNING").upper()
@@ -50,7 +51,7 @@ class InternalMatch:
     # only available if the matcher is `SubgraphMatcherWithNameNodesMap`
     name_node_map: dict[str, Node] = field(default_factory=dict)
 
-    def __copy__(self) -> "InternalMatch":
+    def __copy__(self):
         return InternalMatch(
             anchors=self.anchors,
             nodes_map=self.nodes_map.copy(),
@@ -250,9 +251,7 @@ class SubgraphMatcher:
         # match for `gn`
         match_found = True
 
-        def _match_args(
-            args1: list[Any] | tuple[Any, ...], args2: list[Any] | tuple[Any, ...]
-        ) -> bool:
+        def _match_args(args1: list | tuple, args2: list | tuple) -> bool:
             if len(args1) != len(args2):
                 return False
 
@@ -272,8 +271,7 @@ class SubgraphMatcher:
             return True
 
         # Flatten all args/kwargs into 1 list of args
-        pn_args: list[Any] | None = None
-        gn_args: list[Any] | None = None
+        pn_args, gn_args = None, None
         if (
             (
                 len(pn.args) != len(gn.args)
@@ -284,9 +282,7 @@ class SubgraphMatcher:
         ):
             args_schema = pn.target._schema.arguments
 
-            def get_all_arguments(
-                orig_args: tuple[Any, ...], orig_kwargs: dict[str, Any]
-            ) -> list[Any]:
+            def get_all_arguments(orig_args, orig_kwargs):
                 all_args = []
                 for i, schema in enumerate(args_schema):
                     if schema.name in orig_kwargs:
@@ -374,7 +370,7 @@ class SubgraphMatcher:
 
         matches: list[InternalMatch] = []
 
-        def backtracking(anchor_index: int, match: InternalMatch) -> None:
+        def backtracking(anchor_index, match):
             if anchor_index == len(match_candidates_list):
                 match.placeholder_nodes = [
                     match.nodes_map[pn] for pn in self.pattern_placeholder_nodes
@@ -422,7 +418,7 @@ class SubgraphMatcher:
             )
 
         # filter out the matches that form a cycle if the subgraph is fused
-        valid_matches: list[InternalMatch] = []
+        valid_matches = []
         for match in matches:
             matched_compute_nodes = [
                 gn
