@@ -89,6 +89,7 @@ class GraphModule(torch.nn.Module):
         loss: "f32[]" = res.sum();  res = None
 
         grad = torch.autograd.grad(loss, (l_mod_parameters_weight_, l_mod_parameters_bias_));  l_mod_parameters_weight_ = l_mod_parameters_bias_ = None
+
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
 
@@ -227,6 +228,7 @@ class GraphModule(torch.nn.Module):
         loss: "f32[]" = res.sum();  res = None
 
         grad = torch.autograd.grad(loss, l_mod_parameters_weight_);  l_mod_parameters_weight_ = None
+
         getitem: "f32[4, 4]" = grad[0];  grad = None
 
         detach: "f32[]" = loss.detach();  loss = None
@@ -445,6 +447,7 @@ class GraphModule(torch.nn.Module):
         loss: "f32[]" = res.sum();  res = None
 
         grad = torch.autograd.grad(loss, (l_mod_parameters_weight_, l_mod_parameters_bias_), materialize_grads = False, allow_unused = True);  loss = l_mod_parameters_weight_ = l_mod_parameters_bias_ = None
+
         weight_grad: "f32[4, 4]" = grad[0]
         bias_grad: "f32[4]" = grad[1];  grad = None
 
@@ -880,6 +883,7 @@ class GraphModule(torch.nn.Module):
         loss: "f32[]" = res.sum();  res = None
 
         grad = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = False)
+
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
 
@@ -923,6 +927,7 @@ class GraphModule(torch.nn.Module):
         loss: "f32[]" = res.sum();  res = None
 
         grad = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = True)
+
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
 
@@ -968,6 +973,7 @@ class GraphModule(torch.nn.Module):
         gradient: "f32[2, 4]" = torch.ones_like(res)
 
         grad = torch.autograd.grad(res, [l_mod_parameters_weight_, l_mod_parameters_bias_], gradient, allow_unused = False);  gradient = None
+
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
 
@@ -1015,6 +1021,7 @@ class GraphModule(torch.nn.Module):
         loss: "f32[]" = res.sum();  res = None
 
         grad = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = False, retain_graph = True)
+
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
 
@@ -1028,6 +1035,7 @@ class GraphModule(torch.nn.Module):
         _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
 
         grad_1 = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = False)
+
         getitem_2: "f32[4, 4]" = grad_1[0]
         getitem_3: "f32[4]" = grad_1[1];  grad_1 = None
 
@@ -1118,6 +1126,7 @@ class GraphModule(torch.nn.Module):
         loss: "f32[]" = y.sum();  y = None
 
         grad = torch.autograd.grad(loss, [w]);  loss = w = None
+
         grad_1: "f32[4, 4]" = grad[0];  grad = None
         return (grad_1,)
 """,  # noqa: B950
@@ -1222,6 +1231,81 @@ backward() with non-leaf tensor
         act = opt_fn(a, b)
 
         self.assertTrue(ref is act)
+
+    def test_autograd_grad_lost_grad_fn_in_closure(self):
+        def f(x):
+            return (x**2).sum()
+
+        x = torch.randn(4, requires_grad=True)
+        _, vjp_fn = torch.func.vjp(f, x)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "_autograd_grad with lost grad_fn linkage",
+        ):
+            torch.compile(vjp_fn, backend="eager", fullgraph=True)(torch.ones(()))
+
+    def test_autograd_grad_transform_closure_compiled_separately(self):
+        def f(x):
+            return (x**2).sum()
+
+        x = torch.randn(4, requires_grad=True)
+        _, vjp_fn = torch.func.vjp(f, x)
+        v = torch.ones(())
+
+        eager_grad = vjp_fn(v)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_grad = torch.compile(vjp_fn, backend=cnt)(v)
+
+        self.assertEqual(compiled_grad, eager_grad)
+        self.assertEqual(cnt.frame_count, 0)
+
+    @skipIfCrossRef
+    def test_autograd_grad_transform_compiled_end_to_end(self):
+        def f(x):
+            return (x**2).sum()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            _, vjp_fn = torch.func.vjp(f, x)
+            return vjp_fn(torch.ones(()))
+
+        x = torch.randn(4, requires_grad=True)
+        result = fn(x)
+        expected = torch.func.vjp(f, x)[1](torch.ones(()))
+        self.assertEqual(result, expected)
+
+    def test_autograd_grad_multi_output_transform_closure(self):
+        def f(x):
+            return x * 2, x * 3
+
+        x = torch.randn(4, requires_grad=True)
+        _, vjp_fn = torch.func.vjp(f, x)
+        v = (torch.ones(4), torch.ones(4))
+
+        eager_grad = vjp_fn(v)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_grad = torch.compile(vjp_fn, backend=cnt)(v)
+        self.assertEqual(compiled_grad, eager_grad)
+
+    @skipIfCrossRef
+    def test_autograd_grad_inline_computation_no_graph_break(self):
+        def f(x):
+            return (x * 2).sum()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            y, vjp_fn = torch.func.vjp(f, x)
+            return y, vjp_fn(torch.ones(()))
+
+        x = torch.randn(4, requires_grad=True)
+        compiled_y, compiled_grad = fn(x)
+        eager_y, eager_vjp_fn = torch.func.vjp(f, x)
+        eager_grad = eager_vjp_fn(torch.ones(()))
+        self.assertEqual(compiled_y, eager_y)
+        self.assertEqual(compiled_grad, eager_grad)
 
 
 if __name__ == "__main__":

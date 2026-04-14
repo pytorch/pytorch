@@ -1613,6 +1613,7 @@ TEST_WITH_UBSAN: bool = TestEnvironment.def_flag(
 TEST_WITH_ROCM: bool = TestEnvironment.def_flag(
     "TEST_WITH_ROCM",
     env_var="PYTORCH_TEST_WITH_ROCM",
+    implied_by_fn=lambda: torch.version.hip is not None,
 )
 TEST_WITH_MTIA: bool = TestEnvironment.def_flag(
     "TEST_WITH_MTIA",

@@ -534,6 +534,11 @@ class SideEffects:
             variable_cls = FrozenDataClassVariable
         elif issubclass(user_cls, BaseException):
             variable_cls = variables.UserDefinedExceptionObjectVariable
+        elif issubclass(
+            user_cls,
+            variables.user_defined._CONSTANT_BASE_TYPES,
+        ):
+            variable_cls = variables.UserDefinedConstantVariable
         elif variables.InspectVariable.is_matching_class(user_cls):
             variable_cls = variables.InspectVariable
         assert issubclass(variable_cls, variables.UserDefinedObjectVariable)
@@ -554,6 +559,8 @@ class SideEffects:
                 base_cls = base_cls_vt.fn
             elif isinstance(base_cls_vt, variables.DictBuiltinVariable):
                 base_cls = dict
+            elif isinstance(base_cls_vt, variables.ListBuiltinVariable):
+                base_cls = list
             elif isinstance(base_cls_vt, variables.UserDefinedClassVariable):
                 base_cls = base_cls_vt.value
             else:
@@ -566,6 +573,22 @@ class SideEffects:
                 # Structseq tp_new requires a sequence argument and rejects
                 # tuple.__new__, so create a dummy with None placeholders.
                 obj = user_cls([None] * user_cls.n_fields)
+            elif init_args and issubclass(
+                user_cls,
+                variables.user_defined._CONSTANT_BASE_TYPES,
+            ):
+                example_args = [arg.as_python_constant() for arg in init_args]
+                try:
+                    obj = base_cls.__new__(  # pyrefly: ignore[bad-specialization]
+                        user_cls, *example_args
+                    )
+                except Exception:
+                    # __new__ can raise (e.g., exceeding int str digit limits).
+                    # Fall back to creating without args — the example value is
+                    # only used for tracing, not for correctness.
+                    obj = base_cls.__new__(  # pyrefly: ignore[bad-specialization]
+                        user_cls
+                    )
             else:
                 obj = base_cls.__new__(user_cls)
         return obj
@@ -741,11 +764,7 @@ class SideEffects:
             var.mutation_type.is_modified = True
         if var.source is not None:
             self.mutated_sources.add(var.source)
-        if (
-            var.source
-            and isinstance(var, variables.ConstDictVariable)
-            and not isinstance(var, variables.SetVariable)
-        ):
+        if var.source and isinstance(var, variables.ConstDictVariable):
             self._has_existing_dict_mutation = True
 
     def has_existing_dict_mutation(self) -> bool:
@@ -1027,6 +1046,24 @@ class SideEffects:
 
         return log_str
 
+    def _emit_side_effect_messages(self, side_effect_messages: list[str]) -> None:
+        if not side_effect_messages:
+            return
+
+        for msg in side_effect_messages:
+            side_effects_log.debug(msg)
+
+        torch._logging.trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "dynamo_side_effects",
+                "encoding": "string",
+            },
+            payload_fn=lambda: "\n\n========================================\n\n".join(
+                side_effect_messages
+            ),
+        )
+
     def codegen_update_mutated(
         self, cg: PyCodegen, log_side_effects: bool = False
     ) -> None:
@@ -1037,8 +1074,6 @@ class SideEffects:
             if config.side_effect_replay_policy != "silent" and log_side_effects:
                 msg = self._format_side_effect_message(var)
                 side_effect_messages.append(msg)
-                # Log individual side effects for granular debugging
-                side_effects_log.debug(msg)
 
         suffixes = []
         for var in self._get_modified_vars():
@@ -1095,7 +1130,7 @@ class SideEffects:
                 )
                 _maybe_log_side_effect(var)
 
-            elif isinstance(var, variables.ConstDictVariable):
+            elif isinstance(var, (variables.ConstDictVariable, variables.SetVariable)):
                 # Reconstruct works as follow:
                 # (1) Skip codegen if there are no new items
                 # (2) codegen(...) each pair of key/value
@@ -1401,17 +1436,7 @@ class SideEffects:
 
         # Send batched structured trace for all side effects in this compilation
         if log_side_effects and side_effect_messages:
-            combined_msg = "\n\n========================================\n\n".join(
-                side_effect_messages
-            )
-            torch._logging.trace_structured(
-                "artifact",
-                metadata_fn=lambda: {
-                    "name": "dynamo_side_effects",
-                    "encoding": "string",
-                },
-                payload_fn=lambda: combined_msg,
-            )
+            self._emit_side_effect_messages(side_effect_messages)
 
     def log_side_effects_summary(self) -> None:
         if config.side_effect_replay_policy == "silent":

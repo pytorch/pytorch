@@ -2448,7 +2448,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             fsdp_model(inp)
         # Check for no recompiles (if there were incorrect de-dup guards, then
         # the frame count would be equal to the number of forward calls)
-        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.frame_count, 3)
 
     def test_fsdp_staticmethod(self):
         """
@@ -2494,9 +2494,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             test_outs.append(fsdp_model(x))
             # Check for no recompiles, which could happen if incorrectly
             # passing args to the staticmethod (e.g. doubly passing `self`)
-            # 3 is expected here for 1 forward.
-            # Graph 1 should be add and imul
-            self.assertEqual(cnt.frame_count, 1)
+            self.assertEqual(cnt.frame_count, 2)
         for test_out in test_outs:
             self.assertEqual(test_out, ref_out)
 

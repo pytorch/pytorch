@@ -676,7 +676,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         if name == "__dict__":
             return super().var_getattr(tx, name)
         elif name in cmp_name_to_op_mapping:
-            return variables.GetAttrVariable(self, name)
+            return variables.GetAttrVariable(
+                self, name, py_type=type(getattr(self.fn, name))
+            )
         source = self.get_source()
         return fn_var_getattr(tx, self.fn, source, name)
 
@@ -1069,6 +1071,9 @@ class BuiltinMethodVariable(BaseUserFunctionVariable):
         assert isinstance(fn, types.BuiltinMethodType)
         self.fn = fn
 
+    def python_type(self) -> type:
+        return types.BuiltinMethodType
+
     @staticmethod
     def is_supported_builtin_method(obj: Any) -> bool:
         method_self = obj.__self__
@@ -1446,6 +1451,9 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
 
         This is a wrapper around (Nested)UserFunctionVariable
     """
+
+    def python_type(self) -> type:
+        return types.FunctionType
 
     def __init__(
         self,
@@ -1933,7 +1941,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             d = getattr(self, "defaults", None)
             return d.as_python_constant() if d else ConstantVariable.create(None)
         elif name in cmp_name_to_op_mapping:
-            return variables.GetAttrVariable(self, name)
+            return variables.GetAttrVariable(
+                self, name, py_type=type(getattr(types.FunctionType, name))
+            )
         else:
             return super().var_getattr(tx, name)
 
@@ -2141,7 +2151,14 @@ class SkipFunctionVariable(VariableTracker):
 
             guard_on_source.make_guard(GuardBuilder.CLOSURE_MATCH)
         elif inspect.isbuiltin(value):
-            install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
+            # Bound builtin methods (e.g. obj.__reduce_ex__) are created fresh
+            # on every attribute access, so their id() is unstable.  Skip the
+            # id-based BUILTIN_MATCH guard for them — the type guard on
+            # the owner object is sufficient.
+            if not hasattr(value, "__self__") or isinstance(
+                value.__self__, types.ModuleType
+            ):
+                install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
         elif not is_wrapper_or_member_descriptor(value):
             # These descriptors are not guaranteed to return the same object on
             # attribute lookup. They are unlikely to be changed, so we can skip
@@ -2327,7 +2344,9 @@ class SkipFunctionVariable(VariableTracker):
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name in cmp_name_to_op_mapping:
-            return variables.GetAttrVariable(self, name)
+            return variables.GetAttrVariable(
+                self, name, py_type=type(getattr(self.value, name))
+            )
 
         return fn_var_getattr(tx, self.value, self.source, name)
 
@@ -2386,6 +2405,9 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
     their _torchdynamo_inline attribute. Similarly, functions with
     __script_if_tracing_wrapper have the original attr at "__original_fn".
     """
+
+    def python_type(self) -> type:
+        return types.FunctionType
 
     def __init__(self, wrapper_obj: Any, attr_to_trace: str, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -2452,9 +2474,19 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
                     dynamo_logger.debug(user_stack_trace)
 
         all_args = self.self_args() + list(args)
+        # Inner torch.compile wrapper: disable nested graph breaks to
+        # preserve the inner compile's semantics (e.g. fullgraph=True).
+        # Graph breaks inside the inner function should raise Unsupported
+        # so they're handled by the outer frame, not as nested breaks.
+        polyfill = (
+            polyfills.getattr_and_trace_no_nested_graph_breaks
+            if self.attr_to_trace == "_torchdynamo_inline"
+            and getattr(self.wrapper_obj, "_is_torch_compile", False)
+            else polyfills.getattr_and_trace
+        )
         return VariableTracker.build(
             tx,
-            polyfills.getattr_and_trace,  # type: ignore[arg-type]
+            polyfill,  # type: ignore[arg-type]
         ).call_function(
             tx,
             [self, VariableTracker.build(tx, self.attr_to_trace), *all_args],
@@ -2471,6 +2503,9 @@ class WrapperUserMethodVariable(WrapperUserFunctionVariable):
     saving the vt for `self` object of the method which is then used by
     WrapperUserFunctionVariable in `call_function` method.
     """
+
+    def python_type(self) -> type:
+        return types.MethodType
 
     def __init__(
         self,
@@ -2603,7 +2638,7 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
                     "`P2POp` used incorrectly"
                 )
 
-            ops = list()
+            ops: list[VariableTracker] = list()
             peers = list()
             tags = list()
             tensors = list()
@@ -2793,7 +2828,9 @@ class FunctoolsPartialVariable(VariableTracker):
             items = {VariableTracker.build(tx, k): v for k, v in self.keywords.items()}
             return variables.ConstDictVariable(items, source=source)
         if name in cmp_name_to_op_mapping:
-            return variables.GetAttrVariable(self, name)
+            return variables.GetAttrVariable(
+                self, name, py_type=type(getattr(functools.partial, name))
+            )
         raise_observed_exception(AttributeError, tx)
 
     def as_python_constant(self) -> Any:
@@ -2983,6 +3020,9 @@ class SysFunctionVariable(VariableTracker):
     def __init__(self, value: Any, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
+
+    def python_type(self) -> type:
+        return types.BuiltinFunctionType
 
     def exc_info(self, tx: "InstructionTranslator") -> "variables.TupleVariable":
         if len(tx.exn_vt_stack):
@@ -3234,6 +3274,15 @@ class TritonKernelVariable(VariableTracker):
             self, args, kwargs, tx
         )
 
+    def mp_subscript_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: VariableTracker,
+    ) -> VariableTracker:
+        # Triton kernel[grid] — triton-specific, not a CPython slot.
+        # TODO(follow-up): add test for invalid key type
+        return dynamo_triton_hopifier_singleton.call_getitem(self, [key])
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -3241,9 +3290,7 @@ class TritonKernelVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "__getitem__":
-            return dynamo_triton_hopifier_singleton.call_getitem(self, args)
-        elif name == "run":
+        if name == "run":
             return dynamo_triton_hopifier_singleton.call_run(self, args, kwargs, tx)  # type: ignore[return-value]
 
         # Bail out to parent's implementation
@@ -3341,6 +3388,9 @@ class CreateTMADescriptorExperimentalVariable(VariableTracker):
         super().__init__(**kwargs)
         self.rank = rank
 
+    def python_type(self) -> type:
+        return types.FunctionType
+
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -3403,6 +3453,9 @@ class CreateTMADescriptorExperimentalVariable(VariableTracker):
 
 
 class CreateTMADescriptorStableVariable(VariableTracker):
+    def python_type(self) -> type:
+        return types.FunctionType
+
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -3595,6 +3648,9 @@ class TritonSetAllocatorVariable(VariableTracker):
     def __init__(self, value: Any, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
+
+    def python_type(self) -> type:
+        return type(self.value)
 
     def call_function(
         self,

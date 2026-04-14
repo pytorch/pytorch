@@ -331,6 +331,9 @@ class RepeatIteratorVariable(IteratorVariable):
         super().__init__(**kwargs)
         self.item = item
 
+    def python_type(self) -> type:
+        return itertools.repeat
+
     # Repeat needs no mutation, clone self
     def next_variable(self, tx: "InstructionTranslator") -> VariableTracker:
         return self.item
@@ -355,6 +358,9 @@ class CountIteratorVariable(IteratorVariable):
         "advance_count",
         *IteratorVariable._nonvar_fields,
     }
+
+    def python_type(self) -> type:
+        return itertools.count
 
     def __init__(
         self,

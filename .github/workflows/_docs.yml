@@ -89,12 +89,8 @@ jobs:
             To start Python docs build type:
               cd docs && make html && make coverage
 
-      # [see note: pytorch repo ref]
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
-
       - name: Setup Linux
-        uses: ./.github/actions/setup-linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@main
 
       - name: Login to ECR
         uses: ./.github/actions/ecr-login

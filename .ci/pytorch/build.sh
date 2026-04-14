@@ -144,6 +144,7 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   export USE_XCCL=1
   export USE_MPI=0
   export TORCH_XPU_ARCH_LIST=pvc
+  export USE_STATIC_MKL=1
 fi
 
 # sccache will fail for CUDA builds if all cores are used for compiling

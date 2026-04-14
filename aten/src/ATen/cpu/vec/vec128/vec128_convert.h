@@ -373,25 +373,6 @@ struct VecConvert<float, 1, BFloat16, 1> {
   }
 };
 
-template <>
-struct VecConvert<BFloat16, 1, float, 2> {
-  static inline VectorizedN<BFloat16, 1> apply(
-      const VectorizedN<float, 2>& src) {
-    VectorizedN<BFloat16, 1> result;
-    result[0] = convert_float_bfloat16(src[0], src[1]);
-    return result;
-  }
-};
-
-template <>
-struct VecConvert<Half, 1, float, 2> {
-  static inline VectorizedN<Half, 1> apply(const VectorizedN<float, 2>& src) {
-    VectorizedN<Half, 1> result;
-    result[0] = convert_float_half(src[0], src[1]);
-    return result;
-  }
-};
-
 #endif // defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256)
 } // namespace CPU_CAPABILITY
 } // namespace at::vec

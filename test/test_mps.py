@@ -13186,6 +13186,16 @@ class TestConsistency(TestCaseMPS):
             # Broadcast
             self.assertEqual(op(x, y[0]), op(x.to("mps"), y.to("mps")[0]).cpu())
 
+    def test_mm_stride_zero(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/180201
+        # MPSGraph matrixMultiplication produces incorrect results with stride-0
+        # inputs on macOS < 26.4 (only every 16th row is correct).
+        expanded = torch.ones(1, 1, device="mps").expand(64, 1)
+        w = torch.randn(1, 16, device="mps")
+        result = expanded.mm(w)
+        expected = torch.ones(64, 1, device="mps").mm(w)
+        self.assertEqual(result, expected)
+
 
 class TestErrorInputs(TestCase):
     _ignore_not_implemented_error = True

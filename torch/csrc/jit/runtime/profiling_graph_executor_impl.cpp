@@ -57,6 +57,13 @@ C10_DEFINE_bool(
     "fuse on 12 dynamic compilations")
 
 C10_DEFINE_bool(
+    torch_jit_input_independent_optimization,
+    false,
+    "If set, getPlanFor will use input-independent optimization passes only, "
+    "skipping profiling-based specializations that require runtime type/shape "
+    "information. Useful for predictor nets and AOT compilation scenarios.")
+
+C10_DEFINE_bool(
     torch_jit_release_profiling_graph_after_optimization,
     false,
     "After getOptimizedPlanFor release the optimization record for reduction of memory in inference. This is aggressive memory saving, and please be cautious!")
@@ -714,8 +721,57 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getPlanFor(
     }
     return *optimized_plan_;
   }
+  if (FLAGS_torch_jit_input_independent_optimization) {
+    return getInputIndependentPlanImpl();
+  }
   // if depth is not set, use
   return getOptimizedPlanFor(stack, remaining_bailout_depth);
+}
+
+const ExecutionPlan& ProfilingGraphExecutorImpl::getInputIndependentPlan() {
+  std::lock_guard<std::mutex> lock(compile_mutex);
+  return getInputIndependentPlanImpl();
+}
+
+const ExecutionPlan&
+ProfilingGraphExecutorImpl::getInputIndependentPlanImpl() {
+  if (optimized_plan_) {
+    return *optimized_plan_;
+  }
+
+  auto copy = graph->copy();
+  if (!getGraphExecutorOptimize() || !getProfilingMode()) {
+    LowerGradOf(*copy);
+    RemoveExpands(copy);
+  } else {
+    // Run all input-independent optimizations. This includes
+    // runProfilingInsensitiveOptimizations (inlining, constant propagation,
+    // CSE, peephole, etc.) followed by runPreAutodiffPassPipeline which adds
+    // loop unrolling, list mutation removal, and additional rounds of
+    // peephole + constant propagation. Profiling-dependent passes (type
+    // specialization, fusion, autodiff guards) are skipped since they
+    // require runtime type/shape information from actual inputs.
+    runProfilingInsensitiveOptimizations(copy);
+    runPreAutodiffPassPipeline(copy);
+
+    // Run additional input-independent passes from runNoGradOptimizations
+    // and runFinalOptimizations. These operate on graph structure (node
+    // patterns, alias analysis) and do not require profiled type/shape info.
+    // Skipped: RemoveProfileNodesAndSpecializeTypes, FuseTensorExprs,
+    // FuseGraph (these need profiled tensor types for specialization/fusion).
+    for (const auto& passPair : getCustomPrePasses()) {
+      passPair.first(copy);
+    }
+    BatchMM(copy);
+    for (const auto& passPair : getCustomPostPasses()) {
+      passPair.first(copy);
+    }
+    AddIfThenElseOp(copy);
+    EliminateDeadCode(copy);
+  }
+  optimized_plan_ = ExecutionPlan(copy, function_name_);
+  time_optimized_plan_created_ = getNowInSecs();
+  return *optimized_plan_;
 }
 
 GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {

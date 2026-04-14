@@ -4201,7 +4201,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         cnt = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt)
         opt_fn(inp1, inp2, inp3, inp4, c)
-        self.assertEqual(cnt.frame_count, 3)
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_torch_variable_type(self):
         # from torchvision
@@ -5429,17 +5429,11 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         obj = A()
 
-        try:
+        with self.assertRaisesRegex(RuntimeError, r"super\(\)"):
             fn(obj)
-        except Exception as e:
-            orig_str = str(e)
-        self.assertIn("no arguments", orig_str)
 
-        try:
+        with self.assertRaisesRegex(RuntimeError, r"super\(\)"):
             torch.compile(backend="eager")(fn)(obj)
-        except Exception as e:
-            compiled_str = str(e)
-        self.assertEqual(orig_str, compiled_str)
 
     def test_super_staticmethod(self):
         class Parent:
@@ -5983,6 +5977,34 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             )
             self.assertEqual(len(compile_nodes), 0)
             self.assertEqual(len(export_nodes), 0)
+
+    def test_multiheadattention_tracing_slowpath_matches_fastpath_layout(self):
+        class MHAWithView(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.hidden_dim = 64
+                self.attention = nn.MultiheadAttention(
+                    self.hidden_dim, 8, batch_first=True
+                )
+
+            def forward(self, x):
+                attn_output, _ = self.attention(x, x, x)
+                return attn_output.view(-1, self.hidden_dim)
+
+        with torch.no_grad():
+            model = MHAWithView().eval()
+            x = torch.randn(4, 32, model.hidden_dim)
+            eager = model(x)
+
+            backend = EagerAndRecordGraphs()
+            compiled_model = torch.compile(model, backend=backend, fullgraph=True)
+            compiled = compiled_model(x)
+
+            compile_nodes = backend.graphs[0].graph.find_nodes(
+                op="call_function", target=torch._native_multi_head_attention
+            )
+            self.assertEqual(compiled, eager)
+            self.assertEqual(len(compile_nodes), 0)
 
     def test_negative_floor_div_solve(self):
         class CompiledClass(nn.Module):
@@ -8018,6 +8040,57 @@ SavedForBackwardsAOTOutput(idx=5)""",
         _ = fn(x)
         self.assertTrue(getattr(self, self._testMethodName).__dict__.get("slow_test"))
 
+    def test_elementwise_dtypes_constant_fold(self):
+        from torch._prims_common import (
+            elementwise_dtypes,
+            ELEMENTWISE_TYPE_PROMOTION_KIND,
+        )
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(x):
+            dt, _ = elementwise_dtypes(
+                x, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+            )
+            return x.to(dt)
+
+        result = fn(torch.randn(3))
+        self.assertEqual(result.dtype, torch.float32)
+
+    def test_elementwise_dtypes_int_to_float(self):
+        from torch._prims_common import (
+            elementwise_dtypes,
+            ELEMENTWISE_TYPE_PROMOTION_KIND,
+        )
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(x):
+            dt, _ = elementwise_dtypes(
+                x, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+            )
+            return x.to(dt)
+
+        result = fn(torch.randint(0, 10, (3,)))
+        self.assertEqual(result.dtype, torch.float32)
+
+    def test_elementwise_dtypes_multi_args(self):
+        from torch._prims_common import (
+            elementwise_dtypes,
+            ELEMENTWISE_TYPE_PROMOTION_KIND,
+        )
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(x, y):
+            dt, _ = elementwise_dtypes(
+                x, y, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+            )
+            return x.to(dt)
+
+        result = fn(
+            torch.randn(3, dtype=torch.float16),
+            torch.randn(3, dtype=torch.float32),
+        )
+        self.assertEqual(result.dtype, torch.float32)
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     def test_sub_alpha_scalar_repro(self, device):
@@ -8565,6 +8638,10 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x), opt_fn(x))
         self.assertEqual(cnt.frame_count, 1)
 
+    # nested_graph_breaks creates separate resume functions per graph break,
+    # giving each warnings.warn call a unique call site that defeats Python's
+    # warning deduplication.
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_filter_warnings(self):
         x = torch.ones(2, 2, requires_grad=True)
 

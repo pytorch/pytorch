@@ -529,7 +529,9 @@ class ConfigModule(ModuleType):
                 it skips it.
         """
         config: dict[str, Any] = {}
-        for key in self._config:
+        for key, entry in self._config.items():
+            if entry.alias is not None:
+                continue
             if ignored_keys and key in ignored_keys:
                 continue
             if ignored_prefixes:
@@ -537,14 +539,23 @@ class ConfigModule(ModuleType):
                     continue
             if skip_default and self._is_default(key):
                 continue
-            if self._config[key].alias is not None:
-                continue
 
-            curr_entry = self._config[key]
-            has_been_warned = curr_entry._deprecation_warned
-            curr_entry._deprecation_warned = True
-            config[key] = copy.deepcopy(getattr(self, key))
-            curr_entry._deprecation_warned = has_been_warned
+            # Read value directly, bypassing __getattr__ overhead
+            # (deprecation warnings, alias resolution).
+            user_override = entry.user_override.get()
+            if entry.env_value_force is not _UNSET_SENTINEL:
+                val = entry.env_value_force
+            elif user_override is not _UNSET_SENTINEL:
+                val = user_override
+            elif entry.env_value_default is not _UNSET_SENTINEL:
+                val = entry.env_value_default
+            elif entry.justknob is not None:
+                val = justknobs_check(name=entry.justknob, default=entry.default)
+            else:
+                val = entry.default
+            if isinstance(val, (list, set, dict)):
+                val = copy.deepcopy(val)
+            config[key] = val
 
         return config
 
@@ -746,28 +757,40 @@ class ConfigModule(ModuleType):
                 )
         if not isinstance(changes, dict):
             raise AssertionError(f"expected `dict` got {type(changes)}")
-        prior: dict[str, Any] = {}
         config = self
 
         class ConfigPatch(ContextDecorator):
             def __init__(self) -> None:
                 self.changes = changes
+                self._prior: ContextVar[tuple[dict[str, Any], ...]] = ContextVar(
+                    f"{config.__name__}.ConfigPatch[{id(self)}]",
+                    default=(),
+                )
 
             def __enter__(self) -> None:
-                if prior:
-                    raise AssertionError(
-                        "prior should be empty when entering ConfigPatch"
-                    )
+                prior: dict[str, Any] = {}
                 for key in self.changes:
                     # KeyError on invalid entry
                     prior[key] = config.__getattr__(key)
-                for k, v in self.changes.items():
-                    config.__setattr__(k, v)
+                prior_stack = self._prior.get()
+                self._prior.set((*prior_stack, prior))
+                try:
+                    for k, v in self.changes.items():
+                        config.__setattr__(k, v)
+                except Exception:
+                    self._prior.set(prior_stack)
+                    raise
 
             def __exit__(self, exc_type, exc_val, exc_tb):  # type: ignore[no-untyped-def]
+                prior_stack = self._prior.get()
+                if not prior_stack:
+                    raise AssertionError(
+                        "prior should not be empty when exiting ConfigPatch"
+                    )
+                prior = prior_stack[-1]
+                self._prior.set(prior_stack[:-1])
                 for k, v in prior.items():
                     config.__setattr__(k, v)
-                prior.clear()
 
         return ConfigPatch()
 

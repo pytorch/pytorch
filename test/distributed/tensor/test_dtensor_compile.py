@@ -1577,17 +1577,16 @@ def forward(self, L_x_ : torch.Tensor, L_mesh_ : torch.distributed.device_mesh.D
         x2 = x2.to_local()
         self.assertTrue(isinstance(x2, AsyncCollectiveTensor))
         opt_fn(x2)
-        # The important part: we get a wait_tensor() in the graph.
-        # At runtime, the input to the graph is an AsyncCollectiveTensor,
-        # and inside the graph we need to issue a wait() to synchronize.
+        # ACTs are unwrapped before AOT autograd tracing in
+        # process_inputs, so the graph receives a plain tensor with
+        # no wait_tensor op.
         self.assertExpectedInline(
             str(fw_graph_cell[0]).strip(),
             """\
-def forward(self, primals_1):
-    wait_tensor = torch.ops._c10d_functional.wait_tensor.default(primals_1)
-    sin = torch.ops.aten.sin.default(wait_tensor)
+def forward(self, arg0_1):
+    sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
     sin_1 = torch.ops.aten.sin.default(sin);  sin = None
-    return (sin_1, primals_1, wait_tensor)""",
+    return (sin_1,)""",
         )
 
     @skipIfTorchDynamo()

@@ -110,6 +110,9 @@ class BaseListVariable(VariableTracker):
     def getitem_const(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
+        # TODO(follow-up): this assumes the caller (mp_subscript_impl) has already
+        # run _PyIndex_Check → nb_index_impl. Direct callers bypassing
+        # mp_subscript_impl will skip that validation.
         from .tensor import SymNodeVariable
 
         if isinstance(arg, SymNodeVariable):
@@ -235,6 +238,33 @@ class BaseListVariable(VariableTracker):
             mutation_type=ValueMutationNew(),
         )
 
+    def mp_subscript_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: VariableTracker,
+    ) -> VariableTracker:
+        # list_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/listobject.c#L3689-L3710
+        # _PyIndex_Check: https://github.com/python/cpython/blob/62a6e898e01/Include/internal/pycore_abstract.h#L13-L17
+        # TODO(follow-up): replace hasattr(key_type, "__index__") with
+        # has_slot(num_slots, PyNumberSlots.NB_INDEX) for C extension types.
+        try:
+            key_type = key.python_type()
+        except NotImplementedError:
+            key_type = None
+        if key_type not in (int, bool, slice):
+            if key_type is not None and not hasattr(key_type, "__index__"):
+                container_name = self.python_type_name()
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[
+                        f"{container_name} indices must be integers or slices, not {key.python_type_name()}"
+                    ],
+                )
+            key = key.nb_index_impl(tx)
+
+        return self.getitem_const(tx, key)
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -244,38 +274,7 @@ class BaseListVariable(VariableTracker):
     ) -> VariableTracker:
         from .builder import SourcelessBuilder
 
-        if name == "__getitem__":
-            if kwargs or len(args) != 1:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-
-            value = args[0]
-
-            try:
-                value_type = value.python_type()
-            except NotImplementedError:
-                value_type = None
-            if value_type not in (int, bool, slice):
-                # CPython: list_subscript checks _PyIndex_Check first, and
-                # raises its own error if the type doesn't have nb_index.
-                # Only if the type has __index__ does it call PyNumber_AsSsize_t.
-                if value_type is not None and not hasattr(value_type, "__index__"):
-                    container_name = self.python_type_name()
-                    raise_observed_exception(
-                        TypeError,
-                        tx,
-                        args=[
-                            f"{container_name} indices must be integers or slices, not {value.python_type_name()}"
-                        ],
-                    )
-                value = value.nb_index_impl(tx)
-
-            return self.getitem_const(tx, value)
-        elif name == "__contains__":
+        if name == "__contains__":
             if kwargs or len(args) != 1:
                 raise_args_mismatch(
                     tx,
@@ -586,7 +585,10 @@ class RangeVariable(BaseListVariable):
     def getitem_const(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
-        # implementations mimics https://github.com/python/cpython/blob/main/Objects/rangeobject.c
+        # range_subscript: https://github.com/python/cpython/blob/main/Objects/rangeobject.c
+        # TODO(follow-up): this assumes the caller (mp_subscript_impl) has already
+        # run _PyIndex_Check → nb_index_impl. Direct callers bypassing
+        # mp_subscript_impl will skip that validation.
         index = arg.as_python_constant()
 
         if isinstance(index, slice):
@@ -661,6 +663,29 @@ class RangeVariable(BaseListVariable):
             return int(re)
         return 0
 
+    def mp_subscript_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: VariableTracker,
+    ) -> VariableTracker:
+        # range_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/rangeobject.c#L729-L748
+        # CPython: range_subscript checks _PyIndex_Check → PyNumber_Index for non-slice keys
+        try:
+            key_type = key.python_type()
+        except NotImplementedError:
+            key_type = None
+        if key_type not in (int, bool, slice):
+            if key_type is not None and not hasattr(key_type, "__index__"):
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[
+                        f"range indices must be integers or slices, not {key.python_type_name()}"
+                    ],
+                )
+            key = key.nb_index_impl(tx)
+        return self.getitem_const(tx, key)
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -692,8 +717,6 @@ class RangeVariable(BaseListVariable):
                 tx,
                 args=[f"{x} is not in range"],
             )
-        elif name == "__getitem__":
-            return self.getitem_const(tx, *args)
         elif name in cmp_name_to_op_mapping:
             other = args[0]
             pt = other.python_type()
@@ -822,7 +845,7 @@ class CommonListMethodsVariable(BaseListVariable):
 
             if len(args):
                 idx = args[0].as_python_constant()
-                if idx > len(self.items):
+                if idx >= len(self.items):
                     raise_observed_exception(
                         IndexError, tx, args=["pop index out of range"]
                     )
@@ -1135,6 +1158,11 @@ class ListVariable(CommonListMethodsVariable):
         return False
 
 
+# TODO(follow-up): DequeVariable inherits BaseListVariable.mp_subscript_impl which
+# accepts slices. CPython's deque only has sq_item (Modules/_collectionsmodule.c:1888),
+# not mp_subscript — deque[slice] should raise TypeError. Override mp_subscript_impl
+# to reject slices and only accept integer-like keys via _PyIndex_Check → nb_index_impl.
+# Also add tests for: negative index, __index__ object key, invalid type key.
 class DequeVariable(CommonListMethodsVariable):
     # deque_spec: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1866
     _cpython_type = collections.deque
@@ -1469,6 +1497,29 @@ class SizeVariable(TupleVariable):
             result = mul.call_function(tx, [result, v], {})
         return result
 
+    def mp_subscript_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: VariableTracker,
+    ) -> VariableTracker:
+        # tuple_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/tupleobject.c#L877-L930
+        # CPython: tuplesubscript checks _PyIndex_Check → PyNumber_AsSsize_t for non-slice keys
+        try:
+            key_type = key.python_type()
+        except NotImplementedError:
+            key_type = None
+        if key_type not in (int, bool, slice):
+            if key_type is not None and not hasattr(key_type, "__index__"):
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[
+                        f"tuple indices must be integers or slices, not {key.python_type_name()}"
+                    ],
+                )
+            key = key.nb_index_impl(tx)
+        return self.get_item_dyn(tx, key)
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -1476,17 +1527,7 @@ class SizeVariable(TupleVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "__getitem__":
-            if kwargs or len(args) != 1:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            out = self.get_item_dyn(tx, args[0])
-            return out
-        elif name == "numel":
+        if name == "numel":
             if args or kwargs:
                 raise_args_mismatch(
                     tx,
@@ -1594,7 +1635,9 @@ class SliceVariable(VariableTracker):
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name in cmp_name_to_op_mapping:
-            return variables.GetAttrVariable(self, name)
+            return variables.GetAttrVariable(
+                self, name, py_type=type(getattr(slice, name))
+            )
         fields = ["start", "stop", "step"]
         if name not in fields:
             unimplemented(

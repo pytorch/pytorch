@@ -64,6 +64,7 @@ from .base import VariableTracker
 from .dicts import ConstDictVariable
 from .lazy import LazyVariableTracker
 from .lists import ListVariable, TupleVariable
+from .sets import SetVariable
 
 
 if TYPE_CHECKING:
@@ -233,6 +234,9 @@ def find_mismatched_vars(
     elif isinstance(var, ConstDictVariable):
         for value in var.items.values():
             mismatched_vars.update(find_mismatched_vars(value, types, allow_none))
+    elif isinstance(var, SetVariable):
+        for key in var.items:
+            mismatched_vars.update(find_mismatched_vars(key.vt, types, allow_none))
     else:
         if not isinstance(var, types) and not (allow_none and var.is_constant_none()):
             mismatched_vars.add(var)
@@ -3757,11 +3761,13 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         unpacked_sequence = args[1].unpack_var_sequence(tx)
         # TODO (tmanlaibaatar) support pytree here
         for arg in unpacked_sequence:
-            if isinstance(arg, (ListVariable, TupleVariable, ConstDictVariable)):
+            if isinstance(
+                arg, (ListVariable, TupleVariable, ConstDictVariable, SetVariable)
+            ):
                 unimplemented(
                     gb_type="strict_mode: improper args",
                     context=f"args: {args}, kwargs: {kwargs}",
-                    explanation="strict_mode higher order op expects flat inputs (list/tuple/dict)",
+                    explanation="strict_mode higher order op expects flat inputs (list/tuple/dict/set)",
                     hints=[
                         *graph_break_hints.USER_ERROR,
                     ],
@@ -4517,6 +4523,9 @@ class AutogradFunctionApplyVariable(VariableTracker):
         self.fwd_fn = fwd_fn
         self.bwd_fn = bwd_fn
         self.parent_source = parent_source
+
+    def python_type(self) -> type:
+        return types.BuiltinMethodType
 
     def call_function(
         self,

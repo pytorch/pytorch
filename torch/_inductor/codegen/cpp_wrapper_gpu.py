@@ -399,7 +399,8 @@ class DeferredTritonCallWrapper:
             size_expr = f"{kernel_name}_result.{scratch_name}"
             var = f"{scratch_name}_ptr"
             prefix.splice(
-                f"""\
+                maybe_hipify_code_wrapper(
+                    f"""\
                 {device_ptr_type} {var} = 0;
                 RAIIAtenTensorHandle {var}_tensor;
                 if ({size_expr} > 0) {{
@@ -413,6 +414,7 @@ class DeferredTritonCallWrapper:
                     {var} = reinterpret_cast<{device_ptr_type}>({var}_tensor.data_ptr());
                 }}
             """
+                )
             )
             call_args_str += f", &{var}"
         return call_args_str

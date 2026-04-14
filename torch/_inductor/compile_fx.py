@@ -1145,6 +1145,10 @@ def _compile_fx_inner(
             )
         compiled_graph.post_compile(example_inputs, constants, graph_kwargs)
 
+        policy = config.cudagraph_policy
+        if policy is not None:
+            compiled_graph = policy.wrap_output(compiled_graph)
+
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
     # This message is for printing overview information of inductor mm counts, shapes,etc after lowering
@@ -2205,9 +2209,11 @@ def fw_compiler_freezing(
 
 
 def get_cpp_wrapper_config() -> dict[str, object]:
-    if config.triton.cudagraphs:
+    if config.triton.cudagraphs and config.graph_partition:
         log_cudagraph_skip_and_bump_counter(
-            format_default_skip_message("cpp wrapper enabled")
+            format_default_skip_message(
+                "cpp-wrapper does not support graph partition yet"
+            )
         )
 
     autotune_at_compile_time = (
@@ -2219,7 +2225,11 @@ def get_cpp_wrapper_config() -> dict[str, object]:
     return {
         "triton.autotune_at_compile_time": autotune_at_compile_time,
         "triton.autotune_cublasLt": not autotune_at_compile_time,
-        "triton.cudagraphs": False,  # TODO: to be removed
+        "triton.cudagraphs": (
+            config.triton.cudagraphs
+            and not V.aot_compilation
+            and not config.graph_partition
+        ),
         "triton.store_cubin": True,
     }
 

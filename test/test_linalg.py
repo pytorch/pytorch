@@ -6493,9 +6493,9 @@ class TestLinalg(TestCase):
             # launched per PyTorch API. The kernels have string
             # that always starts with `Cijk*`
             mm_key = 'Cijk'
-            events = prof.key_averages()
+            events = prof.events()
             for evt in events:
-                if mm_key in evt.key:
+                if mm_key in evt.name:
                     self.assertEqual(evt.count, 1)
                     kernel_count = kernel_count + 1
 

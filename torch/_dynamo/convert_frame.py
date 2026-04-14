@@ -99,7 +99,7 @@ from .cache_size import (
     exceeds_recompile_limit,
     is_recompilation,
 )
-from .compile_options import DynamoCompileOptions
+from .code_context import code_context
 from .eval_frame import (
     always_optimize_code_objects,
     Constraint,
@@ -188,6 +188,7 @@ if typing.TYPE_CHECKING:
     from torch.utils.weak import WeakIdKeyDictionary
 
     from .backends.registry import CompilerFn
+    from .package import CompilePackage
     from .repro.after_dynamo import WrapBackendDebug
     from .types import BytecodeHook, CacheEntry, DynamoFrameType
     from .variables.builder import FrameStateSizeEntry
@@ -581,20 +582,30 @@ class ConvertFrameAssert:
     def __init__(
         self,
         compiler_fn: CompilerFn,
-        compile_options: DynamoCompileOptions,
+        one_graph: bool = True,
+        export: bool = False,
+        export_constraints: Any | None = None,
+        package: CompilePackage | None = None,
+        recompile_limit: int | None = None,
     ) -> None:
         # assert export_constraints is None
         reset_graph_break_dup_checker()
         self._torchdynamo_orig_backend = compiler_fn
-        self._compile_options = compile_options
+        self._one_graph = one_graph
+        self._export = export
+        self._export_constraints = export_constraints
+        self._package = package
+        self._recompile_limit = recompile_limit
         self._box = ConvertFrameBox()
 
     @property
     def _clone_with_backend(self) -> Callable[[CompilerFn], ConvertFrameAssert]:
-        clone_options = dataclasses.replace(self._compile_options, package=None)
         return lambda backend: convert_frame_assert(
             backend,
-            clone_options,
+            self._one_graph,
+            self._export,
+            self._export_constraints,
+            recompile_limit=self._recompile_limit,
         )
 
     def __call__(
@@ -716,10 +727,9 @@ class ConvertFrameAssert:
             compile_ctx = compile_context(CompileContext(compile_id))
             # When recompile_limit is set, temporarily override the global
             # config so the existing exceeds_recompile_limit check uses it.
-            recompile_limit = self._compile_options.recompile_limit
             recompile_ctx = (
-                config.patch(recompile_limit=recompile_limit)
-                if recompile_limit is not None
+                config.patch(recompile_limit=self._recompile_limit)
+                if self._recompile_limit is not None
                 else contextlib.nullcontext()
             )
             with compile_ctx, recompile_ctx:
@@ -730,7 +740,9 @@ class ConvertFrameAssert:
                     frame.f_builtins,
                     frame.closure,
                     self._torchdynamo_orig_backend,
-                    self._compile_options,
+                    self._one_graph,
+                    self._export,
+                    self._export_constraints,
                     hooks,
                     cache_entry,
                     cache_size,
@@ -738,28 +750,37 @@ class ConvertFrameAssert:
                     frame_state=frame_state,
                     compile_id=compile_id,
                     skip=skip + 1,
+                    package=self._package,
                     convert_frame_box=self._box,
                 )
         finally:
             # Restore the previous initial_global_state for nested compilation handling
             initial_global_state = prev_initial_global_state
 
-        if config.caching_precompile and self._compile_options.package is not None:
+        if config.caching_precompile and self._package is not None:
             from .package import DynamoCache
 
             # Record that the dynamo package has changed
-            DynamoCache.record_package(self._compile_options.package)
+            DynamoCache.record_package(self._package)
         return result
 
 
 def convert_frame_assert(
     compiler_fn: CompilerFn,
-    compile_options: DynamoCompileOptions,
+    one_graph: bool = True,
+    export: bool = False,
+    export_constraints: Any | None = None,
+    package: CompilePackage | None = None,
+    recompile_limit: int | None = None,
 ) -> ConvertFrameAssert:
     """Fully convert a frame into an FX graph, raising an exception if we fail."""
     return ConvertFrameAssert(
         compiler_fn,
-        compile_options,
+        one_graph,
+        export,
+        export_constraints,
+        package,
+        recompile_limit,
     )
 
 
@@ -770,12 +791,47 @@ from torch.utils.hooks import RemovableHandle
 
 # we have to use `OrderedDict` to make `RemovableHandle` work.
 _bytecode_hooks: dict[int, BytecodeHook] = OrderedDict()
+_BYTECODE_HOOK_SIDE_EFFECTS_CONTEXT_KEY = "bytecode_hook_side_effects"
+
+
+def get_compiled_code_side_effects(
+    code: types.CodeType,
+) -> tuple[str, ...] | None:
+    """Return Dynamo's replayed Python side-effect sources for compiled code.
+
+    Returns ``None`` when ``code`` was not produced by Dynamo or no metadata was
+    attached to it.
+    """
+    if not code_context.has_context(code):
+        return None
+    side_effects = code_context.get_context(code).get(
+        _BYTECODE_HOOK_SIDE_EFFECTS_CONTEXT_KEY
+    )
+    if side_effects is None:
+        return None
+    return side_effects
+
+
+def compiled_code_has_side_effects(code: types.CodeType) -> bool:
+    """Return whether Dynamo recorded replayed Python side effects for compiled code."""
+    return bool(get_compiled_code_side_effects(code))
+
+
+def _copy_code_context(src_code: types.CodeType, dst_code: types.CodeType) -> None:
+    if not code_context.has_context(src_code):
+        return
+    src_context = code_context.get_context(src_code)
+    if _BYTECODE_HOOK_SIDE_EFFECTS_CONTEXT_KEY in src_context:
+        code_context.get_context(dst_code)[_BYTECODE_HOOK_SIDE_EFFECTS_CONTEXT_KEY] = (
+            src_context[_BYTECODE_HOOK_SIDE_EFFECTS_CONTEXT_KEY]
+        )
 
 
 def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
     """Register hooks for bytecode generated by Dynamo. The hook can do some
-    logging, as well as return a new code object to be used. Please refer
-    to `BytecodeHook` for the hook signature.
+    logging, as well as return a new code object to be used. Hooks can query
+    `get_compiled_code_side_effects(new_code)` for replayed Python side effect
+    sources. Please refer to `BytecodeHook` for the hook signature.
     """
     handle = RemovableHandle(_bytecode_hooks)
     _bytecode_hooks[handle.id] = hook
@@ -794,13 +850,16 @@ def trace_frame(
     closure: tuple[CellType],
     compiler_fn: CompilerFn,
     tf_mode_stack: list[torch.overrides.TorchFunctionMode],
-    compile_options: DynamoCompileOptions,
+    one_graph: bool,
     speculation_log: SpeculationLog,
     instructions: list[Instruction],
     code_options: dict[str, object],
     *,
+    export: bool = False,
+    export_constraints: Any | None = None,
     frame_state: dict[str, int | FrameStateSizeEntry] | None = None,
     distributed_state: DistributedState | None = None,
+    package: CompilePackage | None = None,
 ) -> DynamoTracerOutput:
     from torch.fx.experimental.validator import bisect, translation_validation_enabled
 
@@ -816,11 +875,14 @@ def trace_frame(
         tf_mode_stack,
         code_options,
         compiler_fn,
-        compile_options,
+        one_graph,
+        export,
+        export_constraints,
         frame_state=frame_state,
         speculation_log=speculation_log,  # type: ignore[has-type]
         exn_vt_stack=exn_vt_stack,
         distributed_state=distributed_state,  # type: ignore[has-type]
+        package=package,
     )
 
     def run_tracer() -> None:
@@ -1307,11 +1369,9 @@ def _fullgraph_capture_frame(
             frame.builtins,
             frame.closure,
             compiler_fn=fullgraph_compiler,
-            compile_options=DynamoCompileOptions(
-                export=_is_export_deprecated_do_not_use,
-                export_constraints=constraints,
-                one_graph=True,
-            ),
+            export=_is_export_deprecated_do_not_use,
+            export_constraints=constraints,  # type: ignore[arg-type]
+            one_graph=True,
             restart_reasons=set(),
         )
         # https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/eval_frame.py#L831
@@ -1362,11 +1422,14 @@ def compile_frame(  # type: ignore[return]
     builtins: dict[str, object],
     closure: tuple[CellType],
     compiler_fn: CompilerFn,
-    compile_options: DynamoCompileOptions,
+    one_graph: bool,
     restart_reasons: set[str],
     *,
+    export: bool = False,
+    export_constraints: Any | None = None,
     frame_state: dict[str, int | FrameStateSizeEntry] | None = None,
     distributed_state: DistributedState | None = None,
+    package: CompilePackage | None = None,
     # pyrefly: ignore [bad-return]
 ) -> DynamoOutput:
     """
@@ -1392,12 +1455,15 @@ def compile_frame(  # type: ignore[return]
             closure,
             compiler_fn,
             tf_mode_stack,
-            compile_options,
+            one_graph,
             speculation_log,
             instructions,
             code_options,
+            export=export,
+            export_constraints=export_constraints,
             frame_state=frame_state,
             distributed_state=distributed_state,
+            package=package,
         )
 
         assert tracer_output is not None
@@ -1465,7 +1531,9 @@ def _compile(
     builtins: dict[str, object],
     closure: tuple[CellType],
     compiler_fn: CompilerFn,
-    compile_options: DynamoCompileOptions,
+    one_graph: bool,
+    export: bool,
+    export_constraints: Any | None,
     hooks: Hooks,
     cache_entry: CacheEntry | None,
     cache_size: CacheSizeRelevantForFrame,
@@ -1474,6 +1542,7 @@ def _compile(
     *,
     compile_id: CompileId,
     skip: int = 0,
+    package: CompilePackage | None = None,
     # Can be used to record things for the caller, both
     # in the case of normal and exception code paths
     convert_frame_box: ConvertFrameBox | None = None,
@@ -1482,10 +1551,6 @@ def _compile(
         BisectValidationException,
         ValidationException,
     )
-
-    one_graph = compile_options.one_graph
-    export = compile_options.export
-    package = compile_options.package
 
     # Only nonlocal defs here please!
     # Time spent compiling this frame before restarting or failing analysis
@@ -1569,10 +1634,13 @@ def _compile(
                     builtins,
                     closure,
                     compiler_fn,
-                    compile_options,
+                    one_graph,
                     restart_reasons,
+                    export=export,
+                    export_constraints=export_constraints,
                     frame_state=frame_state,
                     distributed_state=distributed_state,
+                    package=package,
                 )
         except exc.SkipFrame as e:
             if one_graph:
@@ -1608,17 +1676,23 @@ def _compile(
                 payload_fn=lambda: dis.Bytecode(out_code).dis(),
             )
 
+        assert tracer_output.output_graph is not None
+        output = tracer_output.output_graph
+        code_context.get_context(out_code)[_BYTECODE_HOOK_SIDE_EFFECTS_CONTEXT_KEY] = (
+            tuple(output.get_replayed_side_effect_source_refs())
+        )
+
         for idx, hook in enumerate(_bytecode_hooks.values()):
             with dynamo_timed(f"bytecode_hooks_{idx}", log_pt2_compile_event=True):
                 hook_output = hook(code, out_code)
                 if hook_output is not None:
+                    if hook_output is not out_code:
+                        _copy_code_context(out_code, hook_output)
                     out_code = hook_output
 
         orig_code_map[out_code] = code
         output_codes.add(out_code)
         dynamo_time_before_restart = last_attempt_start_time - start_time
-        assert tracer_output.output_graph is not None
-        output = tracer_output.output_graph
 
         from .bytecode_debugger import BREAKPOINT_MARKER
 
@@ -1719,7 +1793,7 @@ def _compile(
         return wrap_guarded_code(guarded_code), tracer_output
 
     metrics_context = get_metrics_context()
-    code_context = (
+    package_code_context = (
         package.code_context(code) if package is not None else contextlib.nullcontext()
     )
     with (
@@ -1735,7 +1809,7 @@ def _compile(
             phase_name="entire_frame_compile",
             dynamo_compile_column_us="dynamo_cumulative_compile_time_us",
         ),
-        code_context,
+        package_code_context,
     ):
         restart_reasons: set[str] = set()
         if compile_pg := get_compile_pg():
@@ -2083,26 +2157,25 @@ class ConvertFrame:
         self,
         compiler_fn: CompilerFn,
         hooks: Hooks,
-        compile_options: DynamoCompileOptions,
+        package: CompilePackage | None = None,
+        recompile_limit: int | None = None,
     ) -> None:
         self._torchdynamo_orig_backend = compiler_fn
-        compile_options_for_assert = dataclasses.replace(
-            compile_options, one_graph=False
-        )
         self._inner_convert = convert_frame_assert(
             compiler_fn,
-            compile_options_for_assert,
+            one_graph=False,
+            package=package,
+            recompile_limit=recompile_limit,
         )
         self._hooks = hooks
-        self._compile_options = compile_options
+        self._recompile_limit = recompile_limit
 
     @property
     def _clone_with_backend(self) -> Callable[[WrapBackendDebug], ConvertFrame]:
-        clone_options = dataclasses.replace(self._compile_options, package=None)
         return lambda backend: convert_frame(
             backend,
             self._hooks,
-            clone_options,
+            recompile_limit=self._recompile_limit,
         )
 
     def __call__(
@@ -2226,10 +2299,13 @@ class ConvertFrame:
 def convert_frame(
     compiler_fn: CompilerFn,
     hooks: Hooks,
-    compile_options: DynamoCompileOptions,
+    package: CompilePackage | None = None,
+    recompile_limit: int | None = None,
 ) -> ConvertFrame:
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
-    return ConvertFrame(compiler_fn, hooks, compile_options)
+    return ConvertFrame(
+        compiler_fn, hooks, package=package, recompile_limit=recompile_limit
+    )
 
 
 # TODO mlazos: add support for same args, or record them
@@ -2251,7 +2327,9 @@ def replay(filename: str) -> None:
                 record.builtins,
                 record.closure,
                 compiler_fn=eager,
-                compile_options=DynamoCompileOptions(one_graph=False),
+                one_graph=False,
+                export=False,
+                export_constraints=None,
                 hooks=Hooks(),
                 cache_size=CacheSizeRelevantForFrame(0, 0),
                 cache_entry=None,

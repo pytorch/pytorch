@@ -6,10 +6,11 @@ values during compilation, ensuring proper handling of Python literals and
 maintaining type safety through the compilation process.
 """
 
+from __future__ import annotations
+
 import operator
-from collections.abc import Sequence
-from typing import Any, Literal, Optional, overload, TYPE_CHECKING
-from typing_extensions import Never, override
+from typing import Any, Literal, overload, TYPE_CHECKING
+from typing_extensions import override
 
 import torch
 from torch._dynamo.source import GetItemSource
@@ -21,6 +22,8 @@ from .base import ValueMutationNew, VariableTracker
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
     from .functions import UserFunctionVariable
@@ -46,21 +49,12 @@ class ConstantVariable(VariableTracker):
 
     @overload
     @staticmethod
-    def create(value: None) -> Never: ...
+    def create(value: None) -> ConstantVariable: ...
 
     @overload
     @staticmethod
-    def create(value: Literal[True]) -> Never: ...
+    def create(value: bool) -> ConstantVariable: ...
 
-    @overload
-    @staticmethod
-    def create(value: Literal[False]) -> Never: ...
-
-    @overload
-    @staticmethod
-    def create(value: bool) -> "ConstantVariable": ...
-
-    # TODO: Refactor to make these return ConstantVariable
     @overload
     @staticmethod
     def create(value: Any, **kwargs: Any) -> VariableTracker: ...
@@ -75,6 +69,17 @@ class ConstantVariable(VariableTracker):
         NOTE: the caller must install the proper guards if needed; most often
         the guard will be `CONSTANT_MATCH`.
         """
+        # Return pre-allocated sentinels for None/True/False when there are
+        # no extra kwargs (source, etc.) that would differentiate the instance.
+        if not kwargs:
+            match value:
+                case None:
+                    return CONSTANT_VARIABLE_NONE
+                case True:
+                    return CONSTANT_VARIABLE_TRUE
+                case False:
+                    return CONSTANT_VARIABLE_FALSE
+
         source = kwargs.get("source")
 
         # Routing for supported collection literals.
@@ -148,7 +153,7 @@ its type to `common_constant_types`.
         return self.unpack_var_sequence(tx=None)
 
     def getitem_const(
-        self, tx: "InstructionTranslator", arg: VariableTracker
+        self, tx: InstructionTranslator, arg: VariableTracker
     ) -> VariableTracker:
         return ConstantVariable.create(
             self.value[arg.as_python_constant()],
@@ -171,29 +176,29 @@ its type to `common_constant_types`.
         return ConstantVariable.is_base_literal(obj)
 
     def unpack_var_sequence(
-        self, tx: Optional["InstructionTranslator"]
+        self, tx: InstructionTranslator | None
     ) -> list[VariableTracker]:
         try:
             return [ConstantVariable.create(x) for x in self.as_python_constant()]
         except TypeError as e:
             raise NotImplementedError from e
 
-    def len_impl(self, tx: "InstructionTranslator") -> "VariableTracker":
+    def len_impl(self, tx: InstructionTranslator) -> VariableTracker:
         """Generic len for any constant value (sequence or mapping)."""
         try:
             return ConstantVariable.create(len(self.value))
         except TypeError as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
 
-    def sq_length(self, tx: "InstructionTranslator") -> "VariableTracker":
+    def sq_length(self, tx: InstructionTranslator) -> VariableTracker:
         """Sequence length - delegates to len_impl for constants."""
         return self.len_impl(tx)
 
-    def mp_length(self, tx: "InstructionTranslator") -> "VariableTracker":
+    def mp_length(self, tx: InstructionTranslator) -> VariableTracker:
         """Mapping length - delegates to len_impl for constants."""
         return self.len_impl(tx)
 
-    def const_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def const_getattr(self, tx: InstructionTranslator, name: str) -> VariableTracker:
         if not hasattr(self.value, name):
             raise_observed_exception(AttributeError, tx, args=[name])
         member = getattr(self.value, name)
@@ -203,7 +208,7 @@ its type to `common_constant_types`.
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: InstructionTranslator,
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -314,8 +319,8 @@ its type to `common_constant_types`.
 
     def call_tree_map(
         self,
-        tx: "InstructionTranslator",
-        tree_map_fn: "UserFunctionVariable",
+        tx: InstructionTranslator,
+        tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
         rest: Sequence[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
@@ -366,8 +371,8 @@ its type to `common_constant_types`.
 
     @override
     def call_obj_hasattr(
-        self, tx: "InstructionTranslator", name: str
-    ) -> "ConstantVariable":
+        self, tx: InstructionTranslator, name: str
+    ) -> ConstantVariable:
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
@@ -393,7 +398,7 @@ its type to `common_constant_types`.
     def nb_index_impl(
         self,
         tx: Any,
-    ) -> "VariableTracker":
+    ) -> VariableTracker:
         # CPython: int and bool define nb_index (returns self for int,
         # int(self) for bool). All other constant types do not.
         if isinstance(self.value, (int, bool)):

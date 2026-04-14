@@ -3783,6 +3783,168 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(result[0], x * 2)
         self.assertIs(result[1], m)
 
+    def test_reconstruct_fn_sets_meta_val(self):
+        """Opaque nodes created via reconstruct_fn have meta['val'] set.
+
+        When _try_reconstruct_opaque dispatches through a custom op via
+        Proxy.__torch_function__, the resulting node does not get
+        meta['val'] set automatically (unlike the __torch_dispatch__
+        path which calls track_tensor_tree).  The fix in
+        _try_reconstruct_opaque ensures set_meta is called so that
+        downstream consumers like the min-cut partitioner can classify
+        the node correctly via is_opaque_node().
+        """
+        from torch._functorch._aot_autograd.graph_compile import is_opaque_node
+
+        # Use the already-registered OpaqueMultiplier type.
+        # Register a reconstruct_fn that derives one multiplier from
+        # another via a custom op — mirrors how DeviceMesh submeshes
+        # are derived from a parent mesh via _get_submesh.
+        multiplier_type = get_opaque_type_name(OpaqueMultiplier)
+
+        self.lib.define(
+            f"derive_multiplier({multiplier_type} parent, float scale)"
+            f" -> {multiplier_type}",
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::derive_multiplier",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def derive_impl(parent, scale):
+            return OpaqueMultiplier(parent.multiplier * scale)
+
+        @torch.library.register_fake(
+            "_TestOpaqueObject::derive_multiplier", lib=self.lib
+        )
+        def derive_fake(parent, scale):
+            return OpaqueMultiplier(0.0)
+
+        parent = OpaqueMultiplier(3.0)
+        # The "child" is derived at eager time before tracing.
+        # It's NOT passed as an input — it's captured in a closure,
+        # simulating how DeviceMesh submeshes are captured in DTensor
+        # backward closures.  This forces _try_reconstruct_opaque to
+        # be called when make_fx encounters the child.
+        child = OpaqueMultiplier(parent.multiplier * 0.5)
+        child._parent = parent
+        child._scale = 0.5
+
+        from torch._library.opaque_object import _OPAQUE_TYPES
+
+        original_reconstruct_fn = _OPAQUE_TYPES[OpaqueMultiplier].reconstruct_fn
+
+        def multiplier_reconstruct_fn(obj, get_tracked_proxy, tracer):
+            if not hasattr(obj, "_parent"):
+                return None
+            parent_proxy = get_tracked_proxy(obj._parent)
+            if parent_proxy is None:
+                return None
+            return torch.ops._TestOpaqueObject.derive_multiplier(
+                parent_proxy, obj._scale
+            )
+
+        _OPAQUE_TYPES[OpaqueMultiplier].reconstruct_fn = multiplier_reconstruct_fn
+        try:
+            # child is captured from the closure, NOT an input
+            def fn(parent, x):
+                return torch.ops._TestOpaqueObject.mul_with_scale(child, x)
+
+            fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+            with fake_mode:
+                fake_x = torch.randn(4)
+
+            gm = make_fx(fn, tracing_mode="fake")(parent, fake_x)
+
+            # Find the derive_multiplier node (created by reconstruct_fn)
+            derive_nodes = [
+                n
+                for n in gm.graph.nodes
+                if n.op == "call_function" and "derive_multiplier" in str(n.target)
+            ]
+            self.assertGreater(len(derive_nodes), 0, "No derive_multiplier node found")
+
+            for node in derive_nodes:
+                self.assertIn(
+                    "val",
+                    node.meta,
+                    f"Node {node.name} created via reconstruct_fn is missing "
+                    f"meta['val']. This would cause the partitioner to fail "
+                    f"with 'Expected {node.name} to be a tensor'.",
+                )
+                self.assertTrue(
+                    is_opaque_node(node),
+                    f"Node {node.name} should be classified as opaque",
+                )
+        finally:
+            _OPAQUE_TYPES[OpaqueMultiplier].reconstruct_fn = original_reconstruct_fn
+
+    def test_partitioner_must_save_opaque_node(self):
+        """Opaque nodes tagged MUST_SAVE go to saved_opaque_nodes.
+
+        When activation checkpointing tags an opaque node with
+        CheckpointPolicy.MUST_SAVE, the default_partition function
+        must route it to saved_opaque_nodes (not saved_values).
+        Otherwise the runtime assertion in save_from_forward will
+        fail because it expects all saved_values to be Tensors.
+        """
+        from functorch.compile import default_partition
+        from torch._functorch._aot_autograd.graph_compile import is_opaque_node
+        from torch.utils.checkpoint import CheckpointPolicy
+
+        m = OpaqueMultiplier(2.0)
+
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+
+        # Build a joint fwd+bwd graph where the opaque node is tagged
+        # MUST_SAVE — simulates activation checkpointing.
+        graph = torch.fx.Graph()
+        m_node = graph.placeholder("m")
+        m_node.meta["val"] = m
+        x_node = graph.placeholder("x")
+        with fake_mode:
+            x_node.meta["val"] = torch.randn(3)
+
+        mul_node = graph.call_function(
+            torch.ops._TestOpaqueObject.mul_with_scale.default,
+            (m_node, x_node),
+        )
+        with fake_mode:
+            mul_node.meta["val"] = torch.randn(3)
+
+        # Tag the opaque node as MUST_SAVE
+        m_node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+
+        # Create backward portion: identity backward
+        bw_node = graph.call_function(torch.ops.aten.mul.Scalar, (mul_node, 1.0))
+        with fake_mode:
+            bw_node.meta["val"] = torch.randn(3)
+
+        graph.output((mul_node, bw_node))
+        joint_gm = torch.fx.GraphModule({}, graph)
+
+        # Run default_partition — this should NOT raise even though
+        # the opaque node is tagged MUST_SAVE.
+        num_fwd_outputs = 1
+        fw_module, bw_module = default_partition(
+            joint_gm, [], num_fwd_outputs=num_fwd_outputs
+        )
+
+        # Verify the opaque node ended up in the forward graph as
+        # a pass-through (not as a saved tensor that would fail the
+        # save_from_forward assertion).
+        fw_opaque_nodes = [
+            n
+            for n in fw_module.graph.nodes
+            if n.op == "placeholder" and is_opaque_node(n)
+        ]
+        self.assertGreater(
+            len(fw_opaque_nodes),
+            0,
+            "Forward graph should have opaque placeholder nodes",
+        )
+
 
 instantiate_parametrized_tests(TestOpaqueObject)
 

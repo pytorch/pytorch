@@ -151,7 +151,7 @@ from .variables.ctx_manager import (
     WithEnterFunctionVariable,
     WithExitFunctionVariable,
 )
-from .variables.dicts import ConstDictVariable, SetVariable
+from .variables.dicts import ConstDictVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
     LocalGeneratorFunctionVariable,
@@ -181,6 +181,7 @@ from .variables.misc import (
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
+from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
 from .variables.torch_function import (
@@ -201,7 +202,6 @@ if TYPE_CHECKING:
 
     from torch._subclasses.fake_tensor import FakeTensorMode
 
-    from .compile_options import DynamoCompileOptions
     from .package import CompilePackage
 
 log = logging.getLogger(__name__)
@@ -589,19 +589,128 @@ explain = False
 #   3. Any compile_subgraph call should be preceded immediately by a log in the form of "... triggered compile".
 
 
+def get_node_source_info(n: torch.fx.Node) -> str:
+    """Extract the innermost user source location from an FX node's stack trace."""
+    st = n.meta.get("stack_trace", "") or getattr(n, "stack_trace", "")
+    if not st:
+        return ""
+    trace_lines = st.strip().split("\n")
+    last_file_idx = -1
+    for i, line in enumerate(trace_lines):
+        if line.strip().startswith("File "):
+            last_file_idx = i
+    if last_file_idx < 0:
+        return ""
+    file_line = trace_lines[last_file_idx].strip()
+    code = ""
+    if last_file_idx + 1 < len(trace_lines):
+        code = trace_lines[last_file_idx + 1].strip()
+    return f"{file_line}" + (f", code: {code}" if code else "")
+
+
+def format_tensor_computation_trace(value: VariableTracker, max_lines: int = 20) -> str:
+    """Walk the FX graph backwards from a TensorVariable to show how it was
+    computed, with user source locations. Graph inputs (placeholders) are always
+    shown first, followed by operations in dataflow order ending at the branch
+    condition."""
+    if not isinstance(value, TensorVariable):
+        return ""
+    try:
+        node = value.proxy.node
+
+        # Collect operations and placeholders separately so placeholders (root
+        # cause) always appear first regardless of traversal order.
+        op_blocks: list[list[str]] = []
+        placeholder_blocks: list[list[str]] = []
+        visited: set[str] = set()
+
+        def fmt_arg(a: object) -> str:
+            return a.name if isinstance(a, torch.fx.Node) else repr(a)
+
+        def walk(n: torch.fx.Node) -> None:
+            if n.name in visited:
+                return
+            visited.add(n.name)
+            source = get_node_source_info(n)
+
+            if n.op == "placeholder":
+                block = []
+                if source:
+                    block.append(f"# {source}")
+                block.append(f"{n.name}: graph input ({n.target})")
+                placeholder_blocks.append(block)
+                return
+
+            if n.op == "call_function" and len(op_blocks) < max_lines:
+                target_name = getattr(n.target, "__name__", str(n.target))
+                args_str = ", ".join(fmt_arg(a) for a in n.args)
+                block = []
+                if source:
+                    block.append(f"# {source}")
+                block.append(f"{n.name} = {target_name}({args_str})")
+                op_blocks.append(block)
+
+                for a in n.args:
+                    if isinstance(a, torch.fx.Node):
+                        walk(a)
+
+        walk(node)
+
+        if not op_blocks and not placeholder_blocks:
+            return ""
+
+        # Placeholders first (root cause), then ops in dataflow order (reversed
+        # from the DFS collection order) ending at the branch condition.
+        all_lines: list[str] = []
+        for block in placeholder_blocks + list(reversed(op_blocks)):
+            all_lines.extend(block)
+            all_lines.append("")
+
+        return (
+            "\n\n  The branch condition involves a tensor computed as follows:\n"
+            + "\n".join(f"    {line}" for line in all_lines)
+        )
+    except Exception:
+        log.debug("format_tensor_computation_trace failed", exc_info=True)
+        return ""
+
+
 def generic_jump(
     truth_fn: Callable[[object], bool], push: bool
 ) -> Callable[[InstructionTranslatorBase, Instruction], None]:
     def raise_jump_graph_break(value: VariableTracker) -> NoReturn:
+        trace_info = format_tensor_computation_trace(value)
+        hints: list[str] = []
+        if isinstance(value, TensorVariable):
+            try:
+                example = value.proxy.node.meta.get("example_value")
+                if (
+                    example is not None
+                    and example.dim() == 0
+                    and example.dtype
+                    in (
+                        torch.bool,
+                        torch.int32,
+                        torch.int64,
+                    )
+                ):
+                    hints.append(
+                        "The branch condition uses a scalar integer tensor. "
+                        "Consider rewriting the computation to use plain Python "
+                        "ints (e.g. use int attributes instead of tensor buffers) "
+                        "so the condition becomes a shape guard instead of "
+                        "data-dependent branching."
+                    )
+            except Exception:
+                pass
+        hints.extend(graph_break_hints.FUNDAMENTAL)
+        hints.append("Use `torch.cond` to express dynamic control flow.")
         unimplemented(
             gb_type="Data-dependent branching",
             context=f"attempted to jump with {value}",
             explanation="Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). "
-            "Dynamo does not support tracing dynamic control flow.",
-            hints=[
-                *graph_break_hints.FUNDAMENTAL,
-                "Use `torch.cond` to express dynamic control flow.",
-            ],
+            "Dynamo does not support tracing dynamic control flow." + trace_info,
+            hints=hints,
         )
 
     def jump_graph_break(
@@ -658,7 +767,12 @@ def generic_jump(
             self.output.add_output_instructions([create_instruction("TO_BOOL")])
 
         jump_inst = create_instruction(inst.opname, target=if_jump[0])
-        jump_inst.copy_positions(inst)
+        # For inlined frames, use the root frame's current instruction
+        # positions so the output code maps to the correct source line.
+        positions_inst = (
+            self.output.root_tx.current_instruction if self.parent is not None else inst
+        )
+        jump_inst.copy_positions(positions_inst)
         self.output.add_output_instructions([jump_inst] + if_next + if_jump)
 
     def inner(self: InstructionTranslatorBase, inst: Instruction) -> None:
@@ -980,6 +1094,16 @@ def break_graph_if_unsupported(
             self.output.add_output_instructions(cg.get_instructions())
             del cg
 
+            # For inlined frames, use the root frame's current instruction
+            # positions so the output code maps to the correct source line.
+            # The output code is always for the root function, so line numbers
+            # from inlined child frames would be wrong.
+            positions_inst = (
+                self.output.root_tx.current_instruction
+                if self.parent is not None
+                else inst
+            )
+
             if sys.version_info >= (3, 11) and inst.opname == "CALL":
                 kw_names = (
                     self.kw_names.as_python_constant()
@@ -994,13 +1118,14 @@ def break_graph_if_unsupported(
                     )
                 assert inst.arg is not None
                 call_insts = create_call_function(inst.arg, False)
-                call_insts[-1].copy_positions(inst)
+                call_insts[-1].copy_positions(positions_inst)
                 self.output.add_output_instructions(call_insts)
             else:
                 # copy instruction, but without exception table data
                 assert inst.target is None
                 inst_copy = copy.copy(inst)
                 inst_copy.exn_tab_entry = None
+                inst_copy.copy_positions(positions_inst)
                 self.output.add_output_instructions([inst_copy])
 
             self.output.add_output_instructions(cleanup)
@@ -3953,6 +4078,7 @@ class InstructionTranslatorBase(
     BINARY_REMAINDER = stack_op(operator.mod)
     BINARY_ADD = stack_op(operator.add)
     BINARY_SUBTRACT = stack_op(operator.sub)
+
     BINARY_SUBSCR = break_graph_if_unsupported(
         push=True,
         msg_prefix="Encountered graph break when attempting to trace BINARY_SUBSCR: a binary subscript, e.g. x[attr]",
@@ -4772,11 +4898,14 @@ class InstructionTranslator(InstructionTranslatorBase):
         torch_function_mode_stack: Any,
         code_options: dict[str, Any],
         compiler_fn: Any,
-        compile_options: DynamoCompileOptions,
+        one_graph: bool,
+        export: bool,
+        export_constraints: Any,
         frame_state: Any,
         speculation_log: SpeculationLog,
         exn_vt_stack: ExceptionStack,
         distributed_state: DistributedState | None,
+        package: CompilePackage | None,
     ) -> None:
         _step_logger()(
             logging.INFO,
@@ -4787,12 +4916,15 @@ class InstructionTranslator(InstructionTranslatorBase):
                 code_options,
                 compiler_fn,
                 self,
-                compile_options,
+                export,
+                export_constraints,
                 frame_state,
                 local_scope=f_locals,
                 global_scope=f_globals,
                 f_code=f_code,
                 torch_function_mode_stack=torch_function_mode_stack,
+                one_graph=one_graph,
+                package=package,
             ),
             instructions=instructions,
             f_locals=f_locals,
@@ -4806,12 +4938,12 @@ class InstructionTranslator(InstructionTranslatorBase):
             symbolic_torch_function_state=None,  # type: ignore[arg-type] # set below
             symbolic_stream_state=None,  # type: ignore[arg-type] # set below
             f_code=f_code,
-            export=compile_options.export,
+            export=export,
             inline_depth=0,
             speculation_log=speculation_log,
             exn_vt_stack=exn_vt_stack,
             distributed_state=distributed_state,
-            package=compile_options.package,
+            package=package,
         )
 
         self._throw_if_in_functorch()
@@ -4819,8 +4951,8 @@ class InstructionTranslator(InstructionTranslatorBase):
         # as soon as we create the tracing context we should keep it active, so any calls
         # into dynamo apis can rely on finding it
         with tracing(self.output.tracing_context), self.set_current_tx():
-            self.one_graph: bool = compile_options.one_graph
-            self.export = compile_options.export
+            self.one_graph: bool = one_graph
+            self.export = export
             if self.export:
                 assert self.one_graph, (
                     "Export without one graph - something has gone wrong."
@@ -4913,7 +5045,7 @@ class InstructionTranslator(InstructionTranslatorBase):
 
             self.symbolic_stream_state = SymbolicStreamState()
 
-            if compile_options.export:
+            if export:
                 # export gets confused if we never realize unused inputs
                 # in export mode just eagerly realize everything
                 self.symbolic_locals = variables.LazyVariableTracker.realize_all(

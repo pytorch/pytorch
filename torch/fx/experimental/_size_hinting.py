@@ -350,10 +350,14 @@ def _optimization_hint_base(
 
         fallback = unbacked_symint_fallback
 
+    # to have expanded (Identity free) expr stored in original
+    if isinstance(expr, sympy.Expr):
+        expr = expr.expand(identity=True)
+
     original = expr
     # sympy.expand() doesn't work with boolean expressions like Or/And
     if isinstance(expr, sympy.Expr):
-        expr = sympy.expand(expr).xreplace(shape_env.replacements)
+        expr = expr.xreplace(shape_env.replacements)
     else:
         expr = sympy.sympify(expr).xreplace(shape_env.replacements)
 

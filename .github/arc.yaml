@@ -81,3 +81,9 @@ runner_mapping:
   linux.arm64.m8g.4xlarge: l-arm64g4-16-62                       # m8g.4xlarge
   linux.arm64.r7g.12xlarge.memory: l-arm64g3-61-463              # r7g.12xlarge
   linux.arm64.m7g.metal: l-barm64g4-62-226                       # m7g.metal
+
+
+  # ---- Partner hardwares ----
+
+  linux.idc.xpu: linux.idc.xpu
+  linux.rocm.gpu.2: linux.rocm.gpu.2
