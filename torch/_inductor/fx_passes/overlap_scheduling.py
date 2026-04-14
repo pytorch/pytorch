@@ -15,6 +15,7 @@ from torch._inductor import config
 from torch._inductor.comm_analysis import estimate_fx_collective_memory_footprint
 from torch._inductor.fx_passes.bucketing import (
     _default_bucket_mode,
+    _get_collective_node_from_wait,
     _schedulable_wait_node,
     bucket_key,
     BucketMode,
@@ -653,11 +654,17 @@ class OverlapScheduler:
 
         for node in self.nodes:
             if _schedulable_wait_node(node):
-                start = node.args[0]
+                start = _get_collective_node_from_wait(node)
+                assert start is not None
                 assert start in self.node_estimations, (
                     f"Missing estimation for collective {start.name}. "
                     f"Ensure custom_runtime_estimation returns a value for this node."
                 )
+                self.wait_to_start[node] = start
+                # For coalesced collectives, multiple waits share the same
+                # start node. Only register the first wait as the representative.
+                if start in self.collective_info:
+                    continue
                 coll_time_ms = self.node_estimations[start]
 
                 info = CollectiveInfo(
@@ -668,7 +675,6 @@ class OverlapScheduler:
                     exposed_time_ms=coll_time_ms,  # Initially fully exposed
                 )
                 self.collective_info[start] = info
-                self.wait_to_start[node] = start
                 self.unscheduled_collectives.add(start)
                 self.all_pgs.add(get_group_name(start))
 
@@ -1182,7 +1188,11 @@ class OverlapScheduler:
         """Handle scheduling a wait."""
         assert node in self.wait_to_start
         coll_start = self.wait_to_start[node]
-        assert coll_start in self.in_flight
+        # For coalesced collectives, multiple waits share the same start node.
+        # The first wait completes the collective; subsequent waits just schedule.
+        if coll_start not in self.in_flight:
+            self._schedule(node)
+            return
 
         # Scheduling a wait of a collective also forces the wait
         # of every node enqueued prior to the collective on the
@@ -1628,7 +1638,10 @@ def gather_node_runtime_estimations(
     collective_nodes: list[fx.Node] = []
     for node in nodes:
         if _schedulable_wait_node(node):
-            start = node.args[0]
+            start = _get_collective_node_from_wait(node)
+            assert start is not None
+            if start in estimations:
+                continue
             estimations[start] = estimate_collective_time(
                 start,
                 custom_runtime_estimation=custom_runtime_estimation,
