@@ -74,7 +74,7 @@ from ..utils import (
     tensortype_to_dtype,
 )
 from .base import AttributeMutationNew, ValueMutationNew, VariableTracker
-from .constant import ConstantVariable
+from .constant import CONSTANT_VARIABLE_NONE, CONSTANT_VARIABLE_TRUE, ConstantVariable
 from .lists import ListIteratorVariable, SizeVariable
 from .script_object import TorchScriptObjectVariable
 from .user_defined import UserDefinedClassVariable
@@ -520,7 +520,7 @@ class TensorVariable(VariableTracker):
                 hints=[],
             )
         else:
-            return variables.ConstantVariable.create(None)
+            return variables.CONSTANT_VARIABLE_NONE
 
     def method_attr__version(self, tx: "InstructionTranslator") -> VariableTracker:
         from ..tensor_version_op import _tensor_version
@@ -539,7 +539,7 @@ class TensorVariable(VariableTracker):
         # attributes and existing attributes. This is a bug and requires more
         # deep dive.
         if name in all_tensor_attrs:
-            return ConstantVariable.create(True)
+            return CONSTANT_VARIABLE_TRUE
 
         try:
             var = VariableTracker.build(tx, getattr).call_function(
@@ -869,7 +869,7 @@ class TensorVariable(VariableTracker):
 
         # This is seen in inspect signature where we check if the value is a default value
         if name == "__eq__" and isinstance(args[0], UserDefinedClassVariable):
-            return variables.ConstantVariable.create(False)
+            return variables.CONSTANT_VARIABLE_FALSE
 
         if name == "wait":
             if args or kwargs:
@@ -1378,7 +1378,7 @@ class TensorVariable(VariableTracker):
                 # No leaf tensors found - nothing to accumulate gradients into.
                 # This matches eager behavior where backward() is a no-op if there
                 # are no leaves requiring grad.
-                return ConstantVariable.create(None)
+                return CONSTANT_VARIABLE_NONE
         else:
             provided_vars = (
                 inputs.items
@@ -1434,7 +1434,7 @@ class TensorVariable(VariableTracker):
 
         grad_mode_var.exit(tx)
 
-        return ConstantVariable.create(None)
+        return CONSTANT_VARIABLE_NONE
 
     def method_data_ptr(
         self,
@@ -1461,7 +1461,7 @@ class TensorVariable(VariableTracker):
             (self.as_proxy(), stream.user_object_index),
             {},
         )
-        return ConstantVariable.create(None)
+        return CONSTANT_VARIABLE_NONE
 
     def method_item(
         self,
@@ -1627,7 +1627,7 @@ class TensorVariable(VariableTracker):
         if config.use_graph_deduplication or config.track_nodes_for_deduplication:
             tx.output.region_tracker.add_node_mutation(proxy.node, 0)
 
-        return ConstantVariable.create(None)
+        return CONSTANT_VARIABLE_NONE
 
     def method_resize_(
         self,
@@ -1997,7 +1997,7 @@ class TensorVariable(VariableTracker):
                     self
                 ):
                     tx.output.side_effects.store_attr(
-                        self, "grad", variables.ConstantVariable.create(None)
+                        self, "grad", variables.CONSTANT_VARIABLE_NONE
                     )
         return self
 

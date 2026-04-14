@@ -88,7 +88,12 @@ from .base import (
     ValueMutationNew,
     VariableTracker,
 )
-from .constant import ConstantVariable, FakeIdVariable
+from .constant import (
+    CONSTANT_VARIABLE_FALSE,
+    CONSTANT_VARIABLE_NONE,
+    ConstantVariable,
+    FakeIdVariable,
+)
 from .dicts import (
     ConstDictVariable,
     DefaultDictVariable,
@@ -1562,7 +1567,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
         if self.fn is object and name == "__init__":
             # object.__init__ is a no-op
-            return variables.ConstantVariable.create(None)
+            return variables.CONSTANT_VARIABLE_NONE
 
         if self.fn is set:
             resolved_fn = getattr(self.fn, name)
@@ -2071,7 +2076,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                 NNModuleVariable,
             ),
         ):
-            return variables.ConstantVariable.create(True)
+            return variables.CONSTANT_VARIABLE_TRUE
         elif isinstance(arg, UserDefinedVariable):
             return VariableTracker.build(tx, callable(arg.value))
         elif isinstance(
@@ -2085,7 +2090,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                 ListIteratorVariable,
             ),
         ):
-            return variables.ConstantVariable.create(False)
+            return variables.CONSTANT_VARIABLE_FALSE
         else:
             return None
 
@@ -2197,7 +2202,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                     "1 kwargs (`strict`)",
                     f"{len(kwargs)} kwargs",
                 )
-        strict = kwargs.pop("strict", ConstantVariable.create(False))
+        strict = kwargs.pop("strict", CONSTANT_VARIABLE_FALSE)
         iter_args = [
             SourcelessBuilder.create(tx, iter).call_function(tx, [arg], {})
             for arg in args
@@ -2396,7 +2401,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         *seqs: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        strict = ConstantVariable.create(False)
+        strict = CONSTANT_VARIABLE_FALSE
         if kwargs:
             if sys.version_info >= (3, 14):
                 if not (len(kwargs) == 1 and "strict" in kwargs):
@@ -2406,7 +2411,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                         "1 kwargs (`strict`)",
                         f"{len(kwargs)} kwargs",
                     )
-                strict = kwargs.pop("strict", ConstantVariable.create(False))
+                strict = kwargs.pop("strict", CONSTANT_VARIABLE_FALSE)
             else:
                 raise_args_mismatch(
                     tx,
@@ -3314,7 +3319,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                 f"{len(args)} args",
             )
         if len(args) == 1:
-            args = (*args, ConstantVariable.create(None))
+            args = (*args, CONSTANT_VARIABLE_NONE)
         if len(args) != 2:
             raise_args_mismatch(
                 tx,

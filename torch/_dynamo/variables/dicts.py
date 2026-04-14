@@ -55,7 +55,12 @@ from .base import (
     ValueMutationNew,
     VariableTracker,
 )
-from .constant import ConstantVariable
+from .constant import (
+    CONSTANT_VARIABLE_FALSE,
+    CONSTANT_VARIABLE_NONE,
+    CONSTANT_VARIABLE_TRUE,
+    ConstantVariable,
+)
 from .hashable import HashableTracker, is_hashable, raise_unhashable
 from .sets import SetVariable
 
@@ -478,7 +483,7 @@ class ConstDictVariable(VariableTracker):
             )
             tx.output.side_effects.mutation(self)
             self.items.update(temp_dict_vt.items)  # type: ignore[attr-defined]
-            return ConstantVariable.create(None)
+            return CONSTANT_VARIABLE_NONE
         elif name == "items":
             if args or kwargs:
                 raise_args_mismatch(
@@ -539,7 +544,7 @@ class ConstDictVariable(VariableTracker):
                 )
             tx.output.side_effects.mutation(self)
             self.items[Hashable(args[0])] = args[1]
-            return ConstantVariable.create(None)
+            return CONSTANT_VARIABLE_NONE
         elif name == "__delitem__" and self.is_mutable():
             arg_hashable = args and is_hashable(args[0])
             if arg_hashable:
@@ -547,7 +552,7 @@ class ConstDictVariable(VariableTracker):
                 self.should_reconstruct_all = True
                 tx.output.side_effects.mutation(self)
                 self.items.__delitem__(Hashable(args[0]))
-                return ConstantVariable.create(None)
+                return CONSTANT_VARIABLE_NONE
             else:
                 return super().call_method(tx, name, args, kwargs)
         elif name == "get":
@@ -562,7 +567,7 @@ class ConstDictVariable(VariableTracker):
                 self.install_dict_contains_guard(tx, args)
                 if len(args) == 1:
                     # if default is not given, return None
-                    return ConstantVariable.create(None)
+                    return CONSTANT_VARIABLE_NONE
                 return args[1]
             # Key guarding - Nothing to do.
             return self.getitem_const(tx, args[0])
@@ -630,7 +635,7 @@ class ConstDictVariable(VariableTracker):
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             self.items.clear()
-            return ConstantVariable.create(None)
+            return CONSTANT_VARIABLE_NONE
         elif name == "update" and self.is_mutable():
             # In general, this call looks like `a.update(b, x=1, y=2, ...)`.
             # Either `b` or the kwargs is omittable, but not both.
@@ -658,7 +663,7 @@ class ConstDictVariable(VariableTracker):
                         for k, v in kwargs.items()
                     }
                     self.items.update(kwargs_hashable)
-                return ConstantVariable.create(None)
+                return CONSTANT_VARIABLE_NONE
             else:
                 return super().call_method(tx, name, args, kwargs)
         elif name == "__contains__":
@@ -703,7 +708,7 @@ class ConstDictVariable(VariableTracker):
                 return value
             else:
                 if len(args) == 1:
-                    x = ConstantVariable.create(None)
+                    x = CONSTANT_VARIABLE_NONE
                 else:
                     x = args[1]
                 tx.output.side_effects.mutation(self)
@@ -724,7 +729,7 @@ class ConstDictVariable(VariableTracker):
 
             key = Hashable(args[0])
             self.items.move_to_end(key, last=last)
-            return ConstantVariable.create(None)
+            return CONSTANT_VARIABLE_NONE
         elif name == "__eq__" and istype(
             self, ConstDictVariable
         ):  # don't let Set use this function
@@ -840,9 +845,9 @@ class ConstDictVariable(VariableTracker):
             for t in (dict, collections.OrderedDict, collections.defaultdict)
         ):
             if hasattr(self.user_cls, name):
-                return ConstantVariable.create(True)
+                return CONSTANT_VARIABLE_TRUE
             if self.user_cls is dict:
-                return ConstantVariable.create(False)
+                return CONSTANT_VARIABLE_FALSE
 
         msg = f"hasattr on {self.user_cls} is not supported"
         unimplemented(
@@ -991,7 +996,7 @@ class DefaultDictVariable(ConstDictVariable):
         super().__init__(items, user_cls, **kwargs)
         assert user_cls is collections.defaultdict
         if default_factory is None:
-            default_factory = ConstantVariable.create(None)
+            default_factory = CONSTANT_VARIABLE_NONE
         self.default_factory = default_factory
 
     def is_python_constant(self) -> bool:
@@ -1052,7 +1057,7 @@ class DefaultDictVariable(ConstDictVariable):
             ) and self.is_supported_arg(args[1]):
                 tx.output.side_effects.mutation(self)
                 self.default_factory = args[1]
-                return ConstantVariable.create(None)
+                return CONSTANT_VARIABLE_NONE
             return super().call_method(tx, name, args, kwargs)
         elif name == "__eq__":
             if len(args) != 1:
@@ -1143,8 +1148,8 @@ class DictViewVariable(VariableTracker):
     ) -> ConstantVariable:
         assert self.kv is not None
         if name in self.python_type().__dict__:
-            return ConstantVariable.create(True)
-        return ConstantVariable.create(False)
+            return CONSTANT_VARIABLE_TRUE
+        return CONSTANT_VARIABLE_FALSE
 
     def call_method(
         self,
@@ -1325,7 +1330,7 @@ class DictItemsVariable(DictViewVariable):
                     tx,
                     len(self.set_items ^ args[0].set_items) == 0,
                 )
-            return ConstantVariable.create(False)
+            return CONSTANT_VARIABLE_FALSE
         elif name == "__iter__":
             from .lists import ListIteratorVariable
 

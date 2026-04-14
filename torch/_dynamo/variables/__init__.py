@@ -24,7 +24,12 @@ from .builtin import (
     IterBuiltinVariable,
     ListBuiltinVariable,
 )
-from .constant import ConstantVariable
+from .constant import (
+    CONSTANT_VARIABLE_FALSE,
+    CONSTANT_VARIABLE_NONE,
+    CONSTANT_VARIABLE_TRUE,
+    ConstantVariable,
+)
 from .ctx_manager import (
     CatchWarningsCtxManagerVariable,
     ContextWrappingVariable,
@@ -191,6 +196,9 @@ __all__ = [
     "BaseListVariable",
     "BuiltinVariable",
     "CatchWarningsCtxManagerVariable",
+    "CONSTANT_VARIABLE_FALSE",
+    "CONSTANT_VARIABLE_NONE",
+    "CONSTANT_VARIABLE_TRUE",
     "ConstantVariable",
     "ConstDictVariable",
     "DictBuiltinVariable",
