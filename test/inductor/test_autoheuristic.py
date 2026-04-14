@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import os
 import unittest
+from unittest.mock import patch
 
 import torch
 import torch._inductor.config as inductor_config
@@ -41,7 +42,7 @@ class AutoHeuristicTest(TestCase):
         self.assertFalse(os.path.exists(self.get_path_to_autoheuristic_log("pad_mm")))
 
     @skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
-    @inductor_config.patch(autoheuristic_collect="foo")
+    @inductor_config.patch("autoheuristic_collect.pad_mm", False)
     def test_autoheuristic_pad_mm_off(self):
         # this test ensures that data is not collected for pad_mm when autoheuristic_collect does not contain "pad_mm"
         self.run_mm()
@@ -58,19 +59,19 @@ class AutoHeuristicTest(TestCase):
         self.assertEqual(num_lines, 4)
 
     @skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
-    @inductor_config.patch(autoheuristic_collect="pad_mm")
+    @inductor_config.patch("autoheuristic_collect.pad_mm", True)
     def test_autoheuristic_pad_mm_collect_data(self):
-        # this test ensures that data is collected for pad_mm when autoheuristic_collect="pad_mm"
+        # this test ensures that data is collected for pad_mm when autoheuristic_collect.pad_mm=True
         self.assert_autoheuristic_collected_data()
 
     @skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
-    @inductor_config.patch(autoheuristic_collect="foo,pad_mm")
+    @inductor_config.patch("autoheuristic_collect.pad_mm", True)
     def test_autoheuristic_pad_mm_collect_data2(self):
-        # this test ensures that data is collected for "pad_mm" when autoheuristic_collect contains "pad_mm"
+        # this test ensures that data is collected for pad_mm when autoheuristic_collect.pad_mm=True
         self.assert_autoheuristic_collected_data()
 
     @skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
-    @inductor_config.patch(autoheuristic_collect="test")
+    @patch.dict(os.environ, {"TORCHINDUCTOR_AUTOHEURISTIC_COLLECT": "test"})
     def test_autoheuristic(self):
         # test basic functionality of autoheuristic
         def fallback():
@@ -124,7 +125,7 @@ class AutoHeuristicTest(TestCase):
 
     @skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
     @unittest.skipIf(not IS_A100, "heuristic only run on A100")
-    @inductor_config.patch(autoheuristic_use="pad_mm")
+    @inductor_config.patch("autoheuristic_use.pad_mm", True)
     def test_autoheuristic_a100(self):
         # Make sure heuristic does not break anything
         # TODO (AlnisM): Find a way to check whether heuristic is used
@@ -132,7 +133,7 @@ class AutoHeuristicTest(TestCase):
 
     @skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
     @unittest.skipIf(not IS_H100, "heuristic only run on H100")
-    @inductor_config.patch(autoheuristic_use="pad_mm")
+    @inductor_config.patch("autoheuristic_use.pad_mm", True)
     def test_autoheuristic_h100(self):
         # Make sure heuristic does not break anything
         # TODO (AlnisM): Find a way to check whether heuristic is used
@@ -157,12 +158,10 @@ class AutoHeuristicTest(TestCase):
     @unittest.skip(
         "mixed_mm autoheuristic collection is broken after mixed_mm special casing deletion (PR #147151)"
     )
-    @inductor_config.patch(
-        autoheuristic_collect="mixed_mm",
-        autoheuristic_use="",
-        fx_graph_cache=False,
-        fx_graph_remote_cache=False,
-    )
+    @inductor_config.patch("autoheuristic_collect.mixed_mm", True)
+    @inductor_config.patch("autoheuristic_use.mixed_mm", False)
+    @inductor_config.patch(fx_graph_cache=False)
+    @inductor_config.patch(fx_graph_remote_cache=False)
     def test_global_feedback(self):
         self.run_mixed_mm()
         path = self.get_path_to_autoheuristic_log("mixed_mm")
@@ -174,7 +173,7 @@ class AutoHeuristicTest(TestCase):
         self.assertTrue(num_lines > 4)
 
     @skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
-    @inductor_config.patch(autoheuristic_use="mixed_mm")
+    @inductor_config.patch("autoheuristic_use.mixed_mm", True)
     @unittest.skipIf(not IS_A100, "heuristic only run on A100")
     def test_mixed_mm_a100(self):
         self.run_mixed_mm()
@@ -182,7 +181,8 @@ class AutoHeuristicTest(TestCase):
 
     @skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
     @unittest.skipIf(not IS_H100 and not IS_A100, "heuristic only run on H100")
-    @inductor_config.patch(deterministic=True, autoheuristic_use="pad_mm")
+    @inductor_config.patch(deterministic=True)
+    @inductor_config.patch("autoheuristic_use.pad_mm", True)
     def test_pad_mm_autoheuristic_deterministic_mode(self):
         """Test that pad_mm AutoHeuristics works in deterministic mode."""
         from torch._dynamo.utils import counters

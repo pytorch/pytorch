@@ -246,12 +246,13 @@ class BenchmarkRunnerPadMM(BenchmarkRunner):  # type: ignore[misc, no-any-unimpo
         self.setup_shape_collections(args.additional_shape_csv)
 
         # Set up torch configuration (copied from parent run method)
+
         if args.use_heuristic:
-            torch._inductor.config.autoheuristic_use = self.name
-            torch._inductor.config.autoheuristic_collect = ""
+            torch._inductor.config.autoheuristic_use.pad_mm = True
+            torch._inductor.config.autoheuristic_collect.pad_mm = False
         else:
-            torch._inductor.config.autoheuristic_use = ""
-            torch._inductor.config.autoheuristic_collect = self.name
+            torch._inductor.config.autoheuristic_use.pad_mm = False
+            torch._inductor.config.autoheuristic_collect.pad_mm = True
         torch._inductor.config.autoheuristic_log_path = args.o
         if args.device is not None:
             torch.cuda.set_device(args.device)
