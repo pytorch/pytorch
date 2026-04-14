@@ -444,9 +444,7 @@ class OptimizedModule(torch.nn.Module):
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
         elif (
             config.wrap_top_frame
-            or utils.nnmodule_has_hooks(
-                self._orig_mod, check_forward_hooks=True
-            )
+            or utils.nnmodule_has_hooks(self._orig_mod, check_forward_hooks=True)
             or (
                 isinstance(self._orig_mod.forward, types.MethodType)
                 and (trace_rules.check(self._orig_mod.forward))
