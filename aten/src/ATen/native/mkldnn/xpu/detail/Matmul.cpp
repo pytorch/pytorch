@@ -41,8 +41,8 @@ FpMatmulLruCache& get_fpmatmul_primitive_cache(int device_id) {
   return c;
 }
 
-// Bias fields as one key part so build_fpmatmul_primitive_cache_key_rec stays
-// in sync with make_fpmatmul_cached_primitive's single variadic forward.
+// Bias-related key fields as one unit for build_fpmatmul_primitive_cache_key_rec
+// and make_fpmatmul_cached_primitive (engine / dst are not part of the cache key).
 struct FpMatmulCacheBiasKeyParts {
   bool with_bias;
   const dnnl::memory::dims& bias_dims;
@@ -80,14 +80,6 @@ inline void append_fp_matmul_cache_key_part(dnnl::memory::dims& key, Attr& attr)
   append_fp_matmul_cache_key_part(
       key, attr.matmul_primitive_cache_key_extra());
 }
-
-inline void append_fp_matmul_cache_key_part(
-    dnnl::memory::dims& key,
-    dnnl::engine&) {}
-
-inline void append_fp_matmul_cache_key_part(
-    dnnl::memory::dims& key,
-    const at::Tensor&) {}
 
 void build_fpmatmul_primitive_cache_key_rec(dnnl::memory::dims& /*key*/) {}
 
@@ -172,15 +164,17 @@ FpMatmulCacheValue make_fpmatmul_cached_primitive(
 template <typename... Args>
 FpMatmulCacheValue lookup_or_build_fpmatmul_cached_primitive(
     FpMatmulLruCache& primitive_cache,
-    Args&&... args) {
+    Args&&... args,
+    dnnl::engine& engine,
+    const at::Tensor& dst) {
   dnnl::memory::dims cache_key = build_fpmatmul_primitive_cache_key(
       std::forward<Args>(args)...);
   auto cache_it = primitive_cache.find(cache_key);
   if (cache_it != primitive_cache.end()) {
     return cache_it->second;
   }
-  FpMatmulCacheValue entry =
-      make_fpmatmul_cached_primitive(std::forward<Args>(args)...);
+  FpMatmulCacheValue entry = make_fpmatmul_cached_primitive(
+      std::forward<Args>(args)..., engine, dst);
   primitive_cache.insert({std::move(cache_key), entry});
   return entry;
 }
