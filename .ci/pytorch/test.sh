@@ -332,7 +332,8 @@ if [[ "$BUILD_ENVIRONMENT" == *-tsan* ]]; then
     # interpreter that has the TSan runtime.
     export PATH=/opt/python/cp314-cp314t+tsan/bin:$PATH
     python -m pip install "$(echo dist/*.whl)[opt-einsum]"
-    export TSAN_OPTIONS="log_path=$(pwd)/test/test-reports/tsan_toprint.log"
+    TSAN_OPTIONS="log_path=$(pwd)/test/test-reports/tsan_toprint.log"
+    export TSAN_OPTIONS
     export PYTORCH_TEST_WITH_TSAN=1
 fi
 
