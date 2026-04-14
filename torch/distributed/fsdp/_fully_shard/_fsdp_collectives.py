@@ -49,7 +49,7 @@ lib.define(
         SymInt[] inp_split_sizes,
         SymInt all_gather_input_numel,
         SymInt rank
-    ) -> (Tensor(a!), Tensor(a!))
+    ) -> (Tensor(a), Tensor(a))
     """
 )
 
