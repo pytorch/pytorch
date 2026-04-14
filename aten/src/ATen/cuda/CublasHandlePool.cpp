@@ -283,10 +283,10 @@ void resetCUDABlasLtWorkspaceSize() {
 }
 
 size_t getCUDABlasLtWorkspaceSize() {
-  static size_t pool_size = parseCUDABlasLtWorkspaceSize();
+  size_t pool_size = parseCUDABlasLtWorkspaceSize();
 #ifndef USE_ROCM
   if (unified_cublas_and_lt_workspaces()) {
-    static size_t cublasWorkspaceSize = parseChosenWorkspaceSize();
+    size_t cublasWorkspaceSize = parseChosenWorkspaceSize();
     if (cublasWorkspaceSize < pool_size) {
       TORCH_WARN_ONCE("Requested unified CUBLASLT workspace size of ", pool_size,
                       " bytes exceeds CUBLAS workspace size of ", cublasWorkspaceSize,
@@ -361,7 +361,7 @@ void* getCUDABlasLtWorkspace() {
     auto new_workspace = getNewWorkspace();
     {
       std::unique_lock<std::shared_mutex> lock(workspace.mutex);
-      auto workspace_it = workspace.map.try_emplace(key, std::move(new_workspace)).first;
+      auto workspace_it = workspace.map.try_emplace(key, std::make_pair(std::move(new_workspace), parseChosenWorkspaceSize())).first;
       return workspace_it->second.first.mutable_get();
     }
   }
