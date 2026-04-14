@@ -3961,7 +3961,13 @@ class TestOpaqueGenerator(TestCase):
             def forward(self, q, k, v, rng_state):
                 out = graphsafe_run_with_rng_state(
                     torch.ops.aten._scaled_dot_product_efficient_attention.default,
-                    q, k, v, None, True, 0.1, True,
+                    q,
+                    k,
+                    v,
+                    None,
+                    True,
+                    0.1,
+                    True,
                     rng_state=rng_state,
                 )
                 return out[0]
@@ -3986,7 +3992,13 @@ class TestOpaqueGenerator(TestCase):
             def forward(self, q, k, v, rng_state):
                 out = graphsafe_run_with_rng_state(
                     torch.ops.aten._scaled_dot_product_efficient_attention.default,
-                    q, k, v, None, False, 0.0, True,
+                    q,
+                    k,
+                    v,
+                    None,
+                    False,
+                    0.0,
+                    True,
                     rng_state=rng_state,
                 )
                 return out[0]
