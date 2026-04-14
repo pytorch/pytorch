@@ -136,11 +136,6 @@ namespace detail {
 
 struct PostOpsMatmulKeySink {
   dnnl::memory::dims& key;
-  const PostOpParam* cur_ = nullptr;
-
-  void bind_curr(const PostOpParam& op) {
-    cur_ = &op;
-  }
 
   void push_op_kind(kind_t kind) {
     key.push_back(static_cast<dnnl::memory::dim>(kind));
@@ -155,18 +150,12 @@ struct PostOpsMatmulKeySink {
 
   void append_eltwise(
       dnnl::algorithm aalgorithm, float alpha, float beta) {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(cur_ != nullptr);
     push_f32(key, alpha);
     push_f32(key, beta);
     key.push_back(static_cast<dnnl::memory::dim>(static_cast<int>(aalgorithm)));
   }
 
-  void append_sum(
-      float scale,
-      std::int32_t zero_point,
-      dnnl::memory::data_type data_type =
-          dnnl::memory::data_type::undef) {
-    (void)data_type;
+  void append_sum(float scale, std::int32_t zero_point) {
     push_f32(key, scale);
     key.push_back(static_cast<dnnl::memory::dim>(zero_point));
   }
@@ -192,23 +181,9 @@ struct PostOpsMatmulKeySink {
   void append_prelu(int mask) {
     key.push_back(static_cast<dnnl::memory::dim>(mask));
   }
-
-  void unknown_post_op_kind() {
-    key.push_back(-999);
-  }
 };
 
 } // namespace detail
-
-inline void fp_matmul_post_sink_bind_curr(
-    dnnl::post_ops& /*sink*/,
-    const PostOpParam& /*op*/) noexcept {}
-
-inline void fp_matmul_post_sink_bind_curr(
-    detail::PostOpsMatmulKeySink& sink,
-    const PostOpParam& op) {
-  sink.bind_curr(op);
-}
 
 inline void fp_matmul_post_sink_push_kind(
     dnnl::post_ops& /*sink*/,
@@ -218,12 +193,6 @@ inline void fp_matmul_post_sink_push_kind(
     detail::PostOpsMatmulKeySink& sink,
     kind_t kind) {
   sink.push_op_kind(kind);
-}
-
-inline void fp_matmul_post_sink_on_unknown(dnnl::post_ops& /*sink*/) noexcept {}
-
-inline void fp_matmul_post_sink_on_unknown(detail::PostOpsMatmulKeySink& sink) {
-  sink.unknown_post_op_kind();
 }
 
 class Attr {
@@ -440,7 +409,6 @@ class Attr {
   template <typename PostOpsSink>
   void emit_post_ops_for_matmul_cache_and_dnnl(PostOpsSink&& sink) const {
     for (const auto& op : ops_params_) {
-      fp_matmul_post_sink_bind_curr(sink, op);
       fp_matmul_post_sink_push_kind(sink, op.kind_);
       switch (op.kind_) {
         case kind_t::eltwise:
@@ -457,7 +425,6 @@ class Attr {
           sink.append_prelu(op.mask_);
           break;
         default:
-          fp_matmul_post_sink_on_unknown(sink);
           break;
       }
     }
