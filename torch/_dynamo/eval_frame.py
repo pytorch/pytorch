@@ -442,13 +442,21 @@ class OptimizedModule(torch.nn.Module):
         if isinstance(self.dynamo_ctx, DisableContext):
             # No need to check trace rules
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
-        elif config.wrap_top_frame or (
-            isinstance(self._orig_mod.forward, types.MethodType)
-            and (trace_rules.check(self._orig_mod.forward))
+        elif (
+            config.wrap_top_frame
+            or utils.nnmodule_has_hooks(
+                self._orig_mod, check_forward_hooks=True
+            )
+            or (
+                isinstance(self._orig_mod.forward, types.MethodType)
+                and (trace_rules.check(self._orig_mod.forward))
+            )
         ):
             # This may be a torch.nn.* instance in trace_rules.py which
             # won't trigger a frame evaluation workaround to add an extra
-            # frame we can capture
+            # frame we can capture. We also force the wrapper when the root
+            # module has forward hooks so Dynamo captures the hook and forward
+            # in the same frame.
             self.forward = self.dynamo_ctx(external_utils.wrap_inline(self._orig_mod))
         else:
             # Invoke hooks outside of dynamo then pickup the inner frame
@@ -941,15 +949,30 @@ class _TorchDynamoContext:
             filename = inspect.getsourcefile(fn)
         except TypeError:
             filename = None
-        if config.debug_force_nested_calls:
-            fn = external_utils.wrap_inline(fn)
-        elif config.wrap_top_frame or (
+
+        wrap_root_module_call_with_hooks = False
+        if isinstance(fn, types.MethodType):
+            bound_module = getattr(fn, "__self__", None)
+            wrap_root_module_call_with_hooks = (
+                getattr(fn, "__name__", "") in {"_call_impl", "_wrapped_call_impl"}
+                and isinstance(bound_module, torch.nn.Module)
+                and utils.nnmodule_has_hooks(bound_module, check_forward_hooks=True)
+            )
+
+        wrap_builtin_without_frame = (
             (filename is None or trace_rules.check(fn) or top_level_in_graph)
             and (
                 getattr(fn, "__name__", "")
                 not in ["_call_impl", "_wrapped_call_impl", "_lazy_forward"]
             )
             and filename not in DONT_WRAP_FILES
+        )
+        if config.debug_force_nested_calls:
+            fn = external_utils.wrap_inline(fn)
+        elif (
+            config.wrap_top_frame
+            or wrap_root_module_call_with_hooks
+            or wrap_builtin_without_frame
         ):
             # call to a builtin without a frame for us to capture
             fn = external_utils.wrap_inline(fn)
