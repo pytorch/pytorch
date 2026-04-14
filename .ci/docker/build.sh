@@ -152,12 +152,6 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.14
     CLANG_VERSION=18
     ;;
-  pytorch-linux-jammy-py3.14t-clang18-tsan)
-    ANACONDA_PYTHON_VERSION=3.14
-    PYTHON_FREETHREADED=1
-    CLANG_VERSION=18
-    TSAN=yes
-    ;;
   pytorch-linux-jammy-rocm-n-py3 | pytorch-linux-jammy-rocm-n-py3-benchmarks | pytorch-linux-noble-rocm-n-py3)
     if [[ $tag =~ "jammy" ]]; then
       ANACONDA_PYTHON_VERSION=3.10
@@ -283,6 +277,7 @@ case "$tag" in
       then
         ANACONDA_PYTHON_VERSION=${ANACONDA_PYTHON_VERSION%?}
         PYTHON_FREETHREADED=1
+        TSAN=yes
       fi
     fi
     if [[ "$image" == *cuda* ]]; then
