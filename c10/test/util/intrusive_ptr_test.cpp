@@ -3524,8 +3524,8 @@ TEST(
   EXPECT_TRUE(wasDestructed);
 }
 
-#ifdef NDEBUG
-// with LTO and GCC this test will not compile
+#if !(defined(__GNUC__) && !defined(__clang__) && defined(NDEBUG))
+// with LTO and GCC this test will not compile with LTO
 #else
 TEST(WeakIntrusivePtrTest, givenStackObject_whenReclaimed_thenCrashes) {
   // This would cause very weird bugs on destruction.
