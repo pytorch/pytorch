@@ -20,11 +20,12 @@ from torch._C import (
     DispatchKey,
 )
 from torch._C._dynamo.guards import set_is_in_mode_without_ignore_compile_internals
-from torch._opaque_base import OpaqueBase
 
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
+
+    from torch._opaque_base import OpaqueBase
 
 
 # TODO: Limitations and things about enable_torch_dispatch_mode we should fix before exposing it:
@@ -472,7 +473,8 @@ class TraceableWrapperSubclass(Protocol):
 
     ``__tensor_unflatten__`` may be implemented as either a ``@staticmethod``
     or a ``@classmethod``; the runtime check below intentionally uses duck
-    typing to support both forms.
+    typing to support both forms, even though static type checkers may only
+    recognize the ``@staticmethod`` form as conforming to this protocol.
     """
 
     def __tensor_flatten__(self) -> tuple[Sequence[str], object]: ...
