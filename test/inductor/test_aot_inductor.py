@@ -4815,6 +4815,13 @@ class AOTInductorTestsTemplate:
     @skipCUDAIf(not TEST_CUDNN, "CUDNN not available")
     @skipIfRocm(msg="cudnn_grid_sampler not supported on ROCm")
     def test_cudnn_grid_sampler(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("cudnn_grid_sampler is CUDA-only")
+        if torch.backends.cudnn.version() >= 90000:
+            raise unittest.SkipTest(
+                "cuDNN spatial transformer API deprecated in cuDNN 9+"
+            )
+
         class M(torch.nn.Module):
             def forward(self, input, grid):
                 return torch.cudnn_grid_sampler(input, grid)
