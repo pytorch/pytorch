@@ -51,9 +51,6 @@ dnnl::memory::dims build_fpmatmul_primitive_cache_key(
     const dnnl::memory::dims& m1_strides,
     const dnnl::memory::dims& m2_strides,
     const dnnl::memory::dims& dst_strides,
-    dnnl::memory::data_type m1_usr_dt,
-    dnnl::memory::data_type m2_usr_dt,
-    dnnl::memory::data_type dst_usr_dt,
     dnnl::memory::data_type m1_dt,
     dnnl::memory::data_type m2_dt,
     dnnl::memory::data_type dst_dt,
@@ -79,9 +76,6 @@ dnnl::memory::dims build_fpmatmul_primitive_cache_key(
   append_dims(m1_strides);
   append_dims(m2_strides);
   append_dims(dst_strides);
-  key.push_back(static_cast<dim_t>(static_cast<int>(m1_usr_dt)));
-  key.push_back(static_cast<dim_t>(static_cast<int>(m2_usr_dt)));
-  key.push_back(static_cast<dim_t>(static_cast<int>(dst_usr_dt)));
   key.push_back(static_cast<dim_t>(static_cast<int>(m1_dt)));
   key.push_back(static_cast<dim_t>(static_cast<int>(m2_dt)));
   key.push_back(static_cast<dim_t>(static_cast<int>(dst_dt)));
@@ -105,9 +99,6 @@ FpMatmulCacheValue make_fpmatmul_cached_primitive(
     const dnnl::memory::dims& m1_strides,
     const dnnl::memory::dims& m2_strides,
     const dnnl::memory::dims& dst_strides,
-    [[maybe_unused]] dnnl::memory::data_type m1_usr_dt,
-    [[maybe_unused]] dnnl::memory::data_type m2_usr_dt,
-    [[maybe_unused]] dnnl::memory::data_type dst_usr_dt,
     dnnl::memory::data_type m1_dt,
     dnnl::memory::data_type m2_dt,
     dnnl::memory::data_type dst_dt,
@@ -358,9 +349,6 @@ sycl::event matmul(
       m1_strides,
       m2_strides,
       dst_strides,
-      m1_usr_dt,
-      m2_usr_dt,
-      dst_usr_dt,
       m1_dt,
       m2_dt,
       dst_dt,
