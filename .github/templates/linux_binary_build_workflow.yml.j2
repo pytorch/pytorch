@@ -4,6 +4,8 @@
 {%- block name -%}
 # Template is at:    .github/templates/linux_binary_build_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
+# NOTE: This template is only used for ROCm, XPU, and s390x builds.
+#       CPU/CUDA x86 and aarch64 builds use linux-binary-manywheel.yml.
 name: !{{ build_environment }}
 {%- endblock %}
 
@@ -31,12 +33,12 @@ on:
 
 permissions:
   id-token: write
+  contents: read
+  actions: read
 
 env:
   # Needed for conda builds
-  {%- if "aarch64" in build_environment %}
-  ALPINE_IMAGE: "arm64v8/alpine"
-  {%- elif "s390x" in build_environment %}
+  {%- if "s390x" in build_environment %}
   ALPINE_IMAGE: "docker.io/s390x/alpine"
   {%- else %}
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
@@ -69,20 +71,13 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:!{{ upload.binary_env_as_input(config) }}
-      {%- if "aarch64" in build_environment %}
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.arm64.r7g.12xlarge.memory
-      ALPINE_IMAGE: "arm64v8/alpine"
-      {%- elif "s390x" in build_environment %}
+      {%- if "s390x" in build_environment %}
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
       timeout-minutes: 420
       {%- elif config["gpu_arch_type"] == "rocm" %}
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       timeout-minutes: 420
-      {%- elif "conda" in build_environment and config["gpu_arch_type"] == "cuda" %}
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.24xlarge.ephemeral
       {%- else %}
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       {%- endif %}
@@ -90,9 +85,6 @@ jobs:
       build_environment: !{{ build_environment }}
       {%- if config.pytorch_extra_install_requirements is defined and config.pytorch_extra_install_requirements|d('')|length > 0  %}
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ config.pytorch_extra_install_requirements }}
-      {%- endif %}
-      {%- if config["gpu_arch_type"] == "cuda-aarch64" %}
-      timeout-minutes: 420
       {%- endif %}
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -102,30 +94,7 @@ jobs:
     needs:
       - !{{ config["build_name"] }}-build
       - get-label-type
-    {%- if config["gpu_arch_type"] not in ["rocm", "xpu"] %}
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:!{{ upload.binary_env_as_input(config) }}
-      build_name: !{{ config["build_name"] }}
-      build_environment: !{{ build_environment }}
-      {%- if "aarch64" in build_environment %}
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.arm64.2xlarge
-      ALPINE_IMAGE: "arm64v8/alpine"
-      {%- elif "s390x" in build_environment %}
-      runs_on: linux.s390x
-      ALPINE_IMAGE: "docker.io/s390x/alpine"
-      {%- elif config["gpu_arch_type"] == "rocm" %}
-      runs_on: linux.rocm.gpu
-      {%- elif config["gpu_arch_type"] == "cuda" %}
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu
-      {%- else %}
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.4xlarge
-      {%- endif %}
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-    {%- elif config["gpu_arch_type"] == "xpu" %}
+    {%- if config["gpu_arch_type"] == "xpu" %}
     runs-on: linux.idc.xpu
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config) }}
@@ -161,7 +130,7 @@ jobs:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown XPU
         uses: ./.github/actions/teardown-xpu
-    {%- else %}
+    {%- elif config["gpu_arch_type"] == "rocm" %}
     runs-on: linux.rocm.gpu.gfx942.1
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config) }}
@@ -206,54 +175,23 @@ jobs:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
+    {%- else %}
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:!{{ upload.binary_env_as_input(config) }}
+      build_name: !{{ config["build_name"] }}
+      build_environment: !{{ build_environment }}
+      {%- if "s390x" in build_environment %}
+      runs_on: linux.s390x
+      ALPINE_IMAGE: "docker.io/s390x/alpine"
+      {%- else %}
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.4xlarge
+      {%- endif %}
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
     {%- endif %}
 
 {%- if branches == "nightly" %}
   !{{ upload.upload_binaries(config) }}
-{%- endif %}
-{% endfor %}
-
-{%- for lt_config in libtorch_extraction_configs %}
-  !{{ lt_config["build_name"] }}-extract:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs:
-      - !{{ lt_config["source_wheel_build_name"] }}-build
-      - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
-    timeout-minutes: 60
-    env:
-      DESIRED_CUDA: !{{ lt_config["desired_cuda"] }}
-      LIBTORCH_VARIANT: !{{ lt_config["libtorch_variant"] }}
-    steps:
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          sparse-checkout: .ci/libtorch/
-          show-progress: false
-      - uses: !{{ common.download_artifact_action }}
-        name: Download Wheel Artifact
-        with:
-          name: !{{ lt_config["source_wheel_build_name"] }}
-          path: "${{ runner.temp }}/wheel_artifact/"
-      - name: Extract libtorch from wheel
-        run: |
-          set -eux
-          mkdir -p "${{ runner.temp }}/libtorch_output"
-          python3 .ci/libtorch/extract_libtorch_from_wheel.py \
-            --wheel-dir "${{ runner.temp }}/wheel_artifact" \
-            --output-dir "${{ runner.temp }}/libtorch_output" \
-            --platform linux \
-            --desired-cuda "$DESIRED_CUDA" \
-            --libtorch-variant "$LIBTORCH_VARIANT"
-      - uses: !{{ common.upload_artifact_action }}
-        if: always()
-        with:
-          name: !{{ lt_config["build_name"] }}
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ runner.temp }}/libtorch_output/"
-{%- if branches == "nightly" %}
-  !{{ upload.upload_extracted_libtorch(lt_config) }}
 {%- endif %}
 {% endfor %}
