@@ -18,7 +18,6 @@ namespace {
 
 using dim_t = dnnl::memory::dim;
 
-constexpr int64_t kFpMatmulPrimitiveCacheKeyVersion = 1;
 constexpr size_t kFpMatmulPrimitiveCacheCapacity = 512;
 
 struct FpMatmulCachedPrimitive {
@@ -107,7 +106,6 @@ void build_fpmatmul_primitive_cache_key_rec(
 template <typename... Args>
 dnnl::memory::dims build_fpmatmul_primitive_cache_key(Args&&... args) {
   dnnl::memory::dims key;
-  key.push_back(kFpMatmulPrimitiveCacheKeyVersion);
   build_fpmatmul_primitive_cache_key_rec(key, std::forward<Args>(args)...);
   return key;
 }
