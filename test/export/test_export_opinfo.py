@@ -3,7 +3,6 @@
 # flake8: noqa
 
 import itertools
-import os
 import subprocess
 import sys
 import unittest
