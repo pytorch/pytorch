@@ -22,6 +22,7 @@ from .. import graph_break_hints
 from ..exc import (
     handle_observed_exception,
     ObservedTypeError,
+    raise_observed_exception,
     raise_type_error,
     unimplemented,
 )
@@ -111,6 +112,18 @@ def type_implements_nb_bool(obj_type: type) -> bool:
     """Check whether obj_type implements the nb_bool slot (i.e. has __bool__ or __len__)."""
     _, _, number_slots, _ = _get_cached_slots(obj_type)
     return has_slot(number_slots, PyNumberSlots.NB_BOOL)
+
+
+def type_implements_nb_int(obj_type: type) -> bool:
+    """Check whether obj_type implements the nb_int slot."""
+    _, _, number_slots, _ = _get_cached_slots(obj_type)
+    return has_slot(number_slots, PyNumberSlots.NB_INT)
+
+
+def type_implements_nb_index(obj_type: type) -> bool:
+    """Check whether obj_type implements the nb_index slot."""
+    _, _, number_slots, _ = _get_cached_slots(obj_type)
+    return has_slot(number_slots, PyNumberSlots.NB_INDEX)
 
 
 def maybe_get_python_type(obj: VariableTracker) -> type:
@@ -217,3 +230,43 @@ def vt_getitem(
     TODO(follow-up): bytes (bytes_subscript, Objects/bytesobject.c)
     """
     return obj.mp_subscript_impl(tx, key)
+
+
+def generic_int(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTracker:
+    """Mirrors PyNumber_Long (int(x) dispatch).
+
+    https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1520-L1632
+
+    Resolution: nb_int → nb_index → str/bytes/bytearray parsing → TypeError.
+    """
+    from .constant import ConstantVariable
+
+    # Fast path for int (sub)class instances — mirrors PyLong_Check at the
+    # top of PyNumber_Long (abstract.c:1531). Avoids infinite recursion for
+    # int subclasses like IntEnum whose __int__ calls int() again.
+    if obj.is_python_constant() and isinstance(obj.as_python_constant(), int):
+        return ConstantVariable.create(int(obj.as_python_constant()))
+
+    obj_type = maybe_get_python_type(obj)
+
+    if type_implements_nb_int(obj_type):
+        return obj.nb_int_impl(tx)
+
+    if type_implements_nb_index(obj_type):
+        return obj.nb_index_impl(tx)
+
+    # String/bytes/bytearray parsing fallback.
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1598-L1612
+    if obj.is_python_constant() and isinstance(
+        obj.as_python_constant(), (str, bytes, bytearray)
+    ):
+        try:
+            return ConstantVariable.create(int(obj.as_python_constant()))
+        except ValueError as e:
+            raise_observed_exception(ValueError, tx, args=[str(e)])
+
+    raise_type_error(
+        tx,
+        f"int() argument must be a string, a bytes-like object "
+        f"or a real number, not '{obj.python_type_name()}'",
+    )

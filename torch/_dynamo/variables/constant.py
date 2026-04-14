@@ -405,6 +405,15 @@ its type to `common_constant_types`.
             return ConstantVariable.create(operator.index(self.value))
         return super().nb_index_impl(tx)
 
+    def nb_int_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        # CPython: int defines nb_int (long_long, returns copy).
+        # bool inherits nb_int from int via slot inheritance.
+        # float defines nb_int (truncates toward zero via PyLong_FromDouble).
+        return ConstantVariable.create(int(self.value))
+
 
 CONSTANT_VARIABLE_NONE = ConstantVariable(None)
 CONSTANT_VARIABLE_TRUE = ConstantVariable(True)
