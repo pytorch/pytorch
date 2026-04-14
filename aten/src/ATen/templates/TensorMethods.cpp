@@ -58,4 +58,11 @@ T* TensorBase::data_ptr() const {
  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_ITEM)
  #undef DEFINE_ITEM
 
+#if defined(C10_HAS_FLOAT16_TYPE)
+template <>
+TORCH_API _Float16 Tensor::item() const {
+  return static_cast<_Float16>(item().toHalf());
+}
+#endif
+
  } //namespace at
