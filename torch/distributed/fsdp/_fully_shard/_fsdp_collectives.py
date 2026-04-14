@@ -45,11 +45,11 @@ lib.define(
     """
     all_gather_copy_in(
         Tensor[] all_gather_inputs,
-        Tensor all_gather_output,
+        Tensor(a!) all_gather_output,
         SymInt[] inp_split_sizes,
         SymInt all_gather_input_numel,
         SymInt rank
-    ) -> (Tensor, Tensor)
+    ) -> (Tensor(a!), Tensor(a!))
     """
 )
 
