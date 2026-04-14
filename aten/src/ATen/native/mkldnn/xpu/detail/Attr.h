@@ -174,15 +174,18 @@ struct PostOpsMatmulKeySink {
   void append_binary(
       dnnl::algorithm aalgorithm, const dnnl::memory::desc& src1_desc) {
     key.push_back(static_cast<dnnl::memory::dim>(static_cast<int>(aalgorithm)));
-    const auto md_dims = src1_desc.get_dims();
-    if (md_dims.empty()) {
-      key.push_back(-1);
-    } else {
-      key.insert(key.end(), md_dims.begin(), md_dims.end());
-      key.push_back(static_cast<dnnl::memory::dim>(
-          static_cast<int>(src1_desc.get_data_type())));
-      const auto md_strides = src1_desc.get_strides();
-      key.insert(key.end(), md_strides.begin(), md_strides.end());
+    dnnl::memory::desc md = src1_desc;
+    const std::vector<uint8_t> blob = md.get_blob();
+    key.push_back(static_cast<dnnl::memory::dim>(blob.size()));
+    constexpr size_t kPack = sizeof(dnnl::memory::dim);
+    size_t off = 0;
+    while (off < blob.size()) {
+      const size_t rest = blob.size() - off;
+      const size_t chunk = rest < kPack ? rest : kPack;
+      dnnl::memory::dim packed = 0;
+      std::memcpy(&packed, blob.data() + off, chunk);
+      key.push_back(packed);
+      off += chunk;
     }
   }
 
