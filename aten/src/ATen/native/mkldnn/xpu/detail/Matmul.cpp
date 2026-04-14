@@ -69,7 +69,6 @@ inline void append_fp_matmul_cache_key_part(dnnl::memory::dims& key, bool b) {
 inline void append_fp_matmul_cache_key_part(
     dnnl::memory::dims& key,
     const FpMatmulCacheBiasKeyParts& b) {
-  key.push_back(b.with_bias ? 1 : 0);
   if (b.with_bias) {
     append_fp_matmul_cache_key_part(key, b.bias_dims);
     append_fp_matmul_cache_key_part(key, b.bias_dt);
