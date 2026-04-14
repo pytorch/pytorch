@@ -54,7 +54,6 @@ dnnl::memory::dims build_fpmatmul_primitive_cache_key(
     dnnl::memory::data_type m1_dt,
     dnnl::memory::data_type m2_dt,
     dnnl::memory::data_type dst_dt,
-    bool m2_trans,
     bool with_bias,
     const dnnl::memory::dims& bias_dims,
     dnnl::memory::data_type bias_dt,
@@ -79,7 +78,6 @@ dnnl::memory::dims build_fpmatmul_primitive_cache_key(
   key.push_back(static_cast<dim_t>(static_cast<int>(m1_dt)));
   key.push_back(static_cast<dim_t>(static_cast<int>(m2_dt)));
   key.push_back(static_cast<dim_t>(static_cast<int>(dst_dt)));
-  key.push_back(m2_trans ? 1 : 0);
   key.push_back(with_bias ? 1 : 0);
   if (with_bias) {
     append_dims(bias_dims);
@@ -102,7 +100,6 @@ FpMatmulCacheValue make_fpmatmul_cached_primitive(
     dnnl::memory::data_type m1_dt,
     dnnl::memory::data_type m2_dt,
     dnnl::memory::data_type dst_dt,
-    [[maybe_unused]] bool m2_trans,
     bool with_bias,
     const dnnl::memory::dims& bias_dims,
     dnnl::memory::data_type bias_dt,
@@ -352,7 +349,6 @@ sycl::event matmul(
       m1_dt,
       m2_dt,
       dst_dt,
-      m2_trans,
       with_bias,
       bias_dims,
       bias_dt,
