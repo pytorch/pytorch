@@ -42,51 +42,73 @@ FpMatmulLruCache& get_fpmatmul_primitive_cache(int device_id) {
   return c;
 }
 
-// build_* and make_* must keep identical parameter lists; lookup forwards the
-// same pack to both so arity/type mismatches fail at compile time.
-dnnl::memory::dims build_fpmatmul_primitive_cache_key(
-    const dnnl::memory::dims& m1_dims,
-    const dnnl::memory::dims& m2_dims,
-    const dnnl::memory::dims& dst_dims,
-    const dnnl::memory::dims& m1_strides,
-    const dnnl::memory::dims& m2_strides,
-    const dnnl::memory::dims& dst_strides,
-    dnnl::memory::data_type m1_dt,
-    dnnl::memory::data_type m2_dt,
-    dnnl::memory::data_type dst_dt,
-    bool with_bias,
-    const dnnl::memory::dims& bias_dims,
-    dnnl::memory::data_type bias_dt,
-    const dnnl::memory::dims& bias_strides,
-    bool deterministic,
-    bool allow_tf32_oneapi,
-    Attr& attr,
-    dnnl::engine&,
-    const at::Tensor&) {
-  dnnl::memory::dims key;
-  auto append_dims = [&](const dnnl::memory::dims& d) {
-    key.insert(key.end(), d.begin(), d.end());
-  };
+// Bias fields as one key part so build_fpmatmul_primitive_cache_key_rec stays
+// in sync with make_fpmatmul_cached_primitive's single variadic forward.
+struct FpMatmulCacheBiasKeyParts {
+  bool with_bias;
+  const dnnl::memory::dims& bias_dims;
+  dnnl::memory::data_type bias_dt;
+  const dnnl::memory::dims& bias_strides;
+};
 
-  key.push_back(kFpMatmulPrimitiveCacheKeyVersion);
-  append_dims(m1_dims);
-  append_dims(m2_dims);
-  append_dims(dst_dims);
-  append_dims(m1_strides);
-  append_dims(m2_strides);
-  append_dims(dst_strides);
-  key.push_back(static_cast<dim_t>(static_cast<int>(m1_dt)));
-  key.push_back(static_cast<dim_t>(static_cast<int>(m2_dt)));
-  key.push_back(static_cast<dim_t>(static_cast<int>(dst_dt)));
-  key.push_back(with_bias ? 1 : 0);
-  if (with_bias) {
-    append_dims(bias_dims);
-    key.push_back(static_cast<dim_t>(static_cast<int>(bias_dt)));
-    append_dims(bias_strides);
+inline void append_fp_matmul_cache_key_part(
+    dnnl::memory::dims& key,
+    const dnnl::memory::dims& d) {
+  key.insert(key.end(), d.begin(), d.end());
+}
+
+inline void append_fp_matmul_cache_key_part(
+    dnnl::memory::dims& key,
+    dnnl::memory::data_type dt) {
+  key.push_back(static_cast<dim_t>(static_cast<int>(dt)));
+}
+
+inline void append_fp_matmul_cache_key_part(dnnl::memory::dims& key, bool b) {
+  key.push_back(b ? 1 : 0);
+}
+
+inline void append_fp_matmul_cache_key_part(
+    dnnl::memory::dims& key,
+    const FpMatmulCacheBiasKeyParts& b) {
+  key.push_back(b.with_bias ? 1 : 0);
+  if (b.with_bias) {
+    append_fp_matmul_cache_key_part(key, b.bias_dims);
+    append_fp_matmul_cache_key_part(key, b.bias_dt);
+    append_fp_matmul_cache_key_part(key, b.bias_strides);
   }
-  key.push_back(deterministic ? 1 : 0);
-  key.push_back(allow_tf32_oneapi ? 1 : 0);
-  append_dims(attr.matmul_primitive_cache_key_extra());
+}
+
+inline void append_fp_matmul_cache_key_part(dnnl::memory::dims& key, Attr& attr) {
+  append_fp_matmul_cache_key_part(
+      key, attr.matmul_primitive_cache_key_extra());
+}
+
+inline void append_fp_matmul_cache_key_part(
+    dnnl::memory::dims& key,
+    dnnl::engine&) {}
+
+inline void append_fp_matmul_cache_key_part(
+    dnnl::memory::dims& key,
+    const at::Tensor&) {}
+
+void build_fpmatmul_primitive_cache_key_rec(dnnl::memory::dims& /*key*/) {}
+
+template <typename Head, typename... Tail>
+void build_fpmatmul_primitive_cache_key_rec(
+    dnnl::memory::dims& key,
+    Head&& head,
+    Tail&&... tail) {
+  append_fp_matmul_cache_key_part(key, std::forward<Head>(head));
+  build_fpmatmul_primitive_cache_key_rec(key, std::forward<Tail>(tail)...);
+}
+
+// Each forwarded argument type must have append_fp_matmul_cache_key_part so new
+// parameters cannot be silently skipped in the key.
+template <typename... Args>
+dnnl::memory::dims build_fpmatmul_primitive_cache_key(Args&&... args) {
+  dnnl::memory::dims key;
+  key.push_back(kFpMatmulPrimitiveCacheKeyVersion);
+  build_fpmatmul_primitive_cache_key_rec(key, std::forward<Args>(args)...);
   return key;
 }
 
@@ -100,10 +122,7 @@ FpMatmulCacheValue make_fpmatmul_cached_primitive(
     dnnl::memory::data_type m1_dt,
     dnnl::memory::data_type m2_dt,
     dnnl::memory::data_type dst_dt,
-    bool with_bias,
-    const dnnl::memory::dims& bias_dims,
-    dnnl::memory::data_type bias_dt,
-    const dnnl::memory::dims& bias_strides,
+    const FpMatmulCacheBiasKeyParts& bias,
     bool deterministic,
     bool allow_tf32_oneapi,
     Attr& attr,
@@ -139,16 +158,16 @@ FpMatmulCacheValue make_fpmatmul_cached_primitive(
 
   // STEP3: create primitive
   dnnl::matmul::primitive_desc matmul_pd =
-      with_bias ? dnnl::matmul::primitive_desc(
-                        engine,
-                        m1_md,
-                        m2_md,
-                        dnnl::memory::desc(
-                            bias_dims, bias_dt, bias_strides),
-                        dst_md,
-                        pattr)
-                  : dnnl::matmul::primitive_desc(
-                        engine, m1_md, m2_md, dst_md, pattr);
+      bias.with_bias ? dnnl::matmul::primitive_desc(
+                           engine,
+                           m1_md,
+                           m2_md,
+                           dnnl::memory::desc(
+                               bias.bias_dims, bias.bias_dt, bias.bias_strides),
+                           dst_md,
+                           pattr)
+                     : dnnl::matmul::primitive_desc(
+                           engine, m1_md, m2_md, dst_md, pattr);
 
   return std::make_shared<FpMatmulCachedPrimitive>(std::move(matmul_pd));
 }
@@ -338,6 +357,8 @@ sycl::event matmul(
 
   const int device_id = c10::xpu::current_device();
   auto& primitive_cache = get_fpmatmul_primitive_cache(device_id);
+  const FpMatmulCacheBiasKeyParts bias_key{
+      with_bias, bias_dims, bias_dt, bias_strides};
   FpMatmulCacheValue entry = lookup_or_build_fpmatmul_cached_primitive(
       primitive_cache,
       m1_dims,
@@ -349,10 +370,7 @@ sycl::event matmul(
       m1_dt,
       m2_dt,
       dst_dt,
-      with_bias,
-      bias_dims,
-      bias_dt,
-      bias_strides,
+      bias_key,
       deterministic,
       allow_tf32_oneapi,
       attr,
