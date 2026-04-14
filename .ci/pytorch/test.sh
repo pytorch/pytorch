@@ -358,7 +358,8 @@ fi
 test_tsan() {
   # PATH, TSAN_OPTIONS, and wheel install are set up earlier in this
   # script when BUILD_ENVIRONMENT matches *-tsan*.
-  python test/test_tsan.py -v
+  local test_status=0
+  python test/test_tsan.py -v || test_status=$?
 
   # TSan appends .<pid> to log_path. Merge all reports into a single
   # file with the _toprint.log suffix so the CI "Print remaining test
@@ -367,8 +368,11 @@ test_tsan() {
   if ls "${TSAN_REPORT}".* 1>/dev/null 2>&1; then
     cat "${TSAN_REPORT}".* > "${TSAN_REPORT}"
     rm -f "${TSAN_REPORT}".*
-    echo "TSan detected data races (see test-reports/tsan_toprint.log)"
-    exit 1
+  fi
+
+  if [ "$test_status" -ne 0 ]; then
+    echo "TSan tests failed with exit code $test_status"
+    exit "$test_status"
   fi
 
   assert_git_not_dirty
