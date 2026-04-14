@@ -117,7 +117,7 @@ FpMatmulCacheValue make_fpmatmul_cached_primitive(
     Attr& attr,
     dnnl::engine& engine,
     const at::Tensor& dst) {
-  dnnl::post_ops po = attr.extract_post_ops(dst);
+  dnnl::post_ops po = attr.extract_post_ops();
 
   // STEP1: create memory desc
   dnnl::memory::desc m1_md(m1_dims, m1_dt, m1_strides);

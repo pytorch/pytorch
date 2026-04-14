@@ -271,7 +271,7 @@ class Attr {
     return *this;
   }
 
-  dnnl::post_ops extract_post_ops(const at::Tensor& dst) {
+  dnnl::post_ops extract_post_ops() {
     // this function is used to extract post ops params from the ops_params_
     // and put them into onednn post ops
     for (size_t i = 0; i < ops_params_.size(); ++i) {

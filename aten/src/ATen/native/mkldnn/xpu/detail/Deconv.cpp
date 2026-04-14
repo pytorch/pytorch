@@ -181,7 +181,7 @@ sycl::event deconvolution(
 
   // construct primitive attr
   dnnl::primitive_attr pattr;
-  dnnl::post_ops po = attr.extract_post_ops(dst);
+  dnnl::post_ops po = attr.extract_post_ops();
   pattr.set_post_ops(po);
 #if ONEDNN_SUPPORT_DETERMINISTIC
   if (at::globalContext().deterministicAlgorithms() ||
