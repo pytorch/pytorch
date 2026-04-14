@@ -259,6 +259,12 @@ endif()
 
 option(USE_CUDA "Use CUDA" ON)
 
+if(USE_TSAN)
+  # CUDA objects compiled by nvcc don't get TSan instrumentation,
+  # causing link errors from mismatched atomic symbols.
+  caffe2_update_option(USE_CUDA OFF)
+endif()
+
 option(USE_XPU "Use XPU" ON)
 option(USE_MTIA "Use MTIA" OFF)
 cmake_dependent_option(
