@@ -19,8 +19,8 @@ from torch._inductor.codegen.cutlass.serialization import (
 )
 from torch._inductor.utils import clear_caches
 from torch.export import Dim
-from torch.testing._internal.logging_utils import log_settings
 from torch.testing._internal.common_utils import random_matrix_with_scaled_reduction_dim
+from torch.testing._internal.logging_utils import log_settings
 from torch.utils import _pytree as pytree
 
 
