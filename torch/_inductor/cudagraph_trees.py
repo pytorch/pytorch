@@ -84,6 +84,8 @@ from torch._inductor.cudagraph_utils import (
     PlaceholderInfo,
     WrappedFunction,
 )
+from torch._library.opaque_object import is_opaque_value
+from torch._opaque_base import OpaqueBase
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.storage import UntypedStorage
 from torch.utils import _pytree as pytree
@@ -932,9 +934,26 @@ class CUDAGraphNode:
         # and also aliases an output of the current CUDAGraphNode
         self.preserved_aliased_inputs: InputList[bool] = [False] * len(inputs)
 
+        # Opaque values (e.g. DeviceMesh, ProcessGroup) are non-tensor
+        # inputs that cannot be copied like tensors. We include them in
+        # static_input_idxs to keep them out of non_static_input_idx
+        # (which drives the tensor-copy path during replay). "Static"
+        # here just means "don't try to copy this as a tensor" — it
+        # does NOT mean the object is semantically immutable.
+        #
+        # Opaque indices must also be excluded from any list passed to
+        # _tensors_data_ptrs_at_indices_equal (the C++ data-pointer
+        # stability check), because opaque objects have no data_ptr.
+        # That is why tensor_static_input_idxs and
+        # non_managed_static_input_idxs filter them out below.
+        opaque_input_idxs = OrderedSet(
+            i for i, inp in enumerate(inputs) if is_opaque_value(inp)
+        )
+        static_input_idxs = OrderedSet(wrapped_function.static_input_idxs)
+        cudagraph_managed_idxs = OrderedSet(self.cudagraph_managed_idxs)
+
         self.static_input_idxs: list[int] = list(
-            OrderedSet(wrapped_function.static_input_idxs)
-            | OrderedSet(self.cudagraph_managed_idxs)
+            static_input_idxs | cudagraph_managed_idxs | opaque_input_idxs
         )
 
         self.non_static_input_idx: LevelList[int] = [
@@ -945,11 +964,13 @@ class CUDAGraphNode:
             self.non_static_input_idx
         )
 
-        self.non_managed_static_input_idxs: LevelList[int] = [
-            i
-            for i in wrapped_function.static_input_idxs
-            if i not in self.cudagraph_managed_idxs
-        ]
+        self.non_managed_static_input_idxs: LevelList[int] = LevelList(
+            static_input_idxs - cudagraph_managed_idxs - opaque_input_idxs
+        )
+
+        self.tensor_static_input_idxs: list[int] = list(
+            static_input_idxs | cudagraph_managed_idxs
+        )
 
         def maybe_get_static_data_ptr(
             idx: int,
@@ -1729,7 +1750,7 @@ class CUDAGraphNode:
         ):
             for i, inp in enumerate(inputs):
                 if not isinstance(inp, torch.Tensor):
-                    assert isinstance(inp, (int, torch.Generator))
+                    assert isinstance(inp, (int, torch.Generator, OpaqueBase))
 
                     recording_inputs.append(inp)
                 elif i not in self.static_input_idxs:
@@ -1788,13 +1809,13 @@ class CUDAGraphNode:
             and not torch._C._tensors_data_ptrs_at_indices_equal(
                 inputs,  # type: ignore[arg-type]
                 self.static_input_data_ptrs,
-                self.static_input_idxs,
+                self.tensor_static_input_idxs,
             )
         ):
             status = CheckInvariantStatus.StaticInputIdxMismatch
             _logger = functools.partial(
                 _logger,
-                self.static_input_idxs,
+                self.tensor_static_input_idxs,
                 status,
             )
             return status, _logger

@@ -20,7 +20,9 @@ from torch.distributed.tensor._sharding_prop import ShardingPropagator
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     MI200_ARCH,
+    parametrize,
     run_tests,
     serialTest,
     skipIfRocmArch,
@@ -898,6 +900,225 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         output_dt = torch.index_put(input_dt, [idx_dt], value_dt)
         self.assertEqual(output_dt.full_tensor(), ref)
 
+    def _test_index_op_partial_propagation(self, op, reduce_op):
+        """Helper: verify Partial placement propagates correctly through an
+        index op that decomposes to index_put."""
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        global_input = torch.randn(4, 8, device=self.device_type)
+        idx = torch.tensor([1, 3], device=self.device_type)
+        global_source = torch.randn(4, 2, device=self.device_type)
+
+        # Create Partial tensors — each rank holds partial contribution
+        if reduce_op == "sum":
+            local_input = global_input / self.world_size
+            local_source = global_source / self.world_size
+        else:
+            # avg/max/min: each rank holds the full value
+            local_input = global_input.clone()
+            local_source = global_source.clone()
+
+        input_dt = DTensor.from_local(
+            local_input, device_mesh, [Partial(reduce_op)], run_check=False
+        )
+        source_dt = DTensor.from_local(
+            local_source, device_mesh, [Partial(reduce_op)], run_check=False
+        )
+
+        idx_dt = distribute_tensor(idx, device_mesh, [Replicate()])
+
+        ref = op(global_input, 1, idx, global_source)
+        output_dt = op(input_dt, 1, idx_dt, source_dt)
+        self.assertIsInstance(output_dt, DTensor)
+        self.assertEqual(output_dt.full_tensor(), ref)
+
+    @parametrize("reduce_op", ["sum", "avg", "max", "min"])
+    def test_index_copy_partial_propagation(self, reduce_op):
+        self._test_index_op_partial_propagation(torch.index_copy, reduce_op)
+
+    @parametrize("reduce_op", ["sum", "avg"])
+    def test_index_add_partial_propagation(self, reduce_op):
+        self._test_index_op_partial_propagation(torch.index_add, reduce_op)
+
+    @parametrize(
+        "op",
+        [torch.ops.aten.index_put, torch.index_copy, torch.index_add],
+    )
+    def test_index_ops_leading_none_dim_mapping(self, op):
+        """Regression: index_put dim-mapping bug when indexed dim is not dim 0.
+
+        When indices = (None, index), indexed_dims=[1] is contiguous so
+        broadcast replaces dim 1 in-place:
+            values shape = (self.size(0), len(index))  i.e. (non_indexed, broadcast)
+
+        The buggy strategy assumed broadcast at front, so it wrongly allowed
+        S(0) on self + S(1) on values (sharding the broadcast dim).
+        We force that exact placement — if the strategy accepts it without
+        redistributing, the numerics will be wrong.
+
+        index_copy and index_add decompose to index_put with leading None,
+        so they hit the same bug.
+        """
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        n = self.world_size
+        global_input = torch.randn(n, 2 * n, device=self.device_type)
+        idx = torch.arange(n, device=self.device_type)
+        global_source = torch.randn(n, n, device=self.device_type)
+
+        input_dt = distribute_tensor(global_input, device_mesh, [Shard(0)])
+        idx_dt = distribute_tensor(idx, device_mesh, [Replicate()])
+        source_dt = distribute_tensor(global_source, device_mesh, [Shard(1)])
+
+        if op is torch.ops.aten.index_put:
+            ref = op(global_input, [None, idx], global_source)
+            output_dt = op(input_dt, [None, idx_dt], source_dt)
+        else:
+            ref = op(global_input, 1, idx, global_source)
+            output_dt = op(input_dt, 1, idx_dt, source_dt)
+
+        self.assertIsInstance(output_dt, DTensor)
+        self.assertEqual(output_dt.full_tensor(), ref)
+
+    def test_index_fill(self):
+        """Test index_fill with sharded input."""
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        global_input = torch.randn(4, 8, device=self.device_type)
+        idx = torch.tensor([1, 3], device=self.device_type)
+        fill_value = 5.0
+
+        ref = global_input.index_fill(1, idx, fill_value)
+
+        input_dt = distribute_tensor(global_input, device_mesh, [Shard(0)])
+        idx_dt = distribute_tensor(idx, device_mesh, [Replicate()])
+
+        output_dt = input_dt.index_fill(1, idx_dt, fill_value)
+
+        self.assertIsInstance(output_dt, DTensor)
+        self.assertEqual(output_dt.full_tensor(), ref)
+
+    @parametrize("reduce_op", ["mean", "amax", "amin", "prod"])
+    def test_index_reduce(self, reduce_op):
+        """Test index_reduce with sharded input."""
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        global_input = torch.randn(4, 8, device=self.device_type)
+        idx = torch.tensor([1, 3], device=self.device_type)
+        global_source = torch.randn(4, 2, device=self.device_type)
+
+        ref = global_input.index_reduce(1, idx, global_source, reduce_op)
+
+        input_dt = distribute_tensor(global_input, device_mesh, [Shard(0)])
+        idx_dt = distribute_tensor(idx, device_mesh, [Replicate()])
+        source_dt = distribute_tensor(global_source, device_mesh, [Shard(0)])
+
+        output_dt = input_dt.index_reduce(1, idx_dt, source_dt, reduce_op)
+
+        self.assertIsInstance(output_dt, DTensor)
+        self.assertEqual(output_dt.full_tensor(), ref)
+
+    def test_index_put_none_indices(self):
+        """Test index_put with None entries in the indices list.
+
+        None indices (meaning "select all along this dim") are only
+        valid at the ATen level, not through Python's index_put.
+        """
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        # 3D tensor indexed on dim 0, with trailing None
+        global_input = torch.randn(4, 8, 16, device=self.device_type)
+        idx = torch.tensor([1, 2], device=self.device_type)
+        # indices = [idx, None, None] -> indexed on dim 0, dims 1,2 not indexed
+        # values shape = (2, 8, 16) matching (*broadcast_shape, *non_indexed_dims)
+        global_value = torch.randn(2, 8, 16, device=self.device_type)
+
+        ref = torch.ops.aten.index_put.default(
+            global_input, [idx, None, None], global_value
+        )
+
+        idx_dt = distribute_tensor(idx, device_mesh, [Replicate()])
+        value_dt = distribute_tensor(global_value, device_mesh, [Replicate()])
+
+        # Shard self on non-indexed dims (1 or 2)
+        for shard_dim in [1, 2]:
+            input_dt = distribute_tensor(global_input, device_mesh, [Shard(shard_dim)])
+            output_dt = torch.ops.aten.index_put.default(
+                input_dt, [idx_dt, None, None], value_dt
+            )
+            self.assertEqual(output_dt.full_tensor(), ref)
+
+    def test_index_put_inplace_none_indices(self):
+        """Test in-place aten.index_put_ with None entries in the indices list.
+
+        The in-place variant with None indices is generated by autograd
+        (e.g. backward of aten.index.Tensor), not by Python-level
+        index_put_. We call the ATen op directly.
+        """
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        global_input = torch.randn(4, 8, 16, device=self.device_type)
+        idx = torch.tensor([1, 2], device=self.device_type)
+        global_value = torch.randn(2, 8, 16, device=self.device_type)
+
+        ref = torch.ops.aten.index_put_.default(
+            global_input.clone(), [idx, None, None], global_value
+        )
+
+        idx_dt = distribute_tensor(idx, device_mesh, [Replicate()])
+        value_dt = distribute_tensor(global_value, device_mesh, [Replicate()])
+        input_dt = distribute_tensor(global_input.clone(), device_mesh, [Shard(1)])
+        torch.ops.aten.index_put_.default(input_dt, [idx_dt, None, None], value_dt)
+        self.assertEqual(input_dt.full_tensor(), ref)
+
+    def test_index_put_noncontiguous_indexed_dims(self):
+        """Test index_put with non-contiguous indexed dims (None gaps).
+
+        For non-contiguous indexed dims like [idx, None, idx2], advanced
+        indexing moves the broadcast shape to the front of the output:
+        output = (*broadcast_shape, *non_indexed_dim_sizes).
+        """
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        # self[4, 8, 3, 16], index dims 0 and 2 (non-contiguous)
+        global_input = torch.randn(4, 8, 3, 16, device=self.device_type)
+        idx0 = torch.tensor([0, 1], device=self.device_type)
+        idx2 = torch.tensor([2, 0], device=self.device_type)
+        # output shape = (2, 8, 16), values must be broadcastable to that
+        global_value = torch.randn(2, 8, 16, device=self.device_type)
+
+        ref = torch.ops.aten.index_put.default(
+            global_input, [idx0, None, idx2], global_value
+        )
+
+        idx0_dt = distribute_tensor(idx0, device_mesh, [Replicate()])
+        idx2_dt = distribute_tensor(idx2, device_mesh, [Replicate()])
+        value_dt = distribute_tensor(global_value, device_mesh, [Replicate()])
+
+        # Shard self on non-indexed dim 1 (size 8)
+        input_dt = distribute_tensor(global_input, device_mesh, [Shard(1)])
+        output_dt = torch.ops.aten.index_put.default(
+            input_dt, [idx0_dt, None, idx2_dt], value_dt
+        )
+        self.assertEqual(output_dt.full_tensor(), ref)
+
+    def test_index_put_mid_dim_indexed(self):
+        """Test index_put when indexed dims are in the middle of the tensor."""
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        # self[16, 8, 4, 16]: index dim 2, non-indexed dims = [0, 1, 3]
+        global_input = torch.randn(16, 8, 4, 16, device=self.device_type)
+        idx = torch.tensor([1], device=self.device_type)
+        # values shape = [16, 8, 1, 16] (broadcast replaces dim 2 in-place)
+        global_value = torch.randn(16, 8, 1, 16, device=self.device_type)
+
+        ref = torch.ops.aten.index_put.default(
+            global_input, [None, None, idx], global_value
+        )
+
+        idx_dt = distribute_tensor(idx, device_mesh, [Replicate()])
+        value_dt = distribute_tensor(global_value, device_mesh, [Replicate()])
+
+        # Shard self on each non-indexed dim
+        for shard_dim in [0, 1, 3]:
+            input_dt = distribute_tensor(global_input, device_mesh, [Shard(shard_dim)])
+            output_dt = torch.ops.aten.index_put.default(
+                input_dt, [None, None, idx_dt], value_dt
+            )
+            self.assertEqual(output_dt.full_tensor(), ref)
+
     def test_where_type_promotion(self):
         mesh = self.build_device_mesh()  # 1D mesh
 
@@ -1118,6 +1339,43 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
                 ):
                     self.assertEqual(x.full_tensor(), y)
 
+    @with_comms
+    def test_select_scatter(self):
+        device_mesh = self.build_device_mesh()
+        inp = torch.randn(8, 4, 6, device=self.device_type)
+        # select_scatter(self, src, dim, index): insert src at self[:, :, index]
+        for dim, idx in [(0, 2), (1, 1), (2, 3)]:
+            src_shape = list(inp.shape)
+            src_shape.pop(dim)
+            src = torch.randn(src_shape, device=self.device_type)
+            expected = inp.select_scatter(src, dim, idx)
+
+            for shard_dim in range(inp.ndim):
+                if shard_dim == dim:
+                    continue
+                dt_inp = distribute_tensor(inp, device_mesh, [Shard(shard_dim)])
+                src_shard_dim = shard_dim if shard_dim < dim else shard_dim - 1
+                dt_src = distribute_tensor(src, device_mesh, [Shard(src_shard_dim)])
+                result = dt_inp.select_scatter(dt_src, dim, idx)
+                self.assertEqual(result.full_tensor(), expected)
+                self.assertTrue(result.placements[0].is_shard(shard_dim))
+
+    @with_comms
+    def test_diagonal_scatter(self):
+        device_mesh = self.build_device_mesh()
+        inp = torch.randn(8, 4, 6, device=self.device_type)
+
+        # diagonal_scatter(self, src, offset, dim1, dim2)
+        src = torch.randn(8, 4, device=self.device_type)
+        expected = inp.diagonal_scatter(src, 0, 1, 2)
+
+        # shard on dim 0 (batch), which is not one of the diagonal dims
+        dt_inp = distribute_tensor(inp, device_mesh, [Shard(0)])
+        dt_src = distribute_tensor(src, device_mesh, [Shard(0)])
+        result = dt_inp.diagonal_scatter(dt_src, 0, 1, 2)
+        self.assertEqual(result.full_tensor(), expected)
+        self.assertTrue(result.placements[0].is_shard(0))
+
 
 class DistBucketizeTest(LocalDTensorTestBase):
     @with_comms
@@ -1292,6 +1550,7 @@ DistArgMaxArgMinTestWithLocalTensor = create_local_tensor_test_class(
     base_class=LocalDTensorContinuousTestBase,
 )
 
+instantiate_parametrized_tests(DistTensorOpsTest)
 DistTensorOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistTensorOpsTest,
     base_class=LocalDTensorContinuousTestBase,

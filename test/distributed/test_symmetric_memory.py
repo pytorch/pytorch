@@ -79,6 +79,24 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         self.assertFalse(_SymmetricMemory.has_multicast_support(DeviceType.CPU, 0))
         # NOTE: DeviceType.CUDA is implicitly tested through @requires_multicast_support
 
+    @requires_cuda
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_is_symm_mem_tensor(self) -> None:
+        # CPU tensor -> False (no allocator registered for CPU)
+        t_cpu = torch.empty(1024)
+        self.assertFalse(symm_mem.is_symm_mem_tensor(t_cpu))
+
+        # Regular CUDA tensor -> False
+        t_cuda = torch.empty(1024, device="cuda")
+        self.assertFalse(symm_mem.is_symm_mem_tensor(t_cuda))
+
+        # symm-mem tensor
+        t_symm = symm_mem.empty(1024, device="cuda")
+        self.assertTrue(symm_mem.is_symm_mem_tensor(t_symm))
+
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )

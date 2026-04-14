@@ -91,7 +91,7 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
 
     def __init__(self, value: Any, **kwargs: Any) -> None:
         assert not (isinstance(value, type) and issubclass(value, enum.Enum)), (
-            f"Enum class {value} should use UserDefinedEnumClassVariable, "
+            f"Enum class {value} should use UserDefinedClassVariable, "
             "not OpaqueObjectClassVariable"
         )
         super().__init__(**kwargs)
@@ -237,7 +237,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         **options: Any,
     ) -> "TorchScriptObjectVariable":
         assert not isinstance(value, enum.Enum), (
-            f"Enum {type(value)} should use EnumVariable, not TorchScriptObjectVariable"
+            f"Enum {type(value)} should use UserDefinedObjectVariable, not TorchScriptObjectVariable"
         )
         out = TorchScriptObjectVariable(
             proxy, value, ctor_args_kwargs, ctor_arg_sources=ctor_arg_sources, **options
@@ -392,9 +392,18 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
             method_name=name,
         )
 
+    def mp_subscript_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: "VariableTracker",
+    ) -> "VariableTracker":
+        # Call call_method directly on this class to avoid the __getitem__ →
+        # mp_subscript_impl loop in VariableTracker.call_method.
+        return TorchScriptObjectVariable.call_method(self, tx, "__getitem__", [key], {})
+
     # We only support method calls on script objects. Interpreting the bytecodes
     # should go through var_getattr then call_function instead of call_method.
-    #
+
     # However, it's possible for call_method to be used directly e.g. for __setattr__.
     @_raise_hard_error_if_graph_break(
         "Dynamo cannot safely trace script object due to graph break."

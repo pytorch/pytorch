@@ -1184,7 +1184,7 @@ def forward(self, x_1, output_1):
         num_bufs_allocated = code.count(code_string)
         if (
             inductor_config.cpp_wrapper
-            and inductor_config.triton.autotune_at_compile_time is False
+            and inductor_config.triton.autotune_at_compile_time is not True
         ):
             # Lazy compile emits aoti_torch_empty_strided for scratch space
             # allocation (global_scratch + profile_scratch) per unique kernel wrapper
@@ -4996,6 +4996,73 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
         self.assertEqual(f(x, y), x + y + y)
 
+    @requires_gpu
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_triton_kernel_heuristics_and_prune_configs_by(self, backend):
+        def noop_prune(configs, named_args, **kwargs):
+            return configs
+
+        @triton.autotune(
+            configs=[
+                triton.Config({"BLOCK": 128}),
+                triton.Config({"BLOCK": 256}),
+            ],
+            key=["N"],
+            prune_configs_by={"early_config_prune": noop_prune},
+        )
+        @triton.heuristics({"EVEN": lambda args: args["N"] % 128 == 0})
+        @triton.jit
+        def kernel(x_ptr, out_ptr, N, BLOCK: tl.constexpr, EVEN: tl.constexpr):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK + tl.arange(0, BLOCK)
+            mask = offs < N
+            tl.store(out_ptr + offs, tl.load(x_ptr + offs, mask=mask) * 2, mask=mask)
+
+        def f(x):
+            out = torch.empty_like(x)
+            kernel[(triton.cdiv(x.numel(), 128),)](x, out, x.numel())
+            return out
+
+        compiled_f = torch.compile(f, backend=backend, fullgraph=True)
+        x = torch.randn(1024, device=GPU_TYPE)
+        self.assertEqual(compiled_f(x), x * 2)
+
+    @requires_gpu
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_triton_kernel_run_with_prune_configs_by(self, backend):
+        def noop_prune(configs, named_args, **kwargs):
+            return configs
+
+        @triton.autotune(
+            configs=[
+                triton.Config({"BLOCK": 64}),
+                triton.Config({"BLOCK": 128}),
+            ],
+            key=["N"],
+            prune_configs_by={"early_config_prune": noop_prune},
+        )
+        @triton.jit
+        def kernel(x_ptr, out_ptr, N, BLOCK: tl.constexpr):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK + tl.arange(0, BLOCK)
+            mask = offs < N
+            tl.store(out_ptr + offs, tl.load(x_ptr + offs, mask=mask) + 1, mask=mask)
+
+        def f(x):
+            out = torch.empty_like(x)
+            kernel.run(
+                x,
+                out,
+                x.numel(),
+                grid=(triton.cdiv(x.numel(), 64),),
+                warmup=False,
+            )
+            return out
+
+        compiled_f = torch.compile(f, backend=backend, fullgraph=True)
+        x = torch.randn(1024, device=GPU_TYPE)
+        self.assertEqual(compiled_f(x), x + 1)
+
     # see: https://github.com/triton-lang/triton/blob/67ea999935f4511a535a25bdecb27e79e3c3af41/python/test/unit/language/test_decorator.py#L31
     @requires_gpu
     @common_utils.parametrize("non_strict", [True, False])
@@ -5442,6 +5509,32 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         out, code = run_and_get_code(torch.compile(fn), a, b)
         self.assertEqual(out, fn(a, b), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
+
+    @requires_cuda_and_triton
+    def test_no_fusion_non_unary_epilogue(self):
+        @triton.jit
+        def add_kernel(a_ptr, b_ptr, out_ptr, numel, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offs < numel
+            a = tl.load(a_ptr + offs, mask=mask)
+            b = tl.load(b_ptr + offs, mask=mask)
+            out = a + b
+            tl.store(out_ptr + offs, out, mask=mask)
+
+        def fn(a, b, c):
+            out = torch.empty_like(a)
+            GRID = (a.numel(),)
+            add_kernel[GRID](a, b, out, a.numel(), 1)
+            return out + c
+
+        a = torch.randn(10, dtype=torch.float32, device="cuda")
+        b = torch.randn(10, dtype=torch.float32, device="cuda")
+        c = torch.randn(10, dtype=torch.float32, device="cuda")
+
+        out, code = run_and_get_code(torch.compile(fn), a, b, c)
+        self.assertEqual(out, fn(a, b, c))
+        self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=4)
 
 
 if HAS_CUDA_AND_TRITON:

@@ -346,6 +346,7 @@ ExecuTorch (Edge, Mobile)
 
 -  Mergen Nachin (`mergennachin <https://github.com/mergennachin>`__)
 -  Jacob Szwejbka (`JacobSzwejbka <https://github.com/JacobSzwejbka>`__)
+-  Digant Desai (`digantdesai <https://github.com/digantdesai>`__)
 -  (emeritus) Kimish Patel (`kimishpatel <https://github.com/kimishpatel>`__)
 -  (emeritus) Dave Bort (`dbort <https://github.com/dbort>`__)
 -  (emeritus) Martin Yuan (`iseeyuan <https://github.com/iseeyuan>`__)

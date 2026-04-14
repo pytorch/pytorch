@@ -95,7 +95,7 @@ jobs:
           docker_image_tag=${{ matrix.docker-image }}
           docker_image_tag="${docker_image_tag#*:}" # Remove everything before and including first ":"
           docker_image_tag="${docker_image_tag%-*}" # Remove everything after and including last "-"
-          ref_name=${{ github.event.workflow_run.head_branch || github.event.inputs.branch }}
+          ref_name=${WORKFLOW_RUN_HEAD_BRANCH}
           if [[ $ref_name =~ "release/" ]]; then
             ref_suffix="release"
           elif [[ $ref_name == "main" ]]; then
@@ -107,3 +107,6 @@ jobs:
           # mv is atomic operation, so we use intermediate tar.tmp file to prevent read-write contention
           docker save -o ~/pytorch-data/docker/${docker_image_tag}.tar.tmp ${{ matrix.docker-image }}
           mv ~/pytorch-data/docker/${docker_image_tag}.tar.tmp ~/pytorch-data/docker/${docker_image_tag}_${ref_suffix}.tar
+
+        env:
+          WORKFLOW_RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch || github.event.inputs.branch }}

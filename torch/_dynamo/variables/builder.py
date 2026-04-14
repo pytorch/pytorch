@@ -125,7 +125,6 @@ from ..source import (
     GradSource,
     is_constant_source,
     is_from_closure_source,
-    is_from_flatten_script_object_source,
     is_from_global_source,
     is_from_nonlocal_source,
     is_from_optimizer_source,
@@ -150,8 +149,8 @@ from ..utils import (
     clone_input,
     common_constant_types,
     dict_keys,
+    enumerate_items_with_dict_position,
     get_fake_value,
-    get_items_from_dict,
     get_locals_to_steal,
     get_static_address_type,
     is_frozen_dataclass,
@@ -187,7 +186,7 @@ from .base import (
     VariableTrackerMeta,
 )
 from .builtin import BuiltinVariable
-from .constant import ConstantVariable, EnumVariable
+from .constant import ConstantVariable
 from .ctx_manager import (
     AutocastModeVariable,
     CudagraphOverrideVariable,
@@ -199,11 +198,7 @@ from .ctx_manager import (
 from .dicts import (
     ConstDictVariable,
     DefaultDictVariable,
-    DictKeySetVariable,
-    FrozensetVariable,
     MappingProxyVariable,
-    OrderedSetClassVariable,
-    OrderedSetVariable,
     SetVariable,
 )
 from .distributed import WorldMetaClassVariable
@@ -230,7 +225,6 @@ from .lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
-    NamedTupleVariable,
     RangeVariable,
     SizeVariable,
     SliceVariable,
@@ -271,6 +265,12 @@ from .nn_module import (
 from .optimizer import OptimizerVariable
 from .script_object import OpaqueObjectClassVariable, TorchScriptObjectVariable
 from .sdpa import SDPAParamsVariable
+from .sets import (
+    DictKeySetVariable,
+    FrozensetVariable,
+    OrderedSetClassVariable,
+    OrderedSetVariable,
+)
 from .streams import EventVariable, StreamContextVariable, StreamVariable
 from .tensor import (
     NumpyNdarrayVariable,
@@ -299,8 +299,8 @@ from .user_defined import (
     MutableMappingVariable,
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
+    UserDefinedConstantVariable,
     UserDefinedDictVariable,
-    UserDefinedEnumClassVariable,
     UserDefinedExceptionClassVariable,
     UserDefinedListVariable,
     UserDefinedObjectVariable,
@@ -824,9 +824,8 @@ class VariableBuilder:
                 source=self.source,
                 mutation_type=ValueMutationExisting(),
             )
-            result = NamedTupleVariable(
-                output,
-                tuple_cls=type(value),
+            result = UserDefinedTupleVariable.get_vt_cls(type(value))(
+                value,
                 source=self.source,
                 tuple_vt=tuple_vt,
             )
@@ -859,7 +858,7 @@ class VariableBuilder:
                 self.tx.output.guard_on_key_order.add(self.source)
 
             # We need all the keys to be hashable. We do this within the
-            # _HashableTracker class in dicts.py
+            # HashableTracker class in hashable.py
             def build_key_value(
                 i: Any, k: Any, v: Any
             ) -> tuple[VariableTracker, VariableTracker]:
@@ -875,13 +874,9 @@ class VariableBuilder:
 
                 return key, res_value
 
-            # Ensure that we call dict.keys and not value.keys (which can call
-            # overridden keys method). In the C++ guards, we relied on
-            # PyDict_Next to traverse the dictionary, which uses the internal
-            # data structure and does not call the overridden keys method.
             result = dict(
                 build_key_value(i, k, v)
-                for i, (k, v) in enumerate(get_items_from_dict(value))
+                for i, k, v in enumerate_items_with_dict_position(value)
             )
 
             if istype(value, collections.defaultdict):
@@ -973,10 +968,11 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.EQUALS_MATCH)
             return FrozensetVariable(items, source=self.source)
         elif isinstance(
-            value, (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType)
+            value,
+            (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType),
         ):
             self.install_guards(GuardBuilder.ID_MATCH)
-            return EnumVariable(value=value, source=self.source)
+            return UserDefinedObjectVariable(value, source=self.source)
         elif DebuggingVariable.is_reorderable_logging_function(value):
             # Put this above builtin_callable so that print() can be handled
             # along with other builtin debugging functions
@@ -1137,6 +1133,7 @@ class VariableBuilder:
                     source=AttrSource(self.source, member="__self__"),
                 ),
                 "apply",
+                py_type=type(value),
             )
         elif isinstance(value, torch._C._ImperativeEngine):
             self.install_guards(GuardBuilder.ID_MATCH)
@@ -1270,6 +1267,8 @@ class VariableBuilder:
                     hint=value.real,  # type: ignore[attr-defined]
                     source=source,
                 )
+                if not isinstance(node, SymInt):
+                    raise AssertionError(f"Expected SymInt, got {type(node)}")
 
             # Bind to graph input
             sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
@@ -1332,6 +1331,8 @@ class VariableBuilder:
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
             assert new_symint is not None
+            if not isinstance(new_symint, SymInt):
+                raise AssertionError(f"Expected SymInt, got {type(new_symint)}")
             sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
                 type(new_symint),
@@ -1438,6 +1439,7 @@ class VariableBuilder:
             return GetAttrVariable(
                 BuiltinVariable(float, source=self.source),
                 value.__name__,
+                py_type=type(value),
             )
         elif is_function_or_wrapper(value):
             value, attr_name = unwrap_with_attr_name_if_wrapper(value)
@@ -1528,15 +1530,12 @@ class VariableBuilder:
                 self.install_guards(GuardBuilder.CLASS_MATCH)
 
             if isinstance(value, type) and issubclass(value, enum.Enum):
-                # Order this before OpaqueObjectClassVariable since it's better
-                # to use the native UserDefinedEnumClassVariable
-                return UserDefinedEnumClassVariable(
+                return UserDefinedClassVariable(
                     value,
                     source=self.source,
                 )
 
             if is_opaque_type(value):
-                assert not (isinstance(value, type) and issubclass(value, enum.Enum))
                 return OpaqueObjectClassVariable(
                     value,
                     source=self.source,
@@ -1667,7 +1666,7 @@ class VariableBuilder:
             self.tx.output.guard_on_key_order.add(self.source)
 
             # We need all the keys to be hashable. We do this within the
-            # _HashableTracker class in dicts.py
+            # HashableTracker class in hashable.py
             def build_key_value(
                 i: Any, k: Any, v: Any
             ) -> tuple[VariableTracker, VariableTracker]:
@@ -1680,13 +1679,9 @@ class VariableBuilder:
 
                 return key, res_value
 
-            # Ensure that we call dict.keys and not value.keys (which can call
-            # overridden keys method). In the C++ guards, we relied on
-            # PyDict_Next to traverse the dictionary, which uses the internal
-            # data structure and does not call the overridden keys method.
             result = dict(
                 build_key_value(i, k, v)
-                for i, (k, v) in enumerate(get_items_from_dict(value))
+                for i, k, v in enumerate_items_with_dict_position(value)
             )
 
             dict_vt = ConstDictVariable(
@@ -1777,7 +1772,7 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif is_frozen_dataclass(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            result = FrozenDataClassVariable.create(self.tx, value, source=self.source)
+            result = FrozenDataClassVariable(value, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, dict_keys):
             if all(ConstantVariable.is_literal(k) for k in value):
@@ -1835,6 +1830,8 @@ class VariableBuilder:
             return self.wrap_user_defined(value)
 
     def wrap_user_defined(self, value: Any) -> VariableTracker:
+        from .user_defined import _CONSTANT_BASE_TYPES
+
         self.install_guards(GuardBuilder.TYPE_MATCH)
         if InspectVariable.is_matching_object(value):
             # Skip guards on inspect related variable trackers because they are
@@ -1842,6 +1839,12 @@ class VariableBuilder:
             # cause recompiles) and can cause a large number of OBJECT_ALIASING
             # guards.
             result = InspectVariable(value, source=SkipGuardSource(self.source))
+        elif (
+            isinstance(value, _CONSTANT_BASE_TYPES)
+            and type(value) not in common_constant_types
+        ):
+            self.install_guards(GuardBuilder.CONSTANT_SUBCLASS_MATCH)
+            result = UserDefinedConstantVariable(value, source=self.source)
         else:
             result = UserDefinedObjectVariable(value, source=self.source)
         if not SideEffects.cls_supports_mutation_side_effects(type(value)):
@@ -1857,15 +1860,8 @@ class VariableBuilder:
             return ConstantVariable.create(value=value)
 
         # One can index a tensor with a list/tuple. Therefore, we need to
-        # have a stricter match. Keep plain list length guards lazy so mutating
-        # methods like append()/clear() don't specialize on untouched contents.
-        # Flattened torchbind state still needs eager length guards because its
-        # size can be observed through fake-class methods outside list VT reads.
-        if type(value) is not list or (
-            self.source is not None
-            and is_from_flatten_script_object_source(self.source)
-        ):
-            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+        # have a stricter match.
+        self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
         # Tuples are immutable objects, so we should mark its items static. This
         # avoids wrapping of tuple items as symints. This helps for nn module
@@ -1964,12 +1960,8 @@ class VariableBuilder:
             # https://github.com/pytorch/pytorch/issues/153701.
             for vt in output:
                 vt.realize()
-        list_options: dict[str, Any] = {"source": self.source}
-        if type(value) is list:
-            list_options["mutation_type"] = ValueMutationExisting()
-
         # type: ignore[arg-type]
-        result = BaseListVariable.cls_for_instance(value)(output, **list_options)
+        result = BaseListVariable.cls_for_instance(value)(output, source=self.source)
         if istype(value, (list, collections.deque)):
             return self.tx.output.side_effects.track_mutable(value, result)
         return result
@@ -1989,7 +1981,9 @@ class VariableBuilder:
         self.install_guards(GuardBuilder.RANGE_ITERATOR_MATCH)
         # Get all the values from the range iterator; no need to install guards
         # on items since `RANGE_ITERATOR_MATCH` guarantees the same items.
-        items = [ConstantVariable.create(v) for v in copy.deepcopy(value)]
+        items: list[VariableTracker] = [
+            ConstantVariable.create(v) for v in copy.deepcopy(value)
+        ]
         result = ListIteratorVariable(items, source=self.source)
         return self.tx.output.side_effects.track_mutable(value, result)
 
@@ -2776,6 +2770,8 @@ class VariableBuilder:
                 dynamic_dim=dynamic_dim,
                 excluded_value=excluded_scalar,
             )
+            if not isinstance(wrapped_value, SymInt):
+                raise AssertionError(f"Expected SymInt, got {type(wrapped_value)}")
 
             self.tx.output.tracked_fakes.append(
                 TrackedFake(wrapped_value, self.source, context)
@@ -3395,6 +3391,7 @@ def handle_traced_output(
 
                 # WARNING: this assumes the same target_cls as this tuple/list call
                 unpacked.append(
+                    # pyrefly: ignore [bad-argument-type]
                     wrap_fx_proxy_cls(
                         # pyrefly: ignore[bad-argument-type]
                         target_cls=target_cls,
@@ -3413,13 +3410,18 @@ def handle_traced_output(
         elif istype(example_value, (list, immutable_list)):
             return ListVariable(unpacked, **options)
         else:
-            assert (
-                example_value.__class__.__module__ == "torch.return_types"
-                or hasattr(example_value, "_fields")
-            ), (
-                f"expected {example_value.__class__.__module__} == torch.return_types or named tuple but got {type(example_value)}"
+            assert is_namedtuple(example_value), (
+                f"expected namedtuple or structseq but got {type(example_value)}"
             )
-            return NamedTupleVariable(unpacked, example_value.__class__, **options)  # type: ignore[arg-type]
+            tuple_vt = TupleVariable(
+                unpacked,
+                mutation_type=options.get("mutation_type", ValueMutationNew()),
+            )
+            return UserDefinedTupleVariable.get_vt_cls(type(example_value))(
+                example_value,
+                tuple_vt=tuple_vt,
+                **options,  # type: ignore[arg-type]
+            )
     elif example_value is None or proxy.node.target is torch.manual_seed:
         return ConstantVariable.create(None, **options)
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
@@ -3644,6 +3646,7 @@ def construct_tensor_variable(
     if proxy.node.op != "placeholder":
         tx.output.current_tracer.track_produced_symints(example_value, proxy)
     options.update(get_specialized_props(target_cls, tx, example_value, subclass_type))
+    # pyrefly: ignore [bad-argument-count]
     return target_cls(proxy, **options)
 
 
@@ -4280,36 +4283,38 @@ class SourcelessBuilder:
             # NamedTuple._make uses an alias of tuple.__new__
             # pyrefly: ignore[not-callable, bad-argument-count, missing-attribute]
             obj = trace_rules.lookup_callable(value.__self__)(value.__self__)
-            return GetAttrVariable(obj, "__new__")
+            return GetAttrVariable(obj, "__new__", py_type=type(value))
         elif is_function_or_wrapper(value):
             # pyrefly: ignore[not-callable, bad-argument-count]
             return trace_rules.lookup(value)(value)
         elif isinstance(
-            value, (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType)
+            value,
+            (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType),
         ):
-            return EnumVariable(value)
+            return UserDefinedObjectVariable(value)
         elif isinstance(value, (type, abc.ABCMeta)):
-            if isinstance(value, type) and issubclass(value, enum.Enum):
-                return UserDefinedEnumClassVariable(value)
-            elif issubclass(type(value), type) and issubclass(value, BaseException):
+            if issubclass(type(value), type) and issubclass(value, BaseException):
                 return UserDefinedExceptionClassVariable(value)
             return UserDefinedClassVariable(value)
         elif isinstance(value, types.MethodWrapperType):
             return MethodWrapperVariable(value)
-        elif (
-            isinstance(value, types.MethodType)
-            # We only want to support sourceless class objects here
-            # An instance variable is not allowed and it should have source
-            and isinstance(value.__self__, (type, abc.ABCMeta))
-        ):
-            # value is a classmethod
-            assert getattr(value.__self__, value.__func__.__name__) == value
-            cls_obj_vt = SourcelessBuilder.create(tx, value.__self__)
-            try:
-                # pyrefly: ignore[bad-argument-type]
-                return cls_obj_vt.var_getattr(tx, value.__func__.__name__)
-            except NotImplementedError:
-                pass  # failthrough to unimplemented branch
+        elif isinstance(value, types.MethodType):
+            if isinstance(value.__self__, (type, abc.ABCMeta)):
+                # value is a classmethod
+                assert getattr(value.__self__, value.__func__.__name__) == value
+                cls_obj_vt = SourcelessBuilder.create(tx, value.__self__)
+                try:
+                    # pyrefly: ignore[bad-argument-type]
+                    return cls_obj_vt.var_getattr(tx, value.__func__.__name__)
+                except NotImplementedError:
+                    pass  # failthrough to unimplemented branch
+            else:
+                # Instance method — look up the VT for __self__ via side effects
+                obj_vt = tx.output.side_effects.id_to_variable.get(id(value.__self__))
+                if obj_vt is not None:
+                    return torch._dynamo.variables.UserMethodVariable(
+                        value.__func__, obj_vt
+                    )
         elif isinstance(value, torch.fx.graph_module.GraphModule):
             return SourcelessGraphModuleVariable(value)
         elif isinstance(value, torch.utils._pytree.TreeSpec):
@@ -4341,13 +4346,22 @@ class SourcelessBuilder:
                 SourcelessBuilder.create(tx, getattr(value, name))
                 for name in namedtuple_fields(type(value))
             ]
-            return NamedTupleVariable(output, tuple_cls=type(value))
+            tuple_vt = TupleVariable(output, mutation_type=ValueMutationNew())
+            return UserDefinedTupleVariable.get_vt_cls(type(value))(
+                value, tuple_vt=tuple_vt
+            )
         elif (
             isinstance(value, torch.SymInt)
             and value.node.expr in tx.output.bound_symbols
         ):
             proxy = tx.output.bound_symbols[value.node.expr]
             return SymNodeVariable.create(tx, proxy)
+        elif isinstance(value, slice):
+            items = [
+                SourcelessBuilder.create(tx, getattr(value, k))
+                for k in ("start", "stop", "step")
+            ]
+            return SliceVariable(items, tx)  # pyrefly: ignore[bad-argument-type]
         elif istype(value, object):
             return ObjectVariable(value)
         unimplemented(

@@ -191,6 +191,7 @@ class TestUtils(TestCase):
         self.assertEqual(get_filenames(traced_code_lists), [[__file__, utils_path]])
 
         # === graph break occurs during inlining ===
+        @torch._dynamo.disable_nested_graph_breaks
         @torch.compile(backend=my_backend)
         def fn(x):
             z = x + 1

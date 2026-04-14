@@ -310,7 +310,7 @@ class AutogradCompilerInstance:
         self,
         inputs: list[torch.Tensor],
         sizes: list[int],
-        scalars: list[int | float],
+        scalars: list[IntLikeType | FloatLikeType],
         origins: list[list[tuple[int, str]]],
         accumulate_grad: bool,
         check_nans: bool,
@@ -382,7 +382,8 @@ class AutogradCompilerInstance:
                 (proxies[i],),
                 {},
             )
-            self.symnode_proxy_lookup[symint.node] = proxies[i]
+            if not isinstance(symint, int):
+                self.symnode_proxy_lookup[symint.node] = proxies[i]
         proxies = self.bind_objects_to_proxies(sym_sizes, proxies, sizes_origins)
 
         for idx, val in enumerate(scalars):
@@ -504,6 +505,7 @@ class AutogradCompilerInstance:
 
         pgrads = self.fx_tracer.create_proxy(
             kind="call_function",
+            # pyrefly: ignore [bad-argument-type]
             target=call_aot_bwd_prologue,
             args=(
                 psaved_tensors,
@@ -634,6 +636,7 @@ class AutogradCompilerInstance:
 
             poutput = self.fx_tracer.create_proxy(
                 kind="call_function",
+                # pyrefly: ignore [bad-argument-type]
                 target=make_subclass,
                 args=tuple(punwrapped_args),
                 kwargs={},

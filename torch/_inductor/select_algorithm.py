@@ -512,6 +512,7 @@ class TritonTemplateKernel(TritonKernel):
         hint_override: int | None = None,
         triton_meta: dict[str, object] | None = None,
         always_freeze_layout: bool = False,
+        index_dtype_override: str | None = None,
     ) -> None:
         if tma_store:
             pass
@@ -582,6 +583,7 @@ class TritonTemplateKernel(TritonKernel):
         self.epilogue_fn = epilogue_fn
         self.render_hooks = {}  # type: ignore[var-annotated]
         self.triton_meta: dict[str, object] | None = triton_meta
+        self._index_dtype_override = index_dtype_override
         # For Templated Attention this can be a list of ir.Subgraph
         self.subgraphs: list[ir.ComputedBuffer] | None = subgraphs
 
@@ -645,6 +647,12 @@ class TritonTemplateKernel(TritonKernel):
 
         # Tracking for intermediate variables
         self.tmp_var_ctr = itertools.count()
+
+    @property
+    def index_dtype(self) -> str:
+        if self._index_dtype_override is not None:
+            return self._index_dtype_override
+        return super().index_dtype
 
     def _gen_tmp_var(self) -> str:
         return f"_tmp_var{next(self.tmp_var_ctr)}"
@@ -1689,8 +1697,13 @@ class TritonTemplateKernel(TritonKernel):
             inductor_meta=inductor_meta,
             triton=True,
         )
+        self._emit_post_kernel_code(wrapper, name)
         if self.workspace_arg is not None:
             wrapper.generate_workspace_deallocation(self.workspace_arg)
+
+    def _emit_post_kernel_code(self, wrapper, kernel_name: str) -> None:
+        """Hook for subclasses to emit code after kernel call, before workspace dealloc."""
+        pass  # noqa: PIE790
 
     def kernel_benchmark_extra_args(self) -> list[str]:
         # Grid args are only used for benchmarking, not correctness
@@ -1712,12 +1725,19 @@ class TritonTemplateKernel(TritonKernel):
         Scheduler falls back to aten if layout constraint violated. If no aten,
         freeze right away.
         """
+
         # realizing for safety
         ir.ExternKernel.realize_input(node)
         layout = node.data.layout
         node_name = node.get_name()
 
-        if isinstance(layout, ir.FlexibleLayout):
+        # For ReinterpretView, the view's strides are already determined by its layout.
+        # We skip constraint tracking because node.get_name() returns the underlying
+        # buffer name, not the view's identity, so constraints would be incorrectly
+        # associated with the underlying buffer rather than the view.
+        if isinstance(layout, ir.FlexibleLayout) and not isinstance(
+            node, ir.ReinterpretView
+        ):
             if not use_aten_gemm_kernels() or self.always_freeze_layout:
                 # No ExternKernel fallback available, or always_freeze_layout is set
                 # (e.g., for FlexAttention templates), freeze immediately
@@ -2599,6 +2619,7 @@ class TritonTemplate(KernelTemplate):
             "subgraphs": subgraphs,
             "prologue_loads_all_inputs": self.prologue_loads_all_inputs,
             "always_freeze_layout": self.always_freeze_layout,
+            "index_dtype_override": index_dtype,
         }
 
         if HAS_WARP_SPEC:
@@ -2833,7 +2854,8 @@ class TritonTemplate(KernelTemplate):
         workspace_zero_fill = False
         workspace_args = []
         if workspace_arg is not None:
-            workspace_size_bytes = workspace_arg.count
+            ws_count = V.graph.sizevars.optimization_hint(workspace_arg.count)
+            workspace_size_bytes = ws_count * get_dtype_size(workspace_arg.dtype)
             workspace_zero_fill = (
                 workspace_arg.zero_mode != WorkspaceZeroMode.UNINITIALIZED
             )
@@ -3737,7 +3759,6 @@ class AlgorithmSelectorCache(PersistentCache):
         benchmark_with_cudagraphs: bool = False,  # Use CUDA graphs for ExternKernelCaller benchmarking
     ):
         from .codegen.cutlass.kernel import CUTLASSTemplateCaller
-        from .codegen.subgraph import SubgraphChoiceCaller
 
         # Run preprocessing functions on choices
         for preprocessing_fn in self.preprocessing_fns:
@@ -3791,9 +3812,6 @@ class AlgorithmSelectorCache(PersistentCache):
             if use_pipelined_autotuning():
                 assert not config.benchmark_epilogue_fusion, (
                     "Benchmarking epilogues will cause gpu contention with pipelined autotuning"
-                )
-                assert all(not isinstance(c, SubgraphChoiceCaller) for c in choices), (
-                    "Pipelined autotuning not compatible yet with subgraph choices"
                 )
                 extern_kernels = [
                     c for c in choices if AlgorithmSelectorCache._is_extern(c)

@@ -890,7 +890,7 @@ This class does not support ``__members__`` property.)");
             return ::c10d::ReduceOp(self);
           })
       .def(py::pickle(
-          [](const ::c10d::ReduceOp& r) {
+          [](const ::c10d::ReduceOp& r) -> py::tuple {
             // __getstate__
             if (r.op_ != ::c10d::ReduceOp::RedOpType::PREMUL_SUM) {
               return py::make_tuple(r.op_, py::none());
@@ -1143,6 +1143,10 @@ This class does not support ``__members__`` property.)");
           &::c10d::symmetric_memory::has_multicast_support)
       .def_static("set_backend", &::c10d::symmetric_memory::set_backend)
       .def_static("get_backend", &::c10d::symmetric_memory::get_backend)
+      .def_static(
+          "is_symm_mem_tensor",
+          &::c10d::symmetric_memory::is_symm_mem_tensor,
+          py::arg("tensor"))
       .def_property_static(
           "signal_pad_size",
           [](py::object /* self */) {
@@ -2760,6 +2764,13 @@ Arguments:
   // Thread local process group manipulation
   module.def("_set_process_group", &::c10d::setProcessGroup);
   module.def("_current_process_group", &::c10d::currentProcessGroup);
+
+  // Thread local comm profiling name
+  module.def(
+      "_set_comm_profiling_name",
+      &::c10d::set_comm_profiling_name,
+      py::arg("name"));
+  module.def("_get_comm_profiling_name", &::c10d::get_comm_profiling_name);
 
   py::enum_<::c10d::ProcessGroup::BackendType>(
       processGroup,

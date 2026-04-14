@@ -40,6 +40,11 @@ from .triton import TritonKernel
 from .triton_utils import config_of, equal_1_arg_indices, signature_to_meta
 
 
+# Default block sizes used when combo kernel autotuning is disabled.
+DEFAULT_COMBO_BLOCK_SIZE_1D = 1024
+DEFAULT_COMBO_BLOCK_SIZE_2D = 32
+
+
 log = logging.getLogger(__name__)
 pexpr = PythonPrinter().doprint
 LARGE_NUMELS = 512e5
@@ -454,9 +459,9 @@ class ComboKernel(Kernel):
             | None
         ) = None
         self.block_args: list[str] = []
-        # there following are used when autotuning is disabled
-        self.block_size_1d = 1024  # Try tuning this value
-        self.block_size_2d = 32
+        # the following are used when autotuning is disabled
+        self.block_size_1d = DEFAULT_COMBO_BLOCK_SIZE_1D
+        self.block_size_2d = DEFAULT_COMBO_BLOCK_SIZE_2D
         self.num_warps = 8
         self.block_size_reduce = 256
         self.dynamic_shape_args: list[str] = []
@@ -1201,6 +1206,10 @@ class ComboKernel(Kernel):
                         meta[f"tile_hint_{num}"] = "TileHint.SQUARE"
                     else:
                         meta[f"tile_hint_{num}"] = "TileHint.DEFAULT"
+                else:
+                    meta[f"reduction_hint_{num}"] = (
+                        sub_kernel.features.get_reduction_hint().name
+                    )
 
             for tree in sub_kernel.range_trees:
                 if not tree.is_reduction:

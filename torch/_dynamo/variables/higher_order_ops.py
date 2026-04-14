@@ -64,6 +64,7 @@ from .base import VariableTracker
 from .dicts import ConstDictVariable
 from .lazy import LazyVariableTracker
 from .lists import ListVariable, TupleVariable
+from .sets import SetVariable
 
 
 if TYPE_CHECKING:
@@ -233,6 +234,9 @@ def find_mismatched_vars(
     elif isinstance(var, ConstDictVariable):
         for value in var.items.values():
             mismatched_vars.update(find_mismatched_vars(value, types, allow_none))
+    elif isinstance(var, SetVariable):
+        for key in var.items:
+            mismatched_vars.update(find_mismatched_vars(key.vt, types, allow_none))
     else:
         if not isinstance(var, types) and not (allow_none and var.is_constant_none()):
             mismatched_vars.add(var)
@@ -908,6 +912,7 @@ def are_same_graph_modules(
     from torch._subclasses.fake_tensor import extract_tensor_metadata
 
     # Maps the equivalent nodes from a to b
+    # pyrefly: ignore [implicit-any]
     node_map = {}
 
     def check_all_args(a_nodes: Iterable[Any], b_nodes: Iterable[Any]) -> bool:
@@ -1711,7 +1716,7 @@ def speculate_subgraph_with_auto_output_flattening(
                 ):
                     graph_output_vt_list.append(vt)
 
-            VariableTracker.visit(visit, output)
+            VariableTracker.visit(visit, output, side_effects=tx.output.side_effects)
             graph_output_vts = tuple(graph_output_vt_list)
 
             # NOTE - [Return subgraph intermediates as subgraph outputs]
@@ -1752,11 +1757,13 @@ def speculate_subgraph_with_auto_output_flattening(
             # nested_compile_region and autograd.Function. Today, its safe
             # because we error out on seeing a side-effect.
 
-            allow_side_effects = (
-                allow_side_effects
-                or tx.output.current_tracer.traced_with_externally_visible_side_effects
+            traced_externally = (
+                tx.output.current_tracer.traced_with_externally_visible_side_effects
             )
-            if allow_side_effects:
+            has_side_effects = (
+                subtracer.side_effect_stack is not None or traced_externally
+            )
+            if (allow_side_effects or traced_externally) and has_side_effects:
                 extra_outputs = collect_intermediate_outputs(
                     tx, subtracer, graph_output_vts, filter_aliased_intermediates
                 )
@@ -3754,11 +3761,13 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         unpacked_sequence = args[1].unpack_var_sequence(tx)
         # TODO (tmanlaibaatar) support pytree here
         for arg in unpacked_sequence:
-            if isinstance(arg, (ListVariable, TupleVariable, ConstDictVariable)):
+            if isinstance(
+                arg, (ListVariable, TupleVariable, ConstDictVariable, SetVariable)
+            ):
                 unimplemented(
                     gb_type="strict_mode: improper args",
                     context=f"args: {args}, kwargs: {kwargs}",
-                    explanation="strict_mode higher order op expects flat inputs (list/tuple/dict)",
+                    explanation="strict_mode higher order op expects flat inputs (list/tuple/dict/set)",
                     hints=[
                         *graph_break_hints.USER_ERROR,
                     ],
@@ -4514,6 +4523,9 @@ class AutogradFunctionApplyVariable(VariableTracker):
         self.fwd_fn = fwd_fn
         self.bwd_fn = bwd_fn
         self.parent_source = parent_source
+
+    def python_type(self) -> type:
+        return types.BuiltinMethodType
 
     def call_function(
         self,
@@ -5531,6 +5543,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
 
             priors[vt] = global_tensor
             vt.as_proxy().node.meta["example_value"] = local_tensor
+            # pyrefly: ignore [missing-attribute]
             vt.synchronize_attributes(tx)
 
         # Step 3: Trace local_map subgraph with local tensors
@@ -5615,6 +5628,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
         # Step 6: Restore inputs and outputs to global shapes
         for vt, global_tensor in priors.items():
             vt.as_proxy().node.meta["example_value"] = global_tensor
+            # pyrefly: ignore [missing-attribute]
             vt.synchronize_attributes(tx)
 
         outs = out.items if isinstance(out, TupleVariable) else [out]

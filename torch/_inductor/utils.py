@@ -487,6 +487,8 @@ def _type_of(key: torch.dtype | None) -> str:
         "float8e4b15x4": "fp8e4b15x4",
         "float8_e4m3fn": "fp8e4nv",
         "float8_e5m2": "fp8e5",
+        "float8_e4m3fnuz": "fp8e4b8",
+        "float8_e5m2fnuz": "fp8e5b16",
         # TODO: remove when support is added in triton
         # https://github.com/triton-lang/triton/issues/6054
         "float8_e8m0fnu": "u8",
@@ -2636,7 +2638,7 @@ def run_and_get_kernels(
     result, source_codes = run_and_get_code(fn, *args, **kwargs)
     kernels = []
     for code in source_codes:
-        if config.cpp_wrapper and config.triton.autotune_at_compile_time is False:
+        if config.cpp_wrapper and config.triton.autotune_at_compile_time is not True:
             # With lazy Triton kernel compilation, kernel sources are embedded
             # inside C++ R"TRITON(...)TRITON" raw strings.
             kernels.extend(re.findall(r'R"TRITON\((.*?)\)TRITON"', code, re.DOTALL))

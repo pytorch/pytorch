@@ -278,7 +278,12 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
             cache_entries = _debug_get_cache_entry_list(frame.f_code)
             if cache_entries:
                 reasons = get_and_maybe_log_recompilation_reasons(
-                    cache_entries[0], frame, innermost_fn(callback), skip_logging=True
+                    # pyrefly: ignore [bad-argument-type]
+                    cache_entries[0],
+                    frame,
+                    # pyrefly: ignore [bad-argument-type]
+                    innermost_fn(callback),
+                    skip_logging=True,
                 )
                 if reasons:
                     failures = textwrap.indent("\n".join(reasons), "- ")
@@ -1074,7 +1079,6 @@ class _TorchDynamoContext:
             )
         else:
             compile_wrapper._torchdynamo_inline = fn  # type: ignore[attr-defined]
-
         # Save the function pointer to find the original callable while nesting
         # of decorators.
         compile_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
@@ -1181,6 +1185,11 @@ class OptimizeContext(_TorchDynamoContext):
                 return functools.partial(ctx.__exit__, None, None, None)
 
             self.enter_exit_hooks.append(call_compiled_autograd)
+
+    def __call__(self, fn: Callable[..., Any]) -> Callable[..., Any]:
+        result = super().__call__(fn)
+        result._is_torch_compile = True  # type: ignore[attr-defined]
+        return result
 
     def __reduce__(
         self,

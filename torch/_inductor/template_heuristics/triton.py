@@ -2083,6 +2083,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
             EVEN_K=even_k_symbolic,
             USE_FAST_ACCUM=False,  # Option for _scaled_mm
             ACC_TYPE=self._get_acc_type(out_dtype),
+            OUT_DTYPE=self._get_out_dtype(out_dtype),
             num_stages=triton_config.num_stages,
             num_warps=triton_config.num_warps,
             **triton_config.kwargs,
@@ -2095,6 +2096,11 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
 
         return options_dict
 
+    @staticmethod
+    def _dtype_to_triton(dtype: torch.dtype) -> str:
+        """Convert a torch dtype to a triton type string."""
+        return f"tl.{dtype}".replace("torch.", "")
+
     def _get_acc_type(self, dtype: torch.dtype) -> str:
         """
         Get accumulator type for the given dtype.
@@ -2102,7 +2108,11 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         """
         if dtype in (torch.float16, torch.bfloat16):
             return "tl.float32"
-        return f"tl.{dtype}".replace("torch.", "")
+        return self._dtype_to_triton(dtype)
+
+    def _get_out_dtype(self, dtype: torch.dtype) -> str:
+        """Get output dtype as a triton type string."""
+        return self._dtype_to_triton(dtype)
 
 
 # INT8 specific mixin to filter correctly
@@ -2325,7 +2335,10 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
         if bias:
             nodes.append(bias)
         return MMKernelInputs(
-            nodes, mat1_idx=kernel_inputs._mat1_idx, mat2_idx=kernel_inputs._mat2_idx
+            nodes,
+            mat1_idx=kernel_inputs._mat1_idx,
+            mat2_idx=kernel_inputs._mat2_idx,
+            out_dtype=kernel_inputs._out_dtype,
         )
 
     def _get_template_configs_impl(
@@ -2830,6 +2843,18 @@ class ROCmMMTemplateConfigHeuristic(MMTemplateConfigMixin, ROCmConfigHeuristic):
 )
 class ROCmAddMMTemplateConfigHeuristic(AddMMConfigMixin, ROCmMMTemplateConfigHeuristic):
     """Addmm specific mixin for ROCm"""
+
+
+@register_template_heuristic(
+    persistent_mm_template.uid,
+    "cuda",
+    register=torch.version.hip is not None,
+    op_name="addmm",
+)
+class ROCmAddMMPersistentTemplateConfigHeuristic(
+    AddMMConfigMixin, PersistentMMTemplateConfigHeuristic
+):
+    """Addmm specific mixin for persistent MM on ROCm"""
 
 
 # TODO(coconutruben): deprecate once autoheuristic is deprecated

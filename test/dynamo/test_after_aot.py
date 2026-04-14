@@ -16,7 +16,7 @@ from torch._dynamo.repro.after_aot import (
 )
 from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_utils import IS_FBCODE
+from torch.testing._internal.common_utils import IS_FBCODE, TEST_CUDA
 from torch.utils._traceback import report_compile_source_on_error
 from torch.utils._triton import has_triton
 
@@ -132,6 +132,43 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         save_graph_repro(buf, gm, args, "inductor_accuracy")
         r = buf.getvalue()
         self.assertIn("reader.opaque('__torch__.MyClass')", r)
+
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_dump_generator(self):
+        torch.cuda.init()
+        gen = torch.cuda.default_generators[0].clone_state()
+        writer = InputWriter(None)
+        writer.generator("fwd_rng_state_0", gen)
+        self.assertExpectedInline(
+            "\n".join(writer._lines),
+            """reader.generator('cuda', 0)  # fwd_rng_state_0""",
+        )
+        reader = InputReader(None)
+        env = {"reader": reader, "torch": torch}
+        exec("\n".join(writer._lines), env)
+        self.assertIsInstance(reader.args[0], torch._C.Generator)
+        self.assertEqual(reader.args[0].device, torch.device("cuda", 0))
+
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_graphsafe_rng_repro(self):
+        """save_graph_repro should emit reader.generator() for Generator args."""
+        torch.cuda.init()
+        gen = torch.cuda.default_generators[0].clone_state()
+
+        def f(x):
+            return (x * x,)
+
+        args = [torch.randn(4, device="cuda"), gen]
+        gm = make_fx(f)(args[0])
+        with gm.graph.inserting_before(next(iter(gm.graph.nodes))):
+            gm.graph.placeholder("fwd_rng_state_0")
+        gm.recompile()
+
+        buf = io.StringIO()
+        save_graph_repro(buf, gm, args, "inductor_accuracy")
+        r = buf.getvalue()
+        self.assertIn("reader.generator('cuda', 0)", r)
+        self.assertNotIn("reader.unsupported(", r)
 
     @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
     def test_extract_distributed_info_skips_non_string_group_name(self):

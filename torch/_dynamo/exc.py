@@ -456,6 +456,11 @@ def raise_observed_exception(
     raise raised_exc
 
 
+def raise_type_error(tx: InstructionTranslatorBase, msg: str) -> NoReturn:
+    """Raise a TypeError as an observed exception during tracing."""
+    raise_observed_exception(TypeError, tx, args=[msg])
+
+
 def handle_observed_exception(tx: Any) -> None:
     # This is essentially exception handling code, equivalent of this pseudo code
     #
@@ -791,13 +796,13 @@ def filter_stack(stack: StackSummary) -> StackSummary:
     return user_stack
 
 
-def remove_resume_prefix(name: str) -> str | None:
+def remove_resume_prefix(name: str) -> str:
     from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 
     match = re.match(f"{TORCH_DYNAMO_RESUME_IN_PREFIX}_(\\w+)_at_\\d+", name)
     if match:
         return match.group(1)
-    return None
+    return name
 
 
 def collapse_resume_frames(stack: StackSummary | list[FrameSummary]) -> StackSummary:
@@ -829,6 +834,7 @@ def collapse_resume_frames(stack: StackSummary | list[FrameSummary]) -> StackSum
             new_stack[-1] = frame
             frame.name = name
         else:
+            frame.name = name
             new_stack.append(frame)
 
     return new_stack

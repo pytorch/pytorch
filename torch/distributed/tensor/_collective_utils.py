@@ -392,6 +392,8 @@ def _compute_placement_transition_cost(
 
     num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[mesh_dim]
 
+    # NOTE: is_shard() does not match _StridedShard; see _is_shard_like().
+    # Safe today: redistribute_cost bails with inf when shard_order is None.
     if current_placement.is_shard() and target_placement.is_replicate():
         # allgather gives larger comm bytes
         comm_bytes_gb *= num_devices_on_mesh_dim

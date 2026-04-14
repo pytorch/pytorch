@@ -662,6 +662,22 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
+    def test_cholesky_upper_reconstructs(self, device, dtype):
+        batch_dims = (1,)
+        matrix_size = 65
+        A = torch.randn(
+            *(batch_dims + (matrix_size, matrix_size)), dtype=dtype, device=device
+        )
+        pd_matrix = A @ A.mH + torch.eye(matrix_size, dtype=dtype, device=device)
+        pd_matrix = pd_matrix.squeeze(0)
+        U = torch.linalg.cholesky(pd_matrix, upper=True)
+        self.assertEqual(U, torch.triu(U))
+        reconstructed = U.mH @ U
+        self.assertEqual(pd_matrix, reconstructed, atol=1e-4, rtol=1e-5)
+
+    @skipCUDAIfNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(*floating_and_complex_types())
     def test_cholesky_errors_and_warnings(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
@@ -6477,9 +6493,9 @@ class TestLinalg(TestCase):
             # launched per PyTorch API. The kernels have string
             # that always starts with `Cijk*`
             mm_key = 'Cijk'
-            events = prof.key_averages()
+            events = prof.events()
             for evt in events:
-                if mm_key in evt.key:
+                if mm_key in evt.name:
                     self.assertEqual(evt.count, 1)
                     kernel_count = kernel_count + 1
 

@@ -330,7 +330,7 @@ def rrelu_with_noise_backward(
     training: bool,
     self_is_result: bool,
 ) -> Tensor:
-    if training and upper - lower > 1e-6:
+    if training:
         return grad_output.mul(noise)
     else:
         negative_slope = (lower + upper) / 2

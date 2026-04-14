@@ -2415,6 +2415,25 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertEqual(f(x_ref, y_ref), out)
 
+    @skipCUDAIf(
+        not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"
+    )
+    @unittest.skipIf(
+        config.is_fbcode(),
+        "bfloat16 atomic add is supported in fbcode, so we won't fallback",
+    )
+    def test_index_add_fallback_direct(self):
+        def f(x, idx, src):
+            return torch.index_add(x, 0, idx, src)
+
+        x = torch.randn(16, 256, dtype=torch.bfloat16, device=device_type)
+        idx = torch.randperm(8, device=device_type)
+        src = torch.randn(8, 256, dtype=torch.bfloat16, device=device_type)
+
+        out = f(x, idx, src)
+        compiled_out = torch.compile(f)(x, idx, src)
+        self.assertEqual(out, compiled_out)
+
     @requires_multigpu()
     def test_not_initializing_wrong_device(self):
         device_stats = torch.cuda.memory_stats("cuda:0")

@@ -4012,22 +4012,26 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             hidden = torch.randn(correct_hidden_shape)
 
             # input and weights are not at the same device
-            with self.assertRaisesRegex(RuntimeError,
-                                        "Input and parameter tensors are not at the same device"):
+            rnn_param_device_msg = (
+                r"(?:Input and parameter tensors are not at the same device|"
+                r"Expected all tensors to be on the same device)"
+            )
+            with self.assertRaisesRegex(RuntimeError, rnn_param_device_msg):
                 model(input.to('cuda:0'))
-            with self.assertRaisesRegex(RuntimeError,
-                                        "Input and parameter tensors are not at the same device"):
+            with self.assertRaisesRegex(RuntimeError, rnn_param_device_msg):
                 model_cuda(input)
 
             # input and hiddens are not at the same device
-            with self.assertRaisesRegex(RuntimeError,
-                                        r"Input and hidden tensors are not at the same device"):
+            rnn_hidden_device_msg = (
+                r"(?:Input and hidden tensors are not at the same device|"
+                r"Expected all tensors to be on the same device)"
+            )
+            with self.assertRaisesRegex(RuntimeError, rnn_hidden_device_msg):
                 if mode == 'LSTM':
                     model(input, (hidden.to('cuda:0'), hidden.to('cuda:0')))
                 else:
                     model(input, (hidden.to('cuda:0')))
-            with self.assertRaisesRegex(RuntimeError,
-                                        r"Input and hidden tensors are not at the same device"):
+            with self.assertRaisesRegex(RuntimeError, rnn_hidden_device_msg):
                 if mode == 'LSTM':
                     model_cuda(input.to('cuda:0'), (hidden, hidden))
                 else:
@@ -4035,8 +4039,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
             # hidden tensors are not at the same CUDA device
             if mode == 'LSTM':
-                with self.assertRaisesRegex(RuntimeError,
-                                            "Input and hidden tensors are not at the same device"):
+                with self.assertRaisesRegex(RuntimeError, rnn_hidden_device_msg):
                     model(input.to('cuda:0'), (hidden.to('cuda:0'), hidden.to('cuda:1')))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
@@ -9417,6 +9420,49 @@ class TestNNDeviceType(NNTestCase):
             group_norm.cpu()
             Y_cpu = group_norm(X.cpu())
             self.assertEqual(Y_cpu, Y, rtol=0, atol=1e-5)
+
+    @onlyCUDA
+    @dtypes(torch.float32, torch.bfloat16)
+    def test_GroupNorm_backward_large_batch(self, device, dtype):
+        # Test GroupNorm backward with N > 128, which triggers
+        # GammaBetaBackwardCUDAKernel2. This kernel uses a (32, 16) block
+        # with WarpReduceSum after a shared memory transpose. On AMD
+        # wavefront-64, WarpReduceSum incorrectly summed across two tile
+        # columns, producing wrong dgamma/dbeta.
+        # bfloat16 tolerances are loose because the forward pass computes
+        # intermediate values (mean, var, x_norm) in bfloat16 vs float32 on CPU,
+        # causing accumulated differences in dgamma/dbeta.  The AMD wavefront-64
+        # bug this test targets produces ~100% error on all elements, so atol=1.0
+        # still catches it with wide margin.
+        rtol = 1.0 if dtype == torch.bfloat16 else 1e-3
+        atol = 1.0 if dtype == torch.bfloat16 else 1e-3
+        for N in [129, 256, 512]:
+            for C, G in [(32, 4), (64, 8), (128, 32)]:
+                x = torch.randn(N, C, 16, device=device, dtype=dtype, requires_grad=True)
+                gamma = torch.randn(C, device=device, dtype=dtype, requires_grad=True)
+                beta = torch.randn(C, device=device, dtype=dtype, requires_grad=True)
+
+                y = F.group_norm(x, G, gamma, beta)
+                grad = torch.randn_like(y)
+                y.backward(grad)
+                dgamma_gpu = gamma.grad.clone()
+                dbeta_gpu = beta.grad.clone()
+
+                # CPU reference in float32
+                x_cpu = x.detach().float().cpu().requires_grad_(True)
+                gamma_cpu = gamma.detach().float().cpu().requires_grad_(True)
+                beta_cpu = beta.detach().float().cpu().requires_grad_(True)
+                y_cpu = F.group_norm(x_cpu, G, gamma_cpu, beta_cpu)
+                y_cpu.backward(grad.float().cpu())
+
+                self.assertEqual(
+                    dgamma_gpu.float().cpu(), gamma_cpu.grad, atol=atol, rtol=rtol,
+                    msg=f"dgamma mismatch: N={N} C={C} G={G} dtype={dtype}",
+                )
+                self.assertEqual(
+                    dbeta_gpu.float().cpu(), beta_cpu.grad, atol=atol, rtol=rtol,
+                    msg=f"dbeta mismatch: N={N} C={C} G={G} dtype={dtype}",
+                )
 
     @expectedFailureMPS  # Double is not supported on MPS
     @onlyNativeDeviceTypes

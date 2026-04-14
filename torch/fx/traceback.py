@@ -1,11 +1,11 @@
-# mypy: allow-untyped-defs
 import copy
 import logging
 import traceback
 from collections import defaultdict
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from enum import Enum
-from typing import Any, Optional, Union
+from typing import Any, Optional, ParamSpec, TypeVar, Union
 
 from torch._utils_internal import signpost_event
 
@@ -14,6 +14,9 @@ from .graph import Graph
 from .graph_module import GraphModule
 from .node import Node
 
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 log = logging.getLogger(__name__)
 
@@ -82,7 +85,7 @@ class NodeSource:
     """
 
     class NodeInfo:
-        def __init__(self, name: str, target: str, graph_id: int):
+        def __init__(self, name: str, target: str, graph_id: int) -> None:
             self.name = name
             self.target = target
             self.graph_id = graph_id
@@ -99,7 +102,7 @@ class NodeSource:
         node: Node | None,
         pass_name: str = "",
         action: Union["NodeSourceAction", list["NodeSourceAction"]] | None = None,
-    ):
+    ) -> None:
         self.pass_name = pass_name
 
         if action is None:
@@ -139,15 +142,15 @@ class NodeSource:
     def graph_id(self) -> int:
         return self.node_info.graph_id if self.node_info else -1
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.print_readable()
 
-    def _get_action_string(self):
+    def _get_action_string(self) -> str:
         if self._action_string is None:
             self._action_string = "+".join([a.name.lower() for a in self.action])
         return self._action_string
 
-    def print_readable(self, indent=0):
+    def print_readable(self, indent: int = 0) -> str:
         if indent > 9:
             return ""
         result = ""
@@ -160,7 +163,7 @@ class NodeSource:
             result += item.print_readable(indent + 1)
         return result
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         if self._dict is None:
             # Convert the object to a dictionary
             action_string = self._get_action_string()
@@ -177,15 +180,15 @@ class NodeSource:
             raise AssertionError("_dict is None after initialization")
         return self._dict
 
-    def __eq__(self, other: object):
+    def __eq__(self, other: object) -> bool:
         if not isinstance(other, NodeSource):
             return False
         return self.to_dict() == other.to_dict()
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         # Create a hash based on the dictionary representation
         # We need to convert the dict to a hashable form
-        def _make_hashable(obj):
+        def _make_hashable(obj: Any) -> Any:
             if isinstance(obj, dict):
                 return tuple(sorted((k, _make_hashable(v)) for k, v in obj.items()))
             elif isinstance(obj, list):
@@ -196,7 +199,7 @@ class NodeSource:
         return hash(_make_hashable(self.to_dict()))
 
     @classmethod
-    def _from_dict(cls, d: dict | None) -> Optional["NodeSource"]:
+    def _from_dict(cls, d: dict[str, Any] | None) -> Optional["NodeSource"]:
         """
         Recursively deserialize from_node metadata from dictionary data.
         It is used to deserialize the from_node field from serialized metadata.
@@ -253,7 +256,7 @@ class NodeSource:
 
 @compatibility(is_backward_compatible=False)
 @contextmanager
-def preserve_node_meta(enable=True):
+def preserve_node_meta(enable: bool = True) -> Iterator[None]:
     global should_preserve_node_meta
     global current_meta
     saved_should_preserve_node_meta = should_preserve_node_meta
@@ -268,7 +271,7 @@ def preserve_node_meta(enable=True):
 
 
 @contextmanager
-def _preserve_node_seq_nr(preserve_seq_nr=True):
+def _preserve_node_seq_nr(preserve_seq_nr: bool = True) -> Iterator[None]:
     """
     Temporarily enables or disables the preservation of node.meta["seq_nr"] in the
     tracing context.
@@ -284,7 +287,7 @@ def _preserve_node_seq_nr(preserve_seq_nr=True):
 
 
 @compatibility(is_backward_compatible=False)
-def set_stack_trace(stack: list[str]):
+def set_stack_trace(stack: list[str]) -> None:
     global current_meta
 
     if should_preserve_node_meta:
@@ -298,7 +301,7 @@ def set_stack_trace(stack: list[str]):
 
 @compatibility(is_backward_compatible=False)
 @contextmanager
-def annotate(annotation_dict: dict):
+def annotate(annotation_dict: dict[str, Any]) -> Iterator[None]:
     """
     Temporarily adds custom annotations to the current tracing context.
     The fx_node produced from this tracing context will have the
@@ -338,7 +341,7 @@ def annotate(annotation_dict: dict):
 
     try:
         if not has_custom:
-            current_meta["custom"] = {}
+            current_meta["custom"] = dict[str, Any]()
 
         # Update with all key-value pairs from the input dict
         current_meta["custom"].update(annotation_dict)
@@ -352,7 +355,9 @@ def annotate(annotation_dict: dict):
 
 
 @compatibility(is_backward_compatible=False)
-def annotate_fn(annotation_dict: dict):
+def annotate_fn(
+    annotation_dict: dict[str, Any],
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """
     A decorator that wraps a function with the annotate context manager.
     Use this when you want to annotate an entire function instead of a specific code block.
@@ -377,19 +382,21 @@ def annotate_fn(annotation_dict: dict):
     """
     from functools import wraps
 
-    def decorator(func):
+    def decorator(func: Callable[_P, _R]) -> Callable[_P, _R]:
         @wraps(func)
-        def wrapper(*args, **kwargs):
+        # NB: Do not annotate with _P.args/_P.kwargs here. Dynamo guards on
+        # the identity of ParamSpec annotation objects, causing guard failures.
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
             with annotate(annotation_dict):
                 return func(*args, **kwargs)
 
-        return wrapper
+        return wrapper  # type: ignore[return-value]
 
     return decorator
 
 
 @compatibility(is_backward_compatible=False)
-def set_grad_fn_seq_nr(seq_nr):
+def set_grad_fn_seq_nr(seq_nr: int) -> None:
     global current_meta
 
     if should_preserve_node_meta:
@@ -401,7 +408,7 @@ def set_grad_fn_seq_nr(seq_nr):
 
 
 @compatibility(is_backward_compatible=False)
-def reset_grad_fn_seq_nr():
+def reset_grad_fn_seq_nr() -> None:
     # NB: reset state properly, this would be helpful towards supporting
     #     reentrant autograd if we actually wanted to do that.
     global current_meta
@@ -437,7 +444,7 @@ def _is_preserving_node_seq_nr() -> bool:
 
 @compatibility(is_backward_compatible=False)
 @contextmanager
-def set_current_meta(node, pass_name=""):
+def set_current_meta(node: Node, pass_name: str = "") -> Iterator[None]:
     global current_meta
     if should_preserve_node_meta and node.meta:
         saved_meta = current_meta
@@ -465,7 +472,7 @@ def get_current_meta() -> dict[str, Any]:
 
 @compatibility(is_backward_compatible=False)
 @contextmanager
-def set_current_replay_node(node):
+def set_current_replay_node(node: Node | None) -> Iterator[None]:
     """
     Set the currently replay node. If `current_replay_node` is not None,
     then we're re-generating the `current_replay_node` in FunctionalTensorMode.
@@ -481,7 +488,7 @@ def set_current_replay_node(node):
 
 
 @compatibility(is_backward_compatible=False)
-def get_current_replay_node():
+def get_current_replay_node() -> Node | None:
     """
     Get the currently replay node
     """
@@ -522,7 +529,7 @@ def _get_custom_metadata(gm: GraphModule) -> str:
     if not isinstance(gm, GraphModule):
         raise AssertionError(f"Expected GraphModule, got {type(gm)}")
 
-    def helper(gm: GraphModule):
+    def helper(gm: GraphModule) -> list[Any]:
         custom_metadata = []
         for node in gm.graph.nodes:
             if hasattr(node, "meta") and node.meta.get("custom", None):
@@ -530,7 +537,10 @@ def _get_custom_metadata(gm: GraphModule) -> str:
             if node.op == "get_attr" and isinstance(
                 getattr(gm, node.target), GraphModule
             ):
-                custom_metadata.append(helper(getattr(gm, node.target)))
+                custom_metadata.append(
+                    # pyrefly: ignore[bad-argument-type]
+                    helper(getattr(gm, node.target))
+                )
         return custom_metadata
 
     return "\n".join(str(x) for x in helper(gm))

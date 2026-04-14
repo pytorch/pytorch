@@ -34,7 +34,7 @@ from torch._subclasses.meta_utils import (
     is_sparse_compressed,
     MetaConverter,
 )
-from torch._utils import render_call
+from torch._utils import _is_privateuse1_backend_available, render_call
 from torch.fx.immutable_collections import immutable_dict
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -664,7 +664,9 @@ class SymNumberMemoDescriptor:
         return r
 
     def __set__(
-        self, obj: FakeTensor, value: torch.SymInt | torch.SymFloat | None
+        self,
+        obj: FakeTensor,
+        value: torch.SymInt | torch.SymFloat | torch.SymBool | int | float | None,
     ) -> None:
         if value is None:
             setattr(obj, self._memo(obj), None)
@@ -1436,6 +1438,7 @@ class FakeTensorMode(TorchDispatchMode):
         return not (
             torch.cuda.is_available()
             or (hasattr(torch, "hpu") and torch.hpu.is_available())
+            or _is_privateuse1_backend_available()
         )
 
     @property
@@ -2740,9 +2743,7 @@ class FakeTensorMode(TorchDispatchMode):
                                 "self.shape_env must not be None for symbolic Eq"
                             )
 
-                        self.shape_env.set_real_tensor_prop_unbacked_vals(
-                            s, int(real_t)
-                        )
+                        self.shape_env.set_real_tensor_prop_unbacked_vals(s, real_t)
 
             if real_out is not nil:
                 # cross check fake/real outputs, and optionally override fake kernel mismatches
@@ -2903,8 +2904,10 @@ class FakeTensorMode(TorchDispatchMode):
         # and then afterwards wrapping them to a FakeTensor
         for run_impl_check, op_impl in op_implementations_checks:
             if run_impl_check(func):
+                # pyrefly: ignore [bad-argument-count]
                 op_impl_out = op_impl(self, func, *args, **kwargs)
                 if op_impl_out is not NotImplemented:
+                    # pyrefly: ignore [bad-return]
                     return maybe_propagate_real_tensors(op_impl_out)
 
         def maybe_run_unsafe_fallback(
@@ -3075,7 +3078,7 @@ class FakeTensorMode(TorchDispatchMode):
 
     def create_symbolic_nested_int(
         self, *, nt_tensor_id: int | None = None
-    ) -> torch.SymInt:
+    ) -> IntLikeType:
         # See Note: [Creating symbolic nested int]
         # Returned nested int always has coeff=1; multiply the result by coeff if needed
         import torch.nested._internal.nested_tensor

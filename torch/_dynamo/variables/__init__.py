@@ -22,13 +22,13 @@ from .builtin import (
     BuiltinVariable,
     DictBuiltinVariable,
     IterBuiltinVariable,
+    ListBuiltinVariable,
 )
 from .constant import (
     CONSTANT_VARIABLE_FALSE,
     CONSTANT_VARIABLE_NONE,
     CONSTANT_VARIABLE_TRUE,
     ConstantVariable,
-    EnumVariable,
 )
 from .ctx_manager import (
     CatchWarningsCtxManagerVariable,
@@ -58,14 +58,9 @@ from .dicts import (
     ConstDictVariable,
     DefaultDictVariable,
     DictItemsVariable,
-    DictKeySetVariable,
     DunderDictVariable,
-    FrozensetVariable,
     MappingProxyVariable,
     NNModuleHooksDictVariable,
-    OrderedSetClassVariable,
-    OrderedSetVariable,
-    SetVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable
 from .functions import (
@@ -114,7 +109,6 @@ from .lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
-    NamedTupleVariable,
     RangeVariable,
     SliceVariable,
     TupleIteratorVariable,
@@ -151,6 +145,13 @@ from .nn_module import (
 )
 from .optimizer import OptimizerVariable
 from .sdpa import SDPAParamsVariable
+from .sets import (
+    DictKeySetVariable,
+    FrozensetVariable,
+    OrderedSetClassVariable,
+    OrderedSetVariable,
+    SetVariable,
+)
 from .streams import (
     CudaStreamVariable,
     EventVariable,
@@ -171,8 +172,11 @@ from .user_defined import (
     FrozenDataClassVariable,
     InspectVariable,
     MutableMappingVariable,
+    NamedTupleVariable,
     RemovableHandleVariable,
+    StructSequenceVariable,
     UserDefinedClassVariable,
+    UserDefinedConstantVariable,
     UserDefinedDictVariable,
     UserDefinedExceptionClassVariable,
     UserDefinedExceptionObjectVariable,
@@ -209,7 +213,6 @@ __all__ = [
     "DeletedVariable",
     "DictKeySetVariable",
     "DynamoConfigPatchVariable",
-    "EnumVariable",
     "FakeItemVariable",
     "GetAttrVariable",
     "GradModeVariable",
@@ -221,9 +224,9 @@ __all__ = [
     "LambdaVariable",
     "LazyConstantVariable",
     "LazyVariableTracker",
+    "ListBuiltinVariable",
     "ListIteratorVariable",
     "ListVariable",
-    "NamedTupleVariable",
     "NestedUserFunctionVariable",
     "CellVariable",
     "NewGlobalVariable",
@@ -256,6 +259,8 @@ __all__ = [
     "UntypedStorageVariable",
     "UserDefinedClassVariable",
     "UserDefinedTupleVariable",
+    "NamedTupleVariable",
+    "StructSequenceVariable",
     "UserDefinedObjectVariable",
     "UserFunctionVariable",
     "UserMethodVariable",

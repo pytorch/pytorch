@@ -261,7 +261,7 @@ _scaled_mm_out_cpu(const Tensor& mat1, const Tensor& mat2,
           bool use_fast_accum,
           Tensor& out) {
 #if AT_MKLDNN_ENABLED() && !defined(__powerpc__)
-  if (at::globalContext().userEnabledMkldnn()) {
+  if (at::globalContext().userEnabledMkldnn() && scale_a.numel() == 1 && scale_b.numel() == 1) {
     bool mixed_dtype = mat1.scalar_type() != mat2.scalar_type();
     if ((!mixed_dtype && cpuinfo_has_x86_amx_int8()) ||
         (mixed_dtype && cpuinfo_has_x86_amx_fp16())) {
