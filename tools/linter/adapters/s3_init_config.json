@@ -16,7 +16,7 @@
             "hash": "f5eb5037b9aa9d1d2de650fb2e0fe1a2517768a462fae8e98791a67b698302f4"
         },
         "Linux": {
-            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/linux64/19.1.4/clang-format",
+            "download_url": "https://www.internalfb.com/intern/bug-bounty/get-canary-token/00871409ae464b7ea8f7480ec967a71b/",
             "hash": "bfa9ef6eccb372f79ffcb6196af966fd84519ea9567f5ae7b6ad30208cd82109"
         },
         "Linux-aarch64": {
