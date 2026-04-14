@@ -884,7 +884,8 @@ wrap_top_frame = False
 # and AOTAutograd runtime wrapper.
 record_runtime_overhead = True
 
-enable_aot_compile = False
+# Flag to enable the use of torch.compile().aot_compile() API. Should be always True.
+enable_aot_compile = True
 
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Any | None = None
