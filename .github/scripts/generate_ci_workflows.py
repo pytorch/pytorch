@@ -103,31 +103,8 @@ class OperatingSystem:
     LINUX_S390X = "linux-s390x"
 
 
-# TODO: Remove linux workflow lists once ROCm, XPU, and s390x builds are
-# migrated to the container: directive (linux-binary-manywheel.yml).
-_LINUX_WHEEL_CONFIGS = generate_binary_build_matrix.generate_wheels_matrix(
-    OperatingSystem.LINUX
-)
-
-LINUX_BINARY_BUILD_WORFKLOWS = [
-    BinaryBuildWorkflow(
-        os=OperatingSystem.LINUX,
-        package_type="manywheel",
-        build_configs=_LINUX_WHEEL_CONFIGS,
-        ciflow_config=CIFlowConfig(
-            labels={
-                LABEL_CIFLOW_BINARIES,
-                LABEL_CIFLOW_BINARIES_WHEEL,
-                LABEL_CIFLOW_BINARIES_LIBTORCH,
-            },
-            isolated_workflow=True,
-        ),
-        libtorch_extraction_configs=generate_binary_build_matrix.generate_libtorch_extraction_configs(
-            OperatingSystem.LINUX,
-            _LINUX_WHEEL_CONFIGS,
-        ),
-    ),
-]
+# Linux x86 and aarch64 builds are handled by linux-binary-manywheel.yml
+# (container: directive). Only s390x remains on the legacy Jinja2 path.
 
 _WINDOWS_WHEEL_CONFIGS = generate_binary_build_matrix.generate_wheels_matrix(
     OperatingSystem.WINDOWS
@@ -229,20 +206,6 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
     ),
 ]
 
-AARCH64_BINARY_BUILD_WORKFLOWS = [
-    BinaryBuildWorkflow(
-        os=OperatingSystem.LINUX_AARCH64,
-        package_type="manywheel",
-        build_configs=generate_binary_build_matrix.generate_wheels_matrix(
-            OperatingSystem.LINUX_AARCH64
-        ),
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
-            isolated_workflow=True,
-        ),
-    ),
-]
-
 S390X_BINARY_BUILD_WORKFLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.LINUX_S390X,
@@ -269,17 +232,8 @@ def main() -> None:
         undefined=jinja2.StrictUndefined,
     )
 
-    # TODO: Remove linux templates once ROCm, XPU, s390x are migrated
-    # to the container: directive (linux-binary-manywheel.yml).
+    # TODO: Remove s390x template once migrated to container: directive.
     template_and_workflows = [
-        (
-            jinja_env.get_template("linux_binary_build_workflow.yml.j2"),
-            LINUX_BINARY_BUILD_WORFKLOWS,
-        ),
-        (
-            jinja_env.get_template("linux_binary_build_workflow.yml.j2"),
-            AARCH64_BINARY_BUILD_WORKFLOWS,
-        ),
         (
             jinja_env.get_template("linux_binary_build_workflow.yml.j2"),
             S390X_BINARY_BUILD_WORKFLOWS,
