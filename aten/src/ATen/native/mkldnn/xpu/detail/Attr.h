@@ -336,9 +336,9 @@ class Attr {
   }
 
   dnnl::post_ops extract_post_ops() {
-    dnnl_post_ops_ = dnnl::post_ops();
-    emit_post_ops_for_matmul_cache_and_dnnl(dnnl_post_ops_);
-    return dnnl_post_ops_;
+    dnnl::post_ops po;
+    emit_post_ops_for_matmul_cache_and_dnnl(po);
+    return po;
   }
 
   bool with_sum() {
@@ -434,7 +434,6 @@ class Attr {
                         // to int8, only works for int8 case
   int64_t q_zero_point_ = 0;
   std::vector<PostOpParam> ops_params_; // series of post ops
-  dnnl::post_ops dnnl_post_ops_;
 };
 
 static inline void construct_attr_for_unary(
