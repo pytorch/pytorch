@@ -173,28 +173,15 @@ struct PostOpsMatmulKeySink {
 
   void append_binary(
       dnnl::algorithm aalgorithm, const dnnl::memory::desc& src1_desc) {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(cur_ != nullptr);
-    (void)aalgorithm;
-    (void)src1_desc;
-    const PostOpParam& op = *cur_;
-    key.push_back(static_cast<dnnl::memory::dim>(static_cast<int>(op.algo_)));
-    if (op.binary_.defined()) {
-      key.push_back(static_cast<dnnl::memory::dim>(op.binary_.dim()));
-      for (int64_t i = 0; i < op.binary_.dim(); ++i) {
-        key.push_back(op.binary_.size(i));
-        key.push_back(op.binary_.stride(i));
-      }
-      key.push_back(static_cast<dnnl::memory::dim>(
-          static_cast<int>(c10::toUnderlying(op.binary_.scalar_type()))));
-    } else {
+    key.push_back(static_cast<dnnl::memory::dim>(static_cast<int>(aalgorithm)));
+    const auto md_dims = src1_desc.get_dims();
+    if (md_dims.empty()) {
       key.push_back(-1);
-    }
-    const auto md_dims = op.meta_.get_dims();
-    if (!md_dims.empty()) {
+    } else {
       key.insert(key.end(), md_dims.begin(), md_dims.end());
       key.push_back(static_cast<dnnl::memory::dim>(
-          static_cast<int>(op.meta_.get_data_type())));
-      const auto md_strides = op.meta_.get_strides();
+          static_cast<int>(src1_desc.get_data_type())));
+      const auto md_strides = src1_desc.get_strides();
       key.insert(key.end(), md_strides.begin(), md_strides.end());
     }
   }
