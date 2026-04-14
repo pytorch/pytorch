@@ -49,6 +49,8 @@ from torch.utils._python_dispatch import (
     _get_current_dispatch_mode,
     _get_current_dispatch_mode_stack,
     is_in_torch_dispatch_mode,
+    is_traceable_wrapper_subclass,
+    is_traceable_wrapper_subclass_type,
     TorchDispatchMode,
 )
 from torch.utils._pytree import tree_map, tree_map_only
@@ -1079,6 +1081,83 @@ $6: f32[1] = torch._ops.aten.add_.Tensor($1, $5)""",
 
         self.assertEqual(type(torch.full_like(MyTensor(2), 1.0)), MyTensor)
         self.assertEqual(type(torch.randint_like(MyTensor(2), high=3)), MyTensor)
+
+    def test_traceable_wrapper_subclass_protocol_runtime_check(self) -> None:
+        class WrapperBase(torch.Tensor):
+            elem: torch.Tensor
+
+            __slots__ = ["elem"]
+
+            @staticmethod
+            def __new__(cls, elem):
+                r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+                    cls,
+                    elem.size(),
+                    dtype=elem.dtype,
+                    layout=elem.layout,
+                    device=elem.device,
+                    requires_grad=elem.requires_grad,
+                    strides=elem.stride(),
+                    storage_offset=elem.storage_offset(),
+                )
+                r.elem = elem
+                return r
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                raise RuntimeError("NYI")
+
+        class StaticUnflattenWrapper(WrapperBase):
+            def __tensor_flatten__(self):
+                return ["elem"], {"kind": "static"}
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
+                return StaticUnflattenWrapper(inner_tensors["elem"])
+
+        class ClassmethodUnflattenWrapper(WrapperBase):
+            def __tensor_flatten__(self):
+                return ["elem"], {"kind": "classmethod"}
+
+            @classmethod
+            def __tensor_unflatten__(
+                cls, inner_tensors, metadata, outer_size, outer_stride
+            ):
+                return cls(inner_tensors["elem"])
+
+        base = torch.randn(2, 2)
+        static = StaticUnflattenWrapper(base)
+        classmethod_wrapper = ClassmethodUnflattenWrapper(base)
+
+        self.assertFalse(is_traceable_wrapper_subclass(base))
+        self.assertTrue(is_traceable_wrapper_subclass(static))
+        self.assertTrue(is_traceable_wrapper_subclass(classmethod_wrapper))
+        self.assertTrue(is_traceable_wrapper_subclass_type(type(static)))
+        self.assertTrue(
+            is_traceable_wrapper_subclass_type(type(classmethod_wrapper))
+        )
+        self.assertFalse(is_traceable_wrapper_subclass_type(torch.Tensor))
+
+        static_attrs, static_meta = static.__tensor_flatten__()
+        static_rebuilt = type(static).__tensor_unflatten__(
+            {attr: getattr(static, attr) for attr in static_attrs},
+            static_meta,
+            static.size(),
+            static.stride(),
+        )
+        self.assertIs(type(static_rebuilt), StaticUnflattenWrapper)
+
+        classmethod_attrs, classmethod_meta = classmethod_wrapper.__tensor_flatten__()
+        classmethod_rebuilt = type(classmethod_wrapper).__tensor_unflatten__(
+            {
+                attr: getattr(classmethod_wrapper, attr)
+                for attr in classmethod_attrs
+            },
+            classmethod_meta,
+            classmethod_wrapper.size(),
+            classmethod_wrapper.stride(),
+        )
+        self.assertIs(type(classmethod_rebuilt), ClassmethodUnflattenWrapper)
 
     def test_make_fx_with_subclass(self) -> None:
         def f(x, y):
