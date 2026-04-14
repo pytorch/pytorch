@@ -98,7 +98,7 @@ struct alignas(2) Half {
   inline C10_HOST_DEVICE Half(float value);
   inline C10_HOST_DEVICE operator float() const;
 #if defined(C10_HAS_FLOAT16_TYPE)
-  inline Half(_Float16 value);
+  explicit inline Half(_Float16 value);
   inline operator _Float16() const;
 #endif
 #endif
