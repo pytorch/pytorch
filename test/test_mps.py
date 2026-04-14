@@ -16629,15 +16629,12 @@ class TestExecutableCache(TestCaseMPS):
 class TestGraphCapture(TestCaseMPS):
     """Tests for torch.mps.graph_capture / graph_replay and torch.mps.MPSGraph.
 
-    Capture records ops that go through MPSStream::executeMPSGraph (matmul,
-    relu, gelu, softmax, layer_norm, nn.Linear, etc.).  Ops that use raw Metal
-    encoders (elementwise +, *, sigmoid, exp, tanh) are not captured.
-    Models must consist entirely of MPSGraph-routed ops for replay to produce
-    correct results with updated inputs — the same constraint as torch.cuda.graph.
+    Capture records all MPS ops: both MPSGraph-routed ops (matmul, linear, etc.)
+    and raw Metal kernel dispatches (elementwise +, *, sigmoid, etc.) via the
+    MPSRecordingEncoder wrapper at MPSStream::commandEncoder().
     """
 
     def _simple_model(self, x):
-        # Uses only MPSGraph-routed ops: matmul + relu.
         return torch.relu(x @ x)
 
     def test_replay_matches_eager(self):
@@ -16774,37 +16771,37 @@ class TestGraphCapture(TestCaseMPS):
         self.assertEqual(out, expected)
 
     def test_transformer_encoder_correctness(self):
-        # TransformerEncoderLayer mixes captured (MPSGraph) and non-captured ops
-        # (layernorm, gelu use raw Metal encoders). Verify the capture pass produces
-        # numerically correct output relative to a plain eager forward pass.
-        # Replay correctness for partially-captured models is not asserted here;
-        # full replay correctness is covered by test_mlp_correctness which uses a
-        # fully-captured op chain.
+        # TransformerEncoderLayer uses both MPSGraph ops and raw Metal kernels.
+        # With the MPSRecordingEncoder wrapper, all ops are captured.
+        # Known issue: replay with new input diverges for TransformerEncoder
+        # (likely SDPA internal temporaries not bound to captured buffers).
+        # Capture pass correctness and replay stability are verified here;
+        # full replay-with-new-input correctness is covered by test_mlp_correctness.
+        torch._C._mps_graphCaptureReset()
         d_model, nhead, seq, batch = 64, 4, 16, 2
         layer = torch.nn.TransformerEncoderLayer(
             d_model=d_model, nhead=nhead, dim_feedforward=128,
             batch_first=True, norm_first=True,
-        ).to("mps").to(torch.float16).eval()
-        x = torch.randn(batch, seq, d_model, device="mps", dtype=torch.float16)
+        ).to("mps").eval()
+        x = torch.randn(batch, seq, d_model, device="mps")
 
         with torch.no_grad():
-            eager_out = layer(x).float().cpu()
+            eager_out = layer(x).cpu()
         torch.mps.synchronize()
 
         with torch.mps.graph_capture():
             with torch.no_grad():
                 cap_out = layer(x)
         torch.mps.synchronize()
-        # The capture pass runs all ops normally — output must match eager.
         self.assertTrue(
-            torch.allclose(eager_out, cap_out.float().cpu(), atol=1e-2, rtol=1e-2),
-            f"capture vs eager max_diff={(eager_out - cap_out.float().cpu()).abs().max():.5f}",
+            torch.allclose(eager_out, cap_out.cpu(), atol=1e-4, rtol=1e-4),
+            f"capture vs eager max_diff={(eager_out - cap_out.cpu()).abs().max():.5f}",
         )
 
         # Replay must not crash and must produce finite values.
         torch.mps.graph_replay()
         torch.mps.synchronize()
-        result = cap_out.float().cpu()
+        result = cap_out.cpu()
         self.assertFalse(result.isnan().any(), "replay produced NaN")
         self.assertFalse(result.isinf().any(), "replay produced Inf")
 

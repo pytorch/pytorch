@@ -256,10 +256,6 @@ class MPSGraph:
     * Tensor shapes must not change between capture and replays.
     * Input data must be updated **in-place** via ``.copy_()`` before each replay.
     * MPS profiling must be disabled during capture.
-    * Only ops routed through ``MPSStream::executeMPSGraph`` are captured.
-      Elementwise ops that use raw Metal encoders (``sigmoid``, ``exp``,
-      ``tanh``, ``layernorm``) are not captured and will execute eagerly
-      during replay.
     """
 
     def capture_begin(self) -> None:
@@ -323,8 +319,6 @@ def graph_capture():
     * Input data must be updated **in-place** via ``.copy_()`` before each
       replay — do **not** create new tensors or reassign variables.
     * MPS profiling must be disabled during capture.
-    * Ops that go through raw Metal encoders (``torch.mps.synchronize``,
-      explicit copies, etc.) are executed eagerly and not captured.
 
     Example::
 
