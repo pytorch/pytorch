@@ -332,9 +332,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-tsan* ]]; then
     # interpreter that has the TSan runtime.
     export PATH=/opt/python/cp314-cp314t+tsan/bin:$PATH
     python -m pip install "$(echo dist/*.whl)[opt-einsum]"
-    TSAN_LOG_DIR=$(pwd)/test/test-reports/tsan
-    mkdir -p "$TSAN_LOG_DIR"
-    export TSAN_OPTIONS="log_path=$TSAN_LOG_DIR/tsan"
+    export TSAN_OPTIONS="log_path=$(pwd)/test/test-reports/tsan_toprint.log"
     export PYTORCH_TEST_WITH_TSAN=1
 fi
 
@@ -362,13 +360,14 @@ test_tsan() {
   # script when BUILD_ENVIRONMENT matches *-tsan*.
   python test/test_tsan.py -v
 
-  # Display and check TSan logs. TSan appends .<pid> to log_path.
-  TSAN_LOG_DIR=$(pwd)/test/test-reports/tsan
-  if ls "$TSAN_LOG_DIR"/tsan.* 1>/dev/null 2>&1; then
-    echo "=== TSan reports ==="
-    cat "$TSAN_LOG_DIR"/tsan.*
-    echo "=== End TSan reports ==="
-    echo "TSan detected data races (see above)"
+  # TSan appends .<pid> to log_path. Merge all reports into a single
+  # file with the _toprint.log suffix so the CI "Print remaining test
+  # logs" step picks them up automatically.
+  TSAN_REPORT=$(pwd)/test/test-reports/tsan_toprint.log
+  if ls "${TSAN_REPORT}".* 1>/dev/null 2>&1; then
+    cat "${TSAN_REPORT}".* > "${TSAN_REPORT}"
+    rm -f "${TSAN_REPORT}".*
+    echo "TSan detected data races (see test-reports/tsan_toprint.log)"
     exit 1
   fi
 

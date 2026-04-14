@@ -7,24 +7,31 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class TestTSan(TestCase):
-    def test_data_race(self):
-        # Intentional data race: multiple threads doing unsynchronized
-        # in-place operations on a shared tensor. This should trigger a
-        # TSan error, confirming the sanitizer is working.
-        for _ in range(100):
-            shared = torch.zeros(64, 64)
-            barrier = threading.Barrier(4)
+    def test_interned_strings_race(self):
+        # Exercise a known data race in InternedStringsTable
+        # (python_dimname.cpp): concurrent THPDimname_parse calls on
+        # new dimname strings trigger unsynchronized find/emplace on a
+        # shared ska::flat_hash_map.
+        barrier = threading.Barrier(4)
 
-            def fn():
-                barrier.wait()
-                for _ in range(100):
-                    shared.add_(1)
+        def fn(names):
+            barrier.wait()
+            for name in names:
+                torch.tensor([1], names=[name])
 
-            threads = [threading.Thread(target=fn) for _ in range(4)]
-            for t in threads:
-                t.start()
-            for t in threads:
-                t.join()
+        # Each thread parses unique dimname strings so that addMapping
+        # (emplace) races with lookup (find) across threads.
+        thread_names = [
+            [f"dim_a_{i}" for i in range(100)],
+            [f"dim_b_{i}" for i in range(100)],
+            [f"dim_c_{i}" for i in range(100)],
+            [f"dim_d_{i}" for i in range(100)],
+        ]
+        threads = [threading.Thread(target=fn, args=(names,)) for names in thread_names]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
 
 
 if __name__ == "__main__":
