@@ -156,7 +156,6 @@ struct PostOpsMatmulKeySink {
   void append_eltwise(
       dnnl::algorithm aalgorithm, float alpha, float beta) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(cur_ != nullptr);
-    push_f32(key, cur_->scale_);
     push_f32(key, alpha);
     push_f32(key, beta);
     key.push_back(static_cast<dnnl::memory::dim>(static_cast<int>(aalgorithm)));
@@ -178,7 +177,6 @@ struct PostOpsMatmulKeySink {
     (void)aalgorithm;
     (void)src1_desc;
     const PostOpParam& op = *cur_;
-    push_f32(key, op.scale_);
     key.push_back(static_cast<dnnl::memory::dim>(static_cast<int>(op.algo_)));
     if (op.binary_.defined()) {
       key.push_back(static_cast<dnnl::memory::dim>(op.binary_.dim()));
