@@ -215,12 +215,11 @@ static void moveConstantTensorsOutOfSubgraph(
     const std::shared_ptr<Graph>& tensorexpr_graph) {
   auto parent = tensorexpr_graph_node->owningGraph();
 
-  auto env = [&](Value* v) {
+  auto env = [&](Value* v) -> Value* {
     TORCH_INTERNAL_ASSERT(
         false,
         "this should never happen since constant nodes do not have any inputs",
         v->debugName());
-    return v;
   };
 
   WithInsertPoint wip(tensorexpr_graph_node);
