@@ -1018,7 +1018,7 @@ def convolution_backward_lowering(
             grad_out = ir.ExternKernel.require_channels_last(grad_out)  # type: ignore[assignment]
             layout_dw = conv_bwd_weight_layout(grad_out, input, weight, **kwargs)
         else:
-            # Check output node's stride instead of dry running conv_bwd_weight_layout
+            guard = V.graph.sizevars.guard_int_seq
             stride_order = ir.get_stride_order(guard(layout_dw.stride))
             input = ir.ExternKernel.require_stride_order(input, stride_order)  # type: ignore[assignment]
             grad_out = ir.ExternKernel.require_stride_order(grad_out, stride_order)  # type: ignore[assignment]
@@ -1072,7 +1072,7 @@ def convolution_backward_lowering(
             weight = ir.ExternKernel.require_channels_last(weight)  # type: ignore[assignment]
             layout_dx = conv_bwd_input_layout(grad_out, input, weight, **kwargs)
         else:
-            # Check output node's stride instead of dry running conv_bwd_input_layout
+            guard = V.graph.sizevars.guard_int_seq
             stride_order = ir.get_stride_order(guard(layout_dx.stride))
             grad_out = ir.ExternKernel.require_stride_order(grad_out, stride_order)  # type: ignore[assignment]
             weight = ir.ExternKernel.require_stride_order(weight, stride_order)  # type: ignore[assignment]
