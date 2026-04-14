@@ -3,7 +3,6 @@
 """Test examples for NEP 50."""
 
 import itertools
-import sys
 from unittest import skipIf as skipif, SkipTest
 
 
@@ -32,6 +31,7 @@ from torch._numpy import (  # noqa: F401
 from torch._numpy.testing import assert_allclose
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_WINDOWS,
     parametrize,
     run_tests,
     TestCase,
@@ -224,7 +224,7 @@ class TestCompareToNumpy(TestCase):
             if result is not None and result_numpy is not None:
                 expected_numpy_dtype = result_numpy.dtype
                 expected_torch_dtype = result.tensor.numpy().dtype
-                if sys.platform == "win32":
+                if IS_WINDOWS:
                     if (
                         array.tensor.numpy().dtype != _np.bool_
                         and result.tensor.numpy().dtype != result_numpy.dtype

@@ -23,6 +23,7 @@ from torch.testing._internal.common_methods_invocations import (
 )
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
+    IS_WINDOWS,
     run_tests,
     skipIfRocm,
     TestCase,
@@ -154,7 +155,7 @@ class TestExportOnFakeCuda(TestCase):
     # Running this on all ops in op_db is too slow, so we only run on a selected subset
     @onlyCUDA
     @unittest.skipIf(
-        sys.platform == "win32",
+        IS_WINDOWS,
         'Subprocess with CUDA_VISIBLE_DEVICES="" imports op_db which triggers '
         "get_device_capability(); 0 devices raises Invalid device id on Windows.",
     )
@@ -225,7 +226,7 @@ for op in ops:
 
     @unittest.skipIf(not torch.backends.cuda.is_built(), "requires CUDA build")
     @unittest.skipIf(
-        sys.platform == "win32",
+        IS_WINDOWS,
         "Failing on Windows, device_count() changes from 0 to 1 ",
     )
     def test_preserve_original_behavior(self):
