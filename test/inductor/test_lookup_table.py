@@ -906,6 +906,10 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
     @fresh_cache()
     def test_valid_lookup_table_entry(self, operation):
         """Test when there's a valid entry for the operation"""
+        if operation == "addmm" and torch.version.hip:
+            self.skipTest(
+                "skipping on ROCm since https://github.com/pytorch/pytorch/issues/179955 didn't skip as expected"
+            )
         k = 256 if operation == "mm_plus_mm" else 64
         tensors = self.create_tensors(operation, k=k)
 
