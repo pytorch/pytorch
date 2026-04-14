@@ -252,9 +252,14 @@ def invoke_subgraph_placeholder(func, *args, **kwargs):
         def _invoke_subgraph_placeholder_wrapper(func, args):
             return invoke_subgraph_placeholder(func, *args)
 
-        from torch._higher_order_ops.utils import _hop_compile_and_call
+        from torch._higher_order_ops.utils import setup_compilation_env
 
-        return _hop_compile_and_call(_invoke_subgraph_placeholder_wrapper, (func, args))
+        with setup_compilation_env() as backend:
+            return torch.compile(
+                _invoke_subgraph_placeholder_wrapper,
+                backend=backend,
+                fullgraph=True,
+            )(func, args)
 
     return func(*args, **kwargs)
 

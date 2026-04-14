@@ -96,29 +96,10 @@ def _maybe_run_with_interpreter(fn):
     return maybe_interpreted_fn
 
 
-def _hop_compile_and_call(fn, args, kwargs=None):
-    """Compile and call fn with fullgraph=True for HOP eager execution.
-
-    Pre-activates the fullgraph counter so that compile_wrapper treats this as
-    a nested compile.  This avoids erroring when a non-infra dispatch mode
-    causes the frame to be skipped — the function still executes eagerly within
-    compile_wrapper and returns normally.
-    """
-    from torch._dynamo.eval_frame import set_fullgraph_compiled_frame_count
-
-    with setup_compilation_env() as backend:
-        old_count = set_fullgraph_compiled_frame_count(0)
-        try:
-            return torch.compile(fn, backend=backend, fullgraph=True)(
-                *args, **(kwargs or {})
-            )
-        finally:
-            set_fullgraph_compiled_frame_count(old_count)
-
-
 def _maybe_compile_and_run_fn(fn, *args):
     if not torch.compiler.is_dynamo_compiling():
-        return _hop_compile_and_call(fn, args)
+        with setup_compilation_env() as backend:  # type: ignore[attr-defined]
+            return torch.compile(fn, backend=backend, fullgraph=True)(*args)
     else:
         return fn(*args)
 

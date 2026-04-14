@@ -5269,7 +5269,6 @@ known_graph_breaks_tests = {
     "test_nested_checkpoint_same_graph_early_stop_False",  # dynamo disable
     "test_nested_checkpoint_same_graph_early_stop_True",  # dynamo disable
     "test_nested_checkpoint_set_early_stop",  # dynamo disable
-    "test_nested_checkpoint_set_early_stop_no_recompution_needed",  # TorchDispatchMode causes frame skip
     "test_nested_checkpoint_two_children_early_stop_False",  # dynamo disable
     "test_nested_checkpoint_two_children_early_stop_True",  # dynamo disable
     "test_custom_autograd_ac_early_stop",  # marked as skipped
