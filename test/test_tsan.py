@@ -1,6 +1,5 @@
 # Owner(s): ["module: ci"]
 
-import threading
 import weakref
 
 import torch
@@ -30,6 +29,7 @@ class TestTSan(TestCase):
         StopTheWorldGuard), this crashes from heap corruption due to data
         races on the shared hash maps.
         """
+
         def work():
             for _ in range(100):
                 d = {str(i): list(range(i % 10)) for i in range(20)}
