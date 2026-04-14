@@ -160,23 +160,7 @@ case "${GPU_ARCH_TYPE:-cpu}" in
         echo "CUDA ${CUDA_VERSION} environment configured"
         ;;
 
-    rocm)
-        export TH_BINARY_BUILD=1
-        # Source ROCm environment if already installed in the container
-        [[ -f /etc/rocm_env.sh ]] && source /etc/rocm_env.sh
-        echo "ROCm ${GPU_ARCH_VERSION} environment configured"
-        ;;
-
-    xpu)
-        export TH_BINARY_BUILD=1
-        # Source Intel OneAPI environment if already installed in the container
-        source /opt/intel/oneapi/compiler/latest/env/vars.sh 2>/dev/null || true
-        source /opt/intel/oneapi/pti/latest/env/vars.sh 2>/dev/null || true
-        source /opt/intel/oneapi/umf/latest/env/vars.sh 2>/dev/null || true
-        source /opt/intel/oneapi/ccl/latest/env/vars.sh 2>/dev/null || true
-        source /opt/intel/oneapi/mpi/latest/env/vars.sh 2>/dev/null || true
-        echo "XPU environment configured"
-        ;;
+    # ROCm and XPU use the legacy Docker-in-Docker workflow, not this script.
 
     cpu|cpu-aarch64|cpu-s390x|cpu-cxx11-abi)
         export TH_BINARY_BUILD=1

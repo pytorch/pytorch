@@ -634,45 +634,9 @@ def generate_manywheel_build_configs() -> list[dict[str, str]]:
             }
         )
 
-    # --- x86_64 ROCm ---
-    for rocm_ver in ROCM_ARCHES:
-        desired_cuda = translate_desired_cuda("rocm", rocm_ver)
-        configs.append(
-            {
-                "name": f"rocm{rocm_ver}",
-                "desired_cuda": desired_cuda,
-                "gpu_arch_type": "rocm",
-                "gpu_arch_version": rocm_ver,
-                "container_image": MANYWHEEL_CONTAINER_IMAGES[f"rocm{rocm_ver}"],
-                "extra_install_reqs": "",
-                "torch_cuda_arch_list": "",
-                "torch_nvcc_flags": "",
-                "pytorch_rocm_arch": PYTORCH_ROCM_ARCH,
-                "use_cuda": "0",
-                "use_gold_linker": "OFF",
-                "use_gloo_with_openssl": "ON",
-                "runs_on_build": MANYWHEEL_RUNNERS["build"]["x86_64"],
-            }
-        )
-
-    # --- x86_64 XPU ---
-    configs.append(
-        {
-            "name": "xpu",
-            "desired_cuda": "xpu",
-            "gpu_arch_type": "xpu",
-            "gpu_arch_version": "",
-            "container_image": MANYWHEEL_CONTAINER_IMAGES["xpu"],
-            "extra_install_reqs": PYTORCH_EXTRA_INSTALL_REQUIREMENTS["xpu"],
-            "torch_cuda_arch_list": "",
-            "torch_nvcc_flags": "",
-            "pytorch_rocm_arch": "",
-            "use_cuda": "0",
-            "use_gold_linker": "OFF",
-            "use_gloo_with_openssl": "ON",
-            "runs_on_build": MANYWHEEL_RUNNERS["build"]["x86_64"],
-        }
-    )
+    # TODO: Add ROCm and XPU once migrated to container: directive.
+    # They currently use the legacy Docker-in-Docker workflow
+    # (generated-linux-binary-manywheel-nightly.yml).
 
     # --- aarch64 CPU ---
     configs.append(
@@ -744,27 +708,7 @@ def generate_manywheel_test_configs() -> list[dict[str, str]]:
             }
         )
 
-    for rocm_ver in ROCM_ARCHES:
-        desired_cuda = translate_desired_cuda("rocm", rocm_ver)
-        configs.append(
-            {
-                "name": f"rocm{rocm_ver}",
-                "desired_cuda": desired_cuda,
-                "gpu_arch_type": "rocm",
-                "container_image": MANYWHEEL_CONTAINER_IMAGES[f"rocm{rocm_ver}"],
-                "runs_on": MANYWHEEL_RUNNERS["test_rocm"],
-            }
-        )
-
-    configs.append(
-        {
-            "name": "xpu",
-            "desired_cuda": "xpu",
-            "gpu_arch_type": "xpu",
-            "container_image": MANYWHEEL_CONTAINER_IMAGES["xpu"],
-            "runs_on": MANYWHEEL_RUNNERS["test_xpu"],
-        }
-    )
+    # TODO: Add ROCm and XPU once migrated to container: directive.
 
     configs.append(
         {
@@ -799,9 +743,7 @@ def generate_manywheel_upload_configs() -> list[dict[str, str]]:
     configs.append({"name": "cpu"})
     for cuda_ver in CUDA_ARCHES:
         configs.append({"name": f"cuda{cuda_ver}"})
-    for rocm_ver in ROCM_ARCHES:
-        configs.append({"name": f"rocm{rocm_ver}"})
-    configs.append({"name": "xpu"})
+    # TODO: Add ROCm and XPU once migrated to container: directive.
     configs.append({"name": "cpu-aarch64"})
     for aarch64_ver in CUDA_AARCH64_ARCHES:
         base_ver = _cuda_version_base(aarch64_ver)
