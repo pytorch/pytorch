@@ -1,0 +1,73 @@
+name: RHEL 9.6 Build and Test
+# Full pipeline test with all fixes applied
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+    paths:
+      - .ci/docker/rhel9/**
+      - .github/workflows/rhel-build-test.yml
+      - .github/workflows/build-rhel9-images.yml
+      - .github/workflows/_linux-build.yml
+      - .github/workflows/_linux-test.yml
+      - .github/actions/setup-linux/**
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+  artifact-metadata: read
+  attestations: read
+  checks: read
+  deployments: read
+  discussions: read
+  issues: read
+  models: read
+  packages: read
+  pages: read
+  pull-requests: read
+  repository-projects: read
+  security-events: read
+  statuses: read
+
+jobs:
+  build-docker-image:
+    name: Build RHEL 9.6 Docker Image
+    uses: ./.github/workflows/build-rhel9-images.yml
+    secrets: inherit
+
+  rhel-9_6-py3_12-gcc11-build:
+    needs: build-docker-image
+    name: rhel-9.6-py3.12-gcc11
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      runner_prefix: ""
+      runner: "linux.rhel9"
+      build-environment: linux-rhel9.6-cuda13.0-py3.12-gcc11
+      docker-image-name: ci-image:pytorch-rhel-9.6-py3.12-gcc11
+      cuda-arch-list: "9.0"
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 5, runner: "linux.rhel9" },
+          { config: "default", shard: 2, num_shards: 5, runner: "linux.rhel9" },
+          { config: "default", shard: 3, num_shards: 5, runner: "linux.rhel9" },
+          { config: "default", shard: 4, num_shards: 5, runner: "linux.rhel9" },
+          { config: "default", shard: 5, num_shards: 5, runner: "linux.rhel9" },
+        ]}
+    secrets: inherit
+
+  rhel-9_6-py3_12-gcc11-test:
+    name: rhel-9.6-py3.12-gcc11
+    uses: ./.github/workflows/_linux-test.yml
+    needs: rhel-9_6-py3_12-gcc11-build
+    with:
+      build-environment: linux-rhel9.6-cuda13.0-py3.12-gcc11
+      docker-image: ${{ needs.rhel-9_6-py3_12-gcc11-build.outputs.docker-image }}
+      test-matrix: ${{ needs.rhel-9_6-py3_12-gcc11-build.outputs.test-matrix }}
+      timeout-minutes: 600
+    secrets: inherit

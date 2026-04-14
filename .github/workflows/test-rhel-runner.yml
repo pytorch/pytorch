@@ -1,0 +1,36 @@
+name: test-rhel-runner
+# Test trigger with linux.rhel9
+on:
+  workflow_dispatch:
+
+jobs:
+  test-runner:
+    name: Test RHEL Runner
+    runs-on: linux.rhel9
+    steps:
+      - name: Check runner
+        run: |
+          echo "=== Runner Information ==="
+          echo "Runner OS: $(uname -a)"
+          echo "Runner hostname: $(hostname)"
+          echo "Python version: $(python3 --version)"
+          echo "GCC version: $(gcc --version | head -1)"
+
+      - name: Check RHEL version
+        run: |
+          echo "=== RHEL Version ==="
+          cat /etc/redhat-release || echo "Not a RHEL system"
+          cat /etc/os-release || true
+
+      - name: Check Docker
+        run: |
+          echo "=== Docker Information ==="
+          docker --version
+          docker ps -a || echo "Docker not running or no permission"
+
+      - name: System info
+        run: |
+          echo "=== System Resources ==="
+          echo "CPU: $(nproc) cores"
+          echo "Memory: $(free -h | grep Mem)"
+          echo "Disk: $(df -h /)"

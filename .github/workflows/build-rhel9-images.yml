@@ -1,0 +1,110 @@
+name: build-rhel9-images
+
+on:
+  workflow_dispatch:
+  workflow_call:
+  push:
+    branches:
+      - main
+      - release/*
+    paths:
+      - .ci/docker/rhel9/**
+      - .github/workflows/build-rhel9-images.yml
+    tags:
+      # Release candidate tags
+      - v[0-9]+.[0-9]+.0+-rc[0-9]+
+  pull_request:
+    paths:
+      - .ci/docker/rhel9/**
+      - .github/workflows/build-rhel9-images.yml
+
+permissions: read-all
+
+jobs:
+  build-rhel9-images:
+    runs-on: linux.rhel9
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        tag: ["cuda13.0"]
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Clean up stale podman containers and configure storage
+        shell: bash
+        run: |
+          # Clean up old containers and images (but don't reset storage)
+          podman container prune -f || true
+          podman image prune -f || true
+
+          # Create podman config directory
+          mkdir -p ~/.config/containers
+
+          # Only configure storage.conf if it doesn't already exist
+          # (runner may have pre-configured storage at /mnt/podman_storage/)
+          if [ ! -f ~/.config/containers/storage.conf ]; then
+            ACTUAL_HOME=$(eval echo ~)
+            cat > ~/.config/containers/storage.conf << EOF
+          [storage]
+          driver = "overlay"
+          runroot = "${ACTUAL_HOME}/.local/share/containers/storage"
+          graphroot = "${ACTUAL_HOME}/.local/share/containers/storage"
+
+          [storage.options]
+          additionalimagestores = []
+          pull_options = {enable_partial_images = "false", use_hard_links = "false", ostree_repos=""}
+
+          [storage.options.overlay]
+          mountopt = "nodev,metacopy=on"
+          EOF
+            mkdir -p ~/.local/share/containers/storage
+          fi
+
+          # Ensure podman short-name mode is permissive
+          if ! grep -q 'short-name-mode' ~/.config/containers/registries.conf 2>/dev/null; then
+            echo 'short-name-mode = "permissive"' > ~/.config/containers/registries.conf
+          fi
+
+          # Create temp directory
+          mkdir -p ~/tmp
+          export TMPDIR=$HOME/tmp
+
+      - name: Build and tag RHEL 9 Docker image
+        shell: bash
+        run: |
+          cd .ci/docker
+          docker build -f rhel9/Dockerfile -t ci-image:pytorch-rhel-9.6-py3.12-gcc11 .
+
+      - name: List built Docker images
+        run: |
+          echo "=== Newly built RHEL images ==="
+          docker images | grep -E "(ci-image|rhel9-builder|tmp\.)" | head -20
+          echo ""
+          echo "Build completed successfully!"
+          echo "Image ci-image:pytorch-rhel-9.6-py3.12-gcc11 is ready for PyTorch build"
+
+      - name: Export Docker image to persistent storage
+        shell: bash
+        run: |
+          # Create persistent directory for Docker images
+          mkdir -p /mnt/podman_storage/vpcuser/docker-images
+
+          # Remove old tar file if it exists (podman doesn't overwrite)
+          rm -f /mnt/podman_storage/vpcuser/docker-images/rhel9-py3.12-gcc11.tar
+          rm -f /mnt/podman_storage/vpcuser/docker-images/rhel9-py3.12-gcc11.tar.ready
+
+          # Export the image to tar file (use localhost/ prefix for podman compatibility)
+          echo "Exporting localhost/ci-image:pytorch-rhel-9.6-py3.12-gcc11 to tar file..."
+          docker save -o /mnt/podman_storage/vpcuser/docker-images/rhel9-py3.12-gcc11.tar localhost/ci-image:pytorch-rhel-9.6-py3.12-gcc11
+
+          # Verify the tar file was created
+          ls -lh /mnt/podman_storage/vpcuser/docker-images/rhel9-py3.12-gcc11.tar
+          echo "Image exported successfully to /mnt/podman_storage/vpcuser/docker-images/rhel9-py3.12-gcc11.tar"
+
+          # Create a .ready marker file to signal that the tar is complete
+          touch /mnt/podman_storage/vpcuser/docker-images/rhel9-py3.12-gcc11.tar.ready
+          echo "Ready marker created: rhel9-py3.12-gcc11.tar.ready"

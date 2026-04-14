@@ -14,10 +14,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # shellcheck source=./common-build.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 
-# Only change workspace permissions if passwordless sudo is available
-# (e.g. ROCm and s390x CI jobs lack it, and changing permissions
-# can leave the workspace in a bad state for cancelled jobs)
-if sudo -n true 2>/dev/null && [[ -d /var/lib/jenkins/workspace ]]; then
+# Do not change workspace permissions for ROCm and s390x CI jobs
+# as it can leave workspace with bad permissions for cancelled jobs
+if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && -d /var/lib/jenkins/workspace ]]; then
   # Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
   WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
   cleanup_workspace() {
@@ -1866,9 +1865,7 @@ EOF
     fi
 
     # Ensure invalid item is in the test output.
-    # Use a here-string instead of a pipe to avoid SIGPIPE when grep -q
-    # exits early on large output (causes exit code 141 with pipefail).
-    grep -q "${invalid_item_name}" <<< "${test_output}" && ret=$? || ret=$?
+    echo "${test_output}" | grep -q "${invalid_item_name}" && ret=$? || ret=$?
 
     if [ $ret -ne 0 ]; then
         cat << EOF

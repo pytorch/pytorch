@@ -129,6 +129,36 @@ jobs:
             )"
           fi
 
+  rhel-9_6-py3_12-gcc11-build:
+    name: rhel-9.6-py3.12-gcc11
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      runner_prefix: ""
+      runner: "linux.rhel9"
+      build-environment: linux-rhel9.6-cuda13.0-py3.12-gcc11
+      docker-image-name: ci-image:pytorch-rhel-9.6-py3.12-gcc11
+      cuda-arch-list: "9.0"
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 5, runner: "linux.rhel9" },
+          { config: "default", shard: 2, num_shards: 5, runner: "linux.rhel9" },
+          { config: "default", shard: 3, num_shards: 5, runner: "linux.rhel9" },
+          { config: "default", shard: 4, num_shards: 5, runner: "linux.rhel9" },
+          { config: "default", shard: 5, num_shards: 5, runner: "linux.rhel9" },
+        ]}
+    secrets: inherit
+
+  rhel-9_6-py3_12-gcc11-test:
+    name: rhel-9.6-py3.12-gcc11
+    uses: ./.github/workflows/_linux-test.yml
+    needs: rhel-9_6-py3_12-gcc11-build
+    with:
+      build-environment: linux-rhel9.6-cuda13.0-py3.12-gcc11
+      docker-image: ${{ needs.rhel-9_6-py3_12-gcc11-build.outputs.docker-image }}
+      test-matrix: ${{ needs.rhel-9_6-py3_12-gcc11-build.outputs.test-matrix }}
+      timeout-minutes: 600
+    secrets: inherit
+
   update-commit-hashes:
     runs-on: ubuntu-latest
     environment: update-commit-hash

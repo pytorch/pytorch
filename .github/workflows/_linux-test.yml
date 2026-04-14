@@ -179,21 +179,46 @@ jobs:
         run: echo "TPU_DOCKER_FLAGS=--privileged --network=host -e PJRT_DEVICE=TPU -e TPU_SKIP_MDS_QUERY -e TPU_TOPOLOGY -e TPU_WORKER_ID -e TPU_TOPOLOGY_WRAP -e TPU_CHIPS_PER_HOST_BOUNDS -e TPU_ACCELERATOR_TYPE -e TPU_RUNTIME_METRICS_PORTS -e TPU_TOPOLOGY_ALT -e HOST_BOUNDS -e TPU_HOST_BOUNDS -e VBAR_CONTROL_SERVICE_URL -e CHIPS_PER_HOST_BOUNDS -e TPU_WORKER_HOSTNAMES" >> "$GITHUB_ENV"
 
       - name: Login to ECR
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && !contains(inputs.build-environment, 'rhel')
         uses: ./.github/actions/ecr-login
         with:
           aws-role-to-assume: ${{ inputs.aws-role-to-assume }}
 
+      - name: Import RHEL Docker image from local storage
+        if: contains(inputs.build-environment, 'rhel')
+        shell: bash
+        run: |
+          IMAGE_TAR_PATH="/mnt/podman_storage/vpcuser/docker-images/rhel9-py3.12-gcc11.tar"
+          READY_MARKER="${IMAGE_TAR_PATH}.ready"
+          for i in {1..12}; do
+            if [ -f "${READY_MARKER}" ]; then break; fi
+            echo "Waiting for Docker image... (attempt $i/12)" && sleep 5
+          done
+          if [ -f "${IMAGE_TAR_PATH}" ]; then
+            docker load -i "${IMAGE_TAR_PATH}"
+            docker images | grep ci-image
+          else
+            echo "Error: RHEL image tar file not found at ${IMAGE_TAR_PATH}"
+            exit 1
+          fi
+
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && !contains(inputs.build-environment, 'rhel')
         with:
           docker-image-name: ${{ inputs.docker-image }}
 
+      - name: Set RHEL docker image
+        id: set-rhel-image
+        if: contains(inputs.build-environment, 'rhel')
+        shell: bash
+        run: |
+          echo "docker-image=${{ inputs.docker-image }}" >> "${GITHUB_OUTPUT}"
+
       - name: Use following to pull public copy of the image
         id: print-ghcr-mirror
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && !contains(inputs.build-environment, 'rhel')
         env:
           ECR_DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
         shell: bash
@@ -203,7 +228,7 @@ jobs:
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && !contains(inputs.build-environment, 'rhel')
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -218,6 +243,7 @@ jobs:
         with:
           driver-version: '580.82.07'
         if: ${{ !contains(matrix.runner, 'b200') }}
+        continue-on-error: true
 
       - name: Setup GPU_FLAG for docker run
         id: setup-gpu-flag
@@ -250,7 +276,7 @@ jobs:
         with:
           name: ${{ inputs.build-environment }}
           s3-bucket: ${{ inputs.s3-bucket }}
-          use-gha: ${{ inputs.use-gha }}
+          use-gha: ${{ contains(inputs.build-environment, 'rhel') || inputs.use-gha }}
 
       - name: Download TD artifacts
         continue-on-error: true
@@ -376,7 +402,7 @@ jobs:
           SCCACHE_BUCKET: ${{ !contains(matrix.runner, 'b200') && 'ossci-compiler-cache-circleci-v2' || '' }}
           SCCACHE_REGION: ${{ !contains(matrix.runner, 'b200') && 'us-east-1' || '' }}
           SHM_SIZE: ${{ steps.install-nvidia-driver.outputs.has-nvidia == 'true' && '2g' || '1g' }}
-          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image || steps.set-rhel-image.outputs.docker-image }}
           DOCKER_IMAGE_S390X: ${{ inputs.docker-image }}
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
@@ -424,6 +450,13 @@ jobs:
             # when job is cancelled
             DOCKER_SHELL_CMD="sleep 12h"
             USED_IMAGE="${DOCKER_IMAGE_S390X}"
+          elif [[ ${BUILD_ENVIRONMENT} == *"rhel"* ]]; then
+            # RHEL: no --shm-size with --ipc=host (Podman conflict)
+            SHM_OPTS=
+            JENKINS_USER="--user jenkins"
+            DOCKER_SHELL_CMD=
+            USED_IMAGE="${DOCKER_IMAGE}"
+            export PYTHON_TEST_EXTRA_OPTION="--keep-going"
           else
             SHM_OPTS="--shm-size=${SHM_SIZE}"
             JENKINS_USER="--user jenkins"
@@ -499,6 +532,7 @@ jobs:
             -e EXPORT_PROFILER_TRACE \
             -e ENABLE_TORCH_TRACE \
             -e ARTIFACTS_FILE_SUFFIX \
+            -e PYTHON_TEST_EXTRA_OPTION \
             -e TORCH_TPU \
             -e TORCH_TPU_TEXT_FILE \
             ${TPU_DOCKER_FLAGS:-} \
@@ -535,7 +569,7 @@ jobs:
       - name: Upload pytest cache if tests failed
         uses: ./.github/actions/pytest-cache-upload
         continue-on-error: true
-        if: failure() && steps.test.conclusion && steps.test.conclusion == 'failure' && inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: failure() && steps.test.conclusion && steps.test.conclusion == 'failure' && inputs.build-environment != 'linux-s390x-binary-manywheel' && !contains(inputs.build-environment, 'rhel')
         with:
           cache_dir: .pytest_cache
           shard: ${{ matrix.shard }}
@@ -581,7 +615,7 @@ jobs:
         if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
         with:
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.setup-linux.outputs.job-id }}
-          use-gha: ${{ inputs.use-gha }}
+          use-gha: ${{ contains(inputs.build-environment, 'rhel') || inputs.use-gha }}
           s3-bucket: ${{ inputs.s3-bucket }}
 
       - name: Collect backtraces from coredumps (if any)
@@ -600,7 +634,7 @@ jobs:
           path: ./**/core.[1-9]*
 
       - name: Upload utilization stats
-        if: ${{ always() && steps.test.conclusion && steps.test.conclusion != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
+        if: ${{ always() && steps.test.conclusion && steps.test.conclusion != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel' && !contains(inputs.build-environment, 'rhel') }}
         continue-on-error: true
         uses: ./.github/actions/upload-utilization-stats
         with:
@@ -612,7 +646,7 @@ jobs:
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
-        if: always() && steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false'
+        if: always() && steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' && !contains(inputs.build-environment, 'rhel')
 
       - name: Cleanup docker
         if: always() && inputs.build-environment == 'linux-s390x-binary-manywheel'
