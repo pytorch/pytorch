@@ -2546,15 +2546,15 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         loss_bwd = loss.backward()
 
         self.assertEqual(eager_loss_bwd, loss_bwd)
-        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.frame_count, 1)
 
         # Ndim change, recompile
         pred = model(torch.randn([10, 10, 10]))
-        self.assertEqual(cnt.frame_count, 4)
+        self.assertEqual(cnt.frame_count, 2)
 
         # Stable
         pred = model(torch.randn([10, 10, 10]))
-        self.assertEqual(cnt.frame_count, 4)
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_dunder_call_explicitly(self):
         # hooks should be triggered if explicit calling `__call__`

@@ -950,21 +950,29 @@ class _TorchDynamoContext:
         except TypeError:
             filename = None
 
-        wrap_root_module_call_with_hooks = (
-            isinstance(fn, types.MethodType)
-            and getattr(fn, "__name__", "") in {"_call_impl", "_wrapped_call_impl"}
-            and isinstance(getattr(fn, "__self__", None), torch.nn.Module)
-            and utils.nnmodule_has_hooks(fn.__self__, check_forward_hooks=True)
-        )
-        if config.debug_force_nested_calls:
-            fn = external_utils.wrap_inline(fn)
-        elif config.wrap_top_frame or wrap_root_module_call_with_hooks or (
+        wrap_root_module_call_with_hooks = False
+        if isinstance(fn, types.MethodType):
+            bound_module = getattr(fn, "__self__", None)
+            wrap_root_module_call_with_hooks = (
+                getattr(fn, "__name__", "") in {"_call_impl", "_wrapped_call_impl"}
+                and isinstance(bound_module, torch.nn.Module)
+                and utils.nnmodule_has_hooks(bound_module, check_forward_hooks=True)
+            )
+
+        wrap_builtin_without_frame = (
             (filename is None or trace_rules.check(fn) or top_level_in_graph)
             and (
                 getattr(fn, "__name__", "")
                 not in ["_call_impl", "_wrapped_call_impl", "_lazy_forward"]
             )
             and filename not in DONT_WRAP_FILES
+        )
+        if config.debug_force_nested_calls:
+            fn = external_utils.wrap_inline(fn)
+        elif (
+            config.wrap_top_frame
+            or wrap_root_module_call_with_hooks
+            or wrap_builtin_without_frame
         ):
             # call to a builtin without a frame for us to capture
             fn = external_utils.wrap_inline(fn)
