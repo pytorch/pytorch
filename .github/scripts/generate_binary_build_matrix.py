@@ -752,6 +752,40 @@ def generate_manywheel_upload_configs() -> list[dict[str, str]]:
     return configs
 
 
+def generate_manywheel_libtorch_configs() -> list[dict[str, str]]:
+    """Generate libtorch extraction configs for the manywheel workflow.
+
+    Each config extracts a libtorch package from a py3.10 wheel build.
+    """
+    build_configs = generate_manywheel_build_configs()
+    configs: list[dict[str, str]] = []
+    libtorch_variant = "shared-with-deps"
+
+    for bc in build_configs:
+        # XPU doesn't have libtorch
+        if bc["gpu_arch_type"] == "xpu":
+            continue
+        desired_cuda = bc["desired_cuda"]
+        gpu_arch_type = bc["gpu_arch_type"]
+        gpu_arch_version = bc["gpu_arch_version"]
+        build_name = (
+            f"libtorch-{gpu_arch_type}{gpu_arch_version}"
+            f"-{libtorch_variant}-release"
+        ).replace(".", "_")
+        configs.append(
+            {
+                "build_name": build_name,
+                "source_wheel_name": f"wheels-{bc['name']}-cp310",
+                "desired_cuda": desired_cuda,
+                "gpu_arch_type": gpu_arch_type,
+                "gpu_arch_version": gpu_arch_version,
+                "libtorch_variant": libtorch_variant,
+            }
+        )
+
+    return configs
+
+
 arch_version = ""
 for arch_version in CUDA_ARCHES:
     validate_nccl_dep_consistency(arch_version)
@@ -770,6 +804,7 @@ if __name__ == "__main__":
             "build-configs": generate_manywheel_build_configs(),
             "test-configs": generate_manywheel_test_configs(),
             "upload-configs": generate_manywheel_upload_configs(),
+            "libtorch-configs": generate_manywheel_libtorch_configs(),
         }
         print(json.dumps(result, indent=2))
         github_output = os.environ.get("GITHUB_OUTPUT")
