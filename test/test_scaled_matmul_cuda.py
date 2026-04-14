@@ -1335,10 +1335,9 @@ class TestFP8Matmul(TestCase):
                 x_fp8, x_scales, y_fp8, y_scales, output_dtype, bias
             )
 
-            if base_dtype in {torch.bfloat16, torch.float16}:
-                atol, rtol = 7e-2, 7e-2
-            else:
-                atol, rtol = 2e-3, 2e-3
+            # Numerical differences scale with sqrt(K), so tolerance needs to scale accordingly
+            # The cosine_sim check ensures that accumulation differences don't change the "direction" of the result
+            atol, rtol = 1e-3 * math.sqrt(K), 1e-3 * math.sqrt(K)
 
             self.assertEqual(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
 
