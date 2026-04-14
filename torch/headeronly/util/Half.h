@@ -67,8 +67,8 @@
 // __FLT16_MAX__ is defined by GCC/Clang when _Float16 is available.
 // Excluded on aarch64 (already has native float16_t from ARM NEON)
 // and during CUDA/HIP compilation (they have their own half types).
-#if defined(__FLT16_MAX__) && !defined(__aarch64__) && \
-    !defined(__CUDACC__) && !defined(__HIPCC__)
+#if defined(__FLT16_MAX__) && !defined(__aarch64__) && !defined(__CUDACC__) && \
+    !defined(__HIPCC__)
 #define C10_HAS_FLOAT16_TYPE 1
 #endif
 
@@ -98,7 +98,6 @@ struct alignas(2) Half {
   inline C10_HOST_DEVICE Half(float value);
   inline C10_HOST_DEVICE operator float() const;
 #if defined(C10_HAS_FLOAT16_TYPE)
-  explicit inline Half(_Float16 value);
   inline operator _Float16() const;
 #endif
 #endif
@@ -480,8 +479,6 @@ inline C10_HOST_DEVICE Half::operator float() const {
 }
 
 #if defined(C10_HAS_FLOAT16_TYPE)
-inline Half::Half(_Float16 value)
-    : x(detail::fp16_ieee_from_fp32_value(static_cast<float>(value))) {}
 inline Half::operator _Float16() const {
   return static_cast<_Float16>(detail::fp16_ieee_to_fp32_value(x));
 }
