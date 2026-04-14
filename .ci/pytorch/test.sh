@@ -1802,7 +1802,9 @@ EOF
     fi
 
     # Ensure invalid item is in the test output.
-    echo "${test_output}" | grep -q "${invalid_item_name}" && ret=$? || ret=$?
+    # Use a here-string instead of a pipe to avoid SIGPIPE when grep -q
+    # exits early on large output (causes exit code 141 with pipefail).
+    grep -q "${invalid_item_name}" <<< "${test_output}" && ret=$? || ret=$?
 
     if [ $ret -ne 0 ]; then
         cat << EOF
