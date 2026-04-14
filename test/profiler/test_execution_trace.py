@@ -223,7 +223,13 @@ class TestExecutionTrace(TestCase):
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @skipIfHpu
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
-    @patch.dict(os.environ, {"ENABLE_PYTORCH_EXECUTION_TRACE": "1", "ENABLE_PYTORCH_EXECUTION_TRACE_EXTRAS": "1"})
+    @patch.dict(
+        os.environ,
+        {
+            "ENABLE_PYTORCH_EXECUTION_TRACE": "1",
+            "ENABLE_PYTORCH_EXECUTION_TRACE_EXTRAS": "1",
+        },
+    )
     def test_execution_trace_env_enabled_with_kineto(self, device):
         trace_called_num = 0
 
@@ -362,7 +368,13 @@ class TestExecutionTrace(TestCase):
                 f"Expected {expected_loop_events} loop events, got {loop_count}"
             )
 
-    @patch.dict(os.environ, {"ENABLE_PYTORCH_EXECUTION_TRACE": "0", "ENABLE_PYTORCH_EXECUTION_TRACE_EXTRAS": "0"})
+    @patch.dict(
+        os.environ,
+        {
+            "ENABLE_PYTORCH_EXECUTION_TRACE": "0",
+            "ENABLE_PYTORCH_EXECUTION_TRACE_EXTRAS": "0",
+        },
+    )
     def test_execution_trace_env_disabled(self, device):
         use_device = (
             torch.profiler.ProfilerActivity.CUDA
@@ -461,7 +473,13 @@ class TestExecutionTrace(TestCase):
         "need triton and device(CUDA or XPU) availability to run",
     )
     @skipCPUIf(True, "skip CPU device for testing profiling triton")
-    @patch.dict(os.environ, {"ENABLE_PYTORCH_EXECUTION_TRACE": "1", "ENABLE_PYTORCH_EXECUTION_TRACE_EXTRAS": "1"})
+    @patch.dict(
+        os.environ,
+        {
+            "ENABLE_PYTORCH_EXECUTION_TRACE": "1",
+            "ENABLE_PYTORCH_EXECUTION_TRACE_EXTRAS": "1",
+        },
+    )
     def test_execution_trace_env_enabled_with_pt2(self, device):
         # clean up the local cache for triton kernel
         from torch._inductor.codecache import PyCodeCache
@@ -757,7 +775,9 @@ class TestExecutionTrace(TestCase):
         not TEST_CUDA,
         "need CUDA device availability to run",
     )
-    @patch.dict(os.environ, {"ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_RANGE": "1"})
+    @patch.dict(
+        os.environ, {"ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_RANGE": "1"}
+    )
     def test_execution_trace_record_integral_tensor_range(self):
         t1 = torch.tensor([[1, 2], [3, 4]]).cuda()
         t2 = torch.tensor([[0, 0], [1, 0]]).cuda()
@@ -796,7 +816,10 @@ class TestExecutionTrace(TestCase):
         not TEST_CUDA,
         "need CUDA device availability to run",
     )
-    @patch.dict(os.environ, {"ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_DATA": "aten::gather"})
+    @patch.dict(
+        os.environ,
+        {"ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_DATA": "aten::gather"},
+    )
     def test_execution_trace_record_integral_tensor_data(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             fp_name = os.path.join(temp_dir, "test.et.json")
