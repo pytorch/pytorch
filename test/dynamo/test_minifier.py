@@ -77,14 +77,14 @@ inner(torch.randn(20, 20, requires_grad=True, device="{device}") + 1)
             device, "relu_accuracy_error_TESTING_ONLY"
         )
 
-    # Test that a module with mixed cpu/gpu parts with an error after dynamo can be repro'd
+    # Test that a module with mixed cpu/device parts  with an error after dynamo can be repro'd
     @skipIfNNModuleInlined()
-    def test_cpu_gpu_module_after_dynamo(self, device):
+    def test_cpu_device_module_after_dynamo(self, device):
         backend_name = "relu_compile_error_TESTING_ONLY"
         run_code = f"""\
 device = "{device}"
 
-class CpuGpuModule(torch.nn.Module):
+class CpuDeviceModule(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
         self.m_x = torch.nn.Linear(20, 20).to(device)
@@ -97,7 +97,7 @@ class CpuGpuModule(torch.nn.Module):
     def forward(self, x, y):
         return self.m_x(x) + self.p_x + self.b_x, self.m_y(y) + self.p_y + self.b_y
 
-mod = CpuGpuModule()
+mod = CpuDeviceModule()
 
 @torch.compile(backend={backend_name!r})
 def inner(x1, y1):
