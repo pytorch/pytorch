@@ -1,6 +1,7 @@
 name: TSan
 
 on:
+  pull_request:
   push:
     tags:
       - ciflow/tsan/*
