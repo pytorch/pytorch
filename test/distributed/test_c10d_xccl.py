@@ -556,17 +556,11 @@ class ProcessGroupXCCLGroupTest(MultiProcessTestCase):
 
         backend._set_enable_nan_check(True)
         try:
-            print("Testing NaN check with allgather_base")
             pg._allgather_base(output, nan_tensor)
-            print("Testing NaN check with allgather_base succeeded")
         except Exception:
-            print("Testing NaN check with allgather_base failed")
             sys.exit(signal.SIGABRT)
-            print("Testing NaN check with allgather_base survived post exit")
 
-        print("Finished testing NaN check with allgather_base")
         dist.destroy_process_group()
-        print("Destroyed process group after testing NaN check with allgather_base")
 
         # reset env
         os.environ["TORCH_XCCL_NAN_CHECK"] = "0"
