@@ -190,6 +190,7 @@ jobs:
             --models "${MODELS}" \
             --device "${DEVICE_NAME}" \
             --include-eager-mode \
+            --include-inductor-graph-partition \
             --compilation-config "${COMPILATION_CONFIG}"
           popd
 

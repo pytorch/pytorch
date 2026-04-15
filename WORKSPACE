@@ -131,7 +131,7 @@ new_local_repository(
 
 new_local_repository(
     name = "org_pytorch_cpuinfo",
-    build_file = "//third_party:cpuinfo/BUILD.bazel",
+    build_file = "//third_party:cpuinfo.BUILD",
     path = "third_party/cpuinfo",
 )
 
@@ -210,11 +210,8 @@ http_archive(
 
 http_archive(
     name = "rules_python",
-    # TODO Fix bazel linter to support hashes for release tarballs.
-    #
-    # sha256 = "94750828b18044533e98a129003b6a68001204038dc4749f40b195b24c38f49f",
-    strip_prefix = "rules_python-0.21.0",
-    url = "https://github.com/bazelbuild/rules_python/releases/download/0.21.0/rules_python-0.21.0.tar.gz",
+    strip_prefix = "rules_python-0.31.0",
+    url = "https://github.com/bazelbuild/rules_python/releases/download/0.31.0/rules_python-0.31.0.tar.gz",
 )
 
 load("@rules_python//python:repositories.bzl", "py_repositories")
@@ -225,6 +222,7 @@ load("@rules_python//python:repositories.bzl", "python_register_toolchains")
 
 python_register_toolchains(
     name = "python3_10",
+    ignore_root_user_error = True,
     python_version = "3.10",
 )
 
@@ -235,6 +233,13 @@ pip_parse(
     name = "pip_deps",
     python_interpreter_target = interpreter,
     requirements_lock = "//:tools/build/bazel/requirements.txt",
+    extra_pip_args = [
+        "--index-url",
+        "${PIP_INDEX_URL}",
+        "--trusted-host",
+        "${PIP_TRUSTED_HOST}",
+    ],
+    envsubst = ["PIP_INDEX_URL", "PIP_TRUSTED_HOST"],
 )
 
 load("@pip_deps//:requirements.bzl", "install_deps")

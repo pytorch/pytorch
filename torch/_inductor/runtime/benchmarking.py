@@ -325,8 +325,13 @@ def _default_cuda_bench(self, f, *, warmup, rep, **kw):
     return self.benchmark_gpu(f, warmup=warmup, rep=rep, **kw)
 
 
+def _default_xpu_bench(self, f, *, warmup, rep, **kw):
+    return self.benchmark_gpu(f, warmup=warmup, rep=rep, **kw)
+
+
 register_benchmarker("cpu", _default_cpu_bench, override=True)
 register_benchmarker("cuda", _default_cuda_bench, override=True)
+register_benchmarker("xpu", _default_xpu_bench, override=True)
 
 
 class TritonBenchmarker(Benchmarker):

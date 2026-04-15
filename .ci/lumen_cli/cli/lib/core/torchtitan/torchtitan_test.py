@@ -21,11 +21,12 @@ class TorchtitanTestRunner(BaseRunner):
 
     def prepare(self):
         clone_torchtitan(dst=self.work_directory)
-        # torchao nightly is required by torchtitan
+        # torchao and torchcomms nightlies are required by torchtitan
         pip_install_packages(
             packages=[
                 "--pre",
                 "torchao",
+                "torchcomms",
                 "--index-url",
                 "https://download.pytorch.org/whl/nightly/cu129",
             ],

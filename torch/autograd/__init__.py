@@ -547,6 +547,7 @@ def grad(
         result = tuple(
             output
             if output is not None
+            # pyrefly: ignore [bad-argument-type]
             else torch.zeros_like(input, requires_grad=create_graph)
             for (output, input) in zip(result, inputs)
         )

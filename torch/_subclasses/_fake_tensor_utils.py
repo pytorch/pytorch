@@ -35,9 +35,10 @@ class _DeconstructedSymNode:
         return _DeconstructedSymNode(
             node._expr,
             node.pytype,
+            # pyrefly: ignore[bad-argument-type]
             node._hint,
             node.constant,
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore[bad-argument-type]
             node.fx_node,
         )
 

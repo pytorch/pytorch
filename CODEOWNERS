@@ -48,6 +48,17 @@ nn/qat/ @jerryzh168
 # c10d backend APIs
 /torch/csrc/distributed/c10d/Backend.* @kwen2501
 /torch/csrc/distributed/c10d/Ops.* @kwen2501
+# FSDP, DDP
+/torch/distributed/_composable/fsdp/ @weifengpy
+/torch/distributed/_composable/replicate.py @weifengpy
+/torch/distributed/_composable/replicate_with_fsdp.py @weifengpy
+/torch/distributed/fsdp/ @weifengpy
+/torch/distributed/optim/ @weifengpy
+/torch/nn/parallel/ @weifengpy
+# DTensor view, matmul, _StridedShard
+/torch/distributed/tensor/placement_types.py @weifengpy
+/torch/distributed/tensor/_ops/_view_ops.py @weifengpy
+/torch/distributed/tensor/_ops/_matrix_ops.py @weifengpy
 
 # ONNX Export
 /torch/_dynamo/backends/onnxrt.py @titaiwangms @xadupre @justinchuby
@@ -131,10 +142,10 @@ aten/src/ATen/detail/MTIAHooksInterface.h @egienvalue
 torch/csrc/mtia/ @egienvalue
 
 # Profiler
-torch/csrc/autograd/profiler* @sraikund16
-torch/autograd/profiler* @sraikund16
-torch/csrc/profiler/ @sraikund16
-torch/profiler/ @sraikund16
+torch/csrc/autograd/profiler* @scotts
+torch/autograd/profiler* @scotts
+torch/csrc/profiler/ @scotts
+torch/profiler/ @scotts
 
 # AOTDispatch tests
 test/functorch/test_aotdispatch.py @ezyang @Chillee
@@ -173,9 +184,9 @@ caffe2/utils/hip @jeffdaily @jithunnair-amd
 /torch/_export/serde/schema.py @SherlockNoMad @zhxchen17
 
 # Dynamic Shapes
-/torch/fx/experimental/symbolic_shapes.py @bobrenjc93 @laithsakka
-/torch/fx/experimental/sym_node.py @bobrenjc93 @laithsakka
-/torch/fx/experimental/recording.py @bobrenjc93 @laithsakka
+/torch/fx/experimental/symbolic_shapes.py @laithsakka
+/torch/fx/experimental/sym_node.py @laithsakka
+/torch/fx/experimental/recording.py @laithsakka
 
 # ProxyTorchDispatchMode
 torch/fx/experimental/proxy_tensor.py @aorenste
@@ -236,3 +247,6 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 /torch/sparse/ @amjames @pearu @nikitaved
 /test/test_sparse.py @amjames @pearu @nikitaved
 /test/test_sparse_csr.py @amjames @pearu @nikitaved
+
+# Python/DSL native ops
+/torch/_native/ @slayton58 @drisspg

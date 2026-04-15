@@ -15,6 +15,14 @@
     "class MixedMMH100": 133,
     "def MixedMMH100.get_best_choices()": 86
   },
+  "torch/_inductor/autoheuristic/artifacts/_PadMMA100.py": {
+    "class PadMMA100": 249,
+    "def PadMMA100.get_best_choices()": 221
+  },
+  "torch/_inductor/autoheuristic/artifacts/_PadMMH200.py": {
+    "class PadMMH200": 159,
+    "def PadMMH200.get_best_choices()": 131
+  },
   "torch/_inductor/bounds.py": {
     "class ValueRangeAnalysis": 108
   },
@@ -31,7 +39,7 @@
   },
   "torch/_inductor/codegen/cpp.py": {
     "class CppKernelProxy": 616,
-    "class CppOverrides": 437,
+    "class CppOverrides": 496,
     "class CppScheduling": 819,
     "class CppVecKernel": 867,
     "class OuterLoopFusedSchedulerNode": 159,
@@ -79,7 +87,7 @@
   },
   "torch/_inductor/codegen/halide.py": {
     "class HalideKernel": 999,
-    "class HalideOverrides": 339,
+    "class HalideOverrides": 384,
     "class HalidePrinter": 128,
     "def HalideKernel.halide_kernel_meta()": 82
   },

@@ -1,3 +1,4 @@
+// @allow-raw-throw
 #pragma once
 
 #include <exception>

@@ -69,13 +69,10 @@ jobs:
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+      - name: Setup Linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@main
         with:
           submodules: false
-
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
 
       - name: Login to ECR
         uses: ./.github/actions/ecr-login
@@ -253,4 +250,4 @@ jobs:
         shell: bash
         run: |
           set -ex
-          bash .circleci/scripts/binary_upload.sh
+          bash .ci/pytorch/binary_upload.sh

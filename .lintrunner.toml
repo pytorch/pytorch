@@ -16,6 +16,8 @@ exclude_patterns = [
     'functorch/docs/source/tutorials/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/autoheuristic/artifacts/**',
+    'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
+    'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
     'scripts/**',
     'test/generated_type_hints_smoketest.py',
     'test/test_torchfuzz_repros.py',
@@ -122,7 +124,10 @@ include_patterns = [
     'tools/**/*.py',
     'tools/**/*.pyi',
 ]
-exclude_patterns = []
+exclude_patterns = [
+    'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
+    'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
+]
 command = [
     'uv',
     'run',
@@ -186,6 +191,11 @@ exclude_patterns = [
     'aten/src/ATen/cpu/FlushDenormal.cpp',
     'aten/src/ATen/cpu/vml.h',
     'aten/src/ATen/CPUFixedAllocator.h',
+    # interned_strings.h includes the generated aten_interned_strings.h which
+    # #errors under TORCH_ASSERT_ONLY_METHOD_OPERATORS. The .cpp file #undefs
+    # the macro before including the header, but clang-tidy lints the .h
+    # standalone using the .cpp's compile flags, so the #error always fires.
+    'aten/src/ATen/core/interned_strings.h',
     'aten/src/ATen/Parallel*.h',
     'c10/xpu/**/*.h',
     'c10/xpu/**/*.cpp',
@@ -506,6 +516,44 @@ command = [
     '--replace-pattern=s/C10_NODISCARD/[[nodiscard]]/',
     """--error-description=\
         Deprecated macro, use [[nodiscard]] directly\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'RAWTHROW'
+include_patterns = [
+    '**/*.cpp',
+    '**/*.h',
+]
+exclude_patterns = [
+    # Vendored code (do not modify)
+    'c10/util/flat_hash_map.h',
+    'c10/util/order_preserving_flat_hash_map.h',
+    'aten/src/ATen/native/quantized/cpu/qnnpack/**',
+    'aten/src/ATen/native/transformers/cuda/mem_eff_attention/**',
+    # Standalone code that cannot depend on c10
+    'torch/csrc/inductor/aoti_runtime/**',
+    # Test files use EXPECT_THROW which is a gtest macro
+    'test/cpp/**/*.cpp',
+    # JIT frontend uses throw(ErrorReport(...)) pervasively
+    'torch/csrc/jit/frontend/schema_type_parser.cpp',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=\bthrow\b',
+    '--allowlist-pattern=@allow-raw-throw',
+    '--linter-name=RAWTHROW',
+    '--error-name=raw throw statement',
+    """--error-description=\
+        Do not use raw `throw` in C++ code. Use TORCH_CHECK, \
+        TORCH_CHECK_WITH, C10_THROW_ERROR, or other error-reporting macros \
+        instead. See c10/util/Exception.h for available macros. If this is a \
+        re-throw (throw;), restructure the code to avoid try/catch/throw or \
+        add the file to the RAWTHROW exclude list in .lintrunner.toml with \
+        justification.\
     """,
     '--',
     '@{{PATHSFILE}}'
@@ -1114,6 +1162,8 @@ exclude_patterns = [
     'torch/_vendor/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/autoheuristic/artifacts/**',
+    'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
+    'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
     'torch/utils/model_dump/preact.mjs',
 ]
 is_formatter = true
@@ -1499,6 +1549,8 @@ exclude_patterns = [
     'functorch/docs/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/autoheuristic/artifacts/**',
+    'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
+    'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
     'test/dynamo/cpython/**',
     'test/test_torchfuzz_repros.py',
     'scripts/**',
@@ -1677,6 +1729,10 @@ command = [
 ]
 include_patterns = [
    'torch/_inductor/**/*.py'
+]
+exclude_patterns = [
+    'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
+    'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
 ]
 is_formatter = false
 

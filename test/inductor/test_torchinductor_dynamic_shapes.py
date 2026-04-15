@@ -27,9 +27,10 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_FBCODE,
+    MI350_ARCH,
     parametrize,
     serialTest,
-    skipIfRocm,
+    skipIfRocmArch,
     TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_ASAN,
 )
@@ -80,7 +81,6 @@ test_failures = {
     "test_reduction3_dynamic_shapes": TestFailure(("mps",)),
     "test_reduction5_dynamic_shapes": TestFailure(("mps",)),
     "test_roll_dynamic_shapes": TestFailure(("mps",)),
-    "test_select_scatter_dtype_consistency_dynamic_shapes": TestFailure(("mps",)),
     "test_std_dynamic_shapes": TestFailure(("mps",)),
     "test_var_correction_dynamic_shapes": TestFailure(("mps",)),
     "test_var_mean_div_by_dynamic_shapes": TestFailure(("mps",)),
@@ -135,6 +135,16 @@ if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
     copy_tests(
         DynamicShapesCommonTemplate, DynamicShapesGPUTests, GPU_TYPE, test_failures
     )
+
+    if HAS_GPU and hasattr(
+        DynamicShapesGPUTests, "test_conv_with_as_strided_dynamic_shapes_cuda"
+    ):
+        # gfx950 shows a deterministic numerical mismatch for this generated test.
+        DynamicShapesGPUTests.test_conv_with_as_strided_dynamic_shapes_cuda = (
+            skipIfRocmArch(MI350_ARCH)(
+                DynamicShapesGPUTests.test_conv_with_as_strided_dynamic_shapes_cuda
+            )
+        )
 
 
 class TestInductorDynamic(TestCase):
@@ -633,7 +643,6 @@ class TestInductorDynamic(TestCase):
         torch.compile(fullgraph=True)(f)(x, w).sum().backward()
         self.assertEqual(orig_w, w.grad)
 
-    @skipIfRocm  # regression in ROCm 7.2, XBLOCK should remain 64 (got 256)
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )

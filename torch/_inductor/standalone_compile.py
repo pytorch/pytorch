@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import copy
 import logging
 import os
@@ -371,35 +372,22 @@ class AOTCompiledArtifact(CompiledArtifact):
             return AOTCompiledArtifact.deserialize(artifact)
 
 
-def standalone_compile(
-    gm: GraphModule,
-    example_inputs: Sequence[InputType],
-    *,
-    dynamic_shapes: Any,
-    options: Any,
-    aot: bool = False,  # AOT mode, which uses BundledAOTAutogradCache
-) -> CompiledArtifact:
-    """
-    Implementation of torch.inductor.standalone_compile
-    """
-    from torch.compiler._cache import CacheArtifactManager
+def _resolve_ignore_shape_env(dynamic_shapes: Any):
+    # tells compile_fx to ignore the shape_envs on the ambient context
+    # and the graph_module.
+    return dynamic_shapes == "from_example_inputs"
 
-    from .compile_fx import compile_fx
 
-    ignore_shape_env = False
+def _resolve_fake_mode(gm: GraphModule, dynamic_shapes: Any) -> FakeTensorMode:
     if dynamic_shapes == "from_example_inputs":
-        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
-        # tells compile_fx to ignore the shape_envs on the ambient context
-        # and the graph_module.
-        ignore_shape_env = True
+        return FakeTensorMode(shape_env=ShapeEnv())
     elif dynamic_shapes == "from_tracing_context":
         # Reuse fake_mode from the TracingContext.
         # NB: The TracingContext only exists if we're currently in a torch.compile backend.
         context = torch._guards.TracingContext.get()
         assert context.fake_mode is not None
-        fake_mode = context.fake_mode
+        return context.fake_mode
     elif dynamic_shapes == "from_graph":
-        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
         # Strategy: find a FakeTensor in the graph output, grab its FakeTensorMode.
         # The graph passed to standalone_compile must be an Inductor-approved graph,
         # which means that there is at least one Tensor output and the output node
@@ -408,39 +396,64 @@ def standalone_compile(
         assert last_node.op == "output"
         assert len(last_node.args) == 1
 
-        def handle_node(node: torch.fx.Node) -> None:
-            nonlocal fake_mode
-            if "example_value" in node.meta:
-                maybe_tensor = node.meta["example_value"]
-                if isinstance(maybe_tensor, torch._subclasses.fake_tensor.FakeTensor):
-                    fake_mode = maybe_tensor.fake_mode
-
         # If gm came from Dynamo, then last_node.args[0] is always a list,
         # even in single-Tensor returns.
         #
         # It's possible to get into a situation where last_node.args[0]
         # is a Node (and not a list!). This happens if you call split_module
         # on the graph. We allow for this case since it is common.
-        if isinstance(last_node.args[0], torch.fx.Node):
-            handle_node(last_node.args[0])
-        else:
-            for node in last_node.args[0]:
-                handle_node(node)
+        nodes = (
+            [last_node.args[0]]
+            if isinstance(last_node.args[0], torch.fx.Node)
+            else last_node.args[0]
+        )
+        for node in nodes:
+            if "example_value" in node.meta:
+                maybe_tensor = node.meta["example_value"]
+                if isinstance(maybe_tensor, torch._subclasses.fake_tensor.FakeTensor):
+                    return maybe_tensor.fake_mode
 
+        return FakeTensorMode(shape_env=ShapeEnv())
     else:
         raise ValueError(
             f"standalone_compile got unsupported `dynamic_shapes` value: dynamic_shapes={dynamic_shapes}."
         )
 
-    context = torch._guards.TracingContext(fake_mode)
+
+@contextlib.contextmanager
+def _standalone_context(gm: GraphModule, dynamic_shapes: Any, aot: bool):
+    from torch.compiler._cache import CacheArtifactManager
+
+    fake_mode = _resolve_fake_mode(gm, dynamic_shapes)
+    tracing_context = torch._guards.TracingContext(fake_mode)
     with (
-        torch._guards.tracing(context),
+        torch._guards.tracing(tracing_context),
         CacheArtifactManager.with_fresh_cache(),
         config.patch("triton.autotune_at_compile_time", True),
         torch._functorch.config.patch("bundled_autograd_cache", aot),
     ):
-        # compile_fx can mutate gm
-        gm = copy.deepcopy(gm)
+        yield
+
+
+def standalone_compile(
+    gm: GraphModule,
+    example_inputs: Sequence[InputType],
+    *,
+    dynamic_shapes: Any,
+    options: Any,
+    aot: bool = False,  # AOT mode, which uses BundledAOTAutogradCache
+    donate_graph_module: bool = False,
+) -> CompiledArtifact:
+    """
+    Implementation of torch.inductor.standalone_compile
+    """
+    from .compile_fx import compile_fx
+
+    ignore_shape_env = _resolve_ignore_shape_env(dynamic_shapes)
+    with _standalone_context(gm, dynamic_shapes, aot):
+        # compile_fx takes ownership of gm and may mutate it on cache miss.
+        if not donate_graph_module:
+            gm = copy.deepcopy(gm)
         compiled_fn = compile_fx(
             gm, example_inputs, ignore_shape_env=ignore_shape_env, **options
         )
@@ -459,3 +472,20 @@ def standalone_compile(
             )
 
     return CacheCompiledArtifact(compiled_fn, artifacts)
+
+
+def autograd_cache_key(
+    graph,
+    example_inputs,
+    dynamic_shapes: Any,
+    aot: bool = False,  # AOT mode, which uses BundledAOTAutogradCache
+):
+    from . import compile_fx
+
+    ignore_shape_env = _resolve_ignore_shape_env(dynamic_shapes)
+    with _standalone_context(graph, dynamic_shapes, aot):
+        return compile_fx.autograd_cache_key(
+            graph,
+            example_inputs,
+            ignore_shape_env=ignore_shape_env,
+        )

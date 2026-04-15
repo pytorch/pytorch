@@ -303,6 +303,9 @@ std::ostream& print(
   } else if (tensor_.is_mps()) {
     // MPS does not support double tensors, so first copy then convert
     tensor = tensor_.to(kCPU).to(kDouble).contiguous();
+  } else if (tensor_.is_privateuseone()) {
+    // PrivateUseOne backends may not support double tensors
+    tensor = tensor_.to(kCPU).to(kDouble).contiguous();
   } else {
     tensor = tensor_.to(kCPU, kDouble).contiguous();
   }

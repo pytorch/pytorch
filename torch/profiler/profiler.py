@@ -105,6 +105,33 @@ class _ITraceObserver(ABC):
         pass
 
 
+def _parse_activities(
+    activities: Iterable[ProfilerActivity | dict[ProfilerActivity, list[str]]],
+) -> tuple[set[ProfilerActivity], dict[ProfilerActivity, set[str]]]:
+    """Parse a mixed activities list into a set of activities and a filter dict.
+
+    Each item is either a bare ``ProfilerActivity`` (collect all defaults) or a
+    ``dict[ProfilerActivity, list[str]]`` (collect only the named subset).
+    An empty list value (e.g. ``{CUDA: []}``) means collect nothing for that group.
+    """
+    parsed_activities: set[ProfilerActivity] = set()
+    activity_filters: dict[ProfilerActivity, set[str]] = {}
+    for item in activities:
+        if isinstance(item, ProfilerActivity):
+            if item in parsed_activities:
+                raise ValueError(f"Activity {item} specified more than once")
+            parsed_activities.add(item)
+        elif isinstance(item, dict):
+            for key, val in item.items():
+                if key in parsed_activities:
+                    raise ValueError(f"Activity {key} specified more than once")
+                parsed_activities.add(key)
+                activity_filters[key] = set(val)
+        else:
+            raise TypeError(f"Expected ProfilerActivity or dict, got {type(item)}")
+    return parsed_activities, activity_filters
+
+
 class _KinetoProfile:
     """Low-level profiler wrap the autograd profile
 
@@ -114,6 +141,14 @@ class _KinetoProfile:
             ``torch.profiler.ProfilerActivity.XPU``.
             Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA
             or (when available) ProfilerActivity.XPU.
+
+            Each item can be a ``ProfilerActivity`` enum (collects all default
+            activity types for that group) or a ``dict`` mapping a ``ProfilerActivity``
+            to a list of individual activity type names to collect, e.g.
+            ``{ProfilerActivity.CUDA: ["GPU_MEMCPY", "CUDA_RUNTIME"]}``.
+            An empty list (e.g. ``{ProfilerActivity.CUDA: []}``) means collect
+            nothing for that group.
+            The same activity group must not appear more than once.
         record_shapes (bool): save information about operator's input shapes.
         profile_memory (bool): track tensor memory allocation/deallocation (see ``export_memory_timeline``
             for more details).
@@ -152,7 +187,8 @@ class _KinetoProfile:
     def __init__(
         self,
         *,
-        activities: Iterable[ProfilerActivity] | None = None,
+        activities: Iterable[ProfilerActivity | dict[ProfilerActivity, list[str]]]
+        | None = None,
         record_shapes: bool = False,
         profile_memory: bool = False,
         with_stack: bool = False,
@@ -164,7 +200,11 @@ class _KinetoProfile:
         custom_trace_id_callback: Callable[[], str] | None = None,
         post_processing_timeout_s: float | None = None,
     ) -> None:
-        self.activities = set(activities) if activities else supported_activities()
+        if activities is not None:
+            self.activities, self.activity_filters = _parse_activities(activities)
+        else:
+            self.activities = supported_activities()
+            self.activity_filters: dict[ProfilerActivity, set[str]] = {}
         self.record_shapes = record_shapes
         self.with_flops = with_flops
         self.profile_memory = profile_memory
@@ -224,6 +264,9 @@ class _KinetoProfile:
                 acc_events=self.acc_events,
                 custom_trace_id_callback=self.custom_trace_id_callback,
                 post_processing_timeout_s=self.post_processing_timeout_s,
+                activity_filters=self.activity_filters
+                if self.activity_filters
+                else None,
             )
         if (self.profiler is not None) and (not self.acc_events):
             _warn_once(
@@ -612,6 +655,14 @@ class profile(_KinetoProfile):
             ``torch.profiler.ProfilerActivity.XPU``.
             Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA
             or (when available) ProfilerActivity.XPU.
+
+            Each item can be a ``ProfilerActivity`` enum (collects all default
+            activity types for that group) or a ``dict`` mapping a ``ProfilerActivity``
+            to a list of individual activity type names to collect, e.g.
+            ``{ProfilerActivity.CUDA: ["GPU_MEMCPY", "CUDA_RUNTIME"]}``.
+            An empty list (e.g. ``{ProfilerActivity.CUDA: []}``) means collect
+            nothing for that group.
+            The same activity group must not appear more than once.
         schedule (Callable): callable that takes step (int) as a single parameter and returns
             ``ProfilerAction`` value that specifies the profiler action to perform at each step.
         on_trace_ready (Callable): callable that is called at each step when ``schedule``
@@ -740,7 +791,8 @@ class profile(_KinetoProfile):
     def __init__(
         self,
         *,
-        activities: Iterable[ProfilerActivity] | None = None,
+        activities: Iterable[ProfilerActivity | dict[ProfilerActivity, list[str]]]
+        | None = None,
         schedule: Callable[[int], ProfilerAction] | None = None,
         on_trace_ready: Callable[..., Any] | None = None,
         record_shapes: bool = False,
@@ -756,7 +808,16 @@ class profile(_KinetoProfile):
         custom_trace_id_callback: Callable[[], str] | None = None,
         post_processing_timeout_s: float | None = None,
     ) -> None:
-        activities_set = set(activities) if activities else supported_activities()
+        # Extract activities for the use_cuda deprecation check.
+        if activities is not None:
+            activities_set: set[ProfilerActivity] = set()
+            for item in activities:
+                if isinstance(item, ProfilerActivity):
+                    activities_set.add(item)
+                elif isinstance(item, dict):
+                    activities_set.update(item.keys())
+        else:
+            activities_set = supported_activities()
         if use_cuda is not None:
             warn(
                 "`use_cuda` is deprecated, use `activities` argument instead",

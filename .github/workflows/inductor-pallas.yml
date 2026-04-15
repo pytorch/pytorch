@@ -16,6 +16,7 @@ concurrency:
 permissions:
   id-token: write
   contents: read
+  actions: read
 
 jobs:
   get-label-type:
@@ -46,9 +47,6 @@ jobs:
     secrets: inherit
 
   linux-jammy-py3_12-inductor-pallas-gpu-test:
-    permissions:
-      id-token: write
-      contents: read
     name: pallas-gpu-py3.12-inductor
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-jammy-py3_12-inductor-pallas-gpu-build
@@ -73,9 +71,6 @@ jobs:
     secrets: inherit
 
   linux-jammy-py3_12-inductor-pallas-tpu-test:
-    permissions:
-      id-token: write
-      contents: read
     name: pallas-tpu-py3.12-inductor
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-jammy-py3_12-inductor-pallas-tpu-build

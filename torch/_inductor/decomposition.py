@@ -32,6 +32,7 @@ from torch._inductor.utils import pad_listlike
 from torch._prims_common import (
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
+    suggest_memory_format,
     type_to_dtype,
 )
 from torch._refs import native_layer_norm as decomp_native_layer_norm
@@ -99,6 +100,7 @@ inductor_decompositions = get_decompositions(
         aten.triu_indices,
         aten.unbind_copy.int,
         aten.upsample_bilinear2d.vec,
+        aten.hann_window,
         quantized.linear_dynamic_fp16_unpacked_weight,
         _quantized.wrapped_quantized_linear,
     ]
@@ -136,6 +138,8 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten.addcdiv_,
     aten._foreach_addcdiv.Scalar,
     aten._foreach_addcdiv_,
+    aten.lerp,
+    aten.lerp_,
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
@@ -148,6 +152,38 @@ def register_decomposition(
         if op in decompositions:
             log.warning("duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)
+
+
+@register_decomposition([aten.lerp.Scalar])
+def _lerp_scalar(start: torch.Tensor, end: torch.Tensor, weight: float) -> torch.Tensor:
+    # Decompose into sub + add(alpha=weight) so that the add lowering emits FMA,
+    # matching eager CUDA's dual-formula (see aten/src/ATen/native/Lerp.h).
+    # Convert end to start's memory format so the output preserves start's layout,
+    # matching eager TensorIterator behavior.
+    fmt = suggest_memory_format(start)
+    if fmt != torch.contiguous_format:
+        end = end.contiguous(memory_format=fmt)
+    diff = end - start
+    if weight >= 0.5 or weight <= -0.5:
+        return torch.add(end, diff, alpha=-(1.0 - weight))
+    return torch.add(start, diff, alpha=weight)
+
+
+@register_decomposition([aten.lerp.Tensor])
+def _lerp_tensor(
+    start: torch.Tensor, end: torch.Tensor, weight: torch.Tensor
+) -> torch.Tensor:
+    # Same dual-formula as foreach_lerp polyfill: decompose into sub + addcmul.
+    # Convert end to start's memory format so the output preserves start's layout.
+    fmt = suggest_memory_format(start)
+    if fmt != torch.contiguous_format:
+        end = end.contiguous(memory_format=fmt)
+    diff = end - start
+    mask = weight.abs() >= 0.5
+    neg_omw = -(1.0 - weight)
+    w = torch.where(mask, neg_omw, weight)
+    base = torch.where(mask, end, start)
+    return torch.addcmul(base, w, diff, value=1)
 
 
 @register_decomposition([aten.embedding_dense_backward])
@@ -315,7 +351,7 @@ def bmm(
 ) -> torch.Tensor:
     # Outer-product specialization: [B, M, 1] x [B, 1, N] -> [B, M, N].
     # This avoids introducing a reduction and maps directly to broadcasted mul.
-    if statically_known_true(self.shape[2] == 1) or statically_known_true(
+    if statically_known_true(self.shape[2] == 1) and statically_known_true(
         batch2.shape[1] == 1
     ):
         return (self * batch2).contiguous()
@@ -349,6 +385,16 @@ def addmm(
     beta: torch.types.Number = 1,
     alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
+    if mat1.device.type not in ["cpu", "mps"]:
+        if (
+            statically_known_true(mat1.size(-1) == 1)
+            and statically_known_true(mat1.size(0) != 1)
+            and statically_known_true(mat2.size(1) != 1)
+        ):
+            counters["inductor"]["decompose_addmm"] += 1
+            out = mat1 * mat2
+            return alpha * out + beta * self
+
     if self.device.type == "cpu":
         if statically_known_true(mat1.size(0) == 1) and statically_known_true(
             mat2.size(-1) == 1
@@ -386,9 +432,14 @@ def mm(
             input2.shape[1] == 1
         ):
             return (self.unsqueeze(2) * input2.unsqueeze(0)).sum(dim=1)
-    if self.device.type == "cpu":
-        if (
-            statically_known_true(self.size(-1) == 1)
+    # Non-CPU/MPS: always decompose. CPU: only for small tensors.
+    if (
+        statically_known_true(self.size(-1) == 1)
+        and statically_known_true(self.size(0) != 1)
+        and statically_known_true(input2.size(1) != 1)
+    ):
+        if self.device.type not in ["cpu", "mps"] or (
+            self.device.type == "cpu"
             and statically_known_true(self.size(0) > 0)
             and statically_known_true(input2.size(0) == 1)
             and (self.dtype == input2.dtype)
@@ -396,6 +447,7 @@ def mm(
         ):
             counters["inductor"]["decompose_mm"] += 1
             return self * input2
+    if self.device.type == "cpu":
         if statically_known_true(self.size(0) == 1) and statically_known_true(
             input2.size(-1) == 1
         ):
@@ -724,22 +776,22 @@ def _rand_like(
     return result.permute(permutation).clone()
 
 
-@register_decomposition(aten.rand_like)
+@decomp.register_decomposition([aten.rand_like], extra_random_decomps)
 def rand_like(self: torch.Tensor, **kwargs: Any) -> torch.Tensor:
     return _rand_like(torch.rand, self, **kwargs)
 
 
-@register_decomposition(aten.randn_like)
+@decomp.register_decomposition([aten.randn_like], extra_random_decomps)
 def randn_like(self: torch.Tensor, **kwargs: Any) -> torch.Tensor:
     return _rand_like(torch.randn, self, **kwargs)
 
 
-@register_decomposition(aten.randint_like.default)
+@decomp.register_decomposition([aten.randint_like.default], extra_random_decomps)
 def randint_like(self: torch.Tensor, high: int, **kwargs: Any) -> torch.Tensor:
     return _rand_like(functools.partial(aten.randint.low, 0, high), self, **kwargs)
 
 
-@register_decomposition(aten.randint_like.low_dtype)
+@decomp.register_decomposition([aten.randint_like.low_dtype], extra_random_decomps)
 def randint_like_low(
     self: torch.Tensor, low: int, high: int, **kwargs: Any
 ) -> torch.Tensor:
