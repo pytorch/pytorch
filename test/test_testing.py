@@ -2397,6 +2397,8 @@ class TestImports(TestCase):
             cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
 
     @skipIfXpu(msg="The test is flaky on XPU, see https://github.com/pytorch/pytorch/issues/110040")
+    # The test is flaky on ROCm/XPU and has been open and close multiple times
+    # https://github.com/pytorch/pytorch/issues/110040
     def test_circular_dependencies(self) -> None:
         """ Checks that all modules inside torch can be imported
         Prevents regression reported in https://github.com/pytorch/pytorch/issues/77441 """
@@ -2408,6 +2410,7 @@ class TestImports(TestCase):
                            "torch.ao.pruning._experimental.",  # depends on pytorch_lightning, not user-facing
                            "torch.onnx._internal",  # depends on onnx-script
                            "torch._inductor.runtime.triton_helpers",  # depends on triton
+                           "torch._native.ops.bmm_outer_product.triton_kernels",  # depends on triton
                            "torch._inductor.codegen.cuda",  # depends on cutlass
                            "torch._inductor.codegen.cutedsl",  # depends on cutlass
                            "torch.distributed.benchmarks",  # depends on RPC and DDP Optim

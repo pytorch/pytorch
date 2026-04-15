@@ -245,6 +245,15 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 pass_name = "custom_backend_passes_" + device
                 GraphTransformObserver(gm, pass_name).apply_gm_pass(custom_backend_pass)
 
+    # SPMD verification — before collective reordering passes.
+    if (
+        config.aten_distributed_optimizations.spmd_check
+        and _needs_spmd_graph_preservation()
+    ):
+        from torch._inductor.fx_passes.spmd_check import spmd_check
+
+        spmd_check(gm)
+
     collectives_bucketing: bool = False
 
     if config.bucket_reduce_scatters_fx != "none":
@@ -777,6 +786,13 @@ def reorder_for_locality(graph: torch.fx.Graph):
         def check():
             return True
 
+    def consumes_rng_state(node: torch.fx.Node) -> bool:
+        return (
+            node.op == "call_function"
+            and isinstance(node.target, torch._ops.OpOverload)
+            and torch.Tag.nondeterministic_seeded in node.target.tags
+        )
+
     def visit(other_node):
         if (
             other_node.op == "call_function"
@@ -786,6 +802,11 @@ def reorder_for_locality(graph: torch.fx.Graph):
             == get_mutation_region_id(graph, other_node)
             and check()
         ):
+            # Ops that consume RNG state are order-sensitive and must not be
+            # reordered during locality optimization.
+            if consumes_rng_state(other_node):
+                return
+
             # move node's producers right before it
             node.prepend(other_node)
 

@@ -50,6 +50,7 @@ from torch._inductor.utils import (
     output_node,
     set_tracing_context_output_strides,
 )
+from torch._opaque_base import OpaqueBase
 from torch.fx._graph_pickler import _node_metadata_key_filter_safe, _ops_filter_safe
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_in_torch_dispatch_mode
@@ -234,18 +235,16 @@ def cudagraph_post_compile(
             compiled_graph, example_inputs, boxed_forward_device_index
         )
 
-        from .compile_fx import cudagraphify
-
         current_callable = compiled_graph.current_callable
         assert current_callable is not None
         # Filter to only tensor constants (exclude opaque value type classes)
         tensor_constants = {
             k: v for k, v in constants.items() if isinstance(v, torch.Tensor)
         }
-        compiled_graph.current_callable = cudagraphify(
-            current_callable,
-            static_input_idxs=static_input_idxs or (),
-            device_index=next(iter(compiled_graph.device_idxs)),
+
+        device_index = next(iter(compiled_graph.device_idxs))
+        cudagraphify_kwargs = dict(
+            device_index=device_index,
             stack_traces=stack_traces,
             is_backward=is_backward,
             is_inference=is_inference,
@@ -253,6 +252,23 @@ def cudagraph_post_compile(
             placeholders=placeholders,
             mutated_input_idxs=tuple(compiled_graph.mutated_input_idxs),
         )
+
+        policy = config.cudagraph_policy
+        if policy is not None:
+            compiled_graph.current_callable = policy.cudagraphify(
+                current_callable,
+                example_inputs,
+                static_input_idxs or (),
+                **cudagraphify_kwargs,
+            )
+        else:
+            from .compile_fx import cudagraphify
+
+            compiled_graph.current_callable = cudagraphify(
+                current_callable,
+                static_input_idxs=static_input_idxs or (),
+                **cudagraphify_kwargs,
+            )
 
     else:
         BoxedBool.disable(cudagraphs)
@@ -306,8 +322,6 @@ def cudagraph_partition_post_compile(
         maybe_handle_backward_generation(compiled_graph, boxed_forward_device_index)
         return
 
-    from .compile_fx import cudagraphify
-
     assert compiled_graph.current_callable is not None
     assert compiled_graph.recursively_apply_fns is not None
     is_inference = compiled_graph.fx_kwargs["is_inference"]
@@ -335,6 +349,8 @@ def cudagraph_partition_post_compile(
     prepare_cudagraph_post_compile(
         compiled_graph, example_inputs, boxed_forward_device_index
     )
+
+    from .compile_fx import cudagraphify
 
     # cudagraphify each partition function, assuming every graph partition function
     # is cudagraphable. Non-cudagraphable ops (e.g., cpu ops) are inlined into
@@ -373,14 +389,28 @@ def maybe_realign_inputs(
     we didn't end up running cudagraphs. Mutates
     `compiled_graph.current_callable` if cudagraphs
     was run. Otherwise, does nothing.
+
+    Non-mutated inputs are handled by deferred alignment copies
+    in the generated code. Only mutated inputs need the wrapper
+    for writeback.
     """
     if not ran_cudagraphs:
-        assert compiled_graph.current_callable is not None
-        new_callable = align_inputs_from_check_idxs(
-            compiled_graph.current_callable, inputs_to_check, mutated_inputs_idxs
-        )
-        if new_callable is not compiled_graph.current_callable:
-            compiled_graph.current_callable = new_callable
+        check_idxs = inputs_to_check
+        if compiled_graph._defers_input_alignment:
+            # Non-mutated inputs are handled by deferred alignment copies
+            # in the generated Python code. Only mutated inputs need the wrapper
+            # for writeback. Backends that don't emit deferred copies (cpp_wrapper,
+            # FXIR) need the full wrapper.
+            check_idxs = [i for i in inputs_to_check if i in mutated_inputs_idxs]
+        if check_idxs:
+            assert compiled_graph.current_callable is not None
+            new_callable = align_inputs_from_check_idxs(
+                compiled_graph.current_callable,
+                check_idxs,
+                mutated_inputs_idxs,
+            )
+            if new_callable is not compiled_graph.current_callable:
+                compiled_graph.current_callable = new_callable
 
 
 class CompiledFxGraphConstants:
@@ -468,12 +498,14 @@ class CompiledFxGraph(OutputCode):
 
     cudagraph_info: CudagraphCachedInfo | None
     partition_maps: list[GraphPartitionMap] | None
+    compile_region_name: str | None
     fx_kwargs: _CompileFxKwargs
     inputs_to_check: Sequence[int]
 
     _boxed_call: bool | None = None
     _triton_bundle: TritonBundle | None = None
     _wrap_compiled_regions: bool = False
+    _defers_input_alignment: bool = False
     # Metadata-stripped copy of the FX graph for fake tensor propagation.
     # Running this graph under FakeTensorMode re-derives output shapes
     # (including aliasing) from the input shapes.
@@ -491,6 +523,7 @@ class CompiledFxGraph(OutputCode):
         cudagraphs: BoxedBool,
         example_inputs: Sequence[InputType],
         static_input_idxs: Sequence[int],
+        compile_region_name: str | None,
         fx_kwargs: _CompileFxKwargs,
         inputs_to_check: Sequence[int],
         runnable_graph_str: str,
@@ -550,6 +583,7 @@ class CompiledFxGraph(OutputCode):
         self.extern_libs_key = None
         self.cudagraph_info = None
         self.partition_maps = graph.partition_maps
+        self._defers_input_alignment = getattr(graph, "_defers_input_alignment", False)
         self.fx_kwargs = {}
         self.inputs_to_check = ()
 
@@ -598,7 +632,15 @@ class CompiledFxGraph(OutputCode):
                     (not complex_memory_overlap_inputs, "complex memory overlap"),
                     (
                         all(
-                            isinstance(t, (torch.Tensor, torch.SymInt, torch.Generator))
+                            isinstance(
+                                t,
+                                (
+                                    torch.Tensor,
+                                    torch.SymInt,
+                                    torch.Generator,
+                                    OpaqueBase,
+                                ),
+                            )
                             for t in example_inputs
                         ),
                         "non-Tensor inputs",
@@ -621,6 +663,7 @@ class CompiledFxGraph(OutputCode):
                 )
 
         self.cudagraph_info = cudagraph_info
+        self.compile_region_name = compile_region_name
         self.inputs_to_check = inputs_to_check
         self.fx_kwargs = fx_kwargs
 
@@ -721,6 +764,17 @@ class CompiledFxGraph(OutputCode):
         assert graph_kwargs["is_backward"] is not None
         is_backward = graph_kwargs["is_backward"]
         cudagraphs: BoxedBool = graph_kwargs["cudagraphs"]
+
+        # When a CUDAGraphPolicy is set and it says not to wrap this
+        # inner CompiledFxGraph (e.g. because wrapping happens at the
+        # outer level via policy.wrap_output), disable cudagraphs for
+        # this graph so the rest of post_compile (input realignment,
+        # _wrap_compiled_regions) still runs normally.
+        policy = config.cudagraph_policy
+        if policy is not None and not policy.should_wrap(self):
+            counters["inductor"]["cudagraph_skips"] += 1
+            BoxedBool.disable(cudagraphs)
+
         if cudagraphs:
             # It's possible that cudagraphs is enabled, but was disabled
             # during a previous compilation we're loading from the cache.
@@ -746,9 +800,12 @@ class CompiledFxGraph(OutputCode):
                         "boxed_forward_device_index", None
                     )
 
-                if config.graph_partition:
-                    # with graph_partition=True, we skip some cudagraph checks if it's supported
-                    # with partition. So we have to use cudagraph_partition_post_compile.
+                if config.graph_partition and policy is None:
+                    # With graph_partition=True, we skip some cudagraph checks
+                    # if it's supported with partition, so we use
+                    # cudagraph_partition_post_compile.  When a CUDAGraphPolicy
+                    # is active, we use cudagraph_post_compile instead so the
+                    # policy controls wrapping via policy.cudagraphify().
                     cudagraph_partition_post_compile(
                         example_inputs,
                         self,
@@ -782,12 +839,19 @@ class CompiledFxGraph(OutputCode):
             original_callable = self.current_callable
 
             inductor_callable = InductorCompiledCallable(
-                original_callable, self._original_gm
+                original_callable,
+                self._original_gm,
+                compile_region_name=self.compile_region_name,
             )
 
             def wrapped_callable(inputs):
                 if is_in_torch_dispatch_mode():
-                    return inductor_compiled_code(inductor_callable, inputs)
+                    kwargs = (
+                        {"name": self.compile_region_name}
+                        if self.compile_region_name is not None
+                        else {}
+                    )
+                    return inductor_compiled_code(inductor_callable, inputs, **kwargs)
                 else:
                     return original_callable(inputs)
 
@@ -900,6 +964,15 @@ class CompiledAOTI(OutputCode):
                     self.device_type,
                     "",
                     True,
+                ).run  # type: ignore[attr-defined]
+            )  # type: ignore[attr-defined]
+        elif self.device_type.startswith("xpu"):
+            current_callable = (
+                torch._C._aoti.AOTIModelContainerRunnerXpu(  # type: ignore[call-arg]
+                    current_callable,
+                    1,
+                    self.device_type,
+                    "",
                 ).run  # type: ignore[attr-defined]
             )  # type: ignore[attr-defined]
         elif self.device_type == "cpu":

@@ -2388,6 +2388,44 @@ def forward(self, pred_1, x_1):
             )
             self.assertEqual(cnt.frame_count, 6)
 
+    def test_scan_operator_call_count(self):
+        from torch._higher_order_ops.scan import generic_scan, wrap_combine_fn_flat
+
+        counter = [0]
+
+        def counting_combine(carry, x):
+            counter[0] += 1
+            return carry + x, x
+
+        init = [torch.zeros(3)]
+        xs = [torch.ones(5, 3)]
+        combine_flat = functools.partial(
+            wrap_combine_fn_flat,
+            combine_fn=counting_combine,
+            spec_init=pytree.tree_flatten(init)[1],
+            spec_xs=pytree.tree_flatten(xs)[1],
+            num_init_leaves=len(init),
+            num_inp_leaves=len(xs),
+        )
+
+        counter[0] = 0
+        result = generic_scan(combine_flat, init, xs)  # noqa: F841
+        self.assertEqual(counter[0], 5)
+
+        # Single-element scan should call operator exactly once.
+        xs_one = [torch.ones(1, 3)]
+        combine_flat_one = functools.partial(
+            wrap_combine_fn_flat,
+            combine_fn=counting_combine,
+            spec_init=pytree.tree_flatten(init)[1],
+            spec_xs=pytree.tree_flatten(xs_one)[1],
+            num_init_leaves=len(init),
+            num_inp_leaves=len(xs_one),
+        )
+        counter[0] = 0
+        generic_scan(combine_flat_one, init, xs_one)
+        self.assertEqual(counter[0], 1)
+
     @skipIfTorchDynamo("don't test compile on compile")
     def test_scan_init_scanned_0(self):
         # Only init and no input
@@ -10291,7 +10329,7 @@ class TestControlFlowAndRNG(TestCase):
         compiled_func = torch.compile(func, backend="cudagraphs")
         with self.assertRaisesRegex(
             RuntimeError,
-            "RNG within data-dependent conditional nodes is not supported yet",
+            "RNG op during graph capture but generator is not registered",
         ):
             compiled_func(pred, x)
 

@@ -154,7 +154,7 @@ jobs:
 
       - name: Setup Linux
         if: inputs.build_environment != 'linux-s390x-binary-manywheel'
-        uses: ./.github/actions/setup-linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@main
 
       - name: Login to ECR
         if: inputs.build_environment != 'linux-s390x-binary-manywheel'

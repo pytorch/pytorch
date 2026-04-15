@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
     HAS_CPU,
     HAS_GPU,
     HAS_TRITON,
@@ -45,8 +46,12 @@ class TestCustomOpAutoTune(TestCase):
         """Set up test environment with appropriate device and dtype."""
         super().setUp()
         torch._dynamo.reset()
-        self.device = "cuda" if HAS_GPU else "cpu"
-        self.dtype = torch.float16 if self.device == "cuda" else torch.float32
+        self.device = GPU_TYPE if HAS_GPU else "cpu"
+        self.dtype = (
+            torch.float16
+            if self.device == "cuda" or self.device == "xpu"
+            else torch.float32
+        )
         # Clear any previous lowering registrations to ensure test isolation
         from torch._inductor.lowering import user_lowerings
 
@@ -164,7 +169,6 @@ class TestCustomOpAutoTune(TestCase):
         )
         return input_tensor, gate_weight, up_weight, down_weight
 
-    @skipIfXpu
     def test_rmsnorm_custom_op_autotune_with_dynamic_shape(self):
         """Test RMSNorm autotuning with multiple decomposition variants and dynamic shapes.
 
@@ -255,7 +259,6 @@ class TestCustomOpAutoTune(TestCase):
         )
         return a, b, bias
 
-    @skipIfXpu
     def test_decompose_k_custom_op_autotune_dynamic_config_for_input_shape(self):
         """Test decompose_k autotuning with with epilogue fusion(matmul+bias+relu+scale) and
         dynamic config generation based on matmul input shapes.
@@ -376,7 +379,6 @@ class TestCustomOpAutoTune(TestCase):
                 msg=f"Failed for shape ({m}, {k}, {n})",
             )
 
-    @skipIfXpu
     def test_multi_parameter_tuning(self):
         """Test autotuning with multiple parameters for combinatorial parameter exploration.
 
@@ -476,7 +478,6 @@ class TestCustomOpAutoTune(TestCase):
             multi_param_op, (test_x, test_factor), expected_result, "MultiParam"
         )
 
-    @skipIfXpu
     def test_range_based_static_shape_no_cond_dispatch(self):
         """Test dispatch code generation for static vs dynamic shapes.
 

@@ -6909,7 +6909,6 @@ def forward(self, primals_1, tangents_1):
                 subclass_inp_meta=[],
                 subclass_fw_graph_out_meta=[],
                 subclass_tangent_meta=[],
-                is_train=False,
                 traced_tangents_descs=[],
             )
             meta.tokens = {EffectType.ORDERED: torch.tensor([])}
@@ -6937,6 +6936,148 @@ def forward(self, primals_1, tangents_1):
             )
         finally:
             handle.destroy()
+
+    def test_collect_metadata_subclass_fw_outs_follow_input_mutation_type(self):
+        from torch._functorch._aot_autograd.collect_metadata_analysis import (
+            run_functionalized_fw_and_collect_metadata,
+        )
+        from torch._functorch._aot_autograd.descriptors import PlainAOTInput
+        from torch._functorch._aot_autograd.schemas import SubclassCreationMeta
+
+        def f(x):
+            x.add_(1)
+            return [torch.sin(x)]
+
+        fake_mode = FakeTensorMode()
+        subclass_arg = TwoTensor(
+            fake_mode.from_tensor(torch.ones(2)),
+            fake_mode.from_tensor(torch.ones(2)),
+        )
+
+        keep_input_mutations_meta = run_functionalized_fw_and_collect_metadata(
+            f,
+            flat_args_descs=[PlainAOTInput(0)],
+            keep_input_mutations=True,
+            static_input_indices=[],
+        )(subclass_arg)
+        self.assertEqual(keep_input_mutations_meta.mutated_inp_runtime_indices, [])
+        self.assertEqual(len(keep_input_mutations_meta.subclass_fw_graph_out_meta), 1)
+        self.assertIsInstance(
+            keep_input_mutations_meta.subclass_fw_graph_out_meta[0],
+            SubclassCreationMeta,
+        )
+        self.assertEqual(
+            keep_input_mutations_meta.subclass_fw_graph_out_meta[
+                0
+            ].flat_tensor_start_idx,
+            0,
+        )
+
+        out_of_graph_mutation_meta = run_functionalized_fw_and_collect_metadata(
+            f,
+            flat_args_descs=[PlainAOTInput(0)],
+            keep_input_mutations=False,
+            static_input_indices=[],
+        )(subclass_arg)
+        self.assertEqual(out_of_graph_mutation_meta.mutated_inp_runtime_indices, [0])
+        self.assertEqual(len(out_of_graph_mutation_meta.subclass_fw_graph_out_meta), 2)
+        self.assertIsInstance(
+            out_of_graph_mutation_meta.subclass_fw_graph_out_meta[0],
+            SubclassCreationMeta,
+        )
+        self.assertIsInstance(
+            out_of_graph_mutation_meta.subclass_fw_graph_out_meta[1],
+            SubclassCreationMeta,
+        )
+        self.assertEqual(
+            out_of_graph_mutation_meta.subclass_fw_graph_out_meta[
+                0
+            ].flat_tensor_start_idx,
+            0,
+        )
+        self.assertEqual(
+            out_of_graph_mutation_meta.subclass_fw_graph_out_meta[
+                1
+            ].flat_tensor_start_idx,
+            2,
+        )
+
+    def test_collect_metadata_subclass_fw_outs_include_metadata_only_mutation(self):
+        from torch._functorch._aot_autograd.collect_metadata_analysis import (
+            run_functionalized_fw_and_collect_metadata,
+        )
+        from torch._functorch._aot_autograd.descriptors import PlainAOTInput
+        from torch._functorch._aot_autograd.schemas import (
+            PlainTensorMeta,
+            SubclassCreationMeta,
+        )
+
+        def f(x):
+            x.transpose_(0, 1)
+            return [TwoTensor(torch.sin(x), torch.cos(x))]
+
+        fake_mode = FakeTensorMode()
+        arg = fake_mode.from_tensor(torch.ones(2, 3))
+
+        metadata = run_functionalized_fw_and_collect_metadata(
+            f,
+            flat_args_descs=[PlainAOTInput(0)],
+            keep_input_mutations=True,
+            static_input_indices=[],
+        )(arg)
+
+        self.assertEqual(metadata.mutated_inp_runtime_indices, [0])
+        self.assertEqual(len(metadata.subclass_fw_graph_out_meta), 2)
+        self.assertIsInstance(metadata.subclass_fw_graph_out_meta[0], PlainTensorMeta)
+        self.assertEqual(metadata.subclass_fw_graph_out_meta[0].unwrapped_idx, 0)
+        self.assertIsInstance(
+            metadata.subclass_fw_graph_out_meta[1],
+            SubclassCreationMeta,
+        )
+        self.assertEqual(
+            metadata.subclass_fw_graph_out_meta[1].flat_tensor_start_idx,
+            1,
+        )
+
+    def test_collect_metadata_subclass_fw_outs_include_intermediate_bases(self):
+        from torch._functorch._aot_autograd.collect_metadata_analysis import (
+            run_functionalized_fw_and_collect_metadata,
+        )
+        from torch._functorch._aot_autograd.descriptors import PlainAOTInput
+        from torch._functorch._aot_autograd.schemas import PlainTensorMeta
+
+        def f(x):
+            y = x.a + x.b
+            return [y.view(-1), y.view(-1)]
+
+        fake_mode = FakeTensorMode()
+        subclass_arg = TwoTensor(
+            fake_mode.from_tensor(torch.ones(2, 3, requires_grad=True)),
+            fake_mode.from_tensor(torch.ones(2, 3, requires_grad=True)),
+        )
+
+        metadata = run_functionalized_fw_and_collect_metadata(
+            f,
+            flat_args_descs=[PlainAOTInput(0)],
+            keep_input_mutations=True,
+            static_input_indices=[],
+        )(subclass_arg)
+
+        self.assertEqual(metadata.num_intermediate_bases, 1)
+        self.assertEqual(len(metadata.subclass_fw_graph_out_meta), 3)
+        self.assertTrue(
+            all(
+                isinstance(out_meta, PlainTensorMeta)
+                for out_meta in metadata.subclass_fw_graph_out_meta
+            )
+        )
+        self.assertEqual(
+            [
+                out_meta.unwrapped_idx
+                for out_meta in metadata.subclass_fw_graph_out_meta
+            ],
+            [0, 1, 2],
+        )
 
 
 class TestAOTDispatch(AOTTestCase):
@@ -8745,8 +8886,6 @@ aot_autograd_failures = {
     xfail("nn.functional.gaussian_nll_loss"),
     xfail("tensor_split"),
     xfail("corrcoef"),
-    xfail("quantile"),
-    xfail("nanquantile"),
     skip("narrow"),
     xfail("istft"),
     xfail("linalg.eig"),

@@ -1,6 +1,8 @@
 # Owner(s): ["module: unknown"]
 import os
 import pickle
+import queue
+import threading
 import warnings
 from unittest.mock import patch
 
@@ -23,7 +25,7 @@ class TestConfigModule(TestCase):
     def tearDown(self):
         # Config changes get persisted between test cases
         for k in config._config:
-            config._config[k].user_override = _UNSET_SENTINEL
+            config._config[k].user_override.set(_UNSET_SENTINEL)
         config._hash_digest = None
         # Reset deprecation warning flags
         for k in config._config:
@@ -86,7 +88,7 @@ class TestConfigModule(TestCase):
         config.e_bool = None
         self.assertIsNone(config.e_bool)
         for k in config._config:
-            config._config[k].user_override = _UNSET_SENTINEL
+            config._config[k].user_override.set(_UNSET_SENTINEL)
 
     def test_reference_semantics(self):
         config.e_list.append(2)
@@ -156,6 +158,42 @@ class TestConfigModule(TestCase):
         config.load_config(p)
         self.assertTrue(config.e_bool)
         self.assertFalse(config.e_ignored)
+
+    def test_save_config_with_patch(self):
+        self.assertTrue(config.e_bool)
+        with config.patch(e_bool=False):
+            p = config.save_config()
+            self.assertDictEqual(
+                pickle.loads(p),
+                {
+                    "_cache_config_ignore_prefix": ["magic_cache_config"],
+                    "e_bool": False,
+                    "e_dict": {1: 2},
+                    "e_float": 1.0,
+                    "e_int": 1,
+                    "e_list": [1],
+                    "e_none": None,
+                    "e_set": {1},
+                    "e_string": "string",
+                    "e_tuple": (1,),
+                    "nested.e_bool": True,
+                    "_e_ignored": True,
+                    "e_compile_ignored": True,
+                    "magic_cache_config_ignored": True,
+                    "_save_config_ignore": ["e_ignored"],
+                    "e_config": True,
+                    "e_jk": True,
+                    "e_jk_false": False,
+                    "e_env_default": True,
+                    "e_env_default_FALSE": False,
+                    "e_env_default_str": "1234",
+                    "e_env_default_str_empty": "",
+                    "e_env_force": True,
+                    "e_optional": True,
+                    "e_deprecated": True,
+                    "e_not_deprecated": False,
+                },
+            )
 
     def test_save_config_portable(self):
         with warnings.catch_warnings():
@@ -389,6 +427,65 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
             with config.patch("does_not_exist"):
                 pass
 
+    def _assert_patch_reentrant_across_threads(self, fn):
+        barrier = threading.Barrier(2, timeout=5)
+        errors: queue.SimpleQueue[str] = queue.SimpleQueue()
+
+        def worker():
+            try:
+                fn(barrier)
+            except Exception as e:
+                errors.put(repr(e))
+
+        threads = [threading.Thread(target=worker) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        error_messages = []
+        while True:
+            try:
+                error_messages.append(errors.get_nowait())
+            except queue.Empty:
+                break
+
+        self.assertFalse(
+            error_messages, f"concurrent patch usage failed: {error_messages}"
+        )
+        self.assertTrue(config.e_bool)
+
+    def test_patch_context_manager_is_reentrant_across_threads(self):
+        patcher = config.patch(e_bool=False)
+
+        def fn(barrier):
+            with patcher:
+                self.assertFalse(config.e_bool)
+                barrier.wait()
+                self.assertFalse(config.e_bool)
+
+        self._assert_patch_reentrant_across_threads(fn)
+
+    def test_patch_context_manager_is_reentrant_when_nested(self):
+        patcher = config.patch(e_bool=False)
+
+        with patcher:
+            self.assertFalse(config.e_bool)
+            with patcher:
+                self.assertFalse(config.e_bool)
+            self.assertFalse(config.e_bool)
+
+        self.assertTrue(config.e_bool)
+
+    def test_patch_decorator_is_reentrant_across_threads(self):
+        @config.patch(e_bool=False)
+        def fn(barrier):
+            self.assertFalse(config.e_bool)
+            barrier.wait()
+            self.assertFalse(config.e_bool)
+
+        self._assert_patch_reentrant_across_threads(fn)
+
     def test_make_closur_patcher(self):
         revert = config._make_closure_patcher(e_bool=False)()
         self.assertFalse(config.e_bool)
@@ -408,7 +505,7 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
             AssertionError,
             msg="AssertionError: justknobs only support booleans, thisisnotvalid is not a boolean",
         ):
-            _ConfigEntry(Config(default="bad", justknob="fake_knob"))
+            _ConfigEntry(Config(default="bad", justknob="fake_knob"), "test")
 
     def test_alias(self):
         self.assertFalse(config2.e_aliasing_bool)
@@ -428,13 +525,15 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
     def test_invalid_config_int(self):
         with self.assertRaises(AssertionError):
             _ConfigEntry(
-                Config(default=2, env_name_default="FAKE_DISABLE", value_type=int)
+                Config(default=2, env_name_default="FAKE_DISABLE", value_type=int),
+                "test",
             )
 
     def test_invalid_config_float(self):
         with self.assertRaises(AssertionError):
             _ConfigEntry(
-                Config(default=2, env_name_force="FAKE_DISABLE", value_type=float)
+                Config(default=2, env_name_force="FAKE_DISABLE", value_type=float),
+                "test",
             )
 
     def test_deprecated_config(self):
@@ -521,6 +620,49 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
                 0,
                 f"Unexpected config deprecation warnings: {[str(x.message) for x in deprecation_warnings]}",
             )
+
+    def test_patch_then_global(self):
+        self.assertTrue(config.e_bool)
+        with config.patch(e_bool=False):
+            self.assertFalse(config.e_bool)
+
+        config.e_bool = False
+        self.assertFalse(config.e_bool)
+
+    def test_is_default_patch(self):
+        self.assertTrue(config.e_bool)
+        with config.patch(e_bool=False):
+            self.assertFalse(config._is_default("e_bool"))
+
+    def test_dict_patch(self):
+        self.assertTrue(config.e_bool)
+        with config.patch(e_bool=False):
+            d = config._get_dict()
+            self.assertFalse(d["e_bool"])
+
+    def test_set_in_patch(self):
+        self.assertEqual(config.e_int, 1)
+        with config.patch(e_int=2):
+            self.assertEqual(config.e_int, 2)
+            config.e_int = 3
+            self.assertEqual(config.e_int, 3)
+        # Exiting the patch resets e_int to 1, losing the fact that we explicitly set it to 4 - see ConfigModule._do_setattr
+        self.assertEqual(config.e_int, 1)
+
+    def test_nested_patch(self):
+        self.assertEqual(config.e_int, 1)
+        self.assertEqual(config.e_string, "string")
+        with config.patch(e_int=2, e_string="inner"):
+            self.assertEqual(config.e_int, 2)
+            self.assertEqual(config.e_string, "inner")
+            with config.patch(e_int=3):
+                self.assertEqual(config.e_int, 3)
+                self.assertEqual(config.e_string, "inner")
+                config.e_int = 4
+                self.assertEqual(config.e_int, 4)
+            self.assertEqual(config.e_int, 2)
+        self.assertEqual(config.e_int, 1)
+        self.assertEqual(config.e_string, "string")
 
 
 if __name__ == "__main__":

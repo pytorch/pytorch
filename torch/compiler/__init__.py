@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import contextlib
 import io
 from collections.abc import Callable
 from typing import Any, TypeVar
@@ -433,6 +434,7 @@ def wrap_numpy(fn):
 
 _is_compiling_flag: bool = False
 _is_exporting_flag: bool = False
+_is_non_strict_tracing_flag: bool = False
 
 
 def is_compiling() -> bool:
@@ -455,6 +457,60 @@ def is_compiling() -> bool:
         return False
     else:
         return _is_compiling_flag
+
+
+def _is_non_strict_tracing() -> bool:
+    """
+    Indicates whether we are inside a non-strict make_fx-based tracing session.
+    """
+    return _is_non_strict_tracing_flag
+
+
+@contextlib.contextmanager
+def _non_strict_tracing_context():
+    """Context manager that sets the non-strict tracing flag."""
+    global _is_non_strict_tracing_flag
+    old = _is_non_strict_tracing_flag
+    try:
+        _is_non_strict_tracing_flag = True
+        yield
+    finally:
+        _is_non_strict_tracing_flag = old
+
+
+@contextlib.contextmanager
+def _patch_autograd_grad():
+    """Patch autograd.grad for non-strict make_fx tracing.
+
+    This patch installs autograd hooks so traced backward nodes preserve
+    stack trace, seq_nr, and autograd_backward metadata before delegating to
+    the real torch.autograd.grad.
+    """
+    import functools
+
+    import torch.autograd
+    from torch._functorch._aot_autograd.logging_utils import (
+        setup_stacktrace_preservation_hooks_from_tensors,
+    )
+
+    _orig_grad = torch.autograd.grad
+
+    @functools.wraps(_orig_grad)
+    def _patched_grad(outputs, inputs, *args, **kwargs):
+        if not _is_non_strict_tracing():
+            raise AssertionError(
+                "_patch_autograd_grad() must be used under "
+                "_non_strict_tracing_context()"
+            )
+
+        setup_stacktrace_preservation_hooks_from_tensors(outputs)
+        return _orig_grad(outputs, inputs, *args, **kwargs)
+
+    torch.autograd.grad = _patched_grad
+    try:
+        yield
+    finally:
+        torch.autograd.grad = _orig_grad
 
 
 def is_dynamo_compiling() -> bool:
@@ -663,6 +719,7 @@ def nested_compile_region(
     *,
     options: NestedCompileRegionOptions | None = None,
     max_reuse_entries: int = 8,
+    reuse_hash_fn=None,
 ):
     """
     Tells **``torch.compile``** that the marked set of operations forms a nested
@@ -696,6 +753,14 @@ def nested_compile_region(
         max_reuse_entries: Maximum number of reuse cache entries per function
             before raising an error. If this limit is hit, guards keep failing
             across invocations and hierarchical compilation is not effective.
+        reuse_hash_fn: Optional callable that takes the same ``*args, **kwargs``
+            as the wrapped function and returns an integer hash key. When
+            provided, Dynamo traces this function to obtain a constant integer
+            and uses it as the cache key for subgraph reuse, bypassing the
+            automatic fingerprint/guard machinery. Two calls that produce the
+            same hash key reuse the same cached subgraph. The hash function
+            must be fully traceable (no graph breaks) and must return a
+            constant integer.
     """
 
     if options is not None:
@@ -711,7 +776,10 @@ def nested_compile_region(
     )
 
     return _mark_compile_region(
-        fn, options=options, max_reuse_entries=max_reuse_entries
+        fn,
+        options=options,
+        max_reuse_entries=max_reuse_entries,
+        reuse_hash_fn=reuse_hash_fn,
     )
 
 

@@ -31,6 +31,35 @@ from torch.types import IntLikeType
 
 logger = logging.getLogger(__name__)
 
+# Opaque types must be registered before defining schemas that reference them,
+# so the schema parser recognizes the type names and uses PyObjectType (which
+# wraps Python objects as ConcretePyObjectHolder) instead of AnyType (which
+# calls toTypeInferredIValue and fails for Python-only opaque types).
+from torch.distributed.device_mesh import _register_distributed_opaque_types
+
+
+_register_distributed_opaque_types()
+
+_dtensor_lib = torch.library.Library("_dtensor", "FRAGMENT")
+_dtensor_lib.define(
+    "mesh_get_process_group("
+    "torch.distributed.device_mesh.DeviceMesh mesh, int dim"
+    ") -> torch.distributed.distributed_c10d.ProcessGroup"
+)
+
+
+@torch.library.impl("_dtensor::mesh_get_process_group", "CompositeExplicitAutograd")
+def _mesh_get_process_group_impl(mesh, dim):
+    return mesh.get_group(dim)
+
+
+@torch.library.register_fake("_dtensor::mesh_get_process_group")
+def _mesh_get_process_group_fake(mesh, dim):
+    from torch._library.fake_class_registry import maybe_unwrap_fake_script_object
+
+    real_mesh = maybe_unwrap_fake_script_object(mesh)
+    return real_mesh.get_group(dim)
+
 
 @torch.library.register_fake("_dtensor::shard_dim_alltoall")
 def _shard_dim_alltoall_meta(
@@ -363,6 +392,8 @@ def _compute_placement_transition_cost(
 
     num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[mesh_dim]
 
+    # NOTE: is_shard() does not match _StridedShard; see _is_shard_like().
+    # Safe today: redistribute_cost bails with inf when shard_order is None.
     if current_placement.is_shard() and target_placement.is_replicate():
         # allgather gives larger comm bytes
         comm_bytes_gb *= num_devices_on_mesh_dim

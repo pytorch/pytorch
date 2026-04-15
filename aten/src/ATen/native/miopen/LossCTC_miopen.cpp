@@ -12,6 +12,7 @@
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/miopen_ctc_loss.h>
 #include <ATen/ops/miopen_ctc_loss_native.h>
+#include <ATen/ops/_use_miopen_ctc_loss_native.h>
 #endif
 
 // TODO: Remove the condition on AT_ROCM_ENABLED entirely,

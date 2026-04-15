@@ -966,6 +966,17 @@ def sdpa_dense_backward(
             f"got query.dtype={query.dtype}, key.dtype={key.dtype}, "
             f"and value.dtype={value.dtype}"
         )
+    if joint_graph is None:
+        example_vals = (
+            query.new_zeros((), requires_grad=True),
+            query.new_zeros((), dtype=torch.int),
+            query.new_zeros((), dtype=torch.int),
+            query.new_zeros((), dtype=torch.int),
+            query.new_zeros((), dtype=torch.int),
+        )
+        _, joint_graph = create_fw_bw_graph(
+            fw_graph, example_vals, score_mod_other_buffers
+        )
     from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
 
     Bq, Hq, seq_len_q, qk_head_dim = query.shape
@@ -1012,7 +1023,9 @@ def sdpa_dense_backward(
     if grad_logsumexp is None:
         grad_logsumexp = torch.zeros_like(logsumexp)
 
-    # We're undoing the log -> log2 change of base in the forwards
+    # logsumexp is expected in log2 scale (as returned by the forward HOP).
+    # The public flex_attention API converts lse to natural log before returning,
+    # so callers using the public API must not pass that value here directly.
     logsumexp = logsumexp * math.log(2)
     # The backwards formula for the log -> log2 change of base in the forwards
     grad_logsumexp = grad_logsumexp / math.log(2)
