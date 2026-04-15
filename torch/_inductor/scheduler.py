@@ -5581,11 +5581,9 @@ class Scheduler:
 
         """
 
-        # TODO Don't do loop reordering for CPU for now.
+        # TODO Don't do loop reordering/reindexing for CPU for now.
         # Should debug more why it does not work for CPU codegen
-        if not config.loop_ordering_after_fusion or any(
-            n.is_cpu() for n in [node1, node2]
-        ):
+        if any(n.is_cpu() for n in [node1, node2]):
             return -1
 
         # in some rare case, a template can be passed in.
@@ -5600,20 +5598,29 @@ class Scheduler:
         if not common_buffer_names:
             return -1
 
-        score = self._try_reorder_loops_for_candidates(node1, node2)
-        if score >= 0:
-            return score
+        if config.loop_ordering_after_fusion:
+            score = self._try_reorder_loops_for_candidates(node1, node2)
+            if score >= 0:
+                return score
 
-        # No reordering candidates found. Try reindexing the pointwise
-        # to match the reduction's iteration domain (e.g., [1024, 8192] ->
-        # [65536, 128] for RMS norm with reshape). Reindexing sets the
-        # pointwise's sizes to exactly match the reduction's groups, so
-        # no further loop reordering is needed.
+        # No reordering candidates found (or loop ordering disabled).
+        # Try reindexing the pointwise to match the reduction's iteration
+        # domain (e.g., [1024, 8192] -> [65536, 128] for RMS norm with
+        # reshape), then retry loop reordering if enabled. The retry is
+        # needed because FusedSchedulerNodes may have more loop vars than
+        # the reindexed pointwise (e.g., 3 vs 2), and only the normalize()
+        # comparison in _try_reorder_loops_for_candidates handles that
+        # num_vars mismatch.
         if (
             not config.loop_reindexing_after_fusion
             or not self._try_reindex_pointwise_for_reduction(node1, node2)
         ):
             return -1
+
+        if config.loop_ordering_after_fusion:
+            score = self._try_reorder_loops_for_candidates(node1, node2)
+            if score >= 0:
+                return score
 
         return self.score_fusion_memory(node1, node2)
 
@@ -5629,19 +5636,27 @@ class Scheduler:
         common_buffer_names = (
             node1.read_writes.buffer_names() & node2.read_writes.buffer_names()
         )
-        node1_name2dep = {dep.name: dep for dep in node1.read_writes.reads_and_writes()}
-        node2_name2dep = {dep.name: dep for dep in node2.read_writes.reads_and_writes()}
+        node1_reads = {dep.name: dep for dep in node1.read_writes.reads}
+        node1_writes = {dep.name: dep for dep in node1.read_writes.writes}
+        node2_reads = {dep.name: dep for dep in node2.read_writes.reads}
+        node2_writes = {dep.name: dep for dep in node2.read_writes.writes}
 
         candidates = []
         for buffer_name in common_buffer_names:
-            lhs_dep = node1_name2dep[buffer_name]
-            rhs_dep = node2_name2dep[buffer_name]
+            lhs_dep = node1_writes.get(buffer_name) or node1_reads[buffer_name]
+            rhs_dep = node2_writes.get(buffer_name) or node2_reads[buffer_name]
+
+            is_write_read = (
+                buffer_name in node1_writes and buffer_name in node2_reads
+            ) or (buffer_name in node2_writes and buffer_name in node1_reads)
+
             if (
                 lhs_dep.normalize_with_stride_order()
                 == rhs_dep.normalize_with_stride_order()
             ):
                 candidates.append(
                     (
+                        is_write_read,
                         V.graph.sizevars.optimization_hint(
                             lhs_dep.get_numel(), fallback=0
                         ),
@@ -5649,12 +5664,33 @@ class Scheduler:
                         rhs_dep,
                     )
                 )
+            elif is_write_read:
+                # A write→read dep failed normalize_with_stride_order.
+                # This could be a dimension order issue (reordering can
+                # fix it) or a factorization issue (only reindexing can).
+                # Distinguish by checking if the write dep's sizes are
+                # a subset of the read dep's — if so, reordering the
+                # read's loops could align them.
+                w = node1_writes.get(buffer_name) or node2_writes.get(buffer_name)
+                r = node2_reads.get(buffer_name) or node1_reads.get(buffer_name)
+                if isinstance(w, MemoryDep) and isinstance(r, MemoryDep):
+                    sv = V.graph.sizevars
+                    w_sizes = w.normalize().size
+                    r_sizes = r.normalize().size
+                    if not all(
+                        any(sv.statically_known_equals(ws, rs) for rs in r_sizes)
+                        for ws in w_sizes
+                    ):
+                        return -1
 
         if len(candidates) == 0:
             return -1
 
-        # Pick the largest buffer to guide the loop reordering
-        _numel, lhs_dep, rhs_dep = max(candidates, key=operator.itemgetter(0))
+        # Prefer write→read deps over shared reads. Among same
+        # priority, pick the largest buffer.
+        _is_wr, _numel, lhs_dep, rhs_dep = max(
+            candidates, key=operator.itemgetter(0, 1)
+        )
 
         if not isinstance(lhs_dep, MemoryDep) or not isinstance(rhs_dep, MemoryDep):
             return -1
@@ -5744,7 +5780,16 @@ class Scheduler:
             refresh_group_node_dependencies(pw_node)
 
         # Verify reindexing actually increases shared deps.
-        if self.score_fusion_memory(node1, node2) <= 0:
+        common_names = (
+            node1.read_writes.buffer_names() & node2.read_writes.buffer_names()
+        )
+        n1_deps = {dep.name: dep for dep in node1.read_writes.reads_and_writes()}
+        n2_deps = {dep.name: dep for dep in node2.read_writes.reads_and_writes()}
+        has_benefit = any(
+            self.deps_match_normalized(n1_deps[name], n2_deps[name])
+            for name in common_names
+        )
+        if not has_benefit:
             for sn, state in snapshots:
                 sn.restore_loop_state(state)
             if isinstance(pw_node, FusedSchedulerNode):
@@ -5752,6 +5797,17 @@ class Scheduler:
                 pw_node.group = old_pw_group
                 refresh_group_node_dependencies(pw_node)
             return False
+
+        # When loop ordering is disabled, re-extract deps with
+        # normalize=True so variable names are canonical. This is
+        # safe because no further loop reordering will occur.
+        # Without this, reindexed deps use different var names
+        # (e.g. c0 vs d0) causing exact dep comparisons to fail.
+        if not config.loop_ordering_after_fusion:
+            for sn in snodes:
+                sn.refresh_dependencies(normalize=True, need_clear_tiling_cache=False)
+            if isinstance(pw_node, FusedSchedulerNode):
+                refresh_group_node_dependencies(pw_node)
 
         return True
 
@@ -6135,7 +6191,9 @@ class Scheduler:
         if (
             can_reorder
             and shared_data_score < config.score_fusion_memory_threshold
-            and config.loop_ordering_after_fusion
+            and (
+                config.loop_ordering_after_fusion or config.loop_reindexing_after_fusion
+            )
         ):
             new_shared_data_score = self.shared_data_after_reordering_loop(node1, node2)
             if new_shared_data_score >= 0:
@@ -6354,6 +6412,24 @@ class Scheduler:
         if isinstance(write, StarDep) and read_name == write_name:
             return True
         return False
+
+    @staticmethod
+    def deps_match_normalized(dep1: Dep, dep2: Dep) -> bool:
+        """Check if two deps refer to the same access pattern after normalization.
+
+        Handles the case where FusedSchedulerNodes have more loop vars
+        than a single SchedulerNode (e.g., 3 vars vs 2) by falling back
+        to normalize() which merges loops before comparing.
+        """
+        if not isinstance(dep1, MemoryDep) or not isinstance(dep2, MemoryDep):
+            return False
+        if dep1 == dep2:
+            return True
+        if dep1.num_vars == dep2.num_vars:
+            return (
+                dep1.normalize_with_stride_order() == dep2.normalize_with_stride_order()
+            )
+        return dep1.normalize() == dep2.normalize()
 
     def dep_size_hint(self, dep: Dep, count_bytes: bool = True) -> int:
         return V.graph.get_dep_size_hint(dep, count_bytes)
