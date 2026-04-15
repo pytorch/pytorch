@@ -610,9 +610,72 @@ class ProcessGroupXCCLGroupTest(MultiProcessTestCase):
         # reset env
         os.environ["TORCH_XCCL_NAN_CHECK"] = "0"
 
+
+    def _helper_test_extra_xpu_context_by_memory(self):
+        """
+        A helper for `test_extra_xpu_context`, if pynvml is NOT available.
+        If extra context is created, it would manifest into device 0's memory usage.
+        """
+        device = torch.device(f"xpu:{self.rank:d}")
+        x = torch.empty((1,), device=device)
+        # Rank 0 takes a snapshot before collective -- this snapshot should have
+        # included rank 0's own context.
+        if self.rank == 0:
+            free, total = torch.xpu.mem_get_info(device)
+            used_before = float(total - free)
+
+        work = c10d.all_reduce(x, async_op=True)
+
+        # Wait for non-0 ranks to garbage collect Work -- this is the latest
+        # point where extra CUDA context can be created
+        if self.rank == 0:
+            time.sleep(5)
+            free, total = torch.xpu.mem_get_info(device)
+            used_after = float(total - free)
+        del work
+
+        # A barrier for non-0 ranks
+        c10d.all_reduce(x)
+        torch.xpu.synchronize(device)
+        c10d.destroy_process_group()
+        if self.rank == 0:
+            # If non-0 rank creates a context on device 0, this assert would
+            # fail because one context takes about 1 GB -- much more than the
+            # tensor size created in this test.
+            self.assertTrue(
+                # Bump the heuristic from 1.5 to 1.7 due to
+                # https://github.com/pytorch/pytorch/issues/153122
+                used_after < used_before * 1.7,
+                f"{device} used {used_after} bytes after collective, "
+                f"70% more than the status before ({used_before} bytes). "
+                f"Extra CUDA context may have been created.",
+            )
+
+    @requires_xccl()
+    @skip_if_lt_x_gpu(2)
+    def test_extra_xpu_context(self):
+        self.skipTest("XPU context test not supported")
+        # TODO: Use xpu-smi to detect XPU contexts
+        # Check if non-0 ranks would create extra XPU context on device 0
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"xpu:{self.rank:d}")
+        c10d.init_process_group(
+            backend="xccl",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+            device_id=device,
+        )
+        try:
+            self._helper_test_extra_xpu_context_by_nvml()
+        except ModuleNotFoundError:
+            self._helper_test_extra_xpu_context_by_memory()
+
     @requires_xccl()
     @skip_if_lt_x_gpu(2)
     def test_extra_xpu_context_sync_ops(self):
+        self.skipTest("XPU context test not supported")
+        # TODO: Use xpu-smi to detect XPU contexts
         # Loop a bunch of sync ops and see if any of them creates extra context.
         # Requires nvml to check number of processes resident on a device.
         try:
