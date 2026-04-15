@@ -2195,7 +2195,6 @@ class CppKernel(Kernel):
             # back to compute.
             idx_str = cexpr(self.rename_indexing(expr))
             if self.cse.try_get(idx_str) is not None:
-                # Already defined in compute; assert must go in compute too.
                 csevar = ops.index_expr(expr, torch.int64).value
                 buffer = V.kernel.compute
             else:
