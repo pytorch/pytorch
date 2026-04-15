@@ -28,12 +28,15 @@ from .profiler import (
     tensorboard_trace_handler,
 )
 
+from ._opentelemetry import opentelemetry_trace_handler
+
 
 __all__ = [
     "profile",
     "schedule",
     "supported_activities",
     "tensorboard_trace_handler",
+    "opentelemetry_trace_handler",
     "ProfilerAction",
     "ProfilerActivity",
     "kineto_available",
