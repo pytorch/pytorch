@@ -470,6 +470,9 @@ at::Tensor _qconv_prepack_onednn(
 struct QlinearForwardParams {
   dnnl::matmul primitive;
   ideep::exec_args args;
+  ideep::tensor src;
+  ideep::tensor dst;
+  std::optional<ideep::tensor> src1;
   ideep::tensor packed_weight;
   ideep::tensor weight_scales;
   std::optional<ideep::tensor> src_scale;
@@ -480,8 +483,13 @@ struct QlinearForwardParams {
   ideep::tensor scratchpad;
 
   void init_args() {
+    args.insert({DNNL_ARG_SRC, src});
     args.insert({DNNL_ARG_WEIGHTS, packed_weight});
+    args.insert({DNNL_ARG_DST, dst});
     args.insert({DNNL_ARG_SCRATCHPAD, scratchpad});
+    if (src1.has_value()) {
+      args.insert({DNNL_ARG_ATTR_MULTIPLE_POST_OP(0) | DNNL_ARG_SRC_1, src1.value()});
+    }
     if (bias.has_value()) {
       args.insert({DNNL_ARG_BIAS, bias.value()});
     }
