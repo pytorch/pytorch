@@ -33,7 +33,7 @@ for i in  ".github/workflows/_binary-build-linux.yml" ".github/workflows/_binary
     sed -i "/github.event_name == 'pull_request'/d" $i;
 done
 
-sed -i -e "/^        \.github\/scripts\/generate_ci_workflows.py/i \\        export RELEASE_VERSION_TAG=${RELEASE_VERSION}" .github/workflows/lint.yml
+sed -i "s#^        \.github/scripts/generate_ci_workflows.py#        RELEASE_VERSION_TAG=${RELEASE_VERSION} .github/scripts/generate_ci_workflows.py#" .github/workflows/lint.yml
 
 # Triton wheel
 echo "Triton Changes"
