@@ -85,8 +85,6 @@ CONSTANT_NUMEL_LIMIT = 1
 
 RECURSION_COUNT = 0
 # Internal sentinels shared across the extracted dispatch helpers.
-# `_DISPATCH_UNHANDLED` means a phase intentionally declined to handle an op,
-# while `_NO_REAL_OUT` marks the absence of a propagated real-tensor result.
 _DISPATCH_UNHANDLED = object()
 _NO_REAL_OUT = object()
 
