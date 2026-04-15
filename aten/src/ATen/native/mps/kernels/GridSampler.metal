@@ -863,19 +863,19 @@ kernel void grid_sampler_3d_backward(
       iz_n = clamp(iz_n, 0, static_cast<int32_t>(inp_D - 1));
     } else if (params.padding_mode == kPaddingReflection) {
       if (params.align_corners) {
-        ix_n = static_cast<int32_t>(rint(
-            reflect_coordinates(static_cast<float>(ix_n), 0, 2 * (inp_W - 1))));
-        iy_n = static_cast<int32_t>(rint(
-            reflect_coordinates(static_cast<float>(iy_n), 0, 2 * (inp_H - 1))));
-        iz_n = static_cast<int32_t>(rint(
-            reflect_coordinates(static_cast<float>(iz_n), 0, 2 * (inp_D - 1))));
+        ix_n = static_cast<int32_t>(rint(reflect_coordinates(
+            static_cast<float>(ix_n), 0.0f, 2.0f * (inp_W - 1))));
+        iy_n = static_cast<int32_t>(rint(reflect_coordinates(
+            static_cast<float>(iy_n), 0.0f, 2.0f * (inp_H - 1))));
+        iz_n = static_cast<int32_t>(rint(reflect_coordinates(
+            static_cast<float>(iz_n), 0.0f, 2.0f * (inp_D - 1))));
       } else {
-        ix_n = static_cast<int32_t>(rint(
-            reflect_coordinates(static_cast<float>(ix_n), -1, 2 * inp_W - 1)));
-        iy_n = static_cast<int32_t>(rint(
-            reflect_coordinates(static_cast<float>(iy_n), -1, 2 * inp_H - 1)));
-        iz_n = static_cast<int32_t>(rint(
-            reflect_coordinates(static_cast<float>(iz_n), -1, 2 * inp_D - 1)));
+        ix_n = static_cast<int32_t>(rint(reflect_coordinates(
+            static_cast<float>(ix_n), -1.0f, 2.0f * inp_W - 1)));
+        iy_n = static_cast<int32_t>(rint(reflect_coordinates(
+            static_cast<float>(iy_n), -1.0f, 2.0f * inp_H - 1)));
+        iz_n = static_cast<int32_t>(rint(reflect_coordinates(
+            static_cast<float>(iz_n), -1.0f, 2.0f * inp_D - 1)));
       }
       ix_n = clamp(ix_n, 0, static_cast<int32_t>(inp_W - 1));
       iy_n = clamp(iy_n, 0, static_cast<int32_t>(inp_H - 1));
