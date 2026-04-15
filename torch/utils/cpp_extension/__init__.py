@@ -1,21 +1,25 @@
 # mypy: allow-untyped-defs
 """C++/CUDA/SYCL extension utilities.
 
-Historically a single ``torch/utils/cpp_extension.py`` module. The module is
-in the process of being split into focused submodules; for now all
-implementation lives in :mod:`torch.utils.cpp_extension._impl` and is
-re-exported here to preserve the full public API.
+The setuptools-dependent adapters (:class:`BuildExtension`,
+:func:`CppExtension`, :func:`CUDAExtension`, :func:`SyclExtension`) live
+in :mod:`.setuptools` and are resolved lazily on first access, so
+``import torch.utils.cpp_extension`` does not pull in the ``setuptools``
+library unless one of those adapters is used.
 """
 
-from ._impl import *  # noqa: F401, F403
-from ._impl import __all__  # noqa: F401
-
-# Re-export names not in _impl.__all__ that are consumed elsewhere in the
-# PyTorch source tree or by downstream projects. Keep this list in sync as
-# implementation is moved into the dedicated submodules.
-from ._impl import (  # noqa: F401
+from ._discovery import (  # noqa: F401
+    _COMMON_SYCL_FLAGS,
+    _find_cuda_home,
+    _find_rocm_home,
+    _find_sycl_home,
+    _join_rocm_home,
+    _SYCL_DLINK_FLAGS,
+    _TORCH_PATH,
     ABI_INCOMPATIBILITY_WARNING,
     BUILT_FROM_SOURCE_VERSION_PATTERN,
+    check_compiler_is_gcc,
+    check_compiler_ok_for_platform,
     CLIB_EXT,
     CLIB_PREFIX,
     COMMON_HIP_FLAGS,
@@ -30,13 +34,19 @@ from ._impl import (  # noqa: F401
     CUDA_NOT_FOUND_MESSAGE,
     CUDNN_HOME,
     EXEC_EXT,
+    get_compiler_abi_compatibility_and_version,
+    get_cxx_compiler,
+    get_default_build_root,
     HIP_HOME,
+    include_paths,
     IS_HIP_EXTENSION,
     IS_LINUX,
     IS_MACOS,
+    is_ninja_available,
     IS_WINDOWS,
     JIT_EXTENSION_VERSIONER,
     LIB_EXT,
+    library_paths,
     MINIMUM_CLANG_VERSION,
     MINIMUM_GCC_VERSION,
     MINIMUM_MSVC_VERSION,
@@ -48,30 +58,62 @@ from ._impl import (  # noqa: F401
     SUBPROCESS_DECODE_ARGS,
     SYCL_HOME,
     TORCH_LIB_PATH,
+    verify_ninja_availability,
     VersionMap,
     VersionRange,
     WINDOWS_CUDA_HOME,
     WRONG_COMPILER_WARNING,
-    _COMMON_SYCL_FLAGS,
-    _find_cuda_home,
-    _find_rocm_home,
-    _find_sycl_home,
-    _join_rocm_home,
-    _SYCL_DLINK_FLAGS,
-    _TORCH_PATH,
+)
+from ._jit import (  # noqa: F401
+    _get_cuda_arch_flags,
+    _get_hipcc_path,
+    _get_rocm_arch_flags,
+    _write_ninja_file_and_compile_objects,
+    load,
+    load_inline,
+    remove_extension_h_precompiler_headers,
+)
+
+
+__all__ = [
+    "BuildExtension",
+    "check_compiler_is_gcc",
+    "check_compiler_ok_for_platform",
+    "CppExtension",
+    "CUDAExtension",
+    "get_compiler_abi_compatibility_and_version",
+    "get_cxx_compiler",
+    "get_default_build_root",
+    "include_paths",
+    "is_ninja_available",
+    "library_paths",
+    "load",
+    "load_inline",
+    "remove_extension_h_precompiler_headers",
+    "SyclExtension",
+    "verify_ninja_availability",
+]
+
+
+_SETUPTOOLS_LAZY = frozenset(
+    ("BuildExtension", "CppExtension", "CUDAExtension", "SyclExtension")
 )
 
 
 def __getattr__(name):
-    # The historical ``torch/utils/cpp_extension.py`` module exposed all of its
-    # module-level names (including those starting with underscore) via plain
-    # attribute access. Now that it's a package, preserve that surface by
-    # transparently forwarding unknown attributes to the implementation module.
-    from . import _impl
+    if name in _SETUPTOOLS_LAZY:
+        from . import setuptools as _st
 
-    try:
-        return getattr(_impl, name)
-    except AttributeError:
-        raise AttributeError(
-            f"module 'torch.utils.cpp_extension' has no attribute {name!r}"
-        ) from None
+        value = getattr(_st, name)
+        globals()[name] = value
+        return value
+    # Preserve historical attribute access to names that lived on the old
+    # monolithic ``cpp_extension.py`` module but aren't explicitly re-exported
+    # above (e.g. private helpers consumed elsewhere in the tree).
+    for _sub in ("_jit", "_discovery"):
+        _mod = __import__(f"{__name__}.{_sub}", fromlist=[name])
+        if hasattr(_mod, name):
+            value = getattr(_mod, name)
+            globals()[name] = value
+            return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
