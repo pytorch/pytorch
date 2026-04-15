@@ -12949,6 +12949,12 @@ class TestConsistency(TestCaseMPS):
     NEW_ALLOW_LIST_GRAD = defaultdict(list)
 
     def _run_op(self, op, mps_sample, dtype=None):
+        # MPS uses float32 intermediates for these ops, so the CPU reference
+        # must also run in float32 to avoid comparing against less-precise
+        # native half-precision CPU results.
+        if op.name in ["grid_sampler_2d", "grid_sampler_3d"] and dtype is None and mps_sample.input.dtype in [torch.float16, torch.bfloat16]:
+            dtype = torch.float32
+
         cpu_sample = transform_opinfo_sample_to_cpu(mps_sample, dtype)
 
         with warnings.catch_warnings():
@@ -12988,11 +12994,7 @@ class TestConsistency(TestCaseMPS):
                 include_conjugated_inputs=include_conjugated_inputs,
                 set_seed=True):
 
-            opt_dtype = None
-            # CPU implementation is less precise than MPS one so compare MPS to full fp32
-            if dtype in [torch.float16, torch.bfloat16] and op.name in ["grid_sampler_2d", "grid_sampler_3d"]:
-                opt_dtype = torch.float32
-            mps_out, cpu_out, cpu_sample = self._run_op(op, mps_sample, opt_dtype)
+            mps_out, cpu_out, cpu_sample = self._run_op(op, mps_sample)
 
             atol, rtol = self._compute_tolerances(op, dtype)
             if (op.name == "nn.functional.interpolate" and dtype == torch.uint8 and
@@ -13590,6 +13592,40 @@ class TestMetalLibrary(TestCaseMPS):
         for i in [0, 5, 6, 7, 63, 64]:
             self.assertEqual(out[i], 0)
 
+    def test_load_precompiled_metallib(self):
+        # Load a checked-in precompiled metallib containing square and inc_inplace kernels
+        metallib_path = os.path.join(os.path.dirname(__file__), "metal", "test_kernels.metallib")
+        with open(metallib_path, "rb") as f:
+            lib = torch.mps.load_metallib(f.read())
+
+        # Verify kernel discovery
+        kernel_names = set(dir(lib))
+        self.assertIn("square", kernel_names)
+        self.assertIn("inc_inplace", kernel_names)
+
+        # Test square kernel: [1, 2, 3, 4] -> [1, 4, 9, 16]
+        x = torch.tensor([1.0, 2.0, 3.0, 4.0], device="mps")
+        lib.square(x)
+        self.assertEqual(x, torch.tensor([1.0, 4.0, 9.0, 16.0], device="mps"))
+
+        # Test inc_inplace kernel: [1, 4, 9, 16] -> [2, 5, 10, 17]
+        lib.inc_inplace(x)
+        self.assertEqual(x, torch.tensor([2.0, 5.0, 10.0, 17.0], device="mps"))
+
+    def test_load_precompiled_metallib_from_path(self):
+        # Load metallib directly from file path (uses newLibraryWithURL:)
+        metallib_path = os.path.join(os.path.dirname(__file__), "metal", "test_kernels.metallib")
+        lib = torch.mps.load_metallib(metallib_path)
+
+        # Verify kernel discovery
+        kernel_names = set(dir(lib))
+        self.assertIn("square", kernel_names)
+        self.assertIn("inc_inplace", kernel_names)
+
+        # Test square kernel
+        x = torch.tensor([1.0, 2.0, 3.0, 4.0], device="mps")
+        lib.square(x)
+        self.assertEqual(x, torch.tensor([1.0, 4.0, 9.0, 16.0], device="mps"))
 
 
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.

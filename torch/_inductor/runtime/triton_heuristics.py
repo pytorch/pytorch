@@ -2017,7 +2017,7 @@ class StaticTritonCompileResult(CompileResult[_T]):
             result = check_can_launch()
             return result
         except CannotStaticallyLaunchKernel as e:
-            log.info("Bypassing StaticallyLaunchedCudaKernel due to %s", e)  # noqa: G200
+            log.info("Bypassing StaticallyLaunchedCudaKernel due to %s", e)
             if torch._inductor.config.strict_static_triton_launcher:
                 raise e
             return None

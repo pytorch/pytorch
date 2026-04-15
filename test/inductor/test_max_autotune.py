@@ -1549,6 +1549,39 @@ class TestMaxAutotune(TestCase):
         act = f(x, y)
         torch.testing.assert_close(act, ref, atol=2e-2, rtol=1e-2)
 
+    def test_broadcast_batch_bmm(self):
+        # Batch size > 1 with stride[0]=0 to exercise the broadcast batch
+        # guard that skips the Triton bmm template for stride-0 inputs.
+        x = rand_strided((4, 32, 64), (0, 64, 1), dtype=torch.bfloat16, device=GPU_TYPE)
+        y = rand_strided(
+            (4, 64, 16), (1024, 16, 1), dtype=torch.bfloat16, device=GPU_TYPE
+        )
+
+        @torch.compile(mode="max-autotune")
+        def f(x, y):
+            return torch.bmm(x, y)
+
+        ref = torch.bmm(x, y)
+        act = f(x, y)
+        torch.testing.assert_close(act, ref, atol=2e-2, rtol=1e-2)
+
+    def test_broadcast_batch_baddbmm(self):
+        # Batch size > 1 with stride[0]=0 to exercise the broadcast batch
+        # guard that skips the Triton bmm template for stride-0 inputs.
+        x = rand_strided((4, 32, 64), (0, 64, 1), dtype=torch.bfloat16, device=GPU_TYPE)
+        y = rand_strided(
+            (4, 64, 16), (1024, 16, 1), dtype=torch.bfloat16, device=GPU_TYPE
+        )
+        inp = torch.randn(4, 32, 16, dtype=torch.bfloat16, device=GPU_TYPE)
+
+        @torch.compile(mode="max-autotune")
+        def f(inp, x, y):
+            return torch.baddbmm(inp, x, y)
+
+        ref = torch.baddbmm(inp, x, y)
+        act = f(inp, x, y)
+        torch.testing.assert_close(act, ref, atol=2e-2, rtol=1e-2)
+
     @unittest.skipIf(
         config.triton.native_matmul,
         "native matmul and Triton template both have accuracy fail (2.2%)",

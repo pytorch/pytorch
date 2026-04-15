@@ -114,7 +114,7 @@ def start_kernel_compile(
 
     # Evaluate the kernel source to get the Future or CachingAutotuner
     # The kernel_source is like: async_compile.triton('name', '''...''', ...)
-    kernel_obj = eval(kernel_source.strip())  # noqa: S307
+    kernel_obj = eval(kernel_source.strip())
 
     pending_kernels[kernel_name] = kernel_obj
 

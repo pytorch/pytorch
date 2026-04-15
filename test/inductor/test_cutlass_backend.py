@@ -19,6 +19,7 @@ from torch._inductor.codegen.cutlass.serialization import (
 )
 from torch._inductor.utils import clear_caches
 from torch.export import Dim
+from torch.testing._internal.common_utils import random_matrix_with_scaled_reduction_dim
 from torch.testing._internal.logging_utils import log_settings
 from torch.utils import _pytree as pytree
 
@@ -144,7 +145,8 @@ use_evt_config = config.patch(
         "max_autotune_gemm_backends": "CUTLASS",
         "cutlass.cutlass_max_profiling_configs": 1,
         "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
-        "cutlass.cutlass_tma_only": True,
+        "cutlass.cutlass_tma_only": GPU_TYPE
+        == "cuda",  # Only CUDA requires TMA for EVT.
         "cutlass.cutlass_epilogue_fusion_enabled": True,
     }
 )
@@ -334,10 +336,16 @@ class TestCutlassBackend(TestCase):
         """
 
         M, N, K = 4096, 2048, 25728
-        dtype = torch.float16
 
-        a = torch.randn(M, K, dtype=dtype).to(GPU_TYPE)
-        b = torch.randn(N, K, dtype=dtype).to(GPU_TYPE).t()
+        # Scale inputs by 1/sqrt(K) so that the matmul output has O(1)
+        # magnitude, avoiding large accumulation errors in half precision
+        # that would require loose tolerances.
+        a = random_matrix_with_scaled_reduction_dim(
+            M, K, dtype=dtype, device=GPU_TYPE, reduction_dim=-1
+        )
+        b = random_matrix_with_scaled_reduction_dim(
+            N, K, dtype=dtype, device=GPU_TYPE, reduction_dim=-1
+        ).t()
 
         x_shapes = [
             (M, N),
@@ -2023,7 +2031,7 @@ class TestCutlassBackend(TestCase):
         ):
             _ = torch.compile(model)(B)
 
-    @skipXPUIf(True, "evt not supported on xpu cutlass backend yet")
+    @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @use_evt_config
@@ -2125,7 +2133,7 @@ class TestCutlassBackend(TestCase):
             torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
         self.assertTrue(time.time() - start_time < expected_time)
 
-    @skipXPUIf(True, "evt not supported on xpu cutlass backend yet")
+    @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     @evt_all_ops
@@ -2138,7 +2146,7 @@ class TestCutlassBackend(TestCase):
 
         self.run_evt_test(TestModel(), op, shape)
 
-    @skipXPUIf(True, "evt not supported on xpu cutlass backend yet")
+    @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     @evt_bin_ops
@@ -2164,7 +2172,7 @@ class TestCutlassBackend(TestCase):
         )
         torch.testing.assert_close(result, ref_result)
 
-    @skipXPUIf(True, "evt not supported on xpu cutlass backend yet")
+    @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     @evt_un_ops
@@ -2190,7 +2198,7 @@ class TestCutlassBackend(TestCase):
         )
         torch.testing.assert_close(result, ref_result)
 
-    @skipXPUIf(True, "evt not supported on xpu cutlass backend yet")
+    @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     @evt_all_ops
@@ -2232,7 +2240,7 @@ class TestCutlassBackend(TestCase):
 
         torch.testing.assert_close(result, ref_result)
 
-    @skipXPUIf(True, "evt not supported on xpu cutlass backend yet")
+    @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     @evt_all_ops
@@ -2244,7 +2252,7 @@ class TestCutlassBackend(TestCase):
 
         self.run_evt_test(TestModel(), op, (1024, 512))
 
-    @skipXPUIf(True, "evt not supported on xpu cutlass backend yet")
+    @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     @evt_all_ops
@@ -2256,7 +2264,7 @@ class TestCutlassBackend(TestCase):
 
         self.run_evt_test(TestModel(), op, (1024, 1024))  # shape needs to be square
 
-    @skipXPUIf(True, "evt not supported on xpu cutlass backend yet")
+    @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     @evt_all_ops
@@ -2293,7 +2301,7 @@ class TestCutlassBackend(TestCase):
             )
             torch.testing.assert_close(result, ref_result)
 
-    @skipXPUIf(True, "evt not supported on xpu cutlass backend yet")
+    @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     def test_evt_return_accumulator(self):

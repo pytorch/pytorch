@@ -636,6 +636,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.nb_index_impl(tx)
         elif name == "__int__" and not args and not kwargs:
             return self.nb_int_impl(tx)
+        elif name == "__float__" and not args and not kwargs:
+            return self.nb_float_impl(tx)
         elif name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
             other = args[0]
             if not isinstance(self, type(other)) and not (
@@ -1022,6 +1024,23 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             context=f"{type(self).__name__} has nb_int slot but no nb_int_impl override",
             explanation=f"The type {self.python_type_name()} has an nb_int C slot but "
             "the corresponding VariableTracker doesn't implement nb_int_impl.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def nb_float_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        """Mirrors CPython's tp_as_number->nb_float slot.
+
+        Called when type_implements_nb_float returns True for this type.
+        Subclasses override to provide the actual conversion.
+        """
+        unimplemented(
+            gb_type="nb_float_impl not implemented",
+            context=f"{type(self).__name__} has nb_float slot but no nb_float_impl override",
+            explanation=f"The type {self.python_type_name()} has an nb_float C slot but "
+            "the corresponding VariableTracker doesn't implement nb_float_impl.",
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 

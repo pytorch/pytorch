@@ -111,7 +111,7 @@ class CUDAGraph(_CUDAGraph):
                 may be unsafe. "global" will error on actions in other threads, "thread_local" will only error for
                 actions in the current thread, and "relaxed" will not error on these actions. Do NOT change this setting
                 unless you're familiar with `cudaStreamCaptureMode <https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85>`_
-        """  # noqa: B950
+        """
         super().capture_begin(pool=pool, capture_error_mode=capture_error_mode)
 
     def capture_end(self) -> None:
@@ -168,14 +168,14 @@ class CUDAGraph(_CUDAGraph):
         r"""Returns the underlying cudaGraph_t. ``keep_graph`` must be True.
 
         See the following for APIs for how to manipulate this object: `Graph Managmement <https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html>`_ and `cuda-python Graph Management bindings <https://nvidia.github.io/cuda-python/cuda-bindings/latest/module/runtime.html#graph-management>`_
-        """  # noqa: B950
+        """
         return super().raw_cuda_graph()
 
     def raw_cuda_graph_exec(self) -> int:
         r"""Returns the underlying cudaGraphExec_t. ``instantiate`` must have been called if ``keep_graph`` is True, or ``capture_end`` must have been called if ``keep_graph`` is False. If you call ``instantiate()`` after ``raw_cuda_graph_exec()``, the previously returned cudaGraphExec_t will be destroyed. It is your responsibility not to use this object after destruction.
 
         See the following for APIs for how to manipulate this object: `Graph Execution <https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH__EXEC.html>`_ and `cuda-python Graph Execution bindings <https://nvidia.github.io/cuda-python/cuda-bindings/latest/module/runtime.html#graph-execution>`_
-        """  # noqa: B950
+        """
         return super().raw_cuda_graph_exec()
 
 
@@ -213,7 +213,7 @@ class graph:
 
     .. _cudaStreamCaptureMode:
         https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
-    """  # noqa: B950
+    """
 
     default_capture_stream: torch.cuda.Stream | None = None
 

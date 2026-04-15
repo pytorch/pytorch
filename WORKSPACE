@@ -131,7 +131,7 @@ new_local_repository(
 
 new_local_repository(
     name = "org_pytorch_cpuinfo",
-    build_file = "//third_party:cpuinfo/BUILD.bazel",
+    build_file = "//third_party:cpuinfo.BUILD",
     path = "third_party/cpuinfo",
 )
 

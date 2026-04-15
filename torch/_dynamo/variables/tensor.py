@@ -32,7 +32,7 @@ import sympy
 import torch._numpy as tnp
 import torch.fx
 import torch.random
-from torch import sym_int
+from torch import sym_float, sym_int
 from torch._dynamo import compiled_autograd
 from torch._library.opaque_object import is_opaque_reference_type
 from torch._opaque_base import OpaqueBase
@@ -1546,6 +1546,34 @@ class TensorVariable(VariableTracker):
     def method___int__(self, tx: "InstructionTranslator") -> VariableTracker:
         return self.nb_int_impl(tx)
 
+    def nb_float_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        # CPython: THPVariable_float_scalar dispatches to double.
+        # Complex tensors raise RuntimeError at runtime.
+        if self.dtype is not None and self.dtype.is_complex:
+            raise_observed_exception(
+                RuntimeError,
+                tx,
+                args=["value cannot be converted to type double without overflow"],
+            )
+        item = self.call_method(tx, "item", [], {})
+        from .builder import wrap_fx_proxy
+
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                sym_float,
+                (item.as_proxy(),),
+                {},
+            ),
+        )
+
+    def method___float__(self, tx: "InstructionTranslator") -> VariableTracker:
+        return self.nb_float_impl(tx)
+
     def method___getitem__(
         self,
         tx: "InstructionTranslator",
@@ -2263,6 +2291,28 @@ class SymNodeVariable(VariableTracker):
         self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
     ) -> VariableTracker:
         return self.nb_int_impl(tx)
+
+    def nb_float_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        # SymFloat.__float__: https://github.com/pytorch/pytorch/blob/ee336ca5440939b8ad65e916d47421f849e56178/torch/__init__.py#L679
+        from .builder import wrap_fx_proxy
+
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                sym_float,
+                (self.as_proxy(),),
+                {},
+            ),
+        )
+
+    def method___float__(
+        self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
+    ) -> VariableTracker:
+        return self.nb_float_impl(tx)
 
     def is_python_hashable(self) -> bool:
         return True

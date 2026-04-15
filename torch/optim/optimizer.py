@@ -374,7 +374,7 @@ class Optimizer:
         'OrderedDict[int, Callable[["Optimizer"], None]]'
     )
 
-    def __init__(self, params: ParamsT, defaults: dict[str, Any]) -> None:  # noqa: D107
+    def __init__(self, params: ParamsT, defaults: dict[str, Any]) -> None:
         torch._C._log_api_usage_once("python.optimizer")
         self.defaults = defaults
         self._optimizer_step_pre_hooks = OrderedDict()
@@ -409,14 +409,14 @@ class Optimizer:
         # https://github.com/pytorch/pytorch/issues/72948
         self._warned_capturable_if_run_uncaptured = True
 
-    def __getstate__(self) -> dict[str, Any]:  # noqa: D105
+    def __getstate__(self) -> dict[str, Any]:
         return {
             "defaults": self.defaults,
             "state": self.state,
             "param_groups": self.param_groups,
         }
 
-    def __setstate__(self, state: dict[str, Any]) -> None:  # noqa: D105
+    def __setstate__(self, state: dict[str, Any]) -> None:
         self.__dict__.update(state)
         if "_optimizer_step_pre_hooks" not in self.__dict__:
             self._optimizer_step_pre_hooks = OrderedDict()
@@ -433,7 +433,7 @@ class Optimizer:
         self._patch_step_function()  # To support multiprocessing pickle/unpickle
         self.defaults.setdefault("differentiable", False)
 
-    def __repr__(self) -> str:  # noqa: D105
+    def __repr__(self) -> str:
         format_string = self.__class__.__name__ + " ("
         for i, group in enumerate(self.param_groups):
             format_string += "\n"
@@ -510,7 +510,7 @@ class Optimizer:
         """
 
     @staticmethod
-    def profile_hook_step(func: Callable[_P, R]) -> Callable[_P, R]:  # noqa: D102
+    def profile_hook_step(func: Callable[_P, R]) -> Callable[_P, R]:
         @functools.wraps(func)
         def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> R:
             self, *_ = args
@@ -618,7 +618,7 @@ class Optimizer:
 
     def register_state_dict_pre_hook(
         self, hook: Callable[["Optimizer"], None], prepend: bool = False
-    ) -> RemovableHandle:  # noqa: D101
+    ) -> RemovableHandle:
         r"""Register a state dict pre-hook which will be called before :meth:`~torch.optim.Optimizer.state_dict` is called.
 
         It should have the following signature::
@@ -811,7 +811,7 @@ class Optimizer:
         self,
         hook: Callable[["Optimizer", StateDict], StateDict | None],
         prepend: bool = False,
-    ) -> RemovableHandle:  # noqa: D205 D400
+    ) -> RemovableHandle:
         r"""Register a load_state_dict pre-hook which will be called before
         :meth:`~torch.optim.Optimizer.load_state_dict` is called. It should have the
         following signature::
@@ -848,7 +848,7 @@ class Optimizer:
 
     def register_load_state_dict_post_hook(
         self, hook: Callable[["Optimizer"], None], prepend: bool = False
-    ) -> RemovableHandle:  # noqa: D205 D400
+    ) -> RemovableHandle:
         r"""Register a load_state_dict post-hook which will be called after
         :meth:`~torch.optim.Optimizer.load_state_dict` is called. It should have the
         following signature::

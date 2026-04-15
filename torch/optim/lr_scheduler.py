@@ -120,7 +120,7 @@ class LRScheduler:
         self,
         optimizer: Optimizer,
         last_epoch: int = -1,
-    ) -> None:  # noqa: D107
+    ) -> None:
         # Attach optimizer
         if not isinstance(optimizer, Optimizer):
             raise TypeError(f"{type(optimizer).__name__} is not an Optimizer")
@@ -380,7 +380,7 @@ class LambdaLR(LRScheduler):
         optimizer: Optimizer,
         lr_lambda: Callable[[int], float] | list[Callable[[int], float]],
         last_epoch: int = -1,
-    ) -> None:  # noqa: D107
+    ) -> None:
         self.optimizer = optimizer
 
         self.lr_lambdas: list[Callable[[int], float]]
@@ -495,7 +495,7 @@ class MultiplicativeLR(LRScheduler):
         optimizer: Optimizer,
         lr_lambda: Callable[[int], float] | list[Callable[[int], float]],
         last_epoch: int = -1,
-    ) -> None:  # noqa: D107
+    ) -> None:
         self.optimizer = optimizer
 
         self.lr_lambdas: list[Callable[[int], float]]
@@ -624,7 +624,7 @@ class StepLR(LRScheduler):
         step_size: int,
         gamma: float = 0.1,
         last_epoch: int = -1,
-    ) -> None:  # noqa: D107
+    ) -> None:
         self.step_size = step_size
         self.gamma = gamma
         super().__init__(optimizer, last_epoch)
@@ -710,7 +710,7 @@ class MultiStepLR(LRScheduler):
         milestones: Iterable[int],
         gamma: float = 0.1,
         last_epoch: int = -1,
-    ) -> None:  # noqa: D107
+    ) -> None:
         self.milestones = Counter(milestones)
         self.gamma = gamma
         super().__init__(optimizer, last_epoch)
@@ -809,7 +809,7 @@ class ConstantLR(LRScheduler):
         factor: float = 1.0 / 3,
         total_iters: int = 5,
         last_epoch: int = -1,
-    ) -> None:  # noqa: D107
+    ) -> None:
         if factor > 1.0 or factor < 0:
             raise ValueError(
                 "Constant multiplicative factor expected to be between 0 and 1."
@@ -917,7 +917,7 @@ class LinearLR(LRScheduler):
         end_factor: float = 1.0,
         total_iters: int = 5,
         last_epoch: int = -1,
-    ) -> None:  # noqa: D107
+    ) -> None:
         if start_factor > 1.0 or start_factor <= 0:
             raise ValueError(
                 "Starting multiplicative factor expected to be greater than 0 and less or equal to 1."
@@ -1030,7 +1030,7 @@ class ExponentialLR(LRScheduler):
         optimizer: Optimizer,
         gamma: float,
         last_epoch: int = -1,
-    ) -> None:  # noqa: D107
+    ) -> None:
         self.gamma = gamma
         super().__init__(optimizer, last_epoch)
 
@@ -1122,7 +1122,7 @@ class SequentialLR(LRScheduler):
         schedulers: list[LRScheduler],
         milestones: list[int],
         last_epoch: int = -1,
-    ) -> None:  # noqa: D107
+    ) -> None:
         if len(schedulers) < 1:
             raise ValueError(
                 f"{self.__class__.__name__} expects at least one scheduler, but got no scheduler."
@@ -1266,7 +1266,7 @@ class PolynomialLR(LRScheduler):
         total_iters: int = 5,
         power: float = 1.0,
         last_epoch: int = -1,
-    ) -> None:  # noqa: D107
+    ) -> None:
         self.total_iters = total_iters
         self.power = power
         super().__init__(optimizer, last_epoch)
@@ -1390,7 +1390,7 @@ class CosineAnnealingLR(LRScheduler):
         T_max: int,
         eta_min: float = 0.0,
         last_epoch: int = -1,
-    ) -> None:  # noqa: D107
+    ) -> None:
         self.T_max = T_max
         self.eta_min = eta_min
         super().__init__(optimizer, last_epoch)
@@ -1507,7 +1507,7 @@ class ChainedScheduler(LRScheduler):
 
     def __init__(
         self, schedulers: Sequence[LRScheduler], optimizer: Optimizer | None = None
-    ) -> None:  # noqa: D107
+    ) -> None:
         if len(schedulers) < 1:
             raise ValueError(
                 f"{self.__class__.__name__} expects at least one scheduler to be chained, but got no scheduler."
@@ -1648,7 +1648,7 @@ class ReduceLROnPlateau(LRScheduler):
         cooldown: int = 0,
         min_lr: list[float] | float = 0,
         eps: float = 1e-8,
-    ) -> None:  # noqa: D107
+    ) -> None:
         if factor >= 1.0:
             raise ValueError("Factor should be < 1.0.")
         self.factor = factor
@@ -1734,10 +1734,10 @@ class ReduceLROnPlateau(LRScheduler):
                 _update_param_group_val(param_group, "lr", new_lr)
 
     @property
-    def in_cooldown(self):  # noqa: D102
+    def in_cooldown(self):
         return self.cooldown_counter > 0
 
-    def _is_better(self, a, best):  # noqa: D102
+    def _is_better(self, a, best):
         if self.mode == "min" and self.threshold_mode == "rel":
             rel_epsilon = 1.0 - self.threshold
             return a < best * rel_epsilon
@@ -1891,7 +1891,7 @@ class CyclicLR(LRScheduler):
         base_momentum: float = 0.8,
         max_momentum: float = 0.9,
         last_epoch: int = -1,
-    ) -> None:  # noqa: D107
+    ) -> None:
         # Attach optimizer
         if not isinstance(optimizer, Optimizer):
             raise TypeError(f"{type(optimizer).__name__} is not an Optimizer")
@@ -2061,7 +2061,7 @@ class CyclicLR(LRScheduler):
         return lrs
 
     @override
-    def state_dict(self) -> dict[str, Any]:  # noqa: D102
+    def state_dict(self) -> dict[str, Any]:
         """Return the state of the scheduler as a :class:`dict`.
 
         It contains an entry for every variable in ``self.__dict__`` which
@@ -2142,7 +2142,7 @@ class CosineAnnealingWarmRestarts(LRScheduler):
         T_mult: int = 1,
         eta_min: float = 0.0,
         last_epoch: int = -1,
-    ) -> None:  # noqa: D107
+    ) -> None:
         if T_0 <= 0 or not isinstance(T_0, int):
             raise ValueError(f"Expected positive integer T_0, but got {T_0}")
         if T_mult < 1 or not isinstance(T_mult, int):
@@ -2394,7 +2394,7 @@ class OneCycleLR(LRScheduler):
         final_div_factor: float = 1e4,
         three_phase: bool = False,
         last_epoch: int = -1,
-    ) -> None:  # noqa: D107
+    ) -> None:
         # Validate optimizer
         if not isinstance(optimizer, Optimizer):
             raise TypeError(f"{type(optimizer).__name__} is not an Optimizer")

@@ -37,11 +37,25 @@ on:
         description: |
           Fetch's GitHub Issue from pytorch/test-infra
           Example: https://github.com/pytorch/test-infra/issues/5132
+      runner_config:
+        required: false
+        type: string
+        default: ""
+        description: Runner configuration used by the caller to derive runner-type.
 
     outputs:
       label-type:
         description: Type of runners to use
         value: ${{ jobs.runner-determinator.outputs.label-type }}
+      runner-config:
+        description: Normalized runner configuration derived from the caller input
+        value: ${{ jobs.runner-determinator.outputs.runner-config }}
+      runner-type:
+        description: Runner suffix to use for workflow-specific runner selection
+        value: ${{ jobs.runner-determinator.outputs.runner-type }}
+      runner-label:
+        description: Fully qualified runner label derived from runner_config
+        value: ${{ jobs.runner-determinator.outputs.runner-label }}
       use-arc:
         description: Whether to use ARC runners
         value: ${{ jobs.runner-determinator.outputs.use-arc }}
@@ -53,6 +67,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       label-type: ${{ steps.set-condition.outputs.label-type }}
+      runner-config: ${{ steps.set-runner-info.outputs.runner-config }}
+      runner-type: ${{ steps.set-runner-info.outputs.runner-type }}
+      runner-label: ${{ steps.set-runner-info.outputs.runner-label }}
       use-arc: ${{ steps.set-condition.outputs.use-arc }}
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -87,3 +104,30 @@ jobs:
             --eligible-experiments "$CHECK_EXPERIMENTS" \
             --opt-out-experiments "$OPT_OUT_EXPERIMENTS" \
             --pr-number "${PR_NUMBER}"
+
+      - name: Determine runner configuration
+        id: set-runner-info
+        run: |
+          case "${{ inputs.runner_config }}" in
+            "")
+              runner_config="m8g"
+              runner_type="metal-24xl"
+              ;;
+            "m8g")
+              runner_config="m8g"
+              runner_type="metal-24xl"
+              ;;
+            "m7g")
+              runner_config="m7g"
+              runner_type="metal"
+              ;;
+            *)
+              echo "Unsupported runner_config: ${{ inputs.runner_config }}"
+              exit 1
+              ;;
+          esac
+
+          runner_label="linux.arm64.${runner_config}.${runner_type}"
+          echo "runner-config=${runner_config}" >> "$GITHUB_OUTPUT"
+          echo "runner-type=${runner_type}" >> "$GITHUB_OUTPUT"
+          echo "runner-label=${runner_label}" >> "$GITHUB_OUTPUT"

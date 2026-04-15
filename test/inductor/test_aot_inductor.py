@@ -5185,6 +5185,26 @@ class AOTInductorTestsTemplate:
         self.check_model(m, inputs)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    def test_assert_size_stride_guarded_by_env_check(self):
+        # Verify that assert_size_stride and assert_alignment calls in
+        # AOTI-generated code are guarded by _check_aoti_runtime_check_inputs_env()
+        # so they only fire when AOTI_RUNTIME_CHECK_INPUTS is set.
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.linalg.qr(x)[0]
+
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+        _, code = run_and_get_cpp_code(AOTIRunnerUtil.compile, Model(), example_inputs)
+        FileCheck().check(
+            "if (_check_aoti_runtime_check_inputs_env()) { assert_size_stride("
+        ).run(code)
+        # assert_alignment is only emitted on GPU
+        if self.device != "cpu":
+            FileCheck().check(
+                "if (_check_aoti_runtime_check_inputs_env()) { assert_alignment("
+            ).run(code)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
     def test_runtime_checks_fp8(self):
         # cuda only

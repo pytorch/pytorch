@@ -1751,7 +1751,7 @@ def _find_buffers_with_changed_last_use_sink_waits(
 
     for buf in candidate_bufs:
         snode_last_use = buf_to_snode_last_use[buf]
-        if snode_last_use != candidate:  # noqa: E711
+        if snode_last_use != candidate:
             continue
 
         # candidate is last use of buf
@@ -2186,7 +2186,7 @@ def visualize_overlap(order):
     cur_comm_node = None
 
     def step_log(step, msg):
-        overlap_log.debug(f"{step:>6}: {msg}")  # noqa: G004
+        overlap_log.debug(f"{step:>6}: {msg}")
 
     for step, snode in enumerate(order):
         if cur_comm_node is None:
@@ -2205,15 +2205,13 @@ def visualize_overlap(order):
             if contains_collective(snode):
                 total_est_runtime += estimate_op_runtime(snode)
                 cur_comm_node = snode.node
-                step_log(step, f"{node_summary(snode)}")  # noqa: G004
+                step_log(step, f"{node_summary(snode)}")
             elif is_wait(snode.node):  # end of this comm op
                 step_log(step, f"{node_summary(snode)}")
                 cur_comm_node = None
             else:  # overlapped compute op
                 step_log(step, f"| {node_summary(snode)}")
-    overlap_log.debug(
-        f"Est. runtime (ms): {total_est_runtime / 1000 / 1000}"  # noqa: G004
-    )
+    overlap_log.debug(f"Est. runtime (ms): {total_est_runtime / 1000 / 1000}")
 
 
 def reorder_compute_and_comm_for_overlap(

@@ -2467,7 +2467,7 @@ def _iota_aten(
 
 
 iota = _make_prim(
-    schema="iota(SymInt length, *, SymInt start, SymInt step, ScalarType dtype, Device device, bool requires_grad) -> Tensor",  # noqa: B950
+    schema="iota(SymInt length, *, SymInt start, SymInt step, ScalarType dtype, Device device, bool requires_grad) -> Tensor",
     return_type=RETURN_TYPE.NEW,
     meta=_iota_meta,
     impl_aten=_iota_aten,
@@ -2575,7 +2575,7 @@ _empty_permuted_doc = """
 
 # TODO: add layout, pin_memory
 empty_permuted = _make_prim(
-    schema="empty_permuted(SymInt[] shape, int[] physical_layout, *, ScalarType dtype, Device device, bool requires_grad) -> Tensor",  # noqa: B950
+    schema="empty_permuted(SymInt[] shape, int[] physical_layout, *, ScalarType dtype, Device device, bool requires_grad) -> Tensor",
     return_type=RETURN_TYPE.NEW,
     meta=_empty_permuted_meta,
     impl_aten=torch.empty_permuted,
@@ -2832,7 +2832,7 @@ _normal_doc = """
 
 normal = _make_prim(
     schema=(
-        "normal(SymInt[] shape, *, Scalar mean, Scalar std, ScalarType dtype, Device device, bool requires_grad, Generator? generator=None) -> Tensor"  # noqa: B950
+        "normal(SymInt[] shape, *, Scalar mean, Scalar std, ScalarType dtype, Device device, bool requires_grad, Generator? generator=None) -> Tensor"
     ),
     return_type=RETURN_TYPE.NEW,
     meta=_normal_meta,

@@ -323,6 +323,15 @@ auto check_has_torch_function(PyObject* obj, bool ignore_mode) -> bool {
       !THPVariable_CheckTypeExact(tp) && !is_basic_python_type(tp) &&
       torch::torch_function_enabled() && has_torch_function_attr(obj));
 }
+
+bool has_torch_function(c10::ArrayRef<PyObject*> args) {
+  for (const auto obj : args) {
+    if (has_torch_function(obj)) {
+      return true;
+    }
+  }
+  return false;
+}
 } // namespace torch
 
 inline static bool sequence_has_torch_function(PyObject* args) {

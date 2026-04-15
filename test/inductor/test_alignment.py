@@ -26,7 +26,6 @@ except unittest.SkipTest:
 TestCase = test_torchinductor.TestCase
 check_model = test_torchinductor.check_model
 check_model_gpu = test_torchinductor.check_model_gpu
-skip_if_cpp_wrapper = test_torchinductor.skip_if_cpp_wrapper
 copy_tests = test_torchinductor.copy_tests
 define_custom_op_for_test = test_torchinductor.define_custom_op_for_test
 
@@ -102,9 +101,6 @@ class CommonTemplate:
         self.common(fn, (x,), check_lowp=False)
 
     @config.patch(implicit_fallbacks=True, alignment_asserts=True)
-    @skip_if_cpp_wrapper(
-        "Inductor does not generate alignment assertion for cpp_wrapper right now"
-    )
     def test_incorrect_meta_for_custom_op_2d(self):
         def slice2d(x):
             return (3 * x)[..., 1:-15]
@@ -123,7 +119,8 @@ class CommonTemplate:
         x = torch.randn(1024, 1024 + 16, device=self.device)
 
         expected_error = "Expect the tensor to be 16 bytes aligned. Fail due to storage_offset=1 itemsize=4"
-        with self.assertRaisesRegex(AssertionError, expected_error):
+        error_type = RuntimeError if config.cpp_wrapper else AssertionError
+        with self.assertRaisesRegex(error_type, expected_error):
             self.common(fn, (x,), check_lowp=False)
 
     def test_slice(self):

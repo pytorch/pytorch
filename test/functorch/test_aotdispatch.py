@@ -11,6 +11,7 @@ import itertools
 import operator
 import unittest
 import warnings
+import weakref
 from collections.abc import Callable
 from contextlib import ContextDecorator, ExitStack, nullcontext
 from functools import partial, wraps
@@ -4732,6 +4733,135 @@ def forward(self, tangents_1):
         inp = TwoTensor(a, b)
         out = f(inp)
         self.assertEqual(out.stride(), inp.stride())
+
+    def _make_model_and_input(self, hidden=1024, vocab=4096, seq_len=128):
+        """Build a small model that produces non-scalar output (like an LM head)."""
+        model = nn.Sequential(
+            nn.Linear(hidden, hidden, bias=False),
+            nn.ReLU(),
+            nn.Linear(hidden, hidden, bias=False),
+            nn.ReLU(),
+            nn.Linear(hidden, vocab, bias=False),
+        ).cuda()
+        x = torch.randn(seq_len, hidden, device="cuda", requires_grad=True)
+        labels = torch.randint(0, vocab, (seq_len,), device="cuda")
+        return model, x, labels
+
+    def _make_refcount_probe(self):
+        """Create a boxed-grads probe that checks the framework holds no extra refs.
+
+        The probe uses boxed_grads_call=True so PyNode::apply moves grads
+        into a mutable list (same mechanism as CompiledFunction). After
+        removing the grad from the list, a weakref must become dead — proving
+        the framework released all its refs.
+
+        Returns (ProbeClass, result_box). After backward,
+        result_box["ref_dead"] is True if no extra refs were held."""
+        result_box = {}
+
+        class RefcountProbe(torch.autograd.Function):
+            boxed_grads_call = True
+
+            @staticmethod
+            def forward(ctx, pred):
+                return pred.clone()
+
+            @staticmethod
+            def backward(ctx, grads):
+                grad = grads.pop(0)
+                grad_for_return = grad.clone()
+                ref = weakref.ref(grad)
+                del grad
+                result_box["ref_dead"] = ref() is None
+                return grad_for_return
+
+        return RefcountProbe, result_box
+
+    def _assert_no_extra_refs(self, result_box):
+        """Assert the framework holds no extra refs to the grad tensor."""
+        self.assertIn("ref_dead", result_box)
+        self.assertTrue(
+            result_box["ref_dead"],
+            "Framework holds extra refs to tangent: weakref still alive after "
+            "removing all user-visible references",
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_tangent_freed_compiled_model_and_loss(self):
+        """Scenario: compiled model + compiled loss (torchtitan simple_fsdp pattern).
+
+        Mirrors torchtitan's simple_fsdp training loop:
+          pred = compiled_model(input)   # torch.compile(model)
+          loss = compiled_loss(pred, labels)  # torch.compile(loss_fn)
+          loss.backward()
+
+        The tangent for model backward is created internally by loss backward.
+        No user variable holds it — only the C++ pyInputs tuple on the stack.
+        The boxed calling convention alone frees it."""
+        model, x, labels = self._make_model_and_input()
+        compiled_model = torch.compile(model, backend="inductor")
+
+        def loss_fn(pred, labels):
+            return torch.nn.functional.cross_entropy(pred.float(), labels)
+
+        compiled_loss = torch.compile(loss_fn, backend="inductor")
+
+        Probe, refcount_box = self._make_refcount_probe()
+        pred = compiled_model(x)
+        pred = Probe.apply(pred)
+        loss = compiled_loss(pred, labels)
+        del pred
+        loss.backward()
+
+        self._assert_no_extra_refs(refcount_box)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_tangent_freed_compiled_model_eager_loss(self):
+        """Scenario: compiled model + eager loss (common training pattern).
+
+        Similar to torchtitan but loss is not compiled. The tangent is
+        created by eager cross_entropy backward. Boxed convention frees it."""
+        model, x, labels = self._make_model_and_input()
+        compiled_model = torch.compile(model, backend="inductor")
+
+        Probe, refcount_box = self._make_refcount_probe()
+        pred = compiled_model(x)
+        pred = Probe.apply(pred)
+        loss = torch.nn.functional.cross_entropy(pred.float(), labels)
+        del pred
+        loss.backward()
+
+        self._assert_no_extra_refs(refcount_box)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_tangent_user_provided_via_pop(self):
+        """Scenario: user creates tangent but releases it before backward runs.
+
+        The user wraps the tangent in a list and calls out.backward(l.pop()).
+        After pop(), no Python variable holds the tangent — same as torchtitan.
+        The boxed calling convention should free it."""
+        model, x, _labels = self._make_model_and_input()
+        compiled_model = torch.compile(model, backend="inductor")
+
+        def loss_fn(pred, labels):
+            return torch.nn.functional.cross_entropy(pred.float(), labels)
+
+        compiled_loss = torch.compile(loss_fn, backend="inductor")
+        _, _, labels = self._make_model_and_input()
+
+        Probe, refcount_box = self._make_refcount_probe()
+        pred = compiled_model(x)
+        pred = Probe.apply(pred)
+        loss = compiled_loss(pred, labels)
+        del pred
+
+        # Wrap loss in a list and use pop() — no user variable holds loss
+        # after this. The tangent created by loss backward has no user ref.
+        loss_list = [loss]
+        del loss
+        loss_list.pop().backward()
+
+        self._assert_no_extra_refs(refcount_box)
 
 
 def extract_graph(fx_g, _, graph_cell):
