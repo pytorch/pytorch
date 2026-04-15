@@ -821,5 +821,89 @@ class TestUnbind(TestCase):
 instantiate_device_type_tests(TestUnbind, globals(), only_for=("cpu", "cuda"))
 
 
+class TestShardedGeneration(TestCase):
+    """Test sharded_uniform/sharded_normal produce the same full tensor
+    regardless of how many shards (simulating 1/2/4/8 GPUs)."""
+
+    @parametrize("gen_fn_name", ["sharded_uniform", "sharded_normal"])
+    def test_1d_gpu_count_invariance(self, device, gen_fn_name):
+        key = random.key(42, device=device)
+        global_shape = (128,)
+        ref_fn = random.uniform if "uniform" in gen_fn_name else random.normal
+        expected = ref_fn(key, global_shape)
+        gen_fn = getattr(random, gen_fn_name)
+
+        for num_gpus in [1, 2, 4, 8]:
+            splits = (num_gpus,)
+            shards = [gen_fn(key, global_shape, splits, (r,)) for r in range(num_gpus)]
+            full = torch.cat(shards)
+            self.assertEqual(full, expected)
+
+    @parametrize("gen_fn_name", ["sharded_uniform", "sharded_normal"])
+    def test_2d_grid_invariance(self, device, gen_fn_name):
+        key = random.key(42, device=device)
+        global_shape = (64, 80)
+        ref_fn = random.uniform if "uniform" in gen_fn_name else random.normal
+        expected = ref_fn(key, global_shape)
+        gen_fn = getattr(random, gen_fn_name)
+
+        for grid in [(1, 1), (2, 1), (1, 2), (2, 2), (4, 2), (2, 4), (4, 4)]:
+            rows = []
+            for r in range(grid[0]):
+                cols = []
+                for c in range(grid[1]):
+                    cols.append(gen_fn(key, global_shape, grid, (r, c)))
+                rows.append(torch.cat(cols, dim=1))
+            full = torch.cat(rows, dim=0)
+            self.assertEqual(full, expected)
+
+    @parametrize("gen_fn_name", ["sharded_uniform", "sharded_normal"])
+    def test_1d_float64_reconstruction(self, device, gen_fn_name):
+        key = random.key(42, device=device)
+        global_shape = (128,)
+        ref_fn = random.uniform if "uniform" in gen_fn_name else random.normal
+        expected = ref_fn(key, global_shape, dtype=torch.float64)
+        gen_fn = getattr(random, gen_fn_name)
+
+        for num_gpus in [1, 2, 4]:
+            splits = (num_gpus,)
+            shards = [
+                gen_fn(key, global_shape, splits, (r,), dtype=torch.float64)
+                for r in range(num_gpus)
+            ]
+            full = torch.cat(shards)
+            self.assertEqual(full, expected)
+
+    def test_different_shard_indices_differ(self, device):
+        key = random.key(42, device=device)
+        global_shape = (128,)
+        splits = (4,)
+        shard_0 = random.sharded_uniform(key, global_shape, splits, (0,))
+        shard_1 = random.sharded_uniform(key, global_shape, splits, (1,))
+        self.assertNotEqual(shard_0, shard_1)
+
+    def test_error_mismatched_splits_length(self, device):
+        key = random.key(42, device=device)
+        with self.assertRaisesRegex(ValueError, "same length"):
+            random.sharded_uniform(key, (128,), (4, 2), (0,))
+
+    def test_error_mismatched_shard_index_length(self, device):
+        key = random.key(42, device=device)
+        with self.assertRaisesRegex(ValueError, "same length"):
+            random.sharded_uniform(key, (128,), (4,), (0, 0))
+
+    def test_error_shard_index_out_of_range(self, device):
+        key = random.key(42, device=device)
+        with self.assertRaisesRegex(ValueError, "out of range"):
+            random.sharded_uniform(key, (128,), (4,), (4,))
+        with self.assertRaisesRegex(ValueError, "out of range"):
+            random.sharded_uniform(key, (128,), (4,), (-1,))
+
+
+instantiate_device_type_tests(
+    TestShardedGeneration, globals(), only_for=("cpu", "cuda")
+)
+
+
 if __name__ == "__main__":
     run_tests()

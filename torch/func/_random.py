@@ -419,3 +419,127 @@ def uniform(
     # pyrefly: ignore [no-matching-overload]
     result = torch.empty(shape, dtype=dtype, device=key.device)
     return uniform_(key, result, low=low, high=high, portable=portable)
+
+
+def _validate_sharded_args(
+    global_shape: tuple[int, ...],
+    splits: tuple[int, ...],
+    shard_index: tuple[int, ...],
+) -> None:
+    if len(splits) != len(global_shape):
+        raise ValueError(
+            f"splits and global_shape must have the same length, "
+            f"got {len(splits)} and {len(global_shape)}"
+        )
+    if len(shard_index) != len(global_shape):
+        raise ValueError(
+            f"shard_index and global_shape must have the same length, "
+            f"got {len(shard_index)} and {len(global_shape)}"
+        )
+    for i, (idx, sp) in enumerate(zip(shard_index, splits)):
+        if not (0 <= idx < sp):
+            raise ValueError(
+                f"shard_index[{i}]={idx} out of range for splits[{i}]={sp}"
+            )
+
+
+def _sharded_generate(
+    key: torch.Tensor,
+    global_shape: tuple[int, ...],
+    splits: tuple[int, ...],
+    shard_index: tuple[int, ...],
+    gen_fn: object,
+    dtype: torch.dtype | None,
+    **gen_kwargs: float,
+) -> torch.Tensor:
+    """Core logic for sharded random generation with reconstruction guarantee."""
+    _validate_sharded_args(global_shape, splits, shard_index)
+    if dtype is None:
+        dtype = torch.float32
+
+    shard_keys = unbind(key, global_shape, splits, dtype=dtype)
+    my_key = shard_keys[shard_index]
+    tile_shape = tuple(s // sp for s, sp in zip(global_shape, splits))
+
+    if len(global_shape) > 1:
+        my_key = my_key.unsqueeze(-2)
+
+    return gen_fn(my_key, tile_shape, dtype=dtype, **gen_kwargs)
+
+
+def sharded_uniform(
+    key: torch.Tensor,
+    global_shape: tuple[int, ...],
+    splits: tuple[int, ...],
+    shard_index: tuple[int, ...],
+    *,
+    low: float = 0.0,
+    high: float = 1.0,
+    dtype: torch.dtype | None = None,
+) -> torch.Tensor:
+    r"""Generate a local shard of a uniform random tensor.
+
+    Uses :func:`unbind` to derive the per-shard key, then generates the
+    local tile.  Concatenating all shards reproduces the same values as
+    ``uniform(key, global_shape)``::
+
+        # On 4 ranks, each generating its shard:
+        local = sharded_uniform(key, (128,), (4,), (rank,))
+        # torch.cat(all locals) == uniform(key, (128,))
+
+    This function has no dependency on DTensor or ``DeviceMesh`` and is
+    suitable for SPMD programs that manage sharding manually.
+
+    Args:
+        key (Tensor): A PRNG key from :func:`key`.
+        global_shape (tuple): Shape of the full (unsharded) tensor.
+        splits (tuple): Number of tiles along each dimension.
+        shard_index (tuple): This rank's tile index, one int per dimension.
+        low (float): Lower bound (inclusive). Default: 0.0.
+        high (float): Upper bound (exclusive). Default: 1.0.
+        dtype (:class:`torch.dtype`, optional): Output dtype. Default:
+            ``torch.float32``.
+
+    Returns:
+        The local shard tensor.
+    """
+    return _sharded_generate(
+        key, global_shape, splits, shard_index, uniform, dtype, low=low, high=high
+    )
+
+
+def sharded_normal(
+    key: torch.Tensor,
+    global_shape: tuple[int, ...],
+    splits: tuple[int, ...],
+    shard_index: tuple[int, ...],
+    *,
+    mean: float = 0.0,
+    std: float = 1.0,
+    dtype: torch.dtype | None = None,
+) -> torch.Tensor:
+    r"""Generate a local shard of a normal random tensor.
+
+    Uses :func:`unbind` to derive the per-shard key, then generates the
+    local tile.  Concatenating all shards reproduces the same values as
+    ``normal(key, global_shape)``.
+
+    This function has no dependency on DTensor or ``DeviceMesh`` and is
+    suitable for SPMD programs that manage sharding manually.
+
+    Args:
+        key (Tensor): A PRNG key from :func:`key`.
+        global_shape (tuple): Shape of the full (unsharded) tensor.
+        splits (tuple): Number of tiles along each dimension.
+        shard_index (tuple): This rank's tile index, one int per dimension.
+        mean (float): Mean of the distribution. Default: 0.0.
+        std (float): Standard deviation. Default: 1.0.
+        dtype (:class:`torch.dtype`, optional): Output dtype. Default:
+            ``torch.float32``.
+
+    Returns:
+        The local shard tensor.
+    """
+    return _sharded_generate(
+        key, global_shape, splits, shard_index, normal, dtype, mean=mean, std=std
+    )
