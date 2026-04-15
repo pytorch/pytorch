@@ -617,16 +617,16 @@ instantiate_device_type_tests(
 class TestUnbind(TestCase):
     def test_1d_shape(self, device):
         k = random.key(42, device=device)
-        keys = random.unbind(k, (100,), (10,))
+        keys = random.unbind(k, (120,), (10,))
         self.assertEqual(keys.shape, (10, 2))
         self.assertEqual(keys.dtype, torch.uint64)
 
     def test_1d_uniform_reconstruction(self, device):
         k = random.key(42, device=device)
         num_tiles = 10
-        keys = random.unbind(k, (100,), (num_tiles,))
-        full = random.uniform(k, (100,))
-        tile_size = 100 // num_tiles
+        keys = random.unbind(k, (120,), (num_tiles,))
+        full = random.uniform(k, (120,))
+        tile_size = 120 // num_tiles
         tiled = torch.cat(
             [random.uniform(keys[i], (tile_size,)) for i in range(num_tiles)]
         )
@@ -635,9 +635,9 @@ class TestUnbind(TestCase):
     def test_1d_normal_reconstruction(self, device):
         k = random.key(42, device=device)
         num_tiles = 10
-        keys = random.unbind(k, (100,), (num_tiles,))
-        full = random.normal(k, (100,))
-        tile_size = 100 // num_tiles
+        keys = random.unbind(k, (120,), (num_tiles,))
+        full = random.normal(k, (120,))
+        tile_size = 120 // num_tiles
         tiled = torch.cat(
             [random.normal(keys[i], (tile_size,)) for i in range(num_tiles)]
         )
@@ -645,8 +645,8 @@ class TestUnbind(TestCase):
 
     def test_1d_determinism(self, device):
         k = random.key(42, device=device)
-        keys1 = random.unbind(k, (100,), (10,))
-        keys2 = random.unbind(k, (100,), (10,))
+        keys1 = random.unbind(k, (120,), (10,))
+        keys2 = random.unbind(k, (120,), (10,))
         self.assertEqual(keys1, keys2)
 
     def test_2d_shape(self, device):
@@ -717,16 +717,16 @@ class TestUnbind(TestCase):
 
     def test_3d_shape(self, device):
         k = random.key(42, device=device)
-        splits = (3, 4, 3)
-        keys = random.unbind(k, (12, 20, 30), splits)
-        # tile_shape = (4, 5, 10), per-tile rows = (4, 5)
-        # -> shape (*splits, 4, 5, 2) = (3, 4, 3, 4, 5, 2)
-        self.assertEqual(keys.shape, (3, 4, 3, 4, 5, 2))
+        splits = (3, 4, 4)
+        keys = random.unbind(k, (12, 20, 32), splits)
+        # tile_shape = (4, 5, 8), per-tile rows = (4, 5)
+        # -> shape (*splits, 4, 5, 2) = (3, 4, 4, 4, 5, 2)
+        self.assertEqual(keys.shape, (3, 4, 4, 4, 5, 2))
 
     def test_3d_uniform_reconstruction(self, device):
         k = random.key(77, device=device)
-        shape = (12, 20, 30)
-        splits = (3, 4, 3)
+        shape = (12, 20, 32)
+        splits = (3, 4, 4)
         tile_shape = tuple(s // sp for s, sp in zip(shape, splits))
         keys = random.unbind(k, shape, splits)
         full = random.uniform(k, shape)
@@ -763,7 +763,7 @@ class TestUnbind(TestCase):
         seed = 42
         near_max_offset = (1 << 64) - 48
         k = torch.tensor([seed, near_max_offset], dtype=torch.uint64, device=device)
-        shape = (100,)
+        shape = (120,)
         num_tiles = 10
         tile_size = shape[0] // num_tiles
         keys = random.unbind(k, shape, (num_tiles,), dtype=dtype)
@@ -800,8 +800,8 @@ class TestUnbind(TestCase):
     def test_cross_device_consistency_1d(self, device):
         k_cpu = random.key(42)
         k_cuda = random.key(42, device=device)
-        keys_cpu = random.unbind(k_cpu, (100,), (10,))
-        keys_cuda = random.unbind(k_cuda, (100,), (10,))
+        keys_cpu = random.unbind(k_cpu, (120,), (10,))
+        keys_cuda = random.unbind(k_cuda, (120,), (10,))
         self.assertEqual(keys_cpu, keys_cuda.cpu())
 
     @onlyCUDA

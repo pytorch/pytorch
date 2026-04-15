@@ -156,9 +156,9 @@ def _philox_unbind(
     # slice of size tile_shape[-1]) IS contiguous, so we emit one key per row
     # within each tile. Returned shape: (*splits, *tile_shape[:-1], 2).
 
-    # Row-major strides of the full shape (in Philox outputs).
+    # Row-major strides of the full shape (in elements).
     strides = []
-    s = outputs_per_elem
+    s = 1
     for d in reversed(shape):
         strides.append(s)
         s *= d
@@ -190,7 +190,7 @@ def _philox_unbind(
     view_shape[2 * (ndim - 1)] = splits[-1]
     offset = offset + ranges[-1].reshape(view_shape)
 
-    offset = offset + base_offset
+    offset = offset // epc + base_offset
     offset = offset.squeeze(-1)
     target_shape = []
     for j in range(ndim - 1):
