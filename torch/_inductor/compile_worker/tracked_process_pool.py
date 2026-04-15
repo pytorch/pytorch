@@ -17,10 +17,11 @@ from typing_extensions import ParamSpec
 import torch._thread_safe_fork  # noqa: F401
 
 
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
-
-
 log = logging.getLogger(__name__)
 
 

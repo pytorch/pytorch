@@ -927,7 +927,7 @@ def forward(self, arg0_1, arg1_1):
                 ignore_empty_lines=True,
             )
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize("serialize", [False])  # , True
     def test_flex_attention(self, serialize):
         def _squared(score, b, h, m, n):
@@ -961,7 +961,7 @@ def forward(self, arg0_1, arg1_1):
             a * b,
             b,
             dtype=torch.bfloat16,
-            device="cuda",
+            device=device_type,
             requires_grad=True,
         )
 
@@ -1088,7 +1088,7 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
                 }
             )
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize("serialize", [False])  # , True
     def test_selective_ac_flex(self, serialize):
         # must decompose the following fallback ops in inductor
@@ -1196,9 +1196,9 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
                 return output
 
         flex_module = SacModule(hidden_size=512, num_heads=8, context_fn=context_fn).to(
-            "cuda", dtype=torch.bfloat16
+            device_type, dtype=torch.bfloat16
         )
-        x = torch.ones(8, 1024, 512, device="cuda", dtype=torch.bfloat16)
+        x = torch.ones(8, 1024, 512, device=device_type, dtype=torch.bfloat16)
         compiled_module = torch.compile(
             flex_module,
             backend=aot_eager_regional_inductor(serialize, on_invoke_subgraph=True),
