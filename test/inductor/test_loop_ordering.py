@@ -478,6 +478,78 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    @inductor_config.patch("loop_ordering_after_fusion", False)
+    def test_reshape_reindexing_without_loop_ordering(self):
+        """
+        Reindexing should enable fusion even when loop ordering is
+        disabled. Same RMS norm pattern as test_reshape_reindexing_for_reduction.
+        """
+
+        def f(x):
+            head_dim = 128
+            M, N = x.shape
+            x_reshaped = x.reshape(-1, head_dim)
+            x_f32 = x_reshaped.float()
+            variance = x_f32.pow(2).mean(dim=-1, keepdim=True)
+            x_normed = x_f32 * torch.rsqrt(variance + 1e-5)
+            return x_normed.reshape(M, N).to(x.dtype)
+
+        M = 16
+        qkv = torch.randn(M, 10240, dtype=torch.bfloat16)
+        x = qkv[:, :8192]
+
+        ref = f(x)
+        actual = torch.compile(f)(x)
+        torch.testing.assert_close(actual, ref, atol=1e-2, rtol=1e-2)
+        self.assertEqual(1, metrics.generated_kernel_count)
+
+    def test_reindex_unfusable_write_read_dep(self):
+        """
+        Grouped quantization where a custom op consumes both the
+        quantized tensor and the scale, forcing the reduction (amax)
+        and scale epilogue to fuse into a FusedSchedulerNode while
+        the quantize pointwise remains separate.
+
+        The FusedSchedulerNode's dep on the input has 3 vars (from the
+        reduction + scale bodies), while the pointwise has 2 vars.
+        This num_vars mismatch causes _try_reorder_loops_for_candidates
+        to return a score based on the shared read (input), short-
+        circuiting reindexing. The write-read dep prioritization
+        detects the unfusable dep and returns -1, letting reindexing
+        fire.
+        """
+        HIDDEN, GROUP_SIZE = 7168, 128
+
+        @torch.library.custom_op("test::opaque_gemm", mutates_args=())
+        def opaque_gemm(x_q: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
+            return torch.zeros(
+                x_q.shape[0], 1024, device=x_q.device, dtype=torch.bfloat16
+            )
+
+        @opaque_gemm.register_fake
+        def _(x_q, scale):
+            return torch.zeros(
+                x_q.shape[0], 1024, device=x_q.device, dtype=torch.bfloat16
+            )
+
+        def f(x):
+            grouped = x.reshape(-1, HIDDEN // GROUP_SIZE, GROUP_SIZE).float()
+            absmax = grouped.abs().amax(dim=-1, keepdim=True)
+            scale = (absmax / FP8_MAX).clamp(min=1e-6)
+            x_q = (
+                (grouped / scale)
+                .clamp(-FP8_MAX, FP8_MAX)
+                .to(torch.float16)
+                .reshape(x.shape)
+            )
+            scale = scale.squeeze(-1)
+            return torch.ops.test.opaque_gemm(x_q, scale)
+
+        FP8_MAX = 448.0  # arbitrary clamp range
+        x = torch.randn(8, HIDDEN, dtype=torch.bfloat16)
+        self.do_acc_test(f, x)
+        self.assertEqual(1, metrics.generated_kernel_count)
+
     def test_reindex_rollback_on_no_improvement(self):
         """
         When reindexing is attempted but doesn't improve the fusion
