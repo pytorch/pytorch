@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import dataclasses
 import io
 import logging
 import os
@@ -33,7 +34,7 @@ log = logging.getLogger(__name__)
 def compile(
     gm: torch.fx.GraphModule,
     example_inputs: list[InputType],
-    options: Optional[dict[str, Any]] = None,
+    options: dict[str, Any] | None = None,
 ):
     """
     Compile a given FX graph with TorchInductor.  This allows compiling
@@ -57,8 +58,8 @@ def aoti_compile_and_package(
     _deprecated_unused_args=None,
     _deprecated_unused_kwargs=None,
     *,
-    package_path: Optional[FileLike] = None,
-    inductor_configs: Optional[dict[str, Any]] = None,
+    package_path: FileLike | None = None,
+    inductor_configs: dict[str, Any] | None = None,
 ) -> str:
     """
     Compiles the exported program with AOTInductor, and packages it into a .pt2
@@ -160,12 +161,12 @@ def _aoti_compile_and_package_inner(
     gm: torch.nn.Module,
     # flat_example_inputs: List[Any],
     args: tuple[Any],
-    kwargs: Optional[dict[str, Any]] = None,
+    kwargs: dict[str, Any] | None = None,
     *,
     load_and_run: bool = False,
-    check_accuracy: Optional[str] = None,
-    package_path: Optional[Union[str, io.BytesIO]] = None,
-    inductor_configs: Optional[dict[str, Any]] = None,
+    check_accuracy: str | None = None,
+    package_path: str | io.BytesIO | None = None,
+    inductor_configs: dict[str, Any] | None = None,
 ):
     """
     See docstring for aoti_compile_and_package.
@@ -272,10 +273,10 @@ def aoti_load_package(
 def aot_compile(
     gm: torch.fx.GraphModule,
     args: tuple[Any, ...],
-    kwargs: Optional[dict[str, Any]] = None,
+    kwargs: dict[str, Any] | None = None,
     *,
-    options: Optional[dict[str, Any]] = None,
-) -> Union[str, list[Union[str, Weights]], torch.fx.GraphModule]:
+    options: dict[str, Any] | None = None,
+) -> str | list[str | Weights] | torch.fx.GraphModule:
     """
     Ahead-of-time compile a given FX graph with TorchInductor into a shared library.
 
@@ -334,7 +335,7 @@ lite_mode_options = {
 
 
 def list_mode_options(
-    mode: Optional[str] = None, dynamic: Optional[bool] = None
+    mode: str | None = None, dynamic: bool | None = None
 ) -> dict[str, Any]:
     r"""Returns a dictionary describing the optimizations that each of the available
     modes passed to `torch.compile()` performs.
@@ -409,8 +410,9 @@ def standalone_compile(
     dynamic_shapes: Literal[
         "from_example_inputs", "from_tracing_context", "from_graph"
     ] = "from_graph",
-    options: Optional[dict[str, Any]] = None,
+    options: dict[str, Any] | None = None,
     aot: bool = False,  # AOT mode, which uses BundledAOTAutogradCache
+    donate_graph_module: bool = False,
 ) -> CompiledArtifact:
     """
     Precompilation API for inductor.
@@ -434,6 +436,9 @@ def standalone_compile(
             If "from_example_inputs", we will specialize the graph on the
             example_inputs.
         options: Inductor compilation options
+        donate_graph_module: If True, standalone_compile takes ownership of
+            the graph module and may mutate it, avoiding an internal deepcopy.
+            Defaults to False for backwards compatibility.
 
     Returns:
         CompiledArtifact that can be saved to disk or invoked directly.
@@ -442,5 +447,16 @@ def standalone_compile(
 
     options = options if options else {}
     return standalone_compile(
-        gm, example_inputs, dynamic_shapes=dynamic_shapes, options=options, aot=aot
+        gm,
+        example_inputs,
+        dynamic_shapes=dynamic_shapes,
+        options=options,
+        aot=aot,
+        donate_graph_module=donate_graph_module,
     )
+
+
+@dataclasses.dataclass
+class _CudagraphAnnotation:
+    fwd: bool | None
+    bwd: bool | None

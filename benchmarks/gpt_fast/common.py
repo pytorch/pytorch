@@ -1,6 +1,5 @@
 import dataclasses
 from collections.abc import Callable
-from typing import Optional
 
 
 all_experiments: dict[str, Callable] = {}
@@ -18,7 +17,7 @@ class Experiment:
     is_model: bool = False
 
 
-def register_experiment(name: Optional[str] = None):
+def register_experiment(name: str | None = None):
     def decorator(func):
         key = name or func.__name__
         all_experiments[key] = func

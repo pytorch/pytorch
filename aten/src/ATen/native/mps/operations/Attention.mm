@@ -64,9 +64,9 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
   int64_t batchSize = query.size(0);
   int64_t num_head = query.size(1);
   int64_t qSize = query.size(2);
-  int64_t headSize = query.size(3);
+  int64_t valueHeadSize = value.size(3);
   int64_t maxSeqLength = key.size(2);
-  auto out = at::empty({batchSize, num_head, qSize, headSize}, query.options());
+  auto out = at::empty({batchSize, num_head, qSize, valueHeadSize}, query.options());
   auto attn = at::empty({batchSize, num_head, qSize, maxSeqLength}, query.options());
   auto scale_factor = sdp::calculate_scale(query, scale).expect_float();
   @autoreleasepool {
@@ -149,12 +149,25 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
     runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outs);
   }
 
-  auto final_out = unsqueezed ? out.view_as(orig_query) : out;
-  auto final_attn = unsqueezed ? (orig_query.dim() == 3 ? attn.squeeze(0) : [&]{
-    std::vector<int64_t> shape(orig_query.sizes().begin(), orig_query.sizes().end() - 3);
-    shape.insert(shape.end(), {attn.size(1), attn.size(2), attn.size(3)});
-    return attn.view(shape);
-  }()) : attn;
+  auto final_out = out;
+  auto final_attn = attn;
+  if (unsqueezed) {
+    if (orig_query.dim() == 3) {
+      final_out = out.squeeze(0);
+      final_attn = attn.squeeze(0);
+    } else {
+      std::vector<int64_t> prefix_shape(orig_query.sizes().begin(), orig_query.sizes().end() - 3);
+
+      auto out_shape = prefix_shape;
+      auto attn_shape = prefix_shape;
+
+      out_shape.insert(out_shape.end(), {out.size(1), out.size(2), out.size(3)});
+      attn_shape.insert(attn_shape.end(), {attn.size(1), attn.size(2), attn.size(3)});
+
+      final_out = out.view(out_shape);
+      final_attn = attn.view(attn_shape);
+    }
+  }
 
   return {std::move(final_out), std::move(final_attn)};
 }
@@ -170,6 +183,8 @@ static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
                                                        std::optional<double> scale,
                                                        const Tensor& orig_query,
                                                        bool unsqueezed) {
+  TORCH_CHECK(q_.size(3) == k_.size(3) && q_.size(3) == v_.size(3),
+              "sdpa_vector_fast_mps expects query, key, and value to have the same head dimension");
   const auto macOS15_0_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
   using namespace mps;
   uint batchSize = q_.size(0);
@@ -246,6 +261,8 @@ static std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
                                                         std::optional<double> scale,
                                                         const Tensor& orig_query,
                                                         bool unsqueezed) {
+  TORCH_CHECK(q_.size(3) == k_.size(3) && q_.size(3) == v_.size(3),
+              "sdpa_vector_2pass_mps expects query, key, and value to have the same head dimension");
   using namespace mps;
   uint batchSize = q_.size(0);
   uint num_heads = q_.size(1);
@@ -265,8 +282,8 @@ static std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
 
   auto out = at::empty({batchSize, num_heads, seq_len_q, headSize}, q_.options());
   auto intermediate = at::empty({batchSize, num_heads, seq_len_q, blocks, headSize}, q_.options());
-  auto sums = at::empty({batchSize, num_heads, seq_len_q, blocks}, q_.options());
-  auto maxs = at::empty({batchSize, num_heads, seq_len_q, blocks}, q_.options());
+  auto sums = at::empty({batchSize, num_heads, seq_len_q, blocks}, q_.options().dtype(kFloat));
+  auto maxs = at::empty({batchSize, num_heads, seq_len_q, blocks}, q_.options().dtype(kFloat));
 
   auto scale_factor = sdp::calculate_scale(orig_query, scale).expect_float();
   bool has_mask = mask_.has_value();
@@ -422,13 +439,42 @@ static std::tuple<Tensor, Tensor> sdpa_full_attention_mps(const Tensor& q_,
 }
 
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& query,
-                                                                  const Tensor& key,
-                                                                  const Tensor& value,
+                                                                  const Tensor& key_,
+                                                                  const Tensor& value_,
                                                                   const std::optional<Tensor>& attn_mask,
                                                                   double dropout_p,
                                                                   bool is_causal,
                                                                   const std::optional<Tensor>& dropout_mask,
-                                                                  std::optional<double> scale) {
+                                                                  std::optional<double> scale,
+                                                                  bool enable_gqa) {
+  TORCH_CHECK_NOT_IMPLEMENTED(c10::isFloatingType(query.scalar_type()),
+                              "scaled_dot_product_attention for MPS does not support dtype ",
+                              query.scalar_type());
+  TORCH_CHECK_NOT_IMPLEMENTED(c10::isFloatingType(key_.scalar_type()),
+                              "scaled_dot_product_attention for MPS does not support dtype ",
+                              key_.scalar_type());
+  TORCH_CHECK_NOT_IMPLEMENTED(c10::isFloatingType(value_.scalar_type()),
+                              "scaled_dot_product_attention for MPS does not support dtype ",
+                              value_.scalar_type());
+  const auto any_nested = query.is_nested() || key_.is_nested() || value_.is_nested();
+  const auto all_contiguous =
+      query.is_contiguous_or_false() && key_.is_contiguous_or_false() && value_.is_contiguous_or_false();
+  auto key = key_;
+  auto value = value_;
+  if (enable_gqa) {
+    int64_t q_heads = query.size(-3);
+    int64_t k_heads = key_.size(-3);
+    int64_t repeat_factor = q_heads / k_heads;
+
+    if (repeat_factor > 1) {
+      TORCH_CHECK(q_heads % k_heads == 0,
+                  "For GQA, the query tensor's head dimension (" + std::to_string(q_heads) +
+                      ") must be divisible by the key tensor's head dimension (" + std::to_string(k_heads) + ").");
+      key = key_.repeat_interleave(repeat_factor, /*dim=*/-3);
+      value = value_.repeat_interleave(repeat_factor, /*dim=*/-3);
+    }
+  }
+
   auto query_tuple = ensure_4d(query);
   Tensor q_ = std::get<0>(query_tuple);
   bool unsqueezed = std::get<1>(query_tuple);

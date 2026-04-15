@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import dataclasses
+import itertools
 import pickle
 import sys
 import tempfile
@@ -9,7 +10,6 @@ import unittest
 import weakref
 from collections.abc import Iterator
 from typing import NamedTuple
-from unittest.mock import patch
 
 import torch
 import torch._dynamo.testing
@@ -154,7 +154,7 @@ class SubclassWithMeta(torch.Tensor):
         kwargs_a = pytree.tree_map_only(SubclassWithMeta, lambda x: x.a, kwargs)
         out_a = func(*args_a, **kwargs_a)
         if isinstance(out_a, torch.Tensor):
-            assert isinstance(args[0], SubclassWithMeta)
+            assert isinstance(args[0], SubclassWithMeta)  # noqa: S101
             return SubclassWithMeta(out_a, extra=args[0].extra)
         return out_a
 
@@ -164,13 +164,13 @@ class SubclassWithMeta(torch.Tensor):
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-        assert isinstance(meta, dict)
+        assert isinstance(meta, dict)  # noqa: S101
         a = inner_tensors["a"]
         # pull out extra from meta
         extra = meta["extra"]
         if type(a) is torch.Tensor:
-            assert outer_size is not None
-            assert outer_stride is not None
+            assert outer_size is not None  # noqa: S101
+            assert outer_stride is not None  # noqa: S101
         return SubclassWithMeta(a, extra, outer_size, outer_stride)
 
 
@@ -208,7 +208,7 @@ class SubclassWithCustomMetadataGuard(torch.Tensor):
         )
         out_a = func(*args_a, **kwargs_a)
         if isinstance(out_a, torch.Tensor):
-            assert isinstance(args[0], SubclassWithCustomMetadataGuard)
+            assert isinstance(args[0], SubclassWithCustomMetadataGuard)  # noqa: S101
             return SubclassWithCustomMetadataGuard(out_a, extra=args[0].extra)
         return out_a
 
@@ -225,13 +225,13 @@ class SubclassWithCustomMetadataGuard(torch.Tensor):
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-        assert isinstance(meta, dict)
+        assert isinstance(meta, dict)  # noqa: S101
         a = inner_tensors["a"]
         # pull out extra from meta
         extra = meta["extra"]
         if type(a) is torch.Tensor:
-            assert outer_size is not None
-            assert outer_stride is not None
+            assert outer_size is not None  # noqa: S101
+            assert outer_stride is not None  # noqa: S101
         return SubclassWithCustomMetadataGuard(a, extra, outer_size, outer_stride)
 
 
@@ -269,7 +269,7 @@ class SubclassWithSubclassInnerTensor(torch.Tensor):
         )
         out_a = func(*args_a, **kwargs_a)
         if isinstance(out_a, torch.Tensor):
-            assert isinstance(args[0], SubclassWithSubclassInnerTensor)
+            assert isinstance(args[0], SubclassWithSubclassInnerTensor)  # noqa: S101
             return SubclassWithSubclassInnerTensor(out_a, extra=args[0].inner_sub.extra)
         return out_a
 
@@ -278,12 +278,12 @@ class SubclassWithSubclassInnerTensor(torch.Tensor):
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-        assert meta is None
+        assert meta is None  # noqa: S101
         a = inner_tensors["a"]
         extra = inner_tensors["inner_sub"].extra
         if type(a) is torch.Tensor:
-            assert outer_size is not None
-            assert outer_stride is not None
+            assert outer_size is not None  # noqa: S101
+            assert outer_stride is not None  # noqa: S101
         return SubclassWithSubclassInnerTensor(a, extra, outer_size, outer_stride)
 
 
@@ -364,7 +364,8 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
         finally:
             sys.settrace(None)
 
-        assert self._frame_state is not None
+        if self._frame_state is None:
+            raise AssertionError("Expected _frame_state to be set after tracing")
 
         # Set f_locals from regenerated kwargs to handle exhausted input iterators
         # NB: This is super janky and might cause unforeseen problems
@@ -623,11 +624,11 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
             @staticmethod
             def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-                assert meta is None
+                assert meta is None  # noqa: S101
                 a = inner_tensors["a"]
                 if type(a) is torch.Tensor:
-                    assert outer_size is not None
-                    assert outer_stride is not None
+                    assert outer_size is not None  # noqa: S101
+                    assert outer_stride is not None  # noqa: S101
                 return LocalSubclass(a, outer_size, outer_stride)
 
         def fn(x):
@@ -789,22 +790,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # guard should fail for different y value
         self._test_check_fn(ref, loaded, {"x": torch.randn(3), "y": 6}, False)
 
-    def test_nn_module(self):
-        def fn(m, x):
-            return m(x)
-
-        m = GlobalModule()
-        x = torch.randn(3)
-
-        # config setting controls whether the NN_MODULE guard is installed
-        with patch("torch._dynamo.config.inline_inbuilt_nn_modules", False):
-            # we don't support NN_MODULE because it adds an ID_MATCH guard, and we don't
-            # support that in serialization
-            with self.assertRaisesRegex(
-                PackageError, "NN_MODULE guard cannot be serialized."
-            ):
-                self._test_serialization("NN_MODULE", fn, m, x)
-
     def test_class_match(self):
         def fn(x):
             # usage of this context manager installs a FUNCTION_MATCH guard
@@ -943,6 +928,35 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"x": x, "r": iter(range(2, 15, 4))}, False)
         self._test_check_fn(
             ref, loaded, {"x": torch.randn(4), "r": iter(range(2, 15, 4))}, False
+        )
+
+    def test_count_iterator_match(self):
+        def fn(x, counter):
+            return x + next(counter)
+
+        x = torch.randn(3)
+
+        def _gen_kwargs(x=x):
+            return {"x": x, "counter": itertools.count(2, 3)}
+
+        ref, loaded = self._test_serialization(
+            "COUNT_ITERATOR_MATCH", fn, _gen_fn=_gen_kwargs
+        )
+
+        self._test_check_fn(
+            ref, loaded, {"x": x, "counter": itertools.count(2, 3)}, True
+        )
+        self._test_check_fn(
+            ref,
+            loaded,
+            {"x": torch.randn(4), "counter": itertools.count(2, 3)},
+            True,
+        )
+        self._test_check_fn(
+            ref, loaded, {"x": x, "counter": itertools.count(5, 3)}, False
+        )
+        self._test_check_fn(
+            ref, loaded, {"x": x, "counter": itertools.count(2, 4)}, False
         )
 
     def test_dict_version(self):
@@ -1481,7 +1495,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
                 return x + 1
 
         def foo(x: torch.Tensor, y: list[MyClass]):
-            assert len(y) == 1
+            assert len(y) == 1  # noqa: S101
             return x + 1
 
         ref, loaded = self._test_serialization(
@@ -1493,7 +1507,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
     def test_bound_methods_empty(self):
         def foo(x, y):
-            assert callable(y[0])
+            assert callable(y[0])  # noqa: S101
             return x + 1
 
         ref, loaded = self._test_serialization(
@@ -1506,6 +1520,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             True,
         )
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_ddp_module(self):
         import torch.distributed as dist
 
@@ -1661,19 +1676,17 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"inputs": Inputs(x, weakref.ref(x))}, True)
 
     def test_unused_stream(self):
-        if not torch.cuda.is_available():
-            self.skipTest("CUDA is not available")
+        if not torch.accelerator.is_available():
+            self.skipTest("Accelerator is not available")
 
         def foo(inputs):
             return inputs.x + 1
 
         x = torch.randn(3, 2)
         ref, loaded = self._test_serialization(
-            "TENSOR_MATCH", foo, Inputs(x, torch.cuda.Stream())
+            "TENSOR_MATCH", foo, Inputs(x, torch.Stream())
         )
-        self._test_check_fn(
-            ref, loaded, {"inputs": Inputs(x, torch.cuda.Stream())}, True
-        )
+        self._test_check_fn(ref, loaded, {"inputs": Inputs(x, torch.Stream())}, True)
 
     def test_unused_process_group(self):
         import torch.distributed as dist
@@ -1732,7 +1745,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         m.forward = forward
 
         def foo(f, x):
-            assert callable(f)
+            assert callable(f)  # noqa: S101
             return f(x)
 
         x = torch.randn(3, 2)
@@ -1762,7 +1775,9 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
         with torch.no_grad():
             compiled_fn = torch.compile(
-                foo, options={"guard_filter_fn": torch.compiler.skip_all_guards_unsafe}
+                foo,
+                backend="eager",
+                options={"guard_filter_fn": torch.compiler.skip_all_guards_unsafe},
             )
             compiled_fn(x)
 
@@ -1778,7 +1793,9 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
         with GlobalTorchFunctionMode():
             compiled_fn = torch.compile(
-                foo, options={"guard_filter_fn": torch.compiler.skip_all_guards_unsafe}
+                foo,
+                backend="eager",
+                options={"guard_filter_fn": torch.compiler.skip_all_guards_unsafe},
             )
             compiled_fn(x)
 
@@ -1851,6 +1868,17 @@ class TestGuardSerialization(TestGuardSerializationBase):
         object.__setattr__(src2, "_hash", 67890)
 
         self.assertEqual(pickle.dumps(src1), pickle.dumps(src2))
+
+    def test_source_serialization_init_false_fields(self):
+        # Test that source serialization handles fields that are not initialized
+        from torch._dynamo.source import DefaultsSource, LocalSource
+
+        base = LocalSource("x")
+        source = DefaultsSource(base=base, idx_key=0, is_kw=False)
+
+        # Round-trip through pickle should work even with init=False fields
+        restored = pickle.loads(pickle.dumps(source))
+        self.assertEqual(source, restored)
 
 
 class SimpleModule(torch.nn.Module):

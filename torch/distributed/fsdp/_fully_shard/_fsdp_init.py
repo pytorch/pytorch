@@ -13,6 +13,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from ._fsdp_common import (
     _is_composable_with_fsdp,
     DataParallelMeshInfo,
+    DDPMeshInfo,
     FSDPMeshInfo,
     HSDPMeshInfo,
 )
@@ -23,7 +24,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from typing import Any
 
-    from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
+    from ._fsdp_api import DataParallelMeshDims, MixedPrecisionPolicy, OffloadPolicy
+    from ._fsdp_common import ShardPlacementFnResult
     from ._fsdp_state import FSDPState
 
 
@@ -36,19 +38,44 @@ def _validate_module(module: nn.Module, func_name: str) -> None:
 
     Raises ValueError if the module is a container that doesn't implement forward.
     """
-    if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
+    if (
+        isinstance(module, (nn.ModuleList, nn.ModuleDict))
+        and module.__class__.forward is nn.Module.forward
+    ):
         raise ValueError(
             f"{func_name} does not support containers that do not implement forward: {module}"
         )
 
 
-def _validate_mesh(mesh: "DeviceMesh") -> None:
+def _validate_mesh(
+    mesh: "DeviceMesh",
+    dp_mesh_dims: "DataParallelMeshDims | None" = None,
+) -> None:
     """
     Validate that the mesh can be used with fully_shard.
 
-    Raises ValueError if the mesh is not 1D or 2D.
-    Raises AssertionError if the mesh is 2D but mesh_dim_names is not specified.
+    When ``dp_mesh_dims`` is provided, validates that the named dims
+    exist in the mesh and at least one of shard/replicate is set.
+    Otherwise raises ValueError if the mesh is not 1D or 2D.
     """
+    if dp_mesh_dims is not None:
+        if dp_mesh_dims.shard is None and dp_mesh_dims.replicate is None:
+            raise ValueError(
+                "At least one of shard or replicate must be set in dp_mesh_dims"
+            )
+        if mesh.mesh_dim_names is None:
+            raise ValueError(
+                "mesh must have mesh_dim_names when dp_mesh_dims is provided"
+            )
+        names_to_check: list[str] = list(dp_mesh_dims.shard_names)
+        names_to_check.extend(dp_mesh_dims.replicate_names)
+        for name in names_to_check:
+            if name not in mesh.mesh_dim_names:
+                raise ValueError(
+                    f"Mesh dim name '{name}' not found in mesh.mesh_dim_names "
+                    f"{mesh.mesh_dim_names}"
+                )
+        return
     if mesh.ndim not in (1, 2):
         raise ValueError(f"fully_shard expects a 1D or 2D DeviceMesh but got {mesh}")
     if mesh.ndim == 2 and mesh.mesh_dim_names is None:
@@ -57,16 +84,69 @@ def _validate_mesh(mesh: "DeviceMesh") -> None:
         )
 
 
-def _get_mesh_info(mesh: "DeviceMesh") -> "FSDPMeshInfo":
+def _get_mesh_info(
+    mesh: "DeviceMesh",
+    dp_mesh_dims: "DataParallelMeshDims | None" = None,
+) -> "DataParallelMeshInfo":
     """
     Get the appropriate mesh info for the given mesh.
 
+    When ``dp_mesh_dims`` is provided, extracts the DP submesh from the
+    full SPMD mesh and returns FSDPMeshInfo, HSDPMeshInfo, or DDPMeshInfo
+    with ``dp_mesh_dims`` set and ``is_spmd_mesh`` as True.
+
     Returns FSDPMeshInfo for 1D mesh, HSDPMeshInfo for 2D mesh.
     """
+    if dp_mesh_dims is not None:
+        return _get_mesh_info_from_named_dims(mesh, dp_mesh_dims)
     if mesh.ndim == 1:
         return FSDPMeshInfo(mesh, shard_mesh_dim=0)
     else:
         return HSDPMeshInfo(mesh, shard_mesh_dim=1, replicate_mesh_dim=0)
+
+
+def _get_mesh_info_from_named_dims(
+    mesh: "DeviceMesh",
+    dp_mesh_dims: "DataParallelMeshDims",
+) -> "DataParallelMeshInfo":
+    shard_names = dp_mesh_dims.shard_names
+    replicate_names = dp_mesh_dims.replicate_names
+
+    def _get_submesh(names: tuple[str, ...]) -> "DeviceMesh":
+        if len(names) == 1:
+            return mesh[names[0]]
+        # Flatten multi-dim submesh into a single dim so FSDP's internal
+        # logic (which expects one shard and/or one replicate dim) works
+        # unchanged. This creates a new 1D DeviceMesh and ProcessGroup.
+        return mesh[names]._flatten("_".join(names))
+
+    if len(shard_names) == 0:  # DDP
+        dp_mesh = _get_submesh(replicate_names)
+        return DDPMeshInfo(
+            dp_mesh,
+            replicate_mesh_dim=0,
+            dp_mesh_dims=dp_mesh_dims,
+            spmd_mesh=mesh,
+        )
+    if len(replicate_names) == 0:  # FSDP
+        dp_mesh = _get_submesh(shard_names)
+        return FSDPMeshInfo(
+            dp_mesh,
+            shard_mesh_dim=0,
+            dp_mesh_dims=dp_mesh_dims,
+            spmd_mesh=mesh,
+        )
+    # HSDP
+    shard_mesh = _get_submesh(shard_names)
+    replicate_mesh = _get_submesh(replicate_names)
+    dp_mesh = DeviceMesh._concatenate([replicate_mesh, shard_mesh])
+    return HSDPMeshInfo(
+        dp_mesh,
+        shard_mesh_dim=1,
+        replicate_mesh_dim=0,
+        dp_mesh_dims=dp_mesh_dims,
+        spmd_mesh=mesh,
+    )
 
 
 def _get_post_forward_mesh_info(
@@ -357,28 +437,99 @@ def _init_param_group(
     mesh_info: DataParallelMeshInfo,
     post_forward_mesh_info: FSDPMeshInfo | None,
     device: torch.device,
-    shard_placement_fn: "Callable[[nn.Parameter], Any] | None",
+    shard_placement_fn: "Callable[[nn.Parameter], ShardPlacementFnResult] | None",
     mp_policy: "MixedPrecisionPolicy",
     offload_policy: "OffloadPolicy",
+    reshard_after_forward: bool | int = True,
 ) -> None:
     """
-    Initialize the FSDP param group for the given state if there are params.
+    Initialize FSDP param groups for the given state.
 
-    This is shared between fully_shard and replicate.
+    Params are grouped by their process group (derived from ``mesh_info`` via
+    ``shard_placement_fn``). Each group becomes a separate ``FSDPParamGroup``.
+    When ``shard_placement_fn`` is ``None`` or returns the same mesh for all
+    params, this creates a single group.
     """
     # Import here to avoid circular imports
+    from ._fsdp_common import FSDPMeshInfo, resolve_shard_placement
     from ._fsdp_param_group import FSDPParamGroup
 
-    if params:
-        state._fsdp_param_group = FSDPParamGroup(
-            params,
-            modules,
+    if not params:
+        return
+
+    if shard_placement_fn is None:
+        # No shard_placement_fn means all params use the same mesh_info,
+        # so no grouping is needed. This also handles DDPMeshInfo from
+        # replicate_with_fsdp, which doesn't have shard_process_group.
+        state._fsdp_param_groups.append(
+            FSDPParamGroup(
+                params,
+                modules,
+                mesh_info,
+                post_forward_mesh_info,
+                device,
+                shard_placement_fn,
+                mp_policy,
+                offload_policy,
+            )
+        )
+        return
+
+    # Group params by their process group to support per-param mesh,
+    # e.g., expert params using ep_mesh vs regular params using dp_mesh.
+    # For HSDP, also key by replicate_process_group to avoid grouping
+    # FSDPMeshInfo params with HSDPMeshInfo params that share the same
+    # shard_process_group but require different gradient reduction behavior.
+    if not isinstance(mesh_info, FSDPMeshInfo):
+        raise ValueError(
+            "Per-param mesh via shard_placement_fn is not supported with "
+            f"{type(mesh_info).__name__}; it requires FSDPMeshInfo (or subclass)"
+        )
+    pg_to_group: dict[
+        tuple[dist.ProcessGroup, dist.ProcessGroup | None],
+        tuple[FSDPMeshInfo, list[nn.Parameter]],
+    ] = {}
+    for param in params:
+        param_mesh_info = resolve_shard_placement(
+            shard_placement_fn(param),
             mesh_info,
-            post_forward_mesh_info,
-            device,
-            shard_placement_fn,
-            mp_policy,
-            offload_policy,
+        ).mesh_info
+        shard_pg = param_mesh_info.shard_process_group
+        replicate_pg: dist.ProcessGroup | None = None
+        if isinstance(param_mesh_info, HSDPMeshInfo):
+            replicate_pg = param_mesh_info.replicate_process_group
+        key = (shard_pg, replicate_pg)
+        if key not in pg_to_group:
+            pg_to_group[key] = (param_mesh_info, [param])
+        else:
+            existing_mesh_info = pg_to_group[key][0]
+            if existing_mesh_info is not param_mesh_info:
+                raise ValueError(
+                    f"Params sharing the same process group must use the same "
+                    f"FSDPMeshInfo object, but got different objects: "
+                    f"{existing_mesh_info} vs {param_mesh_info}"
+                )
+            pg_to_group[key][1].append(param)
+
+    # Create a FSDPParamGroup per process group
+    for group_mesh_info, group_params in pg_to_group.values():
+        if group_mesh_info is not mesh_info:
+            group_post_forward = _get_post_forward_mesh_info(
+                reshard_after_forward, group_mesh_info
+            )
+        else:
+            group_post_forward = post_forward_mesh_info
+        state._fsdp_param_groups.append(
+            FSDPParamGroup(
+                group_params,
+                modules,
+                group_mesh_info,
+                group_post_forward,
+                device,
+                shard_placement_fn,
+                mp_policy,
+                offload_policy,
+            )
         )
 
 

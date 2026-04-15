@@ -489,7 +489,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
 
     auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
     const int head_size = round_multiple(head_size_og, 8);
-    const int head_size_rounded = round_multiple(head_size, 32) < 224 ? round_multiple(head_size, 32) : 256;
+    const int head_size_rounded = round_multiple(head_size, head_size <= 128 ? 32 : 64);
     const int seqlen_q_rounded = round_multiple(seqlen_q, 128);
     const int seqlen_k_rounded = round_multiple(seqlen_k, 128);
 
@@ -709,7 +709,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
 
     auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
     const int head_size = round_multiple(head_size_og, 8);
-    const int head_size_rounded = round_multiple(head_size, 32) < 224 ? round_multiple(head_size, 32) : 256;
+    const int head_size_rounded = round_multiple(head_size, head_size <= 128 ? 32 : 64);
     const int seqlen_q_rounded = round_multiple(max_seqlen_q, 128);
     const int seqlen_k_rounded = round_multiple(max_seqlen_k, 128);
 
@@ -906,7 +906,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
     TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
 
     auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
-    const int head_size_rounded = round_multiple(head_size, 32) < 224 ? round_multiple(head_size, 32) : 256;
+    const int head_size_rounded = round_multiple(head_size, head_size <= 128 ? 32 : 64);
     const int seqlen_q_rounded = round_multiple(seqlen_q, 128);
     const int seqlen_k_rounded = round_multiple(seqlen_k, 128);
 
@@ -1121,7 +1121,7 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
     TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
 
     auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
-    const int head_size_rounded = round_multiple(head_size, 32) < 224 ? round_multiple(head_size, 32) : 256;
+    const int head_size_rounded = round_multiple(head_size, head_size <= 128 ? 32 : 64);
     const int seqlen_q_rounded = round_multiple(max_seqlen_q, 128);
     const int seqlen_k_rounded = round_multiple(max_seqlen_k, 128);
 
@@ -1391,7 +1391,7 @@ mha_fwd_kvcache(at::Tensor &q,                 // batch_size x seqlen_q x num_he
 
     auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
     const int head_size = round_multiple(head_size_og, 8);
-    const int head_size_rounded = round_multiple(head_size, 32) < 224 ? round_multiple(head_size, 32) : 256;
+    const int head_size_rounded = round_multiple(head_size, head_size <= 128 ? 32 : 64);
     const int seqlen_q_rounded = round_multiple(seqlen_q, 128);
     const int seqlen_k_rounded = round_multiple(seqlen_k, 128);
 

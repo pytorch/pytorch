@@ -13,13 +13,14 @@ import math
 import operator
 import re
 import traceback
+import types
 import typing
 from collections import namedtuple, OrderedDict
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Annotated, Any, cast, final, Optional, Union
+from typing import Annotated, Any, cast, final, Optional
 
 import sympy
 
@@ -117,16 +118,16 @@ def _reverse_map(d: dict[Any, Enum]):
     return {v.value: k for k, v in d.items()}
 
 
-MetaType = Union[
-    FakeTensor,
-    int,
-    torch.SymInt,
-    float,
-    torch.SymFloat,
-    bool,
-    torch.SymBool,
-    ep.CustomObjArgument,
-]
+MetaType = (
+    FakeTensor
+    | int
+    | torch.SymInt
+    | float
+    | torch.SymFloat
+    | bool
+    | torch.SymBool
+    | ep.CustomObjArgument
+)
 
 DEFAULT_PICKLE_PROTOCOL = 2
 
@@ -151,6 +152,9 @@ _TORCH_TO_SERIALIZE_DTYPE = {
     torch.float8_e5m2: ScalarType.FLOAT8E5M2,
     torch.float8_e4m3fnuz: ScalarType.FLOAT8E4M3FNUZ,
     torch.float8_e5m2fnuz: ScalarType.FLOAT8E5M2FNUZ,
+    torch.float8_e8m0fnu: ScalarType.FLOAT8E8M0FNU,
+    torch.uint32: ScalarType.UINT32,
+    torch.uint64: ScalarType.UINT64,
 }
 
 
@@ -287,13 +291,13 @@ def deserialize_storage_offset(offset: SymInt) -> int:
     return offset.as_int
 
 
-def _print_sympy(s: Union[torch.SymInt, torch.SymBool, torch.SymFloat, sympy.Expr]):
+def _print_sympy(s: torch.SymInt | torch.SymBool | torch.SymFloat | sympy.Expr):
     if isinstance(s, (torch.SymInt, torch.SymBool, torch.SymFloat)):
         s = s.node.expr
     return sympy.printing.repr.srepr(s)
 
 
-def serialize_sym_int(s: Union[int, torch.SymInt]) -> SymInt:
+def serialize_sym_int(s: int | torch.SymInt) -> SymInt:
     if isinstance(s, (torch.SymInt, sympy.Symbol, int)):
         if symbolic_shapes.is_concrete_int(s):
             return SymInt.create(as_int=int(s))
@@ -317,7 +321,7 @@ def serialize_sym_int(s: Union[int, torch.SymInt]) -> SymInt:
         )
 
 
-def serialize_sym_float(s: Union[float, torch.SymFloat]) -> SymFloat:
+def serialize_sym_float(s: float | torch.SymFloat) -> SymFloat:
     if isinstance(s, (torch.SymFloat, sympy.Symbol, float)):
         if symbolic_shapes.is_concrete_float(s):
             return SymFloat.create(as_float=float(s))
@@ -341,7 +345,7 @@ def serialize_sym_float(s: Union[float, torch.SymFloat]) -> SymFloat:
         )
 
 
-def serialize_sym_bool(s: Union[bool, torch.SymBool]) -> SymBool:
+def serialize_sym_bool(s: bool | torch.SymBool) -> SymBool:
     if isinstance(s, (torch.SymBool, bool)):
         if symbolic_shapes.is_concrete_bool(s):
             return SymBool.create(as_bool=bool(s))
@@ -397,7 +401,7 @@ def _reconstruct_fake_tensor(
 
 
 def serialize_torch_artifact(
-    artifact: Optional[Any], pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL
+    artifact: Any | None, pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL
 ) -> bytes:
     if artifact is None:
         return b""
@@ -420,7 +424,7 @@ def serialize_torch_artifact(
 
 
 def deserialize_torch_artifact(
-    serialized: Union[dict[str, Any], tuple[Any, ...], bytes],
+    serialized: dict[str, Any] | tuple[Any, ...] | bytes,
 ):
     if isinstance(serialized, (dict, tuple)):
         return serialized
@@ -445,7 +449,7 @@ def deserialize_torch_artifact(
     return artifact
 
 
-def _sympy_int_to_int(val: sympy.Expr, adjust: str) -> Optional[int]:
+def _sympy_int_to_int(val: sympy.Expr, adjust: str) -> int | None:
     # Convert simple sympy Integers into concrete int
     if val in (sympy.oo, int_oo):
         return None
@@ -472,7 +476,7 @@ def _sympy_int_to_int(val: sympy.Expr, adjust: str) -> Optional[int]:
         raise RuntimeError(f"Got invalid adjustment {adjust}")
 
 
-def _int_to_sympy_int(val: Optional[int], default) -> sympy.Expr:
+def _int_to_sympy_int(val: int | None, default) -> sympy.Expr:
     # Convert concrete int into simple sympy Integers
     if val is None:
         return default
@@ -630,6 +634,7 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
             if isinstance(val, (bool, int, float)):
                 normalized_expected.append(val)
             else:
+                # pyrefly: ignore [bad-argument-type]
                 normalized_expected.append(str(val))
 
         matching_entries = []
@@ -1024,7 +1029,7 @@ class GraphModuleSerializer(metaclass=Final):
     def handle_get_attr(self, node):
         log.debug("[handle_get_attr] %s", node.name)
 
-    def _output_node_at_index(self, node, index) -> Optional[torch.fx.Node]:
+    def _output_node_at_index(self, node, index) -> torch.fx.Node | None:
         user_node = None
         for user in node.users:
             if user.target is not operator.getitem:
@@ -1104,8 +1109,8 @@ class GraphModuleSerializer(metaclass=Final):
         return ret
 
     def _serialize_from_node(
-        self, from_node: Optional[list[NodeSource]]
-    ) -> Optional[list[dict[str, Any]]]:
+        self, from_node: list[NodeSource] | None
+    ) -> list[dict[str, Any]] | None:
         """
         Serialize from_node metadata from a list of NodeSource objects to a list of dictionaries.
         """
@@ -1244,7 +1249,7 @@ class GraphModuleSerializer(metaclass=Final):
         )
 
     # should be torch._C.JitType but that annotation is busted
-    def serialize_input(self, arg, arg_type: Optional[Any] = None) -> Argument:
+    def serialize_input(self, arg, arg_type: Any | None = None) -> Argument:
         import torch._inductor.ir as inductor_ir
 
         inductor_tensor_buffers = (
@@ -1460,6 +1465,21 @@ class GraphModuleSerializer(metaclass=Final):
                         )
                     arguments.append(TensorArgument(name=a.name))
                 return Argument.create(as_tensors=arguments)
+            elif all(isinstance(a, (list, tuple)) for a in arg) and all(
+                all(isinstance(t, torch.fx.Node) for t in inner) for inner in arg
+            ):
+                # nested list of tensors (List[List[Tensor]])
+                nested_arguments = []
+                for inner_list in arg:
+                    inner_arguments = []
+                    for node in inner_list:
+                        if node.op == "get_attr":
+                            raise SerializeError(
+                                "getattr nodes containing tensors should not appear in the graph"
+                            )
+                        inner_arguments.append(TensorArgument(name=node.name))
+                    nested_arguments.append(inner_arguments)
+                return Argument.create(as_nested_tensors=nested_arguments)
             elif all(isinstance(a, (torch.fx.Node, type(None))) for a in arg):
                 # list of optional tensors
                 def serialize_optional_tensor_args(a):
@@ -1502,6 +1522,12 @@ class GraphModuleSerializer(metaclass=Final):
             ):
                 # list of int tuples
                 return Argument.create(as_int_lists=[list(t) for t in arg])
+            elif all(
+                isinstance(a, (list, tuple)) and all(isinstance(x, float) for x in a)
+                for a in arg
+            ):
+                # list of float lists (List[List[float]])
+                return Argument.create(as_float_lists=[list(t) for t in arg])
             else:
                 raise SerializeError(
                     f"Unsupported list/tuple argument type: {[type(a) for a in arg]}"
@@ -1958,17 +1984,15 @@ class GraphModuleSerializer(metaclass=Final):
                         f"expected ListType with TensorType element, got {type(return_schema.real_type).__name__}"
                     )
                 user_node = self._output_node_at_index(node, idx)
-                if user_node is None:
-                    raise AssertionError(
-                        f"user_node should not be None for list output at index {idx}"
-                    )
-
                 args = []
                 for i, m in enumerate(meta):
                     if m is None:
                         continue
-                    sub_user_node_name = self._output_node_name_at_index(user_node, i)
-                    args.append(self.serialize_tensor_output(sub_user_node_name, m))
+                    if user_node is None:
+                        name = f"{node.name}_unused_{idx}_{i}"
+                    else:
+                        name = self._output_node_name_at_index(user_node, i)
+                    args.append(self.serialize_tensor_output(name, m))
                 output_arguments.append(Argument.create(as_tensors=args))
             elif isinstance(meta, (int, SymInt, float, SymFloat)):
                 user_node_name = self._output_node_name_at_index(node, idx)
@@ -1992,11 +2016,6 @@ class GraphModuleSerializer(metaclass=Final):
                 user_node = self._output_node_at_index(node, i)
                 if isinstance(element_meta_val, list):
                     # e.g "-> Tensor[]"
-                    if user_node is None:
-                        raise AssertionError(
-                            f"user_node should not be None for list output at index {i}"
-                        )
-
                     tensors = []
                     for j, m in enumerate(element_meta_val):
                         if not isinstance(m, torch.Tensor):
@@ -2004,7 +2023,10 @@ class GraphModuleSerializer(metaclass=Final):
                                 f"Serialize list output with type {type(m)} nyi"
                             )
 
-                        name = self._output_node_name_at_index(user_node, j)
+                        if user_node is None:
+                            name = f"{node.name}_unused_{i}_{j}"
+                        else:
+                            name = self._output_node_name_at_index(user_node, j)
                         tensors.append(self.serialize_tensor_output(name, m))
                     outputs.append(Argument.create(as_tensors=tensors))
 
@@ -2071,6 +2093,7 @@ class GraphModuleSerializer(metaclass=Final):
         for user in node.users:
             if user.target is not operator.getitem:
                 raise AssertionError(f"User node {user} of {node} is incorrect")
+            # pyrefly: ignore [unsupported-operation]
             idx_to_name[user.args[1]] = user.name
 
         for idx, _ in enumerate(meta_val):
@@ -2078,11 +2101,13 @@ class GraphModuleSerializer(metaclass=Final):
             # However, we need a name for them so that the number of outputs will
             # correctly match the schema. Just assign a dummy name.
             if idx not in idx_to_name:
+                # pyrefly: ignore [unsupported-operation]
                 idx_to_name[idx] = f"{node.name}_unused_{idx}"
 
         arg_list = []
         for i, element_meta_val in enumerate(meta_val):
             arg_list.append(
+                # pyrefly: ignore [bad-index]
                 self.serialize_tensor_output(idx_to_name[i], element_meta_val)
             )
 
@@ -2147,7 +2172,7 @@ class GraphModuleSerializer(metaclass=Final):
 class ExportedProgramSerializer(metaclass=Final):
     def __init__(
         self,
-        opset_version: Optional[dict[str, int]] = None,
+        opset_version: dict[str, int] | None = None,
         pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
     ):
         self.opset_version: dict[str, int] = {}
@@ -2158,7 +2183,14 @@ class ExportedProgramSerializer(metaclass=Final):
 
         self.pickle_protocol = pickle_protocol
 
-    def serialize(self, exported_program: ep.ExportedProgram) -> _SerializedProgram:
+    def serialize(
+        self,
+        exported_program: ep.ExportedProgram,
+        *,
+        serialize_state_dict: bool = True,
+        serialize_constants: bool = True,
+        serialize_example_inputs: bool = True,
+    ) -> _SerializedProgram:
         """
         Args:
             exported_program: Exported Program to serialize
@@ -2202,13 +2234,29 @@ class ExportedProgramSerializer(metaclass=Final):
         new_state_dict = remove_proxy_from_state_dict(
             exported_program.state_dict, in_place=False
         )
+        serialized_state_dict = b""
+        if serialize_state_dict:
+            serialized_state_dict = serialize_torch_artifact(
+                new_state_dict, self.pickle_protocol
+            )
+
+        serialized_constants = b""
+        if serialize_constants:
+            serialized_constants = serialize_torch_artifact(
+                constants, self.pickle_protocol
+            )
+
+        serialized_example_inputs = b""
+        if serialize_example_inputs:
+            serialized_example_inputs = serialize_torch_artifact(
+                exported_program.example_inputs, self.pickle_protocol
+            )
+
         return _SerializedProgram(
             serialized_ep,
-            serialize_torch_artifact(new_state_dict, self.pickle_protocol),
-            serialize_torch_artifact(constants, self.pickle_protocol),
-            serialize_torch_artifact(
-                exported_program.example_inputs, self.pickle_protocol
-            ),
+            serialized_state_dict,
+            serialized_constants,
+            serialized_example_inputs,
         )
 
 
@@ -2220,9 +2268,9 @@ class GraphModuleDeserializer(metaclass=Final):
         signature: ep.ExportGraphSignature
         module_call_graph: list[ep.ModuleCallEntry]
         names_to_symbols: dict[str, sympy.Symbol]
-        state_dict: dict[str, Union[torch.Tensor, torch.nn.Parameter]]
+        state_dict: dict[str, torch.Tensor | torch.nn.Parameter]
         constants: dict[str, _ConstantAttributeType]
-        example_inputs: Optional[tuple[tuple[torch.Tensor, ...], dict[str, Any]]]
+        example_inputs: tuple[tuple[torch.Tensor, ...], dict[str, Any]] | None
 
     def __init__(self) -> None:
         self.serialized_name_to_node: dict[str, torch.fx.Node] = {}
@@ -2287,7 +2335,7 @@ class GraphModuleDeserializer(metaclass=Final):
         return target
 
     def _parse_sym_expr(
-        self, expr_str: str, hint: Optional[Union[int, bool, float]] = None
+        self, expr_str: str, hint: int | bool | float | None = None
     ) -> sympy.Expr:
         """
         Parses and does bottom-up processing of sympy.Expr nodes,
@@ -2295,7 +2343,7 @@ class GraphModuleDeserializer(metaclass=Final):
         """
 
         def _process_sym_expr(
-            sym: sympy.Expr, hint: Optional[Union[int, bool, float]] = None
+            sym: sympy.Expr, hint: int | bool | float | None = None
         ) -> sympy.Expr:
             if sym.is_Integer or sym.is_Float or sym.is_Boolean:  # base case
                 return sym
@@ -2335,7 +2383,7 @@ class GraphModuleDeserializer(metaclass=Final):
         )
         return _process_sym_expr(expr, hint)
 
-    def deserialize_sym_int(self, s: SymInt) -> Union[int, torch.SymInt]:
+    def deserialize_sym_int(self, s: SymInt) -> int | torch.SymInt:
         val = s.value
         if s.type == "as_expr":
             if val.hint is None:
@@ -2358,7 +2406,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 f"SymInt has invalid field type {s.type} with value {s.value}"
             )
 
-    def deserialize_sym_float(self, s: SymFloat) -> Union[float, torch.SymFloat]:
+    def deserialize_sym_float(self, s: SymFloat) -> float | torch.SymFloat:
         val = s.value
         if s.type == "as_expr":
             hint = val.hint.as_float if val.hint else None
@@ -2373,7 +2421,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 f"SymFloat has invalid field type {s.type} with value {s.value}"
             )
 
-    def deserialize_sym_bool(self, s: SymBool) -> Union[bool, torch.SymBool]:
+    def deserialize_sym_bool(self, s: SymBool) -> bool | torch.SymBool:
         val = s.value
         if s.type == "as_expr":
             expr = self._parse_sym_expr(val.expr_str)
@@ -2411,7 +2459,7 @@ class GraphModuleDeserializer(metaclass=Final):
             class_fqn=script_obj_meta.class_fqn,
         )
 
-    def deserialize_graph_output(self, output) -> Optional[Union[torch.fx.Node, int]]:
+    def deserialize_graph_output(self, output) -> torch.fx.Node | int | None:
         if output.type == "as_tensor":
             return self.serialized_name_to_node[output.as_tensor.name]
         elif output.type == "as_sym_int":
@@ -2804,12 +2852,12 @@ class GraphModuleDeserializer(metaclass=Final):
     def deserialize(
         self,
         serialized_graph_module: GraphModule,
-        serialized_state_dict: Union[dict[str, torch.Tensor], bytes],
-        constants: Union[dict[str, Any], bytes],
-        example_inputs: Optional[
-            Union[tuple[tuple[torch.Tensor, ...], dict[str, Any]], bytes]
-        ] = None,
-        symbol_name_to_range: Optional[dict[str, symbolic_shapes.ValueRanges]] = None,
+        serialized_state_dict: dict[str, torch.Tensor] | bytes,
+        constants: dict[str, Any] | bytes,
+        example_inputs: tuple[tuple[torch.Tensor, ...], dict[str, Any]]
+        | bytes
+        | None = None,
+        symbol_name_to_range: dict[str, symbolic_shapes.ValueRanges] | None = None,
     ) -> Result:
         global _CURRENT_DESERIALIZER
         if _CURRENT_DESERIALIZER is not None:
@@ -3054,6 +3102,14 @@ class GraphModuleDeserializer(metaclass=Final):
             elif typ_ == "as_int_lists":
                 # Convert list of lists back to list of tuples for Triton grids
                 return [tuple(dims) for dims in value]
+            elif typ_ == "as_float_lists":
+                return [list(floats) for floats in value]
+            elif typ_ == "as_nested_tensors":
+                # nested list of tensors (List[List[Tensor]])
+                return [
+                    [self.serialized_name_to_node[arg.name] for arg in inner_list]
+                    for inner_list in value
+                ]
             elif typ_ in ("as_sym_ints", "as_sym_bools", "as_sym_floats"):
                 return [self.deserialize_sym_argument(arg) for arg in value]
             elif typ_ == "as_optional_tensors":
@@ -3176,7 +3232,7 @@ class GraphModuleDeserializer(metaclass=Final):
         self,
         meta_val,
         fx_node: torch.fx.Node,
-        arg: Union[TensorArgument, SymIntArgument, SymFloatArgument],
+        arg: TensorArgument | SymIntArgument | SymFloatArgument,
         idx: int,
         deserialized_metadata: dict[str, Any],
     ):
@@ -3367,8 +3423,8 @@ class GraphModuleDeserializer(metaclass=Final):
         return ret
 
     def _deserialize_from_node(
-        self, from_node_data: Optional[list[dict[str, Any]]]
-    ) -> Optional[list[NodeSource]]:
+        self, from_node_data: list[dict[str, Any]] | None
+    ) -> list[NodeSource] | None:
         """
         Deserialize from_node metadata from JSON data.
         """
@@ -3435,7 +3491,7 @@ class GraphModuleDeserializer(metaclass=Final):
 
 @final
 class ExportedProgramDeserializer(metaclass=Final):
-    def __init__(self, expected_opset_version: Optional[dict[str, int]] = None):
+    def __init__(self, expected_opset_version: dict[str, int] | None = None):
         self.expected_opset_version: dict[str, int] = {}
         if expected_opset_version:
             self.expected_opset_version.update(expected_opset_version)
@@ -3462,11 +3518,11 @@ class ExportedProgramDeserializer(metaclass=Final):
     def deserialize(
         self,
         exported_program: ExportedProgram,
-        state_dict: Union[dict[str, torch.Tensor], bytes],
-        constants: Union[dict[str, torch.Tensor], bytes],
-        example_inputs: Optional[
-            Union[tuple[tuple[torch.Tensor, ...], dict[str, Any]], bytes]
-        ] = None,
+        state_dict: dict[str, torch.Tensor] | bytes,
+        constants: dict[str, torch.Tensor] | bytes,
+        example_inputs: tuple[tuple[torch.Tensor, ...], dict[str, Any]]
+        | bytes
+        | None = None,
         *,
         _unsafe_skip_version_check=False,
     ) -> ep.ExportedProgram:
@@ -3565,13 +3621,22 @@ def _to_json_bytes(obj: Any) -> bytes:
 
 def serialize(
     exported_program: ep.ExportedProgram,
-    opset_version: Optional[dict[str, int]] = None,
+    opset_version: dict[str, int] | None = None,
     pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
+    *,
+    serialize_state_dict: bool = True,
+    serialize_constants: bool = True,
+    serialize_example_inputs: bool = True,
 ) -> SerializedArtifact:
     with _enable_graph_inputs_of_type_nn_module(exported_program.example_inputs):
         serialized_program = ExportedProgramSerializer(
             opset_version, pickle_protocol
-        ).serialize(exported_program)
+        ).serialize(
+            exported_program,
+            serialize_state_dict=serialize_state_dict,
+            serialize_constants=serialize_constants,
+            serialize_example_inputs=serialize_example_inputs,
+        )
     if not isinstance(serialized_program.exported_program, ExportedProgram):
         raise AssertionError(
             f"expected ExportedProgram, got {type(serialized_program.exported_program).__name__}"
@@ -3603,7 +3668,9 @@ def _dict_to_dataclass(cls, data):
         raise AssertionError(f"Unresolved class type: '{cls}'.")
     if typing.get_origin(cls) is Annotated:
         return _dict_to_dataclass(cls.__origin__, data)
-    if typing.get_origin(cls) == typing.Union and type(None) in typing.get_args(cls):
+    if typing.get_origin(cls) in (typing.Union, types.UnionType) and type(
+        None
+    ) in typing.get_args(cls):
         if data is None:
             return None
         ty_args = typing.get_args(cls)
@@ -3657,7 +3724,7 @@ def _bytes_to_dataclass(cls: Any, artifact_bytes: bytes) -> Any:
 
 def deserialize(
     artifact: SerializedArtifact,
-    expected_opset_version: Optional[dict[str, int]] = None,
+    expected_opset_version: dict[str, int] | None = None,
     *,
     _unsafe_skip_version_check=False,
 ) -> ep.ExportedProgram:
@@ -3735,8 +3802,12 @@ def _canonicalize_graph(
             return None
         elif a.type == "as_int_lists":
             return None
+        elif a.type == "as_float_lists":
+            return None
         elif a.type == "as_string_to_argument":
             return None
+        elif a.type == "as_nested_tensors":
+            return a.as_nested_tensors
         else:
             raise AssertionError(f"Unknown input type to the ExportedProgram: {a}")
 
@@ -3759,7 +3830,7 @@ def _canonicalize_graph(
         rank: dict[str, int] = {}
         ret: list[Node] = []
 
-        def get_name(a) -> Optional[str]:
+        def get_name(a) -> str | None:
             if a is None:
                 return None
             if isinstance(a, TensorArgument):
@@ -3999,7 +4070,7 @@ def _canonicalize_graph(
 
 
 def canonicalize(
-    ep: ExportedProgram, constants: Optional[set[str]] = None
+    ep: ExportedProgram, constants: set[str] | None = None
 ) -> ExportedProgram:
     """
     Normalize a serialized ExportedProgram, so that different eager program which
@@ -4042,7 +4113,7 @@ def canonicalize(
             f"graph.outputs length {len(graph.outputs)} != signature.output_specs length {len(signature.output_specs)}"
         )
 
-    def rank_input(inp) -> tuple[int, Optional[str], int]:
+    def rank_input(inp) -> tuple[int, str | None, int]:
         idx, (_arg, spec) = inp
         if not isinstance(spec, InputSpec):
             raise AssertionError(f"expected InputSpec, got {type(spec).__name__}")
@@ -4063,7 +4134,7 @@ def canonicalize(
         else:
             raise AssertionError(f"Unknown input type: {spec}")
 
-    def rank_output(out) -> tuple[int, Optional[str], int]:
+    def rank_output(out) -> tuple[int, str | None, int]:
         idx, (_arg, spec) = out
         if not isinstance(spec, OutputSpec):
             raise AssertionError(f"expected OutputSpec, got {type(spec).__name__}")

@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: pt2"]
 
 from collections import deque
-from typing import Optional
 
 import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -57,7 +56,8 @@ def enumerate_reachable_states(
         # 1. Unflatten: try factoring each dimension
         for dim in range(ndim):
             size = sizes[dim]
-            assert size > 1
+            if size <= 1:
+                raise AssertionError(f"size must be > 1, got {size}")
             # Try all factorizations x * y = size where both x, y >= 2
             # We only need to check x up to size // 2 since when x > size // 2,
             # y = size // x < 2, which we reject
@@ -153,7 +153,7 @@ class TestAsStrided(TestCase):
         Test that for sizes 2..10, each smaller tensor results in a strict
         subset of possible states compared to the next one.
         """
-        prev_states: Optional[set[tuple[tuple[int, ...], tuple[int, ...]]]] = None
+        prev_states: set[tuple[tuple[int, ...], tuple[int, ...]]] | None = None
         for size in range(2, 11):
             current_states = enumerate_reachable_states(size)
 

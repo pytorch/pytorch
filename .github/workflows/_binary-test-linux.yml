@@ -63,7 +63,7 @@ on:
       runs_on:
         required: true
         type: string
-        description: Hardware to run this job on. Valid values are linux.4xlarge, linux.4xlarge.nvidia.gpu, linux.arm64.2xlarge, and linux.rocm.gpu
+        description: Hardware to run this job on. Valid values are linux.4xlarge, linux.g4dn.4xlarge.nvidia.gpu, linux.arm64.2xlarge, and linux.rocm.gpu
     secrets:
       github-token:
         required: true
@@ -138,7 +138,7 @@ jobs:
 
       - name: Setup Linux
         if: inputs.build_environment != 'linux-s390x-binary-manywheel'
-        uses: ./.github/actions/setup-linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@main
 
       - name: Login to ECR
         if: inputs.build_environment != 'linux-s390x-binary-manywheel'

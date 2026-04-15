@@ -106,7 +106,8 @@ class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
             False,
             padding_mode,
         )
-        assert qconfig, "qconfig must be provided for QAT module"
+        if not qconfig:
+            raise AssertionError("qconfig must be provided for QAT module")
         self.qconfig = qconfig
         self.eps = eps
         self.momentum = momentum
@@ -241,17 +242,18 @@ class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
         Args: `mod` a float module, either produced by torch.ao.quantization utilities
         or directly from user
         """
-        assert type(mod) is cls._FLOAT_MODULE, (
-            "qat."
-            + cls.__name__
-            + ".from_float only works for "
-            + cls._FLOAT_MODULE.__name__
-        )
-        if not qconfig:
-            assert hasattr(mod, "qconfig"), (
-                "Input float module must have qconfig defined"
+        if type(mod) is not cls._FLOAT_MODULE:
+            raise AssertionError(
+                "qat."
+                + cls.__name__
+                + ".from_float only works for "
+                + cls._FLOAT_MODULE.__name__
             )
-            assert mod.qconfig, "Input float module must have a valid qconfig"
+        if not qconfig:
+            if not hasattr(mod, "qconfig"):
+                raise AssertionError("Input float module must have qconfig defined")
+            if not mod.qconfig:
+                raise AssertionError("Input float module must have a valid qconfig")
             qconfig = mod.qconfig
         conv, bn = mod[0], mod[1]
         qat_convbn = cls(

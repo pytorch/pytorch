@@ -996,7 +996,7 @@ def add_docstr_to_hint(docstr: str, hint: str) -> str:
         hint = hint.removesuffix("...").rstrip()  # remove "..."
         content = hint + "\n" + textwrap.indent(f'r"""\n{docstr}\n"""', prefix="    ")
         # Remove trailing whitespace on each line
-        # pyrefly: ignore [no-matching-overload]
+        # pyrefly: ignore [bad-argument-type, no-matching-overload]
         return "\n".join(map(str.rstrip, content.splitlines())).rstrip()
 
     # attribute or property
@@ -1072,7 +1072,7 @@ def gen_pyi(
                         "dtype: _dtype | None = None",
                         "device: DeviceLikeType | None = None",
                         "copy: _bool | None = None",
-                        "requires_grad: _bool = False",
+                        "requires_grad: _bool | None = None",
                     ],
                     "Tensor",
                 )

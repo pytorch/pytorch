@@ -2,17 +2,14 @@ sphinx==7.2.6
 #Description: This is used to generate PyTorch docs
 #Pinned versions: 7.2.6
 
-pytorch_sphinx_theme2==0.2.0
+pytorch_sphinx_theme2==0.4.6
 #Description: This is needed to generate PyTorch docs
-#Pinned versions: 0.2.0
+#Pinned versions: 0.4.6
 
-# TODO: sphinxcontrib.katex 0.9.0 adds a local KaTeX server to speed up pre-rendering
-# but it doesn't seem to work and hangs around idly. The initial thought that it is probably
-# something related to Docker setup. We can investigate this later.
-
-sphinxcontrib.katex==0.8.6
+sphinxcontrib.katex==0.9.11
 #Description: This is used to generate PyTorch docs
-#Pinned versions: 0.8.6
+#Pinned versions: 0.9.11 (0.9.0+ uses a persistent KaTeX server instead of
+#  spawning a subprocess per math expression, ~20% faster writes)
 
 sphinxext-opengraph==0.9.1
 #Description: This is used to generate PyTorch docs
@@ -47,6 +44,10 @@ exhale==0.3.7
 docutils==0.20
 #Description: This is used to generate PyTorch C++ docs
 #Pinned versions: 0.20
+
+coverxygen==1.8.1
+#Description: This is used to measure C++ API doc coverage from Doxygen XML
+#Pinned versions: 1.8.1
 
 bs4==0.0.1
 #Description: This is used to generate PyTorch C++ docs

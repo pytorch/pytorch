@@ -56,6 +56,9 @@ def check_graph_breaks(actual_csv, expected_csv, expected_filename):
                 "Qwen/Qwen3-0.6B",
                 "mistralai/Mistral-7B-Instruct-v0.3",
                 "openai/gpt-oss-20b",
+                # Discovered after gfx950 CI enablement and rocm 7.2
+                "mobilenet_v3_large",
+                "mnasnet1_0",
             }
         )
 

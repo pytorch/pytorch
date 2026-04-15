@@ -11,7 +11,7 @@
 #   "mccabe==0.7.0",
 #   "pycodestyle==2.14.0",
 #   "pyflakes==3.4.0",
-#   "setuptools",
+#   "setuptools<82",
 # ]
 # ///
 from __future__ import annotations

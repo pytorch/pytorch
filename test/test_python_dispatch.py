@@ -26,7 +26,9 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     first_sample,
+    instantiate_parametrized_tests,
     IS_WINDOWS,
+    parametrize,
     run_tests,
     TEST_WITH_ROCM,
     TestCase,
@@ -219,9 +221,6 @@ class TestPythonRegistration(TestCase):
             self.assertEqual(c, a + b)
             self.assertTrue(is_called)
 
-    @unittest.skip(
-        "Causing flakiness, see https://github.com/pytorch/pytorch/issues/145108"
-    )
     def test_fallthrough_for_dense_key_with_meta_in_tls(self) -> None:
         # This tests that if meta is included in TlS dispatch key set,
         # then a meta kernel should be called regardless if a dense
@@ -243,6 +242,29 @@ class TestPythonRegistration(TestCase):
             with torch._C._IncludeDispatchKeyGuard(torch.DispatchKey.Meta):
                 torch.ops.custom.sum.default(a)
                 self.assertTrue(meta_is_called)
+
+    def test_include_dispatch_key_guard_restores_tls_exactly(self) -> None:
+        before = torch._C._dispatch_tls_local_include_set().raw_repr()
+        with torch._C._IncludeDispatchKeyGuard(torch.DispatchKey.Meta):
+            pass
+        after = torch._C._dispatch_tls_local_include_set().raw_repr()
+        self.assertEqual(before, after)
+
+    @parametrize(
+        "key",
+        [
+            torch.DispatchKey.Meta,
+            torch.DispatchKey.CUDA,
+            torch.DispatchKey.CPU,
+        ],
+    )
+    def test_exclude_dispatch_key_guard_restores_tls_exactly(self, key) -> None:
+        keyset = torch._C.DispatchKeySet(key)
+        before = torch._C._dispatch_tls_local_exclude_set().raw_repr()
+        with torch._C._ExcludeDispatchKeyGuard(keyset):
+            pass
+        after = torch._C._dispatch_tls_local_exclude_set().raw_repr()
+        self.assertEqual(before, after)
 
     def test_dispatchkeyset_pickle(self) -> None:
         keyset = torch._C.DispatchKeySet(torch._C.DispatchKey.AutogradCPU)
@@ -594,7 +616,8 @@ class TestPythonRegistration(TestCase):
             def _test():
                 torch.ops._test_python_registration._op()
 
-            assert "_test_python_registration::_op" in str(_test.graph)
+            if "_test_python_registration::_op" not in str(_test.graph):
+                raise AssertionError("expected _test_python_registration::_op in graph")
 
         with self.assertRaises(AssertionError):
             test_helper("")  # alias_analysis="FROM_SCHEMA"
@@ -686,6 +709,9 @@ class TestPythonRegistration(TestCase):
         with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
             # default behavior should have been restored
             self.assertEqual(torch.mm(a, b).dtype, torch.bfloat16)
+
+
+instantiate_parametrized_tests(TestPythonRegistration)
 
 
 class TestPythonDispatch(TestCase):
@@ -973,9 +999,13 @@ $1: f32[1] = torch._ops.aten.detach.default($0)""",
 
             @staticmethod
             def backward(ctx, grad_output):
-                assert isinstance(grad_output, LoggingTensor)
+                if not isinstance(grad_output, LoggingTensor):
+                    raise AssertionError(
+                        f"expected LoggingTensor, got {type(grad_output)}"
+                    )
                 (x,) = ctx.saved_tensors
-                assert isinstance(x, LoggingTensor)
+                if not isinstance(x, LoggingTensor):
+                    raise AssertionError(f"expected LoggingTensor, got {type(x)}")
                 escape[0] = x
                 return grad_output * 2 * x
 
@@ -1563,10 +1593,11 @@ $3: f32[] = torch._ops.aten.add.Tensor($1, $2)""",
         self.assertIsInstance(y, ModeTensor)
         self.assertIsInstance(z, ModeTensor)
 
-        assert self.assertRaisesRegex(
+        if not self.assertRaisesRegex(
             RuntimeError,
             "subclass Mode but.* associated to a python object of type Mode",
-        )
+        ):
+            raise AssertionError("expected RuntimeError")
 
     def test_notimplemented_mode(self):
         sub_count = 0

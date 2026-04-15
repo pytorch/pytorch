@@ -12,11 +12,12 @@ from collections import namedtuple
 from collections.abc import Callable, Iterable, Sequence
 from enum import Enum
 from functools import partial, wraps
-from typing import Any, ClassVar, Optional, TypeVar, Union
+from typing import Any, ClassVar, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
 from torch._inductor.utils import GPU_TYPES
+from torch._utils import _is_privateuse1_backend_available
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     _get_torch_hipblaslt_version,
@@ -33,7 +34,6 @@ from torch.testing._internal.common_utils import (
     get_tracked_input,
     IS_FBCODE,
     IS_MACOS,
-    is_privateuse1_backend_available,
     IS_REMOTE_GPU,
     IS_S390X,
     IS_SANDCASTLE,
@@ -317,6 +317,15 @@ def _update_param_kwargs(param_kwargs, name, value):
 
 class DeviceTypeTestBase(TestCase):
     device_type: str = "generic_device_type"
+
+    # When True, @onlyOn-based decorators (@onlyCUDA, @onlyMPS, etc.) will not
+    # skip tests for this device type. This is a pragmatic short-term solution to
+    # allow PrivateUse1 backends to run tests that are currently gated behind
+    # device-specific decorators. It is intended to be used together with the
+    # skip mechanism (see https://github.com/pytorch/pytorch/issues/177253).
+    # In the longer term, we are incrementally migrating accelerator tests to be
+    # device-generic and removing @onlyCUDA on tests that should be device-generic.
+    bypass_device_restrictions: bool = False
 
     # Flag to disable test suite early due to unrecoverable error such as CUDA error.
     _stop_test_suite = False
@@ -670,6 +679,7 @@ class PrivateUse1TestBase(DeviceTypeTestBase):
     primary_device: ClassVar[str]
     device_mod = None
     device_type = "privateuse1"
+    bypass_device_restrictions = False
 
     @classmethod
     def get_primary_device(cls):
@@ -723,7 +733,7 @@ def get_device_type_test_bases():
         if torch.cuda.is_available():
             test_bases.append(CUDATestBase)
 
-        if is_privateuse1_backend_available():
+        if _is_privateuse1_backend_available():
             test_bases.append(PrivateUse1TestBase)
         # Disable MPS testing in generic device testing temporarily while we're
         # ramping up support.
@@ -750,7 +760,7 @@ def filter_desired_device_types(device_type_test_bases, except_for=None, only_fo
     # This handles the case where PrivateUse1TestBase.device_type has been
     # changed from "privateuse1" to the actual backend name (e.g., "openreg")
     # by setUpClass being called during previous instantiate_device_type_tests calls
-    if is_privateuse1_backend_available():
+    if _is_privateuse1_backend_available():
         privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
 
         def func_replace(x: str) -> str:
@@ -1064,8 +1074,8 @@ class ops(_TestParametrizer):
         self,
         op_list,
         *,
-        dtypes: Union[OpDTypes, Sequence[torch.dtype]] = OpDTypes.supported,
-        allowed_dtypes: Optional[Sequence[torch.dtype]] = None,
+        dtypes: OpDTypes | Sequence[torch.dtype] = OpDTypes.supported,
+        allowed_dtypes: Sequence[torch.dtype] | None = None,
         skip_if_dynamo=True,
     ):
         self.op_list = list(op_list)
@@ -1087,7 +1097,7 @@ class ops(_TestParametrizer):
         op = check_exhausted_iterator = object()
         for op in self.op_list:
             # Determine the set of dtypes to use.
-            dtypes: Union[set[torch.dtype], set[None]]
+            dtypes: set[torch.dtype] | set[None]
             if isinstance(self.opinfo_dtypes, Sequence):
                 dtypes = set(self.opinfo_dtypes)
             elif self.opinfo_dtypes == OpDTypes.unsupported_backward:
@@ -1104,7 +1114,7 @@ class ops(_TestParametrizer):
                 dtypes = set(op.supported_dtypes(device_cls.device_type))
             elif self.opinfo_dtypes == OpDTypes.any_one:
                 # Tries to pick a dtype that supports both forward or backward
-                supported = op.supported_dtypes(device_cls.device_type)
+                supported = set(op.supported_dtypes(device_cls.device_type))
                 supported_backward = op.supported_backward_dtypes(
                     device_cls.device_type
                 )
@@ -1437,13 +1447,15 @@ class expectedFailure:
 
 
 class onlyOn:
-    def __init__(self, device_type: Union[str, list]):
+    def __init__(self, device_type: str | list):
         self.device_type = device_type
 
     def __call__(self, fn):
         @wraps(fn)
         def only_fn(slf, *args, **kwargs):
             if slf.device_type not in self.device_type:
+                if getattr(slf, "bypass_device_restrictions", False):
+                    return fn(slf, *args, **kwargs)
                 reason = f"Only runs on {self.device_type}"
                 if IS_SANDCASTLE or IS_FBCODE:
                     print(
@@ -1828,6 +1840,15 @@ def has_hipsolver():
     return rocm_version >= (5, 3)
 
 
+# Skips a test on CUDA if cuSOLVER is not available,
+# and on ROCm if MAGMA is not available.
+def skipCUDAIfNoCusolverROCMIfNoMagma(fn):
+    if TEST_WITH_ROCM:
+        return skipCUDAIfNoMagma(fn)
+    else:
+        return skipCUDAIfNoCusolver(fn)
+
+
 # Skips a test on CUDA/ROCM if cuSOLVER/hipSOLVER is not available
 def skipCUDAIfNoCusolver(fn):
     return skipCUDAIf(
@@ -1932,7 +1953,7 @@ def skipCUDAIfNotMiopenSuggestNHWC(fn):
 
 
 # Skips a test for specified CUDA versions, given in the form of a list of [major, minor]s.
-def skipCUDAVersionIn(versions: Optional[list[tuple[int, int]]] = None):
+def skipCUDAVersionIn(versions: list[tuple[int, int]] | None = None):
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):
@@ -1950,7 +1971,7 @@ def skipCUDAVersionIn(versions: Optional[list[tuple[int, int]]] = None):
 
 
 # Skips a test for CUDA versions less than specified, given in the form of [major, minor].
-def skipCUDAIfVersionLessThan(versions: Optional[tuple[int, int]] = None):
+def skipCUDAIfVersionLessThan(versions: tuple[int, int] | None = None):
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):
@@ -2057,23 +2078,26 @@ def get_all_device_types() -> list[str]:
 
 # skip since currently flex attention requires at least `avx2` support on CPU.
 IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED = (
-    not torch.xpu.is_available()
-    and not torch.cuda.is_available()
-    and not IS_MACOS
+    not IS_MACOS
     and torch.cpu._is_avx2_supported()
     and os.getenv("ATEN_CPU_CAPABILITY") != "default"
 )
 IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED = (
     torch.xpu.is_available() and torch.utils._triton.has_triton()
 )
+IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED = (
+    torch.cuda.is_available()
+    and torch.utils._triton.has_triton()
+    and torch.cuda.get_device_capability() >= (8, 0)
+)
 flex_attention_supported_platform = unittest.skipUnless(
     IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED
-    or IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED
     or (
-        torch.cuda.is_available()
-        and torch.utils._triton.has_triton()
-        and torch.cuda.get_device_capability() >= (8, 0)
-    ),
+        IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED
+        and not torch.xpu.is_available()
+        and not torch.cuda.is_available()
+    )
+    or IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
     "Requires CUDA and Triton, Intel GPU and triton, or CPU with avx2 and later",
 )
 if (

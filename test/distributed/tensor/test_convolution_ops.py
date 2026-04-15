@@ -13,6 +13,7 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_utils import run_tests
@@ -294,6 +295,38 @@ class DistConvolutionOpsTest(DTensorTestBase):
         self.assertIsNotNone(w_dt.grad)
         self.assertEqual(w_dt.grad.shape, torch.Size([8, 4, 3, 3]))
 
+    @with_tf32_off
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_conv2d_batch_shard_strided(self):
+        """Batch-dim sharding with stride != 1 should not hit _is_supported."""
+        device_mesh = self.build_device_mesh()
+
+        model = nn.Conv2d(3, 8, kernel_size=7, stride=2, padding=3).to(self.device_type)
+        model_ref = copy.deepcopy(model).to(self.device_type)
+        model = distribute_module(model, device_mesh, _conv_fn)
+
+        x = torch.randn(4, 3, 16, 16, device=self.device_type, requires_grad=True)
+        x_ref = x.detach().clone().requires_grad_(True)
+        x_dt = distribute_tensor(x, device_mesh, [Shard(0)])
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            out_dt = model(x_dt)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+
+        out_ref = model_ref(x_ref)
+        self.assertEqual(out_dt.full_tensor(), out_ref)
+
+        grad = torch.randn_like(out_ref)
+        grad_dt = distribute_tensor(grad, device_mesh, [Shard(0)])
+        with comm_mode:
+            out_dt.backward(grad_dt)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+
+        out_ref.backward(grad)
+        self.assertEqual(x_dt.grad.full_tensor(), x_ref.grad)
+
     @with_comms
     def test_conv2d_module_no_bias(self):
         """Test nn.Conv2d module with bias=False (Issue #167091)
@@ -324,6 +357,72 @@ class DistConvolutionOpsTest(DTensorTestBase):
         # Check that model.bias is None
         self.assertIsNone(model.bias)
 
+    @with_tf32_off
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_conv1d_batch_shard(self):
+        device_mesh = self.build_device_mesh()
+
+        model = nn.Conv1d(3, 8, kernel_size=3, padding=1).to(self.device_type)
+        model_ref = copy.deepcopy(model).to(self.device_type)
+        model = distribute_module(model, device_mesh, _conv_fn)
+
+        x = torch.randn(4, 3, 16, device=self.device_type, requires_grad=True)
+        x_ref = x.detach().clone().requires_grad_(True)
+        x_dt = distribute_tensor(x, device_mesh, [Shard(0)])
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            out_dt = model(x_dt)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertTrue(out_dt.placements[0].is_shard(0))
+
+        out_ref = model_ref(x_ref)
+        self.assertEqual(out_dt.full_tensor(), out_ref)
+
+        grad = torch.randn_like(out_ref)
+        grad_dt = distribute_tensor(grad, device_mesh, [Shard(0)])
+        with comm_mode:
+            out_dt.backward(grad_dt)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+
+        out_ref.backward(grad)
+        self.assertTrue(x_dt.grad.placements[0].is_shard(0))
+        self.assertEqual(x_dt.grad.full_tensor(), x_ref.grad)
+
+    @with_tf32_off
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_conv3d_batch_shard(self):
+        device_mesh = self.build_device_mesh()
+
+        model = nn.Conv3d(3, 8, kernel_size=3, padding=1).to(self.device_type)
+        model_ref = copy.deepcopy(model).to(self.device_type)
+        model = distribute_module(model, device_mesh, _conv_fn)
+
+        x = torch.randn(4, 3, 8, 8, 8, device=self.device_type, requires_grad=True)
+        x_ref = x.detach().clone().requires_grad_(True)
+        x_dt = distribute_tensor(x, device_mesh, [Shard(0)])
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            out_dt = model(x_dt)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertTrue(out_dt.placements[0].is_shard(0))
+
+        out_ref = model_ref(x_ref)
+        self.assertEqual(out_dt.full_tensor(), out_ref)
+
+        grad = torch.randn_like(out_ref)
+        grad_dt = distribute_tensor(grad, device_mesh, [Shard(0)])
+        with comm_mode:
+            out_dt.backward(grad_dt)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+
+        out_ref.backward(grad)
+        self.assertTrue(x_dt.grad.placements[0].is_shard(0))
+        self.assertEqual(x_dt.grad.full_tensor(), x_ref.grad)
+
 
 DistConvolutionOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistConvolutionOpsTest,
@@ -332,10 +431,13 @@ DistConvolutionOpsTestWithLocalTensor = create_local_tensor_test_class(
         "test_conv_backward_none_grad_inp",
         "test_depthwise_convolution",
         "test_downsampling_convolution",
+        "test_conv2d_batch_shard_strided",
         # New tests for Issue #167091 - use send/recv via tp_convolution
         "test_conv2d_no_bias_compile",
         "test_conv2d_no_bias_backward",
         "test_conv2d_module_no_bias",
+        "test_conv1d_batch_shard",
+        "test_conv3d_batch_shard",
     ],
 )
 

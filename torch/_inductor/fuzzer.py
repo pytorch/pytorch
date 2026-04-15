@@ -11,7 +11,7 @@ from collections.abc import Callable, KeysView, Sequence
 from enum import Enum
 from functools import partial, wraps
 from types import FrameType
-from typing import Any, get_args, get_origin, Literal, Optional, TypeVar, Union
+from typing import Any, get_args, get_origin, Literal, TypeVar, Union
 
 import torch
 from functorch.compile import min_cut_rematerialization_partition
@@ -62,7 +62,7 @@ class DummyPass(CustomGraphPass):
     def __call__(self, graph: torch.fx.graph.Graph) -> None:
         return None
 
-    def uuid(self) -> Optional[Any]:
+    def uuid(self) -> Any | None:
         return None
 
 
@@ -76,7 +76,7 @@ class DummyPartitionerFn(CustomPartitionerFn):
     ) -> tuple[torch.fx.GraphModule, torch.fx.GraphModule]:
         return min_cut_rematerialization_partition(gm, joint_inputs, **kwargs)
 
-    def uuid(self) -> Optional[Any]:
+    def uuid(self) -> Any | None:
         return None
 
 
@@ -96,7 +96,7 @@ class TypeExemplars:
     }
 
     @staticmethod
-    def example(t: type[T]) -> Optional[T]:
+    def example(t: type[T]) -> T | None:
         """
         Return an example of a class.
         """
@@ -179,8 +179,18 @@ TYPE_OVERRIDES: dict[str, list[Any]] = {
             "group_linear": {"require_fbgemm": True},
         },
     ],
-    "autoheuristic_collect": ["pad_mm", "mixed_mm"],
-    "autoheuristic_use": ["pad_mm", "mixed_mm"],
+    "autoheuristic_collect": [
+        {"pad_mm": True, "mixed_mm": True},
+        {"pad_mm": True, "mixed_mm": False},
+        {"pad_mm": False, "mixed_mm": True},
+        {"pad_mm": False, "mixed_mm": False},
+    ],
+    "autoheuristic_use": [
+        {"pad_mm": True, "mixed_mm": True},
+        {"pad_mm": True, "mixed_mm": False},
+        {"pad_mm": False, "mixed_mm": True},
+        {"pad_mm": False, "mixed_mm": False},
+    ],
     "traceable_tensor_subclasses": [OrderedSet()],
     "nontraceable_tensor_subclasses": [OrderedSet()],
 }
@@ -435,7 +445,7 @@ class ResultType:
         combo = tuple(sorted(combo))
         self._vals[combo] = status
 
-    def lookup(self, combo: ComboType) -> Optional[Status]:
+    def lookup(self, combo: ComboType) -> Status | None:
         combo = tuple(sorted(combo))
         return self._vals.get(combo, None)
 
@@ -509,6 +519,7 @@ MODULE_DEFAULTS: dict[str, ConfigType] = {
         "pre_grad_custom_pass": DEFAULT,  # Typing
         "custom_partitioner_fn": DEFAULT,  # Typing
         "inductor_choices_class": DEFAULT,  # Typing
+        "cudagraph_policy": DEFAULT,  # Typing
     },
     "torch._dynamo.config": {
         "traceable_tensor_subclasses": DEFAULT,  # Typing
@@ -589,7 +600,7 @@ class ConfigFuzzer:
         config_module: ConfigModule,
         test_model_fn_factory: FactoryType,
         seed: int,
-        default: Optional[ConfigType] = None,
+        default: ConfigType | None = None,
         sm: SamplingMethod = SamplingMethod.TOGGLE,
         test_timeout: int = 3600,
     ):
@@ -719,7 +730,7 @@ class ConfigFuzzer:
             self.results = state["results"]
             self.detailed_results = state.get("detailed_results", {})
 
-    def timeout_handler(self, signum: int, frame: Optional[FrameType]) -> None:
+    def timeout_handler(self, signum: int, frame: FrameType | None) -> None:
         raise TimeoutError("Test execution timed out")
 
     def test_config(self, results: ResultType, config: ConfigType) -> Status:
@@ -749,7 +760,7 @@ class ConfigFuzzer:
             message: str,
             return_status: Status,
             print_traceback: bool,
-            exc: Optional[Exception],
+            exc: Exception | None,
         ) -> Status:
             signal.signal(signal.SIGALRM, original_handler)
             print(f"{message} with config combination:")
@@ -843,12 +854,12 @@ class ConfigFuzzer:
 
     def _bisect_failing_config(
         self, results: ResultType, failing_config: ConfigType
-    ) -> Optional[ConfigType]:
+    ) -> ConfigType | None:
         return self._bisect_failing_config_helper(results, list(failing_config.items()))
 
     def _bisect_failing_config_helper(
         self, results: ResultType, failing_config: list[tuple[str, Any]]
-    ) -> Optional[ConfigType]:
+    ) -> ConfigType | None:
         """
         Bisect a failing configuration to find minimal set of configs that cause failure.
 

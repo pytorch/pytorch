@@ -45,6 +45,7 @@ from torch.fx.operator_schemas import (
 from torch.fx.passes import graph_manipulation
 from torch.fx.passes.param_fetch import lift_lowering_attrs_to_nodes
 from torch.fx.passes.shape_prop import ShapeProp
+from torch.fx._lazy_graph_module import _use_lazy_graph_module
 from torch.fx.passes.split_module import split_module
 from torch.fx.passes.annotate_getitem_nodes import annotate_getitem_nodes
 from torch.testing._internal.common_device_type import (
@@ -54,7 +55,14 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_nn import module_tests, get_new_module_tests
-from torch.testing._internal.common_utils import TEST_Z3, run_tests, TestCase, TEST_WITH_CROSSREF
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    TEST_Z3,
+    run_tests,
+    TestCase,
+    TEST_WITH_CROSSREF,
+)
 from torch.testing._internal.jit_utils import JitTestCase
 import torch.utils._pytree as pytree
 
@@ -72,7 +80,7 @@ skipIfNoMkldnn = unittest.skipIf(
 )
 
 
-def symbolic_trace_with_rewrite(root: Union[torch.nn.Module, Callable]) -> GraphModule:
+def symbolic_trace_with_rewrite(root: torch.nn.Module | Callable) -> GraphModule:
     return GraphModule(
         root if isinstance(root, torch.nn.Module) else torch.nn.Module(),
         RewritingTracer().trace(root),
@@ -101,7 +109,8 @@ class TestFXExperimental(JitTestCase):
         module_with_submodules = ret.module_with_submodules
         dag = ret.dag
         self.assertEqual(traced(a, b), module_with_submodules(a, b))
-        assert dag.nodes[0].logical_device_ids == [1]
+        if dag.nodes[0].logical_device_ids != [1]:
+            raise AssertionError(f"expected logical_device_ids == [1], got {dag.nodes[0].logical_device_ids}")
 
     def test_lack_of_devices(self):
         class TestModule(torch.nn.Module):
@@ -121,7 +130,8 @@ class TestFXExperimental(JitTestCase):
             ret = partitioner.partition_graph(traced, m, partitioner_config)
         except RuntimeError:
             catch_runtime_error = True
-        assert catch_runtime_error
+        if not catch_runtime_error:
+            raise AssertionError("expected RuntimeError")
 
     def test_large_node_error(self):
         class TestModule(torch.nn.Module):
@@ -152,7 +162,8 @@ class TestFXExperimental(JitTestCase):
             ret = partitioner.partition_graph(traced, m, partitioner_config)
         except RuntimeError:
             catch_runtime_error = True
-        assert catch_runtime_error
+        if not catch_runtime_error:
+            raise AssertionError("expected RuntimeError")
 
     def test_partition_node_manipulation(self):
         class TestModule(torch.nn.Module):
@@ -171,14 +182,16 @@ class TestFXExperimental(JitTestCase):
         partitioner_config = PartitionerConfig(devices)
         ret = partitioner.partition_graph(traced, m, partitioner_config)
         partition = partitioner.partitions[0]
-        assert partition.used_mem_bytes == 112
+        if partition.used_mem_bytes != 112:
+            raise AssertionError(f"expected used_mem_bytes == 112, got {partition.used_mem_bytes}")
         # Select add_2 node to remove
         selected_node = None
         for node in partition.nodes:
             if node.name == "add_2":
                 selected_node = node
         partition.remove_node(selected_node)
-        assert partition.used_mem_bytes == 80
+        if partition.used_mem_bytes != 80:
+            raise AssertionError(f"expected used_mem_bytes == 80, got {partition.used_mem_bytes}")
 
     def test_size_based_partition(self):
         class TestModule(torch.nn.Module):
@@ -210,7 +223,8 @@ class TestFXExperimental(JitTestCase):
         dag = ret.dag
         self.assertEqual(traced(a, b), module_with_submodules(a, b))
         for i, node in enumerate(dag.nodes):
-            assert node.logical_device_ids == [i]
+            if node.logical_device_ids != [i]:
+                raise AssertionError(f"expected logical_device_ids == [{i}], got {node.logical_device_ids}")
 
     def test_partition_device_mapping(self):
         class TestModule(torch.nn.Module):
@@ -239,9 +253,11 @@ class TestFXExperimental(JitTestCase):
         self.assertEqual(traced(a), module_with_submodules(a))
         for i, node in enumerate(dag.nodes):
             if i == 1:
-                assert node.logical_device_ids == [1]
+                if node.logical_device_ids != [1]:
+                    raise AssertionError(f"expected logical_device_ids == [1], got {node.logical_device_ids}")
             else:
-                assert node.logical_device_ids == [0]
+                if node.logical_device_ids != [0]:
+                    raise AssertionError(f"expected logical_device_ids == [0], got {node.logical_device_ids}")
 
     def test_sparse_nn_partition(self):
         class MyRecommendationModule(torch.nn.Module):
@@ -303,7 +319,8 @@ class TestFXExperimental(JitTestCase):
         module_with_submodules = ret.module_with_submodules
         dag = ret.dag
         self.assertEqual(traced(a, b, offset), module_with_submodules(a, b, offset))
-        assert len(module_with_submodules.graph.nodes) == 24
+        if len(module_with_submodules.graph.nodes) != 24:
+            raise AssertionError(f"expected 24 nodes, got {len(module_with_submodules.graph.nodes)}")
 
     def test_partition_latency(self):
         class TestModule(torch.nn.Module):
@@ -353,14 +370,17 @@ class TestFXExperimental(JitTestCase):
         )
         for p in partition_to_latency_mapping:
             if p.partition_id == 0:
-                assert partition_to_latency_mapping[p] == (128.0, 80.0, 160.0)
+                if partition_to_latency_mapping[p] != (128.0, 80.0, 160.0):
+                    raise AssertionError(f"expected (128.0, 80.0, 160.0), got {partition_to_latency_mapping[p]}")
             else:
-                assert partition_to_latency_mapping[p] == (16.0, 32.0, 32.0)
+                if partition_to_latency_mapping[p] != (16.0, 32.0, 32.0):
+                    raise AssertionError(f"expected (16.0, 32.0, 32.0), got {partition_to_latency_mapping[p]}")
         transfer_rate_bytes_per_sec = 2
         critical_path_latency_sec = get_latency_of_partitioned_graph(
             partitions, partition_to_latency_mapping, transfer_rate_bytes_per_sec
         )
-        assert critical_path_latency_sec == 208.0
+        if critical_path_latency_sec != 208.0:
+            raise AssertionError(f"expected 208.0, got {critical_path_latency_sec}")
 
     def test_cost_aware_partition(self):
         class MyModule(torch.nn.Module):
@@ -422,7 +442,8 @@ class TestFXExperimental(JitTestCase):
             partition_to_latency_mapping,
             partitioner_config.transfer_rate_bytes_per_sec,
         )
-        assert critical_path_latency_sec == 160.0
+        if critical_path_latency_sec != 160.0:
+            raise AssertionError(f"expected 160.0, got {critical_path_latency_sec}")
 
     def test_aot_based_partition(self):
         class TestModule(torch.nn.Module):
@@ -461,8 +482,10 @@ class TestFXExperimental(JitTestCase):
         dag = ret.dag
         self.assertEqual(module_with_submodules(a), traced(a))
         for node in dag.nodes:
-            assert node.size_bytes == 48
-            assert node.logical_device_ids == [0]
+            if node.size_bytes != 48:
+                raise AssertionError(f"expected size_bytes == 48, got {node.size_bytes}")
+            if node.logical_device_ids != [0]:
+                raise AssertionError(f"expected logical_device_ids == [0], got {node.logical_device_ids}")
 
     def test_replace_target_nodes_with(self):
         class testModule(torch.nn.Module):
@@ -473,7 +496,8 @@ class TestFXExperimental(JitTestCase):
         traced = symbolic_trace(m)
         input1 = torch.randn(1)
         input2 = torch.randn(1)
-        assert (input1 + input2) == traced(input1, input2)
+        if (input1 + input2) != traced(input1, input2):
+            raise AssertionError("traced output mismatch")
         graph_manipulation.replace_target_nodes_with(
             fx_module=traced,
             old_op="call_function",
@@ -481,7 +505,8 @@ class TestFXExperimental(JitTestCase):
             new_op="call_function",
             new_target=operator.mul,
         )
-        assert (input1 * input2) == traced(input1, input2)
+        if (input1 * input2) != traced(input1, input2):
+            raise AssertionError("traced output mismatch after replacement")
 
     def test_saturate_host(self):
         class TestModule(torch.nn.Module):
@@ -589,7 +614,7 @@ class TestFXExperimental(JitTestCase):
     def test_call_to_assert_no_msg(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
-                assert a == b
+                assert a == b  # noqa: S101
                 return a + b
 
         m = M()
@@ -648,7 +673,7 @@ class TestFXExperimental(JitTestCase):
     def test_call_to_assert_with_msg(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
-                assert a == b, "test message"
+                assert a == b, "test message"  # noqa: S101
                 return a + b
 
         m = M()
@@ -676,7 +701,7 @@ class TestFXExperimental(JitTestCase):
     def test_call_to_assert_with_empty_msg(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
-                assert a == b, ""
+                assert a == b, ""  # noqa: S101
                 return a + b
 
         m = M()
@@ -708,7 +733,7 @@ class TestFXExperimental(JitTestCase):
 An error message with
 terrible spacing
                 """
-                assert a == b, error_msg
+                assert a == b, error_msg  # noqa: S101
                 return a + b
 
         m = M()
@@ -737,7 +762,8 @@ terrible spacing
         # Confirm that the output is correct
         self.assertEqual(traced(3, 3), m(3, 3))
 
-    def test_subgraph_creation(self):
+    @parametrize("use_lazy", [True, False])
+    def test_subgraph_creation(self, use_lazy):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -769,9 +795,10 @@ terrible spacing
             return partition
 
         # split module in module with submodules
-        module_with_submodules = split_module(
-            my_module_traced, my_module, mod_partition
-        )
+        with _use_lazy_graph_module(use_lazy):
+            module_with_submodules = split_module(
+                my_module_traced, my_module, mod_partition
+            )
 
         # Check that test_meta_info was still on all nodes.
         submodules = dict(module_with_submodules.named_modules())
@@ -879,6 +906,40 @@ terrible spacing
                 break
         else:
             raise RuntimeError("Expected the subgraph to have an output node.")
+
+    def test_split_module_tuple_return(self):
+        from torch._inductor.compile_fx import graph_returns_tuple
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                a = x + y
+                return a * x
+
+        gm = torch.fx.symbolic_trace(M())
+
+        # Assign ops to different partitions so a single-output submodule exists.
+        def partition_fn(node):
+            return 0 if node.target == operator.add else 1
+
+        # Without tuple_return: single-output submodules return a bare value.
+        sp = split_module(gm, None, partition_fn)
+        self.assertTrue(
+            any(
+                not graph_returns_tuple(submod)
+                for submod in sp.children()
+            ),
+            "expected at least one non-tuple-returning submodule",
+        )
+        x, y = torch.randn(4), torch.randn(4)
+        self.assertEqual(sp(x, y), gm(x, y))
+
+        # With tuple_return: all submodules return a tuple.
+        sp_boxed = split_module(gm, None, partition_fn, tuple_return=True)
+        self.assertTrue(
+            all(graph_returns_tuple(submod) for submod in sp_boxed.children()),
+            "all submodules should return a tuple with tuple_return=True",
+        )
+        self.assertEqual(sp_boxed(x, y), gm(x, y))
 
 
     def test_split_module_kwargs_expansion(self):
@@ -1197,8 +1258,10 @@ class {test_classname}(torch.nn.Module):
                         normalized_args2 = normalize_module(
                             traced, node.target, node.args, node.kwargs
                         )
-                        assert normalized_args == normalized_args2
-                        assert normalized_args
+                        if normalized_args != normalized_args2:
+                            raise AssertionError("normalized_args mismatch")
+                        if not normalized_args:
+                            raise AssertionError("expected normalized_args to be truthy")
                         node.args = normalized_args.args
                         node.kwargs = normalized_args.kwargs
 
@@ -1346,7 +1409,8 @@ class {test_classname}(torch.nn.Module):
         # by default, fx transform loses type annotation of getitem nodes.
         for node in my_module_traced.graph.nodes:
             if node.target == operator.getitem:
-                assert node.type is None
+                if node.type is not None:
+                    raise AssertionError(f"expected node.type is None, got {node.type}")
 
         annotate_getitem_nodes(my_module_traced.graph)
 
@@ -1360,7 +1424,8 @@ class {test_classname}(torch.nn.Module):
         # by default, fx transform loses type annotation of getitem nodes.
         for node in my_module_traced.graph.nodes:
             if node.target == operator.getitem:
-                assert node.type is None
+                if node.type is not None:
+                    raise AssertionError(f"expected node.type is None, got {node.type}")
 
         annotate_getitem_nodes(my_module_traced.graph)
 
@@ -1516,13 +1581,18 @@ class {test_classname}(torch.nn.Module):
 
         for node in traced.graph.nodes:
             if node.op == "call_module":
-                assert hasattr(node, "attrs_for_lowering")
+                if not hasattr(node, "attrs_for_lowering"):
+                    raise AssertionError("expected node to have attrs_for_lowering")
                 para_list = attrs_for_lowering[node.attrs_for_lowering["name"]]
 
                 # node.attrs_for_lowering has an addition field of class name
-                assert len(para_list) + 1 == len(node.attrs_for_lowering)
+                if len(para_list) + 1 != len(node.attrs_for_lowering):
+                    raise AssertionError(
+                        f"attrs_for_lowering length mismatch: {len(para_list) + 1} != {len(node.attrs_for_lowering)}"
+                    )
                 for p_name in para_list:
-                    assert p_name in node.attrs_for_lowering
+                    if p_name not in node.attrs_for_lowering:
+                        raise AssertionError(f"{p_name} not in node.attrs_for_lowering")
 
     def test_merge_matmuls(self):
         """
@@ -1653,8 +1723,8 @@ class {test_classname}(torch.nn.Module):
             (numbers.Number, int),
             (numbers.Number, float),
             (int, type(torch.float)),
-            (Union[int, float], int),
-            (Union[int, float], float),
+            (Union[int, float], int),  # noqa: UP007
+            (Union[int, float], float),  # noqa: UP007
             (list[int], int),
             (list[int], create_type_hint([int, int])),
             (list[int], create_type_hint((int, int))),
@@ -1674,8 +1744,8 @@ class {test_classname}(torch.nn.Module):
             (torch.Tensor, torch.nn.Parameter),
             (list[torch.Tensor], create_type_hint((torch.nn.Parameter, torch.Tensor))),
             (list[torch.Tensor], create_type_hint((torch.Tensor, torch.nn.Parameter))),
-            (Optional[list[torch.Tensor]], list[torch.Tensor]),
-            (Optional[list[int]], list[int]),
+            (Optional[list[torch.Tensor]], list[torch.Tensor]),  # noqa: UP045
+            (Optional[list[int]], list[int]),  # noqa: UP045
         ] + [
             # pre-PEP585 signatures
             (typing.List[int], int),  # noqa: UP006
@@ -1695,8 +1765,8 @@ class {test_classname}(torch.nn.Module):
             ),
             (typing.List[torch.Tensor], create_type_hint((torch.nn.Parameter, torch.Tensor))),  # noqa: UP006
             (typing.List[torch.Tensor], create_type_hint((torch.Tensor, torch.nn.Parameter))),  # noqa: UP006
-            (Optional[typing.List[torch.Tensor]], typing.List[torch.Tensor]),  # noqa: UP006
-            (Optional[typing.List[int]], typing.List[int]),  # noqa: UP006
+            (Optional[typing.List[torch.Tensor]], typing.List[torch.Tensor]),  # noqa: UP006, UP045
+            (Optional[typing.List[int]], typing.List[int]),  # noqa: UP006, UP045
         ]
 
         for sig_type, arg_type in should_be_equal:
@@ -1704,7 +1774,7 @@ class {test_classname}(torch.nn.Module):
 
         should_fail = [
             (int, float),
-            (Union[int, float], str),
+            (Union[int, float], str),  # noqa: UP007
             (list[torch.Tensor], typing.List[int]),  # noqa: UP006
         ] + [
             # pre-PEP585 signatures
@@ -1805,7 +1875,8 @@ class TestNormalizeOperators(JitTestCase):
 
             def jit_infer_type(v):
                 inferred_arg_type = torch._C._jit_try_infer_type(v)
-                assert inferred_arg_type.success()
+                if not inferred_arg_type.success():
+                    raise AssertionError("expected inferred_arg_type.success()")
                 t = _torchscript_type_to_python_type(inferred_arg_type.type())
                 return t
 
@@ -1905,7 +1976,8 @@ class TestModule(torch.nn.Module):
                     normalized_args = node.normalized_arguments(
                         traced, arg_types, kwarg_types
                     )
-                    assert normalized_args
+                    if not normalized_args:
+                        raise AssertionError("expected normalized_args to be truthy")
                     node.args = normalized_args.args
                     node.kwargs = normalized_args.kwargs
             traced.recompile()
@@ -2124,6 +2196,7 @@ if TEST_Z3:
                 self.assertEqual(z3str(expr), expected)
 
 
+instantiate_parametrized_tests(TestFXExperimental)
 instantiate_device_type_tests(TestNormalizeOperators, globals())
 
 if __name__ == "__main__":

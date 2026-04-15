@@ -125,7 +125,7 @@ has_side_effect(torch.ops.streams.join.default)
 def record_event(event_index: int, stream_index: int) -> None:
     event = _get_event_by_index(event_index)
     stream = _get_stream_by_index(stream_index)
-    stream.record_event(event)
+    event.record(stream)
 
 
 @record_event.register_fake
@@ -143,7 +143,7 @@ has_side_effect(torch.ops.streams.record_event.default)
 def wait_event(event_index: int, stream_index: int) -> None:
     event = _get_event_by_index(event_index)
     stream = _get_stream_by_index(stream_index)
-    stream.wait_event(event)
+    event.wait(stream)
 
 
 @wait_event.register_fake
@@ -155,6 +155,47 @@ def _(
 
 
 has_side_effect(torch.ops.streams.wait_event.default)
+
+
+@custom_op("streams::synchronize_event", mutates_args=())
+def synchronize_event(event_index: int) -> None:
+    event = _get_event_by_index(event_index)
+    event.synchronize()
+
+
+@synchronize_event.register_fake
+def _(event_index: int) -> None:
+    pass
+
+
+has_side_effect(torch.ops.streams.synchronize_event.default)
+
+
+@custom_op("streams::synchronize_device", mutates_args=())
+def synchronize_device(device_type: str, device_index: int) -> None:
+    torch.accelerator.synchronize(torch.device(device_type, device_index))
+
+
+@synchronize_device.register_fake
+def _(device_type: str, device_index: int) -> None:
+    pass
+
+
+has_side_effect(torch.ops.streams.synchronize_device.default)
+
+
+@custom_op("streams::synchronize_stream", mutates_args=())
+def synchronize_stream(stream_index: int) -> None:
+    stream = _get_stream_by_index(stream_index)
+    stream.synchronize()
+
+
+@synchronize_stream.register_fake
+def _(stream_index: int) -> None:
+    pass
+
+
+has_side_effect(torch.ops.streams.synchronize_stream.default)
 
 
 @custom_op("streams::wait_stream", mutates_args=())
@@ -188,6 +229,15 @@ def sync_dealloc(
     torch.ops.streams.wait_event.default(wait_event_index, src_stream_index)
 
 
+@sync_dealloc.register_fake
+def _(
+    wait_event_index: int,
+    src_stream_index: int,
+    to_dealloc: torch.Tensor,
+) -> None:
+    pass
+
+
 has_side_effect(torch.ops.streams.sync_dealloc.default)
 
 
@@ -198,11 +248,13 @@ def record_stream(tensor: torch.Tensor, stream_index: int) -> None:
 
 @record_stream.register_fake
 def _(
-    src_stream_index: int,
-    wait_event_index: int,
-    to_dealloc: torch.Tensor,
+    tensor: torch.Tensor,
+    stream_index: int,
 ) -> None:
     pass
+
+
+has_side_effect(torch.ops.streams.record_stream.default)
 
 
 class SymbolicStreamState:
@@ -229,7 +281,7 @@ class SymbolicStreamState:
     def exit_stream(self) -> None:
         self.cur_stream_stack.pop()
 
-    def cur_stream(self, device: Optional[torch.device] = None) -> "StreamVariable":
+    def cur_stream(self, device: torch.device | None = None) -> "StreamVariable":
         if device is not None:
             for stream in reversed(self.cur_stream_stack):
                 if stream.device == device:
@@ -239,6 +291,13 @@ class SymbolicStreamState:
 
     def in_stream_context(self) -> bool:
         return len(self.cur_stream_stack) > 0
+
+    def cur_stream_id(self) -> int:
+        """Get an identifier for the current stream without realizing lazy variables."""
+        stream = self.cur_stream_stack[-1]
+        if isinstance(stream, LazyVariableTracker) and not stream.is_realized():
+            return id(stream.peek_value())
+        return id(stream.value)
 
 
 class StreamContextVariable(FxTracebackAnnotateVariable):
@@ -279,6 +338,9 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
         tx.symbolic_stream_state.exit_stream()
         return super().exit(tx, *args)
 
+    def python_type(self) -> type:
+        return torch.cuda.StreamContext
+
     def supports_graph_breaks(self) -> bool:
         return True
 
@@ -290,11 +352,13 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
 class StreamVariable(StreamContextVariable):
     """Represents the device-agnostic torch.Stream class"""
 
+    _cpython_type = torch.Stream
+
     def __init__(
         self,
         proxy: Proxy,
         value: torch.Stream,
-        user_object_index: Optional[int] = None,
+        user_object_index: int | None = None,
         **kwargs: Any,
     ) -> None:
         # Index into the user object table
@@ -304,7 +368,6 @@ class StreamVariable(StreamContextVariable):
 
         self.proxy = proxy
         self.value = value
-        # pyrefly: ignore [read-only]
         self.device = value.device
 
         self.user_object_index = user_object_index
@@ -312,6 +375,9 @@ class StreamVariable(StreamContextVariable):
 
     def python_type(self) -> type:
         return torch.Stream
+
+    def get_real_python_backed_value(self) -> object:
+        return self.value
 
     def call_method(
         self,
@@ -325,11 +391,34 @@ class StreamVariable(StreamContextVariable):
         from ..utils import cmp_name_to_op_mapping, proxy_args_kwargs
         from .builder import wrap_fx_proxy_cls
 
-        if name in ("wait_stream", "synchronize", "wait_event"):
+        if name == "wait_event":
+            event_arg = args[0]
+            assert isinstance(event_arg, EventVariable)
             tx.output.create_proxy(
-                "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+                "call_function",
+                torch.ops.streams.wait_event,
+                (event_arg.user_object_index, self.user_object_index),
+                {},
             )
-            return ConstantVariable(None)
+            return ConstantVariable.create(None)
+        elif name == "wait_stream":
+            other_stream = args[0]
+            assert isinstance(other_stream, StreamVariable)
+            tx.output.create_proxy(
+                "call_function",
+                torch.ops.streams.wait_stream,
+                (self.user_object_index, other_stream.user_object_index),
+                {},
+            )
+            return ConstantVariable.create(None)
+        elif name == "synchronize":
+            tx.output.create_proxy(
+                "call_function",
+                torch.ops.streams.synchronize_stream,
+                (self.user_object_index,),
+                {},
+            )
+            return ConstantVariable.create(None)
         elif name == "query":
             return wrap_fx_proxy_cls(
                 target_cls=ConstantVariable,
@@ -339,11 +428,34 @@ class StreamVariable(StreamContextVariable):
                 ),
             )
         elif name == "record_event":
-            return wrap_fx_proxy_cls(
-                target_cls=EventVariable,
+            from .builder import wrap_fx_proxy
+
+            tx.output.check_event_record_after_input_mutation(id(self.value))
+            if args and isinstance(args[0], EventVariable):
+                event_var = args[0]
+                event = event_var.value
+                event_index = event_var.user_object_index
+            else:
+                event = self.value.record_event()
+                event_index = register_graph_created_object(
+                    event,
+                    EventVariable.make_construct_in_graph_event_fn(
+                        TupleVariable([]), ConstDictVariable({})
+                    ),
+                )
+            tx.output.create_proxy(
+                "call_function",
+                torch.ops.streams.record_event,
+                (event_index, self.user_object_index),
+                {},
+            )
+            return wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
-                    "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+                    "call_function",
+                    get_external_object_by_index,
+                    (event_index,),
+                    {},
                 ),
             )
         elif name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
@@ -356,13 +468,14 @@ class StreamVariable(StreamContextVariable):
             # constant values
             other = args[0]
             if not isinstance(other, StreamVariable):
-                return ConstantVariable.create(NotImplemented)
+                return VariableTracker.build(tx, NotImplemented)
 
             if other.source:
                 assert self.source is not None
                 install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
-            return ConstantVariable.create(
-                cmp_name_to_op_mapping[name](self.value, other.value)  # type: ignore[arg-type]
+            return VariableTracker.build(
+                tx,
+                cmp_name_to_op_mapping[name](self.value, other.value),  # type: ignore[arg-type]
             )
 
         return super().call_method(tx, name, args, kwargs)
@@ -422,12 +535,34 @@ class StreamVariable(StreamContextVariable):
         return fn
 
 
+class CudaStreamVariable(StreamVariable):
+    """Represents torch.cuda.Stream, preserving device-specific type and attributes."""
+
+    _cpython_type = torch.cuda.Stream
+
+    def python_type(self) -> type:
+        return torch.cuda.Stream
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        if name == "cuda_stream":
+            from ..guards import GuardBuilder, install_guard
+
+            if self.source:
+                install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
+            if isinstance(self.value, torch.cuda.Stream):
+                return ConstantVariable.create(self.value.cuda_stream)
+            # For torch.Stream values (e.g. from torch.accelerator.current_stream),
+            # the default stream has cuda_stream == stream_id == 0.
+            return ConstantVariable.create(self.value.stream_id)
+        return super().var_getattr(tx, name)
+
+
 class EventVariable(VariableTracker):
     def __init__(
         self,
         proxy: Proxy,
         value: torch.Event,
-        user_object_index: Optional[int],
+        user_object_index: int | None,
         **kwargs: Any,
     ) -> None:
         if proxy is not None and "example_value" in proxy.node.meta:
@@ -436,6 +571,12 @@ class EventVariable(VariableTracker):
         self.proxy = proxy
         self.value = value
         self.user_object_index = user_object_index
+
+    def python_type(self) -> type:
+        return torch.Event
+
+    def get_real_python_backed_value(self) -> object:
+        return self.value
 
     def call_method(
         self,
@@ -457,23 +598,28 @@ class EventVariable(VariableTracker):
                 ),
                 {},
             )
-            return ConstantVariable(None)
+            return ConstantVariable.create(None)
         elif name == "record":
+            stream_arg = EventVariable._get_stream_arg(tx, args, kwargs)
+            tx.output.check_event_record_after_input_mutation(id(stream_arg.value))
             tx.output.create_proxy(
                 "call_function",
                 torch.ops.streams.record_event,
                 (
                     self.user_object_index,
-                    EventVariable._get_stream_arg(tx, args, kwargs).user_object_index,
+                    stream_arg.user_object_index,
                 ),
                 {},
             )
-            return ConstantVariable(None)
+            return ConstantVariable.create(None)
         elif name == "synchronize":
             tx.output.create_proxy(
-                "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+                "call_function",
+                torch.ops.streams.synchronize_event,
+                (self.user_object_index,),
+                {},
             )
-            return ConstantVariable(None)
+            return ConstantVariable.create(None)
         elif name == "query":
             return wrap_fx_proxy_cls(
                 target_cls=ConstantVariable,

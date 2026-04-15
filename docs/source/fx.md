@@ -8,6 +8,7 @@
 ## Overview
 ```{eval-rst}
 .. automodule:: torch.fx
+   :no-members:
 ```
 
 
@@ -1100,6 +1101,311 @@ The set of leaf modules can be customized by overriding
 .. autofunction:: torch.fx.passes.tools_common.stable_topological_sort
 ```
 
+## torch.fx.annotate
+
+```{eval-rst}
+.. automodule:: torch.fx.annotate
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.annotate
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    annotate
+```
+
+## torch.fx.node
+
+```{eval-rst}
+.. automodule:: torch.fx.node
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.node
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    has_side_effect
+    map_aggregate
+    map_arg
+```
+
+## torch.fx.operator_schemas
+
+```{eval-rst}
+.. automodule:: torch.fx.operator_schemas
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.operator_schemas
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    check_for_mutable_operation
+    create_type_hint
+    type_matches
+```
+
+## torch.fx.traceback
+
+```{eval-rst}
+.. automodule:: torch.fx.traceback
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.traceback
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    annotate_fn
+```
+
+## torch.fx.subgraph_rewriter
+
+```{eval-rst}
+.. currentmodule:: torch.fx.subgraph_rewriter
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    replace_pattern
+    replace_pattern_with_filters
+```
+
+## torch.fx.tensor_type
+
+```{eval-rst}
+.. currentmodule:: torch.fx.tensor_type
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    is_consistent
+    is_more_precise
+```
+
+## torch.fx.passes.backends.cudagraphs
+
+```{eval-rst}
+.. currentmodule:: torch.fx.passes.backends.cudagraphs
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    partition_cudagraphs
+```
+
+## torch.fx.passes.graph_manipulation
+
+```{eval-rst}
+.. currentmodule:: torch.fx.passes.graph_manipulation
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    replace_target_nodes_with
+```
+
+## torch.fx.passes.infra.pass_manager
+
+```{eval-rst}
+.. currentmodule:: torch.fx.passes.infra.pass_manager
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    pass_result_wrapper
+    this_before_that_pass_constraint
+```
+
+## torch.fx.passes.operator_support
+
+```{eval-rst}
+.. currentmodule:: torch.fx.passes.operator_support
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    any_chain
+    chain
+    create_op_support
+```
+
+## torch.fx.passes.param_fetch
+
+```{eval-rst}
+.. automodule:: torch.fx.passes.param_fetch
+   :no-members:
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.passes.param_fetch
+```
+
+```{eval-rst}
+.. autofunction:: default_matching
+```
+
+```{eval-rst}
+.. autofunction:: extract_attrs_for_lowering
+```
+
+```{eval-rst}
+.. autofunction:: lift_lowering_attrs_to_nodes
+```
+
+## torch.fx.passes.pass_manager
+
+```{eval-rst}
+.. currentmodule:: torch.fx.passes.pass_manager
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    inplace_wrapper
+    log_hook
+    loop_pass
+    these_before_those_pass_constraint
+    this_before_that_pass_constraint
+```
+
+## torch.fx.passes.regional_inductor
+
+```{eval-rst}
+.. currentmodule:: torch.fx.passes.regional_inductor
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    regional_inductor
+```
+
+## torch.fx.passes.reinplace
+
+```{eval-rst}
+.. currentmodule:: torch.fx.passes.reinplace
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    reinplace
+```
+
+## torch.fx.passes.split_utils
+
+```{eval-rst}
+.. currentmodule:: torch.fx.passes.split_utils
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    setattr_recursive
+```
+
+## torch.fx.passes.tools_common
+
+```{eval-rst}
+.. currentmodule:: torch.fx.passes.tools_common
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    is_node_output_tensor
+```
+
+## torch.fx.passes.utils.common
+
+```{eval-rst}
+.. currentmodule:: torch.fx.passes.utils.common
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    compare_graphs
+```
+
+## torch.fx.passes.utils.fuser_utils
+
+```{eval-rst}
+.. currentmodule:: torch.fx.passes.utils.fuser_utils
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    erase_nodes
+    topo_sort
+    validate_partition
+```
+
+## torch.fx.passes.utils.source_matcher_utils
+
+```{eval-rst}
+.. currentmodule:: torch.fx.passes.utils.source_matcher_utils
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    check_subgraphs_connected
+```
 
 <!-- The experimental and passes submodules are missing docs. -->
 <!-- Adding it here for coverage but this doesn't add anything to the -->
@@ -1116,12 +1422,8 @@ The set of leaf modules can be customized by overriding
 .. py:module:: torch.fx.experimental.migrate_gradual_types
 .. py:module:: torch.fx.passes.dialect
 .. py:module:: torch.fx.passes.dialect.common
-.. py:module:: torch.fx.annotate
 .. py:module:: torch.fx.config
-.. py:module:: torch.fx.experimental.accelerator_partitioner
 .. py:module:: torch.fx.experimental.const_fold
-.. py:module:: torch.fx.experimental.debug
-.. py:module:: torch.fx.experimental.merge_matmul
 .. py:module:: torch.fx.experimental.migrate_gradual_types.operation
 .. py:module:: torch.fx.experimental.migrate_gradual_types.util
 .. py:module:: torch.fx.experimental.migrate_gradual_types.z3_types
@@ -1131,23 +1433,10 @@ The set of leaf modules can be customized by overriding
 .. py:module:: torch.fx.experimental.rewriter
 .. py:module:: torch.fx.experimental.schema_type_annotation
 .. py:module:: torch.fx.experimental.unification.dispatch
-.. py:module:: torch.fx.experimental.unification.match
-.. py:module:: torch.fx.experimental.unification.more
-.. py:module:: torch.fx.experimental.unification.multipledispatch.conflict
-.. py:module:: torch.fx.experimental.unification.multipledispatch.core
-.. py:module:: torch.fx.experimental.unification.multipledispatch.dispatcher
-.. py:module:: torch.fx.experimental.unification.multipledispatch.utils
-.. py:module:: torch.fx.experimental.unification.multipledispatch.variadic
-.. py:module:: torch.fx.experimental.unification.utils
-.. py:module:: torch.fx.experimental.unification.variable
-.. py:module:: torch.fx.experimental.unify_refinements
-.. py:module:: torch.fx.experimental.validator
 .. py:module:: torch.fx.graph
 .. py:module:: torch.fx.graph_module
 .. py:module:: torch.fx.immutable_collections
 .. py:module:: torch.fx.interpreter
-.. py:module:: torch.fx.node
-.. py:module:: torch.fx.operator_schemas
 .. py:module:: torch.fx.passes.annotate_getitem_nodes
 .. py:module:: torch.fx.passes.backends.cudagraphs
 .. py:module:: torch.fx.passes.dialect.common.cse_pass
@@ -1160,7 +1449,7 @@ The set of leaf modules can be customized by overriding
 .. py:module:: torch.fx.passes.infra.pass_manager
 .. py:module:: torch.fx.passes.net_min_base
 .. py:module:: torch.fx.passes.operator_support
-.. py:module:: torch.fx.passes.param_fetch
+
 .. py:module:: torch.fx.passes.pass_manager
 .. py:module:: torch.fx.passes.regional_inductor
 .. py:module:: torch.fx.passes.reinplace
@@ -1180,5 +1469,4 @@ The set of leaf modules can be customized by overriding
 .. py:module:: torch.fx.proxy
 .. py:module:: torch.fx.subgraph_rewriter
 .. py:module:: torch.fx.tensor_type
-.. py:module:: torch.fx.traceback
 ```

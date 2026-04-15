@@ -6,7 +6,6 @@ import sys
 import unittest
 from collections import namedtuple
 from collections.abc import Callable
-from typing import Optional, Union
 from unittest import expectedFailure
 from unittest.mock import patch
 
@@ -329,7 +328,7 @@ class TestFlexDecoding(InductorTestCase):
         ref_out: torch.Tensor,
         compiled_out: torch.Tensor,
         fudge_factor: float,
-        tensor_name: Optional[str] = None,
+        tensor_name: str | None = None,
     ):
         compiled_error = (golden_out - compiled_out).abs().mean()
         ref_error = (golden_out - ref_out).abs().mean()
@@ -372,7 +371,7 @@ class TestFlexDecoding(InductorTestCase):
 
     def run_test(
         self,
-        score_mod: Optional[Callable] = None,
+        score_mod: Callable | None = None,
         dtype: torch.dtype = torch.float16,
         Q_B: int = B,
         Q_H: int = Hq,
@@ -382,14 +381,16 @@ class TestFlexDecoding(InductorTestCase):
         KV_H: int = Hkv,
         KV_S: int = S,
         V_D: int = D,
-        block_mask: Optional[BlockMask] = None,
+        block_mask: BlockMask | None = None,
         device="cuda",
         kernel_options=None,
     ):
-        assert score_mod is not None or block_mask is not None, (
-            "Must provide score_mod or block_mask"
-        )
-        assert Q_H % KV_H == 0
+        if score_mod is None and block_mask is None:
+            raise AssertionError("Must provide score_mod or block_mask")
+        if Q_H % KV_H != 0:
+            raise AssertionError(
+                f"Expected Q_H % KV_H == 0, got {Q_H} % {KV_H} = {Q_H % KV_H}"
+            )
         if device == "cpu" and dtype is torch.float16:
             dtype = torch.float32
 
@@ -443,7 +444,7 @@ class TestFlexDecoding(InductorTestCase):
     def run_test_with_call(
         self,
         sdpa_call: Callable,
-        golden_call: Optional[Callable] = None,
+        golden_call: Callable | None = None,
         dtype: torch.dtype = torch.float16,
         Q_B: int = B,
         Q_H: int = Hq,
@@ -495,7 +496,7 @@ class TestFlexDecoding(InductorTestCase):
 
     def preprocess_paged_attention(
         self,
-        score_mod: Optional[Callable],
+        score_mod: Callable | None,
         q: Tensor,
         k: Tensor,
         v: Tensor,
@@ -504,7 +505,8 @@ class TestFlexDecoding(InductorTestCase):
         page_size: int = 128,
         device="cuda",
     ):
-        assert block_mask is not None, "Must provide block_mask"
+        if block_mask is None:
+            raise AssertionError("Must provide block_mask")
         if device == "cpu" and dtype is torch.float16:
             dtype = torch.float32
         Q_B, Q_H, Q_S, _ = q.shape
@@ -577,12 +579,12 @@ class TestFlexDecoding(InductorTestCase):
 
     def run_paged_attention(
         self,
-        score_mod: Optional[Callable],
+        score_mod: Callable | None,
         q: Tensor,
         k: Tensor,
         v: Tensor,
         dtype: torch.dtype = torch.float16,
-        block_mask: Optional[BlockMask] = None,
+        block_mask: BlockMask | None = None,
         device="cuda",
     ):
         Q_B, Q_H, KV_H = q.shape[0], q.shape[1], k.shape[1]
@@ -629,7 +631,7 @@ class TestFlexDecoding(InductorTestCase):
 
     def run_test_with_paged_attention(
         self,
-        score_mod: Optional[Callable],
+        score_mod: Callable | None,
         dtype: torch.dtype = torch.float16,
         Q_B: int = B,
         Q_H: int = Hq,
@@ -639,10 +641,13 @@ class TestFlexDecoding(InductorTestCase):
         KV_H: int = Hkv,
         KV_S: int = S,
         V_D: int = D,
-        block_mask: Optional[BlockMask] = None,
+        block_mask: BlockMask | None = None,
         device="cuda",
     ):
-        assert Q_H % KV_H == 0
+        if Q_H % KV_H != 0:
+            raise AssertionError(
+                f"Expected Q_H % KV_H == 0, got {Q_H} % {KV_H} = {Q_H % KV_H}"
+            )
         if device == "cpu" and dtype is torch.float16:
             dtype = torch.float32
         q = torch.randn(
@@ -691,8 +696,8 @@ class TestFlexDecoding(InductorTestCase):
 
     def run_test_with_call_paged_attention(
         self,
-        score_mod: Optional[Callable],
-        mask_mod: Optional[Callable],
+        score_mod: Callable | None,
+        mask_mod: Callable | None,
         sdpa_mask: Tensor,
         dtype: torch.dtype = torch.float16,
         Q_B: int = B,
@@ -790,7 +795,10 @@ class TestFlexDecoding(InductorTestCase):
         self, device, dtype: torch.dtype, score_mod: Callable, head_dims
     ):
         Hq, Hkv = head_dims
-        assert Hq % Hkv == 0
+        if Hq % Hkv != 0:
+            raise AssertionError(
+                f"Expected Hq % Hkv == 0, got {Hq} % {Hkv} = {Hq % Hkv}"
+            )
         self.run_test(score_mod, dtype, Q_H=Hq, KV_H=Hkv, device=device)
         self.run_test_with_paged_attention(
             score_mod, dtype, Q_H=Hq, KV_H=Hkv, device=device
@@ -810,7 +818,10 @@ class TestFlexDecoding(InductorTestCase):
         page_size: int,
     ):
         Hq, Hkv = head_dims
-        assert Hq % Hkv == 0
+        if Hq % Hkv != 0:
+            raise AssertionError(
+                f"Expected Hq % Hkv == 0, got {Hq} % {Hkv} = {Hq % Hkv}"
+            )
 
         def generate_causal_offset(offset: torch.Tensor):
             def causal_offset_mask(b, h, q_idx, kv_idx):
@@ -846,7 +857,7 @@ class TestFlexDecoding(InductorTestCase):
         device,
         dtype: torch.dtype,
         score_mod: Callable,
-        BLOCK_SIZE: Union[int, tuple[int, int]],
+        BLOCK_SIZE: int | tuple[int, int],
     ):
         block_mask = create_block_mask(
             noop_mask, B, 1, 1, S, BLOCK_SIZE=BLOCK_SIZE, device=device
@@ -882,7 +893,10 @@ class TestFlexDecoding(InductorTestCase):
     @common_utils.parametrize("head_dims", test_Hq_Hkv)
     def test_strided_inputs(self, device, dtype: torch.dtype, k_s, v_s, head_dims):
         Hq, Hkv = head_dims
-        assert Hq % Hkv == 0
+        if Hq % Hkv != 0:
+            raise AssertionError(
+                f"Expected Hq % Hkv == 0, got {Hq} % {Hkv} = {Hq % Hkv}"
+            )
         q1 = torch.randn((B * Hq * D), dtype=dtype, device=device)
         k1 = torch.randn((B * Hkv * S * D * 4), dtype=dtype, device=device)
         v1 = torch.randn((B * Hkv * S * D * 4), dtype=dtype, device=device)
@@ -894,14 +908,22 @@ class TestFlexDecoding(InductorTestCase):
 
         k_strides, k_offset = k_s(B, Hkv, S, D)
         k_max = [x * (y - 1) for x, y in zip(k_strides, k_shape)]
-        assert sum(k_max) + k_offset < B * Hkv * S * D * 4
-        assert k_strides[-1] == 1
+        if sum(k_max) + k_offset >= B * Hkv * S * D * 4:
+            raise AssertionError(
+                f"Expected sum(k_max) + k_offset < {B * Hkv * S * D * 4}, got {sum(k_max) + k_offset}"
+            )
+        if k_strides[-1] != 1:
+            raise AssertionError(f"Expected k_strides[-1] == 1, got {k_strides[-1]}")
         k = torch.as_strided(k1, k_shape, k_strides, k_offset)
 
         v_strides, v_offset = v_s(B, Hkv, S, D)
         v_max = [x * (y - 1) for x, y in zip(v_strides, v_shape)]
-        assert sum(v_max) + v_offset < B * Hkv * S * D * 4
-        assert v_strides[-1] == 1
+        if sum(v_max) + v_offset >= B * Hkv * S * D * 4:
+            raise AssertionError(
+                f"Expected sum(v_max) + v_offset < {B * Hkv * S * D * 4}, got {sum(v_max) + v_offset}"
+            )
+        if v_strides[-1] != 1:
+            raise AssertionError(f"Expected v_strides[-1] == 1, got {v_strides[-1]}")
         v = torch.as_strided(v1, v_shape, v_strides, v_offset)
 
         score_mod = _generate_alibi_bias(8)
@@ -941,10 +963,16 @@ class TestFlexDecoding(InductorTestCase):
         score_mod: Callable,
     ):
         Hq, Hkv = head_dims
-        assert Hq % Hkv == 0
+        if Hq % Hkv != 0:
+            raise AssertionError(
+                f"Expected Hq % Hkv == 0, got {Hq} % {Hkv} = {Hq % Hkv}"
+            )
 
         Bq, Bkv = batch_dims
-        assert Bq > 1 and Bkv == 1
+        if not (Bq > 1 and Bkv == 1):
+            raise AssertionError(
+                f"Expected Bq > 1 and Bkv == 1, got Bq={Bq}, Bkv={Bkv}"
+            )
 
         block_mask = create_block_mask(noop_mask, Bq, 1, 1, S, device=device)
 
@@ -1143,7 +1171,10 @@ class TestFlexDecoding(InductorTestCase):
         self, device, dtype: torch.dtype, score_mod, head_dims
     ):
         Hq, Hkv = head_dims
-        assert Hq % Hkv == 0
+        if Hq % Hkv != 0:
+            raise AssertionError(
+                f"Expected Hq % Hkv == 0, got {Hq} % {Hkv} = {Hq % Hkv}"
+            )
 
         def head_attention_mod(kv_head_num):
             head_type = torch.tensor(
@@ -1988,7 +2019,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
-    @skip_on_xpu  # TODO: SYCL acc issue
     def test_non_sparse_mulitple_block_size(self, device):
         def generate_causal_offset(offset: torch.Tensor):
             def causal_offset_mask(b, h, q_idx, kv_idx):

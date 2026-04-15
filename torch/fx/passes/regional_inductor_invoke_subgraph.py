@@ -8,7 +8,10 @@ import torch
 from torch._inductor.standalone_compile import AOTCompiledArtifact
 from torch.compiler._cache import CacheArtifactManager
 from torch.fx._compatibility import compatibility
-from torch.fx.passes.regional_inductor import _dummy_wrapper
+from torch.fx.passes.regional_inductor import (
+    _disable_remat_for_regional_subcompile,
+    _dummy_wrapper,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -67,6 +70,7 @@ def _compile_submod(
             torch._guards.tracing(context),
             CacheArtifactManager.with_fresh_cache(),
             torch._functorch.config.patch("bundled_autograd_cache", True),
+            _disable_remat_for_regional_subcompile(),
         ):
             # compile_fx can mutate gm
             gm = copy.deepcopy(submod)

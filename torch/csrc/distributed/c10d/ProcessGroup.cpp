@@ -51,10 +51,11 @@ std::string opTypeToString(OpType opType) {
       return "COALESCED";
     case OpType::_ALLREDUCE_SPARSE:
       return "_ALLREDUCE_SPARSE";
+    case OpType::REDUCE_SCATTER_TENSOR_COALESCED:
+      return "REDUCE_SCATTER_TENSOR_COALESCED";
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown op type!");
   }
-  return "UNKNOWN";
 }
 
 bool isP2POp(OpType opType, bool batchP2P /*= false*/) {

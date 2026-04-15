@@ -4,7 +4,7 @@ import re
 import string
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 from types import ModuleType
 
 import torch
@@ -79,11 +79,11 @@ class ExportCase:
     model: torch.nn.Module
     name: str
     example_kwargs: dict[str, Any] = field(default_factory=dict)
-    extra_args: Optional[ArgsType] = None  # For testing graph generalization.
+    extra_args: ArgsType | None = None  # For testing graph generalization.
     # Tags associated with the use case. (e.g dynamic-shape, escape-hatch)
     tags: set[str] = field(default_factory=set)
     support_level: SupportLevel = SupportLevel.SUPPORTED
-    dynamic_shapes: Optional[dict[str, Any]] = None
+    dynamic_shapes: dict[str, Any] | None = None
 
     def __post_init__(self):
         check_inputs_type(self.example_args, self.example_kwargs)

@@ -2,15 +2,9 @@
 import contextlib
 import warnings
 from collections.abc import Generator
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
-
-
-if TYPE_CHECKING:
-    from torch.utils.data._utils.worker import WorkerInfo
-
-from torch._C import default_generator
 
 
 __all__ = [
@@ -22,6 +16,12 @@ __all__ = [
     "fork_rng",
     "thread_safe_generator",
 ]
+
+
+if TYPE_CHECKING:
+    from torch.utils.data._utils.worker import WorkerInfo
+
+from torch._C import default_generator
 
 
 def set_rng_state(new_state: torch.Tensor) -> None:
@@ -234,7 +234,7 @@ def fork_rng(
             device_mod.set_rng_state(device_rng_state, device)
 
 
-def thread_safe_generator() -> Optional[torch.Generator]:
+def thread_safe_generator() -> torch.Generator | None:
     """Returns a thread-safe random number generator for use in DataLoader workers.
     This function provides a convenient way for transforms and user code to use
     thread-safe random number generation without manually checking worker context.
@@ -261,6 +261,10 @@ def thread_safe_generator() -> Optional[torch.Generator]:
     from torch.utils.data import get_worker_info
 
     worker_info: WorkerInfo | None = get_worker_info()
-    if worker_info is not None and worker_info.worker_method == "thread":
+    if (
+        worker_info is not None
+        and worker_info.worker_method == "thread"
+        and worker_info.rng is not None
+    ):
         return worker_info.rng.torch_generator
     return None

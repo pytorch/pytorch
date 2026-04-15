@@ -42,7 +42,6 @@ COPY ./common/install_conda.sh install_conda.sh
 COPY ./common/common_utils.sh common_utils.sh
 COPY ./common/install_magma_conda.sh install_magma_conda.sh
 RUN bash ./install_conda.sh && rm install_conda.sh install_magma_conda.sh common_utils.sh /opt/conda/requirements-ci.txt /opt/conda/requirements-docs.txt
-RUN if [ -n "${UNINSTALL_DILL}" ]; then pip uninstall -y dill; fi
 
 # Install gcc
 ARG GCC_VERSION
@@ -68,36 +67,7 @@ ENV NCCL_INCLUDE_DIR="/usr/local/cuda/include/"
 ENV NCCL_LIB_DIR="/usr/local/cuda/lib64/"
 
 
-# (optional) Install UCC
-ARG UCX_COMMIT
-ARG UCC_COMMIT
 ARG CUDA_VERSION
-ENV UCX_COMMIT $UCX_COMMIT
-ENV UCC_COMMIT $UCC_COMMIT
-ENV UCX_HOME /usr
-ENV UCC_HOME /usr
-ADD ./common/install_ucc.sh install_ucc.sh
-RUN if [ -n "${UCX_COMMIT}" ] && [ -n "${UCC_COMMIT}" ]; then bash ./install_ucc.sh; fi
-RUN rm install_ucc.sh
-
-# (optional) Install vision packages like OpenCV
-ARG VISION
-COPY ./common/install_vision.sh ./common/cache_vision_models.sh ./common/common_utils.sh ./
-RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
-RUN rm install_vision.sh cache_vision_models.sh common_utils.sh
-ENV INSTALLED_VISION ${VISION}
-
-# (optional) Install non-default Ninja version
-ARG NINJA_VERSION
-COPY ./common/install_ninja.sh install_ninja.sh
-RUN if [ -n "${NINJA_VERSION}" ]; then bash ./install_ninja.sh; fi
-RUN rm install_ninja.sh
-
-COPY ./common/install_openssl.sh install_openssl.sh
-RUN bash ./install_openssl.sh
-ENV OPENSSL_ROOT_DIR /opt/openssl
-ENV OPENSSL_DIR /opt/openssl
-RUN rm install_openssl.sh
 
 ARG INDUCTOR_BENCHMARKS
 COPY ./common/install_inductor_benchmark_deps.sh install_inductor_benchmark_deps.sh
@@ -155,11 +125,16 @@ ARG CUDA_VERSION
 # TPU=yes -> install JAX with TPU support
 # PALLAS=yes + CUDA_VERSION -> install JAX with CUDA support
 # PALLAS=yes (no CUDA) -> install JAX CPU-only
+COPY ./common/requirements_tpu.txt requirements_tpu.txt
 COPY ./common/install_jax.sh install_jax.sh
 COPY ./common/common_utils.sh common_utils.sh
 COPY ./ci_commit_pins/jax.txt /ci_commit_pins/jax.txt
-RUN if [ -n "${TPU}" ]; then bash ./install_jax.sh tpu; \
-    elif [ -n "${PALLAS}" ]; then bash ./install_jax.sh ${CUDA_VERSION:-cpu}; fi
+RUN if [ -n "${TPU}" ]; then \
+      bash -c "source ./common_utils.sh && pip_install -r requirements_tpu.txt" && \
+      bash ./install_jax.sh tpu; \
+    elif [ -n "${PALLAS}" ]; then \
+      bash ./install_jax.sh ${CUDA_VERSION:-cpu}; \
+    fi
 RUN rm -f install_jax.sh common_utils.sh /ci_commit_pins/jax.txt
 
 ARG ONNX
@@ -201,11 +176,6 @@ RUN rm install_openmpi.sh
 # Include BUILD_ENVIRONMENT environment variable in image
 ARG BUILD_ENVIRONMENT
 ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
-
-# Install LLVM dev version (Defined in the pytorch/builder github repository)
-ARG SKIP_LLVM_SRC_BUILD_INSTALL
-COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
-RUN if [ -n "${SKIP_LLVM_SRC_BUILD_INSTALL}" ]; then set -eu; rm -rf /opt/llvm; fi
 
 # AWS specific CUDA build guidance
 ENV TORCH_NVCC_FLAGS "-Xfatbin -compress-all"

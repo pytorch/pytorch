@@ -1,5 +1,6 @@
 import abc
 import contextlib
+import contextvars
 import functools
 import logging
 import threading
@@ -75,6 +76,10 @@ class Node(abc.ABC):
     @abc.abstractmethod
     def metadata(self) -> dict:
         r"""Return the metadata."""
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def _sequence_nr(self) -> int:
         raise NotImplementedError
 
     @property
@@ -204,7 +209,7 @@ class GradientEdge(NamedTuple):
     output_nr: int
     # This token can be used to ensure the graph stays alive when it cannot be
     # done via the node field
-    ownership_token: Optional[Node] = None
+    ownership_token: Node | None = None
 
 
 def get_gradient_edge(tensor: torch.Tensor) -> GradientEdge:
@@ -235,7 +240,7 @@ def get_gradient_edge(tensor: torch.Tensor) -> GradientEdge:
     return GradientEdge(grad_fn, tensor.output_nr, ownership_token=token)
 
 
-def increment_version(tensor: Union[torch.Tensor, Iterable[torch.Tensor]]) -> None:
+def increment_version(tensor: torch.Tensor | Iterable[torch.Tensor]) -> None:
     """Update autograd metadata tracking whether the given Tensor was modified in place.
 
     This is to enable more accurate error checking within the autograd engine.
@@ -351,9 +356,18 @@ class save_on_cpu(saved_tensors_hooks):
     Use this context-manager to trade compute for GPU memory usage (e.g.
     when your model doesn't fit in GPU memory during training).
 
+    .. warning::
+
+        When ``pin_memory=True``, the GPU to CPU copy during packing is
+        asynchronous. Accessing saved tensors on CPU (e.g. via
+        ``grad_fn._saved_self``) before the CUDA stream has finished may
+        yield incorrect data. Call :func:`torch.cuda.synchronize` first
+        if you need to read them.
+
     Args:
         pin_memory (bool): If ``True`` tensors will be saved to CPU pinned memory
-                           during packing and copied to GPU asynchronously during unpacking.
+                           during packing and copied to GPU asynchronously during both
+                           packing and unpacking.
                            Defaults to ``False``.
                            Also see :ref:`cuda-memory-pinning`.
 
@@ -387,13 +401,14 @@ class save_on_cpu(saved_tensors_hooks):
         def pack_to_cpu(tensor: torch.Tensor) -> tuple[torch.device, torch.Tensor]:
             if not pin_memory:
                 return (tensor.device, tensor.cpu())
+            is_pinnable = device_module.is_available() and not tensor.is_sparse
             packed = torch.empty(
                 tensor.size(),
                 dtype=tensor.dtype,
                 layout=tensor.layout,
-                pin_memory=(device_module.is_available() and not tensor.is_sparse),
+                pin_memory=is_pinnable,
             )
-            packed.copy_(tensor)
+            packed.copy_(tensor, non_blocking=is_pinnable)
             return (tensor.device, packed)
 
         def unpack_from_cpu(packed: tuple[torch.device, torch.Tensor]) -> torch.Tensor:
@@ -465,10 +480,8 @@ class _MultiHandle(RemovableHandle):
 
 def register_multi_grad_hook(
     tensors: Sequence[torch.Tensor],
-    fn: Union[
-        Callable[[Sequence[Optional[torch.Tensor]]], None],
-        Callable[[torch.Tensor], None],
-    ],
+    fn: Callable[[Sequence[torch.Tensor | None]], None]
+    | Callable[[torch.Tensor], None],
     *,
     mode: Literal["all", "any"] = "all",
 ) -> RemovableHandle:
@@ -528,7 +541,7 @@ def register_multi_grad_hook(
     if mode == "all":
         count: dict[int, int] = {}
         nb_calls = None
-        buffer: dict[int, list[Optional[torch.Tensor]]] = {}
+        buffer: dict[int, list[torch.Tensor | None]] = {}
 
         grad_fns = list(map(_get_grad_fn_or_grad_acc, tensors))
         len_tensors = len(tensors)
@@ -559,7 +572,7 @@ def register_multi_grad_hook(
                 if nb_calls is None:
                     raise AssertionError("Expected nb_calls to be set")
                 if curr_count == nb_calls - 1:
-                    fn = cast(Callable[[Sequence[Optional[torch.Tensor]]], None], fn)
+                    fn = cast(Callable[[Sequence[torch.Tensor | None]], None], fn)
                     fn(buffer[id])
                     del count[id]
                     del buffer[id]
@@ -656,7 +669,7 @@ class _swap_with_cloned(saved_tensors_hooks):
             tid = _get_tid(tensor)
             sid = _get_sid(tensor)
             # Tensors saved for backward have an entry in _tid_to_weakhandle
-            handle: Optional[_Handle] = None
+            handle: _Handle | None = None
 
             # Save aliasing information
             ctx.sid_to_tid[sid].add(tid)
@@ -698,7 +711,7 @@ class _CloneArgBeforeMutateMode(TorchDispatchMode):
         func: "OpOverload",
         types: Iterable[type],
         args: tuple[Any, ...] = (),
-        kwargs: Optional[dict[Any, Any]] = None,
+        kwargs: dict[Any, Any] | None = None,
     ) -> Any:
         kwargs = kwargs or {}
 
@@ -806,7 +819,7 @@ def allow_mutation_on_saved_tensors() -> Generator[
 
 
 def _register_logging_hooks_on_whole_graph(
-    t_outputs: Sequence[Union[torch.Tensor, GradientEdge]],
+    t_outputs: Sequence[torch.Tensor | GradientEdge],
 ) -> Callable[[], None]:
     grad_fns = list(map(_get_grad_fn_or_grad_acc, t_outputs))
 
@@ -830,7 +843,7 @@ def _register_logging_hooks_on_whole_graph(
 
             yield node
 
-    def fmt(t: Optional[torch.Tensor]) -> str:
+    def fmt(t: torch.Tensor | None) -> str:
         # Avoid circular import
         from torch.utils._dtype_abbrs import dtype_abbrs
 
@@ -838,7 +851,7 @@ def _register_logging_hooks_on_whole_graph(
             return "None"
         return f"{dtype_abbrs[t.dtype]}[{', '.join(map(str, t.shape))}]"
 
-    def prehook(grad_outputs: Sequence[Optional[torch.Tensor]]) -> None:
+    def prehook(grad_outputs: Sequence[torch.Tensor | None]) -> None:
         node = torch._C._current_autograd_node()
         grad_outputs_str = f"[{','.join(fmt(t) for t in grad_outputs)}]"
         log_str = f"Executing: {node} with grad_outputs: {grad_outputs_str}"
@@ -854,13 +867,17 @@ def _register_logging_hooks_on_whole_graph(
 
 
 def _engine_run_backward(
-    t_outputs: Sequence[Union[torch.Tensor, GradientEdge]],
+    t_outputs: Sequence[torch.Tensor | GradientEdge],
     *args: Any,
     **kwargs: Any,
 ) -> tuple[torch.Tensor, ...]:
     attach_logging_hooks = log.getEffectiveLevel() <= logging.DEBUG
     if attach_logging_hooks:
         unregister_hooks = _register_logging_hooks_on_whole_graph(t_outputs)
+
+    # Need to save the context so compiler config will be visible in device threads
+    torch._C._stash_obj_in_tls("context", contextvars.copy_context())
+
     try:
         return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
             t_outputs, *args, **kwargs
@@ -868,3 +885,4 @@ def _engine_run_backward(
     finally:
         if attach_logging_hooks:
             unregister_hooks()  # type: ignore[possibly-undefined]
+        torch._C._stash_obj_in_tls("context", None)

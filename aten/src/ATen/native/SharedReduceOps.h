@@ -24,24 +24,12 @@
 #if defined(__CUDACC__) || defined(__HIPCC__)
 template <typename scalar_t>
 inline C10_DEVICE scalar_t max_propagate_nan(scalar_t a, scalar_t b) {
-#if defined(__HIPCC__)
-  // TODO: remove this special case for HIP when issue is fixed:
-  //       https://github.com/ROCm/hip/issues/2209
-  scalar_t max = at::_isnan(a) ? a : (at::_isnan(b) ? b : std::max(a, b));
-#else
   scalar_t max = at::_isnan(b) ? b : std::max(a, b);
-#endif
   return max;
 }
 template <typename scalar_t>
 inline C10_DEVICE scalar_t min_propagate_nan(scalar_t a, scalar_t b) {
-#if defined(__HIPCC__)
-  // TODO: remove this special case for HIP when issue is fixed:
-  //       https://github.com/ROCm/hip/issues/2209
-  scalar_t min = at::_isnan(a) ? a : (at::_isnan(b) ? b : std::min(a, b));
-#else
   scalar_t min = at::_isnan(b) ? b : std::min(a, b);
-#endif
   return min;
 }
 #define MAX(X, Y) max_propagate_nan(X,Y)
@@ -52,13 +40,14 @@ inline C10_DEVICE scalar_t min_propagate_nan(scalar_t a, scalar_t b) {
 #define MIN(X, Y) min_impl(X,Y)
 #endif
 
-// ROCM hcc doesn't work well with using std:: in kernel functions
+// ROCm hip compiler doesn't work well with using std:: in kernel functions
+#if defined(__CUDA_ARCH__) || defined(__HIPCC__)
 #if defined(__CUDA_ARCH__)
 #include <c10/cuda/CUDAMathCompat.h>
-#define compat_pow c10::cuda::compat::pow
 #elif defined(__HIPCC__)
 #include <c10/hip/HIPMathCompat.h>
-#define compat_pow c10::hip::compat::pow
+#endif
+#define compat_pow c10::cuda::compat::pow
 #else
 #define compat_pow std::pow
 #endif

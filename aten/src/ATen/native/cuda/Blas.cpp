@@ -12,7 +12,7 @@
 #include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/CUDABlas.h>
-#include <ATen/cuda/CUDAScaledBlas.h>
+#include <ATen/native/ScaledBlasUtils.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <ATen/cuda/tunable/TunableGemm.h>
 #include <ATen/native/Resize.h>
@@ -34,6 +34,7 @@
 #else
 #include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_efficientzerotensor.h>
+#include <ATen/ops/_int_mm_native.h>
 #include <ATen/ops/_scaled_mm_native.h>
 #include <ATen/ops/_unsafe_view_native.h>
 #include <ATen/ops/abs.h>
@@ -108,8 +109,7 @@ cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activa
     case Activation::GELU:
       return cuda::blas::GEMMAndBiasActivationEpilogue::GELU;
     default:
-      TORCH_CHECK(false);
-      return cuda::blas::GEMMAndBiasActivationEpilogue::None;
+      TORCH_CHECK(false, "Unknown activation epologue type");
   }
 }
 
@@ -118,24 +118,40 @@ cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activa
  * Additionally, for ROCM we test whether the architecture supports the Lt.
  */
 static bool isGloballyDisabledAddmmCudaLt(const at::Device& device) {
-  // When hipBLASLt is not supported on the architecture, return true
+  /* On ROCM, we have the following order of precedence:
+  - When hipBLASLt is NOT supported on the architecture, return true.
+  - If and only if the environment is set, then return the value that it set to.
+  - If the environment variable is NOT set, treturn a value based on the preferred BLAS backend.
+  */
+  static const auto is_addmm_cuda_lt_disabled = c10::utils::get_env("DISABLE_ADDMM_CUDA_LT");
   #ifdef USE_ROCM
   const auto& archs = at::detail::getCUDAHooks().getHipblasltSupportedArchs();
   const auto is_hipblas_lt_arch_supported = at::detail::getCUDAHooks().isGPUArch(archs, device.index());
   if (!is_hipblas_lt_arch_supported) {
     return true;
   }
-  #endif
 
-  // Check whether it is disabled in the env
-  static const auto is_addmm_cuda_lt_disabled = c10::utils::get_env("DISABLE_ADDMM_CUDA_LT");
+  // If environment variable is explicitly set, respect it
+  if (is_addmm_cuda_lt_disabled.has_value()) {
+    return is_addmm_cuda_lt_disabled == "1";
+  }
+
+  // The available BLAS backends on ROCm are: rocBLAS, hipBLASLt, and CK.
+  const auto preferred_backend = at::globalContext().blasPreferredBackend();
+  if (preferred_backend == at::BlasBackend::Cublaslt) {
+    return false;
+  } else {
+    return true;
+  }
+
+  #else
   if (is_addmm_cuda_lt_disabled == "1") {
     return true;
   }
 
   return false;
+  #endif
 }
-
 /*
  * Check whether for the given input we want to enable the Lt interface
  */
@@ -212,9 +228,6 @@ static bool isInputCompliesAddmmCudaLt(
       mat2_sizes[0] > 1 && mat2_sizes[1] > 1
     )
   );
-
-  // no compliance by default
-  return false;
 }
 
 template <typename scalar_t>
@@ -351,6 +364,12 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   // if lt path fails, we recurse back into this function here and force the lt path to off
   // we cannot update variable disable_addmm_cuda_lt from above since it is static and would be permanent
   bool disable_addmm_cuda_lt = persistent_disable_addmm_cuda_lt || disable_addmm_cuda_lt_override;
+  // NOTE: See https://github.com/pytorch/pytorch/issues/172231
+  const auto preferred_cublas_backend = at::globalContext().blasPreferredBackend();
+  disable_addmm_cuda_lt = !(
+      preferred_cublas_backend == BlasBackend::Cublaslt
+      || preferred_cublas_backend == BlasBackend::Default // Lt is default
+  ) || disable_addmm_cuda_lt;
   #ifdef USE_ROCM
   // Conditioned on the device index, which is not persistent
   disable_addmm_cuda_lt = disable_addmm_cuda_lt || isGloballyDisabledAddmmCudaLt(self.device());

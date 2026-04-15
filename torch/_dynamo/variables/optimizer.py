@@ -23,7 +23,7 @@ optimizer-specific optimizations and safety guarantees.
 import logging
 import weakref
 from collections.abc import Iterable
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._dynamo.variables.tensor import TensorVariable
@@ -44,6 +44,7 @@ from ..utils import GLOBAL_KEY_PREFIX
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
+from .hashable import HashableTracker
 from .lists import ListVariable
 from .misc import GetAttrVariable
 from .user_defined import UserDefinedObjectVariable
@@ -94,9 +95,9 @@ class OptimizerVariable(UserDefinedObjectVariable):
     def __init__(
         self,
         value: torch.optim.Optimizer,
-        grad_to_source: Optional[dict[Any, GradSource]] = None,
-        static_tensor_names: Optional[set[str]] = None,
-        tensor_to_source: Optional[dict[torch.Tensor, Source]] = None,
+        grad_to_source: dict[Any, GradSource] | None = None,
+        static_tensor_names: set[str] | None = None,
+        tensor_to_source: dict[torch.Tensor, Source] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(value, **kwargs)
@@ -148,7 +149,12 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # which will directly inline
         if name in ("_init_group"):
             assert self.source
-            return GetAttrVariable(self, name, source=AttrSource(self.source, name))
+            return GetAttrVariable(
+                self,
+                name,
+                py_type=type(getattr(self.value, name)),
+                source=AttrSource(self.source, name),
+            )
 
         if name == "param_groups":
             from ..decorators import mark_static_address
@@ -207,9 +213,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
             VariableTracker.build(tx, self.value.param_groups, source)
         )
         for param_group_vt in param_groups_vt.items:
-            key = ConstDictVariable._HashableTracker(
-                ConstantVariable.create("capturable")
-            )
+            key = HashableTracker(ConstantVariable.create("capturable"))
             param_group_vt.items[key] = ConstantVariable.create(True)
 
     def get_python_args(
@@ -221,6 +225,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
             if isinstance(arg, VariableTracker) and arg.is_python_constant():
                 return arg.as_python_constant()
             elif isinstance(arg, ListVariable) and not arg.items:
+                # pyrefly: ignore [implicit-any]
                 return []
             elif (
                 isinstance(arg, ConstDictVariable)

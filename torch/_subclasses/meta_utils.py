@@ -14,12 +14,10 @@ from typing import (
     ClassVar,
     Generic,
     NewType,
-    Optional,
     Protocol,
     TYPE_CHECKING,
     TypeGuard,
     TypeVar,
-    Union,
 )
 from typing_extensions import override, TypedDict, TypeIs, Unpack
 
@@ -40,6 +38,7 @@ from torch._C._functorch import (
 )
 from torch._dispatch.python import enable_python_dispatcher
 from torch._logging import trace_structured
+from torch._opaque_base import OpaqueBase
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import WeakIdKeyDictionary
@@ -56,6 +55,7 @@ if TYPE_CHECKING:
     # Import the following modules during type checking to enable code intelligence features,
     # Do not import unconditionally, as they import sympy and importing sympy is very slow
     from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
+    from torch.types import IntLikeType
 
 
 def _is_fake_tensor(t: object) -> TypeIs[FakeTensor]:
@@ -71,7 +71,7 @@ _TensorT = TypeVar("_TensorT", bound=torch.Tensor)
 _TensorT_cov = TypeVar("_TensorT_cov", bound=torch.Tensor, covariant=True)
 
 
-def safe_is_leaf(t: Union[MetaTensorDesc[Any], torch.Tensor]) -> bool:
+def safe_is_leaf(t: MetaTensorDesc[Any] | torch.Tensor) -> bool:
     try:
         return t.is_leaf
     except RuntimeError:
@@ -79,7 +79,7 @@ def safe_is_leaf(t: Union[MetaTensorDesc[Any], torch.Tensor]) -> bool:
         return False
 
 
-def safe_grad(t: _TensorLikeT) -> Optional[_TensorLikeT]:
+def safe_grad(t: _TensorLikeT) -> _TensorLikeT | None:
     with torch._logging.hide_warnings(torch._logging._internal.safe_grad_filter):
         # pyrefly: ignore [bad-return]
         return t.grad
@@ -116,7 +116,7 @@ def disable_inference_mode_for_fake_prop() -> Generator[None, None, None]:
 
 def assert_metadata_eq(
     assert_eq: Callable[[object, object], None],
-    m1: Union[MetaTensorDesc[Any], torch.Tensor],
+    m1: MetaTensorDesc[Any] | torch.Tensor,
     m2: torch.Tensor,
     *,
     skip_symbolic: bool = False,
@@ -367,6 +367,7 @@ class MetaTensorDescriber:
                 pass
 
         attrs = None
+        opaque_attrs = None
         ctx = None
         type_v = None
         if is_traceable_wrapper_subclass_v:
@@ -375,10 +376,23 @@ class MetaTensorDescriber:
                     "Traceable wrapper subclass must have __tensor_flatten__ method"
                 )
             raw_attrs, ctx = t.__tensor_flatten__()
-            attrs = {
-                attr: self.describe_tensor(getattr(t, attr), trace=trace)
-                for attr in raw_attrs
-            }
+            attrs = {}
+            opaque_attrs = {}
+            for attr in raw_attrs:
+                inner = getattr(t, attr)
+                match inner:
+                    case torch.Tensor():
+                        attrs[attr] = self.describe_tensor(inner, trace=trace)
+                    case OpaqueBase():
+                        from torch._library.fake_class_registry import (
+                            maybe_unwrap_fake_script_object,
+                        )
+
+                        opaque_attrs[attr] = maybe_unwrap_fake_script_object(inner)
+                    case _:
+                        raise AssertionError(
+                            f"expected Tensor or OpaqueBase, got {type(inner)}"
+                        )
             type_v = type(t)
 
         from torch.nested._internal.nested_tensor import _tensor_symint_registry
@@ -485,6 +499,7 @@ class MetaTensorDescriber:
             view_func=view_func,
             # pyrefly: ignore [bad-argument-type]
             attrs=attrs,
+            opaque_attrs=opaque_attrs if opaque_attrs else None,
             ctx=ctx,
             type=type_v,
             # NB: even if functorch is enabled, don't actually save the
@@ -510,7 +525,7 @@ class MetaStorageDesc:
     size: int
     # NB: this is only populated with copy_data True, it is not directly
     # serializable in JSON, you want to do something special here anyway
-    data: Optional[torch.UntypedStorage]
+    data: torch.UntypedStorage | None
 
     def as_json(self, describer_id: _DescriberId) -> dict[str, object]:
         return {
@@ -527,8 +542,8 @@ class ViewFunc(Generic[_TensorT]):
         self,
         t: _TensorT,
         new_base: _TensorT,
-        symint_visitor_fn: Optional[Callable[[int], int]] = None,
-        tensor_visitor_fn: Optional[Callable[[torch.Tensor], _TensorT]] = None,
+        symint_visitor_fn: Callable[[int], int] | None = None,
+        tensor_visitor_fn: Callable[[torch.Tensor], _TensorT] | None = None,
     ) -> _TensorT: ...
 
     @staticmethod
@@ -546,8 +561,8 @@ class _FakeTensorViewFunc(ViewFunc["FakeTensor"]):
         self,
         t: torch.Tensor,
         new_base: torch.Tensor,
-        symint_visitor_fn: Optional[Callable[[int], int]] = None,
-        tensor_visitor_fn: Optional[Callable[[torch.Tensor], FakeTensor]] = None,
+        symint_visitor_fn: Callable[[int], int] | None = None,
+        tensor_visitor_fn: Callable[[torch.Tensor], FakeTensor] | None = None,
     ) -> FakeTensor:
         return torch._subclasses.fake_tensor.FakeTensor._view_func_unsafe(
             # pyrefly: ignore [bad-argument-type]
@@ -563,8 +578,8 @@ class _CustomViewFunc(ViewFunc[_TensorT], Generic[_TensorT]):
     func: Callable[
         [
             torch.Tensor,
-            Optional[Callable[[int], int]],
-            Optional[Callable[[torch.Tensor], _TensorT]],
+            Callable[[int], int] | None,
+            Callable[[torch.Tensor], _TensorT] | None,
         ],
         _TensorT,
     ]
@@ -574,8 +589,8 @@ class _CustomViewFunc(ViewFunc[_TensorT], Generic[_TensorT]):
         self,
         t: torch.Tensor,
         new_base: torch.Tensor,
-        symint_visitor_fn: Optional[Callable[[int], int]] = None,
-        tensor_visitor_fn: Optional[Callable[[torch.Tensor], _TensorT]] = None,
+        symint_visitor_fn: Callable[[int], int] | None = None,
+        tensor_visitor_fn: Callable[[torch.Tensor], _TensorT] | None = None,
     ) -> _TensorT:
         # ignore `t`
         return self.func(new_base, symint_visitor_fn, tensor_visitor_fn)
@@ -588,12 +603,12 @@ class _CustomViewFunc(ViewFunc[_TensorT], Generic[_TensorT]):
 #   def mk(arg: Callable[[], torch.Tensor], device: Optional[Union[torch.device, str]] = None)
 class _MetaTensorCallback(Protocol, Generic[_TensorT_cov]):
     def __call__(
-        self, arg: Callable[[], torch.Tensor], /, *, device: Union[torch.device, str]
+        self, arg: Callable[[], torch.Tensor], /, *, device: torch.device | str
     ) -> _TensorT_cov: ...
 
 
 class _MetaTensorCallbackKwargs(TypedDict, total=False):
-    device: Union[torch.device, str]
+    device: torch.device | str
 
 
 # A callback where the device may not be provided (is optional).
@@ -647,35 +662,38 @@ class MetaTensorDesc(Generic[_TensorT]):
     # We eagerly symbolicize the associated nested int for e.g. offsets / lengths
     # metadata if that offsets is already associated with a nested int.
     # See test_construct_from_jagged_with_input_offsets_mixed_case.
-    nested_int: Optional[int] = None
+    nested_int: int | None = None
     is_traceable_wrapper_subclass: bool = False
     is_functional: bool = False
     is_conj: bool = False
     is_neg: bool = False
     is_parameter: bool = False
-    stride: Optional[tuple[int, ...]] = None
+    stride: tuple[int, ...] | None = None
     storage_offset: int = 0
     # NB: We have a choice whether or not to store the id or a direct pointer
     # to the data structure.  For ease of use, we store the data structure,
     # but this means that when we serialize, we have to swizzle these pointers
     # back into ids (so we have accurate aliasing relationships)
-    storage: Optional[MetaStorageDesc] = None
-    sparse_dim: Optional[int] = None  # is_sparse, is_sparse_compressed
-    dense_dim: Optional[int] = None  # is_sparse, is_sparse_compressed
-    is_coalesced: Optional[bool] = None  # is_sparse
-    crow_indices: Optional[MetaTensorDesc[Any]] = None  # is_sparse_compressed
-    col_indices: Optional[MetaTensorDesc[Any]] = None  # is_sparse_compressed
-    ccol_indices: Optional[MetaTensorDesc[Any]] = None  # is_sparse_compressed
-    row_indices: Optional[MetaTensorDesc[Any]] = None  # is_sparse_compressed
-    values: Optional[MetaTensorDesc[Any]] = None  # is_sparse_compressed
-    unwrapped: Optional[MetaTensorDesc[Any]] = None  # is_functorch_wrapped
-    bdim: Optional[int] = None  # is_functorch_wrapped
-    base: Optional[MetaTensorDesc[Any]] = None  # is_view
-    attrs: Optional[dict[str, MetaTensorDesc[Any]]] = (
-        None  # is_traceable_wrapper_subclass
+    storage: MetaStorageDesc | None = None
+    sparse_dim: int | None = None  # is_sparse, is_sparse_compressed
+    dense_dim: int | None = None  # is_sparse, is_sparse_compressed
+    is_coalesced: bool | None = None  # is_sparse
+    crow_indices: MetaTensorDesc[Any] | None = None  # is_sparse_compressed
+    col_indices: MetaTensorDesc[Any] | None = None  # is_sparse_compressed
+    ccol_indices: MetaTensorDesc[Any] | None = None  # is_sparse_compressed
+    row_indices: MetaTensorDesc[Any] | None = None  # is_sparse_compressed
+    values: MetaTensorDesc[Any] | None = None  # is_sparse_compressed
+    unwrapped: MetaTensorDesc[Any] | None = None  # is_functorch_wrapped
+    bdim: int | None = None  # is_functorch_wrapped
+    base: MetaTensorDesc[Any] | None = None  # is_view
+    attrs: dict[str, MetaTensorDesc[Any]] | None = None  # is_traceable_wrapper_subclass
+    # A Tensor subclass containing opaque references is almost certainly NOT
+    # serializable.
+    opaque_attrs: dict[str, OpaqueBase] | None = (
+        None  # non-tensor attrs from __tensor_flatten__
     )
-    creation_meta: Optional[CreationMeta] = None
-    grad: Optional[MetaTensorDesc[Any]] = None
+    creation_meta: CreationMeta | None = None
+    grad: MetaTensorDesc[Any] | None = None
 
     # Everything below is NOT serializable, need some more work
 
@@ -693,21 +711,21 @@ class MetaTensorDesc(Generic[_TensorT]):
         "nested_int",
     }
 
-    ctx: Optional[object] = None  # is_traceable_wrapper_subclass
-    type: Optional[type] = None  # is_traceable_wrapper_subclass
-    fake_mode: Optional[FakeTensorMode] = None
-    view_func: Optional[ViewFunc[Any]] = None
+    ctx: object | None = None  # is_traceable_wrapper_subclass
+    type: type | None = None  # is_traceable_wrapper_subclass
+    fake_mode: FakeTensorMode | None = None
+    view_func: ViewFunc[Any] | None = None
     # level looks serializable, but actually it is meaningless without
     # the functorch_stack below
-    level: Optional[int] = None  # is_functorch_wrapped
-    current_level: Optional[int] = None
-    functorch_stack: Optional[list[CInterpreter]] = None
-    autograd_meta_from: Optional[torch.Tensor] = None
+    level: int | None = None  # is_functorch_wrapped
+    current_level: int | None = None
+    functorch_stack: list[CInterpreter] | None = None
+    autograd_meta_from: torch.Tensor | None = None
 
     # This is only populated on copy_data, and typically is not used at all,
     # except for some of our meta-ification paths that don't properly use
     # storage (pro-tip: you should use storage)
-    data: Optional[torch.Tensor] = None
+    data: torch.Tensor | None = None
 
     # Faithfully serializing functorch tensors will not be too difficult.
     # We only need to consider grad/vmap interpreters, and their internal
@@ -774,16 +792,75 @@ class MetaTensorDesc(Generic[_TensorT]):
 # FakeTensor as src, we MUST NOT run the copy/clone operation.  A better way
 # to do this would be to not use no_dispatch and instead just disable fake
 # tensor mode only (allowing for subclass dispatch to occur)
-def _safe_copy(dst: torch.Tensor, src: Optional[torch.Tensor]) -> None:
+def _safe_copy(dst: torch.Tensor, src: torch.Tensor | None) -> None:
     if type(src) is not torch.Tensor:
         return
     dst.copy_(src)
 
 
-def _safe_clone(src: torch.Tensor) -> Optional[torch.Tensor]:
+def _safe_clone(src: torch.Tensor) -> torch.Tensor | None:
     if type(src) is not torch.Tensor:
         return None
     return src.clone()
+
+
+def _grad_context_compatible(
+    symbolic_context: torch.fx.experimental.symbolic_shapes.SymbolicContext,
+    grad_desc: MetaTensorDesc[torch.Tensor],
+) -> bool:
+    """Check if a symbolic_context is compatible with a grad tensor.
+
+    Returns False when the view base structure in symbolic_context doesn't
+    match the grad, which means we need a fresh symbolic context.  This
+    happens in FSDP2 where param._local_tensor is a view of an N-D padded
+    base while grad._local_tensor is a view of a 1-D flat gradient buffer.
+
+    We check at both the outer level and the inner (subclass attr) level.
+    """
+    from torch.fx.experimental.symbolic_shapes import (
+        StatelessSymbolicContext,
+        SubclassSymbolicContext,
+    )
+
+    def _view_base_compatible(
+        ctx: StatelessSymbolicContext[Any, Any],
+        grad_t: MetaTensorDesc[torch.Tensor],
+    ) -> bool:
+        vbc = ctx.view_base_context
+        if grad_t.is_view and vbc is None:
+            return False
+        if not grad_t.is_view and vbc is not None:
+            return False
+        if (
+            grad_t.is_view
+            and vbc is not None
+            and isinstance(vbc, StatelessSymbolicContext)
+            and grad_t.base is not None
+            and len(vbc.dynamic_sizes) != grad_t.base.ndim
+        ):
+            return False
+        return True
+
+    if not isinstance(symbolic_context, StatelessSymbolicContext):
+        return True
+
+    # Check outer level
+    if not _view_base_compatible(symbolic_context, grad_desc):
+        return False
+
+    # Check inner (subclass) level
+    if isinstance(symbolic_context, SubclassSymbolicContext):
+        if grad_desc.attrs is None:
+            return False
+        for attr, inner_ctx in symbolic_context.inner_contexts.items():
+            if attr not in grad_desc.attrs:
+                return False
+            if isinstance(
+                inner_ctx, StatelessSymbolicContext
+            ) and not _view_base_compatible(inner_ctx, grad_desc.attrs[attr]):
+                return False
+
+    return True
 
 
 # This is a class for converting multiple tensors into meta tensors which
@@ -818,7 +895,7 @@ class MetaConverter(Generic[_TensorT]):
     def successful(self) -> bool:
         return self.hit > 0 and self.miss == 0
 
-    def get_tensor_memo(self, t: MetaTensorDesc[Any]) -> Optional[torch.Tensor]:
+    def get_tensor_memo(self, t: MetaTensorDesc[Any]) -> torch.Tensor | None:
         return self.tensor_memo.get(t.id, None)
 
     def _checked_get_tensor_memo(self, t: MetaTensorDesc[Any]) -> _TensorT:
@@ -830,7 +907,7 @@ class MetaConverter(Generic[_TensorT]):
     def set_tensor_memo(self, t: MetaTensorDesc[Any], v: _TensorT) -> None:
         self.tensor_memo[t.id] = v
 
-    def get_storage_memo(self, s: MetaStorageDesc) -> Optional[torch.UntypedStorage]:
+    def get_storage_memo(self, s: MetaStorageDesc) -> torch.UntypedStorage | None:
         return self.storage_memo.get(s.id, None)
 
     def set_storage_memo(self, s: MetaStorageDesc, v: torch.UntypedStorage) -> None:
@@ -870,7 +947,7 @@ class MetaConverter(Generic[_TensorT]):
     def _identity_callable(
         cls,
         t: Callable[[], torch.Tensor],
-        device: Optional[Union[torch.device, str]] = None,
+        device: torch.device | str | None = None,
     ) -> _TensorT:
         return cls._checked_cast_tensor_t(t())
 
@@ -883,6 +960,73 @@ class MetaConverter(Generic[_TensorT]):
         err = errfn(t)
         return typing.cast(_TensorT, err)
 
+    def _empty_create_subclass(
+        self,
+        t: MetaTensorDesc[Any],
+        outer_size: tuple[int, ...] | None,
+        outer_stride: tuple[int, ...] | None,
+        shape_env: ShapeEnv | None,
+        symbolic_context: torch.fx.experimental.symbolic_shapes.SymbolicContext | None,
+        callback: _MetaTensorCallbackOptDevice[_TensorT],
+        source: torch._guards.Source,
+    ) -> _TensorT:
+        from torch._dynamo.source import AttrSource
+        from torch.fx.experimental.symbolic_shapes import SubclassSymbolicContext
+
+        # We are hitting plain meta_desc tensor so actually
+        # create a tensor here.
+        if t.attrs is None:
+            return self.meta_tensor(
+                t,
+                shape_env,
+                callback,
+                source,
+                symbolic_context,
+            )
+
+        inner_tensors: dict[str, torch.Tensor | OpaqueBase] = {}
+        for attr, meta_tensor_desc in t.attrs.items():
+            current_context = None
+            if symbolic_context is not None:
+                if not isinstance(symbolic_context, SubclassSymbolicContext):
+                    raise AssertionError(
+                        f"Expected SubclassSymbolicContext, got {type(symbolic_context)}"
+                    )
+                if attr not in symbolic_context.inner_contexts:
+                    raise AssertionError(
+                        f"tensor attr {attr!r} missing from inner_contexts"
+                    )
+                if (
+                    current_context_ := symbolic_context.inner_contexts[attr]
+                ) is not None:
+                    current_context = _checked_cast(
+                        torch.fx.experimental.symbolic_shapes.SymbolicContext,
+                        current_context_,
+                    )
+
+            current_source = AttrSource(source, attr)
+            inner_callback = functools.partial(callback, device=meta_tensor_desc.device)
+            new_empty_tensor = self._empty_create_subclass(
+                meta_tensor_desc,
+                meta_tensor_desc.size,
+                meta_tensor_desc.stride,
+                shape_env,
+                current_context,
+                inner_callback,
+                current_source,
+            )
+            inner_tensors[attr] = new_empty_tensor
+
+        # Pass through opaque (non-tensor) attrs
+        if t.opaque_attrs:
+            inner_tensors.update(t.opaque_attrs)
+
+        if t.type is None:
+            raise AssertionError("t.type must not be None for subclass")
+        return t.type.__tensor_unflatten__(  # type: ignore[attr-defined]
+            inner_tensors, t.ctx, outer_size, outer_stride
+        )
+
     # This function assumes that it's possible to do the conversion
     # NB: name here is used in a conventional way by Dynamo; it corresponds
     # precisely to the Source.name of the tensor we're fakeifying and
@@ -892,10 +1036,10 @@ class MetaConverter(Generic[_TensorT]):
     def meta_tensor(
         self,
         t: MetaTensorDesc[Any],
-        shape_env: Optional[ShapeEnv],
+        shape_env: ShapeEnv | None,
         callback_: _MetaTensorCallback[_TensorT],
-        source: Optional[Source],
-        symbolic_context: Optional[SymbolicContext],
+        source: Source | None,
+        symbolic_context: SymbolicContext | None,
     ) -> _TensorT:
         callback: _MetaTensorCallbackOptDevice[_TensorT] = functools.partial(
             callback_, device=t.device
@@ -949,10 +1093,9 @@ class MetaConverter(Generic[_TensorT]):
         def sym_sizes_strides_storage_offset(
             t: MetaTensorDesc[Any],
             src: torch._guards.Source,
-            symbolic_context: Optional[
-                torch.fx.experimental.symbolic_shapes.SymbolicContext
-            ] = symbolic_context,
-        ) -> tuple[tuple[int, ...], tuple[int, ...], int]:
+            symbolic_context: torch.fx.experimental.symbolic_shapes.SymbolicContext
+            | None = symbolic_context,
+        ) -> tuple[tuple[IntLikeType, ...], tuple[IntLikeType, ...], IntLikeType]:
             # local import to prevent circular import
             from torch.fx.experimental.symbolic_shapes import is_symbolic
 
@@ -1004,9 +1147,8 @@ class MetaConverter(Generic[_TensorT]):
         def empty_create(
             inner_t: MetaTensorDesc[Any],
             inner_src: torch._guards.Source,
-            symbolic_context: Optional[
-                torch.fx.experimental.symbolic_shapes.SymbolicContext
-            ] = symbolic_context,
+            symbolic_context: torch.fx.experimental.symbolic_shapes.SymbolicContext
+            | None = symbolic_context,
         ) -> torch.Tensor:
             (
                 inner_sizes,
@@ -1024,14 +1166,12 @@ class MetaConverter(Generic[_TensorT]):
         # symbolic context.
         def empty_create_subclass(
             t: MetaTensorDesc[Any],
-            outer_size: tuple[int, ...],
-            outer_stride: tuple[int, ...],
-            symbolic_context: Optional[
-                torch.fx.experimental.symbolic_shapes.SymbolicContext
-            ] = symbolic_context,
-            source: Optional[torch._guards.Source] = source,
+            outer_size: tuple[IntLikeType, ...],
+            outer_stride: tuple[IntLikeType, ...],
+            symbolic_context: torch.fx.experimental.symbolic_shapes.SymbolicContext
+            | None = symbolic_context,
+            source: torch._guards.Source | None = source,
         ) -> _TensorT:
-            from torch._dynamo.source import AttrSource
             from torch.fx.experimental.symbolic_shapes import SubclassSymbolicContext
 
             if t.attrs is None:
@@ -1061,67 +1201,18 @@ class MetaConverter(Generic[_TensorT]):
                     f"Expected SubclassSymbolicContext or None, got {type(symbolic_context)}"
                 )
 
-            def _empty_create_subclass(
-                t: MetaTensorDesc[Any],
-                outer_size: Optional[tuple[int, ...]],
-                outer_stride: Optional[tuple[int, ...]],
-                symbolic_context: Optional[
-                    torch.fx.experimental.symbolic_shapes.SymbolicContext
-                ],
-                callback: _MetaTensorCallbackOptDevice[_TensorT],
-                source: torch._guards.Source,
-            ) -> _TensorT:
-                # We are hitting plain meta_desc tensor so actually
-                # create a tensor here.
-                if t.attrs is None:
-                    return self.meta_tensor(
-                        t,
-                        shape_env,
-                        callback,
-                        source,
-                        symbolic_context,
-                    )
-
-                inner_tensors = {}
-                for attr, meta_tensor_desc in t.attrs.items():
-                    current_context = None
-                    if symbolic_context is not None:
-                        if not isinstance(symbolic_context, SubclassSymbolicContext):
-                            raise AssertionError(
-                                f"Expected SubclassSymbolicContext, got {type(symbolic_context)}"
-                            )
-                        if (
-                            current_context_ := symbolic_context.inner_contexts[attr]
-                        ) is not None:
-                            current_context = _checked_cast(
-                                torch.fx.experimental.symbolic_shapes.SymbolicContext,
-                                current_context_,
-                            )
-
-                    current_source = AttrSource(source, attr)
-                    inner_callback = functools.partial(
-                        callback, device=meta_tensor_desc.device
-                    )
-                    new_empty_tensor = _empty_create_subclass(
-                        meta_tensor_desc,
-                        meta_tensor_desc.size,
-                        meta_tensor_desc.stride,
-                        current_context,
-                        inner_callback,
-                        current_source,
-                    )
-                    inner_tensors[attr] = new_empty_tensor
-
-                if t.type is None:
-                    raise AssertionError("t.type must not be None for subclass")
-                return t.type.__tensor_unflatten__(  # type: ignore[attr-defined]
-                    inner_tensors, t.ctx, outer_size, outer_stride
-                )
-
             if source is None:
                 raise AssertionError("source must not be None")
-            sub = _empty_create_subclass(
-                t, outer_size, outer_stride, symbolic_context, callback, source
+            sub = self._empty_create_subclass(
+                t,
+                # pyrefly: ignore[bad-argument-type]
+                outer_size,
+                # pyrefly: ignore[bad-argument-type]
+                outer_stride,
+                shape_env,
+                symbolic_context,
+                callback,
+                source,
             )
 
             # NB: Purposefully guard here to simplify the inner / outer symbols.
@@ -1147,7 +1238,7 @@ class MetaConverter(Generic[_TensorT]):
         def all_dynamic_symbolic_context(
             t: MetaTensorDesc[Any],
             source: torch._guards.Source,
-            shape_env: Optional[torch.fx.experimental.symbolic_shapes.ShapeEnv],
+            shape_env: torch.fx.experimental.symbolic_shapes.ShapeEnv | None,
             callback: _MetaTensorCallback[_TensorT],
         ) -> torch.fx.experimental.symbolic_shapes.SymbolicContext:
             from torch._dynamo.source import AttrSource
@@ -1157,9 +1248,9 @@ class MetaConverter(Generic[_TensorT]):
                 SubclassSymbolicContext,
             )
 
-            view_base_context: Optional[
-                torch.fx.experimental.symbolic_shapes.SymbolicContext
-            ] = None
+            view_base_context: (
+                torch.fx.experimental.symbolic_shapes.SymbolicContext | None
+            ) = None
             if t.is_view:
                 if t.base is None:
                     raise AssertionError("t.base must not be None for view tensor")
@@ -1231,9 +1322,8 @@ class MetaConverter(Generic[_TensorT]):
         def view_from_base(
             base: _TensorT,
             t: MetaTensorDesc[Any],
-            shape_env: Optional[
-                torch.fx.experimental.symbolic_shapes.ShapeEnv
-            ] = shape_env,
+            shape_env: torch.fx.experimental.symbolic_shapes.ShapeEnv
+            | None = shape_env,
         ) -> _TensorT:
             with enable_python_dispatcher():
                 # fake-ify t's metadata according to the outer symbolic context
@@ -1258,7 +1348,7 @@ class MetaConverter(Generic[_TensorT]):
                     sym_eq,
                 )
 
-                def symint_visitor_fn(s: int) -> int:
+                def symint_visitor_fn(s: int) -> IntLikeType:
                     nonlocal symbolic_context
                     from torch.fx.experimental.symbolic_shapes import DimDynamic
 
@@ -1312,15 +1402,17 @@ class MetaConverter(Generic[_TensorT]):
                     )
                     attrs, _ = fake_t.__tensor_flatten__()  # type: ignore[attr-defined]
                     for attr in attrs:
-                        real_to_fake_mapping[t.attrs[attr].id] = getattr(fake_t, attr)
+                        if attr in t.attrs:
+                            real_to_fake_mapping[t.attrs[attr].id] = getattr(
+                                fake_t, attr
+                            )
 
                 def tensor_visitor_fn(
                     visited_t: torch.Tensor,
                     # These arguments are never passed, we just use them to close
                     # over these relevant values
-                    shape_env: Optional[
-                        torch.fx.experimental.symbolic_shapes.ShapeEnv
-                    ] = shape_env,
+                    shape_env: torch.fx.experimental.symbolic_shapes.ShapeEnv
+                    | None = shape_env,
                     callback: _MetaTensorCallbackOptDevice[_TensorT] = callback,
                 ) -> torch.Tensor:
                     # It's possible to close over an undefined tensor (e.g. NJT's lengths).
@@ -1363,7 +1455,11 @@ class MetaConverter(Generic[_TensorT]):
                 # NB: we do NOT suppress guards here, we need to remove ephemeral
                 # sources
                 fake_t = t.view_func.apply(
-                    t, base, symint_visitor_fn, tensor_visitor_fn
+                    t,
+                    base,
+                    # pyrefly: ignore[bad-argument-type]
+                    symint_visitor_fn,
+                    tensor_visitor_fn,
                 )
 
                 # Ensure the output has symbolic shapes according to the outer symbolic context.
@@ -1719,13 +1815,21 @@ class MetaConverter(Generic[_TensorT]):
                         if symbolic_context.view_base_context is not None:
                             base_symbolic_context = symbolic_context.view_base_context
 
-                    base = self.meta_tensor(
-                        t.base,
-                        shape_env,
-                        callback,
-                        torch._dynamo.source.AttrSource(source, "_base"),
-                        base_symbolic_context,
-                    )
+                    # We don't track the example values of base tensors.
+                    # Allocation of unbacked symbols can happen when mark_unbacked
+                    # is called on a base tensor that have unbacked_indices.
+                    with (
+                        shape_env.ignore_fresh_unbacked_symbols()
+                        if shape_env
+                        else contextlib.nullcontext()
+                    ):
+                        base = self.meta_tensor(
+                            t.base,
+                            shape_env,
+                            callback,
+                            torch._dynamo.source.AttrSource(source, "_base"),
+                            base_symbolic_context,
+                        )
 
                     def is_c_of_r(
                         complex_dtype: torch.dtype, real_dtype: torch.dtype
@@ -1986,15 +2090,28 @@ class MetaConverter(Generic[_TensorT]):
                 if t.grad is not None:
                     from torch._dynamo.source import AttrSource
 
-                    # TODO: Use a valid grad-specific symbolic context instead of recycling
-                    # the one from t. This isn't correct if e.g. t._is_view() != t.grad._is_view().
+                    grad_source = AttrSource(source, "grad")
+                    grad_symbolic_context = symbolic_context
+
+                    # The param's symbolic_context may be incompatible with the
+                    # grad when they have different view base dimensionalities.
+                    # This happens in FSDP2 where param._local_tensor is a view
+                    # of an N-D padded base but grad._local_tensor is a view of
+                    # a 1-D flat gradient buffer.  Build a fresh context only in
+                    # that case to preserve FX graph cache consistency.
+                    if shape_env is not None and symbolic_context is not None:
+                        if not _grad_context_compatible(symbolic_context, t.grad):
+                            grad_symbolic_context = all_dynamic_symbolic_context(
+                                t.grad, grad_source, shape_env, callback
+                            )
+
                     # pyrefly: ignore [unbound-name]
                     r.grad = self.meta_tensor(
                         t.grad,
                         shape_env,
                         callback,
-                        AttrSource(source, "grad"),
-                        symbolic_context,
+                        grad_source,
+                        grad_symbolic_context,
                     )
                 # pyrefly: ignore [unbound-name]
                 torch._C._set_conj(r, t.is_conj)
@@ -2037,11 +2154,11 @@ class MetaConverter(Generic[_TensorT]):
     def __call__(
         self,
         t: torch.Tensor,
-        shape_env: Optional[ShapeEnv] = None,
+        shape_env: ShapeEnv | None = None,
         *,
-        callback: Optional[_MetaTensorCallback[_TensorT]] = None,
-        source: Optional[Source] = None,
-        symbolic_context: Optional[SymbolicContext] = None,
+        callback: _MetaTensorCallback[_TensorT] | None = None,
+        source: Source | None = None,
+        symbolic_context: SymbolicContext | None = None,
         # Controls whether or not we should dump the tensor metadata to structured logs
         # when source is not None.  Because we refakify after Dynamo is done,
         # we don't want to dump info again from AOTAutograd, it is redundant.

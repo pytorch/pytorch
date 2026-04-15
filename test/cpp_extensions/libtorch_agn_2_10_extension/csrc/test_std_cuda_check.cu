@@ -40,7 +40,7 @@ void test_std_cuda_kernel_launch_check_error() {
   STD_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_10, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("test_std_cuda_check_success() -> int");
   m.def("test_std_cuda_check_error() -> ()");
   m.def("test_std_cuda_kernel_launch_check_success() -> ()");
@@ -48,7 +48,7 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_10, m) {
 }
 
 STABLE_TORCH_LIBRARY_IMPL(
-    libtorch_agn_2_10,
+    STABLE_LIB_NAME,
     CompositeExplicitAutograd,
     m) {
   m.impl(

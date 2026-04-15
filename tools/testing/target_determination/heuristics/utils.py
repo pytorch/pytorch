@@ -92,6 +92,30 @@ def query_changed_files() -> list[str]:
     return lines
 
 
+# File extensions that are documentation-only and don't require running tests
+DOCS_ONLY_EXTENSIONS = frozenset({".rst", ".md"})
+
+
+def is_docs_only_change(changed_files: list[str]) -> bool:
+    """
+    Returns True if all changed files are documentation-only files
+    (e.g., .rst, .md files) that don't require running tests.
+    """
+    if not changed_files:
+        return False
+
+    for f in changed_files:
+        # Skip empty strings that might come from git diff output
+        if not f:
+            continue
+        # Check if the file extension is in the docs-only set
+        ext = os.path.splitext(f)[1].lower()
+        if ext not in DOCS_ONLY_EXTENSIONS:
+            return False
+
+    return True
+
+
 @cache
 def get_git_commit_info() -> str:
     """Gets the commit info since the last commit on the default branch."""

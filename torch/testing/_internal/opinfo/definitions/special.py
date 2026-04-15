@@ -118,13 +118,19 @@ def sample_inputs_erfcx(op_info, device, dtype, requires_grad, **kwargs):
         )
 
 
+_unsigned_int_types = (torch.uint16, torch.uint32, torch.uint64)
+
+
 op_db: list[OpInfo] = [
     UnaryUfuncInfo(
         "special.i0e",
         aten_name="special_i0e",
         ref=scipy.special.i0e if TEST_SCIPY else None,
         decorators=(precisionOverride({torch.bfloat16: 3e-1, torch.float16: 3e-1}),),
-        dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
+        dtypes=all_types_and(
+            torch.bool, torch.half, torch.bfloat16, *_unsigned_int_types
+        ),
+        dtypesIfMPS=all_types_and(torch.bool, torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_i0_i1,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -135,7 +141,10 @@ op_db: list[OpInfo] = [
         ref=np_unary_ufunc_integer_promotion_wrapper(scipy.special.i1)
         if TEST_SCIPY
         else None,
-        dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
+        dtypes=all_types_and(
+            torch.bool, torch.half, torch.bfloat16, *_unsigned_int_types
+        ),
+        dtypesIfMPS=all_types_and(torch.bool, torch.half, torch.bfloat16),
         backward_dtypes=floating_types(),
         sample_inputs_func=sample_inputs_i0_i1,
         decorators=(
@@ -163,7 +172,10 @@ op_db: list[OpInfo] = [
         "special.i1e",
         aten_name="special_i1e",
         ref=scipy.special.i1e if TEST_SCIPY else None,
-        dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
+        dtypes=all_types_and(
+            torch.bool, torch.half, torch.bfloat16, *_unsigned_int_types
+        ),
+        dtypesIfMPS=all_types_and(torch.bool, torch.half, torch.bfloat16),
         backward_dtypes=floating_types(),
         sample_inputs_func=sample_inputs_i0_i1,
         supports_forward_ad=True,
@@ -174,7 +186,10 @@ op_db: list[OpInfo] = [
         aten_name="special_ndtr",
         decorators=(precisionOverride({torch.bfloat16: 5e-3, torch.float16: 5e-4}),),
         ref=scipy.special.ndtr if TEST_SCIPY else None,
-        dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
+        dtypes=all_types_and(
+            torch.bool, torch.half, torch.bfloat16, *_unsigned_int_types
+        ),
+        dtypesIfMPS=all_types_and(torch.bool, torch.half, torch.bfloat16),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
@@ -208,21 +223,6 @@ op_db: list[OpInfo] = [
                 "TestNormalizeOperators",
                 "test_normalize_operator_exhaustive",
             ),
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_noncontiguous_samples",
-                device_type="mps",
-                dtypes=(torch.float32, torch.int64),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_out",
-                device_type="mps",
-                dtypes=(torch.float32,),
-            ),
         ),
         sample_kwargs=lambda device, dtype, input: ({"n": 0}, {"n": 0}),
         # polygamma functions have multiple singularities at x having non-positive integer value
@@ -233,7 +233,10 @@ op_db: list[OpInfo] = [
     BinaryUfuncInfo(
         "special.xlog1py",
         aten_name="special_xlog1py",
-        dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
+        dtypes=all_types_and(
+            torch.bool, torch.half, torch.bfloat16, *_unsigned_int_types
+        ),
+        dtypesIfMPS=all_types_and(torch.bool, torch.half, torch.bfloat16),
         promotes_int_to_float=True,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -244,7 +247,7 @@ op_db: list[OpInfo] = [
     BinaryUfuncInfo(
         "special.zeta",
         aten_name="special_zeta",
-        dtypes=all_types_and(torch.bool),
+        dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         promotes_int_to_float=True,
         supports_autograd=False,
@@ -281,7 +284,10 @@ op_db: list[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         decorators=(precisionOverride({torch.float16: 1e-1, torch.bfloat16: 1e-1}),),
-        dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
+        dtypes=all_types_and(
+            torch.bool, torch.half, torch.bfloat16, *_unsigned_int_types
+        ),
+        dtypesIfMPS=all_types_and(torch.bool, torch.half, torch.bfloat16),
         skips=(
             DecorateInfo(
                 unittest.skip("Skipped!"),
@@ -310,7 +316,8 @@ op_db: list[OpInfo] = [
         "special.log_ndtr",
         aten_name="special_log_ndtr",
         ref=scipy.special.log_ndtr if TEST_SCIPY else None,
-        dtypes=all_types_and(torch.bool),
+        dtypes=all_types_and(torch.bool, *_unsigned_int_types),
+        dtypesIfMPS=all_types_and(torch.bool),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
@@ -329,14 +336,23 @@ op_db: list[OpInfo] = [
                 }
             ),
         ),
-        dtypes=all_types_and(torch.bool),
+        skips=(
+            # Exception: Tensor-likes are not close!
+            # Greatest absolute difference: inf at index (10,) (up to 1e-05 allowed)
+            # Greatest relative difference: nan at index (10,) (up to 0.001 allowed)
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestConsistency",
+                "test_output_grad_match",
+                device_type="mps",
+                dtypes=(torch.float16,),
+            ),
+        ),
+        dtypes=all_types_and(torch.bool, *_unsigned_int_types),
+        dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_erfcx,
-        skips=(
-            # The operator 'aten::special_erfcx.out' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
-        ),
     ),
     UnaryUfuncInfo(
         "special.airy_ai",
@@ -348,7 +364,8 @@ op_db: list[OpInfo] = [
                 },
             ),
         ),
-        dtypes=all_types_and(torch.bool),
+        dtypes=all_types_and(torch.bool, *_unsigned_int_types),
+        dtypesIfMPS=all_types_and(torch.bool),
         ref=lambda x: scipy.special.airy(x)[0] if TEST_SCIPY else None,
         skips=(
             DecorateInfo(
@@ -394,7 +411,7 @@ op_db: list[OpInfo] = [
                 device_type="mps",
             ),
         ),
-        dtypes=all_types_and(torch.bool),
+        dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=scipy.special.j0 if TEST_SCIPY else None,
         supports_autograd=False,
@@ -427,7 +444,7 @@ op_db: list[OpInfo] = [
                 device_type="mps",
             ),
         ),
-        dtypes=all_types_and(torch.bool),
+        dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=scipy.special.j1 if TEST_SCIPY else None,
         supports_autograd=False,
@@ -455,7 +472,7 @@ op_db: list[OpInfo] = [
             ),
         ),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
-        dtypes=all_types_and(torch.bool),
+        dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         ref=scipy.special.y0 if TEST_SCIPY else None,
         supports_autograd=False,
     ),
@@ -481,14 +498,14 @@ op_db: list[OpInfo] = [
                 device_type="mps",
             ),
         ),
-        dtypes=all_types_and(torch.bool),
+        dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=scipy.special.y1 if TEST_SCIPY else None,
         supports_autograd=False,
     ),
     BinaryUfuncInfo(
         "special.chebyshev_polynomial_t",
-        dtypes=all_types_and(torch.bool),
+        dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         promotes_int_to_float=True,
         skips=(
@@ -502,7 +519,7 @@ op_db: list[OpInfo] = [
     ),
     BinaryUfuncInfo(
         "special.chebyshev_polynomial_u",
-        dtypes=all_types_and(torch.bool),
+        dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         promotes_int_to_float=True,
         skips=(
@@ -510,20 +527,13 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
             # Greatest absolute difference: nan
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
-            # AssertionError: Scalars are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
-            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
     ),
     BinaryUfuncInfo(
         "special.chebyshev_polynomial_v",
-        dtypes=all_types_and(torch.bool),
+        dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         promotes_int_to_float=True,
         skips=(
@@ -537,7 +547,7 @@ op_db: list[OpInfo] = [
     ),
     BinaryUfuncInfo(
         "special.chebyshev_polynomial_w",
-        dtypes=all_types_and(torch.bool),
+        dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         promotes_int_to_float=True,
         skips=(
@@ -545,20 +555,13 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
             # Greatest absolute difference: nan
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
-            # AssertionError: Scalars are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
-            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
     ),
     BinaryUfuncInfo(
         "special.hermite_polynomial_h",
-        dtypes=all_types_and(torch.bool),
+        dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         promotes_int_to_float=True,
         skips=(
@@ -576,7 +579,7 @@ op_db: list[OpInfo] = [
     ),
     BinaryUfuncInfo(
         "special.hermite_polynomial_he",
-        dtypes=all_types_and(torch.bool),
+        dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         promotes_int_to_float=True,
         skips=(
@@ -590,7 +593,8 @@ op_db: list[OpInfo] = [
     ),
     BinaryUfuncInfo(
         "special.laguerre_polynomial_l",
-        dtypes=all_types_and(torch.bool),
+        dtypes=all_types_and(torch.bool, *_unsigned_int_types),
+        dtypesIfMPS=all_types_and(torch.bool),
         promotes_int_to_float=True,
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
@@ -631,12 +635,6 @@ op_db: list[OpInfo] = [
                 device_type="mps",
             ),
             DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
-            ),
-            DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
             ),
         ),
@@ -645,7 +643,8 @@ op_db: list[OpInfo] = [
     ),
     BinaryUfuncInfo(
         "special.legendre_polynomial_p",
-        dtypes=all_types_and(torch.bool),
+        dtypes=all_types_and(torch.bool, *_unsigned_int_types),
+        dtypesIfMPS=all_types_and(torch.bool),
         promotes_int_to_float=True,
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
@@ -682,12 +681,6 @@ op_db: list[OpInfo] = [
                 device_type="mps",
             ),
             DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
-            ),
-            DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
             ),
         ),
@@ -704,7 +697,7 @@ op_db: list[OpInfo] = [
                 },
             ),
         ),
-        dtypes=all_types_and(torch.bool),
+        dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=scipy.special.i0 if TEST_SCIPY else None,
         supports_autograd=False,
@@ -719,7 +712,7 @@ op_db: list[OpInfo] = [
                 },
             ),
         ),
-        dtypes=all_types_and(torch.bool),
+        dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=scipy.special.i1 if TEST_SCIPY else None,
         supports_autograd=False,
@@ -734,7 +727,7 @@ op_db: list[OpInfo] = [
                 },
             ),
         ),
-        dtypes=all_types_and(torch.bool),
+        dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=scipy.special.k0 if TEST_SCIPY else None,
         supports_autograd=False,
@@ -749,7 +742,7 @@ op_db: list[OpInfo] = [
                 },
             ),
         ),
-        dtypes=all_types_and(torch.bool),
+        dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=scipy.special.k1 if TEST_SCIPY else None,
         supports_autograd=False,
@@ -764,7 +757,7 @@ op_db: list[OpInfo] = [
                 }
             ),
         ),
-        dtypes=all_types_and(torch.bool),
+        dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=scipy.special.k0e if TEST_SCIPY else None,
         supports_autograd=False,
@@ -779,14 +772,14 @@ op_db: list[OpInfo] = [
                 }
             ),
         ),
-        dtypes=all_types_and(torch.bool),
+        dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=scipy.special.k1e if TEST_SCIPY else None,
         supports_autograd=False,
     ),
     BinaryUfuncInfo(
         "special.shifted_chebyshev_polynomial_t",
-        dtypes=all_types_and(torch.bool),
+        dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         promotes_int_to_float=True,
         skips=(
@@ -800,7 +793,7 @@ op_db: list[OpInfo] = [
     ),
     BinaryUfuncInfo(
         "special.shifted_chebyshev_polynomial_u",
-        dtypes=all_types_and(torch.bool),
+        dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         promotes_int_to_float=True,
         skips=(
@@ -808,20 +801,13 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
             # Greatest absolute difference: nan
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
-            # AssertionError: Scalars are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
-            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
     ),
     BinaryUfuncInfo(
         "special.shifted_chebyshev_polynomial_v",
-        dtypes=all_types_and(torch.bool),
+        dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         promotes_int_to_float=True,
         skips=(
@@ -829,20 +815,13 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
             # Greatest absolute difference: nan
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
-            # AssertionError: Scalars are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
-            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
     ),
     BinaryUfuncInfo(
         "special.shifted_chebyshev_polynomial_w",
-        dtypes=all_types_and(torch.bool),
+        dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         promotes_int_to_float=True,
         skips=(
@@ -850,13 +829,6 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
             # Greatest absolute difference: nan
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
-            # AssertionError: Scalars are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
-            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
@@ -873,7 +845,7 @@ op_db: list[OpInfo] = [
                 }
             ),
         ),
-        dtypes=all_types_and(torch.bool),
+        dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=lambda x: scipy.special.spherical_jn(0, x) if TEST_SCIPY else None,
         supports_autograd=False,
@@ -906,23 +878,6 @@ python_ref_db: list[OpInfo] = [
                 },
             ),
         ),
-        skips=(
-            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref",
-                device_type="mps",
-                dtypes=(torch.float16, torch.bfloat16),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref_torch_fallback",
-                device_type="mps",
-                dtypes=(torch.float16, torch.bfloat16),
-            ),
-        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.bessel_j1",
@@ -934,23 +889,6 @@ python_ref_db: list[OpInfo] = [
                     torch.float32: 1e-04,
                     torch.float64: 1e-05,
                 },
-            ),
-        ),
-        skips=(
-            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref",
-                device_type="mps",
-                dtypes=(torch.float16, torch.bfloat16),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref_torch_fallback",
-                device_type="mps",
-                dtypes=(torch.float16, torch.bfloat16),
             ),
         ),
     ),
@@ -980,8 +918,20 @@ python_ref_db: list[OpInfo] = [
             ),
         ),
         skips=(
-            # The operator 'aten::special_erfcx.out' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_python_ref",
+                device_type="mps",
+                dtypes=(torch.float16,),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_python_ref_torch_fallback",
+                device_type="mps",
+                dtypes=(torch.float16,),
+            ),
         ),
     ),
     ElementwiseUnaryPythonRefInfo(
@@ -1011,21 +961,6 @@ python_ref_db: list[OpInfo] = [
                 "test_reference_numerics_large",
                 dtypes=(torch.int8,),
             ),
-            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref",
-                device_type="mps",
-                dtypes=(torch.float16,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref_torch_fallback",
-                device_type="mps",
-                dtypes=(torch.float16,),
-            ),
         ),
     ),
     ElementwiseUnaryPythonRefInfo(
@@ -1039,30 +974,24 @@ python_ref_db: list[OpInfo] = [
         op_db=op_db,
         skips=(
             # The operator 'aten::special_log_ndtr.out' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
-        ),
-    ),
-    ElementwiseUnaryPythonRefInfo(
-        "_refs.special.ndtr",
-        torch_opinfo_name="special.ndtr",
-        op_db=op_db,
-        skips=(
-            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestCommon",
                 "test_python_ref",
                 device_type="mps",
-                dtypes=(torch.float16, torch.bfloat16),
             ),
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestCommon",
                 "test_python_ref_torch_fallback",
                 device_type="mps",
-                dtypes=(torch.float16, torch.bfloat16),
             ),
         ),
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.special.ndtr",
+        torch_opinfo_name="special.ndtr",
+        op_db=op_db,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.ndtri",
@@ -1093,6 +1022,22 @@ python_ref_db: list[OpInfo] = [
                 "TestUnaryUfuncs",
                 "test_reference_numerics_normal",
                 dtypes=(torch.bool,),
+            ),
+            # Seems to fail on M2 but not M4:
+            # Exception: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            DecorateInfo(
+                unittest.skip("Platform-specific error"),
+                "TestCommon",
+                "test_python_ref",
+                device_type="mps",
+                dtypes=(torch.float16,),
+            ),
+            DecorateInfo(
+                unittest.skip("Platform-specific error"),
+                "TestCommon",
+                "test_python_ref_torch_fallback",
+                device_type="mps",
+                dtypes=(torch.float16,),
             ),
         ),
     ),

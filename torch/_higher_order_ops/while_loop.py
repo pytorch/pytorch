@@ -2,7 +2,6 @@
 import contextlib
 import functools
 from collections.abc import Callable
-from typing import Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -35,8 +34,8 @@ class WhileLoopOp(HigherOrderOperator):
         self,
         cond_fn: Callable,
         body_fn: Callable,
-        carried_inputs: tuple[Union[torch.Tensor, int, float, bool]],
-        additional_inputs: tuple[Union[torch.Tensor, torch.SymInt, int], ...],
+        carried_inputs: tuple[torch.Tensor | int | float | bool],
+        additional_inputs: tuple[torch.Tensor | torch.SymInt | int, ...],
         /,
     ):
         if not isinstance(carried_inputs, (tuple, list)):
@@ -132,17 +131,19 @@ while_loop_op = WhileLoopOp()
 
 def while_loop(cond_fn, body_fn, carried_inputs):
     r"""
-    Run body_fn(*carried_inputs) while cond_fn(*carried_inputs) returns a True scalar tensor. Returns the output of body_fn or
-    initial carried_inputs.
+    Run ``body_fn(*carried_inputs)`` while ``cond_fn(*carried_inputs)`` returns
+    a True scalar tensor. Returns the output of body_fn or initial
+    carried_inputs.
 
     .. warning::
+
         `torch.while_loop` is a prototype feature in PyTorch. It has limited support for input and output types and
         doesn't support training currently. Please look forward to a more stable implementation in a future version of PyTorch.
         Read more about feature classification at: https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
 
     `while_loop` is a structured control flow operator. It preserves the loop semantic across the torch.compile and torch.export.
 
-    `while_loop` is equivalent to the following:
+    `while_loop` is equivalent to the following::
 
         def while_loop(cond_fn, body_fn, carried_inputs):
             val = carried_inputs
@@ -160,25 +161,29 @@ def while_loop(cond_fn, body_fn, carried_inputs):
             the corresponding return of while_loop will be another int with unknown values because we don't know how many
             iterations while_loop will run.
 
-    Example 1:
+    Example 1::
 
         def cond_fn(iter, x):
             return iter.sum() < 10
 
+
         def body_fn(iter, x):
             return iter + 1, x.sin()
 
+
         while_loop(cond_fn, body_fn, (torch.zeros(1), torch.randn(3, 4)))
 
-    Example 2:
+    Example 2::
 
         def cond_fn(int_iter, x):
             return 2 * int_iter < x.shape[0]
 
+
         def body_fn(int_iter, x):
             return int_iter + 1, x + int_iter
 
-        while_loop(cond,_fn, body_fn, (0, torch.randn(3, 4)))
+
+        while_loop(cond_fn, body_fn, (0, torch.randn(3, 4)))
 
     Restrictions:
 
@@ -191,6 +196,7 @@ def while_loop(cond_fn, body_fn, carried_inputs):
         - body_fn and cond_fn's output cannot alias any of the inputs. A clone is required.
 
     .. warning::
+
         Temporal Limitations:
 
         - 'while_loop' only supports **inference** right now. Autograd will be supported in the future.
@@ -242,12 +248,12 @@ def while_loop(cond_fn, body_fn, carried_inputs):
     def _while_loop_op_wrapper(*args, **kwargs):
         return while_loop_op(*args, **kwargs)
 
-    from torch._higher_order_ops.utils import setup_compilation_env
+    from torch._higher_order_ops.utils import _hop_compile_and_call
 
-    with setup_compilation_env() as backend:
-        return torch.compile(_while_loop_op_wrapper, backend=backend, fullgraph=True)(
-            flat_cond_fn, flat_body_fn, tuple(flat_inputs), tuple()
-        )
+    return _hop_compile_and_call(
+        _while_loop_op_wrapper,
+        (flat_cond_fn, flat_body_fn, tuple(flat_inputs), tuple()),
+    )
 
 
 @while_loop_op.py_impl(DispatchKey.CompositeExplicitAutograd)
@@ -620,8 +626,8 @@ class WhileLoopStackOutputOp(HigherOrderOperator):
         self,
         cond_fn: Callable,
         body_fn: Callable,
-        carried_inputs: tuple[Union[torch.Tensor, int, float, bool]],
-        additional_inputs: tuple[Union[torch.Tensor, torch.SymInt, int], ...],
+        carried_inputs: tuple[torch.Tensor | int | float | bool],
+        additional_inputs: tuple[torch.Tensor | torch.SymInt | int, ...],
         /,
     ):
         if not isinstance(carried_inputs, (tuple, list)):

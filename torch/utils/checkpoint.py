@@ -1,11 +1,15 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import contextlib
+import itertools
 import platform
 import uuid
 import warnings
 import weakref
 from collections import defaultdict
 from typing import *  # noqa: F403
+from typing_extensions import Self
 import enum
 from weakref import ReferenceType
 
@@ -14,6 +18,7 @@ import torch.fx.traceback as fx_traceback
 from torch.utils._pytree import tree_map
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensorMode
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch._C._autograd import _make_saved_tensor, SavedTensor
 from typing import NoReturn
 
 __all__ = [
@@ -38,11 +43,11 @@ __all__ = [
 
 _DEFAULT_DETERMINISM_MODE = "default"
 
-_checkpoint_debug_enabled: Optional[bool] = None
+_checkpoint_debug_enabled: bool | None = None
 
 
 @contextlib.contextmanager
-def set_checkpoint_debug_enabled(enabled: Optional[bool]):
+def set_checkpoint_debug_enabled(enabled: bool | None):
     """
     Context manager that sets whether checkpoint should print additional debug
     information when running. See the ``debug`` flag for
@@ -77,8 +82,7 @@ def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
         return tuple(out)
     else:
         raise RuntimeError(
-            "Only tuple of tensors is supported. Got Unsupported input type: ",
-            type(inputs).__name__,
+            f"Only tuple of tensors is supported. Got Unsupported input type: {type(inputs).__name__}"
         )
 
 
@@ -106,7 +110,7 @@ class DefaultDeviceType:
     to save and restore for recomputation.
     """
 
-    _default_device_type: Optional[str] = None
+    _default_device_type: str | None = None
 
     @staticmethod
     def set_device_type(device: str = "cuda") -> None:
@@ -135,10 +139,11 @@ class DefaultDeviceType:
 def _infer_device_type(*args):
     device_types = []
 
-    def add_device_types(arg) -> None:
+    def add_device_types(arg):
         nonlocal device_types
         if isinstance(arg, torch.Tensor) and arg.device.type != "cpu":
             device_types.append(arg.device.type)
+        return arg
     tree_map(add_device_types, args)
 
     device_types_set = set(device_types)
@@ -171,10 +176,11 @@ def get_device_states(*args) -> Tuple[List[int], List[torch.Tensor]]:
     # the conditionals short-circuit.
     fwd_device_ids = []
 
-    def add_device_ids(arg) -> None:
+    def add_device_ids(arg):
         nonlocal fwd_device_ids
         if isinstance(arg, torch.Tensor) and arg.device.type not in {"cpu", "meta"}:
             fwd_device_ids.append(arg.get_device())
+        return arg
     tree_map(add_device_ids, args)
 
     fwd_device_states = []
@@ -349,7 +355,7 @@ def noop_context_fn():
 def checkpoint(
     function,
     *args,
-    use_reentrant: Optional[bool] = None,
+    use_reentrant: bool | None = None,
     context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
     determinism_check: str = _DEFAULT_DETERMINISM_MODE,
     debug: bool = False,
@@ -748,7 +754,7 @@ def _internal_assert(cond) -> None:
 #    by holder=None. We skip over them. We still save x at (4) (since its holder
 #    is still alive.)
 
-_enable_checkpoint_early_stop: Optional[bool] = None
+_enable_checkpoint_early_stop: bool | None = None
 
 
 @contextlib.contextmanager
@@ -788,51 +794,13 @@ class _Handle:
 
 class _Holder:
     def __init__(self) -> None:
-        self.handles: Dict[int, Optional[_Handle]] = {}
-
-
-class _NoopSaveInputs(torch.autograd.Function):
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def forward(*args):
-        return torch.empty((0,))
-
-    @staticmethod
-    def setup_context(ctx: Any, inputs: Tuple[Any, ...], output: Any) -> None:
-        # Only tensors can be saved with ctx.save_for_backward, everything else
-        # is captured by get_args, which is saved directly on ctx
-        tensor_indices, tensors = zip(
-            *[(i, o) for i, o in enumerate(inputs) if isinstance(o, torch.Tensor)], strict=False
-        )
-        idx2saved_idx = {b: a for a, b in enumerate(tensor_indices)}
-        # args but with tensors replaced with None as placeholders
-        args = [None if isinstance(o, torch.Tensor) else o for o in inputs]
-
-        def get_args(saved_tensors):
-            # restore the placeholders with the original tensors grabbed from
-            # ctx.saved_tensors (which may be saved on a parent checkpoint if
-            # this checkpoint is nested, and that would trigger a recursive
-            # unpack!)
-            ret = [
-                saved_tensors[idx2saved_idx[i]] if i in tensor_indices else o
-                for i, o in enumerate(args)
-            ]
-            # grab the tail since we also saved the dummy to avoid having to explicitly
-            # handle the case where there are no tensor inputs
-            return ret[1:]
-
-        ctx.get_args = get_args
-        ctx.save_for_backward(*tensors)
-
-    @staticmethod
-    def backward(ctx, *grad_outputs) -> NoReturn:
-        raise AssertionError("Did not expect to backward on this graph")
+        self.handles: dict[int, _Handle | None] = {}
 
 
 class _CheckpointFrame:
     def __init__(self, recompute_fn, early_stop, unpack_error_cb, metadata_fn) -> None:
         self.recompute_fn = recompute_fn
-        self.input_saver = None
+        self.saved_args: List[Any] = []
         self.weak_holders: List[ReferenceType] = []
         # We store this as a weakkeydictionary so that in the case of a partial
         # backward, the entries in the dict are cleared alongside the Holder
@@ -854,6 +822,19 @@ class _CheckpointFrame:
         self.x_metadatas = []
         self.forward_completed = False
         self.ignore_saved_mismatch = False
+
+    def save_inputs(self, *args):
+        self.saved_args = [
+            _make_saved_tensor(arg, is_output=False)
+            if isinstance(arg, torch.Tensor) else arg
+            for arg in args
+        ]
+
+    def get_inputs(self):
+        return [
+            arg.unpack() if isinstance(arg, SavedTensor) else arg
+            for arg in self.saved_args
+        ]
 
     def check_recomputed_tensors_match(self, gid) -> None:
         if self.ignore_saved_mismatch:
@@ -931,6 +912,18 @@ Tip: To see a more detailed error message, either pass `debug=True` to
 `torch.utils.checkpoint.checkpoint(...)` or wrap the code block
 with `with torch.utils.checkpoint.set_checkpoint_debug_enabled(True):` to
 enable checkpoint‑debug mode globally.
+
+If this error occurs under torch.compile with automatic_dynamic_shapes enabled,
+it may be because the recomputation selected a different compiled graph than the
+forward pass (e.g., a dynamic graph instead of the original static graph).
+To fix this, either:
+  - Use torch._dynamo.mark_dynamic() to explicitly mark varying dimensions as
+    dynamic upfront, avoiding the static-to-dynamic transition.
+  - Call torch._C._dynamo.eval_frame._set_lru_cache(False) to disable LRU cache
+    reordering, which can change which graph is checked first between forward
+    and recompute.
+See https://github.com/pytorch/pytorch/issues/166926 for more details and
+workaround examples.
 """
 
 
@@ -1003,8 +996,7 @@ def _get_debug_context_and_cb() -> Tuple[Callable[[], Any], Callable[[Checkpoint
     # checkpointing mechanism. error_cb is invoked when an error is detected
     # during unpack.
 
-    # record_context_cpp is not support on non-linux non-x86_64 platforms
-    cpp_tb = platform.machine() == 'x86_64' and platform.system() == 'Linux'
+    cpp_tb = platform.machine() in ('x86_64', 'aarch64', 'arm64') and platform.system() == 'Linux'
 
     class CaptureLogs:
         def __init__(self) -> None:
@@ -1016,7 +1008,6 @@ def _get_debug_context_and_cb() -> Tuple[Callable[[], Any], Callable[[Checkpoint
             def logging_mode():
                 with LoggingTensorMode(), \
                      capture_logs(True, python_tb=True, script_tb=True, cpp_tb=cpp_tb) as logs_and_tb:
-                    # pyrefly: ignore [bad-assignment]
                     self.logs, self.tbs = logs_and_tb
                     yield logs_and_tb
             return logging_mode()
@@ -1079,7 +1070,11 @@ class _StopRecomputationError(Exception):
 
 
 class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
-    def __init__(self, target_frame_ref: ReferenceType, gid: Union["GraphExecGroup", int]) -> None:
+    def __init__(self, target_frame_ref: ReferenceType, gid: GraphExecGroup | int) -> None:
+        # Dynamo guards on WeakKeyDictionary internals are unstable here
+        # (dict length/keys change every call), causing recompilation storms.
+        # with `.compile()` so we disable
+        @torch._dynamo.disable
         def pack_hook(x):
             x = x.detach() if x.requires_grad else x
             target_frame = target_frame_ref()
@@ -1153,7 +1148,7 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
 
         def unpack_hook(holder):
             # First check if we're inside a GraphExecGroup context
-            gid: Union[GraphExecGroup, None, int] = GraphExecGroup._get_current_group()
+            gid: GraphExecGroup | None | int = GraphExecGroup._get_current_group()
             if gid is None:
                 # Fallback to using the current graph task id
                 gid = torch._C._current_graph_task_id()
@@ -1162,8 +1157,7 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
                     gid = int(uuid.uuid4())
 
             if not frame.is_recomputed[gid]:
-                ctx = frame.input_saver.grad_fn
-                args = ctx.get_args(ctx.saved_tensors)
+                args = frame.get_inputs()
 
                 try:
                     with _recomputation_hook(
@@ -1208,16 +1202,18 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
 
 
 def _is_compiling(func, args, kwargs):
-    # Check if we are under AOTAutograd tracing
-    # Checking that a functional mode is active should always do what we want
+    # Check if we are under AOTAutograd tracing or export tracing
+    # Checking that a proxy mode is active should always do what we want
+    if torch.compiler._is_non_strict_tracing():
+        return False
     return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY) is not None
 
 
 class _VersionWrapper:
     # Check that cached tensors are not mutated.
     def __init__(self, val) -> None:
-        self.val: Union[torch.Tensor, Any] = val
-        self.version: Optional[int] = val._version if isinstance(val, torch.Tensor) else None
+        self.val: torch.Tensor | Any = val
+        self.version: int | None = val._version if isinstance(val, torch.Tensor) else None
 
     def get_val(self, allow_cache_entry_mutation):
         if self.version is not None and not allow_cache_entry_mutation:
@@ -1270,8 +1266,9 @@ class SelectiveCheckpointContext:
         >>>     context_fn=context_fn,
         >>> )
     """
-    def __init__(self, *, is_recompute) -> None:
+    def __init__(self, *, is_recompute, op_output=None) -> None:
         self.is_recompute = is_recompute
+        self.op_output = op_output
 
 
 class CheckpointPolicy(enum.Enum):
@@ -1328,25 +1325,29 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         return True
 
     # Used together with _CachedTorchDispatchMode to implement SAC.
-    def __init__(self, policy_fn, storage) -> None:
+    def __init__(self, policy_fn, storage, ac_graph_id=None) -> None:
         self.policy_fn = policy_fn
         self.storage = storage
+        self.ac_graph_id = ac_graph_id
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        if func in SAC_IGNORED_OPS:
-            return func(*args, **kwargs)
-
         kwargs = {} if kwargs is None else kwargs
-        policy = self.policy_fn(SelectiveCheckpointContext(is_recompute=False),
-                                func, *args, **kwargs)
-        if isinstance(policy, bool):
-            policy = _policy_from_bool(policy)
-
         is_compiling = _is_compiling(func, args, kwargs)
 
         if is_compiling:
-            # Overwrite each node's "recompute" tag to add in the user annotation.
-            fx_traceback.current_meta["recompute"] = policy
+            fx_traceback.current_meta["ac_graph_id"] = self.ac_graph_id
+            fx_traceback.current_meta["recompute"] = CheckpointPolicy.PREFER_RECOMPUTE
+
+        if func in SAC_IGNORED_OPS:
+            return func(*args, **kwargs)
+
+        proxy_mode = None
+        graph_len_before = 0
+        if is_compiling:
+            from torch.fx.experimental.proxy_tensor import get_proxy_mode
+            proxy_mode = get_proxy_mode()
+            if proxy_mode is not None:
+                graph_len_before = len(proxy_mode.tracer.graph.nodes)
 
         out = func(*args, **kwargs)
 
@@ -1357,6 +1358,18 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
             any_ret_has_alias_info = False
         else:
             any_ret_has_alias_info = any(ret.alias_info is not None for ret in func._schema.returns)
+
+        policy = self.policy_fn(SelectiveCheckpointContext(is_recompute=False, op_output=out),
+                                func, *args, **kwargs)
+        if isinstance(policy, bool):
+            policy = _policy_from_bool(policy)
+
+        if is_compiling:
+            if proxy_mode is not None:
+                graph = proxy_mode.tracer.graph
+                num_new = len(graph.nodes) - graph_len_before
+                for node in itertools.islice(reversed(graph.nodes), num_new):
+                    node.meta["recompute"] = policy
 
         if policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE) or is_compiling:
             self.storage[func].append(tree_map(lambda x: _VersionWrapper(_maybe_detach(x, any_ret_has_alias_info)), out))
@@ -1584,9 +1597,10 @@ def _checkpoint_without_reentrant_generator(
         ),
         contextlib.nullcontext(),
     )
+    error_on_nested_fx_trace = torch._dynamo.config.error_on_nested_fx_trace
+    is_non_strict_tracing = torch.compiler._is_non_strict_tracing()
 
-    def recompute_fn(*inputs) -> None:
-        kwargs, *args = inputs
+    def recompute_fn(*args) -> None:
         # This will be called later during recomputation. This wrapping enables
         # the necessary global state to be captured.
         rng_devices = []
@@ -1603,7 +1617,20 @@ def _checkpoint_without_reentrant_generator(
             device_autocast_ctx = torch.amp.autocast(
                 device_type=device_type, **device_autocast_kwargs
             ) if torch.amp.is_autocast_available(device_type) else contextlib.nullcontext()
-            with device_autocast_ctx, torch.amp.autocast("cpu", **cpu_autocast_kwargs), recompute_context, device_ctx:  # type: ignore[attr-defined]
+            nested_fx_trace_ctx = (
+                torch._dynamo.config.patch(
+                    error_on_nested_fx_trace=error_on_nested_fx_trace
+                )
+                if is_non_strict_tracing
+                else contextlib.nullcontext()
+            )
+            with (
+                device_autocast_ctx,
+                torch.amp.autocast("cpu", **cpu_autocast_kwargs),
+                recompute_context,
+                device_ctx,
+                nested_fx_trace_ctx,
+            ):  # type: ignore[attr-defined]
                 fn(*args, **kwargs)
 
     new_frame = _CheckpointFrame(
@@ -1612,13 +1639,12 @@ def _checkpoint_without_reentrant_generator(
         unpack_error_cb,
         metadata_fn
     )
-    dummy = torch.empty((0,), requires_grad=True)
-    new_frame.input_saver = _NoopSaveInputs.apply(dummy, kwargs, *args)
 
-    # When ambient grad_mode is False
-    if new_frame.input_saver.grad_fn is None:
+    if not torch.is_grad_enabled():
         yield
         return
+
+    new_frame.save_inputs(*args)
 
     with _checkpoint_hook(new_frame), forward_context:
         yield
@@ -1652,7 +1678,7 @@ class GraphExecGroup:
         is a no-op otherwise.
     """
 
-    def __enter__(self) -> "GraphExecGroup":
+    def __enter__(self) -> Self:
         if torch._C._get_graph_exec_group() is not None:
             raise RuntimeError(
                 "GraphExecGroup contexts cannot be nested. "
@@ -1665,7 +1691,7 @@ class GraphExecGroup:
         torch._C._set_graph_exec_group(None)
 
     @classmethod
-    def _get_current_group(cls) -> Optional["GraphExecGroup"]:
+    def _get_current_group(cls) -> GraphExecGroup | None:
         # Private API to be used by utils like AC
         return torch._C._get_graph_exec_group()
 

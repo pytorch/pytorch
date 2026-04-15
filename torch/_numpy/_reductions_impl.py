@@ -9,7 +9,7 @@ Anything here only deals with torch objects, e.g. "dtype" is a torch.dtype insta
 from __future__ import annotations
 
 import functools
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -73,7 +73,7 @@ def count_nonzero(a: ArrayLike, axis: AxisLike = None, *, keepdims: KeepDims = F
 def argmax(
     a: ArrayLike,
     axis: AxisLike = None,
-    out: Optional[OutArray] = None,
+    out: OutArray | None = None,
     *,
     keepdims: KeepDims = False,
 ):
@@ -93,7 +93,7 @@ def argmax(
 def argmin(
     a: ArrayLike,
     axis: AxisLike = None,
-    out: Optional[OutArray] = None,
+    out: OutArray | None = None,
     *,
     keepdims: KeepDims = False,
 ):
@@ -113,7 +113,7 @@ def argmin(
 def any(
     a: ArrayLike,
     axis: AxisLike = None,
-    out: Optional[OutArray] = None,
+    out: OutArray | None = None,
     keepdims: KeepDims = False,
     *,
     where: NotImplementedType = None,
@@ -127,7 +127,7 @@ def any(
 def all(
     a: ArrayLike,
     axis: AxisLike = None,
-    out: Optional[OutArray] = None,
+    out: OutArray | None = None,
     keepdims: KeepDims = False,
     *,
     where: NotImplementedType = None,
@@ -141,7 +141,7 @@ def all(
 def amax(
     a: ArrayLike,
     axis: AxisLike = None,
-    out: Optional[OutArray] = None,
+    out: OutArray | None = None,
     keepdims: KeepDims = False,
     initial: NotImplementedType = None,
     where: NotImplementedType = None,
@@ -159,7 +159,7 @@ max = amax
 def amin(
     a: ArrayLike,
     axis: AxisLike = None,
-    out: Optional[OutArray] = None,
+    out: OutArray | None = None,
     keepdims: KeepDims = False,
     initial: NotImplementedType = None,
     where: NotImplementedType = None,
@@ -177,7 +177,7 @@ min = amin
 def ptp(
     a: ArrayLike,
     axis: AxisLike = None,
-    out: Optional[OutArray] = None,
+    out: OutArray | None = None,
     keepdims: KeepDims = False,
 ):
     return a.amax(axis) - a.amin(axis)
@@ -187,8 +187,8 @@ def ptp(
 def sum(
     a: ArrayLike,
     axis: AxisLike = None,
-    dtype: Optional[DTypeLike] = None,
-    out: Optional[OutArray] = None,
+    dtype: DTypeLike | None = None,
+    out: OutArray | None = None,
     keepdims: KeepDims = False,
     initial: NotImplementedType = None,
     where: NotImplementedType = None,
@@ -209,8 +209,8 @@ def sum(
 def prod(
     a: ArrayLike,
     axis: AxisLike = None,
-    dtype: Optional[DTypeLike] = None,
-    out: Optional[OutArray] = None,
+    dtype: DTypeLike | None = None,
+    out: OutArray | None = None,
     keepdims: KeepDims = False,
     initial: NotImplementedType = None,
     where: NotImplementedType = None,
@@ -231,8 +231,8 @@ product = prod
 def mean(
     a: ArrayLike,
     axis: AxisLike = None,
-    dtype: Optional[DTypeLike] = None,
-    out: Optional[OutArray] = None,
+    dtype: DTypeLike | None = None,
+    out: OutArray | None = None,
     keepdims: KeepDims = False,
     *,
     where: NotImplementedType = None,
@@ -249,8 +249,8 @@ def mean(
 def std(
     a: ArrayLike,
     axis: AxisLike = None,
-    dtype: Optional[DTypeLike] = None,
-    out: Optional[OutArray] = None,
+    dtype: DTypeLike | None = None,
+    out: OutArray | None = None,
     ddof=0,
     keepdims: KeepDims = False,
     *,
@@ -267,8 +267,8 @@ def std(
 def var(
     a: ArrayLike,
     axis: AxisLike = None,
-    dtype: Optional[DTypeLike] = None,
-    out: Optional[OutArray] = None,
+    dtype: DTypeLike | None = None,
+    out: OutArray | None = None,
     ddof=0,
     keepdims: KeepDims = False,
     *,
@@ -289,8 +289,8 @@ def var(
 def cumsum(
     a: ArrayLike,
     axis: AxisLike = None,
-    dtype: Optional[DTypeLike] = None,
-    out: Optional[OutArray] = None,
+    dtype: DTypeLike | None = None,
+    out: OutArray | None = None,
 ):
     if dtype == torch.bool:
         dtype = _dtypes_impl.default_dtypes().int_dtype
@@ -306,8 +306,8 @@ def cumsum(
 def cumprod(
     a: ArrayLike,
     axis: AxisLike = None,
-    dtype: Optional[DTypeLike] = None,
-    out: Optional[OutArray] = None,
+    dtype: DTypeLike | None = None,
+    out: OutArray | None = None,
 ):
     if dtype == torch.bool:
         dtype = _dtypes_impl.default_dtypes().int_dtype
@@ -380,7 +380,7 @@ def quantile(
     a: ArrayLike,
     q: ArrayLike,
     axis: AxisLike = None,
-    out: Optional[OutArray] = None,
+    out: OutArray | None = None,
     overwrite_input=False,
     method="linear",
     keepdims: KeepDims = False,
@@ -423,7 +423,7 @@ def percentile(
     a: ArrayLike,
     q: ArrayLike,
     axis: AxisLike = None,
-    out: Optional[OutArray] = None,
+    out: OutArray | None = None,
     overwrite_input=False,
     method="linear",
     keepdims: KeepDims = False,
@@ -449,7 +449,7 @@ def percentile(
 def median(
     a: ArrayLike,
     axis=None,
-    out: Optional[OutArray] = None,
+    out: OutArray | None = None,
     overwrite_input=False,
     keepdims: KeepDims = False,
 ):

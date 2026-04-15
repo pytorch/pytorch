@@ -19,7 +19,7 @@ optimization of both forward and backward passes.
 import contextlib
 import functools
 import logging
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from typing import Any
 from typing_extensions import ParamSpec, TypeVar
 from unittest.mock import patch
@@ -47,7 +47,7 @@ class AotAutograd:
         self.kwargs = kwargs
 
     def __call__(
-        self, gm: torch.fx.GraphModule, example_inputs: Iterable[Any], **kwargs: Any
+        self, gm: torch.fx.GraphModule, example_inputs: Sequence[Any], **kwargs: Any
     ) -> Callable[..., Any]:
         if kwargs:
             log.warning("aot_autograd-based backend ignoring extra kwargs %s", kwargs)
@@ -70,7 +70,6 @@ class AotAutograd:
         if use_fallback:
             log.debug("Unable to use AOT Autograd because graph has mutation")
             counters["aot_autograd"]["not_ok"] += 1
-            # pyrefly: ignore [bad-return]
             return gm
 
         def wrap_bw_compiler(bw_compiler_fn: Callable[P, R]) -> Callable[..., R]:
@@ -150,7 +149,7 @@ def mem_efficient_fusion_kwargs(use_decomps: bool) -> dict[str, Any]:
     }
 
     if use_decomps:
-        # pyrefly: ignore[unsupported-operation]
+        # pyrefly: ignore [bad-typed-dict-key]
         kwargs["decompositions"] = default_decompositions
 
     return kwargs

@@ -23,12 +23,6 @@ cmake --version
 echo "Environment variables:"
 env
 
-# The sccache wrapped version of nvcc gets put in /opt/cache/lib in docker since
-# there are some issues if it is always wrapped, so we need to add it to PATH
-# during CI builds.
-# https://github.com/pytorch/pytorch/blob/0b6c0898e6c352c8ea93daec854e704b41485375/.ci/docker/common/install_cache.sh#L97
-export PATH="/opt/cache/lib:$PATH"
-
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   # Use jemalloc during compilation to mitigate https://github.com/pytorch/pytorch/issues/116289
   export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
@@ -39,16 +33,6 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *cuda13* ]]; then
   # Disable FBGEMM for CUDA 13 builds
   export USE_FBGEMM=0
-fi
-
-if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
-  if [[ "$BUILD_ENVIRONMENT" != *clang* ]]; then
-    # TODO: there is a linking issue when building with UCC using clang,
-    # disable it for now and to be fix later.
-    # TODO: disable UCC temporarily to enable CUDA 12.1 in CI
-    export USE_UCC=1
-    export USE_SYSTEM_UCC=1
-  fi
 fi
 
 if [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
@@ -118,30 +102,6 @@ if [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
 
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
-  POSSIBLE_JAVA_HOMES=()
-  POSSIBLE_JAVA_HOMES+=(/usr/local)
-  POSSIBLE_JAVA_HOMES+=(/usr/lib/jvm/java-8-openjdk-amd64)
-  POSSIBLE_JAVA_HOMES+=(/Library/Java/JavaVirtualMachines/*.jdk/Contents/Home)
-  # Add the Windows-specific JNI
-  POSSIBLE_JAVA_HOMES+=("$PWD/.circleci/windows-jni/")
-  for JH in "${POSSIBLE_JAVA_HOMES[@]}" ; do
-    if [[ -e "$JH/include/jni.h" ]] ; then
-      # Skip if we're not on Windows but haven't found a JAVA_HOME
-      if [[ "$JH" == "$PWD/.circleci/windows-jni/" && "$OSTYPE" != "msys" ]] ; then
-        break
-      fi
-      echo "Found jni.h under $JH"
-      export JAVA_HOME="$JH"
-      export BUILD_JNI=ON
-      break
-    fi
-  done
-  if [ -z "$JAVA_HOME" ]; then
-    echo "Did not find jni.h"
-  fi
-fi
-
 # Use special scripts for Android builds
 
 if [[ "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
@@ -184,6 +144,7 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   export USE_XCCL=1
   export USE_MPI=0
   export TORCH_XPU_ARCH_LIST=pvc
+  export USE_STATIC_MKL=1
 fi
 
 # sccache will fail for CUDA builds if all cores are used for compiling
@@ -214,9 +175,9 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && echo "${TORCH_CUDA_ARCH_LIST}" | tr '
   export BUILD_CUSTOM_STEP="ninja -C build flash_attention -j ${J}"
 fi
 
-if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
-  export CC=clang
-  export CXX=clang++
+# TODO: Removeme once all the wrappers are gone
+if [[ "$BUILD_ENVIRONMENT" == *clang* ]] && [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  sudo rm -f /opt/cache/bin/clang++
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-clang*-asan* ]]; then
@@ -230,10 +191,6 @@ fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *no-ops* ]]; then
   export USE_PER_OPERATOR_HEADERS=0
-fi
-
-if [[ "${BUILD_ENVIRONMENT}" == *-pch* ]]; then
-    export USE_PRECOMPILED_HEADERS=1
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" != *cuda* ]]; then

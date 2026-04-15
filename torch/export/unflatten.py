@@ -1650,7 +1650,10 @@ def _reorder_submodules(
         fqn = prefix + name
         _reorder_submodules(child, fqn_order, prefix=fqn.split("@")[0] + ".")
         delattr(parent, name)
-        children.append((fqn_order[fqn], name, child))
+        base_fqn = fqn.split("@")[0]
+        children.append(
+            (fqn_order.get(fqn, fqn_order.get(base_fqn, len(fqn_order))), name, child)
+        )
     children.sort(key=operator.itemgetter(0))
     for _, name, child in children:
         parent.register_module(name, child)

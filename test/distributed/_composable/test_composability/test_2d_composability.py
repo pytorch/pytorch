@@ -4,7 +4,6 @@ import copy
 import functools
 import io
 from copy import deepcopy
-from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -45,7 +44,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     skip_if_rocm_arch_multiprocess,
 )
-from torch.testing._internal.common_fsdp import FSDPTest, MLP, MLPStack
+from torch.testing._internal.common_fsdp import FSDPTestContinuous, MLP, MLPStack
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     MI200_ARCH,
@@ -55,11 +54,10 @@ from torch.testing._internal.common_utils import (
     xfailIf,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     MLPModule,
     ModelArgs,
     Transformer,
-    with_comms,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
@@ -111,15 +109,13 @@ class SimpleModelUneven(nn.Module):
         return torch.rand(4, 5, device=device_type)
 
 
-class TestFullyShard2DTraining(FSDPTest):
+class TestFullyShard2DTraining(FSDPTestContinuous):
     global c10d_ops
     global funcol
     c10d_ops = torch.ops.c10d
     funcol = torch.ops.c10d_functional
 
-    @property
-    def world_size(self) -> int:
-        return min(4, torch.accelerator.device_count())
+    world_size = 4
 
     def init_global_mesh(self) -> DeviceMesh:
         # Prefer to test with >=4 GPUs, but for 2 GPUs, use 2-way TP
@@ -198,12 +194,15 @@ class TestFullyShard2DTraining(FSDPTest):
         )
         model = Transformer.parallelize(model, global_mesh["tp"], use_seq_parallel=True)
 
-        def _shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+        def _shard_placement_fn(param: nn.Parameter) -> Shard | None:
             if isinstance(param, DTensor):
                 for placement in param.placements:
                     if isinstance(placement, Shard):
                         shard_dim = param.ndim - 1 - placement.dim
-                        assert shard_dim >= 0, f"{param.shape}"
+                        if not (shard_dim >= 0):
+                            raise AssertionError(
+                                f"Expected shard_dim >= 0, got {shard_dim} for {param.shape}"
+                            )
                         return Shard(shard_dim)
             return Shard(0)
 
@@ -423,14 +422,15 @@ class TestFullyShard2DTraining(FSDPTest):
         self.assertEqual(loss_no_cp2, loss_cp2)
 
 
-class TestFullyShard2DStateDict(DTensorTestBase):
+class TestFullyShard2DStateDict(DTensorContinuousTestBase):
+    world_size = 4
+
     @property
     def backend(self):
         # need to specify gloo backend for testing cpu offload
         return f"cpu:gloo,{device_type}:{curr_backend}"
 
     @skip_if_lt_x_gpu(4)
-    @with_comms
     def test_fully_shard_tp_2d_set_full_state_dict(self):
         dummy_model = SimpleModel().to(device_type)
         mesh_2d = init_device_mesh(
@@ -474,7 +474,9 @@ class TestFullyShard2DStateDict(DTensorTestBase):
         self.assertEqual(ref_osd, new_osd)
 
 
-class Test2dFSDP1ParallelIntegration(DTensorTestBase):
+class Test2dFSDP1ParallelIntegration(DTensorContinuousTestBase):
+    world_size = 4
+
     def init_model(self, device_type, model_parallel_size=2):
         torch.manual_seed(0)
         model = MLPModule(device_type)
@@ -520,7 +522,6 @@ class Test2dFSDP1ParallelIntegration(DTensorTestBase):
             self.assertEqual(param_m2, param_m1)
 
     @skip_if_lt_x_gpu(4)
-    @with_comms
     def test_2d_ddp_integration_functionality(self) -> None:
         model, twod_model, dp_pg = self.init_model(self.device_type)
         optim = torch.optim.Adam(model.parameters(), lr=3e-5)
@@ -555,7 +556,9 @@ class Test2dFSDP1ParallelIntegration(DTensorTestBase):
 
 # TODO: add additional tests for multi_param_group, optim_in_backward,
 # and fsdp_nested.
-class TestNew2dParallelTraining(DTensorTestBase):
+class TestNew2dParallelTraining(DTensorContinuousTestBase):
+    world_size = 4
+
     def _compare_params(self, m1, m2):
         with FSDP.summon_full_params(m1):
             with FSDP.summon_full_params(m2):
@@ -572,7 +575,6 @@ class TestNew2dParallelTraining(DTensorTestBase):
                     self.assertTrue(torch.allclose(p1, p2), f"{p1} vs {p2}")
 
     @skip_if_lt_x_gpu(4)
-    @with_comms
     def test_2d_fsdp_state_enable_extension(self):
         mesh_2d = init_device_mesh(
             self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
@@ -648,17 +650,14 @@ class TestNew2dParallelTraining(DTensorTestBase):
         self._compare_params(model, model_2d)
 
     @skip_if_lt_x_gpu(4)
-    @with_comms
     def test_2d_e2e_training_default(self):
         self._test_2d_e2e_training()
 
     @skip_if_lt_x_gpu(4)
-    @with_comms
     def test_2d_e2e_training_use_orig_params(self):
         self._test_2d_e2e_training(use_orig_params=True)
 
     @skip_if_lt_x_gpu(4)
-    @with_comms
     def test_2d_e2e_training_not_use_orig_params(self):
         # TODO: need to revisit input_reshard API about why it failed multi-gpu tests.
         # self._test_2d_e2e_training(recompute_activation=True)
@@ -667,14 +666,15 @@ class TestNew2dParallelTraining(DTensorTestBase):
 
 # TODO: update all state dict unit tests to use distributed.checkpoint.state_dict,
 # and consolidate all the state_dict test in test.distributed.checkpoint.
-class TestNew2dParallelStateDict(DTensorTestBase):
+class TestNew2dParallelStateDict(DTensorContinuousTestBase):
+    world_size = 4
+
     @property
     def backend(self):
         # need to specify gloo backend for testing cpu offload
         return f"cpu:gloo,{device_type}:{curr_backend}"
 
     @skip_if_lt_x_gpu(4)
-    @with_comms
     def test_fsdp_2d_extension(self):
         """
         Test whether _fsdp_extension from FSDPstate has been set correctly.
@@ -706,7 +706,6 @@ class TestNew2dParallelStateDict(DTensorTestBase):
         self.assertEqual(model_1d_fsdp_state._fsdp_extension, None)
 
     @skip_if_lt_x_gpu(4)
-    @with_comms
     @parametrize("is_even_sharded_model", [True, False])
     def test_2d_state_dict(self, is_even_sharded_model):
         simple_model = SimpleModel if is_even_sharded_model else SimpleModelUneven
@@ -762,7 +761,6 @@ class TestNew2dParallelStateDict(DTensorTestBase):
             )
 
     @skip_if_lt_x_gpu(4)
-    @with_comms
     @parametrize("is_even_sharded_model", [True, False])
     def test_2d_load_state_dict(self, is_even_sharded_model):
         simple_model = SimpleModel if is_even_sharded_model else SimpleModelUneven
@@ -817,7 +815,6 @@ class TestNew2dParallelStateDict(DTensorTestBase):
             self.assertEqual(v1.placements, v2.placements)
 
     @skip_if_lt_x_gpu(4)
-    @with_comms
     @parametrize("is_even_sharded_model", [True, False])
     def test_2d_optim_state_dict(self, is_even_sharded_model):
         simple_model = SimpleModel if is_even_sharded_model else SimpleModelUneven
@@ -905,7 +902,6 @@ class TestNew2dParallelStateDict(DTensorTestBase):
                     self.assertEqual(new_state, state)
 
     @skip_if_lt_x_gpu(4)
-    @with_comms
     @with_temp_dir
     def test_fsdp1_tp_2d_set_full_state_dict(self):
         """

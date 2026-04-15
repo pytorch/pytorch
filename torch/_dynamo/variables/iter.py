@@ -16,7 +16,7 @@ handling of iterator operations during code transformation and optimization.
 import itertools
 import sys
 from collections.abc import Callable, Sequence
-from typing import Any, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import (
@@ -53,6 +53,9 @@ class ItertoolsVariable(VariableTracker):
         return f"ItertoolsVariable({self.value})"
 
     def as_python_constant(self) -> Any:
+        return self.value
+
+    def get_real_python_backed_value(self) -> Any:
         return self.value
 
     def call_function(
@@ -158,7 +161,6 @@ class ItertoolsVariable(VariableTracker):
 
             result = []
             try:
-                # pyrefly: ignore [unbound-name]
                 for k, v in itertools.groupby(seq, key=keyfunc):
                     result.append(
                         variables.TupleVariable(
@@ -196,10 +198,20 @@ class ItertoolsVariable(VariableTracker):
             return tx.inline_user_function_return(
                 VariableTracker.build(tx, polyfills.repeat), args, kwargs
             )
-        elif self.value is itertools.count:
-            return variables.CountIteratorVariable(
-                *args, mutation_type=ValueMutationNew()
-            )
+        elif self.value is itertools.count and not kwargs:
+            if len(args) == 0:
+                return variables.CountIteratorVariable(mutation_type=ValueMutationNew())
+            if len(args) == 1:
+                return variables.CountIteratorVariable(
+                    item=args[0], mutation_type=ValueMutationNew()
+                )
+            if len(args) == 2:
+                return variables.CountIteratorVariable(
+                    item=args[0],
+                    step=args[1],
+                    mutation_type=ValueMutationNew(),
+                )
+            return super().call_function(tx, args, kwargs)
         elif (
             self.value is itertools.permutations
             and (len(args) == 1 or (len(args) == 2 and args[1].is_python_constant()))
@@ -319,6 +331,9 @@ class RepeatIteratorVariable(IteratorVariable):
         super().__init__(**kwargs)
         self.item = item
 
+    def python_type(self) -> type:
+        return itertools.repeat
+
     # Repeat needs no mutation, clone self
     def next_variable(self, tx: "InstructionTranslator") -> VariableTracker:
         return self.item
@@ -337,10 +352,21 @@ class RepeatIteratorVariable(IteratorVariable):
 
 
 class CountIteratorVariable(IteratorVariable):
+    # advance_count tracks how many next() calls were made during tracing,
+    # used by side_effects.py to replay them on the real iterator post-execution.
+    _nonvar_fields = {
+        "advance_count",
+        *IteratorVariable._nonvar_fields,
+    }
+
+    def python_type(self) -> type:
+        return itertools.count
+
     def __init__(
         self,
-        item: Union[int, VariableTracker] = 0,
-        step: Union[int, VariableTracker] = 1,
+        item: int | VariableTracker = 0,
+        step: int | VariableTracker = 1,
+        advance_count: int = 0,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -350,12 +376,14 @@ class CountIteratorVariable(IteratorVariable):
             step = ConstantVariable.create(step)
         self.item = item
         self.step = step
+        self.advance_count = advance_count
 
     def next_variable(self, tx: "InstructionTranslator") -> VariableTracker:
         assert self.is_mutable()
         old_item = self.item
         tx.output.side_effects.mutation(self)
         self.item = self.item.call_method(tx, "__add__", [self.step], {})
+        self.advance_count += 1
         return old_item
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -376,6 +404,9 @@ class ZipVariable(IteratorVariable):
     """
     Represents zip(*iterables)
     """
+
+    # PyZip_Type: https://github.com/python/cpython/blob/v3.13.0/Python/bltinmodule.c#L3011
+    _cpython_type = zip
 
     _nonvar_fields = {
         "index",
@@ -429,7 +460,7 @@ class ZipVariable(IteratorVariable):
         args = []
 
         def get_item(
-            it: Union[list[VariableTracker], VariableTracker],
+            it: list[VariableTracker] | VariableTracker,
         ) -> VariableTracker:
             if isinstance(it, list):
                 if old_index >= len(it):
@@ -498,6 +529,9 @@ class MapVariable(ZipVariable):
     Represents map(fn, *iterables)
     """
 
+    # PyMap_Type: https://github.com/python/cpython/blob/v3.13.0/Python/bltinmodule.c#L1484
+    _cpython_type = map
+
     def __init__(
         self,
         fn: VariableTracker,
@@ -544,6 +578,9 @@ class FilterVariable(IteratorVariable):
     """
     Represents filter(fn, iterable)
     """
+
+    # PyFilter_Type: https://github.com/python/cpython/blob/v3.13.0/Python/bltinmodule.c#L630
+    _cpython_type = filter
 
     _nonvar_fields = {
         "index",

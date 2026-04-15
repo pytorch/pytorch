@@ -150,10 +150,18 @@ struct FromImpl<ScalarType> {
         return torch::stable::detail::from(aoti_torch_dtype_uint32());
       case ScalarType::UInt64:
         return torch::stable::detail::from(aoti_torch_dtype_uint64());
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
+      case ScalarType::Float8_e8m0fnu:
+        return torch::stable::detail::from(torch_dtype_float8_e8m0fnu());
+      case ScalarType::Float4_e2m1fn_x2:
+        return torch::stable::detail::from(torch_dtype_float4_e2m1fn_x2());
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
       default:
         STD_TORCH_CHECK(
             false,
-            "Not yet supported ScalarType, please file an issue describing your use case.");
+            "Not yet supported ScalarType ",
+            toString(val),
+            ", please file an issue describing your use case.");
     }
   }
 };
@@ -526,6 +534,12 @@ struct ToImpl<ScalarType> {
       return ScalarType::UInt32;
     } else if (shim_scalartype == aoti_torch_dtype_uint64()) {
       return ScalarType::UInt64;
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
+    } else if (shim_scalartype == torch_dtype_float8_e8m0fnu()) {
+      return ScalarType::Float8_e8m0fnu;
+    } else if (shim_scalartype == torch_dtype_float4_e2m1fn_x2()) {
+      return ScalarType::Float4_e2m1fn_x2;
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
     } else {
       STD_TORCH_CHECK(
           false,

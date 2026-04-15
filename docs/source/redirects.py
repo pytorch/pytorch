@@ -10,6 +10,9 @@ redirects = {
     "torch.compiler": "user_guide/torch_compiler/torch.compiler.html",
     "torch.compiler.config": "user_guide/torch_compiler/torch.compiler.config.html",
     "torch.compiler_aot_inductor": "user_guide/torch_compiler/torch.compiler_aot_inductor.html",
+    "torch.compiler_aot_compile": (
+        "user_guide/torch_compiler/torch.compiler_aot_compile.html"
+    ),
     "torch.compiler_aot_inductor_debugging_guide": (
         "user_guide/torch_compiler/torch.compiler_aot_inductor_debugging_guide.html"
     ),
@@ -74,6 +77,7 @@ redirects = {
         "user_guide/torch_compiler/export/programming_model.html"
     ),
     "export/pt2_archive": "user_guide/torch_compiler/export/pt2_archive.html",
+    "cond": "higher_order_ops/cond.html",
     # Redirects for compile documents moved from source/compile/ to
     # source/user_guide/torch_compiler/compile/
     "compile/dynamic_shapes_advanced_control_options": (

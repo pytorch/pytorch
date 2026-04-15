@@ -5,6 +5,10 @@
 #include <torch/csrc/jit/python/python_list.h>
 #include <torch/csrc/jit/python/utf8_decoding_ignore.h>
 
+#ifdef USE_DISTRIBUTED
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#endif
+
 #include <ATen/ScalarOps.h>
 
 #include <c10/util/irange.h>
@@ -538,6 +542,21 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
       return c10::ivalue::ConcretePyObjectHolder::create(obj);
     }
     case TypeKind::CapsuleType: {
+#ifdef USE_DISTRIBUTED
+      // Handle ProcessGroup custom class as a capsule.  FakeScriptObject
+      // (used during Dynamo tracing with CooR) passes py::isinstance via
+      // OpaqueBaseMeta but cannot be cast directly; unwrap real_obj first.
+      if (py::isinstance<c10d::ProcessGroup>(obj)) {
+        py::handle target = obj;
+        if (py::hasattr(obj, "real_obj")) {
+          target = obj.attr("real_obj");
+        }
+        auto cpp_obj = target.cast<c10::intrusive_ptr<c10d::ProcessGroup>>();
+        return IValue::make_capsule(cpp_obj);
+      }
+#endif
+
+      // Original: handle generic c10::Capsule Python objects
       return IValue::make_capsule(py::cast<c10::Capsule>(obj).obj_ptr);
     }
     case TypeKind::FutureType: {
@@ -752,7 +771,17 @@ py::object toPyObject(IValue ivalue) {
     // PyObject
     return py::reinterpret_borrow<py::object>(ivalue.toPyObject());
   } else if (ivalue.isCapsule()) {
-    return py::cast(c10::Capsule(ivalue.toCapsule()));
+    auto capsule = ivalue.toCapsule();
+#ifdef USE_DISTRIBUTED
+    {
+      auto pg = c10::static_intrusive_pointer_cast<c10d::ProcessGroup>(capsule);
+      if (pg != nullptr) {
+        // ProcessGroup is a torch custom class, return it directly
+        return py::cast(pg);
+      }
+    }
+#endif
+    return py::cast(c10::Capsule(capsule));
   } else if (ivalue.isFuture()) {
     return py::cast(std::make_shared<PythonFutureWrapper>(ivalue.toFuture()));
   } else if (ivalue.isAwait()) {
@@ -976,6 +1005,28 @@ py::object _get_operation_for_overload_or_packet(
   return torch_function_called
       ? *res
       : invokeOperatorFromPython(operations, args, kwargs, dk);
+}
+
+std::optional<InferredType> detail::_tryToInferTypeImpl(py::handle input) {
+#ifdef USE_DISTRIBUTED
+  if (py::isinstance<c10d::ProcessGroup>(input)) {
+    return InferredType(CapsuleType::get());
+  }
+  // During Dynamo tracing with compile-on-one-rank (CooR), opaque reference
+  // types like ProcessGroup are wrapped in FakeScriptObject.  Python-level
+  // isinstance() sees through the wrapper (via OpaqueBaseMeta), but the C++
+  // py::isinstance above does too — yet the subsequent pybind11 cast would
+  // fail because FakeScriptObject is not a C++ bound object.  Detect this
+  // case by checking for the wrapped real_obj attribute.
+  if (py::hasattr(input, "real_obj")) {
+    py::object real = input.attr("real_obj");
+    if (py::isinstance<c10d::ProcessGroup>(real)) {
+      return InferredType(CapsuleType::get());
+    }
+  }
+#endif
+
+  return std::nullopt;
 }
 
 } // namespace torch::jit

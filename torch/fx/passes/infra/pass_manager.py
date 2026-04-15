@@ -124,22 +124,21 @@ def _topological_sort_passes(
 @compatibility(is_backward_compatible=False)
 def this_before_that_pass_constraint(this: Callable, that: Callable) -> Callable:
     """
-    Defines a partial order ('depends on' function) where `this` must occur
-    before `that`.
+    Defines a partial order ('depends on' function) where ``this`` must occur
+    before ``that``.
 
-    For example, the following pass list and constraint list would be invalid.
-    ```
-    passes = [pass_b, pass_a]
+    For example, the following pass list and constraint list would be invalid::
 
-    constraints = [this_before_that_pass_constraint(pass_a, pass_b)]
-    ```
+        passes = [pass_b, pass_a]
+
+        constraints = [this_before_that_pass_constraint(pass_a, pass_b)]
 
     Args:
         this (Callable): pass which should occur first
         that (Callable): pass which should occur later
 
     Returns:
-        depends_on (Callable[[Object, Object], bool]
+        depends_on (Callable[[Object, Object], bool])
     """
 
     def depends_on(a: Callable, b: Callable):

@@ -61,7 +61,8 @@ class PythonProfilerEventHandler(cpp.ProfilerEventHandler):
         global device
         # blueprint(f"training iteration {iteration} in thread {thread_id}")
         torch_device = getattr(torch, device)
-        assert hasattr(torch_device, "synchronize")
+        if not hasattr(torch_device, "synchronize"):
+            raise AssertionError(f"Device {device} does not have synchronize method")
         sync_func = torch_device.synchronize
 
         with torch.autograd.profiler.record_function("user_function"):

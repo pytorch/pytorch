@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple
 
 import torch
 from torch.fx._compatibility import compatibility
@@ -26,8 +26,10 @@ def replace_target_nodes_with(
     new_op: str,
     new_target: Target,
 ):
-    """Modifies all nodes in fx_module.graph.nodes which match the specified op code and target,
-    and updates them to match the new op code and target"""
+    """
+    Modifies all nodes in fx_module.graph.nodes which match the specified op code
+    and target, and updates them to match the new op code and target.
+    """
     new_graph = Graph()
     val_map: dict[Node, Node] = {}
     for node in fx_module.graph.nodes:
@@ -54,7 +56,7 @@ class size_bytes(NamedTuple):
 
 @compatibility(is_backward_compatible=False)
 def get_size_of_all_nodes(
-    fx_module: GraphModule, args: Optional[list[torch.Tensor]] = None
+    fx_module: GraphModule, args: list[torch.Tensor] | None = None
 ) -> None:
     """Given a fx graph module, update each node with its total size (weights + bias + output)
     and its output_size(output). For a non-module node, the total size is the output size.

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import contextlib
 from functools import partial, wraps
-from typing import Any, Optional, overload, TYPE_CHECKING, Union
+from typing import Any, overload, TYPE_CHECKING
 from typing_extensions import ParamSpec, TypeVar
 
 import torch
@@ -98,7 +98,8 @@ _TensorsU = TypeVar("_TensorsU", bound=_Tensors)
 def _undo_create_differentiable(inps: _TensorsT, level: int | None = None) -> _TensorsT:
     def unwrap_tensors(x: _TensorsU) -> _TensorsU:
         if isinstance(x, torch.Tensor):
-            assert level is not None
+            if level is None:
+                raise AssertionError("level must not be None when unwrapping tensors")
             # pyrefly: ignore[bad-return]
             return _unwrap_for_grad(x, level)
         # TODO: Remove the following hack for namedtuples
@@ -335,6 +336,23 @@ def vjp(
 
 
 @contextlib.contextmanager
+def _disable_inference_mode() -> Generator[None, None, None]:
+    # Disable inference_mode without clobbering grad_mode / fw_grad_mode.
+    # torch.inference_mode(False) unconditionally sets grad_mode=True and
+    # fw_grad_mode=True; we save and restore those to avoid that.
+    # No-op when inference_mode is already off.
+    if not torch.is_inference_mode_enabled():
+        yield
+        return
+    prev_grad = torch.is_grad_enabled()
+    prev_fw_grad = torch._C._is_fwd_grad_enabled()
+    with torch.inference_mode(False):
+        torch._C._set_grad_enabled(prev_grad)
+        torch._C._set_fwd_grad_enabled(prev_fw_grad)
+        yield
+
+
+@contextlib.contextmanager
 def grad_increment_nesting() -> Generator[int, None, None]:
     try:
         grad_level = _grad_increment_nesting()
@@ -368,12 +386,12 @@ def jvp_increment_nesting() -> Generator[int, None, None]:
 def _vjp_with_argnums(
     func: Callable[..., Any],
     *primals: Any,
-    argnums: Optional[argnums_t] = None,
+    argnums: argnums_t | None = None,
     has_aux: bool = False,
 ) -> tuple[Any, Callable[..., Any]] | tuple[Any, Callable[..., Any], Any]:
     # This is the same function as vjp but also accepts an argnums argument
     # All args are the same as vjp except for the added argument
-    # argnums (Optional[int or tuple[int,...]]): Optional, specifies the argument(s) to compute gradients with respect to.
+    # argnums (int or tuple[int,...] | None): Optional, specifies the argument(s) to compute gradients with respect to.
     #         If None, computes the gradients with respect to all inputs (used for vjp). Default: None
     #
     # WARN: Users should NOT call this function directly and should just be calling vjp.
@@ -410,7 +428,10 @@ def _vjp_with_argnums(
             results = _undo_create_differentiable(primals_out, level)
 
             for primal_out in flat_primals_out:
-                assert isinstance(primal_out, torch.Tensor)
+                if not isinstance(primal_out, torch.Tensor):
+                    raise AssertionError(
+                        f"expected primal_out to be a Tensor, got {type(primal_out)}"
+                    )
                 if primal_out.is_floating_point() or primal_out.is_complex():
                     continue
                 raise RuntimeError(
@@ -434,13 +455,23 @@ def _vjp_with_argnums(
                     f"cotangents: {treespec_pprint(cotangents_spec)}, "
                     f"primal output: {treespec_pprint(primals_out_spec)}"
                 )
-            result = _autograd_grad(
-                flat_primals_out,
-                flat_diff_primals,
-                flat_cotangents,
-                retain_graph=retain_graph,
-                create_graph=create_graph,
+            # This closure runs after grad_increment_nesting exits, so
+            # inference_mode may have been restored. Disable it for autograd.
+            # Skip under Dynamo — tracing through the generator CM emits
+            # spurious _enter_inference_mode nodes.
+            ctx = (
+                contextlib.nullcontext()
+                if torch.compiler.is_compiling()
+                else _disable_inference_mode()
             )
+            with ctx:
+                result = _autograd_grad(
+                    flat_primals_out,
+                    flat_diff_primals,
+                    flat_cotangents,
+                    retain_graph=retain_graph,
+                    create_graph=create_graph,
+                )
             return tree_unflatten(result, primals_spec)
 
     if has_aux:
@@ -450,7 +481,8 @@ def _vjp_with_argnums(
 
 
 def _safe_zero_index(x: tuple[_R, ...]) -> _R:
-    assert len(x) == 1
+    if len(x) != 1:
+        raise AssertionError(f"expected tuple of length 1, got length {len(x)}")
     return x[0]
 
 
@@ -471,10 +503,10 @@ def error_if_complex(func_name: str, args: Any, is_input: bool) -> None:
 @exposed_in("torch.func")
 def jacrev(
     func: Callable[..., Any],
-    argnums: Union[int, tuple[int, ...]] = 0,
+    argnums: int | tuple[int, ...] = 0,
     *,
     has_aux: bool = False,
-    chunk_size: Optional[int] = None,
+    chunk_size: int | None = None,
     _preallocate_and_copy: bool = False,
 ) -> Callable[..., Any]:
     """
@@ -641,7 +673,10 @@ def jacrev(
                 if chunk_size == 1:
                     # sanity check.
                     for t in flat_basis_chunk:
-                        assert t.size(0) == 1
+                        if t.size(0) != 1:
+                            raise AssertionError(
+                                f"expected t.size(0) to be 1, got {t.size(0)}"
+                            )
 
                     flat_basis_chunk = tree_map(
                         lambda t: torch.squeeze(t, 0), flat_basis_chunk
@@ -701,7 +736,10 @@ def jacrev(
                 if chunk_size == 1:
                     # sanity check.
                     for t in flat_basis_chunk:
-                        assert t.size(0) == 1
+                        if t.size(0) != 1:
+                            raise AssertionError(
+                                f"expected t.size(0) to be 1, got {t.size(0)}"
+                            )
 
                     flat_basis_chunk = [torch.squeeze(t, 0) for t in flat_basis_chunk]
 
@@ -842,9 +880,14 @@ def _chunked_standard_basis_for_(
     # NOTE: Argument `chunk_size` is used to generate chunked basis instead of
     #       one huge basis matrix. `chunk_size` dictates the maximum size of the
     #       basis matrix along dim=0.
-    assert len(tensors) == len(tensor_numels)
-    assert len(tensors) > 0
-    assert chunk_size is None or chunk_size > 0
+    if len(tensors) != len(tensor_numels):
+        raise AssertionError(
+            f"len(tensors)={len(tensors)} != len(tensor_numels)={len(tensor_numels)}"
+        )
+    if len(tensors) == 0:
+        raise AssertionError("tensors must have at least one element")
+    if chunk_size is not None and chunk_size <= 0:
+        raise AssertionError(f"chunk_size must be > 0 or None, got {chunk_size}")
     total_numel = sum(tensor_numels)
     if chunk_size and chunk_size < total_numel:
         chunk_numels = get_chunk_sizes(total_numel, chunk_size)
@@ -1112,7 +1155,7 @@ def _jvp_with_argnums(
     func: Callable[..., Any],
     primals: Any,
     tangents: Any,
-    argnums: Optional[argnums_t],
+    argnums: argnums_t | None,
     *,
     strict: bool = False,
     has_aux: bool,
@@ -1196,7 +1239,10 @@ def _jvp_with_argnums(
 
 def safe_unflatten(tensor: torch.Tensor, dim: int, shape: torch.Size) -> torch.Tensor:
     if len(shape) == 0:
-        assert tensor.shape[dim] == 1
+        if tensor.shape[dim] != 1:
+            raise AssertionError(
+                f"expected tensor.shape[{dim}] to be 1, got {tensor.shape[dim]}"
+            )
         return tensor.squeeze(dim)
     return tensor.unflatten(dim, shape)
 
@@ -1321,7 +1367,8 @@ def jacfwd(
         flat_primals, primals_spec = tree_flatten(primals)
         flat_primals_numels = tuple(p.numel() for p in flat_primals)
         flat_basis = _construct_standard_basis_for(flat_primals, flat_primals_numels)
-        assert flat_basis is not None
+        if flat_basis is None:
+            raise AssertionError("flat_basis must not be None")
         basis = tree_unflatten(flat_basis, primals_spec)
 
         def push_jvp(basis: Any) -> Any:

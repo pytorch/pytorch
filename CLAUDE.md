@@ -1,3 +1,21 @@
+# Scratch Space
+
+Use `agent_space/` (git-ignored, at repo root) for temporary scripts, scratch files, and throwaway experiments. Do not commit files from this directory.
+
+# PR Review
+
+When asked to review a PR, always use the /pr-review skill.
+
+# Environment
+
+If any tool you're trying to use (pip, python, spin, etc) is missing, always stop and ask the user if an environment is needed. Do NOT try to find alternatives or install these tools.
+
+# Build
+
+Always ask for build configuration environment variables before running build.
+All build (both codegen, C++ and python) is done via `pip install -e . -v --no-build-isolation`.
+You should NEVER run any other command to build PyTorch.
+
 # Testing
 
 Use our test class and test runner:
@@ -13,6 +31,14 @@ if __name__ == "__main__":
 ```
 
 To test Tensor equality, use assertEqual.
+For tests over multiple inputs, use the `@parametrize` decorator.
+For any test that checks numerics of the on-device implementation, use `instantiate_device_type_tests` to write device-generic tests.
+
+# Linting
+
+Only use commands provided via `spin` for linting.
+Use `spin help` to list available commands.
+Generally, use `spin lint` as to run the lint and `spin fixlint` to apply automatic fixes.
 
 # Commit messages
 
@@ -24,6 +50,10 @@ changes. Instead, if the PR is large, explain the order to review changes
 entirely.
 
 Disclose that the PR was authored with Claude.
+
+If a commit message contains `ghstack-source-id` or `Pull-Request` trailers,
+you MUST preserve them when rewriting or splitting commit messages. ghstack
+will update the source id automatically when needed.
 
 # Coding Style Guidelines
 

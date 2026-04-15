@@ -17,7 +17,7 @@ import re
 import sys
 import unittest
 from collections.abc import Callable
-from typing import Any, Union
+from typing import Any
 
 import torch
 import torch.testing
@@ -36,7 +36,7 @@ from . import config, reset, utils
 log = logging.getLogger(__name__)
 
 
-def run_tests(needs: Union[str, tuple[str, ...]] = ()) -> None:
+def run_tests(needs: str | tuple[str, ...] = ()) -> None:
     from torch.testing._internal.common_utils import run_tests
 
     if TEST_WITH_TORCHDYNAMO or TEST_WITH_CROSSREF:
@@ -60,6 +60,7 @@ def run_tests(needs: Union[str, tuple[str, ...]] = ()) -> None:
                 importlib.import_module(need)
             except ImportError:
                 return
+
     run_tests()
 
 
@@ -85,6 +86,8 @@ class TestCase(TorchTestCase):
 
     def setUp(self) -> None:
         self._prior_is_grad_enabled = torch.is_grad_enabled()
+        self._prior_nested_graph_breaks = config.nested_graph_breaks
+        config.nested_graph_breaks = True
         super().setUp()
         reset()
         utils.counters.clear()
@@ -94,7 +97,7 @@ class TestCase(TorchTestCase):
     def tearDown(self) -> None:
         trace_log.removeHandler(self.handler)
         for k, v in utils.counters.items():
-            print(k, v.most_common())
+            log.debug("%s %s", k, v.most_common())
         reset()
         utils.counters.clear()
         torch._C._autograd._saved_tensors_hooks_enable()
@@ -102,6 +105,7 @@ class TestCase(TorchTestCase):
         if self._prior_is_grad_enabled is not torch.is_grad_enabled():
             log.warning("Running test changed grad mode")
             torch.set_grad_enabled(self._prior_is_grad_enabled)
+        config.nested_graph_breaks = self._prior_nested_graph_breaks
 
     def assertEqual(self, x: Any, y: Any, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
         if (
@@ -114,21 +118,6 @@ class TestCase(TorchTestCase):
 
     # assertExpectedInline might also need to be disabled for wrapped nested
     # graph break tests
-
-
-# NB: multiple inheritance with LoggingTestCase is possible - this should be fine
-# since there is no overlap in overridden methods.
-class TestCaseWithNestedGraphBreaks(TestCase):
-    def setUp(self) -> None:
-        super().setUp()
-        self.prev_nested_graph_breaks = torch._dynamo.config.nested_graph_breaks
-        # pyrefly: ignore [bad-assignment]
-        torch._dynamo.config.nested_graph_breaks = True
-
-    def tearDown(self) -> None:
-        super().tearDown()
-        # pyrefly: ignore [bad-assignment]
-        torch._dynamo.config.nested_graph_breaks = self.prev_nested_graph_breaks
 
 
 class CPythonTestCase(TestCase):
@@ -184,7 +173,7 @@ class CPythonTestCase(TestCase):
     def compile_fn(
         self,
         fn: Callable[..., Any],
-        backend: Union[str, Callable[..., Any]],
+        backend: str | Callable[..., Any],
         nopython: bool,
     ) -> Callable[..., Any]:
         # We want to compile only the test function, excluding any setup code
@@ -240,3 +229,7 @@ class CPythonTestCase(TestCase):
                 enable_trace_unittest=True,
             ),
         )
+
+    # pyrefly: ignore [implicit-any]
+    def wrap_with_policy(self, method_name: str, policy: Callable) -> None:
+        pass

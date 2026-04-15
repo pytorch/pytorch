@@ -12,19 +12,11 @@ RUN yum install -y sudo wget curl perl util-linux xz bzip2 git patch which perl 
 ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
 ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
 
-# cmake-3.18.4 from pip
+# cmake-3.18.4.post1 from pip
+# NS: Apr 1 2026 3.18.4 is gone, reported here https://github.com/scikit-build/cmake-python-distributions/issues/693
 RUN yum install -y python3-pip && \
-    python3 -mpip install cmake==3.18.4 && \
+    python3 -mpip install cmake==3.18.4.post1 && \
     ln -s /usr/local/bin/cmake /usr/bin/cmake3
-
-FROM base as openssl
-# Install openssl (this must precede `build python` step)
-# (In order to have a proper SSL module, Python is compiled
-# against a recent openssl [see env vars above], which is linked
-# statically. We delete openssl afterwards.)
-ADD ./common/install_openssl.sh install_openssl.sh
-RUN bash ./install_openssl.sh && rm install_openssl.sh
-
 
 FROM base as cuda
 ARG BASE_CUDA_VERSION=12.6
@@ -95,7 +87,6 @@ RUN git config --global --add safe.directory "*"
 
 ENV SSL_CERT_FILE=/opt/_internal/certs.pem
 # Install LLVM version
-COPY --from=openssl            /opt/openssl                          /opt/openssl
 COPY --from=base               /opt/python                           /opt/python
 COPY --from=base               /usr/local/lib/                       /usr/local/lib/
 COPY --from=base               /opt/_internal                        /opt/_internal
@@ -127,9 +118,9 @@ RUN for cpython_version in "cp312-cp312" "cp313-cp313" "cp313-cp313t"; do \
 ADD ./common/patch_libstdc.sh patch_libstdc.sh
 RUN bash ./patch_libstdc.sh && rm patch_libstdc.sh
 
-# cmake-3.18.4 from pip; force in case cmake3 already exists
+# cmake-3.18.4.post1 from pip; force in case cmake3 already exists
 RUN yum install -y python3-pip && \
-    python3 -mpip install cmake==3.18.4 && \
+    python3 -mpip install cmake==3.18.4.post1 && \
     ln -sf /usr/local/bin/cmake /usr/bin/cmake3
 
 FROM cpu_final as cuda_final
@@ -144,7 +135,8 @@ ARG ROCM_VERSION=6.0
 ARG PYTORCH_ROCM_ARCH
 ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
 ARG DEVTOOLSET_VERSION=13
-ENV LDFLAGS="-Wl,-rpath=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64 -Wl,-rpath=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib"
+# All rocm clang cfg files load the same rocm.cfg, make sure it points to the right toolchain.
+RUN echo "--gcc-toolchain=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr" >> /opt/rocm/llvm/bin/rocm.cfg
 # Somewhere in ROCm stack, we still use non-existing /opt/rocm/hip path,
 # below workaround helps avoid error
 ENV ROCM_PATH /opt/rocm
@@ -154,12 +146,16 @@ RUN python3 -m pip install --upgrade pip && \
     python3 -mpip install cmake==3.28.4
 # replace the libdrm in /opt/amdgpu with custom amdgpu.ids lookup path
 ADD ./common/install_rocm_drm.sh install_rocm_drm.sh
-RUN bash ./install_rocm_drm.sh && rm install_rocm_drm.sh
+RUN bash ./install_rocm_drm.sh /opt/amdgpu && rm install_rocm_drm.sh
 # ROCm 6.4 rocm-smi depends on system drm.h header
 RUN yum install -y libdrm-devel
 ENV MKLROOT /opt/intel
 ADD ./common/install_rocm_magma.sh install_rocm_magma.sh
 RUN bash ./install_rocm_magma.sh ${ROCM_VERSION} && rm install_rocm_magma.sh
+
+ADD ./common/install_rocSHMEM.sh install_rocSHMEM.sh
+RUN bash ./install_rocSHMEM.sh ${ROCM_VERSION} && rm install_rocSHMEM.sh
+
 ADD ./common/install_miopen.sh install_miopen.sh
 RUN bash ./install_miopen.sh ${ROCM_VERSION} && rm install_miopen.sh
 

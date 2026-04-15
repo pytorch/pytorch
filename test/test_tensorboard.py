@@ -559,7 +559,8 @@ def get_expected_file(function_ptr):
 
 def read_expected_content(function_ptr):
     expected_file = get_expected_file(function_ptr)
-    assert os.path.exists(expected_file), expected_file
+    if not os.path.exists(expected_file):
+        raise AssertionError(f"expected file does not exist: {expected_file}")
     with open(expected_file) as f:
         return f.read()
 
@@ -739,6 +740,7 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
 
 class TestTensorBoardFigure(BaseTestCase):
     @skipIfNoMatplotlib
+    @skipIfTorchDynamo("dynamo fails to trace matplotlib WRITEABLE flag and slice.indices")
     def test_figure(self):
         writer = self.createSummaryWriter()
 
@@ -764,6 +766,7 @@ class TestTensorBoardFigure(BaseTestCase):
         writer.close()
 
     @skipIfNoMatplotlib
+    @skipIfTorchDynamo("dynamo fails to trace matplotlib WRITEABLE flag and slice.indices")
     def test_figure_list(self):
         writer = self.createSummaryWriter()
 

@@ -367,6 +367,25 @@ to configure quantization settings for individual ops.
     default_qat_qconfig_v2
 ```
 
+## torch.ao.quantization.quantization_mappings
+
+```{eval-rst}
+.. automodule:: torch.ao.quantization.quantization_mappings
+```
+
+```{eval-rst}
+.. currentmodule:: torch.ao.quantization.quantization_mappings
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    no_observer_set
+```
+
 ## torch.ao.nn.intrinsic
 
 ```{eval-rst}
@@ -774,6 +793,10 @@ the `custom operator mechanism <https://pytorch.org/tutorials/advanced/torch_scr
 .. automodule:: torch.nn.intrinsic.quantized.dynamic.modules
 .. automodule:: torch.nn.quantized.dynamic.modules
 .. automodule:: torch.quantization
+
+.. currentmodule:: torch.quantization
+.. autofunction:: default_eval_fn
+
 .. automodule:: torch.nn.intrinsic.modules
 ```
 

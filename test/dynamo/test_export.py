@@ -9,6 +9,9 @@ import functools
 import inspect
 import io
 import operator
+import os
+import subprocess
+import sys
 import unittest
 from collections.abc import Sequence
 from enum import Enum
@@ -126,6 +129,15 @@ def forward(self, x, y):
     x = arg0
     return pytree.tree_unflatten([x], self._out_spec)""",
         )
+
+    def test_export_empty_graph_no_error(self):
+        def func(x):
+            return len(x)
+
+        exported = torch._dynamo.export(func)(torch.randn(5))
+        out_graph = exported[0]
+        result = out_graph(torch.randn(5))
+        self.assertEqual(result, 5)
 
     def test_no_tensor_computation_2(self):
         inp = torch.randn(3)
@@ -384,7 +396,9 @@ def forward(self, x, y):
             _error_on_data_dependent_ops=True,
         )(*[x1, x2])
         ep = torch.export.export(fx_model, (x1, x2))
-        res = torch.compile(ep.module(), dynamic=True, fullgraph=True)(x1, x2)
+        res = torch.compile(ep.module(), backend="eager", dynamic=True, fullgraph=True)(
+            x1, x2
+        )
         self.assertTrue(torch._dynamo.utils.same(res, M()(x1, x2)))
 
     def test_dupes(self):
@@ -2873,7 +2887,7 @@ def forward(self, x):
 
     def test_list_contains(self):
         def func(x):
-            assert x.size(-1) in [4, 5, 6], "bad"
+            assert x.size(-1) in [4, 5, 6], "bad"  # noqa: S101
             return x + x
 
         inps = (torch.randn(1, 5),)
@@ -2891,8 +2905,8 @@ def forward(self, x):
 
     def test_list_not_contains(self):
         def func(x):
-            assert x.size(0) not in [4, 5, 6], "bad1"
-            assert "monkey" not in ["cow", "pig"], "bad2"
+            assert x.size(0) not in [4, 5, 6], "bad1"  # noqa: S101
+            assert "monkey" not in ["cow", "pig"], "bad2"  # noqa: S101
             return x + x
 
         inps = (torch.randn(1, 5),)
@@ -3027,7 +3041,7 @@ def forward(self, x):
     @config.patch(assume_static_by_default=False)
     def test_export_persist_assert(self):
         def f(x):
-            assert x[0].sum() > 4, "Shape must be more than 4"
+            assert x[0].sum() > 4, "Shape must be more than 4"  # noqa: S101
             return x.cos() + x.sin()
 
         gm, _ = torch._dynamo.export(f, aten_graph=True, tracing_mode="symbolic")(
@@ -4364,7 +4378,7 @@ def forward(self, x):
 
         expected = [
             """x = torch.sin(l_x_)""",
-            """cos = torch.cos(l_stack0_)""",
+            """cos = torch.cos(l_nested_frame_values_0_1_)""",
         ]
 
         def test_backend(gm: torch.fx.GraphModule, example_inputs):
@@ -4568,6 +4582,32 @@ def forward(self, x, b, y):
             res = ep.module()(*inputs)
 
         self.assertEqual(ref, res)
+
+
+class ExportTestsSubprocess(torch._dynamo.test_case.TestCase):
+    def test_strict_export_under_pythonoptimize(self):
+        env = dict(os.environ)
+        env["PYTHONOPTIMIZE"] = "1"
+        code = """\
+import torch
+model = torch.nn.Linear(2, 3)
+example_input = torch.randn(1, 2)
+ep = torch.export.export(model, args=(example_input,), strict=True)
+out_export = ep.module()(example_input)
+out_orig = model(example_input)
+torch.testing.assert_close(out_export, out_orig)
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=f"strict export under PYTHONOPTIMIZE=1 failed: stdout={result.stdout!r} stderr={result.stderr!r}",
+        )
 
 
 class ExportTestsDevice(torch._dynamo.test_case.TestCase):

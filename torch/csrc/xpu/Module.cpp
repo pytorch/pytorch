@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/xpu/XPUContext.h>
 #include <ATen/xpu/XPUGeneratorImpl.h>
+#include <ATen/xpu/XPUGraphsUtils.h>
 #include <c10/xpu/XPUCachingAllocator.h>
 #include <c10/xpu/XPUFunctions.h>
 #include <torch/csrc/Module.h>
@@ -335,7 +336,10 @@ static void registerXpuDeviceProperties(PyObject* module) {
       ._(gpu_eu_count)                                           \
       ._(max_work_group_size)                                    \
       ._(max_num_sub_groups)                                     \
+      ._(memory_clock_rate)                                      \
+      ._(memory_bus_width)                                       \
       ._(sub_group_sizes)                                        \
+      ._(local_mem_size)                                         \
       ._(has_fp16)                                               \
       ._(has_fp64)                                               \
       ._(has_atomic64)                                           \
@@ -366,9 +370,12 @@ static void registerXpuDeviceProperties(PyObject* module) {
                           reinterpret_cast<const char*>(prop.uuid.data()))
                    << ", driver_version='" << prop.driver_version
                    << "', total_memory="
-                   << prop.global_mem_size / (1024ull * 1024) << "MB"
-                   << ", max_compute_units=" << prop.max_compute_units
-                   << ", gpu_eu_count=" << prop.gpu_eu_count
+                   << prop.global_mem_size / (1024ull * 1024)
+                   << "MB, local_mem_size=" << prop.local_mem_size / 1024ull
+                   << "KB, max_compute_units=" << prop.max_compute_units
+                   << ", memory_clock_rate=" << prop.memory_clock_rate
+                   << "MHz, memory_bus_width=" << prop.memory_bus_width
+                   << "-bit, gpu_eu_count=" << prop.gpu_eu_count
                    << ", gpu_subslice_count=" << gpu_subslice_count(prop)
                    << ", max_work_group_size=" << prop.max_work_group_size
                    << ", max_num_sub_groups=" << prop.max_num_sub_groups
@@ -666,6 +673,19 @@ static PyObject* THXPModule_initExtension(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THXPModule_isCurrentStreamCapturing_wrap(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  if (at::xpu::currentStreamCaptureStatus() ==
+      at::xpu::CaptureStatus::Executing) {
+    Py_RETURN_FALSE;
+  } else {
+    Py_RETURN_TRUE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 // NOLINTNEXTLINE(*-c-arrays*, *-global-variables)
 static struct PyMethodDef _THXPModule_methods[] = {
     {"_xpu_init", THXPModule_initExtension, METH_NOARGS, nullptr},
@@ -689,6 +709,10 @@ static struct PyMethodDef _THXPModule_methods[] = {
     {"_xpu_getCurrentRawStream",
      THXPModule_getCurrentStream_raw,
      METH_O,
+     nullptr},
+    {"_xpu_isCurrentStreamCapturing",
+     THXPModule_isCurrentStreamCapturing_wrap,
+     METH_NOARGS,
      nullptr},
     {"_xpu_setStream",
      castPyCFunctionWithKeywords(THXPModule_setStream_wrap),

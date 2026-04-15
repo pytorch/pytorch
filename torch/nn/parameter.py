@@ -101,6 +101,7 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
             (self.data, self.requires_grad, hooks, state),
         )
 
+    # pyrefly: ignore [bad-override]
     __torch_function__ = _disabled_torch_function_impl
 
 
@@ -144,7 +145,7 @@ class UninitializedTensorMixin:
         if dtype is None:
             dtype = self.data.dtype
         self.data = torch.empty(shape, device=device, dtype=dtype)
-        # pyrefly: ignore [bad-override, missing-attribute]
+        # pyrefly: ignore [missing-attribute]
         self.__class__ = self.cls_to_become
 
     @property
@@ -273,6 +274,7 @@ class Buffer(torch.Tensor, metaclass=_BufferMeta):
         t._is_buffer = True
         return t
 
+    # pyrefly: ignore [bad-override]
     __torch_function__ = _disabled_torch_function_impl
 
 

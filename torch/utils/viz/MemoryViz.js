@@ -1,3 +1,61 @@
+/**
+ * ================================================================================
+ * MemoryViz.js - PyTorch Memory Visualization Tool
+ * ================================================================================
+ *
+ * OVERVIEW:
+ * ---------
+ * This file contains the core visualization logic for PyTorch's memory profiler.
+ * It renders memory allocation timelines, stack traces, and provides interactive
+ * exploration of memory snapshots captured during model execution.
+ *
+ * KEY FEATURES:
+ * - Multiple visualization tabs/views for different memory analysis perspectives
+ * - Interactive stack trace display (supports both click and hover modes)
+ * - Zoom and brush controls for navigating large memory timelines
+ * - Support for loading memory snapshot files (.pickle format)
+ *
+ * ================================================================================
+ * TESTING INSTRUCTIONS FOR ENGINEERS & AGENTS
+ * ================================================================================
+ *
+ * 1. LOCAL TESTING SETUP:
+ *    - Create a simple HTML file that references this JS file:
+ *
+ *      <!DOCTYPE html>
+ *      <html>
+ *      <head><title>MemoryViz Test</title></head>
+ *      <body>
+ *        <script type="module" src="MemoryViz.js"></script>
+ *      </body>
+ *      </html>
+ *
+ *    - Serve locally using: python3 -m http.server 8888
+ *    - Open http://localhost:8888 in your browser
+ *
+ * 2. WHAT TO TEST:
+ *    - Ensure ALL tabs/views render correctly and switch properly
+ *    - Verify BOTH interaction modes work:
+ *      * Click mode: stack traces appear on click
+ *      * Hover mode: stack traces appear on mouseover
+ *    - Test zoom and brush controls for timeline navigation
+ *    - Verify memory allocation blocks are rendered and interactive
+ *
+ * 3. TEST DATA REQUIREMENTS:
+ *    - DO NOT just test with small dummy .pickle files
+ *    - Use realistic, decent-sized .pickle files (10-100+ MB range)
+ *    - Large files stress-test rendering performance and memory handling
+ *    - Test with snapshots from real model training/inference runs
+ *
+ * 4. COMMON ISSUES TO WATCH FOR:
+ *    - Performance degradation with large snapshots
+ *    - Stack trace popups not appearing or positioning incorrectly
+ *    - Tab switching not updating the visualization properly
+ *    - Zoom/brush state not persisting across interactions
+ *
+ * ================================================================================
+ */
+
 'use strict';
 
 import * as d3 from "https://cdn.jsdelivr.net/npm/d3@7/+esm";
@@ -5,6 +63,24 @@ import {axisLeft} from "https://cdn.jsdelivr.net/npm/d3-axis@3/+esm";
 import {scaleLinear} from "https://cdn.jsdelivr.net/npm/d3-scale@4/+esm";
 import {zoom, zoomIdentity} from "https://cdn.jsdelivr.net/npm/d3-zoom@3/+esm";
 import {brushX} from "https://cdn.jsdelivr.net/npm/d3-brush@3/+esm";
+import {process_alloc_data, isPrivatePoolId, formatSize, formatAddr,
+        elideRepeats, frameFilter, format_user_metadata,
+        format_forward_frames, format_frames} from "./process_alloc_data.js";
+
+// Global configuration for trace interaction mode
+// 'hover' = show trace on hover (default)
+// 'click' = show trace on click
+let traceInteractionMode = 'hover';
+
+function setTraceInteractionMode(mode) {
+  if (mode === 'click' || mode === 'hover') {
+    traceInteractionMode = mode;
+  }
+}
+
+function getTraceInteractionMode() {
+  return traceInteractionMode;
+}
 
 const schemeTableau10 = [
   '#4e79a7',
@@ -33,8 +109,8 @@ function version_space() {
   };
 }
 
-function Segment(addr, size, stream, frames, version, user_metadata) {
-  return {addr, size, stream, version, frames, user_metadata};
+function Segment(addr, size, stream, frames, version, user_metadata, segment_pool_id) {
+  return {addr, size, stream, version, frames, user_metadata, segment_pool_id};
 }
 
 function Block(addr, size, requested_size, frames, free_requested, version, user_metadata) {
@@ -100,22 +176,6 @@ function EventSelector(outer, events, stack_info, memory_view) {
   return es;
 }
 
-function formatSize(num) {
-  const orig = num;
-  // https://stackoverflow.com/questions/1094841/get-human-readable-version-of-file-size
-  const units = ['', 'Ki', 'Mi', 'Gi', 'Ti', 'Pi', 'Ei', 'Zi'];
-  for (const unit of units) {
-    if (Math.abs(num) < 1024.0) {
-      return `${num.toFixed(1)}${unit}B (${orig} bytes)`;
-    }
-    num /= 1024.0;
-  }
-  return `${num.toFixed(1)}YiB`;
-}
-function formatAddr(event) {
-  const prefix = event.action.startsWith('segment') ? 's\'' : 'b\'';
-  return `${prefix}${event.addr.toString(16)}_${event.version}`;
-}
 function formatEvent(event) {
   const stream =
     event.stream === null ? '' : `\n              (stream ${event.stream})`;
@@ -142,7 +202,8 @@ function eventStack(e, allocated, reserved) {
   }
   const user_metadata_str = format_user_metadata(e.user_metadata);
   const frames_str = format_frames(e.frames);
-  return event + '\n' + (user_metadata_str ? user_metadata_str + '\n' : '') + frames_str;
+  const forward_frames_str = format_forward_frames(e.forward_frames);
+  return event + '\n' + (user_metadata_str ? user_metadata_str + '\n' : '') + frames_str + forward_frames_str;
 }
 
 function hashCode(num) {
@@ -227,6 +288,7 @@ function MemoryView(outer, stack_info, snapshot, device) {
         seg.frames || [],
         seg.version,
         seg.user_metadata,
+        seg.segment_pool_id,
       ),
     );
     for (const b of seg.blocks) {
@@ -470,15 +532,21 @@ function MemoryView(outer, stack_info, snapshot, device) {
           }
           const user_metadata_str = format_user_metadata(t.user_metadata);
           const frames_str = format_frames(t.frames);
+          const forward_frames_str = format_forward_frames(t.forward_frames);
+          let pool_str = '';
+          if (isPrivatePoolId(t.segment_pool_id)) {
+            pool_str = `, pool_id (${t.segment_pool_id[0]}, ${t.segment_pool_id[1]})`;
+          }
           return (
             `s${t.addr.toString(16)}_${t.version}: segment ${formatSize(
               t.size,
             )} allocated, ` +
             `${formatSize(free)} free${internal} (stream ${
               t.stream
-            })\n` +
+            }${pool_str})\n` +
             (user_metadata_str ? user_metadata_str + '\n' : '') +
-            frames_str
+            frames_str +
+            forward_frames_str
           );
         },
         d => {
@@ -542,13 +610,19 @@ function MemoryView(outer, stack_info, snapshot, device) {
           }
           const user_metadata_str = format_user_metadata(t.user_metadata);
           const frames_str = format_frames(t.frames);
+          const forward_frames_str = format_forward_frames(t.forward_frames);
+          let pool_str = '';
+          if (isPrivatePoolId(t.segment?.segment_pool_id)) {
+            pool_str = `, pool_id (${t.segment.segment_pool_id[0]}, ${t.segment.segment_pool_id[1]})`;
+          }
           return (
             `b${t.addr.toString(16)}_${t.version} ` +
             `${formatSize(t.requested_size)} allocation${requested} (stream ${
               t.segment.stream
-            })\n` +
+            }${pool_str})\n` +
             (user_metadata_str ? user_metadata_str + '\n' : '') +
-            frames_str
+            frames_str +
+            forward_frames_str
           );
         },
         removeStroke,
@@ -576,13 +650,15 @@ function MemoryView(outer, stack_info, snapshot, device) {
           const t = d.datum();
           const user_metadata_str = format_user_metadata(t.user_metadata);
           const frames_str = format_frames(t.frames);
+          const forward_frames_str = format_forward_frames(t.forward_frames);
           return (
             `Free space lost due to rounding ${formatSize(
               t.size - t.requested_size,
             )}` +
             ` (stream ${t.segment.stream})\n` +
             (user_metadata_str ? user_metadata_str + '\n' : '') +
-            frames_str
+            frames_str +
+            forward_frames_str
           );
         },
         removeStroke,
@@ -607,23 +683,39 @@ function StackInfo(outer) {
   };
   return {
     register(dom, enter, leave = _e => {}, select = _e => {}) {
-      dom
-        .on('mouseover', function (event) {
-          selected.leave();
-          stack_trace.text(enter(d3.select(event.target)));
-        })
-        .on('mousedown', function (event) {
-          const obj = d3.select(event.target);
-          selected = {
-            enter: () => stack_trace.text(enter(obj)),
-            leave: () => leave(obj),
-          };
-          select(obj);
-        })
-        .on('mouseleave', function (event) {
-          leave(d3.select(event.target));
-          selected.enter();
-        });
+      if (getTraceInteractionMode() === 'hover') {
+        // Hover mode: show on mouseover, pin on click
+        dom
+          .on('mouseover', function (event) {
+            selected.leave();
+            stack_trace.text(enter(d3.select(event.target)));
+          })
+          .on('mousedown', function (event) {
+            const obj = d3.select(event.target);
+            selected = {
+              enter: () => stack_trace.text(enter(obj)),
+              leave: () => leave(obj),
+            };
+            select(obj);
+          })
+          .on('mouseleave', function (event) {
+            leave(d3.select(event.target));
+            selected.enter();
+          });
+      } else {
+        // Click mode: show only on click
+        dom
+          .on('click', function (event) {
+            selected.leave();
+            const obj = d3.select(event.target);
+            selected = {
+              enter: () => stack_trace.text(enter(obj)),
+              leave: () => leave(obj),
+            };
+            stack_trace.text(enter(obj));
+            select(obj);
+          });
+      }
     },
     highlight(enter, leave = () => {}) {
       selected = {enter: () => stack_trace.text(enter()), leave};
@@ -737,6 +829,7 @@ function annotate_snapshot(snapshot) {
         }
       }
       b.version = snapshot.block_version(b.addr, false);
+      b.segment_pool_id = seg.segment_pool_id;
       // Note [BigInt and Number Safe Arithmetic]
       // Device pointer addresses may be represented as either Number or BigInt.
       // Use explicit conversions to perform arithmetic safely and avoid mixing
@@ -751,351 +844,6 @@ function annotate_snapshot(snapshot) {
   ) {
     snapshot.categores.push('unknown');
   }
-}
-
-function elideRepeats(frames) {
-  const result = [];
-  const length = frames.length;
-  for (let i = 0; i < length; ) {
-    let j = i + 1;
-    const f = frames[i];
-    while (j < length && f === frames[j]) {
-      j++;
-    }
-    switch (j - i) {
-      case 1:
-        result.push(f);
-        break;
-      case 2:
-        result.push(f, f);
-        break;
-      default:
-        result.push(f, `<repeats ${j - i - 1} times>`);
-        break;
-    }
-    i = j;
-  }
-  return result;
-}
-function frameFilter({name, filename}) {
-  const omitFunctions = [
-    'unwind::unwind',
-    'CapturedTraceback::gather',
-    'gather_with_cpp',
-    '_start',
-    '__libc_start_main',
-    'PyEval_',
-    'PyObject_',
-    'PyFunction_',
-  ];
-
-  const omitFilenames = [
-    'core/boxing',
-    '/Register',
-    '/Redispatch',
-    'pythonrun.c',
-    'Modules/main.c',
-    'Objects/call.c',
-    'Objects/methodobject.c',
-    'pycore_ceval.h',
-    'ceval.c',
-    'cpython/abstract.h',
-  ];
-
-  for (const of of omitFunctions) {
-    if (name.includes(of)) {
-      return false;
-    }
-  }
-
-  for (const of of omitFilenames) {
-    if (filename.includes(of)) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-function format_user_metadata(user_metadata) {
-  if (!user_metadata) {
-    return '';
-  }
-  // Handle string metadata
-  if (typeof user_metadata === 'string') {
-    return `User Metadata:\n  ${user_metadata}`;
-  }
-  // Handle object metadata
-  if (typeof user_metadata === 'object' && Object.keys(user_metadata).length === 0) {
-    return '';
-  }
-  const metadata_lines = Object.entries(user_metadata)
-    .map(([key, value]) => `  ${key}: ${value}`);
-  return 'User Metadata:\n' + metadata_lines.join('\n');
-}
-
-function format_frames(frames) {
-  if (frames.length === 0) {
-    return (
-      `This block has no frames. Potential causes:\n` +
-      `1) This block was allocated before _record_memory_history was enabled.\n` +
-      `2) The context or stacks passed to _record_memory_history does not include this block. Consider changing context to 'state', 'alloc', or 'all', or changing stacks to 'all'.\n` +
-      `3) This event occurred during backward, which has no python frames, and memory history did not include C++ frames. Use stacks='all' to record both C++ and python frames.`
-    );
-  }
-  const frame_strings = frames
-    .filter(frameFilter)
-    .map(f => {
-      let frame_str = `${f.filename}:${f.line}:${f.name}`;
-
-      // Add FX debug information if available
-      if (f.fx_node_op || f.fx_node_name || f.fx_node_target) {
-        const fx_parts = [];
-        if (f.fx_node_name) fx_parts.push(`node=${f.fx_node_name}`);
-        if (f.fx_node_op) fx_parts.push(`op=${f.fx_node_op}`);
-        if (f.fx_node_target) fx_parts.push(`target=${f.fx_node_target}`);
-        frame_str += `\n    >> FX: ${fx_parts.join(', ')}`;
-      }
-
-      if (f.fx_original_trace) {
-        frame_str += `\n    >> Original Model Code:`;
-        const original_lines = f.fx_original_trace.trim().split('\n');
-        // Show all lines of the original trace
-        for (const line of original_lines) {
-          frame_str += `\n       ${line}`;
-        }
-      }
-
-      return frame_str;
-    });
-  return elideRepeats(frame_strings).join('\n');
-}
-
-function process_alloc_data(snapshot, device, plot_segments, max_entries) {
-  const elements = [];
-  const initially_allocated = [];
-  const actions = [];
-  const addr_to_alloc = {};
-
-  const alloc = plot_segments ? 'segment_alloc' : 'alloc';
-  const [free, free_completed] = plot_segments
-    ? ['segment_free', 'segment_free']
-    : ['free', 'free_completed'];
-  for (const e of snapshot.device_traces[device]) {
-    switch (e.action) {
-      case alloc:
-        elements.push(e);
-        addr_to_alloc[e.addr] = elements.length - 1;
-        actions.push(elements.length - 1);
-        break;
-      case free:
-      case free_completed:
-        if (e.addr in addr_to_alloc) {
-          actions.push(addr_to_alloc[e.addr]);
-          delete addr_to_alloc[e.addr];
-        } else {
-          elements.push(e);
-          initially_allocated.push(elements.length - 1);
-          actions.push(elements.length - 1);
-        }
-        break;
-      default:
-        break;
-    }
-  }
-  for (const seg of snapshot.segments) {
-    if (seg.device !== device) {
-      continue;
-    }
-    if (plot_segments) {
-      if (!(seg.address in addr_to_alloc)) {
-        const element = {
-          action: 'alloc',
-          addr: seg.address,
-          size: seg.total_size,
-          frames: [],
-          stream: seg.stream,
-          version: seg.version,
-        };
-        elements.push(element);
-        initially_allocated.push(elements.length - 1);
-      }
-    } else {
-      for (const b of seg.blocks) {
-        if (b.state === 'active_allocated' && !(b.addr in addr_to_alloc)) {
-          const element = {
-            action: 'alloc',
-            addr: b.addr,
-            size: b.requested_size,
-            frames: b.frames,
-            stream: seg.stream,
-            version: b.version,
-          };
-          elements.push(element);
-          initially_allocated.push(elements.length - 1);
-        }
-      }
-    }
-  }
-  initially_allocated.reverse();
-  // if there are no actions, the graph will be blank,
-  // but if there are existing allocations we do not want to hide them
-  // by having just one allocate action it will show a flat graph with all segments
-  if (actions.length === 0 && initially_allocated.length > 0) {
-    actions.push(initially_allocated.pop());
-  }
-
-  const current = [];
-  const current_data = [];
-  const data = [];
-  let max_size = 0;
-
-  let total_mem = 0;
-  let total_summarized_mem = 0;
-  let timestep = 0;
-
-  const max_at_time = [];
-
-  const summarized_mem = {
-    elem: 'summarized',
-    timesteps: [],
-    offsets: [total_mem],
-    size: [],
-    color: 0,
-  };
-  const summarized_elems = {};
-
-  function advance(n) {
-    summarized_mem.timesteps.push(timestep);
-    summarized_mem.offsets.push(total_mem);
-    summarized_mem.size.push(total_summarized_mem);
-    timestep += n;
-    for (let i = 0; i < n; i++) {
-      max_at_time.push(total_mem + total_summarized_mem);
-    }
-  }
-
-  const sizes = elements
-    .map((x, i) => [x.size, i])
-    .sort(([x, _xi], [y, _yi]) => y - x);
-
-  const draw_elem = {};
-  for (const [_s, e] of sizes.slice(0, max_entries)) {
-    draw_elem[e] = true;
-  }
-
-  function add_allocation(elem) {
-    const element_obj = elements[elem];
-    const size = element_obj.size;
-    current.push(elem);
-    let color = elem;
-    if (snapshot.categories.length > 0) {
-      color = snapshot.categories.indexOf(element_obj.category || 'unknown');
-    }
-    const e = {
-      elem,
-      timesteps: [timestep],
-      offsets: [total_mem],
-      size,
-      color,
-    };
-    current_data.push(e);
-    data.push(e);
-    total_mem += size;
-    element_obj.max_allocated_mem = total_mem + total_summarized_mem;
-  }
-
-  for (const elem of initially_allocated) {
-    if (elem in draw_elem) {
-      add_allocation(elem);
-    } else {
-      total_summarized_mem += elements[elem].size;
-      summarized_elems[elem] = true;
-    }
-  }
-
-  for (const elem of actions) {
-    const size = elements[elem].size;
-    if (!(elem in draw_elem)) {
-      if (elem in summarized_elems) {
-        advance(1);
-        total_summarized_mem -= size;
-        summarized_elems[elem] = null;
-      } else {
-        total_summarized_mem += size;
-        summarized_elems[elem] = true;
-        advance(1);
-      }
-      continue;
-    }
-    const idx = current.findLastIndex(x => x === elem);
-    // first time we see an action we add it
-    // second time we remove it
-    if (idx === -1) {
-      add_allocation(elem);
-      advance(1);
-    } else {
-      advance(1);
-      const removed = current_data[idx];
-      removed.timesteps.push(timestep);
-      removed.offsets.push(removed.offsets.at(-1));
-      current.splice(idx, 1);
-      current_data.splice(idx, 1);
-
-      if (idx < current.length) {
-        for (let j = idx; j < current.length; j++) {
-          const e = current_data[j];
-          e.timesteps.push(timestep);
-          e.offsets.push(e.offsets.at(-1));
-          e.timesteps.push(timestep + 3);
-          e.offsets.push(e.offsets.at(-1) - size);
-        }
-        advance(3);
-      }
-      total_mem -= size;
-    }
-    max_size = Math.max(total_mem + total_summarized_mem, max_size);
-  }
-
-  for (const elem of current_data) {
-    elem.timesteps.push(timestep);
-    elem.offsets.push(elem.offsets.at(-1));
-  }
-  data.push(summarized_mem);
-
-  return {
-    max_size,
-    allocations_over_time: data,
-    max_at_time,
-    summarized_mem,
-    elements_length: elements.length,
-    context_for_id: id => {
-      const elem = elements[id];
-      let text = `Addr: ${formatAddr(elem)}`;
-      text = `${text}, Size: ${formatSize(elem.size)} allocation`;
-      text = `${text}, Total memory used after allocation: ${formatSize(
-        elem.max_allocated_mem,
-      )}`;
-      const context = elem?.compile_context ?? 'None';
-      text = `${text}, Compile context: ${context}`;
-      if (elem.stream !== null) {
-        text = `${text}, stream ${elem.stream}`;
-      }
-      if (elem.timestamp !== null) {
-        var d = new Date(elem.time_us / 1000);
-        text = `${text}, timestamp ${d}`;
-      }
-      if (!elem.action.includes('alloc')) {
-        text = `${text}\nalloc not recorded, stack trace for free:`;
-      }
-      const user_metadata_str = format_user_metadata(elem.user_metadata);
-      if (user_metadata_str) {
-        text = `${text}\n${user_metadata_str}`;
-      }
-      text = `${text}\n${format_frames(elem.frames)}`;
-      return text;
-    },
-  };
 }
 
 function MemoryPlot(
@@ -1126,7 +874,8 @@ function MemoryPlot(
   const plot_height = height;
 
   const yscale = scaleLinear().domain([0, max_size]).range([plot_height, 0]);
-  const yaxis = axisLeft(yscale).tickFormat(d3.format('.3s'));
+  // Use formatSize with showBytes=false for clean axis labels
+  const yaxis = axisLeft(yscale).tickFormat(d => formatSize(d, false));
   const xscale = scaleLinear().domain([0, max_timestep]).range([0, plot_width]);
   const plot_coordinate_space = svg
     .append('g')
@@ -1158,7 +907,8 @@ function MemoryPlot(
     .enter()
     .append('polygon')
     .attr('points', format_points)
-    .attr('fill', d => colors[d.color % colors.length]);
+    .attr('fill', d => colors[d.color % colors.length])
+    .attr('opacity', d => d.opacity ?? 1);
 
   const axis = plot_coordinate_space.append('g').call(yaxis);
 
@@ -1190,16 +940,26 @@ function MemoryPlot(
       );
     },
     set_delegate: delegate => {
-      plot
-        .on('mouseover', function (_e, _d) {
-          delegate.set_selected(d3.select(this));
-        })
-        .on('mousedown', function (_e, _d) {
-          delegate.default_selected = d3.select(this);
-        })
-        .on('mouseleave', function (_e, _d) {
-          delegate.set_selected(delegate.default_selected);
-        });
+      if (getTraceInteractionMode() === 'hover') {
+        // Hover mode: show on mouseover, pin on click
+        plot
+          .on('mouseover', function (_e, _d) {
+            delegate.set_selected(d3.select(this));
+          })
+          .on('mousedown', function (_e, _d) {
+            delegate.default_selected = d3.select(this);
+          })
+          .on('mouseleave', function (_e, _d) {
+            delegate.set_selected(delegate.default_selected);
+          });
+      } else {
+        // Click mode: show only on click
+        plot
+          .on('click', function (_e, _d) {
+            delegate.default_selected = d3.select(this);
+            delegate.set_selected(d3.select(this));
+          });
+      }
     },
   };
 }
@@ -1207,11 +967,34 @@ function MemoryPlot(
 function ContextViewer(text, data) {
   let current_selected = null;
 
+  function restore_search_highlight(d) {
+    if (!d) return;
+    const addr = d.attr('data-search-match') === 'true';
+    const frame = d.attr('data-frame-match') === 'true';
+    if (addr && frame) {
+      d.attr('stroke', '#ff00ff')
+        .attr('stroke-width', 3)
+        .attr('stroke-dasharray', '6,3')
+        .attr('vector-effect', 'non-scaling-stroke');
+    } else if (addr) {
+      d.attr('stroke', 'red')
+        .attr('stroke-width', 2)
+        .attr('stroke-dasharray', null)
+        .attr('vector-effect', 'non-scaling-stroke');
+    } else if (frame) {
+      d.attr('stroke', '#2196F3')
+        .attr('stroke-width', 2)
+        .attr('stroke-dasharray', null)
+        .attr('vector-effect', 'non-scaling-stroke');
+    }
+  }
+
   return {
     default_selected: null,
     set_selected: d => {
       if (current_selected !== null) {
-        current_selected.attr('stroke', null).attr('stroke-width', null);
+        current_selected.attr('stroke', null).attr('stroke-width', null).attr('stroke-dasharray', null);
+        restore_search_highlight(current_selected);
       }
       if (d === null) {
         text.text('');
@@ -1222,6 +1005,10 @@ function ContextViewer(text, data) {
             'Small tensors that were not plotted to cutdown on render time.\n' +
               'Use detail slider to see smaller allocations.',
           );
+        } else if (typeof dd.elem === 'string' && dd.elem.startsWith('pool:')) {
+          const pool_key = dd.elem.slice(5);
+          const capacity = Array.isArray(dd.size) ? dd.size.at(-1) : dd.size;
+          text.text(`Private Pool (${pool_key}): capacity ${formatSize(capacity)}`);
         } else {
           text.text(`${dd.elem} ${data.context_for_id(dd.elem)}`);
         }
@@ -1322,13 +1109,20 @@ function create_trace_view(
   device,
   plot_segments = false,
   max_entries = 15000,
+  include_private_inactive = false,
 ) {
   const left_pad = 70;
-  const data = process_alloc_data(snapshot, device, plot_segments, max_entries);
+  const data = process_alloc_data(snapshot, device, plot_segments, max_entries, include_private_inactive);
   dst.selectAll('svg').remove();
   dst.selectAll('div').remove();
 
   max_entries = Math.min(max_entries, data.elements_length);
+  if (include_private_inactive) {
+    dst.append('div')
+      .attr('style', 'padding: 4px 8px; background: #fff3cd; border: 1px solid #ffc107; font-size: 13px; margin-bottom: 4px;')
+      .text('Note: Private pool memory (the gray bar) is shown as allocated until the pool\'s segment is freed. '
+          + 'This view requires that MemPools are not deleted before torch.cuda.memory._snapshot() is called.');
+  }
   const d = dst.append('div');
   d.append('input')
     .attr('type', 'range')
@@ -1336,17 +1130,33 @@ function create_trace_view(
     .attr('max', data.elements_length)
     .attr('value', max_entries)
     .on('change', function () {
-      create_trace_view(dst, snapshot, device, plot_segments, this.value);
+      create_trace_view(dst, snapshot, device, plot_segments, this.value, include_private_inactive);
     });
   d.append('label').text(
     `Detail: ${max_entries} of ${data.elements_length} entries`,
   );
 
+  d.append('span').text('  |  ');
+  const search_input = d.append('input')
+    .attr('type', 'text')
+    .attr('placeholder', 'Search address (hex)...')
+    .attr('style', 'width: 180px; margin-left: 4px; font-family: monospace;');
+  const search_label = d.append('label')
+    .attr('style', 'margin-left: 4px;');
+
+  d.append('span').text('  |  ');
+  const frame_input = d.append('input')
+    .attr('type', 'text')
+    .attr('placeholder', 'Search stack frame...')
+    .attr('style', 'width: 200px; margin-left: 4px; font-family: monospace;');
+  const frame_label = d.append('label')
+    .attr('style', 'margin-left: 4px;');
+
   const grid_container = dst
     .append('div')
     .attr(
       'style',
-      'display: grid; grid-template-columns: 1fr; grid-template-rows: 10fr 1fr 8fr; height: 100%; gap: 10px',
+      'display: grid; grid-template-columns: 1fr; grid-template-rows: 10fr 1fr 8fr; flex: 1; min-height: 0; gap: 10px',
     );
 
   const plot_svg = grid_container
@@ -1374,10 +1184,65 @@ function create_trace_view(
     .append('div')
     .attr(
       'style',
-      'grid-column: 1; grid-row: 3; width: 100%; height: 100%; overflow: auto;',
+      'grid-column: 1; grid-row: 3; width: 100%; height: 100%; min-height: 0; overflow: auto;',
     );
   const delegate = ContextViewer(context_div.append('pre').text('none'), data);
   plot.set_delegate(delegate);
+
+  function apply_search_highlights() {
+    const addr_query = search_input.node().value.toLowerCase().trim();
+    const frame_query = frame_input.node().value.toLowerCase().trim();
+    const polygons = plot_svg.selectAll('polygon');
+    let addr_matches = 0;
+    let frame_matches = 0;
+    polygons.each(function () {
+      const dd = d3.select(this).datum();
+      if (!dd || typeof dd.elem !== 'number') {
+        d3.select(this)
+          .attr('data-search-match', null)
+          .attr('data-frame-match', null);
+        return;
+      }
+      const ctx = data.context_for_id(dd.elem);
+      const ctx_lower = ctx.toLowerCase();
+      const addr_hit = addr_query && ctx_lower.includes(addr_query);
+      const frame_hit = frame_query && ctx_lower.includes(frame_query);
+      d3.select(this)
+        .attr('data-search-match', addr_hit ? 'true' : null)
+        .attr('data-frame-match', frame_hit ? 'true' : null);
+      if (addr_hit && frame_hit) {
+        d3.select(this)
+          .attr('stroke', '#ff00ff')
+          .attr('stroke-width', 3)
+          .attr('stroke-dasharray', '6,3')
+          .attr('vector-effect', 'non-scaling-stroke');
+      } else if (addr_hit) {
+        d3.select(this)
+          .attr('stroke', 'red')
+          .attr('stroke-width', 2)
+          .attr('stroke-dasharray', null)
+          .attr('vector-effect', 'non-scaling-stroke');
+      } else if (frame_hit) {
+        d3.select(this)
+          .attr('stroke', '#2196F3')
+          .attr('stroke-width', 2)
+          .attr('stroke-dasharray', null)
+          .attr('vector-effect', 'non-scaling-stroke');
+      } else {
+        d3.select(this)
+          .attr('stroke', null)
+          .attr('stroke-width', null)
+          .attr('stroke-dasharray', null);
+      }
+      if (addr_hit) addr_matches++;
+      if (frame_hit) frame_matches++;
+    });
+    search_label.text(addr_query ? `${addr_matches} match${addr_matches !== 1 ? 'es' : ''}` : '');
+    frame_label.text(frame_query ? `${frame_matches} match${frame_matches !== 1 ? 'es' : ''}` : '');
+  }
+
+  search_input.on('input', apply_search_highlights);
+  frame_input.on('input', apply_search_highlights);
 }
 
 function create_settings_view(dst, snapshot, device) {
@@ -1699,6 +1564,8 @@ function decode_base64(input) {
 
 const kinds = {
   'Active Memory Timeline': create_trace_view,
+  'Allocated Memory (incl. Private Pools)': (dst, snapshot, device) =>
+    create_trace_view(dst, snapshot, device, false, 15000, true),
   'Allocator State History': create_segment_view,
   'Active Cached Segment Timeline': (dst, snapshot, device) =>
     create_trace_view(dst, snapshot, device, true),
@@ -1716,18 +1583,42 @@ pre {
 }
 html, body {
   height: 100%;
+  margin: 0;
   overflow: clip;
+}
+body {
+  display: flex;
+  flex-direction: column;
 }`;
 
 const head = d3.select('head');
 head.append('style').text(style);
 const body = d3.select('body');
-const snapshot_select = body.append('select');
-const view = body.append('select');
+const controls = body.append('div');
+const snapshot_select = controls.append('select');
+const view = controls.append('select');
 for (const x in kinds) {
   view.append('option').text(x);
 }
-const gpu = body.append('select');
+const gpu = controls.append('select');
+
+// Add interaction mode toggle (hover vs click)
+const interactionLabel = body.append('label')
+  .attr('style', 'margin-left: 15px; cursor: pointer;');
+const interactionCheckbox = interactionLabel.append('input')
+  .attr('type', 'checkbox')
+  .attr('id', 'interaction-mode-toggle')
+  .attr('style', 'cursor: pointer; margin-right: 5px;');
+interactionLabel.append('span').text('Require click to show trace (applies on file load)');
+
+interactionCheckbox.on('change', function() {
+  const mode = this.checked ? 'click' : 'hover';
+  setTraceInteractionMode(mode);
+  // Only refresh the view if a snapshot is already loaded
+  if (snapshot_select.node().value) {
+    selected_change();
+  }
+});
 
 function unpickle_and_annotate(data) {
   data = unpickle(data);
@@ -1778,12 +1669,12 @@ function snapshot_change(f) {
   }
   const selected_div = selection_to_div[key];
 
-  selected_div.attr('style', 'display: float; height: 100%');
+  selected_div.attr('style', 'display: flex; flex-direction: column; flex: 1; min-height: 0');
 }
 
 function selected_change() {
   for (const d of Object.values(selection_to_div)) {
-    d.attr('style', 'display: none; height: 100%');
+    d.attr('style', 'display: none; flex-direction: column; flex: 1; min-height: 0');
   }
   const f = snapshot_select.node().value;
   if (f === '') {
@@ -1885,3 +1776,6 @@ export function add_local_files(files, view_value) {
     selected_change();
   }
 }
+
+// Export configuration functions for external use
+export { setTraceInteractionMode, getTraceInteractionMode };

@@ -9,7 +9,6 @@ import itertools
 import os
 import unittest
 from collections import OrderedDict
-from typing import Optional, Union
 
 import numpy as np
 
@@ -95,8 +94,8 @@ def _init_test_rpn():
 
 def _construct_tensor_for_quantization_test(
     shape: tuple[int, ...],
-    offset: Optional[Union[int, float]] = None,
-    max_val: Optional[Union[int, float]] = None,
+    offset: int | float | None = None,
+    max_val: int | float | None = None,
 ) -> Tensor:
     """Helper function to generate weights and test inputs in a deterministic way.
 
@@ -361,7 +360,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             masks, boxes, [torch.tensor(o_im_s[0]), torch.tensor(o_im_s[1])]
         )
 
-        assert torch.all(out.eq(out_trace))
+        if not torch.all(out.eq(out_trace)):
+            raise AssertionError("Outputs do not match")
 
         masks2 = torch.rand(20, 1, 26, 26)
         boxes2 = torch.rand(20, 4)
@@ -375,7 +375,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             masks2, boxes2, [torch.tensor(o_im_s2[0]), torch.tensor(o_im_s2[1])]
         )
 
-        assert torch.all(out2.eq(out_trace2))
+        if not torch.all(out2.eq(out_trace2)):
+            raise AssertionError("Outputs do not match")
 
     def test_heatmaps_to_keypoints(self):
         maps = torch.rand(10, 1, 26, 26)
@@ -386,8 +387,10 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         jit_trace = torch.jit.trace(heatmaps_to_keypoints, (maps, rois))
         out_trace = jit_trace(maps, rois)
 
-        assert torch.all(out[0].eq(out_trace[0]))
-        assert torch.all(out[1].eq(out_trace[1]))
+        if not torch.all(out[0].eq(out_trace[0])):
+            raise AssertionError("Outputs do not match at index 0")
+        if not torch.all(out[1].eq(out_trace[1])):
+            raise AssertionError("Outputs do not match at index 1")
 
         maps2 = torch.rand(20, 2, 21, 21)
         rois2 = torch.rand(20, 4)
@@ -396,8 +399,10 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         out2 = heatmaps_to_keypoints(maps2, rois2)
         out_trace2 = jit_trace(maps2, rois2)
 
-        assert torch.all(out2[0].eq(out_trace2[0]))
-        assert torch.all(out2[1].eq(out_trace2[1]))
+        if not torch.all(out2[0].eq(out_trace2[0])):
+            raise AssertionError("Outputs do not match at index 0")
+        if not torch.all(out2[1].eq(out_trace2[1])):
+            raise AssertionError("Outputs do not match at index 1")
 
     def test_word_language_model_RNN_TANH(self):
         self.run_word_language_model("RNN_TANH")
@@ -509,8 +514,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     def test_dict_output(self):
         class DictModelOutput(OrderedDict):
             tensor_out: Tensor
-            tuple_out: Optional[tuple[Tensor]] = None
-            list_out: Optional[list[Tensor]] = None
+            tuple_out: tuple[Tensor] | None = None
+            list_out: list[Tensor] | None = None
 
         class MyModel(torch.nn.Module):
             def forward(self, a, b, c, d):
@@ -581,8 +586,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def forward(
                 self,
                 x,
-                y: Optional[Tensor] = None,
-                z: Optional[Tensor] = None,
+                y: Tensor | None = None,
+                z: Tensor | None = None,
             ):
                 if y is not None:
                     return x + y
@@ -610,8 +615,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def forward(
                 self,
                 x,
-                y: Optional[Tensor] = torch.ones(2, 3),
-                z: Optional[Tensor] = torch.zeros(2, 3),
+                y: Tensor | None = torch.ones(2, 3),
+                z: Tensor | None = torch.zeros(2, 3),
             ):
                 if y is not None:
                     return x + y
@@ -634,8 +639,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def forward(
                 self,
                 x,
-                y: Optional[Tensor] = torch.ones(2, 3),
-                z: Optional[Tensor] = torch.zeros(2, 3),
+                y: Tensor | None = torch.ones(2, 3),
+                z: Tensor | None = torch.zeros(2, 3),
             ):
                 if y is not None:
                     return x + y
@@ -669,7 +674,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipIfUnsupportedMinOpsetVersion(15)
     def test_all_optional_default_none(self):
         class Model(torch.nn.Module):
-            def forward(self, x: Optional[Tensor] = None, y: Optional[Tensor] = None):
+            def forward(self, x: Tensor | None = None, y: Tensor | None = None):
                 if x is not None:
                     return x
                 if y is not None:
@@ -694,8 +699,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class Model(torch.nn.Module):
             def forward(
                 self,
-                x: Optional[Tensor] = torch.ones(2, 3),
-                y: Optional[Tensor] = torch.zeros(2, 3),
+                x: Tensor | None = torch.ones(2, 3),
+                y: Tensor | None = torch.zeros(2, 3),
             ):
                 if x is not None:
                     return x
@@ -720,8 +725,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class Model(torch.nn.Module):
             def forward(
                 self,
-                x: Optional[Tensor] = torch.ones(2, 3),
-                y: Optional[Tensor] = torch.zeros(2, 3),
+                x: Tensor | None = torch.ones(2, 3),
+                y: Tensor | None = torch.zeros(2, 3),
             ):
                 if x is not None:
                     return x
@@ -818,7 +823,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipIfUnsupportedMinOpsetVersion(15)
     def test_mixed_optional(self):
         class Model(torch.nn.Module):
-            def forward(self, x, y: Optional[Tensor]):
+            def forward(self, x, y: Tensor | None):
                 if y is not None:
                     return x + y
                 return x
@@ -832,7 +837,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipIfUnsupportedMinOpsetVersion(15)
     def test_tuple_of_optional(self):
         class Model(torch.nn.Module):
-            def forward(self, x, y: tuple[Optional[Tensor], Optional[Tensor]]):
+            def forward(self, x, y: tuple[Tensor | None, Tensor | None]):
                 if y[0] is not None:
                     return x + y[0]
                 if y[1] is not None:
@@ -850,7 +855,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def forward(
                 self,
                 x,
-                y: tuple[Optional[Tensor], Optional[Tensor]] = (
+                y: tuple[Tensor | None, Tensor | None] = (
                     torch.zeros(2, 3),
                     torch.zeros(2, 3),
                 ),
@@ -873,7 +878,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def forward(
                 self,
                 x,
-                y: tuple[Optional[Tensor], Optional[Tensor]] = (
+                y: tuple[Tensor | None, Tensor | None] = (
                     torch.zeros(2, 3),
                     torch.zeros(2, 3),
                 ),
@@ -10816,7 +10821,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         ort_sess = verification._ort_session(model_onnx)
         ort_outs = verification._run_onnx(ort_sess, (x,))
-        assert not torch.all(torch.eq(x, torch.from_numpy(ort_outs[0])))
+        if torch.all(torch.eq(x, torch.from_numpy(ort_outs[0]))):
+            raise AssertionError("Outputs should not match input after dropout")
 
         script_model = torch.jit.script(model)
         output = model(x)
@@ -10831,7 +10837,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             dynamo=False,
         )
         ort_outs = verification._run_onnx(ort_sess, (x,))
-        assert not torch.all(torch.eq(x, torch.from_numpy(ort_outs[0])))
+        if torch.all(torch.eq(x, torch.from_numpy(ort_outs[0]))):
+            raise AssertionError("Outputs should not match input after dropout")
 
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_dropout_training_zero(self):
@@ -11234,7 +11241,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 )
                 return emb
 
-            def forward(self, input, incremental_state: Optional[Tensor] = None):
+            def forward(self, input, incremental_state: Tensor | None = None):
                 bsz, seq_len = input.shape[0], input.shape[1]
                 self.const = 3
                 if self.weights is None:
@@ -11295,7 +11302,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 )
                 return emb
 
-            def forward(self, input, incremental_state: Optional[Tensor] = None):
+            def forward(self, input, incremental_state: Tensor | None = None):
                 bsz, seq_len = input.shape[0], input.shape[1]
                 self.const = 1.5
                 self.weights = InnerModule.get_embedding(self.embedding_dim)
@@ -11350,13 +11357,13 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def set_cell_anchors(self, anchors):
                 if self.conv.bias is not None:
                     b = self.conv.bias
-                    assert b is not None
+                    assert b is not None  # noqa: S101
                     self.conv.bias = anchors + b
                 elif self.conv.weight is not None:
                     self.conv.weight = torch.randn(3, 10)
                     self.conv.bias = self.conv.weight[:]
 
-            def forward(self, anchors) -> Optional[Tensor]:
+            def forward(self, anchors) -> Tensor | None:
                 self.set_cell_anchors(anchors)
                 return self.conv.bias
 
@@ -11403,7 +11410,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 self.conv.weight = torch.zeros(10, 3)
                 if self.conv.bias is not None:
                     w = self.conv.bias
-                    assert w is not None
+                    assert w is not None  # noqa: S101
                     self.conv.bias = anchors + w
                 else:
                     self.conv.bias = torch.ones(3, 10, 3)
@@ -11413,7 +11420,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 result = []
                 if self.conv.bias is not None:
                     a = self.conv.bias
-                    assert a is not None
+                    assert a is not None  # noqa: S101
                     result += [a]
                 result += [feature_maps]
                 return result[0], result[1]
@@ -11443,7 +11450,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                     # NOTE: `is not None` and `assert` is for passing torchscript.
                     if self.conv.bias is not None:
                         a = self.conv.bias
-                        assert a is not None
+                        assert a is not None  # noqa: S101
                         self.conv.bias = anchors + a
 
             def forward(self, anchors):
@@ -12661,12 +12668,14 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         actual_std = np.std(ort_out)
         actual_mean = np.mean(ort_out)
 
-        assert abs(abs(actual_mean) - expected_mean) <= expected_mean * 0.1, (
-            "the gap of mean between ort outputs and expected one is unacceptable."
-        )
-        assert abs(abs(actual_std) - expected_std) <= expected_std * 0.1, (
-            "the gap of variance between ort outputs and expected one is unacceptable."
-        )
+        if not (abs(abs(actual_mean) - expected_mean) <= expected_mean * 0.1):
+            raise AssertionError(
+                "the gap of mean between ort outputs and expected one is unacceptable."
+            )
+        if not (abs(abs(actual_std) - expected_std) <= expected_std * 0.1):
+            raise AssertionError(
+                "the gap of variance between ort outputs and expected one is unacceptable."
+            )
 
     @skipScriptTest()
     @skipIfUnsupportedMinOpsetVersion(11)
@@ -12696,12 +12705,14 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         actual_std = np.std(ort_out)
         actual_mean = np.mean(ort_out)
 
-        assert abs(abs(actual_mean) - expected_mean) <= expected_mean * 0.1, (
-            "the gap of mean between ort outputs and expected one is unacceptable."
-        )
-        assert abs(abs(actual_std) - expected_std) <= expected_std * 0.1, (
-            "the gap of variance between ort outputs and expected one is unacceptable."
-        )
+        if not (abs(abs(actual_mean) - expected_mean) <= expected_mean * 0.1):
+            raise AssertionError(
+                "the gap of mean between ort outputs and expected one is unacceptable."
+            )
+        if not (abs(abs(actual_std) - expected_std) <= expected_std * 0.1):
+            raise AssertionError(
+                "the gap of variance between ort outputs and expected one is unacceptable."
+            )
 
     @skipScriptTest()
     @skipIfUnsupportedMinOpsetVersion(11)
@@ -12744,15 +12755,12 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         actual_max = np.max(ort_out)
         actual_mean = np.mean(ort_out)
 
-        assert actual_min >= expected_min, (
-            "the minimum value of ort outputs is out of scope."
-        )
-        assert actual_max <= expected_max, (
-            "the maximum value of ort outputs is out of scope."
-        )
-        assert abs(actual_mean - expected_mean) <= expected_mean * 0.05, (
-            "the mean value of ort outputs is out of scope."
-        )
+        if not (actual_min >= expected_min):
+            raise AssertionError("the minimum value of ort outputs is out of scope.")
+        if not (actual_max <= expected_max):
+            raise AssertionError("the maximum value of ort outputs is out of scope.")
+        if not (abs(actual_mean - expected_mean) <= expected_mean * 0.05):
+            raise AssertionError("the mean value of ort outputs is out of scope.")
 
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_sequence_to_int(self):
@@ -13692,29 +13700,29 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 )
 
     class IfNoneInput(torch.nn.Module):
-        def forward(self, x) -> Optional[Tensor]:
-            y: Optional[Tensor] = None
+        def forward(self, x) -> Tensor | None:
+            y: Tensor | None = None
             if x.size(0) > 1:
                 y = x
             return y
 
     class IfNoneOutput(torch.nn.Module):
-        def forward(self, x) -> Optional[Tensor]:
-            y: Optional[Tensor] = x
+        def forward(self, x) -> Tensor | None:
+            y: Tensor | None = x
             if x.size(0) > 1:
                 y = None
             return y
 
     class LoopNoneInput(torch.nn.Module):
-        def forward(self, x) -> Optional[Tensor]:
-            y: Optional[Tensor] = None
+        def forward(self, x) -> Tensor | None:
+            y: Tensor | None = None
             for _ in range(x.size(0)):
                 y = x
             return y
 
     class LoopNoneOutput(torch.nn.Module):
-        def forward(self, x) -> Optional[Tensor]:
-            y: Optional[Tensor] = x
+        def forward(self, x) -> Tensor | None:
+            y: Tensor | None = x
             for _ in range(x.size(0)):
                 y = None
             return y
@@ -13769,7 +13777,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipIfUnsupportedMinOpsetVersion(16)
     def test_uninitialized_optional(self):
         class Module(torch.nn.Module):
-            def forward(self, y: Optional[Tensor]) -> Optional[Tensor]:
+            def forward(self, y: Tensor | None) -> Tensor | None:
                 if y is not None:
                     if y.shape[1] < 5:
                         if y.size(0) == 1:

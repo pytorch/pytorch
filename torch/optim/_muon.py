@@ -273,6 +273,29 @@ Muon.__doc__ = (
         adjust_lr_fn (str, optional): function to adjust learning rate. One of "original" and "match_rms_adamw".
             If not specified, we will default to use "original". (default: None)
 
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> # Muon only supports 2D params; use a standard optimizer
+        >>> # such as AdamW for biases, embeddings, and other non-2D
+        >>> # parameters.
+        >>> muon_params = [
+        ...     p for p in model.parameters() if p.ndim == 2
+        ... ]
+        >>> other_params = [
+        ...     p for p in model.parameters() if p.ndim != 2
+        ... ]
+        >>> optim_muon = torch.optim.Muon(
+        ...     muon_params, lr=0.02, momentum=0.95
+        ... )
+        >>> optim_adamw = torch.optim.AdamW(
+        ...     other_params, lr=3e-4, weight_decay=0.01
+        ... )
+        >>> optim_muon.zero_grad()
+        >>> optim_adamw.zero_grad()
+        >>> loss_fn(model(input), target).backward()
+        >>> optim_muon.step()
+        >>> optim_adamw.step()
+
     .. _Muon\: An optimizer for hidden layers in neural networks:
         https://kellerjordan.github.io/posts/muon/
     .. _Muon is Scalable for LLM Training:
