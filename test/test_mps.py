@@ -13590,6 +13590,40 @@ class TestMetalLibrary(TestCaseMPS):
         for i in [0, 5, 6, 7, 63, 64]:
             self.assertEqual(out[i], 0)
 
+    def test_load_precompiled_metallib(self):
+        # Load a checked-in precompiled metallib containing square and inc_inplace kernels
+        metallib_path = os.path.join(os.path.dirname(__file__), "metal", "test_kernels.metallib")
+        with open(metallib_path, "rb") as f:
+            lib = torch.mps.load_metallib(f.read())
+
+        # Verify kernel discovery
+        kernel_names = set(dir(lib))
+        self.assertIn("square", kernel_names)
+        self.assertIn("inc_inplace", kernel_names)
+
+        # Test square kernel: [1, 2, 3, 4] -> [1, 4, 9, 16]
+        x = torch.tensor([1.0, 2.0, 3.0, 4.0], device="mps")
+        lib.square(x)
+        self.assertEqual(x, torch.tensor([1.0, 4.0, 9.0, 16.0], device="mps"))
+
+        # Test inc_inplace kernel: [1, 4, 9, 16] -> [2, 5, 10, 17]
+        lib.inc_inplace(x)
+        self.assertEqual(x, torch.tensor([2.0, 5.0, 10.0, 17.0], device="mps"))
+
+    def test_load_precompiled_metallib_from_path(self):
+        # Load metallib directly from file path (uses newLibraryWithURL:)
+        metallib_path = os.path.join(os.path.dirname(__file__), "metal", "test_kernels.metallib")
+        lib = torch.mps.load_metallib(metallib_path)
+
+        # Verify kernel discovery
+        kernel_names = set(dir(lib))
+        self.assertIn("square", kernel_names)
+        self.assertIn("inc_inplace", kernel_names)
+
+        # Test square kernel
+        x = torch.tensor([1.0, 2.0, 3.0, 4.0], device="mps")
+        lib.square(x)
+        self.assertEqual(x, torch.tensor([1.0, 4.0, 9.0, 16.0], device="mps"))
 
 
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
