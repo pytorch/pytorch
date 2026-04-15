@@ -108,7 +108,7 @@ jobs:
           fi
 
       - name: Upload usage metrics
-        uses: pytorch/test-infra/.github/actions/upload-claude-usage@main
+        uses: pytorch/test-infra/.github/actions/upload-claude-usage@release/2.12
 
       - name: Upload execution output to S3
         if: always()

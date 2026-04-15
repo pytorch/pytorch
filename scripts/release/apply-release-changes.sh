@@ -24,7 +24,7 @@ done
 
 echo "Applying to templates"
 for i in .github/templates/*.yml.j2; do
-    sed -i 's#common.checkout(\(.*\))#common.checkout(\1, checkout_pr_head=False)#' $i;
+    sed -i '/checkout_pr_head/!s#common.checkout(\([^)]*\))#common.checkout(\1, checkout_pr_head=False)#' $i;
     sed -i -e s#main#"release/${RELEASE_VERSION}"# $i;
 done
 
