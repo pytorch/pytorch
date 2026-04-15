@@ -7257,7 +7257,7 @@ xfail_hops_compile = {
 }
 
 
-class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCase):
     @requires_gpu_and_triton
     @parametrize("backend", ("aot_eager", "inductor"))
     @ops(
