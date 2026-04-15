@@ -190,7 +190,7 @@ class AllGather:
                 raise AssertionError(
                     f"Can't handle all_gather with multiple tensors, got {len(in_tensor_list)}"
                 )
-            src_tensor = in_tensor_list[0].clone()
+            src_tensor = in_tensor_list[0]
 
             for dest in data:
                 dest_tensor = dest[0][0][src_rank]
