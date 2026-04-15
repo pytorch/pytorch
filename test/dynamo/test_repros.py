@@ -81,6 +81,7 @@ from torch.testing._internal.common_utils import (
     serialTest,
     skipIfHpu,
     skipIfRocm,
+	skipIfXpu,
     skipIfWindows,
     TEST_WITH_ROCM,
     TEST_XPU,
@@ -6481,6 +6482,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         fn(torch.randn(4))
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3334")
     @requires_gpu
     # test involves custom ops that return unbacked symints
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
