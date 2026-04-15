@@ -311,6 +311,7 @@ Tensor class reference
     Tensor.chalf
     Tensor.cfloat
     Tensor.cdouble
+    Tensor.const_data_ptr
     Tensor.data_ptr
     Tensor.deg2rad
     Tensor.dequantize
