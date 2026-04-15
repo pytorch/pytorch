@@ -16,6 +16,9 @@ from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwis
 from torch.testing._internal.common_cuda import evaluate_gfx_arch_within, SM70OrLater
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    MI200_ARCH,
+    MI300_ARCH,
+    NAVI_ARCH,
     parametrize,
     run_tests,
     TEST_CUDA,
@@ -276,7 +279,7 @@ TEST_CASE_NAMES = [tc.name for tc in TEST_CASES]
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-@unittest.skipIf(not torch.version.hip and not SM70OrLater, "Requires SM70+")
+@unittest.skipIf(not SM70OrLater, "Requires SM70+")
 @instantiate_parametrized_tests
 class TestInlineAsmElementwise(TestCase):
     """Parametrized tests for inline_asm_elementwise."""
@@ -297,7 +300,13 @@ class TestInlineAsmElementwise(TestCase):
         if (
             torch.version.hip
             and tc.name == "add_bf16_native"
-            and not evaluate_gfx_arch_within(["gfx950"])
+            and evaluate_gfx_arch_within(
+                [
+                    *MI200_ARCH,
+                    *MI300_ARCH,
+                    *NAVI_ARCH,
+                ]
+            )
         ):
             self.skipTest("Requires gfx950+")
 
@@ -340,7 +349,13 @@ class TestInlineAsmElementwise(TestCase):
         if (
             torch.version.hip
             and tc.name == "add_bf16_native"
-            and not evaluate_gfx_arch_within(["gfx950"])
+            and evaluate_gfx_arch_within(
+                [
+                    *MI200_ARCH,
+                    *MI300_ARCH,
+                    *NAVI_ARCH,
+                ]
+            )
         ):
             self.skipTest("Requires gfx950+")
 
@@ -419,7 +434,7 @@ class TestInlineAsmElementwiseErrors(TestCase):
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-@unittest.skipIf(not torch.version.hip and not SM70OrLater, "Requires SM70+")
+@unittest.skipIf(not SM70OrLater, "Requires SM70+")
 class TestInlineAsmElementwiseEdgeCases(TestCase):
     """Tests for edge cases."""
 
@@ -537,7 +552,7 @@ class TestInlineAsmElementwiseEdgeCases(TestCase):
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-@unittest.skipIf(not torch.version.hip and not SM70OrLater, "Requires SM70+")
+@unittest.skipIf(not SM70OrLater, "Requires SM70+")
 class TestInlineAsmPackPadding(TestCase):
     """Test that pack padding works when block size < pack."""
 
