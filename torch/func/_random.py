@@ -124,12 +124,21 @@ def unbind(
     for i, (s, sp) in enumerate(zip(shape, splits)):
         if s % sp != 0:
             raise ValueError(f"splits[{i}]={sp} does not evenly divide shape[{i}]={s}")
-    outputs_per_elem = 2 if dtype is not None and dtype == torch.float64 else 1
-    return _philox_unbind(key, shape, splits, outputs_per_elem)
+    # Elements produced per Philox 4x32 call: 2 for float64, 4 otherwise.
+    epc = 2 if dtype is not None and dtype == torch.float64 else 4
+    tile_shape = tuple(s // sp for s, sp in zip(shape, splits))
+    align_dim = tile_shape[-1] if len(shape) > 1 else tile_shape[0]
+    if align_dim % epc != 0:
+        kind = "float64" if epc == 2 else "float32/float16/bfloat16"
+        raise ValueError(
+            f"tile size along the innermost dimension ({align_dim}) must be a "
+            f"multiple of {epc} (elements per Philox call for {kind})"
+        )
+    return _philox_unbind(key, shape, splits, epc)
 
 
 def _philox_unbind(
-    key: torch.Tensor, shape: tuple, splits: tuple, outputs_per_elem: int
+    key: torch.Tensor, shape: tuple, splits: tuple, epc: int
 ) -> torch.Tensor:
     ndim = len(shape)
     tile_shape = tuple(s // sp for s, sp in zip(shape, splits))
@@ -139,7 +148,7 @@ def _philox_unbind(
 
     if ndim == 1:
         flat_indices = torch.arange(splits[0], dtype=torch.int64, device=key.device)
-        offsets = base_offset + flat_indices * (tile_shape[0] * outputs_per_elem)
+        offsets = base_offset + flat_indices * (tile_shape[0] // epc)
         seeds = seed.expand_as(offsets)
         return torch.stack([seeds, offsets], dim=-1).view(torch.uint64)
 

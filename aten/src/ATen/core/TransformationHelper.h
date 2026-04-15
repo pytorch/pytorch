@@ -1,3 +1,5 @@
+#pragma once
+
 #include <ATen/NumericUtils.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Half.h>
