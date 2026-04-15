@@ -212,7 +212,7 @@ static PyObject * THPVariable_const_data_ptr(PyObject* self_, PyObject* args)
     return handle_torch_function(self_, "const_data_ptr", args);
   }
   auto& self = THPVariable_Unpack(self_);
-  return wrap(reinterpret_cast<intptr_t>(self.const_data_ptr()));
+  return wrap(const_cast<void*>(self.const_data_ptr()));
   END_HANDLE_TH_ERRORS
 }
 

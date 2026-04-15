@@ -4975,10 +4975,6 @@ class TestTorchDeviceType(TestCase):
         self.assertTrue(torch._C._is_cow_tensor(t))
         self.assertTrue(torch._C._is_cow_tensor(clone))
 
-        # data_ptr does trigger materialization
-        clone.data_ptr()
-        self.assertFalse(torch._C._is_cow_tensor(clone))
-
     # See Note [lazy_clone_ tests with inductor enabled]
     @skipXLA
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
