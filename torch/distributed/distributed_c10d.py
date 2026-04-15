@@ -55,6 +55,8 @@ from . import config as dist_config
 from .c10d_logger import _exception_logger, _time_logger
 from .constants import default_pg_nccl_timeout, default_pg_timeout
 from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
+from ._collective_interceptor import get_collective_interceptor as _get_collective_interceptor
+from ._collective_interceptor import call_collective_interceptor as _call_collective_interceptor
 
 
 __all__ = [
@@ -2561,6 +2563,9 @@ def isend(
         None, if not part of the group
 
     """
+    _interceptor = _get_collective_interceptor()
+    if _interceptor is not None:
+        return _call_collective_interceptor(_interceptor, "isend", isend, tensor, dst=dst, group=group, tag=tag, group_dst=group_dst)
     relevant_args = (tensor,)
     if has_torch_function(relevant_args):
         return handle_torch_function(
@@ -2615,6 +2620,9 @@ def irecv(
         None, if not part of the group
 
     """
+    _interceptor = _get_collective_interceptor()
+    if _interceptor is not None:
+        return _call_collective_interceptor(_interceptor, "irecv", irecv, tensor, src=src, group=group, tag=tag, group_src=group_src)
     relevant_args = (tensor,)
     if has_torch_function(relevant_args):
         return handle_torch_function(
@@ -2667,6 +2675,9 @@ def send(
         group_dst (int, optional): Destination rank on ``group``.  Invalid to specify both ``dst`` and ``group_dst``.
 
     """
+    _interceptor = _get_collective_interceptor()
+    if _interceptor is not None:
+        return _call_collective_interceptor(_interceptor, "send", send, tensor, dst=dst, group=group, tag=tag, group_dst=group_dst)
     relevant_args = (tensor,)
     if has_torch_function(relevant_args):
         return handle_torch_function(
@@ -2715,6 +2726,9 @@ def recv(
         -1, if not part of the group
 
     """
+    _interceptor = _get_collective_interceptor()
+    if _interceptor is not None:
+        return _call_collective_interceptor(_interceptor, "recv", recv, tensor, src=src, group=group, tag=tag, group_src=group_src)
     relevant_args = (tensor,)
     if has_torch_function(relevant_args):
         return handle_torch_function(
@@ -2965,6 +2979,10 @@ def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:
         not the first collective call in the ``group``, batched P2P operations
         involving only a subset of ranks of the ``group`` are allowed.
     """
+    _interceptor = _get_collective_interceptor()
+    if _interceptor is not None:
+        return _call_collective_interceptor(_interceptor, "batch_isend_irecv", batch_isend_irecv, p2p_op_list)
+
     _check_p2p_op_list(p2p_op_list)
     group = p2p_op_list[0].group
     if group is None:
@@ -3040,6 +3058,9 @@ def broadcast(
         None, if not async_op or if not part of the group
 
     """
+    _interceptor = _get_collective_interceptor()
+    if _interceptor is not None:
+        return _call_collective_interceptor(_interceptor, "broadcast", broadcast, tensor, src=src, group=group, async_op=async_op, group_src=group_src)
     relevant_args = (tensor,)
     if has_torch_function(relevant_args):
         return handle_torch_function(
@@ -3146,6 +3167,10 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op: bool = False):
             async_op=async_op,
         )
 
+    _interceptor = _get_collective_interceptor()
+    if _interceptor is not None:
+        return _call_collective_interceptor(_interceptor, "all_reduce", all_reduce, tensor, op=op, group=group, async_op=async_op)
+
     _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         _warn_not_in_group("all_reduce")
@@ -3223,6 +3248,10 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op: bool = 
         None, if not async_op or if not part of the group.
 
     """
+    _interceptor = _get_collective_interceptor()
+    if _interceptor is not None:
+        return _call_collective_interceptor(_interceptor, "all_reduce_coalesced", all_reduce_coalesced, tensors, op=op, group=group, async_op=async_op)
+
     if isinstance(tensors, torch.Tensor):
         tensors = [tensors]
     relevant_args = tuple(tensors) if isinstance(tensors, (list, tuple)) else (tensors,)
@@ -3294,6 +3323,9 @@ def reduce(
         None, if not async_op or if not part of the group
 
     """
+    _interceptor = _get_collective_interceptor()
+    if _interceptor is not None:
+        return _call_collective_interceptor(_interceptor, "reduce", reduce, tensor, dst=dst, op=op, group=group, async_op=async_op, group_dst=group_dst)
     relevant_args = (tensor,)
     if has_torch_function(relevant_args):
         return handle_torch_function(
@@ -4191,6 +4223,10 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
             async_op=async_op,
         )
 
+    _interceptor = _get_collective_interceptor()
+    if _interceptor is not None:
+        return _call_collective_interceptor(_interceptor, "all_gather", all_gather, tensor_list, tensor, group=group, async_op=async_op)
+
     _check_tensor_list(tensor_list, "tensor_list")
     _check_single_tensor(tensor, "tensor")
     _ensure_all_tensors_same_dtype(tensor_list, tensor)
@@ -4281,6 +4317,10 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
             group=group,
             async_op=async_op,
         )
+
+    _interceptor = _get_collective_interceptor()
+    if _interceptor is not None:
+        return _call_collective_interceptor(_interceptor, "all_gather_into_tensor", all_gather_into_tensor, output_tensor, input_tensor, group=group, async_op=async_op)
 
     _check_single_tensor(input_tensor, "input_tensor")
     _check_single_tensor(output_tensor, "output_tensor")
@@ -4524,6 +4564,9 @@ def gather(
         None                                                                   # Rank 1
 
     """
+    _interceptor = _get_collective_interceptor()
+    if _interceptor is not None:
+        return _call_collective_interceptor(_interceptor, "gather", gather, tensor, gather_list=gather_list, dst=dst, group=group, async_op=async_op, group_dst=group_dst)
     relevant_args = (tensor,)
     if has_torch_function(relevant_args):
         return handle_torch_function(
@@ -4627,6 +4670,9 @@ def scatter(
         tensor([5., 5.], device='cuda:1') # Rank 1
 
     """
+    _interceptor = _get_collective_interceptor()
+    if _interceptor is not None:
+        return _call_collective_interceptor(_interceptor, "scatter", scatter, tensor, scatter_list=scatter_list, src=src, group=group, async_op=async_op, group_src=group_src)
     relevant_args = (tensor,)
     if has_torch_function(relevant_args):
         return handle_torch_function(
@@ -4711,6 +4757,9 @@ def reduce_scatter(
         None, if not async_op or if not part of the group.
 
     """
+    _interceptor = _get_collective_interceptor()
+    if _interceptor is not None:
+        return _call_collective_interceptor(_interceptor, "reduce_scatter", reduce_scatter, output, input_list, op=op, group=group, async_op=async_op)
     relevant_args = (output,)
     if has_torch_function(relevant_args):
         return handle_torch_function(
@@ -4812,6 +4861,10 @@ def reduce_scatter_tensor(output, input, op=ReduceOp.SUM, group=None, async_op=F
             group=group,
             async_op=async_op,
         )
+
+    _interceptor = _get_collective_interceptor()
+    if _interceptor is not None:
+        return _call_collective_interceptor(_interceptor, "reduce_scatter_tensor", reduce_scatter_tensor, output, input, op=op, group=group, async_op=async_op)
 
     _check_single_tensor(output, "output")
     _check_single_tensor(input, "input")
@@ -4994,6 +5047,10 @@ def all_to_all_single(
             async_op=async_op,
         )
 
+    _interceptor = _get_collective_interceptor()
+    if _interceptor is not None:
+        return _call_collective_interceptor(_interceptor, "all_to_all_single", all_to_all_single, output, input, output_split_sizes=output_split_sizes, input_split_sizes=input_split_sizes, group=group, async_op=async_op)
+
     if _rank_not_in_group(group):
         _warn_not_in_group("all_to_all_single")
         return
@@ -5121,6 +5178,9 @@ def all_to_all(
         [tensor([4+4j]), tensor([8+8j]), tensor([12+12j]), tensor([16+16j])]        # Rank 3
 
     """
+    _interceptor = _get_collective_interceptor()
+    if _interceptor is not None:
+        return _call_collective_interceptor(_interceptor, "all_to_all", all_to_all, output_tensor_list, input_tensor_list, group=group, async_op=async_op)
     relevant_args = (
         tuple(input_tensor_list)
         if isinstance(input_tensor_list, (list, tuple))
@@ -5197,6 +5257,10 @@ def barrier(
        that was first used with this process group, if another collective with tensor inputs has been performed, (4)
        the device index indicated by the global rank mod local device count.
     """
+    _interceptor = _get_collective_interceptor()
+    if _interceptor is not None:
+        return _call_collective_interceptor(_interceptor, "barrier", barrier, group=group, async_op=async_op, device_ids=device_ids)
+
     group = group or _get_default_group()
 
     if _rank_not_in_group(group):
