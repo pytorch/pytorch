@@ -625,6 +625,10 @@ class StepLR(LRScheduler):
         gamma: float = 0.1,
         last_epoch: int = -1,
     ) -> None:  # noqa: D107
+        if step_size <= 0:
+            raise ValueError(
+                f"step_size must be a positive integer, but got {step_size}"
+            )
         self.step_size = step_size
         self.gamma = gamma
         super().__init__(optimizer, last_epoch)
@@ -810,7 +814,7 @@ class ConstantLR(LRScheduler):
         total_iters: int = 5,
         last_epoch: int = -1,
     ) -> None:  # noqa: D107
-        if factor > 1.0 or factor < 0:
+        if factor > 1.0 or factor <= 0:
             raise ValueError(
                 "Constant multiplicative factor expected to be between 0 and 1."
             )
@@ -1391,6 +1395,8 @@ class CosineAnnealingLR(LRScheduler):
         eta_min: float = 0.0,
         last_epoch: int = -1,
     ) -> None:  # noqa: D107
+        if T_max <= 0:
+            raise ValueError(f"T_max must be a positive integer, but got {T_max}")
         self.T_max = T_max
         self.eta_min = eta_min
         super().__init__(optimizer, last_epoch)
@@ -1904,12 +1910,21 @@ class CyclicLR(LRScheduler):
 
         self.max_lrs = _format_param("max_lr", optimizer, max_lr)
 
+        if step_size_up <= 0:
+            raise ValueError(
+                f"step_size_up must be a positive integer, but got {step_size_up}"
+            )
         # pyrefly: ignore [bad-assignment]
         step_size_up = float(step_size_up)
-        step_size_down = (
+        if step_size_down is not None:
+            if step_size_down <= 0:
+                raise ValueError(
+                    f"step_size_down must be a positive integer, but got {step_size_down}"
+                )
             # pyrefly: ignore [bad-assignment]
-            float(step_size_down) if step_size_down is not None else step_size_up
-        )
+            step_size_down = float(step_size_down)
+        else:
+            step_size_down = step_size_up
         # pyrefly: ignore [unsupported-operation]
         self.total_size = step_size_up + step_size_down
         self.step_ratio = step_size_up / self.total_size
@@ -2399,6 +2414,16 @@ class OneCycleLR(LRScheduler):
         if not isinstance(optimizer, Optimizer):
             raise TypeError(f"{type(optimizer).__name__} is not an Optimizer")
         self.optimizer = optimizer
+
+        # Validate div_factor
+        if div_factor <= 0:
+            raise ValueError(
+                f"div_factor must be a positive float, but got {div_factor}"
+            )
+        if final_div_factor <= 0:
+            raise ValueError(
+                f"final_div_factor must be a positive float, but got {final_div_factor}"
+            )
 
         # Validate total_steps
         if total_steps is not None:

@@ -350,6 +350,11 @@ class TestLRScheduler(TestCase):
         scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
         self._test(scheduler, targets, epochs)
 
+    @parametrize("step_size", [0, -1])
+    def test_step_lr_step_size_non_positive(self, step_size):
+        with self.assertRaisesRegex(ValueError, "step_size must be a positive integer"):
+            StepLR(self.opt, step_size=step_size)
+
     def test_get_last_lr_step_lr(self):
         from torch.nn import Parameter
 
@@ -445,6 +450,11 @@ class TestLRScheduler(TestCase):
         scheduler = ConstantLR(self.opt, factor=1.0 / 2, total_iters=5)
         self._test(scheduler, targets, epochs)
 
+    @parametrize("factor", [0, -1])
+    def test_constantlr_factor_non_positive(self, factor):
+        with self.assertRaises(ValueError):
+            ConstantLR(self.opt, factor=factor)
+
     def test_linearlr(self):
         # lr = 0.025     if epoch == 0
         # lr = 0.03125   if epoch == 1
@@ -529,6 +539,11 @@ class TestLRScheduler(TestCase):
         targets = [single_targets, [x * epochs for x in single_targets]]
         scheduler = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
         self._test(scheduler, targets, epochs)
+
+    @parametrize("T_max", [0, -1])
+    def test_cos_anneal_lr_T_max_non_positive(self, T_max):
+        with self.assertRaisesRegex(ValueError, "T_max must be a positive integer"):
+            CosineAnnealingLR(self.opt, T_max=T_max)
 
     def test_closed_form_step_lr(self):
         scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
@@ -1700,6 +1715,20 @@ class TestLRScheduler(TestCase):
         self.assertIs(scheduler._scale_fn_custom, scale_fn)
         self.assertIs(restored_scheduler._scale_fn_custom, scale_fn)
 
+    @parametrize("step_size_up", [0, -1])
+    def test_cycle_lr_step_size_up_non_positive(self, step_size_up):
+        with self.assertRaisesRegex(
+            ValueError, "step_size_up must be a positive integer"
+        ):
+            CyclicLR(self.opt, base_lr=1, max_lr=5, step_size_up=step_size_up)
+
+    @parametrize("step_size_down", [0, -1])
+    def test_cycle_lr_step_size_down_non_positive(self, step_size_down):
+        with self.assertRaisesRegex(
+            ValueError, "step_size_down must be a positive integer"
+        ):
+            CyclicLR(self.opt, base_lr=1, max_lr=5, step_size_down=step_size_down)
+
     def test_onecycle_lr_invalid_anneal_strategy(self):
         with self.assertRaises(ValueError):
             scheduler = OneCycleLR(
@@ -1837,6 +1866,20 @@ class TestLRScheduler(TestCase):
         lr_targets = [lr_target, lr_target]
         momentum_targets = [momentum_target, momentum_target]
         self._test_cycle_lr(scheduler, lr_targets, momentum_targets, 10)
+
+    @parametrize("div_factor", [0, -1])
+    def test_onecycle_lr_div_factor_non_positive(self, div_factor):
+        with self.assertRaisesRegex(ValueError, "div_factor must be a positive float"):
+            OneCycleLR(self.opt, max_lr=1e-3, total_steps=10, div_factor=div_factor)
+
+    @parametrize("final_div_factor", [0, -1])
+    def test_onecycle_lr_final_div_factor_non_positive(self, final_div_factor):
+        with self.assertRaisesRegex(
+            ValueError, "final_div_factor must be a positive float"
+        ):
+            OneCycleLR(
+                self.opt, max_lr=1e-3, total_steps=10, final_div_factor=final_div_factor
+            )
 
     def test_cycle_lr_with_adam(self):
         old_opt = self.opt
