@@ -159,7 +159,7 @@ def fork_rng(
     enabled=True,
     _caller="fork_rng",
     _devices_kw="devices",
-    device_type="cuda",
+    device_type=None,
 ) -> Generator:
     """
     Forks the RNG, so that when you return, the RNG is reset
@@ -174,9 +174,24 @@ def fork_rng(
         enabled (bool): if ``False``, the RNG is not forked.  This is a convenience
             argument for easily disabling the context manager without having
             to delete it and unindent your Python code under it.
-        device_type (str): device type str, default is `cuda`. As for supported device,
+        device_type (str): device type str, default is ``None``, in which case the type
+            is inferred from ``devices`` if provided (using the first entry), falling back
+            to ``"cuda"`` when the type cannot be determined. As for supported devices,
             see details in :ref:`accelerator<accelerators>`
     """
+
+    if device_type is None:
+        if devices is not None:
+            devices = list(devices)
+            if devices:
+                try:
+                    device_type = torch.device(devices[0]).type
+                except Exception:
+                    device_type = "cuda"
+            else:
+                device_type = "cuda"
+        else:
+            device_type = "cuda"
 
     if device_type == "meta":
         yield
