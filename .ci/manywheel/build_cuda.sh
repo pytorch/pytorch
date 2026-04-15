@@ -109,13 +109,13 @@ TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0"
 case ${CUDA_VERSION} in
     12.6) TORCH_CUDA_ARCH_LIST="5.0;6.0;7.0;${TORCH_CUDA_ARCH_LIST//10.0/}" ;;  # Only 12.6 includes legacy Maxwell/Pascal/Volta, -Hopper support
     12.8) TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};12.0" ;;  # +Blackwell support
-    12.9) TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};12.0+PTX" # +Blackwell support + PTX for forward compatibility
+    12.9) TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};12.0" # +Blackwell support + PTX for forward compatibility
         if [[ "$PACKAGE_TYPE" == "libtorch" ]]; then
             TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST//8.6;/}"  # Remove 8.6 for libtorch
         fi
         ;;
     13.0|13.2)
-        TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};$([[ "$ARCH" == "aarch64" ]] && echo "11.0;" || echo "")12.0+PTX"
+        TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};$([[ "$ARCH" == "aarch64" ]] && echo "11.0;" || echo "")12.0"
         export TORCH_NVCC_FLAGS="-compress-mode=size"
         export BUILD_BUNDLE_PTXAS=1
         ;;

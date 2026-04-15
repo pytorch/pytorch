@@ -67,7 +67,7 @@ jobs:
       reenabled-issues: ${{ steps.filter.outputs.reenabled-issues }}
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.12
         with:
           fetch-depth: 1
           submodules: false
@@ -89,24 +89,24 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Setup SSH (Click me for login details)
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.12
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Linux
-        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        uses: pytorch/pytorch/.github/actions/setup-linux@release/2.12
 
       - name: Login to ECR
         uses: ./.github/actions/ecr-login
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.12
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
 
       - name: Pull docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.12
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -116,7 +116,7 @@ jobs:
         run: echo "IN_CONTAINER_RUNNER=$(if [ -f /.inarc ] || [ -f /.incontainer ]; then echo true ; else echo false; fi)" >> "$GITHUB_OUTPUT"
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        uses: pytorch/test-infra/.github/actions/setup-nvidia@main
+        uses: pytorch/test-infra/.github/actions/setup-nvidia@release/2.12
 
       - name: Output disk space left
         run: |
@@ -227,7 +227,7 @@ jobs:
           file-suffix: bazel-${{ github.job }}_${{ steps.get-job-id.outputs.job-id }}
 
       - name: Teardown Linux
-        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        uses: pytorch/test-infra/.github/actions/teardown-linux@release/2.12
         if: always()
 
   build-and-test-osdc:
@@ -242,7 +242,7 @@ jobs:
     steps:
       - name: Setup Linux
         id: setup-linux
-        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        uses: pytorch/pytorch/.github/actions/setup-linux@release/2.12
         with:
           use-arc: true
           python-version: ${{ inputs.python-version }}
@@ -319,7 +319,7 @@ jobs:
           .ci/pytorch/test.sh && cp -Lr ./bazel-testlogs ./test/test-reports
 
       - name: Upload test artifacts
-        uses: pytorch/pytorch/.github/actions/upload-test-artifacts@main
+        uses: pytorch/pytorch/.github/actions/upload-test-artifacts@release/2.12
         if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
         with:
           file-suffix: bazel-${{ github.job }}_${{ steps.setup-linux.outputs.job-id }}

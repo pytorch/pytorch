@@ -8,7 +8,7 @@ on:
 
 jobs:
   claude-code:
-    uses: pytorch/test-infra/.github/workflows/_claude-code.yml@main
+    uses: pytorch/test-infra/.github/workflows/_claude-code.yml@release/2.12
     permissions:
       contents: read
       pull-requests: write
