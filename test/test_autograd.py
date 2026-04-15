@@ -11618,7 +11618,7 @@ for shape in [(1,), ()]:
         with torch.autograd.graph.save_on_cpu():
             a = torch.ones(1, requires_grad=True, device=device_type)
             y = f(a)
-            memory_with_hooks = torch.device(device_type).memory_allocated()
+            memory_with_hooks = torch.get_device_module(device_type).memory_allocated()
             self.assertEqual(memory_with_hooks, memory_without_grad)
 
     @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
