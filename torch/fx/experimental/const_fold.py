@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import re
 from collections.abc import Callable
-from typing import Optional, Union
 
 import torch.fx
 from torch.fx.node import map_arg
@@ -29,8 +28,8 @@ class FoldedGraphModule(torch.fx.GraphModule):
         self,
         root: torch.nn.Module,
         graph: torch.fx.Graph,
-        const_subgraph: Optional[torch.fx.Graph] = None,
-        fx_const_folded_attrs_name: Optional[str] = None,
+        const_subgraph: torch.fx.Graph | None = None,
+        fx_const_folded_attrs_name: str | None = None,
         device_for_folded_attrs: str = "cuda",
     ):
         super().__init__(root, graph)
@@ -193,8 +192,8 @@ def get_unique_attr_name_in_module(mod_traced: torch.fx.GraphModule, name: str) 
 
 
 def split_const_subgraphs(
-    module: Union[torch.nn.Module, torch.fx.GraphModule],
-    skip_folding_node_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
+    module: torch.nn.Module | torch.fx.GraphModule,
+    skip_folding_node_fn: Callable[[torch.fx.Node], bool] | None = None,
     device_for_folded_attrs: str = "cpu",
 ) -> FoldedGraphModule:
     """
@@ -289,14 +288,27 @@ def split_const_subgraphs(
 
     const_mod_name, non_const_mod_name = "submod_0", "submod_1"
     # Safely get submod_1 in case there are no non-const nodes
-    const_gm, non_const_gm = split.submod_0, getattr(split, non_const_mod_name, None)
+    const_gm = getattr(split, const_mod_name)
+    if not isinstance(const_gm, torch.fx.GraphModule):
+        raise AssertionError(
+            f"Expected GraphModule for {const_mod_name}, got {type(const_gm)}"
+        )
+    non_const_mod = getattr(split, non_const_mod_name, None)
+    non_const_gm: torch.fx.GraphModule | None = None
+    if non_const_mod is not None:
+        if not isinstance(non_const_mod, torch.fx.GraphModule):
+            raise AssertionError(
+                f"Expected GraphModule for {non_const_mod_name}, got {type(non_const_mod)}"
+            )
+        non_const_gm = non_const_mod
 
     # The module that a call_module node refers to gets copied to submodules during split.
     # The path to the module also gets inlined, i.e. mod.a.b -> mod_a_b. Here we need to
     # attach inlined modules to `split` as it's the owning module now.
-    for node in non_const_gm.graph.nodes if non_const_gm else []:
-        if node.op == "call_module":
-            setattr(split, node.target, getattr(non_const_gm, node.target))
+    if non_const_gm is not None:
+        for node in non_const_gm.graph.nodes:
+            if node.op == "call_module":
+                setattr(split, node.target, getattr(non_const_gm, node.target))
     for node in const_gm.graph.nodes:
         if node.op == "call_module":
             setattr(split, node.target, getattr(const_gm, node.target))

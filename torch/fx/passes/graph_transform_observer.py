@@ -1,7 +1,7 @@
-# mypy: allow-untyped-defs
 import os
 from collections.abc import Callable
-from typing import Optional, TypeVar
+from types import TracebackType
+from typing import TypeVar
 
 from torch.fx import Graph, Node
 from torch.fx._compatibility import compatibility
@@ -26,9 +26,9 @@ class GraphTransformObserver:
         self,
         gm: GraphModule,
         passname: str,
-        subsystem: Optional[str] = None,
-        log_url: Optional[str] = None,
-    ):
+        subsystem: str | None = None,
+        log_url: str | None = None,
+    ) -> None:
         """
         log_url is inferred to be torch._inductor.config.trace.log_url_for_graph_xform unless otherwise specified
         """
@@ -73,10 +73,10 @@ class GraphTransformObserver:
         ).get_dot_graph()
 
     @classmethod
-    def get_current_pass_count(cls):
+    def get_current_pass_count(cls) -> int:
         return cls.__pass_count
 
-    def apply_gm_pass(self, pass_fn: Callable[[GraphModule], T]) -> Optional[T]:
+    def apply_gm_pass(self, pass_fn: Callable[[GraphModule], T]) -> T | None:
         from torch._dynamo.utils import dynamo_timed
 
         with self:
@@ -89,7 +89,7 @@ class GraphTransformObserver:
             ):
                 return pass_fn(self.gm)
 
-    def apply_graph_pass(self, pass_fn: Callable[[Graph], T]) -> Optional[T]:
+    def apply_graph_pass(self, pass_fn: Callable[[Graph], T]) -> T | None:
         from torch._dynamo.utils import dynamo_timed
 
         with self:
@@ -102,7 +102,7 @@ class GraphTransformObserver:
             ):
                 return pass_fn(self.gm.graph)
 
-    def _check_disable_pass(self):
+    def _check_disable_pass(self) -> bool:
         from torch._inductor import config as inductor_config
 
         if self.passname.upper() in inductor_config.disabled_passes.upper():
@@ -118,7 +118,7 @@ class GraphTransformObserver:
             "inductor", self.subsystem, debug_info
         )
 
-    def __enter__(self):
+    def __enter__(self) -> "GraphTransformObserver":
         if not self.active:
             return self
         self.gm._register_create_node_hook(self._node_creation_hook)
@@ -136,7 +136,12 @@ class GraphTransformObserver:
 
         return self
 
-    def __exit__(self, type, value, tb):
+    def __exit__(
+        self,
+        type: type[BaseException] | None,
+        value: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
         if not self.active:
             return
         for gm in self.copied_gms + [self.gm]:
@@ -181,10 +186,10 @@ class GraphTransformObserver:
                 )
             )
 
-    def get_node_creation_hook(self):
+    def get_node_creation_hook(self) -> Callable[[Node], None]:
         # We have to return a function instead of using a class method directly
         # to avoid max recursion issue when deepcopy a graph module within the context manager.
-        def on_node_creation(node):
+        def on_node_creation(node: Node) -> None:
             self.created_nodes.add(node.name)
             self.name_to_node[node.name] = node
             source = NodeSource(None, self.passname, NodeSourceAction.CREATE)
@@ -195,15 +200,15 @@ class GraphTransformObserver:
 
         return on_node_creation
 
-    def get_node_erase_hook(self):
-        def on_node_erase(node):
+    def get_node_erase_hook(self) -> Callable[[Node], None]:
+        def on_node_erase(node: Node) -> None:
             self.erased_nodes.add(node.name)
             self.name_to_node.pop(node.name, None)
 
         return on_node_erase
 
-    def get_node_replace_hook(self):
-        def on_node_replace(old: Node, new: str, user: Node):
+    def get_node_replace_hook(self) -> Callable[[Node, str, Node], None]:
+        def on_node_replace(old: Node, new: str, user: Node) -> None:
             # Update node meta when replacing old node with new node
             new_node = self.name_to_node.get(new, None)
 
@@ -223,7 +228,7 @@ class GraphTransformObserver:
             if new_node.name in self.created_nodes:
                 action.append(NodeSourceAction.CREATE)
 
-            def created_this_pass(source):
+            def created_this_pass(source: NodeSource) -> bool:
                 return source.pass_name == self.passname and source.action == [
                     NodeSourceAction.CREATE
                 ]
@@ -241,8 +246,8 @@ class GraphTransformObserver:
 
         return on_node_replace
 
-    def get_deepcopy_hook(self):
-        def on_deepcopy(gm):
+    def get_deepcopy_hook(self) -> Callable[[GraphModule], None]:
+        def on_deepcopy(gm: GraphModule) -> None:
             self.copied_gms.append(gm)
 
         return on_deepcopy

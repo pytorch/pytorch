@@ -101,8 +101,34 @@ class DistMathOpsTest(DTensorTestBase):
             "amin",
             "var",
             "std",
+            "nansum",
         ):
             self.linear_op_reductions(op_str)
+
+    @with_comms
+    def test_nansum_with_nan(self):
+        device_mesh = self.build_device_mesh()
+        # Tensor with NaN values sharded across the reduction dim
+        tensor = torch.tensor(
+            [[1.0, float("nan"), 3.0], [float("nan"), 5.0, 6.0]],
+            device=self.device_type,
+        )
+        dtensor = distribute_tensor(tensor, device_mesh, [Shard(0)])
+
+        # Full reduction: Shard(0) reduces to Partial(sum), then to Replicate
+        dt_full = dtensor.nansum()
+        self.assertEqual(dt_full.full_tensor(), tensor.nansum())
+        self.assertEqual(dt_full.placements, (Partial("sum"),))
+
+        # Reduction along sharded dim 0: produces Partial(sum)
+        dt_dim0 = dtensor.nansum(dim=0)
+        self.assertEqual(dt_dim0.full_tensor(), tensor.nansum(dim=0))
+        self.assertEqual(dt_dim0.placements, (Partial("sum"),))
+
+        # Reduction along non-sharded dim 1: preserves Shard(0)
+        dt_dim1 = dtensor.nansum(dim=1)
+        self.assertEqual(dt_dim1.full_tensor(), tensor.nansum(dim=1))
+        self.assertEqual(dt_dim1.placements, (Shard(0),))
 
     @with_comms
     @skip_unless_torch_gpu
@@ -579,7 +605,12 @@ class DistMathOpsTest(DTensorTestBase):
                 with CommDebugMode() as comm_mode:
                     output_dist = model_dist(x)
 
-                self.assertEqual(output_local, output_dist)
+                output_dist_cmp = (
+                    output_dist.full_tensor()
+                    if isinstance(output_dist, DTensor)
+                    else output_dist
+                )
+                self.assertEqual(output_local, output_dist_cmp)
 
                 # all requires_grad patterns should have the same forward comm counts
                 expected_fwd_comm = {
@@ -619,7 +650,12 @@ class DistMathOpsTest(DTensorTestBase):
                     comm_mode.comm_module_counts["Global"]["backward"],
                     expected_bwd_comm,
                 )
-                self.assertEqual(output_local, output_dist)
+                output_dist_cmp = (
+                    output_dist.full_tensor()
+                    if isinstance(output_dist, DTensor)
+                    else output_dist
+                )
+                self.assertEqual(output_local, output_dist_cmp)
 
             except Exception as e:
                 subtest_fails[subtest_cfg] = e
@@ -652,9 +688,41 @@ class DistMathOpsTest(DTensorTestBase):
             out_full_values = out_dt.values.full_tensor()
             self.assertEqual(global_topk.values, out_full_values)
 
-            # TODO: support backward scatter
-            # global_topk.values.sum().backward()
-            # out_full_values.sum().backward()
+    @with_comms
+    def test_topk_backward(self):
+        device_mesh = self.build_device_mesh()
+        # Test backward for topk with various shard_dim / topk_dim combinations.
+        # The fix in value_selecting_reduction_backward ensures that the zeros
+        # tensor created during backward is properly dispatched through DTensor
+        # (using new_zeros instead of at::zeros).
+        topk_dims = [0, 1, -1]
+        shard_dims = [0, 1, 2]
+        for topk_dim, shard_dim in itertools.product(topk_dims, shard_dims):
+            # Reference: plain (non-distributed) backward
+            x = torch.randn(12, 8, 8, device=self.device_type, requires_grad=True)
+            ref_topk = x.topk(3, dim=topk_dim)
+            ref_topk.values.sum().backward()
+
+            # Distributed backward
+            dist_x = distribute_tensor(
+                x.detach().clone().requires_grad_(True),
+                device_mesh,
+                [Shard(shard_dim)],
+            )
+            dist_topk = dist_x.topk(3, dim=topk_dim)
+            dist_topk.values.sum().backward()
+
+            # Verify gradient exists, has the right placement, and matches
+            self.assertIsNotNone(
+                dist_x.grad,
+                msg=f"topk_dim={topk_dim}, shard_dim={shard_dim}",
+            )
+            self.assertEqual(
+                dist_x.grad.full_tensor(),
+                x.grad,
+                msg=f"topk_dim={topk_dim}, shard_dim={shard_dim}",
+            )
+            x.grad.zero_()
 
     @with_comms
     def test_shard0_svd(self):
@@ -877,6 +945,33 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(out.placements, (Replicate(),))
 
     @with_comms
+    def test_max_min_dim_sharded(self):
+        """max.dim/min.dim on sharded tensors produce correct values and indices."""
+        device_mesh = self.build_device_mesh()
+        t = torch.randn(128, 64, device=self.device_type)
+
+        for op in [torch.max, torch.min]:
+            expected_vals, expected_idx = op(t, dim=1)
+
+            # Shard on non-reduction dim: should work directly
+            dt = distribute_tensor(t, device_mesh, [Shard(0)])
+            dt_vals, dt_idx = op(dt, dim=1)
+            self.assertEqual(dt_vals.full_tensor(), expected_vals)
+            self.assertEqual(dt_idx.full_tensor(), expected_idx)
+
+            # Shard on reduction dim: forces redistribute to Replicate
+            dt = distribute_tensor(t, device_mesh, [Shard(1)])
+            dt_vals, dt_idx = op(dt, dim=1)
+            self.assertEqual(dt_vals.full_tensor(), expected_vals)
+            self.assertEqual(dt_idx.full_tensor(), expected_idx)
+
+            # Partial input: forces redistribute to Replicate
+            dt = distribute_tensor(t, device_mesh, [Partial()])
+            dt_vals, dt_idx = op(dt, dim=1)
+            self.assertEqual(dt_vals.full_tensor(), expected_vals)
+            self.assertEqual(dt_idx.full_tensor(), expected_idx)
+
+    @with_comms
     @skip_if_lt_x_gpu(4)
     def test_foreach_add_different_mesh(self):
         mesh_shape = (2, self.world_size // 2)
@@ -991,6 +1086,104 @@ class DistMathOpsTest(DTensorTestBase):
                     self.assertEqual(comm_mode.get_total_counts(), 0)
                     self.assertTrue(output_dtensor.placements[0].is_shard(shard_dim))
                 self.assertEqual(output_dtensor.full_tensor(), output)
+
+    @with_comms
+    def test_scan_ops(self):
+        mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+        inp = torch.rand(3, 5, device=self.device_type)
+
+        shard_dim = 0
+        input_dtensor = distribute_tensor(
+            inp, device_mesh=mesh, placements=[Shard(shard_dim)]
+        )
+
+        for op in [torch.cumprod, torch.logcumsumexp]:
+            for dim in [0, 1]:
+                output = op(inp, dim=dim)
+                with comm_mode:
+                    output_dtensor = op(input_dtensor, dim=dim)
+                if dim == shard_dim:
+                    self.assertTrue(output_dtensor.placements[0].is_replicate())
+                else:
+                    self.assertTrue(output_dtensor.placements[0].is_shard(shard_dim))
+                self.assertEqual(output_dtensor.full_tensor(), output)
+
+    @with_comms
+    def test_scan_ops_with_indices(self):
+        mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+        inp = torch.rand(12, 8, device=self.device_type)
+
+        shard_dim = 0
+        input_dtensor = distribute_tensor(
+            inp, device_mesh=mesh, placements=[Shard(shard_dim)]
+        )
+
+        for op in [torch.cummax, torch.cummin]:
+            for dim in [0, 1]:
+                values, indices = op(inp, dim=dim)
+                with comm_mode:
+                    dt_values, dt_indices = op(input_dtensor, dim=dim)
+                if dim == shard_dim:
+                    self.assertTrue(dt_values.placements[0].is_replicate())
+                else:
+                    self.assertTrue(dt_values.placements[0].is_shard(shard_dim))
+                self.assertEqual(dt_values.full_tensor(), values)
+
+    @with_comms
+    def test_median(self):
+        device_mesh = self.build_device_mesh()
+        tensor = torch.randn(12, 8, device=self.device_type)
+        dtensor = distribute_tensor(tensor, device_mesh, [Shard(0)])
+
+        # Global median
+        self.assertEqual(torch.median(dtensor).full_tensor(), torch.median(tensor))
+
+        # nanmedian global
+        self.assertEqual(
+            torch.nanmedian(dtensor).full_tensor(), torch.nanmedian(tensor)
+        )
+
+    @with_comms
+    def test_dim_reductions_with_indices(self):
+        device_mesh = self.build_device_mesh()
+        tensor = torch.randn(12, 8, device=self.device_type)
+        shard_dim = 0
+        dtensor = distribute_tensor(tensor, device_mesh, [Shard(shard_dim)])
+
+        # nanmedian.dim
+        for dim in range(tensor.ndim):
+            vals, idxs = torch.nanmedian(tensor, dim=dim)
+            dt_vals, dt_idxs = torch.nanmedian(dtensor, dim=dim)
+            self.assertEqual(dt_vals.full_tensor(), vals)
+            self.assertEqual(dt_idxs.full_tensor(), idxs)
+            if dim == shard_dim:
+                self.assertTrue(dt_vals.placements[0].is_replicate())
+            else:
+                self.assertTrue(dt_vals.placements[0].is_shard(shard_dim))
+
+        # kthvalue: reduce along each dim
+        for dim in range(tensor.ndim):
+            vals, idxs = torch.kthvalue(tensor, 3, dim=dim)
+            dt_vals, dt_idxs = torch.kthvalue(dtensor, 3, dim=dim)
+            self.assertEqual(dt_vals.full_tensor(), vals)
+            self.assertEqual(dt_idxs.full_tensor(), idxs)
+            if dim == shard_dim:
+                self.assertTrue(dt_vals.placements[0].is_replicate())
+            else:
+                self.assertTrue(dt_vals.placements[0].is_shard(shard_dim))
+
+        # mode: reduce along each dim
+        for dim in range(tensor.ndim):
+            vals, idxs = torch.mode(tensor, dim=dim)
+            dt_vals, dt_idxs = torch.mode(dtensor, dim=dim)
+            self.assertEqual(dt_vals.full_tensor(), vals)
+            self.assertEqual(dt_idxs.full_tensor(), idxs)
+            if dim == shard_dim:
+                self.assertTrue(dt_vals.placements[0].is_replicate())
+            else:
+                self.assertTrue(dt_vals.placements[0].is_shard(shard_dim))
 
     @with_comms
     def test_conj_complex_dtensor(self):
@@ -1123,7 +1316,9 @@ class DistMathOpsTest(DTensorTestBase):
         dt = dt.redistribute(dt.device_mesh, placements=[Replicate()])
         out_with_redistribute = torch.norm(dt)
 
-        self.assertEqual(out_without_redistribute, out_with_redistribute)
+        self.assertEqual(
+            out_without_redistribute.full_tensor(), out_with_redistribute.full_tensor()
+        )
 
         local_tensor = torch.rand(3, dtype=torch.float32, device=self.device_type)
         dt = DTensor.from_local(
@@ -1134,7 +1329,9 @@ class DistMathOpsTest(DTensorTestBase):
         dt = dt.redistribute(dt.device_mesh, placements=[Replicate()])
         out_with_redistribute = torch.max(dt)
 
-        self.assertEqual(out_without_redistribute, out_with_redistribute)
+        self.assertEqual(
+            out_without_redistribute.full_tensor(), out_with_redistribute.full_tensor()
+        )
 
         local_tensor = torch.rand(3, dtype=torch.float32, device=self.device_type)
         dt = DTensor.from_local(
@@ -1145,7 +1342,9 @@ class DistMathOpsTest(DTensorTestBase):
         dt = dt.redistribute(dt.device_mesh, placements=[Replicate()])
         out_with_redistribute = torch.min(dt)
 
-        self.assertEqual(out_without_redistribute, out_with_redistribute)
+        self.assertEqual(
+            out_without_redistribute.full_tensor(), out_with_redistribute.full_tensor()
+        )
 
     @with_comms
     def test_matching_partial_reduction_ops(self):
@@ -1164,7 +1363,9 @@ class DistMathOpsTest(DTensorTestBase):
 
         self.assertTrue(out_without_redistribute.placements[0].is_partial())
         self.assertTrue(out_with_redistribute.placements[0].is_replicate())
-        self.assertEqual(out_without_redistribute, out_with_redistribute)
+        self.assertEqual(
+            out_without_redistribute.full_tensor(), out_with_redistribute.full_tensor()
+        )
 
     @skip_if_lt_x_gpu(4)
     @with_comms
@@ -1231,6 +1432,39 @@ class DistMathOpsTest(DTensorTestBase):
             self.assertEqual(dtensor_result.full_tensor(), local_result)
 
     @with_comms
+    def test_prims_fma(self):
+        from torch._inductor import inductor_prims
+
+        device_mesh = self.build_device_mesh()
+        a = torch.randn(12, 8)
+        b = torch.randn(12, 8)
+        c = torch.randn(12, 8)
+        dt_a = distribute_tensor(a, device_mesh, [Shard(0)])
+        dt_b = distribute_tensor(b, device_mesh, [Shard(0)])
+        dt_c = distribute_tensor(c, device_mesh, [Shard(0)])
+
+        # All DTensor inputs
+        local_result = inductor_prims.fma(a, b, c)
+        dtensor_result = inductor_prims.fma(dt_a, dt_b, dt_c)
+        self.assertEqual(dtensor_result.full_tensor(), local_result)
+        self.assertTrue(dtensor_result.placements[0].is_shard(dim=0))
+
+        # Scalar tensor input (mimics the alpha argument in add_)
+        scalar = torch.tensor(2.0)
+        local_result = inductor_prims.fma(a, scalar, c)
+        dtensor_result = inductor_prims.fma(dt_a, scalar, dt_c)
+        self.assertEqual(dtensor_result.full_tensor(), local_result)
+        self.assertTrue(dtensor_result.placements[0].is_shard(dim=0))
+
+        # Replicate placement
+        dt_a_rep = distribute_tensor(a, device_mesh, [Replicate()])
+        dt_c_rep = distribute_tensor(c, device_mesh, [Replicate()])
+        local_result = inductor_prims.fma(a, scalar, c)
+        dtensor_result = inductor_prims.fma(dt_a_rep, scalar, dt_c_rep)
+        self.assertEqual(dtensor_result.full_tensor(), local_result)
+        self.assertTrue(dtensor_result.placements[0].is_replicate())
+
+    @with_comms
     def test_prims_view_of(self):
         device_mesh = self.build_device_mesh()
         x = torch.randn(12, 8)
@@ -1239,6 +1473,210 @@ class DistMathOpsTest(DTensorTestBase):
         result = torch.ops.prims.view_of(dtensor)
         self.assertTrue(result.placements[0].is_shard(dim=0))
         self.assertEqual(result.full_tensor(), x)
+
+    @with_comms
+    def test_pooling_ops(self):
+        device_mesh = self.build_device_mesh()
+
+        # Single-output pooling
+        inp_4d = torch.randn(8, 3, 16, 16, device=self.device_type)
+        dt_4d = distribute_tensor(inp_4d, device_mesh, [Shard(0)])
+
+        for op, args in [
+            (torch.nn.functional.avg_pool2d, (3,)),
+            (torch.nn.functional.adaptive_avg_pool2d, ((4, 4),)),
+        ]:
+            expected = op(inp_4d, *args)
+            result = op(dt_4d, *args)
+            self.assertEqual(result.full_tensor(), expected)
+            self.assertTrue(result.placements[0].is_shard(0))
+
+        # Dual-output pooling (values + indices)
+        for op, args, kwargs in [
+            (
+                torch.nn.functional.adaptive_max_pool2d,
+                ((4, 4),),
+                {"return_indices": True},
+            ),
+        ]:
+            exp_val, exp_idx = op(inp_4d, *args, **kwargs)
+            dt_val, dt_idx = op(dt_4d, *args, **kwargs)
+            self.assertEqual(dt_val.full_tensor(), exp_val)
+            self.assertTrue(dt_val.placements[0].is_shard(0))
+
+        # 3D pooling
+        inp_5d = torch.randn(8, 3, 8, 8, 8, device=self.device_type)
+        dt_5d = distribute_tensor(inp_5d, device_mesh, [Shard(0)])
+
+        expected = torch.nn.functional.avg_pool3d(inp_5d, 3)
+        result = torch.nn.functional.avg_pool3d(dt_5d, 3)
+        self.assertEqual(result.full_tensor(), expected)
+        self.assertTrue(result.placements[0].is_shard(0))
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_nll_loss_backward_comm_counts(self):
+        """Test backward comm counts for nll_loss/cross_entropy with Shard(0) inputs.
+
+        When inputs are Shard(0), nll_loss_forward produces total_weight as
+        Partial(sum). The backward strategy requires total_weight to be Replicate
+        for reduction='mean' (where total_weight is used to normalize gradients),
+        but NOT for reduction='sum' or 'none' (where total_weight is unused by
+        the backward kernel). This test verifies that the unnecessary all-reduce
+        is avoided for 'sum' and 'none' reductions.
+        """
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        channel_size = 16
+        # Expected backward all-reduce counts per reduction mode:
+        # - "sum": 0 (total_weight unused in backward)
+        # - "none": 0 (total_weight unused in backward)
+        # - "mean": 1 (total_weight needed to normalize gradients)
+        expected_backward_allreduce = {"sum": 0, "none": 0, "mean": 1}
+
+        for reduction, expected_allreduce_count in expected_backward_allreduce.items():
+            x = torch.rand(8, channel_size, device=self.device_type, requires_grad=True)
+            target = torch.randint(channel_size, (8,), device=self.device_type)
+
+            dist_x = distribute_tensor(x, device_mesh, [Shard(0)])
+            dist_target = distribute_tensor(target, device_mesh, [Shard(0)])
+
+            dist_loss = torch.nn.functional.cross_entropy(
+                dist_x, dist_target, reduction=reduction
+            )
+
+            with comm_mode:
+                if reduction == "none":
+                    dist_loss.sum().backward()
+                else:
+                    dist_loss.backward()
+
+            allreduce_count = comm_mode.get_comm_counts().get(funcol.all_reduce, 0)
+            self.assertEqual(
+                allreduce_count,
+                expected_allreduce_count,
+                f"reduction='{reduction}': expected {expected_allreduce_count} "
+                f"backward all-reduce(s), got {allreduce_count}. "
+                f"Full comm counts: {pformat(dict(comm_mode.get_comm_counts()))}",
+            )
+
+            # Verify correctness
+            local_loss = torch.nn.functional.cross_entropy(
+                x, target, reduction=reduction
+            )
+            if reduction == "none":
+                local_loss.sum().backward()
+            else:
+                local_loss.backward()
+            self.assertEqual(dist_x.grad.full_tensor(), x.grad)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_linalg_ops(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        # Batched positive-definite matrix for ops that require it (cholesky, inv)
+        A = torch.randn(8, 4, 4, device=self.device_type)
+        spd = A @ A.mT + 4 * torch.eye(4, device=self.device_type)
+        dt_spd = distribute_tensor(spd, device_mesh, [Shard(0)])
+
+        # cholesky
+        expected = torch.linalg.cholesky(spd)
+        result = torch.linalg.cholesky(dt_spd)
+        self.assertEqual(result.full_tensor(), expected)
+        self.assertTrue(result.placements[0].is_shard(0))
+
+        # inv
+        expected = torch.linalg.inv(spd)
+        result = torch.linalg.inv(dt_spd)
+        self.assertEqual(result.full_tensor(), expected)
+        self.assertTrue(result.placements[0].is_shard(0))
+
+        # lu_factor
+        B = torch.randn(8, 4, 4, device=self.device_type)
+        dt_B = distribute_tensor(B, device_mesh, [Shard(0)])
+        exp_LU, exp_piv = torch.linalg.lu_factor(B)
+        res_LU, res_piv = torch.linalg.lu_factor(dt_B)
+        self.assertEqual(res_LU.full_tensor(), exp_LU)
+        self.assertTrue(res_LU.placements[0].is_shard(0))
+
+        # eig
+        expected_vals, expected_vecs = torch.linalg.eig(B)
+        result_vals, result_vecs = torch.linalg.eig(dt_B)
+        self.assertEqual(result_vals.full_tensor(), expected_vals)
+        self.assertTrue(result_vals.placements[0].is_shard(0))
+
+        # solve
+        rhs = torch.randn(8, 4, 2, device=self.device_type)
+        dt_rhs = distribute_tensor(rhs, device_mesh, [Shard(0)])
+        expected = torch.linalg.solve(spd, rhs)
+        result = torch.linalg.solve(dt_spd, dt_rhs)
+        self.assertEqual(result.full_tensor(), expected)
+        self.assertTrue(result.placements[0].is_shard(0))
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_linalg_cross(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        a = torch.randn(8, 4, 3, device=self.device_type)
+        b = torch.randn(8, 4, 3, device=self.device_type)
+
+        # Shard on batch dim (dim=0), cross on default dim=-1
+        dt_a = distribute_tensor(a, device_mesh, [Shard(0)])
+        dt_b = distribute_tensor(b, device_mesh, [Shard(0)])
+        expected = torch.linalg.cross(a, b)
+        result = torch.linalg.cross(dt_a, dt_b)
+        self.assertEqual(result.full_tensor(), expected)
+        self.assertTrue(result.placements[0].is_shard(0))
+
+        # Shard on dim=1, cross on dim=-1
+        dt_a1 = distribute_tensor(a, device_mesh, [Shard(1)])
+        dt_b1 = distribute_tensor(b, device_mesh, [Shard(1)])
+        result1 = torch.linalg.cross(dt_a1, dt_b1)
+        self.assertEqual(result1.full_tensor(), expected)
+        self.assertTrue(result1.placements[0].is_shard(1))
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_linalg_solve_partial(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        A = torch.randn(4, 4, device=self.device_type, dtype=torch.float64)
+        A = A @ A.mT + 4 * torch.eye(4, device=self.device_type, dtype=torch.float64)
+        B = torch.randn(4, 2, device=self.device_type, dtype=torch.float64)
+
+        dt_A = distribute_tensor(A, device_mesh, [Replicate()])
+        dt_B = distribute_tensor(B, device_mesh, [Partial()])
+        expected = torch.linalg.solve(A, B)
+        result = torch.linalg.solve(dt_A, dt_B)
+        self.assertEqual(result.full_tensor(), expected)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_interpolation_upsample_ops(self):
+        device_mesh = self.build_device_mesh()
+        F = torch.nn.functional
+
+        inp = torch.randn(8, 3, 16, 16, device=self.device_type)
+        dt_inp = distribute_tensor(inp, device_mesh, [Shard(0)])
+
+        # F.interpolate with nearest mode
+        expected = F.interpolate(inp, size=(8, 8), mode="nearest")
+        result = F.interpolate(dt_inp, size=(8, 8), mode="nearest")
+        self.assertEqual(result.full_tensor(), expected)
+        self.assertTrue(result.placements[0].is_shard(0))
+
+        # F.interpolate with area mode
+        expected = F.interpolate(inp, size=(8, 8), mode="area")
+        result = F.interpolate(dt_inp, size=(8, 8), mode="area")
+        self.assertEqual(result.full_tensor(), expected)
+        self.assertTrue(result.placements[0].is_shard(0))
+
+        # F.adaptive_avg_pool2d
+        expected = F.adaptive_avg_pool2d(inp, (4, 4))
+        result = F.adaptive_avg_pool2d(dt_inp, (4, 4))
+        self.assertEqual(result.full_tensor(), expected)
+        self.assertTrue(result.placements[0].is_shard(0))
 
 
 DistMathOpsTestWithLocalTensor = create_local_tensor_test_class(

@@ -11,7 +11,11 @@ import torch._dynamo.test_case
 import torch._inductor.mock_cache as mock_cache
 import torch.compiler.config
 import torch.nested
-from torch._dynamo.testing import CompileCounter
+from torch._dynamo.testing import (
+    CompileCounter,
+    CompileCounterWithBackend,
+    normalize_gm,
+)
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.utils import clear_caches, fresh_cache
 from torch.testing._internal.common_utils import IS_WINDOWS
@@ -469,6 +473,53 @@ def run(cnt):
                 self.assertEqual(cnts.frame_count, 1)
                 f(t(2, 2), t(2, 4))
                 self.assertEqual(cnts.frame_count, 2)
+
+    def test_factory_created_functions_separate_pgo_state(self):
+        cc_backend = CompileCounterWithBackend(backend="aot_eager")
+
+        def wrap_compile(func):
+            @torch.compile(backend=cc_backend, fullgraph=True)
+            def _func(x):
+                return func(x)
+
+            return _func
+
+        def impl_a(x):
+            return x.view(-1)
+
+        def impl_b(x):
+            return x.sum()
+
+        compiled_a = wrap_compile(impl_a)
+        compiled_b = wrap_compile(impl_b)
+
+        # Call with different shapes - they should NOT share PGO state
+        compiled_a(torch.randn(2, 3))  # shape (2, 3)
+        compiled_b(torch.randn(5, 7))  # shape (5, 7)
+
+        actual = normalize_gm(cc_backend.graphs[1].print_readable(print_output=False))
+
+        # If PGO state is properly separated, compiled_b should NOT have
+        # been triggered to use dynamic shapes based on compiled_a's shapes
+        # This should result in 2 separate static compilations
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[5, 7]"):
+        l_x_ = L_x_
+
+        sum_1: "f32[]" = l_x_.sum();  l_x_ = None
+        return (sum_1,)
+""",
+        )
+
+        # Verify no dynamic shapes were introduced incorrectly
+        # by checking that calling with same shapes doesn't recompile
+        cc_backend.clear()
+        compiled_a(torch.randn(2, 3))
+        compiled_b(torch.randn(5, 7))
+        self.assertEqual(cc_backend.frame_count, 0)  # No recompilation needed
 
 
 if __name__ == "__main__":

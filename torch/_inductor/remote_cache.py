@@ -10,7 +10,7 @@ import os
 import sys
 import typing
 from abc import abstractmethod
-from typing import Any, Generic, TypeAlias, TypeVar
+from typing import Any, Generic, TypeAlias, TypeVar, Union
 from typing_extensions import override
 
 from torch._dynamo.utils import dynamo_timed
@@ -109,9 +109,9 @@ class RemoteCacheSerde(Generic[_T, _U]):
         pass
 
 
-JsonDataTy = (
-    int | float | str | bool | dict[str, "JsonDataTy"] | list["JsonDataTy"] | None
-)
+JsonDataTy: TypeAlias = Union[  # noqa: UP007
+    int, float, str, bool, dict[str, "JsonDataTy"], list["JsonDataTy"], None
+]
 
 
 class RemoteCacheJsonSerde(RemoteCacheSerde[JsonDataTy, bytes]):

@@ -9,7 +9,6 @@ import itertools
 import os
 import unittest
 from collections import OrderedDict
-from typing import Optional, Union
 
 import numpy as np
 
@@ -95,8 +94,8 @@ def _init_test_rpn():
 
 def _construct_tensor_for_quantization_test(
     shape: tuple[int, ...],
-    offset: Optional[Union[int, float]] = None,
-    max_val: Optional[Union[int, float]] = None,
+    offset: int | float | None = None,
+    max_val: int | float | None = None,
 ) -> Tensor:
     """Helper function to generate weights and test inputs in a deterministic way.
 
@@ -515,8 +514,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     def test_dict_output(self):
         class DictModelOutput(OrderedDict):
             tensor_out: Tensor
-            tuple_out: Optional[tuple[Tensor]] = None
-            list_out: Optional[list[Tensor]] = None
+            tuple_out: tuple[Tensor] | None = None
+            list_out: list[Tensor] | None = None
 
         class MyModel(torch.nn.Module):
             def forward(self, a, b, c, d):
@@ -587,8 +586,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def forward(
                 self,
                 x,
-                y: Optional[Tensor] = None,
-                z: Optional[Tensor] = None,
+                y: Tensor | None = None,
+                z: Tensor | None = None,
             ):
                 if y is not None:
                     return x + y
@@ -616,8 +615,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def forward(
                 self,
                 x,
-                y: Optional[Tensor] = torch.ones(2, 3),
-                z: Optional[Tensor] = torch.zeros(2, 3),
+                y: Tensor | None = torch.ones(2, 3),
+                z: Tensor | None = torch.zeros(2, 3),
             ):
                 if y is not None:
                     return x + y
@@ -640,8 +639,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def forward(
                 self,
                 x,
-                y: Optional[Tensor] = torch.ones(2, 3),
-                z: Optional[Tensor] = torch.zeros(2, 3),
+                y: Tensor | None = torch.ones(2, 3),
+                z: Tensor | None = torch.zeros(2, 3),
             ):
                 if y is not None:
                     return x + y
@@ -675,7 +674,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipIfUnsupportedMinOpsetVersion(15)
     def test_all_optional_default_none(self):
         class Model(torch.nn.Module):
-            def forward(self, x: Optional[Tensor] = None, y: Optional[Tensor] = None):
+            def forward(self, x: Tensor | None = None, y: Tensor | None = None):
                 if x is not None:
                     return x
                 if y is not None:
@@ -700,8 +699,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class Model(torch.nn.Module):
             def forward(
                 self,
-                x: Optional[Tensor] = torch.ones(2, 3),
-                y: Optional[Tensor] = torch.zeros(2, 3),
+                x: Tensor | None = torch.ones(2, 3),
+                y: Tensor | None = torch.zeros(2, 3),
             ):
                 if x is not None:
                     return x
@@ -726,8 +725,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class Model(torch.nn.Module):
             def forward(
                 self,
-                x: Optional[Tensor] = torch.ones(2, 3),
-                y: Optional[Tensor] = torch.zeros(2, 3),
+                x: Tensor | None = torch.ones(2, 3),
+                y: Tensor | None = torch.zeros(2, 3),
             ):
                 if x is not None:
                     return x
@@ -824,7 +823,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipIfUnsupportedMinOpsetVersion(15)
     def test_mixed_optional(self):
         class Model(torch.nn.Module):
-            def forward(self, x, y: Optional[Tensor]):
+            def forward(self, x, y: Tensor | None):
                 if y is not None:
                     return x + y
                 return x
@@ -838,7 +837,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipIfUnsupportedMinOpsetVersion(15)
     def test_tuple_of_optional(self):
         class Model(torch.nn.Module):
-            def forward(self, x, y: tuple[Optional[Tensor], Optional[Tensor]]):
+            def forward(self, x, y: tuple[Tensor | None, Tensor | None]):
                 if y[0] is not None:
                     return x + y[0]
                 if y[1] is not None:
@@ -856,7 +855,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def forward(
                 self,
                 x,
-                y: tuple[Optional[Tensor], Optional[Tensor]] = (
+                y: tuple[Tensor | None, Tensor | None] = (
                     torch.zeros(2, 3),
                     torch.zeros(2, 3),
                 ),
@@ -879,7 +878,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def forward(
                 self,
                 x,
-                y: tuple[Optional[Tensor], Optional[Tensor]] = (
+                y: tuple[Tensor | None, Tensor | None] = (
                     torch.zeros(2, 3),
                     torch.zeros(2, 3),
                 ),
@@ -11242,7 +11241,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 )
                 return emb
 
-            def forward(self, input, incremental_state: Optional[Tensor] = None):
+            def forward(self, input, incremental_state: Tensor | None = None):
                 bsz, seq_len = input.shape[0], input.shape[1]
                 self.const = 3
                 if self.weights is None:
@@ -11303,7 +11302,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 )
                 return emb
 
-            def forward(self, input, incremental_state: Optional[Tensor] = None):
+            def forward(self, input, incremental_state: Tensor | None = None):
                 bsz, seq_len = input.shape[0], input.shape[1]
                 self.const = 1.5
                 self.weights = InnerModule.get_embedding(self.embedding_dim)
@@ -11364,7 +11363,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                     self.conv.weight = torch.randn(3, 10)
                     self.conv.bias = self.conv.weight[:]
 
-            def forward(self, anchors) -> Optional[Tensor]:
+            def forward(self, anchors) -> Tensor | None:
                 self.set_cell_anchors(anchors)
                 return self.conv.bias
 
@@ -13701,29 +13700,29 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 )
 
     class IfNoneInput(torch.nn.Module):
-        def forward(self, x) -> Optional[Tensor]:
-            y: Optional[Tensor] = None
+        def forward(self, x) -> Tensor | None:
+            y: Tensor | None = None
             if x.size(0) > 1:
                 y = x
             return y
 
     class IfNoneOutput(torch.nn.Module):
-        def forward(self, x) -> Optional[Tensor]:
-            y: Optional[Tensor] = x
+        def forward(self, x) -> Tensor | None:
+            y: Tensor | None = x
             if x.size(0) > 1:
                 y = None
             return y
 
     class LoopNoneInput(torch.nn.Module):
-        def forward(self, x) -> Optional[Tensor]:
-            y: Optional[Tensor] = None
+        def forward(self, x) -> Tensor | None:
+            y: Tensor | None = None
             for _ in range(x.size(0)):
                 y = x
             return y
 
     class LoopNoneOutput(torch.nn.Module):
-        def forward(self, x) -> Optional[Tensor]:
-            y: Optional[Tensor] = x
+        def forward(self, x) -> Tensor | None:
+            y: Tensor | None = x
             for _ in range(x.size(0)):
                 y = None
             return y
@@ -13778,7 +13777,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipIfUnsupportedMinOpsetVersion(16)
     def test_uninitialized_optional(self):
         class Module(torch.nn.Module):
-            def forward(self, y: Optional[Tensor]) -> Optional[Tensor]:
+            def forward(self, y: Tensor | None) -> Tensor | None:
                 if y is not None:
                     if y.shape[1] < 5:
                         if y.size(0) == 1:

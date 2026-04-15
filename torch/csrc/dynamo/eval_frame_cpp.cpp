@@ -96,9 +96,7 @@ py::object get_null_stack_value() {
 py::list _get_frame_value_stack_with_depth(
     const py::handle& frame_obj,
     int depth) {
-  if (!PyFrame_Check(frame_obj.ptr())) {
-    throw py::type_error("expected a frame object!");
-  }
+  TORCH_CHECK_TYPE(PyFrame_Check(frame_obj.ptr()), "expected a frame object!");
 
   py::list result;
   if (depth <= 0) {
@@ -211,6 +209,49 @@ py::list _get_frame_value_stack_with_depth(
 static constexpr const char* cache_lookup_profiler_str =
     "TorchDynamo Cache Lookup";
 
+// Cache the random module to avoid calling py::module_::import("random") at
+// arbitrary points during execution. torch.package overrides the import
+// machinery, and importing "random" inside a package archive context would fail
+// if random isn't in the extern list.
+// Stored as raw PyObject* (leaked ref) to avoid destructor running after Python
+// finalizes, same pattern as bytecode_debugger_callback_obj above.
+static PyObject* random_module = nullptr;
+static py::handle get_random_module() {
+  if (random_module == nullptr) {
+    random_module = py::module_::import("random").release().ptr();
+  }
+  return py::handle(random_module);
+}
+
+// Use RAII to save/restore global state across the dynamo callback
+class PreserveGlobalState {
+  py::object random_state;
+
+ public:
+  PreserveGlobalState() {
+    this->random_state = get_random_module().attr("getstate")();
+  }
+  PreserveGlobalState(const PreserveGlobalState&) = delete;
+  PreserveGlobalState(PreserveGlobalState&&) = delete;
+  PreserveGlobalState& operator=(const PreserveGlobalState&) = delete;
+  PreserveGlobalState& operator=(PreserveGlobalState&&) = delete;
+  ~PreserveGlobalState() {
+    try {
+      get_random_module().attr("setstate")(this->random_state);
+    } catch (py::error_already_set& e) {
+      try {
+        e.restore();
+      } catch (...) {
+        // Intentionally return to silence empty catch linter.
+        // We can't propagate exceptions since we are in a destructor.
+        return;
+      }
+    } catch (...) {
+      return;
+    }
+  }
+};
+
 // Remember to update the type signature for DynamoCallbackFn.__call__ in
 // torch/_dynamo/types.py if this function's signature changes.
 static py::object dynamo_call_callback(
@@ -251,9 +292,9 @@ static py::handle _callback_from_action(
 static int32_t c_recursion_limit = -1;
 
 void dynamo_set_c_recursion_limit(int32_t limit) {
-  if (limit < 1 && limit != -1) {
-    throw std::range_error("recursion limit must be >= 1, or -1 to reset");
-  }
+  TORCH_CHECK_VALUE(
+      limit >= 1 || limit == -1,
+      "recursion limit must be >= 1, or -1 to reset");
   c_recursion_limit = limit;
 }
 
@@ -295,18 +336,6 @@ struct CRecursionLimitRAII {
 };
 
 #endif
-
-EvalFrameOverride eval_frame_override = EvalFrameOverride::NONE;
-
-EvalFrameOverride get_eval_frame_override() {
-  return eval_frame_override;
-}
-
-EvalFrameOverride set_eval_frame_override(EvalFrameOverride override) {
-  EvalFrameOverride prev = eval_frame_override;
-  eval_frame_override = override;
-  return prev;
-}
 
 // frame and callback are borrowed references.
 // Returns new reference.
@@ -353,7 +382,7 @@ PyObject* dynamo__custom_eval_frame(
     // immediately skip the frame, and (2) even if it did, this would only
     // be profitable if there was tensor code in the unwinding code.  Seems
     // unlikely.
-    DEBUG_TRACE("throw %s", get_frame_name(frame));
+    DEBUG_TRACE("throw %s", get_frame_name(frame)); // @allow-raw-throw
     return dynamo_eval_frame_default(tstate, frame, throw_flag);
   }
 
@@ -387,28 +416,28 @@ PyObject* dynamo__custom_eval_frame(
   // original frame, we are responsible for clearing it - via
   // clear_old_frame_if_python_312_plus.
   auto eval_custom = [&]() {
-    // If we're attempting to run dynamo-generated code and eval frame override
-    // is set to SKIP, then we should set the callback to None to skip.
-    // If the override is set to ERROR, then we call
-    // torch._dynamo.convert_frame.get_fail_callback, which patches
-    // convert_frame.compile_frame with a function that errors unconditionally.
-    // This means Dynamo will error if it attempts to trace into the frame
-    // (Python-level skips pre-trace are permissible).
-    if (!recursive_callback.is_none() &&
-        !recursive_callback.is(py::bool_(false))) {
-      if (eval_frame_override == EvalFrameOverride::SKIP) {
-        recursive_callback = py::none();
-      } else if (eval_frame_override == EvalFrameOverride::ERROR) {
-        if (!convert_frame_get_fail_callback) {
-          convert_frame_get_fail_callback =
-              py::module_::import("torch._dynamo.convert_frame")
-                  .attr("get_fail_callback");
-          auto atexit = py::module_::import("atexit");
-          atexit.attr("register")(py::cpp_function(
-              []() { convert_frame_get_fail_callback = std::nullopt; }));
+    if (fullgraph_compiled_frame_count >= 0) {
+      fullgraph_compiled_frame_count++;
+      // Under fullgraph, disable or error Dynamo for sub-frames of compiled
+      // code. If fullgraph_error_on_nested_compile is set, wrap the callback
+      // with get_fail_callback so compilation attempts error. Otherwise, set
+      // callback to None to skip sub-frames entirely.
+      if (!recursive_callback.is_none() &&
+          !recursive_callback.is(py::bool_(false))) {
+        if (fullgraph_error_on_nested_compile) {
+          if (!convert_frame_get_fail_callback) {
+            convert_frame_get_fail_callback =
+                py::module_::import("torch._dynamo.convert_frame")
+                    .attr("get_fail_callback");
+            auto atexit = py::module_::import("atexit");
+            atexit.attr("register")(py::cpp_function(
+                []() { convert_frame_get_fail_callback = std::nullopt; }));
+          }
+          recursive_callback =
+              convert_frame_get_fail_callback.value()(recursive_callback);
+        } else {
+          recursive_callback = py::none();
         }
-        recursive_callback =
-            convert_frame_get_fail_callback.value()(recursive_callback);
       }
     }
     eval_frame_callback_set(recursive_callback.ptr());
@@ -567,6 +596,7 @@ PyObject* dynamo__custom_eval_frame(
       fail();
       return eval_result;
     }
+    PreserveGlobalState preserve_global_state;
     callback_result = dynamo_call_callback(
         callback, frame, locals.get(), cache_entry, frame_state);
     new_strategy =

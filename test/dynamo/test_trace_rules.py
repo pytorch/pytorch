@@ -474,6 +474,8 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             "handle_assert",  # No global state (constant)
             "handle_nested_tensor",  # No global state
             "handle_current_stream",  # Safely implemented
+            "handle_synchronize",  # Device type from function identity or arg
+            "handle_functorch_autograd_grad",  # Only inspects placeholder metadata
         )
         for fn in handlers:
             if isinstance(fn, staticmethod) or inspect.ismethod(fn):

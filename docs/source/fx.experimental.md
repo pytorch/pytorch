@@ -77,8 +77,6 @@ These APIs are experimental and subject to change without notice.
     InnerTensorKey
     Specialization
 
-    hint_int
-    size_hint
     is_concrete_int
     is_concrete_bool
     is_concrete_float
@@ -116,11 +114,13 @@ These APIs are experimental and subject to change without notice.
     guard_float
     guard_int
     guard_scalar
-    has_hint
+    guarding_hint_or_throw
+    has_guarding_hint
     has_symbolic_sizes_strides
     is_nested_int
     is_symbol_binding_fx_node
     is_symbolic
+    optimization_hint
     expect_true
     log_lru_cache_stats
 ```
@@ -362,6 +362,7 @@ These APIs are experimental and subject to change without notice.
     view_inference_rule
     register_inference_rule
     transpose_inference_rule
+    range_check
 ```
 
 ## torch.fx.experimental.migrate_gradual_types.constraint_transformation

@@ -2,7 +2,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import functools
 from collections.abc import Callable, Sequence
-from typing import Optional, Union
 
 import torch
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
@@ -18,9 +17,9 @@ except ImportError:
 
 __all__ = ["local_map"]
 
-PlacementType = Optional[Sequence[Placement]]
-InputPlacements = Optional[tuple[PlacementType, ...]]
-OutputPlacements = Union[PlacementType, tuple[PlacementType, ...]]
+PlacementType = Sequence[Placement] | None
+InputPlacements = tuple[PlacementType, ...] | None
+OutputPlacements = PlacementType | tuple[PlacementType, ...]
 
 
 def local_map(

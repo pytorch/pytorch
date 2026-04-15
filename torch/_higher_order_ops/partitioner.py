@@ -109,8 +109,7 @@ class HopPartitionedGraph:
         if len(invalid_reasons) > 0:
             newline = "\n"
             raise RuntimeError(
-                "Invalid HopPartitionedGraph. Reasons:\n",
-                f"{newline.join(invalid_reasons)}",
+                f"Invalid HopPartitionedGraph. Reasons:\n{newline.join(invalid_reasons)}"
             )
 
     def _reorder_fw_output(self) -> None:

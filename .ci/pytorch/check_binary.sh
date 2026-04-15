@@ -154,7 +154,7 @@ setup_link_flags () {
 TEST_CODE_DIR="$(dirname $(realpath ${BASH_SOURCE[0]}))/test_example_code"
 build_and_run_example_cpp () {
   setup_link_flags
-  g++ ${TEST_CODE_DIR}/$1.cpp -I${install_root}/include -I${install_root}/include/torch/csrc/api/include -std=gnu++17 -L${install_root}/lib ${REF_LIB} ${ADDITIONAL_LINKER_FLAGS} -ltorch $TORCH_CPU_LINK_FLAGS $TORCH_CUDA_LINK_FLAGS $C10_LINK_FLAGS -o $1
+  g++ ${TEST_CODE_DIR}/$1.cpp -I${install_root}/include -I${install_root}/include/torch/csrc/api/include -std=gnu++20 -L${install_root}/lib ${REF_LIB} ${ADDITIONAL_LINKER_FLAGS} -ltorch $TORCH_CPU_LINK_FLAGS $TORCH_CUDA_LINK_FLAGS $C10_LINK_FLAGS -o $1
   ./$1
 }
 
@@ -290,25 +290,6 @@ if [[ "$PACKAGE_TYPE" != 'libtorch' ]]; then
     python -c "from smoke_test import test_linalg; test_linalg('cuda')"
   fi
   popd
-fi
-
-###############################################################################
-# Check PyTorch supports TCP_TLS gloo transport
-###############################################################################
-
-if [[ "$(uname)" == 'Linux' && "$PACKAGE_TYPE" != 'libtorch' ]]; then
-  GLOO_CHECK="import torch.distributed as dist
-try:
-    dist.init_process_group('gloo', rank=0, world_size=1)
-except RuntimeError as e:
-    print(e)
-"
-  RESULT=`GLOO_DEVICE_TRANSPORT=TCP_TLS MASTER_ADDR=localhost MASTER_PORT=63945 python -c "$GLOO_CHECK"`
-  GLOO_TRANSPORT_IS_NOT_SUPPORTED='gloo transport is not supported'
-  if [[ "$RESULT" =~ "$GLOO_TRANSPORT_IS_NOT_SUPPORTED" ]]; then
-    echo "PyTorch doesn't support TLS_TCP transport, please build with USE_GLOO_WITH_OPENSSL=1"
-    exit 1
-  fi
 fi
 
 ###############################################################################

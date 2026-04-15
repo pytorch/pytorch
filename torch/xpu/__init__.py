@@ -285,6 +285,8 @@ def get_device_properties(
     - ``gpu_eu_count`` (int): number of EUs (Execution Unit).
     - ``max_work_group_size``: (int): maximum number of work-items permitted in a work-group.
     - ``max_num_sub_groups`` (int): maximum number of sub-groups supported in a work-group.
+    - ``memory_clock_rate`` (int) maximum clock rate of device's global memory in MHz.
+    - ``memory_bus_width`` (int) maximum bus width between device and memory in bits.
     - ``sub_group_sizes``: (list[int]): a list of supported sub-group sizes.
     - ``local_mem_size`` (int): device local memory capacity that can be allocated per work-group in bytes.
     - ``has_fp16`` (bool): whether float16 dtype is supported.

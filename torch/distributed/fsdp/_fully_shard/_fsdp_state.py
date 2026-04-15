@@ -16,8 +16,8 @@ from torch.distributed._composable_state import (
     _State,
 )
 from torch.distributed.device_mesh import _get_device_handle
+from torch.distributed.fsdp._common_utils import collect_grad_tensors
 from torch.distributed.utils import _apply_to_tensors, _to_kwargs
-from torch.utils._pytree import tree_flatten
 
 from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_common import _cast_fp_tensor, _dynamo_disable, TrainingState
@@ -200,19 +200,38 @@ class FSDPState(_State):
                 fsdp_param_group.post_forward_mesh_info = None
         self._init_fqns()
         self._init_shared_state()
+        self._validate_no_duplicate_params()
         # Run parameter group lazy inits after initializing FQNs for improved
         # error messages
         for state in self._state_ctx.all_states:
             for fsdp_param_group in state._fsdp_param_groups:
                 fsdp_param_group.lazy_init()
 
+    def _validate_no_duplicate_params(self) -> None:
+        seen: set[int] = set()
+        for state in self._state_ctx.all_states:
+            for fsdp_param_group in state._fsdp_param_groups:
+                for fsdp_param in fsdp_param_group.fsdp_params:
+                    if fsdp_param._orig_param_uid in seen:
+                        raise ValueError(
+                            f"Parameter '{fsdp_param._param_fqn}' is shared with a "
+                            f"parameter already managed by another FSDP group. "
+                            f"For shared/tied parameters, use "
+                            f"fully_shard([module_a, module_b]) to place them in "
+                            f"the same FSDP group."
+                        )
+                    seen.add(fsdp_param._orig_param_uid)
+
     def _init_shared_state(self) -> None:
         self._comm_ctx.lazy_init(self._device)
         for state in self._state_ctx.all_states:
             state._state_ctx = self._state_ctx
             state._comm_ctx = self._comm_ctx
-            for fsdp_param_group in state._fsdp_param_groups:
+            num_groups = len(state._fsdp_param_groups)
+            for i, fsdp_param_group in enumerate(state._fsdp_param_groups):
                 fsdp_param_group.comm_ctx = self._comm_ctx
+                fsdp_param_group._param_group_index = i
+                fsdp_param_group._num_param_groups = num_groups
 
     def _init_fqns(self) -> None:
         """Sets module and parameter FQN attributes for debugging."""
@@ -277,6 +296,8 @@ class FSDPState(_State):
         for fsdp_param_group in self._fsdp_param_groups:
             args, kwargs = fsdp_param_group.pre_forward(module, args, kwargs)
         for fsdp_state in self._states_to_forward_prefetch:
+            # Forward order (not reversed) to match forward execution order;
+            # contrast with reversed() in _pre_backward for backward order.
             for target_param_group in fsdp_state._fsdp_param_groups:
                 FSDPParamGroup._prefetch_unshard(target_param_group, "forward")
         return args, kwargs
@@ -317,7 +338,9 @@ class FSDPState(_State):
         for fsdp_param_group in self._fsdp_param_groups:
             fsdp_param_group.pre_backward(default_prefetch)
         for fsdp_state in self._states_to_backward_prefetch:
-            for target_param_group in fsdp_state._fsdp_param_groups:
+            # Reverse so higher-indexed groups are prefetched first,
+            # matching backward execution order (reverse of forward).
+            for target_param_group in reversed(fsdp_state._fsdp_param_groups):
                 FSDPParamGroup._prefetch_unshard(target_param_group, "backward")
         return grad
 
@@ -326,7 +349,11 @@ class FSDPState(_State):
         logger.debug("FSDP::root_post_backward")
         with torch.profiler.record_function("FSDP::root_post_backward_callback"):
             for state in self._state_ctx.all_states:
-                for fsdp_param_group in state._fsdp_param_groups:
+                # Reverse so that the last param group (which gates the
+                # reduce-scatter wait/clear) fires first, matching the
+                # autograd backward order and preserving RS overlap for
+                # per-param-mesh modules whose inputs lack gradients.
+                for fsdp_param_group in reversed(state._fsdp_param_groups):
                     if fsdp_param_group._training_state != TrainingState.POST_BACKWARD:
                         # Run post-backward in case forward inputs did not require
                         # gradient so the autograd backward did not run
@@ -337,11 +364,12 @@ class FSDPState(_State):
                     state._finalize_backward()
             if self._state_ctx.is_last_backward:
                 self._comm_ctx.post_forward_order.clear()
-                if self._comm_ctx.reduce_scatter_state is not None:
-                    self._device_handle.current_stream().wait_event(
-                        self._comm_ctx.reduce_scatter_state.event
-                    )
-                    self._comm_ctx.reduce_scatter_state = None
+                # Catch the last module's RS states that no subsequent
+                # module's group N-1 wait will clear.
+                for rs_state in self._comm_ctx.reduce_scatter_states:
+                    if rs_state.event is not None:
+                        self._device_handle.current_stream().wait_event(rs_state.event)
+                self._comm_ctx.reduce_scatter_states.clear()
             self._state_ctx.post_backward_final_callback_queued = False
 
     def _finalize_backward(self) -> None:
@@ -363,10 +391,11 @@ class FSDPState(_State):
     def _register_pre_backward_hook(self, output: Any) -> Any:
         if not torch.is_grad_enabled():
             return output
-        flat_outputs, _ = tree_flatten(output)
-        for t in flat_outputs:
-            if torch.is_tensor(t) and t.requires_grad:
-                t.register_hook(self._pre_backward)
+        # output is the forward return value — pass directly without wrapping
+        # (unlike _register_post_backward_hook which wraps (args, kwargs))
+        tensors = collect_grad_tensors(output)
+        for t in tensors:
+            t.register_hook(self._pre_backward)
         return output
 
     def _register_root_post_backward_final_callback(self):

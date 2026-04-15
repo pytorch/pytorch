@@ -34,6 +34,7 @@
 #else
 #include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_efficientzerotensor.h>
+#include <ATen/ops/_int_mm_native.h>
 #include <ATen/ops/_scaled_mm_native.h>
 #include <ATen/ops/_unsafe_view_native.h>
 #include <ATen/ops/abs.h>
@@ -108,8 +109,7 @@ cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activa
     case Activation::GELU:
       return cuda::blas::GEMMAndBiasActivationEpilogue::GELU;
     default:
-      TORCH_CHECK(false);
-      return cuda::blas::GEMMAndBiasActivationEpilogue::None;
+      TORCH_CHECK(false, "Unknown activation epologue type");
   }
 }
 
@@ -228,9 +228,6 @@ static bool isInputCompliesAddmmCudaLt(
       mat2_sizes[0] > 1 && mat2_sizes[1] > 1
     )
   );
-
-  // no compliance by default
-  return false;
 }
 
 template <typename scalar_t>
@@ -367,6 +364,12 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   // if lt path fails, we recurse back into this function here and force the lt path to off
   // we cannot update variable disable_addmm_cuda_lt from above since it is static and would be permanent
   bool disable_addmm_cuda_lt = persistent_disable_addmm_cuda_lt || disable_addmm_cuda_lt_override;
+  // NOTE: See https://github.com/pytorch/pytorch/issues/172231
+  const auto preferred_cublas_backend = at::globalContext().blasPreferredBackend();
+  disable_addmm_cuda_lt = !(
+      preferred_cublas_backend == BlasBackend::Cublaslt
+      || preferred_cublas_backend == BlasBackend::Default // Lt is default
+  ) || disable_addmm_cuda_lt;
   #ifdef USE_ROCM
   // Conditioned on the device index, which is not persistent
   disable_addmm_cuda_lt = disable_addmm_cuda_lt || isGloballyDisabledAddmmCudaLt(self.device());

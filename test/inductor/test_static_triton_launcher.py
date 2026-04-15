@@ -2,7 +2,6 @@
 import os
 import random
 import tempfile
-from typing import Union
 from unittest import mock
 
 import torch
@@ -82,7 +81,7 @@ class TestStaticTritonLauncher(TestCase):
     def _make_launcher(
         self,
         compiled_kernel: CompiledKernel,
-    ) -> Union[StaticallyLaunchedCudaKernel, StaticallyLaunchedXpuKernel]:
+    ) -> StaticallyLaunchedCudaKernel | StaticallyLaunchedXpuKernel:
         """
         Compiles a Triton kernel with the provided *args,
         writes its cubin to the temporary file, and returns the file path.

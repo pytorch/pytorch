@@ -4,7 +4,6 @@
 
 import io
 import textwrap
-from typing import Optional
 
 import torch
 import torch.utils.bundled_inputs
@@ -333,8 +332,8 @@ class TestBundledInputs(TestCase):
         class MyModel(torch.nn.Module):
             def forward(
                 self,
-                arg1: Optional[dict[str, torch.Tensor]],
-                arg2: Optional[list[torch.Tensor]],
+                arg1: dict[str, torch.Tensor] | None,
+                arg2: list[torch.Tensor] | None,
                 arg3: torch.Tensor,
             ):
                 if arg1 is None:

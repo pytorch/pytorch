@@ -544,11 +544,19 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         self, expr_str: str, cute_dtype: str, torch_dtype: torch.dtype
     ) -> str:
         """
-        Convert SSA expression to indexable scalar for tensor loads.
+        Convert expression to indexable scalar for tensor loads.
 
         Workaround for lack of gather support: SSA values cannot be used directly
-        as indices. This generates code to convert SSA → indexable scalar.
+        as indices in tensor loads. This generates code to convert SSA → indexable
+        scalar. Compile-time integer constants are already indexable and are
+        returned directly without the SSA round-trip.
         """
+        # Constant integer expressions (e.g. sympy-folded offsets like "0")
+        # are already valid indices — skip the ssa_to_indexable round-trip
+        # which only accepts TensorSSA, not bare Python ints.
+        if expr_str.lstrip("-").isdigit():
+            return expr_str
+
         result = self.kernel.cse.newvar(dtype=torch_dtype)
         self.kernel.body.writeline(
             f"{result} = ssa_to_indexable({expr_str}, {cute_dtype})"

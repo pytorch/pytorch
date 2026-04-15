@@ -79,7 +79,7 @@ jobs:
       timeout-minutes: 420
       {%- elif config["gpu_arch_type"] == "rocm" %}
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      timeout-minutes: 300
+      timeout-minutes: 420
       {%- elif "conda" in build_environment and config["gpu_arch_type"] == "cuda" %}
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.24xlarge.ephemeral
@@ -162,7 +162,7 @@ jobs:
       - name: Teardown XPU
         uses: ./.github/actions/teardown-xpu
     {%- else %}
-    runs-on: linux.rocm.gpu.mi250.1
+    runs-on: linux.rocm.gpu.gfx942.1
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config) }}
     permissions:
@@ -183,7 +183,7 @@ jobs:
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1

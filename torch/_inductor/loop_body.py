@@ -13,6 +13,7 @@ import sympy
 import torch.fx
 from torch._dynamo.utils import identity
 from torch.fx.proxy import Scope, TracerBase
+from torch.utils._sympy.functions import Mod
 from torch.utils._sympy.symbol import SymT
 
 from . import config, dependencies
@@ -268,7 +269,7 @@ class LoopBody:
             reduce_idx = index[len(iter_size) :]
 
             new_iter_idx = list(iter_idx)
-            new_iter_idx[dimension] = iter_idx[dimension] % original_range
+            new_iter_idx[dimension] = Mod(iter_idx[dimension], original_range)
 
             return old_body(new_iter_idx, reduce_idx)
 
@@ -532,7 +533,12 @@ class LoopBodyBlock:
         from .index_propagation import IndexPropagation
 
         handler: Any = CountOps(
-            CaptureIndexing(proxy_ops, body, tracer),
+            CaptureIndexing(
+                # pyrefly: ignore[bad-argument-type]
+                proxy_ops,
+                body,
+                tracer,
+            ),
             body.op_counts,
         )
         if config.constant_and_index_propagation:

@@ -1,13 +1,19 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import inspect
-from typing import Any, Optional
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.fx
 from torch._jit_internal import boolean_dispatched
 from torch.fx import Transformer
-from torch.fx.node import Argument, Target
 from torch.fx.operator_schemas import _torchscript_type_to_python_type
+
+
+if TYPE_CHECKING:
+    from torch.fx.graph_module import GraphModule
+    from torch.fx.node import Argument, Target
 
 
 class AnnotateTypesWithSchema(Transformer):
@@ -31,7 +37,7 @@ class AnnotateTypesWithSchema(Transformer):
 
     def __init__(
         self,
-        module: torch.nn.Module,
+        module: GraphModule,
         annotate_functionals: bool = True,
         annotate_modules: bool = True,
         annotate_get_attrs: bool = True,
@@ -121,7 +127,7 @@ class AnnotateTypesWithSchema(Transformer):
 
         return attr_proxy
 
-    def _extract_python_return_type(self, target: Target) -> Optional[Any]:
+    def _extract_python_return_type(self, target: Target) -> Any | None:
         """
         Given a Python call target, try to extract the Python return annotation
         if it is available, otherwise return None

@@ -90,6 +90,7 @@ from .bytecode_transformation import (
 )
 from .code_context import code_context
 from .codegen import PyCodegen
+from .comprehension_graph_break import maybe_setup_comprehension_speculation
 from .exc import (
     augment_exc_message_with_hop_name,
     BackendCompilerFailed,
@@ -142,15 +143,15 @@ from .utils import (
 )
 from .variables.base import typestr, ValueMutationNew, VariableTracker
 from .variables.builder import FrameStateSizeEntry, VariableBuilder, wrap_fx_proxy
-from .variables.builtin import BuiltinVariable
-from .variables.constant import CONSTANT_VARIABLE_NONE, ConstantVariable
+from .variables.builtin import BuiltinVariable, DictBuiltinVariable
+from .variables.constant import ConstantVariable
 from .variables.ctx_manager import (
     ContextWrappingVariable,
     GenericContextWrappingVariable,
     WithEnterFunctionVariable,
     WithExitFunctionVariable,
 )
-from .variables.dicts import ConstDictVariable, SetVariable
+from .variables.dicts import ConstDictVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
     LocalGeneratorFunctionVariable,
@@ -180,8 +181,9 @@ from .variables.misc import (
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
+from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
-from .variables.tensor import supported_comparison_ops, SymNodeVariable
+from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
 from .variables.torch_function import (
     SymbolicTorchFunctionState,
     TorchFunctionModeVariable,
@@ -283,6 +285,12 @@ class SpeculationLog:
     # If True, graph break at autograd.grad instead of tracing it.
     # Set when we detect that autograd.grad consumed grad_fns that are returned.
     graph_break_on_autograd_grad: bool = False
+    # Names of output tensors whose grad_fns were consumed by autograd.grad.
+    autograd_grad_leaked_tensors: list[str] = dataclasses.field(default_factory=list)
+    # If True, graph break at requires_grad_() on source-less intermediates
+    # instead of tracing it. Set when we detect that such an intermediate
+    # leaks as a graph output with requires_grad=True.
+    graph_break_on_requires_grad_: bool = False
 
     def restart(self) -> None:
         self.index = 0
@@ -506,110 +514,6 @@ def get_assert_bytecode_sequence(with_msg: bool) -> list[str]:
     return insts[begin_idx + 1 : end_idx + 1]
 
 
-@functools.cache
-def _get_comprehension_bytecode_prefix() -> list[str]:
-    """Get the bytecode instructions that precede BUILD_LIST in a list comprehension."""
-
-    assert sys.version_info >= (3, 12)
-
-    def fn() -> list[int]:
-        return [i for i in range(1)]  # noqa: C416
-
-    insts = [inst.opname for inst in dis.get_instructions(fn)]
-
-    start_idx = len(insts) - 1 - insts[::-1].index("LOAD_FAST_AND_CLEAR")
-    end_idx = insts.index("BUILD_LIST")
-
-    return insts[start_idx:end_idx]
-
-
-@functools.cache
-def _get_comprehension_result_patterns() -> dict[str, dict[str, Any]]:
-    """Discover bytecode patterns for comprehension result handling.
-
-    Analyzes sample functions to extract the opcode sequences that appear
-    after END_FOR for each result disposition (stored, discarded, returned, consumed).
-
-    Returns patterns with:
-        - pre_store_ops: opcodes between END_FOR and first STORE_FAST
-        - post_store_op: first opcode after all STORE_FASTs (for disambiguation)
-    """
-    assert sys.version_info >= (3, 12)
-
-    def fn_stored() -> list[int]:
-        result = [i for i in range(1)]  # noqa: C416
-        return result
-
-    def fn_discarded() -> int:
-        [i for i in range(1)]  # noqa: C416
-        return 1
-
-    def fn_returned() -> list[int]:
-        return [i for i in range(1)]  # noqa: C416
-
-    def fn_consumed() -> int:
-        return sum([i for i in range(1)])  # noqa: C416
-
-    def extract_pattern(fn: Callable[..., Any]) -> tuple[list[str], str | None]:
-        """Extract (pre_store_ops, post_store_op) from comprehension bytecode."""
-        target_line = list(dis.findlinestarts(fn.__code__))[1][1]
-        insts: list[str] = []
-        started = False
-        for instr in dis.get_instructions(fn):
-            if started and instr.starts_line:
-                break
-            pos = instr.positions
-            if pos and pos.lineno == target_line:
-                started = started or bool(instr.starts_line)
-                insts.append(instr.opname)
-
-        ops = insts[insts.index("END_FOR") + 1 :]
-        idx = 0
-
-        pre_store_ops = []
-        while idx < len(ops) and ops[idx] != "STORE_FAST":
-            pre_store_ops.append(ops[idx])
-            idx += 1
-
-        while idx < len(ops) and ops[idx] == "STORE_FAST":
-            idx += 1
-
-        return pre_store_ops, ops[idx] if idx < len(ops) else None
-
-    stored = extract_pattern(fn_stored)
-    discarded = extract_pattern(fn_discarded)
-    returned = extract_pattern(fn_returned)
-    consumed = extract_pattern(fn_consumed)
-
-    return {
-        "stored": {"pre_store_ops": stored[0], "post_store_op": stored[1]},
-        "discarded": {"pre_store_ops": discarded[0], "post_store_op": discarded[1]},
-        "returned": {"pre_store_ops": returned[0], "post_store_op": returned[1]},
-        "consumed": {"pre_store_ops": consumed[0], "post_store_op": []},
-    }
-
-
-@dataclasses.dataclass
-class ComprehensionAnalysis:
-    """Metadata about a comprehension's bytecode structure.
-
-    Attributes:
-        end_ip: Instruction pointer after all comprehension bytecode
-        result_var: Name of result variable, or None if result stays on stack
-        result_on_stack: True if result stays on stack (discarded, returned, or in expression)
-        iterator_vars: Variables from LOAD_FAST_AND_CLEAR (need restoration)
-        walrus_vars: Variables assigned via walrus operator (:=) inside comprehension
-        captured_vars: Variables read from outer scope via LOAD_FAST inside comprehension
-    """
-
-    end_ip: int
-    result_var: str | None
-    result_on_stack: bool
-    iterator_vars: list[str]
-    walrus_vars: list[str]
-    captured_vars: list[str]
-
-
 def _detect_and_normalize_assert_statement(
     self: InstructionTranslatorBase,
     truth_fn: Callable[[object], bool],
@@ -685,19 +589,128 @@ explain = False
 #   3. Any compile_subgraph call should be preceded immediately by a log in the form of "... triggered compile".
 
 
+def get_node_source_info(n: torch.fx.Node) -> str:
+    """Extract the innermost user source location from an FX node's stack trace."""
+    st = n.meta.get("stack_trace", "") or getattr(n, "stack_trace", "")
+    if not st:
+        return ""
+    trace_lines = st.strip().split("\n")
+    last_file_idx = -1
+    for i, line in enumerate(trace_lines):
+        if line.strip().startswith("File "):
+            last_file_idx = i
+    if last_file_idx < 0:
+        return ""
+    file_line = trace_lines[last_file_idx].strip()
+    code = ""
+    if last_file_idx + 1 < len(trace_lines):
+        code = trace_lines[last_file_idx + 1].strip()
+    return f"{file_line}" + (f", code: {code}" if code else "")
+
+
+def format_tensor_computation_trace(value: VariableTracker, max_lines: int = 20) -> str:
+    """Walk the FX graph backwards from a TensorVariable to show how it was
+    computed, with user source locations. Graph inputs (placeholders) are always
+    shown first, followed by operations in dataflow order ending at the branch
+    condition."""
+    if not isinstance(value, TensorVariable):
+        return ""
+    try:
+        node = value.proxy.node
+
+        # Collect operations and placeholders separately so placeholders (root
+        # cause) always appear first regardless of traversal order.
+        op_blocks: list[list[str]] = []
+        placeholder_blocks: list[list[str]] = []
+        visited: set[str] = set()
+
+        def fmt_arg(a: object) -> str:
+            return a.name if isinstance(a, torch.fx.Node) else repr(a)
+
+        def walk(n: torch.fx.Node) -> None:
+            if n.name in visited:
+                return
+            visited.add(n.name)
+            source = get_node_source_info(n)
+
+            if n.op == "placeholder":
+                block = []
+                if source:
+                    block.append(f"# {source}")
+                block.append(f"{n.name}: graph input ({n.target})")
+                placeholder_blocks.append(block)
+                return
+
+            if n.op == "call_function" and len(op_blocks) < max_lines:
+                target_name = getattr(n.target, "__name__", str(n.target))
+                args_str = ", ".join(fmt_arg(a) for a in n.args)
+                block = []
+                if source:
+                    block.append(f"# {source}")
+                block.append(f"{n.name} = {target_name}({args_str})")
+                op_blocks.append(block)
+
+                for a in n.args:
+                    if isinstance(a, torch.fx.Node):
+                        walk(a)
+
+        walk(node)
+
+        if not op_blocks and not placeholder_blocks:
+            return ""
+
+        # Placeholders first (root cause), then ops in dataflow order (reversed
+        # from the DFS collection order) ending at the branch condition.
+        all_lines: list[str] = []
+        for block in placeholder_blocks + list(reversed(op_blocks)):
+            all_lines.extend(block)
+            all_lines.append("")
+
+        return (
+            "\n\n  The branch condition involves a tensor computed as follows:\n"
+            + "\n".join(f"    {line}" for line in all_lines)
+        )
+    except Exception:
+        log.debug("format_tensor_computation_trace failed", exc_info=True)
+        return ""
+
+
 def generic_jump(
     truth_fn: Callable[[object], bool], push: bool
 ) -> Callable[[InstructionTranslatorBase, Instruction], None]:
     def raise_jump_graph_break(value: VariableTracker) -> NoReturn:
+        trace_info = format_tensor_computation_trace(value)
+        hints: list[str] = []
+        if isinstance(value, TensorVariable):
+            try:
+                example = value.proxy.node.meta.get("example_value")
+                if (
+                    example is not None
+                    and example.dim() == 0
+                    and example.dtype
+                    in (
+                        torch.bool,
+                        torch.int32,
+                        torch.int64,
+                    )
+                ):
+                    hints.append(
+                        "The branch condition uses a scalar integer tensor. "
+                        "Consider rewriting the computation to use plain Python "
+                        "ints (e.g. use int attributes instead of tensor buffers) "
+                        "so the condition becomes a shape guard instead of "
+                        "data-dependent branching."
+                    )
+            except Exception:
+                pass
+        hints.extend(graph_break_hints.FUNDAMENTAL)
+        hints.append("Use `torch.cond` to express dynamic control flow.")
         unimplemented(
             gb_type="Data-dependent branching",
             context=f"attempted to jump with {value}",
             explanation="Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). "
-            "Dynamo does not support tracing dynamic control flow.",
-            hints=[
-                *graph_break_hints.FUNDAMENTAL,
-                "Use `torch.cond` to express dynamic control flow.",
-            ],
+            "Dynamo does not support tracing dynamic control flow." + trace_info,
+            hints=hints,
         )
 
     def jump_graph_break(
@@ -771,6 +784,7 @@ def generic_jump(
                     return self.jump(inst)
                 elif self.should_compile_partial_graph():
                     jump_graph_break(self, inst, value)
+                    return
                 else:
                     unimplemented(
                         gb_type="Data-dependent assertion failed (cannot compile partial graph)",
@@ -870,17 +884,19 @@ def generic_jump(
                     x = None
 
             # __bool__ or __len__ is function
-            if isinstance(x, UserMethodVariable):
+            if isinstance(x, (GetAttrVariable, UserMethodVariable)):
                 result = x.call_function(self, [], {})  # type: ignore[arg-type, assignment]
                 method_name = getattr(getattr(x, "fn", None), "__name__", None)
                 if result.is_python_constant():
                     result_value = result.as_python_constant()
                     if method_name == "__bool__" and not isinstance(result_value, bool):
-                        msg = VariableTracker.build(
+                        exc.raise_observed_exception(
+                            TypeError,
                             self,
-                            f"__bool__ should return bool, returned {type(result_value).__name__}",
+                            args=[
+                                f"__bool__ should return bool, returned {type(result_value).__name__}"
+                            ],
                         )
-                        exc.raise_observed_exception(TypeError, self, args=[msg])
                     if isinstance(result_value, (bool, int)) and truth_fn(result_value):
                         if push:
                             self.push(value)
@@ -1182,7 +1198,8 @@ class ExceptionStack:
         if len(self._exc_stack) + prev_idx > 0:
             prev = self._exc_stack[prev_idx]
             self._set_context_recursive(prev, prev_idx - 1)
-            val.set_context(prev)  # type: ignore[union-attr, arg-type]
+            if prev is not val:
+                val.set_context(prev)  # type: ignore[union-attr, arg-type]
         return val
 
     def _break_context_reference_cycle(self, val: ExceptionVals) -> None:
@@ -1198,7 +1215,7 @@ class ExceptionStack:
                 break
 
             if context is val:
-                o.set_context(CONSTANT_VARIABLE_NONE)  # type: ignore[union-attr, arg-type]
+                o.set_context(ConstantVariable.create(None))  # type: ignore[union-attr, arg-type]
                 break
 
             o = context  # type: ignore[assignment]
@@ -1707,9 +1724,8 @@ class InstructionTranslatorBase(
                         *create_copy(2),
                         cg.create_load_const(0),
                         cg.create_binary_subscr(),
-                        create_dup_top(),
                         *create_binary_slice(num_stack, None),
-                        *create_swap(2),
+                        *create_copy(3),
                         cg.create_load_const(0),
                         create_instruction("STORE_SUBSCR"),
                     ]
@@ -1831,6 +1847,9 @@ class InstructionTranslatorBase(
                         exc=e,
                     )
 
+                if not isinstance(e, exc.RestartAnalysis):
+                    self.output.side_effects.log_side_effects_summary()
+
                 if hasattr(e, "msg") and "Data-dependent" in e.msg:
                     readable_graph = torch.fx.GraphModule(
                         self.output.nn_modules, self.output.graph
@@ -1844,6 +1863,8 @@ class InstructionTranslatorBase(
             except Exception as e:
                 if self.exec_recorder:
                     e.exec_record = self.exec_recorder.get_record()  # type: ignore[attr-defined]
+                if not isinstance(e, exc.RestartAnalysis):
+                    self.output.side_effects.log_side_effects_summary()
 
                 raise
             finally:
@@ -1861,11 +1882,11 @@ class InstructionTranslatorBase(
                     # twice is not an issue (second stop is a no op).
                     self.output.mark_bytecode_tracing_stop()
 
-    def push(self, val: VariableTracker | None) -> None:
-        assert val is None or isinstance(val, VariableTracker), (
+    def push(self, val: VariableTracker) -> None:
+        assert isinstance(val, VariableTracker), (
             f"push expects VariableTracker, got {typestr(val)}"
         )
-        self.stack.append(val)  # type: ignore[arg-type]
+        self.stack.append(val)
 
     def push_many(self, vals: list[VariableTracker]) -> None:
         for val in vals:
@@ -1932,7 +1953,53 @@ class InstructionTranslatorBase(
             self.is_tracing_resume_prologue = val
 
     def DELETE_FAST(self, inst: Instruction) -> None:
+        var = self.symbolic_locals.get(inst.argval)
+        if isinstance(var, TensorVariable):
+            self._maybe_emit_sync_dealloc(var)
         del self.symbolic_locals[inst.argval]
+
+    def _maybe_emit_sync_dealloc(self, var: TensorVariable) -> None:
+        from .variables.streams import get_current_stream, new_event
+
+        device = var.device
+        if device is None or device.type not in ("cuda", "xpu"):
+            return
+
+        node = var.proxy.node
+        alloc_stream = node.meta.get("custom", {}).get("stream", None)
+
+        users = set(node.users.keys())
+        if not users:
+            return
+        last_user = None
+        for n in self.output.graph.nodes:
+            if n in users:
+                last_user = n
+        if last_user is None or last_user.op == "output":
+            return
+
+        last_use_stream = last_user.meta.get("custom", {}).get("stream", None)
+        if alloc_stream == last_use_stream:
+            return
+
+        if alloc_stream is None:
+            alloc_stream = get_current_stream(device)
+        if last_use_stream is None:
+            last_use_stream = get_current_stream(device)
+
+        event_idx = new_event()
+        self.output.create_proxy(
+            "call_function",
+            torch.ops.streams.record_event,
+            (event_idx, last_use_stream),
+            {},
+        )
+        self.output.create_proxy(
+            "call_function",
+            torch.ops.streams.sync_dealloc,
+            (event_idx, alloc_stream, var.as_proxy()),
+            {},
+        )
 
     def STORE_DEREF(self, inst: Instruction) -> None:  # type: ignore[override]
         assert inst.argval in self.cell_and_freevars()
@@ -2129,7 +2196,7 @@ class InstructionTranslatorBase(
             self.exec_recorder.add_local_mod(recorded_name, value)
 
         # pyrefly: ignore [unbound-name]
-        if istype(value, (types.ModuleType, DummyModule)):
+        if isinstance(value, (types.ModuleType, DummyModule)):
             # pyrefly: ignore [unbound-name, bad-argument-type]
             self.push(PythonModuleVariable(value, source=source))
         else:
@@ -2214,20 +2281,6 @@ class InstructionTranslatorBase(
         assert inst.target is not None
         self.block_stack.append(BlockStackEntry(inst, inst.target, len(self.stack)))
 
-    def BEGIN_FINALLY(self, inst: Instruction) -> None:
-        self.push(None)
-
-    def WITH_CLEANUP_START(self, inst: Instruction) -> None:
-        exit, exc = self.popn(2)
-        assert exc is None
-        self.push(exc)
-
-        self.push(exit.call_function(self, [CONSTANT_VARIABLE_NONE] * 3, {}))
-
-    def WITH_CLEANUP_FINISH(self, inst: Instruction) -> None:
-        self.popn(2)
-        self.push(None)
-
     def FOR_ITER(self, inst: Instruction) -> None:
         it = self.pop().realize()
         self.push(it)
@@ -2243,7 +2296,7 @@ class InstructionTranslatorBase(
                 # and performs the action of END_FOR as part of FOR_ITER. We jump
                 # to the END_FOR and run it, so we need to make sure 2 values are
                 # on the stack for it to pop.
-                self.push(CONSTANT_VARIABLE_NONE)
+                self.push(ConstantVariable.create(None))
             else:
                 # pop the iterator in Python < 3.12
                 self.pop()
@@ -2315,21 +2368,23 @@ class InstructionTranslatorBase(
             # Pass the stored python_stack to preserve the original exception location
             python_stack = getattr(val, "python_stack", None)
             raise observed_exception_type(
-                f"raised exception {val}", real_stack=python_stack
+                f"raised exception {val.debug_repr()}", real_stack=python_stack
             )
 
-        unimplemented(
-            gb_type="Failed to raise exception",
-            context=str(exc),
-            explanation="Attempted to raise a non-Exception type/value.",
-            hints=[*graph_break_hints.USER_ERROR],
+        exc.raise_observed_exception(
+            TypeError,
+            self,
+            args=[
+                f"exceptions must derive from BaseException, not {val.python_type_name()}",
+            ],
         )
 
     def RAISE_VARARGS(self, inst: Instruction) -> None:
         if inst.arg == 0:
             if not len(self.exn_vt_stack):
-                msg = VariableTracker.build(self, "No active exception to reraise")
-                exc.raise_observed_exception(RuntimeError, self, args=[msg])
+                exc.raise_observed_exception(
+                    RuntimeError, self, args=["No active exception to reraise"]
+                )
 
             # re-raise the previous exception. Here CPython refers to the exception
             # on top of the exception stack
@@ -2455,7 +2510,7 @@ class InstructionTranslatorBase(
             assert isinstance(raised_exception, dynamo_exc)  # sanity check
             unimplemented(
                 gb_type="Observed exception",
-                context=f"raised exception {curr_exc.python_type_name()}({curr_exc.args})",  # type: ignore[union-attr]
+                context=f"raised exception {curr_exc.debug_repr()}",
                 explanation=observed_exn_gb_explanation,
                 hints=[
                     *graph_break_hints.USER_ERROR,
@@ -2552,9 +2607,9 @@ class InstructionTranslatorBase(
                     self.push(variables.BuiltinVariable(old_exception.exc_type))
                 else:
                     # Push empty exception tb, value, type
-                    self.push(variables.CONSTANT_VARIABLE_NONE)
-                    self.push(variables.CONSTANT_VARIABLE_NONE)
-                    self.push(variables.CONSTANT_VARIABLE_NONE)
+                    self.push(ConstantVariable.create(None))
+                    self.push(ConstantVariable.create(None))
+                    self.push(ConstantVariable.create(None))
 
                 # Push new exception - tb, val, type
                 # Traceback is currently mapped to UnknownVariable
@@ -2595,7 +2650,7 @@ class InstructionTranslatorBase(
 
         val = self.pop()
         if len(self.exn_vt_stack) == 0:
-            prev_exc: VariableTracker = CONSTANT_VARIABLE_NONE
+            prev_exc: VariableTracker = ConstantVariable.create(None)
         else:
             prev_exc = self.exn_vt_stack[-1]
         self.push(prev_exc)
@@ -2773,7 +2828,7 @@ class InstructionTranslatorBase(
 
         # Unpack for cases like fn(**obj) where obj is a map
         if isinstance(kwargsvars, UserDefinedObjectVariable):
-            kwargsvars = BuiltinVariable.call_custom_dict(self, dict, kwargsvars)  # type: ignore[arg-type]
+            kwargsvars = DictBuiltinVariable.call_custom_dict(self, dict, kwargsvars)  # type: ignore[arg-type]
 
         # pyrefly: ignore [unbound-name]
         if not isinstance(argsvars, BaseListVariable) or not isinstance(
@@ -2839,15 +2894,14 @@ class InstructionTranslatorBase(
             self.PUSH_NULL(inst)
             self.push(obj)
         else:
-            self.push(obj)
-            self.push(None)
+            raise AssertionError(
+                "LOAD_METHOD should have been rewritten to LOAD_ATTR. We should never reach here."
+            )
 
     def CALL_METHOD(self, inst: Instruction) -> None:
-        args = self.popn(inst.argval)
-        dummy = self.pop()
-        assert dummy is None
-        fn = self.pop()
-        self.call_function(fn, args, {})
+        raise AssertionError(
+            "CALL_METHOD should have been rewritten to CALL_FUNCTION. This function should never be called."
+        )
 
     def _load_attr(self, attr: Any) -> None:
         obj = self.pop()
@@ -2880,11 +2934,21 @@ class InstructionTranslatorBase(
 
     def DELETE_ATTR(self, inst: Instruction) -> None:
         obj = self.pop()
+        self._maybe_sync_dealloc_attr(obj, inst.argval)
         VariableTracker.build(self, delattr).call_function(
             self,  # type: ignore[arg-type]
             [obj, VariableTracker.build(self, inst.argval)],
             {},
         )
+
+    def _maybe_sync_dealloc_attr(self, obj: VariableTracker, name: str) -> None:
+        # Only check side_effects — a pure dict lookup with no observable
+        # side effects. We intentionally avoid var_getattr here because it
+        # can trigger __getattr__, add graph nodes, or cause graph breaks.
+        if self.output.side_effects.has_pending_mutation_of_attr(obj, name):
+            attr_var = self.output.side_effects.load_attr(obj, name)
+            if isinstance(attr_var, TensorVariable):
+                self._maybe_emit_sync_dealloc(attr_var)
 
     @staticmethod
     def codegen_return_with_pops(
@@ -3092,21 +3156,12 @@ class InstructionTranslatorBase(
             )
 
         # add resume function to the global scope
-        if new_code.co_freevars:
-            # expose code object for debugging purposes
-            self.output.install_global_unsafe(resume_name, new_code)
-            package_name = None
-        else:
-            # This is safe: we pre-generate a unique name
-            self.output.install_global_unsafe(
-                resume_name,
-                types.FunctionType(new_code, self.f_globals, resume_name),
-            )
-            package_name = resume_name
-
+        self.output.install_resume_function_global(
+            resume_name, new_code, self.f_globals
+        )
         if self.package is not None:
             self.package.add_resume_function(
-                new_code, self.f_globals["__name__"], package_name
+                new_code, self.f_globals["__name__"], resume_name
             )
 
         counters["resumes"][new_code.co_name] += 1
@@ -3321,7 +3376,15 @@ class InstructionTranslatorBase(
                         cg.create_binary_subscr(),
                     ]
                 )
-                cg.make_function_with_closure(name, code)
+                # Call the factory function (stored under resume_name) to
+                # create the resume function with correct globals and closure.
+                cg.extend_output(
+                    [
+                        cg.create_load_global(name, add=True),
+                        *create_swap(2),
+                        *create_call_function(1, push_null=True),
+                    ]
+                )
             else:
                 cg.extend_output(cg.load_function_name(name, False, 0))
             cg.extend_output(create_swap(2))
@@ -3342,7 +3405,15 @@ class InstructionTranslatorBase(
                     cg.create_binary_subscr(),
                 ]
             )
-            cg.make_function_with_closure(resume_names[-1], resume_codes[-1])
+            # Call the factory function to create the resume function with
+            # correct globals and closure.
+            cg.extend_output(
+                [
+                    cg.create_load_global(resume_names[-1], add=True),
+                    *create_swap(2),
+                    *create_call_function(1, push_null=True),
+                ]
+            )
             cg.extend_output(
                 [
                     *create_rot_n(3),
@@ -3427,7 +3498,31 @@ class InstructionTranslatorBase(
 
     def DELETE_SUBSCR(self, inst: Instruction) -> None:
         obj, key = self.popn(2)
+        # Check for tensor items using side-effect-free internal lookups
+        # only. We avoid call_method("__getitem__") because it can execute
+        # user code and add unwanted graph nodes.
+        self._maybe_sync_dealloc_subscr(obj, key)
         obj.call_method(self, "__delitem__", [key], {})
+
+    def _maybe_sync_dealloc_subscr(
+        self, obj: VariableTracker, key: VariableTracker
+    ) -> None:
+        from .variables.dicts import ConstDictVariable
+        from .variables.lists import BaseListVariable
+
+        item_var = None
+        try:
+            if isinstance(obj, BaseListVariable):
+                item_var = obj.getitem_const(
+                    self,  # pyrefly: ignore [bad-argument-type]
+                    key,
+                )
+            elif isinstance(obj, ConstDictVariable):
+                item_var = obj.maybe_getitem_const(key)
+        except Exception:
+            pass
+        if isinstance(item_var, TensorVariable):
+            self._maybe_emit_sync_dealloc(item_var)
 
     def BUILD_TUPLE(self, inst: Instruction) -> None:
         items = self.popn(inst.argval)
@@ -3444,43 +3539,8 @@ class InstructionTranslatorBase(
         """
         return False
 
-    def _maybe_setup_comprehension_speculation(self, inst: Instruction) -> bool:
-        """
-        Handle comprehension start for Python 3.12+ BUILD_LIST/BUILD_MAP with argval 0.
-        Returns True if a graph break was triggered and the caller should return early.
-        """
-        if not (sys.version_info >= (3, 12) and inst.argval == 0):
-            return False
-
-        if not self._is_comprehension_start():
-            return False
-
-        can_speculate = (
-            all(b.can_restore() for b in self.block_stack)
-            and not self.one_graph
-            and not self.error_on_graph_break
-            and not self.is_tracing_resume_prologue
-            and not self.active_generic_context_managers
-            and self.output.current_tracer.parent is None
-        )
-
-        if can_speculate and self.parent is not None:
-            can_speculate = self._can_speculate_comprehension_nested()
-        # Only set up speculation at depth 0 (outermost comprehension)
-        if can_speculate and self._comprehension_depth == 0:
-            speculation = self.speculate()
-            if speculation.failed(self):
-                self._handle_comprehension_graph_break(inst)
-                return True
-            self.current_speculation = speculation
-        end_for_ip = self._find_comprehension_end_for_ip()
-        assert end_for_ip >= 0
-        self._comprehension_end_for_ips.add(end_for_ip)
-        self._comprehension_depth += 1
-        return False
-
     def BUILD_LIST(self, inst: Instruction) -> None:
-        if self._maybe_setup_comprehension_speculation(inst):
+        if maybe_setup_comprehension_speculation(self, inst):
             return
 
         items = self.popn(inst.argval)
@@ -3520,7 +3580,7 @@ class InstructionTranslatorBase(
     BUILD_TUPLE_UNPACK_WITH_CALL = BUILD_TUPLE_UNPACK
 
     def BUILD_MAP(self, inst: Instruction) -> None:
-        if self._maybe_setup_comprehension_speculation(inst):
+        if maybe_setup_comprehension_speculation(self, inst):
             return
 
         items = self.popn(inst.argval * 2)
@@ -4002,6 +4062,7 @@ class InstructionTranslatorBase(
     BINARY_REMAINDER = stack_op(operator.mod)
     BINARY_ADD = stack_op(operator.add)
     BINARY_SUBTRACT = stack_op(operator.sub)
+
     BINARY_SUBSCR = break_graph_if_unsupported(
         push=True,
         msg_prefix="Encountered graph break when attempting to trace BINARY_SUBSCR: a binary subscript, e.g. x[attr]",
@@ -4375,7 +4436,8 @@ class InstructionTranslatorBase(
         self.push(fn)
 
     def CONVERT_VALUE(self, inst: Instruction) -> None:
-        self.push(self._convert_value(self.pop(), inst.argval))
+        assert inst.arg is not None
+        self.push(self._convert_value(self.pop(), inst.arg))
 
     def FORMAT_SIMPLE(self, inst: Instruction) -> None:
         self._format_value(VariableTracker.build(self, ""), 0)
@@ -4512,533 +4574,6 @@ class InstructionTranslatorBase(
             self.instruction_pointer - 1,
             self.instructions[self.instruction_pointer - 1],
         )
-
-    def _is_comprehension_start(self) -> bool:
-        """Detect if we're at the start of a list/dict comprehension in 3.12+.
-
-        In Python 3.12+, comprehensions are inlined with a bytecode pattern that
-        precedes BUILD_LIST/BUILD_MAP.
-        """
-        assert sys.version_info >= (3, 12)
-
-        assert self.instruction_pointer is not None
-        ip = self.instruction_pointer - 1
-
-        pattern = _get_comprehension_bytecode_prefix()
-        prefix = [inst.opname for inst in self.instructions[ip - len(pattern) : ip]]
-
-        return prefix == pattern
-
-    def _find_comprehension_end_for_ip(self) -> int:
-        """Find the instruction pointer of the outermost END_FOR for current comprehension."""
-        assert sys.version_info >= (3, 12)
-        assert self.instruction_pointer is not None
-
-        nesting_depth = 0
-        for search_ip in range(self.instruction_pointer, len(self.instructions)):
-            inst = self.instructions[search_ip]
-            if inst.opname == "FOR_ITER":
-                nesting_depth += 1
-            elif inst.opname == "END_FOR":
-                nesting_depth -= 1
-                if nesting_depth == 0:
-                    return search_ip
-        return -1
-
-    def _analyze_comprehension(self) -> ComprehensionAnalysis:
-        """Analyze comprehension bytecode to determine result handling pattern."""
-        assert sys.version_info >= (3, 12)
-        assert self.instruction_pointer is not None
-
-        patterns = _get_comprehension_result_patterns()
-        start_ip = self.instruction_pointer - 1  # BUILD_LIST/BUILD_MAP
-
-        iterator_vars: list[str] = []
-        walrus_vars: list[str] = []
-        captured_vars: list[str] = []
-        defined_inside: set[str] = set()
-
-        # Collect iterator variables from LOAD_FAST_AND_CLEAR before BUILD_LIST/BUILD_MAP
-        iter_scan_ip = start_ip - 1
-        while iter_scan_ip >= 0:
-            inst = self.instructions[iter_scan_ip]
-            if inst.opname == "LOAD_FAST_AND_CLEAR":
-                iterator_vars.insert(0, inst.argval)
-                iter_scan_ip -= 1
-            elif inst.opname in ("SWAP", "GET_ITER"):
-                iter_scan_ip -= 1
-            else:
-                break
-        defined_inside.update(iterator_vars)
-
-        end_for_ip = self._find_comprehension_end_for_ip()
-        if end_for_ip == -1:
-            unimplemented(
-                gb_type="Comprehension analysis failed: No END_FOR",
-                context="",
-                explanation="Could not find END_FOR instruction in comprehension bytecode.",
-                hints=[],
-            )
-
-        # Find first FOR_ITER to know where loop body starts
-        for_iter_ip = next(
-            i
-            for i in range(start_ip, end_for_ip)
-            if self.instructions[i].opname == "FOR_ITER"
-        )
-
-        # Single pass through loop body to detect walrus vars and captured vars
-        for body_ip in range(for_iter_ip + 1, end_for_ip):
-            inst = self.instructions[body_ip]
-
-            # Detect walrus pattern: COPY 1 followed by STORE_FAST
-            if inst.opname == "COPY" and inst.arg == 1 and body_ip + 1 < end_for_ip:
-                next_inst = self.instructions[body_ip + 1]
-                if next_inst.opname == "STORE_FAST":
-                    var_name = next_inst.argval
-                    if var_name not in iterator_vars and var_name not in walrus_vars:
-                        walrus_vars.append(var_name)
-                        defined_inside.add(var_name)
-
-            # Track variables defined inside the loop
-            if inst.opname == "STORE_FAST":
-                defined_inside.add(inst.argval)
-
-            # Detect LOAD_FAST referencing outer variables
-            elif inst.opname.startswith("LOAD_FAST"):
-                var_names = (
-                    inst.argval if isinstance(inst.argval, tuple) else (inst.argval,)
-                )
-                for var_name in var_names:
-                    if var_name not in defined_inside and var_name not in captured_vars:
-                        captured_vars.append(var_name)
-
-        # Extract pre_store_ops: all opcodes from END_FOR+1 until first STORE_FAST
-        pre_store_ops: list[str] = []
-        scan_ip = end_for_ip + 1
-        while (
-            scan_ip < len(self.instructions)
-            and self.instructions[scan_ip].opname != "STORE_FAST"
-        ):
-            pre_store_ops.append(self.instructions[scan_ip].opname)
-            scan_ip += 1
-
-        store_fast_ip = scan_ip
-
-        # Skip all STORE_FASTs to find post_store_op
-        while (
-            scan_ip < len(self.instructions)
-            and self.instructions[scan_ip].opname == "STORE_FAST"
-        ):
-            scan_ip += 1
-
-        post_store_op = (
-            self.instructions[scan_ip].opname
-            if scan_ip < len(self.instructions)
-            else None
-        )
-
-        def matches(name: str) -> bool:
-            pat = patterns[name]
-            return pre_store_ops == pat["pre_store_ops"] and (
-                post_store_op == pat["post_store_op"] or not pat["post_store_op"]
-            )
-
-        result_var: str | None = None
-        if matches("stored"):
-            result_var = self.instructions[store_fast_ip].argval
-            result_on_stack = False
-        elif matches("discarded"):
-            result_var = None
-            result_on_stack = False
-            scan_ip = scan_ip + 1 if patterns["discarded"]["post_store_op"] else scan_ip
-        elif (
-            matches("returned")
-            or pre_store_ops == patterns["consumed"]["pre_store_ops"]
-        ):
-            result_var = None
-            result_on_stack = True
-        else:
-            unimplemented(
-                gb_type="Comprehension analysis failed: No matches",
-                context=f"pre_store_ops={pre_store_ops}, post_store_op={post_store_op}",
-                explanation="Comprehension does not match any known bytecode pattern.",
-                hints=[],
-            )
-
-        return ComprehensionAnalysis(
-            end_ip=scan_ip,
-            result_var=result_var,
-            result_on_stack=result_on_stack,
-            iterator_vars=iterator_vars,
-            walrus_vars=walrus_vars,
-            captured_vars=captured_vars,
-        )
-
-    def _handle_comprehension_graph_break(self, inst: Instruction) -> None:
-        """Handle list/dict comprehension graph break.
-
-        Builds a synthetic function wrapping the comprehension bytecode,
-        calls it via codegen_call_resume, then chains into the resume
-        function for the post-comprehension code.
-        """
-        assert sys.version_info >= (3, 12)
-        assert self.instruction_pointer is not None
-
-        start_ip = self.instruction_pointer - 1  # BUILD_LIST/BUILD_MAP
-        analysis = self._analyze_comprehension()
-        stack_pops = 1 + len(analysis.iterator_vars)
-        reason = GraphCompileReason("comprehension_graph_break", [self.frame_summary()])
-        log.debug("comprehension triggered compile")
-
-        # --- Step 1: Compile the graph up to the comprehension ---
-
-        all_stack_locals_metadata = self.output.compile_subgraph(
-            self,
-            reason=reason,
-            stack_pops=stack_pops,
-        )
-        # Record which stack_pops items are NULL before popn loses the info.
-        # NULLs on the CPython stack can't be passed as function arguments.
-        stack_pops_null_mask = [
-            isinstance(self.stack[len(self.stack) - stack_pops + i], NullVariable)
-            for i in range(stack_pops)
-        ]
-
-        self.popn(stack_pops)
-        meta = all_stack_locals_metadata[0]
-        cg = PyCodegen(self.output.root_tx)
-
-        # Runtime stack after compile_subgraph:
-        #   cells, [frame_values], *(non-popped items), *(stack_pops items w/ NULLs)
-        # frame_values[0] = [frame N locals] (no stack items yet)
-
-        nonnull_count = sum(1 for m in stack_pops_null_mask if not m)
-
-        # live_stack_depth: stack items above cells/frame_values excluding NULLs
-        # that compile_subgraph didn't codegen (tracked in stack_null_idxes).
-        live_stack_depth = len(self.stack) - len(meta.stack_null_idxes)
-
-        # --- Step 2: Pop stack_pops items and append non-nulls to frame_values[0] ---
-        # SWAP each item to TOS then LIST_APPEND or pop_null; fv_list stays at
-        # TOS throughout. Items append in TOS-first (reversed) order;
-        # _build_comprehension_fn compensates by loading in reverse.
-        cg.extend_output(
-            [
-                # frame_values[0] to TOS
-                *create_copy(live_stack_depth + stack_pops + 1),
-                cg.create_load_const(0),
-                cg.create_binary_subscr(),
-            ]
-        )
-        for i in reversed(range(stack_pops)):
-            cg.extend_output(create_swap(2))
-            if stack_pops_null_mask[i]:
-                cg.extend_output(cg.pop_null())
-            else:
-                cg.extend_output([create_instruction("LIST_APPEND", arg=1)])
-        cg.extend_output([create_instruction("POP_TOP")])
-
-        # Stack: cells, [frame_values], *(non-popped items)
-
-        # --- Step 3: Build comprehension function ---
-        new_code, fn_name = self._build_comprehension_fn(
-            analysis,
-            start_ip,
-            stack_pops,
-            stack_pops_null_mask,
-            nonnull_count,
-            meta,
-        )
-
-        # --- Step 4: Extract [cells[0]] and [frame_values[0]] for codegen_call_resume ---
-        cg.extend_output(
-            [
-                *create_copy(live_stack_depth + 2),
-                cg.create_load_const(0),
-                cg.create_binary_subscr(),
-                create_instruction("BUILD_LIST", arg=1),
-                *create_copy(live_stack_depth + 2),
-                cg.create_load_const(0),
-                cg.create_binary_subscr(),
-                create_instruction("BUILD_LIST", arg=1),
-            ]
-        )
-
-        # Stack: ..., *(non-popped), [cells[0]], [frame_values[0]]
-
-        # --- Step 5: Call comprehension function via codegen_call_resume ---
-        self.codegen_call_resume([new_code], [fn_name], cg)
-
-        # Stack: ..., *(non-popped), comp_result
-
-        # --- Step 6: Remove appended stack_pops items from frame_values[0] ---
-        if nonnull_count > 0:
-            frame_values_pos = live_stack_depth + 1 + 1  # +1 result, +1 frame_values
-            cg.extend_output(
-                [
-                    *create_copy(frame_values_pos),
-                    cg.create_load_const(0),
-                    cg.create_binary_subscr(),
-                    # frame_values[0] on TOS
-                    create_dup_top(),
-                    # frame_values[0], frame_values[0]
-                    cg.create_load_const(-nonnull_count),
-                    cg.create_load_const(None),
-                    create_instruction("BUILD_SLICE", arg=2),
-                    create_instruction("DELETE_SUBSCR"),
-                    # del frame_values[0][-nonnull_count:]
-                    create_instruction("POP_TOP"),
-                ]
-            )
-
-        # --- Step 7: Pass comprehension outputs to frame_values[0] ---
-        # Walrus vars first, then result_var.
-        vars_to_pass = analysis.walrus_vars + (
-            [analysis.result_var] if analysis.result_var else []
-        )
-
-        existing_vars: dict[str, int] = {}
-        for var_name in vars_to_pass:
-            self.symbolic_locals[var_name] = UnknownVariable()
-            if var_name in meta.locals_names:
-                existing_vars[var_name] = meta.locals_names[var_name]
-            else:
-                meta.locals_names[var_name] = len(meta.locals_names)
-
-        fv_depth = live_stack_depth + 2  # comp_result + frame_values
-
-        # --- Walrus vars: extract from comp_result tuple ---
-        if analysis.walrus_vars:
-            # comp_result is (result, *walrus_vars).
-            cg.extend_output(
-                [
-                    *create_copy(fv_depth),
-                    cg.create_load_const(0),
-                    cg.create_binary_subscr(),
-                ]
-            )
-            # Stack: ..., comp_tuple, fv0
-            for j, walrus_var in enumerate(analysis.walrus_vars):
-                cg.extend_output(
-                    [
-                        *create_copy(2),
-                        cg.create_load_const(j + 1),
-                        cg.create_binary_subscr(),
-                    ]
-                )
-                # Stack: ..., comp_tuple, fv0, walrus_value
-                if walrus_var in existing_vars:
-                    # fv0[idx] = walrus_value
-                    cg.extend_output(
-                        [
-                            *create_copy(2),  # copy fv0
-                            cg.create_load_const(existing_vars[walrus_var]),
-                            create_instruction("STORE_SUBSCR"),
-                        ]
-                    )
-                else:
-                    cg.extend_output([create_instruction("LIST_APPEND", arg=1)])
-                # Stack: ..., comp_tuple, fv0
-            cg.extend_output(
-                [
-                    create_instruction("POP_TOP"),  # pop fv0
-                    # Extract the result from the tuple.
-                    cg.create_load_const(0),
-                    cg.create_binary_subscr(),
-                ]
-            )
-            # Stack: ..., result
-
-        # --- Result: keep on stack, overwrite/append to fv[0], or discard ---
-        if analysis.result_on_stack:
-            self.push(UnknownVariable())
-        elif analysis.result_var:
-            cg.extend_output(
-                [
-                    *create_copy(fv_depth),
-                    cg.create_load_const(0),
-                    cg.create_binary_subscr(),
-                    # Stack: ..., result, fv0
-                ]
-            )
-            if analysis.result_var in existing_vars:
-                cg.extend_output(
-                    [
-                        cg.create_load_const(existing_vars[analysis.result_var]),
-                        create_instruction("STORE_SUBSCR"),
-                        # fv0[idx] = result
-                    ]
-                )
-            else:
-                cg.extend_output(
-                    [
-                        *create_swap(2),
-                        create_instruction("LIST_APPEND", arg=1),
-                        create_instruction("POP_TOP"),
-                    ]
-                )
-        else:
-            cg.extend_output([create_instruction("POP_TOP")])
-
-        # Stack: cells, [frame_values], *(non-popped stack)
-        self.output.add_output_instructions(cg.get_instructions())
-
-        # --- Step 8: Create resume function chain ---
-        resume_inst = self.instructions[analysis.end_ip]
-        self.output.add_output_instructions(
-            self.create_call_resume_at(resume_inst, all_stack_locals_metadata)
-        )
-
-        self.instruction_pointer = None
-
-    def _build_comprehension_fn(
-        self,
-        analysis: ComprehensionAnalysis,
-        start_ip: int,
-        stack_pops: int,
-        stack_pops_null_mask: list[bool],
-        nonnull_count: int,
-        meta: StackLocalsMetadata,
-    ) -> tuple[types.CodeType, str]:
-        """Build a synthetic function wrapping comprehension bytecode.
-
-        Uses the same calling convention as resume functions created by
-        create_resume / ContinueExecutionCache.generate: the first two args
-        are __nested_resume_fns and __nested_frame_values (ignored here),
-        followed by stack items and live locals.
-
-        Returns (code, name) where name is the global name for the function.
-        """
-        from .bytecode_transformation import transform_code_object
-        from .eval_frame import skip_code
-        from .resume_execution import CO_VARARGS, CO_VARKEYWORDS
-
-        # Args follow frame_values layout: locals first, then stack_pops items
-        # (appended to end of frame_values[0] by the caller).
-        # codegen_call_resume unpacks frame_values[0] as positional args.
-        argnames = tuple(
-            k for k in meta.locals_names if k not in self.cell_and_freevars()
-        )
-        args = (
-            ["__nested_resume_fns", "__nested_frame_values"]
-            + list(argnames)
-            + [f"___stack{i}" for i in range(nonnull_count)]
-        )
-
-        freevars = tuple(
-            sorted(
-                list(self.f_code.co_cellvars or [])
-                + list(self.f_code.co_freevars or [])
-            )
-        )
-
-        lineno = self.lineno if self.lineno is not None else self.f_code.co_firstlineno
-        fn_name = unique_id(f"__comprehension_{self.f_code.co_name}_at_{lineno}")
-
-        comprehension_body_vars = (
-            analysis.iterator_vars
-            + analysis.walrus_vars
-            + ([analysis.result_var] if analysis.result_var else [])
-            + analysis.captured_vars
-        )
-
-        def update(
-            instructions: list[Instruction], code_options: dict[str, Any]
-        ) -> None:
-            code_options["co_name"] = fn_name
-            if sys.version_info >= (3, 11):
-                code_options["co_qualname"] = fn_name
-            code_options["co_firstlineno"] = lineno
-            code_options["co_cellvars"] = ()
-            code_options["co_freevars"] = freevars
-            code_options["co_argcount"] = len(args)
-            code_options["co_posonlyargcount"] = 0
-            code_options["co_kwonlyargcount"] = 0
-            code_options["co_varnames"] = tuple(
-                args + [v for v in comprehension_body_vars if v not in args]
-            )
-            code_options["co_flags"] = code_options["co_flags"] & ~(
-                CO_VARARGS | CO_VARKEYWORDS
-            )
-
-            prefix: list[Instruction] = []
-            if freevars:
-                prefix.append(create_instruction("COPY_FREE_VARS", arg=len(freevars)))
-            prefix.append(create_instruction("RESUME", arg=0))
-
-            # Push stack_pops items onto operand stack so the comprehension
-            # bytecode finds them where it expects (iterator + saved vars).
-            # NULL positions get PUSH_NULL, non-null get LOAD_FAST.
-            # Items were appended to frame_values[0] in TOS-first order,
-            # so load in reverse to reconstruct the original stack layout.
-            nonnull_i = nonnull_count - 1
-            for i in range(stack_pops):
-                if stack_pops_null_mask[i]:
-                    prefix.append(create_instruction("PUSH_NULL"))
-                else:
-                    prefix.append(
-                        create_instruction("LOAD_FAST", argval=f"___stack{nonnull_i}")
-                    )
-                    nonnull_i -= 1
-
-            comp_insts = self._copy_comprehension_bytecode(start_ip, analysis.end_ip)
-
-            # Epilogue: ensure result is on stack, pack walrus vars, return.
-            epilogue: list[Instruction] = []
-            if not analysis.result_on_stack:
-                if analysis.result_var:
-                    epilogue.append(
-                        create_instruction("LOAD_FAST", argval=analysis.result_var)
-                    )
-                else:
-                    epilogue.append(create_instruction("LOAD_CONST", argval=None))
-            if analysis.walrus_vars:
-                for var_name in analysis.walrus_vars:
-                    epilogue.append(create_instruction("LOAD_FAST", argval=var_name))
-                epilogue.append(
-                    create_instruction(
-                        "BUILD_TUPLE",
-                        arg=1 + len(analysis.walrus_vars),
-                    )
-                )
-            epilogue.append(create_instruction("RETURN_VALUE"))
-
-            instructions[:] = prefix + comp_insts + epilogue
-
-        new_code, _ = transform_code_object(self.f_code, update)
-        skip_code(new_code)
-
-        # Install as global
-        if new_code.co_freevars:
-            self.output.install_global_unsafe(fn_name, new_code)
-        else:
-            self.output.install_global_unsafe(
-                fn_name,
-                types.FunctionType(new_code, self.f_globals, fn_name),
-            )
-
-        return new_code, fn_name
-
-    def _copy_comprehension_bytecode(
-        self, start_ip: int, end_ip: int
-    ) -> list[Instruction]:
-        """Copy comprehension bytecode instructions, updating jump targets."""
-        inst_map: dict[Instruction, Instruction] = {}
-        copied_insts: list[Instruction] = []
-
-        for ip in range(start_ip, end_ip):
-            original_inst = self.instructions[ip]
-            copied_inst = copy.copy(original_inst)
-            copied_inst.exn_tab_entry = None
-            inst_map[original_inst] = copied_inst
-            copied_insts.append(copied_inst)
-
-        for copied_inst in copied_insts:
-            if copied_inst.target is not None and copied_inst.target in inst_map:
-                copied_inst.target = inst_map[copied_inst.target]
-
-        return copied_insts
 
     def _make_frame_loc(
         self, filename: str, lineno: int | None, fallback_lineno: int
@@ -5576,7 +5111,6 @@ class InstructionTranslator(InstructionTranslatorBase):
             and not self.error_on_graph_break
             and not self.is_tracing_resume_prologue
         ):
-            # TODO graph break if one_graph is set - this might break things
             raise exc.SkipFrame(
                 "No ops traced for the FX graph. `torch.compile` will skip the frame and fall back to eager.\n"
                 f"Frame info: {format_frame_info(self.f_code)}"
@@ -5864,23 +5398,30 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         # Detect inline GraphModule calls in order to propagate node metadata,
         # by checking if the first argument (self) is a variable tracking a GraphModule.
-        if args and isinstance(args[0], NNModuleVariable):
-            module = parent.output.get_submodule(args[0].module_key)
-            if isinstance(module, torch.fx.GraphModule):
-                # The inline call might not actually be a call to `forward`,
-                # but it is enough to add a context for `forward` in case it is called.
-                code_context.get_context(module.forward.__code__)[
-                    "orig_graphmodule"
-                ] = weakref.ref(module)
-        # When we have inline_nn_module turned on, modules resolve to UnspecializedNNModuleVariable
-        if args and isinstance(args[0], UnspecializedNNModuleVariable):
-            module = args[0].value
-            if isinstance(module, torch.fx.GraphModule):
-                # The inline call might not actually be a call to `forward`,
-                # but it is enough to add a context for `forward` in case it is called.
-                code_context.get_context(module.forward.__code__)[
-                    "orig_graphmodule"
-                ] = weakref.ref(module)
+        # For unrealized lazy VTs, use peek_type to skip non-Module args
+        # without realizing them (which would install unnecessary guards).
+        if args:
+            arg0 = args[0]
+            should_check = True
+            if isinstance(arg0, LazyVariableTracker) and not arg0.is_realized():
+                if issubclass(arg0.peek_type(), torch.nn.Module):
+                    arg0 = arg0.realize()
+                else:
+                    should_check = False
+
+            if should_check:
+                if isinstance(arg0, NNModuleVariable):
+                    module = parent.output.get_submodule(arg0.module_key)
+                    if isinstance(module, torch.fx.GraphModule):
+                        code_context.get_context(module.forward.__code__)[
+                            "orig_graphmodule"
+                        ] = weakref.ref(module)
+                elif isinstance(arg0, UnspecializedNNModuleVariable):
+                    module = arg0.value
+                    if isinstance(module, torch.fx.GraphModule):
+                        code_context.get_context(module.forward.__code__)[
+                            "orig_graphmodule"
+                        ] = weakref.ref(module)
 
         assert not isinstance(func, SkipFunctionVariable)
         tracer: InliningInstructionTranslator
@@ -5941,7 +5482,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         if self.output.should_exit:
             # graph break
-            return CONSTANT_VARIABLE_NONE  # return dummy variable
+            return ConstantVariable.create(None)  # return dummy variable
 
         assert self.symbolic_result is not None
 
@@ -6200,7 +5741,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         self.generated_items.append(top)
         if len(self.generated_items) > MAX_ITERATOR_LIMIT:
             raise exc.InfiniteGeneratorError
-        self.push(CONSTANT_VARIABLE_NONE)
+        self.push(ConstantVariable.create(None))
         if (
             config.enable_faithful_generator_behavior
             or self.is_generator_from_ctx_manager

@@ -1,7 +1,6 @@
 import enum
 import os
 import sys
-from typing import Optional
 
 from torch.utils._config_module import Config, install_config_module
 
@@ -84,7 +83,7 @@ validate_shape_env_version_key = False
 # issued (as we test if we've hit the limit on-the-fly, whereas we may
 # do further simplifications at final guard issuance time that make guards
 # irrelevant.)
-symbol_guard_limit_before_specialize: Optional[int] = None
+symbol_guard_limit_before_specialize: int | None = None
 
 # This flag changes whether we should use the same symbolic variable to represent input sizes that are the same.
 use_duck_shape = True

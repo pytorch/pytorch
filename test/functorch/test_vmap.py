@@ -71,6 +71,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
     subtest,
+    TEST_WITH_ROCM,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     unMarkDynamoStrictTest,
@@ -4827,6 +4828,60 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         check_vmap_fallback(self, test, Tensor.fill_)
 
+    @parametrize(
+        "op,msg,extra_positional_args,extra_kwargs",
+        [
+            subtest(
+                (
+                    Tensor.scatter_add_,
+                    "out-of-place operators instead of scatter_add_",
+                    (),
+                    {},
+                ),
+                name="scatter_add",
+            ),
+            subtest(
+                (
+                    Tensor.scatter_reduce_,
+                    "out-of-place operators instead of scatter_reduce_",
+                    ("sum",),
+                    {"include_self": True},
+                ),
+                name="scatter_reduce",
+            ),
+        ],
+    )
+    def test_scatter_inplace_self_not_batched(
+        self, device, op, msg, extra_positional_args, extra_kwargs
+    ):
+        x = torch.zeros(5, device=device)
+
+        def call_op(self, dim, index, src):
+            return op(
+                self,
+                dim,
+                index,
+                src,
+                *extra_positional_args,
+                **extra_kwargs,
+            )
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(call_op, in_dims=(None, None, None, 0))(
+                x,
+                0,
+                torch.tensor([0, 1], device=device),
+                torch.randn(2, 2, device=device),
+            )
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(call_op, in_dims=(None, None, 0, None))(
+                x,
+                0,
+                torch.tensor([[0, 1], [2, 3]], device=device),
+                torch.randn(2, device=device),
+            )
+
     @tf32_on_and_off(0.005)
     def test_conv_double_backward(self, device):
         images = torch.randn(2, 1, 5, 5, device=device)
@@ -4942,6 +4997,23 @@ class TestVmapOperatorsOpInfo(TestCase):
         weight = torch.randn(B, C)
         bias = torch.randn(B, C)
         test(self, op, (x, 4, weight, bias), in_dims=(0, None, 0, 0))
+
+    def test_group_norm_layout_corruption(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/176432
+        def op_function(cotangent):
+            input = torch.tensor([[-6.517, -6.264]], device=device, requires_grad=True)
+            result = F.group_norm(input, num_groups=1)
+            return torch.autograd.grad(result, input, grad_outputs=cotangent)[0]
+
+        cotangent = torch.tensor([[-0.0236, -0.1431]], device=device)
+        result_in_dims_0 = vmap(op_function, in_dims=0)(
+            cotangent.unsqueeze(0).expand(2, -1, -1)
+        )
+        result_in_dims_neg1 = vmap(op_function, in_dims=-1)(
+            cotangent.unsqueeze(-1).expand(-1, -1, 2)
+        )
+
+        self.assertEqual(result_in_dims_0, result_in_dims_neg1)
 
     def test_index_put(self, device):
         def test(f, t, idx, values):
@@ -5103,9 +5175,12 @@ class TestVmapOperatorsOpInfo(TestCase):
                 vmap(torch.topk, (0, None, None))(t, 1, 0), torch.return_types.topk
             )
         )
-        self.assertTrue(
-            isinstance(vmap(torch.linalg.eig, (0))(t), torch.return_types.linalg_eig)
-        )
+        if not (TEST_WITH_ROCM and not torch.cuda.has_magma):
+            self.assertTrue(
+                isinstance(
+                    vmap(torch.linalg.eig, (0))(t), torch.return_types.linalg_eig
+                )
+            )
 
     def test_namedtuple_returns(self, device):
         Point = namedtuple("Point", ["x", "y"])

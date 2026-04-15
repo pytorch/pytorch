@@ -7,6 +7,7 @@ ciflow_push_tags:
 - ciflow/binaries
 - ciflow/binaries_libtorch
 - ciflow/binaries_wheel
+- ciflow/dtensor
 - ciflow/dynamo
 - ciflow/h100
 - ciflow/h100-cutlass-backend
@@ -26,7 +27,6 @@ ciflow_push_tags:
 - ciflow/inductor-rocm-mi200
 - ciflow/inductor-rocm-mi300
 - ciflow/inductor-rocm-mi355
-- ciflow/linux-aarch64
 - ciflow/mps
 - ciflow/nightly
 - ciflow/op-benchmark
@@ -46,6 +46,7 @@ ciflow_push_tags:
 - ciflow/slow
 - ciflow/slow-rocm-mi200
 - ciflow/torchbench
+- ciflow/torchtitan
 - ciflow/triton_binaries
 - ciflow/trunk
 - ciflow/unstable
@@ -58,6 +59,8 @@ retryable_workflows:
 - linux-binary
 - windows-binary
 - inductor-A100-perf-nightly
+retryable_step_names:
+- Initialize containers
 labeler_config: labeler.yml
 label_to_label_config: label_to_label.yml
 mergebot: true

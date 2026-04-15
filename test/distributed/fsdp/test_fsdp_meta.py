@@ -2,7 +2,6 @@
 
 import itertools
 import sys
-from typing import Union
 
 import torch
 import torch.distributed as dist
@@ -374,7 +373,7 @@ class TestFSDPWithMetaDevice(FSDPTestContinuous):
 
         class FakeLinear(nn.Module):
             def __init__(
-                self, in_dim: int, out_dim: int, device: Union[torch.device, str]
+                self, in_dim: int, out_dim: int, device: torch.device | str
             ) -> None:
                 super().__init__()
                 self.weight = nn.Parameter(
