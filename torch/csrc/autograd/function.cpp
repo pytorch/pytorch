@@ -54,12 +54,18 @@ auto Node::forward_op_name() const -> std::string {
     return n;
   }
   // Verify everything after "Backward" is digits (e.g., "Backward0").
-  for (size_t i = pos + 8; i < n.size(); ++i) {
+  auto suffix_start = pos + 8;
+  for (size_t i = suffix_start; i < n.size(); ++i) {
     if (!std::isdigit(static_cast<unsigned char>(n[i]))) {
       return n;
     }
   }
-  return n.substr(0, pos);
+  // Keep the numeric suffix if it is not "0" (e.g., "AddBackward1" → "Add1").
+  auto suffix = n.substr(suffix_start);
+  if (suffix == "0" || suffix.empty()) {
+    return n.substr(0, pos);
+  }
+  return n.substr(0, pos) + suffix;
 }
 
 AnomalyMetadata* Node::metadata() noexcept {
