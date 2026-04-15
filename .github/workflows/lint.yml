@@ -166,6 +166,7 @@ jobs:
       script: |
         # Regenerate workflows
 				export RELEASE_VERSION_TAG=2.12
+        export RELEASE_VERSION_TAG=2.12
         .github/scripts/generate_ci_workflows.py
 
         RC=0
