@@ -24,16 +24,16 @@ done
 
 echo "Applying to templates"
 for i in .github/templates/*.yml.j2; do
-    sed -i 's#common.checkout(\(.*\))#common.checkout(\1, checkout_pr_head=False)#' $i;
+    sed -i '/checkout_pr_head/!s#common.checkout(\([^)]*\))#common.checkout(\1, checkout_pr_head=False)#' $i;
     sed -i -e s#main#"release/${RELEASE_VERSION}"# $i;
 done
 
 echo "Applying to changes to linux binary builds"
 for i in  ".github/workflows/_binary-build-linux.yml" ".github/workflows/_binary-test-linux.yml"; do
-    sed -i "s#ref: \${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}#ref: \${{ github.sha }}#" $i;
+    sed -i "/github.event_name == 'pull_request'/d" $i;
 done
 
-sed -i -e "/^        \.github\/scripts\/generate_ci_workflows.py/i \\\t\t\t\texport RELEASE_VERSION_TAG=${RELEASE_VERSION}" .github/workflows/lint.yml
+sed -i -e "/^        \.github\/scripts\/generate_ci_workflows.py/i \\        export RELEASE_VERSION_TAG=${RELEASE_VERSION}" .github/workflows/lint.yml
 
 # Triton wheel
 echo "Triton Changes"
