@@ -19,6 +19,7 @@ from torch._inductor.codegen.cutlass.serialization import (
 )
 from torch._inductor.utils import clear_caches
 from torch.export import Dim
+from torch.testing._internal.common_utils import random_matrix_with_scaled_reduction_dim
 from torch.testing._internal.logging_utils import log_settings
 from torch.utils import _pytree as pytree
 
@@ -334,10 +335,16 @@ class TestCutlassBackend(TestCase):
         """
 
         M, N, K = 4096, 2048, 25728
-        dtype = torch.float16
 
-        a = torch.randn(M, K, dtype=dtype).to(GPU_TYPE)
-        b = torch.randn(N, K, dtype=dtype).to(GPU_TYPE).t()
+        # Scale inputs by 1/sqrt(K) so that the matmul output has O(1)
+        # magnitude, avoiding large accumulation errors in half precision
+        # that would require loose tolerances.
+        a = random_matrix_with_scaled_reduction_dim(
+            M, K, dtype=dtype, device=GPU_TYPE, reduction_dim=-1
+        )
+        b = random_matrix_with_scaled_reduction_dim(
+            N, K, dtype=dtype, device=GPU_TYPE, reduction_dim=-1
+        ).t()
 
         x_shapes = [
             (M, N),
