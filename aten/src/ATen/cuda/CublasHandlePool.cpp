@@ -163,10 +163,6 @@ void clearCublasWorkspacesForStream(cudaStream_t stream) {
 }
 
 size_t parseChosenWorkspaceSize() {
-  int64_t ov = cublas_workspace_override.load(std::memory_order_relaxed);
-  if (ov >= 0) {
-    return static_cast<size_t>(ov);
-  }
   auto val = c10::utils::get_env("CUBLAS_WORKSPACE_CONFIG");
 #ifdef USE_ROCM
   if (!val) {
@@ -224,10 +220,6 @@ inline bool unified_cublas_and_lt_workspaces() {
 #endif
 
 size_t parseCUDABlasLtWorkspaceSize() {
-  int64_t ov = cublaslt_workspace_override.load(std::memory_order_relaxed);
-  if (ov >= 0) {
-    return static_cast<size_t>(ov);
-  }
   auto val = c10::utils::get_env("CUBLASLT_WORKSPACE_SIZE");
 #ifdef USE_ROCM
   if (!val.has_value()) {
@@ -262,7 +254,11 @@ size_t parseCUDABlasLtWorkspaceSize() {
 }
 
 size_t getChosenWorkspaceSize() {
-  size_t pool_size = parseChosenWorkspaceSize();
+  int64_t ov = cublas_workspace_override.load(std::memory_order_relaxed);
+  if (ov >= 0) {
+    return static_cast<size_t>(ov);
+  }
+  static size_t pool_size = parseChosenWorkspaceSize();
   return pool_size;
 }
 
@@ -283,10 +279,17 @@ void resetCUDABlasLtWorkspaceSize() {
 }
 
 size_t getCUDABlasLtWorkspaceSize() {
-  size_t pool_size = parseCUDABlasLtWorkspaceSize();
+  int64_t ov = cublaslt_workspace_override.load(std::memory_order_relaxed);
+  const size_t pool_size = [&] {
+    if (ov >= 0) {
+      return static_cast<size_t>(ov);
+    }
+    static size_t parsed_pool_size = parseCUDABlasLtWorkspaceSize();
+    return parsed_pool_size;
+  }();
 #ifndef USE_ROCM
   if (unified_cublas_and_lt_workspaces()) {
-    size_t cublasWorkspaceSize = parseChosenWorkspaceSize();
+    size_t cublasWorkspaceSize = getChosenWorkspaceSize();
     if (cublasWorkspaceSize < pool_size) {
       TORCH_WARN_ONCE("Requested unified CUBLASLT workspace size of ", pool_size,
                       " bytes exceeds CUBLAS workspace size of ", cublasWorkspaceSize,
@@ -294,7 +297,7 @@ size_t getCUDABlasLtWorkspaceSize() {
                       " via CUBLAS_WORKSPACE_CONFIG or decrease requested"
                       " CUBLASLT_WORKSPACE_SIZE. Otherwise CUBLASLT workspace"
                       " size will be limited to the CUBLAS workspace size.");
-      pool_size = cublasWorkspaceSize;
+      return cublasWorkspaceSize;
     }
   }
 #endif
@@ -302,7 +305,7 @@ size_t getCUDABlasLtWorkspaceSize() {
 }
 
 at::DataPtr getNewWorkspace() {
-  return c10::cuda::CUDACachingAllocator::get()->allocate(parseChosenWorkspaceSize());
+  return c10::cuda::CUDACachingAllocator::get()->allocate(getChosenWorkspaceSize());
 }
 
 at::DataPtr getNewCUDABlasLtWorkspace() {
@@ -315,7 +318,7 @@ void setWorkspaceForHandle(cublasHandle_t handle, c10::cuda::CUDAStream stream) 
 
   auto& workspace = cublas_handle_stream_to_workspace();
 
-  size_t workspace_size = parseChosenWorkspaceSize();
+  size_t workspace_size = getChosenWorkspaceSize();
 
   // Fast path: check if workspace already exists and is large enough
   {
@@ -361,7 +364,7 @@ void* getCUDABlasLtWorkspace() {
     auto new_workspace = getNewWorkspace();
     {
       std::unique_lock<std::shared_mutex> lock(workspace.mutex);
-      auto workspace_it = workspace.map.try_emplace(key, std::make_pair(std::move(new_workspace), parseChosenWorkspaceSize())).first;
+      auto workspace_it = workspace.map.try_emplace(key, std::make_pair(std::move(new_workspace), getChosenWorkspaceSize())).first;
       return workspace_it->second.first.mutable_get();
     }
   }
