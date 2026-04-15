@@ -715,7 +715,11 @@ TORCH_META_FUNC(linalg_qr)(const Tensor& A,
     const auto& out_q = maybe_get_output(0);
     const auto& out_r = maybe_get_output(1);
     if (out_q.defined() && out_r.defined()) {
-      at::assert_no_overlap(out_q, out_r);
+      // This does the same as at::assert_no_overlap(out_q, out_r); but with a message better suited for this use case.
+      const auto lap = at::get_overlap_status(out_q, out_r);
+      TORCH_CHECK(
+          lap != at::MemOverlapStatus::Partial && lap != at::MemOverlapStatus::Full,
+          "linalg.qr: Q and R in out=(Q, R) cannot alias or partially overlap in memory.");
     }
   }
 

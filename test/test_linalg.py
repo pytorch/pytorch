@@ -4433,7 +4433,7 @@ class TestLinalg(TestCase):
         out = torch.zeros_like(x)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"unsupported operation: some elements.*single memory location",
+            r"linalg\.qr: Q and R in out=\(Q, R\) cannot alias or partially overlap in memory\.",
         ):
             torch.linalg.qr(x, out=(out, out))
 
