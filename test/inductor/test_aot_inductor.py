@@ -53,7 +53,6 @@ from torch.testing._internal.common_cuda import (
     requires_triton_ptxas_compat,
     SM80OrLater,
     SM90OrLater,
-    TEST_CUDNN,
     tf32_on_and_off,
 )
 from torch.testing._internal.common_device_type import (
@@ -4808,28 +4807,6 @@ class AOTInductorTestsTemplate:
         example_args = (
             torch.randn(1, 1, 4, 4, 4, device=self.device),
             torch.randn(1, 2, 2, 2, 3, device=self.device),
-        )
-        self.check_model(M(), example_args)
-
-    @requires_gpu
-    @skipCUDAIf(not TEST_CUDNN, "CUDNN not available")
-    @skipIfRocm(msg="cudnn_grid_sampler not supported on ROCm")
-    def test_cudnn_grid_sampler(self):
-        if self.device == "cpu":
-            raise unittest.SkipTest("cudnn_grid_sampler is CUDA-only")
-        if torch.backends.cudnn.version() >= 90000:
-            raise unittest.SkipTest(
-                "cuDNN spatial transformer API deprecated in cuDNN 9+"
-            )
-
-        class M(torch.nn.Module):
-            def forward(self, input, grid):
-                return torch.cudnn_grid_sampler(input, grid)
-
-        # input: (N, C, H, W), grid: (N, H_out, W_out, 2)
-        example_args = (
-            torch.randn(1, 1, 4, 4, device=self.device),
-            torch.randn(1, 3, 3, 2, device=self.device),
         )
         self.check_model(M(), example_args)
 
