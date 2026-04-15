@@ -437,6 +437,37 @@ XFAIL_DICTS = {
     "binary_numerical": BINARY_NUMERICAL_XFAILS,
 }
 
+# Shared expected failures that should not apply on ROCm.
+# Same structure as the main xfail dicts: test_type -> backend -> op_name -> dtypes.
+ROCM_UNXFAILS = {
+    "binary_numerical": {
+        "inductor_default": {
+            "fmod": {bf16, fp32},
+            "remainder": {ALL},
+        },
+        "inductor_numerics": {
+            "remainder": {ALL},
+        },
+    },
+    "eager_equivalence": {
+        "inductor_default": {
+            "reciprocal": {fp32},
+            "remainder": {ALL},
+        },
+        "inductor_numerics": {
+            "remainder": {ALL},
+        },
+    },
+    "unary_numerical": {
+        "inductor_default": {
+            "exp2": {bf16, fp32},
+            "expm1": {bf16, fp32},
+            "reciprocal": {fp32},
+            "tan": {bf16},
+        },
+    },
+}
+
 # Additional expected failures that only apply on ROCm.
 # Same structure as the main xfail dicts: test_type -> backend -> op_name -> dtypes.
 ROCM_XFAILS = {
@@ -450,6 +481,13 @@ ROCM_XFAILS = {
 
 def is_expected_failure(device_type, op_name, backend, test_type, dtype=None):
     """Check if a test is expected to fail."""
+    if torch.version.hip is not None:
+        rocm_unxfails = (
+            ROCM_UNXFAILS.get(test_type, {}).get(backend, {}).get(op_name, set())
+        )
+        if dtype in rocm_unxfails or ALL in rocm_unxfails:
+            return False
+
     xfails = XFAIL_DICTS.get(test_type, {}).get(backend, {}).get(op_name, set())
     is_xfail = dtype in xfails or ALL in xfails
 
