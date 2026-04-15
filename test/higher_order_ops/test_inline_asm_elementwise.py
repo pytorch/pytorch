@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 import torch
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
-from torch.testing._internal.common_cuda import SM70OrLater
+from torch.testing._internal.common_cuda import evaluate_gfx_arch_within, SM70OrLater
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -292,6 +292,15 @@ class TestInlineAsmElementwise(TestCase):
             tc.min_sm % 10,
         ):
             self.skipTest(f"Requires SM{tc.min_sm}+")
+
+        # Native bf16 conversion instruction not available before gfx950.
+        if (
+            torch.version.hip
+            and tc.name == "add_bf16_native"
+            and not evaluate_gfx_arch_within(["gfx950"])
+        ):
+            self.skipTest("Requires gfx950+")
+
         inputs = tc.input_gen_fn()
 
         def fn(*args):
@@ -326,6 +335,15 @@ class TestInlineAsmElementwise(TestCase):
             tc.min_sm % 10,
         ):
             self.skipTest(f"Requires SM{tc.min_sm}+")
+
+        # Native bf16 conversion instruction not available before gfx950.
+        if (
+            torch.version.hip
+            and tc.name == "add_bf16_native"
+            and not evaluate_gfx_arch_within(["gfx950"])
+        ):
+            self.skipTest("Requires gfx950+")
+
         inputs = tc.input_gen_fn()
 
         def fn(*args):
