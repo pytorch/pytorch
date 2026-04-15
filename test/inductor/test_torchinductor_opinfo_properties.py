@@ -369,7 +369,6 @@ EAGER_EQUIV_XFAILS = {
     },
     "inductor_default": {
         "reciprocal": {fp32},
-        "remainder": {ALL},
         "sigmoid": {fp32},
         "nn.functional.gelu": {fp32},
         "nn.functional.layer_norm": {fp32},
@@ -378,7 +377,6 @@ EAGER_EQUIV_XFAILS = {
         "log_softmax": {fp32},
     },
     "inductor_numerics": {
-        "remainder": {ALL},
         "sigmoid": {fp32},
         "sub": {ALL},
         "nn.functional.gelu": {fp32},
@@ -422,11 +420,9 @@ UNARY_NUMERICAL_XFAILS = {
 BINARY_NUMERICAL_XFAILS = {
     "inductor_default": {
         "fmod": {bf16, fp32},
-        "remainder": {ALL},
+        "remainder": {bf16, fp32},
     },
-    "inductor_numerics": {
-        "remainder": {ALL},
-    },
+    "inductor_numerics": {},
 }
 
 XFAIL_DICTS = {
