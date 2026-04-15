@@ -311,8 +311,18 @@ class BatchNorm1d(_BatchNorm):
     Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
     .. math::
-
         y = \frac{x - \mathrm{E}[x]}{\sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+
+    with
+
+    .. math::
+        \begin{alignat*}{2}
+          x               &=& x               &(n,c,t)  \\
+          \mathrm{E}[x]   &=& \mathrm{E}[x]   &(c)  \\
+          \mathrm{Var}[x] &=& \mathrm{Var}[x] &(c)  \\
+          \gamma          &=& \gamma          &(c)  \\
+          \beta           &=& \beta           &(c)
+        \end{alignat*}
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
@@ -426,8 +436,18 @@ class BatchNorm2d(_BatchNorm):
     Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
     .. math::
-
         y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+
+    with
+
+    .. math::
+        \begin{alignat*}{2}
+          x               &=& x               &(n,c,h,w)  \\
+          \mathrm{E}[x]   &=& \mathrm{E}[x]   &(c)  \\
+          \mathrm{Var}[x] &=& \mathrm{Var}[x] &(c)  \\
+          \gamma          &=& \gamma          &(c)  \\
+          \beta           &=& \beta           &(c)
+        \end{alignat*}
 
     The mean and standard-deviation are calculated per-dimension over the
     mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter
@@ -541,8 +561,18 @@ class BatchNorm3d(_BatchNorm):
     Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
     .. math::
-
         y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+
+    with
+
+    .. math::
+        \begin{alignat*}{2}
+          x               &=& x               &(n,c,d,h,w)  \\
+          \mathrm{E}[x]   &=& \mathrm{E}[x]   &(c)  \\
+          \mathrm{Var}[x] &=& \mathrm{Var}[x] &(c)  \\
+          \gamma          &=& \gamma          &(c)  \\
+          \beta           &=& \beta           &(c)
+        \end{alignat*}
 
     The mean and standard-deviation are calculated per-dimension over the
     mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter
@@ -657,8 +687,18 @@ class SyncBatchNorm(_BatchNorm):
     Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
     .. math::
-
         y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+
+    with
+
+    .. math::
+        \begin{alignat*}{2}
+          x               &=& x               &(n,c,\dots)  \\
+          \mathrm{E}[x]   &=& \mathrm{E}[x]   &(c)  \\
+          \mathrm{Var}[x] &=& \mathrm{Var}[x] &(c)  \\
+          \gamma          &=& \gamma          &(c)  \\
+          \beta           &=& \beta           &(c)
+        \end{alignat*}
 
     The mean and standard-deviation are calculated per-dimension over all
     mini-batches of the same process groups. :math:`\gamma` and :math:`\beta`

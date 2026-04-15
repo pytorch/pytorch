@@ -20,8 +20,9 @@ class LocalResponseNorm(Module):
     Applies normalization across channels.
 
     .. math::
-        b_{c} = a_{c}\left(k + \frac{\alpha}{n}
-        \sum_{c'=\max(0, c-n/2)}^{\min(N-1,c+n/2)}a_{c'}^2\right)^{-\beta}
+        y_c = x_c \cdot \left(k + \frac{\alpha}{n}
+          \sum_{c'=\max(0, c-\lfloor n/2 \rfloor)}^{\min(N,c+\lceil n/2 \rceil)-1}
+          x_{c'}^2 \right)^{-\beta}
 
     Args:
         size: amount of neighbouring channels used for normalization
@@ -111,7 +112,18 @@ class LayerNorm(Module):
     .. math::
         y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
 
-    The mean and standard-deviation are calculated over the last `D` dimensions, where `D`
+    with
+
+    .. math::
+        \begin{alignat*}{2}
+          x               &=& x               &(n,c,\dots,h,w,\dots)  \\
+          \mathrm{E}[x]   &=& \mathrm{E}[x]   &(n,c,\dots \phantom{,h,w,\dots\,})  \\
+          \mathrm{Var}[x] &=& \mathrm{Var}[x] &(n,c,\dots \phantom{,h,w,\dots\,})  \\
+          \gamma          &=& \gamma          &(\phantom{n,c,\dots,} h,w,\dots)  \\
+          \beta           &=& \beta           &(\underbrace{\phantom{n,c,\dots,}}_{D-d} \underbrace{h,w,\dots}_{d} \,)
+        \end{alignat*}
+
+    The mean and standard-deviation are calculated over the last `d` dimensions, where `d`
     is the dimension of :attr:`normalized_shape`. For example, if :attr:`normalized_shape`
     is ``(3, 5)`` (a 2-dimensional shape), the mean and standard-deviation are computed over
     the last 2 dimensions of the input (i.e. ``input.mean((-2, -1))``).
@@ -245,8 +257,21 @@ class GroupNorm(Module):
     .. math::
         y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
 
-    The input channels are separated into :attr:`num_groups` groups, each containing
-    ``num_channels / num_groups`` channels. :attr:`num_channels` must be divisible by
+    with
+
+    .. math::
+        \begin{alignat*}{2}
+          x               &=&    x  &(n, \phantom{g,}\mathclap{c\;\;}\phantom{s} ,i_2,i_3,\dots) =  \\
+                          & &  = x' &(n, \overbracket{g,s}^{\mathclap{c = g \cdot G/C + s}}\!\! ,i_2,i_3,\dots)  \\
+          \mathrm{E}[x]   &=& \mathrm{E}_{s,i_2,i_3,\dots}[x']   &(n,g\phantom{,s,i_2,i_3,\dots\,})  \\
+          \mathrm{Var}[x] &=& \mathrm{Var}_{s,i_2,i_3,\dots}[x'] &(n,g\phantom{,s,i_2,i_3,\dots\,})  \\
+          \gamma          &=& \gamma(c)=\quad  \gamma' &(\phantom{n,}g,s\phantom{,i_2,i_3,\dots\,})  \\
+          \beta           &=& \beta(c)=\quad    \beta' &(\phantom{n,}g,s\phantom{,i_2,i_3,\dots\,})
+        \end{alignat*}
+
+    The input `x` may be 2D or higher-dimensional. The input channels are separated
+    into `G =` :attr:`num_groups` groups, each containing ``num_channels / num_groups``
+    `= G/C` channels. `C =` :attr:`num_channels` must be divisible by
     :attr:`num_groups`. The mean and standard-deviation are calculated
     separately over each group. :math:`\gamma` and :math:`\beta` are learnable
     per-channel affine transform parameter vectors of size :attr:`num_channels` if
@@ -347,13 +372,20 @@ class RMSNorm(Module):
     the paper `Root Mean Square Layer Normalization <https://arxiv.org/pdf/1910.07467.pdf>`__
 
     .. math::
-        y_i = \frac{x_i}{\mathrm{RMS}(x)} * \gamma_i, \quad
-        \text{where} \quad \text{RMS}(x) = \sqrt{\epsilon + \frac{1}{n} \sum_{i=1}^{n} x_i^2}
+        y_{i,j} = \frac{x_{i,j}}{\mathrm{RMS}(x)_i} \cdot \gamma_j, \quad
+        \text{where} \quad \text{RMS}(x)_i =
+          \sqrt{\epsilon + \frac{1}{n} \sum_{\text{all }j} x_{i,j}^2}
 
-    The RMS is taken over the last ``D`` dimensions, where ``D``
+    where :math:`j=(i_{D-d}, i_{D-d+1}, \dots, i_{D-1})` are the last `d` dimension
+    indices of input `x`, :math:`i=(i_0, i_1, \dots, i_{D-d-1})` are all other
+    indices, `D` is the dimension of input `x`, and `n` is the number of terms in
+    the sum.
+
+    The RMS is taken over the last `d` dimensions, where `d`
     is the dimension of :attr:`normalized_shape`. For example, if :attr:`normalized_shape`
     is ``(3, 5)`` (a 2-dimensional shape), the RMS is computed over
-    the last 2 dimensions of the input.
+    the last 2 dimensions of the input. :math:`\gamma` is a learnable scaling
+    parameter of :attr:`normalized_shape` if :attr:`elementwise_affine` is ``True``.
 
     Args:
         normalized_shape (int or list or torch.Size): input shape from an expected input

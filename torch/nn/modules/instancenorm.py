@@ -142,8 +142,18 @@ class InstanceNorm1d(_InstanceNorm):
     <https://arxiv.org/abs/1607.08022>`__.
 
     .. math::
-
         y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+
+    with
+
+    .. math::
+        \begin{alignat*}{2}
+          x               &=& x               &(n,c,t)  \\
+          \mathrm{E}[x]   &=& \mathrm{E}[x]   &(n,c \phantom{,t})  \\
+          \mathrm{Var}[x] &=& \mathrm{Var}[x] &(n,c \phantom{,t})  \\
+          \gamma          &=& \gamma          &(\phantom{n,} c \phantom{,t})  \\
+          \beta           &=& \beta           &(\phantom{n,} c \phantom{,t})
+        \end{alignat*}
 
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
@@ -261,8 +271,18 @@ class InstanceNorm2d(_InstanceNorm):
     <https://arxiv.org/abs/1607.08022>`__.
 
     .. math::
-
         y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+
+    with
+
+    .. math::
+        \begin{alignat*}{2}
+          x               &=& x               &(n,c,h,w)  \\
+          \mathrm{E}[x]   &=& \mathrm{E}[x]   &(n,c \phantom{,h,w})  \\
+          \mathrm{Var}[x] &=& \mathrm{Var}[x] &(n,c \phantom{,h,w})  \\
+          \gamma          &=& \gamma          &(\phantom{n,} c \phantom{,h,w})  \\
+          \beta           &=& \beta           &(\phantom{n,} c \phantom{,h,w})
+        \end{alignat*}
 
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
@@ -381,8 +401,18 @@ class InstanceNorm3d(_InstanceNorm):
     <https://arxiv.org/abs/1607.08022>`__.
 
     .. math::
-
         y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+
+    with
+
+    .. math::
+        \begin{alignat*}{2}
+          x               &=& x               &(n,c,d,h,w)  \\
+          \mathrm{E}[x]   &=& \mathrm{E}[x]   &(n,c \phantom{,d,h,w})  \\
+          \mathrm{Var}[x] &=& \mathrm{Var}[x] &(n,c \phantom{,d,h,w})  \\
+          \gamma          &=& \gamma          &(\phantom{n,} c \phantom{,d,h,w})  \\
+          \beta           &=& \beta           &(\phantom{n,} c \phantom{,d,h,w})
+        \end{alignat*}
 
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
