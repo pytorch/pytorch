@@ -4384,6 +4384,16 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(RuntimeError, r"output 0 of Add,"):
             c.backward(torch.ones(5))
 
+        # sum(dim=...) uses SumBackward1; the non-zero variant number is
+        # preserved so the message says "Sum1" not "Sum".
+        a = torch.randn(3, 4, requires_grad=True)
+        b = a.sum(dim=1)
+        c = b * b
+        with torch.no_grad():
+            b += 1
+        with self.assertRaisesRegex(RuntimeError, r"output 0 of Sum1,"):
+            c.backward(torch.ones(3))
+
         # Custom autograd Function: "MyFunc" not "MyFuncBackward".
         class MyFunc(torch.autograd.Function):
             @staticmethod
