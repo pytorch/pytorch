@@ -1206,6 +1206,11 @@ class ComboKernel(Kernel):
                         meta[f"tile_hint_{num}"] = "TileHint.SQUARE"
                     else:
                         meta[f"tile_hint_{num}"] = "TileHint.DEFAULT"
+                    if sub_kernel.tiling_scores:
+                        meta[f"tiling_scores_{num}"] = {
+                            dim: V.graph.sizevars.optimization_hint(score, fallback=1)
+                            for dim, score in sub_kernel.tiling_scores.items()
+                        }
                 else:
                     meta[f"reduction_hint_{num}"] = (
                         sub_kernel.features.get_reduction_hint().name
