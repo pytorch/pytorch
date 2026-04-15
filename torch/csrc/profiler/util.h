@@ -152,8 +152,8 @@ class TORCH_API GlobalStateManager {
     }
   }
 
-  static auto* get() {
-    return singleton().state_.get();
+  static std::shared_ptr<T> get() {
+    return singleton().state_;
   }
 
   static std::shared_ptr<T> pop() {

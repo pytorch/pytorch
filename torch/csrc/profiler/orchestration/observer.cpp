@@ -123,14 +123,13 @@ ProfilerStateBase::~ProfilerStateBase() {
   }
 }
 
-/*static*/ ProfilerStateBase* ProfilerStateBase::get(bool global) {
-  auto* out = global
-      ? GlobalManager::get()
-      : static_cast<ProfilerStateBase*>(
-            c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PROFILER_STATE));
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      !out || out->config().pushGlobalCallbacks() == global);
-  return out;
+/*static*/ std::shared_ptr<ProfilerStateBase> ProfilerStateBase::getGlobal() {
+  return GlobalManager::get();
+}
+
+/*static*/ ProfilerStateBase* ProfilerStateBase::getTLS() {
+  return static_cast<ProfilerStateBase*>(
+      c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PROFILER_STATE));
 }
 
 /*static*/ void ProfilerStateBase::push(
@@ -183,18 +182,18 @@ void ProfilerStateBase::removeCallback() {
 }
 
 bool profilerEnabled() {
-  auto* state_ptr = ProfilerStateBase::get(/*global=*/false);
+  ProfilerStateBase* state_ptr = ProfilerStateBase::getTLS();
   return state_ptr && !state_ptr->config().disabled();
 }
 
 TORCH_API ActiveProfilerType profilerType() {
-  auto* state_ptr = ProfilerStateBase::get(/*global=*/false);
+  ProfilerStateBase* state_ptr = ProfilerStateBase::getTLS();
   return state_ptr == nullptr ? ActiveProfilerType::NONE
                               : state_ptr->profilerType();
 }
 
 torch::profiler::impl::ProfilerConfig getProfilerConfig() {
-  auto* state_ptr = ProfilerStateBase::get(/*global=*/false);
+  ProfilerStateBase* state_ptr = ProfilerStateBase::getTLS();
   TORCH_CHECK(
       state_ptr,
       "Tried to access profiler config, but profiler is not enabled!");

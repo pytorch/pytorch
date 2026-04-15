@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import unittest
 from typing import Any
 from unittest.mock import patch
@@ -852,6 +853,60 @@ class TestExecutionTrace(TestCase):
                 raise AssertionError("Expected t1 contents to match [1, 2, 3, 4]")
             if not (t2 == np.array([0, 0, 1, 0])).all():
                 raise AssertionError("Expected t2 contents to match [0, 0, 1, 0]")
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_execution_trace_unregister_during_ops(self):
+        """Regression test for use-after-free SIGSEGV when the
+        ExecutionTraceObserver is stopped/unregistered while other threads are
+        still executing PyTorch operations.
+        """
+        NUM_THREADS = 8
+        NUM_TRIALS = 5
+
+        for trial in range(NUM_TRIALS):
+            barrier = threading.Barrier(NUM_THREADS + 1)
+            stop_event = threading.Event()
+            errors = []
+
+            def worker(thread_id):
+                try:
+                    barrier.wait()
+                    while not stop_event.is_set():
+                        x = torch.randn(200, 200)
+                        y = torch.randn(200, 200)
+                        z = x + y
+                        _ = z * x
+                        _ = torch.mm(x, y)
+                        with record_function(f"t{thread_id}"):
+                            _ = torch.relu(z)
+                            _ = torch.cat([x, y], dim=0)
+                except Exception as e:
+                    errors.append((thread_id, e))
+
+            with tempfile.NamedTemporaryFile(
+                "w+t", suffix=".et.json", delete=False
+            ) as fp:
+                filename = fp.name
+            et = ExecutionTraceObserver().register_callback(filename)
+            et.start()
+
+            threads = []
+            for t_id in range(NUM_THREADS):
+                t = threading.Thread(target=worker, args=(t_id,))
+                threads.append(t)
+                t.start()
+
+            barrier.wait()
+
+            et.stop()
+            et.unregister_callback()
+
+            stop_event.set()
+            for t in threads:
+                t.join(timeout=60)
+
+            self.assertEqual(len(errors), 0, f"Trial {trial} thread errors: {errors}")
+            os.remove(filename)
 
 
 devices = ["cpu", "cuda"]
