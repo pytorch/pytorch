@@ -1516,11 +1516,36 @@ In-place version of :meth:`~Tensor.cumsum`
 )
 
 add_docstr_all(
+    "const_data_ptr",
+    r"""
+const_data_ptr() -> int
+
+Returns the address of the first element of :attr:`self` tensor.
+
+Unlike :meth:`data_ptr`, this is guaranteed to be a read-only access
+that will not trigger copy-on-write materialization. For regular
+(non-COW) tensors, the return value is identical to :meth:`data_ptr`.
+
+.. warning::
+
+    The returned pointer must not be used to mutate the tensor data.
+    Use :meth:`data_ptr` when write access is needed.
+""",
+)
+
+add_docstr_all(
     "data_ptr",
     r"""
 data_ptr() -> int
 
 Returns the address of the first element of :attr:`self` tensor.
+
+.. note::
+
+    If the tensor is a copy-on-write tensor (e.g. created via
+    :meth:`_lazy_clone`), calling this method will materialize the
+    copy. Use :meth:`const_data_ptr` if you only need read-only access
+    to the data pointer.
 """,
 )
 
