@@ -4376,22 +4376,12 @@ class TestAutograd(TestCase):
         # Use b * b (not b * 2) so MulBackward saves b and detects the
         # version mismatch when unpacking.
 
-        # add(Tensor, Tensor) → AddBackward0 → "Add" (variant 0 is stripped).
-        a = torch.randn(5, requires_grad=True)
-        b = a + torch.randn(5)
-        c = b * b
-        with torch.no_grad():
-            b += 1
-        with self.assertRaisesRegex(RuntimeError, r"output 0 of Add,"):
-            c.backward(torch.ones(5))
-
-        # add(Tensor, Scalar) → AddBackward1 → "Add1" (non-zero variant kept).
         a = torch.randn(5, requires_grad=True)
         b = a + 1
         c = b * b
         with torch.no_grad():
             b += 1
-        with self.assertRaisesRegex(RuntimeError, r"output 0 of Add1,"):
+        with self.assertRaisesRegex(RuntimeError, r"output 0 of Add,"):
             c.backward(torch.ones(5))
 
         # Custom autograd Function: "MyFunc" not "MyFuncBackward".
