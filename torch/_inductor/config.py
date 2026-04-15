@@ -1218,6 +1218,14 @@ class aten_distributed_optimizations:
     # fails with a cycle error, and file a bug so the root cause can be fixed.
     overlap_scheduling_autofix_cycles: bool = False
 
+    # Replace NCCL collectives with low-contention variants that use
+    # copy engine instead of SMs, freeing SMs for overlapping compute.
+    enable_low_contention_collectives: bool = False
+
+    # Minimum per-rank bytes for LC replacement. Below this, LC barrier
+    # overhead exceeds the benefit. Set to 0 to disable.
+    low_contention_min_bytes_per_rank: int = 16 * 1024 * 1024
+
 
 def parallel_compile_enabled_internally() -> bool:
     """
