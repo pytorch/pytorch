@@ -58,6 +58,7 @@ def apply_reordering_and_get_graph(graph, out_li) -> None:
         "collective_estimator",
         "bucket_exposed_first",
         "bucket_only_internode_comms",
+        "bucket_mode",
     )
     for key in config_keys:
         if (val := getattr(dist_opts, key)) is not None:
@@ -1037,7 +1038,12 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
                 self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @torch._inductor.config.patch(get_bucket_patches())
+    @torch._inductor.config.patch(
+        {
+            **get_bucket_patches(),
+            "aten_distributed_optimizations.bucket_mode": "custom_ops_multidtype",
+        }
+    )
     def test_multidtype_bucketing(self):
         """Test that all_gathers with different dtypes get bucketed together."""
 
@@ -1167,7 +1173,12 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @torch._inductor.config.patch(get_bucket_patches())
+    @torch._inductor.config.patch(
+        {
+            **get_bucket_patches(),
+            "aten_distributed_optimizations.bucket_mode": "custom_ops_multidtype",
+        }
+    )
     def test_bucketing_with_convert_dtype(self):
         """Test that all_gathers with dtype conversion get bucketed and produce correct results."""
 
@@ -1175,6 +1186,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             # Convert inputs to float16 before all_gather
             a_fp16 = a.to(torch.float16)
             b_fp16 = b.to(torch.float16)
+            d_fp16 = d.to(torch.float16)
 
             # Two all_gathers with converted dtypes
             ag1 = _functional_collectives.all_gather_tensor(a_fp16, 0, ranks)
@@ -1182,7 +1194,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
 
             # same dtype
             ag3 = _functional_collectives.all_gather_tensor(c, 0, ranks)
-            ag4 = _functional_collectives.all_gather_tensor(d, 0, ranks)
+            ag4 = _functional_collectives.all_gather_tensor(d_fp16, 0, ranks)
 
             return ag1, ag2, ag3, ag4
 
@@ -1282,6 +1294,49 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
                 "FX graph op targets differ across ranks — not SPMD. "
                 "No-op pad/slice may have been eliminated by remove_noop_ops.",
             )
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(
+        {
+            **get_bucket_patches(),
+            "aten_distributed_optimizations.enable_overlap_scheduling": True,
+            "aten_distributed_optimizations.spmd_check": True,
+            "aten_distributed_optimizations.spmd_mismatch": "error",
+        }
+    )
+    def test_spmd_verify_crashes_on_mismatch(self):
+        """Test that spmd_mismatch="error" raises on non-SPMD graphs."""
+
+        def func(a, *, ranks):
+            # rank 0 gets (4, 8), rank 1 gets (3, 8) — different node counts
+            # if pad is eliminated on rank 0 but not rank 1
+            full_chunk = (7 + len(ranks) - 1) // len(ranks)
+            pad_size = full_chunk - a.size(0)
+            # Only rank 1 will have a real pad op here
+            if pad_size > 0:
+                a = torch.nn.functional.pad(a, [0, 0, 0, pad_size])
+            ag = _functional_collectives.all_gather_tensor(a, 0, ranks)
+            return ag + 1
+
+        with _dynamo_dist_per_rank_init(
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
+        ):
+            world_size = self.world_size
+            full_chunk = (7 + world_size - 1) // world_size
+            local_size = full_chunk if self.rank == 0 else 7 - full_chunk
+            a = torch.randn(local_size, 8, device=device_type)
+            ranks = list(range(world_size))
+
+            func_c = functools.partial(func, ranks=ranks)
+            compiled = torch.compile(func_c)
+
+            # The graph will differ: rank 0 has no pad, rank 1 has pad.
+            # With spmd_check_crash_on_mismatch=True, this should raise.
+            with self.assertRaises(RuntimeError, msg="SPMD graph verification"):
+                compiled(a)
 
 
 def get_toy_model(device_type: str):
@@ -1583,6 +1638,9 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
         )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.bucket_mode": "custom_ops_multidtype"}
+    )
     def test_manual_reordering_bucketing_pass_all_gather_separate_buckets(self):
         self._run_manual_bucketing_test(
             collective_type="all_gather",
@@ -1615,6 +1673,9 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
         )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.bucket_mode": "custom_ops_multidtype"}
+    )
     def test_manual_bucketing_reordering_pass_all_gather_single_bucket(self):
         self._run_manual_bucketing_test(
             collective_type="all_gather",
@@ -1627,6 +1688,9 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
         )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.bucket_mode": "custom_ops_multidtype"}
+    )
     def test_bucketing_reordering_pass_all_gather_single_bucket_custom_module_stack_fn(
         self,
     ):
@@ -1742,6 +1806,9 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
                 )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.bucket_mode": "custom_ops_multidtype"}
+    )
     def test_manual_bucketing_reordering_pass_reduce_scatter_separate_buckets(self):
         self._run_manual_bucketing_test(
             collective_type="reduce_scatter",
@@ -1757,6 +1824,9 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
         )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.bucket_mode": "custom_ops_multidtype"}
+    )
     def test_manual_bucketing_reordering_pass_reduce_scatter_single_bucket(self):
         self._run_manual_bucketing_test(
             collective_type="reduce_scatter",

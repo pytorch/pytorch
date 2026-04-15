@@ -55,6 +55,7 @@ if TYPE_CHECKING:
     # Import the following modules during type checking to enable code intelligence features,
     # Do not import unconditionally, as they import sympy and importing sympy is very slow
     from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
+    from torch.types import IntLikeType
 
 
 def _is_fake_tensor(t: object) -> TypeIs[FakeTensor]:
@@ -803,6 +804,65 @@ def _safe_clone(src: torch.Tensor) -> torch.Tensor | None:
     return src.clone()
 
 
+def _grad_context_compatible(
+    symbolic_context: torch.fx.experimental.symbolic_shapes.SymbolicContext,
+    grad_desc: MetaTensorDesc[torch.Tensor],
+) -> bool:
+    """Check if a symbolic_context is compatible with a grad tensor.
+
+    Returns False when the view base structure in symbolic_context doesn't
+    match the grad, which means we need a fresh symbolic context.  This
+    happens in FSDP2 where param._local_tensor is a view of an N-D padded
+    base while grad._local_tensor is a view of a 1-D flat gradient buffer.
+
+    We check at both the outer level and the inner (subclass attr) level.
+    """
+    from torch.fx.experimental.symbolic_shapes import (
+        StatelessSymbolicContext,
+        SubclassSymbolicContext,
+    )
+
+    def _view_base_compatible(
+        ctx: StatelessSymbolicContext[Any, Any],
+        grad_t: MetaTensorDesc[torch.Tensor],
+    ) -> bool:
+        vbc = ctx.view_base_context
+        if grad_t.is_view and vbc is None:
+            return False
+        if not grad_t.is_view and vbc is not None:
+            return False
+        if (
+            grad_t.is_view
+            and vbc is not None
+            and isinstance(vbc, StatelessSymbolicContext)
+            and grad_t.base is not None
+            and len(vbc.dynamic_sizes) != grad_t.base.ndim
+        ):
+            return False
+        return True
+
+    if not isinstance(symbolic_context, StatelessSymbolicContext):
+        return True
+
+    # Check outer level
+    if not _view_base_compatible(symbolic_context, grad_desc):
+        return False
+
+    # Check inner (subclass) level
+    if isinstance(symbolic_context, SubclassSymbolicContext):
+        if grad_desc.attrs is None:
+            return False
+        for attr, inner_ctx in symbolic_context.inner_contexts.items():
+            if attr not in grad_desc.attrs:
+                return False
+            if isinstance(
+                inner_ctx, StatelessSymbolicContext
+            ) and not _view_base_compatible(inner_ctx, grad_desc.attrs[attr]):
+                return False
+
+    return True
+
+
 # This is a class for converting multiple tensors into meta tensors which
 # share the same view/storage structure.  The operation model is you allocate
 # one of these, and then call it repeatedly on all the tensors you want to
@@ -1035,7 +1095,7 @@ class MetaConverter(Generic[_TensorT]):
             src: torch._guards.Source,
             symbolic_context: torch.fx.experimental.symbolic_shapes.SymbolicContext
             | None = symbolic_context,
-        ) -> tuple[tuple[int, ...], tuple[int, ...], int]:
+        ) -> tuple[tuple[IntLikeType, ...], tuple[IntLikeType, ...], IntLikeType]:
             # local import to prevent circular import
             from torch.fx.experimental.symbolic_shapes import is_symbolic
 
@@ -1106,8 +1166,8 @@ class MetaConverter(Generic[_TensorT]):
         # symbolic context.
         def empty_create_subclass(
             t: MetaTensorDesc[Any],
-            outer_size: tuple[int, ...],
-            outer_stride: tuple[int, ...],
+            outer_size: tuple[IntLikeType, ...],
+            outer_stride: tuple[IntLikeType, ...],
             symbolic_context: torch.fx.experimental.symbolic_shapes.SymbolicContext
             | None = symbolic_context,
             source: torch._guards.Source | None = source,
@@ -1145,7 +1205,9 @@ class MetaConverter(Generic[_TensorT]):
                 raise AssertionError("source must not be None")
             sub = self._empty_create_subclass(
                 t,
+                # pyrefly: ignore[bad-argument-type]
                 outer_size,
+                # pyrefly: ignore[bad-argument-type]
                 outer_stride,
                 shape_env,
                 symbolic_context,
@@ -1286,7 +1348,7 @@ class MetaConverter(Generic[_TensorT]):
                     sym_eq,
                 )
 
-                def symint_visitor_fn(s: int) -> int:
+                def symint_visitor_fn(s: int) -> IntLikeType:
                     nonlocal symbolic_context
                     from torch.fx.experimental.symbolic_shapes import DimDynamic
 
@@ -1393,7 +1455,11 @@ class MetaConverter(Generic[_TensorT]):
                 # NB: we do NOT suppress guards here, we need to remove ephemeral
                 # sources
                 fake_t = t.view_func.apply(
-                    t, base, symint_visitor_fn, tensor_visitor_fn
+                    t,
+                    base,
+                    # pyrefly: ignore[bad-argument-type]
+                    symint_visitor_fn,
+                    tensor_visitor_fn,
                 )
 
                 # Ensure the output has symbolic shapes according to the outer symbolic context.
@@ -2024,15 +2090,28 @@ class MetaConverter(Generic[_TensorT]):
                 if t.grad is not None:
                     from torch._dynamo.source import AttrSource
 
-                    # TODO: Use a valid grad-specific symbolic context instead of recycling
-                    # the one from t. This isn't correct if e.g. t._is_view() != t.grad._is_view().
+                    grad_source = AttrSource(source, "grad")
+                    grad_symbolic_context = symbolic_context
+
+                    # The param's symbolic_context may be incompatible with the
+                    # grad when they have different view base dimensionalities.
+                    # This happens in FSDP2 where param._local_tensor is a view
+                    # of an N-D padded base but grad._local_tensor is a view of
+                    # a 1-D flat gradient buffer.  Build a fresh context only in
+                    # that case to preserve FX graph cache consistency.
+                    if shape_env is not None and symbolic_context is not None:
+                        if not _grad_context_compatible(symbolic_context, t.grad):
+                            grad_symbolic_context = all_dynamic_symbolic_context(
+                                t.grad, grad_source, shape_env, callback
+                            )
+
                     # pyrefly: ignore [unbound-name]
                     r.grad = self.meta_tensor(
                         t.grad,
                         shape_env,
                         callback,
-                        AttrSource(source, "grad"),
-                        symbolic_context,
+                        grad_source,
+                        grad_symbolic_context,
                     )
                 # pyrefly: ignore [unbound-name]
                 torch._C._set_conj(r, t.is_conj)

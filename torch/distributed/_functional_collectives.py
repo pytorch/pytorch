@@ -204,8 +204,6 @@ def all_gather_tensor(
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
-    if not self.is_contiguous():
-        raise AssertionError("Tensor must be contiguous for all_gather_tensor")
     group = _resolve_group(group, tag)
     group_size = c10d._get_group_size_by_name(group)
     tensor = torch.ops._c10d_functional.all_gather_into_tensor(
@@ -1214,6 +1212,8 @@ def _resolve_group(
             raise AssertionError(
                 "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
             )
+        if dist.config.compile_on_one_rank:
+            return torch.ops._dtensor.mesh_get_process_group(group, 0)
         return group._dim_group_names[0]
     elif isinstance(group, tuple):
         if (
@@ -1223,6 +1223,8 @@ def _resolve_group(
         ):
             dmesh = group[0]
             dim = group[1]
+            if dist.config.compile_on_one_rank:
+                return torch.ops._dtensor.mesh_get_process_group(dmesh, dim)
             return dmesh._dim_group_names[dim]
         else:
             raise ValueError(
@@ -1831,6 +1833,8 @@ def _group_or_group_name(
     group: dist.ProcessGroup | c10d.GroupName,
 ) -> dist.ProcessGroup | c10d.GroupName:
     if isinstance(group, str):
+        return group
+    elif dist.config.compile_on_one_rank:
         return group
     else:
         return group.group_name

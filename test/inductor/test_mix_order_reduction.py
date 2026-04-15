@@ -217,7 +217,13 @@ class MixOrderReductionTest(TestBase):
         self.check_numeric(f, (x,))
         # We don't do mix order reduction for split redutions
         # with more than 2 layers
-        self.assertEqual(metrics.codegen_mix_order_reduction, 0)
+        self.assertEqual(
+            metrics.codegen_mix_order_reduction,
+            1
+            if inductor_config.triton.cooperative_reductions
+            or inductor_config.triton.force_cooperative_reductions
+            else 0,
+        )
 
     def test_independent_split_size(self):
         """
@@ -996,6 +1002,68 @@ class MixOrderReductionTest(TestBase):
         act = fwd_bwd(opt_f)
         torch.testing.assert_close(ref, act, atol=1e-3, rtol=1e-3)
         self.assertGreaterEqual(metrics.codegen_mix_order_reduction, 0)
+
+    def test_keepdim_shape_mismatch(self):
+        """
+        Test that MixOrderReduction correctly handles keepdim=True reductions.
+
+        This test reproduces a bug where the final reduction in MixOrderReduction
+        generates `view(nsplit, rnumel).sum(dim=0)` which produces shape [rnumel],
+        but the expected output should be [1, rnumel] when keepdim=True.
+
+        The error manifests as:
+        RuntimeError: Function CompiledFunctionBackward returned an invalid gradient
+        at index N - got [2048] but expected shape compatible with [1, 2048]
+        """
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        # Create a model that produces reductions with keepdim=True in the backward pass
+        # This pattern is common in normalization layers like RMSNorm/LayerNorm
+        class KeepDimReductionModel(nn.Module):
+            def __init__(self, hidden_size):
+                super().__init__()
+                # Using shape [1, hidden_size] to ensure keepdim=True in backward
+                self.weight = nn.Parameter(torch.ones(1, hidden_size))
+                self.bias = nn.Parameter(torch.zeros(1, hidden_size))
+
+            def forward(self, x):
+                # x: [batch, hidden_size]
+                # Normalization-like operation that produces keepdim reductions in backward
+                mean = x.mean(dim=-1, keepdim=True)
+                var = ((x - mean) ** 2).mean(dim=-1, keepdim=True)
+                x_norm = (x - mean) / (var + 1e-5).sqrt()
+                return x_norm * self.weight + self.bias
+
+        M, N = 32768, 2048  # Large batch to trigger mix order reduction
+        model = KeepDimReductionModel(N).to(GPU_TYPE)
+
+        x = torch.randn(M, N, dtype=torch.float32, device=GPU_TYPE, requires_grad=True)
+        dy = torch.randn_like(x)
+
+        def fwd_bwd(model, x, dy):
+            x.grad = None
+            model.zero_grad()
+            out = model(x)
+            out.backward(dy)
+            return x.grad, model.weight.grad, model.bias.grad
+
+        # Reference (eager)
+        ref = fwd_bwd(model, x, dy)
+
+        # Compiled with mix order reduction
+        compiled_model = torch.compile(model)
+        act = fwd_bwd(compiled_model, x, dy)
+
+        # Verify numerical correctness
+        self.assertTrue(same(ref, act, tol=1e-3), f"ref:\n{ref}\nact:\n{act}")
+
+        # Verify mix order reduction was used
+        self.assertGreater(
+            metrics.codegen_mix_order_reduction,
+            0,
+            "Mix order reduction should be triggered",
+        )
 
 
 @inductor_config.patch(

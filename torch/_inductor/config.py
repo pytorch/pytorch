@@ -16,6 +16,7 @@ from torch.utils._config_module import (
 
 if TYPE_CHECKING:
     from torch._inductor.choices import InductorChoices
+    from torch._inductor.cudagraph_utils import CUDAGraphPolicy
 
 inplace_padding = os.environ.get("TORCHINDUCTOR_INPLACE_PADDING", "1") == "1"
 can_inplace_pad_graph_input = False  # ease testing
@@ -208,7 +209,12 @@ fx_wrapper: bool = os.environ.get("TORCHINDUCTOR_FX_WRAPPER", "0") == "1"
 # Controls automatic precompiling of common include files for codecache.CppCodeCache
 # (i.e. for cpp_wrapper mode and for cpp kernels on CPU).  AOTI header precompiling is
 # controlled by a separate flag.
-cpp_cache_precompile_headers: bool = not is_fbcode()
+cpp_cache_precompile_headers: bool = (
+    os.environ.get(
+        "TORCHINDUCTOR_CPP_CACHE_PRECOMPILE_HEADERS", "0" if is_fbcode() else "1"
+    )
+    == "1"
+)
 
 online_softmax = os.environ.get("TORCHINDUCTOR_ONLINE_SOFTMAX", "1") == "1"
 
@@ -550,6 +556,15 @@ graph_partition: bool = (
     == "1"
 )
 
+# Pluggable CUDAGraph wrapping policy.  When set to a ``CUDAGraphPolicy``
+# instance, ``post_compile`` delegates cudagraph wrapping to the policy
+# instead of the built-in ``cudagraphify`` pipeline.  This allows custom
+# cudagraph implementations, selective inner-vs-outer wrapping for
+# regional compilation, and shared memory pool management.
+#
+# See ``torch._inductor.cudagraph_utils.CUDAGraphPolicy`` for the base class.
+cudagraph_policy: "CUDAGraphPolicy | None" = None
+
 # register ops upon which inductor should partition the graph. name format should be
 # "namespace::kernel_name" (e.g., aten::mm) for op overload packet, or
 # "namespace::kernel_name.overload" (e.g., aten::mm.default).
@@ -726,10 +741,35 @@ coordinate_descent_search_radius = int(
 
 # AutoHeuristic is a framework that allows one to collect data from autotuning, use the data to learn a heuristic, and
 # generate the learned heuristic to code which is shipped with the compiler
-# Specify a list of comma separated optimizations to collect data for
-autoheuristic_collect = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_COLLECT", "")
-# Specify a list of comma separated optimizations to use learned heuristics for
-autoheuristic_use = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_USE", "mixed_mm")
+
+
+def _parse_autoheuristic_collect_env():
+    collect_env = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_COLLECT", "").split(",")
+    return collect_env
+
+
+def _parse_autoheuristic_use_env():
+    use_env = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_USE", "mixed_mm").split(",")
+    return use_env
+
+
+class autoheuristic_collect:
+    """
+    Config for which autoheuristic optimizations should collect training data.
+    """
+
+    pad_mm = "pad_mm" in _parse_autoheuristic_collect_env()
+    mixed_mm = "mixed_mm" in _parse_autoheuristic_collect_env()
+
+
+class autoheuristic_use:
+    """
+    Config for which autoheuristic optimizations should use learned heuristics.
+    """
+
+    pad_mm = "pad_mm" in _parse_autoheuristic_use_env()
+    mixed_mm = "mixed_mm" in _parse_autoheuristic_collect_env()
+
 
 # If set to 1, will run a JIT post compile hook if one is set.
 run_jit_post_compile_hook = (
@@ -742,11 +782,23 @@ def run_autoheuristic(name: str) -> bool:
 
 
 def collect_autoheuristic(name: str) -> bool:
-    return name in torch._inductor.config.autoheuristic_collect.split(",")
+    if name == "pad_mm":
+        return autoheuristic_collect.pad_mm
+    elif name == "mixed_mm":
+        return autoheuristic_collect.mixed_mm
+    else:
+        # For test compatibility with non-standard ops (e.g. "test", "foo" used in tests)
+        return name in _parse_autoheuristic_collect_env()
 
 
 def use_autoheuristic(name: str) -> bool:
-    return name in torch._inductor.config.autoheuristic_use.split(",")
+    if name == "pad_mm":
+        return autoheuristic_use.pad_mm
+    elif name == "mixed_mm":
+        return autoheuristic_use.mixed_mm
+    else:
+        # For test compatibility with non-standard ops (e.g. "test", "foo" used in tests)
+        return name in _parse_autoheuristic_use_env()
 
 
 # If set to "DEFAULT", this will use the default log path specified in autoheuristic.py.
@@ -805,6 +857,9 @@ delay_realize_cheap_outputs: bool = Config(
 # fallback to eager for random/dropout, this is slow but useful for debugging
 fallback_random = False
 
+# align random/dropout as eager mode(aten) behavior, maintaining fused possibility and faster gpu kernel
+align_random_eager = False
+
 # fallback embedding_bag_byte_unpack to eager
 fallback_embedding_bag_byte_unpack = False
 
@@ -814,7 +869,17 @@ assume_unaligned_fallback_output = (
     os.environ.get("TORCHINDUCTOR_ASSUME_UNALIGNED_FALLBACK_OUTPUT") == "1"
 )
 
-# Custom InductorChoices callable to use (can be a class or functools.partial with kwargs)
+# Factory callable that returns a custom InductorChoices instance.
+# A callable (rather than a class) is used to defer imports and avoid circular
+# dependencies between config and the choices module. Example:
+#
+#     def _custom_choices_factory():
+#         from my_package.choices import MyInductorChoices
+#         return MyInductorChoices()
+#
+#     config.inductor_choices_class = _custom_choices_factory
+#
+# The returned instance must implement uuid() for cache key serialization.
 inductor_choices_class: Callable[[], "InductorChoices"] | None = None
 
 # fuse even in cases without common reads
@@ -920,6 +985,9 @@ always_keep_tensor_constants = False
 
 # assert that indirect indexing does not read / write out of bounds
 assert_indirect_indexing = True
+
+# skip emitting runtime assertions for unbacked symbols in generated code
+do_not_emit_runtime_assertions = False
 
 # compute CSE bounds on variables that do not appear in the FX graph
 compute_all_bounds = False
@@ -1120,8 +1188,35 @@ class aten_distributed_optimizations:
     # as atomic units with memory-bound runtime estimates.
     enable_fusion_regions: bool | None = None
 
+    # Default bucketing mode for auto and manual overlap scheduling
+    # "default": traced bucketing, fully lowered by inductor during compilation
+    # "custom_ops": temporary bucketing using custom ops to hide parts from inductor
+    # "custom_ops_multidtype": same as custom_ops but buckets multiple dtypes
+    #     (e.g. bf16 and fp32) into one bucket
+    # "coalesced": zero-copy batching via reduce_scatter_tensor_coalesced
+    #     (reduce_scatter only; all_gather falls back to default)
+    # None means "auto" — the compiler picks the best mode
+    bucket_mode: (
+        Literal["default", "custom_ops", "custom_ops_multidtype", "coalesced"] | None
+    ) = None
+
     # Prioritize bucketing during overlap scheduling by grouping candidates by bucket key
     prioritize_bucketing_during_scheduling: bool = True
+
+    # Verify FX graphs are identical across ranks before overlap scheduling.
+    # Detects non-SPMD graphs that would cause NCCL collective ordering
+    # mismatches and hangs.
+    spmd_check: bool = True
+
+    # Action on SPMD graph mismatch: "warn" logs a warning, "error" raises
+    # RuntimeError. "error" fails fast instead of risking silent NCCL hang.
+    # TODO(ivankobzarev): change default to "error" after real-world testing.
+    spmd_mismatch: Literal["warn", "error"] = "warn"
+
+    # When True, automatically remove extra deps that create cycles instead of
+    # raising an error.  Set this to True as a workaround if overlap scheduling
+    # fails with a cycle error, and file a bug so the root cause can be fixed.
+    overlap_scheduling_autofix_cycles: bool = False
 
 
 def parallel_compile_enabled_internally() -> bool:
@@ -1162,11 +1257,7 @@ def decide_compile_threads() -> int:
         compile_threads = 1
         log.info("compile_threads set to 1 in fbcode")
     else:
-        cpu_count = (
-            len(os.sched_getaffinity(0))
-            if hasattr(os, "sched_getaffinity")
-            else os.cpu_count()
-        )
+        cpu_count = torch._utils.cpu_count()
         assert cpu_count
         compile_threads = min(32, cpu_count)
         log.info("compile_threads set to %d", compile_threads)
@@ -1741,6 +1832,15 @@ class triton:
         os.environ.get("TORCHINDUCTOR_PERSISTENT_REDUCTIONS", "1") == "1"
     )
 
+    # Decompose sort-based ops (sort, mode, median) to generate Triton
+    # kernels instead of falling back to ATen eager.  When enabled, sort
+    # removes the default 512-element dimension limit and uses int32
+    # indices (up to 2^31-1 elements), and mode/median decompose into
+    # sort + reduction / pointwise ops that Inductor can lower to Triton.
+    decompose_sort_ops: bool = (
+        os.environ.get("TORCHINDUCTOR_DECOMPOSE_SORT_OPS", "0") == "1"
+    )
+
     # For small output size reductions uses cross thread-block synchronization to gain more parallelism
     cooperative_reductions = (
         os.environ.get("TORCHINDUCTOR_COOPERATIVE_REDUCTIONS", "0") == "1"
@@ -1810,8 +1910,9 @@ class triton:
     # Whether to upcast float16 / bfloat16 to float32 in triton codegen (Experimental)
     codegen_upcast_to_fp32 = True
 
-    # Whether persistent matmul kernels should be enabled this flag only has effect when on h100
-    # with a version of triton new enough to support TMA
+    # Whether persistent matmul kernels should be enabled. On NVIDIA H100+ with TMA support,
+    # this enables TMA persistent kernels. On AMD GPUs without TMA, this enables
+    # non-TMA persistent kernels as a fallback.
     enable_persistent_tma_matmul = (
         os.environ.get("ENABLE_PERSISTENT_TMA_MATMUL", "0") == "1"
     )
@@ -1912,6 +2013,11 @@ class aot_inductor:
 
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
     debug_symbols = os.environ.get("AOT_INDUCTOR_DEBUG_SYMBOLS", "0") == "1"
+
+    # Enable frame pointers for profiling tools (e.g. strobelight)
+    enable_frame_pointer = (
+        os.environ.get("AOT_INDUCTOR_ENABLE_FRAME_POINTER", "0") == "1"
+    )
 
     # Annotate generated main wrapper function, i.e. AOTInductorModel::run_impl,
     # to use which cpp compiler optimization level, default to O1
@@ -2257,6 +2363,11 @@ class xpu(cutlass):
     # e.g. "20250201".
     version: str | None = None
 
+    # Path to Intel OneAPI.
+    oneapi_root: str | None = None
+
+    cutlass_dir = os.path.realpath(os.environ.get("TORCHINDUCTOR_CUTLASS_DIR", ""))
+
 
 class rocm:
     # Offload arch list for device code compilation, e.g. ["gfx90a", "gfx942"].
@@ -2468,6 +2579,9 @@ _save_config_ignore: list[str] = [
     "post_grad_custom_post_pass",
     "_fuse_ddp_communication_passes",
     "_pre_fusion_custom_pass",
+    # CUDAGraphPolicy objects are not picklable and only affect
+    # post_compile wrapping, not compiled code itself.
+    "cudagraph_policy",
 ]
 
 _cache_config_ignore_prefix: list[str] = [
@@ -2488,6 +2602,8 @@ _cache_config_ignore_prefix: list[str] = [
     "pre_grad_custom_pass",
     "_fuse_ddp_communication_passes",
     "_pre_fusion_custom_pass",
+    # CUDAGraphPolicy only affects post_compile, not compiled output
+    "cudagraph_policy",
     # tests assume that changes here don't invalidate cache
     "always_complex_memory_overlap_TESTING_ONLY",
     # timing affects cache structure, not cache content
@@ -2497,6 +2613,12 @@ _cache_config_ignore_prefix: list[str] = [
     "fx_graph_remote_cache",
     "autotune_local_cache",
     "autotune_remote_cache",
+]
+
+# Config keys whose values are callable factories. save_config_portable will
+# instantiate the factory and use .uuid() for serialization.
+_cache_config_factory_keys: list[str] = [
+    "inductor_choices_class",
 ]
 
 # External callable for matmul tuning candidates

@@ -144,6 +144,7 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   export USE_XCCL=1
   export USE_MPI=0
   export TORCH_XPU_ARCH_LIST=pvc
+  export USE_STATIC_MKL=1
 fi
 
 # sccache will fail for CUDA builds if all cores are used for compiling
@@ -174,14 +175,9 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && echo "${TORCH_CUDA_ARCH_LIST}" | tr '
   export BUILD_CUSTOM_STEP="ninja -C build flash_attention -j ${J}"
 fi
 
-if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
-  export CC=clang
-  export CXX=clang++
-  # TODO: Removeme once all the wrappers are gone
-  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-    sudo rm -f /opt/cache/bin/clang++
-  fi
-
+# TODO: Removeme once all the wrappers are gone
+if [[ "$BUILD_ENVIRONMENT" == *clang* ]] && [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  sudo rm -f /opt/cache/bin/clang++
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-clang*-asan* ]]; then

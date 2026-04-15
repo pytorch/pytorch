@@ -9,6 +9,7 @@ import logging
 import math
 import operator
 import os
+import sys
 import warnings
 from collections import defaultdict
 from collections.abc import Callable, Collection, Iterable, Sequence
@@ -31,6 +32,7 @@ from torch._library.utils import get_layout_constraint_tag
 from torch._prims_common import (
     canonicalize_dim,
     canonicalize_dims,
+    check,
     dtype_to_type,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
@@ -956,6 +958,9 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
     def _get_primitive_bitwidth(dtype):
         if dtype.is_floating_point:
             return torch.finfo(dtype).bits
+        elif dtype == torch.bool:
+            # torch.iinfo doesn't support bool; bools are stored as uint8 (8 bits)
+            return 8
         else:
             return torch.iinfo(dtype).bits
 
@@ -1382,8 +1387,10 @@ def permute(x, dims):
     return TensorBox(PermuteView.create(x.data, tuple(dims)))
 
 
+# Note: logic in this function need to be always synchronized with
+# slice_forward in fake implementation.
 @register_lowering(aten.slice, type_promotion_kind=None)
-def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
+def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
     """
     Lowers a slice call, creating ExternKernels for the output size & storage offset symbols,
     if the indices are unbacked and appropriate semantics aren't known.
@@ -1420,30 +1427,78 @@ def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
         fn = lambda x: V.graph.sizevars.guard_or_false(x)  # noqa: E731
         index = sympy.expand(index)
         size = sympy.expand(size)
-        if fn(sympy.Ge(index, 0)) and fn(sympy.Le(index, size)):
+        if fn(sympy.And(sympy.Ge(index, 0), sympy.Le(index, size))):
             return index
-        elif fn(sympy.Lt(index, 0)) and fn(sympy.Ge(index, -size)):
+        elif fn(sympy.And(sympy.Lt(index, 0), sympy.Ge(index, -size))):
             return index + size
         elif fn(sympy.Gt(index, size)):
             return size
         elif fn(sympy.Lt(index, -size)):
             return 0
+        elif fn(sympy.Ge(index, 0)):
+            # If index >= 0, the resolved index is at most min(index, size).
+            return sympy.Min(index, size)
+        elif fn(sympy.Lt(index, 0)):
+            # If index < 0, wrap and clamp: the resolved index is at least 0.
+            return sympy.Max(index + size, 0)
         return None
 
     start_index, end_index = None, None
-    ambiguous_slice = clamp
-    if ambiguous_slice:
-        start_index = compute_slice_index(start, size, 0)
-        end_index = compute_slice_index(end, size, size)
-        if start_index is not None and end_index is not None:
-            start, end = start_index, end_index
-            ambiguous_slice = False
-
     # ambiguous_slice=False means we know what semantics this slice call follows,
     # and don't need to generate an extern kernel to represent the output size.
     # This is assumed True for clamp=False
     # (meant to follow standard indexing semantics: 0 <= index < size)
+    ambiguous_slice = clamp
+    if ambiguous_slice:
+        start_index = compute_slice_index(start, size, 0)
+        # Special case: if end is maxsize (unbounded), use size directly
+        # This matches the logic in fake_impls.py
+        if end is not None and V.graph.sizevars.statically_known_equals(
+            end, sys.maxsize
+        ):
+            end_index = size
+        else:
+            end_index = compute_slice_index(end, size, size)
+        if start_index is not None and end_index is not None:
+            start, end = start_index, end_index
+            ambiguous_slice = False
+
     if not ambiguous_slice:
+        # Even though the bounds are resolvable now, the FX node may have
+        # allocated unbacked symbols for the slice output size because dynamo
+        # couldn't prove the bounds at trace time (constraints may have been
+        # learned after tracing the slice). We still need to define those
+        # symbols so the assertion new_unbacked_defs >= renamed_unbacked_bindings
+        # passes. Register a DynamicSliceSize operation to define the size symbol.
+        # Note: storage_offset bindings should not appear here because
+        # a resolved start_index means the offset is computable directly
+        # (base_offset + start * stride), so dynamo wouldn't allocate an
+        # unbacked symbol for it.
+        # Note: current_node may be None when slice_ is called from template
+        # rendering (e.g. cpp_template_kernel.slice_nd) rather than FX graph
+        # lowering, so we handle that.
+        current_node = V.graph.current_node
+        node_unbacked_bindings = resolve_unbacked_bindings(
+            V.graph.sizevars.shape_env,
+            current_node.meta.get("unbacked_bindings", {})
+            if current_node is not None
+            else {},
+        )
+        if node_unbacked_bindings:
+            for sym, keypath in node_unbacked_bindings.items():
+                if keypath == (CallMethodKey("size"), pytree.SequenceKey(dim)):
+                    b_size = ir.DynamicSliceSize(sym, start, end, step, size)
+                    b_size.name = V.graph.register_buffer(b_size)
+                    V.graph.register_operation(b_size)
+                elif keypath == (CallMethodKey("storage_offset"),):
+                    # Not handled yet — would require materializing the
+                    # tensor layout. Unlikely to be hit because a resolved
+                    # start_index means the offset is computable directly.
+                    raise AssertionError(
+                        "Unexpected storage_offset unbacked binding when both "
+                        "start and end indices are resolved"
+                    )
+
         return TensorBox(
             ir.SliceView.create(x.data, dim, start, end, step, clamp=clamp)
         )  # go to SliceView/ReinterpretView
@@ -2047,22 +2102,38 @@ def cat(inputs, dim=0):
 
         # Skip pointwise_cat when any cat input has a fusible (pointwise)
         # multi-consumer — ConcatKernel + NonOwningLayout avoids redundant
-        # reads.  Non-fusible users (e.g. matmul) don't benefit, so they
-        # should not prevent pointwise_cat.
+        # reads. Also skip when input is an unrealized Pointwise with
+        # multiple consumers to avoid recomputation (e.g. pad-as-cat).
         def any_input_has_multi_consumers() -> bool:
-            cat_node = V.current_node
-            if cat_node is None:
+            current_node = V.current_node
+            if current_node is None:
                 return False
-            fx_args = cat_node.args[0]  # aten.cat format: cat(input_list, dim)
-            if not isinstance(fx_args, (list, tuple)):
+            fx_args = current_node.args[0]
+            if isinstance(fx_args, (list, tuple)):
+                input_nodes = fx_args
+            elif isinstance(fx_args, torch.fx.Node):
+                input_nodes = [fx_args]
+            else:
                 return False
 
-            def has_fusible_multi_consumer(arg):
+            def is_unrealized_pointwise(x):
+                if isinstance(x, (TensorBox, ir.StorageBox)):
+                    return is_unrealized_pointwise(unwrap_tensor(x))
+                return isinstance(x, ir.Pointwise)
+
+            for arg, ir_input in zip(input_nodes, inputs):
                 if not hasattr(arg, "users") or len(arg.users) <= 1:
-                    return False
-                return any(is_pointwise_use(u) for u in arg.users if u is not cat_node)
-
-            return any(has_fusible_multi_consumer(arg) for arg in fx_args)
+                    continue
+                # input will be computed multiple times because other consumers
+                # (eg. pointwise) will also inline it. So we should realize-in-place via ConcatKernel
+                if any(is_pointwise_use(u) for u in arg.users if u is not current_node):
+                    return True
+                # If input is an unrealized Pointwise with multiple consumers, pointwise_cat
+                # will inline input without realizing it to memory, causing separate
+                # realization cost for input. So we should realize-in-place via ConcatKernel
+                if is_unrealized_pointwise(ir_input):
+                    return True
+            return False
 
         has_multi_consumers = any_input_has_multi_consumers()
 
@@ -2084,7 +2155,7 @@ def diagonal(input, offset: int = 0, dim1: int = 0, dim2: int = 1):
     dim1 = canonicalize_dim(idx=dim1, rank=num_dims)
     dim2 = canonicalize_dim(idx=dim2, rank=num_dims)
 
-    torch._check(
+    check(
         dim1 != dim2, lambda: f"diagonal dimensions cannot be identical {dim1}, {dim2}"
     )
 
@@ -2432,8 +2503,15 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
     return check_skip_condition(node, is_output=True)
 
 
-def make_fallback(op, layout_constraint=None, warn=True, override_decomp=False):
-    assert op not in decompositions or override_decomp, (
+def make_fallback(
+    op,
+    layout_constraint=None,
+    warn=True,
+    override_decomp=False,
+    get_decomp_fn=None,
+):
+    check_decomps = get_decomp_fn() if get_decomp_fn is not None else decompositions
+    assert op not in check_decomps or override_decomp, (
         f"both a fallback and a decomp for same op: {op}"
     )
     if (
@@ -2588,10 +2666,15 @@ fallback_rand_generator = fallback_handler(aten.rand.generator)
 fallback_randn_default = fallback_handler(aten.randn.default)
 fallback_randn_generator = fallback_handler(aten.randn.generator)
 make_fallback(aten.randint)
+make_fallback(aten.rand_like, override_decomp=True)
+make_fallback(aten.randn_like, override_decomp=True)
+make_fallback(aten.randint_like, override_decomp=True)
 
 # TODO: mlazos reevaluate if we want to codegen something different
 make_fallback(torch.ops.streams.record_event.default)
 make_fallback(torch.ops.streams.wait_event.default)
+make_fallback(torch.ops.streams.synchronize_event.default)
+make_fallback(torch.ops.streams.synchronize_device.default)
 
 
 @register_lowering(aten.rand)
@@ -2644,8 +2727,35 @@ def inductor_lookup_seed(seeds, index):
     )
 
 
+def get_threads_per_round(device: torch.device):
+    if not isinstance(device, torch.device):
+        device = torch.device(device)
+
+    if device.type == "cuda":
+        idx = device.index
+        if idx is None:
+            idx = torch.cuda.current_device()
+
+        prop = torch.cuda.get_device_properties(idx)
+        threads_per_round = (
+            prop.multi_processor_count * prop.max_threads_per_multi_processor
+        )
+    else:
+        _CPU_GRAIN_SIZE = 32768
+        threads_per_round = _CPU_GRAIN_SIZE
+
+    return threads_per_round
+
+
 @register_lowering(inductor_prims.random, type_promotion_kind=None)
-def inductor_random(size: list[int], seed: TensorBox, mode: str, *, offset: int = 0):
+def inductor_random(
+    size: list[int],
+    seed: TensorBox,
+    mode: str,
+    *,
+    offset: int = 0,
+    align_dtype: torch.dtype = torch.float32,
+):
     assert not config.fallback_random
     assert mode in ("rand", "randn")
     size = [*size]
@@ -2656,11 +2766,33 @@ def inductor_random(size: list[int], seed: TensorBox, mode: str, *, offset: int 
     ).make_indexer()
     seed_loader = seed.make_loader()
 
-    def inner_fn(index):
-        return getattr(ops, mode)(
-            seed_loader([]),
-            ops.index_expr(random_pos(index), torch.int32),
-        )
+    if config.align_random_eager and device.type == "cuda":
+        threads_per_round = get_threads_per_round(device)
+
+        def _vec_from_dtype(dt: torch.dtype) -> int:
+            if dt in (torch.float16, torch.bfloat16):
+                return 8
+            return 4
+
+        vec = _vec_from_dtype(align_dtype)
+
+        def inner_fn(index):
+            rng_seed = seed_loader([0])
+            base_offset = seed_loader([1])
+            return ops.rand_eager(
+                rng_seed,
+                base_offset,
+                threads_per_round,
+                ops.index_expr(random_pos(index), torch.int32),
+                vec=int(vec),
+            )
+    else:
+
+        def inner_fn(index):
+            return getattr(ops, mode)(
+                seed_loader([]),
+                ops.index_expr(random_pos(index), torch.int32),
+            )
 
     result = Pointwise.create(
         device=device,
@@ -2670,6 +2802,10 @@ def inductor_random(size: list[int], seed: TensorBox, mode: str, *, offset: int 
     )
     result.realize()
     return result
+
+
+make_fallback(inductor_prims.rand_eager_offset)
+make_fallback(inductor_prims.rand_eager_offsets)
 
 
 @register_lowering(inductor_prims.randint, type_promotion_kind=None)
@@ -2880,16 +3016,24 @@ def bucketize(
     return result
 
 
+def _is_tensor_irnode(x):
+    return isinstance(x, ir.IRNode) and not isinstance(
+        x, (ir.NonTensorObj, ir.OpaqueMultiOutput)
+    )
+
+
 def require_dense(_, *args, **kwargs):
     args, kwargs = pytree.tree_map_only(
-        ir.IRNode, ir.ExternKernel.require_stride1, (args, kwargs)
+        _is_tensor_irnode, ir.ExternKernel.require_stride1, (args, kwargs)
     )
     return args, kwargs
 
 
 def require_contiguous(_, *args, **kwargs):
     args, kwargs = pytree.tree_map_only(
-        ir.IRNode, ir.ExternKernel.require_contiguous, (args, kwargs)
+        _is_tensor_irnode,
+        ir.ExternKernel.require_contiguous,
+        (args, kwargs),
     )
     return args, kwargs
 
@@ -2898,14 +3042,18 @@ def require_contiguous_strides(_, *args, **kwargs):
     # TODO: combine this with require_contiguous after
     # https://github.com/pytorch/pytorch/pull/148235 lands.
     args, kwargs = pytree.tree_map_only(
-        ir.IRNode, ir.ExternKernel.require_contiguous_strides, (args, kwargs)
+        _is_tensor_irnode,
+        ir.ExternKernel.require_contiguous_strides,
+        (args, kwargs),
     )
     return args, kwargs
 
 
 def require_channels_last(_, *args, **kwargs):
     args, kwargs = pytree.tree_map_only(
-        ir.IRNode, ir.ExternKernel.require_channels_last, (args, kwargs)
+        _is_tensor_irnode,
+        ir.ExternKernel.require_channels_last,
+        (args, kwargs),
     )
     return args, kwargs
 
@@ -2937,9 +3085,12 @@ def constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs):
 
 def constrain_to_fx_strides(fx_node, *args, **kwargs):
     def apply_constraint(arg, fx_arg):
-        if isinstance(arg, ir.IRNode):
+        if _is_tensor_irnode(arg):
+            fake_val = fx_arg.meta.get("val")
+            if not isinstance(fake_val, torch.Tensor):
+                return arg
             stride_order = ir.get_stride_order(
-                fx_arg.meta["val"].stride(), V.graph.sizevars.shape_env
+                fake_val.stride(), V.graph.sizevars.shape_env
             )
             return ir.ExternKernel.require_stride_order(arg, stride_order)
         if isinstance(arg, dict):
@@ -2963,7 +3114,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
     """Apply stride constraints to SDPA inputs, ensuring dense last dimension."""
 
     def apply_constraint(idx, arg, fx_arg):
-        if not isinstance(arg, ir.IRNode):
+        if not _is_tensor_irnode(arg):
             return arg
 
         meta_val = fx_arg.meta["val"]
@@ -3014,7 +3165,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         return result
 
     def _apply_constraint_inner(idx, arg, meta_val, meta_stride_expr, stride_order):
-        if not meta_val.is_cuda:
+        if not (meta_val.is_cuda or meta_val.is_xpu):
             return ir.ExternKernel.require_stride_order(arg, stride_order)
 
         # This is the minimum alignment required by SDPA kernels for attention_bias.
@@ -3209,12 +3360,6 @@ make_fallback(aten._pdist_backward, require_contiguous)
 # 5) Impossible (missing triton/CPU features)
 
 # Sorting / Sorting-like
-make_fallback(aten.sort)
-make_fallback(aten.sort.stable)
-make_fallback(aten.kthvalue)
-make_fallback(aten.topk)
-make_fallback(aten.mode)
-make_fallback(aten.median)
 make_fallback(aten.nanmedian)
 make_fallback(aten.randperm)
 # see: https://github.com/pytorch/pytorch/pull/121354
@@ -3423,6 +3568,30 @@ def iota(
     )
 
 
+@register_lowering(aten.arange.start_step, type_promotion_kind=None)
+def arange_start_step(
+    start,
+    end,
+    step=1,
+    *,
+    dtype=None,
+    device=None,
+    layout=None,
+    pin_memory=None,
+    requires_grad=False,
+):
+    assert dtype is not None
+    length = ceildiv(end - start, step)
+    return iota(
+        length,
+        start=start,
+        step=step,
+        dtype=dtype,
+        device=device if device is not None else "cpu",
+        requires_grad=requires_grad,
+    )
+
+
 @register_lowering(aten.select_scatter, type_promotion_kind=None)
 def select_scatter(x, src, dim: int, index: int):
     src = to_dtype(src, x.get_dtype())
@@ -3534,7 +3703,7 @@ def _unwrap(x):
     return x
 
 
-@register_lowering([torch.tensor, aten.scalar_tensor])
+@register_lowering([torch.tensor, aten.scalar_tensor, prims.scalar_tensor])
 def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
     assert_nyi(layout in (None, torch.strided), f"layout={layout}")
     assert_nyi(not pin_memory, "pin_memory")
@@ -4761,6 +4930,59 @@ def inplace_constant_pad_nd(
     return resized_x
 
 
+def _pad_as_cat(
+    x: TensorBox, padding: Sequence[int], fill_value: float
+) -> TensorBox | None:
+    """Decompose right-pad into cat([x, fill], dim) and delegate to cat lowering.
+
+    The cat lowering already has heuristics for choosing between pointwise_cat
+    (fusion) and ConcatKernel (memory planning / zero-copy).  By routing through
+    cat() we reuse those heuristics rather than duplicating them here.
+    """
+    # Bail out for symbolic padding, dynamic shapes
+    if not all(isinstance(p, int) for p in padding):
+        return None
+
+    sizes = x.get_size()
+    ndim = len(sizes)
+    pad_pairs = list(zip(padding[::2], padding[1::2]))
+
+    # Only support single-dimension right-pad
+    pad_dim = None
+    pad_amount = None
+    for i, (left, right) in enumerate(pad_pairs):
+        if left != 0:
+            return None
+        if right > 0:
+            if pad_dim is not None:
+                return None  # multi-dim pad
+            pad_dim = ndim - 1 - i  # padding format is reversed dim order
+            pad_amount = right
+        elif right < 0:
+            return None  # trim, not pad
+
+    if pad_dim is None:
+        return None
+
+    # CPU cat always uses ConcatKernel (no pointwise_cat), which adds
+    # extra kernel launches for the fill.  Skip pad-as-cat on CPU.
+    device = x.get_device()
+    if device is not None and device.type == "cpu":
+        return None
+
+    # Build the fill tensor for the padding region
+    pad_shape = list(sizes)
+    pad_shape[pad_dim] = pad_amount
+    dtype = x.get_dtype()
+    fill_value_typed = dtype_to_type(dtype)(fill_value)
+    pad_tensor = tensor_constructor(fill_value_typed)(
+        pad_shape, dtype=dtype, device=device
+    )
+
+    counters["inductor"]["pad_rewritten_as_cat"] += 1
+    return cat([x, pad_tensor], pad_dim)
+
+
 @register_lowering(aten.constant_pad_nd, type_promotion_kind=None)
 def constant_pad_nd(x, padding, fill_value=0):
     assert (len(padding) % 2) == 0
@@ -4772,6 +4994,10 @@ def constant_pad_nd(x, padding, fill_value=0):
         if out:
             return out
             # fall through if can not inplace the padding
+
+    out = _pad_as_cat(x, padding, fill_value)
+    if out is not None:
+        return out
 
     sizes = x.get_size()
 
@@ -4852,7 +5078,7 @@ def constant_boundary_condition(
 
         mask = functools.reduce(
             ops.and_,
-            # pyrefly: ignore [no-matching-overload]
+            # pyrefly: ignore [bad-argument-type, no-matching-overload]
             [range_mask(ih[i], h[i] + padding_h[i], -padding_h[i]) for i in range(dim)],
         )
         return (
@@ -5767,7 +5993,7 @@ def upsample_nearest2d_backward(
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=fn,
-        # pyrefly: ignore [no-matching-overload]
+        # pyrefly: ignore [bad-argument-type, no-matching-overload]
         ranges=list(input_size),
     )
 
@@ -7090,11 +7316,18 @@ def sort_stable(x, *, stable=None, dim=-1, descending=False):
         return clone(x), _full(0, device, torch.int64, shape)
 
     dim_size = shape[dim] if len(shape) else 1
-    if not V.graph.sizevars.statically_known_lt(dim_size, torch.iinfo(torch.int16).max):
+    # Use int32 indices when decompose_sort_ops is enabled, allowing sort
+    # dimensions up to 2^31-1.  Default int16 keeps register pressure low
+    # on GPU where the bitonic network holds all indices in-block.
+    if config.triton.decompose_sort_ops:
+        idx_dtype = torch.int32
+    else:
+        idx_dtype = torch.int16
+    if not V.graph.sizevars.statically_known_lt(dim_size, torch.iinfo(idx_dtype).max):
         return sort_fallback(x, stable=stable, dim=dim, descending=descending)
 
     indices = iota(
-        dim_size, start=0, step=1, dtype=torch.int16, device=device, requires_grad=False
+        dim_size, start=0, step=1, dtype=idx_dtype, device=device, requires_grad=False
     )
     view_shape = [1] * len(shape)
     if len(shape):
@@ -7121,6 +7354,199 @@ def sort_stable(x, *, stable=None, dim=-1, descending=False):
 @register_lowering(aten.sort.default, type_promotion_kind=None)
 def sort(x, dim=-1, descending=False):
     return sort_stable(x, stable=False, dim=dim, descending=descending)
+
+
+# Sort-based op lowerings
+# When config.triton.decompose_sort_ops is enabled, decompose into sort-based
+# ops so Inductor generates Triton kernels via ir.Sort.
+# Otherwise, fall back to ATen eager.
+topk_fallback = fallback_handler(aten.topk.default, add_to_fallback_set=False)
+kthvalue_fallback = fallback_handler(aten.kthvalue.default, add_to_fallback_set=False)
+median_fallback = fallback_handler(aten.median.default, add_to_fallback_set=False)
+median_dim_fallback = fallback_handler(aten.median.dim, add_to_fallback_set=False)
+mode_fallback = fallback_handler(aten.mode.default, add_to_fallback_set=False)
+
+# sort/sort.stable already have register_lowering above (sort_stable, sort).
+# They use ir.Sort directly and fall back when the dimension is too large.
+# When decompose_sort_ops is enabled, the size limit is lifted (int32 indices).
+
+
+@register_lowering(aten.median.default, type_promotion_kind=None)
+def median_default(self):
+    if not config.triton.decompose_sort_ops:
+        return median_fallback(self)
+    size = self.get_size()
+    numel = functools.reduce(operator.mul, size, sympy.Integer(1))
+    flat = view(self, [numel])
+    sorted_vals, _ = sort_stable(flat, dim=0)
+    k = (numel - 1) // 2
+    return select(sorted_vals, 0, k)
+
+
+@register_lowering(aten.median.dim, type_promotion_kind=None)
+def median_dim(self, dim, keepdim=False):
+    if not config.triton.decompose_sort_ops:
+        return median_dim_fallback(self, dim, keepdim)
+    shape = self.get_size()
+    ndim = len(shape)
+    if ndim == 0:
+        return clone(self), _full(0, self.get_device(), torch.int64, shape)
+    dim = canonicalize_dim(ndim, dim)
+    sorted_vals, sorted_idxs = sort_stable(self, stable=True, dim=dim)
+    n = shape[dim]
+    k = (n - 1) // 2
+    values = select(sorted_vals, dim, k)
+    indices = select(sorted_idxs, dim, k)
+    if keepdim:
+        values = unsqueeze(values, dim)
+        indices = unsqueeze(indices, dim)
+    return values, indices
+
+
+@register_lowering(aten.mode.default, type_promotion_kind=None)
+def mode_default(self, dim=-1, keepdim=False):
+    """Lower aten.mode via sort-based decomposition or fallback."""
+    if not config.triton.decompose_sort_ops:
+        return mode_fallback(self, dim, keepdim)
+    shape = self.get_size()
+    ndim = len(shape)
+    device = self.get_device()
+    if ndim == 0:
+        return clone(self), _full(0, device, torch.int64, shape)
+    dim = canonicalize_dim(ndim, dim)
+    sorted_vals, sorted_idxs = sort_stable(self, stable=True, dim=dim)
+    n = shape[dim]
+
+    # Position indices along dim: [0, 1, ..., n-1]
+    positions = iota(
+        n, start=0, step=1, dtype=torch.int64, device=device, requires_grad=False
+    )
+    pos_view_shape = [sympy.Integer(1)] * ndim
+    pos_view_shape[dim] = n
+    positions = view(positions, pos_view_shape)
+    positions = expand(positions, shape)
+
+    # Shift positions by -1, clamp to 0 for position 0
+    positions_loader0 = positions.make_loader()
+
+    def prev_pos_fn(idx):
+        return ops.maximum(
+            ops.sub(positions_loader0(idx), ops.constant(1, torch.int64)),
+            ops.constant(0, torch.int64),
+        )
+
+    prev_positions = Pointwise.create(
+        device=decode_device(device),
+        dtype=torch.int64,
+        inner_fn=prev_pos_fn,
+        ranges=shape,
+    )
+
+    # Gather shifted values and compare for run boundaries
+    shifted_vals = gather(sorted_vals, dim, prev_positions)
+
+    sorted_loader = sorted_vals.make_loader()
+    shifted_loader = shifted_vals.make_loader()
+    positions_loader = positions.make_loader()
+
+    # is_boundary = (sorted != shifted) | (position == 0)
+    def is_boundary_fn(idx):
+        return ops.or_(
+            ops.ne(sorted_loader(idx), shifted_loader(idx)),
+            ops.eq(positions_loader(idx), ops.constant(0, torch.int64)),
+        )
+
+    is_boundary = Pointwise.create(
+        device=decode_device(device),
+        dtype=torch.bool,
+        inner_fn=is_boundary_fn,
+        ranges=shape,
+    )
+
+    # boundary_pos = where(is_boundary, position, -1)
+    is_boundary_loader = is_boundary.make_loader()
+    positions_loader2 = positions.make_loader()
+
+    def boundary_pos_fn(idx):
+        return ops.where(
+            is_boundary_loader(idx),
+            positions_loader2(idx),
+            ops.constant(-1, torch.int64),
+        )
+
+    boundary_pos = Pointwise.create(
+        device=decode_device(device),
+        dtype=torch.int64,
+        inner_fn=boundary_pos_fn,
+        ranges=shape,
+    )
+
+    # Propagate boundary positions forward with cummax
+    last_boundary, _ = cummax(boundary_pos, dim)
+
+    # run_len = position - last_boundary + 1
+    positions_loader3 = positions.make_loader()
+    last_boundary_loader = last_boundary.make_loader()
+
+    def run_len_fn(idx):
+        return ops.add(
+            ops.sub(positions_loader3(idx), last_boundary_loader(idx)),
+            ops.constant(1, torch.int64),
+        )
+
+    run_len = Pointwise.create(
+        device=decode_device(device),
+        dtype=torch.int64,
+        inner_fn=run_len_fn,
+        ranges=shape,
+    )
+
+    # argmax returns first maximum -> end of leftmost longest run
+    max_pos = reduce_argmax(run_len, axis=dim, keepdims=True)
+    mode_vals = gather(sorted_vals, dim, max_pos)
+    mode_idxs = gather(sorted_idxs, dim, max_pos)
+
+    if not keepdim:
+        mode_vals = squeeze(mode_vals, dim)
+        mode_idxs = squeeze(mode_idxs, dim)
+
+    return mode_vals, mode_idxs
+
+
+@register_lowering(aten.topk.default, type_promotion_kind=None)
+def topk(self, k, dim=-1, largest=True, sorted=True):
+    if not config.triton.decompose_sort_ops:
+        return topk_fallback(self, k, dim, largest, sorted)
+    shape = self.get_size()
+    ndim = len(shape)
+    if ndim == 0:
+        return clone(self), _full(0, self.get_device(), torch.int64, shape)
+    dim = canonicalize_dim(ndim, dim)
+    sorted_vals, sorted_idxs = sort_stable(
+        self, stable=True, dim=dim, descending=largest
+    )
+    values = slice_(sorted_vals, dim, 0, k)
+    indices = slice_(sorted_idxs, dim, 0, k)
+    return values, indices
+
+
+@register_lowering(aten.kthvalue.default, type_promotion_kind=None)
+def kthvalue(self, k, dim=-1, keepdim=False):
+    if not config.triton.decompose_sort_ops:
+        return kthvalue_fallback(self, k, dim, keepdim)
+    shape = self.get_size()
+    ndim = len(shape)
+    if ndim == 0:
+        return clone(self), _full(0, self.get_device(), torch.int64, shape)
+    dim = canonicalize_dim(ndim, dim)
+    sorted_vals, sorted_idxs = sort_stable(self, stable=True, dim=dim)
+    # k is 1-based
+    values = select(sorted_vals, dim, k - 1)
+    indices = select(sorted_idxs, dim, k - 1)
+    if keepdim:
+        values = unsqueeze(values, dim)
+        indices = unsqueeze(indices, dim)
+    return values, indices
 
 
 def register_pointwise_numeric(op, name=None, triton_fallback=None):
@@ -7465,6 +7891,7 @@ register_foreach_pointwise(aten._foreach_clamp_max.List, minimum)
 register_foreach_pointwise(aten._foreach_clamp_max.Scalar, minimum)
 register_foreach_pointwise(aten._foreach_reciprocal, reciprocal)
 register_foreach_pointwise(aten._foreach_sign, sign)
+register_foreach_pointwise(aten._foreach_clone, clone)
 foreach_copy = register_foreach_pointwise(aten._foreach_copy, copy)
 
 
@@ -7594,7 +8021,11 @@ for method, func in magic_methods.items():
 
 
 @register_lowering(torch.sym_sum)
-def sym_sum(args):
+def sym_sum(*args):
+    # sym_sum can be called as sym_sum([a, b]) or sym_sum(a, b).
+    # Normalize to a flat list before summing.
+    if len(args) == 1 and isinstance(args[0], (list, tuple)):
+        args = args[0]
     return sympy.Add(*args)
 
 
@@ -7655,9 +8086,6 @@ def resize(x, size, *, memory_format=None):
     dtype = x.get_dtype()
     device = x.get_device_or_error()
 
-    if isinstance(x.data, ir.BaseView):
-        x.data = x.data.unwrap_view()
-
     if (
         torch.are_deterministic_algorithms_enabled()
         and torch.utils.deterministic.fill_uninitialized_memory  # type: ignore[attr-defined]
@@ -7675,15 +8103,18 @@ def resize(x, size, *, memory_format=None):
     if V.graph.sizevars.statically_known_equals(old_numel, 0):  # type: ignore[arg-type]
         return full(size, uninitialized_val, dtype=dtype, device=device)
 
-    x_flat = as_strided(
-        x,
-        [
-            old_numel,
-        ],
-        [
-            1,
-        ],
+    strides = x.maybe_get_stride()
+    has_overlapping = strides is not None and any(
+        V.graph.sizevars.statically_known_equals(s, 0) for s in strides
     )
+    if has_overlapping:
+        # overlapping: provide a contiguous logical view
+        x_flat = view(x, [old_numel])
+    else:
+        # non-overlapping: keep storage order
+        if isinstance(x.data, ir.BaseView):
+            x.data = x.data.unwrap_view()
+        x_flat = as_strided(x, [old_numel], [1])
     flat_loader = x_flat.make_loader()
     out_stride = ir.FlexibleLayout.stride_ordered_for_memory_format(size, memory_format)
     out_indexer = ir.FixedLayout(device, dtype, size, out_stride).make_indexer()
@@ -7775,6 +8206,9 @@ def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, *operands):
     return list(map(TensorBox.create, result))  # type: ignore[call-overload]
 
 
+_MISSING = object()
+
+
 def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list[Any]):
     """Process nodes from a FX graph by executing them through V.graph.
 
@@ -7784,7 +8218,7 @@ def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list[Any]):
     - Other nodes are executed via V.graph.run_node
 
     """
-    output = None
+    output = _MISSING
 
     for i, node in enumerate(graph_module.graph.nodes):
         if node.op == "placeholder":
@@ -7804,7 +8238,7 @@ def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list[Any]):
             finally:
                 V.graph.current_node = saved_current_node
 
-    if output is None:
+    if output is _MISSING:
         raise RuntimeError("No output node found in graph")
 
     return output
@@ -7843,7 +8277,7 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
     # Process subgraph nodes using the shared helper
     output = process_subgraph_nodes(subgraph_fn.graph_module, list(args))
 
-    assert output is not None and additional_deps
+    assert additional_deps
 
     # some operators, like wait_tensor, just return their input,
     # so its more robust to add dep to the operation itself,

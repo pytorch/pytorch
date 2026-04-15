@@ -427,16 +427,24 @@ def raise_observed_exception(
     exc_type: type[Exception],
     tx: InstructionTranslatorBase,
     *,
-    args: list[VariableTracker] | None = None,
+    args: list[VariableTracker] | list[str] | None = None,
     kwargs: dict[str, VariableTracker] | None = None,
 ) -> NoReturn:
     from .symbolic_convert import ExceptionVals
     from .variables.builder import SourcelessBuilder
 
+    if args:
+        args_ = [
+            SourcelessBuilder.create(tx, arg) if isinstance(arg, str) else arg
+            for arg in args
+        ]
+    else:
+        args_: list[VariableTracker] = []
+
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
     # stack and raise the exception.
     exception_vt = SourcelessBuilder.create(tx, exc_type).call_function(
-        tx, args or [], kwargs or {}
+        tx, args_, kwargs or {}
     )
     assert isinstance(exception_vt, ExceptionVals)
     tx._attach_traceback_to_exception(exception_vt)
@@ -444,8 +452,13 @@ def raise_observed_exception(
     raised_exc = get_dynamo_observed_exception(exc_type)
     # Store the original exception arguments for better error messages
     if args:
-        raise raised_exc(*args)
+        raise raised_exc(*args_)
     raise raised_exc
+
+
+def raise_type_error(tx: InstructionTranslatorBase, msg: str) -> NoReturn:
+    """Raise a TypeError as an observed exception during tracing."""
+    raise_observed_exception(TypeError, tx, args=[msg])
 
 
 def handle_observed_exception(tx: Any) -> None:
@@ -783,13 +796,13 @@ def filter_stack(stack: StackSummary) -> StackSummary:
     return user_stack
 
 
-def remove_resume_prefix(name: str) -> str | None:
+def remove_resume_prefix(name: str) -> str:
     from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 
     match = re.match(f"{TORCH_DYNAMO_RESUME_IN_PREFIX}_(\\w+)_at_\\d+", name)
     if match:
         return match.group(1)
-    return None
+    return name
 
 
 def collapse_resume_frames(stack: StackSummary | list[FrameSummary]) -> StackSummary:
@@ -821,6 +834,7 @@ def collapse_resume_frames(stack: StackSummary | list[FrameSummary]) -> StackSum
             new_stack[-1] = frame
             frame.name = name
         else:
+            frame.name = name
             new_stack.append(frame)
 
     return new_stack

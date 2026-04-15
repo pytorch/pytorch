@@ -27,7 +27,6 @@ ciflow_push_tags:
 - ciflow/inductor-rocm-mi200
 - ciflow/inductor-rocm-mi300
 - ciflow/inductor-rocm-mi355
-- ciflow/linux-aarch64
 - ciflow/mps
 - ciflow/nightly
 - ciflow/op-benchmark
@@ -60,6 +59,8 @@ retryable_workflows:
 - linux-binary
 - windows-binary
 - inductor-A100-perf-nightly
+retryable_step_names:
+- Initialize containers
 labeler_config: labeler.yml
 label_to_label_config: label_to_label.yml
 mergebot: true

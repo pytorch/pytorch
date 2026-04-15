@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import atexit
+import contextvars
 import ctypes
 import dataclasses
 import functools
@@ -32,6 +33,7 @@ from torch._inductor.codecache import (
     DLLWrapper,
     get_hash,
     PyCodeCache,
+    XPUCodeCache,
 )
 from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.utils import (
@@ -522,7 +524,7 @@ class BenchmarkRequest:
             bench_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
             autotuning_log.debug(
                 "InChildProcess %s: load %f, create tensor %f, bench %f",
-                str(self),
+                self,
                 load_elapse,  # type: ignore[possibly-undefined]
                 create_tensor_elapse,  # type: ignore[possibly-undefined]
                 bench_elapse,
@@ -828,6 +830,53 @@ class ExternKernelCPUBenchmarkRequest(
     pass
 
 
+class SubgraphBenchmarkRequest(BenchmarkRequest):
+    """
+    Benchmark request for subgraph choices.
+
+    Pre-compiles the subgraph in the main process and stores
+    the module path/cache key for loading in subprocess.
+    """
+
+    def __init__(
+        self,
+        kernel_name: str,
+        input_tensor_meta: TensorMeta | list[TensorMeta],
+        output_tensor_meta: TensorMeta | list[TensorMeta],
+        extra_args: Iterable[Any],
+        module_path: str,
+        module_cache_key: str,
+        sym_input_values: list[int],
+    ) -> None:
+        super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
+        self.module_path = module_path
+        self.module_cache_key = module_cache_key
+        self.sym_input_values = sym_input_values
+
+    def make_run_fn(
+        self, *input_tensors: torch.Tensor, out: torch.Tensor
+    ) -> Callable[[], None]:
+        mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
+        sym_input_values = self.sym_input_values
+        # Create a new list each call since mod.call does args.clear()
+        return lambda: mod.call([*sym_input_values, *input_tensors])
+
+    def precompile(self) -> None:
+        # Module is already compiled in main process, no precompilation needed
+        pass
+
+    def __str__(self) -> str:
+        return f"SubgraphBenchmarkRequest({self.kernel_name}, {self.module_path})"
+
+
+class SubgraphGPUBenchmarkRequest(GPUDeviceBenchmarkMixin, SubgraphBenchmarkRequest):
+    pass
+
+
+class SubgraphCPUBenchmarkRequest(CPUDeviceBenchmarkMixin, SubgraphBenchmarkRequest):
+    pass
+
+
 class CUTLASSBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
     """
     A class to handle CUDA (CUTLASS) benchmark requests. This class is for
@@ -856,7 +905,7 @@ class CUTLASSBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         self.hash_key: str = ""
         self.source_file: str = ""
         self.device_type = device_type
-        self.codecache_cls = CUDACodeCache
+        self.codecache_cls = XPUCodeCache if device_type == "xpu" else CUDACodeCache
         self.device_interface = get_interface_for_device(device_type)
         self.hash_key, self.source_file = self.codecache_cls.write(
             self.source_code, "so"
@@ -868,7 +917,7 @@ class CUTLASSBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         This may happen in a separate thread pool.
         """
         autotuning_log.debug("Precompiling %s", self)
-        CUDACodeCache.compile(self.source_code, "so")
+        self.codecache_cls.compile(self.source_code, "so")
         autotuning_log.debug("Done precompiling %s", self)
 
     def make_run_fn(
@@ -890,8 +939,9 @@ class CUTLASSBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             args,
             self.extra_args,
         )
-        current_stream = self.device_interface.current_stream()
-        stream_ptr = c_void_p(current_stream.cuda_stream)  # type: ignore[attr-defined]
+        stream_ptr = c_void_p(
+            self.device_interface.get_raw_stream(self.device_interface.current_device())
+        )
         run_method = getattr(self.DLL, self.kernel_name)
         workspace_ptr = c_void_p(0)
         if self.workspace_size > 0:
@@ -934,8 +984,9 @@ class CUTLASSBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             dict.fromkeys(meta.name for meta in self.input_tensor_meta)
         )
         args = [c_void_p(None) for _ in range(unique_input_count + 1)]
-        current_stream = self.device_interface.current_stream()
-        stream_ptr = c_void_p(current_stream.cuda_stream)  # type: ignore[attr-defined]
+        stream_ptr = c_void_p(
+            self.device_interface.get_raw_stream(self.device_interface.current_device())
+        )
 
         run_method = getattr(self.DLL, self.kernel_name)
         # Retrieve workspace_size and initialize workspace.
@@ -968,6 +1019,7 @@ class CUTLASSBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             self.DLL, self.hash_key, self.source_file = self.codecache_cls.load(
                 self.source_code, "so"
             )
+        self.DLL.open()
 
     def cleanup_run_fn(self) -> None:
         if self.DLL is not None:
@@ -1301,9 +1353,10 @@ def run_autotune_in_subprocess(
         return timing
 
     except Exception:
-        autotuning_log.error(
+        autotuning_log.warning(
             "Failed to benchmark choice %s",
             benchmark_request,
+            exc_info=True,
         )
         # Use infinity for failed benchmarks so they're not selected
         return float("inf")
@@ -1334,6 +1387,9 @@ class PrecompileThreadPool:
         return cls._instance
 
     def submit(self, fn, *args, **kwargs):
+        ctx = contextvars.copy_context()
+        # Need to copy context so workers have access to the correct config settings
+        fn = functools.partial(ctx.run, fn)
         return self._executor.submit(fn, *args, **kwargs)
 
     def _shutdown(self, wait: bool = False):

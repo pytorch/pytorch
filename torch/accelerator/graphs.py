@@ -24,6 +24,16 @@ class Graph(_acceleratorGraph):
         pool (tuple[int, int], optional): Memory pool identifier for this graph. Multiple graphs
             can share the same pool by passing the same identifier, which can reduce memory overhead.
             Defaults to ``None``.
+        capture_error_mode (Literal["default", "global", "thread_local", "relaxed"], optional):
+            Specifies the behavior of graph capture. The exact semantics are backend-specific.
+            ``"default"``: backend-defined default capture behavior.
+            ``"global"``: potentially unsafe API calls are prohibited. Errors may occur if capture
+            in the current thread affects other threads.
+            ``"thread_local"``: potentially unsafe API calls are prohibited. Errors occur only if
+            capture in the current thread affects itself.
+            ``"relaxed"``: the current thread is allowed to make potentially unsafe API calls, except
+            for calls that inherently conflict with stream capture.
+            Default: ``"default"``.
 
     Example::
 
@@ -39,43 +49,39 @@ class Graph(_acceleratorGraph):
     """
 
     def __new__(
-        cls, keep_graph: bool = False, *, pool: tuple[int, int] | None = None
+        cls,
+        keep_graph: bool = False,
+        *,
+        pool: tuple[int, int] | None = None,
+        capture_error_mode: Literal[
+            "default", "global", "thread_local", "relaxed"
+        ] = "default",
     ) -> Self:
         return super().__new__(cls, keep_graph)
 
     def __init__(
-        self, keep_graph: bool = False, *, pool: tuple[int, int] | None = None
-    ) -> None:
-        super().__init__(keep_graph)
-        self.graph_pool = pool
-
-    def capture_begin(
         self,
+        keep_graph: bool = False,
+        *,
+        pool: tuple[int, int] | None = None,
         capture_error_mode: Literal[
             "default", "global", "thread_local", "relaxed"
         ] = "default",
     ) -> None:
+        super().__init__(keep_graph)
+        self.graph_pool = pool
+        self.capture_error_mode = capture_error_mode
+
+    # pyrefly: ignore [bad-override]
+    def capture_begin(self) -> None:
         r"""
         Begin graph capture on the current stream.
 
-        All operations executed on the current stream of the current device after this call
-        will be recorded into the graph until ``capture_end`` is called. By default, capture
-        uses the memory pool provided at construction time.
-
-        Arguments:
-            capture_error_mode (Literal["default", "global", "thread_local", "relaxed"], optional):
-                Specifies the behavior of graph capture. The exact semantics are backend-specific.
-                Defaults to `"default"`.
-                `default`, backend-defined default capture behavior.
-                `global`, potentially unsafe API calls are prohibited. Errors may occur if capture
-                in the current thread affects other threads.
-                `thread_local`, potentially unsafe API calls are prohibited. Errors occur only if capture
-                in the current thread affects itself.
-                `relaxed`, the current thread is allowed to make potentially unsafe API calls, except for
-                calls that inherently conflict with stream capture.
+        All operations on the current stream after this call will be recorded into the graph until
+        ``capture_end`` is called, using the memory pool and capture error mode provided at construction time.
         """
         super().capture_begin(
-            pool=self.graph_pool, capture_error_mode=capture_error_mode
+            pool=self.graph_pool, capture_error_mode=self.capture_error_mode
         )
 
     def capture_end(self) -> None:
@@ -99,7 +105,12 @@ class Graph(_acceleratorGraph):
         super().replay()
 
     def reset(self) -> None:
-        r"""Delete the graph currently held by this instance."""
+        r"""
+        Delete the graph currently held by this instance.
+
+        After this call, the graph can be recaptured. Set :attr:`graph_pool` or
+        :attr:`capture_error_mode` beforehand to use different settings on the next capture.
+        """
         super().reset()
 
     def pool(self) -> tuple[int, int]:
@@ -156,6 +167,7 @@ class Graph(_acceleratorGraph):
             # very expensive, especially when performing multiple graph captures in sequence.
             gc.collect()
         torch.accelerator.empty_cache()
+        torch.accelerator.empty_host_cache()
         self.capture_begin()
 
     def __exit__(self, *exc_info: object) -> None:

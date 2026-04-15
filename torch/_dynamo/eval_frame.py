@@ -56,11 +56,11 @@ from torch import _guards
 
 # see discussion at https://github.com/pytorch/pytorch/issues/120699
 from torch._C._dynamo.eval_frame import (  # noqa: F401
-    _EvalFrameOverride,
     reset_code,
     set_code_exec_strategy,
     set_eval_frame,
-    set_eval_frame_override,
+    set_fullgraph_compiled_frame_count,
+    set_fullgraph_error_on_nested_compile,
     set_guard_complete_hook,
     set_guard_error_hook,
     set_skip_guard_eval_unsafe,
@@ -278,7 +278,12 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
             cache_entries = _debug_get_cache_entry_list(frame.f_code)
             if cache_entries:
                 reasons = get_and_maybe_log_recompilation_reasons(
-                    cache_entries[0], frame, innermost_fn(callback), skip_logging=True
+                    # pyrefly: ignore [bad-argument-type]
+                    cache_entries[0],
+                    frame,
+                    # pyrefly: ignore [bad-argument-type]
+                    innermost_fn(callback),
+                    skip_logging=True,
                 )
                 if reasons:
                     failures = textwrap.indent("\n".join(reasons), "- ")
@@ -721,12 +726,6 @@ def guard_collectives_hook(guard_eval_result: bool) -> bool:
 _not_set = object()
 
 
-def _get_eval_frame_override() -> _EvalFrameOverride:
-    if torch._dynamo.config.error_on_dynamo_callback_in_fullgraph_compiled_code:
-        return _EvalFrameOverride.ERROR
-    return _EvalFrameOverride.SKIP
-
-
 class _TorchDynamoContext:
     def __init__(
         self,
@@ -921,16 +920,19 @@ class _TorchDynamoContext:
             f"A callable function is expected, but {type(fn)} is provided."
         )
 
-        # NOTE [Top-level TorchInGraph functions]
+        # NOTE [Top-level TorchInGraph and polyfilled functions]
         # Some callables (e.g. torch.exp) are represented as TorchInGraphFunctionVariable
         # when traced inside a frame. When such a function is passed directly to
         # torch.compile, we detect it here so we can force it through wrap_inline.
+        # Similarly, functions registered via substitute_in_graph have a polyfill
+        # that Dynamo can trace, so they also need wrap_inline.
         from .variables import TorchInGraphFunctionVariable
 
         rule = trace_rules.lookup(fn)
         top_level_in_graph = isinstance(rule, type) and issubclass(
             rule, TorchInGraphFunctionVariable
         )
+        has_polyfill = trace_rules.is_polyfilled_callable(fn)
 
         try:
             filename = inspect.getsourcefile(fn)
@@ -939,7 +941,12 @@ class _TorchDynamoContext:
         if config.debug_force_nested_calls:
             fn = external_utils.wrap_inline(fn)
         elif config.wrap_top_frame or (
-            (filename is None or trace_rules.check(fn) or top_level_in_graph)
+            (
+                filename is None
+                or trace_rules.check(fn)
+                or top_level_in_graph
+                or has_polyfill
+            )
             and (
                 getattr(fn, "__name__", "")
                 not in ["_call_impl", "_wrapped_call_impl", "_lazy_forward"]
@@ -968,11 +975,14 @@ class _TorchDynamoContext:
             # Unlike in eval_frame_cpp.cpp/convert_frame.py, we don't attempt to restore global state
             # due to additional overhead costs.
             prior = set_eval_frame(None)
-            prior_eval_frame_override: _EvalFrameOverride | None = None
+            prior_error_on_nested_compile: bool | None = None
+            fullgraph_count_enabled = False
             if self.fullgraph:
-                prior_eval_frame_override = set_eval_frame_override(
-                    _get_eval_frame_override()
+                prior_error_on_nested_compile = set_fullgraph_error_on_nested_compile(
+                    torch._dynamo.config.error_on_dynamo_callback_in_fullgraph_compiled_code
                 )
+                if not self.export:
+                    fullgraph_count_enabled = set_fullgraph_compiled_frame_count(0) < 0
             try:
                 # We shouldn't compile inside kernel invocation.
                 if tracing_context := torch._guards.TracingContext.try_get():
@@ -1032,8 +1042,10 @@ class _TorchDynamoContext:
 
                 _maybe_set_eval_frame(_callback_from_stance(callback))
 
+                call_succeeded = False
                 try:
-                    return fn(*args, **kwargs)
+                    result = fn(*args, **kwargs)
+                    call_succeeded = True
                 except (Unsupported, UncapturedHigherOrderOpError, UserError) as e:
                     if config.verbose:
                         raise
@@ -1051,10 +1063,20 @@ class _TorchDynamoContext:
                 finally:
                     # Restore the dynamic layer stack depth if necessary.
                     set_eval_frame(None)
+                    if fullgraph_count_enabled and call_succeeded:
+                        count = set_fullgraph_compiled_frame_count(-1)
+                        if count == 0:
+                            raise RuntimeError(
+                                "torch.compile with fullgraph=True found no compiled frames. "
+                                "The frame was likely skipped (e.g., a non-infra torch dispatch "
+                                "mode was active, dynamo was disabled, or the frame was skipped."
+                            )
                     if prior_error_on_graph_break is not None:
                         _set_error_on_graph_break(prior_error_on_graph_break)
-                    if prior_eval_frame_override is not None:
-                        set_eval_frame_override(prior_eval_frame_override)
+                    if prior_error_on_nested_compile is not None:
+                        set_fullgraph_error_on_nested_compile(
+                            prior_error_on_nested_compile
+                        )
                     torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
                         saved_dynamic_layer_stack_depth
                     )
@@ -1062,7 +1084,10 @@ class _TorchDynamoContext:
                     set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
                     for cleanup in cleanups:
                         cleanup()
+                return result
             finally:
+                if fullgraph_count_enabled:
+                    set_fullgraph_compiled_frame_count(-1)
                 _maybe_set_eval_frame(prior)
 
         # hooks to properly handle inlining
@@ -1510,6 +1535,7 @@ def _optimize(
     disable: bool = False,
     dynamic: bool | None = None,
     package: CompilePackage | None = None,
+    recompile_limit: int | None = None,
 ) -> OptimizeContext | _NullDecorator:
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -1568,6 +1594,7 @@ def _optimize(
             hooks=hooks,
             rebuild_ctx=rebuild_ctx,
             package=package,
+            recompile_limit=recompile_limit,
         )
 
     backend = get_compiler_fn(backend)
@@ -1591,6 +1618,7 @@ def _optimize(
             backend,
             hooks,
             package=package,
+            recompile_limit=recompile_limit,
         ),
         hooks,
         backend_ctx_ctor,
@@ -2443,6 +2471,7 @@ def _optimize_assert(
     export_constraints: Any | None = None,
     dynamic: bool | None = None,
     package: CompilePackage | None = None,
+    recompile_limit: int | None = None,
 ) -> OptimizeContext:
     """
     Guarantees single-graph capture.
@@ -2473,6 +2502,7 @@ def _optimize_assert(
             export=export,
             export_constraints=export_constraints,
             package=package,
+            recompile_limit=recompile_limit,
         ),
         hooks,
         backend_ctx_ctor,

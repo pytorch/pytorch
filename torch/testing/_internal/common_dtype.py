@@ -229,6 +229,13 @@ def highest_precision_float(device):
         return torch.float64
 
 
+def highest_precision_complex(device):
+    if torch.device(device).type == "mps":
+        return torch.complex64
+    else:
+        return torch.complex128
+
+
 float_to_corresponding_complex_type_map = {
     torch.float16: torch.complex32,
     torch.float32: torch.complex64,

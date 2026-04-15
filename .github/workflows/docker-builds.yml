@@ -53,18 +53,17 @@ jobs:
           pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-vllm,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks,
-          pytorch-linux-jammy-py3.10-clang15,
-          pytorch-linux-jammy-py3.11-clang15,
-          pytorch-linux-jammy-py3.12-clang15,
-          pytorch-linux-jammy-py3.13-clang15,
-          pytorch-linux-jammy-py3.14-clang15,
-          pytorch-linux-jammy-py3.14t-clang15,
+          pytorch-linux-jammy-py3.10-clang18,
+          pytorch-linux-jammy-py3.11-clang18,
+          pytorch-linux-jammy-py3.12-clang18,
+          pytorch-linux-jammy-py3.13-clang18,
+          pytorch-linux-jammy-py3.14-clang18,
+          pytorch-linux-jammy-py3.14t-clang18,
           pytorch-linux-jammy-rocm-n-py3,
           pytorch-linux-noble-rocm-n-py3,
           pytorch-linux-noble-rocm-nightly-py3,
           pytorch-linux-jammy-rocm-n-py3-benchmarks,
-          pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-clang15,
-          pytorch-linux-jammy-py3.10-gcc11,
+          pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-clang18,
           pytorch-linux-jammy-py3-gcc11-inductor-benchmarks,
           pytorch-linux-jammy-py3.12-halide,
           pytorch-linux-jammy-py3.12-pallas,
@@ -74,12 +73,10 @@ jobs:
           pytorch-linux-noble-xpu-n-py3,
           pytorch-linux-noble-xpu-n-py3-client,
           pytorch-linux-noble-xpu-n-py3-inductor-benchmarks,
-          pytorch-linux-jammy-py3-clang18-asan,
-          pytorch-linux-jammy-py3-clang15-onnx,
           pytorch-linux-jammy-linter,
           pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-linter,
           # TODO: Re-enable me when docker pin update happens
-          # pytorch-linux-jammy-py3-clang15-executorch,
+          # pytorch-linux-jammy-py3-clang18-executorch,
           pytorch-linux-jammy-py3.12-triton-cpu,
           pytorch-linux-noble-riscv64-py3.12-gcc14
         ]
@@ -100,13 +97,8 @@ jobs:
           sudo rm -rf "${GITHUB_WORKSPACE}"
           mkdir "${GITHUB_WORKSPACE}"
 
-      # [see note: pytorch repo ref]
-      # deep clone (fetch-depth 0) required for git merge-base
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
-
       - name: Setup Linux
-        uses: ./.github/actions/setup-linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@main
 
       - name: Login to ECR
         uses: ./.github/actions/ecr-login
@@ -159,6 +151,9 @@ jobs:
             echo $GHCR_PAT | docker login ghcr.io -u pytorch --password-stdin
             docker tag "${ECR_DOCKER_IMAGE}" "${ghcr_image}:${tag}"
             docker push "${ghcr_image}:${tag}"
+            # Also push a tag without the hash for easier reference
+            docker tag "${ECR_DOCKER_IMAGE}" "${ghcr_image}:${{ matrix.docker-image-name }}"
+            docker push "${ghcr_image}:${{ matrix.docker-image-name }}"
 
       - name: Chown workspace
         uses: ./.github/actions/chown-workspace

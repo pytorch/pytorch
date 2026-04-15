@@ -16,15 +16,14 @@ from torch._dynamo.testing import (
 )
 from torch._dynamo.utils import counters
 from torch.nn import functional as F
-from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FLASH_ATTENTION,
-    TEST_MULTIGPU,
-)
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
 
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 try:
     from . import test_functions
@@ -85,7 +84,7 @@ def customized_ctx_manager_with_graph_break(mode):
         torch._C._set_grad_enabled(prev)
 
 
-class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+class CtxManagerTests(torch._dynamo.test_case.TestCase):
     def test_no_grad(self):
         def fn1(a, b):
             x = a + 1
@@ -577,7 +576,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertExpectedInline(str(cnts.op_count), """16""")
+        self.assertExpectedInline(str(cnts.op_count), """17""")
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_device(self):
@@ -591,28 +590,6 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
         res = opt_fn(x)
         self.assertEqual(ref, res)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "Requires multiple gpus")
-    def test_cuda__exchange_device(self):
-        def fn(x):
-            dev = torch.cuda._exchange_device(0)
-            x = torch.sin(x + dev)
-            torch.cuda._maybe_exchange_device(dev)
-            return x
-
-        initial_dev = torch.cuda.current_device()
-        x = torch.randn((2, 2), device="cuda")
-        ref = fn(x)
-        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
-        res = opt_fn(x)
-        self.assertEqual(ref, res)
-
-        # make sure we recompile if device changes
-        with torch.cuda.device(1):
-            ref = fn(x)
-            res = opt_fn(x)
-        self.assertEqual(ref, res)
-        self.assertEqual(torch.cuda.current_device(), initial_dev)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda__exchange_device_args(self):
@@ -729,7 +706,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         class MyModule(torch.nn.Module):
             def forward(self, query, key, value):
                 with torch.autocast("cpu"):
-                    with torch.autocast("cuda", dtype=torch.float32):
+                    with torch.autocast(device_type, dtype=torch.float32):
                         out = F.scaled_dot_product_attention(
                             query, key, value, None, 0.0, True
                         )
@@ -740,13 +717,31 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         seq_len_k = 1
         head_dim = 8
         query = torch.ones(
-            1, 8, seq_len_q, head_dim, device="cuda", dtype=dtype, requires_grad=True
+            1,
+            8,
+            seq_len_q,
+            head_dim,
+            device=device_type,
+            dtype=dtype,
+            requires_grad=True,
         )
         key = torch.ones(
-            1, 8, seq_len_k, head_dim, device="cuda", dtype=dtype, requires_grad=True
+            1,
+            8,
+            seq_len_k,
+            head_dim,
+            device=device_type,
+            dtype=dtype,
+            requires_grad=True,
         )
         value = torch.ones(
-            1, 8, seq_len_k, head_dim, device="cuda", dtype=dtype, requires_grad=True
+            1,
+            8,
+            seq_len_k,
+            head_dim,
+            device=device_type,
+            dtype=dtype,
+            requires_grad=True,
         )
 
         module = MyModule()
@@ -760,7 +755,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         self.assertEqual(compiled.device, real_device)
         self.assertEqual(compiled.dtype, real_dtype)
 
-        self.assertEqual(compiled.device.type, "cuda")
+        self.assertEqual(compiled.device.type, device_type)
         self.assertEqual(compiled.device.index, 0)
         self.assertEqual(compiled.dtype, torch.float32)
 
@@ -2316,9 +2311,7 @@ class GraphModule(torch.nn.Module):
         self.assertGreater(len(counters["graph_break"]), 0)
 
 
-class ContextlibContextManagerTests(
-    torch._dynamo.test_case.TestCaseWithNestedGraphBreaks
-):
+class ContextlibContextManagerTests(torch._dynamo.test_case.TestCase):
     def setUp(self):
         super().setUp()
         self._prev = torch._dynamo.config.enable_trace_contextlib
@@ -3276,6 +3269,90 @@ class GraphModule(torch.nn.Module):
         t = torch.randn(2)
         y = fn(t)
         self.assertEqual(y, t.sin())
+
+    @parametrize("gb", (True, False))
+    def test_functorch_low_level(self, gb):
+        def f(x, gb):
+            level = torch._C._functorch._grad_increment_nesting()
+            torch._C._functorch.set_inplace_requires_grad_allowed(True)
+            torch._functorch.eager_transforms._set_tensor_requires_grad(x)
+            if gb:
+                torch._dynamo.graph_break()
+            torch._C._functorch.set_inplace_requires_grad_allowed(False)
+            torch._C._functorch._grad_decrement_nesting()
+            return x + level
+
+        prev_inplace = torch._C._functorch.get_inplace_requires_grad_allowed()
+        prev_level = torch._C._functorch.maybe_current_level()
+        opt_f = torch.compile(f, fullgraph=not gb, backend="eager")
+        x = torch.randn(3, 3, requires_grad=False)
+        opt_y = opt_f(x, gb)
+        self.assertTrue(x.requires_grad)
+        y = f(x, gb)
+        self.assertEqual(y, opt_y)
+        self.assertEqual(torch._C._functorch.maybe_current_level(), prev_level)
+        self.assertEqual(
+            torch._C._functorch.get_inplace_requires_grad_allowed(), prev_inplace
+        )
+
+    def test_retrace_grad(self):
+        # Recompile trick doesn't work with dynamic shapes
+        if check_dynamic_shape_capture():
+            return
+
+        def fn(x):
+            return x.sin().sum()
+
+        def wrapper_fn(x):
+            return torch.func.grad(fn)(x)
+
+        x = torch.randn(3, 3)
+        eager = EagerAndRecordGraphs()
+        opt_f = torch.compile(wrapper_fn, backend=eager, fullgraph=True)
+        y = wrapper_fn(x)
+        opt_y = opt_f(x)
+        self.assertEqual(y, opt_y)
+        first_graph = normalize_gm(eager.graphs[0].print_readable(False))
+        self.assertExpectedInline(
+            first_graph,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[3, 3]"):
+        l_x_ = L_x_
+
+        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable("torch.func.{grad, vjp, jacrev, hessian} don't yet support saved tensor hooks. Please open an issue with your use case.");  _saved_tensors_hooks_disable = None
+        _grad_increment_nesting = torch._C._functorch._grad_increment_nesting();  _grad_increment_nesting = None
+
+        diff_args: "f32[3, 3]" = torch._C._functorch._wrap_for_grad(l_x_, 1);  l_x_ = None
+
+        set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True);  set_inplace_requires_grad_allowed = None
+
+        _set_tensor_requires_grad: "f32[3, 3]" = torch._functorch.eager_transforms._set_tensor_requires_grad(diff_args);  _set_tensor_requires_grad = None
+
+        set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False);  set_inplace_requires_grad_allowed_1 = None
+
+        sin: "f32[3, 3]" = diff_args.sin()
+        output: "f32[]" = sin.sum();  sin = None
+
+        _autograd_grad = torch._functorch.eager_transforms._autograd_grad((output,), [diff_args], create_graph = True);  diff_args = None
+        grad_input: "f32[3, 3]" = _autograd_grad[0];  _autograd_grad = None
+
+        grad_input_1: "f32[3, 3]" = torch._C._functorch._unwrap_for_grad(grad_input, 1);  grad_input = None
+        output_1: "f32[]" = torch._C._functorch._unwrap_for_grad(output, 1);  output = output_1 = None
+
+        _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting = None
+        _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
+        return (grad_input_1,)
+""",  # NOQA: B950
+        )
+
+        d = {}
+        exec(first_graph, globals(), d)
+        retraced = torch.compile(d["GraphModule"], backend=eager, fullgraph=True)
+        retraced_out = retraced()(x)[0]
+        self.assertEqual(y, retraced_out)
+        retraced_graph = normalize_gm(eager.graphs[0].print_readable(False))
+        self.assertEqual(first_graph, retraced_graph)
 
 
 instantiate_parametrized_tests(CtxManagerTests)

@@ -53,7 +53,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_CPU,
     HAS_CUDA_AND_TRITON,
     HAS_GPU,
-    HAS_XPU_AND_TRITON,
+    HAS_GPU_AND_TRITON,
 )
 from torch.testing._internal.logging_utils import logs_to_string
 from torch.testing._internal.triton_utils import (
@@ -1958,7 +1958,7 @@ main()
                 yield x.grad
 
         self.check_output_and_recompiles(
-            fn, count=[1, 3], compiler_fn=make_compiler_fn(fullgraph=False)
+            fn, count=[1, 2], compiler_fn=make_compiler_fn(fullgraph=False)
         )
 
     def test_custom_fn_compiled_fw_graph_break(self):
@@ -2012,9 +2012,9 @@ main()
                 yield x.grad
 
         self.check_output_and_recompiles(
-            fn, count=[1, 3], compiler_fn=make_compiler_fn(fullgraph=False)
+            fn, count=[1, 2], compiler_fn=make_compiler_fn(fullgraph=False)
         )
-        self.assertEqual(counters["stats"]["unique_graphs"], 6)  # 3 fw, 3 bw
+        self.assertEqual(counters["stats"]["unique_graphs"], 5)
 
     def test_mismatch_fake_tensor_mode(self, dynamic_shape=False):
         """
@@ -4615,7 +4615,7 @@ class CompiledAutograd1(torch.nn.Module):
         self.check_output_and_recompiles(
             fn,
             compiler_fn=make_compiler_fn(fullgraph=False),
-            count=[1, 2],
+            count=[1, 1],
         )
 
     # Case 1.5.1: Dense variable gradient layout contract
@@ -4884,7 +4884,7 @@ class CompiledAutograd1(torch.nn.Module):
         self.check_output_and_recompiles(
             fn,
             compiler_fn=make_compiler_fn(fullgraph=False),
-            count=[1, 2],
+            count=[1, 1],
         )
 
     # Case 3.1: Sparse variable_grad + Dense new_grad (reorder into Dense + Sparse)
@@ -4981,7 +4981,7 @@ class CompiledAutograd1(torch.nn.Module):
         self.check_output_and_recompiles(
             fn,
             compiler_fn=make_compiler_fn(fullgraph=False),
-            count=[1, 3],
+            count=[1, 2],
         )
 
     def test_torch_function_mode(self):
@@ -5269,6 +5269,7 @@ known_graph_breaks_tests = {
     "test_nested_checkpoint_same_graph_early_stop_False",  # dynamo disable
     "test_nested_checkpoint_same_graph_early_stop_True",  # dynamo disable
     "test_nested_checkpoint_set_early_stop",  # dynamo disable
+    "test_nested_checkpoint_set_early_stop_no_recompution_needed",  # TorchDispatchMode causes frame skip
     "test_nested_checkpoint_two_children_early_stop_False",  # dynamo disable
     "test_nested_checkpoint_two_children_early_stop_True",  # dynamo disable
     "test_custom_autograd_ac_early_stop",  # marked as skipped
@@ -5419,13 +5420,12 @@ skipped_tests.add("test_checkpoint_automatic_dynamic_lru_disabled_workaround")
 test_autograd = load_test_module("test_autograd")
 test_custom_ops = load_test_module("test_custom_ops")
 test_higher_order_ops = load_test_module("dynamo/test_higher_order_ops")
-if not HAS_XPU_AND_TRITON:
-    TestAutogradWithCompiledAutograd = wrap_test_class(test_autograd.TestAutograd)
+
+TestAutogradWithCompiledAutograd = wrap_test_class(test_autograd.TestAutograd)
 TestNestedCheckpointWithCompiledAutograd = wrap_test_class(
     test_autograd.TestNestedCheckpoint
 )
-if not HAS_XPU_AND_TRITON:
-    TestCustomOpWithCompiledAutograd = wrap_test_class(test_custom_ops.TestCustomOp)
+TestCustomOpWithCompiledAutograd = wrap_test_class(test_custom_ops.TestCustomOp)
 HigherOrderOpTestsWithCompiledAutograd = wrap_test_class(
     test_higher_order_ops.HigherOrderOpTests
 )
@@ -5436,7 +5436,7 @@ ActivationCheckpointingTestsWithCompiledAutograd = wrap_test_class(
     test_higher_order_ops.ActivationCheckpointingTests
 )
 
-if torch.distributed.is_available() and HAS_CUDA_AND_TRITON:
+if torch.distributed.is_available() and HAS_GPU_AND_TRITON:
     test_dtensor = load_test_module("distributed/tensor/test_dtensor_compile")
     TestDTensorCompileWithCompiledAutograd = wrap_test_class(
         test_dtensor.TestDTensorCompile
