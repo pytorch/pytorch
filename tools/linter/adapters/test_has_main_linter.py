@@ -21,7 +21,6 @@ from enum import Enum
 from typing import NamedTuple
 
 import libcst as cst
-
 import libcst.matchers as m
 
 
