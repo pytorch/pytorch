@@ -4016,10 +4016,13 @@ class TilingSelect:
                                         else stride not in [0, 1]
                                     ):
                                         _update_negative_op_count(
-                                            _node.target, self.non_contig_indexing_op_counter
+                                            _node.target,
+                                            self.non_contig_indexing_op_counter
                                         )
                             if isinstance(_node.target, str):
-                                if _node.target.startswith("masked_subblock") or _node.target in ("where", "masked"):
+                                if _node.target.startswith(
+                                    "masked_subblock"
+                                ) or _node.target in ("where", "masked"):
                                     self.mask_op_count += 1
                                 if not (
                                     _node.target.startswith("masked_subblock")
@@ -4436,6 +4439,16 @@ class CppKernelProxy(CppKernel):
                 self.legalize_lowp_fp_dtype_loopbody(body)
 
     def codegen_functions(self, fn_list, var_sizes_list):
+        """Generate scalar/vectorized C++ kernels for a fused function list.
+
+        This method emits one scalar kernel unconditionally, then optionally emits
+        vectorized/tiled variants based on ISA availability and tiling heuristics.
+
+        Args:
+            fn_list: Callable loop bodies to codegen.
+            var_sizes_list: Iteration/reduction size tuples corresponding to
+                each callable in ``fn_list``.
+        """
         assert len(fn_list) == len(var_sizes_list)
         kernel_group = self.kernel_group
         group, reduction_group = max(var_sizes_list, key=lambda sizes: len(sizes[1]))
@@ -4497,12 +4510,13 @@ class CppKernelProxy(CppKernel):
                 # Tail vectorization has non-trivial mask/cast/blend overhead.
                 # Only vectorize tail when it is large enough to amortize overhead.
                 op_num = sum(tiling_select.op_counter.values())
-                if op_num > 0 and (
-                    tiling_select.mask_op_count +
-                    sum(
-                        tiling_select.non_contig_indexing_op_counter.values()
-                    )
-                ) / op_num > 0.12:
+                if (
+                    op_num > 0
+                    and (
+                        tiling_select.mask_op_count
+                        + sum(tiling_select.non_contig_indexing_op_counter.values())
+                    ) / op_num > 0.12
+                ):
                     hint_tail_size = V.graph.sizevars.optimization_hint(tail_size)
                     return V.graph.sizevars.guard_or_false(
                         sympy.Gt(10 * hint_tail_size, 8 * tiling_factor)
@@ -4585,9 +4599,8 @@ class CppKernelProxy(CppKernel):
                     inner_loop.var: inner_ranges["main"],
                 }
                 tail_kernel = []
-                if (
-                    config.cpp.enable_loop_tail_vec
-                    and _tail_vec_worthwhile(inner_tail_size, tiling_factors[0])
+                if config.cpp.enable_loop_tail_vec and _tail_vec_worthwhile(
+                        inner_tail_size, tiling_factors[0]
                 ):
                     for outer_r, inner_r in (
                         ("main", "tail"),
