@@ -130,7 +130,7 @@ Following requirements need to be met prior to cutting a release branch:
 * Triton release branch must be created (e.g., [release/3.6.x](https://github.com/triton-lang/triton/tree/release/3.6.x)) and the Triton pin update PR must be landed (e.g., [#168096](https://github.com/pytorch/pytorch/pull/168096)) at least 1 week before the branch cut
 * Resolve all outstanding issues in the milestones that are feature work and release blocking (for example [release 2.10 milestone](https://github.com/pytorch/pytorch/milestone/57)). A report of outstanding cherry-picks can be produced by running the [github-analytics-daily workflow](https://github.com/pytorch/test-infra/blob/main/.github/workflows/github-analytics-daily.yml)
 * Validate that all new workflows have been created in the PyTorch and domain libraries included in the release. Validate it against all dimensions of release matrix, including operating systems (Linux, macOS, Windows), Python versions as well as CPU architectures (x86 and arm) and accelerator versions (CUDA, ROCm, XPU).
-* All [viable/strict](.github/workflows/update-viablestrict.yml) jobs are green, which requires the following jobs to pass: `pull`, `trunk`, `lint`, `linux-aarch64`
+* All [viable/strict](.github/workflows/update-viablestrict.yml) jobs are green, which requires the following jobs to pass: `pull`, `trunk`, `lint`
 * All the nightly jobs for pytorch and domain libraries should be green. Validate this using the following HUD links:
   * [PyTorch](https://hud.pytorch.org/hud/pytorch/pytorch/nightly)
   * [TorchVision](https://hud.pytorch.org/hud/pytorch/vision/nightly)

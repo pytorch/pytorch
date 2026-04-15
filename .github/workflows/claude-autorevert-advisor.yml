@@ -38,15 +38,16 @@ jobs:
           git fetch origin ${{ inputs.suspect_commit }} --depth=32 || true
 
       - name: Configure AWS credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_claude_code
           aws-region: us-east-1
 
       - name: Run AI Advisor
         id: claude
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
         with:
+          allowed_bots: "pytorch-auto-revert[bot]"
           use_bedrock: "true"
           claude_args: |
             --model global.anthropic.claude-opus-4-6-v1
@@ -126,6 +127,46 @@ jobs:
           name: autorevert-verdict
           path: /tmp/verdict/verdict.json
           retention-days: 30
+
+      - name: Upload verdict to S3 for ClickHouse ingestion
+        if: always() && steps.claude.outputs.structured_output != ''
+        env:
+          VERDICT_JSON: ${{ steps.claude.outputs.structured_output }}
+          SIGNAL_PATTERN: ${{ inputs.signal_pattern }}
+        run: |
+          # Build enriched verdict JSON with signal metadata for CH ingestion
+          jq -n \
+            --arg repo "${{ github.repository }}" \
+            --argjson run_id "${{ github.run_id }}" \
+            --argjson run_attempt "${{ github.run_attempt }}" \
+            --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%S.000)" \
+            --arg suspect_commit "${{ inputs.suspect_commit }}" \
+            --argjson pr_number "${{ inputs.pr_number }}" \
+            --arg signal_key "$(echo "$SIGNAL_PATTERN" | jq -r '.signal_key // ""')" \
+            --arg signal_source "$(echo "$SIGNAL_PATTERN" | jq -r '.signal_source // ""')" \
+            --arg workflow_name "$(echo "$SIGNAL_PATTERN" | jq -r '.workflow_name // ""')" \
+            --arg verdict "$(echo "$VERDICT_JSON" | jq -r '.verdict // ""')" \
+            --argjson confidence "$(echo "$VERDICT_JSON" | jq -r '.confidence // 0')" \
+            --arg summary "$(echo "$VERDICT_JSON" | jq -r '.summary // ""')" \
+            --arg causal_reasoning "$(echo "$VERDICT_JSON" | jq -r '.causal_reasoning // ""')" \
+            '{
+              repo: $repo,
+              run_id: $run_id,
+              run_attempt: $run_attempt,
+              timestamp: $timestamp,
+              suspect_commit: $suspect_commit,
+              pr_number: $pr_number,
+              signal_key: $signal_key,
+              signal_source: $signal_source,
+              workflow_name: $workflow_name,
+              verdict: $verdict,
+              confidence: $confidence,
+              summary: $summary,
+              causal_reasoning: $causal_reasoning
+            }' > /tmp/advisor_verdict.json
+
+          aws s3 cp /tmp/advisor_verdict.json \
+            "s3://ossci-raw-job-status/autorevert_advisor_verdicts/${{ github.repository }}/${{ github.run_id }}_${{ github.run_attempt }}.json"
 
       - name: Upload usage metrics
         if: always()

@@ -61,6 +61,7 @@ const ActivityTypeMap kMtiaTypes{
     {libkineto::ActivityType::MTIA_CCP_EVENTS,       "MTIA_CCP_EVENTS"},
     {libkineto::ActivityType::MTIA_RUNTIME,          "MTIA_RUNTIME"},
     {libkineto::ActivityType::MTIA_INSIGHT,          "MTIA_INSIGHT"},
+    {libkineto::ActivityType::MTIA_COUNTERS,         "MTIA_COUNTERS"},
 };
 
 const ActivityTypeMap kHpuTypes{
@@ -356,6 +357,12 @@ void prepareTrace(
       } else {
         LOG(INFO) << "Disabling MTIA insight events";
       }
+      if (config.custom_profiler_config.find("disable_counter_events") ==
+          std::string::npos) {
+        k_activities.insert(libkineto::ActivityType::MTIA_COUNTERS);
+      } else {
+        LOG(INFO) << "Disabling MTIA counter events";
+      }
     }
   }
   if (activities.count(torch::autograd::profiler::ActivityType::HPU)) {
@@ -490,6 +497,7 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     // TODO: T151322015
     case libkineto::ActivityType::MTIA_CCP_EVENTS:
     case libkineto::ActivityType::MTIA_INSIGHT:
+    case libkineto::ActivityType::MTIA_COUNTERS:
       return device_type_privateuse1_or(c10::DeviceType::MTIA);
     case libkineto::ActivityType::HPU_OP:
       return c10::DeviceType::HPU;

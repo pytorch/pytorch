@@ -188,21 +188,6 @@ class InPlaceCompilationTests(TestCase):
         with self.assertRaises(AttributeError):
             fn(x)
 
-    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
-    def test_compilation_nn_module_invalid_method(self):
-        class Mod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x):
-                return x + self.doesnotexist
-
-        mod = Mod()
-        opt_mod = torch.compile(mod, backend="eager")
-        x = torch.randn(1, 1)
-        with self.assertRaises(AttributeError):
-            opt_mod(x)
-
     def test_torch_script_compilation(self):
         @torch.jit.script
         def fn(x: torch.Tensor) -> torch.Tensor:
@@ -321,6 +306,51 @@ class PublicTorchCompilerTests(TestCase):
 
         for fn_name in function_names:
             self.check_signature(fn_name, fn_name, torch._dynamo)
+
+
+class FullgraphTests(TestCase):
+    def test_fullgraph_errors_on_frame_skip_with_dispatch_mode(self):
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        class SkipMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                return func(*args, **kwargs)
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(5)
+        with SkipMode():
+            with self.assertRaisesRegex(RuntimeError, "found no compiled frames"):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+    def test_fullgraph_errors_on_frame_skip_dynamo_disabled(self):
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(5)
+        with torch._dynamo.config.patch(disable=True):
+            with self.assertRaisesRegex(RuntimeError, "found no compiled frames"):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+    def test_fullgraph_empty_graph_no_error(self):
+        def fn(x):
+            return len(x)
+
+        x = torch.randn(5)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, 5)
+
+    def test_fullgraph_exported_module_no_error(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        m = M()
+        x = torch.randn(5)
+        exported = torch.export.export(m, (x,))
+        result = exported.module()(x)
+        self.assertEqual(result, x + 1)
 
 
 if __name__ == "__main__":

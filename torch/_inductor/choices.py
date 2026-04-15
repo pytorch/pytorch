@@ -95,7 +95,7 @@ class FusionScore:
 
 class InductorChoices:
     """
-    This class contains a collection of default heuristics that effect performance of our generated
+    This class contains a collection of default heuristics that affect performance of our generated
     code.  We try to not put correctness requirements in this file.
 
     You can override the choices made here by doing:
@@ -104,6 +104,9 @@ class InductorChoices:
                 ...
 
             torch._inductor.virtualized.V.set_choices_handler(MyHeuristics())
+
+    Subclasses used with inductor_choices_class must implement uuid() for
+    cache key computation.
     """
 
     def get_config_heuristics(
@@ -346,6 +349,18 @@ class InductorChoices:
     ) -> dict[str, Any]:
         """Hook to change the kwargs passed to TritonKernel, used to apply fixed configurations"""
         return kernel_kwargs
+
+    def override_best_choice(
+        self,
+        best_choice: ChoiceCaller,
+        timings: dict[ChoiceCaller, float],
+    ) -> ChoiceCaller:
+        """Hook to override the autotuning best choice after benchmarking."""
+        return best_choice
+
+    def customize_fused_kernel_name(self, fused_name: str, src_code: str) -> str:
+        """Hook to transform fused kernel names during codegen"""
+        return fused_name
 
     @staticmethod
     def should_use_cooperative_reduction(features: SIMDKernelFeatures) -> bool:

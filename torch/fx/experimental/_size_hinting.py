@@ -23,6 +23,11 @@ from torch.utils._sympy.numbers import int_oo
 
 log = logging.getLogger(__name__)
 
+# Maximum number of free symbols in an expression before we skip
+# sympy.factor() in optimization_hint process for unbacked.
+# Factoring polynomials with many variables is expensive.
+SYMPY_FACTOR_MAX_FREE_SYMBOLS = 50
+
 if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
@@ -297,9 +302,7 @@ def _sub_unbacked_exprs(shape_env: ShapeEnv, expr: sympy.Expr) -> sympy.Expr:
         new_expr = expr.subs(replacements)
         if new_expr == expr:
             break
-        # Limit sympy.factor() to expressions with <= 200 free symbols,
-        # as factoring polynomials with many variables is expensive.
-        if len(new_expr.free_symbols) <= 200:
+        if len(new_expr.free_symbols) <= SYMPY_FACTOR_MAX_FREE_SYMBOLS:
             expr = sympy.factor(new_expr)
         else:
             expr = new_expr
@@ -347,10 +350,14 @@ def _optimization_hint_base(
 
         fallback = unbacked_symint_fallback
 
+    # to have expanded (Identity free) expr stored in original
+    if isinstance(expr, sympy.Expr):
+        expr = expr.expand(identity=True)
+
     original = expr
     # sympy.expand() doesn't work with boolean expressions like Or/And
     if isinstance(expr, sympy.Expr):
-        expr = sympy.expand(expr).xreplace(shape_env.replacements)
+        expr = expr.xreplace(shape_env.replacements)
     else:
         expr = sympy.sympify(expr).xreplace(shape_env.replacements)
 
@@ -391,9 +398,10 @@ def _optimization_hint_base(
     if has_free_unbacked_symbols(expr):
         # Make sure to substitute with the factored version
         # e.g. 10*(s0 + u0) instead of 10*s0 + 10*u0
-        # Limit sympy.factor() to expressions with <= 200 free symbols,
-        # as factoring polynomials with many variables is expensive.
-        if isinstance(original, sympy.Expr) and len(original.free_symbols) <= 200:
+        if (
+            isinstance(original, sympy.Expr)
+            and len(original.free_symbols) <= SYMPY_FACTOR_MAX_FREE_SYMBOLS
+        ):
             original = sympy.factor(original)
         expr = _sub_unbacked_exprs(shape_env, original)
 
@@ -418,7 +426,16 @@ def _optimization_hint_base(
                 sym_fallback = min(sym_fallback, int(vr.upper))
         size_dict[s] = sym_fallback
 
-    final_result = expr.subs(size_dict)
+    try:
+        final_result = expr.subs(size_dict)
+    except ZeroDivisionError:
+        # Expressions like ModularIndexing(x, u1, 4) crash during subs()
+        # when u1 is substituted with 0, because sympy eagerly evaluates
+        # (x // 0) % 4.  This can happen when an unbacked symbol with
+        # var_to_range lower=0 is used as a divisor (e.g. from
+        # _dynamic_reshape_indexer) and the fallback also maps to 0.
+        # Return fallback in that case.
+        return fallback if fallback is not None else 0
 
     final_result = _maybe_realize_expr(final_result, fallback)
     if final_result is None:

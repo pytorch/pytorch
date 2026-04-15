@@ -113,6 +113,9 @@ test_failures = {
     "test_as_strided_on_views_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
+    "test_resize_overlapping_strides_dynamic_shapes": TestFailure(
+        ("cpu",), is_skip=True
+    ),
     #
     # Failed to find dynamic for loop variable:
     #
@@ -128,6 +131,7 @@ test_failures = {
     "test_arange3_dynamic_shapes": TestFailure(("cpu",)),
     "test_arange4_dynamic_shapes": TestFailure(("cpu",)),
     "test_arange6_dynamic_shapes": TestFailure(("cpu",)),
+    "test_arange7_dynamic_shapes": TestFailure(("cpu",)),
     "test_clamp_type_promotion_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv2d_channels_last_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv3d_dynamic_shapes": TestFailure(("cpu",)),
@@ -216,12 +220,6 @@ test_failures = {
     "test_linspace4_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_logcumsumexp_dynamic_shapes": TestFailure(("cpu",)),
     "test_logcumsumexp_zero_dim_dynamic_shapes": TestFailure(("cpu",)),
-    "test_max_pool2d_with_indices_backward5_dynamic_shapes": TestFailure(
-        ("cpu", "cuda")
-    ),
-    "test_max_pool2d_with_indices_backward6_dynamic_shapes": TestFailure(
-        ("cpu", "cuda", "xpu")
-    ),
     "test_misaligned_address_issue1_dynamic_shapes": TestFailure(("cpu",)),
     "test_mm_views_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_new_empty_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),

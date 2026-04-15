@@ -37,6 +37,7 @@ from torch.fx.experimental.symbolic_shapes import (
     StatelessSymbolicContext,
     statically_known_false,
     statically_known_true,
+    SYMPY_INTERP,
 )
 from torch.testing._internal.common_dtype import all_types_and
 from torch.testing._internal.common_utils import (
@@ -917,6 +918,46 @@ def forward(self, x_1):
                 )
             )
         )
+
+    def test_sympy_interp_is_non_overlapping_and_dense_flat_args(self):
+        # SYMPY_INTERP is used as the eval() namespace for guard code strings.
+        # Guard code prints IsNonOverlappingAndDenseIndicator(s0, s1, ..., st0, st1, ...)
+        # with flat args, so the SYMPY_INTERP function must accept flat args.
+        interp_fn = SYMPY_INTERP["IsNonOverlappingAndDenseIndicator"]
+
+        # 1D contiguous: sizes=(5,), strides=(1,)
+        self.assertEqual(interp_fn(5, 1), 1)
+        # 1D non-contiguous: sizes=(5,), strides=(2,)
+        self.assertEqual(interp_fn(5, 2), 0)
+        # 1D single element: sizes=(1,), strides=(42,)
+        self.assertEqual(interp_fn(1, 42), 1)
+
+        # 2D contiguous: sizes=(3, 4), strides=(4, 1)
+        self.assertEqual(interp_fn(3, 4, 4, 1), 1)
+        # 2D non-contiguous: sizes=(3, 4), strides=(5, 1) -- gap in memory
+        self.assertEqual(interp_fn(3, 4, 5, 1), 0)
+        # 2D transposed but still dense: sizes=(4, 3), strides=(1, 4)
+        self.assertEqual(interp_fn(4, 3, 1, 4), 1)
+
+        # 4D contiguous (the exact scenario from the MAST job failure):
+        # sizes=(2, 3, 4, 5), strides=(60, 20, 5, 1)
+        self.assertEqual(interp_fn(2, 3, 4, 5, 60, 20, 5, 1), 1)
+        # 4D non-contiguous:
+        self.assertEqual(interp_fn(2, 3, 4, 5, 100, 20, 5, 1), 0)
+
+    def test_sympy_interp_guard_eval_simulation(self):
+        # Simulate the actual guard eval() path: guard code strings use
+        # IsNonOverlappingAndDenseIndicator as a function name, and SYMPY_INTERP
+        # provides the binding in the eval namespace.
+        guard_code = "IsNonOverlappingAndDenseIndicator(2, 3, 4, 5, 60, 20, 5, 1) == 1"
+        result = eval(guard_code, SYMPY_INTERP)  # noqa: P204
+        self.assertTrue(result)
+
+        guard_code_false = (
+            "IsNonOverlappingAndDenseIndicator(2, 3, 4, 5, 100, 20, 5, 1) == 1"
+        )
+        result_false = eval(guard_code_false, SYMPY_INTERP)  # noqa: P204
+        self.assertFalse(result_false)
 
     def test_prims_is_non_overlapping_and_dense_or_false(self):
         shape_env = ShapeEnv()
@@ -2004,6 +2045,13 @@ class TestSymNumberMagicMethods(TestCase):
         self.assertTrue(z > -2)
         with self.assertRaises(ZeroDivisionError):
             y % x
+
+        # test pow operations preserve DynamicInt type
+        check(w**2, 1)  # DynamicInt ** int
+        check(2**z, 4)  # int ** DynamicInt
+        check(y**x, 1)  # DynamicInt ** DynamicInt
+        check(pow(z, 2), 4)  # pow(DynamicInt, int)
+        self.assertTrue(isinstance(pow(y, 3, 5), DynamicInt))  # pow with modulo
 
         # math, numpy
         self.assertEqual(math.cos(x), y)
@@ -3724,6 +3772,39 @@ class TestUnbacked(TestCase):
             src_tensor = torch.empty((u1, 256))
 
             meta_copy_(self_tensor, src_tensor)
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_symbool_propagate_real_tensors(self):
+        """
+        Test that propagate_real_tensors properly handles SymBool from boolean .item() calls.
+
+        When tracing with propagate_real_tensors=True, if a boolean .item() returns False
+        during tracing, a runtime assertion should be generated that throws when the
+        boolean becomes True at runtime.
+
+        This is a regression test for a bug where int(real_t) was used instead of real_t,
+        causing boolean values to be incorrectly converted to integers and losing the
+        proper runtime assertion.
+        """
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            if x.eq(0.1).any().item():
+                return x
+            return x + 1
+
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            # First call with 0.2 - item() returns False, traces the x + 1 branch
+            result1 = f(torch.ones(2) * 0.2)
+            torch.testing.assert_close(result1, torch.ones(2) * 1.2)
+
+            # Second call with 0.1 - item() returns True, should throw runtime assertion
+            # because the traced graph assumed False
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"Runtime assertion failed for expression Ne\(u0, 1\)",
+            ):
+                f(torch.ones(2) * 0.1)
 
 
 class TestUbackedOps(TestCase):

@@ -711,6 +711,10 @@ def flex_attention_backward(*args, **kwargs):
         for k, v in kernel_options.items()
     }
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
+    kernel_options.setdefault("PRESCALE_QK", False)
+    kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
+    kernel_options.setdefault("BLOCKS_ARE_CONTIGUOUS", False)
+    kernel_options.setdefault("WRITE_DQ", True)
     seq_q_divisible = V.graph.sizevars.statically_known_true(
         sympy.Eq(Mod(seq_len_q, 128), 0)
     )

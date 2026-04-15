@@ -109,6 +109,12 @@ void CUDAAllocatorConfig::parseArgs(const std::string& env) {
     } else if (key == "per_process_memory_fraction") {
       i = parsePerProcessMemoryFraction(tokenizer, i);
       used_native_specific_option = true;
+    } else if (key == "pinned_free_catch_all") {
+      i = parsePinnedFreeCatchAll(tokenizer, i);
+      used_native_specific_option = true;
+    } else if (key == "throw_on_cudamalloc_oom") {
+      i = parseThrowOnCudaMallocOom(tokenizer, i);
+      used_native_specific_option = true;
     } else {
       const auto& keys =
           c10::CachingAllocator::AcceleratorAllocatorConfig::getKeys();
@@ -189,6 +195,25 @@ size_t CUDAAllocatorConfig::parsePinnedReserveSegmentSize(
   TORCH_CHECK_VALUE(
       val2 > 0, "Pinned reserve segment size has to be greater than 0");
   m_pinned_reserve_segment_size_mb = val2;
+  return i;
+}
+
+size_t CUDAAllocatorConfig::parsePinnedFreeCatchAll(
+    const c10::CachingAllocator::ConfigTokenizer& tokenizer,
+    size_t i) {
+  tokenizer.checkToken(++i, ":");
+  m_pinned_free_catch_all = tokenizer.toBool(++i);
+  return i;
+}
+
+size_t CUDAAllocatorConfig::parseThrowOnCudaMallocOom(
+    const c10::CachingAllocator::ConfigTokenizer& tokenizer,
+    size_t i) {
+  // Format: throw_on_cudamalloc_oom:true or throw_on_cudamalloc_oom:false
+  // When enabled, throws OOM error before calling cudaMalloc if the allocation
+  // would likely fail due to insufficient memory.
+  tokenizer.checkToken(++i, ":");
+  m_throw_on_cudamalloc_oom = tokenizer.toBool(++i);
   return i;
 }
 

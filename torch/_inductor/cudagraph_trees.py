@@ -84,6 +84,8 @@ from torch._inductor.cudagraph_utils import (
     PlaceholderInfo,
     WrappedFunction,
 )
+from torch._library.opaque_object import is_opaque_value
+from torch._opaque_base import OpaqueBase
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.storage import UntypedStorage
 from torch.utils import _pytree as pytree
@@ -878,10 +880,7 @@ class CUDAGraphNode:
 
         # Enable re-record a cudagraph when static tensor address changed.
         # if not we should error when it changed.
-        self.rerecord_if_static_inputs_change = (
-            torch._dynamo.config.inline_inbuilt_nn_modules
-            or torch._inductor.config.triton.cudagraph_support_input_mutation
-        )
+        self.rerecord_if_static_inputs_change = True
 
         # if this is a root parent will be None. use weakref to prevent reference cycle
         self._parent = weakref.ref(parent) if parent is not None else None
@@ -935,9 +934,26 @@ class CUDAGraphNode:
         # and also aliases an output of the current CUDAGraphNode
         self.preserved_aliased_inputs: InputList[bool] = [False] * len(inputs)
 
+        # Opaque values (e.g. DeviceMesh, ProcessGroup) are non-tensor
+        # inputs that cannot be copied like tensors. We include them in
+        # static_input_idxs to keep them out of non_static_input_idx
+        # (which drives the tensor-copy path during replay). "Static"
+        # here just means "don't try to copy this as a tensor" — it
+        # does NOT mean the object is semantically immutable.
+        #
+        # Opaque indices must also be excluded from any list passed to
+        # _tensors_data_ptrs_at_indices_equal (the C++ data-pointer
+        # stability check), because opaque objects have no data_ptr.
+        # That is why tensor_static_input_idxs and
+        # non_managed_static_input_idxs filter them out below.
+        opaque_input_idxs = OrderedSet(
+            i for i, inp in enumerate(inputs) if is_opaque_value(inp)
+        )
+        static_input_idxs = OrderedSet(wrapped_function.static_input_idxs)
+        cudagraph_managed_idxs = OrderedSet(self.cudagraph_managed_idxs)
+
         self.static_input_idxs: list[int] = list(
-            OrderedSet(wrapped_function.static_input_idxs)
-            | OrderedSet(self.cudagraph_managed_idxs)
+            static_input_idxs | cudagraph_managed_idxs | opaque_input_idxs
         )
 
         self.non_static_input_idx: LevelList[int] = [
@@ -948,11 +964,13 @@ class CUDAGraphNode:
             self.non_static_input_idx
         )
 
-        self.non_managed_static_input_idxs: LevelList[int] = [
-            i
-            for i in wrapped_function.static_input_idxs
-            if i not in self.cudagraph_managed_idxs
-        ]
+        self.non_managed_static_input_idxs: LevelList[int] = LevelList(
+            static_input_idxs - cudagraph_managed_idxs - opaque_input_idxs
+        )
+
+        self.tensor_static_input_idxs: list[int] = list(
+            static_input_idxs | cudagraph_managed_idxs
+        )
 
         def maybe_get_static_data_ptr(
             idx: int,
@@ -1732,7 +1750,7 @@ class CUDAGraphNode:
         ):
             for i, inp in enumerate(inputs):
                 if not isinstance(inp, torch.Tensor):
-                    assert isinstance(inp, (int, torch.Generator))
+                    assert isinstance(inp, (int, torch.Generator, OpaqueBase))
 
                     recording_inputs.append(inp)
                 elif i not in self.static_input_idxs:
@@ -1791,13 +1809,13 @@ class CUDAGraphNode:
             and not torch._C._tensors_data_ptrs_at_indices_equal(
                 inputs,  # type: ignore[arg-type]
                 self.static_input_data_ptrs,
-                self.static_input_idxs,
+                self.tensor_static_input_idxs,
             )
         ):
             status = CheckInvariantStatus.StaticInputIdxMismatch
             _logger = functools.partial(
                 _logger,
-                self.static_input_idxs,
+                self.tensor_static_input_idxs,
                 status,
             )
             return status, _logger
@@ -2169,13 +2187,7 @@ class CUDAGraphTreeManager:
     def exceed_rerecord_limit(
         self, node_id: GraphID | None, function_id: FunctionID
     ) -> bool:
-        if torch._dynamo.config.inline_inbuilt_nn_modules:
-            return False
-
-        return (
-            self.num_rerecord[node_id][function_id]
-            > torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit
-        )
+        return False
 
     def _run(self, new_inputs: list[InputType], function_id: FunctionID) -> OutputType:
         # we will try to end the current execution lazily, since
@@ -2587,9 +2599,9 @@ class CUDAGraphTreeManager:
 
         self.warned_functions.add(function_id)
         warnings.warn(
-            "Unable to hit fast path of CUDAGraphs because of pending, uninvoked backwards. "
-            "Consider running with torch.no_grad() or using torch.compiler.cudagraph_mark_step_begin() "
-            "before each model invocation"
+            "Unable to hit fast path of CUDAGraphs because outputs from a previous step "
+            "still require backward. Ensure backward() is invoked or detach outputs. "
+            "You may also call torch.compiler.cudagraph_mark_step_begin() before each model invocation."
         )
 
     @staticmethod

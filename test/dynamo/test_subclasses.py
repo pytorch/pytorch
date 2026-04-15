@@ -2285,7 +2285,6 @@ class GraphModule(torch.nn.Module):
                 out_test = compiled_f(view)
                 self.assertEqual(out_ref, out_test)
 
-    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     @parametrize("dynamic", [True, False])
     def test_mark_static_with_subclass_desugaring(self, dynamic):
         from collections.abc import Callable
@@ -2313,6 +2312,7 @@ class GraphModule(torch.nn.Module):
             boxed_forward_device_index: BoxedDeviceIndex | None = None,
             layout_opt: bool | None = None,
             extern_node_serializer: Callable[[list[Any]], Any] | None = None,
+            **kwargs: Any,
         ):
             if dynamic:
                 self.assertEqual(static_input_idxs, [2, 3, 4])
@@ -2328,7 +2328,6 @@ class GraphModule(torch.nn.Module):
 
         fn(torch.ones(4), x, torch.ones(4))
 
-    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     def test_subclass_parameters_are_static_under_training(self):
         from collections.abc import Callable
         from typing import Any
@@ -2350,6 +2349,7 @@ class GraphModule(torch.nn.Module):
             boxed_forward_device_index: BoxedDeviceIndex | None = None,
             layout_opt: bool | None = None,
             extern_node_serializer: Callable[[list[Any]], Any] | None = None,
+            **kwargs: Any,
         ):
             # Important bit: there are 3 params: linear.weight.a, linear.weight.b, linear.bias,
             # which are the first 3 args of the graph.

@@ -252,19 +252,19 @@ def invoke_subgraph_placeholder(func, *args, **kwargs):
         def _invoke_subgraph_placeholder_wrapper(func, args):
             return invoke_subgraph_placeholder(func, *args)
 
-        from torch._higher_order_ops.utils import setup_compilation_env
+        from torch._higher_order_ops.utils import _hop_compile_and_call
 
-        with setup_compilation_env() as backend:
-            return torch.compile(
-                _invoke_subgraph_placeholder_wrapper,
-                backend=backend,
-                fullgraph=True,
-            )(func, args)
+        return _hop_compile_and_call(_invoke_subgraph_placeholder_wrapper, (func, args))
 
     return func(*args, **kwargs)
 
 
-def mark_compile_region(fn=None, options: NestedCompileRegionOptions | None = None):
+def mark_compile_region(
+    fn=None,
+    options: NestedCompileRegionOptions | None = None,
+    max_reuse_entries: int = 8,
+    reuse_hash_fn=None,
+):
     """
     This wrapper instructs torch.compile to compile the wrapped region once and
     reuse the compiled artifact, instead of the usual way of aggressively
@@ -278,6 +278,9 @@ def mark_compile_region(fn=None, options: NestedCompileRegionOptions | None = No
         options: Optional config to use for compiling the subgraph.
             Warning: this is an experimental feature under development and
             not ready for use yet.
+        max_reuse_entries: Maximum number of reuse cache entries per function
+            before raising an error. If this limit is hit, guards keep failing
+            across invocations and hierarchical compilation is not effective.
     """
 
     def wrap(func):
@@ -290,6 +293,8 @@ def mark_compile_region(fn=None, options: NestedCompileRegionOptions | None = No
 
         inner.__marked_compile_region_fn__ = func  # type: ignore[attr-defined]
         func.__marked_compile_region_config__ = options  # type: ignore[attr-defined]
+        func.__marked_compile_region_max_reuse_entries__ = max_reuse_entries  # type: ignore[attr-defined]
+        func.__marked_compile_region_reuse_hash_fn__ = reuse_hash_fn  # type: ignore[attr-defined]
 
         return inner
 

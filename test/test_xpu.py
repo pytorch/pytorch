@@ -23,6 +23,7 @@ import torch.xpu._gpu_trace as gpu_trace
 from torch.testing import make_tensor
 from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestAutocast
 from torch.testing._internal.common_device_type import (
+    dtypes,
     instantiate_device_type_tests,
     OpDTypes,
     ops,
@@ -1265,8 +1266,10 @@ if __name__ == "__main__":
         with torch.xpu.stream(s):
             g = torch.xpu.XPUGraph()
             self.assertFalse(torch.xpu.is_current_stream_capturing())
+            self.assertFalse(s.is_capturing())
             g.capture_begin()
             self.assertTrue(torch.xpu.is_current_stream_capturing())
+            self.assertTrue(s.is_capturing())
             g.capture_end()
 
     def test_graph_capture_simple(self):
@@ -1282,6 +1285,21 @@ if __name__ == "__main__":
                 b = b + 1
             g.capture_end()
         torch.xpu.current_stream().wait_stream(s)
+
+        g.replay()
+
+        self.assertEqual(b.sum().item(), 11000.0)
+
+    def test_accelerator_graph_simple(self):
+        s = torch.Stream()
+        g = torch.accelerator.Graph()
+
+        with s, g:
+            a = torch.full((1000,), 1, device="xpu")
+            b = a
+            for _ in range(10):
+                b = b + 1
+        torch.accelerator.current_stream().wait_stream(s)
 
         g.replay()
 
@@ -2772,6 +2790,78 @@ class TestXpuOps(TestCase):
 
             self.assertEqual(expect, actual)
 
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    def test_fused_rms_norm(self, device, dtype):
+        # Verify _fused_rms_norm is dispatched to XPU kernel (not fallback)
+        has_xpu_kernel = torch._C._dispatch_has_kernel_for_dispatch_key(
+            "aten::_fused_rms_norm",
+            torch._C._dispatch_key_name(torch._C.DispatchKey.XPU),
+        )
+        self.assertTrue(has_xpu_kernel, "_fused_rms_norm XPU kernel is not registered")
+        has_xpu_kernel = torch._C._dispatch_has_kernel_for_dispatch_key(
+            "aten::_fused_rms_norm_backward",
+            torch._C._dispatch_key_name(torch._C.DispatchKey.XPU),
+        )
+        self.assertTrue(
+            has_xpu_kernel, "_fused_rms_norm_backward XPU kernel is not registered"
+        )
+
+        shapes = [
+            (2, 16),  # small 2D
+            (4, 8, 32),  # 3D
+            (1, 1, 64),  # degenerate batch
+            (8, 128),  # typical sequence hidden
+            (2, 16, 512),  # typical LLM hidden dim
+            (4, 32, 1024),  # larger hidden dim
+            (1, 1, 4096),  # LLM-scale hidden
+            (3, 7, 17),  # non-power-of-2
+        ]
+        eps = 1e-5
+        atol_fwd = 1e-1 if dtype in [torch.float16, torch.bfloat16] else 1e-5
+        atol_bwd = 1e-1 if dtype in [torch.float16, torch.bfloat16] else 1e-5
+
+        for shape in shapes:
+            normalized_shape = list(shape[-1:])
+            x = torch.randn(*shape, dtype=dtype, device=device, requires_grad=True)
+            w = torch.randn(
+                *normalized_shape, dtype=dtype, device=device, requires_grad=True
+            )
+            grad_out = torch.randn(*shape, dtype=dtype, device=device)
+            x_cpu = x.detach().cpu().requires_grad_(True)
+            w_cpu = w.detach().cpu().requires_grad_(True)
+            grad_out_cpu = grad_out.detach().cpu()
+
+            # Forward
+            y, _ = torch.ops.aten._fused_rms_norm(x, normalized_shape, w, eps)
+            y_cpu, _ = torch.ops.aten._fused_rms_norm(
+                x_cpu, normalized_shape, w_cpu, eps
+            )
+            self.assertEqual(
+                y,
+                y_cpu,
+                atol=atol_fwd,
+                rtol=0,
+                msg=f"forward shape={shape}, dtype={dtype}",
+            )
+
+            # Backward
+            y.backward(grad_out)
+            y_cpu.backward(grad_out_cpu)
+            self.assertEqual(
+                x.grad.cpu(),
+                x_cpu.grad,
+                atol=atol_bwd,
+                rtol=0,
+                msg=f"x_grad shape={shape}, dtype={dtype}",
+            )
+            self.assertEqual(
+                w.grad.cpu(),
+                w_cpu.grad,
+                atol=atol_bwd,
+                rtol=0,
+                msg=f"w_grad shape={shape}, dtype={dtype}",
+            )
+
 
 instantiate_device_type_tests(TestXpuOps, globals(), only_for="xpu", allow_xpu=True)
 
@@ -2946,6 +3036,8 @@ class TestXPUAPISanity(TestCase):
                 self.assertTrue(value.group(1) in ["ON", "1"])
             else:
                 self.assertTrue(value.group(1) in ["OFF", "0"])
+            value = re.search(r"SYCL_COMPILER_VERSION=([^,]+)", config)
+            self.assertEqual(value.group(1), torch.version.xpu)
         else:
             self.assertTrue(value.group(1) in ["OFF", "0"])
             self.assertFalse(torch.distributed.is_xccl_available())

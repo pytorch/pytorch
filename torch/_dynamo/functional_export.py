@@ -605,13 +605,11 @@ def create_fx_graph_from_captured_output(
 
     graph_module = backend_input.graph_module
     if isinstance(root, torch.nn.Module):
-        graph_module._parameters = root._parameters.copy()
-        graph_module._buffers = root._buffers.copy()
+        graph_module._parameters = root._parameters
+        graph_module._buffers = root._buffers
         assert all(not hasattr(graph_module, m) for m in root._modules)
         graph_module._modules.update(root._modules)
-        graph_module._non_persistent_buffers_set = (
-            root._non_persistent_buffers_set.copy()
-        )
+        graph_module._non_persistent_buffers_set = root._non_persistent_buffers_set
         if sys.version_info >= (3, 14):
             import annotationlib  # added in 3.14
 
@@ -974,9 +972,7 @@ def _dynamo_graph_capture_for_export(
             )
             transformed_graph.recompile()
 
-            clean_nn_module_stack_and_source_fn(
-                transformed_graph, torch._dynamo.config.inline_inbuilt_nn_modules
-            )
+            clean_nn_module_stack_and_source_fn(transformed_graph, True)
             clean_export_root(transformed_graph)
 
             transformed_graph.meta["module_call_specs"] = module_call_spec

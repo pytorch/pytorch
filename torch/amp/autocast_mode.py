@@ -392,6 +392,11 @@ class autocast:
         return autocast_decorator(self, func)
 
 
+# Subclass to distinguish autocast variables created by _enter_autocast (and not managed by a with statement)
+class _UnmanagedAutocast(autocast):
+    pass
+
+
 # These functions aren't meant for public usage.
 # They are what we trace into a graph during pre_dispatch tracing
 # when we encounter an autocast context manager.
@@ -401,7 +406,7 @@ def _enter_autocast(*vals):
         return torch.overrides.handle_torch_function(
             torch.amp._enter_autocast, [], *vals
         )
-    mode = torch.amp.autocast(*vals)
+    mode = _UnmanagedAutocast(*vals)
     mode.__enter__()
     return mode
 

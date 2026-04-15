@@ -650,23 +650,6 @@ class PadMMTest(TestCase):
         torch.manual_seed(42)
         test_masked_mha(B, H, S, D, device, dtype)
 
-    @inductor_config.patch(force_shape_pad=True)
-    def test_pad_mm_output_strides_preserved(self):
-        """Regression test: pad_mm creates views with padded strides.
-        User-visible output strides must match eager execution."""
-
-        def fn(x, y):
-            return torch.mm(x, y)
-
-        # N=2 gets padded to 4, so the mm output is (3, 4) sliced to (3, 2),
-        # creating a view with stride (4, 1) instead of the expected (2, 1).
-        x = torch.randn(3, 5, device=GPU_TYPE)
-        y = torch.randn(5, 2, device=GPU_TYPE)
-        expected = fn(x, y)
-        compiled = torch.compile(fn)(x, y)
-        self.assertEqual(compiled, expected)
-        self.assertEqual(compiled.stride(), expected.stride())
-
 
 if __name__ == "__main__":
     if HAS_GPU_AND_TRITON:

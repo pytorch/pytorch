@@ -245,6 +245,15 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 pass_name = "custom_backend_passes_" + device
                 GraphTransformObserver(gm, pass_name).apply_gm_pass(custom_backend_pass)
 
+    # SPMD verification — before collective reordering passes.
+    if (
+        config.aten_distributed_optimizations.spmd_check
+        and _needs_spmd_graph_preservation()
+    ):
+        from torch._inductor.fx_passes.spmd_check import spmd_check
+
+        spmd_check(gm)
+
     collectives_bucketing: bool = False
 
     if config.bucket_reduce_scatters_fx != "none":
@@ -355,6 +364,15 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                     graph.owning_module,
                 )
             )
+
+    if config.aten_distributed_optimizations.enable_low_contention_collectives:
+        from torch._inductor.fx_passes.low_contention_collectives import (
+            replace_collectives_with_low_contention,
+        )
+
+        GraphTransformObserver(
+            gm, "replace_collectives_with_low_contention"
+        ).apply_graph_pass(replace_collectives_with_low_contention)
 
     # Keep these last, since they introduce mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
@@ -777,6 +795,13 @@ def reorder_for_locality(graph: torch.fx.Graph):
         def check():
             return True
 
+    def consumes_rng_state(node: torch.fx.Node) -> bool:
+        return (
+            node.op == "call_function"
+            and isinstance(node.target, torch._ops.OpOverload)
+            and torch.Tag.nondeterministic_seeded in node.target.tags
+        )
+
     def visit(other_node):
         if (
             other_node.op == "call_function"
@@ -786,6 +811,11 @@ def reorder_for_locality(graph: torch.fx.Graph):
             == get_mutation_region_id(graph, other_node)
             and check()
         ):
+            # Ops that consume RNG state are order-sensitive and must not be
+            # reordered during locality optimization.
+            if consumes_rng_state(other_node):
+                return
+
             # move node's producers right before it
             node.prepend(other_node)
 
@@ -1037,8 +1067,20 @@ def register_noop_decomp(targets, nop_arg=0):
     return register_fun
 
 
+def _needs_spmd_graph_preservation() -> bool:
+    """Check if SPMD graph preservation is needed for distributed overlap."""
+    return (
+        config.aten_distributed_optimizations.enable_overlap_scheduling
+        or config.reorder_for_compute_comm_overlap
+    )
+
+
 @register_noop_decomp(aten.slice)
 def slice_noop(self, dim=0, start=None, end=None, step=1):
+    if _needs_spmd_graph_preservation():
+        # Keep no-op slices so all ranks produce identical FX graphs (SPMD)
+        # with matching op counts and runtime estimations.
+        return False
     if start is None or end is None:
         return False
 
@@ -1082,6 +1124,10 @@ def repeat_noop(self, repeats):
 
 @register_noop_decomp(aten.constant_pad_nd)
 def constant_pad_nd(x, padding, fill_value=0):
+    if _needs_spmd_graph_preservation():
+        # Keep no-op pads so all ranks produce identical FX graphs (SPMD)
+        # with matching op counts and runtime estimations.
+        return False
     return all(p == 0 for p in padding)
 
 
