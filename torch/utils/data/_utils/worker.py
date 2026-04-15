@@ -79,6 +79,29 @@ else:
             return not self.manager_dead
 
 
+class ThreadWatchdog:
+    """Watchdog for thread workers to detect interpreter shutdown.
+
+    We check python_exit_status — a plain bool set by an atexit handler
+    before Python starts freeing core resources. This is safe to read
+    from any thread even during late-stage shutdown.
+    """
+
+    def __init__(self) -> None:
+        self.manager_dead = False
+
+    def is_alive(self) -> bool:
+        if not self.manager_dead:
+            try:
+                from . import python_exit_status
+            except ImportError:
+                self.manager_dead = True
+                return False
+            # python_exit_status is True or None means shutdown triggered.
+            self.manager_dead = python_exit_status is not False
+        return not self.manager_dead
+
+
 _worker_info: WorkerInfo | None = None
 _thread_local_worker_info = threading.local()
 
@@ -265,9 +288,9 @@ def _base_worker_loop(
     drop_last,
     init_fn,
     worker_id,
+    watchdog_constructor,
     shared_rng=None,
     worker_method="multiprocessing",
-    watchdog_constructor=None,
     post_fetch_fn=None,
 ) -> None:
     """
@@ -317,10 +340,10 @@ def _base_worker_loop(
         iteration_end = False
 
         # Create watchdog to check if parent is alive
-        watchdog = watchdog_constructor() if watchdog_constructor is not None else None
+        watchdog = watchdog_constructor()
 
         # Main worker loop
-        while watchdog is None or watchdog.is_alive():
+        while watchdog.is_alive():
             try:
                 r = index_queue.get(timeout=STATUS_CHECK_INTERVAL)
             except queue.Empty:
@@ -477,9 +500,9 @@ def _process_worker_loop(
         drop_last=drop_last,
         init_fn=init_fn,
         worker_id=worker_id,
+        watchdog_constructor=ManagerWatchdog,
         shared_rng=shared_rng,
         worker_method="multiprocessing",
-        watchdog_constructor=ManagerWatchdog,
     )
 
     if done_event.is_set():
@@ -546,7 +569,6 @@ def _thread_worker_loop(
     if pin_memory:
         post_fetch_fn = pin_memory_module.pin_memory
 
-    # Use the common base worker loop with thread-specific settings
     _base_worker_loop(
         dataset_kind=dataset_kind,
         dataset=dataset,
@@ -558,8 +580,7 @@ def _thread_worker_loop(
         drop_last=drop_last,
         init_fn=init_fn,
         worker_id=worker_id,
-        shared_rng=None,  # Not used for thread workers
+        watchdog_constructor=ThreadWatchdog,
         worker_method="thread",
-        watchdog_constructor=None,  # No watchdog needed for threads
         post_fetch_fn=post_fetch_fn,
     )

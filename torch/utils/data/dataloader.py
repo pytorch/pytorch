@@ -1218,23 +1218,6 @@ class _ParallelDataLoaderIter(_BaseDataLoaderIter):
                 "_workers_done_event state does not match shutdown flag"
             )
 
-    @staticmethod
-    def _is_python_exiting() -> bool:
-        """Check if Python is shutting down.
-
-        During interpreter shutdown, resources may already be freed, so
-        shutdown operations (queue puts, event sets, joins) can hang or error.
-        Both threading and multiprocessing workers are daemonic and will be
-        killed automatically, so we can safely no-op.
-        """
-        return (
-            _utils is None
-            # pyrefly: ignore [unnecessary-comparison]
-            or _utils.python_exit_status is True
-            # pyrefly: ignore [unnecessary-comparison]
-            or _utils.python_exit_status is None
-        )
-
     def _shutdown_workers_impl(self) -> None:
         """Common shutdown logic for both threading and multiprocessing implementations."""
 
@@ -1322,7 +1305,7 @@ class _ThreadingDataLoaderIter(_ParallelDataLoaderIter):
         return f"DataLoader worker (thread(s) {thread_ids_str}) exited unexpectedly"
 
     def _shutdown_workers(self) -> None:
-        if _ParallelDataLoaderIter._is_python_exiting():
+        if _utils is None or _utils.python_exit_status is not False:
             return
         if not self._shutdown:
             self._shutdown = True
@@ -1833,7 +1816,7 @@ class _MultiProcessingDataLoaderIter(_ParallelDataLoaderIter):
     # (shell2) ./test_socket.py sock_tmp 1017 send
 
     def _shutdown_workers(self) -> None:
-        if _ParallelDataLoaderIter._is_python_exiting():
+        if _utils is None or _utils.python_exit_status is not False:
             # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details.
             # If Python is shutting down, do no-op.
             return
