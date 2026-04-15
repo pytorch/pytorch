@@ -160,6 +160,7 @@ When a PR touches code in the scope of any item below, **stop and investigate** 
 ### Test Existence
 
 - [ ] **Tests exist** - New functionality has corresponding tests
+- [ ] **Regression tests for bug fixes** - Bug fixes must include a test that reproduces the bug before the fix
 - [ ] **Tests are in the right place** - Tests should be added to an existing test file next to other related tests
 - [ ] **New test file is rare** - New test file should only be added when new major features are added
 
