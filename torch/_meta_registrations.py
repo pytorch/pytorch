@@ -8761,6 +8761,13 @@ def embedding(
 ) -> Tensor:
     if weight.dim() != 2:
         raise AssertionError(f"'weight' must be 2-D, got {weight.dim()}-D")
+    torch._check(
+        indices.dtype in (torch.long, torch.int32),
+        lambda: (
+            "Expected tensor for argument #1 'indices' to have one of the following "
+            f"scalar types: Long, Int; but got {indices.dtype} instead"
+        ),
+    )
     weight_shape = weight.shape
     indices_shape = indices.shape
 
