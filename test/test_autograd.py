@@ -4375,16 +4375,26 @@ class TestAutograd(TestCase):
         # not the backward node (e.g. "AddBackward0").
         # Use b * b (not b * 2) so MulBackward saves b and detects the
         # version mismatch when unpacking.
+
+        # add(Tensor, Tensor) → AddBackward0 → "Add" (variant 0 is stripped).
         a = torch.randn(5, requires_grad=True)
-        b = a + 1
+        b = a + torch.randn(5)
         c = b * b
         with torch.no_grad():
             b += 1
         with self.assertRaisesRegex(RuntimeError, r"output 0 of Add,"):
             c.backward(torch.ones(5))
 
-        # Same for user-defined autograd Functions: the error should say
-        # "MyFunc" not "MyFuncBackward".
+        # add(Tensor, Scalar) → AddBackward1 → "Add1" (non-zero variant kept).
+        a = torch.randn(5, requires_grad=True)
+        b = a + 1
+        c = b * b
+        with torch.no_grad():
+            b += 1
+        with self.assertRaisesRegex(RuntimeError, r"output 0 of Add1,"):
+            c.backward(torch.ones(5))
+
+        # Custom autograd Function: "MyFunc" not "MyFuncBackward".
         class MyFunc(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
