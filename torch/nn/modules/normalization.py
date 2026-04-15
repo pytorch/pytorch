@@ -118,7 +118,7 @@ class LayerNorm(Module):
     :math:`\gamma` and :math:`\beta` are learnable affine transform parameters of
     :attr:`normalized_shape` if :attr:`elementwise_affine` is ``True``.
     The variance is calculated via the biased estimator, equivalent to
-    `torch.var(input, correction=0)`.
+    ``torch.var(input, correction=0)``.
 
     .. note::
         Unlike Batch Normalization and Instance Normalization, which applies
@@ -148,11 +148,11 @@ class LayerNorm(Module):
 
     Attributes:
         weight: the learnable weights of the module of shape
-            :math:`\text{normalized\_shape}` when :attr:`elementwise_affine` is set to ``True``.
+            :attr:`normalized_shape` when :attr:`elementwise_affine` is set to ``True``.
             The values are initialized to 1.
-        bias:   the learnable bias of the module of shape
-                :math:`\text{normalized\_shape}` when :attr:`elementwise_affine` is set to ``True``.
-                The values are initialized to 0.
+        bias: the learnable bias of the module of shape
+            :attr:`normalized_shape` when :attr:`elementwise_affine` is set to ``True``.
+            The values are initialized to 0.
 
     Shape:
         - Input: :math:`(N, *)`
@@ -252,7 +252,7 @@ class GroupNorm(Module):
     per-channel affine transform parameter vectors of size :attr:`num_channels` if
     :attr:`affine` is ``True``.
     The variance is calculated via the biased estimator, equivalent to
-    `torch.var(input, correction=0)`.
+    ``torch.var(input, correction=0)``.
 
     This layer uses statistics computed from input data in both training and
     evaluation modes.
@@ -370,7 +370,8 @@ class RMSNorm(Module):
             fp16/bf16 and fp32 inputs use ``torch.finfo(torch.float32).eps``, while fp64
             inputs use ``torch.finfo(torch.float64).eps``. Default: ``None``
         elementwise_affine: a boolean value that when set to ``True``, this module
-            has learnable per-element affine parameters initialized to ones (for weights). Default: ``True``.
+            has learnable per-element scaling parameters initialized to ones.
+            Default: ``True``.
 
     Shape:
         - Input: :math:`(N, *)`

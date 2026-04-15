@@ -429,9 +429,10 @@ class BatchNorm2d(_BatchNorm):
 
         y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
 
-    The mean and standard-deviation are calculated per-dimension over
-    the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
-    of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are set
+    The mean and standard-deviation are calculated per-dimension over the
+    mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter
+    vectors of size `C` (where `C` is the input number of channels). By default, the
+    elements of :math:`\gamma` are set
     to 1 and the elements of :math:`\beta` are set to 0. At train time in the forward pass, the
     standard-deviation is calculated via the biased estimator, equivalent to
     ``torch.var(input, correction=0)``. However, the value stored in the moving average of the
@@ -543,9 +544,10 @@ class BatchNorm3d(_BatchNorm):
 
         y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
 
-    The mean and standard-deviation are calculated per-dimension over
-    the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
-    of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are set
+    The mean and standard-deviation are calculated per-dimension over the
+    mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter
+    vectors of size `C` (where `C` is the input number of channels). By default, the
+    elements of :math:`\gamma` are set
     to 1 and the elements of :math:`\beta` are set to 0. At train time in the forward pass, the
     standard-deviation is calculated via the biased estimator, equivalent to
     ``torch.var(input, correction=0)``. However, the value stored in the moving average of the
@@ -648,7 +650,7 @@ class LazyBatchNorm3d(_LazyNormBase, _BatchNorm):
 
 
 class SyncBatchNorm(_BatchNorm):
-    r"""Applies Batch Normalization over a N-Dimensional input.
+    r"""Applies Batch Normalization over an N-Dimensional input.
 
     The N-D input is a mini-batch of [N-2]D inputs with additional channel dimension) as described in the paper
     `Batch Normalization: Accelerating Deep Network Training by Reducing
@@ -664,7 +666,7 @@ class SyncBatchNorm(_BatchNorm):
     By default, the elements of :math:`\gamma` are sampled from
     :math:`\mathcal{U}(0, 1)` and the elements of :math:`\beta` are set to 0.
     The standard-deviation is calculated via the biased estimator, equivalent to
-    `torch.var(input, correction=0)`.
+    ``torch.var(input, correction=0)``.
 
     Also by default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
