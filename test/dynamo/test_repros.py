@@ -7257,6 +7257,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         torch._dynamo.utils.clear_compilation_metrics()
 
+    @requires_gpu
     # https://github.com/pytorch/pytorch/issues/156580
     @serialTest()
     def test_dont_dce_rand(self):
