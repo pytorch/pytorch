@@ -4373,9 +4373,11 @@ class TestAutograd(TestCase):
     def test_inplace_version_error_shows_forward_op_name(self):
         # The error message should refer to the forward op (e.g. "Add"),
         # not the backward node (e.g. "AddBackward0").
+        # Use b * b (not b * 2) so MulBackward saves b and detects the
+        # version mismatch when unpacking.
         a = torch.randn(5, requires_grad=True)
         b = a + 1
-        c = b * 2
+        c = b * b
         with torch.no_grad():
             b += 1
         with self.assertRaisesRegex(RuntimeError, r"output 0 of Add,"):
@@ -4396,7 +4398,7 @@ class TestAutograd(TestCase):
 
         a = torch.randn(5, requires_grad=True)
         b = MyFunc.apply(a)
-        c = b * 2
+        c = b * b
         with torch.no_grad():
             b += 1
         with self.assertRaisesRegex(RuntimeError, r"output 0 of MyFunc,"):
