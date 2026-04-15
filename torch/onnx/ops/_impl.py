@@ -5,7 +5,6 @@ NOTE: Fake implementations:
     for more details on how to create fake kernels.
 """
 
-# flake8: noqa: B950
 import math
 from collections.abc import Callable
 from typing import TypeVar

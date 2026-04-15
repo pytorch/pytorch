@@ -14,6 +14,8 @@ from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config
 from torch._inductor.comm_analysis import estimate_fx_collective_memory_footprint
 from torch._inductor.fx_passes.bucketing import (
+    _default_bucket_mode,
+    _get_collective_node_from_wait,
     _schedulable_wait_node,
     bucket_key,
     BucketMode,
@@ -389,7 +391,7 @@ class OverlapScheduler:
         bucket_exposed_first: bool | None = None,
         enable_fusion_regions: bool = False,
         bucket_only_internode_comms: bool = False,
-        bucket_mode: BucketMode = "default",
+        bucket_mode: BucketMode | None = None,
         max_off_bucket_gb: float | None = 0.5,
         prioritize_bucketing_during_scheduling: bool = True,
     ):
@@ -412,7 +414,7 @@ class OverlapScheduler:
         self.log_final_collectives_estimations = log_final_collectives_estimations
         self.bucket_exposed_first = bucket_exposed_first
         self.bucket_only_internode_comms = bucket_only_internode_comms
-        self.bucket_mode = bucket_mode
+        self.bucket_mode = bucket_mode or _default_bucket_mode()
         self.max_off_bucket_bytes: int | None = (
             gb_to_bytes(max_off_bucket_gb) if max_off_bucket_gb is not None else None
         )
@@ -652,11 +654,17 @@ class OverlapScheduler:
 
         for node in self.nodes:
             if _schedulable_wait_node(node):
-                start = node.args[0]
+                start = _get_collective_node_from_wait(node)
+                assert start is not None
                 assert start in self.node_estimations, (
                     f"Missing estimation for collective {start.name}. "
                     f"Ensure custom_runtime_estimation returns a value for this node."
                 )
+                self.wait_to_start[node] = start
+                # For coalesced collectives, multiple waits share the same
+                # start node. Only register the first wait as the representative.
+                if start in self.collective_info:
+                    continue
                 coll_time_ms = self.node_estimations[start]
 
                 info = CollectiveInfo(
@@ -667,7 +675,6 @@ class OverlapScheduler:
                     exposed_time_ms=coll_time_ms,  # Initially fully exposed
                 )
                 self.collective_info[start] = info
-                self.wait_to_start[node] = start
                 self.unscheduled_collectives.add(start)
                 self.all_pgs.add(get_group_name(start))
 
@@ -1181,7 +1188,11 @@ class OverlapScheduler:
         """Handle scheduling a wait."""
         assert node in self.wait_to_start
         coll_start = self.wait_to_start[node]
-        assert coll_start in self.in_flight
+        # For coalesced collectives, multiple waits share the same start node.
+        # The first wait completes the collective; subsequent waits just schedule.
+        if coll_start not in self.in_flight:
+            self._schedule(node)
+            return
 
         # Scheduling a wait of a collective also forces the wait
         # of every node enqueued prior to the collective on the
@@ -1627,7 +1638,10 @@ def gather_node_runtime_estimations(
     collective_nodes: list[fx.Node] = []
     for node in nodes:
         if _schedulable_wait_node(node):
-            start = node.args[0]
+            start = _get_collective_node_from_wait(node)
+            assert start is not None
+            if start in estimations:
+                continue
             estimations[start] = estimate_collective_time(
                 start,
                 custom_runtime_estimation=custom_runtime_estimation,
@@ -1740,7 +1754,7 @@ def schedule_overlap_bucketing(
     bucket_only_internode_comms=False,
     prioritize_bucketing_during_scheduling: bool = True,
     max_off_bucket_gb: float | None = 0.5,
-    bucket_mode: BucketMode = "default",
+    bucket_mode: BucketMode | None = None,
 ) -> torch.fx.GraphModule:
     """Schedule nodes to maximize compute-collective overlap.
 
@@ -1767,6 +1781,7 @@ def schedule_overlap_bucketing(
         max_memory_increase_ratio: Maximum increase as ratio of baseline peak memory. If None, no ratio limit.
             Uses minimum of absolute and ratio limits when both are specified.
         enable_fusion_regions: Enable fusion region detection and cost estimation for fusible ops.
+        bucket_mode: Bucketing mode for grouping collectives.
     """
     if not any(is_wait_tensor(n) for n in gm.graph.nodes):
         return gm

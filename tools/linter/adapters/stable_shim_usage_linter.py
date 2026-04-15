@@ -82,7 +82,7 @@ def get_shim_functions(
     functions: dict[str, tuple[int, int]] = {}
 
     # Match function declarations like: AOTI_TORCH_EXPORT ... function_name(
-    function_pattern = re.compile(r"AOTI_TORCH_EXPORT\s+\w+\s+(\w+)\s*\(")
+    function_pattern = re.compile(r"AOTI_TORCH_EXPORT.+?(\w+)\s*\(")
     # Also match typedef function pointers
     typedef_pattern = re.compile(r"typedef\s+.*\(\*(\w+)\)")
     # Match using declarations like: using TypeName = ...

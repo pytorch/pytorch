@@ -572,6 +572,15 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         input_tensor_meta: TensorMeta | list[TensorMeta] = TensorMeta.from_irnodes(
             self.input_nodes
         )
+        # When input_reorder is set (e.g. [2, 0, 1] for addmm), the kernel
+        # function signature is reordered (e.g. from [X, W, Bias] to
+        # [Bias, X, W]).  input_tensor_meta must follow the same order
+        # because subprocess benchmarking creates tensors from this metadata
+        # and passes them positionally to the compiled kernel.  Without this
+        # reorder the kernel receives mismatched pointers/strides, causing
+        # out-of-bounds GPU memory access for large shapes.
+        if self.input_reorder is not None and isinstance(input_tensor_meta, list):
+            input_tensor_meta = [input_tensor_meta[idx] for idx in self.input_reorder]
         output_tensor_meta: TensorMeta | list[TensorMeta] = TensorMeta.from_irnodes(
             self.output_node
         )
@@ -1141,10 +1150,11 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             "op argument is required and has to be an instance of GemmOperation"
         )
 
-        if epilogue_nodes and not self._has_tma_epilogue(op):
-            raise NotImplementedError(
-                "Non-TMA epilogue visitor tree is not supported in Cutlass."
-            )
+        if epilogue_nodes:
+            if self.device_type == "cuda" and not self._has_tma_epilogue(op):
+                raise NotImplementedError(
+                    "Non-TMA epilogue visitor tree is not supported in NV-Cutlass."
+                )
 
         assert len(self.input_nodes) >= 2 and self.output_node is not None
         X, W = self.input_nodes[0], self.input_nodes[1]
@@ -1436,7 +1446,9 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         return result
 
     @staticmethod
-    def supports_epilogue_fusion(op: GemmOperation) -> bool:
+    def supports_epilogue_fusion(op: GemmOperation, device_type: str) -> bool:
+        if device_type == "xpu":
+            return True
         return CUTLASS3xGemmTemplate._has_tma_epilogue(op)
 
     def _are_inputs_layout_compatible(self, layouts: list[Layout]) -> bool:
@@ -1550,6 +1562,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             {k: name_to_buffer[v] for k, v in var_name_to_buffer_name.items()},  # type: ignore[arg-type,misc]
             V.graph.sizevars.guarding_hint_or_throw,
             kernel_schedule=op.kernel_schedule,
+            device_type=self.device_type,
         )
 
         return (

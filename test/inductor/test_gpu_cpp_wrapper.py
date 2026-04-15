@@ -202,9 +202,54 @@ class TestGpuWrapper(InductorTestCase):
                     f"{name} got XBLOCK={xblock}, expected {DEFAULT_COMBO_BLOCK_SIZE_1D}",
                 )
 
+    def test_cudagraph_no_partition(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        def test_fn(x, s):
+            return (x + s).sum()
+
+        x = torch.randn(4, device=self.device)
+        s = 3
+        expected = test_fn(x, s)
+
+        comp = torch.compile(
+            options={
+                "cpp_wrapper": True,
+                "triton.cudagraphs": True,
+                "graph_partition": False,
+            }
+        )(test_fn)
+        for i in range(3):
+            res = comp(x, s)
+            self.assertEqual(res, expected)
+
+    def test_many_args_fold_expression_nesting(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        num_params = 130
+        params = [torch.randn(64, device=self.device) for _ in range(num_params)]
+        grads = [torch.randn_like(p) for p in params]
+        expected = [p.clone() + (-0.1) * g for p, g in zip(params, grads)]
+
+        @torch.compile(
+            options={
+                "cpp_wrapper": True,
+                "combo_kernels": True,
+                "combo_kernel_max_num_args": 1000,
+            }
+        )
+        def fn(params, grads):
+            torch._foreach_add_(params, grads, alpha=-0.1)
+
+        fn(params, grads)
+
+        for p, e in zip(params, expected):
+            self.assertEqual(p, e)
+
 
 instantiate_parametrized_tests(TestGpuWrapper)
-
 
 # Helper script for test_lazy_compile_kernel_name_collision_across_modules.
 # Run as a subprocess so dlopen truly re-runs .so static initializers.

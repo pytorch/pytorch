@@ -261,7 +261,8 @@ class ListTests(TupleTests):
         p = self.thetype("abcd")
         self.assertEqual(p.pop(), "d")
         self.assertEqual(p.pop(1), "b")
-        self.assertRaises(IndexError, p.pop, 10)
+        # The length of p is now 2, valid indices are 0, 1
+        self.assertRaises(IndexError, p.pop, 2)
 
         # Wrong number of arguments
         self.assertRaises(TypeError, p.pop, 2, 3)

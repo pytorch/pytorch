@@ -60,6 +60,7 @@ runs:
         # --depth=1 for speed, manually fetch history and other refs as necessary
         fetch-depth: ${{ inputs.fetch-depth }}
         single-branch: true
+        fetch-tags: ${{ github.ref_type == 'tag' }}
         submodules: ${{ inputs.submodules }}
         show-progress: false
         filter: ${{ env.filter }}
@@ -107,6 +108,7 @@ runs:
         ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         fetch-depth: ${{ inputs.fetch-depth }}
         single-branch: true
+        fetch-tags: ${{ github.ref_type == 'tag' }}
         submodules: ${{ inputs.submodules }}
         show-progress: false
         filter: ${{ env.filter }}

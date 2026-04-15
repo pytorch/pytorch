@@ -5,7 +5,7 @@ import warnings
 from collections.abc import Callable
 from typing import Any, TypeVar
 
-from .triton_compat import (  # noqa: F401
+from .triton_compat import (
     _log2,
     builtins_use_semantic_kwarg,
     JITFunction,

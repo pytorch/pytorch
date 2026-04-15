@@ -29,7 +29,7 @@ from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, is_constant_source, is_from_local_source
 from ..utils import cmp_name_to_op_mapping, istype, raise_args_mismatch
 from .base import ValueMutationNew, VariableTracker
-from .constant import CONSTANT_VARIABLE_FALSE, CONSTANT_VARIABLE_NONE, ConstantVariable
+from .constant import ConstantVariable
 from .hashable import HashableTracker, is_hashable, raise_unhashable
 
 
@@ -103,7 +103,7 @@ class SetVariable(VariableTracker):
     @staticmethod
     def _default_value() -> VariableTracker:
         # Variable to fill in the keys of the dictionary
-        return CONSTANT_VARIABLE_NONE
+        return ConstantVariable.create(None)
 
     def as_proxy(self) -> Any:
         return {k.vt.as_proxy() for k in self.set_items}
@@ -238,7 +238,7 @@ class SetVariable(VariableTracker):
             tx.output.side_effects.mutation(self)
             self.items.clear()
             self.items.update(temp_set_vt.items)  # type: ignore[attr-defined]
-            return CONSTANT_VARIABLE_NONE
+            return ConstantVariable.create(None)
         elif name == "add":
             if kwargs or len(args) != 1:
                 raise_args_mismatch(
@@ -252,7 +252,7 @@ class SetVariable(VariableTracker):
                 raise_unhashable(args[0], tx)
             tx.output.side_effects.mutation(self)
             self.items[HashableTracker(args[0])] = SetVariable._default_value()
-            return CONSTANT_VARIABLE_NONE
+            return ConstantVariable.create(None)
         elif name == "pop":
             if kwargs or args:
                 raise_args_mismatch(
@@ -366,7 +366,7 @@ class SetVariable(VariableTracker):
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             self.items.pop(HashableTracker(args[0]))
-            return CONSTANT_VARIABLE_NONE
+            return ConstantVariable.create(None)
         elif name == "discard":
             if kwargs or len(args) != 1:
                 raise_args_mismatch(
@@ -379,7 +379,7 @@ class SetVariable(VariableTracker):
                 self.should_reconstruct_all = True
                 tx.output.side_effects.mutation(self)
                 self.items.pop(HashableTracker(args[0]))
-            return CONSTANT_VARIABLE_NONE
+            return ConstantVariable.create(None)
         elif name in ("issubset", "issuperset"):
             if len(args) != 1:
                 raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
@@ -480,7 +480,7 @@ class SetVariable(VariableTracker):
                     DictKeysVariable,
                 ),
             ):
-                return CONSTANT_VARIABLE_FALSE
+                return ConstantVariable.create(False)
             r = self.call_method(tx, "symmetric_difference", args, kwargs)
             return VariableTracker.build(tx, len(r.set_items) == 0)  # type: ignore[attr-defined]
         elif name == "__ne__":
@@ -545,7 +545,7 @@ class SetVariable(VariableTracker):
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             self.items.clear()
-            return CONSTANT_VARIABLE_NONE
+            return ConstantVariable.create(None)
         elif name == "__iter__":
             from .lists import ListIteratorVariable
 
@@ -583,7 +583,9 @@ class OrderedSetClassVariable(VariableTracker):
                 attr_source = AttrSource(self.source, name)
             else:
                 attr_source = None
-            return GetAttrVariable(self, name, source=attr_source)
+            return GetAttrVariable(
+                self, name, py_type=type(getattr(OrderedSet, name)), source=attr_source
+            )
         else:
             return super().var_getattr(tx, name)
 
@@ -723,7 +725,7 @@ class FrozensetVariable(SetVariable):
             raise RuntimeError(f"Illegal call_method {name} on a frozenset")
         elif name == "__init__":
             # frozenset is immutable. Calling __init__ again shouldn't have any effect
-            return CONSTANT_VARIABLE_NONE
+            return ConstantVariable.create(None)
         elif name in (
             "copy",
             "difference",

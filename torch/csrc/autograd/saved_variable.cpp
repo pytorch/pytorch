@@ -180,7 +180,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
       }
       if (grad_fn) {
         message << ", which is output " << output_nr_ << " of "
-                << grad_fn->name() << ',';
+                << grad_fn->forward_op_name() << ',';
       }
       message << " is at version " << current_version << "; expected version "
               << saved_version_ << " instead.";

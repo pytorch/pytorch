@@ -5386,7 +5386,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         hint_override=self.hint_override,
                     )
                     result.writeline(
-                        f"{var_name} = rand_strided({size}, {stride}, device='{buf.get_device()}', dtype={buf.get_dtype()})"  # noqa: B950 line too long
+                        f"{var_name} = rand_strided({size}, {stride}, device='{buf.get_device()}', dtype={buf.get_dtype()})"
                     )
                 elif arg_name in V.graph.constants:
                     # note that random seed is put in V.graph.constants
@@ -5400,7 +5400,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         hint_override=self.hint_override,
                     )
                     result.writeline(
-                        f"{var_name} = rand_strided({size}, {stride}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]  # noqa: B950 line too long
+                        f"{var_name} = rand_strided({size}, {stride}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]
                     )
                 elif isinstance(arg_sig, SizeArg):
                     symval_hint = V.graph.sizevars.optimization_hint_with_override(
@@ -5466,7 +5466,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             result.writeline("args = get_args()")
             result.writeline(
-                f"ms = benchmarker.benchmark(lambda: call(args), device='{V.graph.get_current_device_or_throw().type}', rep=40)"  # noqa: B950 line too long
+                f"ms = benchmarker.benchmark(lambda: call(args), device='{V.graph.get_current_device_or_throw().type}', rep=40)"
             )
             result.writeline(f"num_gb = {num_gb}")
             result.writeline("gb_per_s = num_gb / (ms / 1e3)")
@@ -6353,7 +6353,11 @@ class FusedUserDefinedTritonKernel(TritonKernel):
             )
             return result_var
         else:
-            return super().load(name, index)
+            # The scheduler should prevent this.
+            raise AssertionError(
+                f"Epilogue attempted to load from '{name}'. "
+                "Inductor indexing variables are not defined in user kernel scope. "
+            )
 
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
@@ -6655,7 +6659,7 @@ class TritonScheduling(SIMDScheduling):
             except Exception as e:
                 if config.triton.disallow_failing_autotune_kernels_TESTING_ONLY:
                     raise
-                log.debug(  # noqa: G200
+                log.debug(
                     "Exception (%s) in compiling fused nodes %s",
                     e,
                     node_names,

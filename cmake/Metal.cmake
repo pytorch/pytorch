@@ -45,6 +45,13 @@ set(BFLOAT_METAL_CODE "
     ptr[idx] += 1;
   }
 ")
+set(LAMBDA_METAL_CODE "
+  kernel void test(device float* ptr,
+                   uint idx [[thread_position_in_grid]]) {
+    auto fn = [](float x) { return x + 1.0; };
+    ptr[idx] = fn(ptr[idx]);
+  }
+")
 if(NOT CAN_COMPILE_METAL_FOUND)
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/bfloat_inc.metal" "${BFLOAT_METAL_CODE}")
     execute_process(COMMAND xcrun metal -std=metal3.1 bfloat_inc.metal
@@ -58,6 +65,23 @@ if(NOT CAN_COMPILE_METAL_FOUND)
     else()
         message(WARNING "Machine can not compile metal shaders, fails with ${XCRUN_OUTPUT}")
         set(CAN_COMPILE_METAL NO CACHE BOOL "Host can compile metal shaders")
+    endif()
+    if(CAN_COMPILE_METAL)
+        file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/lambda_test.metal" "${LAMBDA_METAL_CODE}")
+        execute_process(COMMAND xcrun metal -std=metal4.0 -c lambda_test.metal -o /dev/null
+                        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+                        OUTPUT_VARIABLE XCRUN_OUTPUT
+                        ERROR_VARIABLE XCRUN_OUTPUT
+                        RESULT_VARIABLE XCRUN_RC)
+        if(${XCRUN_RC} EQUAL 0)
+            message(STATUS "Metal toolchain supports Metal 4.0")
+            set(CAN_COMPILE_METAL_40 YES CACHE BOOL "Host can compile Metal 4.0 shaders" FORCE)
+        else()
+            message(STATUS "Metal toolchain does not support Metal 4.0")
+            set(CAN_COMPILE_METAL_40 NO CACHE BOOL "Host can compile Metal 4.0 shaders" FORCE)
+        endif()
+    else()
+        set(CAN_COMPILE_METAL_40 NO CACHE BOOL "Host can compile Metal 4.0 shaders" FORCE)
     endif()
     set(CAN_COMPILE_METAL_FOUND YES CACHE INTERNAL "Run check for shader compiler")
 endif()

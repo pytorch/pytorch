@@ -238,6 +238,7 @@ class FSDPParam:
         else:
             self.mesh_info = mesh_info  # pyrefly: ignore[bad-assignment]
             fsdp_placement = None
+        self._shard_mesh = self._init_shard_mesh()
         if param.device != device and param.device.type != "meta":
             raise AssertionError(
                 f"Expects the parameter to already be moved to device {device} but got {param.device}"
@@ -891,14 +892,17 @@ class FSDPParam:
     def _sharded_local_tensor(self) -> torch.Tensor:
         return cast(DTensor, self.sharded_param)._local_tensor
 
-    @property
-    def shard_mesh(self):
+    def _init_shard_mesh(self) -> DeviceMesh:
         mesh = self.mesh_info.mesh
         if mesh.ndim == 1:
             return mesh
         if mesh.mesh_dim_names is None:
             raise AssertionError("Expected mesh_dim_names to not be None")
         return mesh[mesh.mesh_dim_names[-1]]
+
+    @property
+    def shard_mesh(self):
+        return self._shard_mesh
 
     @property
     def shard_mesh_from_root(self):

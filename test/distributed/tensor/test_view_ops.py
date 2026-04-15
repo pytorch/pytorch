@@ -18,6 +18,7 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._ops._view_ops import (
     _ViewShardingPropagator,
     Broadcast,
@@ -224,6 +225,11 @@ class TestViewOps(DTensorContinuousTestBase):
                     device_mesh,
                     in_shard,
                 )
+                # These are literal _StridedShard placements (simulating
+                # flatten output), not shard-order encodings.  Override the
+                # auto-detection which may incorrectly set the flag to True
+                # when split_factor happens to match a mesh dim size.
+                in_dt._spec.use_strided_shard_as_shard_order = False
             else:
                 in_dt = distribute_tensor(args[0], device_mesh, in_shard)
 
@@ -1634,7 +1640,8 @@ class TestViewOps(DTensorContinuousTestBase):
                             if expect_error:
                                 with self.assertRaisesRegex(
                                     RuntimeError,
-                                    "is not evenly divisible by mesh dimension",
+                                    "is not evenly divisible by mesh dimension|"
+                                    "do not support inputs with use_strided_shard_as_shard_order",
                                 ):
                                     self._test_dtensor_unflatten_factors(
                                         factors,
@@ -1695,6 +1702,12 @@ class TestViewOps(DTensorContinuousTestBase):
         nelem = math.prod(tensor_dims_flatten)
         global_inps = torch.arange(nelem).view(tensor_dims_flatten)
         inps = distribute_tensor(global_inps, mesh, placements, src_data_rank=None)
+        # These _StridedShard placements represent literal strided layout
+        # (as produced by flatten), not shard-order encoding.
+        inps._spec.use_strided_shard_as_shard_order = False
+        inps._spec.shard_order = DTensorSpec.compute_default_shard_order(
+            inps._spec.placements
+        )
 
         comm_mode = CommDebugMode()
         with comm_mode:
@@ -2872,6 +2885,104 @@ class TestViewOps(DTensorContinuousTestBase):
         # int == InputDim also raises (catches the original bug: `shard.dim == in_dim`)
         with self.assertRaisesRegex(TypeError, "Did you mean to use .input_dim"):
             _ = 0 == dim
+
+    def _assert_strided_shard_flag(self, dt, expected_flag):
+        """Assert use_strided_shard_as_shard_order matches expected_flag."""
+        self.assertEqual(dt._spec.use_strided_shard_as_shard_order, expected_flag)
+
+    def test_strided_shard_propagates_through_chained_ops(self):
+        """Verify use_strided_shard_as_shard_order=False propagates through
+        chained pointwise ops after flatten produces _StridedShard."""
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        torch.manual_seed(42)
+        B, num_heads, S, head_dim = 2, 6, 4, 8
+        full = torch.randn(B, num_heads, S, head_dim, device=self.device_type)
+        dt = distribute_tensor(full, mesh, [Shard(1)])
+
+        # flatten(0,1): Shard(1) on non-first flatten dim -> _StridedShard(0)
+        flat = dt.flatten(0, 1)
+        self.assertIsInstance(flat.placements[0], _StridedShard)
+        self._assert_strided_shard_flag(flat, False)
+
+        # Chain several pointwise ops and verify flag propagates
+        activated = flat.relu()
+        self._assert_strided_shard_flag(activated, False)
+
+        added = activated + 1.0
+        self._assert_strided_shard_flag(added, False)
+
+        scaled = added * 0.5
+        self._assert_strided_shard_flag(scaled, False)
+
+        result = scaled.abs()
+        self._assert_strided_shard_flag(result, False)
+
+        # full_tensor triggers _StridedShard -> Replicate redistribution
+        expected = full.flatten(0, 1).relu().add(1.0).mul(0.5).abs()
+        self.assertEqual(result.full_tensor(), expected)
+
+    def test_strided_shard_propagates_through_reduction(self):
+        """Verify use_strided_shard_as_shard_order=False propagates through
+        reduction ops that don't reduce the _StridedShard dim."""
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        torch.manual_seed(42)
+        # shape: (2, 6, 4, 8), shard on dim 1
+        B, num_heads, S, head_dim = 2, 6, 4, 8
+        full = torch.randn(B, num_heads, S, head_dim, device=self.device_type)
+        dt = distribute_tensor(full, mesh, [Shard(1)])
+
+        # flatten(0,1) -> (12, 4, 8) with _StridedShard(0)
+        flat = dt.flatten(0, 1)
+        self.assertIsInstance(flat.placements[0], _StridedShard)
+        self._assert_strided_shard_flag(flat, False)
+
+        # sum over dim -1 (head_dim), which is not the strided shard dim
+        reduced = flat.sum(dim=-1)
+        self._assert_strided_shard_flag(reduced, False)
+
+        expected = full.flatten(0, 1).sum(dim=-1)
+        self.assertEqual(reduced.full_tensor(), expected)
+
+    def test_strided_shard_propagates_through_matmul(self):
+        """Verify use_strided_shard_as_shard_order=False propagates when a
+        _StridedShard tensor participates in matmul."""
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        torch.manual_seed(42)
+        B, num_heads, S, head_dim = 2, 6, 4, 8
+        full = torch.randn(B, num_heads, S, head_dim, device=self.device_type)
+        dt = distribute_tensor(full, mesh, [Shard(1)])
+
+        # flatten(0,1) -> (12, 4, 8) with _StridedShard(0)
+        flat = dt.flatten(0, 1)
+        self.assertIsInstance(flat.placements[0], _StridedShard)
+        self._assert_strided_shard_flag(flat, False)
+
+        # matmul with a replicated weight: (12, 4, 8) @ (8, 16) -> (12, 4, 16)
+        weight = torch.randn(head_dim, 16, device=self.device_type)
+        weight_dt = distribute_tensor(weight, mesh, [Replicate()])
+        result = torch.matmul(flat, weight_dt)
+        self._assert_strided_shard_flag(result, False)
+
+        expected = torch.matmul(full.flatten(0, 1), weight)
+        self.assertEqual(result.full_tensor(), expected)
+
+    def test_strided_shard_propagates_2d_mesh(self):
+        """Verify use_strided_shard_as_shard_order=False propagates on a 2D mesh."""
+        mesh = init_device_mesh(self.device_type, (self.world_size // 2, 2))
+        torch.manual_seed(42)
+        # shape: (3, 4, 8), shard dim 0 on mesh dim 0, replicate on mesh dim 1
+        full = torch.randn(3, 4, 8, device=self.device_type)
+        dt = distribute_tensor(full, mesh, [Shard(0), Replicate()])
+
+        # flatten(0,1) -> (12, 8); Shard(0) stays Shard(0), Replicate stays
+        flat = dt.flatten(0, 1)
+        self._assert_strided_shard_flag(flat, False)
+
+        result = flat.relu()
+        self._assert_strided_shard_flag(result, False)
+
+        expected = full.flatten(0, 1).relu()
+        self.assertEqual(result.full_tensor(), expected)
 
 
 TestViewOpsWithLocalTensor = create_local_tensor_test_class(

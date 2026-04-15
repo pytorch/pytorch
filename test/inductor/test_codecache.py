@@ -2055,6 +2055,45 @@ class TestStandaloneCompile(TestCase):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
+    @parametrize("donate", (False, True))
+    def test_donate_graph_module(self, donate: bool) -> None:
+        mod = torch.nn.Linear(1, 3)
+        x = torch.randn(4, 1)
+
+        def f(x):
+            with torch.no_grad():
+                return mod(x)
+
+        eager_out = f(x)
+
+        with fresh_cache():
+            gm, args, kwargs = self.capture(f)(x)
+            if kwargs:
+                raise AssertionError
+
+            # compile_fx mutates the graph module (e.g. adds
+            # mutation_region_id to node metadata). Use this as a
+            # fingerprint to detect mutation.
+            def has_mutation_region_ids(gm):
+                return any("mutation_region_id" in n.meta for n in gm.graph.nodes)
+
+            before = has_mutation_region_ids(gm)
+
+            compiled_artifact = torch._inductor.standalone_compile(
+                gm, args, donate_graph_module=donate
+            )
+            compiled_out = compiled_artifact(*args)
+            self.assertEqual(eager_out, compiled_out[0])
+
+            after = has_mutation_region_ids(gm)
+            if donate:
+                self.assertNotEqual(before, after)
+            else:
+                self.assertEqual(before, after)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": True})
     def test_save_in_new_path(self) -> None:
         mod = torch.nn.Linear(1, 3)
         x = torch.randn(4, 1)
@@ -2729,6 +2768,70 @@ class TestFxGraphCacheHashing(TestCase):
             pickler.dumps(details1),
             pickler.dumps(details3),
         )
+
+    def test_hash_provenance_tracking_level(self):
+        """
+        Test that provenance_tracking_level affects hashes.
+        """
+        with config.patch({"trace.provenance_tracking_level": 0}):
+            details1 = FxGraphHashDetails(None, [], {}, [])
+            details2 = FxGraphHashDetails(None, [], {}, [])
+
+        with config.patch({"trace.provenance_tracking_level": 1}):
+            details3 = FxGraphHashDetails(None, [], {}, [])
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+
+        self.assertEqual(
+            pickler.dumps(details1),
+            pickler.dumps(details2),
+        )
+        self.assertNotEqual(
+            pickler.dumps(details1),
+            pickler.dumps(details3),
+        )
+
+    def test_provenance_tracking_level_causes_cache_miss(self):
+        """
+        Test that changing provenance_tracking_level causes a cache miss.
+        """
+
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 4))
+
+            def forward(self, x):
+                return x @ self.param
+
+        mod = Mod()
+        mod_compiled = torch.compile(mod)
+        with torch.no_grad():
+            x = torch.rand(4, 4)
+            with config.patch({"trace.provenance_tracking_level": 0}):
+                # miss
+                mod_compiled(x)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+                # hit
+                torch._dynamo.reset()
+                mod_compiled(x)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+                torch._dynamo.reset()
+                counters.clear()
+
+            with config.patch({"trace.provenance_tracking_level": 1}):
+                # miss (provenance_tracking_level changed)
+                mod_compiled(x)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+                torch._dynamo.reset()
+                counters.clear()
 
     def test_non_serializable_custom_passes_causes_cache_miss(self):
         class Mod(torch.nn.Module):

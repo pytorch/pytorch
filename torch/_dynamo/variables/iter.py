@@ -277,7 +277,7 @@ class IteratorVariable(VariableTracker):
         self, tx: "InstructionTranslator", name: str
     ) -> "ConstantVariable":
         if name == "__iter__" or name == "__next__":
-            return variables.CONSTANT_VARIABLE_TRUE
+            return variables.ConstantVariable.create(True)
         return super().call_obj_hasattr(tx, name)
 
     def call_method(
@@ -331,6 +331,9 @@ class RepeatIteratorVariable(IteratorVariable):
         super().__init__(**kwargs)
         self.item = item
 
+    def python_type(self) -> type:
+        return itertools.repeat
+
     # Repeat needs no mutation, clone self
     def next_variable(self, tx: "InstructionTranslator") -> VariableTracker:
         return self.item
@@ -355,6 +358,9 @@ class CountIteratorVariable(IteratorVariable):
         "advance_count",
         *IteratorVariable._nonvar_fields,
     }
+
+    def python_type(self) -> type:
+        return itertools.count
 
     def __init__(
         self,

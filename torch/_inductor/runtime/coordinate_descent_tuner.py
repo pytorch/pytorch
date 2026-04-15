@@ -279,7 +279,7 @@ class CoordescTuner:
         try:
             candidate_timing = self.call_func(func, candidate_config)
         except Exception as e:
-            log.debug("Got exception %s", e)  # noqa: G200
+            log.debug("Got exception %s", e)
             return False, float("inf")
 
         if self.has_improvement(best_timing, candidate_timing):

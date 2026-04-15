@@ -2,6 +2,8 @@
 # ruff: noqa: F841
 
 import contextlib
+import ctypes
+import ctypes.util
 import math
 import random
 import unittest
@@ -35,7 +37,7 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     skipIfNoLapack, skipIfRocm, MI300_ARCH, skipIfRocmArch, \
     TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, \
     download_file, get_function_arglist, load_tests, skipIfMPS, \
-    IS_PPC, IS_ARM64, IS_CPU_CAPABILITY_SVE256, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
+    IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE256, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
@@ -6982,6 +6984,77 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     for is_channels_last in (True, False):
                         helper(size, dtype, mode, device, is_channels_last)
 
+
+    @unittest.skipIf(IS_WINDOWS, "requires mmap/mprotect")
+    @unittest.skipUnless(TEST_NUMPY, "requires numpy")
+    def test_interpolate_uint8_overread(self):
+        # Regression test for vectorized resize overreads (NEON vld3_u8 and
+        # similar AVX2 paths). The vectorized block-of-4/8 loops may load
+        # more bytes than needed; on the last row this can read past the
+        # buffer. We detect this by placing tensor data right before an
+        # unmapped guard page so any overread triggers SIGBUS/SIGSEGV.
+
+        page_size = os.sysconf("SC_PAGE_SIZE")
+        libc = ctypes.CDLL(ctypes.util.find_library("c"))
+        libc.mmap.restype = ctypes.c_void_p
+        libc.mmap.argtypes = [
+            ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int,
+            ctypes.c_int, ctypes.c_int, ctypes.c_longlong,
+        ]
+        libc.mprotect.restype = ctypes.c_int
+        libc.mprotect.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int]
+        libc.munmap.restype = ctypes.c_int
+        libc.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+
+        MAP_PRIVATE = 0x02
+        MAP_ANON = 0x1000 if IS_MACOS else 0x20
+        PROT_RW = 0x01 | 0x02
+        PROT_NONE = 0x00
+
+        for num_channels in (3, 4):  # 3ch → NEON on aarch64, 4ch → AVX2 on x86
+            for mode in ("bilinear", "bicubic"):
+                for w_in in range(4, 60):
+                    for w_out in [1, 2, 3]:
+                        h_in = 1
+                        tensor_bytes = h_in * w_in * num_channels
+                        num_data_pages = (tensor_bytes + page_size - 1) // page_size
+                        total_pages = num_data_pages + 1
+                        total_size = total_pages * page_size
+
+                        addr = libc.mmap(0, total_size, PROT_RW,
+                                         MAP_PRIVATE | MAP_ANON, -1, 0)
+                        self.assertTrue(
+                            addr not in (0, 2**64 - 1, -1), "mmap failed"
+                        )
+
+                        guard_start = addr + num_data_pages * page_size
+                        libc.mprotect(guard_start, page_size, PROT_NONE)
+
+                        data_start = guard_start - tensor_bytes
+                        ArrayType = ctypes.c_uint8 * tensor_bytes
+                        c_arr = ArrayType.from_address(data_start)
+                        np_arr = np.frombuffer(c_arr, dtype=np.uint8)
+                        np_arr[:] = 128
+
+                        flat = torch.from_numpy(np_arr)
+                        # channels-last strides: (H*W*C, 1, W*C, C)
+                        t = flat.as_strided(
+                            size=[1, num_channels, h_in, w_in],
+                            stride=[
+                                h_in * w_in * num_channels,
+                                1,
+                                w_in * num_channels,
+                                num_channels,
+                            ],
+                        )
+
+                        # Overread past the guard page will SIGBUS/SIGSEGV
+                        F.interpolate(
+                            t, size=(h_in, w_out), mode=mode,
+                            antialias=True, align_corners=False,
+                        )
+
+                        libc.munmap(addr, total_size)
 
     @set_default_dtype(torch.double)
     def test_interpolate(self):

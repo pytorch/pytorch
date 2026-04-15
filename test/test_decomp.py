@@ -1327,6 +1327,27 @@ class DecompOneOffTests(TestCase):
             in generated_codes[1]
         )
 
+    @onlyCUDA
+    @skipIfCrossRef
+    def test_addmm_out_dtype_decomp(self, device):
+        cases = [
+            {"beta": 1, "alpha": 1},
+            {"beta": 0, "alpha": 1},
+            {"beta": 2, "alpha": 3},
+        ]
+        for kwargs in cases:
+            a = torch.randn(4, 8, dtype=torch.bfloat16, device=device)
+            b = torch.randn(8, 4, dtype=torch.bfloat16, device=device)
+            c = torch.randn(4, 4, dtype=torch.float32, device=device)
+
+            ref = torch.ops.aten.addmm.dtype(c, a, b, torch.float32, **kwargs)
+            res = torch._decomp.decompositions.addmm_dtype(
+                c, a, b, out_dtype=torch.float32, **kwargs
+            )
+
+            self.assertEqual(res.dtype, torch.float32)
+            self.assertEqual(res, ref)
+
 
 instantiate_device_type_tests(DecompOneOffTests, globals())
 

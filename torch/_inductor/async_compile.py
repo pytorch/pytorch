@@ -237,6 +237,7 @@ class AsyncCompile:
     """
 
     _ready_future: Future[Any] | None = None
+    _metal_sources: list[tuple[str, str, list[str]]] | None = None
 
     def __init__(self) -> None:
         pass
@@ -702,6 +703,12 @@ class AsyncCompile:
             future = self.submit(task)
             return LambdaFuture(lambda: future.result())
 
+    def metal(self, kernel_name: str, source: str, headers: list[str]) -> None:
+        """Register a Metal kernel body; wait() compiles all registered kernels into one library."""
+        if self._metal_sources is None:
+            self._metal_sources = []
+        self._metal_sources.append((kernel_name, source, headers))
+
     def wait(self, scope: dict[str, Any]) -> None:
         if get_compile_threads() > 1:
             with dynamo_timed(
@@ -712,6 +719,12 @@ class AsyncCompile:
                 waitcounter_name_override="compile_triton",
             ):
                 self._wait_futures(scope)
+
+        if self._metal_sources:
+            from torch._inductor.runtime.runtime_utils import compile_mps_shaders
+
+            scope.update(compile_mps_shaders(self._metal_sources))
+            self._metal_sources.clear()
 
         _compile_end()
 

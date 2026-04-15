@@ -118,9 +118,8 @@ ViewInfo ViewInfo::chain(
             "Attempted to chain views when the parent view has no view_func() and "
             "does not support as_strided(). This is not supported.";
         view_func = std::make_unique<ErroringViewFunc>(error_msg);
-        rev_view_func = [=](const at::Tensor& root_view) {
+        rev_view_func = [=](const at::Tensor& root_view) -> at::Tensor {
           TORCH_CHECK(false, error_msg);
-          return root_view;
         };
       }
     }
@@ -788,7 +787,7 @@ void handle_view_on_rebase(
             "Output ",
             diff_view_meta->output_nr_,
             " of ",
-            grad_fn->name(),
+            grad_fn->forward_op_name(),
             " is a view of a view which was created in");
       } else {
         prefix = "A view was created in";
@@ -815,7 +814,7 @@ void handle_view_on_rebase(
           "Output ",
           diff_view_meta->output_nr_,
           " of ",
-          grad_fn->name(),
+          grad_fn->forward_op_name(),
           " is a view and ",
           modified_obj,
           " modified inplace.");

@@ -76,6 +76,17 @@ aten_baddbmm = ExternKernelChoice(
 )
 
 
+def _has_broadcast_batch_dim(mat1, mat2):
+    """Check if either input has a broadcast batch dimension (stride=0).
+
+    The Triton bmm template can trigger CUDA IMA during autotuning with
+    stride-0 inputs; the aten bmm fallback handles broadcast correctly.
+    """
+    return V.graph.sizevars.statically_known_equals(
+        mat1.get_stride()[0], 0
+    ) or V.graph.sizevars.statically_known_equals(mat2.get_stride()[0], 0)
+
+
 @L.register_lowering(aten.bmm)
 def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     """
@@ -187,7 +198,8 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         kwarg_overrides[aten_handler.uid] = aten_extra_kwargs
 
     if use_triton_template(layout, check_max_autotune=False):
-        templates_to_use.append(bmm_template)
+        if not _has_broadcast_batch_dim(mat1, mat2):
+            templates_to_use.append(bmm_template)
 
     # Single unified call for all templates
     choices.extend(
@@ -283,7 +295,8 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         templates_to_use.append(aten_baddbmm)
 
     if use_triton_template(layout, check_max_autotune=False):
-        templates_to_use.append(bmm_template)
+        if not _has_broadcast_batch_dim(mat1, mat2):
+            templates_to_use.append(bmm_template)
 
     # Single unified call for all templates
     choices.extend(

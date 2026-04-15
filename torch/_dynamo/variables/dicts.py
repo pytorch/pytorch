@@ -55,12 +55,7 @@ from .base import (
     ValueMutationNew,
     VariableTracker,
 )
-from .constant import (
-    CONSTANT_VARIABLE_FALSE,
-    CONSTANT_VARIABLE_NONE,
-    CONSTANT_VARIABLE_TRUE,
-    ConstantVariable,
-)
+from .constant import ConstantVariable
 from .hashable import HashableTracker, is_hashable, raise_unhashable
 from .sets import SetVariable
 
@@ -368,14 +363,7 @@ class ConstDictVariable(VariableTracker):
     ) -> VariableTracker:
         key = HashableTracker(arg)
         if key not in self.items:
-            try:
-                error_message = (
-                    f"Dict key lookup failed for {str(arg)}. "
-                    f"Debug representation of the key is {arg.debug_repr()!r}"
-                )
-            except Exception:
-                error_message = f"Dict key lookup failed for {str(arg)}"
-            raise_observed_exception(KeyError, tx, args=[error_message])
+            raise_observed_exception(KeyError, tx, args=[arg])
         return self.items[key]
 
     def getitem_const(
@@ -456,6 +444,15 @@ class ConstDictVariable(VariableTracker):
             else:
                 self.install_dict_keys_match_guard()
 
+    def mp_subscript_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: VariableTracker,
+    ) -> VariableTracker:
+        # dict_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/dictobject.c#L3673-L3706
+        # Unhashable key check happens inside _HashableTracker (raise_unhashable → TypeError).
+        return self.getitem_const_raise_exception_if_absent(tx, key)
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -481,12 +478,7 @@ class ConstDictVariable(VariableTracker):
             )
             tx.output.side_effects.mutation(self)
             self.items.update(temp_dict_vt.items)  # type: ignore[attr-defined]
-            return CONSTANT_VARIABLE_NONE
-        elif name == "__getitem__":
-            # Key guarding - Nothing to do. LazyVT for value will take care.
-            if len(args) != 1:
-                raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
-            return self.getitem_const_raise_exception_if_absent(tx, args[0])
+            return ConstantVariable.create(None)
         elif name == "items":
             if args or kwargs:
                 raise_args_mismatch(
@@ -547,7 +539,7 @@ class ConstDictVariable(VariableTracker):
                 )
             tx.output.side_effects.mutation(self)
             self.items[Hashable(args[0])] = args[1]
-            return CONSTANT_VARIABLE_NONE
+            return ConstantVariable.create(None)
         elif name == "__delitem__" and self.is_mutable():
             arg_hashable = args and is_hashable(args[0])
             if arg_hashable:
@@ -555,7 +547,7 @@ class ConstDictVariable(VariableTracker):
                 self.should_reconstruct_all = True
                 tx.output.side_effects.mutation(self)
                 self.items.__delitem__(Hashable(args[0]))
-                return CONSTANT_VARIABLE_NONE
+                return ConstantVariable.create(None)
             else:
                 return super().call_method(tx, name, args, kwargs)
         elif name == "get":
@@ -570,7 +562,7 @@ class ConstDictVariable(VariableTracker):
                 self.install_dict_contains_guard(tx, args)
                 if len(args) == 1:
                     # if default is not given, return None
-                    return CONSTANT_VARIABLE_NONE
+                    return ConstantVariable.create(None)
                 return args[1]
             # Key guarding - Nothing to do.
             return self.getitem_const(tx, args[0])
@@ -638,7 +630,7 @@ class ConstDictVariable(VariableTracker):
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             self.items.clear()
-            return CONSTANT_VARIABLE_NONE
+            return ConstantVariable.create(None)
         elif name == "update" and self.is_mutable():
             # In general, this call looks like `a.update(b, x=1, y=2, ...)`.
             # Either `b` or the kwargs is omittable, but not both.
@@ -666,7 +658,7 @@ class ConstDictVariable(VariableTracker):
                         for k, v in kwargs.items()
                     }
                     self.items.update(kwargs_hashable)
-                return CONSTANT_VARIABLE_NONE
+                return ConstantVariable.create(None)
             else:
                 return super().call_method(tx, name, args, kwargs)
         elif name == "__contains__":
@@ -711,7 +703,7 @@ class ConstDictVariable(VariableTracker):
                 return value
             else:
                 if len(args) == 1:
-                    x = CONSTANT_VARIABLE_NONE
+                    x = ConstantVariable.create(None)
                 else:
                     x = args[1]
                 tx.output.side_effects.mutation(self)
@@ -732,7 +724,7 @@ class ConstDictVariable(VariableTracker):
 
             key = Hashable(args[0])
             self.items.move_to_end(key, last=last)
-            return CONSTANT_VARIABLE_NONE
+            return ConstantVariable.create(None)
         elif name == "__eq__" and istype(
             self, ConstDictVariable
         ):  # don't let Set use this function
@@ -848,9 +840,9 @@ class ConstDictVariable(VariableTracker):
             for t in (dict, collections.OrderedDict, collections.defaultdict)
         ):
             if hasattr(self.user_cls, name):
-                return CONSTANT_VARIABLE_TRUE
+                return ConstantVariable.create(True)
             if self.user_cls is dict:
-                return CONSTANT_VARIABLE_FALSE
+                return ConstantVariable.create(False)
 
         msg = f"hasattr on {self.user_cls} is not supported"
         unimplemented(
@@ -922,13 +914,7 @@ class MappingProxyVariable(VariableTracker):
         codegen(self.dv_dict)
         codegen.extend_output(create_call_function(1, False))
 
-    def call_method(
-        self,
-        tx: "InstructionTranslator",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
+    def _check_mutation_guard(self, tx: "InstructionTranslator") -> None:
         if self.source and tx.output.side_effects.has_existing_dict_mutation():
             msg = (
                 "A dict has been modified while we have an existing mappingproxy object. "
@@ -949,6 +935,25 @@ class MappingProxyVariable(VariableTracker):
                     "Or avoid using the mapping proxy objects after modifying its underlying dictionary",
                 ],
             )
+
+    def mp_subscript_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: VariableTracker,
+    ) -> VariableTracker:
+        # mappingproxy_getitem: https://github.com/python/cpython/blob/62a6e898e01/Objects/descrobject.c#L1052-L1056
+        # TODO(follow-up): add tests for invalid key type, missing key
+        self._check_mutation_guard(tx)
+        return self.dv_dict.mp_subscript_impl(tx, key)
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        self._check_mutation_guard(tx)
         return self.dv_dict.call_method(tx, name, args, kwargs)
 
     def mp_length(self, tx: "InstructionTranslator") -> VariableTracker:
@@ -986,7 +991,7 @@ class DefaultDictVariable(ConstDictVariable):
         super().__init__(items, user_cls, **kwargs)
         assert user_cls is collections.defaultdict
         if default_factory is None:
-            default_factory = CONSTANT_VARIABLE_NONE
+            default_factory = ConstantVariable.create(None)
         self.default_factory = default_factory
 
     def is_python_constant(self) -> bool:
@@ -1013,6 +1018,24 @@ class DefaultDictVariable(ConstDictVariable):
             ),
         ) or (isinstance(arg, variables.ConstantVariable) and arg.value is None)
 
+    def mp_subscript_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: VariableTracker,
+    ) -> VariableTracker:
+        # Mirrors CPython's defaultdict.__getitem__ (dict_subscript → __missing__).
+        # defaultdict.__missing__: https://github.com/python/cpython/blob/62a6e898e01/Modules/_collectionsmodule.c#L2233-L2254
+        # Key present → normal dict lookup (same as ConstDictVariable.mp_subscript_impl).
+        if key in self:
+            return self.getitem_const(tx, key)
+
+        if self.default_factory.is_constant_none():
+            raise_observed_exception(KeyError, tx, args=[key])
+        else:
+            default_var = self.default_factory.call_function(tx, [], {})
+            super().call_method(tx, "__setitem__", [key, default_var], {})
+            return default_var
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -1020,25 +1043,7 @@ class DefaultDictVariable(ConstDictVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "__getitem__":
-            if len(args) != 1:
-                raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
-
-            if args[0] in self:
-                return self.getitem_const(tx, args[0])
-            else:
-                if (
-                    istype(self.default_factory, ConstantVariable)
-                    and self.default_factory.value is None
-                ):
-                    raise_observed_exception(KeyError, tx, args=[args[0]])
-                else:
-                    default_var = self.default_factory.call_function(tx, [], {})
-                    super().call_method(
-                        tx, "__setitem__", [args[0], default_var], kwargs
-                    )
-                    return default_var
-        elif name == "__setattr__" and self.is_mutable:
+        if name == "__setattr__" and self.is_mutable:
             if len(args) != 2:
                 raise_args_mismatch(tx, name, "2 args", f"{len(args)} args")
             # Setting a default factory must be a callable or None type
@@ -1047,7 +1052,7 @@ class DefaultDictVariable(ConstDictVariable):
             ) and self.is_supported_arg(args[1]):
                 tx.output.side_effects.mutation(self)
                 self.default_factory = args[1]
-                return CONSTANT_VARIABLE_NONE
+                return ConstantVariable.create(None)
             return super().call_method(tx, name, args, kwargs)
         elif name == "__eq__":
             if len(args) != 1:
@@ -1138,8 +1143,8 @@ class DictViewVariable(VariableTracker):
     ) -> ConstantVariable:
         assert self.kv is not None
         if name in self.python_type().__dict__:
-            return CONSTANT_VARIABLE_TRUE
-        return CONSTANT_VARIABLE_FALSE
+            return ConstantVariable.create(True)
+        return ConstantVariable.create(False)
 
     def call_method(
         self,
@@ -1320,7 +1325,7 @@ class DictItemsVariable(DictViewVariable):
                     tx,
                     len(self.set_items ^ args[0].set_items) == 0,
                 )
-            return CONSTANT_VARIABLE_FALSE
+            return ConstantVariable.create(False)
         elif name == "__iter__":
             from .lists import ListIteratorVariable
 

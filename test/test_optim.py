@@ -66,6 +66,38 @@ def drosenbrock(tensor):
     return torch.stack((-400 * x * (y - x**2) - 2 * (1 - x), 200 * (y - x**2)))
 
 
+def _bf16_state_init_hook(optimizer, args, kwargs):
+    """Step pre-hook that initializes Adam/AdamW states in bfloat16.
+
+    Pre-populates optimizer state before Adam's lazy initialization so that
+    ``_init_group`` finds non-empty state and skips its own fp32 allocation.
+    The fused CUDA kernel then dispatches to its mixed-precision path.
+    """
+    for group in optimizer.param_groups:
+        for p in group["params"]:
+            if p.grad is None:
+                continue
+            state = optimizer.state[p]
+            if len(state) == 0:
+                state["step"] = (
+                    torch.zeros((), dtype=torch.float32, device=p.device)
+                    if group.get("capturable") or group.get("fused")
+                    else torch.tensor(0.0, dtype=torch.float32)
+                )
+                state["exp_avg"] = torch.zeros_like(
+                    p, dtype=torch.bfloat16, memory_format=torch.preserve_format
+                )
+                state["exp_avg_sq"] = torch.zeros_like(
+                    p, dtype=torch.bfloat16, memory_format=torch.preserve_format
+                )
+                if group.get("amsgrad"):
+                    state["max_exp_avg_sq"] = torch.zeros_like(
+                        p,
+                        dtype=torch.bfloat16,
+                        memory_format=torch.preserve_format,
+                    )
+
+
 @markDynamoStrictTest
 class TestOptimRenewed(TestCase):
     """
@@ -2315,6 +2347,160 @@ class TestOptimRenewed(TestCase):
 
             for state in optim.state.values():
                 self.assertGreater(len(state), 0)
+
+    @onlyCUDA
+    @parametrize("amsgrad", [False, True])
+    @optims(
+        [o for o in optim_db if o.optim_cls.__name__ in ["Adam", "AdamW"]],
+        dtypes=[torch.float32],
+    )
+    def test_fused_mixed_precision_state_init(self, device, dtype, optim_info, amsgrad):
+        optim_cls = optim_info.optim_cls
+        params = [torch.rand(20, 7, device=device, dtype=dtype) for _ in range(5)]
+        for p in params:
+            p.grad = torch.rand_like(p)
+
+        optim = optim_cls(params, lr=1e-3, fused=True, amsgrad=amsgrad)
+        optim.register_step_pre_hook(_bf16_state_init_hook)
+
+        optim.step()
+
+        for p in params:
+            self.assertEqual(p.dtype, torch.float32)
+            state = optim.state[p]
+            self.assertEqual(state["step"].dtype, torch.float32)
+            self.assertEqual(state["exp_avg"].dtype, torch.bfloat16)
+            self.assertEqual(state["exp_avg_sq"].dtype, torch.bfloat16)
+            if amsgrad:
+                self.assertEqual(state["max_exp_avg_sq"].dtype, torch.bfloat16)
+
+        # Second step: hook should be idempotent (skips already-populated state)
+        for p in params:
+            p.grad = torch.rand_like(p)
+        optim.step()
+
+        for p in params:
+            state = optim.state[p]
+            self.assertEqual(state["step"].dtype, torch.float32)
+            self.assertEqual(state["exp_avg"].dtype, torch.bfloat16)
+            self.assertEqual(state["exp_avg_sq"].dtype, torch.bfloat16)
+            if amsgrad:
+                self.assertEqual(state["max_exp_avg_sq"].dtype, torch.bfloat16)
+
+    @onlyCUDA
+    @parametrize("amsgrad", [False, True])
+    @optims(
+        [o for o in optim_db if o.optim_cls.__name__ in ["Adam", "AdamW"]],
+        dtypes=[torch.float32],
+    )
+    def test_fused_mixed_precision_hook_skips_existing_state(
+        self, device, dtype, optim_info, amsgrad
+    ):
+        optim_cls = optim_info.optim_cls
+
+        # Two param groups: group 1 gets f32 state pre-populated (hook should
+        # skip it), group 2 has no state (hook should initialize it in bf16).
+        # This exercises the fused kernel handling two groups whose states have
+        # different dtypes within the same optimizer.step() call.
+        g1_params = [torch.rand(10, 5, device=device, dtype=dtype) for _ in range(2)]
+        g2_params = [torch.rand(10, 5, device=device, dtype=dtype) for _ in range(2)]
+        for p in g1_params + g2_params:
+            p.grad = torch.rand_like(p)
+
+        optim = optim_cls(
+            [{"params": g1_params}, {"params": g2_params}],
+            lr=1e-3,
+            fused=True,
+            amsgrad=amsgrad,
+        )
+
+        for p in g1_params:
+            optim.state[p]["step"] = torch.zeros(
+                (), dtype=torch.float32, device=p.device
+            )
+            optim.state[p]["exp_avg"] = torch.zeros_like(p)
+            optim.state[p]["exp_avg_sq"] = torch.zeros_like(p)
+            if amsgrad:
+                optim.state[p]["max_exp_avg_sq"] = torch.zeros_like(p)
+
+        optim.register_step_pre_hook(_bf16_state_init_hook)
+        optim.step()
+
+        # Group 1: hook skipped (state was non-empty), dtypes stay f32.
+        for p in g1_params:
+            state = optim.state[p]
+            self.assertEqual(state["step"].dtype, torch.float32)
+            self.assertEqual(state["exp_avg"].dtype, torch.float32)
+            self.assertEqual(state["exp_avg_sq"].dtype, torch.float32)
+            if amsgrad:
+                self.assertEqual(state["max_exp_avg_sq"].dtype, torch.float32)
+
+        # Group 2: hook initialized state in bf16.
+        for p in g2_params:
+            state = optim.state[p]
+            self.assertEqual(state["step"].dtype, torch.float32)
+            self.assertEqual(state["exp_avg"].dtype, torch.bfloat16)
+            self.assertEqual(state["exp_avg_sq"].dtype, torch.bfloat16)
+            if amsgrad:
+                self.assertEqual(state["max_exp_avg_sq"].dtype, torch.bfloat16)
+
+    @onlyCUDA
+    @optims(
+        [o for o in optim_db if o.optim_cls.__name__ in ["Adam", "AdamW"]],
+        dtypes=[torch.float32],
+    )
+    def test_fused_mixed_precision_numerics(self, device, dtype, optim_info):
+        optim_inputs = optim_info.optim_inputs_func(device=device, dtype=dtype)
+        optim_cls = optim_info.optim_cls
+        for optim_input in optim_inputs:
+            kwargs = {**optim_input.kwargs, "fused": True}
+
+            params = [torch.rand(20, 7, device=device, dtype=dtype) for _ in range(10)]
+            for p in params:
+                p.grad = torch.rand_like(p)
+
+            params_c = [p.clone() for p in params]
+            for p, pc in zip(params, params_c):
+                pc.grad = p.grad.clone()
+
+            ref_optim = optim_cls(params, **kwargs)
+            bf16_optim = optim_cls(params_c, **kwargs)
+            bf16_optim.register_step_pre_hook(_bf16_state_init_hook)
+
+            # Simulate bf16 storage: after each ref step, quantize states to
+            # bf16 and back so the reference matches the mixed-precision kernel.
+            tracker = TensorTracker()
+            for i in range(7):
+                ref_optim.step()
+                bf16_optim.step()
+                for p in params:
+                    tracker.add(p)
+                    tracker.add(p.grad)
+                for d in ref_optim.state.values():
+                    exp_avg_bf16 = d["exp_avg"].to(torch.bfloat16)
+                    tracker.add(exp_avg_bf16)
+                    d["exp_avg"] = exp_avg_bf16.to(torch.float32)
+                    exp_avg_sq_bf16 = d["exp_avg_sq"].to(torch.bfloat16)
+                    tracker.add(exp_avg_sq_bf16)
+                    d["exp_avg_sq"] = exp_avg_sq_bf16.to(torch.float32)
+                    if "max_exp_avg_sq" in d:
+                        max_exp_avg_sq_bf16 = d["max_exp_avg_sq"].to(torch.bfloat16)
+                        tracker.add(max_exp_avg_sq_bf16)
+                        d["max_exp_avg_sq"] = max_exp_avg_sq_bf16.to(torch.float32)
+
+                for e, pc in enumerate(params_c):
+                    tracker.pop_check_set(pc, self)
+                    tracker.pop_check_set(pc.grad, self)
+
+                for p, pc in zip(params, params_c):
+                    self.assertEqual(p, pc)
+
+                for dc in bf16_optim.state.values():
+                    tracker.pop_check_set(dc["exp_avg"], self)
+                    tracker.pop_check_set(dc["exp_avg_sq"], self)
+                    if "max_exp_avg_sq" in dc:
+                        tracker.pop_check_set(dc["max_exp_avg_sq"], self)
+                self.assertTrue(tracker.all_popped())
 
     @parametrize("dtype", [torch.float32])
     def test_step_iteration(self, device, dtype):

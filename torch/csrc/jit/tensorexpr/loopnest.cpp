@@ -2830,7 +2830,6 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
       if (reduceOp) {
         throw std::runtime_error(
             "can only cache accesses used by at most a single reduceOp");
-        return {nullptr, nullptr};
       }
 
       reduceOp = ro;
@@ -2842,7 +2841,6 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
   auto bounds_it = consumer_bounds_info.find(producer);
   if (bounds_it == consumer_bounds_info.end()) {
     throw std::runtime_error("consumer does not use the Tensor produced");
-    return {nullptr, nullptr};
   }
 
   TORCH_INTERNAL_ASSERT(

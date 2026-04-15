@@ -422,7 +422,7 @@ def _do_bench_using_profiling(
 @functools.cache
 def has_torchvision_roi_align() -> bool:
     try:
-        from torchvision.ops import roi_align  # noqa: F401
+        from torchvision.ops import roi_align
 
         torch._C._dispatch_has_kernel_for_dispatch_key("torchvision::nms", "Meta")
         return roi_align is not None and hasattr(

@@ -237,7 +237,15 @@ class CMake:
                 toolset_expr = ",".join([f"{k}={v}" for k, v in toolset_dict.items()])
                 args.append("-T" + toolset_expr)
 
+        # base_dir is used as cmake's source-dir arg and install prefix;
+        # make it relative to build_dir so these are worktree-independent
+        # (ccache/re-cc friendly).  cmake runs with cwd=build_dir so the
+        # relative path resolves correctly.
         base_dir = str(Path(__file__).absolute().parents[2])
+        if os.environ.get("USE_RELATIVE_PATHS"):
+            base_dir = os.path.relpath(
+                str(Path(__file__).resolve().parents[2]), self.build_dir
+            )
         install_dir = os.path.join(base_dir, "torch")
 
         _mkdir_p(install_dir)

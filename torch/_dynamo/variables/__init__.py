@@ -22,13 +22,9 @@ from .builtin import (
     BuiltinVariable,
     DictBuiltinVariable,
     IterBuiltinVariable,
+    ListBuiltinVariable,
 )
-from .constant import (
-    CONSTANT_VARIABLE_FALSE,
-    CONSTANT_VARIABLE_NONE,
-    CONSTANT_VARIABLE_TRUE,
-    ConstantVariable,
-)
+from .constant import ConstantVariable
 from .ctx_manager import (
     CatchWarningsCtxManagerVariable,
     ContextWrappingVariable,
@@ -175,6 +171,7 @@ from .user_defined import (
     RemovableHandleVariable,
     StructSequenceVariable,
     UserDefinedClassVariable,
+    UserDefinedConstantVariable,
     UserDefinedDictVariable,
     UserDefinedExceptionClassVariable,
     UserDefinedExceptionObjectVariable,
@@ -194,9 +191,6 @@ __all__ = [
     "BaseListVariable",
     "BuiltinVariable",
     "CatchWarningsCtxManagerVariable",
-    "CONSTANT_VARIABLE_FALSE",
-    "CONSTANT_VARIABLE_NONE",
-    "CONSTANT_VARIABLE_TRUE",
     "ConstantVariable",
     "ConstDictVariable",
     "DictBuiltinVariable",
@@ -222,6 +216,7 @@ __all__ = [
     "LambdaVariable",
     "LazyConstantVariable",
     "LazyVariableTracker",
+    "ListBuiltinVariable",
     "ListIteratorVariable",
     "ListVariable",
     "NestedUserFunctionVariable",

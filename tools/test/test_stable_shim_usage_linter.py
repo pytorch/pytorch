@@ -71,6 +71,8 @@ class TestStableShimUsageLinter(unittest.TestCase):
             # Primary path (2.10) and secondary path (2.9) from #if/#elif
             "primary_path": (2, 10),
             "secondary_path": (2, 9),
+            # Function with a return type made up of two words.
+            "function_that_returns_constchar": (2, 12),
         }
 
         self.assertEqual(result, expected)

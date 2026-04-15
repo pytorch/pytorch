@@ -406,6 +406,10 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// Returns the name of the dynamic type of the function, for debugging.
   virtual std::string name() const;
 
+  /// Returns the name of the corresponding forward op by stripping the
+  /// "Backward<N>" suffix from name(), if present.
+  std::string forward_op_name() const;
+
   /// The difference between functions `should_compute_output` and
   /// `task_should_compute_output`:
   /// - `should_compute_output` should only be used during graph construction

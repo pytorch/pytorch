@@ -23,7 +23,6 @@ from torch.distributed.tensor._op_schema import (
     OpSchema,
     OpSpec,
     OpStrategy,
-    PlacementList,
     RuntimeSchemaInfo,
     StrategyType,
     TupleStrategy,
@@ -89,29 +88,39 @@ class _SingleDimStrategyInfo:
 
 def _insert_single_dim_replication_strategy(
     single_dim_strategies_with_placeholders: list[
-        list[Placement | _ShardingPlaceholder]
+        list[Placement | _ShardingPlaceholder | None]
     ],
     num_outputs: int,
     num_input_tensors: int,
-) -> list[list[Placement | _ShardingPlaceholder]]:
+    output_tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None = None,
+) -> list[list[Placement | _ShardingPlaceholder | None]]:
     """
     Inserts the [Replicate(), Replicate(), ...] strategy after asserting that such strategy does not yet exist.
+    For ops with masked-off outputs (e.g. backward ops with output_mask), output positions
+    where output_tensor_meta is None are set to None in the all-Replicate rule.
     """
     for strategy in single_dim_strategies_with_placeholders:
-        if all(isinstance(p, Replicate) for p in strategy):
-            raise AssertionError
-    single_dim_strategies_with_placeholders.insert(
-        0, [Replicate()] * (num_outputs + num_input_tensors)
-    )
+        if all(isinstance(p, Replicate) or p is None for p in strategy):
+            return single_dim_strategies_with_placeholders
+    total_len = num_outputs + num_input_tensors
+    replicate_rule: list[Placement | _ShardingPlaceholder | None] = [
+        Replicate()
+    ] * total_len
+    # Set None for masked-off output positions based on output_tensor_meta
+    if isinstance(output_tensor_meta, Sequence):
+        for i, meta in enumerate(output_tensor_meta):
+            if meta is None and i < num_outputs:
+                replicate_rule[i] = None
+    single_dim_strategies_with_placeholders.insert(0, replicate_rule)
     return single_dim_strategies_with_placeholders
 
 
 def _fill_single_dim_strategy_placeholders(
     unique_input_placements: set[Placement],
     single_dim_strategies_with_placeholders: list[
-        list[Placement | _ShardingPlaceholder]
+        list[Placement | _ShardingPlaceholder | None]
     ],
-) -> list[list[Placement]]:
+) -> list[list[Placement | None]]:
     """
     Replace any _ShardingPlaceholder with the specific Sharding types used by the inputs in op_schema.
     Supports implicit replication.
@@ -141,25 +150,29 @@ def _fill_single_dim_strategy_placeholders(
 
     # if any of the placements is a placeholder, we need to expand the strategy
     # to all possible combinations of placements
-    expanded_strategies_over_one_mesh_dim: list[list[Placement]] = []
+    expanded_strategies_over_one_mesh_dim: list[list[Placement | None]] = []
     for s in single_dim_strategies_with_placeholders:
         if any(isinstance(p, _ShardingPlaceholder) for p in s):
             for shard_builder in shard_builders.values():
-                expanded_strategy: list[Placement] = []
+                expanded_strategy: list[Placement | None] = []
                 for maybe_placeholder in s:
                     if isinstance(maybe_placeholder, _ShardingPlaceholder):
                         # we combine the tensor dim to shard from the placeholder
                         # with other metadata (e.g. split_factor) from the sharding class
                         expanded_strategy.append(shard_builder(maybe_placeholder.dim))
+                    elif maybe_placeholder is None:
+                        expanded_strategy.append(None)
                     else:
                         if not isinstance(maybe_placeholder, Placement):
                             raise AssertionError
                         expanded_strategy.append(maybe_placeholder)
                 expanded_strategies_over_one_mesh_dim.append(expanded_strategy)
         else:
-            if not all(isinstance(p, Placement) for p in s):
+            if not all(isinstance(p, Placement) or p is None for p in s):
                 raise AssertionError
-            expanded_strategies_over_one_mesh_dim.append(cast(list[Placement], (s)))
+            expanded_strategies_over_one_mesh_dim.append(
+                cast(list[Placement | None], (s))
+            )
 
     return expanded_strategies_over_one_mesh_dim
 
@@ -212,14 +225,15 @@ def _get_num_tensor_inputs(op_schema: OpSchema) -> int:
 
 def _build_output_specs(
     mesh: DeviceMesh,
-    per_mesh_dim_placements: list[tuple[Placement, ...]],
+    per_mesh_dim_placements: list[tuple[Placement | None, ...]],
     num_outputs: int,
     output_metas: tuple[TensorMeta | None, ...],
 ) -> DTensorSpec | tuple[DTensorSpec | None, ...]:
     """Build output spec(s) by transposing per-mesh-dim placements to per-output.
 
     per_mesh_dim_placements is indexed [mesh_dim][output_idx]. output_metas must
-    have exactly num_outputs elements.
+    have exactly num_outputs elements. Outputs where output_metas[i] is None
+    (masked-off outputs) produce None specs.
     """
     if num_outputs <= 0:
         raise AssertionError(f"Expected num_outputs > 0, got {num_outputs}")
@@ -228,16 +242,21 @@ def _build_output_specs(
             f"Expected {num_outputs} output_metas, got {len(output_metas)}"
         )
 
-    def _placements_for_output(out_idx: int) -> tuple[Placement, ...]:
-        return tuple(out[out_idx] for out in per_mesh_dim_placements)
+    def _spec_for_output(out_idx: int) -> DTensorSpec | None:
+        if output_metas[out_idx] is None:
+            return None
+        placements = tuple(
+            cast(Placement, out[out_idx]) for out in per_mesh_dim_placements
+        )
+        return DTensorSpec(mesh, placements, tensor_meta=output_metas[out_idx])
 
     if num_outputs > 1:
-        return tuple(
-            DTensorSpec(mesh, _placements_for_output(i), tensor_meta=output_metas[i])
-            for i in range(num_outputs)
-        )
+        return tuple(_spec_for_output(i) for i in range(num_outputs))
     else:
-        return DTensorSpec(mesh, _placements_for_output(0), tensor_meta=output_metas[0])
+        spec = _spec_for_output(0)
+        if spec is None:
+            raise AssertionError("Single-output op cannot have None output meta")
+        return spec
 
 
 class _PreparedSingleDimStrategy:
@@ -253,8 +272,8 @@ class _PreparedSingleDimStrategy:
     allowed_partial_per_input for graph search neighbor generation.
     """
 
-    strategy_lookup: dict[tuple[Placement, ...], tuple[Placement, ...]]
-    expanded_strategies: list[list[Placement]]
+    strategy_lookup: dict[tuple[Placement | None, ...], tuple[Placement | None, ...]]
+    expanded_strategies: list[list[Placement | None]]
     num_outputs: int
     num_inputs: int
     output_metas: tuple[TensorMeta | None, ...]
@@ -338,8 +357,11 @@ class _PreparedSingleDimStrategy:
             num_inputs = _get_num_tensor_inputs(op_schema)
         self.num_inputs = num_inputs
 
-        strategies_with_placeholders = func(
-            op_schema.op, op_schema.args_meta, op_schema.kwargs_meta
+        # Strategy functions may return None in output positions for masked-off
+        # outputs (e.g. backward ops with output_mask). Widen the type here.
+        strategies_with_placeholders = cast(
+            list[list[Placement | _ShardingPlaceholder | None]],
+            func(op_schema.op, op_schema.args_meta, op_schema.kwargs_meta),
         )
 
         # Validate strategy length against the op schema. The schema is the
@@ -373,7 +395,10 @@ class _PreparedSingleDimStrategy:
         self.num_outputs = num_outputs
 
         strategies_with_placeholders = _insert_single_dim_replication_strategy(
-            strategies_with_placeholders, num_outputs, num_inputs
+            strategies_with_placeholders,
+            num_outputs,
+            num_inputs,
+            output_tensor_meta,
         )
 
         unique_input_placements = _get_unique_placements(op_schema)
@@ -396,6 +421,8 @@ class _PreparedSingleDimStrategy:
         for strategy in self.expanded_strategies:
             for input_idx in range(num_inputs):
                 p = strategy[num_outputs + input_idx]
+                if p is None:
+                    continue
                 if _is_sharding(p):
                     self.allowed_sharding_per_input[input_idx].add(p)
                 elif isinstance(p, Partial):
@@ -424,7 +451,7 @@ class _PreparedSingleDimStrategy:
         """
         from torch.distributed.tensor._ops.utils import is_tensor_shardable
 
-        selected_output_placements: list[tuple[Placement, ...]] = []
+        selected_output_placements: list[tuple[Placement | None, ...]] = []
         for mesh_dim in range(mesh.ndim):
             input_placements_for_dim = tuple(
                 placements[mesh_dim] for placements in input_placements
@@ -515,7 +542,7 @@ def _expand_single_dim_strategy_to_mesh(
             return expand_to_full_mesh_op_strategy(
                 element_mesh,
                 op_schema,
-                cast(list[PlacementList], prepared_strategy.expanded_strategies),
+                prepared_strategy.expanded_strategies,
                 output_tensor_meta=output_tensor_meta,
                 inplace_op=is_inplace,
                 input_index=prepared_strategy.num_outputs,
@@ -649,8 +676,16 @@ def _expand_single_dim_strategy_to_mesh(
         return TupleStrategy(children=child_strategies)
 
     # TODO maybe this could be helped by adding a new 'tag' to the OpOverload?
+    # Only use the foreach path if the op has TupleStrategy inputs (i.e., actual
+    # list-of-tensor args). The name prefix alone is insufficient because ops like
+    # _fused_rms_norm share the "_fused_" prefix but are not foreach/fused-optimizer ops.
     op_name = op_schema.op.name()
-    if op_name.startswith(("aten::_foreach_", "aten::_amp_foreach_", "aten::_fused_")):
+    has_tuple_strategy = any(
+        isinstance(arg, TupleStrategy) for arg in op_schema.args_schema
+    )
+    if has_tuple_strategy and op_name.startswith(
+        ("aten::_foreach_", "aten::_amp_foreach_", "aten::_fused_")
+    ):
         return expanded_foreach_strategy
 
     return _create_expanded_strategy(op_schema, output_tensor_meta)

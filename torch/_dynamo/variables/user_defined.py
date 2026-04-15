@@ -278,6 +278,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             frozenset.__new__,
             tuple.__new__,
             list.__new__,
+            int.__new__,
+            float.__new__,
+            str.__new__,
         }
         return c_new_fns.union(exceptions)
 
@@ -309,6 +312,19 @@ class UserDefinedClassVariable(UserDefinedVariable):
             if name in base.__dict__:
                 return base.__dict__[name]
         return NO_SUCH_SUBOBJ
+
+    def bool_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> "VariableTracker":
+        from .constant import ConstantVariable
+
+        # bool() on a class consults the metaclass __bool__.
+        # If the metaclass is the default `type`, all classes are truthy.
+        metaclass = type(self.value)
+        if hasattr(metaclass, "__bool__") and metaclass is not type:
+            return self.call_method(tx, "__bool__", [], {})
+        return ConstantVariable.create(True)
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         source = AttrSource(self.source, name) if self.source is not None else None
@@ -372,7 +388,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # can't trace).  GetAttrVariable defers the access and lets
         # call_method handle it.
         if meta_attr is not NO_SUCH_SUBOBJ:
-            return variables.GetAttrVariable(self, name, None, source=source)
+            return variables.GetAttrVariable(self, name, type(meta_attr), source=source)
 
         # __getattr__ on metaclass (not part of type_getattro proper —
         # CPython handles this via slot_tp_getattr_hook).
@@ -419,7 +435,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         if ConstantVariable.is_literal(resolved):
             return VariableTracker.build(tx, resolved)
-        return variables.GetAttrVariable(self, name, None, source=source)
+        return variables.GetAttrVariable(self, name, type(resolved), source=source)
 
     def resolve_cls_descriptor(
         self,
@@ -454,7 +470,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if name in cmp_name_to_op_mapping and not isinstance(
             cls_attr, types.FunctionType
         ):
-            return variables.GetAttrVariable(self, name, None, source=source)
+            return variables.GetAttrVariable(
+                self, name, py_type=type(cls_attr), source=source
+            )
 
         # User-defined descriptor with Python __get__.
         # For torch-internal classes or attributes in the class's own __dict__,
@@ -488,7 +506,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 )
             ):
                 return VariableTracker.build(tx, cls_attr, source)
-            return variables.GetAttrVariable(self, name, None, source=source)
+            return variables.GetAttrVariable(self, name, type(cls_attr), source=source)
 
         # Everything else: FunctionType, etc.
         return VariableTracker.build(tx, cls_attr, source)
@@ -506,7 +524,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ):
             return super().var_getattr(tx, name)
         if self.value is collections.OrderedDict:
-            return variables.GetAttrVariable(self, name)
+            return variables.GetAttrVariable(self, name, py_type=type(cls_attr))
         return VariableTracker.build(tx, cls_attr, source)
 
     def invoke_cls_descriptor_get(
@@ -517,7 +535,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         source: Source | None,
     ) -> VariableTracker:
         """Trace a class-MRO descriptor's __get__(None, cls) call."""
-        from . import CONSTANT_VARIABLE_NONE
+        from .constant import ConstantVariable
 
         descriptor_source = None
         descriptor_get_source = None
@@ -528,7 +546,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         else:
             descriptor_var = UserDefinedObjectVariable(descriptor)
 
-        none_var = CONSTANT_VARIABLE_NONE
+        none_var = ConstantVariable.create(None)
         return variables.UserMethodVariable(
             descriptor.__get__.__func__,  # type: ignore[union-attr]
             descriptor_var,
@@ -565,13 +583,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         non functional loss call: input, target, optional_output
         """
-        from . import CONSTANT_VARIABLE_NONE, ConstantVariable
+        from . import ConstantVariable
 
         def normalize_args(
-            weight: VariableTracker = CONSTANT_VARIABLE_NONE,
-            size_average: VariableTracker = CONSTANT_VARIABLE_NONE,
+            weight: VariableTracker = ConstantVariable.create(None),
+            size_average: VariableTracker = ConstantVariable.create(None),
             ignore_index: VariableTracker = ConstantVariable.create(-100),
-            reduce: VariableTracker = CONSTANT_VARIABLE_NONE,
+            reduce: VariableTracker = ConstantVariable.create(None),
             reduction: VariableTracker = ConstantVariable.create("mean"),
             label_smoothing: VariableTracker = ConstantVariable.create(0.0),
         ) -> tuple[VariableTracker, ...]:
@@ -782,7 +800,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif self.value is collections.defaultdict:
             if len(args) == 0:
-                default_factory = variables.CONSTANT_VARIABLE_NONE
+                default_factory = variables.ConstantVariable.create(None)
             elif len(args) == 1:
                 # In the case the argument is a builtin, then we can take the callable as the factory method.
                 # Otherwise, it must be a ConstantVariable holding None.
@@ -816,7 +834,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 tx, dict, *args, **kwargs
             )
         elif self.value is collections.deque:
-            maxlen = variables.CONSTANT_VARIABLE_NONE
+            maxlen = variables.ConstantVariable.create(None)
 
             def deque_signature(
                 iterable: Iterable[Any] | None = None, maxlen: int | None = None
@@ -879,7 +897,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             if len(args) > 1:
                 callback = args[1]
             else:
-                callback = variables.CONSTANT_VARIABLE_NONE
+                callback = variables.ConstantVariable.create(None)
             return variables.WeakRefVariable(args[0], callback)
         elif self.value is functools.partial:
             if not args:
@@ -1400,6 +1418,27 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return self.value
         return super().guard_as_python_constant()
 
+    def bool_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> "VariableTracker | None":
+        # Mirrors slot_nb_bool:
+        # https://github.com/python/cpython/blob/c09ccd9c429/Objects/typeobject.c#L9408-L9458
+        if self._maybe_get_baseclass_method("__bool__"):
+            result = self.call_method(tx, "__bool__", [], {})
+            if result.is_python_constant():
+                result_value = result.as_python_constant()
+                if not isinstance(result_value, bool):
+                    raise_observed_exception(
+                        TypeError,
+                        tx,
+                        args=[
+                            f"__bool__ should return bool, returned {type(result_value).__name__}"
+                        ],
+                    )
+            return result
+        return None
+
     def nb_index_impl(
         self,
         tx: "InstructionTranslator",
@@ -1409,9 +1448,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         type_attr = inspect.getattr_static(type(self.value), "__index__", None)
         if type_attr is None:
             return super().nb_index_impl(tx)
-        method_var = self.resolve_type_attr(tx, "__index__", type_attr, source=None)
+        source = self.source and self.get_source_by_walking_mro(tx, "__index__")
+        method_var = self.resolve_type_attr(tx, "__index__", type_attr, source)
         result = method_var.call_function(tx, [], {})
-        # CPython validates that __index__ returns an int (abstract.c:1433-1438).
+        # CPython validates that __index__ returns an int.
+        # https://github.com/python/cpython/blob/c09ccd9c429/Objects/abstract.c#L1433-L1438
         if result.is_python_constant() and not isinstance(
             result.as_python_constant(), int
         ):
@@ -1420,6 +1461,54 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 tx,
                 args=[
                     f"__index__ returned non-int (type {type(result.as_python_constant()).__name__})"
+                ],
+            )
+        return result
+
+    def nb_int_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        # CPython: slot_nb_int calls __int__(), PyNumber_Long validates the return type.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1538-L1550
+        source = self.source and self.get_source_by_walking_mro(tx, "__int__")
+        method_var = self.resolve_type_attr(
+            tx,
+            "__int__",
+            inspect.getattr_static(type(self.value), "__int__"),
+            source,
+        )
+        result = method_var.call_function(tx, [], {})
+        if not issubclass(result.python_type(), int):
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    f"__int__ returned non-int (type {result.python_type().__name__})"
+                ],
+            )
+        return result
+
+    def nb_float_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        # CPython: slot_nb_float calls __float__(), PyNumber_Float validates the return type.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1647-L1658
+        source = self.source and self.get_source_by_walking_mro(tx, "__float__")
+        method_var = self.resolve_type_attr(
+            tx,
+            "__float__",
+            inspect.getattr_static(type(self.value), "__float__"),
+            source,
+        )
+        result = method_var.call_function(tx, [], {})
+        if not issubclass(result.python_type(), float):
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    f"__float__ returned non-float (type {result.python_type().__name__})"
                 ],
             )
         return result
@@ -1467,6 +1556,28 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         }
         return fns
 
+    def mp_subscript_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: VariableTracker,
+    ) -> VariableTracker:
+        # PyObject_GetItem: https://github.com/python/cpython/blob/62a6e898e01/Objects/abstract.c#L155-L206
+        method = self._maybe_get_baseclass_method("__getitem__")
+        if (
+            self._base_vt is not None
+            and self._base_methods is not None
+            and method in self._base_methods
+        ):
+            return self._base_vt.mp_subscript_impl(tx, key)
+        if isinstance(method, types.FunctionType):
+            source_fn = self.source and self.get_source_by_walking_mro(
+                tx, "__getitem__"
+            )
+            return variables.UserMethodVariable(
+                method, self, source_fn=source_fn, source=self.source
+            ).call_function(tx, [key], {})
+        return super().mp_subscript_impl(tx, key)
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -1475,12 +1586,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         kwargs: dict[str, Any],
     ) -> VariableTracker:
         from .. import trace_rules
-        from . import CONSTANT_VARIABLE_NONE, UserMethodVariable
+        from . import UserMethodVariable
+        from .constant import ConstantVariable
 
         method = self._maybe_get_baseclass_method(name)
         if method is not None:
             if method is object.__init__:
-                return CONSTANT_VARIABLE_NONE
+                return ConstantVariable.create(None)
 
             if is_standard_setattr(method) or isinstance(self.value, threading.local):
                 return self.method_setattr_standard(tx, *args, **kwargs)
@@ -1701,7 +1813,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 raise_observed_exception(AttributeError, tx, args=[error_msg])
 
         tx.output.side_effects.store_attr(self, name_str, value)
-        return variables.CONSTANT_VARIABLE_NONE
+        return variables.ConstantVariable.create(None)
 
     def needs_slow_setattr(self) -> bool:
         return not is_standard_setattr(
@@ -2054,15 +2166,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 cls_source = source
             return VariableTracker.build(tx, type(self.value), cls_source)
 
-        # object.__reduce_ex__ is a C builtin that Dynamo cannot trace.
-        # Return a bound polyfill so copy.deepcopy can call reductor(4).
-        if name == "__reduce_ex__":
-            from .. import polyfills
-
-            return variables.UserMethodVariable(
-                polyfills.reduce_ex_user_defined_object, self
-            )
-
         from ..mutation_guard import unpatched_nn_module_init
 
         # ---- CPython attribute lookup algorithm ----
@@ -2284,6 +2387,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # MethodDescriptorType: e.g. list.append (PyMethodDef)
         # WrapperDescriptorType: e.g. list.__add__ (slot wrappers)
         # MethodWrapperType: e.g. [].__add__ (bound slot wrappers)
+        #
+        # Exception: if the descriptor has a registered polyfill, return the
+        # polyfill as a bound method so Dynamo can trace through it.
         if (
             isinstance(
                 type_attr,
@@ -2296,7 +2402,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             or torch._C._dynamo.utils.is_instancemethod(type_attr)  # type: ignore[attr-defined]
             or is_cython_function(type_attr)
         ):
-            return variables.GetAttrVariable(self, name, None, source=source)
+            from .. import trace_rules
+
+            if trace_rules.is_polyfilled_callable(type_attr):  # type: ignore[arg-type]
+                from .functions import PolyfilledFunctionVariable
+
+                polyfill_handlers = PolyfilledFunctionVariable._get_polyfill_handlers()
+                wrapped: Any = polyfill_handlers.get(type_attr)  # type: ignore[arg-type]
+                if wrapped is not None:
+                    traceable_fn = wrapped.__torch_dynamo_polyfill__
+                    return variables.UserMethodVariable(traceable_fn, self)
+            return variables.GetAttrVariable(self, name, type(type_attr), source=source)
 
         # Plain class variable (or MethodType, C-level non-data descriptor
         # without __get__, etc.).
@@ -2365,7 +2481,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
         except ObservedAttributeError:
             handle_observed_exception(tx)
-            return variables.CONSTANT_VARIABLE_FALSE
+            return variables.ConstantVariable.create(False)
 
     def is_python_hashable(self) -> bool:
         raise_on_overridden_hash(self.value, self)
@@ -2705,7 +2821,7 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             and inspect.ismethoddescriptor(method)
             and len(kwargs) == 0
         ):
-            return variables.CONSTANT_VARIABLE_NONE
+            return variables.ConstantVariable.create(None)
         elif (
             name == "__setattr__"
             and len(args) == 2
@@ -2809,6 +2925,40 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
         return super().var_getattr(tx, name)
 
 
+_CONSTANT_BASE_TYPES = (int, float, str)
+
+_constant_base_methods: dict[type, set[Any]] = {
+    t: {m for m in t.__dict__.values() if callable(m)} for t in _CONSTANT_BASE_TYPES
+}
+
+
+class UserDefinedConstantVariable(UserDefinedObjectVariable):
+    """
+    Represents user-defined objects that subclass immutable constant types
+    (int, float, str).
+
+    Uses a ConstantVariable as _base_vt for the underlying constant value.
+    """
+
+    def __init__(self, value: Any, **kwargs: Any) -> None:
+        from .constant import ConstantVariable
+
+        super().__init__(value, **kwargs)
+        for base in type(value).__mro__:
+            if base in _CONSTANT_BASE_TYPES:
+                self._base_vt = ConstantVariable.create(base(value))
+                self._base_methods = _constant_base_methods[base]
+                break
+        assert self._base_vt is not None
+
+    def as_python_constant(self) -> Any:
+        return self.value
+
+    def as_proxy(self) -> object:
+        assert self._base_vt is not None
+        return self._base_vt.as_proxy()
+
+
 class IntWrapperVariable(UserDefinedObjectVariable):
     # Dummy class to check if the object is an IntWrapper, and turn it into a
     # symint
@@ -2844,7 +2994,7 @@ class RemovableHandleVariable(VariableTracker):
                 assert self.idx is not None
                 tx.output.side_effects.remove_hook(self.idx)
                 self.idx = self.REMOVED
-            return variables.CONSTANT_VARIABLE_NONE
+            return variables.ConstantVariable.create(None)
         return super().call_method(tx, name, args, kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -2902,6 +3052,27 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
         # Dict implements __len__ via mp_length (mapping protocol), not
         # sq_length (sequence protocol). Redirect so generic_len works.
         return self.mp_length(tx)
+
+    def mp_subscript_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: VariableTracker,
+    ) -> VariableTracker:
+        # dict_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/dictobject.c#L3673-L3706
+        # TODO(follow-up): add test for unhashable/invalid key type, Counter missing key
+        method = self._maybe_get_baseclass_method("__getitem__")
+        if method in self._base_methods:
+            assert self._base_vt is not None
+            try:
+                return self._base_vt.mp_subscript_impl(tx, key)
+            except ObservedKeyError:
+                if issubclass(
+                    self.python_type(), dict
+                ) and self._maybe_get_baseclass_method("__missing__"):
+                    return self.call_method(tx, "__missing__", [key], {})
+                else:
+                    raise
+        return super().mp_subscript_impl(tx, key)
 
     def call_method(
         self,

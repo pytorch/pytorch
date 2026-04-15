@@ -399,7 +399,8 @@ class DeferredTritonCallWrapper:
             size_expr = f"{kernel_name}_result.{scratch_name}"
             var = f"{scratch_name}_ptr"
             prefix.splice(
-                f"""\
+                maybe_hipify_code_wrapper(
+                    f"""\
                 {device_ptr_type} {var} = 0;
                 RAIIAtenTensorHandle {var}_tensor;
                 if ({size_expr} > 0) {{
@@ -413,6 +414,7 @@ class DeferredTritonCallWrapper:
                     {var} = reinterpret_cast<{device_ptr_type}>({var}_tensor.data_ptr());
                 }}
             """
+                )
             )
             call_args_str += f", &{var}"
         return call_args_str
@@ -482,12 +484,6 @@ class DeferredTritonCallWrapper:
         Generate C++ code that embeds Triton source and compiles it at runtime.
         """
         prefix = wrapper.prefix
-        if not wrapper._lazy_compile_helper_emitted:
-            prefix.splice(
-                "#include <torch/csrc/inductor/cpp_wrapper/lazy_triton_compile.h>"
-            )
-            wrapper._lazy_compile_helper_emitted = True
-
         kernel_name = self.kernel_name
         # Track kernel names for parallel initialization
         wrapper._lazy_kernel_names.append(kernel_name)
@@ -816,7 +812,6 @@ class CppWrapperGpu(CppWrapperCpu):
         self._kernel_name_to_body: dict[str, str] = {}
         self._triton_call_wrappers: dict[str, DeferredTritonCallWrapper] = {}
         self.autotune_input_prefix = "_REAL_AUTOTUNE_INPUT"
-        self._lazy_compile_helper_emitted = False
         self._lazy_kernel_names: list[str] = []
 
     @staticmethod

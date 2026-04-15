@@ -93,7 +93,7 @@ log = logging.getLogger(__name__)
 pexpr = PythonPrinter().doprint
 
 
-ReuseKey = tuple[torch.device, torch.dtype, str, bool]
+ReuseKey = tuple[torch.device, torch.dtype, str, bool, int]
 CommBufferReuseKey = tuple[torch.device, torch.dtype, str, "ir.CommBufferType", str]
 BufferLike = ir.Buffer | WorkspaceArg
 FxConversionFunc = Callable[["WrapperLine"], None]
@@ -102,6 +102,7 @@ FxConversionFunc = Callable[["WrapperLine"], None]
 def buffer_reuse_key(node: BufferLike) -> ReuseKey:
     storage_size = V.graph.get_allocation_storage_size(node)
     alignment = node.get_name() not in V.graph.unaligned_buffers
+    stream = V.graph.scheduler.get_buf_stream(node.get_name())
     return (
         node.get_device_or_error(),
         node.get_dtype(),
@@ -110,6 +111,7 @@ def buffer_reuse_key(node: BufferLike) -> ReuseKey:
         # size hint
         sympy_str(V.graph.sizevars.simplify(storage_size)),
         alignment,
+        stream,
     )
 
 
@@ -917,26 +919,10 @@ class AllocateLine(MemoryPlanningLine):
             return self
 
         # Regular buffer reuse
+        # Stream is part of the key, so cross-stream reuse is naturally prevented.
         key = buffer_reuse_key(self.node)
         if config.allow_buffer_reuse and key in state:
             free_line = state.pop(key)
-            # In multi-stream graphs, only reuse buffers from the same stream
-            # to avoid races where a stream is still reading a buffer whose
-            # memory slot gets reused by a different stream.
-            if V.graph.scheduler._has_multi_stream_nodes():
-                alloc_stream = V.graph.scheduler.buff_to_stream.get(
-                    self.node.get_name()
-                )
-                free_stream = V.graph.scheduler.buff_to_stream.get(
-                    free_line.node.get_name()
-                )
-                if (
-                    alloc_stream is not None
-                    and free_stream is not None
-                    and alloc_stream != free_stream
-                ):
-                    state.push(key, free_line)
-                    return self
             size = V.graph.sizevars.optimization_hint(
                 V.graph.get_allocation_storage_size(self.node), fallback=0
             ) * get_dtype_size(self.node.get_dtype())
@@ -3295,9 +3281,7 @@ class PythonWrapperCodegen(CodeGen):
                 self.writeline(self.wrap_kernel_call(kernel_name, call_args))
             elif device.type == "mps":
                 # TODO: Fix me, MPS does not expose streams now
-                self.writeline(
-                    self.wrap_kernel_call(f"{kernel_name}.generated_kernel", call_args)
-                )
+                self.writeline(self.wrap_kernel_call(kernel_name, call_args))
             else:
                 raise RuntimeError(f"device {device.type} nyi")
             return

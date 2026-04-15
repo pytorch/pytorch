@@ -13,7 +13,7 @@ def _split_to_graph_and_name_node_map(
     from torch.fx.graph import _PyTreeInfo
     from torch.utils._pytree import tree_flatten, tree_unflatten
 
-    name_node_map = {}
+    name_node_map: dict[str, Node] = {}
     for n in gm.graph.nodes:
         if n.op == "output":
             if gm._out_spec is None:

@@ -361,7 +361,7 @@ def set_enable_guard_collectives(enabled: bool):
 
     Returns the previous setting of enabled.
     """
-    from torch._C._dynamo.eval_frame import set_guard_complete_hook  # noqa: F401
+    from torch._C._dynamo.eval_frame import set_guard_complete_hook
     from torch._dynamo.eval_frame import guard_collectives_hook
 
     if enabled:
@@ -482,14 +482,16 @@ def _non_strict_tracing_context():
 def _patch_autograd_grad():
     """Patch autograd.grad for non-strict make_fx tracing.
 
-    This patch annotates the traced backward region with
-    custom["autograd_backward"] before delegating to the real
-    torch.autograd.grad.
+    This patch installs autograd hooks so traced backward nodes preserve
+    stack trace, seq_nr, and autograd_backward metadata before delegating to
+    the real torch.autograd.grad.
     """
     import functools
 
     import torch.autograd
-    import torch.fx.traceback as fx_traceback
+    from torch._functorch._aot_autograd.logging_utils import (
+        setup_stacktrace_preservation_hooks_from_tensors,
+    )
 
     _orig_grad = torch.autograd.grad
 
@@ -501,8 +503,8 @@ def _patch_autograd_grad():
                 "_non_strict_tracing_context()"
             )
 
-        with fx_traceback.annotate({"autograd_backward": True}):
-            return _orig_grad(outputs, inputs, *args, **kwargs)
+        setup_stacktrace_preservation_hooks_from_tensors(outputs)
+        return _orig_grad(outputs, inputs, *args, **kwargs)
 
     torch.autograd.grad = _patched_grad
     try:

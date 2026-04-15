@@ -18,15 +18,6 @@ RUN yum install -y python3-pip && \
     python3 -mpip install cmake==3.18.4.post1 && \
     ln -s /usr/local/bin/cmake /usr/bin/cmake3
 
-FROM base as openssl
-# Install openssl (this must precede `build python` step)
-# (In order to have a proper SSL module, Python is compiled
-# against a recent openssl [see env vars above], which is linked
-# statically. We delete openssl afterwards.)
-ADD ./common/install_openssl.sh install_openssl.sh
-RUN bash ./install_openssl.sh && rm install_openssl.sh
-
-
 FROM base as cuda
 ARG BASE_CUDA_VERSION=12.6
 # Install CUDA
@@ -96,7 +87,6 @@ RUN git config --global --add safe.directory "*"
 
 ENV SSL_CERT_FILE=/opt/_internal/certs.pem
 # Install LLVM version
-COPY --from=openssl            /opt/openssl                          /opt/openssl
 COPY --from=base               /opt/python                           /opt/python
 COPY --from=base               /usr/local/lib/                       /usr/local/lib/
 COPY --from=base               /opt/_internal                        /opt/_internal
@@ -162,6 +152,10 @@ RUN yum install -y libdrm-devel
 ENV MKLROOT /opt/intel
 ADD ./common/install_rocm_magma.sh install_rocm_magma.sh
 RUN bash ./install_rocm_magma.sh ${ROCM_VERSION} && rm install_rocm_magma.sh
+
+ADD ./common/install_rocSHMEM.sh install_rocSHMEM.sh
+RUN bash ./install_rocSHMEM.sh ${ROCM_VERSION} && rm install_rocSHMEM.sh
+
 ADD ./common/install_miopen.sh install_miopen.sh
 RUN bash ./install_miopen.sh ${ROCM_VERSION} && rm install_miopen.sh
 

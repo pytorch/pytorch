@@ -68,10 +68,13 @@ self-hosted-runner:
     # Org wise AWS `mac2.metal` runners (2020 Mac mini hardware powered by Apple silicon M1 processors)
     - macos-m1-stable
     - macos-m1-14
+    - macos-m2-15
+    - macos-m2-26
     # GitHub-hosted MacOS runners
     - macos-latest-xlarge
     - macos-13-xlarge
     - macos-14-xlarge
+    - macos-26-xlarge
     # Organization-wide Intel hosted XPU runners
     - linux.idc.xpu
     # Organization-wide Google Cloud TPU runners

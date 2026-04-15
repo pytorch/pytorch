@@ -1076,7 +1076,7 @@ class TestForeach(TestCase):
         import math
 
         if op.name == "_foreach_norm":
-            ords = [1, 2]
+            ords = [0, 1, 2]
             if not intersperse_empty_tensors:
                 # inf norm over an empty tensor is not defined by vector norm as it expects an identity
                 ords.append(math.inf)

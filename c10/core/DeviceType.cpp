@@ -62,9 +62,6 @@ std::string DeviceTypeName(DeviceType d, bool lower_case) {
           ". If you have recently updated the caffe2.proto file to add a new "
           "device type, did you forget to update the DeviceTypeName() "
           "function to reflect such recent changes?");
-      // The below code won't run but is needed to suppress some compiler
-      // warnings.
-      return "";
   }
 }
 

@@ -836,6 +836,29 @@ Mutating object of type dict (source name: L['mod']._buffers)
         self.assertGreater(len(records), 0)
         self.assertIn("Mutating object of type list", records[0].getMessage())
 
+    @make_logging_test(side_effects=True)
+    def test_side_effects_logged_on_fullgraph_side_effect_error(self, records):
+        tracked_list = []
+        hop_list = []
+
+        def fn(x):
+            hop_list.append(1)
+            return x.sin()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def model(x, lst):
+            lst.append(1)
+            return torch.utils.checkpoint.checkpoint(fn, x, use_reentrant=False)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "HOP: Unsafe side effect",
+        ):
+            model(torch.ones(1), tracked_list)
+
+        self.assertGreaterEqual(len(records), 1)
+        self.assertIn("Mutating object of type list", records[0].getMessage())
+
     @make_settings_test("torch._dynamo.utils")
     def test_dump_compile_times(self, records):
         fn_opt = torch.compile(example_fn, backend="inductor")
@@ -1450,9 +1473,19 @@ fn(torch.randn(5))
                 z = y * x
                 return z
 
-            return bar(), bar
+            # force top-level trace of bar
+            try:
+                return bar(), bar
+            finally:
+                pass
 
         foo()
+
+        @torch.compile
+        def baz(x):
+            return x + 1
+
+        baz(torch.ones(3))
 
         # `_log_traced_frames` is registered as an atexit callback, so we invoke
         # it explicitly for testing.
@@ -1468,6 +1501,7 @@ fn(torch.randn(5))
 TorchDynamo attempted to trace the following frames: [
   * foo test_logging.py:N
   * bar test_logging.py:N
+  * baz test_logging.py:N
 ]""",
         )
 

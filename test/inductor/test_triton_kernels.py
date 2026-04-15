@@ -5510,6 +5510,32 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         self.assertEqual(out, fn(a, b), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
 
+    @requires_cuda_and_triton
+    def test_no_fusion_non_unary_epilogue(self):
+        @triton.jit
+        def add_kernel(a_ptr, b_ptr, out_ptr, numel, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offs < numel
+            a = tl.load(a_ptr + offs, mask=mask)
+            b = tl.load(b_ptr + offs, mask=mask)
+            out = a + b
+            tl.store(out_ptr + offs, out, mask=mask)
+
+        def fn(a, b, c):
+            out = torch.empty_like(a)
+            GRID = (a.numel(),)
+            add_kernel[GRID](a, b, out, a.numel(), 1)
+            return out + c
+
+        a = torch.randn(10, dtype=torch.float32, device="cuda")
+        b = torch.randn(10, dtype=torch.float32, device="cuda")
+        c = torch.randn(10, dtype=torch.float32, device="cuda")
+
+        out, code = run_and_get_code(torch.compile(fn), a, b, c)
+        self.assertEqual(out, fn(a, b, c))
+        self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=4)
+
 
 if HAS_CUDA_AND_TRITON:
 

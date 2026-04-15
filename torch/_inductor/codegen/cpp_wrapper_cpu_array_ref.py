@@ -670,6 +670,85 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
     def is_safe_to_use_borrow_arrayref_tensor_as_tensor(self):
         return not self.allow_stack_allocation and not self.stack_allocated_buffers
 
+    def _borrow_tensor_input_for_assign(self, tensor_expr: str) -> str:
+        # Subgraphs are inlined, so any borrowed handle stays within the wrapper scope.
+        return f"borrow_arrayref_tensor_as_tensor({tensor_expr})"
+
+    def codegen_subgraph_prefix(self, subgraph, outer_inputs, outer_outputs):
+        assert len(subgraph.graph.graph_inputs) == len(outer_inputs)
+
+        for (inner_input, inner_input_val), outer_input in zip(
+            subgraph.graph.graph_inputs.items(), outer_inputs
+        ):
+            if not isinstance(inner_input_val, ir.TensorBox):
+                continue
+
+            self.writeline(f"AtenTensorHandle {inner_input}_handle;")
+            self.writeline(
+                "AOTI_TORCH_ERROR_CODE_CHECK("
+                f"aoti_torch_assign_tensors_out({self._borrow_tensor_input_for_assign(outer_input)}, "
+                f"&{inner_input}_handle));"
+            )
+            self.writeline(f"RAIIAtenTensorHandle {inner_input}({inner_input}_handle);")
+
+    def codegen_while_loop(self, while_loop, stack_output=False):
+        if stack_output:
+            raise NotImplementedError("NYI cpp wrapper for while_loop_stack_output")
+        is_bool_pred = isinstance(
+            while_loop.cond_subgraph.graph.graph_outputs[0], ir.ShapeAsConstantBuffer
+        )
+        name = while_loop.get_name()
+        outer_carried_inputs = [
+            buf.codegen_reference() for buf in while_loop.carried_inputs
+        ]
+        outer_additional_inputs = [
+            buf.codegen_reference() for buf in while_loop.additional_inputs
+        ]
+        cond_result_name = f"{name}_cond_result"
+        if is_bool_pred:
+            self.writeline(f"bool {cond_result_name};")
+        else:
+            self.writeline(f"RAIIAtenTensorHandle {cond_result_name};")
+
+        cond_outer_inputs = []
+        for inp, out in zip(outer_carried_inputs, while_loop.outputs):
+            out_name = out.get_name()
+            self.writeline(f"AtenTensorHandle {out_name}_handle;")
+            self.writeline(
+                "AOTI_TORCH_ERROR_CODE_CHECK("
+                f"aoti_torch_assign_tensors_out({self._borrow_tensor_input_for_assign(inp)}, "
+                f"&{out_name}_handle));"
+            )
+            self.writeline(f"RAIIAtenTensorHandle {out_name}({out_name}_handle);")
+            cond_outer_inputs.append(out_name)
+
+        cond_outer_inputs.extend(outer_additional_inputs)
+
+        cond_outer_outputs = [cond_result_name]
+        body_outer_inputs = list(cond_outer_inputs)
+        body_outer_outputs = body_outer_inputs[: len(outer_carried_inputs)]
+
+        self.writeline("while (1) {")
+        self.writeline(EnterSubgraphLine(self, while_loop.cond_subgraph.graph))
+        self.codegen_subgraph(
+            while_loop.cond_subgraph, cond_outer_inputs, cond_outer_outputs
+        )
+
+        if is_bool_pred:
+            cond_result = f"{cond_result_name}"
+        else:
+            cond_result = f"{cond_result_name}_scalar"
+            self.codegen_tensor_item(torch.bool, cond_result_name, cond_result)
+        self.writeline(f"if (!{cond_result}) break;")
+
+        self.writeline(ExitSubgraphLine(self))
+        self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
+        self.codegen_subgraph(
+            while_loop.body_subgraph, body_outer_inputs, body_outer_outputs
+        )
+        self.writeline(ExitSubgraphLine(self))
+        self.writeline("}")
+
     def generate_c_shim_extern_kernel_call(
         self, kernel: str, args: list[str], device: str, **_
     ) -> None:

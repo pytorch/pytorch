@@ -78,6 +78,12 @@ myst_enable_extensions = [
     "html_image",
 ]
 
+# Don't execute notebooks during the docs build. Notebook correctness is
+# verified by the separate docs_test CI job; re-executing them here just
+# adds ~3 minutes to the build for no benefit.
+nb_execution_mode = "off"
+suppress_warnings = ["myst-nb.lexer"]
+
 html_baseurl = "https://docs.pytorch.org/docs/stable/"  # needed for sphinx-sitemap
 sitemap_locales = [None]
 sitemap_excludes = [
@@ -253,31 +259,18 @@ autosummary_filename_map = {
 coverage_ignore_functions = [
     "main",  # utility script
     "run",  # utility script
-    # torch.distributions.constraints
-    "is_dependent",
     # torch.hub
     "import_module",
-    # torch.jit
-    "export_opnames",
     # torch.jit.unsupported_tensor_ops
     "execWrapper",
-    # torch.onnx
-    "unregister_custom_op_symbolic",
-    # torch.ao.quantization
-    "default_eval_fn",
     # torch.backends
     "disable_global_flags",
     "flags_frozen",
-    # torch.distributed.algorithms.ddp_comm_hooks
-    "register_ddp_comm_hook",
     # torch.nn.parallel
     "DistributedDataParallelCPU",
     # torch.utils
-    "set_module",
     "burn_in_info",
     "get_info_and_burn_skeleton",
-    "get_inline_skeleton",
-    "get_model_info",
     "get_storage_info",
     "hierarchical_pickle",
     # torch.amp.autocast_mode
@@ -612,70 +605,33 @@ coverage_ignore_functions = [
     "make_sharded_output_tensor",
     # torch.fx.passes.annotate_getitem_nodes
     "annotate_getitem_nodes",
-    # torch.fx.passes.backends.cudagraphs
-    "partition_cudagraphs",
     # torch.fx.passes.dialect.common.cse_pass
     "get_CSE_banned_ops",
     # torch.fx.passes.graph_manipulation
     "get_size_of_all_nodes",
     "get_size_of_node",
     "get_tensor_meta",
-    "replace_target_nodes_with",
-    # torch.fx.passes.infra.pass_manager
-    "pass_result_wrapper",
-    "this_before_that_pass_constraint",
-    # torch.fx.passes.operator_support
-    "any_chain",
-    "chain",
-    "create_op_support",
-    # torch.fx.passes.param_fetch
-    "default_matching",
-    "extract_attrs_for_lowering",
-    "lift_lowering_attrs_to_nodes",
-    # torch.fx.passes.pass_manager
-    "inplace_wrapper",
-    "log_hook",
-    "loop_pass",
-    "these_before_those_pass_constraint",
-    "this_before_that_pass_constraint",
-    # torch.fx.passes.regional_inductor
-    "regional_inductor",
-    # torch.fx.passes.reinplace
-    "reinplace",
     # torch.fx.passes.split_module
     "split_module",
     # torch.fx.passes.split_utils
     "getattr_recursive",
-    "setattr_recursive",
     "split_by_tags",
     # torch.fx.passes.splitter_base
     "generate_inputs_for_submodules",
     # torch.fx.passes.tools_common
     "get_acc_ops_name",
     "get_node_target",
-    "is_node_output_tensor",
     "legalize_graph",
     # torch.fx.passes.utils.common
-    "compare_graphs",
     "lift_subgraph_as_module",
     # torch.fx.passes.utils.fuser_utils
-    "erase_nodes",
     "fuse_as_graphmodule",
     "fuse_by_partitions",
     "insert_subgm",
-    "topo_sort",
-    "validate_partition",
     # torch.fx.passes.utils.source_matcher_utils
-    "check_subgraphs_connected",
     "get_source_partitions",
     # torch.fx.proxy
     "assert_fn",
-    # torch.fx.subgraph_rewriter
-    "replace_pattern",
-    "replace_pattern_with_filters",
-    # torch.fx.tensor_type
-    "is_consistent",
-    "is_more_precise",
     # torch.fx.traceback
     "format_stack",
     "get_current_meta",
@@ -683,9 +639,9 @@ coverage_ignore_functions = [
     "preserve_node_meta",
     "reset_grad_fn_seq_nr",
     "set_current_meta",
+    "set_current_replay_node",
     "set_grad_fn_seq_nr",
     "set_stack_trace",
-    "set_current_replay_node",
     "get_current_replay_node",
     # torch.jit.annotations
     "ann_to_type",
@@ -726,13 +682,6 @@ coverage_ignore_functions = [
     "quantize_linear_modules",
     "quantize_rnn_cell_modules",
     "quantize_rnn_modules",
-    # torch.library
-    "define",
-    "get_ctx",
-    "impl",
-    "impl_abstract",
-    # torch.masked.maskedtensor.core
-    "is_masked_tensor",
     # torch.masked.maskedtensor.creation
     "as_masked_tensor",
     "masked_tensor",
@@ -1018,19 +967,8 @@ coverage_ignore_functions = [
     "check_export_model_diff",
     "verify",
     "verify_aten_graph",
-    # torch.optim.optimizer
-    "register_optimizer_step_post_hook",
-    "register_optimizer_step_pre_hook",
     # torch.overrides
     "enable_reentrant_dispatch",
-    # torch.package.analyze.find_first_use_of_broken_modules
-    "find_first_use_of_broken_modules",
-    # torch.package.analyze.is_from_package
-    "is_from_package",
-    # torch.package.analyze.trace_dependencies
-    "trace_dependencies",
-    # torch.profiler.itt
-    "range",
     # torch.profiler.profiler
     "schedule",
     "supported_activities",
@@ -1038,8 +976,6 @@ coverage_ignore_functions = [
     # torch.return_types
     "pytree_register_structseq",
     # torch.serialization
-    "check_module_version_greater_or_equal",
-    "default_restore_location",
     "load",
     "location_tag",
     "mkdtemp",
@@ -1060,8 +996,6 @@ coverage_ignore_functions = [
     "hann",
     "kaiser",
     "nuttall",
-    # torch.sparse.semi_structured
-    "to_sparse_semi_structured",
     # torch.utils.backend_registration
     "generate_methods_for_privateuse1_backend",
     "rename_privateuse1_backend",
@@ -2502,7 +2436,121 @@ def setup(app):
     app.connect("autodoc-process-docstring", process_docstring)
     app.connect("html-page-context", hide_edit_button_for_pages)
     app.config.add_last_updated = True
+
+    # Force serial reads to avoid pipe congestion from large env pickles.
+    # Sphinx's parallel read sends the entire environment (100s of MB for
+    # PyTorch) through a 64KB OS pipe per worker, which causes extreme
+    # slowdowns with many workers. Serial reads avoid this overhead while
+    # parallel writes (which send trivial payloads) remain enabled.
+    from sphinx.builders import Builder
+
+    _orig_read_serial = Builder._read_serial
+
+    def _serial_read_ignoring_nproc(self, docnames, nproc=1):
+        return _orig_read_serial(self, docnames)
+
+    Builder._read_parallel = _serial_read_ignoring_nproc
+
+    # Skip pickling doctrees to disk for the HTML builder. This is only used
+    # for incremental rebuilds which don't apply in CI clean builds. Saves
+    # ~2 minutes by avoiding serializing large autodoc-generated doctrees.
+    # Other builders (doctest, coverage) may need doctrees on disk.
+    from sphinx.builders.html import StandaloneHTMLBuilder
+
+    def _write_doctree_no_disk(self, docname, doctree, *, _cache=True):
+        # Still do the cleanup and in-memory caching, just skip the disk I/O
+        doctree.reporter = None
+        doctree.transformer = None
+        doctree.settings = doctree.settings.copy()
+        doctree.settings.warning_stream = None
+        doctree.settings.env = None
+        from docutils.utils import DependencyList
+
+        doctree.settings.record_dependencies = DependencyList()
+        if _cache:
+            self.env._write_doc_doctree_cache[docname] = doctree
+
+    StandaloneHTMLBuilder.write_doctree = _write_doctree_no_disk
+
+    _skip_git_dates_on_ci(app)
+    _fix_katex_server_race(app)
+
     return {"version": "0.1", "parallel_read_safe": True}
+
+
+def _fix_katex_server_race(app):
+    """Retry on ConnectionRefusedError when connecting to the KaTeX server.
+
+    sphinxcontrib-katex 0.9.x starts a Node.js server and connects via Unix
+    socket. There's a race: Python sees the socket file (created by bind())
+    and calls connect() before Node.js has called listen(). On slow CI
+    machines this causes ConnectionRefusedError. Fix by retrying connect().
+    """
+    try:
+        from sphinxcontrib.katex import KaTeXServer
+    except ImportError:
+        return
+
+    import socket as _socket
+    import time as _time
+
+    @classmethod
+    def _start_with_retry(cls, rundir, timeout):
+        from subprocess import PIPE, Popen
+
+        from sphinxcontrib.katex import ONE_MILLISECOND
+
+        socket_path = rundir / "katex.sock"
+        cmd = cls.build_command(socket=socket_path)
+        process = Popen(cmd, stdin=PIPE, stdout=PIPE, cwd=rundir)
+
+        startup_start = _time.monotonic()
+        while not socket_path.is_socket():
+            _time.sleep(ONE_MILLISECOND)
+            if _time.monotonic() - startup_start > timeout:
+                raise cls.timeout_error(timeout)
+
+        # Retry connect() — bind() creates the socket file but listen()
+        # is async in Node.js and may not be ready yet.
+        while True:
+            remaining = startup_start + timeout - _time.monotonic()
+            if remaining <= 0:
+                raise cls.timeout_error(timeout)
+            try:
+                sock = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+                sock.settimeout(remaining)
+                sock.connect(str(socket_path))
+                break
+            except ConnectionRefusedError:
+                sock.close()
+                _time.sleep(ONE_MILLISECOND)
+            except TimeoutError:
+                sock.close()
+                raise cls.timeout_error(timeout)  # noqa: B904
+
+        return process, sock
+
+    KaTeXServer.start_server_process = _start_with_retry
+
+
+def _skip_git_dates_on_ci(app):
+    """Skip git date lookups on non-release CI builds.
+
+    The pytorch theme runs 2 git subprocess calls per page to display
+    "Created/Updated" dates. On CI preview builds this is wasteful (dates
+    aren't needed) and problematic (treeless clones make git log slow).
+    Release builds (WITH_PUSH=true) keep the original behavior so dates
+    appear in published docs.
+    """
+    if not os.environ.get("CI") or os.environ.get("WITH_PUSH") == "true":
+        return
+
+    try:
+        import pytorch_sphinx_theme2
+    except ImportError:
+        return
+
+    pytorch_sphinx_theme2.get_git_dates = lambda path: ("Unknown", "Unknown")
 
 
 def hide_edit_button_for_pages(app, pagename, templatename, context, doctree):

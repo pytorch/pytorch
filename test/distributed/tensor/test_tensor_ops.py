@@ -1339,6 +1339,43 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
                 ):
                     self.assertEqual(x.full_tensor(), y)
 
+    @with_comms
+    def test_select_scatter(self):
+        device_mesh = self.build_device_mesh()
+        inp = torch.randn(8, 4, 6, device=self.device_type)
+        # select_scatter(self, src, dim, index): insert src at self[:, :, index]
+        for dim, idx in [(0, 2), (1, 1), (2, 3)]:
+            src_shape = list(inp.shape)
+            src_shape.pop(dim)
+            src = torch.randn(src_shape, device=self.device_type)
+            expected = inp.select_scatter(src, dim, idx)
+
+            for shard_dim in range(inp.ndim):
+                if shard_dim == dim:
+                    continue
+                dt_inp = distribute_tensor(inp, device_mesh, [Shard(shard_dim)])
+                src_shard_dim = shard_dim if shard_dim < dim else shard_dim - 1
+                dt_src = distribute_tensor(src, device_mesh, [Shard(src_shard_dim)])
+                result = dt_inp.select_scatter(dt_src, dim, idx)
+                self.assertEqual(result.full_tensor(), expected)
+                self.assertTrue(result.placements[0].is_shard(shard_dim))
+
+    @with_comms
+    def test_diagonal_scatter(self):
+        device_mesh = self.build_device_mesh()
+        inp = torch.randn(8, 4, 6, device=self.device_type)
+
+        # diagonal_scatter(self, src, offset, dim1, dim2)
+        src = torch.randn(8, 4, device=self.device_type)
+        expected = inp.diagonal_scatter(src, 0, 1, 2)
+
+        # shard on dim 0 (batch), which is not one of the diagonal dims
+        dt_inp = distribute_tensor(inp, device_mesh, [Shard(0)])
+        dt_src = distribute_tensor(src, device_mesh, [Shard(0)])
+        result = dt_inp.diagonal_scatter(dt_src, 0, 1, 2)
+        self.assertEqual(result.full_tensor(), expected)
+        self.assertTrue(result.placements[0].is_shard(0))
+
 
 class DistBucketizeTest(LocalDTensorTestBase):
     @with_comms

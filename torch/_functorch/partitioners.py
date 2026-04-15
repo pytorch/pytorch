@@ -704,7 +704,7 @@ def calculate_range(dtype: torch.dtype) -> tuple[float, float]:
     return info.min, info.max
 
 
-def quantize_activation_fw(graph: torch.fx.Graph) -> None:
+def quantize_activation_fw(graph: torch.fx.Graph, num_fwd_outputs: int = 0) -> None:
     output = graph.find_nodes(op="output")[0]
     fwd_outputs = output.args[0]
     quant_type = get_quant_type()
@@ -713,6 +713,14 @@ def quantize_activation_fw(graph: torch.fx.Graph) -> None:
     tensor_scale_nodes: list[fx.Node] = []
     sym_scale_nodes: list[fx.Node] = []
     for position, node in enumerate(fwd_outputs):
+        # Don't quantize user-visible forward outputs. A tensor may appear as
+        # both a user output and a saved-for-backward activation (same FX node
+        # at two positions). Quantizing the user output position would:
+        # 1. Return fp8 to the user instead of the original precision
+        # 2. Create duplicate fp8_quant/fp8_scale backward placeholders that
+        #    shift the stride mapping in _aot_stage2b_bw_compile (T264303372)
+        if position < num_fwd_outputs:
+            continue
         # check if the activation node is the node saved for quantization
         if node.meta.get("saved_for_quantization", False):
             # case: use scaling
@@ -853,6 +861,7 @@ def perform_fp8_activation_quantization(
     fwd_module: fx.GraphModule,
     bwd_module: fx.GraphModule,
     bwd_module_inputs: dict[str, fx.Node],
+    num_fwd_outputs: int = 0,
 ) -> None:
     trace_structured(
         "artifact",
@@ -865,7 +874,7 @@ def perform_fp8_activation_quantization(
         ),
     )
 
-    quantize_activation_fw(fwd_module.graph)
+    quantize_activation_fw(fwd_module.graph, num_fwd_outputs)
 
     trace_structured(
         "artifact",
@@ -944,6 +953,7 @@ def enable_activation_quantization(
     fwd_module: fx.GraphModule,
     bwd_module: fx.GraphModule,
     static_lifetime_input_nodes: OrderedSet[fx.Node] | None = None,
+    num_fwd_outputs: int = 0,
 ) -> None:
     static_input_names: list[str] = (
         [node.name for node in static_lifetime_input_nodes]
@@ -975,7 +985,9 @@ def enable_activation_quantization(
             should_perform_fp8_quant = True
 
     if should_perform_fp8_quant:
-        perform_fp8_activation_quantization(fwd_module, bwd_module, bwd_module_inputs)
+        perform_fp8_activation_quantization(
+            fwd_module, bwd_module, bwd_module_inputs, num_fwd_outputs
+        )
 
 
 def _extract_fwd_bwd_modules(
@@ -1207,7 +1219,11 @@ def _extract_fwd_bwd_modules(
         is not None
     ):
         enable_activation_quantization(
-            saved_values, fwd_module, bwd_module, static_lifetime_input_nodes
+            saved_values,
+            fwd_module,
+            bwd_module,
+            static_lifetime_input_nodes,
+            num_fwd_outputs,
         )
     return fwd_module, bwd_module
 
@@ -3627,8 +3643,23 @@ def min_cut_rematerialization_partition(
     # pyrefly: ignore [unbound-name]
     if config._sync_decision_cross_ranks:
         saved_values = _sync_decision_cross_ranks(joint_graph, saved_values)
+
     # save_for_backward on tensors and stashes symints in autograd .ctx
-    saved_sym_nodes = list(filter(is_sym_node, saved_values))
+    # Skip SymBool nodes whose only consumers are _assert_scalar calls.
+    # These are runtime assertion intermediates and are not needed in backward
+    # for any real computation.
+    def _is_assert_only_symbool(n: fx.Node) -> bool:
+        return (
+            isinstance(n.meta.get("val"), torch.SymBool)
+            and len(n.users) > 0
+            and all(u.target is torch.ops.aten._assert_scalar.default for u in n.users)
+        )
+
+    saved_sym_nodes = list(
+        filter(
+            lambda n: is_sym_node(n) and not _is_assert_only_symbool(n), saved_values
+        )
+    )
     saved_opaque_nodes = list(filter(is_opaque_node, saved_values))
     saved_values = list(
         filter(lambda n: not is_sym_node(n) and not is_opaque_node(n), saved_values)

@@ -335,10 +335,17 @@ class PythonNativeModule(PropModule):
 
     def __getattr__(self, name: str):
         """Dynamic attribute access for DSL controllers."""
+        # Skip dunder attributes to avoid triggering DSL registry lookups
+        # during torch initialization. inspect.getmodule() calls
+        # hasattr(module, '__file__') which would otherwise cause a circular
+        # import through _get_dsl_registry() while torch is still loading.
+        if name.startswith("__") and name.endswith("__"):
+            raise AttributeError(f"module '{self.__name__}' has no attribute '{name}'")
+
         if name in self.all_dsls:
             return self._get_dsl_controller(name)
 
-        # Expose internal functions for testing
+        # Expose private functions for testing
         if name == "_get_dsl_module":
             return _get_dsl_module
         if name == "_get_registry_functions":

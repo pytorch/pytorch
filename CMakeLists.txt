@@ -243,6 +243,7 @@ option(BUILD_MOBILE_AUTOGRAD
        "Build autograd function in mobile build (in development)" OFF)
 cmake_dependent_option(INSTALL_TEST "Install test binaries if BUILD_TEST is on"
                        ON "BUILD_TEST" OFF)
+option(USE_RELATIVE_PATHS "Use relative paths in generated files for ccache friendliness" OFF)
 option(USE_CPP_CODE_COVERAGE "Compile C/C++ with code coverage flags" OFF)
 option(USE_COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address+Undefined Sanitizers" OFF)
@@ -303,7 +304,7 @@ option(USE_NNPACK "Use NNPACK" ON)
 cmake_dependent_option(USE_NUMA "Use NUMA. Only available on Linux." ON "LINUX"
                        OFF)
 cmake_dependent_option(USE_NVRTC "Use NVRTC. Only available if USE_CUDA is on."
-                       OFF "USE_CUDA" OFF)
+                       ON "USE_CUDA" OFF)
 option(USE_NUMPY "Use NumPy" ON)
 option(USE_OBSERVERS "Use observers module." OFF)
 option(USE_OPENCL "Use OpenCL" OFF)
@@ -1247,10 +1248,11 @@ if(USE_CPP_CODE_COVERAGE)
   if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
     string(APPEND CMAKE_C_FLAGS " --coverage -fprofile-abs-path")
     string(APPEND CMAKE_CXX_FLAGS " --coverage -fprofile-abs-path")
+    string(APPEND CMAKE_OBJCXX_FLAGS " --coverage -fprofile-abs-path")
   elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
     string(APPEND CMAKE_C_FLAGS " -fprofile-instr-generate -fcoverage-mapping")
-    string(APPEND CMAKE_CXX_FLAGS
-           " -fprofile-instr-generate -fcoverage-mapping")
+    string(APPEND CMAKE_CXX_FLAGS " -fprofile-instr-generate -fcoverage-mapping")
+    string(APPEND CMAKE_OBJCXX_FLAGS " -fprofile-instr-generate -fcoverage-mapping")
   else()
     message(
       ERROR

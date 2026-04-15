@@ -226,6 +226,67 @@ Tensor amaxamin_jvp(
   return at::where(mask, dx, 0.).sum(dim, keepdim) / mask.sum(dim, keepdim);
 }
 
+// Builds the dims vector for aminmax: all dims when dim is nullopt,
+// or the single wrapped dim otherwise.
+static std::vector<int64_t> _aminmax_dims(
+    const Tensor& self,
+    std::optional<int64_t> dim_opt) {
+  if (dim_opt.has_value()) {
+    return {at::maybe_wrap_dim(*dim_opt, self.dim())};
+  }
+  std::vector<int64_t> dims(self.dim());
+  std::iota(dims.begin(), dims.end(), 0);
+  return dims;
+}
+
+Tensor aminmax_backward(
+    const Tensor& self,
+    std::optional<int64_t> dim,
+    bool keepdim,
+    const Tensor& grad_min,
+    const Tensor& grad_max,
+    const Tensor& min,
+    const Tensor& max) {
+  auto dims_vec = _aminmax_dims(self, dim);
+  IntArrayRef dims(dims_vec);
+  Tensor result;
+
+  if (grad_min.defined()) {
+    auto grad_min_expanded = restore_reduced_dims(grad_min, dims, keepdim);
+    auto min_mask = (self == restore_reduced_dims(min, dims, keepdim));
+    result = scale_grad_by_count(grad_min_expanded, min_mask, dims);
+  }
+
+  if (grad_max.defined()) {
+    auto grad_max_expanded = restore_reduced_dims(grad_max, dims, keepdim);
+    auto max_mask = (self == restore_reduced_dims(max, dims, keepdim));
+    auto grad_max_result =
+        scale_grad_by_count(grad_max_expanded, max_mask, dims);
+
+    if (result.defined()) {
+      if (!areAnyTensorSubclassLike({result, grad_max_result})) {
+        result.add_(grad_max_result);
+      } else {
+        result = result + grad_max_result;
+      }
+    } else {
+      result = grad_max_result;
+    }
+  }
+
+  return result;
+}
+
+Tensor aminmax_jvp(
+    const Tensor& self_p,
+    const Tensor& self_t,
+    const Tensor& result,
+    std::optional<int64_t> dim,
+    bool keepdim) {
+  auto dims_vec = _aminmax_dims(self_p, dim);
+  return amaxamin_jvp(self_p, self_t, result, IntArrayRef(dims_vec), keepdim);
+}
+
 std::tuple<Tensor, Tensor> _euclidean_dist_backward(
     const Tensor& grad,
     const Tensor& x1,
@@ -2256,7 +2317,6 @@ Tensor error_for_max_pool2d_double_backward() { // This is mps-only.
       "max_pool2d with `return_indices=False` is not infinitely differentiable.",
       " If you want to calculate higher order derivatives, e.g. second order,",
       " set `return_indices=True`.");
-  return Tensor();
 }
 
 Tensor glu_double_backward(

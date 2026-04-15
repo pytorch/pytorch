@@ -664,7 +664,9 @@ class SymNumberMemoDescriptor:
         return r
 
     def __set__(
-        self, obj: FakeTensor, value: torch.SymInt | torch.SymFloat | None
+        self,
+        obj: FakeTensor,
+        value: torch.SymInt | torch.SymFloat | torch.SymBool | int | float | None,
     ) -> None:
         if value is None:
             setattr(obj, self._memo(obj), None)
@@ -2334,7 +2336,7 @@ class FakeTensorMode(TorchDispatchMode):
                     "mismatched_fake_kernel",
                     metadata_fn=lambda: {
                         "op": str(func),
-                        "reason": f"mismatch between fake value {fake} and real value {real}",  # noqa: F821
+                        "reason": f"mismatch between fake value {fake} and real value {real}",
                     },
                 )
                 return _infer_fake_from_real_tensor(self, func, real), True  # type: ignore[arg-type]
@@ -2678,7 +2680,7 @@ class FakeTensorMode(TorchDispatchMode):
                 # we shouldn't broadly catch all errors here;
                 # some come from real-kernel mutation/aliasing checks we want to run.
                 # add more exception types as needed.
-                log.debug(  # noqa: G200
+                log.debug(
                     "real-tensor fallback failed for %s: %s; silently ignoring",
                     func,
                     exc,
@@ -3076,7 +3078,7 @@ class FakeTensorMode(TorchDispatchMode):
 
     def create_symbolic_nested_int(
         self, *, nt_tensor_id: int | None = None
-    ) -> torch.SymInt:
+    ) -> IntLikeType:
         # See Note: [Creating symbolic nested int]
         # Returned nested int always has coeff=1; multiply the result by coeff if needed
         import torch.nested._internal.nested_tensor

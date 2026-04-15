@@ -11,7 +11,6 @@ zeros based on the input shape and dtype, and a "fake" implementation that does 
 or less the same thing but is required by the `torch.library.custom_op` interface.
 """
 
-# flake8: noqa: B950
 import dataclasses
 from collections.abc import Sequence
 

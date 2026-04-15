@@ -16,6 +16,7 @@ from torch.utils._config_module import (
 
 if TYPE_CHECKING:
     from torch._inductor.choices import InductorChoices
+    from torch._inductor.cudagraph_utils import CUDAGraphPolicy
 
 inplace_padding = os.environ.get("TORCHINDUCTOR_INPLACE_PADDING", "1") == "1"
 can_inplace_pad_graph_input = False  # ease testing
@@ -555,6 +556,15 @@ graph_partition: bool = (
     == "1"
 )
 
+# Pluggable CUDAGraph wrapping policy.  When set to a ``CUDAGraphPolicy``
+# instance, ``post_compile`` delegates cudagraph wrapping to the policy
+# instead of the built-in ``cudagraphify`` pipeline.  This allows custom
+# cudagraph implementations, selective inner-vs-outer wrapping for
+# regional compilation, and shared memory pool management.
+#
+# See ``torch._inductor.cudagraph_utils.CUDAGraphPolicy`` for the base class.
+cudagraph_policy: "CUDAGraphPolicy | None" = None
+
 # register ops upon which inductor should partition the graph. name format should be
 # "namespace::kernel_name" (e.g., aten::mm) for op overload packet, or
 # "namespace::kernel_name.overload" (e.g., aten::mm.default).
@@ -731,10 +741,35 @@ coordinate_descent_search_radius = int(
 
 # AutoHeuristic is a framework that allows one to collect data from autotuning, use the data to learn a heuristic, and
 # generate the learned heuristic to code which is shipped with the compiler
-# Specify a list of comma separated optimizations to collect data for
-autoheuristic_collect = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_COLLECT", "")
-# Specify a list of comma separated optimizations to use learned heuristics for
-autoheuristic_use = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_USE", "mixed_mm")
+
+
+def _parse_autoheuristic_collect_env():
+    collect_env = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_COLLECT", "").split(",")
+    return collect_env
+
+
+def _parse_autoheuristic_use_env():
+    use_env = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_USE", "mixed_mm").split(",")
+    return use_env
+
+
+class autoheuristic_collect:
+    """
+    Config for which autoheuristic optimizations should collect training data.
+    """
+
+    pad_mm = "pad_mm" in _parse_autoheuristic_collect_env()
+    mixed_mm = "mixed_mm" in _parse_autoheuristic_collect_env()
+
+
+class autoheuristic_use:
+    """
+    Config for which autoheuristic optimizations should use learned heuristics.
+    """
+
+    pad_mm = "pad_mm" in _parse_autoheuristic_use_env()
+    mixed_mm = "mixed_mm" in _parse_autoheuristic_collect_env()
+
 
 # If set to 1, will run a JIT post compile hook if one is set.
 run_jit_post_compile_hook = (
@@ -747,11 +782,23 @@ def run_autoheuristic(name: str) -> bool:
 
 
 def collect_autoheuristic(name: str) -> bool:
-    return name in torch._inductor.config.autoheuristic_collect.split(",")
+    if name == "pad_mm":
+        return autoheuristic_collect.pad_mm
+    elif name == "mixed_mm":
+        return autoheuristic_collect.mixed_mm
+    else:
+        # For test compatibility with non-standard ops (e.g. "test", "foo" used in tests)
+        return name in _parse_autoheuristic_collect_env()
 
 
 def use_autoheuristic(name: str) -> bool:
-    return name in torch._inductor.config.autoheuristic_use.split(",")
+    if name == "pad_mm":
+        return autoheuristic_use.pad_mm
+    elif name == "mixed_mm":
+        return autoheuristic_use.mixed_mm
+    else:
+        # For test compatibility with non-standard ops (e.g. "test", "foo" used in tests)
+        return name in _parse_autoheuristic_use_env()
 
 
 # If set to "DEFAULT", this will use the default log path specified in autoheuristic.py.
@@ -848,6 +895,9 @@ loop_ordering_after_fusion: bool = (
         "TORCHINDUCTOR_LOOP_ORDERING_AFTER_FUSION", "0" if is_fbcode() else "1"
     )
     == "1"
+)
+loop_reindexing_after_fusion: bool = (
+    os.environ.get("TORCHINDUCTOR_LOOP_REINDEXING_AFTER_FUSION", "1") == "1"
 )
 
 
@@ -1141,6 +1191,18 @@ class aten_distributed_optimizations:
     # as atomic units with memory-bound runtime estimates.
     enable_fusion_regions: bool | None = None
 
+    # Default bucketing mode for auto and manual overlap scheduling
+    # "default": traced bucketing, fully lowered by inductor during compilation
+    # "custom_ops": temporary bucketing using custom ops to hide parts from inductor
+    # "custom_ops_multidtype": same as custom_ops but buckets multiple dtypes
+    #     (e.g. bf16 and fp32) into one bucket
+    # "coalesced": zero-copy batching via reduce_scatter_tensor_coalesced
+    #     (reduce_scatter only; all_gather falls back to default)
+    # None means "auto" — the compiler picks the best mode
+    bucket_mode: (
+        Literal["default", "custom_ops", "custom_ops_multidtype", "coalesced"] | None
+    ) = None
+
     # Prioritize bucketing during overlap scheduling by grouping candidates by bucket key
     prioritize_bucketing_during_scheduling: bool = True
 
@@ -1154,13 +1216,18 @@ class aten_distributed_optimizations:
     # TODO(ivankobzarev): change default to "error" after real-world testing.
     spmd_mismatch: Literal["warn", "error"] = "warn"
 
-    # Bucket mode for collective bucketing in overlap scheduling
-    bucket_mode: Literal["default", "custom_ops", "custom_ops_multidtype"] | None = None
-
     # When True, automatically remove extra deps that create cycles instead of
     # raising an error.  Set this to True as a workaround if overlap scheduling
     # fails with a cycle error, and file a bug so the root cause can be fixed.
     overlap_scheduling_autofix_cycles: bool = False
+
+    # Replace NCCL collectives with low-contention variants that use
+    # copy engine instead of SMs, freeing SMs for overlapping compute.
+    enable_low_contention_collectives: bool = False
+
+    # Minimum per-rank bytes for LC replacement. Below this, LC barrier
+    # overhead exceeds the benefit. Set to 0 to disable.
+    low_contention_min_bytes_per_rank: int = 16 * 1024 * 1024
 
 
 def parallel_compile_enabled_internally() -> bool:
@@ -2523,6 +2590,9 @@ _save_config_ignore: list[str] = [
     "post_grad_custom_post_pass",
     "_fuse_ddp_communication_passes",
     "_pre_fusion_custom_pass",
+    # CUDAGraphPolicy objects are not picklable and only affect
+    # post_compile wrapping, not compiled code itself.
+    "cudagraph_policy",
 ]
 
 _cache_config_ignore_prefix: list[str] = [
@@ -2543,6 +2613,8 @@ _cache_config_ignore_prefix: list[str] = [
     "pre_grad_custom_pass",
     "_fuse_ddp_communication_passes",
     "_pre_fusion_custom_pass",
+    # CUDAGraphPolicy only affects post_compile, not compiled output
+    "cudagraph_policy",
     # tests assume that changes here don't invalidate cache
     "always_complex_memory_overlap_TESTING_ONLY",
     # timing affects cache structure, not cache content
@@ -2639,7 +2711,7 @@ class test_configs:
 
 
 if TYPE_CHECKING:
-    from torch.utils._config_typing import *  # noqa: F401, F403
+    from torch.utils._config_typing import *  # noqa: F403
 
 
 class eager_numerics:

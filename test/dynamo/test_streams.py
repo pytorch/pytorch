@@ -1739,6 +1739,7 @@ class GraphModule(torch.nn.Module):
             )
 
     @requires_cuda
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/177771")
     def test_cuda_event_record_on_stream(self):
         """torch.cuda.Event should be accepted by torch.Stream.record_event (C++ type check)."""
         s = torch.Stream(device="cuda")

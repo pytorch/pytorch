@@ -98,6 +98,13 @@ AOTI_TORCH_EXPORT int primary_path(int arg);
 AOTI_TORCH_EXPORT int secondary_path(int arg);
 #endif
 
+
+// Function with a return type that consists of multiple words.
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+AOTI_TORCH_EXPORT const char* function_that_returns_constchar();
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

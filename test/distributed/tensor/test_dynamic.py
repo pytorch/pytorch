@@ -63,6 +63,12 @@ instantiate_parametrized_tests(TestDynamic)
 
 TestDynamicWithLocalTensor = create_local_tensor_test_class(
     TestDynamic,
+    # LocalTensorMode is a non-infra dispatch mode that causes Dynamo to skip
+    # frames, which is incompatible with fullgraph=True.
+    skipped_tests=[
+        "test_embedding_fake_tensor_cache_enabled_False",
+        "test_embedding_fake_tensor_cache_enabled_True",
+    ],
 )
 
 if __name__ == "__main__":

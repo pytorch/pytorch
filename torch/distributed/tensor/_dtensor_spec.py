@@ -759,4 +759,5 @@ class DTensorSpec:
             self.mesh,
             self.placements,
             tensor_meta=tensor_meta,
+            use_strided_shard_as_shard_order=self.use_strided_shard_as_shard_order,
         )

@@ -144,7 +144,7 @@ from .utils import (
 from .variables.base import typestr, ValueMutationNew, VariableTracker
 from .variables.builder import FrameStateSizeEntry, VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable, DictBuiltinVariable
-from .variables.constant import CONSTANT_VARIABLE_NONE, ConstantVariable
+from .variables.constant import ConstantVariable
 from .variables.ctx_manager import (
     ContextWrappingVariable,
     GenericContextWrappingVariable,
@@ -589,19 +589,128 @@ explain = False
 #   3. Any compile_subgraph call should be preceded immediately by a log in the form of "... triggered compile".
 
 
+def get_node_source_info(n: torch.fx.Node) -> str:
+    """Extract the innermost user source location from an FX node's stack trace."""
+    st = n.meta.get("stack_trace", "") or getattr(n, "stack_trace", "")
+    if not st:
+        return ""
+    trace_lines = st.strip().split("\n")
+    last_file_idx = -1
+    for i, line in enumerate(trace_lines):
+        if line.strip().startswith("File "):
+            last_file_idx = i
+    if last_file_idx < 0:
+        return ""
+    file_line = trace_lines[last_file_idx].strip()
+    code = ""
+    if last_file_idx + 1 < len(trace_lines):
+        code = trace_lines[last_file_idx + 1].strip()
+    return f"{file_line}" + (f", code: {code}" if code else "")
+
+
+def format_tensor_computation_trace(value: VariableTracker, max_lines: int = 20) -> str:
+    """Walk the FX graph backwards from a TensorVariable to show how it was
+    computed, with user source locations. Graph inputs (placeholders) are always
+    shown first, followed by operations in dataflow order ending at the branch
+    condition."""
+    if not isinstance(value, TensorVariable):
+        return ""
+    try:
+        node = value.proxy.node
+
+        # Collect operations and placeholders separately so placeholders (root
+        # cause) always appear first regardless of traversal order.
+        op_blocks: list[list[str]] = []
+        placeholder_blocks: list[list[str]] = []
+        visited: set[str] = set()
+
+        def fmt_arg(a: object) -> str:
+            return a.name if isinstance(a, torch.fx.Node) else repr(a)
+
+        def walk(n: torch.fx.Node) -> None:
+            if n.name in visited:
+                return
+            visited.add(n.name)
+            source = get_node_source_info(n)
+
+            if n.op == "placeholder":
+                block = []
+                if source:
+                    block.append(f"# {source}")
+                block.append(f"{n.name}: graph input ({n.target})")
+                placeholder_blocks.append(block)
+                return
+
+            if n.op == "call_function" and len(op_blocks) < max_lines:
+                target_name = getattr(n.target, "__name__", str(n.target))
+                args_str = ", ".join(fmt_arg(a) for a in n.args)
+                block = []
+                if source:
+                    block.append(f"# {source}")
+                block.append(f"{n.name} = {target_name}({args_str})")
+                op_blocks.append(block)
+
+                for a in n.args:
+                    if isinstance(a, torch.fx.Node):
+                        walk(a)
+
+        walk(node)
+
+        if not op_blocks and not placeholder_blocks:
+            return ""
+
+        # Placeholders first (root cause), then ops in dataflow order (reversed
+        # from the DFS collection order) ending at the branch condition.
+        all_lines: list[str] = []
+        for block in placeholder_blocks + list(reversed(op_blocks)):
+            all_lines.extend(block)
+            all_lines.append("")
+
+        return (
+            "\n\n  The branch condition involves a tensor computed as follows:\n"
+            + "\n".join(f"    {line}" for line in all_lines)
+        )
+    except Exception:
+        log.debug("format_tensor_computation_trace failed", exc_info=True)
+        return ""
+
+
 def generic_jump(
     truth_fn: Callable[[object], bool], push: bool
 ) -> Callable[[InstructionTranslatorBase, Instruction], None]:
     def raise_jump_graph_break(value: VariableTracker) -> NoReturn:
+        trace_info = format_tensor_computation_trace(value)
+        hints: list[str] = []
+        if isinstance(value, TensorVariable):
+            try:
+                example = value.proxy.node.meta.get("example_value")
+                if (
+                    example is not None
+                    and example.dim() == 0
+                    and example.dtype
+                    in (
+                        torch.bool,
+                        torch.int32,
+                        torch.int64,
+                    )
+                ):
+                    hints.append(
+                        "The branch condition uses a scalar integer tensor. "
+                        "Consider rewriting the computation to use plain Python "
+                        "ints (e.g. use int attributes instead of tensor buffers) "
+                        "so the condition becomes a shape guard instead of "
+                        "data-dependent branching."
+                    )
+            except Exception:
+                pass
+        hints.extend(graph_break_hints.FUNDAMENTAL)
+        hints.append("Use `torch.cond` to express dynamic control flow.")
         unimplemented(
             gb_type="Data-dependent branching",
             context=f"attempted to jump with {value}",
             explanation="Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). "
-            "Dynamo does not support tracing dynamic control flow.",
-            hints=[
-                *graph_break_hints.FUNDAMENTAL,
-                "Use `torch.cond` to express dynamic control flow.",
-            ],
+            "Dynamo does not support tracing dynamic control flow." + trace_info,
+            hints=hints,
         )
 
     def jump_graph_break(
@@ -1106,7 +1215,7 @@ class ExceptionStack:
                 break
 
             if context is val:
-                o.set_context(CONSTANT_VARIABLE_NONE)  # type: ignore[union-attr, arg-type]
+                o.set_context(ConstantVariable.create(None))  # type: ignore[union-attr, arg-type]
                 break
 
             o = context  # type: ignore[assignment]
@@ -2187,7 +2296,7 @@ class InstructionTranslatorBase(
                 # and performs the action of END_FOR as part of FOR_ITER. We jump
                 # to the END_FOR and run it, so we need to make sure 2 values are
                 # on the stack for it to pop.
-                self.push(CONSTANT_VARIABLE_NONE)
+                self.push(ConstantVariable.create(None))
             else:
                 # pop the iterator in Python < 3.12
                 self.pop()
@@ -2498,9 +2607,9 @@ class InstructionTranslatorBase(
                     self.push(variables.BuiltinVariable(old_exception.exc_type))
                 else:
                     # Push empty exception tb, value, type
-                    self.push(variables.CONSTANT_VARIABLE_NONE)
-                    self.push(variables.CONSTANT_VARIABLE_NONE)
-                    self.push(variables.CONSTANT_VARIABLE_NONE)
+                    self.push(ConstantVariable.create(None))
+                    self.push(ConstantVariable.create(None))
+                    self.push(ConstantVariable.create(None))
 
                 # Push new exception - tb, val, type
                 # Traceback is currently mapped to UnknownVariable
@@ -2541,7 +2650,7 @@ class InstructionTranslatorBase(
 
         val = self.pop()
         if len(self.exn_vt_stack) == 0:
-            prev_exc: VariableTracker = CONSTANT_VARIABLE_NONE
+            prev_exc: VariableTracker = ConstantVariable.create(None)
         else:
             prev_exc = self.exn_vt_stack[-1]
         self.push(prev_exc)
@@ -3953,6 +4062,7 @@ class InstructionTranslatorBase(
     BINARY_REMAINDER = stack_op(operator.mod)
     BINARY_ADD = stack_op(operator.add)
     BINARY_SUBTRACT = stack_op(operator.sub)
+
     BINARY_SUBSCR = break_graph_if_unsupported(
         push=True,
         msg_prefix="Encountered graph break when attempting to trace BINARY_SUBSCR: a binary subscript, e.g. x[attr]",
@@ -5001,7 +5111,6 @@ class InstructionTranslator(InstructionTranslatorBase):
             and not self.error_on_graph_break
             and not self.is_tracing_resume_prologue
         ):
-            # TODO graph break if one_graph is set - this might break things
             raise exc.SkipFrame(
                 "No ops traced for the FX graph. `torch.compile` will skip the frame and fall back to eager.\n"
                 f"Frame info: {format_frame_info(self.f_code)}"
@@ -5373,7 +5482,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         if self.output.should_exit:
             # graph break
-            return CONSTANT_VARIABLE_NONE  # return dummy variable
+            return ConstantVariable.create(None)  # return dummy variable
 
         assert self.symbolic_result is not None
 
@@ -5632,7 +5741,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         self.generated_items.append(top)
         if len(self.generated_items) > MAX_ITERATOR_LIMIT:
             raise exc.InfiniteGeneratorError
-        self.push(CONSTANT_VARIABLE_NONE)
+        self.push(ConstantVariable.create(None))
         if (
             config.enable_faithful_generator_behavior
             or self.is_generator_from_ctx_manager

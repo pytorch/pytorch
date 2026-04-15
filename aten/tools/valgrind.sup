@@ -11,6 +11,16 @@
 }
 
 {
+   <ld_strncmp_rpath_addr8>
+   Memcheck:Addr8
+   fun:strncmp
+   fun:is_dst
+   ...
+   fun:decompose_rpath
+   ...
+}
+
+{
    ignore_empty_generic_uninitialised_conditional_jump
    Memcheck:Cond
    fun:_ZN2at6detail13empty_genericEN3c108ArrayRefIlEEPNS1_9AllocatorENS1_14DispatchKeySetENS1_10ScalarTypeESt8optionalINS1_12MemoryFormatEE

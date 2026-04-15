@@ -162,11 +162,42 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
 
   // Massage a C++ variable_list into a Python arguments tuple
   THPObjectPtr pyInputs(to_py_args(inputs, &_device_guard));
+  inputs.clear();
 
-  THPObjectPtr apply_fn(PyObject_GetAttrString(obj, "apply"));
-  if (!apply_fn)
-    throw_python_error();
-  THPObjectPtr r(PyObject_CallObject(apply_fn, pyInputs.get()));
+  THPObjectPtr r;
+  if (py_fn->boxed_grads_call) {
+    // Move grad tensors from the immutable args tuple into a plain list
+    // and call apply_boxed instead of apply. This lets backward pop/clear
+    // individual grads to free memory mid-execution, because the mutable
+    // list (not the C++ tuple) is the only container holding grad refs.
+    auto num_inputs = PyTuple_GET_SIZE(pyInputs.get());
+    THPObjectPtr gradsList(PyList_New(num_inputs));
+    if (!gradsList)
+      throw_python_error();
+    for (Py_ssize_t i = 0; i < num_inputs; i++) {
+      PyObject* item = PyTuple_GET_ITEM(pyInputs.get(), i);
+      Py_INCREF(item);
+      PyList_SET_ITEM(gradsList.get(), i, item);
+    }
+    // Release the tuple so its refs to individual grads are dropped
+    pyInputs = nullptr;
+
+    THPObjectPtr boxedArgs(PyTuple_New(1));
+    if (!boxedArgs)
+      throw_python_error();
+    PyTuple_SET_ITEM(boxedArgs.get(), 0, gradsList.release());
+
+    THPObjectPtr apply_fn(PyObject_GetAttrString(obj, "apply_boxed"));
+    if (!apply_fn)
+      throw_python_error();
+    r = THPObjectPtr(PyObject_CallObject(apply_fn, boxedArgs.get()));
+  } else {
+    THPObjectPtr apply_fn(PyObject_GetAttrString(obj, "apply"));
+    if (!apply_fn)
+      throw_python_error();
+    r = THPObjectPtr(PyObject_CallObject(apply_fn, pyInputs.get()));
+  }
+  pyInputs = nullptr;
   if (!r)
     throw_python_error();
   ensure_tuple(r);
@@ -1399,6 +1430,16 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
       "clear_saved_tensors_on_access must be a bool, got ",
       Py_TYPE(clear_attr.get())->tp_name);
   ctx->clear_saved_tensors_on_access = clear_attr.get() == Py_True;
+
+  // Get boxed_grads_call from the Function class
+  THPObjectPtr boxed_attr(PyObject_GetAttrString(cls, "boxed_grads_call"));
+  TORCH_CHECK(
+      boxed_attr, "autograd.Function is missing boxed_grads_call attribute");
+  TORCH_CHECK(
+      PyBool_Check(boxed_attr.get()),
+      "boxed_grads_call must be a bool, got ",
+      Py_TYPE(boxed_attr.get())->tp_name);
+  ctx->boxed_grads_call = boxed_attr.get() == Py_True;
 
   // autograd.Function may optionally override a setup_context staticmethod.
   // In this case, autograd.Function.forward does NOT accept a ctx object.
