@@ -896,6 +896,9 @@ loop_ordering_after_fusion: bool = (
     )
     == "1"
 )
+loop_reindexing_after_fusion: bool = (
+    os.environ.get("TORCHINDUCTOR_LOOP_REINDEXING_AFTER_FUSION", "1") == "1"
+)
 
 
 # When trying to fuse two nodes, one with:
