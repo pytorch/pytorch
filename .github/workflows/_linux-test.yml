@@ -279,9 +279,20 @@ jobs:
             echo "Moved cudart.lib to win-torch-wheel-extracted/lib/x64/"
           fi
 
-          # Verify CUDA libraries are present
+          # Setup CUDA runtime DLL (needed for MinGW import lib generation on CUDA 13.0+)
+          mkdir -p win-torch-wheel-extracted/bin/x64
+          for dll in win-torch-wheel/cudart64_*.dll; do
+            if [ -f "$dll" ]; then
+              mv "$dll" win-torch-wheel-extracted/bin/x64/
+              echo "Moved $(basename $dll) to win-torch-wheel-extracted/bin/x64/"
+            fi
+          done
+
+          # Verify CUDA libraries and DLLs are present
           echo "CUDA libraries:"
           ls -la win-torch-wheel-extracted/lib/x64/ || echo "No CUDA libraries found"
+          echo "CUDA DLLs:"
+          ls -la win-torch-wheel-extracted/bin/x64/ || echo "No CUDA DLLs found"
 
       - name: Check for keep-going label and re-enabled test issues
         # This uses the filter-test-configs action because it conveniently
@@ -682,9 +693,20 @@ jobs:
             echo "Moved cudart.lib to win-torch-wheel-extracted/lib/x64/"
           fi
 
-          # Verify CUDA libraries are present
+          # Setup CUDA runtime DLL (needed for MinGW import lib generation on CUDA 13.0+)
+          mkdir -p win-torch-wheel-extracted/bin/x64
+          for dll in win-torch-wheel/cudart64_*.dll; do
+            if [ -f "$dll" ]; then
+              mv "$dll" win-torch-wheel-extracted/bin/x64/
+              echo "Moved $(basename $dll) to win-torch-wheel-extracted/bin/x64/"
+            fi
+          done
+
+          # Verify CUDA libraries and DLLs are present
           echo "CUDA libraries:"
           ls -la win-torch-wheel-extracted/lib/x64/ || echo "No CUDA libraries found"
+          echo "CUDA DLLs:"
+          ls -la win-torch-wheel-extracted/bin/x64/ || echo "No CUDA DLLs found"
 
       - name: Check for keep-going label and re-enabled test issues
         # This uses the filter-test-configs action because it conveniently
