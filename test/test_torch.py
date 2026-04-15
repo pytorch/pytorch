@@ -1814,6 +1814,22 @@ class TestTorchDeviceType(TestCase):
             'grid_sampler_2d_backward_cuda',
             torch.device(device).type == 'cuda')
 
+    @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
+    @skipIfRocm
+    @onlyCUDA
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    def test_nondeterministic_alert_grid_sample_2d_cudnn(self, device):
+        def fn():
+            input = torch.empty(1, 1, 2, 2, device=device, requires_grad=True)
+            grid = torch.empty(1, 1, 1, 2, device=device)
+            with torch.backends.cudnn.flags(enabled=True):
+                res = torch.nn.functional.grid_sample(input, grid, align_corners=True)
+                res.backward(torch.ones_like(res))
+
+        self.check_nondeterministic_alert(
+            fn,
+            'cudnn_grid_sampler_backward')
+
     @skipIfMPS
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_grid_sample_3d(self, device):
