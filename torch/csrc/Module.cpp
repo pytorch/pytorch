@@ -1329,8 +1329,8 @@ static PyObject* THPModule_getCuDNNDepthwiseKernel(
     PyObject* _unused,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto mode = at::cudnn_depthwise2str(
-      at::globalContext().cudnnDepthwiseKernel());
+  auto mode =
+      at::cudnn_depthwise2str(at::globalContext().cudnnDepthwiseKernel());
   return THPUtils_packString(mode);
   END_HANDLE_TH_ERRORS
 }

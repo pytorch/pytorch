@@ -1050,8 +1050,11 @@ print(t.is_pinned())
         # Test all valid values via the flags() context manager
         for mode in ("auto", "cudnn", "native"):
             with torch.backends.cudnn.flags(
-                enabled=None, benchmark=None, deterministic=None,
-                allow_tf32=None, depthwise_kernel=mode,
+                enabled=None,
+                benchmark=None,
+                deterministic=None,
+                allow_tf32=None,
+                depthwise_kernel=mode,
             ):
                 self.assertEqual(torch.backends.cudnn.depthwise_kernel, mode)
 
@@ -1061,8 +1064,11 @@ print(t.is_pinned())
 
         # Verify the flags() context manager restores the previous value
         with torch.backends.cudnn.flags(
-            enabled=None, benchmark=None, deterministic=None,
-            allow_tf32=None, depthwise_kernel="native",
+            enabled=None,
+            benchmark=None,
+            deterministic=None,
+            allow_tf32=None,
+            depthwise_kernel="native",
         ):
             self.assertEqual(torch.backends.cudnn.depthwise_kernel, "native")
         self.assertEqual(torch.backends.cudnn.depthwise_kernel, "auto")

@@ -3657,7 +3657,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
         results = {}
         for mode in ("auto", "cudnn", "native"):
             with torch.backends.cudnn.flags(
-                enabled=True, benchmark=False, deterministic=True,
+                enabled=True,
+                benchmark=False,
+                deterministic=True,
                 depthwise_kernel=mode,
             ):
                 results[mode] = conv(x).detach().clone()
