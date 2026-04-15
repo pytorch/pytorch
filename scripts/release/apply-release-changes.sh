@@ -62,4 +62,4 @@ sed -i -e s#disabled-jobs.json#"disabled-jobs.json?versionId=${DISABLED_VER}"# .
 sed -i -e s#disabled-tests-condensed.json#"disabled-tests-condensed.json?versionId=${DISABLED_TESTS_VER}"# tools/stats/import_test_stats.py
 # Optional
 # git commit -m "[RELEASE-ONLY CHANGES] Branch Cut for Release ${RELEASE_VERSION}"
-git push origin "release/${RELEASE_VERSION}"
+# git push origin "release/${RELEASE_VERSION}"
