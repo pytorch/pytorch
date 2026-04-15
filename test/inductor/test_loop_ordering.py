@@ -859,6 +859,69 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(0, metrics.num_loop_reordering)
 
+    def test_qknorm_rope_fusion(self):
+        """
+        When qknorm (RMS norm) is followed by RoPE which uses cat, the cat
+        inputs read from the same buffers. Pointwise cat should be used so
+        everything fuses into a single kernel.
+        """
+        B, H, S, D = 4, 8, 128, 64
+
+        def rms_norm(x, weight):
+            variance = x.pow(2).mean(-1, keepdim=True)
+            x = x * torch.rsqrt(variance + 1e-6)
+            return x * weight
+
+        def apply_rope(x, freqs_cos, freqs_sin):
+            half = x.shape[-1] // 2
+            x1 = x[..., :half]
+            x2 = x[..., half:]
+            out1 = x1 * freqs_cos - x2 * freqs_sin
+            out2 = x2 * freqs_cos + x1 * freqs_sin
+            return torch.cat([out1, out2], dim=-1)
+
+        def f(q, norm_weight, freqs_cos, freqs_sin):
+            q = rms_norm(q, norm_weight)
+            return apply_rope(q, freqs_cos, freqs_sin)
+
+        q = torch.randn(B, H, S, D)
+        norm_weight = torch.randn(D)
+        freqs_cos = torch.randn(1, 1, S, D // 2)
+        freqs_sin = torch.randn(1, 1, S, D // 2)
+
+        self.do_acc_test(f, q, norm_weight, freqs_cos, freqs_sin)
+        self.assertEqual(1, metrics.generated_kernel_count)
+
+    def test_qknorm_interleaved_rope_fusion(self):
+        """
+        Interleaved RoPE (stack + flatten) should also fuse with qknorm.
+        """
+        B, H, S, D = 4, 8, 128, 64
+
+        def rms_norm(x, weight):
+            variance = x.pow(2).mean(-1, keepdim=True)
+            x = x * torch.rsqrt(variance + 1e-6)
+            return x * weight
+
+        def apply_interleaved_rope(x, cos, sin):
+            pairs = x.reshape(*x.shape[:-1], -1, 2)
+            a, b = pairs[..., 0], pairs[..., 1]
+            out_real = a * cos - b * sin
+            out_imag = a * sin + b * cos
+            return torch.stack([out_real, out_imag], dim=-1).flatten(-2)
+
+        def f(q, norm_weight, cos, sin):
+            q = rms_norm(q, norm_weight)
+            return apply_interleaved_rope(q, cos, sin)
+
+        q = torch.randn(B, H, S, D)
+        norm_weight = torch.randn(D)
+        cos = torch.randn(1, 1, S, D // 2)
+        sin = torch.randn(1, 1, S, D // 2)
+
+        self.do_acc_test(f, q, norm_weight, cos, sin)
+        self.assertEqual(1, metrics.generated_kernel_count)
+
 
 @inductor_config.patch(
     {
