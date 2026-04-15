@@ -386,7 +386,7 @@ class TestSavePlan(TestCase):
 
         with patch(
             "torch.distributed.checkpoint.default_planner._validate_global_plan",
-            return_value=False,
+            return_value=["mock validation error"],
         ):
             with self.assertRaises(ValueError):
                 planner.create_global_plan(all_plans)
@@ -658,7 +658,7 @@ class TestValidateGlobalPlan(TestCase):
             for i in range(4)
         ]
         metadata = self._make_metadata(chunks, [4])
-        self.assertTrue(_validate_global_plan([SavePlan([])], metadata))
+        self.assertEqual(_validate_global_plan([SavePlan([])], metadata), [])
 
     def test_detect_overlapping_chunks(self):
         chunks = [
@@ -666,7 +666,7 @@ class TestValidateGlobalPlan(TestCase):
             ChunkStorageMetadata(offsets=torch.Size([1]), sizes=torch.Size([2])),
         ]
         metadata = self._make_metadata(chunks, [4])
-        self.assertFalse(_validate_global_plan([SavePlan([])], metadata))
+        self.assertGreater(len(_validate_global_plan([SavePlan([])], metadata)), 0)
 
 
 class TestLoadPlanner(TestCase):

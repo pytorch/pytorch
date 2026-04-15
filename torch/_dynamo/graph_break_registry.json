@@ -396,6 +396,16 @@
       ]
     }
   ],
+  "GB6999": [
+    {
+      "Gb_type": "unsupported variable type for __dict__ access",
+      "Context": "VariableTracker type: {type(vt)}",
+      "Explanation": "Dynamo does not know how to get __dict__ from {type(vt)}",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
   "GB0037": [
     {
       "Gb_type": "Dynamic shape operator (no meta kernel)",
@@ -567,6 +577,16 @@
       ]
     }
   ],
+  "GB4880": [
+    {
+      "Gb_type": "missing_mp_subscript",
+      "Context": "mp_subscript_impl not defined for {type(self).__name__}",
+      "Explanation": "Dynamo does not yet support subscripting '{self.python_type_name()}'.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB9741": [
     {
       "Gb_type": "skip frame due to being in functorh mode",
@@ -640,6 +660,16 @@
       "Hints": []
     }
   ],
+  "GB5195": [
+    {
+      "Gb_type": "elementwise_dtypes unsupported arg type",
+      "Context": "str(arg)",
+      "Explanation": "elementwise_dtypes requires tensor or constant arguments, got {type(arg).__name__}",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0054": [
     {
       "Gb_type": "Failed to construct Enum variable",
@@ -679,6 +709,18 @@
       ]
     }
   ],
+  "GB7299": [
+    {
+      "Gb_type": "_autograd_grad with lost grad_fn linkage",
+      "Context": "outputs lost autograd linkage during tracing",
+      "Explanation": "_autograd_grad() received tensors whose grad_fn was lost during tracing - this silently produces zero gradients.",
+      "Hints": [
+        "Compile the full transform instead of the returned ",
+        "closure: torch.compile(lambda x: torch.func.vjp(f, x))",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0058": [
     {
       "Gb_type": "Failed to set tensor attribute",
@@ -704,6 +746,16 @@
       ]
     }
   ],
+  "GB6270": [
+    {
+      "Gb_type": "Unhandled tensor method",
+      "Context": "call_method {self} {name} {args} {kwargs}",
+      "Explanation": "Tensor method `{name}` is not defined on {check_type.__name__} and does not have an explicit handler in TensorVariable.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0060": [
     {
       "Gb_type": "Failed to trace unittest method",
@@ -718,7 +770,7 @@
   "GB8656": [
     {
       "Gb_type": "Opaque object with custom __getattr__ not supported",
-      "Context": "{value_type.__name__} with custom __getattr__",
+      "Context": "{real_obj_type.__name__} with custom __getattr__",
       "Explanation": "Dynamo does not support opaque objects types with custom __getattr__ methods",
       "Hints": []
     }
@@ -876,6 +928,22 @@
       ]
     }
   ],
+  "GB7230": [
+    {
+      "Gb_type": "iter() with no arguments",
+      "Context": "iter()",
+      "Explanation": "iter() requires at least one argument",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    },
+    {
+      "Gb_type": "iter() with no arguments",
+      "Context": "iter()",
+      "Explanation": "iter() requires at least one argument",
+      "Hints": []
+    }
+  ],
   "GB0073": [
     {
       "Gb_type": "Invoking an nn.Module inside a HigherOrderOperator",
@@ -890,6 +958,16 @@
       "Context": "Higher order op name: {self.source_target}",
       "Explanation": "This is not supported.",
       "Hints": []
+    }
+  ],
+  "GB6012": [
+    {
+      "Gb_type": "Cannot trace user-defined __len__",
+      "Context": "{self.python_type_name()}.__len__()",
+      "Explanation": "Dynamo cannot trace len() on {self.python_type_name()} because the __len__ method is either not traceable (e.g., defined in C or built-in) or returns a non-constant value.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
     }
   ],
   "GB0075": [
@@ -931,6 +1009,16 @@
       "Hints": [
         "make sure definition of {fn_name} is outside ",
         "`torch.compile` region"
+      ]
+    }
+  ],
+  "GB3775": [
+    {
+      "Gb_type": "nb_int_impl not implemented",
+      "Context": "{type(self).__name__} has nb_int slot but no nb_int_impl override",
+      "Explanation": "The type {self.python_type_name()} has an nb_int C slot but the corresponding VariableTracker doesn't implement nb_int_impl.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -1040,6 +1128,14 @@
     }
   ],
   "GB0088": [
+    {
+      "Gb_type": "Observed exception",
+      "Context": "raised exception {curr_exc.debug_repr()}",
+      "Explanation": "observed_exn_gb_explanation",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    },
     {
       "Gb_type": "Observed exception",
       "Context": "raised exception {curr_exc.python_type_name()}({curr_exc.args})",
@@ -1387,6 +1483,16 @@
       "Hints": []
     }
   ],
+  "GB7650": [
+    {
+      "Gb_type": "torch.Generator method",
+      "Context": "torch.Generator.{name}",
+      "Explanation": "torch.Generator.{name}() is a stateful RNG operation that cannot be soundly traced in the FX graph.",
+      "Hints": [
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    }
+  ],
   "GB0118": [
     {
       "Gb_type": "Unimplemented next() call",
@@ -1451,6 +1557,16 @@
       "Gb_type": "Unsupported Tensor.backward() call",
       "Context": "call_method {self} backward {gradient} {retain_graph} {create_graph} {inputs}",
       "Explanation": "Dynamo currently does not support tracing `Tensor.backward()`.",
+      "Hints": [
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    }
+  ],
+  "GB4695": [
+    {
+      "Gb_type": "torch.jit.script/freeze modules unsupported",
+      "Context": "str(value)",
+      "Explanation": "Dynamo does not support tracing into torch.jit.script or torch.jit.freeze modules because they execute in the TorchScript runtime, not Python. Replace the ScriptModule submodule with the original eager nn.Module.",
       "Hints": [
         "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
       ]
@@ -1652,6 +1768,22 @@
       ]
     }
   ],
+  "GB1380": [
+    {
+      "Gb_type": "Illegal __getitem__ invocation in strict mode",
+      "Context": "mp_subscript_impl {self} {key}",
+      "Explanation": "Dynamo currently does not support __getitem__ invocation in strict mode.",
+      "Hints": []
+    }
+  ],
+  "GB4240": [
+    {
+      "Gb_type": "unsupported __getitem__",
+      "Context": "mp_subscript_impl {self} {key}",
+      "Explanation": "Dynamo does not know how to handle __getitem__ on {self}",
+      "Hints": []
+    }
+  ],
   "GB0141": [
     {
       "Gb_type": "Unsupported call_id() without source",
@@ -1812,6 +1944,12 @@
   "GB0153": [
     {
       "Gb_type": "Unsupported key type for nn.Module.__getitem__",
+      "Context": "mp_subscript_impl: {self} {key}",
+      "Explanation": "Dynamo does not support getitem on `nn.Module` with non-constant key.",
+      "Hints": []
+    },
+    {
+      "Gb_type": "Unsupported key type for nn.Module.__getitem__",
       "Context": "call_method: {self} {name} {args} {kwargs}",
       "Explanation": "Dynamo does not support getitem on `nn.Module` with non-constant key.",
       "Hints": []
@@ -1919,6 +2057,16 @@
       "Explanation": "Argument mismatch when attempting to trace function {func.get_name()}.",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB4841": [
+    {
+      "Gb_type": "Unsupported python_type() call",
+      "Context": "{obj} does not implement python_type()",
+      "Explanation": "This VariableTracker does not implement python_type(), which is required for object protocol operations.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
       ]
     }
   ],
@@ -2053,6 +2201,12 @@
     }
   ],
   "GB0170": [
+    {
+      "Gb_type": "Data-dependent branching",
+      "Context": "attempted to jump with {value}",
+      "Explanation": "\"Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). \"             \"Dynamo does not support tracing dynamic control flow.\" + trace_info",
+      "Hints": []
+    },
     {
       "Gb_type": "Data-dependent branching",
       "Context": "attempted to jump with {value}",
@@ -2426,6 +2580,15 @@
   "GB8843": [
     {
       "Gb_type": "Opaque object member with method-type USE_REAL returned a reference-type opaque object.",
+      "Context": "Opaque object type: {real_obj_type}. Method name: '{name}'",
+      "Explanation": "To properly guard reference-type opaque objects, we must lift them as inputs to the graph. In order to do this, they must all have a source, meaning they come from a global value or are an attribute of an input.",
+      "Hints": [
+        "Register member '{name}' with MemberType.INLINED in ",
+        "register_opaque_type({real_obj_type}, members=...)."
+      ]
+    },
+    {
+      "Gb_type": "Opaque object member with method-type USE_REAL returned a reference-type opaque object.",
       "Context": "Opaque object type: {value_type}. Method name: '{name}'",
       "Explanation": "To properly guard reference-type opaque objects, we must lift them as inputs to the graph. In order to do this, they must all have a source, meaning they come from a global value or are an attribute of an input.",
       "Hints": [
@@ -2548,6 +2711,16 @@
       "Explanation": "The PyTorch package doesn't include torch.distributed when building from source.",
       "Hints": [
         "Set USE_DISTRIBUTED=1 to enable it when building PyTorch from source."
+      ]
+    }
+  ],
+  "GB2977": [
+    {
+      "Gb_type": "wrap_jit_function: missing _torchdynamo_inline",
+      "Context": "type: {type(value).__name__}",
+      "Explanation": "Dynamo expected a JIT function with a _torchdynamo_inline attribute, but the object does not have one.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -2834,6 +3007,16 @@
       ]
     }
   ],
+  "GB6025": [
+    {
+      "Gb_type": "Failed to trace list()",
+      "Context": "list({arg_types})",
+      "Explanation": "Dynamo does not know how to construct a list from argument types {arg_types}",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0236": [
     {
       "Gb_type": "Invalid input type for nonstrict_trace-ed function",
@@ -3042,6 +3225,16 @@
       ]
     }
   ],
+  "GB9860": [
+    {
+      "Gb_type": "P2POp mutation",
+      "Context": "object={self}, name={name}, value={value}",
+      "Explanation": "Dynamo does not support mutating torch.distributed.P2POp instances.",
+      "Hints": [
+        "Construct a new torch.distributed.P2POp instead of mutating an existing one inside torch.compile."
+      ]
+    }
+  ],
   "GB0253": [
     {
       "Gb_type": "call_method on generator",
@@ -3140,6 +3333,16 @@
     }
   ],
   "GB4927": [
+    {
+      "Gb_type": "autograd.grad consumed returned tensor's grad_fn",
+      "Context": "Leaked output tensors: {leaked_str}",
+      "Explanation": "torch.autograd.grad() consumes grad_fns that are needed by tensors returned from this compiled function. This would cause 'backward through graph a second time' errors.\n  The following returned tensors have consumed grad_fns: {leaked_str}",
+      "Hints": [
+        "Detach the problematic tensor(s) before returning: e.g. `{leaked[0]}.detach()`",
+        "Call .detach() on the tensor before returning.",
+        "If you need to backward through the returned tensor, use retain_graph=True in autograd.grad()."
+      ]
+    },
     {
       "Gb_type": "autograd.grad consumed returned tensor's grad_fn",
       "Context": "",
@@ -3396,6 +3599,20 @@
       ]
     }
   ],
+  "GB7324": [
+    {
+      "Gb_type": "returning intermediate with requires_grad_()",
+      "Context": "graph output depends on source-less requires_grad_()",
+      "Explanation": "msg",
+      "Hints": [
+        "If you only need the tensor values without gradients, ",
+        "call .detach() before returning.",
+        "Consume the gradient inside the compiled function ",
+        "(call backward() and use .grad), ",
+        "or move requires_grad_() outside torch.compile."
+      ]
+    }
+  ],
   "GB0280": [
     {
       "Gb_type": "1-arg super not implemented",
@@ -3406,7 +3623,23 @@
       ]
     }
   ],
+  "GB3383": [
+    {
+      "Gb_type": "Pydantic dataclass constructor",
+      "Context": "{self.value}",
+      "Explanation": "Dynamo graph breaks on pydantic dataclass constructors because validation mutates the instance outside traced bytecode.",
+      "Hints": []
+    }
+  ],
   "GB0281": [
+    {
+      "Gb_type": "Invalid or non-const argument in nn.Module __getitem__",
+      "Context": "mp_subscript_impl: {self} {key}",
+      "Explanation": "Dynamo does not support calling method `__getitem__` of ``nn.Module`` {module} with a non-constant or non-(str, int) key.",
+      "Hints": [
+        "Use constant arguments of type str or int for __getitem__"
+      ]
+    },
     {
       "Gb_type": "Invalid or non-const argument in nn.Module __getitem__",
       "Context": "call_method: {self} {name} {args} {kwargs}",
@@ -3536,6 +3769,16 @@
       ]
     }
   ],
+  "GB7906": [
+    {
+      "Gb_type": "Missing len_impl",
+      "Context": "len({type(self).__name__})",
+      "Explanation": "Dynamo does not support len() on {type(self).__name__}. Add len_impl to this VariableTracker subclass.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0291": [
     {
       "Gb_type": "logging.Logger method not supported for non-export cases",
@@ -3645,6 +3888,54 @@
       ]
     }
   ],
+  "GB9300": [
+    {
+      "Gb_type": "P2P compilation disabled for batch_isend_irecv",
+      "Context": "{self.fn}",
+      "Explanation": "P2P compilation is disabled.",
+      "Hints": [
+        "Set TORCHDYNAMO_ENABLE_P2P_COMPILATION=1 to enable."
+      ]
+    }
+  ],
+  "GB2696": [
+    {
+      "Gb_type": "P2P compilation disabled for isend/irecv",
+      "Context": "{self.fn}",
+      "Explanation": "P2P compilation is disabled.",
+      "Hints": [
+        "Set TORCHDYNAMO_ENABLE_P2P_COMPILATION=1 to enable."
+      ]
+    }
+  ],
+  "GB9277": [
+    {
+      "Gb_type": "unsupported function.__get__ call",
+      "Context": "call_function {self}, args: {args}, kwargs: {kwargs}",
+      "Explanation": "Dynamo only supports function.__get__(func, obj[, cls]) where func is a user-defined function.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1750": [
+    {
+      "Gb_type": "P2P compilation disabled for P2POp construction",
+      "Context": "torch.distributed.P2POp",
+      "Explanation": "P2P compilation is disabled.",
+      "Hints": [
+        "Set TORCHDYNAMO_ENABLE_P2P_COMPILATION=1 to enable."
+      ]
+    }
+  ],
+  "GB3343": [
+    {
+      "Gb_type": "Cannot reconstruct P2POpVariable",
+      "Context": "P2POpVariable.reconstruct",
+      "Explanation": "P2POpVariable does not support reconstruction.",
+      "Hints": []
+    }
+  ],
   "GB0301": [
     {
       "Gb_type": "HOP: non torch.Tensor leaf",
@@ -3750,6 +4041,14 @@
       ]
     }
   ],
+  "GB5458": [
+    {
+      "Gb_type": "Custom metaclass with __getattribute__",
+      "Context": "type({self.value}) = {metacls}",
+      "Explanation": "Dynamo does not trace attribute access on classes whose metaclass overrides __getattribute__",
+      "Hints": []
+    }
+  ],
   "GB0310": [
     {
       "Gb_type": "torch.cond: improper predicate",
@@ -3777,16 +4076,6 @@
       "Explanation": "Expected `operands` to be a list/tuple of pytrees that only consists of tensor leaves.",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
-      ]
-    }
-  ],
-  "GB5799": [
-    {
-      "Gb_type": "unsupported function.__get__ call",
-      "Context": "call_function {self}, args: {args}, kwargs: {kwargs}",
-      "Explanation": "Dynamo only supports function.__get__(func, obj[, cls]) where func is a user-defined function.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -3973,6 +4262,16 @@
       ]
     }
   ],
+  "GB1140": [
+    {
+      "Gb_type": "_autograd_grad with unsupported argument type",
+      "Context": "got {type(var).__name__}",
+      "Explanation": "_autograd_grad() received an argument of type {type(var).__name__} which is not supported. Expected tensor or sequence of tensors.",
+      "Hints": [
+        "Ensure outputs and inputs arguments are tensors or sequences of tensors."
+      ]
+    }
+  ],
   "GB0325": [
     {
       "Gb_type": "torch.map: kwargs not supported",
@@ -3990,6 +4289,16 @@
       "Explanation": "torch.map doesn't support scalar or non-zero sized tensors during tracing.",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB8435": [
+    {
+      "Gb_type": "missing_mp_subscript_impl",
+      "Context": "mp_subscript_impl not defined for {type(self).__name__}",
+      "Explanation": "'{self.python_type_name()}' subscript is not yet supported by Dynamo.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -4157,6 +4466,26 @@
       ]
     }
   ],
+  "GB4501": [
+    {
+      "Gb_type": "Reconstruction of FakeIdVariable",
+      "Context": "str(self.value)",
+      "Explanation": "A fake id produced by id() on a compile-time container cannot be reconstructed across a graph break.",
+      "Hints": [
+        "Avoid using id() on containers in code that may graph-break."
+      ]
+    }
+  ],
+  "GB4198": [
+    {
+      "Gb_type": "Attempted to copy.deepcopy a tensor",
+      "Context": "copy.deepcopy({self})",
+      "Explanation": "Dynamo does not support copy.deepcopy() on tensors.",
+      "Hints": [
+        "Avoid calling copy.deepcopy() on tensors inside compiled regions."
+      ]
+    }
+  ],
   "GB0344": [
     {
       "Gb_type": "wrap_with_autocast: expected constant arg",
@@ -4168,6 +4497,14 @@
     }
   ],
   "GB0345": [
+    {
+      "Gb_type": "strict_mode: improper args",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "strict_mode higher order op expects flat inputs (list/tuple/dict/set)",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    },
     {
       "Gb_type": "strict_mode: improper args",
       "Context": "args: {args}, kwargs: {kwargs}",
@@ -4206,6 +4543,14 @@
       "Gb_type": "autograd.Function.apply: non-function or method backward",
       "Context": "str(self.bwd_graph)",
       "Explanation": "Expected backward function to be a function or method.",
+      "Hints": []
+    }
+  ],
+  "GB8887": [
+    {
+      "Gb_type": "NamedTupleVariable.__setattr__ bad args",
+      "Context": "{len(args)} args and {len(kwargs)} kwargs",
+      "Explanation": "Expected exactly 2 positional args for __setattr__.",
       "Hints": []
     }
   ],
@@ -4307,6 +4652,19 @@
       ]
     }
   ],
+  "GB8985": [
+    {
+      "Gb_type": "requires_grad_() intermediate leaked as output",
+      "Context": "call_method {self} requires_grad_",
+      "Explanation": "An intermediate tensor with requires_grad_() called on it (or a tensor derived from it) is returned from the compiled region. Graph breaking here to preserve partial acceleration.",
+      "Hints": [
+        "Call .detach() before returning if you only need values.",
+        "Consume the gradient inside the compiled function ",
+        "(call backward() and use .grad), ",
+        "or move requires_grad_() outside torch.compile."
+      ]
+    }
+  ],
   "GB0358": [
     {
       "Gb_type": "optimizer: pending mutation on parameter",
@@ -4331,6 +4689,16 @@
       "Context": "expr: {expr}",
       "Explanation": "Expected `expr` to be a symbolic variable or constant.",
       "Hints": []
+    }
+  ],
+  "GB7286": [
+    {
+      "Gb_type": "nb_float_impl not implemented",
+      "Context": "{type(self).__name__} has nb_float slot but no nb_float_impl override",
+      "Explanation": "The type {self.python_type_name()} has an nb_float C slot but the corresponding VariableTracker doesn't implement nb_float_impl.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
     }
   ],
   "GB0361": [

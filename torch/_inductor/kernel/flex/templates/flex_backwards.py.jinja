@@ -90,12 +90,21 @@
         stride_kv_num_blks_h = {{stride("KV_NUM_BLKS", 1)}}
         stride_kv_idx_h = {{stride("KV_IDX", 1)}}
         stride_kv_idx_m = {{stride("KV_IDX", 2)}}
+        {%- if HAS_FULL_BLOCKS %}
+        stride_full_kv_num_blks_h = {{stride("FULL_KV_NUM_BLKS", 1)}}
+        stride_full_kv_idx_h = {{stride("FULL_KV_IDX", 1)}}
+        stride_full_kv_idx_m = {{stride("FULL_KV_IDX", 2)}}
+        {%- endif %}
 
         sparse_idx_hq2 = off_hq2 % SPARSE_HQ
         sparse_hz_offset = sparse_idx_z * SPARSE_HQ + sparse_idx_hq2
 
         sparse_kv_num_blks_offset = sparse_hz_offset * stride_kv_num_blks_h + off_pid_mask
         sparse_kv_idx_offset = sparse_hz_offset * stride_kv_idx_h + off_pid_mask * stride_kv_idx_m  # noqa: B950
+        {%- if HAS_FULL_BLOCKS %}
+        sparse_full_kv_num_blks_offset = sparse_hz_offset * stride_full_kv_num_blks_h + off_pid_mask
+        sparse_full_kv_idx_offset = sparse_hz_offset * stride_full_kv_idx_h + off_pid_mask * stride_full_kv_idx_m  # noqa: B950
+        {%- endif %}
 
         # Offset Q, DQ, DO, DELTA & LSE. These inputs are offsetted by query heads.
         q_adj2 = (stride_qh * off_hq2 + stride_qz * off_zq).to(tl.int64)
@@ -190,9 +199,9 @@
         if HAS_FULL_BLOCKS:
             # ~~~~~~~~~~~ partial unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             # FULL_KV_IDX and FULL_KV_NUM_BLKS are always contiguous.
-            kv_indices = FULL_KV_IDX + sparse_kv_idx_offset
+            kv_indices = FULL_KV_IDX + sparse_full_kv_idx_offset
             kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
-            sparse_kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_kv_num_blks_offset)
+            sparse_kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_full_kv_num_blks_offset)
 
             offs_n2 = kv_start + tl.arange(0, BLOCK_N2)
             dq = bwd_dq_inner(
@@ -223,6 +232,11 @@
         stride_q_num_blks_h = {{stride("Q_NUM_BLKS", 1)}}
         stride_q_idx_h = {{stride("Q_IDX", 1)}}
         stride_q_idx_n = {{stride("Q_IDX", 2)}}
+        {%- if HAS_FULL_BLOCKS %}
+        stride_full_q_num_blks_h = {{stride("FULL_Q_NUM_BLKS", 1)}}
+        stride_full_q_idx_h = {{stride("FULL_Q_IDX", 1)}}
+        stride_full_q_idx_n = {{stride("FULL_Q_IDX", 2)}}
+        {%- endif %}
 
 
         dv = tl.zeros([BLOCK_N1, V_HEAD_DIM_ROUNDED], dtype=tl.float32)
@@ -281,6 +295,10 @@
 
             sparse_q_num_blks_offset = sparse_hz_offset * stride_q_num_blks_h + pid_mask
             sparse_q_idx_offset = sparse_hz_offset * stride_q_idx_h + pid_mask * stride_q_idx_n  # noqa: B950
+            {%- if HAS_FULL_BLOCKS %}
+            sparse_full_q_num_blks_offset = sparse_hz_offset * stride_full_q_num_blks_h + pid_mask
+            sparse_full_q_idx_offset = sparse_hz_offset * stride_full_q_idx_h + pid_mask * stride_full_q_idx_n  # noqa: B950
+            {%- endif %}
 
             # ~~~~~~~~~~~~~~~ fully unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             # Q_IDX and Q_NUM_BLKS are always contiguous.
@@ -321,9 +339,9 @@
             if HAS_FULL_BLOCKS:
                 # ~~~~~~~~~~~~~~~ fully unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
                 # FULL_Q_IDX and FULL_Q_NUM_BLKS are always contiguous.
-                q_indices = FULL_Q_IDX + sparse_q_idx_offset
+                q_indices = FULL_Q_IDX + sparse_full_q_idx_offset
                 q_start = tl.load(q_indices) * SPARSE_Q_BLOCK_SIZE # first q block we're loading
-                sparse_q_num_blocks = tl.load(FULL_Q_NUM_BLKS + sparse_q_num_blks_offset)
+                sparse_q_num_blocks = tl.load(FULL_Q_NUM_BLKS + sparse_full_q_num_blks_offset)
 
                 offs_m1 = q_start + tl.arange(0, BLOCK_M1)
                 dk, dv = bwd_dkdv_inner(

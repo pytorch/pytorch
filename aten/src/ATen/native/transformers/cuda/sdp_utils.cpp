@@ -937,8 +937,8 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
   if (dprop->major >= 8) {
     return check_tensor_dtype(params, greater_than_or_equal_sm80_mem_efficient_dtypes, debug);
   }
-#endif
   return check_tensor_dtype(params, less_than_sm80_mem_efficient_dtypes, debug);
+#endif
 }
 
 SDPBackend select_sdp_backend(sdp_params const& kernel_params) {

@@ -57,6 +57,89 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
 
+    def _compile_and_capture_side_effects(self, fn, *args):
+        """Compile fn and return side-effect metadata from bytecode hooks."""
+        captured = {}
+
+        def rewrite_hook(code, out_code):
+            return out_code.replace(co_name=f"{out_code.co_name}_hooked")
+
+        def inspect_hook(code, out_code):
+            captured["refs"] = (
+                torch._dynamo.convert_frame.get_compiled_code_side_effects(out_code)
+            )
+            captured["has_side_effects"] = (
+                torch._dynamo.convert_frame.compiled_code_has_side_effects(out_code)
+            )
+
+        torch._dynamo.reset()
+        rewrite_handle = torch._dynamo.convert_frame.register_bytecode_hook(
+            rewrite_hook
+        )
+        inspect_handle = torch._dynamo.convert_frame.register_bytecode_hook(
+            inspect_hook
+        )
+        try:
+            torch.compile(fn, backend="eager", fullgraph=True)(*args)
+        finally:
+            inspect_handle.remove()
+            rewrite_handle.remove()
+
+        return captured
+
+    def test_bytecode_hook_exposes_side_effect_refs(self):
+        def mutating_fn(x, lst):
+            lst.append(x + 1)
+            return x * 2
+
+        def pure_fn(x):
+            return x * 2
+
+        x = torch.randn(3)
+
+        mutated = self._compile_and_capture_side_effects(mutating_fn, x, [])
+        self.assertEqual(mutated["refs"], ("L['lst']",))
+        self.assertTrue(mutated["has_side_effects"])
+
+        pure = self._compile_and_capture_side_effects(pure_fn, x)
+        self.assertEqual(pure["refs"], ())
+        self.assertFalse(pure["has_side_effects"])
+
+    def test_side_effect_refs_dict_mutation(self):
+        def fn(x, d):
+            d["result"] = x + 1
+            return x * 2
+
+        result = self._compile_and_capture_side_effects(fn, torch.randn(3), {})
+        self.assertEqual(result["refs"], ("L['d']",))
+        self.assertTrue(result["has_side_effects"])
+
+    def test_side_effect_refs_tensor_in_container(self):
+        # Relevant to cudagraphs: a compiled function computes tensors and
+        # stores them into an external container as a side effect.
+        def fn(x, outputs):
+            y = x * 2
+            z = x + 3
+            outputs.append(y)
+            outputs.append(z)
+            return x
+
+        result = self._compile_and_capture_side_effects(fn, torch.randn(4), [])
+        self.assertEqual(result["refs"], ("L['outputs']",))
+        self.assertTrue(result["has_side_effects"])
+
+    def test_side_effect_refs_multiple_containers(self):
+        def fn(x, lst, d):
+            lst.append(x + 1)
+            d["out"] = x * 2
+            return x
+
+        result = self._compile_and_capture_side_effects(fn, torch.randn(3), [], {})
+        self.assertEqual(len(result["refs"]), 2)
+        self.assertIn("L['lst']", result["refs"])
+        self.assertIn("L['d']", result["refs"])
+        self.assertTrue(result["has_side_effects"])
+
     def test_ConstDict_pop_reconstruct(self):
         """
         If something is pop'ed from the dict, we reconstruct everything
@@ -559,54 +642,60 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
                 opt_gn = torch.compile(gn, backend="eager", fullgraph=True)
                 opt_gn(torch.ones(3))
 
-    def test_as_python_constant_super_delegation_no_false_positive(self):
-        """Passing a reference-type opaque object to a value-type constructor
-        should NOT produce a false 'self-referential' error.
-
-        When OpaqueObjectClassVariable.call_function evaluates constructor args
-        via as_python_constant(), a reference-type TorchScriptObjectVariable's
-        as_python_constant delegates to UserDefinedObjectVariable's via super().
-        The _add_call_once_guard must key on id(original_method) rather than the
-        method name string, so that this super() delegation is not mistaken for
-        a self-referential call.
+    def test_opaque_reference_as_python_constant(self):
+        """TSOV.as_python_constant must succeed for reference-type opaque
+        objects. Without this, __eq__ between two opaque objects graph breaks.
         """
-        from torch._library.opaque_object import OpaqueBase, register_opaque_type
+        import torch._library.opaque_object
+        import torch._opaque_base
 
-        class _Counter(OpaqueBase):
-            def __init__(self, start, end):
-                self.start = start
-                self.end = end
+        class Config(torch._opaque_base.OpaqueBase):
+            def __init__(self, v):
+                self.v = v
 
-        register_opaque_type(_Counter, typ="reference")
-
-        class _ValueWrapper(OpaqueBase):
-            def __init__(self, inner):
-                self.inner = inner
+            def __bool__(self):
+                return True
 
             def __eq__(self, other):
-                return isinstance(other, _ValueWrapper) and self.inner == other.inner
+                return isinstance(other, Config) and self.v == other.v
 
             def __hash__(self):
-                return hash(id(self.inner))
+                return hash(self.v)
 
-            def __fx_repr__(self):
-                return "_ValueWrapper(inner=None)", {"_ValueWrapper": _ValueWrapper}
+        torch._library.opaque_object.register_opaque_type(Config, typ="reference")
 
-        register_opaque_type(_ValueWrapper, typ="value")
+        cfg = Config(42)
 
-        counter = _Counter(0, 10)
+        def fn(x, cfg):
+            if cfg:
+                return x + 1
+            return x
 
-        @torch.compile(backend="eager", fullgraph=False)
-        def f(c):
-            return _ValueWrapper(c)
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        result = opt(torch.ones(4), cfg)
+        self.assertEqual(result, torch.ones(4) + 1)
 
-        # Counter is a reference-type opaque object. Passing it to a value-type
-        # constructor triggers as_python_constant() on the TSOV, which delegates
-        # via super() to UDOV. This should fail because reference types are not
-        # constants, but the error must NOT be "self-referential".
-        with self.assertRaises(RuntimeError) as ctx:
-            f(counter)
-        self.assertNotIn("self-referential", str(ctx.exception))
+    def test_call_once_guard_allows_super_delegation(self):
+        """_add_call_once_guard must key on (id(self), id(original_method))
+        so that super().as_python_constant() between VT subclasses is not
+        mistaken for a self-referential call.
+        """
+        from torch._dynamo.variables.base import VariableTracker
+
+        class _Parent(VariableTracker):
+            def as_python_constant(self):
+                return 42
+
+        class _Child(_Parent):
+            def as_python_constant(self):
+                return super().as_python_constant()
+
+        child = _Child()
+        # With name-based keying, _Child and _Parent share the same key
+        # (id(self), "as_python_constant"), causing a false
+        # AsPythonConstantNotImplementedError("self-referential").
+        self.assertEqual(child.as_python_constant(), 42)
+        self.assertTrue(child.is_python_constant())
 
 
 if __name__ == "__main__":

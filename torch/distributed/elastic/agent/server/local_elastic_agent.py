@@ -7,6 +7,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from __future__ import annotations
 
 import json
 import os
@@ -19,6 +20,7 @@ from string import Template
 from typing import Any, TYPE_CHECKING
 
 import torch.distributed.elastic.timer as timer
+from torch._utils_internal import justknobs_check
 from torch.distributed.elastic import events
 from torch.distributed.elastic.agent.server.api import (
     RunResult,
@@ -42,6 +44,8 @@ from torch.distributed.elastic.utils.logging import get_logger
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torch.distributed.elastic.events.api import EventMetadataValue
 
 logger = get_logger(__name__)
@@ -56,6 +60,29 @@ __all__ = [
 TORCHELASTIC_ENABLE_FILE_TIMER = "TORCHELASTIC_ENABLE_FILE_TIMER"
 TORCHELASTIC_HEALTH_CHECK_PORT = "TORCHELASTIC_HEALTH_CHECK_PORT"
 TORCHELASTIC_TIMER_FILE = "TORCHELASTIC_TIMER_FILE"
+
+
+class _AliveCallbackProxy:
+    """Mutable callback wrapper for the health check server.
+
+    The C++ pybind ``HealthCheckThriftServer`` binds its ``alive_callback``
+    at construction time and cannot update it afterward.  This proxy is
+    created *before* the health check server so it can be passed as the
+    callback.  Initially it returns ``time.time()`` (signalling "alive").
+    After the agent is constructed, :meth:`set_delegate` wires it to
+    ``agent._get_alive_time`` for real liveness tracking.
+    """
+
+    def __init__(self) -> None:
+        self._delegate: Callable[[], int] | None = None
+
+    def __call__(self) -> int:
+        if self._delegate is not None:
+            return self._delegate()
+        return int(time.time())
+
+    def set_delegate(self, delegate: Callable[[], int]) -> None:
+        self._delegate = delegate
 
 
 class LocalElasticAgent(SimpleElasticAgent):
@@ -155,6 +182,7 @@ class LocalElasticAgent(SimpleElasticAgent):
         exit_barrier_timeout: float = 300,
         log_line_prefix_template: str | None = None,
         shutdown_timeout: int = 30,
+        health_check_server: HealthCheckServer | None = None,
     ):
         super().__init__(spec, exit_barrier_timeout, shutdown_timeout)
         self._start_method = start_method
@@ -163,7 +191,7 @@ class LocalElasticAgent(SimpleElasticAgent):
         self._log_line_prefix_template = log_line_prefix_template
         self._worker_watchdog: timer.FileTimerServer | None = None
         self._logs_specs = logs_specs
-        self._health_check_server: HealthCheckServer | None = None
+        self._health_check_server = health_check_server
 
     def _setup_local_watchdog(self, envs: dict[int, dict[str, str]]) -> None:
         enable_watchdog_env_name = TORCHELASTIC_ENABLE_FILE_TIMER
@@ -206,6 +234,27 @@ class LocalElasticAgent(SimpleElasticAgent):
     def _get_current_time_secs() -> int:
         return int(time.time())
 
+    def _get_alive_time(self) -> int:
+        """Return the last progress time from the watchdog, or the current time.
+
+        This callback is passed to the health check server at startup and
+        is called on every TW health check poll. During initialization
+        (before rendezvous and worker launch), the watchdog does not exist
+        yet, so we return the current time to signal the agent is alive.
+        Once workers are running and the watchdog is active, we delegate
+        to the watchdog's ``get_last_progress_time`` for real liveness
+        tracking.
+
+        During the exit barrier wait, workers have finished and the watchdog
+        progress time is stale. We return the current time to prevent TW
+        from killing the task while agents coordinate shutdown.
+        """
+        if self._in_exit_barrier:
+            return int(time.time())
+        if self._worker_watchdog is not None:
+            return self._worker_watchdog.get_last_progress_time()
+        return int(time.time())
+
     def _setup_healthcheck(self) -> None:
         healthcheck_port_env_name = TORCHELASTIC_HEALTH_CHECK_PORT
         healthcheck_port = os.getenv(healthcheck_port_env_name)
@@ -215,13 +264,28 @@ class LocalElasticAgent(SimpleElasticAgent):
                 healthcheck_port_env_name,
                 healthcheck_port,
             )
-            if self._worker_watchdog is None:
-                logger.info(
-                    "FileTimerServer doesn't exist, using current time as dummy callback"
-                )
-                alive_callback = LocalElasticAgent._get_current_time_secs
+
+            if justknobs_check(
+                "ai_infra/pytorch_distributed:torchelastic_enable_healthcheck_before_rendezvous",
+                default=False,
+            ):
+                # New behavior: idempotent guard + dynamic callback that
+                # returns current time before watchdog exists and delegates
+                # to watchdog once workers are running.
+                if self._health_check_server is not None:
+                    return
+                alive_callback = self._get_alive_time
             else:
-                alive_callback = self._worker_watchdog.get_last_progress_time
+                # Original behavior: pick callback based on watchdog state
+                # at call time (only called from _start_workers where
+                # watchdog is already set up).
+                if self._worker_watchdog is None:
+                    logger.info(
+                        "FileTimerServer doesn't exist, using current time as dummy callback"
+                    )
+                    alive_callback = LocalElasticAgent._get_current_time_secs
+                else:
+                    alive_callback = self._worker_watchdog.get_last_progress_time
 
             try:
                 healthcheck_port_as_int = int(healthcheck_port)

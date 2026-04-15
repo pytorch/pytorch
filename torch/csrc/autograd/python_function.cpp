@@ -1,5 +1,7 @@
 #include <torch/csrc/autograd/python_function.h>
 
+#include <atomic>
+
 #include <ATen/ATen.h>
 #include <ATen/SequenceNumber.h>
 #include <c10/util/irange.h>
@@ -160,11 +162,42 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
 
   // Massage a C++ variable_list into a Python arguments tuple
   THPObjectPtr pyInputs(to_py_args(inputs, &_device_guard));
+  inputs.clear();
 
-  THPObjectPtr apply_fn(PyObject_GetAttrString(obj, "apply"));
-  if (!apply_fn)
-    throw_python_error();
-  THPObjectPtr r(PyObject_CallObject(apply_fn, pyInputs.get()));
+  THPObjectPtr r;
+  if (py_fn->boxed_grads_call) {
+    // Move grad tensors from the immutable args tuple into a plain list
+    // and call apply_boxed instead of apply. This lets backward pop/clear
+    // individual grads to free memory mid-execution, because the mutable
+    // list (not the C++ tuple) is the only container holding grad refs.
+    auto num_inputs = PyTuple_GET_SIZE(pyInputs.get());
+    THPObjectPtr gradsList(PyList_New(num_inputs));
+    if (!gradsList)
+      throw_python_error();
+    for (Py_ssize_t i = 0; i < num_inputs; i++) {
+      PyObject* item = PyTuple_GET_ITEM(pyInputs.get(), i);
+      Py_INCREF(item);
+      PyList_SET_ITEM(gradsList.get(), i, item);
+    }
+    // Release the tuple so its refs to individual grads are dropped
+    pyInputs = nullptr;
+
+    THPObjectPtr boxedArgs(PyTuple_New(1));
+    if (!boxedArgs)
+      throw_python_error();
+    PyTuple_SET_ITEM(boxedArgs.get(), 0, gradsList.release());
+
+    THPObjectPtr apply_fn(PyObject_GetAttrString(obj, "apply_boxed"));
+    if (!apply_fn)
+      throw_python_error();
+    r = THPObjectPtr(PyObject_CallObject(apply_fn, boxedArgs.get()));
+  } else {
+    THPObjectPtr apply_fn(PyObject_GetAttrString(obj, "apply"));
+    if (!apply_fn)
+      throw_python_error();
+    r = THPObjectPtr(PyObject_CallObject(apply_fn, pyInputs.get()));
+  }
+  pyInputs = nullptr;
   if (!r)
     throw_python_error();
   ensure_tuple(r);
@@ -1097,6 +1130,7 @@ void _trace_post_record(
   }
 
   std::vector<torch::jit::Value*> trace_outputs;
+  trace_outputs.reserve(static_cast<size_t>(std::max(0, num_outputs)));
   for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GET_ITEM(output_objects, i);
     if (THPVariable_Check(obj)) {
@@ -1303,11 +1337,14 @@ THPObjectPtr make_ctx_input_output_tuple(
   return result;
 }
 
-static PyObject* THPFunction_setup_context = nullptr;
-
 static PyObject* get_base_setup_context() {
-  if (THPFunction_setup_context != nullptr) {
-    return THPFunction_setup_context;
+  // NOTE: THPFunction_setup_context is intentionally leaked and never freed.
+  static std::atomic<PyObject*> THPFunction_setup_context = nullptr;
+
+  PyObject* setup_context =
+      THPFunction_setup_context.load(std::memory_order_acquire);
+  if (setup_context != nullptr) {
+    return setup_context;
   }
 
   auto module = THPObjectPtr(PyImport_ImportModule("torch.autograd.function"));
@@ -1321,11 +1358,17 @@ static PyObject* get_base_setup_context() {
 
   // setup_context gets "leaked" - we return a new reference and hold onto it
   // forever.
-  auto setup_context = PyObject_GetAttrString(function, "setup_context");
+  setup_context = PyObject_GetAttrString(function, "setup_context");
   if (!setup_context)
     return nullptr;
-  THPFunction_setup_context = setup_context;
-  return THPFunction_setup_context;
+
+  PyObject* expected = nullptr;
+  if (!THPFunction_setup_context.compare_exchange_strong(
+          expected, setup_context, std::memory_order_acq_rel)) {
+    Py_DECREF(setup_context);
+    return expected;
+  }
+  return setup_context;
 }
 
 PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
@@ -1387,6 +1430,16 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
       "clear_saved_tensors_on_access must be a bool, got ",
       Py_TYPE(clear_attr.get())->tp_name);
   ctx->clear_saved_tensors_on_access = clear_attr.get() == Py_True;
+
+  // Get boxed_grads_call from the Function class
+  THPObjectPtr boxed_attr(PyObject_GetAttrString(cls, "boxed_grads_call"));
+  TORCH_CHECK(
+      boxed_attr, "autograd.Function is missing boxed_grads_call attribute");
+  TORCH_CHECK(
+      PyBool_Check(boxed_attr.get()),
+      "boxed_grads_call must be a bool, got ",
+      Py_TYPE(boxed_attr.get())->tp_name);
+  ctx->boxed_grads_call = boxed_attr.get() == Py_True;
 
   // autograd.Function may optionally override a setup_context staticmethod.
   // In this case, autograd.Function.forward does NOT accept a ctx object.

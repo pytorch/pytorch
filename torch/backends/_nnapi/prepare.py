@@ -21,7 +21,7 @@ class NnapiModule(torch.nn.Module):
     """
 
     # _nnapi.Compilation is defined
-    comp: Optional[torch.classes._nnapi.Compilation]  # type: ignore[name-defined]
+    comp: Optional[torch.classes._nnapi.Compilation]  # type: ignore[name-defined]  # noqa: UP045
     weights: list[torch.Tensor]
     out_templates: list[torch.Tensor]
 

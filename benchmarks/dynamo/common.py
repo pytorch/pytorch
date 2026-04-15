@@ -1953,10 +1953,6 @@ class BenchmarkRunner:
     def guard_on_nn_module_models(self):
         return set()
 
-    @property
-    def inline_inbuilt_nn_modules_models(self):
-        return set()
-
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         raise NotImplementedError
 
@@ -2028,17 +2024,18 @@ class BenchmarkRunner:
 
         return model, example_inputs
 
-    def validate_model(self, model, example_inputs):
+    def validate_model(self, name, model, example_inputs):
         """
         Runs the eager model with example inputs to ensure that eager passes.
         """
         model = self.deepcopy_model(model)
         example_inputs = clone_inputs(example_inputs)
         model, example_inputs = self.cast_based_on_args(model, example_inputs)
-        try:
-            self.model_iter_fn(model, example_inputs)
-        except Exception as e:
-            raise RuntimeError("Eager run failed") from e
+        with self.pick_grad(name, self.args.training):
+            try:
+                self.model_iter_fn(model, example_inputs)
+            except Exception as e:
+                raise RuntimeError("Eager run failed") from e
 
     def maybe_cast(self, model, example_inputs):
         model, example_inputs = self.cast_based_on_args(model, example_inputs)
@@ -3209,6 +3206,11 @@ def parse_args(args=None):
         "--freezing", action="store_true", help="turn on freezing", default=False
     )
     parser.add_argument(
+        "--deterministic",
+        action="store_true",
+        help="Enable deterministic mode (torch.use_deterministic_algorithms, cudnn.deterministic, etc.)",
+    )
+    parser.add_argument(
         "--inductor-config",
         "-c",
         action="append",
@@ -3871,7 +3873,8 @@ def _run_compare_backed_unbacked(runner, args):
                 )
         print(f"{'=' * 80}", flush=True)
 
-    # Build base command, stripping --compare-backed-unbacked and --only + value
+    # Build base command, stripping --compare-backed-unbacked, --only, --filter and their values
+    # Handles both space-separated (--filter VALUE) and equals-separated (--filter=VALUE) forms
     filtered = []
     skip_next = False
     for a in sys.argv:
@@ -3880,8 +3883,13 @@ def _run_compare_backed_unbacked(runner, args):
         if skip_next:
             skip_next = False
             continue
-        if a == "--only":
-            skip_next = True
+        if a == "--only" or a.startswith("--only="):
+            if "=" not in a:
+                skip_next = True
+            continue
+        if a == "--filter" or a.startswith("--filter="):
+            if "=" not in a:
+                skip_next = True
             continue
         filtered.append(a)
     base_cmd = [sys.executable, "-B"] + filtered
@@ -3988,7 +3996,7 @@ def write_csv_when_exception(args, name: str, status: str, device=None):
         write_outputs(output_filename, headers, row)
 
 
-def setup_determinism_for_accuracy_test(args):
+def setup_determinism(args):
     if args.only is not None and args.only not in {
         "alexnet",
         "Background_Matting",
@@ -4024,6 +4032,11 @@ def setup_determinism_for_accuracy_test(args):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     torch.backends.mkldnn.deterministic = True
+    os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+    torch.backends.cudnn.allow_tf32 = False
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(False)
+    patch_torch_manual_seed()
 
 
 def run(runner, args, original_dir=None):
@@ -4084,6 +4097,9 @@ def run(runner, args, original_dir=None):
                 "DLRM+DDP is unsupported as it requires sharding the embedding layer separately from DDP"
             )
             return sys.exit(-1)
+    if args.deterministic and not args.accuracy:
+        setup_determinism(args)
+
     if args.accuracy:
         # Use small batch size. We use >1 batch size to ensure we test
         # batch_norm type of operators that work on batch dims.
@@ -4107,22 +4123,14 @@ def run(runner, args, original_dir=None):
             args.use_eval_mode = True
         inductor_config.fallback_random = True
 
-        setup_determinism_for_accuracy_test(args)
+        setup_determinism(args)
 
-        os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         if args.only is not None and args.only in {
             "nvidia_deeprecommender",
         }:
             # These seem unhappy with numerics of larger cuBLASLt workspace
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
-
-        torch.backends.cudnn.allow_tf32 = False
-        torch.backends.cuda.matmul.allow_tf32 = False
-        torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(False)
-
-        # Remove randomness when torch manual seed is called
-        patch_torch_manual_seed()
 
         # Some models e.g. yolov3 assert batch size on n_gpus
         if "CUDA_VISIBLE_DEVICES" not in os.environ and not args.multiprocess:
@@ -4335,8 +4343,8 @@ def run(runner, args, original_dir=None):
             )
             model_iter_fn = baseline_ctx(runner.model_iter_fn)
 
-            # needed to avoid error that causes inconsistent timing due to:
-            # Unable to hit fast path of CUDAGraphs because of pending, uninvoked backwards
+            # needed to avoid CUDAGraph fast-path warning / inconsistent timing when prior
+            # outputs still require backward (see torch._inductor.cudagraph_trees)
             def model_iter_fn_and_mark_step(*args, **kwargs):
                 torch.compiler.cudagraph_mark_step_begin()
                 model_iter_fn(*args, **kwargs)
@@ -4616,7 +4624,7 @@ def run(runner, args, original_dir=None):
                             # Use duck_shape_id="batch" so all batch dimensions
                             # share the same unbacked symbol
                             torch._dynamo.decorators.mark_unbacked(
-                                t, i, shape_id="batch", hint_override=batch_size
+                                t, i, shape_id="batch", hint_override=batch_size, min=1
                             )
                         else:
                             torch._dynamo.maybe_mark_dynamic(t, i)
@@ -4657,22 +4665,17 @@ def run(runner, args, original_dir=None):
             if name in runner.guard_on_nn_module_models:
                 guard_ctx = torch._dynamo.config.patch(guard_nn_modules=True)
 
-            inline_ctx = contextlib.nullcontext()
-            if name in runner.inline_inbuilt_nn_modules_models:
-                inline_ctx = torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
-
             with guard_ctx:
-                with inline_ctx:
-                    runner.run_one_model(
-                        name,
-                        model,
-                        example_inputs,
-                        optimize_ctx,
-                        experiment,
-                        explain=args.explain,
-                        tag=args.tag,
-                        batch_size=batch_size if args.dynamic_batch_only else None,
-                    )
+                runner.run_one_model(
+                    name,
+                    model,
+                    example_inputs,
+                    optimize_ctx,
+                    experiment,
+                    explain=args.explain,
+                    tag=args.tag,
+                    batch_size=batch_size if args.dynamic_batch_only else None,
+                )
         if args.generate_aot_autograd_stats:
             stats_file = output_filename.split(".csv")[0] + "_stats.csv"
             write_outputs(

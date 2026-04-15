@@ -142,7 +142,7 @@ the autograd engine.
   tensors filled with zeros. The default value of this setting is True.
 
 In addition to ``ctx`` methods, the :class:`~Function` class supports the following
-class attribute:
+class attributes:
 
 - :attr:`~Function.clear_saved_tensors_on_access`: When set to ``True`` on the
   :class:`~Function` subclass, accessing ``ctx.saved_tensors`` in the backward pass
@@ -152,6 +152,50 @@ class attribute:
   This can reduce peak memory usage in backward passes where saved tensors are only
   needed once. The default is ``False``. Note that ``saved_tensors`` can only be
   accessed once when this is enabled; a second access will raise an error.
+
+- :attr:`~Function.boxed_grads_call`: When set to ``True`` on the
+  :class:`~Function` subclass, backward receives grads as a single mutable list
+  argument instead of individual args in an immutable tuple. This allows backward
+  to free individual grads mid-execution by removing them from the list, reducing
+  peak memory. When enabled, the backward calling convention changes from
+  ``backward(ctx, *grads) -> Tuple[Tensor, ...]`` to ``backward(ctx, grads) -> Tuple[Tensor, ...]`` where ``grads`` is a list.
+  The return convention is unchanged.
+  The default is ``False``.
+
+Here is an example using ``boxed_grads_call`` to reduce peak memory in the backward
+pass of a QKV projection — a common building block of transformer models. The forward
+pass projects an input into three separate tensors (Q, K, V), so backward receives
+three gradients. Without ``boxed_grads_call``, all three grad tensors are held alive
+for the entire backward call because they are unpacked from an immutable tuple.
+With ``boxed_grads_call``, each grad can be freed as soon as it is consumed, so peak
+memory is reduced by up to 2/3 of the total grad memory::
+
+    class QKVProjection(Function):
+        """Projects input x into Q, K, V: q = x @ w_q, k = x @ w_k, v = x @ w_v."""
+        boxed_grads_call = True
+
+        @staticmethod
+        def forward(ctx, x, w_q, w_k, w_v):
+            ctx.save_for_backward(x, w_q, w_k, w_v)
+            return x.mm(w_q), x.mm(w_k), x.mm(w_v)
+
+        @staticmethod
+        def backward(ctx, grads):
+            x, w_q, w_k, w_v = ctx.saved_tensors
+            grad_x = torch.zeros_like(x)
+            grad_weights = []
+
+            # Process each grad independently and free it immediately.
+            # Without boxed_grads_call, all three grads would stay alive
+            # until backward returns, tripling peak grad memory.
+            for i, w in enumerate((w_q, w_k, w_v)):
+                grad_out = grads[i]
+                grads[i] = None      # Release reference in the caller's list
+                grad_x += grad_out.mm(w.t())
+                grad_weights.append(x.t().mm(grad_out))
+                del grad_out         # grad_out can now be freed by the runtime
+
+            return grad_x, *grad_weights
 
 **Step 3:** If your :class:`~Function` does not support double backward
 you should explicitly declare this by decorating backward with the

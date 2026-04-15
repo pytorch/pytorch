@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import importlib.util
 import unittest
 
 from sympy import I, Max, Min, Symbol, sympify
@@ -241,6 +242,48 @@ class TestUtils(TestCase):
 
 
 instantiate_device_type_tests(TestUtils, globals(), allow_xpu=True)
+
+
+class TestFP4Support(TestCase):
+    """Tests for FP4 (float4_e2m1fn_x2) infrastructure support."""
+
+    @unittest.skipIf(
+        not torch.cuda.is_available()
+        or importlib.util.find_spec("cutlass_api") is None,
+        "requires CUDA and cutlass_api",
+    )
+    def test_ensure_fp4_dtype_registered(self):
+        """_ensure_fp4_dtype_registered should patch cutlass_api for FP4."""
+        from torch._inductor.utils import _ensure_fp4_dtype_registered
+
+        _ensure_fp4_dtype_registered()
+        import cutlass
+        import cutlass_api.utils
+
+        result = cutlass_api.utils.cutlass_type_from_torch_type(torch.float4_e2m1fn_x2)
+        self.assertEqual(result, cutlass.Float4E2M1FN)
+
+        result_fp32 = cutlass_api.utils.cutlass_type_from_torch_type(torch.float32)
+        self.assertEqual(result_fp32, cutlass.Float32)
+
+    def test_rand_strided_fp4(self):
+        """rand_strided should produce valid FP4 tensors."""
+        from torch._dynamo.testing import rand_strided
+
+        t = rand_strided((4, 8), (8, 1), dtype=torch.float4_e2m1fn_x2, device="cpu")
+        self.assertEqual(t.dtype, torch.float4_e2m1fn_x2)
+        self.assertEqual(t.shape, (4, 8))
+        self.assertEqual(t.stride(), (8, 1))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_rand_strided_fp4_cuda(self):
+        from torch._dynamo.testing import rand_strided
+
+        t = rand_strided((16, 32), (32, 1), dtype=torch.float4_e2m1fn_x2, device="cuda")
+        self.assertEqual(t.dtype, torch.float4_e2m1fn_x2)
+        self.assertEqual(t.shape, (16, 32))
+        self.assertTrue(t.is_cuda)
+
 
 if __name__ == "__main__":
     run_tests()
