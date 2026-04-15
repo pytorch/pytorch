@@ -1,13 +1,17 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/core/Tensor.h>
-#include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/StatelessPhilox4x32.cuh>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/core/TransformationHelper.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/cuda/DistributionTemplates.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <curand_kernel.h>
+#include <ATen/cuda/StatelessPhilox4x32.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
-#include <ATen/core/TransformationHelper.h>
 #include <type_traits>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -23,8 +27,9 @@ namespace {
 
 using at::cuda::philox_4x32;
 
-// Elements produced per Philox 4x32 call: 4 for float/half/bfloat16, 2 for double.
-// Note that we use a full float for each generated half/bfloat16 for better numerics.
+// Elements produced per Philox 4x32 call: 4 for float/half/bfloat16, 2 for
+// double. Note that we use a full float for each generated half/bfloat16 for
+// better numerics.
 template <typename scalar_t>
 constexpr int elems_per_call = std::is_same_v<scalar_t, double> ? 2 : 4;
 
@@ -52,10 +57,14 @@ __device__ __forceinline__ double2 box_muller_double(uint4 r) {
   constexpr double M = 2.3283064365386963e-10; // 1/2^32
   constexpr double TWO_PI = 6.2831853071795864;
   // Pack pairs of uint32 for ~64 bits of uniform randomness.
-  double u1 = fma(static_cast<double>(r.x), M,
-                  static_cast<double>(r.y) * M * M + M * M * 0.5);
-  double u2 = fma(static_cast<double>(r.z), M,
-                  static_cast<double>(r.w) * M * M + M * M * 0.5);
+  double u1 =
+      fma(static_cast<double>(r.x),
+          M,
+          static_cast<double>(r.y) * M * M + M * M * 0.5);
+  double u2 =
+      fma(static_cast<double>(r.z),
+          M,
+          static_cast<double>(r.w) * M * M + M * M * 0.5);
 
   double radius = ::sqrt(-2.0 * ::log(u1));
   double s, c;
@@ -73,7 +82,6 @@ __global__ void philox_single_key_kernel(
     int64_t num_elems,
     sample_t sample_func,
     param_t param_func) {
-
   // Use vectorized load to get (seed, offset)
   auto key_vec = memory::ld_vec<16>(key);
   auto* key_vals = reinterpret_cast<const uint64_t*>(&key_vec);
@@ -89,7 +97,7 @@ __global__ void philox_single_key_kernel(
     constexpr int vec_bytes = epc * sizeof(scalar_t);
     memory::Vec<vec_bytes> v;
     auto* vals = reinterpret_cast<scalar_t*>(&v);
-    #pragma unroll
+#pragma unroll
     for (int j = 0; j < epc; j++) {
       vals[j] = param_func((&sample.x)[j]);
     }
@@ -99,7 +107,8 @@ __global__ void philox_single_key_kernel(
   // Scalar tail for remaining elements.
   if (chunk == num_full_chunks) {
     int64_t tail_start = num_full_chunks * epc;
-    auto sample = sample_func(seed, offset + static_cast<uint64_t>(num_full_chunks));
+    auto sample =
+        sample_func(seed, offset + static_cast<uint64_t>(num_full_chunks));
     for (int j = 0; j < num_elems - tail_start; j++) {
       output[tail_start + j] = param_func((&sample.x)[j]);
     }
@@ -122,7 +131,8 @@ __global__ void philox_multi_key_kernel(
   int64_t chunks_per_key = (elems_per_key + epc - 1) / epc;
   int64_t total_threads = num_keys * chunks_per_key;
   int64_t tid = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-  if (tid >= total_threads) return;
+  if (tid >= total_threads)
+    return;
 
   // Determine correct (seed, offset) to use and sample.
   int64_t key_idx = tid / chunks_per_key;
@@ -142,7 +152,7 @@ __global__ void philox_multi_key_kernel(
     constexpr int vec_bytes = epc * sizeof(scalar_t);
     memory::Vec<vec_bytes> v;
     auto* vals = reinterpret_cast<scalar_t*>(&v);
-    #pragma unroll
+#pragma unroll
     for (int j = 0; j < epc; j++) {
       vals[j] = param_func((&sample.x)[j]);
     }
@@ -158,28 +168,49 @@ __global__ void philox_multi_key_kernel(
 template <typename scalar_t, typename sample_t, typename param_t>
 void philox_distribution_kernel(
     const char* op_name,
-    Tensor& self, const Tensor& key,
-    const sample_t& sample_func, const param_t& param_func) {
-  TORCH_CHECK(self.is_floating_point(),
-      op_name, ": self must be a floating point tensor, got ",
+    Tensor& self,
+    const Tensor& key,
+    const sample_t& sample_func,
+    const param_t& param_func) {
+  TORCH_CHECK(
+      self.is_floating_point(),
+      op_name,
+      ": self must be a floating point tensor, got ",
       self.scalar_type());
-  TORCH_CHECK(key.scalar_type() == kUInt64,
-      op_name, ": key must have dtype uint64, got ",
+  TORCH_CHECK(
+      key.scalar_type() == kUInt64,
+      op_name,
+      ": key must have dtype uint64, got ",
       key.scalar_type());
-  TORCH_CHECK(self.device() == key.device(),
-      op_name, ": self and key must be on the same device, got ",
-      self.device(), " and ", key.device());
-  TORCH_CHECK(key.dim() >= 1 && key.size(-1) == 2,
-      op_name, ": key must have shape (2,) or (*batch, 2), got shape ",
+  TORCH_CHECK(
+      self.device() == key.device(),
+      op_name,
+      ": self and key must be on the same device, got ",
+      self.device(),
+      " and ",
+      key.device());
+  TORCH_CHECK(
+      key.dim() >= 1 && key.size(-1) == 2,
+      op_name,
+      ": key must have shape (2,) or (*batch, 2), got shape ",
       key.sizes());
   if (key.dim() > 1) {
-    TORCH_CHECK(key.dim() == self.dim() + 1,
-        op_name, ": batched key must have ndim == output ndim + 1, "
-        "got key shape ", key.sizes(), " with output shape ", self.sizes());
+    TORCH_CHECK(
+        key.dim() == self.dim() + 1,
+        op_name,
+        ": batched key must have ndim == output ndim + 1, "
+        "got key shape ",
+        key.sizes(),
+        " with output shape ",
+        self.sizes());
     auto key_batch = key.sizes().slice(0, self.dim());
-    TORCH_CHECK(is_expandable_to(key_batch, self.sizes()),
-        op_name, ": key batch shape ", key_batch,
-        " is not broadcastable with output shape ", self.sizes());
+    TORCH_CHECK(
+        is_expandable_to(key_batch, self.sizes()),
+        op_name,
+        ": key batch shape ",
+        key_batch,
+        " is not broadcastable with output shape ",
+        self.sizes());
   }
 
   if (self.numel() == 0) {
@@ -200,14 +231,17 @@ void philox_distribution_kernel(
     // === Launch single key kernel ===
     constexpr int epc = elems_per_call<scalar_t>;
     int64_t num_chunks = (self.numel() + epc - 1) / epc;
-    int num_blocks = static_cast<int>((num_chunks + block_size - 1) / block_size);
+    int num_blocks =
+        static_cast<int>((num_chunks + block_size - 1) / block_size);
 
     auto key_contig = key.contiguous();
     philox_single_key_kernel<scalar_t>
         <<<num_blocks, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
-        output.mutable_data_ptr<scalar_t>(),
-        key_contig.data_ptr<uint64_t>(),
-        self.numel(), sample_func, param_func);
+            output.mutable_data_ptr<scalar_t>(),
+            key_contig.data_ptr<uint64_t>(),
+            self.numel(),
+            sample_func,
+            param_func);
   } else {
     // === Launch batched (multiple) key kernel ===
     // The kernel writes each key's output as a contiguous block of
@@ -218,7 +252,8 @@ void philox_distribution_kernel(
     int64_t elems_per_key = 1;
     int64_t key_dims = self.dim();
     for (int64_t i = self.dim() - 1; i >= 0; i--) {
-      if (key.size(i) != 1) break;
+      if (key.size(i) != 1)
+        break;
       elems_per_key *= self.size(i);
       key_dims--;
     }
@@ -233,20 +268,24 @@ void philox_distribution_kernel(
       oc_strides[i] = key.size(dim) > 1 ? key.stride(dim) : 0;
     }
     const int64_t* oc_strides_ptr = oc_strides.data();
-    auto key_offset_calc = OffsetCalculator<1>(
-        key_dims, oc_sizes.data(), &oc_strides_ptr);
+    auto key_offset_calc =
+        OffsetCalculator<1>(key_dims, oc_sizes.data(), &oc_strides_ptr);
 
-    int64_t chunks_per_key =
-        (elems_per_key + elems_per_call<scalar_t> - 1) / elems_per_call<scalar_t>;
+    int64_t chunks_per_key = (elems_per_key + elems_per_call<scalar_t> - 1) /
+        elems_per_call<scalar_t>;
     int64_t total_threads = num_keys * chunks_per_key;
-    int num_blocks = static_cast<int>((total_threads + block_size - 1) / block_size);
+    int num_blocks =
+        static_cast<int>((total_threads + block_size - 1) / block_size);
 
     philox_multi_key_kernel<scalar_t>
         <<<num_blocks, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
-        output.mutable_data_ptr<scalar_t>(),
-        key.data_ptr<uint64_t>(),
-        num_keys, elems_per_key,
-        sample_func, param_func, key_offset_calc);
+            output.mutable_data_ptr<scalar_t>(),
+            key.data_ptr<uint64_t>(),
+            num_keys,
+            elems_per_key,
+            sample_func,
+            param_func,
+            key_offset_calc);
   }
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
@@ -255,10 +294,113 @@ void philox_distribution_kernel(
   }
 }
 
+// -- Non-portable fast path --------------------------------------------------
+//
+// Uses PyTorch's distribution_nullary_kernel with PhiloxCudaState pointing
+// directly at the key's device memory. Only supports single (non-batched) keys.
+
+Tensor& philox_nonportable_uniform(
+    Tensor& self,
+    const Tensor& key,
+    double low,
+    double high) {
+  at::cuda::CUDAGuard device_guard(key.device());
+
+  PhiloxCudaState philox_state;
+  philox_state.seed_.ptr = reinterpret_cast<int64_t*>(key.data_ptr<uint64_t>());
+  philox_state.offset_.ptr =
+      reinterpret_cast<int64_t*>(key.data_ptr<uint64_t>() + 1);
+  philox_state.offset_intragraph_ = 0;
+  philox_state.captured_ = true;
+
+  auto iter = TensorIterator::borrowing_nullary_op(self);
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf, kBFloat16, self.scalar_type(), "_philox_uniform_cuda", [&] {
+        using opmath_t = at::opmath_type<scalar_t>;
+        auto range = static_cast<opmath_t>(high - low);
+        auto from = static_cast<scalar_t>(low);
+        auto to = static_cast<scalar_t>(high);
+        if (std::is_same_v<scalar_t, double>) {
+          distribution_nullary_kernel<scalar_t, opmath_t, double2>(
+              iter,
+              philox_state,
+              [] __device__(curandStatePhilox4_32_10_t * state) -> double2 {
+                return curand_uniform2_double(state);
+              },
+              [range, from, to] __device__(opmath_t rand) {
+                auto value = static_cast<scalar_t>(rand * range + from);
+                return value == to ? from : value;
+              });
+        } else {
+          distribution_nullary_kernel<scalar_t, opmath_t, float4>(
+              iter,
+              philox_state,
+              [] __device__(curandStatePhilox4_32_10_t * state) -> float4 {
+                return curand_uniform4(state);
+              },
+              [range, from, to] __device__(opmath_t rand) {
+                auto value = static_cast<scalar_t>(rand * range + from);
+                return value == to ? from : value;
+              });
+        }
+      });
+  return self;
+}
+
+Tensor& philox_nonportable_normal(
+    Tensor& self,
+    const Tensor& key,
+    double mean,
+    double stddev) {
+  at::cuda::CUDAGuard device_guard(key.device());
+
+  PhiloxCudaState philox_state;
+  philox_state.seed_.ptr = reinterpret_cast<int64_t*>(key.data_ptr<uint64_t>());
+  philox_state.offset_.ptr =
+      reinterpret_cast<int64_t*>(key.data_ptr<uint64_t>() + 1);
+  philox_state.offset_intragraph_ = 0;
+  philox_state.captured_ = true;
+
+  auto iter = TensorIterator::borrowing_nullary_op(self);
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf, kBFloat16, self.scalar_type(), "_philox_normal_cuda", [&] {
+        using accscalar_t = at::acc_type<scalar_t, true>;
+        auto fmean = static_cast<accscalar_t>(mean);
+        auto fstd = static_cast<accscalar_t>(stddev);
+        if (std::is_same_v<scalar_t, double>) {
+          distribution_nullary_kernel<scalar_t, accscalar_t, double2>(
+              iter,
+              philox_state,
+              [] __device__(curandStatePhilox4_32_10_t * state) -> double2 {
+                return curand_normal2_double(state);
+              },
+              [fmean, fstd] __device__(accscalar_t rand) {
+                return static_cast<scalar_t>(rand * fstd + fmean);
+              });
+        } else {
+          distribution_nullary_kernel<scalar_t, accscalar_t, float4>(
+              iter,
+              philox_state,
+              [] __device__(curandStatePhilox4_32_10_t * state) -> float4 {
+                return curand_normal4(state);
+              },
+              [fmean, fstd] __device__(accscalar_t rand) {
+                return static_cast<scalar_t>(rand * fstd + fmean);
+              });
+        }
+      });
+  return self;
+}
+
 } // anonymous namespace
 
 Tensor& _philox_uniform_cuda_(
-    Tensor& self, const Tensor& key, double low, double high) {
+    Tensor& self, const Tensor& key, double low, double high, bool portable) {
+  if (!portable) {
+    TORCH_CHECK(key.dim() == 1 && key.size(0) == 2,
+        "_philox_uniform_: portable=False does not support batched keys");
+    return philox_nonportable_uniform(self, key, low, high);
+  }
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf, kBFloat16, self.scalar_type(), "_philox_uniform_", [&] {
     auto sample_func = []() {
@@ -291,7 +433,12 @@ Tensor& _philox_uniform_cuda_(
 }
 
 Tensor& _philox_normal_cuda_(
-    Tensor& self, const Tensor& key, double mean, double stddev) {
+    Tensor& self, const Tensor& key, double mean, double stddev, bool portable) {
+  if (!portable) {
+    TORCH_CHECK(key.dim() == 1 && key.size(0) == 2,
+        "_philox_normal_: portable=False does not support batched keys");
+    return philox_nonportable_normal(self, key, mean, stddev);
+  }
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf, kBFloat16, self.scalar_type(), "_philox_normal_", [&] {
     using compute_t = std::conditional_t<std::is_same_v<scalar_t, double>, double, float>;

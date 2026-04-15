@@ -87,6 +87,52 @@ __global__ void distribution_elementwise_grid_stride_kernel(int64_t numel,
   }
 }
 
+// Helper that launches the grid-stride kernel for a single sub-iterator
+// that is guaranteed to use 32-bit indexing.
+template<typename scalar_t,
+         typename accscalar_t,
+         int unroll_factor,
+         typename dist_t,
+         typename transform_t>
+void distribution_nullary_kernel_launch(
+    at::TensorIteratorBase& iter,
+    int64_t numel,
+    PhiloxCudaState rng_engine_inputs,
+    dim3 grid,
+    dim3 block,
+    const dist_t& dist_func,
+    const transform_t& transform_func) {
+  char* out_data = (char*)iter.data_ptr(0);
+  auto stream = at::cuda::getCurrentCUDAStream();
+  if (iter.is_trivial_1d()) {
+    auto strides = iter.get_inner_strides();
+    int stride0 = strides[0];
+    distribution_elementwise_grid_stride_kernel<accscalar_t, unroll_factor><<<grid, block, 0, stream>>>(
+      numel,
+      rng_engine_inputs,
+      dist_func,
+      [=]__device__(int idx, accscalar_t rand) {
+        scalar_t* out = (scalar_t*)&out_data[stride0 * idx];
+        *out = transform_func(rand);
+      }
+    );
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  } else {
+    auto offset_calc = make_offset_calculator<1>(iter);
+    distribution_elementwise_grid_stride_kernel<accscalar_t, unroll_factor><<<grid, block, 0, stream>>>(
+      numel,
+      rng_engine_inputs,
+      dist_func,
+      [=]__device__(int idx, accscalar_t rand) {
+        auto offsets = offset_calc.get(idx);
+        scalar_t* out = (scalar_t*)&out_data[offsets[0]];
+        *out = transform_func(rand);
+      }
+    );
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  }
+}
+
 /**
  * distribution_nullary_kernel is analogous to gpu_kernel in
  * ATen/native/cuda/Loops.cuh. Like gpu_kernel, it uses
@@ -135,37 +181,52 @@ void distribution_nullary_kernel(at::TensorIteratorBase& iter,
     }
     return;
   }
+distribution_nullary_kernel_launch<scalar_t, accscalar_t, unroll_factor>(
+      iter, numel, rng_engine_inputs, grid, block, dist_func, transform_func);
+}
 
-  char* out_data = (char*)iter.data_ptr(0);
-
-  auto stream = at::cuda::getCurrentCUDAStream();
-  if (iter.is_trivial_1d()) {
-    auto strides = iter.get_inner_strides();
-    int stride0 = strides[0];
-    distribution_elementwise_grid_stride_kernel<accscalar_t, unroll_factor><<<grid, block, 0, stream>>>(
-      numel,
-      rng_engine_inputs,
-      dist_func,
-      [=]__device__(int idx, accscalar_t rand) {
-        scalar_t* out = (scalar_t*)&out_data[stride0 * idx];
-        *out = transform_func(rand);
-      }
-    );
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
-  } else {
-    auto offset_calc = make_offset_calculator<1>(iter);
-    distribution_elementwise_grid_stride_kernel<accscalar_t, unroll_factor><<<grid, block, 0, stream>>>(
-      numel,
-      rng_engine_inputs,
-      dist_func,
-      [=]__device__(int idx, accscalar_t rand) {
-        auto offsets = offset_calc.get(idx);
-        scalar_t* out = (scalar_t*)&out_data[offsets[0]];
-        *out = transform_func(rand);
-      }
-    );
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
+// Overload that accepts a PhiloxCudaState directly instead of a Generator.
+// Used by stateless RNG ops in non-portable mode to avoid DtoH sync: the
+// PhiloxCudaState points at device memory (captured_ mode) and the seed/offset
+// are read inside the kernel.
+template<typename scalar_t,
+        typename accscalar_t,
+        typename dist_func_return_t,
+        typename dist_t,
+        typename transform_t>
+void distribution_nullary_kernel(at::TensorIteratorBase& iter,
+                                PhiloxCudaState philox_state,
+                                const dist_t& dist_func,
+                                const transform_t transform_func) {
+  const int unroll_factor = sizeof(dist_func_return_t) / sizeof(accscalar_t);
+  TORCH_CHECK(unroll_factor >= 1, "unroll_factor must be >= 1.");
+  int64_t numel = iter.numel();
+  if (numel == 0) {
+    return;
   }
+
+  if (!iter.can_use_32bit_indexing()) {
+    // Advance offset_intragraph_ between sub-iterators so each gets
+    // a distinct region of the Philox stream (reusing the CUDA graph
+    // offset mechanism).
+    uint64_t running_offset = 0;
+    for (auto& sub_iter : iter.with_32bit_indexing()) {
+      auto sub_state = philox_state;
+      sub_state.offset_intragraph_ += running_offset;
+
+      distribution_nullary_kernel<scalar_t, accscalar_t, dist_func_return_t>(
+          sub_iter, sub_state, dist_func, transform_func);
+
+      auto [sub_counter_offset, sub_grid, sub_block] =
+          calc_execution_policy(sub_iter.numel(), unroll_factor);
+      running_offset += sub_counter_offset;
+    }
+    return;
+  }
+
+  auto [counter_offset, grid, block] = calc_execution_policy(numel, unroll_factor);
+  distribution_nullary_kernel_launch<scalar_t, accscalar_t, unroll_factor>(
+      iter, numel, philox_state, grid, block, dist_func, transform_func);
 }
 
 // Binary kernel
