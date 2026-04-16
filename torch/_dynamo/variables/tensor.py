@@ -546,7 +546,7 @@ class TensorVariable(VariableTracker):
                 tx, [self, VariableTracker.build(tx, name)], {}
             )
             # in the event that TensorVariable returns NotImplemented
-            # BuiltinVariable.call_getattr returns GetAttrVariable
+            # GetAttrBuiltinVariable.call_function returns GetAttrVariable
             ret_val = not isinstance(var, GetAttrVariable)
         except (AttributeError, ObservedAttributeError):
             ret_val = False
