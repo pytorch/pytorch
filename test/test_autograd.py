@@ -13557,6 +13557,7 @@ class TestAutogradDeviceType(TestCase):
         (c * d).sum().backward()
         self.assertEqual(c.grad.stride(), (2, 1))
 
+    @skipIfTorchDynamo("tests C++ autograd engine layout policy, not dynamo")
     def test_enforce_grad_layout_policy(self, device):
         # A custom function that returns a fresh contiguous gradient,
         # which has different strides from a channels_last parameter.
@@ -13569,7 +13570,7 @@ class TestAutogradDeviceType(TestCase):
             def backward(ctx, grad_output):
                 return torch.ones(2, 3, 4, 5, device=grad_output.device)
 
-        # Parameter is channels_last → its strides differ from contiguous.
+        # Parameter is channels_last -- its strides differ from contiguous.
         a = (
             torch.rand(2, 3, 4, 5, device=device)
             .to(memory_format=torch.channels_last)
