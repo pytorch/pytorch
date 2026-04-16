@@ -976,7 +976,7 @@ Data-dependent branching
         # File "test_error_messages.py", line N, in fn, code: if x.sum() > 0:
         gt = gt(sum_1, 0)
 
-  Hint: The branch condition uses a scalar integer tensor. Consider rewriting the computation to use plain Python ints (e.g. use int attributes instead of tensor buffers) so the condition becomes a shape guard instead of data-dependent branching.
+  Hint: For the common pattern `if tensor_cond: x = transform(x)` (e.g. clamping inf/nan values), consider making the code branchless by always applying the transform. Operations like torch.clamp, torch.nan_to_num, and torch.where are typically no-ops on well-behaved inputs and compile without graph breaks.
   Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
   Hint: Use `torch.cond` to express dynamic control flow.
 
@@ -987,6 +987,35 @@ Data-dependent branching
 from user code:
    File "test_error_messages.py", line N, in fn
     if x.sum() > 0:""",
+        )
+
+    def test_data_dependent_branching_bool_tensor_hints(self):
+        def cast_overflow_tensors(tensors, offset=1000):
+            if tensors.isinf().any() or tensors.isnan().any():
+                clamp_value = torch.finfo(tensors.dtype).max - offset
+                tensors = torch.clamp(tensors, min=-clamp_value, max=clamp_value)
+            return tensors
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(
+                cast_overflow_tensors, backend="eager", fullgraph=True
+            )(torch.randn(3)),
+            """\
+Data-dependent branching
+  Explanation: Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). Dynamo does not support tracing dynamic control flow.
+  Hint: For the common pattern `if tensor_cond: x = transform(x)` (e.g. clamping inf/nan values), consider making the code branchless by always applying the transform. Operations like torch.clamp, torch.nan_to_num, and torch.where are typically no-ops on well-behaved inputs and compile without graph breaks.
+  Hint: Note: Python `or`/`and` between tensor expressions (e.g. `tensor.any() or other_tensor.any()`) triggers implicit bool conversion. Use `torch.logical_or`/`torch.logical_and` or the `|`/`&` operators instead.
+  Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
+  Hint: Use `torch.cond` to express dynamic control flow.
+
+  Developer debug context: attempted to jump with TensorVariable()
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0170.html
+
+from user code:
+   File "test_error_messages.py", line N, in cast_overflow_tensors
+    if tensors.isinf().any() or tensors.isnan().any():""",  # noqa: B950
         )
 
     # Test that the bytecode source attribution is correct with VariableTracker
@@ -1054,7 +1083,7 @@ Graph Break Reason: Data-dependent branching
         # File "test_error_messages.py", line N, in fn, code: if x.sum() > 0:
         gt = gt(sum_1, 0)
 
-  Hint: The branch condition uses a scalar integer tensor. Consider rewriting the computation to use plain Python ints (e.g. use int attributes instead of tensor buffers) so the condition becomes a shape guard instead of data-dependent branching.
+  Hint: For the common pattern `if tensor_cond: x = transform(x)` (e.g. clamping inf/nan values), consider making the code branchless by always applying the transform. Operations like torch.clamp, torch.nan_to_num, and torch.where are typically no-ops on well-behaved inputs and compile without graph breaks.
   Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
   Hint: Use `torch.cond` to express dynamic control flow.
 
@@ -1286,7 +1315,7 @@ Data-dependent branching
         # File "test_error_messages.py", line N, in gn, code: if x.sum() > 0:
         gt = gt(sum_1, 0)
 
-  Hint: The branch condition uses a scalar integer tensor. Consider rewriting the computation to use plain Python ints (e.g. use int attributes instead of tensor buffers) so the condition becomes a shape guard instead of data-dependent branching.
+  Hint: For the common pattern `if tensor_cond: x = transform(x)` (e.g. clamping inf/nan values), consider making the code branchless by always applying the transform. Operations like torch.clamp, torch.nan_to_num, and torch.where are typically no-ops on well-behaved inputs and compile without graph breaks.
   Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
   Hint: Use `torch.cond` to express dynamic control flow.
 
@@ -1342,7 +1371,7 @@ Data-dependent branching
         # File "test_error_messages.py", line N, in fn, code: if x.sum() > 0:
         gt = gt(sum_1, 0)
 
-  Hint: The branch condition uses a scalar integer tensor. Consider rewriting the computation to use plain Python ints (e.g. use int attributes instead of tensor buffers) so the condition becomes a shape guard instead of data-dependent branching.
+  Hint: For the common pattern `if tensor_cond: x = transform(x)` (e.g. clamping inf/nan values), consider making the code branchless by always applying the transform. Operations like torch.clamp, torch.nan_to_num, and torch.where are typically no-ops on well-behaved inputs and compile without graph breaks.
   Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
   Hint: Use `torch.cond` to express dynamic control flow.
 
@@ -2485,7 +2514,7 @@ Data-dependent branching
         # File "test_error_messages.py", line N, in f1, code: if x.sum() > 0:
         gt = gt(sum_1, 0)
 
-  Hint: The branch condition uses a scalar integer tensor. Consider rewriting the computation to use plain Python ints (e.g. use int attributes instead of tensor buffers) so the condition becomes a shape guard instead of data-dependent branching.
+  Hint: For the common pattern `if tensor_cond: x = transform(x)` (e.g. clamping inf/nan values), consider making the code branchless by always applying the transform. Operations like torch.clamp, torch.nan_to_num, and torch.where are typically no-ops on well-behaved inputs and compile without graph breaks.
   Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
   Hint: Use `torch.cond` to express dynamic control flow.
 
