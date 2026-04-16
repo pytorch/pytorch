@@ -129,8 +129,7 @@ are mature and have been tested for years.
 Hence, PyTorch is quite fast — whether you run small or large neural networks.
 
 The memory usage in PyTorch is extremely efficient compared to Torch or some of the alternatives.
-We've written custom memory allocators for the GPU to make sure that
-your deep learning models are maximally memory efficient.
+We've written custom memory allocators for the GPU to make sure that your deep learning models are maximally memory efficient.
 This enables you to train bigger deep learning models than before.
 
 ### Extensions Without Pain
