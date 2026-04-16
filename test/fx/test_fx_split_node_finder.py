@@ -165,16 +165,22 @@ class TestFxSplitNodeFinder(TestCase):
             self._assert_events_file(events_file)
             self._validate_file_content(
                 nodes_file,
-                ["|-sup_f_2: init_acc|callable_and_operator_supported #"],
+                [
+                    "===== Tracking node sup_f_2 =====",
+                    "|-sup_f_2: init_acc|callable_and_operator_supported #",
+                    "===== End of tracking node sup_f_2 =====",
+                ],
             )
         elif mode == 3:
             self._assert_events_file(events_file)
             self._validate_file_content(
                 nodes_file,
                 [
+                    "===== Tracking node sup_f_1 =====",
                     "|-sup_f_1: init_acc|callable_and_operator_supported #",
                     "|-sup_f_1: acc_del|non_tensor_output_with_cpu_user add",
                     "| |-add: init_cpu|operator_support #",
+                    "===== End of tracking node sup_f_1 =====",
                 ],
             )
 
