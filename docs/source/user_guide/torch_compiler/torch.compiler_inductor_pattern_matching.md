@@ -116,7 +116,7 @@ def fuse_mm_add_relu(match: Match, mat1, mat2, *, input):
             input, mat1, mat2, beta=1, alpha=1, use_gelu=False
         )
 
-    # when tracing, theres no need to run the actual kernels, or alloc real memory
+    # when tracing, there's no need to run the actual kernels, or alloc real memory
     # so we enable FakeTensorMode.
     with V.fake_mode:
         match.replace_by_example(repl, [input, mat1, mat2])
