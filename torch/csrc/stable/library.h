@@ -5,7 +5,6 @@
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/stable/c/shim.h>
-#include <torch/headeronly/core/enum_tag.h>
 #include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/Metaprogramming.h>
 
@@ -98,21 +97,6 @@ class StableLibrary final {
     aoti_torch_library_def(lib_, schema);
     return *this;
   }
-
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
-  // corresponds to a limited, stable version of torch::library::def() with tags
-  StableLibrary& def(const char* schema, const std::vector<at::Tag>& tags) {
-    std::vector<int32_t> tag_ints;
-    tag_ints.reserve(tags.size());
-    for (auto t : tags) {
-      tag_ints.push_back(
-          torch::stable::detail::to<int32_t>(torch::stable::detail::from(t)));
-    }
-    torch_library_def_with_tags(
-        lib_, schema, tag_ints.data(), static_cast<int32_t>(tag_ints.size()));
-    return *this;
-  }
-#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
 };
 
 class StableTorchLibraryInit final {

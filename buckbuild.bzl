@@ -410,6 +410,7 @@ def get_aten_generated_files(enabled_backends):
         "core/TensorBody.h",
         "core/TensorMethods.cpp",
         "core/aten_interned_strings.h",
+        "core/enum_tag.h",
         "torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.cpp",
     ] + get_aten_derived_type_srcs(enabled_backends)
 
@@ -943,11 +944,6 @@ def define_buck_targets(
             ("aten/src", "ATen/native/mkl/*.h"),
             ("aten/src", "ATen/native/mkldnn/*.h"),
         ]),
-        # ATen/core/enum_tag.h is a forwarding header that includes from
-        # torch/headeronly, so we need to export that dependency.
-        exported_deps = [
-            "//xplat/caffe2/torch/headeronly:torch_headeronly",
-        ],
         visibility = ["PUBLIC"],
         labels = labels,
     )
@@ -1235,6 +1231,7 @@ def define_buck_targets(
             "ViewMetaClasses.h": ":gen_aten[ViewMetaClasses.h]",
             "core/TensorBody.h": ":gen_aten[core/TensorBody.h]",
             "core/aten_interned_strings.h": ":gen_aten[core/aten_interned_strings.h]",
+            "core/enum_tag.h": ":gen_aten[core/enum_tag.h]",
         }),
         labels = labels,
     )
