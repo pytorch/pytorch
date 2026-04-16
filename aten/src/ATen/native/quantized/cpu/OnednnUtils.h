@@ -468,6 +468,11 @@ at::Tensor _qconv_prepack_onednn(
 #endif
 
 struct QlinearForwardParams {
+  int64_t K{-1};
+  int64_t M{-1};
+  int64_t N{-1};
+  c10::ScalarType out_dtype{c10::ScalarType::Undefined};
+  std::vector<int64_t> output_size;
   dnnl::matmul primitive;
   ideep::exec_args args;
   ideep::tensor src;

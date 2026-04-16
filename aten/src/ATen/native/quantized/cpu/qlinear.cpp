@@ -1108,35 +1108,26 @@ static at::Tensor linear_int8_with_onednn_weight(
       auto input_contig =
           dim == 2 ? input.contiguous() : input.reshape({-1, input.size(dim - 1)}).contiguous();
       int64_t K = input.size(dim - 1), M = input.numel() / K, N = onednn_weight.size(1);
-
-      auto output_size = input.sizes().vec();
-      output_size[dim - 1] = N;
-      std::vector<int64_t> dst_dims = {M, N};
-      auto out_dtype = output_dtype.has_value() ? output_dtype.value() : input.scalar_type();
-      at::Tensor output = binary_post_op == "sum" ?
-          other.value() :
-          at::empty(
-            dst_dims,
-            at::device(c10::kCPU)
-                .dtype(out_dtype)
-          );
-      if (output.numel() == 0) {
-        return output;
-      }
-
       auto& params = it->second;
-      params.src.set_data_handle(input_contig.data_ptr());
-      params.dst.set_data_handle(output.data_ptr());
-      if (binary_post_op == "add") {
-        const auto& other_ref = other.value();
-        auto other_2d = other_ref.reshape({-1, other_ref.size(dim - 1)});
-        params.src1->set_data_handle(other_2d.data_ptr());
+      if (params.K == K && params.M == M && params.N == N) {
+        at::Tensor output = binary_post_op == "sum"
+            ? other.value()
+            : at::empty({M, N}, at::device(c10::kCPU).dtype(params.out_dtype));
+        if (output.numel() == 0) {
+          return output;
+        }
+        params.src.set_data_handle(input_contig.data_ptr());
+        params.dst.set_data_handle(output.data_ptr());
+        if (binary_post_op == "add") {
+          const auto& other_ref = other.value();
+          auto other_2d = other_ref.reshape({-1, other_ref.size(dim - 1)});
+          params.src1->set_data_handle(other_2d.data_ptr());
+        }
+        params.primitive.execute(ideep::stream::default_stream(), params.args);
+        return dim == 2 ? output : output.resize_(params.output_size);
       }
-      params.primitive.execute(ideep::stream::default_stream(), params.args);
-      return dim == 2 ? output : output.resize_(output_size);
     }
   }
-
   double input_scale;
   int64_t input_zero_point;
   if constexpr (std::is_same_v<std::decay_t<InputScaleType>, at::Tensor>) {
@@ -1338,6 +1329,11 @@ static at::Tensor linear_int8_with_onednn_weight(
   // Update cache if needed
   if (allow_cache) {
     QlinearForwardParams params;
+    params.K = K;
+    params.M = M;
+    params.N = N;
+    params.out_dtype = out_dtype;
+    params.output_size = output_size;
     params.primitive = primitive;
     params.packed_weight = expected_weight;
     // keep a copy rather than a view of weight scales
