@@ -20,7 +20,6 @@ import threading
 import warnings
 from collections.abc import Callable
 from typing import Any, Generic, NoReturn, TYPE_CHECKING, TypeVar
-from typing_extensions import Self
 
 import torch
 import torch.distributed as dist
@@ -40,6 +39,7 @@ from torch.utils.data.sampler import (
     Sampler,
     SequentialSampler,
 )
+from typing_extensions import Self
 
 
 if TYPE_CHECKING:
@@ -1293,6 +1293,22 @@ class _ThreadingDataLoaderIter(_ParallelDataLoaderIter):
             self._workers.append(w)
 
         self._data_queue = self._worker_result_queue
+
+        # Register shutdown with threading._register_atexit so worker threads
+        # are cleaned up during threading._shutdown(), which fires BEFORE
+        # atexit handlers and BEFORE daemon threads are abandoned. This is the
+        # last safe moment to signal threads to stop and join them.
+        # Use a weakref to avoid preventing GC of the iterator.
+        import weakref
+
+        weak_self = weakref.ref(self)
+
+        def _atexit_cleanup():
+            self_ref = weak_self()
+            if self_ref is not None:
+                self_ref._shutdown_workers()
+
+        threading._register_atexit(_atexit_cleanup)  # type: ignore[attr-defined]
 
         self._reset(loader, first_iter=True)
 
