@@ -971,6 +971,31 @@ class TestOpaqueObject(TestCase):
         self.assertIsInstance(fake_queue, FakeScriptObject)
         self.assertIsInstance(fake_rng, FakeScriptObject)
 
+    def test_isinstance_opaque_base_covers_all_opaque_types(self):
+        # isinstance(x, OpaqueBase) should match all registered opaque types,
+        # not just classes that directly subclass OpaqueBase.
+
+        # Value-type opaque (Enum) — registered but doesn't subclass OpaqueBase
+        class MyEnum(enum.Enum):
+            A = 1
+
+        self.assertIsInstance(MyEnum.A, OpaqueBase)
+
+        # Reference-type opaque (subclasses OpaqueBase) — sanity check
+        queue = OpaqueQueue([], torch.zeros(3))
+        self.assertIsInstance(queue, OpaqueBase)
+
+        # FakeScriptObject wrapping a reference-type opaque
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        with fake_mode:
+            fake_queue = maybe_to_fake_obj(fake_mode, queue)
+        self.assertIsInstance(fake_queue, FakeScriptObject)
+        self.assertIsInstance(fake_queue, OpaqueBase)
+
+        # Non-opaque value should not match
+        self.assertNotIsInstance(42, OpaqueBase)
+        self.assertNotIsInstance("hello", OpaqueBase)
+
     @parametrize("make_fx_tracing_mode", ["fake", "symbolic"])
     def test_make_fx(self, make_fx_tracing_mode):
         class M(torch.nn.Module):
