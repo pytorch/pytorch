@@ -300,11 +300,11 @@ void setCublasWorkspace(cublasHandle_t handle, c10::cuda::CUDAStream stream) {
   cudaStream_t _stream = stream;
   auto key = std::make_pair(static_cast<int>(device), static_cast<void *>(_stream));
 
-  auto& workspace = cublas_stream_to_workspace();
+  auto& workspace_map = cublas_stream_to_workspace();
 
   size_t workspace_size = getChosenWorkspaceSize();
 
-  auto workspace_it = workspace.find(key);
+  auto workspace_it = workspace_map.find(key);
   if (workspace_it != workspace.end() && workspace_it->second.second >= workspace_size) {
     TORCH_CUDABLAS_CHECK(cublasSetWorkspace(
         handle, workspace_it->second.first.get(), workspace_size));
@@ -317,14 +317,14 @@ void setCublasWorkspace(cublasHandle_t handle, c10::cuda::CUDAStream stream) {
 }
 
 void* getCUDABlasLtWorkspace() {
+    auto key = std::make_pair(static_cast<int>(device), static_cast<void *>(_stream));
 #ifndef USE_ROCM
   if (unified_cublas_and_lt_workspaces()) {
     c10::DeviceIndex device = c10::cuda::current_device();
     auto stream = c10::cuda::getCurrentCUDAStream();
     cudaStream_t _stream = stream;
-    auto key = std::make_pair(static_cast<int>(device), static_cast<void *>(_stream));
-    auto& workspace = at::cuda::cublas_stream_to_workspace();
-    auto workspace_it = workspace.find(key);
+    auto& workspace_map = at::cuda::cublas_stream_to_workspace();
+    auto workspace_it = workspace_map.find(key);
     if (workspace_it != workspace.end()) {
       return workspace_it->second.first.mutable_get();
     }
@@ -335,11 +335,10 @@ void* getCUDABlasLtWorkspace() {
   c10::DeviceIndex device = c10::cuda::current_device();
   auto stream = c10::cuda::getCurrentCUDAStream();
   cudaStream_t _stream = stream;
-  auto key = std::make_pair(static_cast<int>(device), static_cast<void *>(_stream));
 
-  auto& workspace = cublaslt_stream_to_workspace();
+  auto& workspace_map = cublaslt_stream_to_workspace();
 
-  auto workspace_it = workspace.find(key);
+  auto workspace_it = workspace_map.find(key);
   if (workspace_it != workspace.end()) {
     return workspace_it->second.first.mutable_get();
   }
