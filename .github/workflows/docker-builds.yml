@@ -99,6 +99,8 @@ jobs:
 
       - name: Setup Linux
         uses: pytorch/pytorch/.github/actions/setup-linux@main
+        with:
+          submodules: 'false'
 
       - name: Login to ECR
         uses: ./.github/actions/ecr-login

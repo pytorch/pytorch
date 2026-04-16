@@ -56,7 +56,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           fetch-depth: 1
-          submodules: true
+          submodules: 'false'
       - name: Get docker release matrix
         id: generate-matrix
         run: |
@@ -89,6 +89,8 @@ jobs:
 
       - name: Setup Linux
         uses: pytorch/pytorch/.github/actions/setup-linux@main
+        with:
+          submodules: 'false'
 
       - name: Login to ECR
         uses: ./.github/actions/ecr-login
