@@ -21,6 +21,9 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.logging_utils import kwargs_to_settings, log_settings
 
 
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
@@ -117,7 +120,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
         )
 
     @unittest.skipIf(
-        not torch.cuda.is_available() and not torch.xpu.is_available(),
+        not torch.accelerator.is_available() and not torch.xpu.is_available(),
         "requires cuda or xpu",
     )
     def test_nvfuser_guards(self):

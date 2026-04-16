@@ -37,7 +37,7 @@ from torch.testing._internal.logging_utils import (
     make_logging_test,
     make_settings_test,
 )
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.triton_utils import requires_accelerator_and_triton
 
 
 requires_gpu = unittest.skipUnless(
@@ -187,7 +187,7 @@ class LoggingTests(LoggingTestCase):
             len(records), 8 * (1 + torch._inductor.config.loop_ordering_after_fusion)
         )
 
-    @requires_cuda_and_triton
+    @requires_accelerator_and_triton
     @make_logging_test(cudagraphs=True)
     def test_cudagraphs(self, records):
         fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)
@@ -431,7 +431,7 @@ Found from :
         exitstack.close()
 
     @requires_distributed()
-    @requires_cuda_and_triton
+    @requires_accelerator_and_triton
     @make_logging_test(ddp_graphs=True)
     def test_ddp_graphs(self, records):
         class ToyModel(torch.nn.Module):

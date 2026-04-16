@@ -16,7 +16,9 @@ import torch.nn as nn
 import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch._dynamo.backends.common import aot_autograd
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 from torch._dynamo.testing import (
+
     check_dynamic_shape_capture,
     CompileCounter,
     CompileCounterWithBackend,
