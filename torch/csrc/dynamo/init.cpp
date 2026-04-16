@@ -412,7 +412,7 @@ void _register_functions(PyObject* mod) {
 void initDynamoBindings(PyObject* torch) {
   PyObject* dynamo = PyModule_Create(&_module);
   if (dynamo == nullptr || PyModule_AddObject(torch, "_dynamo", dynamo) != 0) {
-    throw python_error();
+    throw python_error(); // @allow-raw-throw
   }
 #ifdef Py_GIL_DISABLED
   PyUnstable_Module_SetGIL(dynamo, Py_MOD_GIL_NOT_USED);
@@ -421,23 +421,23 @@ void initDynamoBindings(PyObject* torch) {
   PyObject* eval_frame = torch_c_dynamo_eval_frame_init();
   if (eval_frame == nullptr ||
       PyModule_AddObject(dynamo, "eval_frame", eval_frame) != 0) {
-    throw python_error();
+    throw python_error(); // @allow-raw-throw
   }
 
   PyObject* utils = torch_c_dynamo_utils_init();
   if (utils == nullptr || PyModule_AddObject(dynamo, "utils", utils) != 0) {
-    throw python_error();
+    throw python_error(); // @allow-raw-throw
   }
 
   PyObject* guards = torch_c_dynamo_guards_init();
   if (guards == nullptr || PyModule_AddObject(dynamo, "guards", guards) != 0) {
-    throw python_error();
+    throw python_error(); // @allow-raw-throw
   }
 
   PyObject* compiled_autograd = torch_c_dynamo_compiled_autograd_init();
   if (compiled_autograd == nullptr ||
       PyModule_AddObject(dynamo, "compiled_autograd", compiled_autograd) != 0) {
-    throw python_error();
+    throw python_error(); // @allow-raw-throw
   }
 
   auto m = py::handle(eval_frame).cast<py::module>();
@@ -576,13 +576,6 @@ void initDynamoBindings(PyObject* torch) {
       .value("TP_SETATTRO", PyTypeSlotBit::TP_SETATTRO)
       .value("TP_DESCR_GET", PyTypeSlotBit::TP_DESCR_GET)
       .value("TP_DESCR_SET", PyTypeSlotBit::TP_DESCR_SET);
-
-  py::enum_<EvalFrameOverride>(m, "_EvalFrameOverride")
-      .value("NONE", EvalFrameOverride::NONE)
-      .value("SKIP", EvalFrameOverride::SKIP)
-      .value("ERROR", EvalFrameOverride::ERROR);
-
-  m.def("set_eval_frame_override", &set_eval_frame_override);
 }
 
 } // namespace torch::dynamo

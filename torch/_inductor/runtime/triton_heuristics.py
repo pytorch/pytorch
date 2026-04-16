@@ -2017,7 +2017,7 @@ class StaticTritonCompileResult(CompileResult[_T]):
             result = check_can_launch()
             return result
         except CannotStaticallyLaunchKernel as e:
-            log.info("Bypassing StaticallyLaunchedCudaKernel due to %s", e)  # noqa: G200
+            log.info("Bypassing StaticallyLaunchedCudaKernel due to %s", e)
             if torch._inductor.config.strict_static_triton_launcher:
                 raise e
             return None
@@ -2897,6 +2897,30 @@ def _get_config(numels: dict[str, int]) -> dict[str, int]:
     return {prefix.upper() + "BLOCK": numel for prefix, numel in numels.items()}
 
 
+def _combo_tiling_signature(
+    tiling_scores: dict[str, Any] | None,
+) -> tuple[tuple[str, float], ...] | None:
+    """
+    Build a grouping signature from tiling scores.
+
+    Normalize scores so proportional patterns (e.g. {x: 8, y: 1} vs {x: 16, y: 2})
+    end up in the same group, while kernels with different coalescing preference do not.
+    """
+    if not tiling_scores:
+        return None
+
+    total = sum(float(score) for score in tiling_scores.values())
+    if total == 0:
+        return tuple(sorted((dim, 0.0) for dim in tiling_scores))
+
+    return tuple(
+        sorted(
+            (dim, round(float(score) / total, 2))
+            for dim, score in tiling_scores.items()
+        )
+    )
+
+
 def _handle_combo_kernel_per_subkernel_blocks(
     size_hints: dict[str, int],
     inductor_meta: dict[str, Any],
@@ -2935,11 +2959,16 @@ def _handle_combo_kernel_per_subkernel_blocks(
     all_num_stages: list[int] = []
     unique_warp_stage_pairs: OrderedSet[tuple[int, int]] = OrderedSet()
 
-    combo_tuning_groups: list[dict[str, Any]] = []
+    # Group sub-kernels with identical config kwargs to skip redundant tuning.
+    group_map: dict[tuple[Any, ...], dict[str, Any]] = {}
 
     for i in range(num_kernels):
         subkernel_heuristic = combo_meta[f"heuristic_{i}"]
         size_hints_i = combo_meta[f"size_hints_{i}"]
+        tiling_scores_i = combo_meta.get(f"tiling_scores_{i}")
+        inductor_meta_i = dict(inductor_meta_clean)
+        if tiling_scores_i is not None:
+            inductor_meta_i["tiling_scores"] = tiling_scores_i
 
         if subkernel_heuristic == "pointwise":
             cfgs = pointwise(
@@ -2950,7 +2979,7 @@ def _handle_combo_kernel_per_subkernel_blocks(
                 else TileHint.DEFAULT,
                 filename=filename,
                 min_elem_per_thread=min_elem_per_thread,
-                inductor_meta=inductor_meta_clean,
+                inductor_meta=inductor_meta_i,
                 return_configs=True,
             )
             skip_rblock = False
@@ -2960,7 +2989,7 @@ def _handle_combo_kernel_per_subkernel_blocks(
                 reduction_hint=ReductionHint[combo_meta[f"reduction_hint_{i}"]],
                 triton_meta=triton_meta,
                 filename=filename,
-                inductor_meta=inductor_meta_clean,
+                inductor_meta=inductor_meta_i,
                 return_configs=True,
             )
             skip_rblock = False
@@ -2970,7 +2999,7 @@ def _handle_combo_kernel_per_subkernel_blocks(
                 reduction_hint=ReductionHint[combo_meta[f"reduction_hint_{i}"]],
                 triton_meta=triton_meta,
                 filename=filename,
-                inductor_meta=inductor_meta_clean,
+                inductor_meta=inductor_meta_i,
                 return_configs=True,
             )
             skip_rblock = True  # persistent reduction embeds RBLOCK in kernel body
@@ -2988,17 +3017,30 @@ def _handle_combo_kernel_per_subkernel_blocks(
         for c in cfgs:
             unique_warp_stage_pairs.add((c.num_warps, c.num_stages))
 
-        combo_tuning_groups.append(
-            {
+        cfg_key = tuple(item for c in cfgs for item in sorted(c.kwargs.items()))
+        group_key = (
+            (
+                subkernel_heuristic,
+                skip_rblock,
+                cfg_key,
+                _combo_tiling_signature(tiling_scores_i),
+            )
+            if torch._inductor.config.combo_kernel_autotune_grouping
+            else (i,)
+        )
+        if group_key in group_map:
+            group_map[group_key]["member_indices"].append(i)
+        else:
+            group_map[group_key] = {
                 "member_indices": [i],
                 "configs": cfgs,
                 "skip_rblock": skip_rblock,
                 "size_hints": size_hints_i,
             }
-        )
 
     unique_warp_stage_pairs.add((max(all_num_warps), max(all_num_stages)))
 
+    combo_tuning_groups = list(group_map.values())
     # Largest sub-kernels tuned first — they dominate runtime and get most freedom
     combo_tuning_groups.sort(
         key=lambda g: -functools.reduce(operator.mul, g["size_hints"].values())

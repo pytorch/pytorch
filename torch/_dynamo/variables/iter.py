@@ -277,7 +277,7 @@ class IteratorVariable(VariableTracker):
         self, tx: "InstructionTranslator", name: str
     ) -> "ConstantVariable":
         if name == "__iter__" or name == "__next__":
-            return variables.CONSTANT_VARIABLE_TRUE
+            return variables.ConstantVariable.create(True)
         return super().call_obj_hasattr(tx, name)
 
     def call_method(
@@ -471,7 +471,7 @@ class ZipVariable(IteratorVariable):
 
         idx: int | None = None
         try:
-            for idx, it in enumerate(self.iterables):  # noqa:B007
+            for idx, it in enumerate(self.iterables):
                 args.append(get_item(it))
         except ObservedUserStopIteration:
             if self.strict:

@@ -410,7 +410,7 @@ def split_module(
             )
             torch.fx.graph.map_arg(
                 node.kwargs, lambda def_node: record_cross_partition_use(def_node, node)
-            )  # noqa: B950
+            )
 
     original_partition_order = list(partitions.keys())
     # find partitions with no dependencies
@@ -639,7 +639,7 @@ def split_module(
 
         base_mod_attrs[partition.submod_name] = _make_graph_module(
             partition.targets, partition.graph
-        )  # noqa: B950
+        )
 
         # Emit call in base graph to this submodule
         output_val = base_mod_graph.call_module(
@@ -671,7 +671,7 @@ def split_module(
         if node.op == "output":
             base_mod_graph.output(
                 torch.fx.graph.map_arg(node.args[0], lambda n: base_mod_env[n.name])
-            )  # noqa: B950
+            )
 
     ret = _make_graph_module(base_mod_attrs, base_mod_graph)
     log.debug(

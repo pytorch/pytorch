@@ -8,13 +8,13 @@ import os
 import sys
 import textwrap
 from itertools import chain, count
-from typing import Any, Protocol, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import sympy
 
 import torch
 import torch._higher_order_ops.torchbind
-import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+import torch._inductor.async_compile
 import torch._ops
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
@@ -24,7 +24,7 @@ from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config, cpp_builder, ir
 from ..ir import ExternKernel
-from ..utils import _align, DeferredLineBase, LineContext, normalize_name
+from ..utils import _align, normalize_name
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, IndentedBuffer, Kernel
@@ -33,6 +33,7 @@ from .wrapper import (
     codegen_reinterpret_view_helper,
     EnterSubgraphLine,
     ExitSubgraphLine,
+    HasWriteLine,
     PythonWrapperCodegen,
     SymbolicCallArg,
 )
@@ -47,10 +48,6 @@ if TYPE_CHECKING:
     _OUTPUT_ARGS_TYPE = list[str | None | list[str | None]]
 
     from ..scheduler import BaseSchedulerNode
-
-
-class HasWriteLine(Protocol):
-    def writeline(self, line: LineContext | DeferredLineBase | str) -> None: ...
 
 
 class CppWrapperCpu(PythonWrapperCodegen):
@@ -295,6 +292,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
             )
         if V.graph.aot_mode:
             self.prefix.writeline("namespace torch::aot_inductor {")
+        if not V.graph.is_const_graph:
+            self.codegen_input_size_and_nan_asserts()
 
     def write_input_output_info(
         self,
@@ -1699,6 +1698,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan({buf}));"
             )
 
+    def codegen_input_nan_asserts(self) -> None:
+        self.wrapper_call.writeline("// make sure graph inputs are not nan/inf")
+        for name, buf in self.get_graph_inputs().items():
+            if isinstance(buf, (sympy.Expr, ir.TorchBindObject)):
+                continue
+            self.wrapper_call.writeline(
+                f'AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan("{name}", {name}));'
+            )
+
     def codegen_device(self, device):
         assert device.type in DEVICE_TO_ATEN, (
             device.type + " not found in DEVICE_TO_ATEN"
@@ -2734,7 +2742,7 @@ if (!custom_op_wrapper) {
             dispatch_lines.writeline("AOTI_TORCH_ERROR_CODE_CHECK(")
             with dispatch_lines.indent():
                 dispatch_lines.writeline(
-                    f'aoti_torch_call_dispatcher("{op_overload._schema.name}", "{op_overload._schema.overload_name}", dispatch_vars.data())'  # noqa: B950
+                    f'aoti_torch_call_dispatcher("{op_overload._schema.name}", "{op_overload._schema.overload_name}", dispatch_vars.data())'
                 )
             dispatch_lines.writeline(");")
 
@@ -2807,7 +2815,7 @@ if (!custom_op_wrapper) {
             for idx, output_arg in enumerate(output_args):
                 if output_arg is None:
                     continue
-                lines += f"{output_arg} = reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_name}.get(), {idx}), NULL));\n"  # noqa: B950
+                lines += f"{output_arg} = reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_name}.get(), {idx}), NULL));\n"
 
         if raw_outputs:
             declarations_before_scope = [

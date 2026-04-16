@@ -42,15 +42,21 @@ def _bmm_outer_product_impl(
     return fallback_kernel.call_boxed(dispatch_keys, a, b)
 
 
+def _register_for_dispatch_key(dispatch_key: str) -> None:
+    fallback_kernel = torch.library.get_kernel("aten::bmm", dispatch_key)
+    tu.register_op_override(
+        "aten",
+        "bmm",
+        dispatch_key,
+        functools.partial(_bmm_outer_product_impl, fallback_kernel=fallback_kernel),
+        allow_multiple_override=True,
+    )
+
+
 def register_to_dispatch() -> None:
     if not _has_triton():
         return
 
-    fallback_kernel = torch.library.get_kernel("aten::bmm", "CUDA")
-    tu.register_op_override(
-        "aten",
-        "bmm",
-        "CUDA",
-        functools.partial(_bmm_outer_product_impl, fallback_kernel=fallback_kernel),
-        allow_multiple_override=True,
-    )
+    _register_for_dispatch_key("CUDA")
+    if torch.xpu._is_compiled():
+        _register_for_dispatch_key("XPU")

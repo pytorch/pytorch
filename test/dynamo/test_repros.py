@@ -8638,10 +8638,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x), opt_fn(x))
         self.assertEqual(cnt.frame_count, 1)
 
-    # nested_graph_breaks creates separate resume functions per graph break,
-    # giving each warnings.warn call a unique call site that defeats Python's
-    # warning deduplication.
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_filter_warnings(self):
         x = torch.ones(2, 2, requires_grad=True)
 

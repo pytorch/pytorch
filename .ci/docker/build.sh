@@ -112,6 +112,7 @@ case "$tag" in
     GCC_VERSION=11
     KATEX=yes
     TRITON=yes
+    INSTALL_MINGW=yes
     ;;
   pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks)
     CUDA_VERSION=13.0.2

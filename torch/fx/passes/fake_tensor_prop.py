@@ -101,13 +101,13 @@ class FakeTensorProp(torch.fx.Interpreter):
 
         return result
 
-    def propagate(self, *args: object) -> object:
+    def propagate(self, *args: object) -> Any:
         fake_args = [
             self._mode.from_tensor(a) if isinstance(a, torch.Tensor) else a
             for a in args
         ]
         return self.propagate_dont_convert_inputs(*fake_args)
 
-    def propagate_dont_convert_inputs(self, *args: object) -> object:
+    def propagate_dont_convert_inputs(self, *args: object) -> Any:
         with self._mode:
             return super().run(*args)

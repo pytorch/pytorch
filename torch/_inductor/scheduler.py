@@ -16,7 +16,7 @@ import traceback
 import typing
 from collections import Counter, defaultdict
 from concurrent.futures import as_completed, Future
-from typing import Any, Generic, TYPE_CHECKING, TypeAlias, TypeVar
+from typing import Any, Generic, Literal, overload, TYPE_CHECKING, TypeAlias, TypeVar
 from typing_extensions import ParamSpec
 
 from torch.utils._ordered_set import OrderedSet
@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 import sympy
 
 import torch
-import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+import torch._inductor.async_compile
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.autotune_process import use_pipelined_autotuning
@@ -1238,11 +1238,11 @@ class BaseSchedulerNode:
             except ValueError as e:
                 # We don't know how to estimate runtime for this collective,
                 # falling back to 0
-                log.info(e)  # noqa: G200
+                log.info(e)
                 return 0
             except TypeError as e:
                 # this happens when the collective is not of type ir._CollectiveKernel
-                log.info(e)  # noqa: G200
+                log.info(e)
                 return 0
 
         elif is_wait(self.node):
@@ -1631,11 +1631,49 @@ class SchedulerNode(BaseSchedulerNode):
             # lru_cache.
             SIMDScheduling.candidate_tilings.cache_clear()
 
+    def snapshot_loop_state(self) -> tuple[Any, ...]:
+        """Snapshot mutable state modified by loop transformations
+        (apply_new_loop_order, apply_loop_reindexing). Must be kept
+        in sync with those methods and restore_loop_state."""
+        return (
+            self._body,
+            self._sizes,
+            self.group,
+            self.read_writes,
+            self.unmet_dependencies,
+        )
+
+    def restore_loop_state(self, state: tuple[Any, ...]) -> None:
+        """Restore state from snapshot_loop_state."""
+        from .codegen.simd import SIMDScheduling
+
+        (
+            self._body,
+            self._sizes,
+            self.group,
+            self.read_writes,
+            self.unmet_dependencies,
+        ) = state
+        self.pointwise_read_writes.clear_cache(self)
+        SIMDScheduling.candidate_tilings.cache_clear()
+
     def apply_new_loop_order(self, new_order: Sequence[int]) -> None:
         self._body = self._body.reorder_iter_loops(
             new_order,
         )
         self._sizes = self._body.sizes
+
+        self.refresh_dependencies(normalize=False, need_clear_tiling_cache=True)
+
+    def apply_loop_reindexing(self, new_iter_sizes: Sequence[sympy.Expr]) -> None:
+        assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer))
+
+        self._body = self._body.reindex_iter_loops(new_iter_sizes)
+        self._sizes = self._body.sizes
+
+        device = self.node.get_device_or_error()
+        group_fn = self.scheduler.get_backend(device).group_fn
+        self.group = (device, group_fn(self._sizes))
 
         self.refresh_dependencies(normalize=False, need_clear_tiling_cache=True)
 
@@ -2218,9 +2256,7 @@ class FusedMixOrderReductions(FusedSchedulerNode):
 
         return (
             not node2.is_reduction()
-            or typing.cast(
-                int, self.scheduler.score_fusion_memory(node1, node2, count_bytes=False)
-            )
+            or self.scheduler.score_fusion_memory(node1, node2, count_bytes=False)
             >= self.numel
         )
 
@@ -2613,7 +2649,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         """
         sorted_nodes = scheduler._topological_sort_nodes()
         grouped_nodes = []
-        max_num_nodes = 8
+        max_num_nodes = config.combo_kernel_max_num_nodes
 
         excluded_buffer_names: OrderedSet[str] = OrderedSet(
             [
@@ -4434,7 +4470,7 @@ class Scheduler:
                             future.result()
                     except Exception as e:
                         if fusion_log.isEnabledFor(logging.DEBUG):
-                            fusion_log.debug(  # noqa: G200
+                            fusion_log.debug(
                                 "Exception in compiling %s: %s",
                                 "prologue" if not epilogue_fusion else "epilogue",
                                 e,
@@ -4569,7 +4605,7 @@ class Scheduler:
                     # triton  will unpredictably error with valid prologue fusions
                     except Exception as e:
                         if fusion_log.isEnabledFor(logging.DEBUG):
-                            fusion_log.debug(  # noqa: G200
+                            fusion_log.debug(
                                 "Exception in compiling %s: %s",
                                 "prologue" if not epilogue_fusion else "epilogue",
                                 e,
@@ -5545,11 +5581,9 @@ class Scheduler:
 
         """
 
-        # TODO Don't do loop reordering for CPU for now.
+        # TODO Don't do loop reordering/reindexing for CPU for now.
         # Should debug more why it does not work for CPU codegen
-        if not config.loop_ordering_after_fusion or any(
-            n.is_cpu() for n in [node1, node2]
-        ):
+        if any(n.is_cpu() for n in [node1, node2]):
             return -1
 
         # in some rare case, a template can be passed in.
@@ -5558,27 +5592,71 @@ class Scheduler:
         if node1.is_template() or node2.is_template():
             return -1
 
-        node1_buffer_names = node1.read_writes.buffer_names()
-        node2_buffer_names = node2.read_writes.buffer_names()
-        # Fast path: no common buffers.
-        common_buffer_names = node1_buffer_names & node2_buffer_names
+        common_buffer_names = (
+            node1.read_writes.buffer_names() & node2.read_writes.buffer_names()
+        )
         if not common_buffer_names:
             return -1
 
-        node1_name2dep = {dep.name: dep for dep in node1.read_writes.reads_and_writes()}
-        node2_name2dep = {dep.name: dep for dep in node2.read_writes.reads_and_writes()}
+        if config.loop_ordering_after_fusion:
+            score = self._try_reorder_loops_for_candidates(node1, node2)
+            if score >= 0:
+                return score
 
-        # Find the commons buffers that has different loop orders
+        # No reordering candidates found (or loop ordering disabled).
+        # Try reindexing the pointwise to match the reduction's iteration
+        # domain (e.g., [1024, 8192] -> [65536, 128] for RMS norm with
+        # reshape), then retry loop reordering if enabled. The retry is
+        # needed because FusedSchedulerNodes may have more loop vars than
+        # the reindexed pointwise (e.g., 3 vs 2), and only the normalize()
+        # comparison in _try_reorder_loops_for_candidates handles that
+        # num_vars mismatch.
+        if (
+            not config.loop_reindexing_after_fusion
+            or not self._try_reindex_pointwise_for_reduction(node1, node2)
+        ):
+            return -1
+
+        if config.loop_ordering_after_fusion:
+            score = self._try_reorder_loops_for_candidates(node1, node2)
+            if score >= 0:
+                return score
+
+        return self.score_fusion_memory(node1, node2)
+
+    def _try_reorder_loops_for_candidates(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+    ) -> int:
+        """
+        Find common buffers with matching normalized stride order but different
+        loop orders, and try to reorder loops to align them.
+        """
+        common_buffer_names = (
+            node1.read_writes.buffer_names() & node2.read_writes.buffer_names()
+        )
+        node1_reads = {dep.name: dep for dep in node1.read_writes.reads}
+        node1_writes = {dep.name: dep for dep in node1.read_writes.writes}
+        node2_reads = {dep.name: dep for dep in node2.read_writes.reads}
+        node2_writes = {dep.name: dep for dep in node2.read_writes.writes}
+
         candidates = []
         for buffer_name in common_buffer_names:
-            lhs_dep = node1_name2dep[buffer_name]
-            rhs_dep = node2_name2dep[buffer_name]
+            lhs_dep = node1_writes.get(buffer_name) or node1_reads[buffer_name]
+            rhs_dep = node2_writes.get(buffer_name) or node2_reads[buffer_name]
+
+            is_write_read = (
+                buffer_name in node1_writes and buffer_name in node2_reads
+            ) or (buffer_name in node2_writes and buffer_name in node1_reads)
+
             if (
                 lhs_dep.normalize_with_stride_order()
                 == rhs_dep.normalize_with_stride_order()
             ):
                 candidates.append(
                     (
+                        is_write_read,
                         V.graph.sizevars.optimization_hint(
                             lhs_dep.get_numel(), fallback=0
                         ),
@@ -5586,12 +5664,33 @@ class Scheduler:
                         rhs_dep,
                     )
                 )
+            elif is_write_read:
+                # A write→read dep failed normalize_with_stride_order.
+                # This could be a dimension order issue (reordering can
+                # fix it) or a factorization issue (only reindexing can).
+                # Distinguish by checking if the write dep's sizes are
+                # a subset of the read dep's — if so, reordering the
+                # read's loops could align them.
+                w = node1_writes.get(buffer_name) or node2_writes.get(buffer_name)
+                r = node2_reads.get(buffer_name) or node1_reads.get(buffer_name)
+                if isinstance(w, MemoryDep) and isinstance(r, MemoryDep):
+                    sv = V.graph.sizevars
+                    w_sizes = w.normalize().size
+                    r_sizes = r.normalize().size
+                    if not all(
+                        any(sv.statically_known_equals(ws, rs) for rs in r_sizes)
+                        for ws in w_sizes
+                    ):
+                        return -1
 
         if len(candidates) == 0:
             return -1
 
-        # Pick the largest buffer to guide the loop reordering
-        _numel, lhs_dep, rhs_dep = max(candidates, key=operator.itemgetter(0))
+        # Prefer write→read deps over shared reads. Among same
+        # priority, pick the largest buffer.
+        _is_wr, _numel, lhs_dep, rhs_dep = max(
+            candidates, key=operator.itemgetter(0, 1)
+        )
 
         if not isinstance(lhs_dep, MemoryDep) or not isinstance(rhs_dep, MemoryDep):
             return -1
@@ -5618,11 +5717,99 @@ class Scheduler:
                 node2.get_name(),
             )
 
-        return (
-            typing.cast(int, self.score_fusion_memory(node1, node2))
-            if reordered
-            else -1
+        return self.score_fusion_memory(node1, node2) if reordered else -1
+
+    def _try_reindex_pointwise_for_reduction(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+    ) -> bool:
+        """
+        Reindex a pointwise's iteration loops to match a reduction's
+        groups. After reindexing, the shared reads have identical index
+        expressions, enabling the codegen to CSE loads.
+
+        Returns True if reindexing was applied.
+        """
+        from .codegen.simd import SIMDKernel
+
+        if node1.is_reduction() and not node2.is_reduction():
+            reduction_node, pw_node = node1, node2
+        elif node2.is_reduction() and not node1.is_reduction():
+            reduction_node, pw_node = node2, node1
+        else:
+            return False
+
+        _, groups = reduction_node.group
+        red_numel = typing.cast(sympy.Expr, groups[0])
+        red_rnumel = typing.cast(sympy.Expr, groups[1])
+        target_numel = red_numel * red_rnumel
+
+        if not all(isinstance(sn, SchedulerNode) for sn in pw_node.get_nodes()):
+            return False
+        snodes = typing.cast(list[SchedulerNode], pw_node.get_nodes())
+
+        # All snodes must have the same total iteration numel matching
+        # the reduction's numel * rnumel so they can be reindexed identically.
+        if not all(
+            V.graph.sizevars.statically_known_equals(
+                sympy_product(sn._sizes[0]), target_numel
+            )
+            for sn in snodes
+        ):
+            return False
+
+        if not all(
+            SIMDKernel.is_compatible((red_numel, red_rnumel), sn.get_ranges())
+            for sn in snodes
+        ):
+            return False
+
+        # Snapshot state before mutation so we can rollback if the
+        # reindexed deps don't actually improve the fusion score.
+        snapshots = [(sn, sn.snapshot_loop_state()) for sn in snodes]
+        old_pw_group = (
+            pw_node.group if isinstance(pw_node, FusedSchedulerNode) else None
         )
+
+        for sn in snodes:
+            sn.apply_loop_reindexing([red_numel, red_rnumel])
+
+        if isinstance(pw_node, FusedSchedulerNode):
+            pw_node.group = snodes[0].group
+            refresh_group_node_dependencies(pw_node)
+
+        # Verify reindexing actually increases shared deps.
+        common_names = (
+            node1.read_writes.buffer_names() & node2.read_writes.buffer_names()
+        )
+        n1_deps = {dep.name: dep for dep in node1.read_writes.reads_and_writes()}
+        n2_deps = {dep.name: dep for dep in node2.read_writes.reads_and_writes()}
+        has_benefit = any(
+            self.deps_match_normalized(n1_deps[name], n2_deps[name])
+            for name in common_names
+        )
+        if not has_benefit:
+            for sn, state in snapshots:
+                sn.restore_loop_state(state)
+            if isinstance(pw_node, FusedSchedulerNode):
+                assert old_pw_group is not None
+                pw_node.group = old_pw_group
+                refresh_group_node_dependencies(pw_node)
+            return False
+
+        # When loop ordering is disabled, re-extract deps with
+        # normalize=True so variable names are canonical. This is
+        # safe because no further loop reordering will occur.
+        # Without this, reindexed deps use different var names
+        # (e.g. c0 vs d0) causing exact dep comparisons to fail.
+        if not config.loop_ordering_after_fusion:
+            for sn in snodes:
+                sn.refresh_dependencies(normalize=True, need_clear_tiling_cache=False)
+            if isinstance(pw_node, FusedSchedulerNode):
+                refresh_group_node_dependencies(pw_node)
+
+        return True
 
     def unfusable_node(self, node: BaseSchedulerNode) -> bool:
         """
@@ -6004,7 +6191,9 @@ class Scheduler:
         if (
             can_reorder
             and shared_data_score < config.score_fusion_memory_threshold
-            and config.loop_ordering_after_fusion
+            and (
+                config.loop_ordering_after_fusion or config.loop_reindexing_after_fusion
+            )
         ):
             new_shared_data_score = self.shared_data_after_reordering_loop(node1, node2)
             if new_shared_data_score >= 0:
@@ -6224,8 +6413,46 @@ class Scheduler:
             return True
         return False
 
+    @staticmethod
+    def deps_match_normalized(dep1: Dep, dep2: Dep) -> bool:
+        """Check if two deps refer to the same access pattern after normalization.
+
+        Handles the case where FusedSchedulerNodes have more loop vars
+        than a single SchedulerNode (e.g., 3 vars vs 2) by falling back
+        to normalize() which merges loops before comparing.
+        """
+        if not isinstance(dep1, MemoryDep) or not isinstance(dep2, MemoryDep):
+            return False
+        if dep1 == dep2:
+            return True
+        if dep1.num_vars == dep2.num_vars:
+            return (
+                dep1.normalize_with_stride_order() == dep2.normalize_with_stride_order()
+            )
+        return dep1.normalize() == dep2.normalize()
+
     def dep_size_hint(self, dep: Dep, count_bytes: bool = True) -> int:
         return V.graph.get_dep_size_hint(dep, count_bytes)
+
+    @overload
+    def score_fusion_memory(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        count_bytes: bool = ...,
+        return_is_mix_order_reduction: Literal[False] = ...,
+        allow_mix_order_reduction: bool = ...,
+    ) -> int: ...
+
+    @overload
+    def score_fusion_memory(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        count_bytes: bool = ...,
+        return_is_mix_order_reduction: Literal[True] = ...,
+        allow_mix_order_reduction: bool = ...,
+    ) -> tuple[int, int, bool]: ...
 
     def score_fusion_memory(
         self,

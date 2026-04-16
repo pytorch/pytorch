@@ -35,7 +35,6 @@ from collections.abc import Callable, Iterable, KeysView, Sequence
 from typing import Any, cast, TYPE_CHECKING
 
 import torch
-from torch import sym_float, sym_int
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.overrides import BaseTorchFunctionMode
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -88,12 +87,7 @@ from .base import (
     ValueMutationNew,
     VariableTracker,
 )
-from .constant import (
-    CONSTANT_VARIABLE_FALSE,
-    CONSTANT_VARIABLE_NONE,
-    ConstantVariable,
-    FakeIdVariable,
-)
+from .constant import ConstantVariable, FakeIdVariable
 from .dicts import (
     ConstDictVariable,
     DefaultDictVariable,
@@ -1148,7 +1142,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                     except TypeError as e:
                         has_constant_handler = obj.has_constant_handler(args, kwargs)
                         if not has_constant_handler:
-                            log.warning(  # noqa: G200
+                            log.warning(
                                 "incorrect arg count %s %s and no constant handler",
                                 self_handler,
                                 e,
@@ -1567,7 +1561,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
         if self.fn is object and name == "__init__":
             # object.__init__ is a no-op
-            return variables.CONSTANT_VARIABLE_NONE
+            return variables.ConstantVariable.create(None)
 
         if self.fn is set:
             resolved_fn = getattr(self.fn, name)
@@ -1607,32 +1601,19 @@ class BuiltinVariable(BaseBuiltinVariable):
 
         return super().call_method(tx, name, args, kwargs)
 
-    def _call_int_float(
+    def call_int(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker | None:
-        # Handle cases like int(torch.seed())
-        # Also handle sym_float to sym_int cases
-        if arg.is_tensor() or isinstance(arg, SymNodeVariable):
-            if arg.is_tensor():
-                item = arg.call_method(tx, "item", [], {})
-            else:
-                item = arg
-            fn_ = sym_int if self.fn is int else sym_float
-            from torch._dynamo.variables.builder import wrap_fx_proxy
+        from .object_protocol import generic_int
 
-            return wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    fn_,
-                    (item.as_proxy(),),
-                    {},
-                ),
-            )
-        return None
+        return generic_int(tx, arg)
 
-    call_int = _call_int_float
-    call_float = _call_int_float
+    def call_float(
+        self, tx: "InstructionTranslator", arg: VariableTracker
+    ) -> VariableTracker | None:
+        from .object_protocol import generic_float
+
+        return generic_float(tx, arg)
 
     def call_bool(
         self, tx: "InstructionTranslator", arg: VariableTracker
@@ -2076,7 +2057,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                 NNModuleVariable,
             ),
         ):
-            return variables.CONSTANT_VARIABLE_TRUE
+            return variables.ConstantVariable.create(True)
         elif isinstance(arg, UserDefinedVariable):
             return VariableTracker.build(tx, callable(arg.value))
         elif isinstance(
@@ -2090,7 +2071,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                 ListIteratorVariable,
             ),
         ):
-            return variables.CONSTANT_VARIABLE_FALSE
+            return variables.ConstantVariable.create(False)
         else:
             return None
 
@@ -2202,7 +2183,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                     "1 kwargs (`strict`)",
                     f"{len(kwargs)} kwargs",
                 )
-        strict = kwargs.pop("strict", CONSTANT_VARIABLE_FALSE)
+        strict = kwargs.pop("strict", ConstantVariable.create(False))
         iter_args = [
             SourcelessBuilder.create(tx, iter).call_function(tx, [arg], {})
             for arg in args
@@ -2401,7 +2382,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         *seqs: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        strict = CONSTANT_VARIABLE_FALSE
+        strict = ConstantVariable.create(False)
         if kwargs:
             if sys.version_info >= (3, 14):
                 if not (len(kwargs) == 1 and "strict" in kwargs):
@@ -2411,7 +2392,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                         "1 kwargs (`strict`)",
                         f"{len(kwargs)} kwargs",
                     )
-                strict = kwargs.pop("strict", CONSTANT_VARIABLE_FALSE)
+                strict = kwargs.pop("strict", ConstantVariable.create(False))
             else:
                 raise_args_mismatch(
                     tx,
@@ -3319,7 +3300,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                 f"{len(args)} args",
             )
         if len(args) == 1:
-            args = (*args, CONSTANT_VARIABLE_NONE)
+            args = (*args, ConstantVariable.create(None))
         if len(args) != 2:
             raise_args_mismatch(
                 tx,

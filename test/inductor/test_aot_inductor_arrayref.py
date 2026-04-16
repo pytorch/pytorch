@@ -2,7 +2,11 @@
 import sys
 import unittest
 
+import torch
+from torch._inductor import config
 from torch._inductor.test_case import TestCase
+from torch._inductor.utils import run_and_get_cpp_code
+from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_CI, IS_FBCODE, IS_WINDOWS
 
 
@@ -18,6 +22,7 @@ try:
     try:
         from .test_aot_inductor import (
             AOTInductorTestsTemplate,
+            AOTIRunnerUtil,
             check_model,
             check_model_with_multiple_inputs,
             code_check_count,
@@ -26,6 +31,7 @@ try:
     except ImportError:
         from test_aot_inductor import (  # @manual
             AOTInductorTestsTemplate,
+            AOTIRunnerUtil,
             check_model,
             check_model_with_multiple_inputs,
             code_check_count,
@@ -57,6 +63,41 @@ def fail_minimal_arrayref_interface(is_skip=False):
     )
 
 
+class AOTInductorArrayRefTestsTemplate(AOTInductorTestsTemplate):
+    def test_simple_v2_interface(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+        model = Model()
+        with config.patch(
+            {
+                "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+            }
+        ):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, model, example_inputs
+            )
+
+        FileCheck().check("AOTInductorModelRunMinimalArrayrefInterfaceV2(").check(
+            "constexpr int32_t expected_num_inputs = 2;"
+        ).check("constexpr int32_t expected_num_outputs = 1;").check(
+            "if (num_inputs != expected_num_inputs)"
+        ).check("if (num_outputs != expected_num_outputs)").run(code)
+        self.code_check_count(
+            model, example_inputs, "AOTInductorModelRunMinimalArrayrefInterface(", 1
+        )
+
+
 # test_failures, xfail by default, set is_skip=True to skip
 CPU_TEST_FAILURES = {
     # TODO: error: ‘complex64’ was not declared in this scope
@@ -74,15 +115,8 @@ CPU_TEST_FAILURES = {
     "test_cond_share_predicate": fail_stack_allocation(is_skip=True),
     "test_cond_predicate_on_cpu": fail_stack_allocation(is_skip=True),
     "test_cond_unbacked_symint_closure_dynamic_True": fail_minimal_arrayref_interface(),
-    "test_while_loop_with_unbacked_symint_closure_dynamic_True": fail_minimal_arrayref_interface(),
-    "test_while_loop_with_unbacked_symint_closure_dynamic_False": fail_minimal_arrayref_interface(),
     "test_while_loop_with_mixed_device_dynamic_True": fail_stack_allocation(),
     "test_while_loop_with_mixed_device_dynamic_False": fail_stack_allocation(),
-    "test_while_loop_with_sym_expr_cond_dynamic_True": fail_minimal_arrayref_interface(),
-    "test_while_loop_with_sym_expr_cond_dynamic_False": fail_minimal_arrayref_interface(),
-    "test_while_loop_with_conv_dynamic_True": fail_minimal_arrayref_interface(),
-    "test_while_loop_with_conv_dynamic_False": fail_minimal_arrayref_interface(),
-    "test_while_loop_with_parameters": fail_minimal_arrayref_interface(),
     "test_while_loop_with_pytree_inputs": fail_stack_allocation(),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_duplicate_constant_folding": fail_stack_allocation(is_skip=True),
@@ -235,6 +269,12 @@ if IS_FBCODE:
     # See https://github.com/pytorch/pytorch/issues/123691
     copy_tests(
         AOTInductorTestsTemplate,
+        AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterface,
+        "cpu_with_stack_allocation_and_minimal_arrayref_interface",
+        CPU_TEST_FAILURES,
+    )
+    copy_tests(
+        AOTInductorArrayRefTestsTemplate,
         AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterface,
         "cpu_with_stack_allocation_and_minimal_arrayref_interface",
         CPU_TEST_FAILURES,

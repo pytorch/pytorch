@@ -120,7 +120,7 @@ class _FunctionalizationMetadataProp(torch.fx.Interpreter):
                 raise AssertionError("view_storage != base_storage")
         return result
 
-    def propagate(self, *args: object) -> object:
+    def propagate(self, *args: object) -> Any:
         self.multi_output_view_nodes = {}
         self.node_counter = -1
 
