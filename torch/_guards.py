@@ -318,7 +318,7 @@ class Guard:
     @staticmethod
     def weakref_to_str(obj_weakref: object) -> str:
         """
-        This is a workaround of a Python weakref bug.
+        Work around a Python weakref bug.
 
         `obj_weakref` is instance returned by `weakref.ref`,
         `str(obj_weakref)` is buggy if the original obj overrides __getattr__, e.g:
@@ -597,7 +597,8 @@ class GlobalContextCheckpointState:
 
 class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
     """
-    This keeps track of the global torch state during tracing of a function.
+    Keep track of the global torch state during tracing of a function.
+
     For example, torch.is_grad_enabled.
     """
 
@@ -1458,7 +1459,9 @@ class ChainedSource(Source):
 
 def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
     """
-    Attempts to "detect" what the current fake mode is.  If there is one ambiently
+    Attempt to "detect" what the current fake mode is.
+
+    If there is one ambiently
     available from TracingContext, we preferentially use that.  Otherwise, we
     heuristically detect the fake mode via the following sources, in order of
     priority:
