@@ -3082,6 +3082,9 @@ class CppVecKernel(CppKernel):
         else:
             raise NotImplementedError(f"store mode={mode}")
 
+    def _adjust_argreduce_index(self, index: sympy.Expr) -> sympy.Expr:
+        return index
+
     def reduction(self, dtype, src_dtype, reduction_type, value):
         """
         Perform vectorized reduction operation.
@@ -3541,7 +3544,7 @@ class CppVecKernel(CppKernel):
             if index is not None:
                 assert horizontal_reduction is not None
                 t_extra = f", {str(horizontal_reduction).lower()}"
-                arg_extra = f", {index}"
+                arg_extra = f", {self._adjust_argreduce_index(index)}"
             if self.tail_size:
                 return (
                     f"{reduction_type}_combine_vec<{cdtype}, {n_src}, {n_idx}{t_extra}>"
@@ -3854,6 +3857,9 @@ class CppTile2DKernel(CppVecKernel):
             itervar_idx=self.outer_idx,
             offset=self.inner_itervar(),
         )
+
+    def _adjust_argreduce_index(self, index: sympy.Expr) -> sympy.Expr:
+        return self.transform_indexing(index)
 
 
 def get_loop_body_lowp_fp(_body: LoopBody) -> tuple[torch.dtype | None, bool]:
