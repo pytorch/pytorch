@@ -3970,7 +3970,7 @@ def tensor_constructor(fill_value):
     ):
         assert_nyi(names is None, "named tensors")
         assert_nyi(layout in (None, torch.strided), f"layout={layout}")
-        assert_nyi(not pin_memory, "pin_memory")
+        assert_nyi(not memory_format, "memory_format")
         device = decode_device(device)
         dtype = dtype or torch.get_default_dtype()
         if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
@@ -3980,7 +3980,14 @@ def tensor_constructor(fill_value):
         for s in size:
             assert not isinstance(s, torch.SymInt)
         size = [sympy.expand(s) for s in size]
-        return _full(fill_value, device, dtype, size)
+        full_pointwise = _full(fill_value, decode_device(device), dtype, size)
+
+        if pin_memory:
+            # Realize the buffer
+            full_pointwise.realize()
+            full_pointwise.data.data.get_layout().is_pinned = True
+
+        return full_pointwise
 
     return inner
 
