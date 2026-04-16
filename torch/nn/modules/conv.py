@@ -49,7 +49,7 @@ convolution_notes = {
         In other words, for an input of size :math:`(N, C_{in}, L_{in})`,
         a depthwise convolution with a depthwise multiplier `K` can be performed with the arguments
         :math:`(C_\text{in}=C_\text{in}, C_\text{out}=C_\text{in} \times \text{K}, ..., \text{groups}=C_\text{in})`.""",
-}  # noqa: B950
+}
 
 
 class _ConvNd(Module):

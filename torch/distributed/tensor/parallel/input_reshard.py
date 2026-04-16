@@ -65,7 +65,7 @@ def input_reshard(
     return module
 
 
-def _pack_hook_tp(mesh: DeviceMesh, input_reshard_dim: int, x: torch.Tensor) -> Any:  # noqa: D401
+def _pack_hook_tp(mesh: DeviceMesh, input_reshard_dim: int, x: torch.Tensor) -> Any:
     """Hook function called after FWD to shard input."""
     if isinstance(x, DTensor) and all(p.is_replicate() for p in x._spec.placements):
         return x.redistribute(device_mesh=mesh, placements=[Shard(input_reshard_dim)])
@@ -83,7 +83,7 @@ def _pack_hook_tp(mesh: DeviceMesh, input_reshard_dim: int, x: torch.Tensor) -> 
         return x
 
 
-def _unpack_hook_tp(mesh: DeviceMesh, input_reshard_dim: int, x: Any) -> torch.Tensor:  # noqa: D401
+def _unpack_hook_tp(mesh: DeviceMesh, input_reshard_dim: int, x: Any) -> torch.Tensor:
     """Hook function called before activation recomputing in BWD to restore input."""
     if (
         isinstance(x, DTensor)

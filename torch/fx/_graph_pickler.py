@@ -15,7 +15,7 @@ from torch.utils._import_utils import import_dill
 
 dill = import_dill()
 if dill is not None:
-    pickle = dill  # noqa: F811
+    pickle = dill
 
 import torch
 import torch.utils._pytree as pytree
