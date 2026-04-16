@@ -108,6 +108,7 @@ TORCH_CUDA_CPP_API WorkspaceMap& cublas_stream_to_workspace();
 TORCH_CUDA_CPP_API WorkspaceMap& cublaslt_stream_to_workspace();
 TORCH_CUDA_CPP_API size_t getCUDABlasLtWorkspaceSize();
 TORCH_CUDA_CPP_API void* getCUDABlasLtWorkspace();
+TORCH_CUDA_CPP_API size_t getChosenWorkspaceSize();
 TORCH_CUDA_CPP_API void setChosenWorkspaceSize(size_t size);
 TORCH_CUDA_CPP_API void setCUDABlasLtWorkspaceSize(size_t size);
 TORCH_CUDA_CPP_API void resetChosenWorkspaceSize();
