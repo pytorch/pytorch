@@ -103,6 +103,120 @@ def expand_hints(hints: list[str], dynamo_dir: str | None = None) -> list[str]:
     return expanded_hints
 
 
+def _find_enclosing_function(
+    tree: ast.Module, target_lineno: int
+) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+    """Find the function/method whose body contains the given line number."""
+    best: ast.FunctionDef | ast.AsyncFunctionDef | None = None
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if hasattr(node, "end_lineno") and node.end_lineno is not None:
+                if node.lineno <= target_lineno <= node.end_lineno:
+                    if best is None or node.lineno > best.lineno:
+                        best = node
+    return best
+
+
+def _extract_string_from_node(node: ast.expr) -> str | None:
+    """Extract a string literal from an ast.Constant or ast.JoinedStr node."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.JoinedStr):
+        parts = []
+        for value in node.values:
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                parts.append(value.value)
+            elif isinstance(value, ast.FormattedValue):
+                parts.append(f"{{{ast.unparse(value.value)}}}")
+        return "".join(parts)
+    return None
+
+
+def _extract_dynamic_hints(
+    tree: ast.Module,
+    call_node: ast.Call,
+    var_name: str,
+    dynamo_dir: str | None = None,
+) -> tuple[list[str], bool]:
+    """Extract hints from dynamic variable assignments/appends in the enclosing function.
+
+    Returns (extracted_hints, is_dynamic).
+    """
+    func = _find_enclosing_function(tree, call_node.lineno)
+    if func is None:
+        return [], True
+
+    hints: list[str] = []
+    found_any = False
+
+    for stmt in ast.walk(func):
+        # var = [str1, str2, ...]
+        if (
+            isinstance(stmt, ast.Assign)
+            and len(stmt.targets) == 1
+            and isinstance(stmt.targets[0], ast.Name)
+            and stmt.targets[0].id == var_name
+            and isinstance(stmt.value, ast.List)
+        ):
+            found_any = True
+            for elt in stmt.value.elts:
+                s = _extract_string_from_node(elt)
+                if s is not None:
+                    hints.append(s)
+
+        # var.append(str)
+        if (
+            isinstance(stmt, ast.Expr)
+            and isinstance(stmt.value, ast.Call)
+            and isinstance(stmt.value.func, ast.Attribute)
+            and isinstance(stmt.value.func.value, ast.Name)
+            and stmt.value.func.value.id == var_name
+            and stmt.value.func.attr == "append"
+            and len(stmt.value.args) == 1
+        ):
+            found_any = True
+            s = _extract_string_from_node(stmt.value.args[0])
+            if s is not None:
+                hints.append(s)
+
+        # var += [str, ...]
+        if (
+            isinstance(stmt, ast.AugAssign)
+            and isinstance(stmt.target, ast.Name)
+            and stmt.target.id == var_name
+            and isinstance(stmt.value, ast.List)
+        ):
+            found_any = True
+            for elt in stmt.value.elts:
+                s = _extract_string_from_node(elt)
+                if s is not None:
+                    hints.append(s)
+
+        # var.extend(graph_break_hints.X) or var.extend([...])
+        if (
+            isinstance(stmt, ast.Expr)
+            and isinstance(stmt.value, ast.Call)
+            and isinstance(stmt.value.func, ast.Attribute)
+            and isinstance(stmt.value.func.value, ast.Name)
+            and stmt.value.func.value.id == var_name
+            and stmt.value.func.attr == "extend"
+            and len(stmt.value.args) == 1
+        ):
+            found_any = True
+            arg = stmt.value.args[0]
+            if isinstance(arg, ast.Attribute) and isinstance(arg.value, ast.Name):
+                if arg.value.id == "graph_break_hints":
+                    ref = f"*graph_break_hints.{arg.attr}"
+                    hints.extend(expand_hints([ref], dynamo_dir))
+            elif isinstance(arg, ast.List):
+                for elt in arg.elts:
+                    s = _extract_string_from_node(elt)
+                    if s is not None:
+                        hints.append(s)
+
+    return hints, found_any
+
+
 def extract_info_from_keyword(source: str, kw: ast.keyword) -> Any:
     """
     Extracts and returns the value of a keyword argument from an AST node.
@@ -176,7 +290,26 @@ def find_unimplemented_calls(
                         if info["gb_type"] is None:
                             continue
 
-                        if info["hints"]:
+                        # Check if hints was passed as a variable name (dynamic hints)
+                        hints_kw = None
+                        for kw in node.keywords:
+                            if kw.arg == "hints":
+                                hints_kw = kw
+                                break
+
+                        if (
+                            hints_kw is not None
+                            and isinstance(hints_kw.value, ast.Name)
+                        ):
+                            extracted, is_dynamic = _extract_dynamic_hints(
+                                tree,
+                                node,
+                                hints_kw.value.id,
+                                dynamo_dir,
+                            )
+                            info["hints"] = extracted
+                            info["hints_are_dynamic"] = is_dynamic
+                        elif info["hints"]:
                             hints = info["hints"]
                             expanded_hints = []
                             items = re.findall(r'"([^"]*)"', hints)
@@ -215,6 +348,7 @@ def create_registry(dynamo_dir: str, registry_path: str) -> None:
                 "Context": info["context"],
                 "Explanation": info["explanation"],
                 "Hints": hints if hints else [],
+                **({"Hints_dynamic": True} if info.get("hints_are_dynamic") else {}),
             }
         ]
 

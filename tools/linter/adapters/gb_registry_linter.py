@@ -113,15 +113,22 @@ def _collect_all_calls(
 
 
 def _create_registry_entry(
-    gb_type: str, context: str, explanation: str, hints: list[str]
+    gb_type: str,
+    context: str,
+    explanation: str,
+    hints: list[str],
+    hints_dynamic: bool = False,
 ) -> dict[str, Any]:
     """Create a registry entry with consistent format."""
-    return {
+    entry: dict[str, Any] = {
         "Gb_type": gb_type,
         "Context": context,
         "Explanation": explanation,
         "Hints": hints or [],
     }
+    if hints_dynamic:
+        entry["Hints_dynamic"] = True
+    return entry
 
 
 def _update_registry_with_changes(
@@ -166,6 +173,7 @@ def _update_registry_with_changes(
     new_entries: list[tuple[str, list[dict[str, Any]]]] = []
 
     for gb_type, (call, file_path) in calls.items():
+        hints_dynamic = call.get("hints_are_dynamic", False)
         if gb_type in latest_entry:
             existing_entry = latest_entry[gb_type]
 
@@ -173,10 +181,12 @@ def _update_registry_with_changes(
                 call["context"] == existing_entry["Context"]
                 and call["explanation"] == existing_entry["Explanation"]
                 and sorted(call["hints"]) == sorted(existing_entry["Hints"])
+                and hints_dynamic == existing_entry.get("Hints_dynamic", False)
             ):
                 registry_key = gb_type_to_key[gb_type]
                 new_entry = _create_registry_entry(
-                    gb_type, call["context"], call["explanation"], call["hints"]
+                    gb_type, call["context"], call["explanation"], call["hints"],
+                    hints_dynamic=hints_dynamic,
                 )
                 updated_registry[registry_key] = [new_entry] + updated_registry[
                     registry_key
@@ -185,7 +195,8 @@ def _update_registry_with_changes(
             # Collect new entries to add later
             new_key = next_gb_id(updated_registry)
             new_entry = _create_registry_entry(
-                gb_type, call["context"], call["explanation"], call["hints"]
+                gb_type, call["context"], call["explanation"], call["hints"],
+                hints_dynamic=hints_dynamic,
             )
             new_entries.append((new_key, [new_entry]))
             # Temporarily add to updated_registry so next_gb_id works correctly
@@ -328,6 +339,8 @@ def check_registry_sync(dynamo_dir: Path, registry_path: Path) -> list[LintMessa
                     call["context"] == existing_entry["Context"]
                     and call["explanation"] == existing_entry["Explanation"]
                     and sorted(call["hints"]) == sorted(existing_entry["Hints"])
+                    and call.get("hints_are_dynamic", False)
+                    == existing_entry.get("Hints_dynamic", False)
                 ):
                     renames[existing_gb_type] = gb_type
                     del remaining_calls[gb_type]
@@ -339,10 +352,12 @@ def check_registry_sync(dynamo_dir: Path, registry_path: Path) -> list[LintMessa
         if gb_type in latest_entry:
             existing_entry = latest_entry[gb_type]
 
+            hints_dynamic = call.get("hints_are_dynamic", False)
             if not (
                 call["context"] == existing_entry["Context"]
                 and call["explanation"] == existing_entry["Explanation"]
                 and sorted(call["hints"] or []) == sorted(existing_entry["Hints"] or [])
+                and hints_dynamic == existing_entry.get("Hints_dynamic", False)
             ):
                 needs_update = True
                 break
