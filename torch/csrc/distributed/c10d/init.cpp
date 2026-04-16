@@ -3773,7 +3773,7 @@ Returns:
   module.def(
       "_reset_fr_recording_xccl",
       []() { ::c10d::reset_xccl_trace(); },
-      "API to reset Flight recorder recording when it comes fault tolerance.");
+      "API to reset Flight recorder recording when it comes to fault tolerance.");
 
 #endif
 

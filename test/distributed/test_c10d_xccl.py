@@ -23,9 +23,7 @@ import torch.distributed as c10d
 import torch.distributed._functional_collectives as _functional_collectives
 
 
-if not c10d.is_available() or not (
-    c10d.is_xccl_available() or c10d.is_xccl_available()
-):
+if not c10d.is_available() or not c10d.is_xccl_available():
     print("c10d XCCL/XCCL not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
@@ -82,16 +80,11 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 _start_time = time.time()
 _logger = logging.getLogger(__name__)
-DEFAULT_PG_TIMEOUT = torch._C._distributed_c10d._DEFAULT_PG_TIMEOUT.seconds * 1000
+DEFAULT_PG_TIMEOUT = int(torch._C._distributed_c10d._DEFAULT_PG_TIMEOUT.seconds * 1000)
 
 
 def _ts():
     return time.time() - _start_time
-
-
-def xccl_version():
-    xccl_lib_version = torch._C._distributed_c10d.get_xccl_version()
-    return tuple(int(i) for i in xccl_lib_version.split("."))
 
 
 def configure(level=logging.INFO, force=False):
@@ -609,7 +602,6 @@ class ProcessGroupXCCLGroupTest(MultiProcessTestCase):
         c10d.destroy_process_group()
         # reset env
         os.environ["TORCH_XCCL_NAN_CHECK"] = "0"
-
 
     def _helper_test_extra_xpu_context_by_memory(self):
         """
