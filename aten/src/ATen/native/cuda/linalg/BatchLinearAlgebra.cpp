@@ -51,11 +51,11 @@ struct MagmaInitializer {
 } initializer;
 }  // namespace (anonymous)
 
-#define AT_MAGMA_VERSION MAGMA_VERSION_MAJOR*100 + MAGMA_VERSION_MINOR*10 + MAGMA_VERSION_MICRO
+#define AT_MAGMA_VERSION MAGMA_VERSION_MAJOR*10000 + MAGMA_VERSION_MINOR*100 + MAGMA_VERSION_MICRO
 
-// Check that MAGMA never releases MAGMA_VERSION_MINOR >= 10 or MAGMA_VERSION_MICRO >= 10
-#if MAGMA_VERSION_MINOR >= 10 || MAGMA_VERSION_MICRO >= 10
-#error "MAGMA release minor or micro version >= 10, please correct AT_MAGMA_VERSION"
+// Check that MAGMA never releases MAGMA_VERSION_MINOR >= 100 or MAGMA_VERSION_MICRO >= 100
+#if MAGMA_VERSION_MINOR >= 100 || MAGMA_VERSION_MICRO >= 100
+#error "MAGMA release minor or micro version >= 100, please correct AT_MAGMA_VERSION"
 #endif
 
 #endif
@@ -123,7 +123,7 @@ void magmaEig(
     magma_int_t *info);
 #endif
 
-#if AT_MAGMA_VERSION >= 254
+#if AT_MAGMA_VERSION >= 20504
 
 template <>
 void magmaLdlHermitian<double>(
@@ -179,7 +179,7 @@ void magmaLdlHermitian<c10::complex<float>>(
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
-#endif // AT_MAGMA_VERSION >= 254
+#endif // AT_MAGMA_VERSION >= 20504
 
 template<>
 void magmaLu<double>(
@@ -597,7 +597,7 @@ void ldl_factor_kernel(
     // If cusolver and magma 2.5.4+ are both available and hermitian=true,
     // call magma for complex inputs
 #ifdef USE_LINALG_SOLVER
-#if AT_MAGMA_ENABLED() && (AT_MAGMA_VERSION >= 254)
+#if AT_MAGMA_ENABLED() && (AT_MAGMA_VERSION >= 20504)
       if (LD.is_complex() && hermitian) {
         return ldl_factor_magma(
             LD, pivots, info, upper, hermitian);
