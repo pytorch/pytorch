@@ -7660,10 +7660,11 @@ class AOTInductorTestsTemplate:
                 add_18,
                 add_13,
             ):
+                device = add_13.device
                 arange_1 = torch.ops.aten.arange.start(
                     180,
                     181,
-                    device=torch.device(type=GPU_TYPE, index=0),
+                    device=device,
                     pin_memory=False,
                 )
                 add_14 = torch.ops.aten.add.Tensor(arange_1, 198)
