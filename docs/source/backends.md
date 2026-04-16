@@ -103,6 +103,18 @@ These backends include:
 ```
 
 ```{eval-rst}
+.. autofunction:: torch.backends.cuda.cublas_workspace_size
+```
+
+```{eval-rst}
+.. autofunction:: torch.backends.cuda.cublaslt_workspace_size
+```
+
+```{eval-rst}
+.. autofunction:: torch.backends.cuda.blas_workspace_size
+```
+
+```{eval-rst}
 .. autofunction:: torch.backends.cuda.preferred_rocm_fa_library
 ```
 

@@ -2309,6 +2309,10 @@ def setBlasBackendsToDefaultFinally(fn):
             fn(*args, **kwargs)
         finally:
             torch.backends.cuda.preferred_blas_library(_preferred_backend)
+            if torch.backends.cuda.is_built():
+                torch._C._cuda_resetCublasWorkspaceSize()
+                torch._C._cuda_resetCublasLtWorkspaceSize()
+                torch._C._cuda_clearCublasWorkspaces()
     return _fn
 
 

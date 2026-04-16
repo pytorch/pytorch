@@ -452,29 +452,29 @@ void Context::setLinalgPreferredBackend(at::LinalgBackend b) {
   }
 }
 
-at::BlasBackend Context::blasPreferredBackend() {
-  // Rather than put logic for interpreting what Default means at every
-  // call site for blasPreferredBackend(), we set it to an actual value.
-  if (blas_preferred_backend == at::BlasBackend::Default) {
-    blas_preferred_backend = at::BlasBackend::Cublas;
-    // This logic sits in the getter because it needs to validate
-    // values set via env vars such as TORCH_BLAS_PREFER_CUBLASLT
-    // which initialize the backend without calling the setter
+at::BlasBackend Context::blasDefaultBackend() {
+  at::BlasBackend result = at::BlasBackend::Cublas;
 #ifdef USE_ROCM
-    // AMD Instinct targets prefer hipblaslt
-    static const bool hipblaslt_preferred = []() {
-      const auto& archs = detail::getCUDAHooks().getHipblasltPreferredArchs();
-      for (auto index: c10::irange(detail::getCUDAHooks().deviceCount())) {
-        if (!detail::getCUDAHooks().isGPUArch(archs, index)) {
-          return false;
-        }
+  // AMD Instinct targets prefer hipblaslt
+  static const bool hipblaslt_preferred = []() {
+    const auto& archs = detail::getCUDAHooks().getHipblasltPreferredArchs();
+    for (auto index : c10::irange(detail::getCUDAHooks().deviceCount())) {
+      if (!detail::getCUDAHooks().isGPUArch(archs, index)) {
+        return false;
       }
-      return true;
-    }();
-    if (hipblaslt_preferred) {
-      blas_preferred_backend = at::BlasBackend::Cublaslt;
     }
+    return true;
+  }();
+  if (hipblaslt_preferred) {
+    result = at::BlasBackend::Cublaslt;
+  }
 #endif
+  return result;
+}
+
+at::BlasBackend Context::blasPreferredBackend() {
+  if (blas_preferred_backend == at::BlasBackend::Default) {
+    blas_preferred_backend = blasDefaultBackend();
   }
 
 #ifdef USE_ROCM
