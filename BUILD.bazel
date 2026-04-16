@@ -40,13 +40,6 @@ COMMON_COPTS = [
 
 aten_generation_srcs = ["aten/src/ATen/native/native_functions.yaml"] + ["aten/src/ATen/native/tags.yaml"] + glob(["aten/src/ATen/templates/**"])
 
-# Exported so torch/headeronly can run its own genrule to produce enum_tag.h.
-filegroup(
-    name = "aten_srcs_for_headeronly",
-    srcs = aten_generation_srcs,
-    visibility = ["//torch/headeronly:__pkg__"],
-)
-
 generated_cpu_cpp = [
     "aten/src/ATen/RegisterBackendSelect.cpp",
     "aten/src/ATen/RegisterCPU_0.cpp",
@@ -104,6 +97,7 @@ generated_cpu_cpp = [
     "aten/src/ATen/ViewMetaClasses.h",
     "aten/src/ATen/ViewMetaClasses.cpp",
     "aten/src/ATen/core/aten_interned_strings.h",
+    "aten/src/ATen/core/enum_tag.h",
     "aten/src/ATen/core/TensorBody.h",
     "aten/src/ATen/core/TensorMethods.cpp",
     "aten/src/ATen/core/ATenOpList.cpp",

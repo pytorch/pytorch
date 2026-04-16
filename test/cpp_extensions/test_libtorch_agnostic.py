@@ -1901,16 +1901,6 @@ except RuntimeError as e:
             curr_mem = torch.cuda.memory_allocated(device)
             self.assertEqual(curr_mem, init_mem)
 
-    @skipIfTorchVersionLessThan(2, 12)
-    @onlyCPU
-    def test_tagged_op(self, device):
-        import libtorch_agn_2_12  # noqa: F401
-
-        op = torch.ops.libtorch_agn_2_12.tagged_identity.default
-        self.assertIn(torch.Tag.pointwise, op.tags)
-        self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
-        self.assertIn(torch.Tag.core, op.tags)
-
     @onlyCPU
     def test_my_layout(self, device):
         """Test layout() method for various tensor layouts."""
