@@ -2649,7 +2649,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         """
         sorted_nodes = scheduler._topological_sort_nodes()
         grouped_nodes = []
-        max_num_nodes = 8
+        max_num_nodes = config.combo_kernel_max_num_nodes
 
         excluded_buffer_names: OrderedSet[str] = OrderedSet(
             [
