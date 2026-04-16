@@ -1877,6 +1877,13 @@ class triton:
     # hint to Triton when arguments are divisible by 16
     divisible_by_16 = os.environ.get("TORCHINDUCTOR_DIVISIBLE_BY_16", "1") == "1"
 
+    # On AMD/HIP, annotate pointer args with tt.pointer_range=32 when the
+    # tensor storage provably fits in 2 GB. This lets Triton emit efficient
+    # buffer load/store ops. Disable if a Triton compiler bug is triggered.
+    emit_pointer_range_32 = (
+        os.environ.get("TORCHINDUCTOR_EMIT_POINTER_RANGE_32", "1") == "1"
+    )
+
     # Minimum R0_BLOCK to be used for a TritonSplitScanKernel
     # NOTE: This also indirectly controls the size of workspace buffer required
     min_split_scan_rblock = 256
