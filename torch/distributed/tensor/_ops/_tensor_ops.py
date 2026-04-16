@@ -282,7 +282,18 @@ def new_factory_strategy(op_schema: OpSchema) -> StrategyType:
             )
         )
 
-        if tuple(input_shape) == tuple(output_shape) and input_spec.is_sharded():
+        # Sharded inputs always propagate. Uninitialized factories (new_empty*)
+        # also propagate Partial — the memory is about to be overwritten, so the
+        # placement just needs to match the source of the subsequent write
+        # (e.g., autograd's clone_obey_contract: new_empty_strided + copy_).
+        # Initialized factories (new_zeros/ones/full) keep Replicate to avoid
+        # incorrect values after Partial reduction (e.g. ones * world_size).
+        is_uninitialized_factory = op_schema.op in (
+            aten.new_empty.default,
+            aten.new_empty_strided.default,
+        )
+        can_propagate_placement = input_spec.is_sharded() or is_uninitialized_factory
+        if tuple(input_shape) == tuple(output_shape) and can_propagate_placement:
             new_factory_strategy.strategies.append(
                 OpSpec(
                     output_specs=input_spec,
