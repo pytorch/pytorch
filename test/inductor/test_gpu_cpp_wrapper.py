@@ -249,6 +249,29 @@ class TestGpuWrapper(InductorTestCase):
             self.assertEqual(p, e)
 
 
+    def test_cpp_wrapper_backward_lazy_compile(self):
+        """Test that options={"cpp_wrapper": True} works with backward pass.
+
+        Backward graphs may be compiled lazily (after compile_fx returns).
+        The cpp_wrapper triton config (store_cubin, autotune_at_compile_time)
+        must still be applied. See https://github.com/pytorch/pytorch/issues/178845
+        """
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        def fn(x, output_grad):
+            layer_norm = torch.nn.LayerNorm(normalized_shape=4).to(self.device)
+            output = layer_norm(x)
+            output.backward(output_grad)
+            return output
+
+        x = torch.randn(2, 3, 4, device=self.device)
+        output_grad = torch.randn(2, 3, 4, device=self.device)
+
+        opt_fn = torch.compile(options={"cpp_wrapper": True})(fn)
+        result = opt_fn(x, output_grad)
+        self.assertEqual(result.shape, x.shape)
+
 instantiate_parametrized_tests(TestGpuWrapper)
 
 # Helper script for test_lazy_compile_kernel_name_collision_across_modules.
