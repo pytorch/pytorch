@@ -176,13 +176,6 @@ struct TORCH_API ProfilerStateBase : public c10::MemoryReportingInfoBase {
 
   static std::shared_ptr<ProfilerStateBase> getGlobal();
   static ProfilerStateBase* getTLS();
-  // UNSAFE: Convenience accessor that checks global first, then TLS.
-  // Returns a raw pointer — does NOT extend lifetime of global state.
-  // Use getGlobal() directly when you need the shared_ptr.
-  static ProfilerStateBase* get() {
-    auto out = getGlobal();
-    return out ? out.get() : getTLS();
-  }
 
   static void push(std::shared_ptr<ProfilerStateBase>&& state);
 

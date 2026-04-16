@@ -542,7 +542,6 @@ std::unique_ptr<at::ObserverContext> onFunctionEnterTLS(
   return state_ptr->recordQueue.getSubqueue()->begin_op(fn);
 }
 
-// @lint-ignore CLANGTIDY clang-diagnostic-unused-parameter
 static void onFunctionExitImpl(
     KinetoThreadLocalState& state,
     const at::RecordFunction& fn,
@@ -737,15 +736,24 @@ void prepareProfiler(
 }
 
 static void toggleTorchOpCollectionDynamic(bool enable) {
-  auto state_ptr = ProfilerStateBase::get();
-  if (state_ptr) {
-    const auto& config = state_ptr->config();
+  std::shared_ptr<ProfilerStateBase> global_state =
+      ProfilerStateBase::getGlobal();
+  if (global_state) {
     if (enable) {
       auto scopes = profiler_state_info_ptr->scopes;
-      config.global() ? pushGlobalProfilingCallbacks(scopes)
-                      : pushTLSProfilingCallbacks(scopes);
+      pushGlobalProfilingCallbacks(scopes);
     } else {
-      state_ptr->removeCallback();
+      global_state->removeCallback();
+    }
+    return;
+  }
+  ProfilerStateBase* tls_state = ProfilerStateBase::getTLS();
+  if (tls_state) {
+    if (enable) {
+      auto scopes = profiler_state_info_ptr->scopes;
+      pushTLSProfilingCallbacks(scopes);
+    } else {
+      tls_state->removeCallback();
     }
   }
 }
@@ -758,24 +766,22 @@ static void toggleTorchOpCollectionDynamic(bool enable) {
 #define UNUSED __attribute__((unused))
 #endif
 static UNUSED void togglePythonCollectionDynamic(bool enable) {
-  auto state_ptr = ProfilerStateBase::get();
-  if (state_ptr) {
-    auto global = state_ptr->config().global();
-    if (global) {
-      std::shared_ptr<KinetoThreadLocalState> kineto_state =
-          KinetoThreadLocalState::getGlobal();
-      if (enable) {
-        kineto_state->resumePython();
-      } else {
-        kineto_state->pausePython();
-      }
+  std::shared_ptr<KinetoThreadLocalState> global_state =
+      KinetoThreadLocalState::getGlobal();
+  if (global_state) {
+    if (enable) {
+      global_state->resumePython();
     } else {
-      KinetoThreadLocalState* kineto_state = KinetoThreadLocalState::getTLS();
-      if (enable) {
-        kineto_state->resumePython();
-      } else {
-        kineto_state->pausePython();
-      }
+      global_state->pausePython();
+    }
+    return;
+  }
+  KinetoThreadLocalState* tls_state = KinetoThreadLocalState::getTLS();
+  if (tls_state) {
+    if (enable) {
+      tls_state->resumePython();
+    } else {
+      tls_state->pausePython();
     }
   }
 }

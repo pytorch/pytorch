@@ -216,7 +216,8 @@ void RecordFunctionFast_dealloc(PyObject* selfGeneric) {
 
 PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
   HANDLE_TH_ERRORS
-  if (torch::profiler::impl::ProfilerStateBase::get() != nullptr) {
+  if (torch::profiler::impl::ProfilerStateBase::getGlobal() != nullptr ||
+      torch::profiler::impl::ProfilerStateBase::getTLS() != nullptr) {
     auto self = (RecordFunctionFast*)selfGeneric;
     TORCH_INTERNAL_ASSERT(
         !self->guard,
@@ -310,7 +311,8 @@ PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
 
 PyObject* RecordFunctionFast_exit(PyObject* selfGeneric, PyObject* unused) {
   HANDLE_TH_ERRORS
-  if (torch::profiler::impl::ProfilerStateBase::get() != nullptr) {
+  if (torch::profiler::impl::ProfilerStateBase::getGlobal() != nullptr ||
+      torch::profiler::impl::ProfilerStateBase::getTLS() != nullptr) {
     auto self = (RecordFunctionFast*)selfGeneric;
     TORCH_INTERNAL_ASSERT(
         self->guard,
