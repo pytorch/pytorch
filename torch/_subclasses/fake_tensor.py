@@ -459,6 +459,25 @@ class FakeTensorConverter:
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
 
+        # Propagate grad_dtype here rather than in meta_converter because
+        # meta tensors don't carry autograd metadata.
+        # Unwrap FunctionalTensor because accessing is_leaf/grad_fn on a
+        # FunctionalTensor view whose base was mutated (e.g. via set_())
+        # triggers lazy view replay through __torch_dispatch__, which
+        # errors without an active FunctionalTensorMode.
+        inner_t = (
+            torch._from_functional_tensor(t.elem)
+            if isinstance(t, torch._subclasses.functional_tensor.FunctionalTensor)
+            else t
+        )
+        if (
+            inner_t.requires_grad
+            and inner_t.is_leaf
+            and inner_t.grad_dtype != inner_t.dtype
+            and out.is_leaf
+        ):
+            out.grad_dtype = inner_t.grad_dtype
+
         from torch._dynamo.source import RandomValueSource
 
         value = None
