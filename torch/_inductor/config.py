@@ -896,6 +896,9 @@ loop_ordering_after_fusion: bool = (
     )
     == "1"
 )
+loop_reindexing_after_fusion: bool = (
+    os.environ.get("TORCHINDUCTOR_LOOP_REINDEXING_AFTER_FUSION", "1") == "1"
+)
 
 
 # When trying to fuse two nodes, one with:
@@ -1007,10 +1010,15 @@ combo_kernel_allow_mixed_sizes = 1
 combo_kernel_foreach_dynamic_shapes = True
 # Maximum number of arguments (read/write buffers) allowed in a combo kernel
 combo_kernel_max_num_args = 250
+# Maximum number of sub-kernels allowed in a single combo kernel
+combo_kernel_max_num_nodes = 8
 # When True, each combo sub-kernel gets its own block sizes (XBLOCK_0, YBLOCK_0, etc.)
 # allowing different sub-kernels to use different tile sizes based on their heuristics.
 # When False, all sub-kernels share block sizes (XBLOCK, YBLOCK, etc.)
 combo_kernel_per_subkernel_blocks = False
+# When True, combo-kernel autotuning groups sub-kernels that share the same
+# candidate config set and kernel-analysis signature. Disabled by default.
+combo_kernel_autotune_grouping = False
 # When True, only pointwise kernels are eligible for combo kernel fusion.
 combo_kernels_pointwise_only = False
 

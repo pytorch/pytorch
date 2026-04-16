@@ -3134,6 +3134,11 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         real_impl_callable = _LeafCallable(wrapped_real_impl)
         fake_impl_callable = _LeafCallable(wrapped_fake_impl)
+        hook_fn = getattr(decorated_fn, "_torchdynamo_leaf_hook_fn", None)
+        if hook_fn is not None:
+            hook_fake_fn = getattr(decorated_fn, "_torchdynamo_leaf_hook_fake_fn", None)
+            real_impl_callable._leaf_hook_real_fn = hook_fn  # type: ignore[attr-defined]
+            real_impl_callable._leaf_hook_fake_fn = hook_fake_fn  # type: ignore[attr-defined]
 
         def make_callable_proxy(name: str, spec: Any) -> Any:
             proxy = tx.output.register_static_attr_and_return_proxy(name, spec)

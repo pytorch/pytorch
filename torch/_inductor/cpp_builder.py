@@ -1700,6 +1700,183 @@ def _find_libcudart_static(path: str) -> Path | None:
     return None
 
 
+def _gen_mingw_import_lib(dll_path: str, def_path: str, import_lib_path: str) -> None:
+    """Generate a MinGW import library (.a) from a DLL using gendef and dlltool."""
+    dll_name = os.path.basename(dll_path)
+    with open(def_path, "w") as def_file:
+        subprocess.run(
+            ["gendef", "-", dll_path],
+            stdout=def_file,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+
+    subprocess.run(
+        [
+            "x86_64-w64-mingw32-dlltool",
+            "-d",
+            def_path,
+            "-l",
+            import_lib_path,
+            "-D",
+            dll_name,
+        ],
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    log.info("Generated MinGW import library %s from %s", import_lib_path, dll_name)
+
+
+# MSVC /GS buffer security check stubs for MinGW cross-compilation.
+# CUDA 13.0+ cudart.lib contains MSVC-compiled static objects that reference
+# these symbols (__security_cookie, __security_check_cookie, __GSHandlerCheck).
+# When cross-compiling with MinGW, we provide no-op stubs so the linker can
+# resolve them. At runtime on Windows, the CUDA runtime DLL handles its own
+# security checks internally; the static loader code that references these
+# symbols is a thin shim whose /GS instrumentation is safe to stub out.
+_MSVC_GS_STUBS_SOURCE = """\
+#include <stdint.h>
+uint64_t __security_cookie = 0x00002B992DDFA232ULL;
+void __security_check_cookie(uint64_t cookie) { (void)cookie; }
+void __GSHandlerCheck(void) {}
+"""
+
+
+def _create_msvc_gs_stubs_lib(output_dir: str) -> str | None:
+    """
+    Create a static library with MSVC GS security symbol stubs for MinGW.
+
+    Returns the library name (without lib prefix / .a suffix) if successful,
+    or None on failure.
+    """
+    stubs_lib = os.path.join(output_dir, "libmsvc_gs_stubs.a")
+    if os.path.exists(stubs_lib):
+        return "msvc_gs_stubs"
+
+    src_path = ""
+    obj_path = ""
+    try:
+        src_path = os.path.join(output_dir, "_msvc_gs_stubs.c")
+        obj_path = os.path.join(output_dir, "_msvc_gs_stubs.o")
+        with open(src_path, "w") as f:
+            f.write(_MSVC_GS_STUBS_SOURCE)
+
+        mingw_gcc = MINGW_GXX.replace("g++", "gcc")
+        subprocess.run(
+            [mingw_gcc, "-c", src_path, "-o", obj_path],
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+        mingw_ar = MINGW_GXX.replace("g++", "ar")
+        subprocess.run(
+            [mingw_ar, "rcs", stubs_lib, obj_path],
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+        log.info("Created MSVC GS stubs library: %s", stubs_lib)
+        return "msvc_gs_stubs"
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        log.warning(
+            "Failed to create MSVC GS stubs library.",
+            exc_info=True,
+        )
+        if os.path.exists(stubs_lib):
+            os.remove(stubs_lib)
+        return None
+    finally:
+        for f in [src_path, obj_path]:
+            if f and os.path.exists(f):
+                os.remove(f)
+
+
+def _ensure_mingw_cudart_import_lib(libraries_dirs: list[str]) -> list[str]:
+    """
+    Auto-generate a MinGW-compatible import library (libcudart.a)
+    from the CUDA runtime DLL. This avoids linking against the hybrid cudart.lib
+    which contains MSVC-compiled static objects with /GS security symbols that
+    MinGW cannot resolve.
+
+    Falls back to creating MSVC GS security stubs if the DLL is unavailable,
+    and falls back gracefully to the original cudart.lib if that also fails.
+
+    Returns a list of extra library names to link (e.g. ["msvc_gs_stubs"]).
+    """
+    import glob
+
+    windows_cuda_home = os.environ.get("WINDOWS_CUDA_HOME")
+    if not windows_cuda_home:
+        log.debug(
+            "WINDOWS_CUDA_HOME not set, skipping MinGW cudart import lib generation"
+        )
+        return []
+
+    for lib_dir in libraries_dirs:
+        if os.path.exists(os.path.join(lib_dir, "libcudart.a")):
+            log.debug("libcudart.a already exists in %s, skipping generation", lib_dir)
+            return []
+
+    # Find the CUDA runtime DLL for import lib generation
+    bin_dir = os.path.join(windows_cuda_home, "bin", "x64")
+    if not os.path.isdir(bin_dir):
+        bin_dir = os.path.join(windows_cuda_home, "bin")
+    dll_candidates = glob.glob(os.path.join(bin_dir, "cudart64_*.dll"))
+
+    # Find a writable directory containing cudart.lib for output
+    output_dir = None
+    for lib_dir in libraries_dirs:
+        if os.path.isdir(lib_dir) and os.access(lib_dir, os.W_OK):
+            if os.path.exists(os.path.join(lib_dir, "cudart.lib")):
+                output_dir = lib_dir
+                break
+
+    if not dll_candidates:
+        log.warning(
+            "No cudart64_*.dll found in %s. Cannot generate MinGW import library. "
+            "Will create MSVC GS security stubs as fallback.",
+            bin_dir,
+        )
+        # Fallback: create GS stubs so the hybrid cudart.lib can link
+        if output_dir is not None:
+            stub_lib = _create_msvc_gs_stubs_lib(output_dir)
+            if stub_lib:
+                return [stub_lib]
+        return []
+
+    if output_dir is None:
+        log.warning(
+            "No writable directory containing cudart.lib found. "
+            "Cannot generate MinGW import library. "
+            "If linking fails with undefined references to __security_cookie, "
+            "ensure cudart.lib is present in one of: %s",
+            libraries_dirs,
+        )
+        return []
+
+    dll_path = dll_candidates[0]
+    dll_name = os.path.basename(dll_path)
+
+    def_path = os.path.join(output_dir, dll_name.replace(".dll", ".def"))
+    import_lib_path = os.path.join(output_dir, "libcudart.a")
+
+    try:
+        _gen_mingw_import_lib(dll_path, def_path, import_lib_path)
+        return []
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        log.warning(
+            "Failed to generate MinGW cudart import library. "
+            "Falling back to MSVC GS stubs.",
+            exc_info=True,
+        )
+        for f in [def_path, import_lib_path]:
+            if os.path.exists(f):
+                os.remove(f)
+        # Fallback: create GS stubs
+        stub_lib = _create_msvc_gs_stubs_lib(output_dir)
+        if stub_lib:
+            return [stub_lib]
+        return []
+
+
 def _transform_cuda_paths(lpaths: list[str]) -> None:
     # This handles two cases:
     # 1. Cases where libs are in (e.g.) lib/cuda-12 and lib/cuda-12/stubs
@@ -1768,7 +1945,8 @@ def get_cpp_torch_device_options(
             else:
                 libraries += ["cuda", "torch_cuda"]
             if config.aot_inductor.cross_target_platform == "windows":
-                libraries += ["cudart"]
+                extra_libs = _ensure_mingw_cudart_import_lib(libraries_dirs)
+                libraries += ["cudart"] + extra_libs
             _transform_cuda_paths(libraries_dirs)
 
     if device_type == "xpu":

@@ -4443,6 +4443,92 @@ class CPUReproTests(TestCase):
             res2 = jit_func(x)
         self.assertEqual(res1, res2)
 
+    def test_sdpa_closure_mask_recompile(self):
+        # Regression test for closure-composed attention masks on CPU Inductor.
+        def causal_fn(b, h, q, kv):
+            return kv <= q
+
+        def padding_fn(padding_mask):
+            def inner(b, h, q, kv):
+                return padding_mask[b, kv]
+
+            return inner
+
+        def and_masks(f1, f2):
+            def combined(b, h, q, kv):
+                return f1(b, h, q, kv) & f2(b, h, q, kv)
+
+            return combined
+
+        def make_mask_closure(batch_size, q_len, kv_len, q_offset, padding_mask):
+            fn = and_masks(causal_fn, padding_fn(padding_mask))
+            b = torch.arange(batch_size)[:, None, None, None]
+            h = torch.arange(1)[None, :, None, None]
+            q = (torch.arange(q_len) + q_offset)[None, None, :, None]
+            kv = torch.arange(kv_len)[None, None, None, :]
+            return fn(b, h, q, kv).expand(batch_size, 1, q_len, kv_len)
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj = torch.nn.Linear(32, 32, bias=False)
+
+            def forward(self, x, past_k, past_v, padding_mask, q_offset):
+                B, S, _ = x.shape
+                q = self.proj(x).view(B, S, 4, 8).transpose(1, 2)
+                k = x.view(B, S, 4, 8).transpose(1, 2)
+                v = k.clone()
+                if past_k is not None:
+                    k = torch.cat([past_k, k], dim=2)
+                    v = torch.cat([past_v, v], dim=2)
+
+                mask = make_mask_closure(B, S, k.shape[2], q_offset, padding_mask)
+                out = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+                return out.transpose(1, 2).reshape(B, S, 32), k, v
+
+        torch._dynamo.reset()
+        torch.manual_seed(0)
+
+        eager_model = Model().eval()
+        compiled_model = Model().eval()
+        compiled_model.load_state_dict(eager_model.state_dict())
+        compiled = torch.compile(compiled_model, backend="inductor")
+
+        pad_mask = torch.ones(1, 8, dtype=torch.bool)
+        pad_mask[0, :2] = False
+
+        # Prefill: seq_len=8
+        x = torch.randn(1, 8, 32)
+        with torch.no_grad():
+            ref_out, ref_k, ref_v = eager_model(x, None, None, pad_mask, q_offset=0)
+            out, k, v = compiled(x, None, None, pad_mask, q_offset=0)
+        torch.testing.assert_close(out, ref_out)
+        torch.testing.assert_close(k, ref_k)
+        torch.testing.assert_close(v, ref_v)
+
+        # Decode: seq_len=1 and kv grows, which exercises recompilation.
+        for _ in range(3):
+            pad_mask = torch.cat([pad_mask, torch.ones(1, 1, dtype=torch.bool)], dim=1)
+            x = torch.randn(1, 1, 32)
+            with torch.no_grad():
+                ref_out, ref_k, ref_v = eager_model(
+                    x,
+                    ref_k,
+                    ref_v,
+                    pad_mask,
+                    q_offset=ref_k.shape[2],
+                )
+                out, k, v = compiled(
+                    x,
+                    k,
+                    v,
+                    pad_mask,
+                    q_offset=k.shape[2],
+                )
+            torch.testing.assert_close(out, ref_out)
+            torch.testing.assert_close(k, ref_k)
+            torch.testing.assert_close(v, ref_v)
+
     def test_scalar_mul_bfloat16(self):
         def f(x):
             return torch.ops.aten.mul.Tensor(x, 1.7015043497085571)
@@ -6331,6 +6417,19 @@ class CPUReproTests(TestCase):
         out2 = cfunc(x2, y2)
 
         self.assertTrue(torch.allclose(out1, out2, equal_nan=True))
+
+    def test_indirect_index_transposed_tensor(self):
+        # https://github.com/pytorch/pytorch/issues/178521
+        # transpose_mxn was referencing a tmp variable defined inside the inner
+        # loop when the index used indirect (SymT.TMP) indexing.
+        def f(buf, idx):
+            return buf[torch.arange(buf.shape[0]), idx, :]
+
+        buf = torch.randn(16, 2, 16).permute(2, 1, 0)
+        idx = torch.randint(0, 2, (16,))
+        expected = f(buf, idx)
+        actual = torch.compile(f, backend="inductor")(buf, idx)
+        self.assertEqual(actual, expected)
 
 
 if __name__ == "__main__":

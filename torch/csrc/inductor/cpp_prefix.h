@@ -9,6 +9,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <type_traits>
 
 // WARNING: be extra careful when including more ATen/c10 header files here!
 // Because AOTInductor generated code will copy-paste this cpp_prefix.h for
@@ -776,9 +777,39 @@ Welford<scalar_t> welford_vec_reduce_all(
 }
 #endif
 
+inline std::atomic<int>* inductor_cpu_integer_div_error_flag = nullptr;
+
+inline void inductor_cpu_note_integer_div_by_zero() {
+  if (inductor_cpu_integer_div_error_flag != nullptr) {
+    inductor_cpu_integer_div_error_flag->store(1, std::memory_order_relaxed);
+  } else {
+    TORCH_CHECK(false, "ZeroDivisionError");
+  }
+}
+
+inline void inductor_cpu_throw_if_integer_div_error(std::atomic<int>& err) {
+  if (err.load(std::memory_order_acquire)) {
+    TORCH_CHECK(false, "ZeroDivisionError");
+  }
+}
+
 template <typename T, typename U>
-inline typename std::common_type_t<T, U> mod(T a, U b) {
-  return a % b;
+inline std::common_type_t<T, U> mod(T a, U b) {
+  using C = std::common_type_t<T, U>;
+  static_assert(
+      std::is_integral_v<C>,
+      "inductor template mod(T a, U b) is only for integral types; use the float/double specializations "
+      "for floating-point operands.");
+  if (C10_UNLIKELY_OR_CONST(b == 0)) {
+    inductor_cpu_note_integer_div_by_zero();
+    return C(0);
+  }
+  const C a_c = static_cast<C>(a);
+  const C b_c = static_cast<C>(b);
+  if (a_c == std::numeric_limits<C>::min() && b_c == C(-1)) {
+    return C(0);
+  }
+  return a_c % b_c;
 }
 template <>
 inline float mod(float a, float b) {
@@ -788,6 +819,61 @@ template <>
 inline double mod(double a, double b) {
   return std::fmod(a, b);
 }
+
+template <typename T>
+inline T remainder_integral(T a, T b) {
+  static_assert(
+      std::is_integral_v<T>, "remainder_integral expects integral scalar T");
+  if (C10_UNLIKELY_OR_CONST(b == 0)) {
+    inductor_cpu_note_integer_div_by_zero();
+    return T(0);
+  }
+  if (a == std::numeric_limits<T>::min() && b == T(-1)) {
+    return T(0);
+  }
+  T r = a % b;
+  if ((r != 0) && (c10::is_negative(r) != c10::is_negative(b))) {
+    r += b;
+  }
+  return r;
+}
+
+#if INDUCTOR_USE_VECTOR_TYPES()
+template <typename T>
+inline at::vec::Vectorized<T> remainder_integral(
+    const at::vec::Vectorized<T>& a,
+    const at::vec::Vectorized<T>& b) {
+  static_assert(
+      std::is_integral_v<T>,
+      "remainder_integral expects integral underlying type");
+  // Some Vectorized<T> (e.g. Vectorized8<int8_t>) deletes operator[];
+  // use store/load like
+  using Vec = at::vec::Vectorized<T>;
+  constexpr int kLen = Vec::size();
+  alignas(alignof(Vec)) T out_buf[kLen];
+  alignas(alignof(Vec)) T b_buf[kLen];
+  a.store(out_buf);
+  b.store(b_buf);
+  for (int i = 0; i < kLen; ++i) {
+    out_buf[i] = remainder_integral(out_buf[i], b_buf[i]);
+  }
+  return Vec::loadu(out_buf);
+}
+
+template <typename T, int N>
+inline at::vec::VectorizedN<T, N> remainder_integral(
+    const at::vec::VectorizedN<T, N>& a,
+    const at::vec::VectorizedN<T, N>& b) {
+  static_assert(
+      std::is_integral_v<T>,
+      "remainder_integral expects integral underlying type");
+  at::vec::VectorizedN<T, N> out;
+  for (int i = 0; i < N; ++i) {
+    out[i] = remainder_integral(a[i], b[i]);
+  }
+  return out;
+}
+#endif
 
 template <typename scalar_t>
 inline scalar_t max_propagate_nan(scalar_t a, scalar_t b) {

@@ -7090,6 +7090,8 @@ class ExternKernel(InputsKernel):
             if V.graph.cpp_wrapper:
                 stmt = f'assert_alignment({name}, {GPU_ALIGN_BYTES}, "{op_name}");'
                 if V.graph.aot_mode:
+                    if V.graph.is_const_graph:
+                        return
                     wrapper.writeline(
                         f"if (_check_aoti_runtime_check_inputs_env()) {{ {stmt} }}"
                     )

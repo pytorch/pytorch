@@ -4370,6 +4370,50 @@ class TestAutograd(TestCase):
             RuntimeError, "modified by an inplace operation", lambda: z.backward()
         )
 
+    def test_inplace_version_error_shows_forward_op_name(self):
+        # The error message should refer to the forward op (e.g. "Add"),
+        # not the backward node (e.g. "AddBackward0").
+        # Use b * b (not b * 2) so MulBackward saves b and detects the
+        # version mismatch when unpacking.
+
+        a = torch.randn(5, requires_grad=True)
+        b = a + 1
+        c = b * b
+        with torch.no_grad():
+            b += 1
+        with self.assertRaisesRegex(RuntimeError, r"output 0 of Add,"):
+            c.backward(torch.ones(5))
+
+        # sum(dim=...) uses SumBackward1; the non-zero variant number is
+        # preserved so the message says "Sum1" not "Sum".
+        a = torch.randn(3, 4, requires_grad=True)
+        b = a.sum(dim=1)
+        c = b * b
+        with torch.no_grad():
+            b += 1
+        with self.assertRaisesRegex(RuntimeError, r"output 0 of Sum1,"):
+            c.backward(torch.ones(3))
+
+        # Custom autograd Function: "MyFunc" not "MyFuncBackward".
+        class MyFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad):
+                (x,) = ctx.saved_tensors
+                return grad * x
+
+        a = torch.randn(5, requires_grad=True)
+        b = MyFunc.apply(a)
+        c = b * b
+        with torch.no_grad():
+            b += 1
+        with self.assertRaisesRegex(RuntimeError, r"output 0 of MyFunc,"):
+            c.backward(torch.ones(5))
+
     def test_increment_version(self):
         a = torch.rand(5, requires_grad=True)
         v = a._version
@@ -9125,9 +9169,7 @@ for shape in [(1,), ()]:
             is_view=True,
             should_raise_tuple=(None, None, None),
         )
-        inp_change_err = (
-            "Output {} of UnbindBackward0 is a view and is being modified inplace."
-        )
+        inp_change_err = "Output {} of Unbind is a view and is being modified inplace."
         run_test(
             grad_mode=True,
             requires_grad=True,
@@ -9274,17 +9316,17 @@ for shape in [(1,), ()]:
 
         fn_id_to_inplace_on_view_err_msg = {
             "one_output": (
-                "Output 0 of IdOneOutputBackward is a view and is being "
+                "Output 0 of IdOneOutput is a view and is being "
                 "modified inplace. This view was created inside a custom Function"
             ),
             "two_output": (
-                "Output 0 of IdTwoOutputBackward is a view and is being modified inplace."
+                "Output 0 of IdTwoOutput is a view and is being modified inplace."
                 " This view is the output of a function that returns multiple views.",
                 "Pure view custom Function can only have one input Tensor and one output Tensor."
                 " Open an issue if you need to support more.",
             ),
             "view_of_temp": (
-                "Output 0 of ViewOfTempBackward is a view and is being "
+                "Output 0 of ViewOfTemp is a view and is being "
                 "modified inplace. This view was created inside a custom Function",
                 "a view of a leaf Variable that requires grad is being used in an in-place operation",
             ),
@@ -9584,7 +9626,7 @@ for shape in [(1,), ()]:
         out = ComplexView.apply(a.clone(), idx)
         with self.assertRaisesRegex(
             RuntimeError,
-            "Output 0 of ComplexViewBackward is a view and is being modified inplace",
+            "Output 0 of ComplexView is a view and is being modified inplace",
         ):
             out += 1
 

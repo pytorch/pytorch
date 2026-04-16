@@ -7886,6 +7886,46 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn(64), torch.randn(64)))
 
+    @skip_if_halide  # cpp-only RuntimeError contract
+    @skip_if_pallas  # cpp-only RuntimeError contract
+    @skip_if_triton_cpu  # cpp-only RuntimeError contract
+    def test_fmod_uint8_zero_divisor_cpu_inductor_raises_error(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest(
+                "CPU-only: uint8 Inductor integer divide-by-zero RuntimeError check"
+            )
+        torch.manual_seed(0)
+        device = self.device
+        divisor = torch.randint(0, 255, (8,), dtype=torch.uint8, device=device)
+        inp = torch.randint(1, 255, (16, 8), dtype=torch.uint8, device=device)
+        divisor[2] = 0  # ensure a divisor is 0
+
+        torch._dynamo.reset()
+        opt = torch.compile(torch.fmod, fullgraph=True, backend="inductor", mode=None)
+        with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
+            opt(inp, divisor)
+
+    @skip_if_halide  # cpp-only RuntimeError contract
+    @skip_if_pallas  # cpp-only RuntimeError contract
+    @skip_if_triton_cpu  # cpp-only RuntimeError contract
+    def test_remainder_uint8_zero_divisor_cpu_inductor_raises_error(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest(
+                "CPU-only: uint8 Inductor integer divide-by-zero RuntimeError check"
+            )
+        torch.manual_seed(0)
+        device = self.device
+        divisor = torch.randint(0, 255, (8,), dtype=torch.uint8, device=device)
+        inp = torch.randint(1, 255, (16, 8), dtype=torch.uint8, device=device)
+        divisor[2] = 0  # ensure a divisor is 0
+
+        torch._dynamo.reset()
+        opt = torch.compile(
+            torch.remainder, fullgraph=True, backend="inductor", mode=None
+        )
+        with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
+            opt(inp, divisor)
+
     def test_zeros(self):
         def fn(a):
             return (
@@ -9935,18 +9975,35 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @requires_gpu()
     @unittest.skipIf(IS_MACOS, "fails on macos")
     @parametrize(
-        "constructor",
-        [torch.empty, torch.ones, torch.zeros, torch.rand, torch.randn],
-        name_fn=lambda constructor: constructor.__name__,
+        "constructor_and_args",
+        [
+            (torch.empty, ([1, 128, 128],)),
+            (torch.ones, ([1, 128, 128],)),
+            (torch.zeros, ([1, 128, 128],)),
+            (
+                torch.full,
+                (
+                    [1, 128, 128],
+                    2,
+                ),
+            ),
+            (torch.rand, ([1, 128, 128],)),
+            (torch.randn, ([1, 128, 128],)),
+        ],
+        name_fn=lambda constructor_and_args: constructor_and_args[0].__name__,
     )
-    def test_constructors_pin_memory(self, constructor):
+    def test_constructors_pin_memory(self, constructor_and_args):
         if self.device != "cpu":
             raise unittest.SkipTest("pin_memory is not supported on non-CPU devices")
 
-        failing_constructors = [torch.rand, torch.ones, torch.zeros]
+        constructor, args = constructor_and_args
+
+        failing_constructors = [
+            torch.rand,
+        ]
 
         def fn():
-            return constructor([1, 128, 128], pin_memory=True, device=self.device)
+            return constructor(*args, pin_memory=True, device=self.device)
 
         result = torch.compile(fn, backend="inductor")()
         if constructor in failing_constructors:

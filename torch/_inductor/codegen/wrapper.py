@@ -1479,6 +1479,7 @@ class PythonWrapperCodegen(CodeGen):
         self.kernel_autotune_defs.splice(
             f"""
                 import torch
+                from math import inf, nan
                 from torch._dynamo.testing import rand_strided
                 from torch._dynamo.utils import preserve_rng_state
                 from torch._inductor.select_algorithm import AlgorithmSelectorCache
@@ -1697,6 +1698,8 @@ class PythonWrapperCodegen(CodeGen):
         if V.graph.cpp_wrapper:
             stmt = f'assert_size_stride({name}, {size}, {stride}, "{op_name}");'
             if V.graph.aot_mode:
+                if V.graph.is_const_graph:
+                    return
                 self.writeline(
                     f"if (_check_aoti_runtime_check_inputs_env()) {{ {stmt} }}"
                 )

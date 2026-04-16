@@ -574,7 +574,7 @@ class TensorVariable(VariableTracker):
                 )
             elif name in self._strict_mode_conditional_banned_ops():
                 raise UnknownPropertiesDuringBackwardTrace(
-                    f"Unknown property {name} during speculating backward, dynamo will insert contiguous call ahead and speculate it again"  # noqa: B950
+                    f"Unknown property {name} during speculating backward, dynamo will insert contiguous call ahead and speculate it again"
                 )
 
         if name == "__class__":
@@ -1443,6 +1443,14 @@ class TensorVariable(VariableTracker):
         **kwargs: VariableTracker,
     ) -> "DataPtrVariable":
         return DataPtrVariable(self)
+
+    def method_const_data_ptr(
+        self,
+        tx: "InstructionTranslator",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> "DataPtrVariable":
+        return DataPtrVariable(self, method_name="const_data_ptr")
 
     def method_record_stream(
         self,
@@ -2678,15 +2686,17 @@ class DataPtrVariable(VariableTracker):
     def __init__(
         self,
         from_tensor: TensorVariable,
+        method_name: str = "data_ptr",
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.from_tensor = from_tensor
+        self.method_name = method_name
 
     def python_type(self) -> type:
         return int
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.from_tensor)
-        codegen.load_method("data_ptr")
+        codegen.load_method(self.method_name)
         codegen.call_method(0)

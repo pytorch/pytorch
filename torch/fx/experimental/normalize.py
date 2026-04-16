@@ -149,7 +149,7 @@ class NormalizeOperators(AnnotateTypesWithSchema):
         self, target: Target, args: tuple[Argument, ...], kwargs: dict[str, Any]
     ):
         # Normalize operators according to the magic methods implemented on tensors here:
-        # https://github.com/pytorch/pytorch/blob/28c5d90b679c6b38bf4183ec99f16d933c2f1bcd/tools/autograd/templates/python_variable_methods.cpp#L1137 # noqa: B950
+        # https://github.com/pytorch/pytorch/blob/28c5d90b679c6b38bf4183ec99f16d933c2f1bcd/tools/autograd/templates/python_variable_methods.cpp#L1137
 
         if not callable(target):
             raise AssertionError(f"Expected callable target, got {type(target)}")

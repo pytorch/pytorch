@@ -2309,6 +2309,10 @@ def setBlasBackendsToDefaultFinally(fn):
             fn(*args, **kwargs)
         finally:
             torch.backends.cuda.preferred_blas_library(_preferred_backend)
+            if torch.backends.cuda.is_built():
+                torch._C._cuda_resetCublasWorkspaceSize()
+                torch._C._cuda_resetCublasLtWorkspaceSize()
+                torch._C._cuda_clearCublasWorkspaces()
     return _fn
 
 
@@ -5961,6 +5965,9 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
     if suppress_prefix:
         s = re.sub(r"Cannot export model.+\n\n", "", s)
     s = re.sub(r" +$", "", s, flags=re.MULTILINE)
+    # Normalize caret-only lines by stripping leading whitespace, since
+    # col_offset in bytecode positions can vary across Python point releases
+    s = re.sub(r"^[ ]+(\^+)$", r"\1", s, flags=re.MULTILINE)
     return s
 
 
