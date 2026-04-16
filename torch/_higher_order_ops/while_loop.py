@@ -248,12 +248,12 @@ def while_loop(cond_fn, body_fn, carried_inputs):
     def _while_loop_op_wrapper(*args, **kwargs):
         return while_loop_op(*args, **kwargs)
 
-    from torch._higher_order_ops.utils import _hop_compile_and_call
+    from torch._higher_order_ops.utils import setup_compilation_env
 
-    return _hop_compile_and_call(
-        _while_loop_op_wrapper,
-        (flat_cond_fn, flat_body_fn, tuple(flat_inputs), tuple()),
-    )
+    with setup_compilation_env() as backend:
+        return torch.compile(_while_loop_op_wrapper, backend=backend, fullgraph=True)(
+            flat_cond_fn, flat_body_fn, tuple(flat_inputs), tuple()
+        )
 
 
 @while_loop_op.py_impl(DispatchKey.CompositeExplicitAutograd)

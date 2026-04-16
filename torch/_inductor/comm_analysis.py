@@ -399,18 +399,10 @@ def estimate_fx_collective_size(fx_node: torch.fx.Node) -> int:
 
     output_val = fx_node.meta.get("val", None)
 
-    if input_bytes is None or output_val is None:
+    if input_bytes is None or not isinstance(output_val, torch.Tensor):
         return 0
 
-    # Coalesced collectives return a list of tensors
-    if isinstance(output_val, (list, tuple)):
-        output_bytes = sum(
-            tensor_bytes(t) for t in output_val if isinstance(t, torch.Tensor)
-        )
-    elif isinstance(output_val, torch.Tensor):
-        output_bytes = tensor_bytes(output_val)
-    else:
-        return 0
+    output_bytes = tensor_bytes(output_val)
 
     return input_bytes + output_bytes
 
@@ -515,12 +507,7 @@ def estimate_nccl_collective_runtime_from_fx_node(
             group=pg, device=device
         ) as time_estimator:
             w = fn(*real_args, **real_kwargs)
-            # Coalesced collectives return a list of tensors
-            if isinstance(w, (list, tuple)):
-                for t in w:
-                    torch.ops._c10d_functional.wait_tensor.default(t)
-            else:
-                torch.ops._c10d_functional.wait_tensor.default(w)
+            torch.ops._c10d_functional.wait_tensor.default(w)
         est_time_us = time_estimator.estimated_time
         # -1000 constant is NCCL return in case of error during estimations.
         # Observed it for all_to_all estimations.

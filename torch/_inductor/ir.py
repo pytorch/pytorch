@@ -7050,61 +7050,30 @@ class ExternKernel(InputsKernel):
         return op_name
 
     def codegen_size_asserts(self, wrapper: PythonWrapperCodegen) -> None:
-        if (
-            not config.size_asserts
-            or
-            # skip AOTI ArrayRef mode
-            config.aot_inductor.allow_stack_allocation
-        ):
-            return
-        # comparing strides for 0 size tensor is tricky. Ignore them for now.
-        if sympy_product(self.get_size()) == 0:
-            return
-        size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
-        stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
-        op_name = self.get_op_name()
-        name = self.get_name()
-        if V.graph.cpp_wrapper:
-            # inplace_view ops (e.g. set_.source_Tensor) don't declare an
-            # output variable; assert on the mutated input instead.
-            if isinstance(self.op_overload, torch._ops.OpOverload):
-                if torch.Tag.inplace_view in self.op_overload.tags:
-                    assert isinstance(self.inputs[0], IRNode)
-                    name = self.inputs[0].get_name()
-        wrapper.write_assert_size_stride(name, size, stride, op_name)
+        if config.size_asserts and not V.graph.cpp_wrapper:
+            # comparing strides for 0 size tensor is tricky. Ignore them for now.
+            if sympy_product(self.get_size()) == 0:
+                return
+            size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
+            stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
+            op_name = self.get_op_name()
+            wrapper.writeline(
+                f"assert_size_stride({self.get_name()}, {size}, {stride}, {op_name!r})"
+            )
 
     def codegen_alignment_asserts(self, wrapper: PythonWrapperCodegen) -> None:
-        if not config.alignment_asserts or config.aot_inductor.allow_stack_allocation:
-            return
-        name = self.get_name()
-        if V.graph.cpp_wrapper:
-            # inplace_view ops (e.g. set_.source_Tensor) don't declare an
-            # output variable; assert on the mutated input instead.
-            if isinstance(self.op_overload, torch._ops.OpOverload):
-                if torch.Tag.inplace_view in self.op_overload.tags:
-                    assert isinstance(self.inputs[0], IRNode)
-                    name = self.inputs[0].get_name()
-        aligned = name not in V.graph.unaligned_buffers
-        op_name = self.get_op_name()
-        if aligned:
-            if V.graph.cpp_wrapper:
-                stmt = f'assert_alignment({name}, {GPU_ALIGN_BYTES}, "{op_name}");'
-                if V.graph.aot_mode:
-                    if V.graph.is_const_graph:
-                        return
-                    wrapper.writeline(
-                        f"if (_check_aoti_runtime_check_inputs_env()) {{ {stmt} }}"
-                    )
-                else:
-                    wrapper.writeline(stmt)
-            else:
+        if config.alignment_asserts and not V.graph.cpp_wrapper:
+            name = self.get_name()
+            aligned = name not in V.graph.unaligned_buffers
+            op_name = self.get_op_name()
+            if aligned:
                 wrapper.writeline(
                     f"assert_alignment({name}, {GPU_ALIGN_BYTES}, {op_name!r})"
                 )
-        else:
-            wrapper.writeline(
-                f"{wrapper.comment} buffer {name} (op: {op_name}) is assumed to be not aligned"
-            )
+            else:
+                wrapper.writeline(
+                    f"# buffer {name} (op: {op_name}) is assumed to be not aligned"
+                )
 
     def codegen_memory_tracking(self, wrapper: PythonWrapperCodegen) -> None:
         """

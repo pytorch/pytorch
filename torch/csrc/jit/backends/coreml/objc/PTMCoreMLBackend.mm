@@ -213,9 +213,8 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
 #elif TARGET_OS_MAC
     NSOperatingSystemVersion supportedVer = {10, 13, 0};
     return [[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:supportedVer];
-#else
-    return false;
 #endif
+    return false;
   }
 };
 

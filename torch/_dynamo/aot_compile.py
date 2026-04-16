@@ -387,20 +387,12 @@ def aot_compile_fullgraph(
             compiled_fn = backend(
                 backend_input.graph_module, backend_input.example_inputs
             )
-            # If Inductor backend or AOTAutograd-based backend is used,
-            # wrap the compiled_fn for serialization.
+            # If Inductor backend is used, grab the compiled_fn from PrecompileContext
             # TODO: this should be replaced once we make the backend return the SerializableCallable directly.
-            if (
-                isinstance(backend, torch._TorchCompileInductorWrapper)
-                or (
-                    hasattr(backend, "compiler_fn")
-                    and isinstance(
-                        backend.compiler_fn, torch._dynamo.backends.common.AotAutograd
-                    )
-                )
-                or (
-                    hasattr(compiled_fn, "serialize")
-                    and compiled_fn.serialize is not None
+            if isinstance(backend, torch._TorchCompileInductorWrapper) or (
+                hasattr(backend, "compiler_fn")
+                and isinstance(
+                    backend.compiler_fn, torch._dynamo.backends.common.AotAutograd
                 )
             ):
                 compiled_fn = BundledAOTAutogradSerializableCallable(compiled_fn)

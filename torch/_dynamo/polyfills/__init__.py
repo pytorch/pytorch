@@ -403,6 +403,11 @@ def getattr_and_trace(*args: Any, **kwargs: Any) -> Any:
     return fn(*args[2:], **kwargs)
 
 
+def getattr_and_trace_no_nested_graph_breaks(*args: Any, **kwargs: Any) -> Any:
+    with torch._dynamo.disable_nested_graph_breaks():
+        return getattr_and_trace(*args, **kwargs)
+
+
 def mapping_get(obj: Mapping[T, U], key: T, value: U | None = None, /) -> U | None:
     try:
         return obj.__getitem__(key)

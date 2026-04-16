@@ -1,4 +1,4 @@
-from .fused import (
+from .fused import (  # noqa: F401
     _FusedModule,
     BNReLU2d,
     BNReLU3d,

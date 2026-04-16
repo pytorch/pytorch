@@ -147,9 +147,7 @@ class ReduceOp:
     # stub with zero members. There is a chance this is due to a recent change
     # in the semantics of enum membership. If so, use `member = value` to mark
     # an enum member, instead of `member: type`
-    class RedOpType(Enum):
-        def __call__(self, factor: float | int | Tensor) -> ReduceOp:
-            """Create a PREMUL_SUM ReduceOp with the given factor. Only PREMUL_SUM supports this."""
+    class RedOpType(Enum): ...  # type: ignore[misc]
 
 class BroadcastOptions:
     rootRank: int

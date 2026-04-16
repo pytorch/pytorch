@@ -20,6 +20,7 @@ int64_t InterpValue::intValue() const {
   AT_FORALL_INT_TYPES(TYPE_CASE);
 #undef TYPE_CASE
   throw unsupported_dtype();
+  return 0;
 }
 
 template <typename T>
@@ -661,6 +662,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       default:
         throw unsupported_dtype();
     }
+    return {};
   }
 
   void check_bounds_throw(int64_t idx, int64_t bound, const BufPtr& buf) {

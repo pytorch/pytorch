@@ -78,7 +78,7 @@ from .runtime_wrappers import (
     SerializableCompiledFunction,
     SubclassMeta,
 )
-from .schemas import AOTAutogradCacheInfo, AOTConfig, ViewAndMutationMeta
+from .schemas import AOTAutogradCacheInfo, AOTConfig, ViewAndMutationMeta  # noqa: F401
 
 
 if TYPE_CHECKING:
@@ -871,7 +871,10 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
     @staticmethod
     def clear() -> None:
         """Clear the cache"""
-        shutil.rmtree(AOTAutogradCache._get_tmp_dir(), ignore_errors=True)
+        try:
+            shutil.rmtree(AOTAutogradCache._get_tmp_dir())
+        except FileNotFoundError:
+            pass
 
     @staticmethod
     def try_load(
@@ -959,7 +962,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         except Exception as e:
             cache_key = None
             counters["aot_autograd"]["autograd_cache_bypass"] += 1
-            log.info("Bypassing autograd cache due to: %s", e)
+            log.info("Bypassing autograd cache due to: %s", e)  # noqa: G200
             cache_state = "bypass"
             cache_event_time = time.time_ns()
             cache_info["cache_bypass_reason"] = str(e)
@@ -1138,7 +1141,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                         ),
                     )
         except Exception as e:
-            log.info("AOTAutograd cache unable to load compiled graph: %s", e)
+            log.info("AOTAutograd cache unable to load compiled graph: %s", e)  # noqa: G200
             if config.strict_autograd_cache:
                 raise e
         if entry is not None:
@@ -1193,7 +1196,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         except (pickle.PicklingError, TypeError, AttributeError) as e:
             bad_field = AOTAutogradCache._find_unpicklable_field(entry)
             error_str = str(e)
-            log.warning("AOTAutograd cache unable to serialize compiled graph: %s", e)
+            log.warning("AOTAutograd cache unable to serialize compiled graph: %s", e)  # noqa: G200
             torch._logging.trace_structured(
                 "artifact",
                 metadata_fn=lambda: {
@@ -1215,10 +1218,10 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         """Handle exceptions during save, re-raising if strict mode is enabled."""
         if is_bypass:
             counters["aot_autograd"]["autograd_cache_bypass"] += 1
-            log.info("Bypassing autograd cache due to: %s", e)
+            log.info("Bypassing autograd cache due to: %s", e)  # noqa: G200
             bypass_reason = str(e)
         else:
-            log.warning("AOTAutograd cache unable to serialize compiled graph: %s", e)
+            log.warning("AOTAutograd cache unable to serialize compiled graph: %s", e)  # noqa: G200
             bypass_reason = "Unable to serialize: " + str(e)
         if remote:
             log_cache_bypass("bypass_aot_autograd", bypass_reason)

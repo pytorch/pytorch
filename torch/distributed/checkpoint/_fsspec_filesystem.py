@@ -47,11 +47,11 @@ class FileSystem(FileSystemBase):
         with self.fs.open(path, mode) as stream:
             try:
                 yield stream
-            except:
+            except:  # noqa: B001,E722
                 if any(ch in mode for ch in "w+a"):  # cleanup file if not read-only
                     try:
                         self.rm_file(path)
-                    except:  # noqa: E722
+                    except:  # noqa: B001,E722
                         pass
                 raise
 

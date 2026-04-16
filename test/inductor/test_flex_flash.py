@@ -26,8 +26,6 @@ from torch.testing._internal.common_cuda import (
     IS_SM90,
     PLATFORM_SUPPORTS_FP8,
     SM120OrLater,
-    SM80OrLater,
-    SM90OrLater,
     xfailIfSM120OrLater,
     xfailIfSM12X,
     xfailIfSM90,
@@ -42,9 +40,6 @@ from torch.testing._internal.common_utils import (
     DeterministicGuard,
     parametrize,
 )
-
-
-IS_SM8X = SM80OrLater and not SM90OrLater
 
 
 def _times_two(score, _b, _h, _m, _n):
@@ -288,9 +283,7 @@ def _create_block_mask_for_device(
     dev = torch.device(device)
     if dev.type == "cuda":
         major, _ = torch.cuda.get_device_capability(dev)
-        if major == 8:
-            kv_block = 64
-        elif major == 10:
+        if major >= 10:
             q_block *= 2
     return create_block_mask(
         mask_mod,
@@ -882,14 +875,6 @@ class TestFlexFlash(InductorTestCase):
                 )
 
     @xfailIfSM120OrLater
-    @decorateIf(
-        unittest.expectedFailure,
-        lambda params: (
-            IS_SM8X
-            and not params["case"].requires_grad
-            and params["case"].score_mod_factory is not None
-        ),
-    )
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", MASK_MOD_CASES, name_fn=mask_case_name)
     def test_flash_attention_mask_mod_cases(self, device, dtype, case):
@@ -1054,14 +1039,6 @@ class TestFlexFlash(InductorTestCase):
                 "backward_mqa_block_mask_causal",
                 "backward_mqa_block_mask_causal_per_head",
             }
-        ),
-    )
-    @decorateIf(
-        unittest.expectedFailure,
-        lambda params: (
-            IS_SM8X
-            and not params["case"].requires_grad
-            and params["case"].block_mask_num_heads == 1
         ),
     )
     @decorateIf(

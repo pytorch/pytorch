@@ -75,7 +75,7 @@ from .utils import (
 
 
 # Register polyfill functions
-from .polyfills import loader as _  # usort: skip
+from .polyfills import loader as _  # usort: skip # noqa: F401
 
 
 __all__ = [

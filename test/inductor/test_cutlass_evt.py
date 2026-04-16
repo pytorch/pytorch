@@ -13,12 +13,9 @@ from torch._inductor.ir import ComputedBuffer, FixedLayout, PermuteView, Pointwi
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.utils import OrderedSet
 from torch.testing._internal.common_cuda import IS_SM100, IS_SM90, SM90OrLater
-from torch.testing._internal.common_device_type import skipCUDAIf, skipXPUIf
-from torch.testing._internal.common_xpu import Xe2_Or_Later
 from torch.testing._internal.inductor_utils import (
-    GPU_TYPE,
     HAS_CPU,
-    HAS_GPU_AND_TRITON,
+    HAS_CUDA_AND_TRITON,
     MockGraphHandler,
 )
 
@@ -115,10 +112,7 @@ class MockComputedBuffer(ComputedBuffer):
 
 
 class TestCutlassEVT(TestCase):
-    device_type = GPU_TYPE
-
-    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen_accumulator_return(self):
         from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
@@ -175,8 +169,7 @@ def fn(accum, buf1, buf2):
 return tmp_0, tmp_2, D""",
         )
 
-    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen_disjoint_read_indexing(self):
         from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
@@ -225,8 +218,7 @@ return tmp_0, tmp_2, D""",
 index strides [200, 60000, 1], and layout stride [60000, 200, 1]""",
             )
 
-    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen_broadcasting(self):
         from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
@@ -286,8 +278,7 @@ def fn(accum, buf1, buf2):
 return tmp_0, tmp_2, D""",
         )
 
-    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen(self):
         from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
@@ -343,8 +334,7 @@ def fn(accum, buf1, buf2):
 return tmp_1, D""",
         )
 
-    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_example_tensor_creation(self):
         from torch._inductor.codegen.cutlass.lib_extensions.evt_extensions import (
@@ -376,47 +366,21 @@ return tmp_1, D""",
                 result["buf1"].element, torch_dtype_to_cutlass_type(torch.float32)
             )
 
-    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_argument_codegen(self):
-        from torch._inductor.codegen.cutlass.utils import cutlass_arch
+        from torch._inductor.codegen.cuda.cuda_env import get_cuda_arch
 
-        arch = int(cutlass_arch(GPU_TYPE))
-        epilogue_functor = _trace(BIAS_CODE, EXAMPLE_TENSORS, arch)
-        code = _render_argument_type(
-            epilogue_functor,
-            _create_mock_buffer_name_map(EXAMPLE_TENSORS),
-            lambda x: int(x),
-        )[0]
-        if GPU_TYPE == "xpu":
-            self.assertExpectedInline(
-                code,
-                """\
-{ /* thread */
-        { /* F */
-          { /* compute_1 */
-            { /* compute_0 */
-              {}, /* accum */
-              {}, /* C */
-              {}, /* compute_0 */
-            },
-            {/* ptr_aux */ (float*) (ptr_0 + ptr_0_offset), /* null_default */ float(0), /* dAux */ {2048, _1{}, _0{}}}, /* aux */
-            {}, /* compute_1 */
-          },
-          {/* ptr_aux */ (float*) (ptr_1 + ptr_1_offset), /* null_default */ float(0), /* dAux */ {2048, _1{}, _0{}}}, /* F */
-        },
-        {/* ptr_col */ (float*) (ptr_2 + ptr_2_offset), /* null_default */ float(0), /* dCol */ {}}, /* bias */
-        {}, /* compute_2 */
-        {}, /* compute_3 */
-        {}, /* compute_4 */
-      }
-""",
-            )
-        else:
-            self.assertExpectedInline(
-                code,
-                """\
+        cuda_arch = int(get_cuda_arch())  # type: ignore[arg-type]
+        epilogue_functor = _trace(BIAS_CODE, EXAMPLE_TENSORS, cuda_arch)
+
+        self.assertExpectedInline(
+            _render_argument_type(
+                epilogue_functor,
+                _create_mock_buffer_name_map(EXAMPLE_TENSORS),
+                lambda x: int(x),
+            )[0],
+            """\
 { /* thread */
         { /* F */
           { /* compute_1 */
@@ -436,15 +400,12 @@ return tmp_1, D""",
         {}, /* compute_4 */
       }
 """,
-            )
+        )
 
-    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_argument_codegen_return_accumulator(self):
-        from torch._inductor.codegen.cutlass.utils import cutlass_arch
-
-        arch = int(cutlass_arch(GPU_TYPE))
+        from torch._inductor.codegen.cuda.cuda_env import get_cuda_arch
 
         code = """
 def fn(accum, bias):
@@ -467,31 +428,16 @@ def fn(accum, bias):
             ),
         }
 
-        epilogue_functor = _trace(code, example_tensors, arch)
-        code = _render_argument_type(
-            epilogue_functor,
-            _create_mock_buffer_name_map(example_tensors),
-            lambda x: int(x),
-        )[0]
+        cuda_arch = int(get_cuda_arch())  # type: ignore[arg-type]
+        epilogue_functor = _trace(code, example_tensors, cuda_arch)
 
-        if GPU_TYPE == "xpu":
-            self.assertExpectedInline(
-                code,
-                """\
-{ /* thread */
-        { /* E */
-          {}, /* accum */
-          {/* ptr_aux */ (float*) (ptr_0 + ptr_0_offset), /* null_default */ float(0), /* dAux */ {2048, _1{}, _0{}}}, /* E */
-        },
-        {/* ptr_col */ (float*) (ptr_1 + ptr_1_offset), /* null_default */ float(0), /* dCol */ {}}, /* bias */
-        {}, /* compute_0 */
-      }
-""",
-            )
-        else:
-            self.assertExpectedInline(
-                code,
-                """\
+        self.assertExpectedInline(
+            _render_argument_type(
+                epilogue_functor,
+                _create_mock_buffer_name_map(example_tensors),
+                lambda x: int(x),
+            )[0],
+            """\
 { /* thread */
         { /* E */
           {}, /* accum */
@@ -501,10 +447,9 @@ def fn(accum, bias):
         {}, /* compute_0 */
       }
 """,
-            )
+        )
 
-    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(not SM90OrLater, "need sm_90 or later")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_codegen(self):
         _, _, code, _ = trace(
@@ -516,7 +461,6 @@ def fn(accum, bias):
             EpilogueScheduleType.ScheduleAuto,
             _create_mock_buffer_name_map(EXAMPLE_TENSORS),
             lambda x: x,  # static shapes
-            device_type=GPU_TYPE,
         )
         if IS_SM90:
             self.assertExpectedInline(
@@ -723,98 +667,10 @@ using StrideD = cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>;
 
 """,  # noqa: B950
             )
-        if GPU_TYPE == "xpu":
-            self.assertExpectedInline(
-                code,
-                """\
-
-using TileShape_MNK = cute::Shape<_128, _128, _8>;
-
-using ElementC = float;
-using StrideC = cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>;
-using TensorC = cutlass::epilogue::fusion::XeSrcFetch<float>;
-
-using Accum = cutlass::epilogue::fusion::XeAccFetch;
-
-using Aux = cutlass::epilogue::fusion::XeAuxLoad<
-    float,
-    cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>
->;
-
-using Bias = cutlass::epilogue::fusion::XeColBroadcast<
-    0 /*Stages*/, TileShape_MNK, float, float,
-    cute::Stride<cute::Int<1>, cute::Int<0>, cute::Int<0>>
->;
-
-using Compute0 = cutlass::epilogue::fusion::XeCompute<
-    cutlass::plus, float, float,
-    cutlass::FloatRoundStyle::round_to_nearest
->;
-
-using EVTCompute0 = cutlass::epilogue::fusion::XeEVT<
-    Compute0,
-    Accum,
-    TensorC>;
-
-using Compute1 = cutlass::epilogue::fusion::XeCompute<
-    cutlass::plus, float, float,
-    cutlass::FloatRoundStyle::round_to_nearest
->;
-
-using EVTCompute1 = cutlass::epilogue::fusion::XeEVT<
-    Compute1,
-    EVTCompute0,
-    Aux>;
-
-using F = cutlass::epilogue::fusion::XeAuxStore<
-    float,
-    cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>
->;
-
-using EVTF = cutlass::epilogue::fusion::XeEVT<
-    F,
-    EVTCompute1>;
-
-using Compute2 = cutlass::epilogue::fusion::XeCompute<
-    cutlass::epilogue::thread::ReLu, float, float,
-    cutlass::FloatRoundStyle::round_to_nearest
->;
-
-using Compute3 = cutlass::epilogue::fusion::XeCompute<
-    cutlass::plus, float, float,
-    cutlass::FloatRoundStyle::round_to_nearest
->;
-
-using Compute4 = cutlass::epilogue::fusion::XeCompute<
-    cutlass::plus, float, float,
-    cutlass::FloatRoundStyle::round_to_nearest
->;
-
-using DagCompute4 = cutlass::epilogue::fusion::XeTopologicalVisitor<
-    float,
-    cute::tuple<
-        cute::seq<>,
-        cute::seq<>,
-        cute::seq<0>,
-        cute::seq<2, 1>,
-        cute::seq<3, 0>
-    >,
-    EVTF,
-    Bias,
-    Compute2,
-    Compute3,
-    Compute4
->;
-
-using ElementD = float;
-using StrideD = cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>;
-
-""",
-            )
 
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if HAS_CPU or HAS_GPU_AND_TRITON:
+    if HAS_CPU or HAS_CUDA_AND_TRITON:
         run_tests(needs="filelock")

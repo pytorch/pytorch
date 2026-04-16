@@ -144,6 +144,8 @@ size_t assertFindRegex(
       extra_msg(ss);
     }
     throw std::runtime_error(ss.str());
+
+    return std::string::npos;
   }
   return pos;
 }

@@ -289,7 +289,6 @@ class TORCH_API Context {
   at::LinalgBackend linalgPreferredBackend() const;
   void setLinalgPreferredBackend(at::LinalgBackend /*b*/);
 
-  at::BlasBackend blasDefaultBackend();
   at::BlasBackend blasPreferredBackend();
   void setBlasPreferredBackend(at::BlasBackend /*b*/);
 

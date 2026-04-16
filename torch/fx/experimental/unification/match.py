@@ -1,45 +1,33 @@
-from __future__ import annotations
-
-from typing import TYPE_CHECKING
-
+# mypy: allow-untyped-defs
 from .core import reify, unify  # type: ignore[attr-defined]
-
-
-if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
-
-    from .variable import Var
-
 from .unification_tools import first, groupby  # type: ignore[import]
 from .utils import _toposort, freeze
 from .variable import isvar
 
 
 class Dispatcher:
-    def __init__(self, name: str) -> None:
+    def __init__(self, name):
         self.name = name
-        self.funcs: dict[object, Callable[..., object]] = {}
-        self.ordering: list[object] = []
+        self.funcs = {}
+        self.ordering = []
 
-    def add(self, signature: tuple[object, ...], func: Callable[..., object]) -> None:
+    def add(self, signature, func):
         self.funcs[freeze(signature)] = func
         self.ordering = ordering(self.funcs)
 
-    def __call__(self, *args: object, **kwargs: object) -> object:
+    def __call__(self, *args, **kwargs):
         func, _ = self.resolve(args)
         return func(*args, **kwargs)
 
-    def resolve(
-        self, args: tuple[object, ...]
-    ) -> tuple[Callable[..., object], dict[Var, object]]:
+    def resolve(self, args):
         n = len(args)
         for signature in self.ordering:
-            if len(signature) != n:  # pyrefly: ignore[bad-argument-type]
+            if len(signature) != n:
                 continue
             s = unify(freeze(args), signature)
             if s is not False:
                 result = self.funcs[signature]
-                return result, s  # pyrefly: ignore[bad-return]
+                return result, s
         raise NotImplementedError(
             "No match found. \nKnown matches: "
             + str(self.ordering)
@@ -47,8 +35,8 @@ class Dispatcher:
             + str(args)
         )
 
-    def register(self, *signature: object) -> Callable[..., object]:
-        def _(func: Callable[..., object]) -> Dispatcher:
+    def register(self, *signature):
+        def _(func):
             self.add(signature, func)
             return self
 
@@ -72,28 +60,24 @@ class VarDispatcher(Dispatcher):
     20
     """
 
-    def __call__(self, *args: object, **kwargs: object) -> object:
+    def __call__(self, *args, **kwargs):
         func, s = self.resolve(args)
-        d = {k.token: v for k, v in s.items()}  # pyrefly: ignore[missing-attribute]
+        d = {k.token: v for k, v in s.items()}
         return func(**d)
 
 
-global_namespace: dict[str, Dispatcher] = {}
+global_namespace = {}  # type: ignore[var-annotated]
 
 
-def match(*signature: object, **kwargs: object) -> Callable[..., object]:
-    namespace: dict[str, Dispatcher] = kwargs.get(  # type: ignore[assignment]
-        "namespace", global_namespace
-    )
-    dispatcher_cls: type[Dispatcher] = kwargs.get(  # type: ignore[assignment]
-        "Dispatcher", Dispatcher
-    )
+def match(*signature, **kwargs):
+    namespace = kwargs.get("namespace", global_namespace)
+    dispatcher = kwargs.get("Dispatcher", Dispatcher)
 
-    def _(func: Callable[..., object]) -> Dispatcher:
+    def _(func):
         name = func.__name__
 
         if name not in namespace:
-            namespace[name] = dispatcher_cls(name)
+            namespace[name] = dispatcher(name)
         d = namespace[name]
 
         d.add(signature, func)
@@ -103,27 +87,22 @@ def match(*signature: object, **kwargs: object) -> Callable[..., object]:
     return _
 
 
-def supercedes(a: object, b: object) -> bool:
+def supercedes(a, b):
     """``a`` is a more specific match than ``b``"""
     if isvar(b) and not isvar(a):
         return True
     s = unify(a, b)
     if s is False:
         return False
-    s = {
-        k: v
-        for k, v in s.items()  # pyrefly: ignore[missing-attribute]
-        if not isvar(k) or not isvar(v)
-    }
+    s = {k: v for k, v in s.items() if not isvar(k) or not isvar(v)}
     if reify(a, s) == a:
         return True
     if reify(b, s) == b:
         return False
-    return False
 
 
 # Taken from multipledispatch
-def edge(a: object, b: object, tie_breaker: Callable[[object], int] = hash) -> bool:
+def edge(a, b, tie_breaker=hash):
     """A should be checked before B
     Tie broken by tie_breaker, defaults to ``hash``
     """
@@ -136,15 +115,15 @@ def edge(a: object, b: object, tie_breaker: Callable[[object], int] = hash) -> b
 
 
 # Taken from multipledispatch
-def ordering(signatures: Iterable[object]) -> list[object]:
+def ordering(signatures):
     """A sane ordering of signatures to check, first to last
     Topological sort of edges as given by ``edge`` and ``supercedes``
     """
-    signatures = list(map(tuple, signatures))  # pyrefly: ignore[bad-argument-type]
+    signatures = list(map(tuple, signatures))
     edges = [(a, b) for a in signatures for b in signatures if edge(a, b)]
     edges = groupby(first, edges)
     for s in signatures:
         if s not in edges:
             edges[s] = []
     edges = {k: [b for a, b in v] for k, v in edges.items()}  # type: ignore[attr-defined, assignment]
-    return _toposort(edges)  # pyrefly: ignore[bad-argument-type]
+    return _toposort(edges)

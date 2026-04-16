@@ -16,7 +16,7 @@ from torch.utils._runtime_estimation import (
 
 
 if TYPE_CHECKING:
-    from .schemas import ViewAndMutationMeta
+    from .schemas import ViewAndMutationMeta  # noqa: TC004
 
 from .indexed_dict import IndexedDict
 

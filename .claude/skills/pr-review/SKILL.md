@@ -190,8 +190,6 @@ Reference the specific infrastructure the PR should be using.]
 ### Recommendation
 **Approve** / **Request Changes** / **Needs Discussion**
 
-Missing tests (new functionality without tests, bug fixes without regression tests) always means **Request Changes**.
-
 [Brief justification for recommendation]
 ```
 

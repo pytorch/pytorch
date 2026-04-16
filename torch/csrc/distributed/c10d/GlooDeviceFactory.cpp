@@ -195,25 +195,22 @@ std::shared_ptr<::gloo::transport::Device> makeGlooDevice(
         transportName.value(), interfaceName, hostName, lazyInit);
   }
 
-#if defined(__linux__)
-
+#ifdef __linux__
   return GlooDeviceRegistry()->Create(
       "LINUX", interfaceName, hostName, lazyInit);
+#endif
 
-#elif defined(__APPLE__)
-
+#ifdef __APPLE__
   return GlooDeviceRegistry()->Create(
       "APPLE", interfaceName, hostName, lazyInit);
+#endif
 
-#elif defined(_WIN32)
-
+#ifdef _WIN32
   return GlooDeviceRegistry()->Create(
       "WIN32", interfaceName, hostName, lazyInit);
-#else
+#endif
 
   return nullptr;
-
-#endif
 }
 } // anonymous namespace
 

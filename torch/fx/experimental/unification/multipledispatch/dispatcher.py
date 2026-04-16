@@ -1,21 +1,12 @@
-from __future__ import annotations
-
+# mypy: allow-untyped-defs
 import inspect
 import itertools as itl
-from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import deprecated
 from warnings import warn
-
-
-if TYPE_CHECKING:
-    from collections.abc import Callable, Generator, Iterable, Iterator
 
 from .conflict import ambiguities, AmbiguityWarning, ordering, super_signature
 from .utils import expand_tuples
 from .variadic import isvariadic, Variadic
-
-
-_T = TypeVar("_T")
 
 
 __all__ = [
@@ -37,9 +28,7 @@ class MDNotImplementedError(NotImplementedError):
     """A NotImplementedError for multiple dispatch"""
 
 
-def ambiguity_warn(
-    dispatcher: Dispatcher, ambiguities: set[tuple[tuple[type, ...], tuple[type, ...]]]
-) -> None:
+def ambiguity_warn(dispatcher, ambiguities):
     """Raise warning when ambiguity is detected.
 
     Parameters
@@ -61,7 +50,7 @@ def ambiguity_warn(
     "`halt_ordering` is deprecated, you can safely remove this call.",
     category=FutureWarning,
 )
-def halt_ordering() -> None:
+def halt_ordering():
     """Deprecated interface to temporarily disable ordering."""
 
 
@@ -70,13 +59,11 @@ def halt_ordering() -> None:
     "you should call the `reorder()` method on each dispatcher.",
     category=FutureWarning,
 )
-def restart_ordering(on_ambiguity: Callable[..., None] = ambiguity_warn) -> None:
+def restart_ordering(on_ambiguity=ambiguity_warn):
     """Deprecated interface to temporarily resume ordering."""
 
 
-def variadic_signature_matches_iter(
-    types: tuple[type, ...], full_signature: tuple[type, ...]
-) -> Generator[bool, None, None]:
+def variadic_signature_matches_iter(types, full_signature):
     """Check if a set of input types matches a variadic signature.
 
     Notes
@@ -118,9 +105,7 @@ def variadic_signature_matches_iter(
             yield False
 
 
-def variadic_signature_matches(
-    types: tuple[type, ...], full_signature: tuple[type, ...]
-) -> bool:
+def variadic_signature_matches(types, full_signature):
     # No arguments always matches a variadic signature
     if not full_signature:
         raise AssertionError("full_signature is empty")
@@ -148,16 +133,14 @@ class Dispatcher:
 
     __slots__ = "__name__", "name", "funcs", "_ordering", "_cache", "doc"
 
-    def __init__(self, name: str, doc: str | None = None) -> None:
+    def __init__(self, name, doc=None):
         self.name = self.__name__ = name
-        self.funcs: dict[tuple[type, ...], Callable[..., object]] = {}
+        self.funcs = {}
         self.doc = doc
 
-        self._cache: dict[tuple[type, ...], Callable[..., object]] = {}
+        self._cache = {}
 
-    def register(
-        self, *types: type, **kwargs: object
-    ) -> Callable[[Callable[..., _T]], Callable[..., _T]]:
+    def register(self, *types, **kwargs):
         """register dispatcher with new implementation
         >>> # xdoctest: +SKIP
         >>> f = Dispatcher("f")
@@ -179,24 +162,20 @@ class Dispatcher:
         [3, 2, 1]
         """
 
-        def _df(func: Callable[..., _T]) -> Callable[..., _T]:
+        def _df(func):
             self.add(types, func, **kwargs)  # type: ignore[call-arg]
             return func
 
         return _df
 
     @classmethod
-    def get_func_params(
-        cls, func: Callable[..., object]
-    ) -> Iterable[inspect.Parameter] | None:
+    def get_func_params(cls, func):
         if hasattr(inspect, "signature"):
             sig = inspect.signature(func)
             return sig.parameters.values()
 
     @classmethod
-    def get_func_annotations(
-        cls, func: Callable[..., object]
-    ) -> tuple[type, ...] | None:
+    def get_func_annotations(cls, func):
         """get annotations of function positional parameters"""
         params = cls.get_func_params(func)
         if params:
@@ -214,7 +193,7 @@ class Dispatcher:
             if all(ann is not Parameter.empty for ann in annotations):
                 return annotations
 
-    def add(self, signature: tuple[type, ...], func: Callable[..., object]) -> None:
+    def add(self, signature, func):
         """Add new types/method pair to dispatcher
         >>> # xdoctest: +SKIP
         >>> D = Dispatcher("add")
@@ -269,7 +248,7 @@ class Dispatcher:
                 # pyrefly: ignore [bad-specialization]
                 new_signature.append(Variadic[typ[0]])
             else:
-                new_signature.append(typ)  # pyrefly: ignore[bad-argument-type]
+                new_signature.append(typ)
 
         self.funcs[tuple(new_signature)] = func
         self._cache.clear()
@@ -280,22 +259,20 @@ class Dispatcher:
             pass
 
     @property
-    def ordering(self) -> list[tuple[type, ...]]:
+    def ordering(self):
         try:
             return self._ordering
         except AttributeError:
             return self.reorder()
 
-    def reorder(
-        self, on_ambiguity: Callable[..., None] = ambiguity_warn
-    ) -> list[tuple[type, ...]]:
+    def reorder(self, on_ambiguity=ambiguity_warn):
         self._ordering = od = ordering(self.funcs)
         amb = ambiguities(self.funcs)
         if amb:
             on_ambiguity(self, amb)
         return od
 
-    def __call__(self, *args: object, **kwargs: object) -> object:
+    def __call__(self, *args, **kwargs):
         types = tuple(type(arg) for arg in args)
         try:
             func = self._cache[types]
@@ -323,12 +300,12 @@ class Dispatcher:
                 f"{self.name}: <{str_signature(types)}> found, but none completed successfully",
             ) from e
 
-    def __str__(self) -> str:
+    def __str__(self):
         return f"<dispatched {self.name}>"
 
     __repr__ = __str__
 
-    def dispatch(self, *types: type) -> Callable[..., object] | None:
+    def dispatch(self, *types):
         """Determine appropriate implementation for this type signature
         This method is internal.  Users should call this object as a function.
         Implementation resolution occurs within the ``__call__`` method.
@@ -354,9 +331,7 @@ class Dispatcher:
         except StopIteration:
             return None
 
-    def dispatch_iter(
-        self, *types: type
-    ) -> Generator[Callable[..., object], None, None]:
+    def dispatch_iter(self, *types):
         n = len(types)
         for signature in self.ordering:
             if len(signature) == n and all(map(issubclass, types, signature)):
@@ -370,17 +345,17 @@ class Dispatcher:
     @deprecated(
         "`resolve()` is deprecated, use `dispatch(*types)`", category=FutureWarning
     )
-    def resolve(self, types: tuple[type, ...]) -> Callable[..., object] | None:
+    def resolve(self, types):
         """Determine appropriate implementation for this type signature
         .. deprecated:: 0.4.4
             Use ``dispatch(*types)`` instead
         """
         return self.dispatch(*types)
 
-    def __getstate__(self) -> dict[str, Any]:
+    def __getstate__(self):
         return {"name": self.name, "funcs": self.funcs}
 
-    def __setstate__(self, d: dict[str, Any]) -> None:
+    def __setstate__(self, d):
         self.name = d["name"]
         self.funcs = d["funcs"]
         self._ordering = ordering(self.funcs)
@@ -393,7 +368,7 @@ class Dispatcher:
         if self.doc:
             docs.append(self.doc)
 
-        other: list[str] = []
+        other = []
         for sig in self.ordering[::-1]:
             func = self.funcs[sig]
             if func.__doc__:
@@ -409,25 +384,25 @@ class Dispatcher:
 
         return "\n\n".join(docs)
 
-    def _help(self, *args: object) -> str | None:
+    def _help(self, *args):
         return self.dispatch(*map(type, args)).__doc__
 
-    def help(self, *args: object, **kwargs: object) -> None:
+    def help(self, *args, **kwargs):
         """Print docstring for the function corresponding to inputs"""
         print(self._help(*args))
 
-    def _source(self, *args: object) -> str:
+    def _source(self, *args):
         func = self.dispatch(*map(type, args))
         if not func:
             raise TypeError("No function found")
         return source(func)
 
-    def source(self, *args: object, **kwargs: object) -> None:
+    def source(self, *args, **kwargs):
         """Print source code for the function corresponding to inputs"""
         print(self._source(*args))
 
 
-def source(func: Callable[..., object]) -> str:
+def source(func):
     s = f"File: {inspect.getsourcefile(func)}\n\n"
     s = s + inspect.getsource(func)
     return s
@@ -442,19 +417,17 @@ class MethodDispatcher(Dispatcher):
     __slots__ = ("obj", "cls")
 
     @classmethod
-    def get_func_params(
-        cls, func: Callable[..., object]
-    ) -> Iterator[inspect.Parameter] | None:
+    def get_func_params(cls, func):
         if hasattr(inspect, "signature"):
             sig = inspect.signature(func)
             return itl.islice(sig.parameters.values(), 1, None)
 
-    def __get__(self, instance: object | None, owner: type) -> MethodDispatcher:
+    def __get__(self, instance, owner):
         self.obj = instance
         self.cls = owner
         return self
 
-    def __call__(self, *args: object, **kwargs: object) -> object:
+    def __call__(self, *args, **kwargs):
         types = tuple(type(arg) for arg in args)
         func = self.dispatch(*types)
         if not func:
@@ -464,7 +437,7 @@ class MethodDispatcher(Dispatcher):
         return func(self.obj, *args, **kwargs)
 
 
-def str_signature(sig: Iterable[type]) -> str:
+def str_signature(sig):
     """String representation of type signature
     >>> str_signature((int, float))
     'int, float'
@@ -472,7 +445,7 @@ def str_signature(sig: Iterable[type]) -> str:
     return ", ".join(cls.__name__ for cls in sig)
 
 
-def warning_text(name: str, amb: set[tuple[tuple[type, ...], tuple[type, ...]]]) -> str:
+def warning_text(name, amb):
     """The text for ambiguity warnings"""
     text = f"\nAmbiguities exist in dispatched function {name}\n\n"
     text += "The following signatures may result in ambiguous behavior:\n"

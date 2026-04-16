@@ -24,11 +24,6 @@ if HAS_GPU:
 
     from torch.library import wrap_triton
     from torch.utils._triton import has_triton
-else:
-
-    def has_triton():
-        return False
-
 
 import torch
 import torch._dynamo as torchdynamo

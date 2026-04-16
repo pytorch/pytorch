@@ -27,7 +27,7 @@ from unittest.mock import patch
 import sympy
 
 import torch
-import torch._inductor.async_compile
+import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import (
@@ -2524,7 +2524,7 @@ class TritonTemplate(KernelTemplate):
                 choices.append(choice)
             return None
         except NotImplementedError as e:
-            log.info(
+            log.info(  # noqa: G200
                 "Cannot Append Choice: %s. KernelTemplate type is %s",
                 e,
                 type(self),
@@ -4469,7 +4469,7 @@ class AlgorithmSelectorCache(PersistentCache):
                             "select_algorithm_num_precompilation_exceptions"
                         ] += 1
                         exceptions.append((futures[future], e))
-                        log.exception(
+                        log.exception(  # noqa: G202
                             "Exception %s for benchmark choice %s",
                             e,
                             futures[future],
@@ -4899,7 +4899,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     from triton.runtime.autotuner import OutOfResources
 
                     if isinstance(e, OutOfResources):
-                        log.warning(e)
+                        log.warning(e)  # noqa: G200
                         timing = float("inf")
                     else:
                         raise e

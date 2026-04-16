@@ -133,6 +133,8 @@ std::optional<AutocastScope> parseAutocast(
     //
     TORCH_CHECK(false, "Unsupported autocast syntax");
   }
+
+  return std::nullopt;
 }
 
 void castTensorInputs(

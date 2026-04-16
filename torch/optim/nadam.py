@@ -29,7 +29,7 @@ from .optimizer import (
 __all__ = ["NAdam", "nadam"]
 
 
-class NAdam(Optimizer):
+class NAdam(Optimizer):  # noqa: D101
     def __init__(
         self,
         params: ParamsT,
@@ -44,7 +44,7 @@ class NAdam(Optimizer):
         maximize: bool = False,
         capturable: bool = False,
         differentiable: bool = False,
-    ) -> None:
+    ) -> None:  # noqa: D107
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
@@ -73,7 +73,7 @@ class NAdam(Optimizer):
         }
         super().__init__(params, defaults)
 
-    def __setstate__(self, state):
+    def __setstate__(self, state):  # noqa: D105
         super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault("maximize", False)

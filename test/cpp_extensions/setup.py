@@ -42,8 +42,6 @@ ext_modules = [
     ),
 ]
 
-NVCC_FLAGS = ["-O2"] + (["-DUSE_CUDA"] if IS_WINDOWS else [])
-
 if torch.cuda.is_available() and (CUDA_HOME is not None or ROCM_HOME is not None):
     extension = CUDAExtension(
         "torch_test_cpp_extension.cuda",
@@ -52,7 +50,7 @@ if torch.cuda.is_available() and (CUDA_HOME is not None or ROCM_HOME is not None
             "cuda_extension_kernel.cu",
             "cuda_extension_kernel2.cu",
         ],
-        extra_compile_args={"cxx": CXX_FLAGS, "nvcc": NVCC_FLAGS},
+        extra_compile_args={"cxx": CXX_FLAGS, "nvcc": ["-O2"]},
     )
     ext_modules.append(extension)
 
@@ -60,7 +58,7 @@ if torch.cuda.is_available() and (CUDA_HOME is not None or ROCM_HOME is not None
     extension = CUDAExtension(
         "torch_test_cpp_extension.torch_library",
         ["torch_library.cu"],
-        extra_compile_args={"cxx": CXX_FLAGS, "nvcc": NVCC_FLAGS},
+        extra_compile_args={"cxx": CXX_FLAGS, "nvcc": ["-O2"]},
     )
     ext_modules.append(extension)
 

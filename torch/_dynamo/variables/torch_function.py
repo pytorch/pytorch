@@ -57,7 +57,7 @@ from ..utils import (
     set_torch_function_mode_stack,
 )
 from .base import VariableTracker
-from .constant import ConstantVariable
+from .constant import CONSTANT_VARIABLE_NONE
 from .ctx_manager import GenericContextWrappingVariable
 from .functions import UserMethodVariable
 from .lazy import LazyVariableTracker
@@ -203,12 +203,12 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         from .torch import TorchInGraphFunctionVariable
 
         if isinstance(self.value, NoEnterTorchFunctionMode):
-            return ConstantVariable.create(None)
+            return CONSTANT_VARIABLE_NONE
 
         TorchInGraphFunctionVariable(
             torch._C._push_on_torch_function_stack
         ).call_function(tx, [self], {})
-        return ConstantVariable.create(None)
+        return CONSTANT_VARIABLE_NONE
 
     def exit(self, tx: "InstructionTranslator", *args: Any) -> VariableTracker:
         from .torch import TorchInGraphFunctionVariable
@@ -216,7 +216,7 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         TorchInGraphFunctionVariable(torch._C._pop_torch_function_stack).call_function(
             tx, [], {}
         )
-        return ConstantVariable.create(None)
+        return CONSTANT_VARIABLE_NONE
 
     def reconstruct_type(self, codegen: "PyCodegen") -> None:
         ty = NoEnterTorchFunctionMode
@@ -489,7 +489,7 @@ def call_torch_function(
     #
     # Also notice the `cls` is not explicitly passed in the reference
     # implementations:
-    # 1. https://github.com/pytorch/pytorch/blob/8d81806211bc3c0ee6c2ef235017bacf1d775a85/torch/csrc/utils/python_arg_parser.cpp#L368-L374
+    # 1. https://github.com/pytorch/pytorch/blob/8d81806211bc3c0ee6c2ef235017bacf1d775a85/torch/csrc/utils/python_arg_parser.cpp#L368-L374  # noqa: B950
     # 2. https://github.com/pytorch/pytorch/blob/8d81806211bc3c0ee6c2ef235017bacf1d775a85/torch/overrides.py#L1741-L1743
     tf_args = [
         fn,

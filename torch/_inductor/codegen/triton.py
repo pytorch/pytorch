@@ -1640,24 +1640,9 @@ class TritonOverrides(OpOverrides):
             else:
                 cast_inputs.append(str(inp))
 
-        if torch.version.hip:
-            # AMDGCN asm strings may contain real newlines (instructions are
-            # newline-separated, unlike PTX which uses semicolons).  The
-            # generated code is nested inside two Python string layers:
-            #   Layer 1 : the cached wrapper .py file
-            #   Layer 2 : the Triton kernel source (a triple-quoted string
-            #             inside that wrapper, exec'd / JIT-compiled)
-            # repr() escapes \n -> \\n, then we double the backslashes so
-            # they survive both layers: \\\\n -> (L1 parse) \\n -> (L2 parse) \n.
-            asm_literal = repr(asm).replace("\\", "\\\\")
-            constraints_literal = repr(constraints).replace("\\", "\\\\")
-        else:
-            asm_literal = f"'{asm}'"
-            constraints_literal = f"'{constraints}'"
-
         def asm_call(args):
             return (
-                f"tl.inline_asm_elementwise({asm_literal}, {constraints_literal}, "
+                f"tl.inline_asm_elementwise('{asm}', '{constraints}', "
                 f"[{args}], dtype={asm_triton_type}, is_pure={is_pure}, pack={pack})"
             )
 
@@ -5401,7 +5386,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         hint_override=self.hint_override,
                     )
                     result.writeline(
-                        f"{var_name} = rand_strided({size}, {stride}, device='{buf.get_device()}', dtype={buf.get_dtype()})"
+                        f"{var_name} = rand_strided({size}, {stride}, device='{buf.get_device()}', dtype={buf.get_dtype()})"  # noqa: B950 line too long
                     )
                 elif arg_name in V.graph.constants:
                     # note that random seed is put in V.graph.constants
@@ -5415,7 +5400,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         hint_override=self.hint_override,
                     )
                     result.writeline(
-                        f"{var_name} = rand_strided({size}, {stride}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]
+                        f"{var_name} = rand_strided({size}, {stride}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]  # noqa: B950 line too long
                     )
                 elif isinstance(arg_sig, SizeArg):
                     symval_hint = V.graph.sizevars.optimization_hint_with_override(
@@ -5481,7 +5466,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             result.writeline("args = get_args()")
             result.writeline(
-                f"ms = benchmarker.benchmark(lambda: call(args), device='{V.graph.get_current_device_or_throw().type}', rep=40)"
+                f"ms = benchmarker.benchmark(lambda: call(args), device='{V.graph.get_current_device_or_throw().type}', rep=40)"  # noqa: B950 line too long
             )
             result.writeline(f"num_gb = {num_gb}")
             result.writeline("gb_per_s = num_gb / (ms / 1e3)")
@@ -6674,7 +6659,7 @@ class TritonScheduling(SIMDScheduling):
             except Exception as e:
                 if config.triton.disallow_failing_autotune_kernels_TESTING_ONLY:
                     raise
-                log.debug(
+                log.debug(  # noqa: G200
                     "Exception (%s) in compiling fused nodes %s",
                     e,
                     node_names,

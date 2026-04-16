@@ -479,10 +479,11 @@ static Tensor _fw_primal(
   std::function<at::Tensor(const at::Tensor&)> rev_func = nullptr;
   if (!self.unsafeGetTensorImpl()->support_as_strided()) {
     func = std::make_unique<ViewViewFunc>(self.sym_sizes());
-    rev_func = [=](const at::Tensor& input_view) -> at::Tensor {
+    rev_func = [=](const at::Tensor& input_view) {
       TORCH_INTERNAL_ASSERT(
           false,
           "Reverse view_func for _fw_primal() is not currently supported");
+      return Tensor();
     };
   }
   auto result = as_view(
@@ -511,10 +512,11 @@ static Tensor _make_dual(
   std::function<at::Tensor(const at::Tensor&)> rev_func = nullptr;
   if (!primal.unsafeGetTensorImpl()->support_as_strided()) {
     func = std::make_unique<ViewViewFunc>(primal.sym_sizes());
-    rev_func = [=](const at::Tensor& input_view) -> at::Tensor {
+    rev_func = [=](const at::Tensor& input_view) {
       TORCH_INTERNAL_ASSERT(
           false,
           "Reverse view_func for _make_dual() is not currently supported");
+      return Tensor();
     };
   }
   auto result = as_view(

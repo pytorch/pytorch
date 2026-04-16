@@ -1,27 +1,23 @@
-from __future__ import annotations
-
+# mypy: allow-untyped-defs
 import inspect
-from typing import Any, TYPE_CHECKING, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 from typing_extensions import TypeVarTuple, Unpack
-
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 from .dispatcher import Dispatcher, MethodDispatcher
 
 
-global_namespace: dict[str, Dispatcher] = {}
+global_namespace = {}  # type: ignore[var-annotated]
 
 __all__ = ["dispatch", "ismethod"]
 
-_T = TypeVar("_T")
-_Ts = TypeVarTuple("_Ts")
+T = TypeVar("T")
+Ts = TypeVarTuple("Ts")
 
 
 def dispatch(
-    *types: Unpack[_Ts], **kwargs: Any
-) -> Callable[[Callable[..., _T]], Callable[..., _T]]:
+    *types: Unpack[Ts], **kwargs: Any
+) -> Callable[[Callable[..., T]], Callable[..., T]]:
     """Dispatch function on the types of the inputs
     Supports dispatch on all non-keyword arguments.
     Collects implementations based on the function name.  Ignores namespaces.
@@ -64,7 +60,7 @@ def dispatch(
 
     types_tuple: tuple[type, ...] = tuple(types)  # type: ignore[arg-type]
 
-    def _df(func: Callable[..., _T]) -> Callable[..., _T]:
+    def _df(func):
         name = func.__name__
 
         if ismethod(func):
@@ -80,10 +76,10 @@ def dispatch(
         dispatcher.add(types_tuple, func)
         return dispatcher
 
-    return _df  # type: ignore[return-value]
+    return _df
 
 
-def ismethod(func: Callable[..., object]) -> bool:
+def ismethod(func):
     """Is func a method?
     Note that this has to work as the method is defined but before the class is
     defined.  At this stage methods look like functions.
@@ -93,4 +89,4 @@ def ismethod(func: Callable[..., object]) -> bool:
         return signature.parameters.get("self", None) is not None
     else:
         spec = inspect.getfullargspec(func)  # type: ignore[union-attr, assignment]
-        return bool(spec and spec.args and spec.args[0] == "self")
+        return spec and spec.args and spec.args[0] == "self"

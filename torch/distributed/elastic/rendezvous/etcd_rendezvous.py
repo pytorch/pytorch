@@ -207,7 +207,7 @@ class EtcdRendezvousHandler(RendezvousHandler):
         try:
             self.set_closed()
             return True
-        except BaseException:
+        except BaseException:  # noqa: B036
             logger.warning("Shutdown failed", exc_info=True)
             return False
 
@@ -332,7 +332,7 @@ class EtcdRendezvous:
                 # to avoid spamming etcd
                 # FIXME: there are a few things that fall under this like
                 # etcd.EtcdKeyNotFound, etc, which could be handled more explicitly.
-                logger.info("Rendezvous attempt failed, will retry. Reason: %s", e)
+                logger.info("Rendezvous attempt failed, will retry. Reason: %s", e)  # noqa: G200
                 time.sleep(1)
 
     def init_phase(self):

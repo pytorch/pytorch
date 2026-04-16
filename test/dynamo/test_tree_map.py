@@ -7,11 +7,12 @@ from typing import NamedTuple
 import torch
 import torch._dynamo
 import torch.utils._pytree as python_pytree
-from torch._dynamo.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    run_tests,
     subtest,
+    TestCase,
 )
 
 

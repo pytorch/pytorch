@@ -254,6 +254,7 @@ static PyObject* THPStorage_pynew(
           "but one of the items was of type ",
           THPUtils_typename(item.get()),
           " instead of int");
+      return nullptr;
     }
   }
   return self;
@@ -301,6 +302,7 @@ static PyObject* THPStorage_get(THPStorage* self, PyObject* index) {
           step,
           ", but only a step of "
           "1 is supported");
+      return nullptr;
     }
 
     const auto& storage = THPStorage_Unpack(self);
@@ -349,6 +351,7 @@ static int THPStorage_set(THPStorage* self, PyObject* index, PyObject* value) {
         "can only set storage content with a int types, but got ",
         THPUtils_typename(value),
         " instead");
+    return -1;
   }
 
   uint8_t rvalue = THPByteUtils_unpackReal(value);
@@ -371,6 +374,7 @@ static int THPStorage_set(THPStorage* self, PyObject* index, PyObject* value) {
           step,
           ", but only a step of "
           "1 is supported");
+      return 0;
     }
     // TODO: check the bounds only once
     // TODO: fill?
@@ -380,6 +384,7 @@ static int THPStorage_set(THPStorage* self, PyObject* index, PyObject* value) {
   }
   TORCH_CHECK(
       false, "can't index a " THPStorageStr " with ", THPUtils_typename(index));
+  return -1;
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 

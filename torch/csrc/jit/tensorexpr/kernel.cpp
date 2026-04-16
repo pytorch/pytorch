@@ -330,9 +330,8 @@ bool mkldnnPrepackedConvIsSupportedJit(const torch::jit::Node* node) {
       _pair_int(*pad),
       _pair_int(*dilation),
       groups->toInt());
-#else
-  return false;
 #endif
+  return false;
 }
 
 bool isConv2d(const Node* node) {

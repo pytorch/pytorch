@@ -241,9 +241,12 @@ def cond(
     def _cond_op_wrapper(*args, **kwargs):
         return cond_op(*args, **kwargs)
 
-    from torch._higher_order_ops.utils import _hop_compile_and_call
+    from torch._higher_order_ops.utils import setup_compilation_env
 
-    return _hop_compile_and_call(_cond_op_wrapper, (pred, true_fn, false_fn, operands))
+    with setup_compilation_env() as backend:
+        return torch.compile(_cond_op_wrapper, backend=backend, fullgraph=True)(
+            pred, true_fn, false_fn, operands
+        )
 
 
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):

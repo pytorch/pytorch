@@ -188,7 +188,7 @@ std::string c10_retrieve_device_side_assertion_info() {
   }
   return oss.str();
 #else
-  return "";
+  return "Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.\n";
 #endif
 }
 

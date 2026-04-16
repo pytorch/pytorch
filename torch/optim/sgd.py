@@ -25,7 +25,7 @@ from .optimizer import (
 __all__ = ["SGD", "sgd"]
 
 
-class SGD(Optimizer):
+class SGD(Optimizer):  # noqa: D101
     def __init__(
         self,
         params: ParamsT,
@@ -39,7 +39,7 @@ class SGD(Optimizer):
         foreach: bool | None = None,
         differentiable: bool = False,
         fused: bool | None = None,
-    ) -> None:
+    ) -> None:  # noqa: D107
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
         if lr < 0.0:
@@ -72,7 +72,7 @@ class SGD(Optimizer):
             if foreach:
                 raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
 
-    def __setstate__(self, state):
+    def __setstate__(self, state):  # noqa: D105
         super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault("nesterov", False)

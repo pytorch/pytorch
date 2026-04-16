@@ -115,6 +115,7 @@ std::string Dtype::ToCppString() const {
     default:
       throw unsupported_dtype();
   }
+  return "invalid";
 }
 
 } // namespace torch::jit::tensorexpr

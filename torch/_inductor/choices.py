@@ -658,10 +658,11 @@ class InductorChoices:
         - Fusions closer together in original graph order
         """
 
-        memory_score, buffer_overlap_score, is_mix_order_reduction = (
+        memory_score, buffer_overlap_score, is_mix_order_reduction = typing.cast(
+            tuple[int, int, bool],
             scheduler.score_fusion_memory(
                 node1, node2, return_is_mix_order_reduction=True
-            )
+            ),
         )
         proximity_score = -max(
             abs(node1.min_order - node2.max_order),

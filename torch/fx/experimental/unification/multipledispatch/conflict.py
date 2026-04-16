@@ -1,11 +1,5 @@
-from __future__ import annotations
-
+# mypy: allow-untyped-defs
 import operator
-from typing import TYPE_CHECKING
-
-
-if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Sequence
 
 from .utils import _toposort, groupby
 from .variadic import isvariadic
@@ -27,7 +21,7 @@ class AmbiguityWarning(Warning):
     pass
 
 
-def supercedes(a: tuple[type, ...], b: tuple[type, ...]) -> bool:
+def supercedes(a, b):
     """A is consistent and strictly more specific than B"""
     if len(a) < len(b):
         # only case is if a is empty and b is variadic
@@ -63,7 +57,7 @@ def supercedes(a: tuple[type, ...], b: tuple[type, ...]) -> bool:
         return p2 == len(b) - 1 and p1 == len(a)
 
 
-def consistent(a: tuple[type, ...], b: tuple[type, ...]) -> bool:
+def consistent(a, b):
     """It is possible for an argument list to satisfy both A and B"""
 
     # Need to check for empty args
@@ -100,14 +94,12 @@ def consistent(a: tuple[type, ...], b: tuple[type, ...]) -> bool:
         )
 
 
-def ambiguous(a: tuple[type, ...], b: tuple[type, ...]) -> bool:
+def ambiguous(a, b):
     """A is consistent with B but neither is strictly more specific"""
     return consistent(a, b) and not (supercedes(a, b) or supercedes(b, a))
 
 
-def ambiguities(
-    signatures: Iterable[tuple[type, ...]],
-) -> set[tuple[tuple[type, ...], tuple[type, ...]]]:
+def ambiguities(signatures):
     """All signature pairs such that A is ambiguous with B"""
     signatures = list(map(tuple, signatures))
     return {
@@ -120,7 +112,7 @@ def ambiguities(
     }
 
 
-def super_signature(signatures: Sequence[tuple[type, ...]]) -> list[type]:
+def super_signature(signatures):
     """A signature that would break ambiguities"""
     n = len(signatures[0])
     if not all(len(s) == n for s in signatures):
@@ -129,11 +121,7 @@ def super_signature(signatures: Sequence[tuple[type, ...]]) -> list[type]:
     return [max((type.mro(sig[i]) for sig in signatures), key=len)[0] for i in range(n)]
 
 
-def edge(
-    a: tuple[type, ...],
-    b: tuple[type, ...],
-    tie_breaker: Callable[[tuple[type, ...]], int] = hash,
-) -> bool:
+def edge(a, b, tie_breaker=hash):
     """A should be checked before B
     Tie broken by tie_breaker, defaults to ``hash``
     """
@@ -144,7 +132,7 @@ def edge(
     )
 
 
-def ordering(signatures: Iterable[tuple[type, ...]]) -> list[tuple[type, ...]]:
+def ordering(signatures):
     """A sane ordering of signatures to check, first to last
     Topological sort of edges as given by ``edge`` and ``supercedes``
     """
@@ -154,10 +142,5 @@ def ordering(signatures: Iterable[tuple[type, ...]]) -> list[tuple[type, ...]]:
     for s in signatures:
         if s not in edges:
             edges[s] = []
-    topo_edges: dict[
-        tuple[type, ...], list[tuple[type, ...]]
-    ] = {  # pyrefly: ignore[bad-assignment]
-        k: [b for a, b in v]
-        for k, v in edges.items()  # type: ignore[attr-defined]
-    }
-    return _toposort(topo_edges)
+    edges = {k: [b for a, b in v] for k, v in edges.items()}  # type: ignore[assignment, attr-defined]
+    return _toposort(edges)

@@ -1,29 +1,9 @@
-from typing import Any, TypeAlias
-
-import torch
-
-
-__all__ = [
-    "evaluate_conditional_with_constraints",
-    "iterate_till_fixed_point",
-    "transform_algebraic_expression",
-    "transform_all_constraints",
-    "transform_all_constraints_trace_time",
-    "transform_dimension",
-    "transform_to_z3",
-    "transform_var",
-]
-
-
-# z3 is an optional dependency with no type stubs, so we use aliases for its types.
-_Z3Expr: TypeAlias = Any
-_Z3Result: TypeAlias = Any
+# mypy: allow-untyped-defs
 from torch.fx.experimental.migrate_gradual_types.constraint import (
     BinConstraintD,
     BinConstraintT,
     BVar,
     Conj,
-    Constraint,
     Disj,
     DVar,
     F,
@@ -52,9 +32,7 @@ from torch.fx.experimental.migrate_gradual_types.operation import (
     op_neq,
     op_sub,
 )
-from torch.fx.graph import Graph
-from torch.fx.node import Node
-from torch.fx.tensor_type import _DynType, Dyn, TensorType
+from torch.fx.tensor_type import Dyn, TensorType
 
 
 try:
@@ -68,9 +46,7 @@ try:
 
     HAS_Z3 = True
 
-    def transform_to_z3(
-        constraint: Constraint, counter: int, dimension_dict: dict[int, int]
-    ) -> tuple[_Z3Expr, int]:
+    def transform_to_z3(constraint, counter, dimension_dict):
         if isinstance(constraint, Conj):
             conjuncts = []
             for c in constraint.conjucts:
@@ -93,16 +69,8 @@ try:
 
         elif isinstance(constraint, BinConstraintT):
             if constraint.op == op_eq:
-                lhs, counter = transform_var(
-                    constraint.lhs,  # pyrefly: ignore[bad-argument-type]
-                    counter,
-                    dimension_dict,
-                )
-                rhs, counter = transform_var(
-                    constraint.rhs,  # pyrefly: ignore[bad-argument-type]
-                    counter,
-                    dimension_dict,
-                )
+                lhs, counter = transform_var(constraint.lhs, counter, dimension_dict)
+                rhs, counter = transform_var(constraint.rhs, counter, dimension_dict)
                 return (lhs == rhs), counter
 
             else:
@@ -112,9 +80,7 @@ try:
             if constraint.op == op_eq:
                 if isinstance(constraint.lhs, BVar) and is_bool_expr(constraint.rhs):
                     transformed_rhs, counter = transform_to_z3(
-                        constraint.rhs,  # pyrefly: ignore[bad-argument-type]
-                        counter,
-                        dimension_dict,
+                        constraint.rhs, counter, dimension_dict
                     )
                     transformed_lhs = z3.Bool(constraint.lhs.c)
                     return transformed_lhs == transformed_rhs, counter
@@ -122,14 +88,10 @@ try:
                 elif is_dim(constraint.lhs) and is_dim(constraint.rhs):
                     # with dimension transformations we consider the encoding
                     lhs, counter = transform_dimension(
-                        constraint.lhs,  # pyrefly: ignore[bad-argument-type]
-                        counter,
-                        dimension_dict,
+                        constraint.lhs, counter, dimension_dict
                     )
                     rhs, counter = transform_dimension(
-                        constraint.rhs,  # pyrefly: ignore[bad-argument-type]
-                        counter,
-                        dimension_dict,
+                        constraint.rhs, counter, dimension_dict
                     )
                     return lhs == rhs, counter
 
@@ -137,14 +99,10 @@ try:
                     # then we have an algebraic expression which means that we disregard the
                     # first element of the encoding
                     lhs, counter = transform_algebraic_expression(
-                        constraint.lhs,  # pyrefly: ignore[bad-argument-type]
-                        counter,
-                        dimension_dict,
+                        constraint.lhs, counter, dimension_dict
                     )
                     rhs, counter = transform_algebraic_expression(
-                        constraint.rhs,  # pyrefly: ignore[bad-argument-type]
-                        counter,
-                        dimension_dict,
+                        constraint.rhs, counter, dimension_dict
                     )
                     return lhs == rhs, counter
 
@@ -155,19 +113,15 @@ try:
                 if not is_dim(constraint.rhs):
                     raise AssertionError("Expected rhs to be a dimension")
                 lhs, counter = transform_dimension(
-                    constraint.lhs,  # pyrefly: ignore[bad-argument-type]
-                    counter,
-                    dimension_dict,
+                    constraint.lhs, counter, dimension_dict
                 )
                 rhs, counter = transform_dimension(
-                    constraint.rhs,  # pyrefly: ignore[bad-argument-type]
-                    counter,
-                    dimension_dict,
+                    constraint.rhs, counter, dimension_dict
                 )
                 if constraint.rhs == Dyn or constraint.lhs == Dyn:
                     if constraint.rhs == Dyn:
                         return lhs.arg(0) == 1, counter
-                    else:
+                    elif constraint.lhs == Dyn:
                         return rhs.arg(0) == 1, counter
 
                 # if one of the instances is a number
@@ -183,7 +137,7 @@ try:
                             counter,
                         )
 
-                    else:
+                    elif isinstance(constraint.rhs, int):
                         return (
                             z3.Or(
                                 [
@@ -219,14 +173,10 @@ try:
                 if not (is_dim(constraint.lhs) and is_dim(constraint.rhs)):
                     raise AssertionError("Expected both lhs and rhs to be dimensions")
                 lhs, counter = transform_algebraic_expression(
-                    constraint.lhs,  # pyrefly: ignore[bad-argument-type]
-                    counter,
-                    dimension_dict,
+                    constraint.lhs, counter, dimension_dict
                 )
                 rhs, counter = transform_algebraic_expression(
-                    constraint.rhs,  # pyrefly: ignore[bad-argument-type]
-                    counter,
-                    dimension_dict,
+                    constraint.rhs, counter, dimension_dict
                 )
                 return lhs <= rhs, counter
 
@@ -234,14 +184,10 @@ try:
                 if not (is_dim(constraint.lhs) and is_dim(constraint.rhs)):
                     raise AssertionError("Expected both lhs and rhs to be dimensions")
                 lhs, counter = transform_algebraic_expression(
-                    constraint.lhs,  # pyrefly: ignore[bad-argument-type]
-                    counter,
-                    dimension_dict,
+                    constraint.lhs, counter, dimension_dict
                 )
                 rhs, counter = transform_algebraic_expression(
-                    constraint.rhs,  # pyrefly: ignore[bad-argument-type]
-                    counter,
-                    dimension_dict,
+                    constraint.rhs, counter, dimension_dict
                 )
                 return lhs > rhs, counter
 
@@ -249,14 +195,10 @@ try:
                 if not (is_dim(constraint.lhs) and is_dim(constraint.rhs)):
                     raise AssertionError("Expected both lhs and rhs to be dimensions")
                 lhs, counter = transform_algebraic_expression(
-                    constraint.lhs,  # pyrefly: ignore[bad-argument-type]
-                    counter,
-                    dimension_dict,
+                    constraint.lhs, counter, dimension_dict
                 )
                 rhs, counter = transform_algebraic_expression(
-                    constraint.rhs,  # pyrefly: ignore[bad-argument-type]
-                    counter,
-                    dimension_dict,
+                    constraint.rhs, counter, dimension_dict
                 )
                 return lhs < rhs, counter
 
@@ -266,11 +208,7 @@ try:
         else:
             raise NotImplementedError("Operation not yet implemented")
 
-    def transform_var(
-        tensor: TVar | TensorType | _DynType,
-        counter: int,
-        dimension_dict: dict[int, int],
-    ) -> tuple[_Z3Expr, int]:
+    def transform_var(tensor, counter, dimension_dict):
         """
         Transforms tensor variables to a format understood by z3
         Args:
@@ -279,7 +217,7 @@ try:
 
         """
         if isinstance(tensor, TensorType):
-            res: list[_Z3Expr] = []
+            res = []
             for t in tensor.__args__:
                 transformed, counter = transform_dimension(t, counter, dimension_dict)
                 res.append(transformed)
@@ -294,10 +232,6 @@ try:
                 return tensor_type.tensor3(res[0], res[1], res[2]), counter
             elif len(tensor.__args__) == 4:
                 return tensor_type.tensor4(res[0], res[1], res[2], res[3]), counter
-            else:
-                raise AssertionError(
-                    f"Unexpected tensor args length: {len(tensor.__args__)}"
-                )
 
         elif tensor == Dyn:
             return z3_dyn, counter
@@ -305,12 +239,7 @@ try:
         elif isinstance(tensor, TVar):
             return z3.Const(tensor.tvar, tensor_type), counter
 
-        else:
-            raise NotImplementedError(f"Unsupported tensor type: {type(tensor)}")
-
-    def transform_dimension(
-        dimension: DVar | int | _DynType, counter: int, dimension_dict: dict[int, int]
-    ) -> tuple[_Z3Expr, int]:
+    def transform_dimension(dimension, counter, dimension_dict):
         """
         Takes a dimension variable or a number and transforms it to a tuple
         according to our scheme
@@ -337,14 +266,7 @@ try:
                 dimension_dict[dimension.c] = counter
                 return D(z3.Int(counter), z3.Int(dimension.c)), counter
 
-        else:
-            raise NotImplementedError(f"Unsupported dimension type: {type(dimension)}")
-
-    def transform_algebraic_expression(
-        expr: DVar | int | _DynType | Prod | BinConstraintD,
-        counter: int,
-        dimension_dict: dict[int, int],
-    ) -> tuple[_Z3Expr, int]:
+    def transform_algebraic_expression(expr, counter, dimension_dict):
         """
         Transforms an algebraic expression to z3 format
         Args:
@@ -358,11 +280,7 @@ try:
             raise AssertionError("Expected algebraic expression or dimension")
 
         if is_dim(expr):
-            transformed, counter = transform_dimension(
-                expr,  # pyrefly: ignore[bad-argument-type]
-                counter,
-                dimension_dict,
-            )
+            transformed, counter = transform_dimension(expr, counter, dimension_dict)
             return transformed.arg(1), counter
 
         elif isinstance(expr, Prod):
@@ -376,17 +294,13 @@ try:
 
         elif is_algebraic_expression(expr):
             lhs, counter = transform_algebraic_expression(
-                expr.lhs,  # pyrefly: ignore[missing-attribute]
-                counter,
-                dimension_dict,
+                expr.lhs, counter, dimension_dict
             )
             rhs, counter = transform_algebraic_expression(
-                expr.rhs,  # pyrefly: ignore[missing-attribute]
-                counter,
-                dimension_dict,
+                expr.rhs, counter, dimension_dict
             )
 
-            if expr.op == op_sub:  # pyrefly: ignore[missing-attribute]
+            if expr.op == op_sub:
                 c = lhs - rhs
 
             elif expr.op == op_add:
@@ -409,25 +323,31 @@ try:
         else:
             raise RuntimeError
 
-    def transform_all_constraints(traced: torch.nn.Module, counter: int = 0) -> _Z3Expr:
+    def transform_all_constraints(traced, counter=0):
         """
         Given a trace, generates constraints and transforms them to z3 format
 
         """
-        dimension_dict: dict[int, int] = {}
+        dimension_dict = {}  # type: ignore[var-annotated]
 
         generator = ConstraintGenerator(traced)
         new_constraints, counter = generator.generate_constraints(counter)
 
+        # print(new_constraints.conjucts[0])
+        # print(*new_constraints.conjucts, sep='\n')
+
+        # transform precision, matching, consistency till obtaining a fixed point
         new_constraints, counter = iterate_till_fixed_point(new_constraints, counter)
+        # print(new_constraints)
+        # print(new_constraints.conjucts)
+        # new_constraints.conjucts = new_constraints.conjucts[:-1]
+        # print(*new_constraints.conjucts, sep='\n')
 
         transformed, counter = transform_to_z3(new_constraints, counter, dimension_dict)
         # print(transformed)
         return transformed
 
-    def iterate_till_fixed_point(
-        constraints: Constraint, counter: int
-    ) -> tuple[Constraint, int]:
+    def iterate_till_fixed_point(constraints, counter):
         """
         Transform constraints till reaching a fixed point
         """
@@ -437,9 +357,7 @@ try:
             constraints, counter = transform_constraint(constraints, counter)
         return constraints, counter
 
-    def transform_all_constraints_trace_time(
-        tracer_root: torch.nn.Module, graph: Graph, node: Node, counter: int = 0
-    ) -> tuple[_Z3Expr, _Z3Expr]:
+    def transform_all_constraints_trace_time(tracer_root, graph, node, counter=0):
         """
         Takes a node and a graph and generates two sets of constraints.
         One set constraints the node's constraints and another set
@@ -455,7 +373,7 @@ try:
         its negation.
 
         """
-        dimension_dict: dict[int, int] = {}
+        dimension_dict = {}  # type: ignore[var-annotated]
 
         generator = ConstraintGenerator(tracer_root, graph)
         new_constraints, counter = generator.generate_constraints(counter)
@@ -476,14 +394,10 @@ try:
         # we make sure the constraint is of the form:
         # c = b where b is a boolean expression
         # and we consider b (constraint.rhs) for transformation
-        if not isinstance(condition_constraint, BinConstraintD):
-            raise TypeError(type(condition_constraint))
         if not isinstance(condition_constraint.lhs, BVar):
             raise AssertionError(f"Expected BVar, got {type(condition_constraint.lhs)}")
         if not is_bool_expr(condition_constraint.rhs):
             raise AssertionError("Expected bool expression for rhs")
-        if not isinstance(condition_constraint.rhs, Constraint):
-            raise TypeError(type(condition_constraint.rhs))
         condition_constraint_rhs = condition_constraint.rhs
 
         # transform the condition constraint
@@ -506,12 +420,8 @@ try:
         )
 
     def evaluate_conditional_with_constraints(
-        tracer_root: torch.nn.Module,
-        graph: Graph,
-        node: Node,
-        counter: int = 0,
-        user_constraints: _Z3Expr | None = None,
-    ) -> tuple[_Z3Result, _Z3Result]:
+        tracer_root, graph, node, counter=0, user_constraints=None
+    ):
         """
         Given an IR and a node representing a conditional, evaluate the conditional
         and its negation

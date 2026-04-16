@@ -272,6 +272,8 @@ void initLazyBindings(PyObject* module) {
 #else
         TORCH_CHECK(
             false, "TorchScript backend not yet supported in FBCODE builds");
+        return std::make_pair(
+            std::vector<int64_t>(), std::vector<at::IValue>());
 #endif // !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
       });
   // TODO(shunting) revisit this part for XLA
@@ -301,13 +303,13 @@ void initLazyBindings(PyObject* module) {
         for (torch::jit::IValue elem : stack) {
           result.push_back(elem.toTensor());
         }
-        return result;
 #else
         TORCH_CHECK(
             false, "TorchScript backend not yet supported in FBCODE builds");
 #endif // !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
+        return result;
       });
-  lazy_ts_backend.def("_get_latest_computation_graph", []() -> std::string {
+  lazy_ts_backend.def("_get_latest_computation_graph", []() {
 #if !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
     auto computation = LazyGraphExecutor::Get()
                            ->GetComputationCache()
@@ -319,6 +321,7 @@ void initLazyBindings(PyObject* module) {
 #else
     TORCH_CHECK(
         false, "TorchScript backend not yet supported in FBCODE builds");
+    return "";
 #endif // !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
   });
 

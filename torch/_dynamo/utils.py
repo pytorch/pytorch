@@ -3095,6 +3095,7 @@ def iter_contains(
     check_tensor_identity: bool = False,
 ) -> Any:
     from .variables import ConstantVariable
+    from .variables.constant import CONSTANT_VARIABLE_FALSE, CONSTANT_VARIABLE_TRUE
 
     if search.is_python_constant():
         found_const = any(
@@ -3115,7 +3116,7 @@ def iter_contains(
         if must_check_tensor_id:
             if x.is_tensor():
                 if search is _get_fake_tensor(x):  # Object equivalence
-                    return ConstantVariable.create(True)
+                    return CONSTANT_VARIABLE_TRUE
         else:
             from torch._dynamo.variables.builder import SourcelessBuilder
 
@@ -3129,7 +3130,7 @@ def iter_contains(
                     tx, [check, found], {}
                 )
     if found is None:
-        found = ConstantVariable.create(False)
+        found = CONSTANT_VARIABLE_FALSE
     return found
 
 
@@ -3185,7 +3186,7 @@ def dict_keys_repr(const_keys: Any, *, local: Any) -> str:
 GLOBAL_KEY_PREFIX = "__dict_key"
 
 
-from torch._subclasses import UnsupportedFakeTensorException
+from torch._subclasses import UnsupportedFakeTensorException  # noqa: F401
 
 
 def get_safe_global_name(tx: InstructionTranslatorBase, root: str, obj: Any) -> str:

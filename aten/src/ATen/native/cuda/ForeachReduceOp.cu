@@ -136,19 +136,17 @@ __global__ void lpmax_cleanup(
 
 std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
   check_foreach_api_restrictions(tensors);
+  if (!can_use_fast_route(tensors)) {
+    return foreach_tensor_max_slow(tensors);
+  }
 
-  // for parity with max in ReduceAllOps.cpp, as max(empty) is undefined
-  // Check this early before routing to slow path
+  // for parity with max in ReduceAllOps.cpp, as max(empty) is ???
   TORCH_CHECK(
       std::all_of(
           tensors.begin(),
           tensors.end(),
           [](const auto& t) { return t.numel() > 0; }),
-      "_foreach_max cannot compute the maximum of an empty tensor; max over zero elements is undefined.");
-
-  if (!can_use_fast_route(tensors)) {
-    return foreach_tensor_max_slow(tensors);
-  }
+      "max(): Expected reduction dim to be specified for input.numel() == 0. Specify the reduction dim with the 'dim' argument.");
 
   const size_t ntensors = tensors.size();
   int max_chunks_per_tensor = -1;

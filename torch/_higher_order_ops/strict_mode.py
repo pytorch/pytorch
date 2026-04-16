@@ -22,9 +22,12 @@ def strict_mode(callable, operands):
     if torch.compiler.is_dynamo_compiling():
         return strict_mode_op(callable, operands)
 
-    from torch._higher_order_ops.utils import _hop_compile_and_call
+    from torch._higher_order_ops.utils import setup_compilation_env
 
-    return _hop_compile_and_call(strict_mode_op, (callable, operands))
+    with setup_compilation_env() as backend:
+        return torch.compile(strict_mode_op, backend=backend, fullgraph=True)(
+            callable, operands
+        )
 
 
 class StrictMode(HigherOrderOperator):
