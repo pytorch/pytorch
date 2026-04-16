@@ -3686,6 +3686,10 @@ class CppTile2DKernel(CppVecKernel):
     def need_vec_transpose(self, index):
         outer_var = self.itervars[self.outer_idx]
         inner_var = self.itervars[self.tiling_idx]
+        # Indirect indexing (SymT.TMP) variables are declared inside the inner
+        # loop, but transpose_mxn is emitted into preloads (before the loop).
+        if free_symbol_is_type(index, SymT.TMP):
+            return False
         outer_stride = stride_at_vec_range(index, outer_var, self.tiling_factor)
         inner_stride = stride_at_vec_range(index, inner_var, self.tiling_factor)
         return (
