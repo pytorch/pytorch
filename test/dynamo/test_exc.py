@@ -1,6 +1,8 @@
 # Owner(s): ["module: dynamo"]
 
+import sys
 import unittest
+from typing import cast
 
 import torch
 import torch._dynamo
@@ -13,6 +15,7 @@ from torch._dynamo.exc import (
     UserError,
     UserErrorType,
 )
+from torch._dynamo.variables.base import SourceLocation
 from torch.testing._internal.common_device_type import skipIf
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
@@ -21,6 +24,39 @@ from torch.testing._internal.common_utils import (
     TEST_Z3,
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
+
+
+# Module-level storage avoids free-variable issues when capturing comptime state.
+_source_location_capture: dict[str, SourceLocation] = {}
+
+
+def _capture_y_source_location(ctx) -> None:
+    tx = ctx._i_will_not_complain_if_bc_breaks_InstructionTranslator()
+    y_vt = tx.symbolic_locals.get("y")
+    if y_vt is not None and y_vt.source_location is not None:
+        _source_location_capture["source_location"] = y_vt.source_location
+
+
+def _unsupported_error_source_attribution() -> str:
+    if sys.version_info < (3, 11):
+        return """\
+Stack variable source attribution:
+  ConstantVariable(int: 1) originated from:
+  File "test_exc.py", line N
+                return {1, 2}
+"""
+
+    return """\
+Stack variable source attribution:
+  ConstantVariable(int: 1) originated from:
+  File "test_exc.py", line N
+                return {1, 2}
+^
+  ConstantVariable(int: 2) originated from:
+  File "test_exc.py", line N
+                return {1, 2}
+^
+"""
 
 
 class ExcTests(LoggingTestCase):
@@ -154,27 +190,31 @@ from user code:
         torch.compile(fn001, backend="eager")(torch.randn(1))
 
         record = self.getRecord(records, "missing BUILD_SET handler")
+        expected = (
+            "Graph break in user code at test_exc.py:N\n"
+            "Graph Break Reason: Failed to handle graph break gracefully. "
+            "Skipping the function and falling back to eager. Graph break "
+            "encountered:\n"
+            "\n"
+            "missing BUILD_SET handler\n"
+            "  Explanation: Missing BUILD_SET bytecode handler (for testing purposes).\n"
+            "\n"
+            "\n"
+            "  Developer debug context:\n"
+            "\n"
+            " For more details about this graph break, please visit: "
+            "https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0200.html\n"
+            "\n" + _unsupported_error_source_attribution() + "\n"
+            "User code traceback:\n"
+            '  File "test_exc.py", line N, in test_unsupported_error\n'
+            '    torch.compile(fn001, backend="eager")(torch.randn(1))\n'
+            '  File "test_exc.py", line N, in fn001\n'
+            "    return {1, 2}\n"
+        )
 
         self.assertExpectedInline(
             munge_exc(record.getMessage()),
-            """\
-Graph break in user code at test_exc.py:N
-Graph Break Reason: Failed to handle graph break gracefully. Skipping the function and falling back to eager. Graph break encountered:
-
-missing BUILD_SET handler
-  Explanation: Missing BUILD_SET bytecode handler (for testing purposes).
-
-
-  Developer debug context:
-
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0200.html
-
-User code traceback:
-  File "test_exc.py", line N, in test_unsupported_error
-    torch.compile(fn001, backend="eager")(torch.randn(1))
-  File "test_exc.py", line N, in fn001
-    return {1, 2}
-""",  # noqa: B950
+            expected,  # noqa: B950
         )
 
     @torch._dynamo.config.patch(suppress_errors=False)
@@ -401,6 +441,61 @@ Target Expressions:
 Failed Source Expressions:
   ==> (== (+ L['shape'][0] L['shape'][1] L['shape'][2]) L['x'].size()[0])""",
         )
+
+    def test_source_location_format_no_col_info(self):
+        source_location = SourceLocation(filename=__file__, lineno=1)
+        result = source_location.format()
+        self.assertIn(f'File "{__file__}", line 1', result)
+        self.assertNotIn("^", result)
+
+    def test_source_location_format_with_col_info(self):
+        source_location = SourceLocation(
+            filename=__file__,
+            lineno=1,
+            end_lineno=1,
+            col_offset=0,
+            end_col_offset=10,
+        )
+        result = source_location.format()
+        self.assertIn(f'File "{__file__}", line 1', result)
+        self.assertIn("^" * 10, result)
+
+    def test_source_location_format_without_source_line(self):
+        source_location = SourceLocation(
+            filename="<string>",
+            lineno=1,
+            end_lineno=1,
+            col_offset=0,
+            end_col_offset=10,
+        )
+        result = source_location.format()
+        self.assertEqual(result, '  File "<string>", line 1\n')
+
+    def test_vt_source_location_set_during_tracing(self):
+        _source_location_capture.clear()
+
+        def fn(x):
+            y = x + 1
+            comptime(_capture_y_source_location)
+            return y
+
+        torch.compile(fn, backend="eager")(torch.ones(3))
+
+        source_location = _source_location_capture.get("source_location")
+        self.assertIsNotNone(source_location)
+        source_location = cast(SourceLocation, source_location)
+        self.assertEqual(source_location.filename, __file__.replace(".pyc", ".py"))
+        self.assertIsNotNone(source_location.lineno)
+
+    @make_logging_test(graph_breaks=True)
+    def test_graph_break_source_attribution_on_stack(self, records):
+        def fn(x):
+            return (x + 1, torch._dynamo.graph_break())[0]  # noqa: GB_REGISTRY
+
+        torch.compile(fn, backend="eager")(torch.ones(3))
+
+        record = self.getRecord(records, "Graph break in user code")
+        self.assertIn("Stack variable source attribution", record.getMessage())
 
 
 if __name__ == "__main__":

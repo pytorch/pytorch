@@ -16,7 +16,9 @@ computations.
 from __future__ import annotations
 
 import collections
+import dataclasses
 import functools
+import linecache
 import logging
 from collections.abc import Callable, ItemsView, KeysView, Sequence, ValuesView
 from contextvars import ContextVar
@@ -43,6 +45,28 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass(frozen=True)
+class SourceLocation:
+    """Source position of the bytecode instruction that generated a VariableTracker."""
+
+    filename: str
+    lineno: int
+    end_lineno: int | None = None
+    col_offset: int | None = None
+    end_col_offset: int | None = None
+
+    def format(self) -> str:
+        line = linecache.getline(self.filename, self.lineno).rstrip()
+        result = f'  File "{self.filename}", line {self.lineno}\n'
+        if line:
+            result += f"    {line}\n"
+        if line and self.col_offset is not None and self.end_col_offset is not None:
+            num_carets = max(1, self.end_col_offset - self.col_offset)
+            result += "    " + " " * self.col_offset + "^" * num_carets + "\n"
+        return result
+
 
 # Tracks active method calls on VariableTracker instances to detect self-referential
 # calls (e.g., as_python_constant on a list that contains itself). Maps
@@ -295,6 +319,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         "value",
         "guards",
         "source",
+        "source_location",
         "mutation_type",
         "parents_tracker",
         "user_code_variable_name",
@@ -877,6 +902,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def set_name_hint(self, name: str) -> None:
         pass
 
+    def set_source_location(self, source_location: SourceLocation) -> None:
+        self.source_location = source_location
+
     def realize(self) -> VariableTracker:
         """Used by LazyVariableTracker to build the real VariableTracker"""
         return self
@@ -1049,9 +1077,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         *,
         source: Source | None = None,
         mutation_type: MutationType | None = None,
+        source_location: SourceLocation | None = None,
     ) -> None:
         super().__init__()
         self.source = source
+        self.source_location = source_location
         self.mutation_type = mutation_type
 
         # NOTE sometimes mutation_type is set afterwards for implementation
