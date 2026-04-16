@@ -35,6 +35,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     munge_exc,
     parametrize,
+	skipIfXpu,
     TEST_WITH_SLOW,
     TEST_WITH_TORCHDYNAMO,
     xfailIfTorchDynamo,
@@ -6927,6 +6928,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
 
+    @skipIfXpu("https://github.com/intel/torch-xpu-ops/issues/3361")
     @requires_gpu_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_dropout(self):
