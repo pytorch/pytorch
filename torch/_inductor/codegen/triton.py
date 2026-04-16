@@ -5854,7 +5854,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # Compute configs after codegen_body() so we know if the kernel
         # uses atomic ops. On HIP, buffer ops don't support atomics, so
         # we must not tag any args with pointer_range_32 in that case.
-        if torch.version.hip is not None and self.atomic_add_found:
+        # Also disable pointer_range_32 when the config flag is off.
+        if torch.version.hip is not None and (
+            self.atomic_add_found or not config.triton.emit_pointer_range_32
+        ):
             triton_meta["configs"] = [config_of(signature, pointer_range_override=())]
         else:
             triton_meta["configs"] = [config_of(signature)]

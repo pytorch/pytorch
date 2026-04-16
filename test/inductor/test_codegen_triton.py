@@ -189,6 +189,59 @@ class TestCodegenTriton(InductorTestCase):
             sympy.Float(0.5) + TruncToFloat(s0),
         )
 
+    @inductor_config.patch("triton.emit_pointer_range_32", True)
+    def test_config_of_emit_pointer_range_32_enabled(self):
+        from torch._inductor.utils import (
+            get_triton_attrs_descriptor_version,
+            TritonAttrsDescriptorVersion,
+        )
+
+        sixteen = sympy.Integer(16)
+        s0 = sympy.Symbol("s0", positive=True, integer=True)
+
+        config = triton_utils.config_of(
+            [SizeArg("A", sixteen), SizeArg("B", s0)],
+            pointer_range_override=(0,),
+        )
+
+        if get_triton_attrs_descriptor_version() in {
+            TritonAttrsDescriptorVersion.V0_NO_TRITON,
+            TritonAttrsDescriptorVersion.V1_COMPILER,
+            TritonAttrsDescriptorVersion.V2_BACKENDS,
+            TritonAttrsDescriptorVersion.V3_BACKENDS_TUPLE,
+        }:
+            self.assertEqual(config.pointer_range_32, (0,))
+        else:
+            self.assertIsInstance(config, dict)
+            self.assertIn(["tt.pointer_range", 32], config[(0,)])
+
+    @inductor_config.patch("triton.emit_pointer_range_32", False)
+    def test_config_of_emit_pointer_range_32_disabled(self):
+        from torch._inductor.utils import (
+            get_triton_attrs_descriptor_version,
+            TritonAttrsDescriptorVersion,
+        )
+
+        sixteen = sympy.Integer(16)
+        s0 = sympy.Symbol("s0", positive=True, integer=True)
+
+        config = triton_utils.config_of(
+            [SizeArg("A", sixteen), SizeArg("B", s0)],
+            pointer_range_override=(),
+        )
+
+        if get_triton_attrs_descriptor_version() in {
+            TritonAttrsDescriptorVersion.V0_NO_TRITON,
+            TritonAttrsDescriptorVersion.V1_COMPILER,
+            TritonAttrsDescriptorVersion.V2_BACKENDS,
+            TritonAttrsDescriptorVersion.V3_BACKENDS_TUPLE,
+        }:
+            self.assertEqual(config.pointer_range_32, ())
+        else:
+            self.assertIsInstance(config, dict)
+            if (0,) in config:
+                self.assertNotIn(["tt.pointer_range", 32], config[(0,)])
+
     @unittest.skipUnless(torch.version.hip is not None, "pointer_range_32 is HIP-only")
     @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
     def test_pointer_range_in_generated_code(self):
