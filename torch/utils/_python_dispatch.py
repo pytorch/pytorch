@@ -23,7 +23,9 @@ from torch._C._dynamo.guards import set_is_in_mode_without_ignore_compile_intern
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
+
+    from torch._opaque_base import OpaqueBase
 
 
 # TODO: Limitations and things about enable_torch_dispatch_mode we should fix before exposing it:
@@ -449,18 +451,41 @@ class BaseTorchDispatchMode(TorchDispatchMode):
         return func(*args, **kwargs)
 
 
-# Subtypes which have __tensor_flatten__ and __tensor_unflatten__.
-class TensorWithFlatten(Protocol):
+# Python typing cannot express Intersection[torch.Tensor, Protocol], so this
+# protocol repeats the Tensor members that call sites commonly use after
+# is_traceable_wrapper_subclass() narrows a value to this protocol.
+class TraceableWrapperSubclass(Protocol):
+    """
+    Canonical protocol for wrapper tensor subclasses that PT2 can trace through.
+
+    ``__tensor_flatten__`` must return stable attribute names for the inner
+    values that participate in tracing together with any metadata needed to
+    rebuild the outer subclass.
+
+    ``__tensor_unflatten__`` must reconstruct an equivalent wrapper subclass
+    instance from the flattened inner values, metadata, and requested outer
+    size/stride. Callers may pass tensor attrs and registered reference-type
+    opaques in ``inner_tensors``. The returned tensor is expected to preserve
+    the requested outer size/stride. If ``attrs, metadata =
+    x.__tensor_flatten__()``, then ``type(x).__tensor_unflatten__`` must round-
+    trip from ``{name: getattr(x, name) for name in attrs}``, ``metadata``,
+    ``x.size()``, and ``x.stride()`` to an equivalent instance of ``x``.
+
+    ``__tensor_unflatten__`` may be implemented as either a ``@staticmethod``
+    or a ``@classmethod``; the runtime check below intentionally uses duck
+    typing to support both forms, even though static type checkers may only
+    recognize the ``@staticmethod`` form as conforming to this protocol.
+    """
+
     def __tensor_flatten__(self) -> tuple[Sequence[str], object]: ...
 
     @staticmethod
     def __tensor_unflatten__(
-        inner_tensors: int, flatten_spec: int, outer_size: int, outer_stride: int
+        inner_tensors: Mapping[str, torch.Tensor | OpaqueBase],
+        metadata: object,
+        outer_size: Sequence[int | torch.SymInt],
+        outer_stride: Sequence[int | torch.SymInt],
     ) -> torch.Tensor: ...
-
-    # It would be really nice to be able to say that the return of
-    # is_traceable_wrapper_subclass() is Intersection[torch.Tensor,
-    # TensorWithFlatten] - but that doesn't exist.
 
     shape: torch._C.Size
 
@@ -512,51 +537,36 @@ class TensorWithFlatten(Protocol):
     ) -> torch.Tensor: ...
 
 
-def is_traceable_wrapper_subclass(t: object) -> TypeIs[TensorWithFlatten]:
+TensorWithFlatten = TraceableWrapperSubclass
+
+
+def _has_traceable_wrapper_subclass_protocol(t: object) -> bool:
+    return hasattr(t, "__tensor_flatten__") and hasattr(t, "__tensor_unflatten__")
+
+
+def is_traceable_wrapper_subclass(t: object) -> TypeIs[TraceableWrapperSubclass]:
     """
-    Returns whether or not a tensor subclass that implements __torch_dispatch__
-    is 'traceable' with torch.compile.
-    In order for a tensor subclass to support TorchDispatchMode-style tracing in PT2,
-    It must implement two magic methods: __tensor_flatten__ and __tensor_unflatten__.
-    It is also expected to obey some restrictions around traceability and aliasing:
-        * The subclass's __torch_dispatch__() implementation should desugar into pytorch
-            dispatcher operations that can be traced into a graph.
-        * The subclass should use return_and_correct_aliasing(). This is needed today to make
-            sure that torch.compile does the right thing in a few cases around input mutation
-            and output aliasing.
+    Returns whether ``t`` is a tensor subclass that matches the
+    ``TraceableWrapperSubclass`` protocol at runtime.
 
-    Expected magic method signatures:
-        attrs, ctx = t.__tensor_flatten__()
-            attrs: list of attribute name strings for inner tensors
-            ctx: dict containing any other subclass-specific metadata needed for unflattening
-
-        t = MySubClass.__tensor_unflatten__(inner_tensors, ctx, outer_size, outer_stride)
-            inner_tensors: dict mapping attribute name -> tensor for each inner tensor
-            ctx: dict with subclass metadata in the form that __tensor_flatten__() produces
-            outer_size: expected (possibly symbolic) size that the returned subclass
-                instance should have. Note that this arg is useful for certain subclasses
-                that require the shape info to be constructed. In most cases, this arg can be
-                safely ignored.
-            outer_stride: expected (possibly symbolic) stride that the returned subclass
-                instance should have. Note that this arg is useful for certain subclasses
-                that require the stride info to be constructed. In most cases, this arg can be
-                safely ignored.
+    See ``TraceableWrapperSubclass`` for the canonical flatten/unflatten
+    contract. Matching the protocol is necessary but not sufficient for full
+    PT2 support: the subclass's ``__torch_dispatch__`` implementation must also
+    desugar into traceable dispatcher operations and preserve aliasing semantics
+    with ``return_and_correct_aliasing()`` when needed.
     """
     is_subclass = isinstance(t, torch.Tensor) and type(t) is not torch.Tensor
-    return (
-        is_subclass
-        and hasattr(t, "__tensor_flatten__")
-        and hasattr(t, "__tensor_unflatten__")
-    )
+    return is_subclass and _has_traceable_wrapper_subclass_protocol(t)
 
 
-def is_traceable_wrapper_subclass_type(t: type) -> TypeIs[type[TensorWithFlatten]]:
+def is_traceable_wrapper_subclass_type(
+    t: type,
+) -> TypeIs[type[TraceableWrapperSubclass]]:
     """Same as above, but takes a type argument instead of an instance."""
     return (
         issubclass(t, torch.Tensor)
         and t is not torch.Tensor
-        and hasattr(t, "__tensor_flatten__")
-        and hasattr(t, "__tensor_unflatten__")
+        and _has_traceable_wrapper_subclass_protocol(t)
     )
 
 
