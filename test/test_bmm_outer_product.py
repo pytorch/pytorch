@@ -5,7 +5,7 @@ import unittest
 import torch
 from torch._native.ops.bmm_outer_product.triton_impl import _is_outer_product
 from torch.testing._internal.common_utils import run_tests, TestCase
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 @unittest.skipIf(not HAS_GPU, "requires GPU")
@@ -25,54 +25,54 @@ class TestBmmOuterProduct(TestCase):
         ]
         for B, M, N in shapes:
             with self.subTest(B=B, M=M, N=N):
-                a = torch.randn(B, M, 1, device="cuda")
-                b = torch.randn(B, 1, N, device="cuda")
+                a = torch.randn(B, M, 1, device=GPU_TYPE)
+                b = torch.randn(B, 1, N, device=GPU_TYPE)
                 self._check_bmm(a, b)
 
     def test_basic_dtypes(self):
         for dtype in [torch.float32, torch.float16, torch.bfloat16]:
             with self.subTest(dtype=dtype):
-                a = torch.randn(4, 8, 1, device="cuda", dtype=dtype)
-                b = torch.randn(4, 1, 16, device="cuda", dtype=dtype)
+                a = torch.randn(4, 8, 1, device=GPU_TYPE, dtype=dtype)
+                b = torch.randn(4, 1, 16, device=GPU_TYPE, dtype=dtype)
                 self.assertEqual(torch.bmm(a, b), a @ b)
 
     def test_permuted_inputs(self):
         B, M, N = 4, 8, 16
         cases = [
             (
-                torch.randn(M, B, 1, device="cuda").permute(1, 0, 2),
-                torch.randn(B, 1, N, device="cuda"),
+                torch.randn(M, B, 1, device=GPU_TYPE).permute(1, 0, 2),
+                torch.randn(B, 1, N, device=GPU_TYPE),
             ),
             (
-                torch.randn(B, M, 1, device="cuda"),
-                torch.randn(N, B, 1, device="cuda").permute(1, 2, 0),
+                torch.randn(B, M, 1, device=GPU_TYPE),
+                torch.randn(N, B, 1, device=GPU_TYPE).permute(1, 2, 0),
             ),
             (
-                torch.randn(M, B, 1, device="cuda").permute(1, 0, 2),
-                torch.randn(N, B, 1, device="cuda").permute(1, 2, 0),
+                torch.randn(M, B, 1, device=GPU_TYPE).permute(1, 0, 2),
+                torch.randn(N, B, 1, device=GPU_TYPE).permute(1, 2, 0),
             ),
         ]
         for a, b in cases:
             self.assertEqual(torch.bmm(a, b), a @ b)
 
     def test_fallback_non_outer_product(self):
-        a = torch.randn(4, 8, 16, device="cuda")
-        b = torch.randn(4, 16, 32, device="cuda")
+        a = torch.randn(4, 8, 16, device=GPU_TYPE)
+        b = torch.randn(4, 16, 32, device=GPU_TYPE)
         self.assertEqual(torch.bmm(a, b), a @ b, atol=1e-5, rtol=1.3e-6)
 
     def test_batch_one(self):
-        a = torch.randn(1, 64, 1, device="cuda")
-        b = torch.randn(1, 1, 128, device="cuda")
+        a = torch.randn(1, 64, 1, device=GPU_TYPE)
+        b = torch.randn(1, 1, 128, device=GPU_TYPE)
         self.assertEqual(torch.bmm(a, b), a @ b)
 
     def test_m_one_n_one(self):
-        a = torch.randn(8, 1, 1, device="cuda")
-        b = torch.randn(8, 1, 1, device="cuda")
+        a = torch.randn(8, 1, 1, device=GPU_TYPE)
+        b = torch.randn(8, 1, 1, device=GPU_TYPE)
         self.assertEqual(torch.bmm(a, b), a @ b)
 
     def test_gradient_flow(self):
-        a = torch.randn(4, 8, 1, device="cuda", requires_grad=True)
-        b = torch.randn(4, 1, 16, device="cuda", requires_grad=True)
+        a = torch.randn(4, 8, 1, device=GPU_TYPE, requires_grad=True)
+        b = torch.randn(4, 1, 16, device=GPU_TYPE, requires_grad=True)
         result = torch.bmm(a, b)
         result.sum().backward()
         self.assertIsNotNone(a.grad)
