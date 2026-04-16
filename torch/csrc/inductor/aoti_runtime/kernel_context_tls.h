@@ -97,7 +97,7 @@ struct KernelContext {
       }
       res_stack += std::string{function} + '[' + std::string{p} + ']';
       res_stack += '\n';
-      res_stack += fs::path{filename}.filename();
+      res_stack += fs::path{filename}.filename().string();
       res_stack += '\n';
       res_stack += std::to_string(fileline);
       res_stack += '\n';
