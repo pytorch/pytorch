@@ -1019,9 +1019,17 @@ def get_kernel_metadata(
                         all_writes.append("%" + output_name)
 
         for node in inductor_nodes:
-            detailed_metadata.append(
-                f"{wrapper.comment}   {node.format_node(include_tensor_metadata=True)}"
-            )
+            formatted_node = node.format_node(include_tensor_metadata=True)
+            if formatted_node is not None and torch.version.hip:
+                # AMDGCN asm strings can contain newlines, which propagate
+                # into format_node() output.  Split so every line gets the
+                # comment prefix; otherwise bare newlines break the wrapper.
+                detailed_metadata.extend(
+                    f"{wrapper.comment}   {line}"
+                    for line in formatted_node.splitlines()
+                )
+            else:
+                detailed_metadata.append(f"{wrapper.comment}   {formatted_node}")
 
         detailed_metadata.append(f"{wrapper.comment}   return {','.join(all_writes)}")
 
