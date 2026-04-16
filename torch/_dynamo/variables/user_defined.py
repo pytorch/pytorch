@@ -685,22 +685,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # __new__ is handled below
             return SourcelessBuilder.create(tx, set).call_method(tx, name, args, kwargs)
         elif (
-            name == "__new__"
-            and self.value is collections.OrderedDict
-            and isinstance(args[0], UserDefinedClassVariable)
-            and args[0].value is collections.OrderedDict
-        ):
-            if kwargs and len(args) != 1:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            return ConstDictVariable(
-                {}, collections.OrderedDict, mutation_type=ValueMutationNew()
-            )
-        elif (
             len(args) == 1
             and isinstance(args[0], variables.GenericContextWrappingVariable)
             and name == "__enter__"
@@ -709,10 +693,20 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif name == "__new__" and UserDefinedClassVariable.is_supported_new_method(
             self.value.__new__
         ):
+            # Some C-level tp_new functions (dict.__new__, set.__new__) ignore
+            # extra args — only the type arg matters.  Pass init_args=[] for
+            # those so reconstruction emits base_cls.__new__(cls) without
+            # unreconstructable args (e.g. generators).  Other tp_new functions
+            # (tuple.__new__, BaseException.__new__) use the extra args.
+            new_fn = self.value.__new__
+            if new_fn in (dict.__new__, set.__new__):
+                init_args: list[VariableTracker] = []
+            else:
+                init_args = list(args[1:])
             return tx.output.side_effects.track_new_user_defined_object(
                 self,
                 args[0],
-                args[1:],
+                init_args,
             )
         elif name == "__setattr__" and self.ban_mutation:
             unimplemented(
@@ -792,12 +786,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             from .ctx_manager import NullContextVariable
 
             return NullContextVariable(*args, **kwargs)
-        elif self.value is collections.OrderedDict:
-            return tx.inline_user_function_return(
-                VariableTracker.build(tx, polyfills.construct_dict),
-                [self, *args],
-                kwargs,
-            )
         elif self.value is collections.defaultdict:
             if len(args) == 0:
                 default_factory = variables.ConstantVariable.create(None)
@@ -1162,23 +1150,24 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 seed = None
             random_object = random.Random(seed)
             return RandomVariable(random_object)
-        elif (
-            self.value is types.MappingProxyType
-            and len(args) == 1
-            and isinstance(args[0], ConstDictVariable)
-        ):
+        elif self.value is types.MappingProxyType and len(args) == 1:
             # types.MappingProxyType is a read-only proxy of the dict. If the
             # original dict changes, the changes are reflected in proxy as well.
-            return variables.MappingProxyVariable(args[0])
+            dict_arg = args[0]
+            if isinstance(dict_arg, variables.UserDefinedDictVariable):
+                dict_arg = dict_arg._base_vt
+            if isinstance(dict_arg, ConstDictVariable):
+                return variables.MappingProxyVariable(dict_arg)
         elif SideEffects.cls_supports_mutation_side_effects(self.value) and self.source:
             with do_not_convert_to_tracable_parameter():
-                return tx.inline_user_function_return(
+                result = tx.inline_user_function_return(
                     VariableTracker.build(
                         tx, polyfills.instantiate_user_defined_class_object
                     ),
                     [self, *args],
                     kwargs,
                 )
+                return result
 
         return super().call_function(tx, args, kwargs)
 
@@ -3036,17 +3025,19 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
             )
             self._base_vt = ConstDictVariable(
                 {},
-                user_cls=(
-                    collections.OrderedDict
-                    if isinstance(value, collections.OrderedDict)
-                    else dict
-                ),
                 mutation_type=ValueMutationNew(),
             )
         else:
             self._base_vt = dict_vt
         self._base_methods = dict_methods
         assert self._base_vt is not None
+
+    def len(self) -> int:
+        # Used by nn_module.py to short-circuit the nn.Module forward method
+        # when no hooks are registered.  Calling .len() directly avoids the
+        # overhead of full call_method("__len__") dispatch during tracing.
+        assert self._base_vt is not None
+        return self._base_vt.len()  # type: ignore[union-attr]
 
     def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:
         # Dict implements __len__ via mp_length (mapping protocol), not
@@ -3095,6 +3086,96 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
             except ObservedKeyError:
                 handle_observed_exception(tx)
                 return self.call_method(tx, "__missing__", args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
+
+
+# TODO: move to dicts.py alongside ConstDictVariable and DefaultDictVariable.
+# Currently blocked by circular imports (dicts.py ↔ user_defined.py).
+class OrderedDictVariable(UserDefinedDictVariable):
+    """
+    Represents collections.OrderedDict instances.
+
+    CPython has both a pure-Python implementation:
+    https://github.com/python/cpython/blob/v3.13.0/Lib/collections/__init__.py#L86-L339
+    and a C accelerator that replaces it at runtime:
+    https://github.com/python/cpython/blob/v3.13.0/Objects/odictobject.c
+
+    The C accelerator is always active, so methods like move_to_end and
+    popitem are C-level method_descriptors, not Python functions.
+
+    Dict storage is delegated to _base_vt (a ConstDictVariable) via
+    UserDefinedDictVariable.
+    """
+
+    def __init__(
+        self,
+        value: object,
+        dict_vt: "ConstDictVariable | None" = None,
+        **kwargs: Any,
+    ) -> None:
+        if dict_vt is None:
+            from .dicts import ConstDictVariable
+
+            dict_vt = ConstDictVariable(
+                {},
+                user_cls=collections.OrderedDict,
+                mutation_type=ValueMutationNew(),
+            )
+        super().__init__(value, dict_vt=dict_vt, **kwargs)
+
+    def is_python_constant(self) -> bool:
+        assert self._base_vt is not None
+        return self._base_vt.is_python_constant()
+
+    def as_python_constant(self) -> Any:
+        assert self._base_vt is not None
+        return self._base_vt.as_python_constant()
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .constant import ConstantVariable
+        from .dicts import HashableTracker
+
+        # OrderedDict-exclusive C methods that ConstDictVariable doesn't handle.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/odictobject.c
+        if name == "move_to_end":
+            assert self._base_vt is not None
+            self._base_vt.install_dict_keys_match_guard()  # type: ignore[union-attr]
+            tx.output.side_effects.mutation(self._base_vt)
+            if args[0] not in self._base_vt:  # type: ignore[operator]
+                raise_observed_exception(KeyError, tx)
+
+            last = True
+            if len(args) == 2 and args[0].is_python_constant():
+                last = args[1].as_python_constant()
+            if kwargs and "last" in kwargs and kwargs["last"].is_python_constant():
+                last = kwargs["last"].as_python_constant()
+
+            key = HashableTracker(args[0])
+            self._base_vt.items.move_to_end(key, last=last)  # type: ignore[union-attr]
+            return ConstantVariable.create(None)
+        elif name == "popitem":
+            assert self._base_vt is not None
+            if not self._base_vt.items:  # type: ignore[union-attr]
+                raise_observed_exception(
+                    KeyError, tx, args=["popitem(): dictionary is empty"]
+                )
+
+            last = True
+            if len(args) == 1 and args[0].is_python_constant():
+                last = args[0].as_python_constant()
+            if kwargs and "last" in kwargs and kwargs["last"].is_python_constant():
+                last = kwargs["last"].as_python_constant()
+
+            k, v = self._base_vt.items.popitem(last=last)  # type: ignore[union-attr]
+            self._base_vt.should_reconstruct_all = True  # type: ignore[union-attr]
+            tx.output.side_effects.mutation(self._base_vt)
+            return variables.TupleVariable([k.vt, v])
         return super().call_method(tx, name, args, kwargs)
 
 

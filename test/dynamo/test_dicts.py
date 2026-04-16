@@ -1244,6 +1244,54 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(ref, res)
 
+    def test_dict_new_ignores_extra_args(self):
+        """dict.__new__ ignores extra args (CPython behavior).
+
+        This matters for instantiate_user_defined_class_object which calls
+        cls.__new__(cls, *args, **kwargs) — dict.__new__ should not fail
+        on the extra args.
+        """
+
+        def f(x):
+            od = OrderedDict(a=1, b=2)
+            return x + od["a"]
+
+        x = torch.ones(2)
+        ref = f(x)
+        res = torch.compile(f, backend="eager", fullgraph=True)(x)
+        self.assertEqual(ref, res)
+
+    def test_ordered_dict_repr(self):
+        """repr() on OrderedDictVariable should not graph break."""
+
+        def f(x):
+            od = OrderedDict(a=1, b=2)
+            r = repr(od)
+            # Just verify repr doesn't graph break and returns a string
+            return x + (1 if isinstance(r, str) else 0)
+
+        x = torch.ones(2)
+        ref = f(x)
+        res = torch.compile(f, backend="eager", fullgraph=True)(x)
+        self.assertEqual(ref, res)
+
+    def test_c_new_init_args_ignored_for_dict(self):
+        """C-level __new__ for dict/set passes init_args=[] since they
+        ignore extra args. This ensures generators passed to OrderedDict()
+        don't end up in reconstruction."""
+
+        def whoo(t):
+            yield 1, t + 1
+            yield 2, t + 2
+
+        def f(t):
+            return OrderedDict(whoo(t))
+
+        t = torch.randn(2)
+        ref = f(t)
+        res = torch.compile(f, backend="eager", fullgraph=True)(t)
+        self.assertEqual(ref, res)
+
     @parametrize("op", ["or_", "and_", "xor", "sub"])
     def test_dict_keys_binop(self, op):
         op = getattr(operator, op)
@@ -2419,7 +2467,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 class DictSubclassMethodsTests(DictMethodsTests):
     thetype = SimpleDict
 
-    @unittest.expectedFailure
     def test_binop_or(self):
         super().test_binop_or()
 

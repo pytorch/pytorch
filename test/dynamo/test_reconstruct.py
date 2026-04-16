@@ -388,6 +388,22 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             got = opt_fn(model, states, x)
             self.assertEqual(expected, got)
 
+    def test_ordered_dict_no_reconstruct_without_mutation(self):
+        """Sourced OrderedDict should not emit BUILD_MAP when not mutated."""
+
+        def hook(instructions: list[dis.Instruction]):
+            build_map = _filter_instructions(instructions, "BUILD_MAP")
+            self.assertEqual(len(build_map), 0)
+
+        def fn(od, x):
+            return x + od["a"]
+
+        od = collections.OrderedDict(a=1, b=2)
+        with self.register_bytecode_hook(hook):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            got = opt_fn(od, torch.tensor(1.0))
+            self.assertEqual(got, torch.tensor(2.0))
+
     def test_graph_break_in_wrapped_user_function(self):
         def fn(x):
             x = x + 1
