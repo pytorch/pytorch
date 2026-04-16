@@ -105,7 +105,7 @@ inline bool check_flash_attention_head_dim_size(
     return false;
   }
 
-  const auto max_supported_headdim = c10::SymInt(192);
+  const auto max_supported_headdim = c10::SymInt(256);
   if (query_size_last > max_supported_headdim) {
     if (debug) {
       TORCH_WARN(
