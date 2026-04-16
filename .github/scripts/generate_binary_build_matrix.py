@@ -741,17 +741,31 @@ def generate_manywheel_test_configs() -> list[dict[str, str]]:
 
 
 def generate_manywheel_upload_configs() -> list[dict[str, str]]:
-    """Generate gpu_config entries for the manywheel upload matrix."""
-    configs: list[dict[str, str]] = []
+    """Generate gpu_config entries for the manywheel upload matrix.
 
-    configs.append({"name": "cpu"})
+    Each entry carries the DESIRED_CUDA / GPU_ARCH_TYPE / GPU_ARCH_VERSION
+    shapes expected by _binary-upload.yml and binary_upload.sh (e.g.
+    DESIRED_CUDA='cu126' drives the S3 UPLOAD_SUBFOLDER), which differ from
+    the matrix 'name' used for artifact grouping ('cuda12.6').
+    """
+
+    def _entry(name: str, gpu_arch_type: str, gpu_arch_version: str) -> dict[str, str]:
+        return {
+            "name": name,
+            "desired_cuda": translate_desired_cuda(gpu_arch_type, gpu_arch_version),
+            "gpu_arch_type": gpu_arch_type,
+            "gpu_arch_version": gpu_arch_version,
+        }
+
+    configs: list[dict[str, str]] = []
+    configs.append(_entry("cpu", "cpu", ""))
     for cuda_ver in CUDA_ARCHES:
-        configs.append({"name": f"cuda{cuda_ver}"})
+        configs.append(_entry(f"cuda{cuda_ver}", "cuda", cuda_ver))
     # TODO: Add ROCm and XPU once migrated to container: directive.
-    configs.append({"name": "cpu-aarch64"})
+    configs.append(_entry("cpu-aarch64", "cpu-aarch64", ""))
     for aarch64_ver in CUDA_AARCH64_ARCHES:
         base_ver = _cuda_version_base(aarch64_ver)
-        configs.append({"name": f"cuda{base_ver}-aarch64"})
+        configs.append(_entry(f"cuda{base_ver}-aarch64", "cuda-aarch64", base_ver))
 
     return configs
 

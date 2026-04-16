@@ -105,9 +105,9 @@ jobs:
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
-      DESIRED_CUDA: ${{ matrix.gpu_config.name }}
-      GPU_ARCH_TYPE: ${{ matrix.gpu_config.name }}
-      DESIRED_PYTHON: "3.10"
+      DESIRED_CUDA: ${{ matrix.gpu_config.desired_cuda }}
+      GPU_ARCH_TYPE: ${{ matrix.gpu_config.gpu_arch_type }}
+      GPU_ARCH_VERSION: ${{ matrix.gpu_config.gpu_arch_version }}
       build_name: wheels-${{ matrix.gpu_config.name }}
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
