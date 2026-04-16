@@ -127,18 +127,16 @@ SPECIAL_NUMBERS = {
 
 FLOAT8_DTYPES_WITH_INF = [torch.float8_e5m2]
 
+FLOAT8_DTYPES_SATURATE_ON_OVERFLOW = [torch.float8_e4m3fn]
+
 
 def _int_bits_to_float(x):
     y = struct.unpack("!f", struct.pack("!I", x))[0]
     return y
 
 
-def simulate_fp8_precision(input, variant, saturate=False):
-    """Round input (as float32) to the given float8 datatype variant.
-
-    When saturate is True, overflows for types without inf clamp to max (matching
-    CUDA __NV_SATFINITE behavior). When False, they become NaN.
-    """
+def simulate_fp8_precision(input, variant):
+    """Round input (as float32) to the given float8 datatype variant."""
 
     # Constants
     dtype = torch.float32
@@ -182,12 +180,12 @@ def simulate_fp8_precision(input, variant, saturate=False):
     # Re-compose mantissa and exponent
     vals = (mantissa_val_rounded * 2.0 ** (-23 + exponent)).to(dtype)
 
-    # Replace overflows with inf/NaN/max as appropriate
-    have_inf = variant in FLOAT8_DTYPES_WITH_INF
+    # Replace overflows: inf for types that have it, saturate to max for types
+    # that use satfinite semantics, NaN otherwise
     overflow = vals > torch.finfo(variant).max
-    if have_inf:
+    if variant in FLOAT8_DTYPES_WITH_INF:
         vals[overflow] = torch.inf
-    elif saturate:
+    elif variant in FLOAT8_DTYPES_SATURATE_ON_OVERFLOW:
         vals[overflow] = torch.finfo(variant).max
     else:
         vals[overflow] = torch.nan
@@ -273,13 +271,7 @@ class TestFloat8Dtype(TestCase):
         x = get_input(dtype, device)
         x = torch.cat((x, -x))
         x8 = x.to(dtype)
-        # CUDA uses __NV_SATFINITE intrinsics which clamp overflow to max
-        saturate = (
-            x.is_cuda
-            and torch.version.cuda >= "13.2"
-            and torch.cuda.get_device_capability() >= (8, 9)
-        )
-        x8_simulated = simulate_fp8_precision(x, dtype, saturate=saturate)
+        x8_simulated = simulate_fp8_precision(x, dtype)
         self.assertEqual(x8_simulated, x8.float())
 
     def test_float8_e8m0fnu_rne_rounding(self, device):
