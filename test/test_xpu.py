@@ -1158,6 +1158,8 @@ print(torch.xpu.is_initialized())
         return allocator, dummy_allocator
 
     def test_xpu_pluggable_allocator(self):
+        from torch.utils.cpp_extension import load_inline
+
         torch.xpu.init()
         allocator, dummy_allocator = self.get_dummy_allocator(True)
         alloc_lib = ctypes.CDLL(dummy_allocator)
@@ -1231,6 +1233,40 @@ if __name__ == "__main__":
         called_dummy_alloc_value, called_dummy_free_value = rc.split()
         self.assertEqual(called_dummy_alloc_value, "123")
         self.assertEqual(called_dummy_free_value, "321")
+
+        cpp_source = r"""
+        #include <torch/extension.h>
+        #include <torch/csrc/xpu/XPUPluggableAllocator.h>
+        // Mimics what torchcomms' get_mem_allocator("xccl") does:
+        // creates an XPUPluggableAllocator and returns it as c10::Allocator*.
+        std::shared_ptr<c10::Allocator> get_xpu_allocator() {
+            auto allocator =
+                torch::xpu::XPUPluggableAllocator::createCustomAllocator(
+                    // alloc_fn
+                    [](size_t size, int device, sycl::queue* queue) -> void* {
+                        void* ptr = sycl::malloc_device(size, *queue);
+                        return ptr;
+                    },
+                    // free_fn
+                    [](void* ptr, size_t size, int device, sycl::queue* queue) {
+                        sycl::free(ptr, *queue);
+                    });
+            return allocator;
+        }
+        """
+        ext = load_inline(
+            name="repro_xpu_alloc",
+            cpp_sources=[cpp_source],
+            functions=["get_xpu_allocator"],
+            verbose=True,
+            is_python_module=True,
+            with_sycl=True,
+        )
+        # Verify that the XPUPluggableAllocator returned as
+        # std::shared_ptr<c10::Allocator> is correctly recognized as Python type.
+        # A TypeError here would mean the custom allocator lacks proper
+        # c10::Allocator pybind11 bindings.
+        allocator = ext.get_xpu_allocator()
 
     def test_torch_version_xpu(self):
         self.assertEqual(len(torch.version.xpu), 8)
