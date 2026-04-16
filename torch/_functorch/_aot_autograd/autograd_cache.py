@@ -871,10 +871,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
     @staticmethod
     def clear() -> None:
         """Clear the cache"""
-        try:
-            shutil.rmtree(AOTAutogradCache._get_tmp_dir())
-        except FileNotFoundError:
-            pass
+        shutil.rmtree(AOTAutogradCache._get_tmp_dir(), ignore_errors=True)
 
     @staticmethod
     def try_load(
