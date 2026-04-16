@@ -74,6 +74,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: true
+          submodules: 'false'
 
       - name: Login to ECR
         uses: ./.github/actions/ecr-login
