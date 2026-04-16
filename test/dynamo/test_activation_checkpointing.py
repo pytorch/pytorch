@@ -2743,30 +2743,9 @@ def forward(self, arg0_1):
         self.assertEqual(ref, result)
         self.assertEqual(x_ref.grad, x_test.grad)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    def test_multiple_user_phase_annotations_errors(self):
-        x = torch.randn(4, 4, requires_grad=True)
-        w = torch.randn(4, 4, requires_grad=True)
-
-        def fn(x, w):
-            z = torch.utils.checkpoint.checkpoint(
-                lambda a, b: torch.sin(a @ b), x, w, use_reentrant=False
-            )
-            loss = z.sum()
-            with torch.fx.traceback.annotate({"phase": "backward"}):
-                dx, dw = _grad(loss, (x, w))
-            # Non-backward computation between two backward annotations
-            out = dx + dw
-            with torch.fx.traceback.annotate({"phase": "backward"}):
-                out = out * 2
-            return out.detach()
-
-        with self.assertRaisesRegex(RuntimeError, "backward regions annotated"):
-            self._compile_and_capture(fn, True, (x, w))
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    def test_user_phase_annotation_with_extra_autograd_grad(self):
-        """Only the user-annotated backward region gets rematerialization."""
+    def test_two_checkpoints_two_grads_both_remat(self):
+        """Two checkpointed blocks with two autograd.grad calls — both backward
+        regions get independent rematerialization."""
         x = torch.randn(4, 4, requires_grad=True)
         w1 = torch.randn(4, 4, requires_grad=True)
         w2 = torch.randn(4, 4, requires_grad=True)
@@ -2780,15 +2759,13 @@ def forward(self, arg0_1):
             )
             loss1 = z1.sum()
             loss2 = z2.sum()
-            # Only the first backward is annotated
-            with torch.fx.traceback.annotate({"phase": "backward"}):
-                dx1 = _grad(loss1, (x,))
-            # Second backward NOT annotated — should not get remat
+            dx1 = _grad(loss1, (x,), retain_graph=True)
             dx2 = _grad(loss2, (x,))
             return (dx1[0] + dx2[0]).detach()
 
         _, gm_with = self._compile_and_capture(fn, True, (x, w1, w2))
 
+        # mm_recomputed for first grad (sin), mm_1_recomputed for second grad (sigmoid)
         self.assertExpectedInline(
             gm_with.code.strip(),
             """\
@@ -2797,31 +2774,32 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     sin = torch.ops.aten.sin.default(mm);  mm = None
     mm_1 = torch.ops.aten.mm.default(arg0_1, arg2_1)
     sigmoid = torch.ops.aten.sigmoid.default(mm_1);  mm_1 = None
-    detach_4 = torch.ops.aten.detach.default(sigmoid)
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
     sum_2 = torch.ops.aten.sum.default(sigmoid);  sigmoid = None
     ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
     expand = torch.ops.aten.expand.default(ones_like, [4, 4]);  ones_like = None
-    mm_recomputed = torch.ops.aten.mm.default(arg0_1, arg1_1);  arg0_1 = None
+    mm_recomputed = torch.ops.aten.mm.default(arg0_1, arg1_1)
     cos = torch.ops.aten.cos.default(mm_recomputed);  mm_recomputed = None
     mul = torch.ops.aten.mul.Tensor(expand, cos);  expand = cos = None
     t = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
     mm_3 = torch.ops.aten.mm.default(mul, t);  mul = t = None
     ones_like_1 = torch.ops.aten.ones_like.default(sum_2, pin_memory = False, memory_format = torch.preserve_format);  sum_2 = None
     expand_1 = torch.ops.aten.expand.default(ones_like_1, [4, 4]);  ones_like_1 = None
-    detach_5 = torch.ops.aten.detach.default(detach_4);  detach_4 = None
-    sigmoid_backward = torch.ops.aten.sigmoid_backward.default(expand_1, detach_5);  expand_1 = detach_5 = None
+    mm_1_recomputed = torch.ops.aten.mm.default(arg0_1, arg2_1);  arg0_1 = None
+    sigmoid_recomputed = torch.ops.aten.sigmoid.default(mm_1_recomputed);  mm_1_recomputed = None
+    detach_4_recomputed = torch.ops.aten.detach.default(sigmoid_recomputed);  sigmoid_recomputed = None
+    detach_6 = torch.ops.aten.detach.default(detach_4_recomputed);  detach_4_recomputed = None
+    sigmoid_backward = torch.ops.aten.sigmoid_backward.default(expand_1, detach_6);  expand_1 = detach_6 = None
     t_1 = torch.ops.aten.t.default(arg2_1);  arg2_1 = None
-    mm_4 = torch.ops.aten.mm.default(sigmoid_backward, t_1);  sigmoid_backward = t_1 = None
-    add = torch.ops.aten.add.Tensor(mm_3, mm_4);  mm_3 = mm_4 = None
-    detach_6 = torch.ops.aten.detach.default(add);  add = None
-    return (detach_6,)""",
+    mm_5 = torch.ops.aten.mm.default(sigmoid_backward, t_1);  sigmoid_backward = t_1 = None
+    add = torch.ops.aten.add.Tensor(mm_3, mm_5);  mm_3 = mm_5 = None
+    detach_7 = torch.ops.aten.detach.default(add);  add = None
+    return (detach_7,)""",
         )
 
     def test_chunked_loss_remat(self):
-        """Chunked loss pattern: multiple backward regions from chunk_loss.backward()
-        calls, but only the final x.backward() region needs remat. The pass should
-        skip the chunk backwards and only rematerialize for the final one."""
+        """Chunked loss: multiple backward regions from chunk_loss.backward(),
+        only the final x.backward() needs remat."""
         dim = 32
         chunksz = 4
 
@@ -2871,15 +2849,14 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         torch.testing.assert_close(result_with, result_without)
 
-        # Without remat, gelu appears once (forward only).
-        # With remat, gelu is duplicated into the backward region.
         gelu_without = self.count_op(gm_without, torch.ops.aten.gelu.default)
         gelu_with = self.count_op(gm_with, torch.ops.aten.gelu.default)
         self.assertEqual(gelu_without, 1)
         self.assertEqual(gelu_with, 2, "gelu should be recomputed in backward")
 
-    def test_two_backward_regions_needing_remat_errors(self):
-        """Two independent backward calls that both need recompute should error."""
+    def test_two_backward_regions_both_needing_remat(self):
+        """Two checkpointed blocks with two .backward() calls — both regions
+        get independent rematerialization."""
         dim = 32
 
         class Block(nn.Module):
@@ -2907,13 +2884,66 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 y.sum().backward()
                 return z.detach()
 
+        model = TwoBackwards()
         x = torch.randn(8, dim, requires_grad=True)
 
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.BackendCompilerFailed,
-            "require recomputation",
-        ):
-            self._compile_and_capture(TwoBackwards(), True, (x,))
+        result_with, gm_with = self._compile_and_capture(model, True, (x,))
+
+        torch._dynamo.reset()
+        result_without, gm_without = self._compile_and_capture(model, False, (x,))
+
+        torch.testing.assert_close(result_with, result_without)
+
+        gelu_without = self.count_op(gm_without, torch.ops.aten.gelu.default)
+        gelu_with = self.count_op(gm_with, torch.ops.aten.gelu.default)
+        self.assertEqual(gelu_without, 2)
+        self.assertGreater(
+            gelu_with, gelu_without, "backward regions should recompute gelu"
+        )
+
+    def test_two_autograd_grads_independent_recompute(self):
+        """Two autograd.grad calls on the same checkpointed output produce
+        independent recomputes, one per backward region — matching eager AC."""
+        x = torch.randn(2, 4, requires_grad=True)
+        w = torch.randn(4, 4, requires_grad=True)
+
+        def fn(x, w):
+            y = torch.utils.checkpoint.checkpoint(
+                lambda a, b: torch.sin(a @ b), x, w, use_reentrant=False
+            )
+            g1 = _grad(y.sum(), (x,), retain_graph=True)
+            g2 = _grad(y.sum(), (x,))
+            return (g1[0] + g2[0]).detach()
+
+        _, gm_with = self._compile_and_capture(fn, True, (x, w))
+
+        # mm_recomputed for first grad, mm_recomputed_1 for second grad
+        self.assertExpectedInline(
+            gm_with.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1):
+    mm = torch.ops.aten.mm.default(arg0_1, arg1_1)
+    sin = torch.ops.aten.sin.default(mm);  mm = None
+    sum_1 = torch.ops.aten.sum.default(sin)
+    ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
+    expand = torch.ops.aten.expand.default(ones_like, [2, 4]);  ones_like = None
+    mm_recomputed = torch.ops.aten.mm.default(arg0_1, arg1_1)
+    cos = torch.ops.aten.cos.default(mm_recomputed);  mm_recomputed = None
+    mul = torch.ops.aten.mul.Tensor(expand, cos);  expand = cos = None
+    t = torch.ops.aten.t.default(arg1_1)
+    mm_2 = torch.ops.aten.mm.default(mul, t);  mul = t = None
+    sum_2 = torch.ops.aten.sum.default(sin);  sin = None
+    ones_like_1 = torch.ops.aten.ones_like.default(sum_2, pin_memory = False, memory_format = torch.preserve_format);  sum_2 = None
+    expand_1 = torch.ops.aten.expand.default(ones_like_1, [2, 4]);  ones_like_1 = None
+    mm_recomputed_1 = torch.ops.aten.mm.default(arg0_1, arg1_1);  arg0_1 = None
+    cos_1 = torch.ops.aten.cos.default(mm_recomputed_1);  mm_recomputed_1 = None
+    mul_1 = torch.ops.aten.mul.Tensor(expand_1, cos_1);  expand_1 = cos_1 = None
+    t_1 = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
+    mm_4 = torch.ops.aten.mm.default(mul_1, t_1);  mul_1 = t_1 = None
+    add = torch.ops.aten.add.Tensor(mm_2, mm_4);  mm_2 = mm_4 = None
+    detach_2 = torch.ops.aten.detach.default(add);  add = None
+    return (detach_2,)""",
+        )
 
 
 devices = ["cuda", "hpu"]
