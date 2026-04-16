@@ -9103,9 +9103,6 @@ symbolic_aot_autograd_failures = {
         "nn.functional.batch_norm", ""
     ),  # '0 is not tracked with proxy for <torch.fx.experimental.proxy_te..
     xfail(
-        "nn.functional.binary_cross_entropy", ""
-    ),  # aten.fill_.Scalar - couldn't find symbolic meta funct...
-    xfail(
         "nn.functional.cross_entropy", ""
     ),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail(
@@ -9318,8 +9315,6 @@ symbolic_aot_autograd_module_failures = {
     torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.equal compares a mask input to a mask producing a bool
     torch.nn.GaussianNLLLoss,  # NotImplementedError: local_scalar_dense/item NYI for torch.bool
     torch.nn.FractionalMaxPool3d,  # int() argument must be a string, a bytes-like object or a number, not 'SymFloat'
-    torch.nn.BCELoss,  # new_size = _infer_size(target.size(), weight.size())
-    # RuntimeError: expected int at position 0, but got: SymInt
 }
 
 
