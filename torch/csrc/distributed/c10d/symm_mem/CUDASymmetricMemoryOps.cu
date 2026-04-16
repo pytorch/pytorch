@@ -1305,6 +1305,63 @@ at::Tensor stream_write_value32_(
   return input;
 }
 
+at::Tensor stream_wait_value32_(
+    at::Tensor& input,
+    int64_t offset,
+    int64_t val) {
+  TORCH_CHECK(
+      input.dim() == 1 && input.is_contiguous() &&
+          input.scalar_type() == c10::ScalarType::UInt32,
+      "symm_mem::stream_wait_value32_: input must be a flat, contiguous "
+      "uint32 tensor.");
+
+  TORCH_CHECK(
+      offset >= 0,
+      "symm_mem::stream_wait_value32_: offset must be greater than or "
+      "equal to 0 (got ",
+      offset,
+      ")");
+
+  TORCH_CHECK(
+      val >= 0 &&
+          static_cast<size_t>(val) <= std::numeric_limits<uint32_t>::max(),
+      "symm_mem::stream_wait_value32_: "
+      "val must be in the range of [0, 4294967295] (uint32_t).")
+
+  TORCH_CHECK(
+      offset < input.numel(),
+      "symm_mem::stream_wait_value32_: offset (",
+      offset,
+      ") exceeded the numel of the input (",
+      input.numel(),
+      ")");
+
+  auto addr = reinterpret_cast<uint32_t*>(input.data_ptr()) + offset;
+  c10::cuda::CUDAGuard guard(input.device());
+
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+  auto driver_api = c10::cuda::DriverAPI::get();
+  // cuStreamWaitValue32 blocks the stream until *addr >= val (with flags=0,
+  // i.e. CU_STREAM_WAIT_VALUE_GEQ). This is a non-blocking CE operation —
+  // the host thread returns immediately, only the stream pipeline stalls.
+  C10_CUDA_DRIVER_CHECK(driver_api->cuStreamWaitValue32_(
+      at::cuda::getCurrentCUDAStream(),
+      reinterpret_cast<CUdeviceptr>(addr),
+      val,
+      0));
+#elif defined(USE_ROCM)
+  C10_CUDA_CHECK(hipStreamWaitValue32(
+                                     at::cuda::getCurrentCUDAStream(),
+                                     reinterpret_cast<void*>(addr),
+                                     val,
+                                     0));
+#else
+  TORCH_CHECK(
+      false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
+#endif
+  return input;
+}
+
 } // namespace
 
 TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
@@ -1337,5 +1394,6 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("multimem_all_gather_out", ::multimem_all_gather_out);
 #endif
   m.impl("stream_write_value32_", ::stream_write_value32_);
+  m.impl("stream_wait_value32_", ::stream_wait_value32_);
   m.impl("memset32_", ::memset32_);
 }

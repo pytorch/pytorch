@@ -1261,6 +1261,18 @@ This class does not support ``__members__`` property.)");
           py::arg("offset"),
           py::arg("val"))
       .def_static(
+          "stream_wait_value32",
+          [](at::Tensor& input, int64_t offset, int64_t val) {
+            auto op =
+                c10::Dispatcher::singleton()
+                    .findSchemaOrThrow("symm_mem::stream_wait_value32_", "")
+                    .typed<at::Tensor(at::Tensor&, int64_t, int64_t)>();
+            return op.call(input, offset, val);
+          },
+          py::arg("input"),
+          py::arg("offset"),
+          py::arg("val"))
+      .def_static(
           "memset32",
           [](at::Tensor& input, int64_t offset, int64_t val, int64_t count) {
             // The range of `val` is checked inside the op
