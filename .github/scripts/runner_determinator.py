@@ -23,7 +23,11 @@ The user list has the following rules:
 
 - Users are GitHub usernames, which must start with the @ prefix
 - Each user is also a comma-separated list of features/experiments to enable
+- Each experiment can optionally include a per-user rollout percentage
+  using the syntax "experiment:percentage" (e.g. "arc:10" for 10% rollout)
+- Without a percentage, opted-in experiments are enabled 100% of the time
 - A "#" prefix opts the user out of all experiments
+- A "-" prefix on an experiment opts the user out of that experiment
 
 Example config:
     # A list of experiments that can be opted into.
@@ -42,12 +46,14 @@ Example config:
     # Opt-ins:
     # Users can opt into the LF fleet by adding their GitHub username to this list
     # and specifying experiments to enable in a comma-separated list.
+    # Optionally append :N to set a per-user rollout percentage (0-100).
     # To always opt out of an experiment, prefix it with a "-".
     # Experiments should be from the above list.
 
     @User1,-lf,split_build
     @User2,lf
     @User3,split_build
+    @User4,lf,arc:10
 """
 
 import json
@@ -301,9 +307,18 @@ def extract_settings_user_opt_in_from_text(rollout_state: str) -> tuple[str, str
         return "", rollout_state
 
 
-class UserOptins(dict[str, list[str]]):
+class UserExperimentConfig(NamedTuple):
     """
-    Dictionary of users with a list of features they have opted into
+    Per-user experiment configuration parsed from the opt-in line.
+    """
+
+    name: str
+    rollout_perc: float = 100  # default: always enabled when opted in
+
+
+class UserOptins(dict[str, list[UserExperimentConfig]]):
+    """
+    Dictionary of users with a list of experiment configs they have opted into
     """
 
 
@@ -326,7 +341,32 @@ def parse_user_opt_in_from_text(user_optin_text: str) -> UserOptins:
 
         if user:
             usr_name = user.split(",")[0].strip("@")
-            optins[usr_name] = [exp.strip(" ") for exp in user.split(",")[1:]]
+            configs = []
+            for exp_str in user.split(",")[1:]:
+                exp_str = exp_str.strip(" ")
+                if not exp_str:
+                    continue
+                # Parse optional per-user rollout percentage (e.g. "arc:10")
+                # Opt-out entries (e.g. "-lf") never have a percentage
+                if ":" in exp_str and not exp_str.startswith("-"):
+                    name, perc_str = exp_str.split(":", 1)
+                    try:
+                        perc = float(perc_str)
+                    except ValueError:
+                        log.warning(
+                            f"Invalid rollout percentage for user {usr_name}, experiment {exp_str}. Defaulting to 100%."
+                        )
+                        perc = 100
+                    if not (0 <= perc <= 100):
+                        log.warning(
+                            f"Rollout percentage {perc} for user {usr_name}, experiment {name} "
+                            f"is out of range [0, 100]. Clamping."
+                        )
+                        perc = max(0.0, min(100.0, perc))
+                    configs.append(UserExperimentConfig(name=name, rollout_perc=perc))
+                else:
+                    configs.append(UserExperimentConfig(name=exp_str, rollout_perc=100))
+            optins[usr_name] = configs
 
     return optins
 
@@ -411,11 +451,24 @@ def parse_users(rollout_state: str) -> UserOptins:
     return parse_user_opt_in_from_text(users_text)
 
 
+def get_user_experiment_config(
+    user: str, user_optins: UserOptins, experiment_name: str
+) -> UserExperimentConfig | None:
+    """
+    Get a user's experiment config if they are opted in.
+    Returns None if the user is not opted into the experiment.
+    """
+    for config in user_optins.get(user, []):
+        if config.name == experiment_name:
+            return config
+    return None
+
+
 def is_user_opted_in(user: str, user_optins: UserOptins, experiment_name: str) -> bool:
     """
     Check if a user is opted into an experiment
     """
-    return experiment_name in user_optins.get(user, [])
+    return get_user_experiment_config(user, user_optins, experiment_name) is not None
 
 
 def is_user_opted_out(user: str, user_optins: UserOptins, experiment_name: str) -> bool:
@@ -424,7 +477,10 @@ def is_user_opted_out(user: str, user_optins: UserOptins, experiment_name: str) 
     """
     # if the experiment is prefixed with a "-", then it's an opt-out
     experiment_optout = "-" + experiment_name
-    if experiment_optout not in user_optins.get(user, []):
+    opted_out = any(
+        config.name == experiment_optout for config in user_optins.get(user, [])
+    )
+    if not opted_out:
         return False
 
     if is_user_opted_in(user, user_optins, experiment_name):
@@ -499,10 +555,37 @@ def get_runner_prefix(
 
         enabled = False
         if opted_in_users:
-            log.info(
-                f"{', '.join(opted_in_users)} have opted into experiment {experiment_name}."
-            )
-            enabled = True
+            # Get the minimum per-user rollout percentage among opted-in requesters.
+            # This is conservative: if the PR author sets 10%, that intent is respected
+            # even if the triggering actor (e.g. pytorchmergebot) has 100%.
+            user_rollout_percs = [
+                get_user_experiment_config(u, user_optins, experiment_name).rollout_perc
+                for u in opted_in_users
+            ]
+            min_perc = min(user_rollout_percs)
+
+            if min_perc >= 100:
+                log.info(
+                    f"{', '.join(opted_in_users)} have opted into experiment {experiment_name}."
+                )
+                enabled = True
+            elif min_perc > 0:
+                if random.uniform(0, 100) <= min_perc:
+                    log.info(
+                        f"{', '.join(opted_in_users)} have opted into experiment {experiment_name} "
+                        f"with {min_perc}% rollout. Enabling this run."
+                    )
+                    enabled = True
+                else:
+                    log.info(
+                        f"{', '.join(opted_in_users)} have opted into experiment {experiment_name} "
+                        f"with {min_perc}% rollout. Not enabling this run."
+                    )
+            else:
+                log.info(
+                    f"{', '.join(opted_in_users)} have opted into experiment {experiment_name} "
+                    f"with 0% rollout. Not enabling."
+                )
 
         elif experiment_settings.rollout_perc:
             # If no user is opted in, then we randomly enable the experiment based on the rollout percentage
