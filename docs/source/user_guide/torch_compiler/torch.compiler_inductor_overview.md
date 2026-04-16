@@ -333,7 +333,11 @@ tlparse /tmp/my_traced_log_dir -o tl_out/
 
 The generated HTML organizes log artifacts by compile ID. For example:
 
-<!-- TODO: Add tlparse output screenshot from Google Doc (image showing compile ID artifacts) -->
+```{image} ../../_static/img/inductor_user_guide/tlparse_output.png
+:alt: tlparse output showing compile artifacts organized by compile ID
+:width: 600px
+:align: center
+```
 
 Among other things, you can observe the post-grad graph discussed earlier (in
 `0_0_0/inductor_post_grad_graph_6.txt`) and the generated code (in

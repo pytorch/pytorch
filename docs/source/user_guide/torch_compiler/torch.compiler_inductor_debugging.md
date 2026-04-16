@@ -126,7 +126,11 @@ $ ls output
 
 `index.html` renders like this:
 
-<!-- TODO: Add tlparse index.html screenshot from Google Doc (showing Stack Frames and compile artifacts organized by compile ID) -->
+```{image} ../../_static/img/inductor_user_guide/tlparse_index.png
+:alt: tlparse index.html showing Stack Frames and compile artifacts organized by compile ID
+:width: 600px
+:align: center
+```
 
 This view shows different **Stack Frames**, which
 together form a **Stack Trie**. Each of these frames correspond to one or more
@@ -143,7 +147,11 @@ was triggered.
 You can view timing information by going to <https://ui.perfetto.dev/> and
 opening up the file `chromium_events.json`:
 
-<!-- TODO: Add Perfetto timing view screenshot from Google Doc (showing runtime breakdown of compiler phases) -->
+```{image} ../../_static/img/inductor_user_guide/perfetto_timing.png
+:alt: Perfetto timing view showing runtime breakdown of compiler phases
+:width: 600px
+:align: center
+```
 
 This view breaks down the runtime
 of various important phases in the compiler and can be helpful when debugging
