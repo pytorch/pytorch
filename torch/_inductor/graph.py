@@ -1618,7 +1618,7 @@ class GraphLowering(torch.fx.Interpreter):
                 value,
                 (
                     TorchBindObject,
-                    sympy.Expr,
+                    sympy.Basic,
                     torch._inductor.ir.GeneratorState,
                     torch._inductor.ir.OpaqueObjectState,
                 ),
