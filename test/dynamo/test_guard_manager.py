@@ -11,8 +11,11 @@ import torch._dynamo.test_case
 from torch._C._dynamo import guards
 from torch._dynamo.convert_frame import GlobalStateGuard
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
-from torch.testing._internal.common_utils import set_default_dtype
+from torch.testing._internal.common_utils import requires_cuda, set_default_dtype
 
+
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 RootGuardManager = guards.RootGuardManager
 DictGuardManager = guards.DictGuardManager
@@ -445,7 +448,8 @@ user_stack=None)
         del x
         self.assertFalse(guard(weakref_x()))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+    @requires_cuda
     def test_call_function_no_args_guard(self):
         root = RootGuardManager()
         x = torch.cuda.current_device()

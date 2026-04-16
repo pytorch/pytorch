@@ -16,7 +16,9 @@ import torch._functorch.config
 import torch.distributed as dist
 import torch.nn as nn
 import torch.utils.checkpoint
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 from functorch.compile import (
+
     default_partition,
     min_cut_rematerialization_partition,
     nop,
@@ -2296,7 +2298,7 @@ class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
 
         return result, captured_gm
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(not torch.accelerator.is_available(), "CUDA not available")
     def test_ac_rematerialize_simple_forward_backward(self):
         x = torch.randn(4, 4, requires_grad=True)
         y = torch.randn(4, 4, requires_grad=True)

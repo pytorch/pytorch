@@ -10,6 +10,9 @@ from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 def checkpoint_wrapper(fn):
     def inner(*args):
         return torch.utils.checkpoint.checkpoint(fn, *args, use_reentrant=True)
@@ -173,7 +176,7 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
             a * b,
             b,
             dtype=torch.bfloat16,
-            device="cuda",
+            device=device_type,
             requires_grad=True,
         )
 

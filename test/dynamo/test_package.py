@@ -17,7 +17,9 @@ from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.testing import reduce_to_scalar_loss
 from torch._functorch import config as functorch_config
 from torch._inductor.runtime.runtime_utils import cache_dir
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 from torch.testing._internal.common_utils import (
+
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -67,7 +69,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.linear = torch.nn.Linear(10, 10, device="cuda")
+                self.linear = torch.nn.Linear(10, 10, device=device_type)
 
             def forward(self, x):
                 return self.linear(x)
@@ -75,7 +77,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
         fn = MyModule()
         package = CompilePackage(fn.forward)
         compiled_fn = torch._dynamo.optimize("inductor", package=package)(fn)
-        x = torch.randn(10, 10, device="cuda")
+        x = torch.randn(10, 10, device=device_type)
         compiled_fn(x)
 
     @parametrize("backend", ("eager", "inductor"))

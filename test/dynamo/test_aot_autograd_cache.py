@@ -23,7 +23,9 @@ import torch._functorch.aot_autograd as aot_autograd
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 from torch._functorch._aot_autograd.autograd_cache import (
+
     AOTAutogradCache,
     AOTAutogradCachePickler,
     autograd_cache_key,
@@ -574,7 +576,7 @@ class AOTAutogradCacheTests(InductorTestCase):
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
     @functorch_config.patch({"strict_autograd_cache": True})
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not torch.accelerator.is_available(), "CUDA is unavailable")
     @requires_triton()
     def test_non_bundled_to_bundled_config_change(self):
         if functorch_config.bundled_autograd_cache:
@@ -791,7 +793,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         def fn(a):
             return MyAutogradFunction.apply(a)
 
-        a = torch.randn(5, device="cuda", requires_grad=True)
+        a = torch.randn(5, device=device_type, requires_grad=True)
         a2 = a.clone().detach_().requires_grad_(True)
         compiled_fn = torch.compile(fn, backend="inductor")
         result = compiled_fn(a)
@@ -847,7 +849,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         def fn(a):
             return MyAutogradFunction.apply(a)
 
-        a = torch.randn(5, device="cuda", requires_grad=True)
+        a = torch.randn(5, device=device_type, requires_grad=True)
         a2 = a.clone().detach_().requires_grad_(True)
         compiled_fn = torch.compile(fn, backend="inductor")
         result = compiled_fn(a)
@@ -1841,8 +1843,8 @@ class AOTAutogradCacheTests(InductorTestCase):
         def f(x, y):
             return x.sin() + y
 
-        x = torch.randn(10, device="cuda")
-        y = torch.randn(10, device="cuda")
+        x = torch.randn(10, device=device_type)
+        y = torch.randn(10, device=device_type)
         with torch.no_grad():
             result = f(x, y)
             self.assertEqual(result, x.sin() + y)
@@ -1887,7 +1889,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not torch.accelerator.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
@@ -1989,7 +1991,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 3)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 3)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not torch.accelerator.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)

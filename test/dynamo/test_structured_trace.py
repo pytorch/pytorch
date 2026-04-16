@@ -28,6 +28,9 @@ from torch.testing._internal.triton_utils import requires_cuda_and_triton
 if torch.distributed.is_available():
     from torch.testing._internal.distributed.fake_pg import FakeStore
 
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 HAS_TLPARSE = shutil.which("tlparse") is not None
 requires_tlparse = unittest.skipUnless(HAS_TLPARSE, "requires tlparse")
 requires_distributed = functools.partial(
@@ -60,7 +63,7 @@ def inductor_error_fn(a):
 
 
 def inductor_schedule_fn(a):
-    output = a.add(torch.ones(1000, 1000, device="cuda"))
+    output = a.add(torch.ones(1000, 1000, device=device_type))
     return output
 
 
@@ -322,7 +325,7 @@ class StructuredTraceTest(TestCase):
     @requires_cuda_and_triton
     def test_schedule(self):
         fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
-        fn_opt(torch.ones(1000, 1000, device="cuda"))
+        fn_opt(torch.ones(1000, 1000, device=device_type))
         self.assertExpectedInline(
             self.buffer.getvalue(),
             """\
@@ -356,7 +359,7 @@ class StructuredTraceTest(TestCase):
     @requires_cuda_and_triton
     def test_cudagraphs(self):
         fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)
-        fn_opt(torch.ones(1000, 1000, device="cuda"))
+        fn_opt(torch.ones(1000, 1000, device=device_type))
         self.assertExpectedInline(
             self.buffer.getvalue(),
             """\
@@ -1286,9 +1289,9 @@ def forward(self, x_1: "f32[2][1]cpu"):
             with self._setup_runtime_estimates_capture() as payload_buffer:
                 torch._dynamo.reset()
 
-                mod = SimpleModule().cuda()
+                mod = SimpleModule().to(device_type)
                 compiled = torch.compile(mod, backend="inductor")
-                compiled(torch.randn(4, 4, device="cuda"))
+                compiled(torch.randn(4, 4, device=device_type))
 
                 # Verify runtime + tensor meta artifact was logged
                 self.assertIn(
@@ -1353,9 +1356,9 @@ def forward(self, x_1: "f32[2][1]cpu"):
             with self._setup_runtime_estimates_capture() as payload_buffer:
                 torch._dynamo.reset()
 
-                mod = MixedModule().cuda()
+                mod = MixedModule().to(device_type)
                 compiled = torch.compile(mod, backend="inductor")
-                compiled(torch.randn(4, 4, device="cuda"))
+                compiled(torch.randn(4, 4, device=device_type))
 
                 # Verify artifact was logged
                 self.assertIn(
@@ -1407,9 +1410,9 @@ def forward(self, x_1: "f32[2][1]cpu"):
         try:
             with self._setup_runtime_estimates_capture() as payload_buffer:
                 torch._dynamo.reset()
-                mod = Mixed().cuda()
+                mod = Mixed().to(device_type)
                 compiled = torch.compile(mod, backend="inductor")
-                compiled(torch.randn(4, 4, device="cuda"))
+                compiled(torch.randn(4, 4, device=device_type))
                 payload = payload_buffer.getvalue().strip()
                 if payload:
                     data = json.loads(payload)

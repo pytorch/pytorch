@@ -48,7 +48,9 @@ from torch._dynamo.comptime import comptime
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.source import ConstantSource, GetItemSource, LocalSource
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 from torch._dynamo.testing import (
+
     CompileCounter,
     CompileCounterWithBackend,
     expectedFailureDynamic,
@@ -269,8 +271,8 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
             return cumsum.sum()
 
-        a = torch.rand(100, 30, device="cuda")
-        b = torch.rand(100, 30, device="cuda")
+        a = torch.rand(100, 30, device=device_type)
+        b = torch.rand(100, 30, device=device_type)
 
         torch._dynamo.decorators.mark_unbacked(a, 0)
         torch._dynamo.decorators.mark_unbacked(a, 1)
@@ -1030,7 +1032,7 @@ graph():
         self.assertTrue(res.offloading_activation)
 
     @unittest.skipIf(
-        not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0),
+        not torch.accelerator.is_available() or not (hasattr(torch.cuda, 'get_device_capability') and torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0)),
         "requires Hopper+ (SM >= 9.0) for TMA",
     )
     @unittest.skipIf(
@@ -1088,7 +1090,7 @@ graph():
             )
             return out
 
-        x = torch.randn(M, N, device="cuda")
+        x = torch.randn(M, N, device=device_type)
 
         from contextlib import contextmanager
 
@@ -1106,7 +1108,7 @@ graph():
         def fn_with_set_allocator(x):
             triton.set_allocator(
                 lambda size, alignment, stream: torch.empty(
-                    size, device="cuda", dtype=torch.int8
+                    size, device=device_type, dtype=torch.int8
                 )
             )
             return run_kernel(x)
@@ -15714,7 +15716,7 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             opt_fn2 = torch.compile(fn2, backend="eager", fullgraph=True)
             res = opt_fn2(x2)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @torch._dynamo.config.patch(recompile_limit=999)
     def test_legacy_cuda_tensor(self):
         typs = [
@@ -15903,9 +15905,9 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
             result = x_bool * sentinel
             return result
 
-        x_true = torch.tensor([True], device="cuda")
-        x_false = torch.tensor([False], device="cuda")
-        sentinel = torch.tensor(2.0, requires_grad=True, device="cuda")
+        x_true = torch.tensor([True], device=device_type)
+        x_false = torch.tensor([False], device=device_type)
+        sentinel = torch.tensor(2.0, requires_grad=True, device=device_type)
         eager_result_true = symbool_mul_fn(x_true, sentinel)
         eager_result_false = symbool_mul_fn(x_false, sentinel)
         compiled_fn = torch.compile(
@@ -15931,9 +15933,9 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
         compiled_guard_fn = torch.compile(
             symbool_guard_fn, backend="eager", dynamic=True
         )
-        a_true = torch.tensor(True, device="cuda")
-        a_false = torch.tensor(False, device="cuda")
-        b = torch.randn(6, device="cuda")
+        a_true = torch.tensor(True, device=device_type)
+        a_false = torch.tensor(False, device=device_type)
+        b = torch.randn(6, device=device_type)
         eager_res_true = symbool_guard_fn(a_true, b)
         compiled_res_true = compiled_guard_fn(a_true, b)
         self.assertEqual(eager_res_true, compiled_res_true)
@@ -15954,8 +15956,8 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
                 result = result.real
             return result
 
-        sentinel = torch.tensor(1.0, requires_grad=True, device="cuda")
-        arg_0 = torch.tensor([True], dtype=torch.bool, device="cuda")
+        sentinel = torch.tensor(1.0, requires_grad=True, device=device_type)
+        arg_0 = torch.tensor([True], dtype=torch.bool, device=device_type)
         args = (arg_0,) + (sentinel,)
         try:
             compiled_program = torch.compile(
@@ -16034,7 +16036,7 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
         with torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False):
             compiled = torch.compile(container, backend="eager", fullgraph=True)
 
-            inp1 = torch.randn(4, 4, 4, device="cuda")
+            inp1 = torch.randn(4, 4, 4, device=device_type)
 
             # First call with CUDA input
             compiled_result1 = compiled(inp1)
@@ -16059,13 +16061,13 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
                 self.to("cpu")
                 return x
 
-        mod = Model().cuda()
+        mod = Model().to(device_type)
         with torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False):
             fn = torch.compile(mod, backend="aot_eager", fullgraph=True)
-            x = torch.randn(10, 10, device="cuda")
+            x = torch.randn(10, 10, device=device_type)
             ref = fn(x)
             self.assertEqual(str(mod.fc.weight.device), "cpu")
-            mod.cuda()
+            mod.to(device_type)
             ref = fn(
                 x
             )  # second time compile runs, we should also move the module to cpu device

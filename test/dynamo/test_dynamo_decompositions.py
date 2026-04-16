@@ -9,6 +9,9 @@ from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
 from torch.testing._internal.common_utils import run_tests, skipIfCrossRef
 
 
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 class TestDynamoDecompositions(torch._dynamo.test_case.TestCase):
     """Tests for enable_dynamo_decompositions config flag.
 
@@ -629,9 +632,9 @@ class GraphModule(torch.nn.Module):
         """On CUDA, ATen add_ with tensor alpha extracts the scalar and uses
         fma(other, alpha, self). Our decomposition must use fma to match."""
         torch.manual_seed(42)
-        x = torch.randn(64, 64, device="cuda")
-        other = torch.randn(64, 64, device="cuda")
-        alpha = torch.tensor(2.3, device="cuda")
+        x = torch.randn(64, 64, device=device_type)
+        other = torch.randn(64, 64, device=device_type)
+        alpha = torch.tensor(2.3, device=device_type)
 
         def fn(x, other, alpha):
             return x.add_(other, alpha=alpha)
@@ -651,8 +654,8 @@ class GraphModule(torch.nn.Module):
         mismatches on typical inputs (e.g. Adagrad's addcmul_(grad, grad, value=1)).
         """
         torch.manual_seed(42)
-        x = torch.randn(64, 64, device="cuda")
-        t1 = torch.randn(64, 64, device="cuda")
+        x = torch.randn(64, 64, device=device_type)
+        t1 = torch.randn(64, 64, device=device_type)
 
         def fn(x, t1):
             # value=1 is a constant, triggers fma path in decomposition
@@ -668,9 +671,9 @@ class GraphModule(torch.nn.Module):
     def test_addcmul_scalar_value_cuda(self):
         """Compiled addcmul_ with scalar value matches eager on CUDA."""
         torch.manual_seed(42)
-        x = torch.randn(64, 64, device="cuda")
-        t1 = torch.randn(64, 64, device="cuda")
-        t2 = torch.randn(64, 64, device="cuda")
+        x = torch.randn(64, 64, device=device_type)
+        t1 = torch.randn(64, 64, device=device_type)
+        t2 = torch.randn(64, 64, device=device_type)
 
         def fn(x, t1, t2):
             return x.addcmul_(t1, t2, value=0.5)
@@ -685,10 +688,10 @@ class GraphModule(torch.nn.Module):
     def test_addcmul_tensor_value_cuda(self):
         """Compiled addcmul_ with tensor value matches eager on CUDA."""
         torch.manual_seed(42)
-        x = torch.randn(64, 64, device="cuda")
-        t1 = torch.randn(64, 64, device="cuda")
-        t2 = torch.randn(64, 64, device="cuda")
-        value = torch.tensor(0.5, device="cuda")
+        x = torch.randn(64, 64, device=device_type)
+        t1 = torch.randn(64, 64, device=device_type)
+        t2 = torch.randn(64, 64, device=device_type)
+        value = torch.tensor(0.5, device=device_type)
 
         def fn(x, t1, t2, value):
             return x.addcmul_(t1, t2, value=value)
@@ -707,9 +710,9 @@ class GraphModule(torch.nn.Module):
         which nvcc can optimize differently than separate div + fma kernels.
         """
         torch.manual_seed(42)
-        x = torch.randn(64, 64, device="cuda")
-        t1 = torch.randn(64, 64, device="cuda")
-        t2 = torch.randn(64, 64, device="cuda") + 0.1
+        x = torch.randn(64, 64, device=device_type)
+        t1 = torch.randn(64, 64, device=device_type)
+        t2 = torch.randn(64, 64, device=device_type) + 0.1
 
         def fn(x, t1, t2):
             return x.addcdiv_(t1, t2, value=-0.01)
@@ -728,10 +731,10 @@ class GraphModule(torch.nn.Module):
         which nvcc can optimize differently than separate div + fma kernels.
         """
         torch.manual_seed(42)
-        x = torch.randn(64, 64, device="cuda")
-        t1 = torch.randn(64, 64, device="cuda")
-        t2 = torch.randn(64, 64, device="cuda") + 0.1
-        value = torch.tensor(-0.01, device="cuda")
+        x = torch.randn(64, 64, device=device_type)
+        t1 = torch.randn(64, 64, device=device_type)
+        t2 = torch.randn(64, 64, device=device_type) + 0.1
+        value = torch.tensor(-0.01, device=device_type)
 
         def fn(x, t1, t2, value):
             return x.addcdiv_(t1, t2, value=value)
@@ -746,8 +749,8 @@ class GraphModule(torch.nn.Module):
     def test_add_scalar_alpha_cuda(self):
         """Compiled add_ with scalar alpha matches eager on CUDA."""
         torch.manual_seed(42)
-        x = torch.randn(64, 64, device="cuda")
-        other = torch.randn(64, 64, device="cuda")
+        x = torch.randn(64, 64, device=device_type)
+        other = torch.randn(64, 64, device=device_type)
 
         def fn(x, other):
             return x.add_(other, alpha=2.3)

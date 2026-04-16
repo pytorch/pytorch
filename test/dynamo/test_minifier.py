@@ -7,6 +7,9 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_utils import skipIfNNModuleInlined
 
 
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 requires_gpu = unittest.skipUnless(
     torch.cuda.is_available() or torch.xpu.is_available(), "requires cuda or xpu"
 )

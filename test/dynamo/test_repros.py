@@ -1,3 +1,5 @@
+
+
 """
 PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_rewrite_assert_with_msg and test_rewrite_assert_without_msg)
@@ -34,6 +36,8 @@ from unittest import mock
 import numpy as np
 
 import torch
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
@@ -76,6 +80,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    requires_accelerator,
     serialTest,
     skipIfHpu,
     skipIfWindows,
@@ -978,8 +983,9 @@ class IncByTwo:
 
 
 class LRUCacheWarningTests(LoggingTestCase):
-    @requires_cuda
+    @requires_accelerator
     @make_logging_test(dynamo=logging.DEBUG)
+    @requires_cuda
     def test_lru_cache_warning_issued_during_tracing(self, records):
         prev_default = torch._C._get_default_device()
 
@@ -4106,7 +4112,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         out2 = torch.empty(12, dtype=torch.int32)
         opt_model(17, (12,), out2)
 
-    @requires_cuda
+    @requires_accelerator
     @serialTest()
     def test_mem_leak_guards(self):
         def gn(x0, x):
@@ -4127,10 +4133,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 x = gn(running_x, x)
                 return x
 
-        mod = MyMod().cuda()
+        mod = MyMod().to(device_type)
 
         fn = torch.compile(mod, backend="eager")
-        x = torch.randn(10, 10, device="cuda")
+        x = torch.randn(10, 10, device=device_type)
         torch.cuda.reset_peak_memory_stats()
 
         fn(x)
@@ -4141,6 +4147,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         peak_mem2 = torch.cuda.max_memory_allocated()
         self.assertTrue(peak_mem1 == peak_mem2)
 
+    @requires_accelerator
     @requires_cuda
     def test_guard_default_device(self):
         try:
@@ -4966,8 +4973,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # See https://github.com/pytorch/pytorch/issues/161010
 
     def test_preserve_stride_with_clone(self) -> None:
-        A = torch.rand(5, 5, device="cuda" if torch.cuda.is_available() else "cpu")
-        B = torch.rand(5, 5, device="cuda" if torch.cuda.is_available() else "cpu")
+        A = torch.rand(5, 5, device=device_type if torch.cuda.is_available() else "cpu")
+        B = torch.rand(5, 5, device=device_type if torch.cuda.is_available() else "cpu")
 
         def fn(
             src: torch.Tensor, count: torch.Tensor
@@ -6363,7 +6370,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         fn(torch.randn(4))
 
-    @requires_cuda
+    @requires_accelerator
     # test involves custom ops that return unbacked symints
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     # test requires the activation memory budget code to think
@@ -6415,13 +6422,13 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             z2 = torch.ops.test_partitioner.j(z, z2)
             return torch.matmul(x, param).sin() * z2.sum()
 
-        x = torch.randn(512, 512, device="cuda")
-        param = torch.randn(512, 512, device="cuda", requires_grad=True)
+        x = torch.randn(512, 512, device=device_type)
+        param = torch.randn(512, 512, device=device_type, requires_grad=True)
         out_ref = f(x, param)
         out_test = torch.compile(f, backend="aot_eager_decomp_partition")(x, param)
         self.assertEqual(out_ref, out_test)
 
-    @requires_cuda
+    @requires_accelerator
     # This test will fail as flip in combination with particular input lengths
     # produces weird results.
     # This is under investigations in
@@ -7776,6 +7783,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(model(*inputs), compiled_model(*inputs))
 
     # https://github.com/pytorch/pytorch/issues/151670
+    @requires_accelerator
     @requires_cuda
     def test_diagonal_scatter_single_elem_cpu_with_cuda_tensor(self):
         class Model(torch.nn.Module):
@@ -8027,7 +8035,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
         f(torch.ones(2, device=device, dtype=torch.float64))
 
-    @requires_cuda
+    @requires_accelerator
     def test_norm_dtype(self, device):
         def foo(_stack0):
             getitem = _stack0[(slice(None, None, None), -1)]
@@ -8159,7 +8167,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
-    @requires_cuda
+    @requires_accelerator
     def test_memleak_when_graph_input_has_tensor_attr(self, device):
         @torch.compile(backend="eager")
         def f(x):
@@ -8238,7 +8246,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(cnt.frame_count, 1)
 
-    @requires_cuda
+    @requires_accelerator
     def test_sdpa_dynamic_shapes(self, device):
         def f(x, s0, s1, s2):
             q = x.view(2, s0, s2, s0)
@@ -8260,7 +8268,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             self.assertEqual(out_ref, out)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "requires gpu with fp8 support")
-    @requires_cuda
+    @requires_accelerator
     def test_partitioner_saves_weights_for_bw(self):
         def mul_tiled(a, *bs):
             for b in bs:
@@ -8348,17 +8356,17 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
                 super().__init__()
                 self.a = torch.nn.Parameter(
                     torch.randn(
-                        64, 64, dtype=torch.bfloat16, device="cuda", requires_grad=True
+                        64, 64, dtype=torch.bfloat16, device=device_type, requires_grad=True
                     )
                 )
                 self.b = torch.nn.Parameter(
                     torch.randn(
-                        64, 64, dtype=torch.bfloat16, device="cuda", requires_grad=True
+                        64, 64, dtype=torch.bfloat16, device=device_type, requires_grad=True
                     )
                 )
                 self.bias = torch.nn.Parameter(
                     torch.randn(
-                        64, dtype=torch.bfloat16, device="cuda", requires_grad=True
+                        64, dtype=torch.bfloat16, device=device_type, requires_grad=True
                     )
                 )
 
@@ -8370,7 +8378,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
                 out = out.unflatten(0, input.shape[:-1])
                 return out
 
-        m = CustomLinear(64, 64, dtype=torch.bfloat16, device="cuda")
+        m = CustomLinear(64, 64, dtype=torch.bfloat16, device=device_type)
         m = torch.compile(m, backend="aot_eager")
 
         # simple mode to track how many collective ops we saw in the backward
@@ -8386,7 +8394,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
                 self.ops_counter[func] += 1
                 return rs
 
-        a = torch.randn(64, 64, dtype=torch.bfloat16, device="cuda", requires_grad=True)
+        a = torch.randn(64, 64, dtype=torch.bfloat16, device=device_type, requires_grad=True)
         out = m(a)
         with TrackingMode() as mode:
             out.sum().backward()
@@ -8527,7 +8535,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         out2 = torch.compile(model, backend="eager")(input.clone())
         self.assertEqual(out1, out2)
 
-    @requires_cuda
+    @requires_accelerator
     def test_zero_dim_param_mixed_device_grad(self):
         # cpu 0-dim params with cuda grads
         # https://github.com/pytorch/pytorch/issues/160084
@@ -8556,10 +8564,10 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     def test_cuda_sync(self):
         def fn(x):
             y = x + 1
-            torch.cuda.synchronize()
+            torch.accelerator.synchronize()
             return y * 2
 
-        x = torch.ones(2, device="cuda")
+        x = torch.ones(2, device=device_type)
         cnt = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt)
         self.assertEqual(fn(x), opt_fn(x))
@@ -8992,7 +9000,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 2)
 
     @skipIfHpu
-    @requires_cuda
+    @requires_accelerator
     def test_deterministic_pad_replicate_compile(self, device):
         from torch.testing._internal.common_utils import DeterministicGuard
 
@@ -9007,7 +9015,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             ref_grad = torch.autograd.grad(ref.sum(), x)
             self.assertEqual(grad, ref_grad)
 
-    @requires_cuda
+    @requires_accelerator
     @unittest.skipIf(
         TEST_WITH_ROCM or not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "flash attention not supported",
