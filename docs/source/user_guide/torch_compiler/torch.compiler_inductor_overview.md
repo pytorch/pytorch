@@ -2,9 +2,20 @@
 
 # Architecture Overview
 
-This page describes the software architecture of TorchInductor, with a
-step-by-step example illustrating how it compiles a simple PyTorch program into
-an optimized Triton kernel.
+This page describes the software architecture of TorchInductor, with examples
+illustrating the various optimizations and features of the backend.
+
+TorchInductor is an optimizing compiler for PyTorch that lowers captured
+computation graphs into hardware-optimized execution. Its most important
+optimization is operator fusion, which reduces memory bandwidth by combining
+multiple operations into single fused kernels. TorchInductor primarily generates
+Triton kernels for GPUs and vectorized C++ kernels for CPUs.
+
+As the default backend for `torch.compile`, TorchInductor handles both training
+and inference. It applies graph-level rewrites to FX graphs composed of PyTorch
+IR before and after forward-backward partitioning. Finally, it lowers from
+PyTorch IR to Inductor IR, fuses operators, and generates the final fused
+kernels.
 
 ## Software Architecture
 
@@ -24,6 +35,7 @@ kernels. The high-level components involved in that translation are:
   the model's forward pass without requiring code changes. Torch IR consists of
   Python functions (for example, `torch.add`) and supports the full
   [2000+ PyTorch operator set](https://dev-discuss.pytorch.org/t/where-do-the-2000-pytorch-operators-come-from-more-than-you-wanted-to-know/373).
+  Later in the pipeline, operators are decomposed to a minimal operator set.
   Note that after TorchDynamo, we only have the forward graph.
 
 - **AOT (Ahead-of-Time) Dispatcher**: Historically known as AOT Autograd, the
@@ -61,8 +73,8 @@ page.
 
 The entry point into TorchInductor is the `compile_fx` function in
 [compile_fx.py](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/compile_fx.py),
-which orchestrates compilation of an FX graph. This includes calling AOT
-Autograd as well as TorchInductor's optimizations and code generation.
+which orchestrates the compilation of an FX graph. Compilation includes calling
+AOT Autograd, as well as TorchInductor's optimizations and code generation.
 
 TorchInductor receives FX graphs in Torch IR from TorchDynamo and applies a
 series of passes to generate optimized kernels:
@@ -70,32 +82,35 @@ series of passes to generate optimized kernels:
 1. **[Pre-grad passes](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/fx_passes/pre_grad.py)**:
    Run on high-level Torch IR (for example, `torch.nn.functional.linear`) which
    contains 2000+ ops. The high-level IR makes it easier to perform pattern
-   matching and can expose fusion opportunities. However, the IR has not been
-   normalized or functionalized, so pre-grad passes must be safe with respect to
-   aliasing and mutation.
+   matching and can expose fusion opportunities. However, the IR has neither been
+   normalized (i.e., not in a canonicalized form) nor functionalized (i.e., not
+   in SSA form), so pre-grad passes must be safe with respect to aliasing and
+   mutation.
 
 2. **[AOT Autograd](https://github.com/pytorch/pytorch/blob/main/torch/_functorch/aot_autograd.py)**:
-   Traces the forward graph and derives the backward graph. During tracing, the
-   IR is functionalized (put in SSA form), normalized (canonicalized), and
-   decomposed into simpler ATen IR. At the end of this step, we have a joint
-   forward-backward graph.
+   Runs the FX graph to trace the forward and derive the backward graph. During
+   tracing, the IR is functionalized (put in SSA form), normalized
+   (canonicalized), and decomposed into simpler, fundamental ATen IR. At the end
+   of this step, we have a joint forward-backward graph.
 
 3. **[Joint graph passes](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/fx_passes/joint_graph.py)**:
    Run on the combined forward and backward graphs from AOT Autograd. These
    optimizations are used when both the forward and backward implementation of
-   an operator need to change.
+   an operator need to change. Some pattern matching is run at this stage, for
+   example.
 
 4. **[Partitioner](https://dev-discuss.pytorch.org/t/min-cut-optimal-recomputation-i-e-activation-checkpointing-with-aotautograd/467)**:
    A min-cut partitioner splits the joint graph into separate forward and
-   backward graphs, minimizing global memory accesses.
+   backward graphs, minimizing global memory accesses and improving memory.
 
 5. **[Post-grad passes](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/fx_passes/post_grad.py)**:
    Receive normalized, functionalized, and partitioned forward and backward
    graphs. They run optimizations such as no-op elimination, dead code
-   elimination, and pattern matching. Users can add custom passes via the
-   `post_grad_custom_pre_pass` / `post_grad_custom_post_pass` configuration
-   hooks. This is the final stage for high-level graph optimizations before
-   lowering to Inductor IR.
+   elimination, and pattern matching. Users can also write their own custom
+   post-grad passes and use the `post_grad_custom_pre_pass` /
+   `post_grad_custom_post_pass` configuration hooks to add those custom passes
+   to the compilation pipeline. This is the final stage to run high-level graph
+   optimizations before the IR is lowered to Inductor IR.
 
 6. **[Graph lowering](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/graph.py)**:
    Lowers ATen IR into [Inductor IR](torch.compiler_inductor_ir.md).
@@ -103,12 +118,13 @@ series of passes to generate optimized kernels:
 7. **[Scheduling](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/scheduler.py)**:
    The [scheduler](torch.compiler_inductor_scheduler.md) operates on
    `SchedulerNode` objects to analyze dependencies and make fusion choices, with
-   the goal of minimizing global reads and writes. Fusion decisions are based on
-   a score calculated from the type of fusion, an estimate of saved memory
-   operations, and the proximity of operations in the graph.
+   the goal of minimizing global reads and writes. The scheduler makes fusion
+   decisions according to a score, which it calculates based on the type of
+   fusion, an estimate of the amount of saved memory operations, as well as the
+   proximity of the operations in the graph.
 
 8. **[Code generation](https://github.com/pytorch/pytorch/tree/main/torch/_inductor/codegen)**:
-   Inductor IR is used to [generate kernels](torch.compiler_inductor_codegen.md).
+   Inductor IR is executed to [generate kernels](torch.compiler_inductor_codegen.md).
    Based on the target hardware, Triton, CUTLASS, CK, and C++ kernels can be
    generated. This step also writes wrapper functions to call the generated
    kernels.
@@ -123,9 +139,9 @@ For more details on each stage, see:
 
 ## Starter Example
 
-Let's walk through a simple example with two elementwise operations — `relu` and
-addition — to see step-by-step how TorchInductor fuses them and generates Triton
-code.
+Let's start with a simple example with two elementwise operations — `relu` and
+addition. We will show step-by-step how TorchInductor fuses these two operations
+and generates Triton code.
 
 :::{tip}
 For a more comprehensive example, see the
@@ -134,7 +150,7 @@ For a more comprehensive example, see the
 
 ### The input program
 
-We start with the following PyTorch program (`example.py`):
+We start with the following simple PyTorch program (`example.py`):
 
 ```python
 import torch
@@ -150,7 +166,7 @@ f(x)
 
 ### Step 1: Post-grad graph
 
-After TorchDynamo and AOT Autograd, we can inspect the post-grad graph:
+After TorchDynamo and AOT Autograd, we can get the post-grad graph with:
 
 ```bash
 TORCH_LOGS=post_grad_graphs python3 example.py
@@ -163,17 +179,20 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cuda:0"):
     return (add,)
 ```
 
-This FX graph contains two
+This output shows an FX graph with two
 [ATen ops](https://github.com/pytorch/pytorch/tree/main/aten/src/ATen):
-`torch.ops.aten.relu.default` and `torch.ops.aten.add.Tensor`. The placeholder
-`arg0_1` is the input and `add` is the output. For each tensor, we can see the
-dtype, shape, device, and stride metadata.
+`torch.ops.aten.relu.default` and `torch.ops.aten.add.Tensor`. We also observe
+the placeholder `arg0_1`, output `add`, and intermediate tensors `relu` and
+`add`. For each tensor, we can see the dtype, shape, device, and other meta
+information.
 
 ### Step 2: Graph lowering
 
-Next, [graph lowering](torch.compiler_inductor_ir.md) converts the FX graph
-into Inductor IR. Graph lowering visits every FX node and generates the
-corresponding IR node. Inspecting a few fields after lowering:
+The next step in the example is
+[graph lowering](torch.compiler_inductor_ir.md), which converts the FX graph
+into Inductor IR. Graph lowering visits every FX node in the graph and generates
+the corresponding IR node. From the debugger, let's check a few fields after
+lowering:
 
 ```pycon
 >>> graph.graph_inputs
@@ -202,38 +221,47 @@ corresponding IR node. Inspecting a few fields after lowering:
     ranges=[10, 10]))]
 ```
 
-The graph input is `arg0_1` and the graph output is `buf0`. Since `buf0` is a
-tensor computed by an operation, it also appears in `graph.operations`. Since
-`buf0` is an intermediate tensor, a buffer is allocated for it and recorded in
-`graph.buffers`. In this simple example, `buf0` is the only buffer, operation,
-and graph output. In more complex programs, there can be many buffers and
-operations that are not graph outputs.
+On the data side, we can see graph inputs `arg0_1` and graph outputs `buf0`.
+Since `buf0` is a tensor computed by an operation, we also record `buf0` in
+`graph.operations`. Since `buf0` is an intermediate tensor, we allocate a buffer
+for it and record it in `graph.buffers`. In this starter example, `buf0` happens
+to be the only buffer and operation, which is also a graph output. For more
+complicated code, there could be many buffers and operations that are not graph
+outputs.
 
 Graph lowering handles some simple optimizations such as fusing elementwise
-operations. Advanced optimizations — horizontal fusion, reordering for peak
-memory — are performed by the [scheduler](torch.compiler_inductor_scheduler.md).
+operations. Advanced optimizations, such as horizontal fusion and reordering for
+peak memory, are mostly done in the
+[scheduler](torch.compiler_inductor_scheduler.md). Please check the
+[Graph Lowering](torch.compiler_inductor_ir.md) and
+[Scheduler and Fusion](torch.compiler_inductor_scheduler.md) sections for more
+details.
 
 ### Step 3: Scheduling
 
-After graph lowering, the
-[scheduler](torch.compiler_inductor_scheduler.md) converts Inductor IR into
+After graph lowering, we enter the
+[scheduler](torch.compiler_inductor_scheduler.md), which performs the most
+advanced optimizations. In particular, it converts Inductor IR into
 [BaseSchedulerNode](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/scheduler.py)
 and
-[SchedulerBuffer](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/scheduler.py)
-objects, analyzes dependencies and mutations, performs fusion, and reorders
-operations.
+[SchedulerBuffer](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/scheduler.py),
+analyzes dependencies and mutations, conducts fusion, and performs reordering.
 
 ### Step 4: Code generation
 
-Finally, TorchInductor
-[generates code](torch.compiler_inductor_codegen.md) that can be executed. The
-codegen accepts `nodes: list[BaseSchedulerNode]`, iterates through each node,
-and generates code for it.
+Finally, TorchInductor performs
+[codegen](torch.compiler_inductor_codegen.md) to generate code that can be run
+by users. Our example operates on CUDA tensors, so TorchInductor generates
+Triton code. TorchInductor could also generate other code, such as C++ and
+CUTLASS, depending on the data and configuration. The codegen accepts
+`nodes: list[BaseSchedulerNode]`, iterates through each node, and generates code
+for each node.
 
-Breakpointing at `_codegen` shows the information available in a
-`BaseSchedulerNode`:
+Let's breakpoint at the start of `_codegen` and check what information is
+available in a `BaseSchedulerNode`:
 
 ```pycon
+>>> # def _codegen(self, nodes: list[BaseSchedulerNode]) -> None
 >>> nodes
 [SchedulerNode(name='op0')]
 
@@ -252,15 +280,19 @@ ReadWrites(
   var_ranges={d0: 100})
 ```
 
-The `SchedulerNode` wraps the Inductor IR `buf0` and contains dependency
-information in `read_writes`: the node reads from `arg0_1` and writes to `buf0`.
+As we can see, `_codegen` takes a list of `BaseSchedulerNode`, which is
+generated and fused in the scheduler. In this example, we have one
+`SchedulerNode`, which wraps the Inductor IR `buf0` as we discussed earlier. It
+also contains the dependency information in `read_writes`. Here, the node reads
+from `arg0_1` and writes to `buf0`.
 
 ### Generated Triton kernel
 
-Since our example operates on CUDA tensors, TorchInductor generates a Triton
-kernel. The output includes the generated kernel, a wrapper function to call it,
-and a `benchmark_compiled_module` for benchmarking. In the kernel below, we can
-see the fused `relu` and `add` operations:
+Finally, we generate runnable Triton code, which contains the generated Triton
+kernels, a wrapper call function to call the generated Triton kernels, and
+`benchmark_compiled_module`, which is convenient for benchmarking the generated
+Triton kernels. In the Triton code, we can find the fused `relu` and `add`
+operations:
 
 ```python
 def triton_poi_fused_add_relu_0(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr):
@@ -289,16 +321,19 @@ structured torch trace logs and generates an HTML report to help explore
 compilation artifacts. It is often the first step in debugging a `torch.compile`
 job.
 
-Basic usage:
+Using `tlparse` is straightforward: set the `TORCH_TRACE` environment variable
+and then point `tlparse` to the output directory. For example:
 
 ```bash
-TORCH_TRACE=/tmp/my_trace_log_dir python3 example.py
-tlparse /tmp/my_trace_log_dir -o tl_out/
+TORCH_TRACE=/tmp/my_traced_log_dir python3 example.py
+tlparse /tmp/my_traced_log_dir -o tl_out/
 ```
 
-The generated HTML organizes artifacts by compile ID, including the post-grad
-graph, generated output code, dynamo graph, pre-grad graph, cache hit/miss
-information, and dynamo C++ guards.
+The generated HTML organizes log artifacts by compile ID. Among other things, you
+can observe the post-grad graph discussed earlier (for example, in
+`0_0_0/inductor_post_grad_graph_6.txt`) and the generated code. The `tlparse`
+output also includes other information such as the dynamo graph, the pre-grad
+graph, cache hit/miss information, and the dynamo C++ guards.
 
 :::{seealso}
 - [Provenance Tracking](torch.compiler_inductor_provenance) for using

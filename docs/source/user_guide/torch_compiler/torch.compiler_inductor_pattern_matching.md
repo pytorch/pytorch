@@ -4,7 +4,7 @@
 
 The [pattern matcher](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/pattern_matcher.py)
 performs peephole graph optimizations — replacing short sequences of known
-operation patterns with fused or more efficient sequences. It is the primary
+operation patterns with fused or optimized sequences. It is the primary
 mechanism that [FX graph passes](torch.compiler_inductor_fx_passes.md) use
 to recognize and rewrite subgraphs.
 
@@ -91,9 +91,11 @@ pattern_pass = PatternMatcherPass()
 
 
 def is_valid_addmm_activation_fusion(match):
-    # For brevity, we just check if tensors are CUDA. Production code should
-    # also verify shape compatibility with cuBLAS, check that we're not
-    # preventing more profitable fusions, etc.
+    # For brevity, we'll just check if tensors are CUDA, but for production we'd also
+    # want to:
+    # - Check that shapes are compatible with cuBLAS's API (1D bias, 2D matrices, etc.)
+    # - Ensure we're not preventing more profitable fusions (e.g., max_autotune_gemm)
+    # - Verify the relu doesn't have fusion opportunities with its users
     return match.output_node().meta["val"].is_cuda
 
 
@@ -114,23 +116,26 @@ def fuse_mm_add_relu(match: Match, mat1, mat2, *, input):
             input, mat1, mat2, beta=1, alpha=1, use_gelu=False
         )
 
-    # When tracing, there's no need to run actual kernels or allocate real
-    # memory, so we enable FakeTensorMode.
+    # when tracing, theres no need to run the actual kernels, or alloc real memory
+    # so we enable FakeTensorMode.
     with V.fake_mode:
         match.replace_by_example(repl, [input, mat1, mat2])
 
 
 def my_pass(graph):
+    print(f"FX Graph Before: {graph}")
     pattern_pass.apply(graph)
+    print(f"FX Graph After: {graph}")
 
 
-# Hook the custom pass into torch.compile. To compose with caching, subclass
-# torch._inductor.custom_graph_pass.CustomGraphPassType.
+# hook in the custom pass to torch.compile. To compose with caching, we would need to
+# subclass torch._inductor.custom_graph_pass.CustomGraphPassType
 torch._inductor.config.post_grad_custom_pre_pass = my_pass
 
 
 class LinearRelu(torch.nn.Linear):
     def forward(self, x):
+        # This will create mm + add + relu pattern that can be fused
         return torch.nn.functional.relu(torch.add(x @ self.weight.T, self.bias))
 
 
@@ -141,9 +146,12 @@ with torch.no_grad():
     compiled_mod = torch.compile(mod)
     result = compiled_mod(inp)
 
-    # Verify correctness
+    print(f"Compilation successful, result shape: {result.shape}")
+
+    # Verify correctness by comparing with eager mode
     eager_result = mod(inp)
     torch.testing.assert_close(result, eager_result, rtol=1e-4, atol=1e-4)
+    print("Results match eager mode")
 ```
 
 With `register_graph_pattern`, you manually construct the pattern using
@@ -181,6 +189,8 @@ def addmm_activation_replacement(input, mat1, mat2):
 
 
 def is_valid_fusion(match):
+    # As above, we will just check if Tensors are cuda, but production may require
+    # additional checks.
     return match.output_node().meta["val"].is_cuda
 
 
@@ -193,7 +203,7 @@ def get_example_args():
 
 
 def register():
-    # Avoid using real memory during registration
+    # avoid using real memory in registrations
     with torch._subclasses.fake_tensor.FakeTensorMode():
         register_replacement(
             addmm_relu_pattern,
@@ -209,7 +219,9 @@ register()
 
 
 def my_pass(graph):
+    print(f"FX Graph Before: {graph}")
     pattern_pass.apply(graph)
+    print(f"FX Graph After: {graph}")
 
 
 torch._inductor.config.post_grad_custom_pre_pass = my_pass
@@ -227,24 +239,31 @@ with torch.no_grad():
     compiled_mod = torch.compile(mod)
     result = compiled_mod(inp)
 
-    # Verify correctness
+    print(f"Compilation successful, result shape: {result.shape}")
+
+    # Verify correctness by comparing with eager mode
     eager_result = mod(inp)
     torch.testing.assert_close(result, eager_result, rtol=1e-4, atol=1e-4)
+    print("Results match eager mode")
 ```
 
 With `register_replacement`, you don't need to manually construct a pattern
-or update the graph. The framework traces both the search and replacement
-functions, decomposes and canonicalizes them into ATen IR, and handles the
-graph rewriting automatically. This makes patterns more robust to future
-compiler changes and less error-prone to write.
+or update the graph. You can write the search pattern as a user would, and
+`register_replacement` will decompose and canonicalize it into ATen IR. If any
+part of that process changes, it will also update the decomposition of the
+search pattern, making it more robust to future compiler changes and less
+error-prone to write. However, for other use cases where the replacement
+pattern is more dynamic, `register_graph_pattern` can be useful.
 
 :::{tip}
 The example argument tensors are used to trace the pattern. If the sequence
-of ATen ops that get traced depends on dtype or device, you need to register
-with the appropriate inputs. For instance, the decomposition of softmax
-includes an upcast when the input is in low precision, so the
-[attention pattern](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/fx_passes/fuse_attention.py)
-traces with both fp16 and fp32.
+of ATen ops that get traced is affected by either the dtype or device, the
+inputs will need to be constructed appropriately. For instance, the
+decomposition of softmax includes an upcast if the input is in low precision;
+when generating patterns,
+[we trace with both fp16 and fp32](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/fx_passes/fuse_attention.py).
+In this example, the pattern will get traced as `aten.addmm` and `aten.relu`
+regardless of device or dtype, so we just need a single registration.
 :::
 
 ## Joint Graph Patterns

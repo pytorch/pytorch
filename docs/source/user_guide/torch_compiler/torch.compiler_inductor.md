@@ -44,5 +44,8 @@ torch.compiler_inductor_scheduler.md
 torch.compiler_inductor_codegen.md
 torch.compiler_inductor_autotuning.md
 torch.compiler_inductor_caching.md
+torch.compiler_inductor_cudagraphs.md
 torch.compiler_inductor_debugging.md
+torch.compiler_inductor_configs.md
+torch.compiler_inductor_references.md
 ```

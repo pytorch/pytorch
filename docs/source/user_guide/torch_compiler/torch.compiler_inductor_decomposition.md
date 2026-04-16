@@ -2,10 +2,8 @@
 
 # Operator Decomposition
 
-Operator decomposition replaces a complex or high-level operation with an
-equivalent sequence of simpler operations. This is a key transformation in the
-compilation pipeline that happens primarily during AOT Autograd tracing, before
-TorchInductor's own optimizations begin.
+Operator decomposition refers to replacing a complex or high-level operation
+with an equivalent sequence of simpler operations.
 
 ## Why Decompose?
 
@@ -29,7 +27,8 @@ torch operators (`torch.*`) to ATen operators (`aten.*`). For TorchInductor,
 AOT Autograd is invoked from the
 [aot_autograd](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/compile_fx.py)
 call in `compile_fx.py`. By the time `aot_autograd` returns, all `torch.*` ops
-have been decomposed into `aten.*` ops that TorchInductor can optimize.
+have been decomposed into `aten.*` ops that TorchInductor can support and
+optimize.
 
 ### The `__torch_dispatch__` Mechanism
 
@@ -90,14 +89,11 @@ x = torch.randn(10)
 torch.compile(fn)(x)
 ```
 
-Running with AOT graph logging:
+Running with logging (`aot_graphs`):
 
 ```bash
 TORCH_LOGS="aot_graphs" python3 example.py
 ```
-
-The output shows separate forward and backward graphs where `nn.Linear` has
-been fully decomposed into ATen operations.
 
 **Forward graph:**
 
@@ -126,13 +122,13 @@ def forward(self, view, tangents_1):
 
 `nn.Linear` decomposes into `aten.view`, `aten.t`, and `aten.addmm` in the
 forward pass, and `aten.mm`, `aten.t`, and `aten.sum` in the backward pass.
-All operations are at the ATen level.
+All operations are decomposed to the ATen level.
 
-## AOT Autograd vs. Inductor Decomposition
+## Comparing AOT Autograd and Inductor Decomposition
 
-Not all operations are decomposed by AOT Autograd. Some operations are
-decomposed later by TorchInductor itself. To illustrate the difference,
-consider `torch.repeat_interleave`:
+To understand when operations decompose and when they don't, let's examine
+`torch.repeat_interleave`, which behaves differently from `nn.Linear`. Consider
+this code:
 
 ```python
 @torch.compile
@@ -148,25 +144,35 @@ output_size = 3
 dim = 0
 ```
 
-**With AOT Eager** (no Inductor), `repeat_interleave` is *not* decomposed —
-it stays in the graph as-is:
+Running with AOT Eager:
 
 ```python
-# torch.compile(fn, backend="aot_eager")(y, repeats, dim, output_size)
+torch.compile(fn, backend="aot_eager")(y, repeats, dim, output_size)
+```
+
+With AOT Eager, `aten.repeat_interleave` stays in the graph as-is; it is not
+decomposed. The operation is used directly, followed by `aten.index_select`.
+
+```python
 def forward(self, arg0_1: "i64[2, 2][2, 1]cpu", arg1_1: "i64[2][1]cpu"):
-    repeat_interleave = torch.ops.aten.repeat_interleave.Tensor(
-        arg1_1, output_size=3
-    )
-    index_select = torch.ops.aten.index_select.default(
-        arg0_1, 0, repeat_interleave
-    )
+    repeat_interleave: "i64[3][1]cpu" = torch.ops.aten.repeat_interleave.Tensor(arg1_1, output_size=3);  arg1_1 = None
+    index_select: "i64[3, 2][2, 1]cpu" = torch.ops.aten.index_select.default(arg0_1, 0, repeat_interleave);  arg0_1 = repeat_interleave = None
     return (index_select,)
 ```
 
-**With TorchInductor**, the behavior changes. Inductor applies a conditional
+Running with TorchInductor:
+
+```python
+torch.compile(fn, backend="inductor")(y, repeats, dim, output_size)
+```
+
+When compiled with TorchInductor, the behavior changes. Inductor applies a
+conditional
 [decomposition](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/decomposition.py)
-that replaces `repeat_interleave` with cumulative sum, binary search, and
-indexing — operations that are more amenable to fusion:
+to `repeat_interleave`. The decomposed version uses cumulative sum (`cumsum`),
+binary search (`searchsorted`) to find insertion points, and indexing to gather
+the results. This is fundamentally different from `nn.Linear`, which is fully
+decomposed by AOT Autograd.
 
 ```python
 # torch.compile(fn, backend="inductor")(y, repeats, dim, output_size)
@@ -182,11 +188,6 @@ def forward(self, arg0_1, arg1_1):
     index = torch.ops.aten.index.Tensor(arg0_1, [searchsorted])
     return (index,)
 ```
-
-This demonstrates the two-level decomposition strategy: AOT Autograd handles
-standard decompositions (like `nn.Linear` → `aten.addmm`), while Inductor
-applies additional backend-specific decompositions when they create better
-optimization opportunities.
 
 ## Decomposition vs. Lowering
 
@@ -207,8 +208,8 @@ decomposition pass), and lowering happens afterward during graph lowering.
 ## Constraints on Decompositions
 
 Decompositions must be **pure functions**: no side effects, no global state
-mutations, and no I/O. They must also be deterministic — the same inputs
-must always produce the same outputs.
+mutations, and no I/O. They must be deterministic, meaning the same inputs
+always produce the same outputs.
 
 ## Registering Decompositions
 

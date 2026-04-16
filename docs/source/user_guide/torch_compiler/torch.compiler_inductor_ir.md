@@ -155,8 +155,10 @@ def inner_fn(index):
     return tmp2
 ```
 
-The indexing range, the buffers used, and the associated function are the primary
-components of the `ir.Loops` representation.
+`ops` is an implementation detail used by lowering; you can ignore that detail.
+Note, however, how we load from `arg0_1` and `arg1_1` with an indexing range
+(`index`, or `i0`). That indexing range, the buffers used, and the associated
+function are the primary components of the `ir.Loops` representation.
 
 :::{note}
 The function is not literally a Python lambda — it is actually an FX module.
@@ -192,7 +194,8 @@ Layout types:
 - **FixedLayout** — frozen and cannot change. Used after layout optimization or
   when a layout must match a specific pattern.
 - **NonOwningLayout** — used for views that don't own storage. Contains a
-  reference to the viewed buffer.
+  reference to the viewed buffer and is used for view operations that share
+  underlying storage.
 - **NoneLayout** — represents no tensor to return.
 - **MultiOutputLayout** — represents multiple distinct return values from an IR
   node.
@@ -217,37 +220,9 @@ After graph lowering, `Operation` objects (typically `ComputedBuffer` and
 
 ### Realization
 
-Think of TorchInductor as a **lazy compiler**. When you write:
-
-```python
-y = x.sin() + 1
-z = y * 2
-```
-
-PyTorch eager mode would compute `sin(x)` and store it in memory, add 1 and
-store the result, then multiply by 2 and store again — three separate memory
-allocations. TorchInductor instead:
-
-1. Remembers that `y` should be `sin(x) + 1`.
-2. Remembers that `z` should be `(sin(x) + 1) * 2`.
-3. When someone actually needs `z`, computes the whole thing in one fused
-   kernel.
-
-This laziness enables powerful optimizations, but requires the IR to track
-what needs to be computed and how. **Realization** is the process of converting
-an unrealized (lazy) computation into a materialized buffer — it is the point
-where the compiler decides that a computation result must be stored in memory
-because it cannot be fused further.
-
-Realization is triggered when:
-
-1. **Too many operations read the same value** — recomputing the value each
-   time would be more expensive than storing it. The threshold is controlled
-   by `config.realize_reads_threshold` and related configs.
-2. **Mutation** — the buffer is mutated later and needs a concrete memory
-   location.
-3. **Contiguous input requirements** — downstream operations (such as
-   `ExternKernel`) need concrete, contiguous memory to read from.
+Realization is the process of converting an unrealized computation into a
+materialized buffer. This happens when a computation result needs to be stored
+because it cannot be fused with subsequent operations.
 
 ### Functionalization of Mutations
 
@@ -278,7 +253,7 @@ before calling the underlying loader.
 Graph lowering converts an FX graph of ATen operators into Inductor IR. This
 transformation happens in the `GraphLowering` class
 ([torch/_inductor/graph.py](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/graph.py))
-and uses `fx.Interpreter` to traverse the graph.
+and uses `fx.Interpreter` to traverse the graph and generate IR nodes.
 
 ### Entry Point
 
@@ -299,7 +274,9 @@ around `ir.TensorBox` objects. The result is a list of `ir.Buffer` objects.
 The call to `graph.compile_to_fn()` converts those `ir.Buffer` objects into
 an actual runnable function via the
 [scheduler](torch.compiler_inductor_scheduler.md) and
-[code generation](torch.compiler_inductor_codegen.md) steps.
+[code generation](torch.compiler_inductor_codegen.md) steps. In this section,
+we focus on what happens in `graph.run(*example_inputs)` — that is,
+*graph lowering*.
 
 ### Lowering Process
 
@@ -310,112 +287,224 @@ import torch._inductor.ir as ir
 from torch._inductor.lowerings import lowerings
 
 def lower(fx_g: fx.Graph, inputs: torch.Tensor):
-    # Map FX nodes to their Inductor IR representations (TensorBox)
+    # Map FX nodes to their Inductor IR representations (TensorBox); it stores
+    # the lowered result for each node.
     env: Dict[fx.Node, ir.TensorBox] = {}
 
-    # List of buffers that represent actual memory allocations
+    # List of buffers that need to be realized.
+    # These represent actual memory allocations in the generated code.
     buffers: List[ir.Buffer] = []
 
-    # Iterate through all nodes in the FX graph in topological order
+    # Iterate through all nodes in the FX graph in topological order.
     for node in fx_g.graph.nodes:
         if node.op == 'placeholder':
-            # Graph inputs become InputBuffer IR nodes
+            # Placeholder nodes are graph inputs. Wrap them as InputBuffer IR nodes.
+            # InputBuffer represents a tensor that already exists.
             env[node] = ir.TensorBox(ir.InputBuffer(get_input(inputs)))
 
         elif node.op == 'call_function':
-            # Look up the lowering function from the registry
+            # Look up the lowering function for this operation from the registry.
+            # The lowerings dict maps torch ops (e.g., aten.add) to their IR lowering
+            # functions.
             lowering_fn = lowerings[node.target]
 
-            # Map FX node arguments to their IR representations
+            # Map the FX node arguments to their corresponding IR representations.
+            # tree_map recursively traverses the args structure and looks up each node.
             arg_boxed = tree_map(lambda n: env[n], args)
 
-            # Call the lowering to produce Inductor IR
+            # Call the lowering function to convert the operation into Inductor IR.
+            # This produces a TensorBox wrapping the IR node (e.g., Pointwise, Reduction).
             output_box: ir.TensorBox = lowering_fn(*arg_boxed)
 
-            # Store for future nodes to reference
+            # Store the result in the environment for future nodes to reference.
             env[node] = output_box
 
         else:
-            pass  # Skip other node types (output, get_attr, etc.)
+            pass  # Skip other node types (e.g., output, get_attr)
 
-        # Check if this intermediate result needs to be realized
+        # Check if this intermediate result needs to be "realized".
+        # Realization happens when:
+        # - The buffer has too many reads (would be recomputed too many times).
+        # - It's mutated later.
+        # - It's needed by operations that require contiguous inputs.
         if env[node].needs_to_be_realized():
+            # Create a ComputedBuffer which represents an actual memory allocation
+            # that will appear in the generated kernel code.
             buffers.append(ComputedBuffer(env[node]))
 
-    # Return buffers to be scheduled and code-generated
+    # Return the list of buffers to be scheduled and code-generated.
     return buffers
 ```
 
-The key insight is that lowering functions take `ir.TensorBox` objects and
-return new `ir.TensorBox` objects. Most of these remain lazy (unrealized)
-until something forces realization. After graph lowering, downstream steps
-(the scheduler) work primarily with `ComputedBuffer` nodes.
+Essentially, we initialize our environment with
+`ir.TensorBox(ir.InputBuffer(...))` nodes (these are inputs to the whole
+graph). Then, we call our lowerings which take `ir.TensorBox` objects and return
+new `ir.TensorBox` objects. Finally, whenever an `ir.TensorBox` needs to be
+realized (such as if it is being passed to an `ir.ExternKernel`), we create a
+`ComputedBuffer` object and append it to our list of buffers.
 
-### Examples
+### The Big Picture: A Lazy Compiler's View of Tensors
 
-**Graph input** — becomes an `InputBuffer`:
+Think of TorchInductor as a **lazy**, but smart compiler. When you write:
+
+```python
+y = x.sin() + 1
+z = y * 2
+```
+
+PyTorch eager mode would:
+
+1. Compute `sin(x)` and store it in memory as `y`.
+2. Add 1 to `y` and store the result.
+3. Multiply by 2 and store that result in memory as `z`.
+
+TorchInductor instead operates like this:
+
+1. "Remember that `y` should be `sin(x) + 1`".
+2. "Remember that `z` should be `(sin(x) + 1) * 2`".
+3. "When someone actually needs `z`, compute the whole thing in one go".
+
+This laziness enables powerful optimizations, but requires a sophisticated IR
+to track what needs to be computed and how. The IR was presented in an earlier
+section, but the following examples tie it together with graph lowering:
+
+**Example 1: Simple TensorBox**
 
 ```python
 # PyTorch code
 x = torch.randn(100, 100)
 
-# In Inductor IR:
-# TensorBox(StorageBox(InputBuffer(name='arg0_1', layout=...)))
+# In Inductor IR, this becomes the following.
+tensor_box = TensorBox(
+    StorageBox(
+        InputBuffer(
+            name="arg0_1",
+            layout=FixedLayout(size=[100, 100], stride=[100, 1])
+        )
+    )
+)
+
+# Note that the TensorBox is just a wrapper - all the interesting stuff is inside.
 ```
 
-**View operation** — no new storage, just a view wrapper:
+**Example 2: TensorBox pointing to a View**
 
 ```python
 # PyTorch code
+x = torch.randn(100, 100)
 y = x.t()  # transpose
 
 # In Inductor IR:
-# x_box = TensorBox(StorageBox(...))  — original tensor
-# y_box = TensorBox(PermuteView(..., StorageBox(...)))  — points to same storage
+x_box = TensorBox(StorageBox(...))  # Original tensor
+y_box = TensorBox(
+    PermuteView(
+        base=x_box,  # Points to original
+        dims=[1, 0]  # Swap dimensions
+    )
+)
+
+# y_box doesn't have its own storage - it's a view of x's storage
 ```
 
-**Lazy computation** — computation is deferred until realization:
+**Example 3: Lazy StorageBox**
 
 ```python
 # PyTorch code
 y = x + 1
 
-# In Inductor IR (before realization):
-# StorageBox contains a DESCRIPTION of the computation (an ir.Loops subclass).
-# No memory allocated yet, no computation performed yet.
+# In Inductor IR:
+lazy_storage = StorageBox(
+    Pointwise(
+        device="cuda",
+        dtype=torch.float32,
+        inner_fn=lambda idx: ops.load("x", idx) + 1.0,
+        ranges=[100, 100]  # Output shape
+    )
+)
 
-# After calling realize():
-# StorageBox now contains a ComputedBuffer with actual memory allocated.
+# This StorageBox contains a DESCRIPTION of the computation, i.e. an ir.Loops
+# subclass object. No memory allocated yet, no computation performed yet.
 ```
 
-**Buffer types in context**:
+**Example 4: Realized StorageBox**
 
 ```python
-# 1. InputBuffer — data from outside the graph
-def compiled_model(x):  # x becomes InputBuffer
+# After calling realize():
+realized_storage = StorageBox(
+    ComputedBuffer(
+        name="buf0",
+        layout=FixedLayout(size=[100, 100], stride=[100, 1]),
+        data=Pointwise(...)  # Original computation preserved
+    )
+)
 
-# 2. ComputedBuffer — result of realized computation
-    y = x.sin()       # lazy Pointwise
-    z = y + 1
-    z.realize()        # becomes ComputedBuffer
-
-# 3. ConstantBuffer — compile-time known values
-    scale = torch.tensor(2.0)  # becomes ConstantBuffer
-    z = x * scale
-
-# 4. ExternKernel — external op implementation
-    # Inputs and outputs are always immediately realized
-    x = torch.randn(100, 200)
-    y = torch.randn(200, 300)
-    result = torch.mm(x, y)    # ExternKernel
+# Now it has actual memory allocated!
 ```
 
-### End-to-End Lowering Example
+**Example 5: Different Buffer types in action**
+
+```python
+# 1. InputBuffer - data from outside, being passed into the graph
+def compiled_model(x):  # x becomes InputBuffer
+    return x + 1
+
+# 2. ComputedBuffer - result of computation
+y = x.sin()       # Lazy Pointwise
+z = y + 1
+z.realize()        # Becomes ComputedBuffer, realizing the computation chain
+
+# 3. ConstantBuffer - compile-time known values
+scale = torch.tensor(2.0)  # Becomes ConstantBuffer
+z = x * scale
+
+# 4. ExternKernel - when Inductor uses external implementation of an op
+# NOTE: since we do not fuse ExternKernel with other kernels, inputs and
+# outputs of ExternKernel are always immediately realized
+x = torch.randn(100, 200)
+y = torch.randn(200, 300)
+result = torch.mm(x, y)    # ExternKernel
+```
+
+### When Does Computation Actually Happen?
+
+Computation happens when we "realize" a buffer. Realization converts the lazy
+description into actual memory with values.
+
+**Realization triggers:**
+
+```python
+# Trigger 1: Too many operations reading the same value
+x = expensive_op(a)
+b1 = x + 1     # read 1
+b2 = x * 2     # read 2
+b3 = x - 3     # read 3
+b4 = x / 4     # read 4
+b5 = x * 3     # read 5
+b6 = x ** 2    # x gets realized (too many reads)
+               # number of consumers allowed is controlled by
+               # config.realize_reads_threshold and other related configs
+
+# Trigger 2: External operations (ExternKernel)
+x = a + 1                            # Lazy
+y = torch.ops.aten.mm.default(x, x)  # x must be realized
+```
+
+Realization can also be triggered by **mutation** — when the buffer is mutated
+later and needs a concrete memory location — or by **contiguous input
+requirements** when downstream operations need concrete, contiguous memory to
+read from.
+
+After graph lowering, in downstream steps of the compilation (for example, the
+[scheduler](torch.compiler_inductor_scheduler.md)), you can assume that we are
+mostly dealing with `ComputedBuffer` nodes. (Although, we also need to make sure
+to handle cases where we are passing into an `ir.ExternKernel`.)
+
+#### An E2E Example
 
 The following example traces the full lowering process from source code
 through IR to generated Triton code.
 
-**Source code:**
+**Starting code:**
 
 ```python
 inps = [torch.randn(100, 256, device='cuda'), torch.randn(256, 50, device='cuda')]
@@ -507,12 +596,15 @@ index0 = s1*z0 + z1
 index1 = z0 + 50*z1
 
 def forward(self, ops):
-    load = ops.load('a_1', self.index0, False)
-    sin = ops.sin(load)
-    load_1 = ops.load('b_1', self.index1, False)
-    cos = ops.cos(load_1)
-    mul = ops.mul(sin, cos)
-    store = ops.store('buf0', self.index0, mul, None)
+    index0 = self.index0
+    load = ops.load('a_1', index0, False);  index0 = None
+    sin = ops.sin(load);  load = None
+    index1 = self.index1
+    load_1 = ops.load('b_1', index1, False);  index1 = None
+    cos = ops.cos(load_1);  load_1 = None
+    mul = ops.mul(sin, cos);  sin = cos = None
+    index0_1 = self.index0
+    store = ops.store('buf0', index0_1, mul, None);  ops = index0_1 = mul = None
     return store
 ```
 
@@ -539,7 +631,11 @@ def kernel0(in_ptr0, in_ptr1, out_ptr0, ks0, xnumel, ynumel,
     tl.store(out_ptr0 + y1 + (ks0 * x0), tmp4, xmask & ymask)
 
 def call(a_1, b_1):
-    s1 = a_1.size()[1]
+    a_1_size = a_1.size()
+    s0 = a_1_size[0]
+    s1 = a_1_size[1]
+    b_1_size = b_1.size()
+    s2 = b_1_size[1]
     buf0 = empty_strided((50, s1), (s1, 1), device='cuda', dtype=torch.float32)
     kernel0[grid(50, s1)](a_1, b_1, buf0, s1, 50, s1)
     return (buf0,)
