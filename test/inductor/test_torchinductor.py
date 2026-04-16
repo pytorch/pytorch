@@ -9937,6 +9937,33 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 check_lowp=check_lowp,
             )
 
+    def test_scatter_reduce_fused_broadcast_non_power_of_2(self):
+        # https://github.com/pytorch/pytorch/issues/178871
+        # When inductor fuses a scalar broadcast with scatter_reduce("sum"),
+        # the store index may simplify to a constant (e.g., output size 1).
+        # For non-power-of-2 input sizes, XBLOCK > numel causes OOB threads
+        # to execute tl.atomic_add without a mask, adding stale values.
+        def fn(x, bias, idx):
+            src = x + bias
+            out = torch.zeros(1, 1, device=x.device, dtype=x.dtype)
+            return out.scatter_reduce(
+                0, idx.unsqueeze(-1).expand_as(src), src, "sum", include_self=True
+            )
+
+        check_lowp = self.device != "xpu"
+        for N in [3, 5, 7, 9, 17, 33, 48]:
+            self.common(
+                fn,
+                [
+                    torch.randn(N, 1),
+                    torch.tensor([0.5]),
+                    torch.zeros(N, dtype=torch.long),
+                ],
+                check_lowp=check_lowp,
+                atol=1e-3,
+                rtol=0.01,
+            )
+
     @skip_if_gpu_halide
     def test_dense_mask_index(self):
         r"""
