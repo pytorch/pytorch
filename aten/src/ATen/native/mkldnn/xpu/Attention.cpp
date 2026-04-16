@@ -183,6 +183,8 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
   // 2. Math fallback
   auto& ctx = at::globalContext();
   // use overridable linked to onednn as overridable implementation
+  // cuDNN is included here because on XPU it falls back to native XPU backends
+  // (see cudnn_attention case below for fallback logic)
   if (!ctx.userEnabledMathSDP() && !ctx.userEnabledOverrideableSDP() &&
       !ctx.userEnabledFlashSDP() && !ctx.userEnabledMemEfficientSDP()) {
     return sdp::SDPBackend::error;
@@ -214,9 +216,26 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
         }
         break;
       case sdp::SDPBackend::cudnn_attention:
-        if (ctx.userEnabledCuDNNSDP() &&
-            can_use_cudnn_attention(kernel_params, print_debug)) {
-          TORCH_CHECK(false, "Invalid backend");
+        // cuDNN is not available on XPU. When it is explicitly requested,
+        // try XPU's native fused backends as substitutes:
+        // overrideable (OneDNN, forward-only) then flash attention (with
+        // backward support), then fall back to math.
+        if (ctx.userEnabledCuDNNSDP()) {
+          if (can_use_overrideable_attention(kernel_params, print_debug)) {
+            return sdp::SDPBackend::overrideable;
+          }
+          if (sdp::can_use_flash_attention(kernel_params, print_debug)) {
+            return sdp::SDPBackend::flash_attention;
+          }
+          // Only fall back to math if input shapes are compatible
+          // (e.g. heads match or valid GQA with enable_gqa=True).
+          if (sdp::check_tensor_shapes(kernel_params, false) &&
+              sdp::check_batch_size_and_num_heads_dense<
+                  true /*supports_gqa*/,
+                  false /*requires_same_num_heads*/>(
+                  kernel_params, print_debug)) {
+            return sdp::SDPBackend::math;
+          }
         }
         break;
       case sdp::SDPBackend::efficient_attention:
@@ -313,13 +332,19 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
       !(attn_bias.has_value() && is_causal),
       "scaled_dot_product_fused_attention_overrideable_xpu: attn_bias cannot present with is_causal");
 
-  const int64_t batch_size = query.size(0);
-  const int64_t num_head_q = query.size(1);
-  const int64_t num_head_kv = key.size(1);
-  const int64_t head_dim_qk = query.size(3);
-  const int64_t head_dim_v = value.size(3);
-  const int64_t seq_len_q = query.size(2);
-  const int64_t seq_len_kv = key.size(2);
+  // OneDNN graph compiler does not support non-contiguous inputs
+  // (e.g. zero-stride broadcast tensors from as_strided).
+  auto query_c = query.contiguous();
+  auto key_c = key.contiguous();
+  auto value_c = value.contiguous();
+
+  const int64_t batch_size = query_c.size(0);
+  const int64_t num_head_q = query_c.size(1);
+  const int64_t num_head_kv = key_c.size(1);
+  const int64_t head_dim_qk = query_c.size(3);
+  const int64_t head_dim_v = value_c.size(3);
+  const int64_t seq_len_q = query_c.size(2);
+  const int64_t seq_len_kv = key_c.size(2);
 
   at::Tensor output;
   std::vector<int64_t> output_shape = {

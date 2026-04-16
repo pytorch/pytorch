@@ -2739,6 +2739,50 @@ def matmul_backward_default(func, *args, **kwargs):
     return (grad_self, grad_other)
 
 
+@register_jagged_func(torch.ops.aten.constant_pad_nd.default, "self: jt_all, pad: any, value: any")
+def constant_pad_nd_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    pad = new_kwargs.pop("pad")
+    value = new_kwargs.pop("value", 0)
+
+    # Apply padding to the underlying values tensor
+    # The padding only affects the last dimensions, not the ragged dimension
+    padded_values = func(inp._values, pad, value)
+
+    # Create a new NestedTensor with the padded values
+    # The structure (offsets, lengths) remains the same
+    return NestedTensor(padded_values, **extract_kwargs(inp))
+
+
+# Flash attention ops should receive dense tensors after preprocessing,
+# but if they're called with nested tensors, extract values and call with dense tensors
+@register_jagged_func(
+    torch.ops.aten._scaled_dot_product_flash_attention.default,
+    "query: any, key: any, value: any"
+)
+def _scaled_dot_product_flash_attention_default(func, *args, **kwargs):
+    """Handle flash attention being called with nested tensors by extracting dense values"""
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    query = new_kwargs.pop("query")
+    key = new_kwargs.pop("key")
+    value = new_kwargs.pop("value")
+
+    # Extract dense values if nested
+    query_dense = query._values if isinstance(query, NestedTensor) else query
+    key_dense = key._values if isinstance(key, NestedTensor) else key
+    value_dense = value._values if isinstance(value, NestedTensor) else value
+
+    # Call with dense tensors
+    return func(query_dense, key_dense, value_dense, **new_kwargs)
+
+
 # Make the dummy available on the C++ side.
 @register_jagged_func(torch.ops.aten._nested_get_jagged_dummy.default, "self: any")
 def _nested_get_jagged_dummy(func, *args, **kwargs):
