@@ -1333,6 +1333,170 @@ class PolynomialLR(LRScheduler):
             for base_lr in self.base_lrs
         ]
 
+class CosineLR(LRScheduler):
+    r"""Scale the learning rate of each parameter group using a cosine interpolation.
+
+    The multiplicative factor changes from ``start_factor`` to ``end_factor``
+    following a cosine curve over ``total_iters`` steps. Unlike
+    :class:`CosineAnnealingLR`, this scheduler applies a **relative** factor to
+    the current learning rate, making it fully composable with
+    :class:`ChainedScheduler` and other multiplicative schedulers.
+
+    The factor at step :math:`t` is defined as:
+
+    .. math::
+        \gamma_t = \frac{\gamma_s + \gamma_e}{2}
+        + \frac{\gamma_s - \gamma_e}{2}
+        \cos\!\left(\frac{t \, \pi}{T}\right)
+
+    where :math:`\gamma_s` is ``start_factor``, :math:`\gamma_e` is
+    ``end_factor``, and :math:`T` is ``total_iters``.
+
+    The learning rate is updated recursively as:
+
+    .. math::
+        \text{lr}_t = \text{lr}_{t-1} \cdot \frac{\gamma_t}{\gamma_{t-1}}
+
+    Notice that the factor can increase or decrease depending on the
+    relationship between ``start_factor`` and ``end_factor``. Such changes can
+    happen simultaneously with other changes to the learning rate from outside
+    this scheduler. When last_epoch=-1, sets initial lr as lr.
+
+    Args:
+        optimizer (Optimizer): Wrapped optimizer.
+        start_factor (float): The number we multiply learning rate in the
+            first epoch. Default: 1.0.
+        end_factor (float): The number we multiply learning rate at the end
+            of the cosine interpolation. Default: 0.01.
+        total_iters (int): The number of iterations over which the
+            multiplicative factor interpolates from ``start_factor`` to
+            ``end_factor``. Default: 5.
+        last_epoch (int): The index of the last epoch. Default: -1.
+
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> # Assuming optimizer uses lr = 0.05 for all groups
+        >>> # Cosine decay from lr to 0.01 * lr over 100 epochs
+        >>> scheduler = CosineLR(optimizer, start_factor=1.0, end_factor=0.01, total_iters=100)
+        >>> for epoch in range(100):
+        >>>     train(...)
+        >>>     validate(...)
+        >>>     scheduler.step()
+        >>>
+        >>> # Cosine warmup from 0.1 * lr to lr over 10 epochs
+        >>> scheduler = CosineLR(optimizer, start_factor=0.1, end_factor=1.0, total_iters=10)
+        >>> for epoch in range(100):
+        >>>     train(...)
+        >>>     validate(...)
+        >>>     scheduler.step()
+        >>>
+        >>> # Composable: cosine warmup + exponential decay
+        >>> scheduler1 = CosineLR(optimizer, start_factor=0.1, end_factor=1.0, total_iters=10)
+        >>> scheduler2 = ExponentialLR(optimizer, gamma=0.95)
+        >>> scheduler = ChainedScheduler([scheduler1, scheduler2])
+    """
+
+    def __init__(
+        self,
+        optimizer: Optimizer,
+        start_factor: float = 1.0,
+        end_factor: float = 0.01,
+        total_iters: int = 5,
+        last_epoch: int = -1,
+    ) -> None:  # noqa: D107
+        if start_factor > 1.0 or start_factor <= 0:
+            raise ValueError(
+                "Starting multiplicative factor expected to be greater than 0 and less or equal to 1."
+            )
+
+        if end_factor > 1.0 or end_factor < 0:
+            raise ValueError(
+                "Ending multiplicative factor expected to be between 0 and 1."
+            )
+
+        self.start_factor = start_factor
+        self.end_factor = end_factor
+        self.total_iters = total_iters
+        super().__init__(optimizer, last_epoch)
+
+    def _compute_factor(self, step: int) -> float:
+        r"""Compute the multiplicative factor at step ``step``.
+
+        .. math::
+            \gamma_t = \frac{1}{2}\left(\gamma_s + \gamma_e\right)
+            + \frac{1}{2}\left(\gamma_s - \gamma_e\right)
+            \cos\!\left(\frac{t \, \pi}{T}\right)
+        """
+        return (
+            0.5 * (self.start_factor + self.end_factor)
+            + 0.5 * (self.start_factor - self.end_factor)
+            * math.cos(math.pi * step / self.total_iters)
+        )
+
+    @override
+    def get_lr(self) -> list[float | Tensor]:
+        r"""Compute the next learning rate for each of the optimizer's
+        :attr:`~torch.optim.Optimizer.param_groups`.
+
+        Scales the ``group["lr"]``\s in the optimizer's
+        :attr:`~torch.optim.Optimizer.param_groups` such that successive steps
+        interpolate along a cosine curve from :attr:`start_factor` to
+        :attr:`end_factor` across :attr:`total_iters` steps:
+
+        .. math::
+            \text{lr}_t = \text{lr}_{t-1} \cdot \frac{\gamma_t}{\gamma_{t-1}}
+
+        Returns:
+            list[float | Tensor]: A :class:`list` of learning rates for each of
+            the optimizer's :attr:`~torch.optim.Optimizer.param_groups` with the
+            same types as their current ``group["lr"]``\s.
+
+        .. note::
+            If you're trying to inspect the most recent learning rate, use
+            :meth:`get_last_lr()` instead.
+
+        .. note::
+            The returned :class:`~torch.Tensor`\s are copies, and never alias
+            the optimizer's ``group["lr"]``\s.
+        """
+        _warn_get_lr_called_within_step(self)
+
+        if self.last_epoch == 0:
+            return [
+                group["lr"] * self.start_factor
+                for group in self.optimizer.param_groups
+            ]
+
+        if self._is_initial or self.last_epoch > self.total_iters:
+            return _param_groups_val_list(self.optimizer, "lr")
+
+        factor = (
+            self._compute_factor(self.last_epoch)
+            / self._compute_factor(self.last_epoch - 1)
+        )
+        return [group["lr"] * factor for group in self.optimizer.param_groups]
+
+    def _get_closed_form_lr(self) -> list[float | Tensor]:
+        r"""Compute learning rates for each of the optimizer's
+        :attr:`~torch.optim.Optimizer.param_groups` at :attr:`last_epoch` using
+        a closed-form formula.
+
+        Uses :attr:`base_lrs` to compute learning rates. This method is called
+        when an epoch is passed to :meth:`step`.
+
+        .. math::
+            \text{lr}_t = \text{base\_lr} \cdot \gamma_t
+
+        Returns:
+            list[float | Tensor]: A :class:`list` of learning rates for each of
+            the optimizer's :attr:`~torch.optim.Optimizer.param_groups` with the
+            same types as their current ``group["lr"]``\s.
+        """
+        return [
+            base_lr
+            * self._compute_factor(min(self.total_iters, self.last_epoch))
+            for base_lr in self.base_lrs
+        ]
 
 class CosineAnnealingLR(LRScheduler):
     r"""
