@@ -93,7 +93,7 @@ TORCH_CUDA_CPP_API void clearCublasWorkspacesForStream(cudaStream_t stream);
 // No mutex is needed because cuBLAS handles are unique per thread
 // (guaranteed by DeviceThreadHandlePool), so each thread's workspace
 // map is only ever accessed by that thread.
-using WorkspaceMap = std::unordered_map<std::pair<int, void*>, at::DataPtr>;
+using WorkspaceMap = std::unordered_map<std::pair<int, void*>, std::pair<at::DataPtr, size_t>>;
 
 TORCH_CUDA_CPP_API WorkspaceMap& cublas_stream_to_workspace();
 TORCH_CUDA_CPP_API WorkspaceMap& cublaslt_stream_to_workspace();
