@@ -1,0 +1,9 @@
+diff --git cc/cc_library.bzl cc/cc_library.bzl
+new file mode 100644
+--- /dev/null
++++ cc/cc_library.bzl
+@@ -0,0 +1,4 @@
++"""Shim: re-export native cc_library for rules_cc 0.2.x compat."""
++
++def cc_library(**kwargs):
++    native.cc_library(**kwargs)
