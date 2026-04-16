@@ -28,6 +28,22 @@ if [[ -d "/opt/rh/gcc-toolset-${GCC_TOOLSET}/root/usr/bin" ]]; then
     echo "Switched to gcc-toolset-${GCC_TOOLSET}: $(cc --version | head -1)"
 fi
 
+# Weaken recursive_directory_iterator symbols in libstdc++_nonshared.a so
+# they don't land as strong T symbols in libtorch_cpu.so. The legacy
+# manywheel Dockerfiles apply this at image-build time; the test-infra
+# images used here don't, so we apply it at build time. Skip if the
+# archive has already been patched (objcopy errors on an empty symbol
+# list). See pytorch#133437.
+PATCH_LIBSTDC="$REPO_ROOT/.ci/docker/common/patch_libstdc.sh"
+if [[ -f "$PATCH_LIBSTDC" ]]; then
+    LIBNONSHARED=$(gcc -print-file-name=libstdc++_nonshared.a)
+    if nm -g "$LIBNONSHARED" | grep -q " T .*recursive_directory_iterator"; then
+        (cd "$(mktemp -d)" && bash "$PATCH_LIBSTDC")
+    else
+        echo "libstdc++_nonshared.a already patched, skipping"
+    fi
+fi
+
 # Install OS packages
 OS_NAME=$(awk -F= '/^NAME/{print $2}' /etc/os-release)
 if [[ "$OS_NAME" == *"AlmaLinux"* ]] || [[ "$OS_NAME" == *"CentOS"* ]] || [[ "$OS_NAME" == *"Red Hat"* ]]; then
