@@ -3249,7 +3249,10 @@ if HAS_CUDA_AND_TRITON:
 
             # Set threshold high enough to skip this simple function
             with torch._inductor.config.patch(
-                {"triton.cudagraph_min_partition_size": 10}
+                {
+                    "triton.cudagraph_min_partition_size": 10,
+                    "graph_partition": True,
+                }
             ):
                 fn_compiled = torch.compile(fn, mode="reduce-overhead")
                 for _ in range(3):
@@ -3275,7 +3278,10 @@ if HAS_CUDA_AND_TRITON:
 
             # Set threshold low enough to allow this function
             with torch._inductor.config.patch(
-                {"triton.cudagraph_min_partition_size": 2}
+                {
+                    "triton.cudagraph_min_partition_size": 2,
+                    "graph_partition": True,
+                }
             ):
                 fn_compiled = torch.compile(fn, mode="reduce-overhead")
                 for _ in range(3):
