@@ -93,8 +93,6 @@ inductor_fallback_ops: dict[str, dict[str, list[str]]] = {
     "aten.cholesky_solve.default": {},
     "aten.convolution_backward.default": {},
     "aten.convolution.default": {},
-    "aten.cudnn_grid_sampler.default": {},
-    "aten.cudnn_grid_sampler_backward.default": {},
     "aten.cummax.default": {},
     "aten.cummin.default": {},
     "aten.cumprod.default": {},
