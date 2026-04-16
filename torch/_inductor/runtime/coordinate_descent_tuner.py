@@ -75,6 +75,7 @@ class CoordescTuner:
         self.frozen_fields: OrderedSet[str] = (
             OrderedSet(frozen_fields) if frozen_fields is not None else OrderedSet()
         )
+        self._combo_tunable_fields: list[str] = []
 
     def get_config_max(self, prefix: str) -> int:
         max_block = TRITON_MAX_BLOCK[prefix.upper()]
@@ -136,9 +137,14 @@ class CoordescTuner:
             # control the stage of pipelining of tl.range.
             out.append("NUM_STAGES")
 
+        out = self._combo_tunable_fields + out
         return [f for f in out if f not in self.frozen_fields]
 
     def value_too_large(self, name: str, val: int) -> bool:
+        field_limits = self.inductor_meta.get("combo_coordesc_field_limits")
+        if isinstance(field_limits, dict) and name in field_limits:
+            return val > field_limits[name]
+
         block_suffix = "BLOCK"
         if name.endswith(block_suffix):
             prefix = name.strip(block_suffix).lower()
@@ -302,6 +308,9 @@ class CoordescTuner:
         baseline_config: "triton.Config",
         baseline_timing: float | None = None,
     ) -> "triton.Config":  # pyrefly: ignore  # missing-attribute
+        """
+        Perform coordinate descent autotuning starting from a baseline configuration.
+        """
         if baseline_timing is None:
             baseline_timing = self.call_func(func, baseline_config)
 
@@ -315,6 +324,11 @@ class CoordescTuner:
         improved = True
         best_config = baseline_config
         best_timing = baseline_timing
+
+        self._combo_tunable_fields = self.inductor_meta.get(
+            "combo_coordesc_field_order", []
+        )
+
         tunable_fields = self.tunable_fields
 
         while improved:
