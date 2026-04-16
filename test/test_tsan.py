@@ -1,4 +1,4 @@
-# Owner(s): ["module: ci"]
+# Owner(s): ["module: multithreading"]
 
 import weakref
 
