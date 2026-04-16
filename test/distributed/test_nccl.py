@@ -692,6 +692,73 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         else:
             self.assertEqual(handle.multicast_ptr, 0)
 
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_nccl_version(
+        (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_symmem_direct_access(self):
+        """Test that intra-node peers are detected as directly accessible."""
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        group_name = c10d.group.WORLD.group_name
+
+        tensor = symm_mem.empty(1024, dtype=torch.float, device=self.device)
+        handle = symm_mem.rendezvous(tensor, group=group_name)
+
+        # On a single node with NVLink, all peers should be directly accessible
+        self.assertTrue(handle.world_within_direct_access)
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_nccl_version(
+        (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_symmem_put_get_direct_access(self):
+        """Regression test: nccl_put and nccl_get still work for intra-node
+        peers after adding cross-node detection logic."""
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        group_name = c10d.group.WORLD.group_name
+
+        dtype = torch.float
+        numel = 1024
+        tensor = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
+        symm_mem.rendezvous(tensor, group=group_name)
+        c10d.barrier()
+
+        # Test put: rank 1 puts its data into rank 0's buffer
+        if self.rank == 1:
+            torch.ops.symm_mem.nccl_put(tensor, 0)
+            c10d.barrier()
+        else:
+            c10d.barrier()
+
+        if self.rank == 0:
+            torch.testing.assert_close(
+                tensor, torch.ones(numel, dtype=dtype, device=self.device)
+            )
+
+        c10d.barrier()
+
+        # Reset tensor values
+        tensor.fill_(self.rank)
+        c10d.barrier()
+
+        # Test get: rank 0 gets data from rank 1's buffer
+        if self.rank == 0:
+            torch.ops.symm_mem.nccl_get(tensor, 1)
+            c10d.barrier()
+            torch.testing.assert_close(
+                tensor, torch.ones(numel, dtype=dtype, device=self.device)
+            )
+        else:
+            c10d.barrier()
+
 
 instantiate_device_type_tests(TestNCCL, globals(), only_for="cuda")
 

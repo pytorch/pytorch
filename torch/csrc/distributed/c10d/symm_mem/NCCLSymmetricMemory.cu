@@ -438,6 +438,22 @@ std::string NCCLSymmetricMemory::get_group_name() {
   return pai_->group_name_;
 }
 
+bool NCCLSymmetricMemory::is_peer_directly_accessible(int peer) {
+  TORCH_CHECK(
+      peer >= 0 && peer < world_size_,
+      "peer ", peer, " out of range [0, ", world_size_, ")");
+  return pai_->buffers_.size() > 0 && pai_->buffers_[peer] != nullptr;
+}
+
+bool NCCLSymmetricMemory::world_within_direct_access() {
+  for (int i = 0; i < world_size_; i++) {
+    if (!is_peer_directly_accessible(i)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
  public:
   void* alloc(

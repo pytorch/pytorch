@@ -49,6 +49,13 @@ class NCCLSymmetricMemory : public SymmetricMemory {
 
   size_t get_offset() override;
 
+  // Returns true if the given peer's buffer is accessible via direct
+  // load/store (e.g. NVLink). Returns false for cross-node peers
+  // reachable only via IB, where NCCL RMA APIs must be used instead.
+  bool is_peer_directly_accessible(int peer);
+
+  bool world_within_direct_access() override;
+
  private:
   c10::intrusive_ptr<NCCLPeerAllocInfo> pai_;
   size_t offset_;

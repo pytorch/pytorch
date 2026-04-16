@@ -163,23 +163,61 @@ __global__ void nccl_wait_for_signal_kernel(
 
 void nccl_put(at::Tensor& tensor, const int64_t peer) {
 #ifdef NCCL_HAS_SYMMEM_SUPPORT
-  // TODO: support non-contiguous tensors
   TORCH_CHECK(tensor.is_contiguous(),
       "put op currently supports contiguous tensors only");
-  // TODO: rendezvous should remember the group name
   auto symm_mem = c10d::symmetric_memory::rendezvous(tensor, "0");
-  int threads = THREADS_PER_BLOCK;
-  int blocks  = (tensor.numel() + threads - 1) / threads;
+  auto* nccl_hdl = dynamic_cast<NCCLSymmetricMemory*>(symm_mem.get());
+  TORCH_CHECK(nccl_hdl != nullptr, "Expected NCCLSymmetricMemory handle");
+
   c10::cuda::CUDAGuard guard(tensor.device());
   size_t nbytes = tensor.numel() * c10::elementSize(tensor.scalar_type());
+  auto stream = at::cuda::getCurrentCUDAStream();
 
-  lsa_put_kernel<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-    symm_mem->get_buffer_ptrs_dev(),
-    peer,
-    0,
-    tensor.data_ptr(),
-    nbytes);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  if (nccl_hdl->is_peer_directly_accessible(peer)) {
+    // Fast path: direct memory access via LSA pointers (intra-node)
+    int threads = THREADS_PER_BLOCK;
+    int blocks  = (tensor.numel() + threads - 1) / threads;
+    lsa_put_kernel<<<blocks, threads, 0, stream>>>(
+      symm_mem->get_buffer_ptrs_dev(),
+      peer,
+      0,
+      tensor.data_ptr(),
+      nbytes);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  } else {
+    // Cross-node path: use NCCL window-based RMA API (works over IB)
+    auto window = nccl_hdl->get_window();
+    auto offset = nccl_hdl->get_offset();
+#ifdef NCCL_RMA_SUPPORTED
+#if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
+    C10D_NCCL_CHECK(
+        ncclPut(
+            tensor.data_ptr(), nbytes, ncclChar,
+            peer, offset, window, stream),
+        "ncclPut (cross-node) failed");
+#else
+    C10D_NCCL_CHECK(
+        ncclx::ncclPut(
+            tensor.data_ptr(), nbytes, ncclChar,
+            peer, offset, window, stream),
+        "ncclx::ncclPut (cross-node) failed");
+#endif
+#elif defined(NCCL_HAS_ONE_SIDED_API)
+    // Fallback: use ncclPutSignal (has signal side-effect but works cross-node)
+    auto& manager = NCCLDevCommManager::get(tensor.device());
+    ncclComm_t comm = manager.get_comm(nccl_hdl->get_group_name());
+    C10D_NCCL_CHECK(
+        ncclPutSignal(
+            tensor.data_ptr(), nbytes, ncclChar,
+            peer, window, offset,
+            /*sigIdx=*/0, /*ctx=*/0, /*flags=*/0,
+            comm, stream),
+        "ncclPutSignal (cross-node put fallback) failed");
+#else
+    TORCH_CHECK(false,
+        "Cross-node put requires NCCLX window RMA or NCCL >= 2.29 one-sided API");
+#endif
+  }
 #else
   TORCH_CHECK(false, "NCCL symmetric memory is not supported. Requires NCCL >= 2.28.9");
 #endif
@@ -190,16 +228,29 @@ void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal) {
   c10::cuda::CUDAGuard guard(sigpad.device());
   auto stream = at::cuda::getCurrentCUDAStream();
   auto symm_mem = c10d::symmetric_memory::rendezvous(sigpad, "0");
+  auto* nccl_hdl = dynamic_cast<NCCLSymmetricMemory*>(symm_mem.get());
+  TORCH_CHECK(nccl_hdl != nullptr, "Expected NCCLSymmetricMemory handle");
 
-  // Always use device-side kernel because this function waits for a SPECIFIC signal value.
-  // ncclWaitSignal only synchronizes on a channel without checking values, so it's not
-  // suitable for this API which expects to wait for signal pad to reach a specific value.
-  int cur_rank = symm_mem->get_rank();
-  nccl_wait_for_signal_kernel<<<1, THREADS_PER_BLOCK, 0, stream>>>(
-    symm_mem->get_signal_pad_ptrs_dev(),
-    cur_rank,
-    signal);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  if (nccl_hdl->world_within_direct_access()) {
+    // Fast path: device-side kernel polls signal pad for a specific value
+    // via direct memory access (intra-node only).
+    int cur_rank = symm_mem->get_rank();
+    nccl_wait_for_signal_kernel<<<1, THREADS_PER_BLOCK, 0, stream>>>(
+      symm_mem->get_signal_pad_ptrs_dev(),
+      cur_rank,
+      signal);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  } else {
+    // Cross-node: nccl_wait_for_signal uses value-based signal semantics
+    // (polling a signal pad for a specific uint64 value), which requires
+    // direct memory access to the signal pad. For cross-node signaling,
+    // use the handle-based nccl_wait_signal / nccl_put_signal APIs instead,
+    // which use NCCL's built-in channel-based signaling over IB.
+    TORCH_CHECK(false,
+        "nccl_wait_for_signal does not support cross-node peers because it "
+        "requires direct memory access to signal pads. Use the handle-based "
+        "nccl_wait_signal/nccl_put_signal APIs for cross-node signaling.");
+  }
 #else
   TORCH_CHECK(false, "NCCL symmetric memory is not supported. Requires NCCL >= 2.28.9");
 #endif
@@ -207,37 +258,51 @@ void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal) {
 
 void nccl_put_with_signal(at::Tensor& tensor, int64_t signal, int64_t peer) {
 #ifdef NCCL_HAS_SYMMEM_SUPPORT
-  // TODO: support non-contiguous tensors
   TORCH_CHECK(tensor.is_contiguous(),
       "put op currently supports contiguous tensors only");
-  // TODO: rendezvous should remember the group name
   auto symm_mem = c10d::symmetric_memory::rendezvous(tensor, "0");
+  auto* nccl_hdl = dynamic_cast<NCCLSymmetricMemory*>(symm_mem.get());
+  TORCH_CHECK(nccl_hdl != nullptr, "Expected NCCLSymmetricMemory handle");
+
   c10::cuda::CUDAGuard guard(tensor.device());
   auto stream = at::cuda::getCurrentCUDAStream();
-
-  // Always use device-side kernel because this function writes a SPECIFIC signal value.
-  // ncclPutSignal expects a channel index (0-7) for the signal parameter, not a signal value,
-  // so it's not suitable for this API which needs to write specific values to the signal pad.
-  int threads = THREADS_PER_BLOCK;
-  int blocks = (tensor.numel() + threads - 1) / threads;
-  auto opts = at::TensorOptions()
-    .dtype(at::kInt)
-    .device(tensor.device());
-  at::Tensor blocks_done = at::zeros({1}, opts);
-  unsigned int* blocks_done_dev =
-    reinterpret_cast<unsigned int*>(blocks_done.data_ptr<int>());
   size_t nbytes = tensor.numel() * c10::elementSize(tensor.scalar_type());
 
-  lsa_put_signal_kernel<<<blocks, threads, 0, stream>>>(
-    symm_mem->get_buffer_ptrs_dev(),
-    symm_mem->get_signal_pad_ptrs_dev(),
-    peer,
-    0,
-    tensor.data_ptr(),
-    nbytes,
-    blocks_done_dev,
-    signal);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  if (nccl_hdl->is_peer_directly_accessible(peer)) {
+    // Fast path: device-side kernel writes data AND a specific signal value
+    // to peer's signal pad via direct memory access (intra-node).
+    int threads = THREADS_PER_BLOCK;
+    int blocks = (tensor.numel() + threads - 1) / threads;
+    auto opts = at::TensorOptions()
+      .dtype(at::kInt)
+      .device(tensor.device());
+    at::Tensor blocks_done = at::zeros({1}, opts);
+    unsigned int* blocks_done_dev =
+      reinterpret_cast<unsigned int*>(blocks_done.data_ptr<int>());
+
+    lsa_put_signal_kernel<<<blocks, threads, 0, stream>>>(
+      symm_mem->get_buffer_ptrs_dev(),
+      symm_mem->get_signal_pad_ptrs_dev(),
+      peer,
+      0,
+      tensor.data_ptr(),
+      nbytes,
+      blocks_done_dev,
+      signal);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  } else {
+    // Cross-node: nccl_put_with_signal uses value-based signal semantics
+    // (writing a specific uint64 value to peer's signal pad), which requires
+    // direct memory access. Its paired nccl_wait_for_signal also requires
+    // direct access. For cross-node data transfer with signaling, use the
+    // handle-based nccl_put_signal / nccl_wait_signal APIs instead.
+    TORCH_CHECK(false,
+        "nccl_put_with_signal does not support cross-node peers because it "
+        "uses value-based signal semantics requiring direct memory access. "
+        "Use the handle-based nccl_put_signal/nccl_wait_signal APIs for "
+        "cross-node data transfer with signaling, or use nccl_put for "
+        "data-only transfer.");
+  }
 #else
   TORCH_CHECK(false, "NCCL symmetric memory is not supported. Requires NCCL >= 2.28.9");
 #endif
@@ -263,23 +328,50 @@ __global__ void lsa_get_kernel(
 
 void nccl_get(at::Tensor& tensor, const int64_t peer) {
 #ifdef NCCL_HAS_SYMMEM_SUPPORT
-  // TODO: support non-contiguous tensors
   TORCH_CHECK(tensor.is_contiguous(),
       "get op currently supports contiguous tensors only");
-  // TODO: rendezvous should remember the group name
   auto symm_mem = c10d::symmetric_memory::rendezvous(tensor, "0");
-  c10::cuda::CUDAGuard guard(tensor.device());
-  int threads = THREADS_PER_BLOCK;
-  int blocks  = (tensor.numel() + threads - 1) / threads;
-  size_t nbytes = tensor.numel() * c10::elementSize(tensor.scalar_type());
+  auto* nccl_hdl = dynamic_cast<NCCLSymmetricMemory*>(symm_mem.get());
+  TORCH_CHECK(nccl_hdl != nullptr, "Expected NCCLSymmetricMemory handle");
 
-  lsa_get_kernel<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-    symm_mem->get_buffer_ptrs_dev(),
-    peer,
-    0,
-    tensor.data_ptr(),
-    nbytes);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  c10::cuda::CUDAGuard guard(tensor.device());
+  size_t nbytes = tensor.numel() * c10::elementSize(tensor.scalar_type());
+  auto stream = at::cuda::getCurrentCUDAStream();
+
+  if (nccl_hdl->is_peer_directly_accessible(peer)) {
+    // Fast path: direct memory access via LSA pointers (intra-node)
+    int threads = THREADS_PER_BLOCK;
+    int blocks  = (tensor.numel() + threads - 1) / threads;
+    lsa_get_kernel<<<blocks, threads, 0, stream>>>(
+      symm_mem->get_buffer_ptrs_dev(),
+      peer,
+      0,
+      tensor.data_ptr(),
+      nbytes);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  } else {
+    // Cross-node path: use NCCL window-based RMA API (works over IB)
+#ifdef NCCL_RMA_SUPPORTED
+    auto window = nccl_hdl->get_window();
+    auto offset = nccl_hdl->get_offset();
+#if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
+    C10D_NCCL_CHECK(
+        ncclGet(
+            tensor.data_ptr(), offset, nbytes, ncclChar,
+            peer, window, stream),
+        "ncclGet (cross-node) failed");
+#else
+    C10D_NCCL_CHECK(
+        ncclx::ncclGet(
+            tensor.data_ptr(), offset, nbytes, ncclChar,
+            peer, window, stream),
+        "ncclx::ncclGet (cross-node) failed");
+#endif
+#else
+    TORCH_CHECK(false,
+        "Cross-node get requires NCCLX window RMA support");
+#endif
+  }
 #else
   TORCH_CHECK(false, "NCCL symmetric memory is not supported. Requires NCCL >= 2.28.9");
 #endif

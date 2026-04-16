@@ -1242,6 +1242,9 @@ This class does not support ``__members__`` property.)");
           py::arg("peer"),
           py::arg("sizes"),
           py::arg("dtype"))
+      .def_property_readonly(
+          "world_within_direct_access",
+          &SymmetricMemory::world_within_direct_access)
       // Util functions that are often used together with symmetric memory but
       // not necessarily directly on symmetric memory.
       .def_static(
