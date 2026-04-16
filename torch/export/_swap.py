@@ -58,7 +58,7 @@ def _try_remove_connecting_pytrees(curr_module_node: torch.fx.Node) -> None:
 
     Currently this optimization only works for the case where all of the outputs
     of `foo` go directly into `bar`, and `bar` has no other inputs.
-    """  # noqa: B950
+    """
 
     log.debug("Trying to remove pytrees for module call %s", curr_module_node)
 
@@ -328,7 +328,7 @@ def _swap_module_helper(
         The `call_module` node should now reference the swapped torch.nn.Module.
         The `tree_flatten_spec` call will deconstruct the eager outputs of the
         swapped module into tensors.
-        """  # noqa: B950
+        """
 
         submod_name = name.replace(".", "_")
         sub_gm, orig_inputs, orig_outputs = fuse_as_graphmodule(

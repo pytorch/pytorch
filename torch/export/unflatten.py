@@ -1283,7 +1283,7 @@ class _ModuleFrame:
         if x.graph is not self.flat_graph:
             raise AssertionError(
                 "expected x.graph to be flat_graph, got different graph"
-            )  # noqa: F541
+            )
         # x is not in subgraph, create a new placeholder for subgraph
         with self.graph.inserting_before(None):
             placeholder_node = self.graph.placeholder(x.name, type_expr=x.type)
@@ -1310,7 +1310,7 @@ class _ModuleFrame:
         if x.graph is not self.flat_graph:
             raise AssertionError(
                 "expected x.graph to be flat_graph, got different graph"
-            )  # noqa: F541
+            )
         if x in self.node_map:
             return self.node_map[x]
         self.print(f"remap_input({x})")

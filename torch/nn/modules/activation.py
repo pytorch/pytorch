@@ -1322,7 +1322,7 @@ class MultiheadAttention(Module):
 
             .. note::
                 `batch_first` argument is ignored for unbatched inputs.
-        """  # noqa: B950
+        """
         why_not_fast_path = ""
         if (
             (attn_mask is not None and torch.is_floating_point(attn_mask))

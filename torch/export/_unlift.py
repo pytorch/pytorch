@@ -74,7 +74,7 @@ def _check_inputs_match(args, kwargs, in_spec: pytree.TreeSpec) -> list:
     )
 
     if not eq_spec(received_spec, in_spec):
-        raise ValueError(  # noqa: B904
+        raise ValueError(
             "Trying to flatten user inputs with exported input tree spec: \n"
             f"{in_spec}\n"
             "but actually got inputs with tree spec of: \n"

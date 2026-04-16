@@ -284,7 +284,7 @@ class OrderedModuleDict(OrderedDictWrapper):
 #     parameters are initialized _before_ the script compiler resolve references to
 #     `self.param` or `self.module`.
 class ScriptMeta(type):
-    def __init__(cls, name, bases, attrs):  # noqa: B902
+    def __init__(cls, name, bases, attrs):
         # Aggregate all the ScriptMethods and constants from superclasses
         cls._methods: dict[str, Any] = {}
         cls._constants_set = set(getattr(cls, "__constants__", ()))

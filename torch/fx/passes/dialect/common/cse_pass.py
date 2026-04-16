@@ -27,7 +27,7 @@ rand_ops = {
     aten.randint,
     aten.randn,
     aten.randperm,
-}  # noqa: E501,B950
+}
 
 inplace_ops = {
     aten.add_,
@@ -39,7 +39,7 @@ inplace_ops = {
     aten.relu_,
     aten.sigmoid_,
     aten.tanh_,
-}  # noqa: E501
+}
 
 
 @torch.fx._compatibility.compatibility(is_backward_compatible=False)

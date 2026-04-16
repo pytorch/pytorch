@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-# flake8: noqa: B950
 """This module implements the user facing API for flex_attention in PyTorch."""
 
 from __future__ import annotations

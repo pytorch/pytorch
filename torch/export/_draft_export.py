@@ -101,7 +101,7 @@ class FailureReport:
     torch.ops.{op} is missing a fake kernel implementation.
 
     Please refer to https://docs.google.com/document/d/1_W62p8WJOQQUzPsJYa7s701JXt0qf2OfLub2sbkHOaU/edit#heading=h.ahugy69p2jmz for more detailed instructions on how to write a meta implementation.
-"""  # noqa: B950
+"""
 
         elif self.failure_type == FailureType.GUARD_ADDED:
             locals_info = (
@@ -140,7 +140,7 @@ class FailureReport:
 
     Please add `torch._check(...)` to the original code to assert this data-dependent assumption.
     Please refer to https://docs.google.com/document/d/1kZ_BbB3JnoLbUZleDT6635dHs88ZVYId8jT-yTFgf3A/edit#heading=h.boi2xurpqa0o for more details.
-"""  # noqa: B950
+"""
 
         elif self.failure_type == FailureType.MISMATCHED_FAKE_KERNEL:
             op = self.data["op"]
@@ -150,7 +150,7 @@ class FailureReport:
     The reason for the mismatch is: {reason}.
 
     Please refer to https://docs.google.com/document/d/1_W62p8WJOQQUzPsJYa7s701JXt0qf2OfLub2sbkHOaU/edit#heading=h.ahugy69p2jmz for more detailed instructions on how to write a fake implementation.
-"""  # noqa: B950
+"""
 
         else:
             raise ValueError(f"Unknown failure type: {self.failure_type}")
