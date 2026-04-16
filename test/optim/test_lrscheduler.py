@@ -17,6 +17,7 @@ from torch.optim.lr_scheduler import (
     ConstantLR,
     CosineAnnealingLR,
     CosineAnnealingWarmRestarts,
+    CosineLR,
     CyclicLR,
     EPOCH_DEPRECATION_WARNING,
     ExponentialLR,
@@ -340,6 +341,10 @@ class TestLRScheduler(TestCase):
         scheduler = PolynomialLR(self.opt, power=0.9)
         self._test_lr_is_constant_for_constant_epoch(scheduler)
 
+    def test_cosinelr_is_constant_for_constant_epoch(self):
+        scheduler = CosineLR(self.opt)
+        self._test_lr_is_constant_for_constant_epoch(scheduler)
+
     def test_step_lr(self):
         # lr = 0.05     if epoch < 3
         # lr = 0.005    if 30 <= epoch < 6
@@ -519,6 +524,114 @@ class TestLRScheduler(TestCase):
         scheduler = PolynomialLR(self.opt, power=power, total_iters=total_iters)
         self._test(scheduler, targets, epochs)
 
+    def test_cosinelr(self):
+        # Cosine decay from start_factor=1.0 to end_factor=0.0 over 4 iters
+        # factor(t) = 0.5 * (1 + 0) + 0.5 * (1 - 0) * cos(pi * t / 4)
+        #           = 0.5 + 0.5 * cos(pi * t / 4)
+        epochs = 10
+        start_factor = 1.0
+        end_factor = 0.0
+        iters = 4
+        base_lr = 0.05
+
+        def _factor(t):
+            return (
+                0.5 * (start_factor + end_factor)
+                + 0.5 * (start_factor - end_factor) * math.cos(math.pi * t / iters)
+            )
+
+        single_targets = [base_lr * _factor(min(t, iters)) for t in range(epochs)]
+        targets = [single_targets, [x * epochs for x in single_targets]]
+        scheduler = CosineLR(
+            self.opt,
+            start_factor=start_factor,
+            end_factor=end_factor,
+            total_iters=iters,
+        )
+        self._test(scheduler, targets, epochs)
+
+    def test_cosinelr_warmup(self):
+        # Cosine warmup from start_factor=0.1 to end_factor=1.0 over 5 iters
+        epochs = 10
+        start_factor = 0.1
+        end_factor = 1.0
+        iters = 5
+        base_lr = 0.05
+
+        def _factor(t):
+            return (
+                0.5 * (start_factor + end_factor)
+                + 0.5 * (start_factor - end_factor) * math.cos(math.pi * t / iters)
+            )
+
+        single_targets = [base_lr * _factor(min(t, iters)) for t in range(epochs)]
+        targets = [single_targets, [x * epochs for x in single_targets]]
+        scheduler = CosineLR(
+            self.opt,
+            start_factor=start_factor,
+            end_factor=end_factor,
+            total_iters=iters,
+        )
+        self._test(scheduler, targets, epochs)
+
+    def test_cosinelr_start_factor_limits(self):
+        with self.assertRaises(ValueError):
+            CosineLR(self.opt, start_factor=0.0, total_iters=4)
+        with self.assertRaises(ValueError):
+            CosineLR(self.opt, start_factor=1.1, total_iters=4)
+
+    def test_cosinelr_end_factor_limits(self):
+        with self.assertRaises(ValueError):
+            CosineLR(self.opt, end_factor=-0.1, total_iters=4)
+        with self.assertRaises(ValueError):
+            CosineLR(self.opt, end_factor=1.1, total_iters=4)
+
+    def test_get_last_lr_cosinelr(self):
+        epochs = 10
+        start_factor = 0.5
+        end_factor = 0.1
+        iters = 4
+        base_lr = 0.05
+
+        def _factor(t):
+            return (
+                0.5 * (start_factor + end_factor)
+                + 0.5 * (start_factor - end_factor) * math.cos(math.pi * t / iters)
+            )
+
+        single_targets = [base_lr * _factor(min(t, iters)) for t in range(epochs)]
+        targets = [single_targets, [x * 10 for x in single_targets]]
+        scheduler = CosineLR(
+            self.opt,
+            start_factor=start_factor,
+            end_factor=end_factor,
+            total_iters=iters,
+        )
+        self._test_get_last_lr(scheduler, targets, epochs)
+
+    def test_cosinelr_with_epoch(self):
+        epochs = 10
+        start_factor = 0.5
+        end_factor = 0.01
+        iters = 4
+        base_lr = 0.05
+
+        def _factor(t):
+            return (
+                0.5 * (start_factor + end_factor)
+                + 0.5 * (start_factor - end_factor) * math.cos(math.pi * t / iters)
+            )
+
+        single_targets = [base_lr * _factor(min(t, iters)) for t in range(epochs)]
+        targets = [single_targets, [x * 10 for x in single_targets]]
+        scheduler = CosineLR(
+            self.opt,
+            start_factor=start_factor,
+            end_factor=end_factor,
+            total_iters=iters,
+        )
+        self._test_with_epoch(scheduler, targets, epochs)
+
     def test_cos_anneal_lr(self):
         epochs = 10
         eta_min = 1e-10
@@ -562,6 +675,15 @@ class TestLRScheduler(TestCase):
     def test_closed_form_poly_lr(self):
         scheduler = PolynomialLR(self.opt, power=0.9)
         closed_form_scheduler = PolynomialLR(self.opt, power=0.9)
+        self._test_against_closed_form(scheduler, closed_form_scheduler, 20)
+
+    def test_closed_form_cosinelr(self):
+        scheduler = CosineLR(
+            self.opt, start_factor=0.3, end_factor=0.7, total_iters=6
+        )
+        closed_form_scheduler = CosineLR(
+            self.opt, start_factor=0.3, end_factor=0.7, total_iters=6
+        )
         self._test_against_closed_form(scheduler, closed_form_scheduler, 20)
 
     def test_closed_form_cos_anneal_lr(self):
@@ -1007,6 +1129,62 @@ class TestLRScheduler(TestCase):
         targets = [single_targets, [x * epochs for x in single_targets]]
         schedulers[0] = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
         schedulers[1] = LinearLR(self.opt, start_factor=start_factor, total_iters=iters)
+        self._test(schedulers, targets, epochs)
+
+    def test_compound_cosinelr_and_exp_lr(self):
+        epochs = 10
+        start_factor = 0.4
+        end_factor = 1.0
+        iters = 4
+        base_lr = 0.05
+
+        def _factor(t):
+            return (
+                0.5 * (start_factor + end_factor)
+                + 0.5 * (start_factor - end_factor) * math.cos(math.pi * t / iters)
+            )
+
+        schedulers = [None] * 2
+        single_targets = [base_lr * (0.9**x) for x in range(epochs)]
+        for i in range(epochs):
+            single_targets[i] *= _factor(min(i, iters))
+        targets = [single_targets, [x * 10 for x in single_targets]]
+        schedulers[0] = CosineLR(
+            self.opt,
+            start_factor=start_factor,
+            end_factor=end_factor,
+            total_iters=iters,
+        )
+        schedulers[1] = ExponentialLR(self.opt, gamma=0.9)
+        self._test(schedulers, targets, epochs)
+
+    def test_compound_cosinelr_and_step_lr(self):
+        epochs = 10
+        start_factor = 0.5
+        end_factor = 0.1
+        iters = 6
+        base_lr = 0.05
+
+        def _factor(t):
+            return (
+                0.5 * (start_factor + end_factor)
+                + 0.5 * (start_factor - end_factor) * math.cos(math.pi * t / iters)
+            )
+
+        schedulers = [None] * 2
+        # StepLR: decay by 0.1 every 3 steps
+        step_targets = [base_lr * (0.1 ** (x // 3)) for x in range(epochs)]
+        single_targets = [
+            step_targets[i] * _factor(min(i, iters)) for i in range(epochs)
+        ]
+        targets = [single_targets, [x * 10 for x in single_targets]]
+        schedulers[0] = StepLR(self.opt, gamma=0.1, step_size=3)
+        schedulers[1] = CosineLR(
+            self.opt,
+            start_factor=start_factor,
+            end_factor=end_factor,
+            total_iters=iters,
+        )
         self._test(schedulers, targets, epochs)
 
     def test_compound_cosanneal_and_step_lr(self):
@@ -2114,7 +2292,13 @@ class TestLRScheduler(TestCase):
             lambda: ExponentialLR(self.opt, gamma=0.01),
         )
 
-    def test_cosine_lr_state_dict(self):
+    def test_cosinelr_state_dict(self):
+        self._check_scheduler_state_dict(
+            lambda: CosineLR(self.opt, start_factor=0.5, end_factor=0.1, total_iters=4),
+            lambda: CosineLR(self.opt, start_factor=0.9, end_factor=0.3, total_iters=8),
+        )
+
+    def test_cosine_annealing_lr_state_dict(self):
         epochs = 10
         eta_min = 1e-10
         self._check_scheduler_state_dict(
