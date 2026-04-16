@@ -1254,40 +1254,6 @@ class DistributedTestBase(MultiProcessTestCase):
         return {i: [i % num_visible_devices] for i in range(self.world_size)}
 
 
-class C10dTorchCommsTestBase(DistributedTestBase):
-    def _skip_if_backend_unavailable(self, test_name: str, device: str) -> None:
-        backend_flags = {
-            "gloo": TORCHCOMM_HAS_GLOO,
-            "xccl": TORCHCOMM_HAS_XCCL,
-            "nccl": TORCHCOMM_HAS_NCCL,
-            "rccl": TORCHCOMM_HAS_RCCL,
-            "ncclx": TORCHCOMM_HAS_NCCLX,
-            "rcclx": TORCHCOMM_HAS_RCCLX,
-        }
-        backend = self.backend(device)
-        if backend in backend_flags and not backend_flags[backend]:
-            self.skipTest(
-                f"Skipping {test_name} since torchcomms does not have {backend} support"
-            )
-
-    def setUp(self) -> None:
-        super().setUp()
-        device = getattr(self, "device_type", getattr(self, "device", "cpu"))
-        self._skip_if_backend_unavailable(self._current_test_name(), device)
-
-    @retry_on_connect_failures
-    def run_test(self, test_name: str, parent_pipe) -> None:
-        torch.distributed.config.use_torchcomms = True
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = str(find_free_port())
-        os.environ["TORCHCOMM_RANK"] = str(self.rank)
-        os.environ["TORCHCOMM_SIZE"] = str(self.world_size)
-        os.environ["TORCHCOMM_STORE_PATH"] = self.file_name
-        device = getattr(self, "device_type", getattr(self, "device", "cpu"))
-        self.pg = self.create_pg(device)
-        super().run_test(test_name, parent_pipe)
-
-
 def run_subtests(
     cls_inst,
     subtest_config: dict[str, list[Any]],
@@ -2175,3 +2141,72 @@ class MultiProcContinuousTest(TestCase):
                 raise ValueError(
                     f"no such test method in {self.__class__}: {methodName}"
                 ) from e
+
+
+class C10dTorchCommsTestBase(MultiProcContinuousTest):
+    world_size: int = DEFAULT_WORLD_SIZE
+
+    @staticmethod
+    def backend(device) -> str:
+        if "cuda" in device:
+            return "nccl"
+        elif "hpu" in device:
+            return "hccl"
+        elif "xpu" in device:
+            return "xccl"
+        else:
+            return "gloo"
+
+    @classmethod
+    def backend_str(cls) -> str:
+        device_type = cls.device_type
+        if callable(device_type):
+            device_type = device_type()
+        return cls.backend(device_type)
+
+    def _skip_if_backend_unavailable(self, device: str) -> None:
+        backend_flags = {
+            "gloo": TORCHCOMM_HAS_GLOO,
+            "xccl": TORCHCOMM_HAS_XCCL,
+            "nccl": TORCHCOMM_HAS_NCCL,
+            "rccl": TORCHCOMM_HAS_RCCL,
+            "ncclx": TORCHCOMM_HAS_NCCLX,
+            "rcclx": TORCHCOMM_HAS_RCCLX,
+        }
+        backend_name = self.backend(device)
+        if backend_name in backend_flags and not backend_flags[backend_name]:
+            self.skipTest(f"torchcomms {backend_name} backend is not available")
+
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file):
+        torch.distributed.config.use_torchcomms = True
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = str(find_free_port())
+        os.environ["TORCHCOMM_RANK"] = str(rank)
+        os.environ["TORCHCOMM_SIZE"] = str(world_size)
+        os.environ["TORCHCOMM_STORE_PATH"] = rdvz_file
+        super()._init_pg(rank, world_size, rdvz_file)
+        # Set up accelerator device if using nccl/xccl backend
+        backend = cls.backend_str()
+        if "nccl" in backend or "xccl" in backend:
+            accelerator = torch.accelerator.current_accelerator()
+            if accelerator:
+                device = torch.device(f"{accelerator.type}:{rank}")
+                torch.set_default_device(device)
+                torch.accelerator.set_device_index(device)
+            else:
+                raise RuntimeError(
+                    f"Expected to find an accelerator when initializing process group with {backend} backend, but got None"
+                )
+
+    def setUp(self) -> None:
+        device_type = self.__class__.device_type
+        logger.debug("Setting up test: %s on device type: %s", self.id(), device_type)
+        if callable(device_type):
+            device_type = device_type()
+        self._skip_if_backend_unavailable(str(device_type))
+        super().setUp()
+
+    def rank_to_device(self, device):
+        num_visible_devices = torch.get_device_module(device).device_count()
+        return {i: [i % num_visible_devices] for i in range(self.world_size)}
