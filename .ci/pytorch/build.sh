@@ -386,11 +386,11 @@ else
     MAX_JOBS=$(nproc --ignore=4)
     export MAX_JOBS
 
-    # NB: Install outside of source directory (at the same level as the root
-    # pytorch folder) so that it doesn't get cleaned away prior to docker push.
     BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py
-    mkdir -p ../cpp-build/caffe2
-    pushd ../cpp-build/caffe2
+    # Build outside the source tree so the artifacts don't interfere with
+    # the workspace. /tmp is writable on both EC2 and OSDC runners.
+    mkdir -p /tmp/cpp-build/caffe2
+    pushd /tmp/cpp-build/caffe2
     WERROR=1 VERBOSE=1 DEBUG=1 python "$BUILD_LIBTORCH_PY"
     popd
   fi
