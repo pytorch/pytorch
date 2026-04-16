@@ -574,7 +574,7 @@ class TensorVariable(VariableTracker):
                 )
             elif name in self._strict_mode_conditional_banned_ops():
                 raise UnknownPropertiesDuringBackwardTrace(
-                    f"Unknown property {name} during speculating backward, dynamo will insert contiguous call ahead and speculate it again"  # noqa: B950
+                    f"Unknown property {name} during speculating backward, dynamo will insert contiguous call ahead and speculate it again"
                 )
 
         if name == "__class__":

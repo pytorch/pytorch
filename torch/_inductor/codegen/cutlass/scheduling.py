@@ -282,13 +282,13 @@ size: {cutlass_template_buffer.get_size()}"
                 not_implemented_op = not_implemented_op[4:]
                 why(
                     f"Cannot fuse epilogue node {node_to_fuse} into {cutlass_template_buffer.name}, \
-likely due to unsupported operation: {not_implemented_op}"  # noqa: G004, B950
+likely due to unsupported operation: {not_implemented_op}"
                 )
                 return False
             else:  # Likely due to unsupported dtype.
                 why(
                     f"Cannot fuse epilogue node {node_to_fuse} into {cutlass_template_buffer.name}. \
-Reason: {not_implemented_op}"  # noqa: G004, B950
+Reason: {not_implemented_op}"
                 )
                 return False
 

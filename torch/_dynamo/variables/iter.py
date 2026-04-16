@@ -471,7 +471,7 @@ class ZipVariable(IteratorVariable):
 
         idx: int | None = None
         try:
-            for idx, it in enumerate(self.iterables):  # noqa:B007
+            for idx, it in enumerate(self.iterables):
                 args.append(get_item(it))
         except ObservedUserStopIteration:
             if self.strict:

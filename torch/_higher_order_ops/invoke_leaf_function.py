@@ -150,7 +150,7 @@ def _resolve_mutated_flat_indices(
     indices: list[int] = []
     for expr in mutates_args:
         # Empty __builtins__ prevents access to builtins like __import__, open, exec.
-        result = eval(expr, {"__builtins__": {}}, namespace)  # noqa: S307
+        result = eval(expr, {"__builtins__": {}}, namespace)
         leaves = pytree.tree_leaves(result)
         for sentinel in leaves:
             if not isinstance(sentinel, int):

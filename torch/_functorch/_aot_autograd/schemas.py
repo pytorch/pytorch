@@ -382,7 +382,7 @@ class SubclassCreationMeta:
         # `_make_size_runtime_safe` replaces any nested int with a dummy value (-1)
         # to prevent serializing a SymInt at runtime. Internally, nested tensor __tensor_unflatten__
         # is designed to safely ignore this dummy value.
-        # For more details, see: https://github.com/pytorch/pytorch/blob/5141ade8e30c64e873e14dcc8de233da45d15025/torch/nested/_internal/nested_tensor.py#L266-L299  # noqa: B950
+        # For more details, see: https://github.com/pytorch/pytorch/blob/5141ade8e30c64e873e14dcc8de233da45d15025/torch/nested/_internal/nested_tensor.py#L266-L299
         self.outer_size = tuple(map(_make_size_runtime_safe, self.outer_size))
         self.outer_stride = tuple(map(_make_size_runtime_safe, self.outer_stride))
 
