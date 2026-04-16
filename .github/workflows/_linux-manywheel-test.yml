@@ -54,16 +54,48 @@ jobs:
       - name: Test wheel
         env:
           DESIRED_CUDA: ${{ matrix.gpu_config.desired_cuda }}
+          DESIRED_PYTHON: ${{ matrix.python_version.version }}
+          GPU_ARCH_TYPE: ${{ matrix.gpu_config.gpu_arch_type }}
+          PACKAGE_TYPE: manywheel
           PYTORCH_BUILD_NUMBER: 1
         run: |
           set -eux
           export PATH="/opt/python/${{ matrix.python_version.tag }}/bin:$PATH"
 
           export PYTORCH_BUILD_VERSION=$(basename artifacts/*.whl | sed 's/^torch-//;s/-.*//')
+          if [[ "$PYTORCH_BUILD_VERSION" == *dev* ]]; then
+            CHANNEL="nightly"
+          else
+            CHANNEL="test"
+          fi
 
           pip install artifacts/*.whl \
-            --index-url "https://download.pytorch.org/whl/nightly/${DESIRED_CUDA}" -v
-          export OMP_NUM_THREADS=4
+            --index-url "https://download.pytorch.org/whl/${CHANNEL}/${DESIRED_CUDA}" -v
 
-          LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:/usr/local/nvidia/lib64" \
-            .ci/pytorch/run_tests.sh manywheel ${{ matrix.python_version.version }} ${{ matrix.gpu_config.desired_cuda }}
+          python_nodot="$(echo $DESIRED_PYTHON | tr -d m.u)"
+          if [[ "$python_nodot" = *311* ]]; then
+            pip install -q numpy==1.23.5 protobuf typing-extensions
+          elif [[ "$python_nodot" = *312* ]]; then
+            pip install -q protobuf typing-extensions
+          else
+            pip install -q numpy protobuf typing-extensions
+          fi
+
+          export OMP_NUM_THREADS=4
+          export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:/usr/local/nvidia/lib64"
+
+          # Binary integrity checks (GCC ABI, library deps, MKL, XNNPACK, CUDA)
+          .ci/pytorch/check_binary.sh
+
+          # Functional smoke tests (torch.compile, version checks, etc.)
+          torch_pkg_size=$(stat -c%s artifacts/*.whl 2>/dev/null || echo 0)
+          if [[ "$torch_pkg_size" -gt 1500000000 ]]; then
+            python .ci/pytorch/smoke_test/smoke_test.py --package=torchonly --torch-compile-check disabled --pypi-pkg-check disabled
+          else
+            python .ci/pytorch/smoke_test/smoke_test.py --package=torchonly --torch-compile-check disabled
+          fi
+
+          # OpenMP checks (skip on aarch64)
+          if [[ "$GPU_ARCH_TYPE" != *aarch64* ]]; then
+            python .ci/pytorch/smoke_test/check_gomp.py
+          fi

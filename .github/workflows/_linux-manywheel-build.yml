@@ -144,7 +144,7 @@ jobs:
           GPU_ARCH_VERSION: ${{ matrix.gpu_config.gpu_arch_version }}
         run: |
           export PATH="/opt/python/${{ matrix.python_version.tag }}/bin:$PATH"
-          pip install wheel
+          pip install wheel==0.45.1
           bash .ci/manywheel/repair_wheel.sh /tmp/raw-wheels "$GITHUB_WORKSPACE/wheelhouse"
 
       - name: Upload wheels
