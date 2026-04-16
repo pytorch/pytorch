@@ -1726,7 +1726,7 @@ class PythonWrapperCodegen(CodeGen):
         if self._pending_alignment_copies:
             V.graph._defers_input_alignment = True
             self.imports.writeline(
-                "from torch._C._dynamo.guards import copy_misaligned"
+                "from torch._C._dynamo.guards import copy_if_misaligned"
             )
 
     def codegen_deferred_alignment_copies(self, input_names: Iterable[str]) -> None:
@@ -1737,7 +1737,7 @@ class PythonWrapperCodegen(CodeGen):
         for name in input_names:
             if name in self._pending_alignment_copies:
                 self._pending_alignment_copies.discard(name)
-                self.writeline(f"{name} = copy_misaligned({name})")
+                self.writeline(f"{name} = copy_if_misaligned({name})")
 
     # this function (and below) takes the graph name as input so
     # that stream caching happens per graph instance. this
