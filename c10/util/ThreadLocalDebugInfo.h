@@ -2,20 +2,55 @@
 
 #include <c10/macros/Export.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <ostream>
+#include <string_view>
 
 namespace c10 {
 
-enum class C10_API_ENUM DebugInfoKind : uint8_t {
-  PRODUCER_INFO = 0,
-  MOBILE_RUNTIME_INFO,
-  PROFILER_STATE,
-  INFERENCE_CONTEXT, // for inference usage
-  PARAM_COMMS_INFO,
+// Identifies a slot in ThreadLocalDebugInfo for storing a specific type
+// of python-thread-local state.
+//
+// This class is trivial to copy and move, and is cheap to construct and
+// destroy. It mimics the behavior of an enum class for backward compatibility
+// with existing uses.
+class C10_API DebugInfoKind {
+ private:
+  // Must be a non-null pointer to a string literal with static storage
+  // duration. The pointer address is used as the identifier for the slot.
+  // The string itself is only used for debugging purposes and should be
+  // descriptive of the slot's purpose and ideally (but not required) be unique.
+  using value_type = const std::string_view*;  // Must be non-null.
 
-  TEST_INFO, // used only in tests
-  TEST_INFO_2, // used only in tests
+ public:
+  // Creates an uninitialized DebugInfoKind.
+  DebugInfoKind() = default;
+
+  // Creates a DebugInfoKind with the given identity.
+  explicit DebugInfoKind(value_type value);
+
+  // Predefined DebugInfoKinds for common use cases.
+  static const DebugInfoKind PRODUCER_INFO;
+  static const DebugInfoKind MOBILE_RUNTIME_INFO;
+  static const DebugInfoKind PROFILER_STATE;
+  static const DebugInfoKind INFERENCE_CONTEXT;  // for inference usage
+  static const DebugInfoKind PARAM_COMMS_INFO;
+  static const DebugInfoKind TEST_INFO;    // used only in tests
+  static const DebugInfoKind TEST_INFO_2;  // used only in tests
+
+  constexpr bool operator==(const DebugInfoKind& other) const {
+    return value_ == other.value_;
+  }
+  constexpr bool operator!=(const DebugInfoKind& other) const {
+    return value_ != other.value_;
+  }
+
+  friend std::ostream& operator<<(std::ostream& os, const DebugInfoKind& kind);
+
+ private:
+  value_type value_ = nullptr;
 };
 
 class C10_API DebugInfoBase {
