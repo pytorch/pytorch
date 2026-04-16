@@ -2187,14 +2187,24 @@ class CppKernel(Kernel):
             csevar = ops.index_expr(expr, torch.int64).value
             buffer = V.kernel.compute
         else:
-            # indexing in loads
-            prior_compute = V.kernel.compute
-            try:
-                V.kernel.compute = self.loads
+            # Prefer to put the assert in loads so it runs before the actual
+            # memory access.  However, if the index expression may have already
+            # been CSE'd into compute by a prior ops.index_expr call, placing a
+            # reference to it in loads would be a forward reference (loads are
+            # emitted before compute in the kernel body).  In that case fall
+            # back to compute.
+            idx_str = cexpr(self.rename_indexing(expr))
+            if self.cse.try_get(idx_str) is not None:
                 csevar = ops.index_expr(expr, torch.int64).value
-            finally:
-                V.kernel.compute = prior_compute
-            buffer = self.loads
+                buffer = V.kernel.compute
+            else:
+                prior_compute = V.kernel.compute
+                try:
+                    V.kernel.compute = self.loads
+                    csevar = ops.index_expr(expr, torch.int64).value
+                finally:
+                    V.kernel.compute = prior_compute
+                buffer = self.loads
 
         size_str = V.kernel.sexpr(self.rename_indexing(size)) if upper else None
 
