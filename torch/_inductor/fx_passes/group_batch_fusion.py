@@ -15,7 +15,9 @@ from torch.utils._ordered_set import OrderedSet
 from .. import config
 from ..pattern_matcher import (
     CallFunctionVarArgs,
+    CallMethodVarArgs,
     get_arg_value,
+    MatchResult,
     stable_topological_sort,
 )
 from ..utils import OPTIMUS_EXCLUDE_POST_GRAD
@@ -1057,7 +1059,7 @@ class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
 
     def match(self, node: torch.fx.Node):
         input = get_arg_value(node, 0, "input")
-        if CallFunctionVarArgs(self.op).match(node) and is_node_meta_valid(node):
+        if self._match_op(node) and is_node_meta_valid(node):
             # check the input has the same shape and its users have the same target
             # check all clamp operators have the same min and max values, and
             # nan_to_num operators use the same default value.
@@ -1070,6 +1072,9 @@ class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
         else:
             group_key = None
         return group_key
+
+    def _match_op(self, node: torch.fx.Node) -> MatchResult:
+        return CallFunctionVarArgs(self.op).match(node)
 
     def fuse(self, graph: torch.fx.GraphModule, subset: list[torch.fx.Node]):
         batch_nodes = []
@@ -1133,6 +1138,11 @@ class BatchReLuPreGradFusion(BatchPointwiseOpsPreGradFusion):
 class BatchDetachPreGradFusion(BatchMathOpsPreGradFusion):
     def __init__(self, **kwargs):
         super().__init__(torch.detach, **kwargs)
+
+    def _match_op(self, node: torch.fx.Node) -> MatchResult:
+        return CallFunctionVarArgs(torch.detach).match(node) or CallMethodVarArgs(
+            "detach"
+        ).match(node)
 
 
 @register_fusion("batch_nan_to_num")
