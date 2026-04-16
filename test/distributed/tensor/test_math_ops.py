@@ -1678,6 +1678,40 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(result.full_tensor(), expected)
         self.assertTrue(result.placements[0].is_shard(0))
 
+    @with_comms
+    def test_normalization_ops(self):
+        device_mesh = self.build_device_mesh()
+        F = torch.nn.functional
+
+        N, C, H, W = 8, 6, 4, 4
+        inp = torch.randn(N, C, H, W, device=self.device_type)
+        weight = torch.randn(C, device=self.device_type)
+        bias = torch.randn(C, device=self.device_type)
+        running_mean = torch.zeros(C, device=self.device_type)
+        running_var = torch.ones(C, device=self.device_type)
+
+        replicate = [Replicate()]
+        dt_inp = distribute_tensor(inp, device_mesh, [Shard(0)])
+        dt_weight = distribute_tensor(weight, device_mesh, replicate)
+        dt_bias = distribute_tensor(bias, device_mesh, replicate)
+        dt_running_mean = distribute_tensor(running_mean, device_mesh, replicate)
+        dt_running_var = distribute_tensor(running_var, device_mesh, replicate)
+
+        # batch_norm (eval mode with running stats) — replicate-only strategy
+        expected = F.batch_norm(inp, running_mean, running_var, weight, bias)
+        result = F.batch_norm(
+            dt_inp, dt_running_mean, dt_running_var, dt_weight, dt_bias
+        )
+        self.assertEqual(result.full_tensor(), expected)
+        self.assertTrue(result.placements[0].is_replicate())
+
+        # group_norm with batch-dim sharding — scalar N/C/HxW args are adjusted
+        num_groups = 3
+        expected = F.group_norm(inp, num_groups, weight, bias)
+        result = F.group_norm(dt_inp, num_groups, dt_weight, dt_bias)
+        self.assertEqual(result.full_tensor(), expected)
+        self.assertTrue(result.placements[0].is_shard(0))
+
 
 DistMathOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistMathOpsTest,
