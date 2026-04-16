@@ -1,7 +1,11 @@
 # Owner(s): ["module: dynamo"]
 import abc
 import functools
+import gc
 import inspect
+import os
+import sys
+import unittest
 import weakref
 
 import torch
@@ -2094,6 +2098,38 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
             handler.eval_fn(types.MappingProxyType({"a": 10, "b": 20}), expected)
         )
         self.assertFalse(handler.eval_fn(types.MappingProxyType({"x": 1}), expected))
+
+    @unittest.skipIf(
+        sys.platform != "linux",
+        "Only support mem leak checking on Linux.",
+    )
+    def test_clone_manager_memory_leak(self):
+        def get_mem():
+            with open("/proc/self/statm") as f:
+                return int(f.read().split()[1]) * os.sysconf("SC_PAGE_SIZE")
+
+        def clone_filter(mgr):
+            return True
+
+        root = RootGuardManager()
+
+        # Warmup
+        for _ in range(100):
+            root.clone_manager(clone_filter)
+        gc.collect()
+
+        # Iterate to make the leak larger
+        initial_mem = get_mem()
+        for _ in range(100000):
+            root.clone_manager(clone_filter)
+        gc.collect()
+        final_mem = get_mem()
+        delta = final_mem - initial_mem
+
+        # Only fail if the leak is larger than 2MB.
+        self.assertLessEqual(
+            delta, 2 * 1024 * 1024, f"Memory leaked: {delta / 1024 / 1024:.2f} MB"
+        )
 
     def test_dict_keys_match(self):
         from torch._dynamo.guards import GuardBuilder
