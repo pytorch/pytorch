@@ -13525,7 +13525,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             if code and len(code) > 0 and "assert_alignment(" in code[0]:
                 try:
                     FileCheck().check_regex(
-                        r"assert_alignment\s*\(\s*[^,]+,\s*[^,]+,\s*'[^']+'\s*\)"
+                        r"assert_alignment\s*\(\s*[^,]+,\s*[^,]+,\s*['\"][^'\"]+['\"]\s*\)"
                     ).run(code[0])
                 except Exception as e:
                     print(f"Failed regex match for assert_alignment: {e}")

@@ -501,6 +501,27 @@ inline void assert_size_stride(
   }
 }
 
+inline void assert_alignment(
+    AtenTensorHandle tensor,
+    int64_t alignment,
+    const char* op_name = nullptr) {
+  std::string op_msg = op_name ? std::string("\nError in op: ") + op_name : "";
+  AOTI_RUNTIME_CHECK(alignment > 0, "alignment must be positive" + op_msg);
+
+  int64_t storage_offset;
+  AOTI_TORCH_ERROR_CODE_CHECK(
+      aoti_torch_get_storage_offset(tensor, &storage_offset));
+  int32_t dtype;
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(tensor, &dtype));
+  size_t itemsize = aoti_torch_dtype_element_size(dtype);
+  AOTI_RUNTIME_CHECK(
+      static_cast<size_t>(storage_offset) * itemsize % alignment == 0,
+      op_msg + "\nExpect the tensor to be " + std::to_string(alignment) +
+          " bytes aligned. Fail due to storage_offset=" +
+          std::to_string(storage_offset) +
+          " itemsize=" + std::to_string(itemsize));
+}
+
 inline void* get_data_ptr_wrapper(const ConstantHandle& constant) {
   return constant.data_ptr();
 }
