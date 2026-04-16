@@ -667,7 +667,9 @@ def generate_manywheel_build_configs() -> list[dict[str, str]]:
                 "desired_cuda": desired_cuda,
                 "gpu_arch_type": "cuda-aarch64",
                 "gpu_arch_version": base_ver,
-                "container_image": MANYWHEEL_CONTAINER_IMAGES[f"cuda{base_ver}-aarch64"],
+                "container_image": MANYWHEEL_CONTAINER_IMAGES[
+                    f"cuda{base_ver}-aarch64"
+                ],
                 "extra_install_reqs": _extra_install_reqs(base_ver),
                 "torch_cuda_arch_list": TORCH_CUDA_ARCH_LIST[base_ver]["aarch64"],
                 "torch_nvcc_flags": _nvcc_flags(base_ver),
@@ -728,7 +730,9 @@ def generate_manywheel_test_configs() -> list[dict[str, str]]:
                 "name": f"cuda{base_ver}-aarch64",
                 "desired_cuda": desired_cuda,
                 "gpu_arch_type": "cuda-aarch64",
-                "container_image": MANYWHEEL_CONTAINER_IMAGES[f"cuda{base_ver}-aarch64"],
+                "container_image": MANYWHEEL_CONTAINER_IMAGES[
+                    f"cuda{base_ver}-aarch64"
+                ],
                 "runs_on": MANYWHEEL_RUNNERS["test_cuda"]["aarch64"],
             }
         )
@@ -762,15 +766,14 @@ def generate_manywheel_libtorch_configs() -> list[dict[str, str]]:
     libtorch_variant = "shared-with-deps"
 
     for bc in build_configs:
-        # XPU doesn't have libtorch
-        if bc["gpu_arch_type"] == "xpu":
+        # XPU and aarch64 don't have libtorch builds
+        if bc["gpu_arch_type"] == "xpu" or "aarch64" in bc["gpu_arch_type"]:
             continue
         desired_cuda = bc["desired_cuda"]
         gpu_arch_type = bc["gpu_arch_type"]
         gpu_arch_version = bc["gpu_arch_version"]
         build_name = (
-            f"libtorch-{gpu_arch_type}{gpu_arch_version}"
-            f"-{libtorch_variant}-release"
+            f"libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-release"
         ).replace(".", "_")
         configs.append(
             {

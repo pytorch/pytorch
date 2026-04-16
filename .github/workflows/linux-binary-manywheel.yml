@@ -57,8 +57,7 @@ jobs:
     with:
       python-versions: ${{ needs.generate-matrix.outputs.python-versions }}
       build-configs: ${{ needs.generate-matrix.outputs.build-configs }}
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
+    secrets: inherit
 
   test:
     needs: [generate-matrix, build]
@@ -66,6 +65,7 @@ jobs:
     with:
       python-versions: ${{ needs.generate-matrix.outputs.python-versions }}
       test-configs: ${{ needs.generate-matrix.outputs.test-configs }}
+    secrets: inherit
 
   # Merge per-Python artifacts into per-GPU artifacts for the upload job.
   # Build produces: wheels-cpu-cp310, wheels-cpu-cp311, ...
