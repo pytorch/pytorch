@@ -582,6 +582,42 @@ class ComboKernelTests(TestCase):
                 torch._inductor.metrics.generated_kernel_count, expected_kernel_count
             )
 
+    @requires_gpu_and_triton
+    @parametrize(
+        "max_num_nodes,expected_kernel_count",
+        [(8, 1), (3, 2), (2, 3)],
+    )
+    def test_combo_kernel_max_num_nodes(self, max_num_nodes, expected_kernel_count):
+        def fn(a, b, c, d, e, f):
+            return (
+                a * 2.0,
+                b + 1.0,
+                c.sin(),
+                d.cos(),
+                e.exp(),
+                f.neg(),
+            )
+
+        inps = [
+            torch.rand(1024, device=GPU_TYPE),
+            torch.rand(1024, device=GPU_TYPE),
+            torch.rand(1024, device=GPU_TYPE),
+            torch.rand(1024, device=GPU_TYPE),
+            torch.rand(1024, device=GPU_TYPE),
+            torch.rand(1024, device=GPU_TYPE),
+        ]
+
+        out_eager = fn(*inps)
+
+        torch._inductor.metrics.reset()
+        with torch._inductor.config.patch("combo_kernel_max_num_nodes", max_num_nodes):
+            fn_c = torch.compile(fn)
+            out_compiled, _ = run_and_get_code(fn_c, *inps)
+            self.assertEqual(out_eager, out_compiled)
+            self.assertEqual(
+                torch._inductor.metrics.generated_kernel_count, expected_kernel_count
+            )
+
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
     @unittest.skipIf(not SM90OrLater, "Avoid oom on CI")
