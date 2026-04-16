@@ -4322,7 +4322,7 @@ class CUTLASSCodeCache:
                         f.write(f"// {cls._BACKEND} {operation_name} cmd\n// {cmd}\n")
                     start_time = time()
                     log.debug("%s %s: %s", cls._BACKEND, operation_name, cmd)
-                    cmd_parts = cmd.split(" ")
+                    cmd_parts = shlex.split(cmd)
                     try:
                         if cls._use_re_build():
                             from triton.fb.re_build_helper import run_build_command
