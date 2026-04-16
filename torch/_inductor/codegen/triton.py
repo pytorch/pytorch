@@ -306,7 +306,7 @@ class TritonSymbols:
                     if prefix_str[sym] == tree.prefix
                 ]
                 assert len(tree_match) == 1, "# of Match expected to 1"
-                
+
                 if tree_match[0].tensor_dim is None:
                     # tree has no tensor dimension (e.g. no_x_dim mode),
                     # treat as scalar
