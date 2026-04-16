@@ -1975,7 +1975,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         work.wait()
         torch.cuda.synchronize()
 
-    @requires_nccl()
+    @requires_nccl_version(
+        (2, 29, 7), "Need NCCL 2.29.7+ for backend.suspend and backend.memory_stats"
+    )
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_suspend(self):
         """Test that suspend can be called on the NCCL backend."""
@@ -1992,7 +1994,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         stats = backend.memory_stats()
         self.assertEqual(stats["suspended"], 1)
 
-    @requires_nccl()
+    @requires_nccl_version(
+        (2, 29, 7), "Need NCCL 2.29.7+ for backend.memory_stats / ncclCommMemStats"
+    )
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_get_memory_stats(self):
         """Test that get_memory_stats returns a dict of memory stats."""
@@ -2010,7 +2014,10 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             self.assertIn(key, stats)
         print(stats)
 
-    @requires_nccl()
+    @requires_nccl_version(
+        (2, 29, 7),
+        "Need NCCL 2.29.7+ for backend.resume, backend.suspend and backend.memory_stats",
+    )
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_resume(self):
         """Test the full suspend/resume cycle with collectives."""
