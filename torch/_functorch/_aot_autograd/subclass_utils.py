@@ -5,7 +5,6 @@ and this includes tensor subclasses that implement __torch_dispatch__.
 """
 
 import collections
-import typing
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any, TypeGuard, TypeVar
 
@@ -17,7 +16,10 @@ from torch._library.opaque_object import is_opaque_reference_type
 from torch._opaque_base import OpaqueBase
 from torch._subclasses.fake_tensor import get_plain_tensors
 from torch.types import IntLikeType
-from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils._python_dispatch import (
+    is_traceable_wrapper_subclass,
+    TraceableWrapperSubclass,
+)
 
 from .descriptors import (
     AOTInput,
@@ -328,7 +330,7 @@ def runtime_unwrap_tensor_subclasses(
     subclass_metas: list[PlainTensorMeta | SubclassCreationMeta] | None = None,
 ) -> list[int | Tensor | SymInt | OpaqueBase]:
     def flatten_subclass(
-        x: Tensor,
+        x: Tensor | TraceableWrapperSubclass,
         subclass_meta: PlainTensorMeta | SubclassCreationMeta | OpaqueMeta | None,
         *,
         out: list[OpaqueBase | SymInt | Tensor | int],
@@ -397,14 +399,14 @@ def runtime_unwrap_tensor_subclasses(
             continue
 
         if subclass_metas is None:
-            get_plain_tensors(typing.cast(Tensor, x), out=xs_inner)
+            get_plain_tensors(x, out=xs_inner)
         else:
             subclass_meta = subclass_metas[idx]
             if not isinstance(subclass_meta, SubclassCreationMeta):
                 raise AssertionError(
                     f"expected SubclassCreationMeta, got {type(subclass_meta)}"
                 )
-            flatten_subclass(typing.cast(Tensor, x), subclass_meta, out=xs_inner)
+            flatten_subclass(x, subclass_meta, out=xs_inner)
 
     return xs_inner
 
@@ -435,7 +437,7 @@ def remap_unwrapped_subclass_arg_indices(
         num_indices = 1
         if is_traceable_wrapper_subclass(arg):
             num_indices = (
-                len(get_plain_tensors(typing.cast(Tensor, arg), out=[]))
+                len(get_plain_tensors(arg, out=[]))
                 + len(enumerate_filter_symints(arg.size()))
                 + len(enumerate_filter_symints(arg.stride()))
             )

@@ -76,6 +76,7 @@ from torch.utils._python_dispatch import (
     _unset_infra_mode,
     autograd_would_have_decomposed,
     TorchDispatchMode,
+    TraceableWrapperSubclass,
 )
 from torch.utils._stats import count
 from torch.utils._thunk import Thunk
@@ -506,11 +507,11 @@ def get_proxy_slot(
     return res
 
 
-# Recursively traverses tensor subclasses,
+# Recursively traverses traceable wrapper subclasses,
 # returnining an (unordered) list of Proxy objects that are tracked
 # for all inner tensors, given the current extant proxy mode.
 # Returns an empty list if no proxy mode is active.
-def _get_proxies(t: torch.Tensor) -> list[Proxy]:
+def _get_proxies(t: torch.Tensor | TraceableWrapperSubclass) -> list[Proxy]:
     proxies = []
     mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
     if mode is None:
