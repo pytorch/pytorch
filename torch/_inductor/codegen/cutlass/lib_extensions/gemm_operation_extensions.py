@@ -8,8 +8,8 @@ from ..utils import try_import_cutlass
 if try_import_cutlass():
     import enum
 
-    from cutlass_library.gemm_operation import *  # noqa: F401, F403
-    from cutlass_library.library import *  # noqa: F401, F403
+    from cutlass_library.gemm_operation import *  # noqa: F403
+    from cutlass_library.library import *  # noqa: F403
 
     _LOGGER = logging.getLogger(__name__)
 

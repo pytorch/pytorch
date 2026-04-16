@@ -34,12 +34,12 @@ from torch.fx.experimental.proxy_tensor import make_fx
 
 from . import config
 from ._aot_autograd import autograd_cache
-from ._aot_autograd.autograd_cache import (  # noqa: F401
+from ._aot_autograd.autograd_cache import (
     AOTAutogradCache,
     should_use_local_autograd_cache,
     should_use_remote_autograd_cache,
 )
-from ._aot_autograd.collect_metadata_analysis import (  # noqa: F401
+from ._aot_autograd.collect_metadata_analysis import (
     run_functionalized_fw_and_collect_metadata,
 )
 from ._aot_autograd.descriptors import (
@@ -77,7 +77,7 @@ from ._aot_autograd.graph_capture_wrappers import (  # noqa: F401
     fn_input_mutations_to_outputs,
     fn_prepped_for_autograd,
 )
-from ._aot_autograd.graph_compile import (  # noqa: F401
+from ._aot_autograd.graph_compile import (
     aot_stage1_graph_capture,
     aot_stage2_compile,
     aot_stage2_export,
@@ -1834,7 +1834,7 @@ def aot_export_joint_simple(
 
     if config.debug_assert:
         # Smoke test that after partitioning, we can run the forward without any calling convention changes.
-        fw_module, _bw_module = default_partition(  # noqa: F821
+        fw_module, _bw_module = default_partition(
             # type: ignore[bad-argument-type]
             fx_g,
             args,

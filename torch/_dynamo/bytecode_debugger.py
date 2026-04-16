@@ -71,7 +71,7 @@ BREAKPOINT_MARKER = _BreakpointMarker()
 
 # Import NULL_STACK_VALUE sentinel from C++ module
 # This is returned by _get_frame_value_stack_with_depth for NULL stack slots
-from torch._C._dynamo.eval_frame import NULL_STACK_VALUE  # noqa: F401
+from torch._C._dynamo.eval_frame import NULL_STACK_VALUE
 
 
 @dataclass

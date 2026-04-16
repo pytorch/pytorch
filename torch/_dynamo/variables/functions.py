@@ -756,7 +756,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
             if not isinstance(fn_var, UserFunctionVariable):
                 fn_name = fn_var.get_name()
-                msg = f"Applying `nonstrict_trace` to function <{fn_name}>; however, `nonstrict_trace` currently requires the function to be defined outside `torch.compile` region."  # noqa: B950
+                msg = f"Applying `nonstrict_trace` to function <{fn_name}>; however, `nonstrict_trace` currently requires the function to be defined outside `torch.compile` region."
                 unimplemented(
                     gb_type="Limitation of `nonstrict_trace",
                     context=f"{self}",

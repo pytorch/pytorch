@@ -341,7 +341,7 @@ def _compile_and_exec_source(
 
     code = compile(source, f"<{artifact_name}>", "exec")
     local_dict: dict[str, object] = {}
-    exec(code, globals_dict, local_dict)  # noqa: S102
+    exec(code, globals_dict, local_dict)
     fn = local_dict[fn_name]
     if wrapped_fn is not None:
         functools.update_wrapper(fn, wrapped_fn)  # type: ignore[arg-type]

@@ -910,7 +910,7 @@ inline_invoke_subgraph: bool = False
 invalidate_compile_context_weakrefs: bool | None = None
 
 if TYPE_CHECKING:
-    from torch.utils._config_typing import *  # noqa: F401, F403
+    from torch.utils._config_typing import *  # noqa: F403
 
     def _make_closure_patcher(**changes: Any) -> Any: ...
 

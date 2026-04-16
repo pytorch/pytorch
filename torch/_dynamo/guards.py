@@ -3488,7 +3488,7 @@ class GuardBuilder(GuardBuilderBase):
             if not static:
                 if hasattr(value, "_dynamo_dynamic_indices"):
                     dynamic_indices = value._dynamo_dynamic_indices
-                    code_part = f"(({tensor_name}._dynamo_dynamic_indices.issubset({dynamic_indices})) if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True)"  # noqa: B950
+                    code_part = f"(({tensor_name}._dynamo_dynamic_indices.issubset({dynamic_indices})) if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True)"
                     code.append(code_part)
                     self.get_guard_manager(guard).add_dynamic_indices_guard(
                         dynamic_indices,
@@ -3515,7 +3515,7 @@ class GuardBuilder(GuardBuilderBase):
                 # tensors that have the attribute when compile-time didn't.
                 if hasattr(value, "_dynamo_unbacked_indices"):
                     shape_ids = getattr(value, "_dynamo_shape_ids", None)
-                    code_part = f"((getattr({tensor_name}, '_dynamo_shape_ids', None) == {shape_ids!r}) if hasattr({tensor_name}, '_dynamo_unbacked_indices') else True)"  # noqa: B950
+                    code_part = f"((getattr({tensor_name}, '_dynamo_shape_ids', None) == {shape_ids!r}) if hasattr({tensor_name}, '_dynamo_unbacked_indices') else True)"
                     code.append(code_part)
                     self.get_guard_manager(guard).add_lambda_guard(
                         lambda x, expected=shape_ids: (
@@ -3534,7 +3534,7 @@ class GuardBuilder(GuardBuilderBase):
                 # tensors that have the attribute when compile-time didn't.
                 if hasattr(value, "_dynamo_unbacked_indices"):
                     unbacked_bounds = getattr(value, "_dynamo_unbacked_bounds", None)
-                    code_part = f"((getattr({tensor_name}, '_dynamo_unbacked_bounds', None) == {unbacked_bounds!r}) if hasattr({tensor_name}, '_dynamo_unbacked_indices') else True)"  # noqa: B950
+                    code_part = f"((getattr({tensor_name}, '_dynamo_unbacked_bounds', None) == {unbacked_bounds!r}) if hasattr({tensor_name}, '_dynamo_unbacked_indices') else True)"
                     code.append(code_part)
                     self.get_guard_manager(guard).add_lambda_guard(
                         lambda x, expected=unbacked_bounds: (
@@ -4151,7 +4151,7 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
             # doesn't exist.
             value = builder.get(guard)
             has_value = True
-        except:  # noqa: B001,E722
+        except:  # noqa: E722
             value = MISSING
             has_value = False
     is_global = get_global_source_name(guard.originating_source) is not None
@@ -4183,7 +4183,7 @@ def pickle_guards_state(
                 try:
                     type(base).__new__(type(base))
                     empty_values[id(base)] = base
-                except:  # noqa: E722, B001
+                except:  # noqa: E722
                     pass
         elif id(leaf) not in guard_tree_values:
             # TODO See if we have lift this branch as the first one.
@@ -5247,7 +5247,7 @@ def guard_error_hook(
     for guard in guard_manager.code_parts:
         try:
             eval(guard, guard_manager.global_scope, local_scope)
-        except:  # noqa: B001,E722
+        except:  # noqa: E722
             print(f"Malformed guard:\n{guard}")
 
 
