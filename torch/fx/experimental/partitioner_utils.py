@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from enum import Enum
 from typing import NamedTuple
 
@@ -19,15 +18,15 @@ class Partition:
         self.used_mem_bytes: int = 0
         self.logical_device_ids: list[int] = []
 
-    def __str__(self):
+    def __str__(self) -> str:
         return str(self.partition_id)
 
-    def recalculate_mem_size(self):
+    def recalculate_mem_size(self) -> None:
         self.used_mem_bytes = 0
         for node in self.nodes:
             self.used_mem_bytes += get_extra_size_of(node, self.nodes)
 
-    def add_node(self, node):
+    def add_node(self, node: Node) -> None:
         input_nodes: dict[Node, None] = {}
         map_arg(node.args, input_nodes.setdefault)
         map_arg(node.kwargs, input_nodes.setdefault)
@@ -38,7 +37,7 @@ class Partition:
         self.nodes.add(node)
         self.recalculate_mem_size()
 
-    def remove_node(self, node):
+    def remove_node(self, node: Node) -> None:
         # Remove a node only if the node is in the partition
         if node in self.nodes:
             self.nodes.remove(node)
@@ -151,7 +150,7 @@ def get_latency_of_one_partition(
                 top_nodes.append(node)
         return top_nodes
 
-    def dfs_helper(node: Node, partition_latency) -> PartitionLatency:
+    def dfs_helper(node: Node, partition_latency: PartitionLatency) -> PartitionLatency:
         """Given a top node of a partition, this function returns
         the latency of the critical path in the partition
         """
@@ -235,7 +234,7 @@ def get_comm_latency_between(
     parent_partition: Partition,
     child_partition: Partition,
     transfer_rate_bytes_per_sec: float,
-):
+) -> float:
     """Given two partitions (parent and child),
     calculate the communication latency between the two.
     """
@@ -271,7 +270,7 @@ def get_latency_of_partitioned_graph(
     partitions: list[Partition],
     partition_to_latency_mapping: dict[Partition, PartitionLatency],
     transfer_rate_bytes_per_sec: float,
-):
+) -> float:
     """Given all partitions in a graph, find the critical path among all partitions
     and return its latency as the latency of the whole graph
     """
