@@ -1640,9 +1640,24 @@ class TritonOverrides(OpOverrides):
             else:
                 cast_inputs.append(str(inp))
 
+        if torch.version.hip:
+            # AMDGCN asm strings may contain real newlines (instructions are
+            # newline-separated, unlike PTX which uses semicolons).  The
+            # generated code is nested inside two Python string layers:
+            #   Layer 1 : the cached wrapper .py file
+            #   Layer 2 : the Triton kernel source (a triple-quoted string
+            #             inside that wrapper, exec'd / JIT-compiled)
+            # repr() escapes \n -> \\n, then we double the backslashes so
+            # they survive both layers: \\\\n -> (L1 parse) \\n -> (L2 parse) \n.
+            asm_literal = repr(asm).replace("\\", "\\\\")
+            constraints_literal = repr(constraints).replace("\\", "\\\\")
+        else:
+            asm_literal = f"'{asm}'"
+            constraints_literal = f"'{constraints}'"
+
         def asm_call(args):
             return (
-                f"tl.inline_asm_elementwise('{asm}', '{constraints}', "
+                f"tl.inline_asm_elementwise({asm_literal}, {constraints_literal}, "
                 f"[{args}], dtype={asm_triton_type}, is_pure={is_pure}, pack={pack})"
             )
 

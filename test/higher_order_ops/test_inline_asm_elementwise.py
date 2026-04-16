@@ -13,9 +13,12 @@ from dataclasses import dataclass
 
 import torch
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
-from torch.testing._internal.common_cuda import SM70OrLater
+from torch.testing._internal.common_cuda import evaluate_gfx_arch_within, SM70OrLater
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    MI200_ARCH,
+    MI300_ARCH,
+    NAVI_ARCH,
     parametrize,
     run_tests,
     TEST_CUDA,
@@ -41,8 +44,8 @@ TEST_CASES = [
     AsmTestCase(
         "identity_f32",
         lambda: (torch.randn(100, device="cuda", dtype=torch.float32),),
-        "mov.f32 $0, $1;",
-        "=f,f",
+        "v_mov_b32 $0, $1" if torch.version.hip else "mov.f32 $0, $1;",
+        "=v, v" if torch.version.hip else "=f,f",
         torch.float32,
         lambda x: x,
     ),
@@ -52,8 +55,8 @@ TEST_CASES = [
             torch.randn(100, device="cuda", dtype=torch.float32),
             torch.randn(100, device="cuda", dtype=torch.float32),
         ),
-        "add.f32 $0, $1, $2;",
-        "=f,f,f",
+        "v_add_f32 $0, $1, $2" if torch.version.hip else "add.f32 $0, $1, $2;",
+        "=v, v, v" if torch.version.hip else "=f,f,f",
         torch.float32,
         lambda x, y: x + y,
     ),
@@ -63,8 +66,8 @@ TEST_CASES = [
             torch.randn(100, device="cuda", dtype=torch.float32),
             torch.randn(100, device="cuda", dtype=torch.float32),
         ),
-        "mul.f32 $0, $1, $2;",
-        "=f,f,f",
+        "v_mul_f32 $0, $1, $2" if torch.version.hip else "mul.f32 $0, $1, $2;",
+        "=v, v, v" if torch.version.hip else "=f,f,f",
         torch.float32,
         lambda x, y: x * y,
     ),
@@ -75,17 +78,26 @@ TEST_CASES = [
             torch.randn(100, device="cuda", dtype=torch.float32),
             torch.randn(100, device="cuda", dtype=torch.float32),
         ),
-        "fma.rn.f32 $0, $1, $2, $3;",
-        "=f,f,f,f",
+        "v_fma_f32 $0, $1, $2, $3"
+        if torch.version.hip
+        else "fma.rn.f32 $0, $1, $2, $3;",
+        "=v, v, v, v" if torch.version.hip else "=f,f,f,f",
         torch.float32,
         lambda a, b, c: a * b + c,
     ),
-    # Multi-line PTX with curly braces
+    # Multi-line inline asm. PTX uses curly braces; AMDGCN uses newlines.
     AsmTestCase(
         "double_multiline",
         lambda: (torch.randn(100, device="cuda", dtype=torch.float32),),
-        "{.reg .f32 tmp; mov.f32 tmp, $1; add.f32 $0, tmp, tmp;}",
-        "=f,f",
+        (
+            """
+            v_mov_b32 $0, $1
+            v_add_f32 $0, $0, $1
+            """
+            if torch.version.hip
+            else "{.reg .f32 tmp; mov.f32 tmp, $1; add.f32 $0, tmp, tmp;}"
+        ),
+        "=v, v" if torch.version.hip else "=f,f",
         torch.float32,
         lambda x: x * 2,
     ),
@@ -93,8 +105,8 @@ TEST_CASES = [
     AsmTestCase(
         "bf16_upcast",
         lambda: (torch.randn(100, device="cuda", dtype=torch.bfloat16),),
-        "add.f32 $0, $1, $1;",
-        "=f,f",
+        "v_add_f32 $0, $1, $1" if torch.version.hip else "add.f32 $0, $1, $1;",
+        "=v, v" if torch.version.hip else "=f,f",
         torch.float32,
         lambda x: x.float() * 2,
         compile_only=True,
@@ -103,8 +115,8 @@ TEST_CASES = [
     AsmTestCase(
         "fp16_upcast",
         lambda: (torch.randn(100, device="cuda", dtype=torch.float16),),
-        "add.f32 $0, $1, $1;",
-        "=f,f",
+        "v_add_f32 $0, $1, $1" if torch.version.hip else "add.f32 $0, $1, $1;",
+        "=v, v" if torch.version.hip else "=f,f",
         torch.float32,
         lambda x: x.float() * 2,
         compile_only=True,
@@ -116,8 +128,8 @@ TEST_CASES = [
             torch.randint(0, 2**16, (100,), device="cuda", dtype=torch.int32),
             torch.randint(0, 2**16, (100,), device="cuda", dtype=torch.int32),
         ),
-        "and.b32 $0, $1, $2;",
-        "=r,r,r",
+        "v_and_b32 $0, $1, $2" if torch.version.hip else "and.b32 $0, $1, $2;",
+        "=v, v, v" if torch.version.hip else "=r,r,r",
         torch.int32,
         lambda x, y: x & y,
     ),
@@ -127,29 +139,38 @@ TEST_CASES = [
             torch.randint(0, 2**16, (100,), device="cuda", dtype=torch.int32),
             torch.randint(0, 2**16, (100,), device="cuda", dtype=torch.int32),
         ),
-        "or.b32 $0, $1, $2;",
-        "=r,r,r",
+        "v_or_b32 $0, $1, $2" if torch.version.hip else "or.b32 $0, $1, $2;",
+        "=v, v, v" if torch.version.hip else "=r,r,r",
         torch.int32,
         lambda x, y: x | y,
     ),
     # Output dtype differs from input (compile-only: Jiterator returns input dtype)
+    # AMDGCN: v_bfe_u32 (bit-field extract) replaces PTX's multi-instruction
+    # shift-and-mask sequence in a single instruction.
     AsmTestCase(
         "exponent_extract",
         lambda: (
             torch.tensor([1.0, 2.0, 0.5, 16.0], device="cuda", dtype=torch.float32),
         ),
-        "{.reg .b32 t; mov.b32 t,$1; shr.u32 t,t,23; and.b32 $0,t,0xFF;}",
-        "=r,f",
+        (
+            "v_bfe_u32 $0, $1, 23, 8"
+            if torch.version.hip
+            else "{.reg .b32 t; mov.b32 t,$1; shr.u32 t,t,23; and.b32 $0,t,0xFF;}"
+        ),
+        "=v, v" if torch.version.hip else "=r,f",
         torch.int32,
         lambda x: ((x.view(torch.int32) >> 23) & 0xFF).to(torch.int32),
         compile_only=True,
     ),
-    # Mixed constraint types: "r" input, "h" output (compile-only)
+    # Truncate u32 -> u16 (compile-only).
+    # PTX: uses "h" (16-bit) output / "r" (32-bit) input constraints.
+    # AMDGCN: VGPRs are always 32-bit (no "h" equivalent), so we use "v"
+    # and extract the lower 16 bits via v_bfe_u32.
     AsmTestCase(
         "truncate_to_uint16",
         lambda: (torch.randint(0, 256, (100,), device="cuda", dtype=torch.int32),),
-        "cvt.u16.u32 $0, $1;",
-        "=h,r",
+        "v_bfe_u32 $0, $1, 0, 16" if torch.version.hip else "cvt.u16.u32 $0, $1;",
+        "=v, v" if torch.version.hip else "=h,r",
         torch.uint16,
         lambda x: x.to(torch.uint16),
         compile_only=True,
@@ -161,8 +182,8 @@ TEST_CASES = [
             torch.randn(4, 1, device="cuda", dtype=torch.float32),
             torch.randn(1, 8, device="cuda", dtype=torch.float32),
         ),
-        "add.f32 $0, $1, $2;",
-        "=f,f,f",
+        "v_add_f32 $0, $1, $2" if torch.version.hip else "add.f32 $0, $1, $2;",
+        "=v, v, v" if torch.version.hip else "=f,f,f",
         torch.float32,
         lambda x, y: x + y,
     ),
@@ -170,32 +191,46 @@ TEST_CASES = [
     AsmTestCase(
         "noncontiguous",
         lambda: (torch.randn(8, 16, device="cuda", dtype=torch.float32).t(),),
-        "mov.f32 $0, $1;",
-        "=f,f",
+        "v_mov_b32 $0, $1" if torch.version.hip else "mov.f32 $0, $1;",
+        "=v, v" if torch.version.hip else "=f,f",
         torch.float32,
         lambda x: x,
     ),
     # fp16/bf16 native asm (compile-only: inductor computes in fp32, needs downcast)
+    # ROCm: Inductor feeds f32 values (upcasted for computation).  AMDGCN has no
+    # "h" constraint for 16-bit regs, so we add in f32 and convert to the target
+    # format.  PTX "h" constraints tell Triton to downcast before the asm.
     AsmTestCase(
         "add_fp16_native",
         lambda: (
             torch.randn(100, device="cuda", dtype=torch.float16),
             torch.randn(100, device="cuda", dtype=torch.float16),
         ),
-        "add.f16 $0, $1, $2;",
-        "=h,h,h",
+        (
+            "v_add_f32 $0, $1, $2\nv_cvt_f16_f32 $0, $0"
+            if torch.version.hip
+            else "add.f16 $0, $1, $2;"
+        ),
+        "=v,v,v" if torch.version.hip else "=h,h,h",
         torch.float16,
         lambda x, y: x + y,
         compile_only=True,
     ),
+    # AMDGCN: v_cvt_pk_bf16_f32 packs two f32 values into bf16 in a single
+    # 32-bit register.  We pass $0 twice — only the lower 16 bits (first
+    # bf16 slot) are used by Triton.
     AsmTestCase(
         "add_bf16_native",
         lambda: (
             torch.randn(100, device="cuda", dtype=torch.bfloat16),
             torch.randn(100, device="cuda", dtype=torch.bfloat16),
         ),
-        "add.bf16 $0, $1, $2;",
-        "=h,h,h",
+        (
+            "v_add_f32 $0, $1, $2\nv_cvt_pk_bf16_f32 $0, $0, $0"
+            if torch.version.hip
+            else "add.bf16 $0, $1, $2;"
+        ),
+        "=v,v,v" if torch.version.hip else "=h,h,h",
         torch.bfloat16,
         lambda x, y: x + y,
         compile_only=True,
@@ -205,8 +240,15 @@ TEST_CASES = [
     AsmTestCase(
         "identity_pack2",
         lambda: (torch.randn(128, device="cuda", dtype=torch.float32),),
-        "mov.b32 $0, $2; mov.b32 $1, $3;",
-        "=r,=r,r,r",
+        (
+            """
+            v_mov_b32 $0, $2
+            v_mov_b32 $1, $3
+            """
+            if torch.version.hip
+            else "mov.b32 $0, $2; mov.b32 $1, $3;"
+        ),
+        "=v,=v,v,v" if torch.version.hip else "=r,=r,r,r",
         torch.float32,
         lambda x: x,
         pack=2,
@@ -218,8 +260,15 @@ TEST_CASES = [
             torch.randn(128, device="cuda", dtype=torch.float32),
             torch.randn(128, device="cuda", dtype=torch.float32),
         ),
-        "add.f32 $0, $2, $4; add.f32 $1, $3, $5;",
-        "=f,=f,f,f,f,f",
+        (
+            """
+            v_add_f32 $0, $2, $4
+            v_add_f32 $1, $3, $5
+            """
+            if torch.version.hip
+            else "add.f32 $0, $2, $4; add.f32 $1, $3, $5;"
+        ),
+        "=v,=v,v,v,v,v" if torch.version.hip else "=f,=f,f,f,f,f",
         torch.float32,
         lambda x, y: x + y,
         pack=2,
@@ -241,8 +290,26 @@ class TestInlineAsmElementwise(TestCase):
     def test_eager_vs_compiled_bitwise(self, case_idx):
         """Verify eager and compiled produce bitwise identical results."""
         tc = TEST_CASES[case_idx]
-        if torch.cuda.get_device_capability() < (tc.min_sm // 10, tc.min_sm % 10):
+        if not torch.version.hip and torch.cuda.get_device_capability() < (
+            tc.min_sm // 10,
+            tc.min_sm % 10,
+        ):
             self.skipTest(f"Requires SM{tc.min_sm}+")
+
+        # Native bf16 conversion instruction not available before gfx950.
+        if (
+            torch.version.hip
+            and tc.name == "add_bf16_native"
+            and evaluate_gfx_arch_within(
+                [
+                    *MI200_ARCH,
+                    *MI300_ARCH,
+                    *NAVI_ARCH,
+                ]
+            )
+        ):
+            self.skipTest("Requires gfx950+")
+
         inputs = tc.input_gen_fn()
 
         def fn(*args):
@@ -272,8 +339,26 @@ class TestInlineAsmElementwise(TestCase):
     def test_correctness(self, case_idx):
         """Verify result matches reference function."""
         tc = TEST_CASES[case_idx]
-        if torch.cuda.get_device_capability() < (tc.min_sm // 10, tc.min_sm % 10):
+        if not torch.version.hip and torch.cuda.get_device_capability() < (
+            tc.min_sm // 10,
+            tc.min_sm % 10,
+        ):
             self.skipTest(f"Requires SM{tc.min_sm}+")
+
+        # Native bf16 conversion instruction not available before gfx950.
+        if (
+            torch.version.hip
+            and tc.name == "add_bf16_native"
+            and evaluate_gfx_arch_within(
+                [
+                    *MI200_ARCH,
+                    *MI300_ARCH,
+                    *NAVI_ARCH,
+                ]
+            )
+        ):
+            self.skipTest("Requires gfx950+")
+
         inputs = tc.input_gen_fn()
 
         def fn(*args):
@@ -302,8 +387,10 @@ class TestInlineAsmElementwiseErrors(TestCase):
     def test_error_no_inputs(self):
         with self.assertRaises(ValueError):
             inline_asm_elementwise(
-                asm_str="mov.f32 $0, 1.0;",
-                constraints="=f",
+                asm_str="v_mov_b32 $0, 1.0"
+                if torch.version.hip
+                else "mov.f32 $0, 1.0;",
+                constraints="=v" if torch.version.hip else "=f",
                 dtype=torch.float32,
             )
 
@@ -314,8 +401,10 @@ class TestInlineAsmElementwiseErrors(TestCase):
             inline_asm_elementwise(
                 x,
                 y,
-                asm_str="add.f32 $0, $1, $2;",
-                constraints="=f,f",
+                asm_str="v_add_f32 $0, $1, $2"
+                if torch.version.hip
+                else "add.f32 $0, $1, $2;",
+                constraints="=v,v" if torch.version.hip else "=f,f",
                 dtype=torch.float32,
             )
 
@@ -326,8 +415,10 @@ class TestInlineAsmElementwiseErrors(TestCase):
             inline_asm_elementwise(
                 x,
                 y,
-                asm_str="add.f32 $0, $1, $2;",
-                constraints="=f,f,r",
+                asm_str="v_add_f32 $0, $1, $2"
+                if torch.version.hip
+                else "add.f32 $0, $1, $2;",
+                constraints="=v,v,v" if torch.version.hip else "=f,f,r",
                 dtype=torch.float32,
             )
 
@@ -336,8 +427,8 @@ class TestInlineAsmElementwiseErrors(TestCase):
         with self.assertRaises(RuntimeError):
             inline_asm_elementwise(
                 x,
-                asm_str="mov.f32 $0, $1;",
-                constraints="=f,f",
+                asm_str="v_mov_b32 $0, $1" if torch.version.hip else "mov.f32 $0, $1;",
+                constraints="=v,v" if torch.version.hip else "=f,f",
                 dtype=torch.float32,
             )
 
@@ -350,14 +441,20 @@ class TestInlineAsmElementwiseEdgeCases(TestCase):
     def test_empty_tensor(self):
         x = torch.empty(0, device="cuda", dtype=torch.float32)
         result = inline_asm_elementwise(
-            x, asm_str="mov.f32 $0, $1;", constraints="=f,f", dtype=torch.float32
+            x,
+            asm_str="v_mov_b32 $0, $1" if torch.version.hip else "mov.f32 $0, $1;",
+            constraints="=v, v" if torch.version.hip else "=f,f",
+            dtype=torch.float32,
         )
         self.assertEqual(result.shape, torch.Size([0]))
 
     def test_scalar_tensor(self):
         x = torch.tensor(3.14, device="cuda", dtype=torch.float32)
         result = inline_asm_elementwise(
-            x, asm_str="mov.f32 $0, $1;", constraints="=f,f", dtype=torch.float32
+            x,
+            asm_str="v_mov_b32 $0, $1" if torch.version.hip else "mov.f32 $0, $1;",
+            constraints="=v, v" if torch.version.hip else "=f,f",
+            dtype=torch.float32,
         )
         self.assertEqual(result.shape, torch.Size([]))
         self.assertEqual(result, x)
@@ -365,7 +462,10 @@ class TestInlineAsmElementwiseEdgeCases(TestCase):
     def test_4d_tensor(self):
         x = torch.randn(2, 3, 4, 5, device="cuda", dtype=torch.float32)
         result = inline_asm_elementwise(
-            x, asm_str="mov.f32 $0, $1;", constraints="=f,f", dtype=torch.float32
+            x,
+            asm_str="v_mov_b32 $0, $1" if torch.version.hip else "mov.f32 $0, $1;",
+            constraints="=v, v" if torch.version.hip else "=f,f",
+            dtype=torch.float32,
         )
         self.assertEqual(result.shape, x.shape)
         self.assertEqual(result, x)
@@ -376,8 +476,10 @@ class TestInlineAsmElementwiseEdgeCases(TestCase):
             w = inline_asm_elementwise(
                 z,
                 y,
-                asm_str="add.f32 $0, $1, $2;",
-                constraints="=f,f,f",
+                asm_str="v_add_f32 $0, $1, $2"
+                if torch.version.hip
+                else "add.f32 $0, $1, $2;",
+                constraints="=v, v, v" if torch.version.hip else "=f,f,f",
                 dtype=torch.float32,
             )
             return w + 1.0
@@ -404,8 +506,10 @@ class TestInlineAsmElementwiseEdgeCases(TestCase):
         eager_result = inline_asm_elementwise(
             x,
             y,
-            asm_str="add.f32 $0, $1, $2;",
-            constraints="=f,f,f",
+            asm_str="v_add_f32 $0, $1, $2"
+            if torch.version.hip
+            else "add.f32 $0, $1, $2;",
+            constraints="=v, v, v" if torch.version.hip else "=f,f,f",
             dtype=torch.float32,
         )
 
@@ -415,8 +519,10 @@ class TestInlineAsmElementwiseEdgeCases(TestCase):
             fake_result = inline_asm_elementwise(
                 fake_x,
                 fake_y,
-                asm_str="add.f32 $0, $1, $2;",
-                constraints="=f,f,f",
+                asm_str="v_add_f32 $0, $1, $2"
+                if torch.version.hip
+                else "add.f32 $0, $1, $2;",
+                constraints="=v, v, v" if torch.version.hip else "=f,f,f",
                 dtype=torch.float32,
             )
 
@@ -428,8 +534,10 @@ class TestInlineAsmElementwiseEdgeCases(TestCase):
             return inline_asm_elementwise(
                 x,
                 y,
-                asm_str="add.f32 $0, $1, $2;",
-                constraints="=f,f,f",
+                asm_str="v_add_f32 $0, $1, $2"
+                if torch.version.hip
+                else "add.f32 $0, $1, $2;",
+                constraints="=v, v, v" if torch.version.hip else "=f,f,f",
                 dtype=torch.float32,
             )
 
@@ -465,8 +573,15 @@ class TestInlineAsmPackPadding(TestCase):
         def fn(x):
             return inline_asm_elementwise(
                 x,
-                asm_str="mov.b32 $0, $2; mov.b32 $1, $3;",
-                constraints="=r,=r,r,r",
+                asm_str=(
+                    """
+                    v_mov_b32 $0, $2
+                    v_mov_b32 $1, $3
+                    """
+                    if torch.version.hip
+                    else "mov.b32 $0, $2; mov.b32 $1, $3;"
+                ),
+                constraints="=v,=v,v,v" if torch.version.hip else "=r,=r,r,r",
                 dtype=torch.float32,
                 pack=2,
             )
@@ -497,8 +612,21 @@ class TestInlineAsmPackPadding(TestCase):
         def fn(x):
             return inline_asm_elementwise(
                 x,
-                asm_str="mov.b32 $0, $4; mov.b32 $1, $5; mov.b32 $2, $6; mov.b32 $3, $7;",
-                constraints="=r,=r,=r,=r,r,r,r,r",
+                asm_str=(
+                    """
+                    v_mov_b32 $0, $4
+                    v_mov_b32 $1, $5
+                    v_mov_b32 $2, $6
+                    v_mov_b32 $3, $7
+                    """
+                    if torch.version.hip
+                    else "mov.b32 $0, $4; mov.b32 $1, $5; mov.b32 $2, $6; mov.b32 $3, $7;"
+                ),
+                constraints=(
+                    "=v,=v,=v,=v,v,v,v,v"
+                    if torch.version.hip
+                    else "=r,=r,=r,=r,r,r,r,r"
+                ),
                 dtype=torch.float32,
                 pack=4,
             )
@@ -528,8 +656,21 @@ class TestInlineAsmPackPadding(TestCase):
         def fn(x):
             return inline_asm_elementwise(
                 x,
-                asm_str="mov.b32 $0, $4; mov.b32 $1, $5; mov.b32 $2, $6; mov.b32 $3, $7;",
-                constraints="=r,=r,=r,=r,r,r,r,r",
+                asm_str=(
+                    """
+                    v_mov_b32 $0, $4
+                    v_mov_b32 $1, $5
+                    v_mov_b32 $2, $6
+                    v_mov_b32 $3, $7
+                    """
+                    if torch.version.hip
+                    else "mov.b32 $0, $4; mov.b32 $1, $5; mov.b32 $2, $6; mov.b32 $3, $7;"
+                ),
+                constraints=(
+                    "=v,=v,=v,=v,v,v,v,v"
+                    if torch.version.hip
+                    else "=r,=r,=r,=r,r,r,r,r"
+                ),
                 dtype=torch.float32,
                 pack=4,
             )
@@ -560,8 +701,15 @@ class TestInlineAsmPackPadding(TestCase):
             return inline_asm_elementwise(
                 x,
                 y,
-                asm_str="add.f32 $0, $2, $4; add.f32 $1, $3, $5;",
-                constraints="=f,=f,f,f,f,f",
+                asm_str=(
+                    """
+                    v_add_f32 $0, $2, $4
+                    v_add_f32 $1, $3, $5
+                    """
+                    if torch.version.hip
+                    else "add.f32 $0, $2, $4; add.f32 $1, $3, $5;"
+                ),
+                constraints="=v,=v,v,v,v,v" if torch.version.hip else "=f,=f,f,f,f,f",
                 dtype=torch.float32,
                 pack=2,
             )
