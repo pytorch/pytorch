@@ -305,46 +305,47 @@ void setCublasWorkspace(cublasHandle_t handle, c10::cuda::CUDAStream stream) {
   size_t workspace_size = getChosenWorkspaceSize();
 
   auto workspace_it = workspace_map.find(key);
-  if (workspace_it != workspace.end() && workspace_it->second.second >= workspace_size) {
+  if (workspace_it != workspace_map.end() && workspace_it->second.second >= workspace_size) {
     TORCH_CUDABLAS_CHECK(cublasSetWorkspace(
         handle, workspace_it->second.first.get(), workspace_size));
     return;
   }
 
-  auto [it, _] = workspace.emplace(key, getNewWorkspace());
+  auto [it, _] = workspace_map.emplace(key, std::make_pair(getNewWorkspace(), workspace_size));
   TORCH_CUDABLAS_CHECK(
       cublasSetWorkspace(handle, it->second.first.get(), workspace_size));
 }
 
 void* getCUDABlasLtWorkspace() {
-    auto key = std::make_pair(static_cast<int>(device), static_cast<void *>(_stream));
 #ifndef USE_ROCM
   if (unified_cublas_and_lt_workspaces()) {
     c10::DeviceIndex device = c10::cuda::current_device();
     auto stream = c10::cuda::getCurrentCUDAStream();
     cudaStream_t _stream = stream;
+    auto key = std::make_pair(static_cast<int>(device), static_cast<void *>(_stream));
     auto& workspace_map = at::cuda::cublas_stream_to_workspace();
     auto workspace_it = workspace_map.find(key);
-    if (workspace_it != workspace.end()) {
+    if (workspace_it != workspace_map.end()) {
       return workspace_it->second.first.mutable_get();
     }
-    auto [it, _] = workspace.emplace(key, getNewWorkspace());
-    return it->second.mutable_get();
+    auto [it, _] = workspace_map.emplace(key, std::make_pair(getNewWorkspace(), getChosenWorkspaceSize()));
+    return it->second.first.mutable_get();
   }
 #endif
   c10::DeviceIndex device = c10::cuda::current_device();
   auto stream = c10::cuda::getCurrentCUDAStream();
   cudaStream_t _stream = stream;
+  auto key = std::make_pair(static_cast<int>(device), static_cast<void *>(_stream));
 
   auto& workspace_map = cublaslt_stream_to_workspace();
 
   auto workspace_it = workspace_map.find(key);
-  if (workspace_it != workspace.end()) {
+  if (workspace_it != workspace_map.end()) {
     return workspace_it->second.first.mutable_get();
   }
 
-  auto [it, _] = workspace.emplace(key, getNewCUDABlasLtWorkspace());
-  return it->second.mutable_get();
+  auto [it, _] = workspace_map.emplace(key, std::make_pair(getNewCUDABlasLtWorkspace(), getCUDABlasLtWorkspaceSize()));
+  return it->second.first.mutable_get();
 }
 
 cublasHandle_t getCurrentCUDABlasHandle(bool setup) {
